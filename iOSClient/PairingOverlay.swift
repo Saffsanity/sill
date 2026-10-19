@@ -40,13 +40,21 @@ struct PairingOverlay: View {
             // The code field has the keyboard: the content goes to the top, so Pair stays above it
             // (the stream screen ignores the keyboard's safe area, so nothing moves by itself), as
             // on the connect screen. The half-folded Duo's is in the top half already.
+
+            #if os(visionOS)
+            // The spatial keyboard floats outside this window; moving its field breaks focus aim.
+            let toTop = false
+            #else
             let toTop = codeFocused && !layout.topHalf
+            #endif
             ZStack(alignment: .top) {
                 // No tap gesture here: one on this backdrop took the taps meant for the buttons in
                 // front of it (measured on the simulator). What is under the overlay is not
                 // hit-testable anyway (StreamScreen), so a touch on the backdrop does nothing.
+                #if !os(visionOS)
                 Color.black.opacity(0.85)
                     .accessibilityHidden(true)
+                #endif
                 Group {
                     if let link = client.pendingLink {
                         LinkConfirmation(link: link, pair: {
@@ -69,6 +77,9 @@ struct PairingOverlay: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        #if os(visionOS)
+        .glassBackgroundEffect(in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+        #endif
         .transition(.opacity)
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)

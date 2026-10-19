@@ -35,6 +35,8 @@ public struct WindowList: Codable {
     public var macName: String
     public var windows: [WindowInfo]
     public var active: StreamSource
+    /// Running regular user apps, independent of selectable windows. Nil means a legacy host.
+    public var runningApps: [AppInfo]?
     /// Random, picked once per launch of the host and the same in every list to every device: two
     /// connections whose lists carry the same one reach the same running host. A name cannot tell
     /// that (two Macs can share one, and mDNS renames neither when they share no link), and a
@@ -59,13 +61,30 @@ public struct WindowList: Codable {
     /// (images) says 2, and a device sends images only to a host that says so. An Int, as `gestures`:
     /// pull request #66's `Bool` (never released) does not decode here and becomes an Int as it
     /// rebases.
+    public var editableFocus: Int?
     public var clipboard: Int?
+    /// Generation 1 acknowledges this connection owns an independent source, encoder and viewport.
+    /// Nil on a shared/legacy session, even on a host which can accept an independent hello.
+    public var independentSessions: Int?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
-                hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil) {
+                hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil, runningApps: [AppInfo]? = nil, editableFocus: Int? = nil, independentSessions: Int? = nil) {
         self.macName = macName; self.windows = windows; self.active = active; self.launchID = launchID
         self.hostVersion = hostVersion; self.protocol = `protocol`; self.gestures = gestures
-        self.clipboard = clipboard
+        self.clipboard = clipboard; self.runningApps = runningApps; self.editableFocus = editableFocus; self.independentSessions = independentSessions
+    }
+}
+
+/// Drawer inventory preserves window order while adding running apps without selectable windows.
+/// An advertised empty inventory is authoritative; nil alone falls back to window-derived apps.
+public enum AppInventory {
+    public static func openApps(windows: [WindowInfo], runningApps: [AppInfo]?) -> [AppInfo] {
+        let inventory = runningApps ?? windows.map { AppInfo(name: $0.appName, bundleID: $0.bundleID) }
+        let byID = Dictionary(inventory.map { ($0.bundleID, $0) }, uniquingKeysWith: { first, _ in first })
+        var seen = Set<String>()
+        return (windows.compactMap { byID[$0.bundleID] } + inventory).filter {
+            !$0.bundleID.isEmpty && seen.insert($0.bundleID).inserted
+        }
     }
 }
 

@@ -87,6 +87,25 @@ do {
     check(m.sprite(now: 0) == macAt, "rotating with the Mac's arrow: it stays")
 }
 
+// Spatial origin is enabled only by the native visionOS stream; iPad defaults remain hidden.
+for portrait in [false, true] {
+    var p = presence(.here, own: ownAt, origin: .spatial, portrait: portrait)
+    check(p.sprite(now: 0) == nil, "spatial pointer unavailable by default")
+    p.spatialStream = true
+    check(p.sprite(now: 0) == ownAt, "Spatial input uses normalized target in either layout")
+    check(!p.recentresOnNewFrame(now: 0), "pinch target never moves to arbitrary frame centre")
+    p.spatialStream = false
+    check(p.sprite(now: 0) == nil, "spatial target hidden when native spatial capability disabled")
+    p.spatialStream = true
+    p.setOwn(nil, from: .none)
+    check(p.sprite(now: 0) == nil, "context cancellation clears the marker")
+    p.setOwn(ownAt, from: .spatial)
+    p.control = .elsewhere; p.mac = macAt; p.macInside = true
+    check(p.sprite(now: 0) == macAt, "Mac takeover replaces spatial target")
+    p.streaming = false
+    check(p.sprite(now: 0) == nil, "disconnect hides spatial target")
+}
+
 // MARK: The trackpad's linger (Q1)
 
 do {
@@ -503,5 +522,51 @@ do {
     check(pad3.cursor == pt(0.50, 0.40), "rest: another device driving on, the finger's move goes on from its latest position")
 }
 
+// Native visionOS persistently shows the latest valid position without changing iPad defaults.
+do {
+    var p = PointerPresence(), f = PointerFeedState()
+    p.streaming = true; p.persistentSpatial = true
+    check(p.sprite(now: 0) == nil, "spatial persistent pointer waits for position")
+    _ = f.report(at: pt(0.3, 0.4), seen: 0, sentOnSession: 0, movePending: false, now: 0)
+    p.follow(f)
+    check(p.sprite(now: 1) == pt(0.3, 0.4), "spatial persistent pointer follows Mac")
+    _ = f.sent(.other, now: 1); p.follow(f)
+    check(p.sprite(now: 2) == pt(0.3, 0.4), "typing retains pointer position")
+    p.setOwn(pt(0.7, 0.2), from: .spatial)
+    _ = f.sent(.pointer(pt(0.7, 0.2)), now: 2); p.follow(f)
+    check(p.sprite(now: 3) == pt(0.7, 0.2), "spatial local input predicts current pointer")
+    p.setOwn(nil, from: .none)
+    check(p.sprite(now: 4) == pt(0.7, 0.2), "scroll and mode cleanup retain latest feed anchor")
+    _ = f.report(at: nil, seen: 1, sentOnSession: 1, movePending: false, now: 4); p.follow(f)
+    check(p.sprite(now: 5) == nil, "Mac offstream hides persistent marker")
+    p.streaming = false
+    check(p.sprite(now: 6) == nil, "disconnected or no frame hides persistent marker")
+}
+// A physical pointer click must not leave a second persistent I-beam after button release.
+do {
+    var p = PointerPresence(), f = PointerFeedState()
+    p.streaming = true; p.persistentSpatial = true
+    _ = f.sent(.pointer(pt(0.4, 0.3)), now: 0)
+    p.setOwn(pt(0.4, 0.3), from: .spatial); p.follow(f)
+    p.nativePointerActive = true
+    p.setOwn(nil, from: .none)
+    check(p.sprite(now: 1) == nil, "native pointer replaces persistent spatial sprite")
+    check(p.hasKnownSpatialPosition, "native visual ownership retains known relative hand anchor")
+    _ = f.sent(.pointer(pt(0.6, 0.3)), now: 1); p.follow(f)
+    check(p.sprite(now: 2) == nil, "buttonless native motion never leaves last click sprite")
+    _ = f.sent(.other, now: 2); p.setOwn(nil, from: .none); p.follow(f)
+    check(p.sprite(now: 3) == nil, "typing or scrolling cannot revive native pointer's spatial anchor")
+    p.follow(f)
+    check(p.nativePointerActive, "unchanged feed renders do not relinquish native ownership")
+    _ = f.report(at: pt(0.8, 0.9), seen: 99, sentOnSession: 99, movePending: false, now: 4); p.follow(f)
+    check(!p.nativePointerActive && p.sprite(now: 5) == pt(0.8, 0.9), "fresh host takeover restores remote sprite")
+    p.nativePointerActive = true
+    p.follow(f)
+    check(p.sprite(now: 6) == nil, "native reentry suppresses unchanged remote report before local send")
+    p.nativePointerActive = false
+    p.setOwn(pt(0.7, 0.8), from: .spatial)
+    _ = f.sent(.pointer(pt(0.7, 0.8)), now: 6); p.follow(f)
+    check(p.sprite(now: 7) == pt(0.7, 0.8), "relative hand input explicitly reclaims local sprite")
+}
 print("\(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

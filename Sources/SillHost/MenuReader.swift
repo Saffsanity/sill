@@ -216,7 +216,7 @@ final class MenuReader: @unchecked Sendable {
     /// one part is one of the bar's menus: never pressed (the mirror refuses it first). An AppKit app
     /// answers AXPress before it runs the action (the fixture: 2–3 ms); one that answers only after
     /// holds this queue until the timeout, which counts as pressed.
-    func press(pid: pid_t, element: AXUIElement?, path: MenuPath, shownTitle: String?, ancestors: [String]?) -> Pressed {
+    func press(pid: pid_t, element: AXUIElement?, path: MenuPath, shownTitle: String?, ancestors: [String]?, perform: ((() -> AXError) -> AXError)? = nil) -> Pressed {
         dispatchPrecondition(condition: .onQueue(queue))
         guard AXIsProcessTrusted() else { return Pressed(outcome: .refused(.notTrusted), foundTitle: nil) }
         guard path.indexes.count >= 2 else { return Pressed(outcome: .refused(.changed), foundTitle: nil) }
@@ -252,7 +252,8 @@ final class MenuReader: @unchecked Sendable {
         case .press, .pressFound:
             guard let target else { return Pressed(outcome: .refused(.changed), foundTitle: found) }
             let started = CFAbsoluteTimeGetCurrent()
-            let e = AXUIElementPerformAction(target, kAXPressAction as CFString)
+            let action = { AXUIElementPerformAction(target, kAXPressAction as CFString) }
+            let e = perform?(action) ?? action()
             if e == .success { return Pressed(outcome: .pressed, foundTitle: found) }
             if e == .cannotComplete, CFAbsoluteTimeGetCurrent() - started >= Double(Self.timeout) * 0.9 {
                 return Pressed(outcome: .pressedNoAnswer, foundTitle: found)

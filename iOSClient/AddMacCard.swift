@@ -97,12 +97,35 @@ struct AddMacCard: View {
                 }
             }
         }
-        .onChange(of: focus) { _, f in editing = f != nil }
+        .onChange(of: focus) { _, f in
+            editing = f != nil
+            #if DEBUG
+            if client.mockDiscovery, UserDefaults.standard.bool(forKey: "SillPairFocus") {
+                NSLog("%@", "pairing focus: code focused=\(f == .code)")
+            }
+            #endif
+        }
+        #if DEBUG
+        .onAppear {
+            guard client.mockDiscovery, typed, UserDefaults.standard.bool(forKey: "SillPairFocus") else { return }
+            let delay = UserDefaults.standard.object(forKey: "SillPairFocusDelay") == nil ? 1.5 : UserDefaults.standard.double(forKey: "SillPairFocusDelay")
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(0, delay)) { focus = .code }
+        }
+        #endif
         .accessibilityAction(.escape, close)
         .background(EscapeKey(action: close))
     }
 
     // MARK: Words
+
+    private var compactEditingCopy: Bool {
+        #if os(visionOS)
+        // Keep field geometry stable while the external spatial keyboard opens.
+        false
+        #else
+        editing && (layout.compactPortrait || layout.short)
+        #endif
+    }
 
     @ViewBuilder private var words: some View {
         if let mac = home {
@@ -112,7 +135,7 @@ struct AddMacCard: View {
                 .font(.system(size: 13))
                 .foregroundStyle(Palette.text)
                 .fixedSize(horizontal: false, vertical: true)
-        } else if editing && (layout.compactPortrait || layout.short) {
+        } else if compactEditingCopy {
             Text("Type the address and code from your Mac.")
                 .font(.system(size: 13))
                 .foregroundStyle(Palette.muted)
@@ -143,6 +166,13 @@ struct AddMacCard: View {
             }
             PairingField(prompt: "0000 0000 0000", label: "Code", text: $code, keyboard: PairingField.codeKeyboard, submit: .go, monospaced: true)
                 .focused($focus, equals: .code)
+                #if DEBUG
+                .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { frame in
+                    if client.mockDiscovery, UserDefaults.standard.bool(forKey: "SillPairFocus") {
+                        NSLog("%@", "pairing focus: code frame \(frame)")
+                    }
+                }
+                #endif
                 .onSubmit(pair)
                 .onChange(of: code) { _, typed in
                     let grouped = PairingField.grouped(typed)

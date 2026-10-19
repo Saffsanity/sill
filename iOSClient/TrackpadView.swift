@@ -77,6 +77,8 @@ private struct DotGrid: View {
 // MARK: - Surface
 
 struct TrackpadView: UIViewRepresentable {
+    @Environment(\.spatialInputAllowed) private var spatialAllowed
+    @Environment(\.spatialInputContext) private var spatialContext
     let send: (InputEvent) -> Void
     let setPointer: (CGPoint) -> Void
     let feed: () -> (anchor: CGPoint?, reseeds: Int)
@@ -96,14 +98,35 @@ struct TrackpadView: UIViewRepresentable {
         return view
     }
 
+    static func dismantleUIView(_ view: TrackpadSurface, coordinator: ()) {
+        #if os(visionOS)
+        view.spatialGate.allowed = false
+        view.cancelSpatialInput()
+        #endif
+    }
+
     func updateUIView(_ uiView: TrackpadSurface, context: Context) {
+        #if os(visionOS)
+        uiView.prepareSpatialInput(spatialContext, allowed: spatialAllowed)
+        let gate = uiView.spatialGate, destination = send
+        uiView.send = { event in if gate.accepts(event) { destination(event) } }
+        #else
         uiView.send = send
+        #endif
         uiView.setPointer = setPointer
         uiView.feed = feed
         uiView.onFingers = onFingers
         uiView.latchedModifiers = latched
         uiView.verticalSpan = verticalSpan
+        #if os(visionOS)
+        let gestureDestination = sendGesture
+        uiView.sendGesture = { gesture, fingers in
+            guard gate.allowed else { return false }
+            return gestureDestination(gesture, fingers)
+        }
+        #else
         uiView.sendGesture = sendGesture
+        #endif
         // Called from a gesture callback, never from inside a SwiftUI update, so the binding write
         // it performs needs no hop to the next runloop turn.
         uiView.onModifiersConsumed = onModifiersConsumed
@@ -112,6 +135,43 @@ struct TrackpadView: UIViewRepresentable {
 
 final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     var send: (InputEvent) -> Void = { _ in }
+    #if os(visionOS)
+    fileprivate let spatialGate = SpatialInputGate()
+    private var spatialContext: SpatialInputContext?
+    private var spatialBounds = CGSize.zero
+    fileprivate func prepareSpatialInput(_ context: SpatialInputContext, allowed: Bool) {
+        if spatialContext != context || spatialGate.allowed != allowed {
+            spatialGate.allowed = false
+            cancelSpatialInput()
+        }
+        spatialContext = context
+        spatialGate.allowed = allowed
+        isUserInteractionEnabled = allowed
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if spatialBounds != bounds.size {
+            cancelSpatialInput()
+            spatialBounds = bounds.size
+        }
+    }
+    fileprivate func cancelSpatialInput() {
+        let wasAllowed = spatialGate.allowed
+        spatialGate.allowed = false
+        defer { spatialGate.allowed = wasAllowed }
+        momentum.stop()
+        if scrolling { endScroll(momentumVelocity: nil) }
+        if dragging {
+            send(.pointer(.leftUp, x: cursor.x, y: cursor.y))
+            dragging = false
+        }
+        releaseModifiers()
+        for recognizer in gestureRecognizers ?? [] {
+            recognizer.isEnabled = false
+            recognizer.isEnabled = true
+        }
+    }
+    #endif
     /// Writes this device's own pointer (`StreamClient.setOwnPointer`, from the trackpad: a fraction
     /// of the frame). Called with the virtual cursor on every move, click, drag and scroll, so the
     /// sprite follows the finger at touch rate rather than a network round trip behind it. Never
@@ -198,7 +258,9 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// its short, hard tick. It fires for a click and for arming and releasing a drag, never for a
     /// move, a scroll or a coast. iPads have no Taptic Engine; there every call is a silent no-op,
     /// which is UIKit's doing, so there is deliberately no device check here.
+        #if !os(visionOS)
     private let clickHaptic = UIImpactFeedbackGenerator(style: .rigid)
+        #endif
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -442,7 +504,9 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         // The first finger of a new stroke: carry on from wherever the pointer is now.
         if down == touches.count { adoptAnchor() }
         // Spin the Taptic Engine up now, so a tap's click lands without its start-up delay.
+        #if !os(visionOS)
         clickHaptic.prepare()
+        #endif
         if down >= 2 { momentum.stop() }
     }
 
@@ -485,7 +549,9 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         case .began:
             dragging = true
             // Firmer than a click: the button is now held down.
+        #if !os(visionOS)
             clickHaptic.impactOccurred(intensity: 1.0)
+        #endif
             catchUp()
             setPointer(cursor)
             pressModifiers()
@@ -494,7 +560,9 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
             guard dragging else { return }
             dragging = false
             // Softer: the button coming back up.
+        #if !os(visionOS)
             clickHaptic.impactOccurred(intensity: 0.5)
+        #endif
             catchUp()
             setPointer(cursor)
             send(.pointer(.leftUp, x: cursor.x, y: cursor.y))
@@ -518,13 +586,18 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// when it went (an iPhone's; an iPad has no Taptic Engine). A latched modifier stays latched: a
     /// gesture is not a keystroke.
     private func gestureDecided(_ gesture: TrackpadGestures.Gesture, fingers: Int) {
-        if sendGesture(gesture, fingers) { clickHaptic.impactOccurred(intensity: 0.7) }
+        guard sendGesture(gesture, fingers) else { return }
+        #if !os(visionOS)
+        clickHaptic.impactOccurred(intensity: 0.7)
+        #endif
     }
 
     /// The click itself carries no position beyond the cursor and no modifiers: pointer events have
     /// no modifier field at all, which is why the latched ones are pressed around it below.
     private func click(down: PointerAction, up: PointerAction) {
+        #if !os(visionOS)
         clickHaptic.impactOccurred(intensity: 0.8)
+        #endif
         catchUp()
         setPointer(cursor)
         pressModifiers()

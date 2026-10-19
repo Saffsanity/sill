@@ -128,12 +128,27 @@ final class StreamServer {
         /// The last kind 26 sent to it; nil also while it drives the pointer, so the next one goes out
         /// whatever it says.
         var lastPointer: MacPointer?
+        var connectedAnnounced = false
+        var legacyFallback = false
+        var independentRefused = false
+        weak var sessionOwner: StreamServer?
         init(_ c: NWConnection) { connection = c }
     }
 
     /// The network queue: both doors, their connections, the verify blocks and the timers.
     let queue: DispatchQueue
     private var clients: [ObjectIdentifier: Client] = [:]
+    /// Root retains every admitted connection for pairing revocation and session limits. A scoped
+    /// server owns only its pipeline's output; it never creates or starts a listening socket.
+    private var scopedReady = false
+    private var pendingSessionMessages: [(StreamMessage, NWConnection)] = []
+    private var sessionServers: [ObjectIdentifier: StreamServer] = [:]
+    private weak var sessionParent: StreamServer?
+    var isScopedSession: Bool { sessionParent != nil }
+    static let independentSessionLimit = 4
+    var onIndependentSession: ((StreamServer, NWConnection, ClientRoute, ClientLink.Route?, Hello) -> Void)?
+    private var pipelineClients: [Client] { clients.values.filter { $0.connectedAnnounced && !$0.independentRefused && ($0.sessionOwner ?? self) === self } }
+    private let outputGate: StreamOutputGate
     private var lastParameterSets: Data?
     /// A client was admitted (home door at `.ready`, remote door once paired and checked), with
     /// its route (which door, from where) and, for a home client, its link (ClientLink.route; nil
@@ -218,7 +233,7 @@ final class StreamServer {
 
     /// On the network queue.
     private func updateTicking() {
-        let wanted = !clients.isEmpty && (streaming || Date().timeIntervalSince1970 - lastInputAt < Self.inputRecency)
+        let wanted = !pipelineClients.isEmpty && (streaming || Date().timeIntervalSince1970 - lastInputAt < Self.inputRecency)
         if wanted, tickTimer == nil {
             let t = DispatchSource.makeTimerSource(queue: queue)
             t.schedule(deadline: .now(), repeating: Self.tickInterval, leeway: .milliseconds(5))
@@ -234,12 +249,13 @@ final class StreamServer {
     /// On the network queue. Re-evaluates the recency rule so the timer stops itself after a quiet spell.
     private func tick() {
         let live = streaming || Date().timeIntervalSince1970 - lastInputAt < Self.inputRecency
-        guard live, !clients.isEmpty else { updateTicking(); return }
+        guard live, !pipelineClients.isEmpty else { updateTicking(); return }
         let now = Date().timeIntervalSince1970
         // The Mac's pointer, unless the frame-rate sampler has it while it moves.
         let reported = pointerSampler == nil ? samplePointer(now: now) : []
         let data = StreamMessage(kind: .tick, timestamp: now, isKeyframe: false, payload: Data()).serialized()
-        for (id, client) in clients where client.connection.state == .ready {
+        for client in pipelineClients where client.connection.state == .ready {
+            let id = ObjectIdentifier(client.connection)
             // A kind 26 just sent keeps its link awake this turn.
             if reported.contains(id) { continue }
             // Over TLS every record costs CPU (the remote plan's H20): skip a tick right after
@@ -270,14 +286,15 @@ final class StreamServer {
     /// (PointerWatch.samplerInterval). Returns the devices sent one.
     @discardableResult
     private func samplePointer(now: TimeInterval) -> Set<ObjectIdentifier> {
-        let ready = clients.compactMap { $0.value.connection.state == .ready ? $0.key : nil }
+        let ready = pipelineClients.compactMap { $0.connection.state == .ready ? ObjectIdentifier($0.connection) : nil }
         guard let watch = pointerWatch, let reading = watch.sample(devices: ready) else {
             setPointerSampler(interval: nil)
             return []
         }
         var sent = Set<ObjectIdentifier>()
         var watched = false
-        for (id, client) in clients where client.connection.state == .ready {
+        for client in pipelineClients where client.connection.state == .ready {
+            let id = ObjectIdentifier(client.connection)
             guard let report = reading.report(for: id, seen: client.inputsRead) else {
                 client.lastPointer = nil
                 continue
@@ -360,9 +377,9 @@ final class StreamServer {
     let homeDoor: Door?
     /// The home door speaks TLS: its TXT record carries `p`, and kind 21 comes only from an
     /// unpaired session.
-    var homeTLS: Bool { homeDoor != nil }
+    var homeTLS: Bool { sessionParent?.homeTLS ?? (homeDoor != nil) }
 
-    private var listener: NWListener                 // replaced whole, never reconfigured
+    private var listener: NWListener!                 // replaced whole, never reconfigured
     /// The Mac's name and `_sill._tcp`, a test registration (SILL_TEST_SERVICE_TYPE), or nil (the
     /// synthetic hosts, which devices must never find).
     private let serviceNameAndType: (name: String, type: String)?
@@ -402,9 +419,11 @@ final class StreamServer {
     /// for its test registration (SILL_TEST_SERVICE_TYPE, above). `home`: how the home door speaks.
     /// `testHooks`: false for Sill.app's own executable, which honours no TEST ONLY hook that bears
     /// on who gets in (docs/home-pairing-plan.md §4.3).
-    init(serviceType: String = "_sill._tcp", advertise: Bool = true, home: HomeDoorMode = .plain, testHooks: Bool = true) throws {
-        let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
+    init(serviceType: String = "_sill._tcp", advertise: Bool = true, home: HomeDoorMode = .plain, testHooks: Bool = true, sessionParent: StreamServer? = nil) throws {
+        self.sessionParent = sessionParent
+        let queue = sessionParent?.queue ?? DispatchQueue(label: "sill.net", qos: .userInteractive)
         self.queue = queue
+        self.outputGate = StreamOutputGate(queue: queue)
         let test = DoorPolicy.isTestHost(advertises: advertise, bundled: !testHooks)
         // The synthetic test host does not advertise: a device would otherwise find it, connect,
         // and show the test pattern (Noah saw "a white moving wall", 2026-09-23). Test clients
@@ -425,6 +444,7 @@ final class StreamServer {
         var door: Door?
         if case .tls(let t) = home { door = Door(.home, queue: queue, identity: t.identity, trust: t.trust, testHost: test) }
         homeDoor = door
+        if sessionParent != nil { return }
         // TEST ONLY: SILL_TEST_LOOPBACK, on a test host alone (anywhere else TestHooks says it is ignored).
         if test, Self.testLoopback { print("Test listener: loopback only (SILL_TEST_LOOPBACK); reach this host at 127.0.0.1.") }
         listener = try Self.makeListener(peerToPeer: false, port: nil, tls: door?.tlsOptions(), loopback: test && Self.testLoopback)
@@ -677,6 +697,7 @@ final class StreamServer {
     /// it; after, the listener is replaced (see the MARK above). Thread-safe; returns at once.
     /// Requests during a replacement coalesce, and the newest wins.
     func setPeerToPeer(_ on: Bool) {
+        guard !isScopedSession else { return }
         queue.async { [self] in
             wantedPeerToPeer = on
             if started { beginSwap() }
@@ -690,7 +711,7 @@ final class StreamServer {
         swapCount += 1
         let n = swapCount
         swap = .cancelling(n)
-        let old = listener
+        guard let old = listener else { return }
         let oldPort = old.port   // nil for a listener that failed or was never ready: any port then
         // Its registration ending is not the Mac leaving: the status keeps the name through the
         // replacement, whose own registration brings it back.
@@ -860,6 +881,7 @@ final class StreamServer {
     /// A closed home door (no identity) never listens: one line, and the CLI exits as it does when
     /// its listener fails; the app keeps running and says why.
     func start() {
+        guard !isScopedSession else { return }
         queue.async { [self] in
             if case .closed(let why) = homeMode {
                 print("Home door unavailable: \(why).")
@@ -932,8 +954,8 @@ final class StreamServer {
                     self.register(client)
                     print("Client connected: \(connection.endpoint)")
                     self.receiveLoop(client)
-                    self.onClientConnected?(connection, client.route, client.link)
                     if let hello { self.took(hello, from: client) }
+                    self.announceConnected(client, deferForHello: hello == nil)
                 }
                 // The floor at "0": registered at once, as always. Above it: by the first message.
                 client.judging = true
@@ -960,6 +982,7 @@ final class StreamServer {
             guard link != client.link else { return }
             client.link = link
             self.onClientRouteChanged?(connection, link)
+            client.sessionOwner?.onClientRouteChanged?(connection, link)
         }
         connection.start(queue: queue)
     }
@@ -969,7 +992,6 @@ final class StreamServer {
         client.connectedAt = Date().timeIntervalSince1970
         client.lastHeardAt = client.connectedAt
         clients[ObjectIdentifier(client.connection)] = client
-        onClientCountChanged?(clients.count)
         updateTicking()
         updateSweep()
     }
@@ -1008,13 +1030,47 @@ final class StreamServer {
                 guard link != client.link else { return }
                 client.link = link
                 self.onClientRouteChanged?(connection, link)
+            client.sessionOwner?.onClientRouteChanged?(connection, link)
             }
         }
         register(client)
         receiveLoop(client)
-        onClientConnected?(connection, route, client.link)
-        admitted()
         if let hello { took(hello, from: client) }
+        announceConnected(client, deferForHello: hello == nil)
+        admitted()
+    }
+
+    /// TLS supplies its admitted hello before any catalog callback. The development plain door
+    /// leaves a short first-message grace for hello, then preserves clients which send no hello.
+    /// A late opt-in after that legacy fallback is refused instead of migrating a served stream.
+    private func announceConnected(_ client: Client, deferForHello: Bool = false) {
+        guard !client.connectedAnnounced else { return }
+        if deferForHello {
+            queue.asyncAfter(deadline: .now() + .seconds(2)) { [weak self, weak client] in
+                guard let self, let client, self.clients[ObjectIdentifier(client.connection)] === client,
+                      !client.connectedAnnounced else { return }
+                client.legacyFallback = true
+                self.announceConnected(client)
+            }
+            return
+        }
+        client.connectedAnnounced = true
+        onClientCountChanged?(pipelineClients.count)
+        updateTicking()
+        onClientConnected?(client.connection, client.route, client.link)
+    }
+
+    /// Called only after the coordinator has wired every callback. Admission and receive framing
+    /// remain on the parent; pending messages preserve arrival order across the main-actor hop.
+    func activateScopedSession(_ connection: NWConnection, route: ClientRoute, link: ClientLink.Route?) {
+        queue.async { [self] in
+            guard let client = clients[ObjectIdentifier(connection)], client.connection.state == .ready else { return }
+            scopedReady = true
+            onClientCountChanged?(1)
+            onClientConnected?(connection, route, link)
+            for (message, connection) in pendingSessionMessages { onMessage?(message, connection) }
+            pendingSessionMessages.removeAll()
+        }
     }
 
     /// Admitted remote sessions: how many. On `queue`.
@@ -1219,6 +1275,35 @@ final class StreamServer {
         let name = SafeText.label(hello.device ?? "")
         if client.device == nil, !name.isEmpty { client.device = name }
         print(DeviceGate.helloLine(hello, endpoint: "\(c.endpoint)"))
+        if let generation = hello.independentSession {
+            guard generation == 1, !client.legacyFallback, sessionServers.count < Self.independentSessionLimit,
+                  let onIndependentSession else {
+                client.independentRefused = true
+                onClientCountChanged?(pipelineClients.count)
+                goodbye(Goodbye(reason: "independentSession", message: generation == 1
+                    ? (client.legacyFallback ? "This connection already started a shared Sill session. Reconnect to open an independent window."
+                        : "This Mac already has four independent Sill windows open. Close one and try again.")
+                    : "Update Sill on this Mac to open an independent window.", reconnect: false), to: c)
+                return
+            }
+            do {
+                let scoped = try StreamServer(advertise: false, home: .closed("Scoped session"), testHooks: false, sessionParent: self)
+                scoped.clients[ObjectIdentifier(c)] = client
+                client.sessionOwner = scoped
+                sessionServers[ObjectIdentifier(c)] = scoped
+                client.needsKeyframe = true
+                client.awaitingFirstKeyframe = true
+                onClientCountChanged?(pipelineClients.count)
+                updateTicking()
+                announceConnected(client)
+                onIndependentSession(scoped, c, client.route, client.link, hello)
+            } catch {
+                client.independentRefused = true
+                onClientCountChanged?(pipelineClients.count)
+                goodbye(Goodbye(reason: "independentSession", message: "This Mac couldn’t open another Sill stream. Try again.", reconnect: false), to: c)
+            }
+        }
+        announceConnected(client)
         onClientHello?(c, hello)
     }
 
@@ -1267,7 +1352,10 @@ final class StreamServer {
             client.sentThisSecond = 0
             client.withheldThisSecond = 0
             client.takenThisSecond = 0
-            if let verdict = client.judge.close(second) { onClientLinkChanged?(client.connection, verdict) }
+            if let verdict = client.judge.close(second) {
+                onClientLinkChanged?(client.connection, verdict)
+                client.sessionOwner?.onClientLinkChanged?(client.connection, verdict)
+            }
             guard client.route.isRemote else { continue }
             let silent = now - client.lastHeardAt
             if now - client.connectedAt >= Self.remoteSilence, silent > Self.remoteSilence {
@@ -1284,10 +1372,14 @@ final class StreamServer {
         // sweep asks too, on the same terms (its queue idle, the request due); the encoder then
         // encodes the still window's last frame again (HEVCEncoder.requestKeyframe). While frames
         // come, whichever looks first asks, once.
-        if !waiting.isEmpty, remoteKeyframeDue(now) {
-            lastRemoteKeyframeRequest = now
-            for client in waiting { client.keyframeWanted = false }
-            onKeyframeNeeded?()
+        var requested = Set<ObjectIdentifier>()
+        for client in waiting {
+            let owner = client.sessionOwner ?? self
+            guard !requested.contains(ObjectIdentifier(owner)), owner.remoteKeyframeDue(now) else { continue }
+            requested.insert(ObjectIdentifier(owner))
+            owner.lastRemoteKeyframeRequest = now
+            client.keyframeWanted = false
+            owner.onKeyframeNeeded?()
         }
     }
 
@@ -1296,9 +1388,16 @@ final class StreamServer {
     private func unregister(_ id: ObjectIdentifier) {
         guard let client = clients.removeValue(forKey: id) else { return }
         pointerWatch?.clientLeft(id)
+        if let scoped = sessionServers.removeValue(forKey: id) {
+            scoped.clients[id] = nil
+            scoped.pointerWatch?.clientLeft(id)
+            scoped.onClientDisconnected?(client.connection)
+            scoped.onClientCountChanged?(0)
+            scoped.updateTicking()
+        }
         print("Client left: \(client.connection.endpoint)")
         onClientDisconnected?(client.connection)
-        onClientCountChanged?(clients.count)
+        onClientCountChanged?(pipelineClients.count)
         updateTicking()
         updateSweep()
     }
@@ -1306,10 +1405,12 @@ final class StreamServer {
     /// The source is changing: forget the old parameter sets and make every client wait for
     /// the next keyframe, so nobody decodes frames of the new window with the old format. Each
     /// client's link keeps its judgement (`resetLinks` is the coordinator's to call).
-    func resetForNewStream() {
-        queue.async { [self] in
+    /// The returned token admits only this pipeline attempt's encoded output.
+    @discardableResult
+    func resetForNewStream() -> StreamOutputGate.Generation {
+        outputGate.reset { [self] in
             lastParameterSets = nil
-            for client in clients.values {
+            for client in pipelineClients {
                 client.needsKeyframe = true
                 client.awaitingFirstKeyframe = true
             }
@@ -1321,7 +1422,7 @@ final class StreamServer {
     /// reset. A restart that keeps the quality never calls it. Thread-safe.
     func resetLinks() {
         queue.async { [self] in
-            for client in clients.values {
+            for client in pipelineClients {
                 client.sentThisSecond = 0
                 client.withheldThisSecond = 0
                 if let verdict = client.judge.reset() { onClientLinkChanged?(client.connection, verdict) }
@@ -1335,10 +1436,10 @@ final class StreamServer {
     /// built for a connection the server has just forgotten, before the coordinator hears it left).
     /// Thread-safe.
     func send(each messages: [(NWConnection, StreamMessage)]) {
-        let items = messages.map { (ObjectIdentifier($0.0), $0.1.serialized()) }
+        let items = messages.map { (ObjectIdentifier($0.0), $0.1.serialized(), $0.1.kind == .clipboard) }
         queue.async { [self] in
-            for (id, data) in items {
-                guard let client = clients[id], client.connection.state == .ready else { continue }
+            for (id, data, sharedClipboard) in items {
+                guard let client = clients[id], !client.independentRefused, ((client.sessionOwner ?? self) === self || sharedClipboard), client.connection.state == .ready else { continue }
                 send(data, to: client)
             }
         }
@@ -1348,7 +1449,8 @@ final class StreamServer {
     func send(_ message: StreamMessage, to connection: NWConnection) {
         let data = message.serialized()
         queue.async { [self] in
-            guard let client = clients[ObjectIdentifier(connection)] else {
+            guard let client = clients[ObjectIdentifier(connection)], !client.independentRefused, (client.sessionOwner ?? self) === self else {
+                if self.sessionServers[ObjectIdentifier(connection)] != nil || self.clients[ObjectIdentifier(connection)]?.independentRefused == true || connection.state != .ready { return }
                 print("send: no client for \(connection.endpoint) (\(clients.count) known)")
                 return
             }
@@ -1376,14 +1478,20 @@ final class StreamServer {
                 return
             }
             let deliver = { (payload: Data) in
+                guard !client.independentRefused else { return }
+                if header.kind != .hello, !client.connectedAnnounced {
+                    client.legacyFallback = true
+                    self.announceConnected(client)
+                }
                 if header.kind == .input {
-                    self.lastInputAt = Date().timeIntervalSince1970
-                    if self.tickTimer == nil { self.updateTicking() }
+                    let owner = client.sessionOwner ?? self
+                    owner.lastInputAt = Date().timeIntervalSince1970
+                    if owner.tickTimer == nil { owner.updateTicking() }
                     // This device moves the Mac's pointer now. The count and the controller change
                     // in the same queue turn as every sample, so no kind 26 carries the new count
                     // with the old controller (docs/pointer-visibility-plan.md §3.3).
                     client.inputsRead += 1
-                    self.pointerWatch?.inputArrived(from: ObjectIdentifier(c), movesPointer: PointerControl.movesPointer(payload: payload))
+                    (client.sessionOwner ?? self).pointerWatch?.inputArrived(from: ObjectIdentifier(c), movesPointer: PointerControl.movesPointer(payload: payload))
                 }
                 if header.kind == .ping {
                     // Echo straight back from the network queue: the round trip should measure the
@@ -1412,6 +1520,7 @@ final class StreamServer {
                             client.worstRttSincePrint = -1
                         }
                         self.onClientStats?(c, stats)
+                        client.sessionOwner?.onClientStats?(c, stats)
                     }
                 } else if header.kind == .hello {
                     // The device's hello: the first of this connection counts, a second is skipped
@@ -1423,7 +1532,14 @@ final class StreamServer {
                 } else if header.kind == .pairingWanted && client.route.isRemote {
                     // "Show your pairing code" comes only from a device near the Mac: ignored here.
                 } else {
-                    self.onMessage?(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), c)
+                    let message = StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload)
+                    let owner = client.sessionOwner ?? self
+                    if owner.isScopedSession && !owner.scopedReady {
+                        // Bound pre-activation traffic; the client cannot queue unbounded work while
+                        // the main actor creates its pipeline. Refuse rather than silently lose picks.
+                        guard owner.pendingSessionMessages.count < 64 else { c.cancel(); return }
+                        owner.pendingSessionMessages.append((message, c))
+                    } else { owner.onMessage?(message, c) }
                 }
                 self.receiveLoop(client)
             }
@@ -1449,15 +1565,16 @@ final class StreamServer {
         return "\(median)/\(max(worst, median)) ms"
     }
 
-    /// Thread-safe: hops onto the network queue.
-    func broadcast(_ message: StreamMessage) {
+    /// Thread-safe: hops onto the network queue. Encoded output supplies its generation;
+    /// stale callbacks are rejected before changing the cached format or sending any bytes.
+    func broadcast(_ message: StreamMessage, generation: StreamOutputGate.Generation? = nil) {
         let data = message.serialized()
-        queue.async { [self] in
+        outputGate.enqueue(generation: generation) { [self] in
             if message.kind == .parameterSets { lastParameterSets = data }
             if message.kind == .frame, message.isKeyframe { lastKeyframeAt = Date().timeIntervalSince1970 }
             var wantKeyframe = false
             defer { if wantKeyframe { onKeyframeNeeded?() } }
-            for client in clients.values where client.connection.state == .ready {
+            for client in pipelineClients where client.connection.state == .ready {
                 if message.kind == .frame, client.route.isRemote {
                     if paceRemote(client, message: message, data: data) { wantKeyframe = true }
                     continue
@@ -1591,7 +1708,7 @@ final class StreamServer {
     /// hitch (the trackpad stutter's cause 2); it only brings one forward when frames come slower
     /// than the stream's rate. The remote device waits longer after a drop in exchange. On `queue`.
     private func remoteKeyframeDue(_ now: TimeInterval) -> Bool {
-        guard clients.values.contains(where: { !$0.route.isRemote }) else {
+        guard pipelineClients.contains(where: { !$0.route.isRemote }) else {
             return now - lastRemoteKeyframeRequest >= Self.remoteKeyframeSpacing
         }
         return now - lastRemoteKeyframeRequest >= Self.remoteKeyframeSpacingBesideHome

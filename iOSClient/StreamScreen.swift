@@ -102,8 +102,29 @@ enum DuoLayout {
 
 struct StreamScreen: View {
     @ObservedObject var client: StreamClient
+    #if os(visionOS)
+    @Environment(\.spatialScenePreferences) private var spatialPreferences
+    private var spatialToolbarAutomatic: Bool {
+        get { spatialPreferences?.wrappedValue.toolbarAutomatic ?? true }
+        nonmutating set { spatialPreferences?.wrappedValue.toolbarAutomatic = newValue }
+    }
+    private var spatialSavedMouseMode: Bool {
+        get { spatialPreferences?.wrappedValue.mouseMode ?? false }
+        nonmutating set { spatialPreferences?.wrappedValue.mouseMode = newValue }
+    }
+    private var spatialSavedTextScale: Double {
+        get { spatialPreferences?.wrappedValue.textScale ?? 0 }
+        nonmutating set { spatialPreferences?.wrappedValue.textScale = newValue }
+    }
+    @State private var spatialToolbarHover = VisionToolbarHoverCycle()
+    @Namespace private var spatialToolbarHoverNamespace
+    @Environment(\.accessibilityVoiceOverEnabled) private var spatialVoiceOver
+    @Environment(\.openWindow) private var openSpatialWindow
+    #endif
     @State private var drawerOpen = false
     @State private var keyboardShown = false
+    @State private var keyboardToolsOpen = false
+    @State private var keyboardShowEpoch = UUID()
     /// Modifiers held down by the portrait key row until the next key, character or click uses
     /// them. Lives up here so rotating the iPad does not drop a half-typed shortcut.
     @State private var latched: KeyModifiers = []
@@ -196,7 +217,13 @@ struct StreamScreen: View {
         self.client = client
         _drawerOpen = State(initialValue: drawerOpen)
         _keyboardShown = State(initialValue: keyboardShown)
+        #if os(visionOS)
+        // Native popovers need a presented host. The launch-argument harness opens this after
+        // attachment, through the same binding as the button.
+        _scaleOpen = State(initialValue: false)
+        #else
         _scaleOpen = State(initialValue: scaleOpen)
+        #endif
         _textScale = State(initialValue: textScale)
         _settingsOpen = State(initialValue: settingsOpen)
         // The panel open over the keyboard, as in a session: it took the keyboard down, and closing
@@ -236,6 +263,9 @@ struct StreamScreen: View {
                 && PhonePortraitLayout.offersLargerPicture(screen: geo.size)
             ZStack {
                 Group {
+                    #if os(visionOS)
+                    spatialLayout(size: geo.size)
+                    #else
                     switch duo {
                     case .innerLandscape:
                         landscape(bar: .regular, width: geo.size.width, fold: posture.info(in: geo.size))
@@ -246,10 +276,12 @@ struct StreamScreen: View {
                     case .outerPortrait:
                         portrait(metrics: DuoLayout.phoneArrangement ? .phone : .compact, largerKeyboard: largerKeyboard)
                     }
+                    #endif
                 }
                 // Under the pairing overlay and the tour nothing takes a touch: not the bar, and
                 // not the stream's UIKit input view (nor, so, the Pencil, a hover or a key).
                 .allowsHitTesting(!overlayShown && tour == nil)
+                .environment(\.spatialInputAllowed, keyboardTakers.isEmpty && scenePhase == .active && windowMenu == nil && !scaleOpen)
                 // The pointer sprite follows the layout: the trackpad's arrow shows only in the
                 // laptop layout, and a rotation re-renders it at once; the Mac's arrow stays.
                 .onChange(of: DuoLayout.of(geo.size).isPortrait, initial: true) { _, portrait in
@@ -314,6 +346,20 @@ struct StreamScreen: View {
             .duoFold(posture, size: geo.size, screen: "stream screen")
             .duoStatusBar(posture, size: geo.size)
             .environment(\.largerPictureOffered, offersLarger)
+            #if os(visionOS)
+            .onChange(of: client.active) { _, _ in spatialToolbarHover.resetScrollEpisode() }
+            .onChange(of: client.connectedAt) { _, _ in spatialToolbarHover.resetScrollEpisode() }
+            .onChange(of: scenePhase) { _, _ in spatialToolbarHover.resetScrollEpisode() }
+            #if DEBUG
+            .onChange(of: spatialToolbarHover.generation) { _, generation in
+                if UserDefaults.standard.bool(forKey: "SillToolbarHoverTrace") {
+                    // Counts app-owned resets and distinct IDs requested, never private gaze state.
+                    NSLog("TOOLBAR_HOVER reset=%d native=%d requestedGroupIDs=%d", generation,
+                          spatialToolbarNativeReset ? 1 : 0, spatialToolbarNativeReset ? 1 : generation + 1)
+                }
+            }
+            #endif
+            #endif
             #if DEBUG
             // The console's line for the gates: what Larger Picture's rule made of the switch and of
             // what streams, on a phone held upright, each time one of them or the outcome changes.
@@ -322,23 +368,44 @@ struct StreamScreen: View {
             }
             #endif
         }
+        #if !os(visionOS)
         .background(Color.black)
+        #endif
         .overlayPreferenceValue(WindowMenuAnchorKey.self) { anchor in
-            if let anchor, let id = windowMenu, let window = client.windows.first(where: { $0.id == id }) {
+            if let anchor, rootWindowMenuAllowed, let id = windowMenu, let window = client.windows.first(where: { $0.id == id }) {
                 WindowLightsMenu(anchor: anchor, window: window,
                                  command: { action in client.command(action, window: id); closeWindowMenu() },
                                  dismiss: closeWindowMenu,
                                  alwaysBelow: DuoLayout.drawsPhone)
+                    #if os(visionOS)
+                    .environment(\.openSpatialSource, { source in
+                        guard let seed = client.spatialWindowSeed(source: source) else { return }
+                        let id = VisionWindowLaunches.shared.register(seed)
+                        closeWindowMenu()
+                        openSpatialWindow(id: "sill-session", value: id)
+                    })
+                    .environment(\.spatialSourceCanOpen, client.spatialWindowSeed(source: .window(id)) != nil)
+                    #endif
             }
         }
+        #if !os(visionOS)
         .animation(.spring(duration: 0.25, bounce: 0.2), value: windowMenu)
+        #endif
         .onChange(of: client.pendingLink) { _, link in
             // An outside link while streaming: the panel and the keyboard go first, as for Pair This iPad….
             if link != nil { openLinkOverlay() }
         }
         .onChange(of: scenePhase) { _, phase in
             // A gesture cut short by a scene change never ends: put the transient UI away.
-            if phase != .active { scaleOpen = false; windowMenu = nil }
+            if phase != .active {
+                scaleOpen = false; windowMenu = nil
+                #if os(visionOS)
+                overlay.endSpatialKeyboardSession()
+                keyboardToolsOpen = false
+                keyboardShowEpoch = UUID()
+                keyboardBeforeSettings = false; keyboardAfterMenus = false; tourKeyboardAfter = false
+                #endif
+            }
         }
         // One thing open at a time: the Aa ruler and a thumbnail's traffic lights put the Settings
         // panel away. (Opening the panel closes them, the drawer and the keyboard.)
@@ -346,6 +413,10 @@ struct StreamScreen: View {
         .onChange(of: windowMenu) { _, menu in if menu != nil { setSettings(false) } }
         .ignoresSafeArea(edges: .bottom)
         .onAppear {
+            #if os(visionOS)
+            client.visionMouseMode = spatialSavedMouseMode
+            textScale = spatialSavedTextScale.isFinite && spatialSavedTextScale > 0 && spatialSavedTextScale <= 8 ? spatialSavedTextScale : nil
+            #endif
             // A fresh connection starts on the Desktop (the client asks for it as soon as the host
             // reports nothing streaming), so the drawer stays closed until the user opens it.
             sendViewport()
@@ -356,10 +427,16 @@ struct StreamScreen: View {
             #endif
         }
         .onChange(of: client.active) { _, source in
+            keyboardShowEpoch = UUID()
+            keyboardToolsOpen = false
             if source != .none { withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false } }
             // The host sizes a window as it selects it, from the last viewport it has; this repeat
             // is for a host that restarted, or a window that was picked from the Mac's side.
             sendViewport()
+        }
+        .onChange(of: client.connectedAt) { _, _ in
+            keyboardToolsOpen = false
+            keyboardShowEpoch = UUID()
         }
         .onChange(of: client.connected) { _, up in
             if up { sendViewport() }
@@ -367,19 +444,40 @@ struct StreamScreen: View {
         // A hardware keyboard (docs/hardware-keyboard-plan.md §2): the input view takes the keyboard by
         // itself while one is attached and nothing open takes it, never as the person's own.
         .onReceive(HardwareKeyboardMonitor.shared.$attached) { overlay.update(attached: $0) }
-        .onChange(of: keyboardTakers, initial: true) { _, takers in overlay.update(takers: takers) }
+        .onChange(of: keyboardTakers, initial: true) { _, takers in
+            #if os(visionOS)
+            if !takers.isEmpty { client.cancelRemoteKeyboardRequest() }
+            #endif
+            overlay.update(takers: takers)
+        }
+        #if os(visionOS)
+        .onChange(of: client.editableFocusActivation) { _, token in
+            guard let token, client.isCurrentEditableFocusActivation(token) else { return }
+            showSpatialKeyboard(confirmedToken: token)
+        }
+        #endif
         // Rotation animates, and a Mac window resize restarts the stream, so let the size settle.
         .onChange(of: panelSize) { _, _ in sendViewport(after: 0.25) }
         // Same wait for Aa: cycling from Off to 0.8× passes three sizes nobody wants the Mac to try.
-        .onChange(of: textScale) { _, _ in sendViewport(after: 0.25) }
+        .onChange(of: textScale) { _, value in
+            #if os(visionOS)
+            spatialSavedTextScale = value ?? 0
+            #endif
+            sendViewport(after: 0.25)
+        }
+        #if os(visionOS)
+        .onChange(of: client.visionMouseMode) { _, value in spatialSavedMouseMode = value }
+        #endif
         // The stream rate follows the panel (`StreamClient.wantedFPS`): re-send when Low Power Mode
         // toggles or the screen's mode changes. Both notifications can arrive off the main thread.
         .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange).receive(on: RunLoop.main)) { _ in
             sendViewport(after: 0.25)
         }
+        #if !os(visionOS)
         .onReceive(NotificationCenter.default.publisher(for: UIScreen.modeDidChangeNotification).receive(on: RunLoop.main)) { _ in
             sendViewport(after: 0.25)
         }
+        #endif
         // Away from home the stream rate follows the route (60 fps through a VPN or the internet): a
         // session that stops being away (the move home) asks for its full rate whatever path it took
         // (docs/remote-bundle-plan.md §7.3).
@@ -512,6 +610,17 @@ struct StreamScreen: View {
         guard !Self.launchArgumentsRan else { return }
         Self.launchArgumentsRan = true
         let defaults = UserDefaults.standard
+        #if os(visionOS)
+        if defaults.bool(forKey: "SillMouseMode") { client.visionMouseMode = true }
+        if defaults.object(forKey: "SillToolbarAutomatic") != nil {
+            spatialToolbarAutomatic = defaults.bool(forKey: "SillToolbarAutomatic")
+        }
+        #if DEBUG
+        if defaults.bool(forKey: "SillControls") {
+            spatialToolbarAutomatic = false
+        }
+        #endif
+        #endif
         let live = !client.mockDiscovery
         func after(_ seconds: Double, _ step: @escaping () -> Void) {
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: step)
@@ -564,6 +673,19 @@ struct StreamScreen: View {
                       + (largerPictureHeld != nil ? "; the Settings panel is open, so it applies when the panel closes" : ""))
             }
         }
+        #if os(visionOS)
+        let opensTextSizeAfterAttachment = true
+        #else
+        let opensTextSizeAfterAttachment = live
+        #endif
+        if defaults.bool(forKey: "SillScaleOpen"), opensTextSizeAfterAttachment {
+            after(1.5) {
+                let scale = defaults.double(forKey: "SillScale")
+                if scale > 0 { textScale = scale }
+                print("harness: the text-size control opened")
+                scaleOpen = true
+            }
+        }
         guard live else { return }
         if defaults.bool(forKey: "SillDrawer") {
             after(1.5) { print("harness: the drawer opened"); withAnimation(.easeOut(duration: 0.18)) { drawerOpen = true } }
@@ -574,14 +696,6 @@ struct StreamScreen: View {
             // waiting under it, then showing: docs/clipboard-plan.md).
             let closeAt = defaults.double(forKey: "SillSettingsCloseAt")
             if closeAt > 1.5 { after(closeAt) { print("harness: the Settings panel closed"); setSettings(false) } }
-        }
-        if defaults.bool(forKey: "SillScaleOpen") {
-            after(1.5) {
-                let scale = defaults.double(forKey: "SillScale")
-                if scale > 0 { textScale = scale }
-                print("harness: the Aa ruler opened")
-                scaleOpen = true
-            }
         }
     }
     private static var launchArgumentsRan = false
@@ -633,10 +747,16 @@ struct StreamScreen: View {
     private var keyboardTakers: Set<HardwareKeyboardPolicy.Taker> {
         var takers: Set<HardwareKeyboardPolicy.Taker> = []
         if settingsOpen { takers.insert(.settings) }
+        #if os(visionOS)
+        if keyboardToolsOpen { takers.insert(.menus) }
+        #endif
         if overlayShown { takers.insert(.pairing) }
         if tour != nil { takers.insert(.tour) }
         if drawerOpen { takers.insert(.drawer) }
         if menusOpen { takers.insert(.menus) }
+        #if os(visionOS)
+        if scenePhase != .active { takers.insert(.inactive) }
+        #endif
         return takers
     }
 
@@ -705,7 +825,9 @@ struct StreamScreen: View {
             largerPictureHeld = open ? largerPictureNow : nil
         }
         if !open {
+            #if !os(visionOS)
             if restoreKeyboard, keyboardBeforeSettings { overlay.setKeyboard(shown: true) }
+            #endif
             keyboardBeforeSettings = false
         }
     }
@@ -729,7 +851,9 @@ struct StreamScreen: View {
         #if DEBUG
         if keyboardAfterMenus { print("menus: the pull-down went; the keyboard back up, as before the Settings panel") }
         #endif
+        #if !os(visionOS)
         if keyboardAfterMenus { overlay.setKeyboard(shown: true) }
+        #endif
         keyboardAfterMenus = false
         menusOpen = false
     }
@@ -959,7 +1083,9 @@ struct StreamScreen: View {
         let onScreen = tourOnScreen
         withAnimation(.easeOut(duration: 0.2)) { tour = nil }
         client.tourSession.running = false
+        #if !os(visionOS)
         if tourKeyboardAfter && !overlayShown { overlay.setKeyboard(shown: true) }
+        #endif
         tourKeyboardAfter = false
         // VoiceOver reads the stream screen afresh (not from under the pairing overlay).
         if onScreen { AccessibilityNotification.ScreenChanged().post() }
@@ -1024,20 +1150,227 @@ struct StreamScreen: View {
         reduceMotion ? .opacity : .scale(scale: 0.94, anchor: anchor).combined(with: .opacity)
     }
 
+    private func showSpatialKeyboard(confirmedToken: String? = nil) {
+        keyboardToolsOpen = false
+        let epoch = keyboardShowEpoch
+        #if os(visionOS)
+        let focus = overlay.focusEpoch
+        #endif
+        let session = client.connectedAt
+        let source = client.active
+        DispatchQueue.main.async {
+            guard scenePhase == .active, !keyboardToolsOpen, keyboardShowEpoch == epoch,
+                  client.connected, client.connectedAt == session, client.active == source else { return }
+            #if os(visionOS)
+            guard overlay.focusEpoch == focus else { return }
+            if let confirmedToken {
+                guard client.isCurrentEditableFocusActivation(confirmedToken) else { return }
+                overlay.showKeyboardForEditableFocus()
+                return
+            }
+            #endif
+            #if os(visionOS)
+            overlay.showKeyboardFromUserAction()
+            #else
+            overlay.setKeyboard(shown: true)
+            #endif
+        }
+    }
+
+    #if os(visionOS)
+    private var spatialToolbarNativeReset: Bool {
+        if #available(visionOS 26.0, *) {
+            #if DEBUG
+            return !UserDefaults.standard.bool(forKey: "SillToolbarLegacyReset")
+            #else
+            return true
+            #endif
+        }
+        return false
+    }
+
+    private var spatialToolbarHoverGroup: HoverEffectGroup {
+        HoverEffectGroup(id: spatialToolbarHover.groupID(nativeReset: spatialToolbarNativeReset),
+                         in: spatialToolbarHoverNamespace)
+    }
+
+    private var spatialToolbarUsesHover: Bool {
+        spatialToolbarAutomatic && !spatialToolbarPinned
+    }
+
+    private func spatialLayout(size: CGSize) -> some View {
+        let toolbarLength = tour == nil ? max(180, size.width - 60) : max(750, size.width - 60)
+        // During onboarding, preserve the inline target anchors in TourOverlay's
+        // scene coordinate space. Native ornaments never change the picture's size.
+        return VStack(spacing: tour == nil ? 0 : 24) {
+            if tour != nil {
+                spatialToolbar(sidebar: false).frame(width: toolbarLength)
+            }
+            contentArea(bar: .regular)
+                .modifier(VisionToolbarPreserve(group: spatialToolbarHoverGroup))
+                .modifier(VisionToolbarReset(group: spatialToolbarHoverGroup,
+                                            generation: spatialToolbarHover.generation,
+                                            nativeReset: spatialToolbarNativeReset))
+        }
+        .ornament(attachmentAnchor: .scene(.top), contentAlignment: .bottom) {
+            if tour == nil {
+                spatialTopToolbar(size: size, length: toolbarLength)
+                    .padding(.bottom, 12)
+            }
+        }
+        .ornament(attachmentAnchor: .scene(.leading), contentAlignment: .trailing) {
+            if tour == nil {
+                spatialControlsBar(height: max(180, min(750, size.height)), glanceLength: size.height / 3)
+                    .padding(.trailing, 12)
+            }
+        }
+    }
+
+    private func spatialTopToolbar(size: CGSize, length: CGFloat) -> some View {
+        ZStack {
+            if spatialToolbarUsesHover {
+                VisionToolbarGlanceTarget(vertical: false, length: size.width / 3, reduceMotion: reduceMotion,
+                                         group: spatialToolbarHoverGroup)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                spatialToolbar(sidebar: false, content: .previews).frame(width: length)
+            }
+            .frame(width: size.width, height: BarMetrics.regular.height)
+            .popover(isPresented: Binding(get: { windowMenu != nil }, set: { if !$0 { closeWindowMenu() } }), arrowEdge: .bottom) {
+                spatialSidebarWindowMenu
+            }
+            .modifier(VisionToolbarReveal(automatic: spatialToolbarUsesHover, reduceMotion: reduceMotion,
+                                          group: spatialToolbarHoverGroup))
+        }
+    }
+
+    @ViewBuilder
+    private var spatialSidebarWindowMenu: some View {
+        if let id = windowMenu, let window = client.windows.first(where: { $0.id == id }) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("\(window.appName) window actions").font(.headline)
+                Button("Close window", systemImage: "xmark") { client.command(.close, window: id); closeWindowMenu() }
+                Button("Minimize window", systemImage: "minus") { client.command(.minimize, window: id); closeWindowMenu() }
+                Button("Full screen", systemImage: "arrow.up.left.and.arrow.down.right") { client.command(.fullScreen, window: id); closeWindowMenu() }
+                Button("Open as own window", systemImage: "rectangle.on.rectangle") {
+                    guard let seed = client.spatialWindowSeed(source: .window(id)) else { return }
+                    let launch = VisionWindowLaunches.shared.register(seed)
+                    closeWindowMenu()
+                    openSpatialWindow(id: "sill-session", value: launch)
+                }
+                .disabled(client.spatialWindowSeed(source: .window(id)) == nil)
+            }
+            .padding(24)
+        }
+    }
+
+    private func spatialControlsBar(height: CGFloat, glanceLength: CGFloat) -> some View {
+        ZStack {
+            if spatialToolbarUsesHover {
+                VisionToolbarGlanceTarget(vertical: true, length: glanceLength, reduceMotion: reduceMotion,
+                                         group: spatialToolbarHoverGroup)
+            }
+            ScrollView(.vertical, showsIndicators: false) {
+                spatialToolbar(sidebar: true, content: .controls)
+            }
+            .frame(width: BarMetrics.regular.buttonWidth + 16, height: height)
+            .modifier(VisionToolbarReveal(automatic: spatialToolbarUsesHover, reduceMotion: reduceMotion,
+                                          group: spatialToolbarHoverGroup))
+        }
+    }
+
+    private func spatialToolbar(sidebar: Bool, thumbnailHeight: CGFloat = 200, content: TopBar.Content = .all) -> some View {
+        TopBar(client: client, metrics: .regular, drawerOpen: $drawerOpen,
+               keyboardShown: $keyboardShown, textScale: $textScale, scaleOpen: $scaleOpen,
+               windowMenu: $windowMenu, settingsOpen: settingsOpen, menusFit: true,
+               toggleKeyboard: { client.cancelRemoteKeyboardRequest(); overlay.toggleKeyboard() },
+               setSettings: { setSettings($0, restoreKeyboard: $1) },
+               menusOpened: menusOpened, menusClosed: menusClosed,
+               keyboardTools: $keyboardToolsOpen, showKeyboard: { showSpatialKeyboard() }, overlay: overlay,
+               vertical: sidebar, thumbnailHeight: thumbnailHeight, content: content,
+               visibilityButton: sidebar ? AnyView(spatialVisibilityButton) : nil)
+    }
+
+    private var spatialControlsPinned: Bool {
+        settingsOpen || drawerOpen || menusOpen || scaleOpen || keyboardToolsOpen || spatialVoiceOver
+    }
+
+    private var spatialToolbarPinned: Bool {
+        spatialControlsPinned || windowMenu != nil || tour != nil
+    }
+
+    private var spatialVisibilityButton: some View {
+        BarButton(open: !spatialToolbarAutomatic, width: BarMetrics.regular.buttonWidth,
+                  height: BarMetrics.regular.buttonHeight,
+                  accessibilityLabel: spatialToolbarAutomatic ? "Pin toolbars open" : "Automatically hide toolbars") {
+            spatialToolbarAutomatic.toggle()
+            spatialToolbarHover.resetScrollEpisode()
+            // Returning to Auto begins a fresh hidden phase for both bars.
+            spatialToolbarHover.reset()
+        } content: {
+            Image(systemName: spatialToolbarAutomatic ? "lock.open" : "lock")
+                .font(.system(size: 22))
+        }
+        .hoverEffect(.highlight)
+        .accessibilityValue(spatialToolbarAutomatic ? "Automatic" : "Pinned open")
+        .accessibilityHint("Look at either subtle pill to reveal both toolbars. Activate to switch between pinned open and automatic visibility.")
+    }
+
+    /// An explicit remote click, scroll or key starts control. Merely moving a
+    /// pointer (including hover) or selecting a preview does not dismiss tools.
+    private var spatialSurfaceInputSender: (InputEvent) -> Void {
+        let send = client.surfaceInputSender
+        let session = client.connectedAt, source = client.active
+        return { event in
+            let admitted = client.connected && session != nil && session == client.connectedAt &&
+                source != .none && source == client.active && !client.inputPaused
+            spatialToolbarHover.input(event, automatic: spatialToolbarAutomatic, admitted: admitted)
+            send(event)
+        }
+    }
+    #endif
+
+    private var rootWindowMenuAllowed: Bool {
+        #if os(visionOS)
+        tour != nil // Both native ornaments present their own popover outside the inline tour.
+        #else
+        true
+        #endif
+    }
+
+    private static var nativeToolbarButtons: Int {
+        #if os(visionOS)
+        7
+        #else
+        6
+        #endif
+    }
+
     private func landscape(bar plain: BarMetrics, width: CGFloat, fold: FoldInfo) -> some View {
         // The book pose (docs/iphone-duo-plan.md, (a)): nothing on the fold's band; elsewhere as before.
         let (bar, stripWidth) = plain.clearing(fold, width: width)
-        return VStack(spacing: 0) {
+        #if os(visionOS)
+        let surfaceGap: CGFloat = 24
+        #else
+        let surfaceGap: CGFloat = 0
+        #endif
+        return VStack(spacing: surfaceGap) {
             TopBar(client: client, metrics: bar, stripWidth: stripWidth, drawerOpen: $drawerOpen,
                    keyboardShown: $keyboardShown,
                    textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
                    settingsOpen: settingsOpen,
                    // Apps, Menus, Aa, Keyboard, Desktop, Settings, and the strip.
-                   menusFit: MacMenuButton.fits(width: width - 2 * bar.padding, buttons: 6, buttonWidth: bar.buttonWidth,
+                   menusFit: MacMenuButton.fits(width: width - 2 * bar.padding, buttons: Self.nativeToolbarButtons, buttonWidth: bar.buttonWidth,
                                                 gap: bar.gap, thumbWidth: bar.thumbWidth),
-                   toggleKeyboard: { overlay.toggleKeyboard() },
+                   toggleKeyboard: {
+                       #if os(visionOS)
+                       client.cancelRemoteKeyboardRequest()
+                       #endif
+                       overlay.toggleKeyboard()
+                   },
                    setSettings: { setSettings($0, restoreKeyboard: $1) },
-                   menusOpened: menusOpened, menusClosed: menusClosed)
+                   menusOpened: menusOpened, menusClosed: menusClosed,
+                   keyboardTools: $keyboardToolsOpen, showKeyboard: { showSpatialKeyboard() }, overlay: overlay)
             contentArea(bar: bar)
         }
     }
@@ -1056,26 +1389,43 @@ struct StreamScreen: View {
                              pairThisDevice: openPairingOverlay,
                              linkLine: shownLinkLine,
                              takeTour: takeTour,
-                             largerKeyboard: largerKeyboard)
+                             largerKeyboard: largerKeyboard,
+                             keyboardTools: $keyboardToolsOpen, showKeyboard: { showSpatialKeyboard() })
     }
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
 
     private func contentArea(bar: BarMetrics) -> some View {
         ZStack(alignment: .topLeading) {
+            #if !os(visionOS)
             Color.black
+            #endif
 
             ZStack {
                 StreamView(client: client)
                 // Same frame as the video, so a touch maps straight onto the streamed frame.
                 InputOverlay(videoSize: client.videoSize,
-                             send: { client.sendInput($0) },
-                             setOwnPointer: { client.setOwnPointer($0, from: $1) },
+                             send: {
+                                 #if os(visionOS)
+                                 spatialSurfaceInputSender
+                                 #else
+                                 client.surfaceInputSender
+                                 #endif
+                             }(),
+                             setOwnPointer: client.surfacePointerSender,
+                             setNativePointerActive: client.setNativePointerActive,
+                             pointerFeed: { client.pointerFeedState },
+                             cancelRemoteKeyboardRequest: {
+                                 #if os(visionOS)
+                                 client.cancelRemoteKeyboardRequest()
+                                 #endif
+                             },
                              proxy: overlay,
                              isKeyboardShown: $keyboardShown,
                              latchedModifiers: latched,
                              onModifiersConsumed: { latched = [] },
                              sendGesture: { client.sendGesture($0, fingers: $1) })
+                    .spatialInputBoundary(client: client)
             }
             .background(Palette.panel)
             .overlay(alignment: .top) { LinkLineView(text: shownLinkLine) }
@@ -1084,7 +1434,9 @@ struct StreamScreen: View {
             // The panel itself, inside the padding: the size the host fits the Mac window to.
             .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { panelSize = $0 })
             .tourTarget(.stream)
+            #if !os(visionOS)
             .padding(8)
+            #endif
 
             // The dim comes after the overlay on purpose: with the drawer open a tap on the dim
             // closes the drawer instead of clicking the Mac.
@@ -1104,9 +1456,9 @@ struct StreamScreen: View {
                     .transition(.opacity)
             }
 
-            // The drawer's mirror on the trailing edge, its right side lined up with the Settings
-            // button's. No dim: the stream stays as it is, so a change can be watched taking effect.
-            // A tap on it closes the panel and never clicks the Mac; the bar above stays live.
+            // Align Settings with its toolbar: leading on visionOS, trailing on iPad.
+            // No dim: the stream stays visible so changes can be watched taking effect.
+            // A tap outside closes the panel and never clicks the Mac; the toolbar stays live.
             if settingsOpen {
                 Color.clear
                     .contentShape(Rectangle())
@@ -1119,9 +1471,15 @@ struct StreamScreen: View {
                     .frame(maxHeight: .infinity, alignment: .top)
                     .padding(.top, 8)
                     .padding(.bottom, 14)
+                    #if os(visionOS)
+                    .padding(.leading, bar.padding)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .transition(settingsTransition(anchor: .topLeading))
+                    #else
                     .padding(.trailing, bar.padding)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .transition(settingsTransition())
+                    #endif
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1234,72 +1592,196 @@ private struct TopBar: View {
     /// The Menus pull-down opened and went (see `StreamScreen.menusOpened`).
     let menusOpened: () -> Void
     let menusClosed: () -> Void
+    @Binding var keyboardTools: Bool
+    let showKeyboard: () -> Void
+    let overlay: InputOverlayProxy
+    var vertical = false
+    var thumbnailHeight: CGFloat = 200
+    #if os(visionOS)
+    enum Content { case all, previews, controls }
+    var content: Content = .all
+    var visibilityButton: AnyView? = nil
+    #endif
+    private var showsControls: Bool {
+        #if os(visionOS)
+        content != .previews
+        #else
+        true
+        #endif
+    }
+    private var showsPreviews: Bool {
+        #if os(visionOS)
+        content != .controls
+        #else
+        true
+        #endif
+    }
+    #if os(visionOS)
+    @Environment(\.scenePhase) private var scenePhase
+    #endif
 
     var body: some View {
-        HStack(spacing: metrics.gap) {
-            button(open: drawerOpen, symbol: "magnifyingglass", label: "Apps",
-                   accessibilityLabel: drawerOpen ? "Close the app list" : "Open the app list",
-                   action: {
-                       setSettings(false, false)
-                       withAnimation(.easeOut(duration: 0.18)) { drawerOpen.toggle() }
-                   })
-
-            WindowStrip(client: client, width: metrics.thumbWidth, height: metrics.thumbHeight,
-                        radius: metrics.thumbRadius, spacing: metrics.thumbSpacing,
-                        pad: metrics.thumbPad, fade: metrics.thumbFade, menuFor: $windowMenu)
-                .opacity(scaleOpen ? 0.2 : 1)      // the ruler is centred on Aa and reaches over the strip's end
-                .allowsHitTesting(!scaleOpen)
-                .frame(width: stripWidth)
-                .tourTarget(.strip, inset: WindowStrip.tourBand(pad: metrics.thumbPad))
-            // The book pose: the fold's band, and nothing on it, between the strip and the buttons.
-            if stripWidth != nil { Spacer(minLength: 0) }
-
-            // The Mac's menus of the streamed app, next to the thumbnails because they are the picked
-            // window's app's. Only while the Mac sent some, and where the bar holds it: with none the
-            // strip takes its room back.
-            if client.menus.hasMenus, menusFit {
-                MacMenuButton(client: client, width: metrics.buttonWidth, height: metrics.buttonHeight,
-                              spacing: metrics.buttonSpacing, onOpen: menusOpened, onClose: menusClosed)
-                    .opacity(scaleOpen ? 0 : 1)    // under the Aa ruler, as the buttons after Aa
-                    .allowsHitTesting(!scaleOpen)
-                    .transition(.opacity)
+        let arrangement = vertical ? AnyLayout(VStackLayout(spacing: metrics.gap)) : AnyLayout(HStackLayout(spacing: metrics.gap))
+        arrangement {
+            if showsControls {
+                button(open: drawerOpen, symbol: "magnifyingglass", label: "Apps",
+                       accessibilityLabel: drawerOpen ? "Close the app list" : "Open the app list",
+                       action: {
+                           setSettings(false, false)
+                           withAnimation(.easeOut(duration: 0.18)) { drawerOpen.toggle() }
+                       })
             }
+            if showsPreviews {
+                WindowStrip(client: client, width: metrics.thumbWidth, height: metrics.thumbHeight,
+                            radius: metrics.thumbRadius, spacing: metrics.thumbSpacing,
+                            pad: metrics.thumbPad, fade: metrics.thumbFade, menuFor: $windowMenu, vertical: vertical)
+                    .opacity(scaleOpen ? 0.2 : 1)      // the ruler is centred on Aa and reaches over the strip's end
+                    .allowsHitTesting(!scaleOpen)
+                    .frame(width: vertical ? metrics.thumbWidth + 16 : stripWidth, height: vertical ? thumbnailHeight : nil)
+                    #if os(visionOS)
+                    .frame(minWidth: vertical ? nil : content == .previews ? 60 : 160)
+                    #endif
+                    .tourTarget(.strip, inset: WindowStrip.tourBand(pad: metrics.thumbPad))
+                #if os(visionOS)
+                if content == .previews { desktopButton }
+                #endif
+                // The book pose: the fold's band, and nothing on it, between the strip and the buttons.
+                if stripWidth != nil { Spacer(minLength: 0) }
+            }
+            if showsControls {
+                // The Mac's menus of the streamed app, next to the thumbnails because they are the picked
+                // window's app's. Only while the Mac sent some, and where the bar holds it: with none the
+                // strip takes its room back.
+                if client.menus.hasMenus, menusFit {
+                    MacMenuButton(client: client, width: metrics.buttonWidth, height: metrics.buttonHeight,
+                                  spacing: metrics.buttonSpacing, onOpen: menusOpened, onClose: menusClosed)
+                        .opacity(scaleOpen ? 0 : 1)    // under the Aa ruler, as the buttons after Aa
+                        .allowsHitTesting(!scaleOpen)
+                        .transition(.opacity)
+                }
 
-            // Text size: the host sizes the Mac window to the panel divided by this scale, so a
-            // bigger number means a smaller Mac window and bigger text here. The slider unfolds to
-            // the right, over the two buttons after it, which fade while it is open.
-            TextScaleControl(scale: $textScale, open: $scaleOpen,
-                             width: metrics.buttonWidth, height: metrics.buttonHeight,
-                             pointsPerStep: metrics.buttonHeight >= 60 ? 44 : 40)
-                .tourTarget(.textSize)
+                // Text size: the host sizes the Mac window to the panel divided by this scale, so a
+                // bigger number means a smaller Mac window and bigger text here. The slider unfolds to
+                // the right, over the two buttons after it, which fade while it is open.
+                #if os(visionOS)
+                // A gaze-and-pinch activation must leave the picker open after release. The iPad's
+                // press-and-drag ruler closes on gesture end and also competes with the top scroll view.
+                button(open: scaleOpen, symbol: "textformat.size", label: "Text size",
+                       accessibilityLabel: "Text size in this window") { scaleOpen.toggle() }
+                    .popover(isPresented: $scaleOpen, arrowEdge: vertical ? .trailing : .top) {
+                        VisionTextSizePicker(scale: $textScale)
+                    }
+                    .tourTarget(.textSize)
+                #else
+                TextScaleControl(scale: $textScale, open: $scaleOpen,
+                                 width: metrics.buttonWidth, height: metrics.buttonHeight,
+                                 pointsPerStep: metrics.buttonHeight >= 60 ? 44 : 40)
+                    .tourTarget(.textSize)
 
-            button(open: keyboardShown, symbol: "keyboard", label: "Keyboard",
-                   accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
-                   action: { setSettings(false, false); toggleKeyboard() })
-                .opacity(scaleOpen ? 0 : 1)
-                .allowsHitTesting(!scaleOpen)
-                .tourTarget(.keyboard)
+                #endif
 
-            button(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop",
-                   accessibilityLabel: "Show the full Mac desktop",
-                   action: { client.select(.desktop) })
-                .opacity(scaleOpen ? 0 : 1)
-                .allowsHitTesting(!scaleOpen)
+                #if os(visionOS)
+                VisionMouseModeButton(client: client, width: metrics.buttonWidth, height: metrics.buttonHeight, spacing: metrics.buttonSpacing)
+                    .opacity(scaleOpen ? 0 : 1)
+                    .allowsHitTesting(!scaleOpen)
+                #endif
+                button(open: keyboardShown, symbol: "keyboard", label: "Keyboard",
+                       accessibilityLabel: keyboardButtonAccessibilityLabel,
+                       action: keyboardTapped)
+                    #if os(visionOS)
+                    .visionKeyboardToolsGesture(tap: keyboardTapped) {
+                        client.cancelRemoteKeyboardRequest()
+                        setSettings(false, false)
+                        keyboardTools = true
+                    }
+                    .popover(isPresented: $keyboardTools) {
+                        VisionKeyboardTools(client: client, shown: keyboardShown, overlay: overlay) {
+                            keyboardTools = false
+                            showKeyboard()
+                        }
+                    }
+                    .onChange(of: client.active) { _, _ in keyboardTools = false }
+                    .onChange(of: client.connectedAt) { _, _ in keyboardTools = false }
+                    .onChange(of: scenePhase) { _, phase in
+                        if phase != .active { keyboardTools = false }
+                    }
+                    #endif
+                    .opacity(scaleOpen ? 0 : 1)
+                    .allowsHitTesting(!scaleOpen)
+                    .tourTarget(.keyboard)
 
-            // Leave's old slot: Disconnect is the Settings panel's pinned last row now.
-            button(open: settingsOpen, symbol: "gearshape", label: "Settings",
-                   accessibilityLabel: settingsOpen ? "Close settings" : "Settings for \(client.macName.isEmpty ? "the Mac" : client.macName)",
-                   action: { setSettings(!settingsOpen, true) })
-                .opacity(scaleOpen ? 0 : 1)
-                .allowsHitTesting(!scaleOpen)
-                .tourTarget(.settings)
+                #if os(visionOS)
+                if content == .all { desktopButton }
+                #else
+                desktopButton
+                #endif
+
+                // Leave's old slot: Disconnect is the Settings panel's pinned last row now.
+                button(open: settingsOpen, symbol: "gearshape", label: "Settings",
+                       accessibilityLabel: settingsOpen ? "Close settings" : "Settings for \(client.macName.isEmpty ? "the Mac" : client.macName)",
+                       action: { setSettings(!settingsOpen, true) })
+                    .opacity(scaleOpen ? 0 : 1)
+                    .allowsHitTesting(!scaleOpen)
+                    .tourTarget(.settings)
+                #if os(visionOS)
+                if let visibilityButton { visibilityButton }
+                #endif
+            }
         }
         .animation(.easeOut(duration: 0.16), value: scaleOpen)
         .animation(.easeOut(duration: 0.18), value: client.menus.hasMenus)
-        .frame(height: metrics.height)
-        .padding(.horizontal, metrics.padding)
+        .frame(height: vertical ? nil : metrics.height)
+        .padding(.horizontal, toolbarHorizontalPadding)
+        .padding(.vertical, vertical ? 8 : 0)
         // The bar's colour runs to the screen edge; its contents stay inside the safe area.
+        #if os(visionOS)
+        .background(.clear)
+        #else
         .background(Palette.bar.ignoresSafeArea(edges: .top))
+        #endif
+    }
+
+    private var toolbarHorizontalPadding: CGFloat {
+        #if os(visionOS)
+        vertical || content == .previews ? 8 : metrics.padding
+        #else
+        vertical ? 8 : metrics.padding
+        #endif
+    }
+
+    private var desktopButton: some View {
+        button(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop",
+               accessibilityLabel: "Show the full Mac desktop",
+               action: {
+                   #if os(visionOS)
+                   if content == .previews { scaleOpen = false }
+                   #endif
+                   client.select(.desktop)
+               })
+            #if os(visionOS)
+            .opacity(content == .previews ? 1 : scaleOpen ? 0 : 1)
+            .allowsHitTesting(content == .previews || !scaleOpen)
+            #else
+            .opacity(scaleOpen ? 0 : 1)
+            .allowsHitTesting(!scaleOpen)
+            #endif
+    }
+
+    private var keyboardButtonAccessibilityLabel: String {
+        #if os(visionOS)
+        keyboardShown ? "Keyboard enabled" : "Enable keyboard"
+        #else
+        keyboardShown ? "Hide the keyboard" : "Show the keyboard"
+        #endif
+    }
+
+    private func keyboardTapped() {
+        setSettings(false, false)
+        #if os(visionOS)
+        showKeyboard()
+        #else
+        toggleKeyboard()
+        #endif
     }
 
     private func button(open: Bool, symbol: String, label: String, accessibilityLabel: String,
@@ -1309,10 +1791,16 @@ private struct TopBar: View {
             VStack(spacing: metrics.buttonSpacing) {
                 Image(systemName: symbol)
                     .font(.system(size: 22))
+                    #if os(visionOS)
+                    .foregroundStyle(.white)
+                    #else
                     .foregroundStyle(open ? Palette.accent : Palette.text)
+                    #endif
+                #if !os(visionOS)
                 Text(label)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(open ? Palette.accent : Palette.barLabel)
+                #endif
             }
         }
     }
@@ -1361,11 +1849,21 @@ struct BarButton<Content: View>: View {
         Button(action: action) {
             content()
                 .frame(width: width, height: height)
+                #if os(visionOS)
+                .foregroundStyle(.white)
+                .background(Circle().fill(.black))
+                .overlay(Circle().strokeBorder(.white.opacity(open ? 0.8 : 0), lineWidth: 2))
+                .contentShape(Circle())
+                #else
                 .background(RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .fill(open ? Palette.controlOpen : Palette.control))
+                #endif
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+        #if os(visionOS)
+        .accessibilityAddTraits(open ? .isSelected : [])
+        #endif
     }
 }
 
@@ -1445,7 +1943,9 @@ struct TextScaleControl: View {
                     let dx = g.location.x - startX
                     let snapped = Self.snap(startValue + Double(dx / pointsPerStep) * 0.25)
                     if snapped != live {
+        #if !os(visionOS)
                         UISelectionFeedbackGenerator().selectionChanged()
+        #endif
                         withAnimation(.easeOut(duration: 0.1)) { live = snapped }
                     }
                 }
@@ -1552,12 +2052,17 @@ struct WindowStrip: View {
     /// Which thumbnail has its traffic-light submenu open. Owned by the screen root, which draws
     /// the submenu outside this clipped strip.
     @Binding var menuFor: UInt32?
+    var vertical = false
 
-    /// Press and hold a thumbnail for 1.5 s: it starts to wiggle and its traffic lights (close,
+    /// Press and hold a thumbnail (0.5 s on visionOS, 1.5 s on iPad): it starts to wiggle and its traffic lights (close,
     /// minimize, full screen) appear in a submenu beside it, the way a held Home Screen icon
     /// offers its menu. Keep holding and move: the submenu goes, the thumbnail lifts and drags
     /// into a new slot. The arrangement is the device's own, persisted per Mac. A tap selects.
+    #if os(visionOS)
+    static let holdToOpen: TimeInterval = 0.5
+    #else
     static let holdToOpen: TimeInterval = 1.5
+    #endif
     /// What the tour lights of the strip: its thumbnails' band (the strip is as tall as its bar),
     /// with the active halo's 5 pt above and the app badge's 6 pt below.
     static func tourBand(pad: CGFloat) -> EdgeInsets {
@@ -1569,9 +2074,10 @@ struct WindowStrip: View {
 
     var body: some View {
         let windows = client.orderedWindows
-        let slot = width + spacing
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: spacing) {
+        let slot = (vertical ? height : width) + spacing
+        let arrangement = vertical ? AnyLayout(VStackLayout(spacing: spacing)) : AnyLayout(HStackLayout(spacing: spacing))
+        ScrollView(vertical ? .vertical : .horizontal, showsIndicators: false) {
+            arrangement {
                 ForEach(Array(windows.enumerated()), id: \.element.id) { index, window in
                     WindowThumbnail(window: window,
                                     image: client.thumbnails[window.id],
@@ -1592,12 +2098,22 @@ struct WindowStrip: View {
                                             onHold: { openMenu(for: window.id) },
                                             onMove: { t in holdMoved(window: window, index: index, count: windows.count, slot: slot, translation: t) },
                                             onEnd: { holdEnded(window: window) })
+                                #if os(visionOS)
+                                // Give visionOS an explicit thumbnail-sized interaction region
+                                // and native hover feedback for the transparent UIKit overlay.
+                                .contentShape(.interaction, Rectangle())
+                                .hoverEffect(.highlight)
+                                #endif
                         }
-                        .offset(x: lifted == window.id ? liftOffset : 0)
+                        .offset(x: !vertical && lifted == window.id ? liftOffset : 0,
+                                y: vertical && lifted == window.id ? liftOffset : 0)
                         .zIndex(lifted == window.id ? 1 : 0)
                         // The lifted thumbnail follows the finger: its slot change must not animate,
                         // or the layout springs one way while the compensating offset jumps the other.
                         .transaction { if lifted == window.id { $0.animation = nil } }
+                        #if os(visionOS)
+                        .accessibilityAction(named: "Window actions") { openMenu(for: window.id) }
+                        #endif
                 }
             }
             .padding(.vertical, pad)
@@ -1609,7 +2125,7 @@ struct WindowStrip: View {
         .mask(LinearGradient(stops: [.init(color: .black, location: 0),
                                      .init(color: .black, location: fade),
                                      .init(color: .clear, location: 1)],
-                             startPoint: .leading, endPoint: .trailing))
+                             startPoint: vertical ? .top : .leading, endPoint: vertical ? .bottom : .trailing))
         .onChange(of: client.windows) { _, now in
             // A window that closed or minimized takes its menu, and any drag, with it.
             if let id = menuFor, !now.contains(where: { $0.id == id }) { closeMenu() }
@@ -1636,16 +2152,21 @@ struct WindowStrip: View {
             closeMenu()
             lifted = window.id
             liftStartIndex = index
+        #if !os(visionOS)
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        #endif
         }
         guard lifted == window.id else { return }
-        let shift = Int((t.width / slot).rounded())
+        let travel = vertical ? t.height : t.width
+        let shift = Int((travel / slot).rounded())
         let target = max(0, min(count - 1, liftStartIndex + shift))
         if let current = client.orderedWindows.firstIndex(where: { $0.id == window.id }), current != target {
+        #if !os(visionOS)
             UISelectionFeedbackGenerator().selectionChanged()
+        #endif
             withAnimation(.spring(duration: 0.3, bounce: 0.15)) { client.moveWindow(window.id, to: target) }
         }
-        liftOffset = t.width - CGFloat(target - liftStartIndex) * slot
+        liftOffset = travel - CGFloat(target - liftStartIndex) * slot
     }
 
     /// The finger lifted after a hold: drop the thumbnail (the submenu, if open, stays).
@@ -1657,7 +2178,9 @@ struct WindowStrip: View {
 
     private func openMenu(for id: UInt32) {
         guard menuFor != id else { return }
+        #if !os(visionOS)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        #endif
         menuFor = id
     }
 
@@ -1684,6 +2207,16 @@ struct HoldDragOverlay: UIViewRepresentable {
         let hold = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.held(_:)))
         hold.minimumPressDuration = minimumHold
         hold.allowableMovement = 12        // more than this before the hold fires is a scroll, not a hold
+        #if os(visionOS)
+        let spatialTouches = [UITouch.TouchType.direct.rawValue,
+                              UITouch.TouchType.indirect.rawValue,
+                              UITouch.TouchType.indirectPointer.rawValue].map { NSNumber(value: $0) }
+        tap.allowedTouchTypes = spatialTouches
+        hold.allowedTouchTypes = spatialTouches
+        // A physical primary click-and-hold follows the same path as a hand pinch-and-hold.
+        // The tap must lose once the hold recognizes, so release never also selects the window.
+        tap.require(toFail: hold)
+        #endif
         view.addGestureRecognizer(tap)
         view.addGestureRecognizer(hold)
         return view
@@ -1733,7 +2266,13 @@ struct WindowLightsMenu: View {
     /// arrangement); otherwise they go on the side of the screen's middle away from it.
     var alwaysBelow: (CGSize) -> Bool = { _ in false }
 
+    #if os(visionOS)
+    @Environment(\.openSpatialSource) private var openSpatialSource
+    @Environment(\.spatialSourceCanOpen) private var spatialSourceCanOpen
+    private static let size = CGSize(width: 280, height: 164)
+    #else
     private static let size = CGSize(width: 214, height: 62)
+    #endif
     /// The Duo's hinge (iOS 27.1): the lights keep off its fold.
     @Environment(\.duoEnvironment) private var duoEnvironment
 
@@ -1750,10 +2289,25 @@ struct WindowLightsMenu: View {
             let below = at.below, x = at.x, y = at.y
             ZStack {
                 Color.clear.contentShape(Rectangle()).onTapGesture(perform: dismiss)
-                HStack(spacing: 6) {
+                VStack(spacing: 8) {
+                    HStack(spacing: 6) {
                     light(.close, Color(hex: 0xFF5F57), "xmark", "Close")
                     light(.minimize, Color(hex: 0xFEBC2E), "minus", "Minimize")
                     light(.fullScreen, Color(hex: 0x28C840), "arrow.up.left.and.arrow.down.right", "Full Screen")
+                    }
+                    #if os(visionOS)
+                    Button("Open as own window", systemImage: "rectangle.on.rectangle") {
+                        openSpatialSource?(.window(window.id))
+                    }
+                    .disabled(!spatialSourceCanOpen || openSpatialSource == nil)
+                    .help("Open the full Sill interface in another window")
+                    if !spatialSourceCanOpen {
+                        Text("Requires an updated Sill Mac and a paired connection.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    #endif
                 }
                 .padding(.horizontal, 10)
                 .frame(width: w, height: h)
@@ -1830,6 +2384,10 @@ private struct WindowThumbnail: View {
         return preview
             .frame(width: width, height: height)
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            #if os(visionOS)
+            .background(RoundedRectangle(cornerRadius: radius + 5, style: .continuous)
+                .fill(.black).padding(-5))
+            #endif
             .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
             // The active halo sits under the app badge: the badge's bar-coloured ring then reads as
@@ -1930,7 +2488,7 @@ struct AppDrawer: View {
                             DrawerRow(height: 50,
                                       highlighted: app.bundleID == activeBundleID,
                                       title: app.name,
-                                      trailing: app.windows.count == 1 ? "1 window" : "\(app.windows.count) windows",
+                                      trailing: app.windows.isEmpty ? "Running" : app.windows.count == 1 ? "1 window" : "\(app.windows.count) windows",
                                       action: { show(app) }) {
                                 AppIcon(image: client.icons[app.bundleID], name: app.name,
                                         size: 32, radius: 9, fontSize: 12)
@@ -2010,24 +2568,27 @@ struct AppDrawer: View {
 
     /// Running apps, grouped from the window list and kept in its front-to-back order.
     private var openApps: [OpenApp] {
-        var order: [String] = []
-        var names: [String: String] = [:]
-        var grouped: [String: [WindowInfo]] = [:]
-        for window in client.windows {
-            if grouped[window.bundleID] == nil {
-                order.append(window.bundleID)
-                names[window.bundleID] = window.appName
-            }
-            grouped[window.bundleID, default: []].append(window)
-        }
-        return order.map { OpenApp(bundleID: $0, name: names[$0] ?? $0, windows: grouped[$0] ?? []) }
-            .filter { matches($0.name) }
+        let inventory: [AppInfo]?
+        #if os(visionOS)
+        inventory = client.runningApps
+        #else
+        inventory = nil
+        #endif
+        return AppInventory.openApps(windows: client.windows, runningApps: inventory).map { app in
+            OpenApp(bundleID: app.bundleID, name: app.name,
+                    windows: client.windows.filter { $0.bundleID == app.bundleID })
+        }.filter { matches($0.name) }
     }
 
     private var closedApps: [AppInfo] {
+        #if os(visionOS)
+        let running = Set(AppInventory.openApps(windows: client.windows, runningApps: client.runningApps).map(\.bundleID))
+        #else
         let running = Set(client.windows.map(\.bundleID))
+        #endif
+        var seen = Set<String>()
         return client.apps
-            .filter { !running.contains($0.bundleID) && matches($0.name) }
+            .filter { !running.contains($0.bundleID) && seen.insert($0.bundleID).inserted && matches($0.name) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
@@ -2043,14 +2604,25 @@ struct AppDrawer: View {
 
     /// First window of the app, or the next one if this app is already showing.
     private func show(_ app: OpenApp) {
-        guard !app.windows.isEmpty else { return }
+        guard !app.windows.isEmpty else {
+            #if os(visionOS)
+            guard client.connected, client.runningApps?.contains(where: { $0.bundleID == app.bundleID }) == true else { return }
+            client.launch(bundleID: app.bundleID)
+            drawerOpen = false
+            #endif
+            return
+        }
         var target = app.windows[0]
         if case .window(let id) = client.active,
            let index = app.windows.firstIndex(where: { $0.id == id }) {
             target = app.windows[(index + 1) % app.windows.count]
         }
         client.select(.window(target.id))
+        #if os(visionOS)
+        drawerOpen = false
+        #else
         withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false }
+        #endif
     }
 }
 
@@ -2115,3 +2687,140 @@ extension PhonePortraitLayout.Streaming {
         }
     }
 }
+
+// The visual hierarchy is shared; only the native spatial input lifecycle needs this fence.
+private struct SpatialInputAllowedKey: EnvironmentKey {
+    static let defaultValue = true
+}
+extension EnvironmentValues {
+    var spatialInputAllowed: Bool {
+        get { self[SpatialInputAllowedKey.self] }
+        set { self[SpatialInputAllowedKey.self] = newValue }
+    }
+}
+struct SpatialInputContext: Equatable {
+    var session: Date? = nil
+    var source: StreamSource = .none
+    var mouseMode = false
+}
+private struct SpatialInputContextKey: EnvironmentKey {
+    static let defaultValue = SpatialInputContext()
+}
+extension EnvironmentValues {
+    var spatialInputContext: SpatialInputContext {
+        get { self[SpatialInputContextKey.self] }
+        set { self[SpatialInputContextKey.self] = newValue }
+    }
+}
+private struct SpatialInputBoundary: ViewModifier {
+    @ObservedObject var client: StreamClient
+    @Environment(\.spatialInputAllowed) private var allowed
+    func body(content: Content) -> some View {
+        #if os(visionOS)
+        content
+            .environment(\.spatialInputContext, SpatialInputContext(session: client.connectedAt, source: client.active, mouseMode: client.visionMouseMode))
+            .allowsHitTesting(allowed)
+        #else
+        content
+        #endif
+    }
+}
+extension View {
+    func spatialInputBoundary(client: StreamClient) -> some View {
+        modifier(SpatialInputBoundary(client: client))
+    }
+}
+extension StreamClient {
+    var surfacePointerSender: (CGPoint?, PointerPresence.Origin) -> Void {
+        #if os(visionOS)
+        let session = connectedAt, source = active
+        return { [weak self] point, origin in
+            guard let self, self.connected, session != nil, session == self.connectedAt, source != .none, source == self.active else { return }
+            if point != nil && self.inputPaused { return }
+            self.setOwnPointer(point, from: origin)
+        }
+        #else
+        return { self.setOwnPointer($0, from: $1) }
+        #endif
+    }
+
+    /// A delayed callback belongs to the source and session that created its input surface.
+    var surfaceInputSender: (InputEvent) -> Void {
+        #if os(visionOS)
+        let session = connectedAt, source = active
+        return { [weak self] event in
+            guard let self,
+                  VisionSurfaceInputPolicy.accepts(event, allowed: true, session: session,
+                      currentSession: self.connectedAt, connected: self.connected,
+                      source: source, currentSource: self.active) else { return }
+            self.sendInput(event)
+        }
+        #else
+        return { self.sendInput($0) }
+        #endif
+    }
+}
+
+#if os(visionOS)
+extension View {
+    /// One physical interaction has exactly one outcome. Keeping the Button underneath preserves
+    /// its ordinary accessibility activation; the named action also makes the tools discoverable.
+    func visionKeyboardToolsGesture(tap: @escaping () -> Void, hold: @escaping () -> Void) -> some View {
+        highPriorityGesture(
+            LongPressGesture(minimumDuration: 0.5)
+                .exclusively(before: TapGesture())
+                .onEnded { result in
+                    switch result {
+                    case .first(true): hold()
+                    case .second: tap()
+                    default: break
+                    }
+                }
+        )
+        .accessibilityAction(named: "Keyboard and paste tools", hold)
+    }
+}
+
+/// System paste consent, with no clipboard subscription or composition field.
+struct VisionKeyboardTools: View {
+    @ObservedObject var client: StreamClient
+    let shown: Bool
+    let overlay: InputOverlayProxy
+    let toggle: () -> Void
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var active = false
+    @State private var epoch = UUID()
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Button("Right-click last point") { overlay.rightClick(client: client) }
+                .disabled(overlay.spatialTarget?.context != SpatialInputContext(session: client.connectedAt, source: client.active, mouseMode: client.visionMouseMode))
+            Text("Tap Keyboard to enable typing until this Sill window loses focus. Opening local controls suspends typing; tap the stream or Keyboard to resume.")
+                .font(.caption).foregroundStyle(.secondary)
+            let session = client.connectedAt
+            let source = client.active
+            let request = epoch
+            let focus = overlay.focusEpoch
+            PasteButton(payloadType: String.self) { strings in
+                DispatchQueue.main.async {
+                    guard active, epoch == request, overlay.focusEpoch == focus,
+                          overlay.view?.window?.isKeyWindow == true,
+                          UIApplication.shared.applicationState == .active,
+                          scenePhase == .active, client.connected,
+                          client.connectedAt == session, client.active == source else { return }
+                    if let text = strings.first(where: { !$0.isEmpty }), text.utf8.count <= Clipboard.maxTextBytes {
+                        client.sendInput(.text(text))
+                    }
+                }
+            }
+            .accessibilityLabel("Paste Text into the Mac")
+            Text("Click the Mac field first. Copy text on your other Apple device, then tap Paste Text here. This types plain text into the current Mac control.")
+                .font(.caption).foregroundStyle(.secondary)
+        }.padding(24).frame(width: 340)
+        .onAppear { active = true }
+        .onDisappear { active = false; epoch = UUID() }
+        .onChange(of: client.active) { _, _ in epoch = UUID() }
+        .onChange(of: client.connectedAt) { _, _ in epoch = UUID() }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { active = false; epoch = UUID() } }
+    }
+}
+#endif

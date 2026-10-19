@@ -38,7 +38,13 @@ struct CodeScanner: View {
     @State private var access = AVCaptureDevice.authorizationStatus(for: .video)
 
     /// Whether this device can scan at all; false in the simulator.
-    static var isSupported: Bool { DataScannerViewController.isSupported }
+    static var isSupported: Bool {
+        #if os(visionOS)
+        return false // No general camera scanner access; use the existing typed pairing card.
+        #else
+        return DataScannerViewController.isSupported
+        #endif
+    }
 
     /// The camera as it stands: refused (or restricted) means the typed path and a way to Settings.
     static var cameraDenied: Bool {

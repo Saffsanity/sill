@@ -75,6 +75,7 @@ public enum StreamMessageKind: UInt8 {
                              // on), its text becomes the Mac's clipboard, and `stop` ends the subscription; only
                              // to a host whose window list says `clipboard` 1 or more. Host → device: text copied
                              // on the Mac (or sent by another device), only to a connection that subscribed
+    case editableFocus = 33  // both ways: JSON EditableFocus, one post-click request and correlated reply
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

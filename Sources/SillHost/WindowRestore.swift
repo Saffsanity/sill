@@ -322,7 +322,11 @@ enum WindowRestore {
         /// The windows that stop streaming when `keep` streams next (nil: none streams), taken out
         /// in window ID order, for the coordinator to put back.
         mutating func stopping(keeping keep: CGWindowID?) -> [(id: CGWindowID, entry: Entry)] {
-            let ids = entries.keys.filter { $0 != keep }.sorted()
+            stopping(keeping: Set(keep.map { [$0] } ?? []))
+        }
+
+        mutating func stopping(keeping keep: Set<CGWindowID>) -> [(id: CGWindowID, entry: Entry)] {
+            let ids = entries.keys.filter { !keep.contains($0) }.sorted()
             var out: [(id: CGWindowID, entry: Entry)] = []
             for id in ids { if let e = entries.removeValue(forKey: id) { out.append((id, e)) } }
             return out
@@ -335,6 +339,10 @@ enum WindowRestore {
         /// (`WindowRestore.stop`), but the one the virtual display holds (`staged`: only when Quit or a
         /// signal lands while the stage takes it), which goes home with the stage.
         mutating func restore<A: Access>(keeping keep: CGWindowID?, staged: CGWindowID?, on a: inout A) -> [Stopped] where A.W == Handle {
+            restore(keeping: Set(keep.map { [$0] } ?? []), staged: staged, on: &a)
+        }
+
+        mutating func restore<A: Access>(keeping keep: Set<CGWindowID>, staged: CGWindowID?, on a: inout A) -> [Stopped] where A.W == Handle {
             var out: [Stopped] = []
             for (id, entry) in stopping(keeping: keep) where id != staged {
                 out.append(WindowRestore.stop(id, entry.handle, entry.record, on: &a))

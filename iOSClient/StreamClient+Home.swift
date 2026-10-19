@@ -831,6 +831,9 @@ extension StreamClient {
     /// none answering, the link's own addresses, as before (a window a device opened lists none:
     /// "Nothing answered…").
     func pairLinkAtHome(_ link: PairLink, overlay: Bool, scanned: Bool) {
+        #if os(visionOS)
+        clearSpatialPendingSelectionForManualConnect()
+        #endif
         let secret = scanned ? link.secret : nil
         let qr: (Data) -> SymmetricKey? = { _ in PairingProof.qrKey(secret: link.secret) }
         if let ask = homeAsk, ask.phase == .shown, let key = ask.askedKey, key == link.fingerprint, let answered = ask.answered {

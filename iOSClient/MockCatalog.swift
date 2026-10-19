@@ -137,10 +137,23 @@ enum MockCatalog {
     /// display view is told of since no parameter sets ever arrive; `pencilPointer` is Q2's flip.
     private static func seedPointer(_ client: StreamClient, _ state: String, pencilPointer: Bool) {
         guard client.debugSeedPointer(state, pencilShows: pencilPointer) else {
-            print("-SillPointer \(state): not a state (mac@X,Y, device@X,Y, hidden or pencil@X,Y)")
+            print("-SillPointer \(state): not a state (mac@X,Y, device@X,Y, hidden, spatial@X,Y or pencil@X,Y)")
             return
         }
-        client.displayView.debugFrameSize(client.videoSize)
+        if UserDefaults.standard.bool(forKey: "SillPointerVideo") {
+            client.displayView.debugVideoFrame(size: client.videoSize)
+        } else {
+            client.displayView.debugFrameSize(client.videoSize)
+        }
+        #if os(visionOS)
+        // First attachment refreshes the real overlay's source/session context and clears any
+        // stale local pointer. Seed after that normal cancellation, as a new accepted event would.
+        // Otherwise a spatial fixture created before SwiftUI hosts the surface tests startup reset
+        // rather than rendering. This delayed seed exists only in the network-free DEBUG mock.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak client] in
+            _ = client?.debugSeedPointer(state, pencilShows: pencilPointer)
+        }
+        #endif
     }
 
     // MARK: - The Mac's menus
@@ -527,6 +540,7 @@ enum MockCatalog {
         default: return (false, false, .placeholder)
         }
     }
+
 
     /// A stand-in pairing link: a made-up key and secret, so nothing pairs with it.
     static var mockLink: PairLink {

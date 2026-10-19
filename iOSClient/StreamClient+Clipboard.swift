@@ -44,10 +44,15 @@ extension StreamClient {
     /// off. The device's own preference, never sent; read at each decision.
     static let clipboardKey = "Sill.shareClipboard"
     static var clipboardOn: Bool {
+        #if os(visionOS)
+        // Spatial sharing is opt-in; the native settings sheet supplies the Paste control.
+        return UserDefaults.standard.bool(forKey: clipboardKey)
+        #else
         // `bool(forKey:)`, not `as? Bool`: a launch argument's "0" is a string, which it reads as
         // @AppStorage does, so the switch and the panel always agree.
         let defaults = UserDefaults.standard
         return defaults.object(forKey: clipboardKey) == nil || defaults.bool(forKey: clipboardKey)
+        #endif
     }
 
     /// The clipboard's change count Sill last handled (sent, written from the Mac, the chip dismissed
@@ -228,8 +233,13 @@ extension StreamClient {
         #if DEBUG
         if mockDiscovery { return }      // the harness's chip stays
         #endif
+        #if os(visionOS)
+        let voiceOver = UIAccessibility.isVoiceOverRunning
+        #else
+        let voiceOver = HostSettingsPanel.voiceOverRunning
+        #endif
         let counts = ClipboardPolicy.chipCounts(onScreen: clipboardChipOnScreen, active: clipboardAppActive,
-                                                voiceOver: HostSettingsPanel.voiceOverRunning)
+                                                voiceOver: voiceOver)
         let left = ClipboardPolicy.chipLifetime - clipboardChipShownFor
         #if DEBUG
         print("clipboard: the chip's time " + (counts ? "runs" : "waits") + String(format: ", %.1f s left", max(0, left)))
@@ -288,7 +298,9 @@ extension StreamClient {
             #endif
         case .tooLong:
             showClipboardNote(ClipboardPolicy.Copy.tooLong(mac: mac), spoken: ClipboardPolicy.Copy.tooLong(mac: mac), warning: true)
+        #if !os(visionOS)
             if UIDevice.current.userInterfaceIdiom == .phone { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
+        #endif
         case .nothing:
             break
         }
@@ -305,7 +317,9 @@ extension StreamClient {
         hideClipboardChip()
         let mac = macName.isEmpty ? "the Mac" : macName
         showClipboardNote(ClipboardPolicy.Copy.sent(mac: mac), spoken: ClipboardPolicy.Copy.sentSpoken(mac: mac), warning: false)
+        #if !os(visionOS)
         if UIDevice.current.userInterfaceIdiom == .phone { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+        #endif
         #if DEBUG
         print("clipboard: the Mac has read it (its receipt" + (receipt.late ? ", after its time ran out)" : ")"))
         #endif
@@ -320,7 +334,9 @@ extension StreamClient {
         clipboardReceipt = receipt
         let mac = macName.isEmpty ? "the Mac" : macName
         showClipboardNote(ClipboardPolicy.Copy.notSent(mac: mac), spoken: ClipboardPolicy.Copy.notSent(mac: mac), warning: true)
+        #if !os(visionOS)
         if UIDevice.current.userInterfaceIdiom == .phone { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
+        #endif
         #if DEBUG
         print("clipboard: no receipt in time: did not reach the Mac")
         #endif

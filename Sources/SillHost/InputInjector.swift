@@ -103,7 +103,11 @@ final class InputInjector {
     /// on (`.null`), where the pointer is now.
     private func point(_ x: Double, _ y: Double, in rect: CGRect) -> CGPoint {
         if rect.isNull { return pointerNow() }
-        return CGPoint(x: rect.minX + CGFloat(x) * rect.width, y: rect.minY + CGFloat(y) * rect.height)
+        return Self.sourcePoint(x, y, in: rect)
+    }
+
+    nonisolated static func sourcePoint(_ x: Double, _ y: Double, in rect: CGRect) -> CGPoint {
+        CGPoint(x: rect.minX + CGFloat(x) * rect.width, y: rect.minY + CGFloat(y) * rect.height)
     }
 
     /// Where the Mac's pointer is: read (no permission) on a host that posts; on a synthetic host,

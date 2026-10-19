@@ -36,6 +36,10 @@ struct HostSettingsPanel: View {
     @AccessibilityFocusState private var headerFocused: Bool
     /// Two seconds on this connection and still no state: the Mac runs a Sill without settings.
     @State private var olderMac = false
+    #if os(visionOS)
+    @State private var spatialModeDetails = false
+    @Environment(\.spatialWindowManagement) private var manageSpatialWindows
+    #endif
     /// Bumped when Low Power Mode toggles, so the frame rate note is read again.
     @State private var powerState = 0
     /// This device's switch for three-finger gestures (docs/trackpad-gestures-plan.md §8): on unless
@@ -49,7 +53,11 @@ struct HostSettingsPanel: View {
     @Environment(\.largerPictureOffered) private var offersLargerPicture
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
+    #if os(visionOS)
+    @AppStorage(StreamClient.clipboardKey) private var clipboardOn = false
+    #else
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
+    #endif
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -119,7 +127,9 @@ struct HostSettingsPanel: View {
         .onAppear { headerFocused = true }
         // A refused change: the control has already gone back to the Mac's value, and the reason
         // is in the footer or the note. The haptic is a no-op on an iPad.
+        #if !os(visionOS)
         .sensoryFeedback(.warning, trigger: client.settingsRefusals)
+        #endif
         .onChange(of: client.settingsRefusals) { _, _ in
             AccessibilityNotification.Announcement("\(mac) kept its setting").post()
         }
@@ -329,6 +339,18 @@ struct HostSettingsPanel: View {
             }
             // After everything of the Mac's, whatever state its settings are in: while they load, and
             // for a Mac without them too. Both are this device's own: its gestures, then the tour.
+            #if os(visionOS)
+            if let manageSpatialWindows {
+                Button("Sill windows…", systemImage: "rectangle.on.rectangle") { manageSpatialWindows() }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .padding(.horizontal, 14)
+            }
+            DisclosureGroup("Touch and Mouse instructions", isExpanded: $spatialModeDetails) {
+                spatialModeHelp
+            }
+            .foregroundStyle(Palette.text)
+            .padding(.horizontal, 14)
+            #endif
             thisDevice
             tour
         }
@@ -456,6 +478,35 @@ struct HostSettingsPanel: View {
     static func turnOnRemoteAccess(_ mac: String) -> String {
         "To reach \(mac) away from home, turn on Remote Access in Sill’s Settings on the Mac."
     }
+
+    #if os(visionOS)
+    /// Deliberately expanded Settings details; no instructions or recovery panel covers the stream.
+    private var spatialModeHelp: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Touch and Mouse")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Palette.muted)
+                .accessibilityAddTraits(.isHeader)
+            Text("Switch modes with Touch/Mouse in the left toolbar.")
+            Text("Touch: tap targets the picture; pinch-drag scrolls.")
+            Text("Mouse: pinch-drag moves the pointer; tap clicks it. Switching windows centres the pointer. Hold, then move to drag; hold and release to right-click. Switch to Touch to scroll.")
+            if client.visionMouseMode && !client.visionPointerKnown && client.active != .none {
+                Text("Cursor position unavailable. Place it in the centre, or switch to Touch to choose a position.")
+                let session = client.connectedAt, source = client.active, mode = client.visionMouseEpoch
+                Button("Place cursor in centre") {
+                    close()
+                    client.placeVisionPointer(in: session, source: source, modeEpoch: mode)
+                }
+            }
+        }
+        .font(.footnote)
+        .foregroundStyle(Palette.text)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+    #endif
 
     // MARK: This device
 
@@ -609,7 +660,13 @@ struct HostSettingsPanel: View {
     }
 
     /// "iPhone" or "iPad", for copy about this device.
-    private var device: String { UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad" }
+    private var device: String {
+        #if os(visionOS)
+        return "Vision Pro"
+        #else
+        return UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad"
+        #endif
+    }
 
     /// Under the Direct Wireless Connection row: what it does and costs, and, while the switch shows
     /// on and this device is connected over it, what turning it off does to this device: the Mac
@@ -715,6 +772,15 @@ private struct GestureRow: View {
     /// Measured afresh when the text size changes, as `AdaptiveRow` is.
     @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
+        #if os(visionOS)
+        if let only = does.first, does.count == 1 {
+            Button { perform(only.gesture) } label: { row }.buttonStyle(.plain)
+        } else {
+            Menu { ForEach(does, id: \.name) { item in Button(item.name) { perform(item.gesture) } } }
+                label: { row }
+                .buttonStyle(.plain)
+        }
+        #else
         if let only = does.first, does.count == 1 {
             row.accessibilityAddTraits(.isButton).accessibilityAction { perform(only.gesture) }
         } else {
@@ -722,6 +788,7 @@ private struct GestureRow: View {
                 ForEach(does, id: \.name) { item in Button(item.name) { perform(item.gesture) } }
             }
         }
+        #endif
     }
     private var row: some View {
         ViewThatFits(in: .horizontal) {

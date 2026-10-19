@@ -79,10 +79,14 @@ extension StreamClient {
         let forced = UserDefaults.standard.integer(forKey: "SillScreenFPS")
         if forced > 0 { return forced }
         #endif
+        #if os(visionOS)
+        return 60 // A conservative initial spatial-window stream budget.
+        #else
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         // `connectedScenes` is unordered: prefer the scene the user is looking at.
         let screen = (scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)?.screen
         return max(30, screen?.maximumFramesPerSecond ?? 60)
+        #endif
     }
 }
 

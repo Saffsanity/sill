@@ -21,6 +21,23 @@ func check(_ name: String, _ ok: Bool) {
     if ok { passes += 1; print("ok   \(name)") } else { fails += 1; print("FAIL \(name)") }
 }
 
+// Manual capture regression: connected devices cannot reclaim a shared keyboard.
+do {
+    var manual = P(attached: true, automaticCapture: false)
+    check("manual join never captures", manual.joined().isEmpty)
+    check("manual detach never captures", manual.keyboard(attached: false).isEmpty)
+    check("manual attach never captures", manual.keyboard(attached: true).isEmpty)
+    check("manual tap asks for own keyboard", manual.shown(true) == [.take(automatic: false)])
+    _ = manual.became(automatic: false)
+    check("manual local UI releases own keyboard", manual.takers([.drawer]) == [.letGo])
+    manual.resigned()
+    check("manual local UI closing never restores", manual.takers([]).isEmpty)
+    _ = manual.became(automatic: false)
+    check("manual release really lets go", manual.toggled() == [.letGo])
+    manual.resigned()
+    check("manual reconnection never captures", manual.joined().isEmpty)
+}
+
 // MARK: - The proxy and UIKit, as a model
 
 /// What can happen to the stream screen and its input view.

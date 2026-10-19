@@ -521,7 +521,9 @@ private struct TourCard: View {
             titleFocused = true
             AccessibilityNotification.LayoutChanged().post()
         }
+        #if !os(visionOS)
         .sensoryFeedback(.selection, trigger: run.at)
+        #endif
     }
 
     private var appearAnchor: UnitPoint {

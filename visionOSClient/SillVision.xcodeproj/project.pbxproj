@@ -1,0 +1,605 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0286F85FBEC5C5904478CCE8 /* VisionWindowSizePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B8F97C5F98B98759E96769E /* VisionWindowSizePolicy.swift */; };
+		046E0EE93F2F4D3BA91C64FB /* StreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0FA76229714A08E65475D7E /* StreamClient.swift */; };
+		081E359449CA7DA0B51DB375 /* MacMenuHub.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0232F17EB5E0852D3B5403A7 /* MacMenuHub.swift */; };
+		09039E27426AB72C9E325996 /* SillVisionApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9BFCDA222808ECA106A9C53 /* SillVisionApp.swift */; };
+		0AB70B3ED2ABC2A7EEE7B869 /* MacMenuState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02573DF8DD05A951D810111E /* MacMenuState.swift */; };
+		12B00E3237C7068646414246 /* GoodbyePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65937F3D3E5B38C209BD7EC5 /* GoodbyePolicy.swift */; };
+		12EDCEF914BA78B1D9E18257 /* VisionSessionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 312AC885D30CA344D19CA5F9 /* VisionSessionPolicy.swift */; };
+		21690848FE6E2C6A034C1164 /* InputOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE3228237E1B25F04A191EB2 /* InputOverlay.swift */; };
+		291583D7D8B52648C9E60A20 /* PointerPresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A99AC56A9DD31B5847D548D /* PointerPresence.swift */; };
+		2969C56302EB8E8DDA4DE2DD /* TourOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A21E31605E4DA519835E0E20 /* TourOverlay.swift */; };
+		317CF98D76B743DEC4940674 /* VisionTextInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B50A28D45EF350C9B614263 /* VisionTextInput.swift */; };
+		3E8928C5C30E465A22F12531 /* AwayCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1282DAAA431DA2B0323D477D /* AwayCopy.swift */; };
+		3E9A251BA52671295F108FF1 /* MessageReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 976EA5075BB7218CBFE4A908 /* MessageReader.swift */; };
+		3ED3CE76D599FDB3B8BE2390 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3B5062D86723DC407F1BE215 /* Assets.xcassets */; };
+		47CEE57C9ADA4FE7E431657F /* VisionGeometryDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61B1AD288FA5ADD7FCDDFA67 /* VisionGeometryDiagnostics.swift */; };
+		566F6ED4F751FB2574FA7D3C /* HEVCDisplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B679A2CB47172A9ECC57010 /* HEVCDisplayView.swift */; };
+		58F71FA7AEA5FFBCB37200DD /* VisionInputGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74769F3E7592C6A93F1DB91 /* VisionInputGeometry.swift */; };
+		5E155AA6A432DAA38D401D49 /* HostSettingsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CF2A5AFCADAB50B8E1FFB8C /* HostSettingsPanel.swift */; };
+		5F4B271BAA433A9474C282F7 /* VisionSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A227B9BE32995F0F04525298 /* VisionSessionView.swift */; };
+		5FDC47969AA8594B4E77B035 /* ClipboardChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94DAA147126838519E786ED3 /* ClipboardChip.swift */; };
+		68148B5158C74254328D36CE /* PhonePortraitLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2233A1492A3C4B609D9E85E1 /* PhonePortraitLayout.swift */; };
+		683DEA8AF2941CC601D52B31 /* TourPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BF83D777BEEC5E5313D18F3 /* TourPolicy.swift */; };
+		6AB2FE1963BF2BBAF839810E /* StreamClient+Clipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08AA3B3798EB105400FBC4E4 /* StreamClient+Clipboard.swift */; };
+		6F60029D7D1B1F5E7C8A96B6 /* RemoteConnector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 178F9B743DDE7591F5AE4119 /* RemoteConnector.swift */; };
+		6FEDC14A4A89C886F4BC514E /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D083BC0E6B1B250227A01F93 /* PrivacyInfo.xcprivacy */; };
+		70CF28443F3DA3949C201214 /* MockCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7955AA95FF632D943108088 /* MockCatalog.swift */; };
+		71A1BA923C073C7116B1F27A /* DiscoveryPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9040EF1D2BFAF387CA68D67D /* DiscoveryPolicy.swift */; };
+		72705CA1534DF1010C320F5F /* VisionSceneSet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA2D4552B6085AE3377FAB8D /* VisionSceneSet.swift */; };
+		767D03F73F84BE563FC53B9D /* StreamClient+Home.swift in Sources */ = {isa = PBXBuildFile; fileRef = 590E81606E56D8A684C550E9 /* StreamClient+Home.swift */; };
+		784A1B7DE31692B50B930251 /* DiagnosticsHUD.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8C0B9518BBE552DB3F856E3 /* DiagnosticsHUD.swift */; };
+		7871231780FD480C9BCB974F /* HostSettingsLedger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91E9B8D4F2B0D40C6213500D /* HostSettingsLedger.swift */; };
+		7AE835BC8E2B5695091893AF /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2AF4C9C966AD2A750E012B7 /* ContentView.swift */; };
+		7E962EE89351795E734E11DD /* TrackpadGestures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19E5F1CF39839BF0FE22243B /* TrackpadGestures.swift */; };
+		8C2155EDB731D3EBB72604F3 /* TrackpadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C88405D735A1C4DDA0C047E /* TrackpadView.swift */; };
+		8CFFEA88AB512446B2CCAF7C /* SessionLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 003EEE0E9A4B9E8693C60412 /* SessionLink.swift */; };
+		94438CD564D7F1AC36C37DE7 /* CodeScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 466369EDF41B6F7F8F017428 /* CodeScanner.swift */; };
+		98387590A4242A6B1D76F7A3 /* HardwareKeyboardPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CB0EA222B6A602E5BCB741E /* HardwareKeyboardPolicy.swift */; };
+		9BBE863394EF826AC8B65B7F /* VisionToolbarPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 405305FF2AB6DEC013B26455 /* VisionToolbarPreferences.swift */; };
+		9F5A4F5FE776FDD24B02CD70 /* VisionTextSizePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99A57799CAF7D2F0853B3114 /* VisionTextSizePicker.swift */; };
+		A2A98EDAC890A68EB6361313 /* StreamProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = 27BC08963A13D4A2A6E00B9A /* StreamProtocol */; };
+		ACCF02F0281ED4D6590235BB /* StreamScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F62ED20D388F0818EECAC548 /* StreamScreen.swift */; };
+		B1BB2AFD49AA36B9E1E2C7F5 /* StreamClient+Remote.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7411A30CFC17F90265C8DEC7 /* StreamClient+Remote.swift */; };
+		BA78EC89F104CEFB208CF39B /* VisionWindowLaunches.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11FAD507430F20C5A093CD45 /* VisionWindowLaunches.swift */; };
+		BC67E753A2022C8E097C43FE /* PortraitStreamScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0A78F38A23BDF8BFEDA0D4E /* PortraitStreamScreen.swift */; };
+		C1618562159FD637C63A1FB7 /* MacMenuButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8153744189BB38FDD3817AC /* MacMenuButton.swift */; };
+		C4770C3F5BF492039F7BA277 /* KeyChords.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4CF3E0E55AA1602A829D098 /* KeyChords.swift */; };
+		CFB57DE73391780EBC5C613C /* StreamClient+Viewport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A47ED9CEBA240FDEB3E0ABD /* StreamClient+Viewport.swift */; };
+		D4C8659E8BE9E5320DBD548A /* VisionSpatialInputPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99055606E53425AB3F7CAE1F /* VisionSpatialInputPolicy.swift */; };
+		D6AEF54A74EEA01D4F15005F /* VisionHIDKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = B56A7D8293BD4D42F4A4F6E4 /* VisionHIDKey.swift */; };
+		DCA8B03CF7752D06621A88B3 /* PairingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB68AA4F8E7CF0A1E69166E4 /* PairingOverlay.swift */; };
+		DD2643E5D72B15EF64C07FEF /* RemoteDialPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 849BE7AE46C5F454B262F78A /* RemoteDialPolicy.swift */; };
+		E6BBFD4C66674E9D6470C8B7 /* VisionSceneRecoveryDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C398C2F0B0A3DEBD8D62006 /* VisionSceneRecoveryDiagnostics.swift */; };
+		EAF87C0CE499C5F04DE733A3 /* VisionSceneSessionLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D5579DD67C58BD8FA56F371 /* VisionSceneSessionLifecycle.swift */; };
+		EB8946E87C07F13A73AC88F9 /* VisionNativeGeometryFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29BC0C842059723948EFBEA3 /* VisionNativeGeometryFixture.swift */; };
+		EC7B78555F6AC2255C33BBA9 /* VisionWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = B12D3343614DAB2312DAF000 /* VisionWorkspace.swift */; };
+		ED21B1B77AB4AC0123F36190 /* MacMenuElements.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9331C430091BA2888E9C9112 /* MacMenuElements.swift */; };
+		EFB70F863535B42E5D5A6DBE /* SavedMacs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49197449FFAC0F939E674EAC /* SavedMacs.swift */; };
+		F2D9FF99D05C395861775FDA /* SillLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D78C12278C1769068E1314 /* SillLinks.swift */; };
+		F4D36B3941E2342A74008C02 /* AddMacCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 852A0478D049ACE060C639E1 /* AddMacCard.swift */; };
+		F526FA38C08C625A6F79694C /* DeviceIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01B8EBE2CBEF519F3A940282 /* DeviceIdentity.swift */; };
+		F737BB6AE1E749A82F34A42D /* VisionWindowGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCAABE68C8CC29C716B61FAC /* VisionWindowGeometry.swift */; };
+		F9B5E1310CB52431A95A4652 /* DuoPostureReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = C13182D0982A7EE1827EE3FD /* DuoPostureReader.swift */; };
+		FB7E6B93731465770FFF0B1A /* DuoPosture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20B0D4400FBC497A82659574 /* DuoPosture.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		003EEE0E9A4B9E8693C60412 /* SessionLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionLink.swift; sourceTree = "<group>"; };
+		01B8EBE2CBEF519F3A940282 /* DeviceIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentity.swift; sourceTree = "<group>"; };
+		0232F17EB5E0852D3B5403A7 /* MacMenuHub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMenuHub.swift; sourceTree = "<group>"; };
+		02573DF8DD05A951D810111E /* MacMenuState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMenuState.swift; sourceTree = "<group>"; };
+		059D92F6A1F4873BCF5DD191 /* SillVision */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SillVision; path = ..; sourceTree = SOURCE_ROOT; };
+		08AA3B3798EB105400FBC4E4 /* StreamClient+Clipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StreamClient+Clipboard.swift"; sourceTree = "<group>"; };
+		0B679A2CB47172A9ECC57010 /* HEVCDisplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HEVCDisplayView.swift; sourceTree = "<group>"; };
+		0CF2A5AFCADAB50B8E1FFB8C /* HostSettingsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostSettingsPanel.swift; sourceTree = "<group>"; };
+		11FAD507430F20C5A093CD45 /* VisionWindowLaunches.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionWindowLaunches.swift; sourceTree = "<group>"; };
+		1282DAAA431DA2B0323D477D /* AwayCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AwayCopy.swift; sourceTree = "<group>"; };
+		178F9B743DDE7591F5AE4119 /* RemoteConnector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteConnector.swift; sourceTree = "<group>"; };
+		19E5F1CF39839BF0FE22243B /* TrackpadGestures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackpadGestures.swift; sourceTree = "<group>"; };
+		1BF83D777BEEC5E5313D18F3 /* TourPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TourPolicy.swift; sourceTree = "<group>"; };
+		20B0D4400FBC497A82659574 /* DuoPosture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuoPosture.swift; sourceTree = "<group>"; };
+		2233A1492A3C4B609D9E85E1 /* PhonePortraitLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhonePortraitLayout.swift; sourceTree = "<group>"; };
+		29BC0C842059723948EFBEA3 /* VisionNativeGeometryFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionNativeGeometryFixture.swift; sourceTree = "<group>"; };
+		2C398C2F0B0A3DEBD8D62006 /* VisionSceneRecoveryDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionSceneRecoveryDiagnostics.swift; sourceTree = "<group>"; };
+		312AC885D30CA344D19CA5F9 /* VisionSessionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionSessionPolicy.swift; sourceTree = "<group>"; };
+		33D78C12278C1769068E1314 /* SillLinks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SillLinks.swift; sourceTree = "<group>"; };
+		3B5062D86723DC407F1BE215 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		405305FF2AB6DEC013B26455 /* VisionToolbarPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionToolbarPreferences.swift; sourceTree = "<group>"; };
+		412D83D88C31CF5CE25DB15A /* SillVision.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = SillVision.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		466369EDF41B6F7F8F017428 /* CodeScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeScanner.swift; sourceTree = "<group>"; };
+		49197449FFAC0F939E674EAC /* SavedMacs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMacs.swift; sourceTree = "<group>"; };
+		4A47ED9CEBA240FDEB3E0ABD /* StreamClient+Viewport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StreamClient+Viewport.swift"; sourceTree = "<group>"; };
+		590E81606E56D8A684C550E9 /* StreamClient+Home.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StreamClient+Home.swift"; sourceTree = "<group>"; };
+		5A99AC56A9DD31B5847D548D /* PointerPresence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PointerPresence.swift; sourceTree = "<group>"; };
+		61B1AD288FA5ADD7FCDDFA67 /* VisionGeometryDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionGeometryDiagnostics.swift; sourceTree = "<group>"; };
+		65937F3D3E5B38C209BD7EC5 /* GoodbyePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoodbyePolicy.swift; sourceTree = "<group>"; };
+		6C88405D735A1C4DDA0C047E /* TrackpadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackpadView.swift; sourceTree = "<group>"; };
+		6D5579DD67C58BD8FA56F371 /* VisionSceneSessionLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionSceneSessionLifecycle.swift; sourceTree = "<group>"; };
+		7411A30CFC17F90265C8DEC7 /* StreamClient+Remote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StreamClient+Remote.swift"; sourceTree = "<group>"; };
+		7CB0EA222B6A602E5BCB741E /* HardwareKeyboardPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareKeyboardPolicy.swift; sourceTree = "<group>"; };
+		849BE7AE46C5F454B262F78A /* RemoteDialPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteDialPolicy.swift; sourceTree = "<group>"; };
+		852A0478D049ACE060C639E1 /* AddMacCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddMacCard.swift; sourceTree = "<group>"; };
+		8B8F97C5F98B98759E96769E /* VisionWindowSizePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionWindowSizePolicy.swift; sourceTree = "<group>"; };
+		9040EF1D2BFAF387CA68D67D /* DiscoveryPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryPolicy.swift; sourceTree = "<group>"; };
+		91E9B8D4F2B0D40C6213500D /* HostSettingsLedger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostSettingsLedger.swift; sourceTree = "<group>"; };
+		9331C430091BA2888E9C9112 /* MacMenuElements.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMenuElements.swift; sourceTree = "<group>"; };
+		94DAA147126838519E786ED3 /* ClipboardChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardChip.swift; sourceTree = "<group>"; };
+		976EA5075BB7218CBFE4A908 /* MessageReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageReader.swift; sourceTree = "<group>"; };
+		99055606E53425AB3F7CAE1F /* VisionSpatialInputPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionSpatialInputPolicy.swift; sourceTree = "<group>"; };
+		99A57799CAF7D2F0853B3114 /* VisionTextSizePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionTextSizePicker.swift; sourceTree = "<group>"; };
+		9B50A28D45EF350C9B614263 /* VisionTextInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionTextInput.swift; sourceTree = "<group>"; };
+		A21E31605E4DA519835E0E20 /* TourOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TourOverlay.swift; sourceTree = "<group>"; };
+		A227B9BE32995F0F04525298 /* VisionSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionSessionView.swift; sourceTree = "<group>"; };
+		A3F3D5B07DA8CE8A1252E741 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		B0A78F38A23BDF8BFEDA0D4E /* PortraitStreamScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortraitStreamScreen.swift; sourceTree = "<group>"; };
+		B0FA76229714A08E65475D7E /* StreamClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamClient.swift; sourceTree = "<group>"; };
+		B12D3343614DAB2312DAF000 /* VisionWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionWorkspace.swift; sourceTree = "<group>"; };
+		B56A7D8293BD4D42F4A4F6E4 /* VisionHIDKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionHIDKey.swift; sourceTree = "<group>"; };
+		BB68AA4F8E7CF0A1E69166E4 /* PairingOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingOverlay.swift; sourceTree = "<group>"; };
+		C13182D0982A7EE1827EE3FD /* DuoPostureReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuoPostureReader.swift; sourceTree = "<group>"; };
+		D083BC0E6B1B250227A01F93 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		D7955AA95FF632D943108088 /* MockCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockCatalog.swift; sourceTree = "<group>"; };
+		DCAABE68C8CC29C716B61FAC /* VisionWindowGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionWindowGeometry.swift; sourceTree = "<group>"; };
+		E2AF4C9C966AD2A750E012B7 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		E8C0B9518BBE552DB3F856E3 /* DiagnosticsHUD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsHUD.swift; sourceTree = "<group>"; };
+		E9BFCDA222808ECA106A9C53 /* SillVisionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SillVisionApp.swift; sourceTree = "<group>"; };
+		F4CF3E0E55AA1602A829D098 /* KeyChords.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyChords.swift; sourceTree = "<group>"; };
+		F62ED20D388F0818EECAC548 /* StreamScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamScreen.swift; sourceTree = "<group>"; };
+		F74769F3E7592C6A93F1DB91 /* VisionInputGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionInputGeometry.swift; sourceTree = "<group>"; };
+		F8153744189BB38FDD3817AC /* MacMenuButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMenuButton.swift; sourceTree = "<group>"; };
+		FA2D4552B6085AE3377FAB8D /* VisionSceneSet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionSceneSet.swift; sourceTree = "<group>"; };
+		FE3228237E1B25F04A191EB2 /* InputOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputOverlay.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		D57C2B9EB326CCDEA6801A74 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A2A98EDAC890A68EB6361313 /* StreamProtocol in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0A8A0CB0D58B9FDAB01D37CA /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				412D83D88C31CF5CE25DB15A /* SillVision.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		372364C228628BB956AD09CD = {
+			isa = PBXGroup;
+			children = (
+				39B9CF4CD818D7B41296DE96 /* iOSClient */,
+				CC5766CCEF06C39E88F016CC /* Packages */,
+				41E728C4AE2305A37C009C37 /* visionOSClient */,
+				0A8A0CB0D58B9FDAB01D37CA /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		39B9CF4CD818D7B41296DE96 /* iOSClient */ = {
+			isa = PBXGroup;
+			children = (
+				852A0478D049ACE060C639E1 /* AddMacCard.swift */,
+				1282DAAA431DA2B0323D477D /* AwayCopy.swift */,
+				94DAA147126838519E786ED3 /* ClipboardChip.swift */,
+				466369EDF41B6F7F8F017428 /* CodeScanner.swift */,
+				E2AF4C9C966AD2A750E012B7 /* ContentView.swift */,
+				01B8EBE2CBEF519F3A940282 /* DeviceIdentity.swift */,
+				E8C0B9518BBE552DB3F856E3 /* DiagnosticsHUD.swift */,
+				9040EF1D2BFAF387CA68D67D /* DiscoveryPolicy.swift */,
+				20B0D4400FBC497A82659574 /* DuoPosture.swift */,
+				C13182D0982A7EE1827EE3FD /* DuoPostureReader.swift */,
+				65937F3D3E5B38C209BD7EC5 /* GoodbyePolicy.swift */,
+				7CB0EA222B6A602E5BCB741E /* HardwareKeyboardPolicy.swift */,
+				0B679A2CB47172A9ECC57010 /* HEVCDisplayView.swift */,
+				91E9B8D4F2B0D40C6213500D /* HostSettingsLedger.swift */,
+				0CF2A5AFCADAB50B8E1FFB8C /* HostSettingsPanel.swift */,
+				FE3228237E1B25F04A191EB2 /* InputOverlay.swift */,
+				F4CF3E0E55AA1602A829D098 /* KeyChords.swift */,
+				F8153744189BB38FDD3817AC /* MacMenuButton.swift */,
+				9331C430091BA2888E9C9112 /* MacMenuElements.swift */,
+				0232F17EB5E0852D3B5403A7 /* MacMenuHub.swift */,
+				02573DF8DD05A951D810111E /* MacMenuState.swift */,
+				976EA5075BB7218CBFE4A908 /* MessageReader.swift */,
+				D7955AA95FF632D943108088 /* MockCatalog.swift */,
+				BB68AA4F8E7CF0A1E69166E4 /* PairingOverlay.swift */,
+				2233A1492A3C4B609D9E85E1 /* PhonePortraitLayout.swift */,
+				5A99AC56A9DD31B5847D548D /* PointerPresence.swift */,
+				B0A78F38A23BDF8BFEDA0D4E /* PortraitStreamScreen.swift */,
+				D083BC0E6B1B250227A01F93 /* PrivacyInfo.xcprivacy */,
+				178F9B743DDE7591F5AE4119 /* RemoteConnector.swift */,
+				849BE7AE46C5F454B262F78A /* RemoteDialPolicy.swift */,
+				49197449FFAC0F939E674EAC /* SavedMacs.swift */,
+				003EEE0E9A4B9E8693C60412 /* SessionLink.swift */,
+				33D78C12278C1769068E1314 /* SillLinks.swift */,
+				B0FA76229714A08E65475D7E /* StreamClient.swift */,
+				08AA3B3798EB105400FBC4E4 /* StreamClient+Clipboard.swift */,
+				590E81606E56D8A684C550E9 /* StreamClient+Home.swift */,
+				7411A30CFC17F90265C8DEC7 /* StreamClient+Remote.swift */,
+				4A47ED9CEBA240FDEB3E0ABD /* StreamClient+Viewport.swift */,
+				F62ED20D388F0818EECAC548 /* StreamScreen.swift */,
+				A21E31605E4DA519835E0E20 /* TourOverlay.swift */,
+				1BF83D777BEEC5E5313D18F3 /* TourPolicy.swift */,
+				19E5F1CF39839BF0FE22243B /* TrackpadGestures.swift */,
+				6C88405D735A1C4DDA0C047E /* TrackpadView.swift */,
+			);
+			name = iOSClient;
+			path = ../iOSClient;
+			sourceTree = "<group>";
+		};
+		41E728C4AE2305A37C009C37 /* visionOSClient */ = {
+			isa = PBXGroup;
+			children = (
+				3B5062D86723DC407F1BE215 /* Assets.xcassets */,
+				A3F3D5B07DA8CE8A1252E741 /* Info.plist */,
+				E9BFCDA222808ECA106A9C53 /* SillVisionApp.swift */,
+				61B1AD288FA5ADD7FCDDFA67 /* VisionGeometryDiagnostics.swift */,
+				B56A7D8293BD4D42F4A4F6E4 /* VisionHIDKey.swift */,
+				F74769F3E7592C6A93F1DB91 /* VisionInputGeometry.swift */,
+				29BC0C842059723948EFBEA3 /* VisionNativeGeometryFixture.swift */,
+				2C398C2F0B0A3DEBD8D62006 /* VisionSceneRecoveryDiagnostics.swift */,
+				6D5579DD67C58BD8FA56F371 /* VisionSceneSessionLifecycle.swift */,
+				FA2D4552B6085AE3377FAB8D /* VisionSceneSet.swift */,
+				312AC885D30CA344D19CA5F9 /* VisionSessionPolicy.swift */,
+				A227B9BE32995F0F04525298 /* VisionSessionView.swift */,
+				99055606E53425AB3F7CAE1F /* VisionSpatialInputPolicy.swift */,
+				9B50A28D45EF350C9B614263 /* VisionTextInput.swift */,
+				99A57799CAF7D2F0853B3114 /* VisionTextSizePicker.swift */,
+				405305FF2AB6DEC013B26455 /* VisionToolbarPreferences.swift */,
+				DCAABE68C8CC29C716B61FAC /* VisionWindowGeometry.swift */,
+				11FAD507430F20C5A093CD45 /* VisionWindowLaunches.swift */,
+				8B8F97C5F98B98759E96769E /* VisionWindowSizePolicy.swift */,
+				B12D3343614DAB2312DAF000 /* VisionWorkspace.swift */,
+			);
+			name = visionOSClient;
+			path = .;
+			sourceTree = "<group>";
+		};
+		CC5766CCEF06C39E88F016CC /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				059D92F6A1F4873BCF5DD191 /* SillVision */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		910D6D8A2046742375ACCB44 /* SillVision */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3A0976095498FAB951E155C7 /* Build configuration list for PBXNativeTarget "SillVision" */;
+			buildPhases = (
+				4E53B0EF743A4C9977E1011F /* Sources */,
+				B266836C331E171BB6038D53 /* Resources */,
+				D57C2B9EB326CCDEA6801A74 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SillVision;
+			packageProductDependencies = (
+				27BC08963A13D4A2A6E00B9A /* StreamProtocol */,
+			);
+			productName = SillVision;
+			productReference = 412D83D88C31CF5CE25DB15A /* SillVision.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		BB398954AB374FC3EE8BFC3F /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					910D6D8A2046742375ACCB44 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = A07D5BCCF33B7B9215564163 /* Build configuration list for PBXProject "SillVision" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 372364C228628BB956AD09CD;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				5ED3DCB3CA423F10B4AC53E0 /* XCLocalSwiftPackageReference ".." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 0A8A0CB0D58B9FDAB01D37CA /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				910D6D8A2046742375ACCB44 /* SillVision */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		B266836C331E171BB6038D53 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3ED3CE76D599FDB3B8BE2390 /* Assets.xcassets in Resources */,
+				6FEDC14A4A89C886F4BC514E /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		4E53B0EF743A4C9977E1011F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F4D36B3941E2342A74008C02 /* AddMacCard.swift in Sources */,
+				3E8928C5C30E465A22F12531 /* AwayCopy.swift in Sources */,
+				5FDC47969AA8594B4E77B035 /* ClipboardChip.swift in Sources */,
+				94438CD564D7F1AC36C37DE7 /* CodeScanner.swift in Sources */,
+				7AE835BC8E2B5695091893AF /* ContentView.swift in Sources */,
+				F526FA38C08C625A6F79694C /* DeviceIdentity.swift in Sources */,
+				784A1B7DE31692B50B930251 /* DiagnosticsHUD.swift in Sources */,
+				71A1BA923C073C7116B1F27A /* DiscoveryPolicy.swift in Sources */,
+				FB7E6B93731465770FFF0B1A /* DuoPosture.swift in Sources */,
+				F9B5E1310CB52431A95A4652 /* DuoPostureReader.swift in Sources */,
+				12B00E3237C7068646414246 /* GoodbyePolicy.swift in Sources */,
+				566F6ED4F751FB2574FA7D3C /* HEVCDisplayView.swift in Sources */,
+				98387590A4242A6B1D76F7A3 /* HardwareKeyboardPolicy.swift in Sources */,
+				7871231780FD480C9BCB974F /* HostSettingsLedger.swift in Sources */,
+				5E155AA6A432DAA38D401D49 /* HostSettingsPanel.swift in Sources */,
+				21690848FE6E2C6A034C1164 /* InputOverlay.swift in Sources */,
+				C4770C3F5BF492039F7BA277 /* KeyChords.swift in Sources */,
+				C1618562159FD637C63A1FB7 /* MacMenuButton.swift in Sources */,
+				ED21B1B77AB4AC0123F36190 /* MacMenuElements.swift in Sources */,
+				081E359449CA7DA0B51DB375 /* MacMenuHub.swift in Sources */,
+				0AB70B3ED2ABC2A7EEE7B869 /* MacMenuState.swift in Sources */,
+				3E9A251BA52671295F108FF1 /* MessageReader.swift in Sources */,
+				70CF28443F3DA3949C201214 /* MockCatalog.swift in Sources */,
+				DCA8B03CF7752D06621A88B3 /* PairingOverlay.swift in Sources */,
+				68148B5158C74254328D36CE /* PhonePortraitLayout.swift in Sources */,
+				291583D7D8B52648C9E60A20 /* PointerPresence.swift in Sources */,
+				BC67E753A2022C8E097C43FE /* PortraitStreamScreen.swift in Sources */,
+				6F60029D7D1B1F5E7C8A96B6 /* RemoteConnector.swift in Sources */,
+				DD2643E5D72B15EF64C07FEF /* RemoteDialPolicy.swift in Sources */,
+				EFB70F863535B42E5D5A6DBE /* SavedMacs.swift in Sources */,
+				8CFFEA88AB512446B2CCAF7C /* SessionLink.swift in Sources */,
+				F2D9FF99D05C395861775FDA /* SillLinks.swift in Sources */,
+				09039E27426AB72C9E325996 /* SillVisionApp.swift in Sources */,
+				6AB2FE1963BF2BBAF839810E /* StreamClient+Clipboard.swift in Sources */,
+				767D03F73F84BE563FC53B9D /* StreamClient+Home.swift in Sources */,
+				B1BB2AFD49AA36B9E1E2C7F5 /* StreamClient+Remote.swift in Sources */,
+				CFB57DE73391780EBC5C613C /* StreamClient+Viewport.swift in Sources */,
+				046E0EE93F2F4D3BA91C64FB /* StreamClient.swift in Sources */,
+				ACCF02F0281ED4D6590235BB /* StreamScreen.swift in Sources */,
+				2969C56302EB8E8DDA4DE2DD /* TourOverlay.swift in Sources */,
+				683DEA8AF2941CC601D52B31 /* TourPolicy.swift in Sources */,
+				7E962EE89351795E734E11DD /* TrackpadGestures.swift in Sources */,
+				8C2155EDB731D3EBB72604F3 /* TrackpadView.swift in Sources */,
+				47CEE57C9ADA4FE7E431657F /* VisionGeometryDiagnostics.swift in Sources */,
+				D6AEF54A74EEA01D4F15005F /* VisionHIDKey.swift in Sources */,
+				58F71FA7AEA5FFBCB37200DD /* VisionInputGeometry.swift in Sources */,
+				EB8946E87C07F13A73AC88F9 /* VisionNativeGeometryFixture.swift in Sources */,
+				E6BBFD4C66674E9D6470C8B7 /* VisionSceneRecoveryDiagnostics.swift in Sources */,
+				EAF87C0CE499C5F04DE733A3 /* VisionSceneSessionLifecycle.swift in Sources */,
+				72705CA1534DF1010C320F5F /* VisionSceneSet.swift in Sources */,
+				12EDCEF914BA78B1D9E18257 /* VisionSessionPolicy.swift in Sources */,
+				5F4B271BAA433A9474C282F7 /* VisionSessionView.swift in Sources */,
+				D4C8659E8BE9E5320DBD548A /* VisionSpatialInputPolicy.swift in Sources */,
+				317CF98D76B743DEC4940674 /* VisionTextInput.swift in Sources */,
+				9F5A4F5FE776FDD24B02CD70 /* VisionTextSizePicker.swift in Sources */,
+				9BBE863394EF826AC8B65B7F /* VisionToolbarPreferences.swift in Sources */,
+				F737BB6AE1E749A82F34A42D /* VisionWindowGeometry.swift in Sources */,
+				BA78EC89F104CEFB208CF39B /* VisionWindowLaunches.swift in Sources */,
+				0286F85FBEC5C5904478CCE8 /* VisionWindowSizePolicy.swift in Sources */,
+				EC7B78555F6AC2255C33BBA9 /* VisionWorkspace.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		0166DBBC350F6D963D39516C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Sill;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Find and connect to your Mac to stream its windows.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = me.saffer.sill.vision;
+				SDKROOT = xros;
+				TARGETED_DEVICE_FAMILY = 7;
+				XROS_DEPLOYMENT_TARGET = 2.0;
+			};
+			name = Debug;
+		};
+		21B9E1A111EE7E961E877085 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 37;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MARKETING_VERSION = 0.37.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = xros;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		5E0E80902094257BF8750065 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Sill;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Find and connect to your Mac to stream its windows.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = me.saffer.sill.vision;
+				SDKROOT = xros;
+				TARGETED_DEVICE_FAMILY = 7;
+				XROS_DEPLOYMENT_TARGET = 2.0;
+			};
+			name = Release;
+		};
+		E30493B278EE2D77D08A4DCF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 37;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MARKETING_VERSION = 0.37.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = xros;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		3A0976095498FAB951E155C7 /* Build configuration list for PBXNativeTarget "SillVision" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0166DBBC350F6D963D39516C /* Debug */,
+				5E0E80902094257BF8750065 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A07D5BCCF33B7B9215564163 /* Build configuration list for PBXProject "SillVision" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E30493B278EE2D77D08A4DCF /* Debug */,
+				21B9E1A111EE7E961E877085 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		5ED3DCB3CA423F10B4AC53E0 /* XCLocalSwiftPackageReference ".." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		27BC08963A13D4A2A6E00B9A /* StreamProtocol */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = StreamProtocol;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = BB398954AB374FC3EE8BFC3F /* Project object */;
+}

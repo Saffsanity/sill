@@ -28,8 +28,10 @@ func header(_ kind: UInt8) -> StreamHeader? {
 }
 check(StreamMessageKind.clipboard.rawValue == 32 && StreamMessageKind(rawValue: 32) == .clipboard, "kind 32 is clipboard")
 check(header(32)?.kind == .clipboard && header(32)?.payloadLength == 2, "a kind 32 header parses")
-check([29, 30, 31, 33].allSatisfy { StreamMessageKind(rawValue: $0) == nil && header($0)?.kind == .unknown },
-      "29 (the audio plan's), 30 and 31 (#66's side streams) and 33 are not this build's")
+check(StreamMessageKind(rawValue: 33) == .editableFocus && header(33)?.kind == .editableFocus,
+      "33 is explicit editable click confirmation")
+check([29, 30, 31, 34].allSatisfy { StreamMessageKind(rawValue: $0) == nil && header($0)?.kind == .unknown },
+      "29 (the audio plan's), 30 and 31 (#66's side streams) remain reserved; 34 is unknown")
 check(StreamMessageKind(rawValue: 28) == .gesture, "28 is still the gesture")
 let message = StreamMessage(kind: .clipboard, timestamp: 1, isKeyframe: false, payload: P.subscription).serialized()
 check(message.first == 32 && StreamMessage.parseHeader(message)?.kind == .clipboard && message.count == StreamMessage.headerLength + 2,

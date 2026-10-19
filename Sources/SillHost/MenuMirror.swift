@@ -3,6 +3,30 @@ import Network
 import ApplicationServices
 import StreamProtocol
 
+/// A queued menu operation is valid only while its input owner still has Mac focus. The mutex
+/// spans just the final AXPress (bounded by MenuReader's timeout), so a main-actor focus handoff
+/// cannot change the key window between the last ownership check and the destructive action.
+struct MenuFocusLease {
+    let isCurrent: () -> Bool
+    let perform: (() -> AXError) -> AXError
+}
+
+final class MenuFocusFence: @unchecked Sendable {
+    private let lock = NSLock()
+    private var revision = UUID()
+    func advance() { lock.lock(); revision = UUID(); lock.unlock() }
+    func lease() -> MenuFocusLease {
+        lock.lock(); let token = revision; lock.unlock()
+        return MenuFocusLease(isCurrent: { [self] in
+            lock.lock(); defer { lock.unlock() }; return revision == token
+        }, perform: { [self] action in
+            lock.lock(); defer { lock.unlock() }
+            guard revision == token else { return .invalidUIElement }
+            return action()
+        })
+    }
+}
+
 /// The streamed app's menus, for the devices that asked for them (docs/menu-bar-plan.md §4.4).
 ///
 /// Main actor: the target, the version, the top level, the kept elements and the cache are its
@@ -43,6 +67,7 @@ final class MenuMirror {
     /// coordinator's `focusForMenus`). True when the app is frontmost as it returns; true at once
     /// for the Desktop and for nothing.
     var prepare: () async -> Bool = { true }
+    var focusLease: () -> MenuFocusLease? = { nil }
     /// The app behind the current source, asked when the first device subscribes (the coordinator
     /// tells the mirror of changes only while someone subscribes).
     var currentTarget: () -> Target? = { nil }
@@ -158,7 +183,8 @@ final class MenuMirror {
             send(MacMenu(version: version, answering: r.token, menu: menu, items: [], note: MenuRefusal.changedNote), to: c)
             return
         }
-        enqueue { await self.serveFetch(r, id: menuID, to: c, arrived: now) }
+        let lease = focusLease()
+        enqueue { await self.serveFetch(r, id: menuID, to: c, arrived: now, lease: lease) }
     }
 
     /// Kind 25: choose one item, at most 4 a second per connection, and only from a subscriber.
@@ -183,7 +209,8 @@ final class MenuMirror {
             send(MacMenu(version: version, answering: r.token, pressed: false, note: MenuRefusal.changedNote), to: c)
             return
         }
-        enqueue { await self.servePress(r, to: c, who: who, arrived: now) }
+        let lease = focusLease()
+        enqueue { await self.servePress(r, to: c, who: who, arrived: now, lease: lease) }
     }
 
     /// A connection's client stats, about once a second: its worst round trip of that second (a
@@ -256,7 +283,7 @@ final class MenuMirror {
         }
     }
 
-    private func serveFetch(_ r: FetchMenu, id menuID: String, to c: NWConnection, arrived: Double) async {
+    private func serveFetch(_ r: FetchMenu, id menuID: String, to c: NWConnection, arrived: Double, lease: MenuFocusLease?) async {
         let cid = ObjectIdentifier(c)
         // The device left before this fetch's turn: nobody to answer, so nothing is activated or read.
         guard subscribers[cid] != nil else { return }
@@ -285,7 +312,9 @@ final class MenuMirror {
             return
         }
         let v = version
+        guard lease?.isCurrent() != false else { refuse(MenuRefusal.changedNote); return }
         let frontmost = await prepare()
+        guard lease?.isCurrent() != false else { refuse(MenuRefusal.changedNote); return }
         guard v == version, target?.pid == t.pid else { refuse(MenuRefusal.changedNote); return }
         // Still not frontmost: a read now would return the last validation, an inactive app's too.
         if !frontmost, let e = cache.fresh(path.id, title: shown, now: CFAbsoluteTimeGetCurrent(), frontmostNow: false) { cached(e); return }
@@ -406,7 +435,7 @@ final class MenuMirror {
         }
     }
 
-    private func servePress(_ r: PressMenuItem, to c: NWConnection, who: String, arrived: Double) async {
+    private func servePress(_ r: PressMenuItem, to c: NWConnection, who: String, arrived: Double, lease: MenuFocusLease?) async {
         let cid = ObjectIdentifier(c)
         let path = r.id.flatMap(MenuPath.init)
         let app = label(target?.app ?? "")
@@ -428,13 +457,15 @@ final class MenuMirror {
         let waited = CFAbsoluteTimeGetCurrent() - arrived
         if RequestDeadline.expired(waited: waited, rttMs: roundTrips[cid]) { refuse(.late(waited), what: logPath(path, app: t.app)); return }
         let v = version
-        _ = await prepare()
+        guard lease?.isCurrent() != false else { refuse(.changed, what: shownID); return }
+        let prepared = await prepare()
+        guard lease?.isCurrent() != false, lease == nil || prepared else { refuse(.changed, what: shownID); return }
         guard v == version, target?.pid == t.pid else { refuse(.changed, what: shownID); return }
         let reader = self.reader
         let kept = elements[path]?.element
         let shown = r.title
         let ancestors = ancestorTitles(path)
-        let result = await onMenus { reader.press(pid: t.pid, element: kept, path: path, shownTitle: shown, ancestors: ancestors) }
+        let result = await onMenus { reader.press(pid: t.pid, element: kept, path: path, shownTitle: shown, ancestors: ancestors, perform: lease?.perform) }
         // A press can change any state.
         cache.clear()
         let what = logPath(path, app: t.app, last: result.foundTitle)

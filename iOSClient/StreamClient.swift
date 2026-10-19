@@ -3,6 +3,9 @@ import Network
 import QuartzCore
 import UIKit
 import StreamProtocol
+#if os(visionOS)
+import CoreMedia
+#endif
 
 /// A Mac on the connect screen: one the network browser lists, one seen only over peer-to-peer
 /// Wi-Fi (Direct: its Direct Wireless Connection is on and no network is shared), or a saved Mac
@@ -116,6 +119,23 @@ enum RemoteRoute: Equatable {
     }
 }
 
+#if os(visionOS)
+/// An in-memory continuation of a live, authenticated session. It cannot be decoded from scene
+/// restoration or URLs; a new scene still performs its own TLS admission and capability check.
+struct VisionWindowSeed {
+    fileprivate enum Target {
+        case home(endpoint: NWEndpoint, name: String, peerToPeer: Bool, macID: String?, trust: DiscoveryPolicy.HomeTrust)
+        case remote(macID: String, fingerprint: Data)
+    }
+    fileprivate let target: Target
+    fileprivate let source: StreamSource
+    fileprivate let sourceSize: CGSize?
+    fileprivate init(target: Target, source: StreamSource, sourceSize: CGSize?) {
+        self.target = target; self.source = source; self.sourceSize = sourceSize
+    }
+}
+#endif
+
 /// Finds Macs over Bonjour, connects, and splits the byte stream into messages.
 /// Frame callbacks fire on the network queue; published state hops to main.
 final class StreamClient: ObservableObject {
@@ -217,6 +237,228 @@ final class StreamClient: ObservableObject {
     static let lookingNearby = "Looking for Macs on this network and nearby"
     static let allowLocalNetwork = "To find your Mac, allow Local Network for Sill in Settings."
 
+    #if os(visionOS)
+    struct SpatialSourceSize {
+        let source: StreamSource
+        let size: CGSize
+    }
+    @Published private(set) var spatialPreferredSourceSize: SpatialSourceSize?
+    /// Only parameter sets received after the host acknowledges Desktop may supply its ratio.
+    /// A previous window's `videoSize` can survive a source switch (including equal formats).
+    @Published private(set) var spatialDesktopVideoSize: CGSize?
+    #if DEBUG
+    func setNativeGeometryFixtureDesktopSize(_ size: CGSize) { spatialDesktopVideoSize = size }
+    #endif
+    @Published private(set) var supportsSpatialWindows = false
+    /// Secondary windows must never fall back to an older host's shared selection.
+    private var requiresSpatialCapability = false
+    private var pendingSpatialSource: StreamSource?
+    private var pendingSpatialSourceSize: CGSize?
+    private var pendingSpatialSourceTimeout: DispatchWorkItem?
+    private var pendingSpatialSourceTimeoutID: UUID?
+    private var spatialSeedStarted = false
+    private var suppressSpatialAutoDesktop = false
+    private var pendingSpatialWorkspace: VisionWorkspace?
+    private var pendingSpatialWorkspaceSource: StreamSource?
+    private var spatialPresentationSession: Date?
+    private var suspendedRequiresSpatialCapability = false
+    private var suspendedSpatialWorkspace: VisionWorkspace?
+    @Published private(set) var spatialWorkspaceClearGeneration = 0
+    @Published private(set) var spatialPresentationSize: CGSize?
+    private var spatialPresentationSource: StreamSource?
+    var spatialPreservesRestoredSize = false
+    var spatialRestoredSize: CGSize?
+
+    var spatialWorkspaceSnapshot: VisionWorkspace? {
+        guard connected, pendingSpatialWorkspace == nil, let id = session?.macID,
+              let mac = savedMac(id), mac.revoked != true, mac.newKey != true else { return nil }
+        let target: VisionWorkspace.Window?
+        switch active {
+        case .none: return nil
+        case .desktop: target = nil
+        case .window(let id):
+            guard let info = windows.first(where: { $0.id == id }), !info.bundleID.isEmpty else { return nil }
+            target = VisionWorkspace.Window(info)
+        }
+        let size = spatialPresentationSource == active && spatialPresentationSession == connectedAt
+            ? spatialPresentationSize : (spatialPreservesRestoredSize ? spatialRestoredSize : nil)
+        return VisionWorkspace(macID: id, window: target, width: size.map { Double($0.width) }, height: size.map { Double($0.height) })
+    }
+
+    func noteSpatialPresentationSize(_ size: CGSize, source: StreamSource, session started: Date?, confirmed: Bool = false) {
+        guard connected, started != nil, started == connectedAt, active == source else { return }
+        if !confirmed {
+            guard spatialPresentationSession == started, spatialPresentationSource == source else { return }
+        }
+        let changedSource = spatialPresentationSource != source
+        spatialPresentationSession = started
+        spatialPresentationSource = source
+        if spatialPresentationSize != size || changedSource {
+            spatialPresentationSize = size
+            #if DEBUG
+            print("WORKSPACE_SIZE width=\(Int(size.width)) height=\(Int(size.height))")
+            #endif
+        }
+    }
+
+    /// Only existing admitted pairings may reconnect. No DEBUG launch-pairing arguments,
+    /// identity creation or name-only discovery fallback is run by restoration.
+    func restoreSpatialWorkspace(_ workspace: VisionWorkspace, independent: Bool) {
+        guard !connected, connection == nil, remoteDial == nil else { return }
+        requiresSpatialCapability = independent
+        guard DeviceIdentity.existing() != nil, let mac = savedMac(workspace.macID),
+              mac.revoked != true, mac.newKey != true, mac.fingerprintData != nil else {
+            startBrowsing()
+            status = "Pair this Mac again to restore this Sill window."
+            return
+        }
+        pendingSpatialWorkspace = workspace
+        spatialPreservesRestoredSize = true
+        spatialRestoredSize = workspace.size
+        reconnect = Reconnect(macID: mac.macID, bonjourName: nil, name: displayName(mac.macID),
+                              lostAt: ProcessInfo.processInfo.systemUptime, pathAtLoss: pathSignature,
+                              remoteAllowed: true, rememberedDirect: false)
+        status = "Restoring this Sill window…"
+        startBrowsing()
+        reconnectIfListed()
+    }
+
+    private func requestSpatialWorkspaceSource(_ source: StreamSource, workspace: VisionWorkspace, from: NWConnection) {
+        cancelSpatialSourceTimeout()
+        pendingSpatialWorkspaceSource = source
+        request(source)
+        let timeoutID = UUID()
+        pendingSpatialSourceTimeoutID = timeoutID
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self, self.connection === from, self.pendingSpatialWorkspace == workspace,
+                  self.pendingSpatialWorkspaceSource == source, self.pendingSpatialSourceTimeoutID == timeoutID else { return }
+            self.disconnect(preservingWorkspace: true)
+            self.status = "Couldn’t restore the selected source. Choose a Mac to reconnect."
+        }
+        pendingSpatialSourceTimeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: timeout)
+    }
+
+    func cancelSpatialRestoreForForgottenMac(_ id: String) {
+        let restoring = pendingSpatialWorkspace?.macID == id
+        guard restoring || suspendedSpatialWorkspace?.macID == id || spatialWorkspaceSnapshot?.macID == id else { return }
+        spatialWorkspaceClearGeneration += 1
+        suspendedSpatialWorkspace = nil
+        if restoring { disconnect() }
+    }
+
+    func resumeSpatialWorkspace() {
+        let workspace = suspendedSpatialWorkspace
+        suspendedSpatialWorkspace = nil
+        if let workspace { restoreSpatialWorkspace(workspace, independent: suspendedRequiresSpatialCapability) }
+        else { startBrowsing(); status = "Choose a Mac to reconnect this Sill window." }
+    }
+
+    func spatialWindowSeed(source: StreamSource) -> VisionWindowSeed? {
+        guard connected, supportsSpatialWindows, let session, DeviceIdentity.existing() != nil else { return nil }
+        switch source {
+        case .none: return nil
+        case .window(let id): guard windows.contains(where: { $0.id == id }) else { return nil }
+        case .desktop: break
+        }
+        let sourceSize: CGSize?
+        if case .window(let id) = source, let window = windows.first(where: { $0.id == id }) {
+            sourceSize = CGSize(width: window.width, height: window.height)
+        } else { sourceSize = nil }
+        if session.route.isRemote {
+            guard let id = session.macID, let pin = savedMac(id)?.fingerprintData else { return nil }
+            return VisionWindowSeed(target: .remote(macID: id, fingerprint: pin), source: source, sourceSize: sourceSize)
+        }
+        guard let endpoint = session.endpoint, let trust = session.home,
+              case .key = DiscoveryPolicy.pin(trust) else { return nil }
+        return VisionWindowSeed(target: .home(endpoint: endpoint, name: macName,
+                                               peerToPeer: session.route == .direct,
+                                               macID: session.macID, trust: trust), source: source, sourceSize: sourceSize)
+    }
+
+    /// Run instead of startup pairing/launch arguments in a seeded scene. Reuse the existing device
+    /// identity; never create, forget or reset a key to open a window.
+    func startSpatialWindow(seed: VisionWindowSeed) {
+        guard !spatialSeedStarted else { return }
+        spatialSeedStarted = true
+        clearSpatialPendingSelectionForManualConnect()
+        requiresSpatialCapability = true
+        pendingSpatialSource = seed.source
+        pendingSpatialSourceSize = seed.sourceSize
+        guard DeviceIdentity.existing() != nil else {
+            status = "Pair this Apple Vision Pro with your Mac again before opening another window."
+            return
+        }
+        switch seed.target {
+        case .home(let endpoint, let name, let peerToPeer, let id, let trust):
+            _ = connect(to: endpoint, name: name, peerToPeer: peerToPeer, macID: id, trust: trust)
+        case .remote(let id, let fingerprint):
+            guard savedMac(id)?.fingerprintData == fingerprint else {
+                status = "This Mac’s pairing changed. Open another window from a connected session."
+                return
+            }
+            dialSaved(id, why: .tap, preservingSpatialSelection: true)
+        }
+        startBrowsing()
+    }
+
+    func prepareSpatialWindowForManualConnection() {
+        requiresSpatialCapability = true
+        clearSpatialPendingSelectionForManualConnect()
+    }
+
+    private func cancelSpatialSourceTimeout() {
+        pendingSpatialSourceTimeout?.cancel()
+        pendingSpatialSourceTimeout = nil
+        pendingSpatialSourceTimeoutID = nil
+    }
+
+    func clearSpatialPendingSelectionForManualConnect() {
+        cancelSpatialSourceTimeout()
+        pendingSpatialWorkspace = nil
+        pendingSpatialWorkspaceSource = nil
+        spatialPreservesRestoredSize = false
+        spatialRestoredSize = nil
+        pendingSpatialSource = nil
+        pendingSpatialSourceSize = nil
+        spatialPreferredSourceSize = nil
+        suppressSpatialAutoDesktop = false
+    }
+
+    /// Scene closure cancels only this client's work. A backgrounded sibling scene keeps its own
+    /// stream, browser, reporter and identity; no process-wide cancellation is used here.
+    func stopSpatialWindow() {
+        suspendedSpatialWorkspace = spatialWorkspaceSnapshot ?? pendingSpatialWorkspace
+        suspendedRequiresSpatialCapability = requiresSpatialCapability
+        cancelPendingLink()
+        cancelPairing()
+        cancelHomeAsk()
+        endOverlayAsk(withdraw: true)
+        disconnect(preservingWorkspace: true)
+        browsing = false
+        discoveryRecheck?.cancel(); discoveryRecheck = nil
+        networkLife.rebuildWork?.cancel(); networkLife.settleWork?.cancel()
+        networkLife = BrowserLife()
+        networkBrowser?.cancel(); networkBrowser = nil
+        networkResults = []
+        stopNearbyBrowser()
+        pathMonitor?.cancel(); pathMonitor = nil
+        reconnectCheck?.cancel(); reconnectCheck = nil
+        reconnectRetryChain += 1
+        afterPairingWatch?.cancel(); afterPairingWatch = nil
+    }
+    #endif
+
+    /// Independent visionOS streams are admitted per connection. Overlapping path handovers would
+    /// create another stream and consume a scene slot. Loss uses the normal reconnect instead.
+    private var permitsConnectionHandover: Bool {
+        #if os(visionOS)
+        return false
+        #else
+        return true
+        #endif
+    }
+
     // Switcher catalog, as the host sends it. Published on main.
     @Published var macName = ""
     @Published var windows: [WindowInfo] = []          // front to back, in the host's order
@@ -237,8 +479,21 @@ final class StreamClient: ObservableObject {
     /// waits out a closed window stands down if this moved meanwhile: the user chose something,
     /// and the host cannot tell that request from a Desktop tap, so it could replace the choice.
     private var choicesSent = 0
+    /// Explicit drawer/window intent outlives provisional empty lists while the Mac opens,
+    /// restores or switches captures. Automatic Desktop must not cancel that request.
+    private var pendingAppSelection: (windowID: UInt32?, bundleID: String?, expires: Date)?
     @Published var active: StreamSource = .none {
         didSet {
+            #if os(visionOS)
+            if oldValue != active {
+                presence.setOwn(nil, from: .none)
+                cancelRemoteKeyboardRequest()
+                visionSourceEpoch = UUID()
+                visionReadySource = .none
+                visionMouseCenter.activate(session: connectedAt, source: active, mouseMode: visionMouseMode)
+                renderPointer()
+            }
+            #endif
             // The pointer sprite shows nothing while nothing streams.
             let streaming = active != .none
             if presence.streaming != streaming {
@@ -249,6 +504,7 @@ final class StreamClient: ObservableObject {
     }
     @Published var thumbnails: [UInt32: UIImage] = [:] // by window ID
     @Published var icons: [String: UIImage] = [:]      // by bundle ID
+    @Published var runningApps: [AppInfo]? = nil      // nil: legacy host, []: authoritative empty
     @Published var apps: [AppInfo] = []                // installed apps, for "All apps"
 
     // The Mac's streaming settings (kinds 16 and 17; see the Host settings section below and
@@ -264,7 +520,119 @@ final class StreamClient: ObservableObject {
     /// When this connection became ready (a remote one: its first window list, since with TLS 1.3
     /// the device is ready before the Mac has judged its certificate); nil while disconnected. The
     /// panel gives the first state two seconds before it calls the Mac an older one.
-    @Published var connectedAt: Date?
+    #if os(visionOS)
+    /// Deliberately session-local: every new connection starts with direct Touch input.
+    private(set) var visionMouseEpoch = UUID()
+    @Published var visionMouseMode = false {
+        didSet {
+            if oldValue != visionMouseMode {
+                visionMouseEpoch = UUID()
+                cancelRemoteKeyboardRequest()
+                visionMouseCenter.cancel()
+                if visionMouseMode {
+                    let feed = pointerFeed.current
+                    let known = feed.control == .elsewhere ? feed.macInside : feed.anchor != nil
+                    if !known {
+                        visionMouseCenter.activate(session: connectedAt, source: active, mouseMode: true)
+                        DispatchQueue.main.async { self.attemptVisionMouseCenter() }
+                    }
+                }
+                renderPointer()
+            }
+        }
+    }
+    @Published private(set) var visionPointerKnown = false
+    // Network-queue source boundary, reset before any later pointer reports are accepted.
+    private var visionDesktopSourceEpoch = UUID() // network queue, only changes at source boundaries
+    private var visionAcknowledgedDesktopEpoch = UUID() // main queue
+    private var visionPointerSource: StreamSource = .none
+    private var visionPointerGeometryRevision = 0 // network queue
+    private var visionPointerFrameReady = false // network queue
+    private var visionSourceEpoch = UUID() // main, also fences rapid A → B → A selections
+    private var visionReadySource: StreamSource = .none // main
+    private var visionReadyGeometryRevision = 0 // main
+    private var visionCenterRetryEpoch = 0 // main readiness/resume transitions
+    private var visionMouseCenter = VisionMouseCenterPolicy() // main
+    private var visionEditableFocus = VisionEditableFocusPolicy()
+    private var hostEditableFocus: Int?
+    @Published private(set) var editableFocusActivation: String?
+    func cancelRemoteKeyboardRequest() { visionEditableFocus.cancel() }
+    func isCurrentEditableFocusActivation(_ token: String) -> Bool { visionEditableFocus.acceptsActivation(token) }
+
+    private func attemptVisionMouseCenter() {
+        guard connected, !inputPaused, appInForeground, UIApplication.shared.applicationState == .active,
+              let ticket = visionMouseCenter.claim(session: connectedAt, source: active,
+                readySource: visionReadySource, mouseMode: visionMouseMode,
+                pictureReady: videoSize.width > 0 && videoSize.height > 0) else { return }
+        let epoch = visionMouseEpoch, revision = visionReadyGeometryRevision, retryEpoch = visionCenterRetryEpoch
+        commitVisionPointer(in: ticket.session, source: ticket.source, modeEpoch: epoch,
+                            geometryRevision: revision) { [weak self] committed in
+            guard let self else { return }
+            self.visionMouseCenter.finish(ticket, committed: committed)
+            if !committed && (self.visionReadyGeometryRevision != revision || self.visionCenterRetryEpoch != retryEpoch) {
+                DispatchQueue.main.async { self.attemptVisionMouseCenter() }
+            }
+        }
+    }
+
+    func placeVisionPointer(in session: Date?, source: StreamSource, modeEpoch: UUID) {
+        commitVisionPointer(in: session, source: source, modeEpoch: modeEpoch)
+    }
+
+    private func commitVisionPointer(in session: Date?, source: StreamSource, modeEpoch: UUID,
+                                     geometryRevision: Int? = nil,
+                                     completion: @escaping (Bool) -> Void = { _ in }) {
+        guard connected, session != nil, session == connectedAt, source != .none,
+              source == active, visionMouseMode, modeEpoch == visionMouseEpoch,
+              !inputPaused, appInForeground, UIApplication.shared.applicationState == .active,
+              videoSize.width > 0, videoSize.height > 0 else { completion(false); return }
+        let sourceEpoch = visionSourceEpoch
+        let point = CGPoint(x: 0.5, y: 0.5)
+        let event = InputEvent.pointer(.move, x: point.x, y: point.y)
+        // Commit ownership, input count and placement atomically on the report queue. Readiness
+        // becomes visible only after this commit, so an earlier host report cannot undo it.
+        queue.async { [weak self] in
+            guard let self, self.connectedAt == session, self.active == source,
+                  self.visionMouseMode, self.visionMouseEpoch == modeEpoch, !self.inputPaused,
+                  self.visionPointerSource == source, self.visionSourceEpoch == sourceEpoch,
+                  geometryRevision.map { VisionMouseCenterPolicy.acceptsGeometry(expected: $0, current: self.visionPointerGeometryRevision) } ?? true,
+                  self.appInForeground, UIApplication.shared.applicationState == .active else {
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+            self.flushPendingMove()
+            self.pointerNoteSent(event)
+            self.send(.input, Wire.encode(event))
+            DispatchQueue.main.async {
+                guard self.connectedAt == session, self.active == source,
+                      self.visionMouseMode, self.visionMouseEpoch == modeEpoch,
+                      self.visionSourceEpoch == sourceEpoch,
+                      geometryRevision.map({ $0 == self.visionReadyGeometryRevision }) ?? true else {
+                    // The remote move already committed. A stale visual completion must not
+                    // re-arm this activation and send a second centre move.
+                    completion(true)
+                    return
+                }
+                // Follow the latest queue anchor/Mac report, including any newer local move,
+                // rather than overwriting its marker with this completion's centre point.
+                self.presence.setOwn(nil, from: .none)
+                self.renderPointer()
+                completion(true)
+            }
+        }
+    }
+    #endif
+    @Published var connectedAt: Date? {
+        didSet {
+            #if os(visionOS)
+            if oldValue != connectedAt {
+                cancelRemoteKeyboardRequest()
+                // The scene restores pointer mode separately; keyboard eligibility is still reset.
+                // Retain this preference through teardown so removal cannot save a transient false.
+            }
+            #endif
+        }
+    }
     /// The next pick's token: strictly increasing for the life of the process, never reset, so an
     /// answer can never be taken for one to an earlier connection's pick.
     private var settingsToken = 1
@@ -310,7 +678,16 @@ final class StreamClient: ObservableObject {
 
     /// Pixel size of the frames the host is sending, from the HEVC parameter sets. Input positions
     /// are fractions of this, so the overlay needs it to letterbox touches the way the layer does.
-    @Published var videoSize: CGSize = .zero
+    @Published var videoSize: CGSize = .zero {
+        didSet {
+            #if os(visionOS)
+            if oldValue != videoSize {
+                visionCenterRetryEpoch += 1
+                DispatchQueue.main.async { self.attemptVisionMouseCenter() }
+            }
+            #endif
+        }
+    }
     // The pointer sprite (docs/pointer-visibility-plan.md §7.3; the rules are PointerPresence.swift's).
     // One sprite in the display view shows the Mac's pointer while the Mac, or another device, moved it
     // last (kind 26 says where), and this device's own only for the portrait trackpad (and the Pencil,
@@ -357,6 +734,13 @@ final class StreamClient: ObservableObject {
     /// Main thread.
     var inputPaused = false {
         didSet {
+            #if os(visionOS)
+            if inputPaused { cancelRemoteKeyboardRequest() }
+            if oldValue && !inputPaused {
+                visionCenterRetryEpoch += 1
+                DispatchQueue.main.async { self.attemptVisionMouseCenter() }
+            }
+            #endif
             guard oldValue, !inputPaused, pointerMoveOwed else { return }
             pointerMoveOwed = false
             presence.follow(pointerFeed.current)
@@ -916,7 +1300,17 @@ final class StreamClient: ObservableObject {
         }
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             self?.appInForeground = false
+            #if os(visionOS)
+            self?.renderPointer()
+            #endif
         }
+        #if os(visionOS)
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.visionCenterRetryEpoch += 1
+            self.attemptVisionMouseCenter()
+        }
+        #endif
         // The clipboard's chip looks when Sill becomes active (StreamClient+Clipboard).
         observeClipboardActivation()
     }
@@ -1009,6 +1403,11 @@ final class StreamClient: ObservableObject {
     private func cameForward() {
         let wasInBackground = !appInForeground
         appInForeground = true
+        #if os(visionOS)
+        renderPointer()
+        visionCenterRetryEpoch += 1
+        DispatchQueue.main.async { self.attemptVisionMouseCenter() }
+        #endif
         guard browsing, wasInBackground else { return }
         rebuildIfDue(.network, cameForward: true)
         if nearbyBrowser != nil { rebuildIfDue(.nearby, cameForward: true) }
@@ -1358,6 +1757,9 @@ final class StreamClient: ObservableObject {
     /// the saved Mac's addresses through the remote door. At home the row's door decides the rest
     /// (`dial`): a pinned session, the ask, a session on an open door, a plain one, or nothing.
     func connect(to mac: FoundMac) {
+        #if os(visionOS)
+        clearSpatialPendingSelectionForManualConnect()
+        #endif
         #if DEBUG
         if mockDiscovery {
             switch mac.route {
@@ -1745,7 +2147,12 @@ final class StreamClient: ObservableObject {
         if let v = UserDefaults.standard.string(forKey: "SillHelloVersion"), !v.isEmpty { version = v }
         #endif
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        #if os(visionOS)
+        return Wire.encode(Hello(appVersion: version, build: build, protocol: SillProtocol.current,
+                                 device: ClientStatsReporter.deviceName, independentSession: 1))
+        #else
         return Wire.encode(Hello(appVersion: version, build: build, protocol: SillProtocol.current, device: ClientStatsReporter.deviceName))
+        #endif
     }()
 
     /// The hello, the first thing on every session connection, written straight to `c` before
@@ -1776,6 +2183,7 @@ final class StreamClient: ObservableObject {
     /// while (2026-09-24, twice). Not before this connection's first window list, which names the
     /// host the move must reach again (`moveProbed`). Main thread.
     private func moveToNetworkIfListed() {
+        guard permitsConnectionHandover else { return }
         moveCheck?.cancel()
         moveCheck = nil
         guard connected, connectedDirectly, sessionListed, moving == nil, connection != nil,
@@ -1844,6 +2252,7 @@ final class StreamClient: ObservableObject {
     /// row (not home), never beside another move, and not before the session's first window list and
     /// its own verified kind 18. Main thread.
     func moveHomeIfListed() {
+        guard permitsConnectionHandover else { return }
         homeMoveCheck?.cancel()
         homeMoveCheck = nil
         // A row no longer listed is forgotten, its refusal and its tries: listed again, it is tried afresh.
@@ -2490,6 +2899,7 @@ final class StreamClient: ObservableObject {
     /// browsers' results change, when iOS says something of the session connection's path, at the
     /// session's first window list, after a move, and at the plan's own look again. Main thread.
     private func followBestPath() {
+        guard permitsConnectionHandover else { return }
         pathCheck?.cancel()
         pathCheck = nil
         guard connected, connection != nil, sessionListed else { return }
@@ -2619,6 +3029,7 @@ final class StreamClient: ObservableObject {
     /// goodbye on (kind 22: it closed it on purpose, "quit" at home, and the session ends with the
     /// words that goodbye deserves rather than after a dial to a Mac that is going). Main thread.
     private func rescue(from c: NWConnection) -> Bool {
+        guard permitsConnectionHandover else { return false }
         guard connected, sessionListed, goodbye == nil else { return false }
         // The remote connection went while the move home is under way (the hotspot dropped as the
         // home Wi-Fi joined): the move carries the session, without a fence (nothing sent on a dead
@@ -3038,7 +3449,14 @@ final class StreamClient: ObservableObject {
     }
 
     /// The user chose to leave. No reconnect.
-    func disconnect() {
+    func disconnect(preservingWorkspace: Bool = false) {
+        #if os(visionOS)
+        if !preservingWorkspace {
+            spatialWorkspaceClearGeneration += 1
+            suspendedSpatialWorkspace = nil
+        }
+        clearSpatialPendingSelectionForManualConnect()
+        #endif
         reconnect = nil
         cancelRemoteDial()
         let c = connection
@@ -3073,6 +3491,12 @@ final class StreamClient: ObservableObject {
     /// that was to carry a session whose connection had gone on did not (`moveEnded`,
     /// `followBestPath`). Main thread.
     private func endSession(error: NWError? = nil, end: RemoteDialPolicy.End? = nil) {
+        #if os(visionOS)
+        if supportsSpatialWindows, active != .none {
+            pendingSpatialSource = active
+            pendingSpatialSourceSize = spatialPreferredSourceSize.flatMap { $0.source == active ? $0.size : nil }
+        }
+        #endif
         connection = nil
         #if DEBUG
         if connected { print("session: over; back to the connect screen") }
@@ -3119,6 +3543,13 @@ final class StreamClient: ObservableObject {
         hostVersion = nil
         hostProtocol = nil
         hostGestures = nil
+        #if os(visionOS)
+        cancelSpatialSourceTimeout()
+        supportsSpatialWindows = false
+        spatialPreferredSourceSize = nil
+        hostEditableFocus = nil
+        cancelRemoteKeyboardRequest()
+        #endif
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -3146,6 +3577,7 @@ final class StreamClient: ObservableObject {
             searchingSince = ProcessInfo.processInfo.systemUptime
             askedNearby = false
         }
+        pendingAppSelection = nil
         lastAutoDesktop = .distantPast     // the next connection starts on the Desktop again
         self.status = status
         macName = ""
@@ -3154,6 +3586,7 @@ final class StreamClient: ObservableObject {
         thumbnails = [:]
         icons = [:]
         apps = []
+        runningApps = nil
         videoSize = .zero
         displayView.clear()
         // Nothing of a Mac's settings outlives its connection: the next one sends them afresh.
@@ -3175,6 +3608,10 @@ final class StreamClient: ObservableObject {
     /// The person's pick (a thumbnail, Desktop, the Apps list): the host streams this source and
     /// answers with a fresh window list. It counts for the tour as something happening.
     func select(_ source: StreamSource) {
+        #if os(visionOS)
+        clearSpatialPendingSelectionForManualConnect()
+        #endif
+        resumeSource = nil
         noteAction()
         request(source)
     }
@@ -3182,7 +3619,20 @@ final class StreamClient: ObservableObject {
     /// Asks the host to stream this source: the person's pick (`select`), or this device's own
     /// request (the Desktop on a connection's first list, a pick made again after a move), which
     /// is not the person's doing.
-    private func request(_ source: StreamSource) {
+    private func request(_ source: StreamSource, spatialSnapshot: CGSize? = nil) {
+        #if os(visionOS)
+        guard !requiresSpatialCapability || supportsSpatialWindows else { return }
+        suppressSpatialAutoDesktop = false
+        // Freeze physical Mac points before the host can resize this window to the current
+        // viewport. A new scene reuses the parent's pre-launch snapshot for its first pick.
+        if case .window(let id) = source, let window = windows.first(where: { $0.id == id }) {
+            spatialPreferredSourceSize = SpatialSourceSize(source: source,
+                size: spatialSnapshot ?? CGSize(width: window.width, height: window.height))
+        } else { spatialPreferredSourceSize = nil }
+        #endif
+        if case .window(let id) = source {
+            pendingAppSelection = (id, nil, Date().addingTimeInterval(15))
+        } else { pendingAppSelection = nil }
         choicesSent += 1
         send(.selectSource, Wire.encode(source))
         #if DEBUG
@@ -3236,9 +3686,37 @@ final class StreamClient: ObservableObject {
 
     /// Ask the host to launch an installed app; the host selects its first window itself.
     func launch(bundleID: String) {
+        #if os(visionOS)
+        guard !requiresSpatialCapability || supportsSpatialWindows else { return }
+        clearSpatialPendingSelectionForManualConnect()
+        #endif
         noteAction()
+        resumeSource = nil
+        let expires = Date().addingTimeInterval(15)
+        pendingAppSelection = (nil, bundleID, expires)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            guard let self, self.pendingAppSelection?.expires == expires else { return }
+            _ = self.awaitingAppSelection(active: self.active, windows: self.windows)
+        }
         choicesSent += 1   // the host picks the launched app's window: a choice, like a pick
         send(.launchApp, Wire.encode(LaunchApp(bundleID: bundleID)))
+    }
+
+    /// Called for each host list, before automatic Desktop recovery. A stale Desktop list
+    /// cannot acknowledge an app pick; only its matching active window can do that.
+    private func awaitingAppSelection(active: StreamSource, windows: [WindowInfo]) -> Bool {
+        guard let pending = pendingAppSelection else { return false }
+        if case .window(let id) = active,
+           pending.windowID == id || windows.contains(where: { $0.id == id && $0.bundleID == pending.bundleID }) {
+            pendingAppSelection = nil
+            return false
+        }
+        guard Date() < pending.expires else {
+            pendingAppSelection = nil
+            status = "The app hasn’t opened a window yet. Try Apps again."
+            return false
+        }
+        return true
     }
 
     /// Send one input event to the Mac. Safe to call from the main thread; the work hops to the
@@ -3257,6 +3735,23 @@ final class StreamClient: ObservableObject {
     }
 
     func sendInput(_ event: InputEvent) {
+        #if os(visionOS)
+        guard connected, !requiresSpatialCapability || supportsSpatialWindows else { return }
+        // A local overlay/tour may interrupt a coasting input. Releases must still get through.
+        if inputPaused {
+            switch event {
+            case .key(_, false, _), .pointer(.leftUp, _, _), .pointer(.rightUp, _, _),
+                 .scrollGesture(.ended, _, _), .scrollGesture(.momentumEnded, _, _): break
+            default: return
+            }
+        }
+        #endif
+        #if os(visionOS)
+        let focusRequest = visionEditableFocus.input(event, capability: hostEditableFocus,
+            session: connectedAt, source: active, mode: visionMouseEpoch,
+            enabled: connected && !inputPaused && appInForeground && UIApplication.shared.applicationState == .active,
+            now: ProcessInfo.processInfo.systemUptime)
+        #endif
         // Every input passes here, a hover and a flick's coast included: the tour's rule counts it
         // as something happening (StreamScreen.considerTour).
         lastInputAt = ProcessInfo.processInfo.systemUptime
@@ -3274,6 +3769,9 @@ final class StreamClient: ObservableObject {
             guard case .pointer(.move, _, _) = event else {
                 self.flushPendingMove()
                 self.send(.input, Wire.encode(event))
+                #if os(visionOS)
+                if let focusRequest { self.send(.editableFocus, Wire.encode(focusRequest)) }
+                #endif
                 return
             }
             let now = CACurrentMediaTime()
@@ -3321,6 +3819,9 @@ final class StreamClient: ObservableObject {
     /// pointer, no scroll, and a latched modifier stays latched. Main thread. True when it went.
     @discardableResult
     func sendGesture(_ gesture: TrackpadGestures.Gesture, fingers: Int) -> Bool {
+        #if os(visionOS)
+        guard !requiresSpatialCapability || supportsSpatialWindows else { return false }
+        #endif
         var windowStreams = false
         if case .window = active { windowStreams = true }
         let plan = TrackpadGestures.sending(switchOn: Self.gesturesOn, connected: connected, hostGestures: hostGestures,
@@ -3364,6 +3865,22 @@ final class StreamClient: ObservableObject {
     /// and at Q1's timer. Main thread.
     func renderPointer() {
         presence.follow(pointerFeed.current)
+        #if os(visionOS)
+        presence.spatialStream = active != .none
+        presence.persistentSpatial = true
+        presence.streaming = VisionSurfaceInputPolicy.showsCursor(mouseMode: visionMouseMode,
+            streamReady: connected && active != .none && appInForeground && videoSize.width > 0 && videoSize.height > 0)
+        let known = presence.hasKnownSpatialPosition
+        if visionPointerKnown != known {
+            // Rendering may be requested from a representable update. Publish only a readiness
+            // transition on the next main turn, never pointer coordinates or per-frame updates.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let latest = self.presence.hasKnownSpatialPosition
+                if self.visionPointerKnown != latest { self.visionPointerKnown = latest }
+            }
+        }
+        #endif
         let now = ProcessInfo.processInfo.systemUptime
         onPointerChange?(presence.sprite(now: now))
         // Q1's flip: one re-render when the trackpad's pointer is due to go. Never while the linger
@@ -3382,6 +3899,12 @@ final class StreamClient: ObservableObject {
     /// draws that one). Called alongside the input that goes out anyway, never instead of it. A flip
     /// between none and some still tells the host (`setLocalCursor`), as it did; the Mac's arrow
     /// never does. Main thread.
+    func setNativePointerActive(_ active: Bool) {
+        guard presence.nativePointerActive != active else { return }
+        presence.nativePointerActive = active
+        renderPointer()
+    }
+
     func setOwnPointer(_ p: CGPoint?, from origin: PointerPresence.Origin) {
         let flipped = (p == nil) != (presence.own == nil)
         presence.setOwn(p, from: origin)
@@ -3423,6 +3946,12 @@ final class StreamClient: ObservableObject {
     /// before; the Mac's arrow waits for the host's next report, which is in the new geometry already
     /// (PointerPresence.recentresOnNewFrame). The display view calls it. Main thread.
     func pointerFrameChanged() {
+        #if os(visionOS)
+        // A pinch target belongs to the previous picture geometry, never its arbitrary centre.
+        presence.setOwn(nil, from: .none)
+        renderPointer()
+        return
+        #endif
         presence.follow(pointerFeed.current)
         guard presence.recentresOnNewFrame(now: ProcessInfo.processInfo.systemUptime) else { return }
         setOwnPointer(CGPoint(x: 0.5, y: 0.5), from: presence.origin)
@@ -3436,9 +3965,21 @@ final class StreamClient: ObservableObject {
     /// and again on `queue`, behind anything of the old connection still being handled there, so no
     /// late report of it outlives the reset. Main thread.
     private func resetPointerFeed() {
+        #if os(visionOS)
+        visionReadySource = .none
+        spatialDesktopVideoSize = nil
+        visionAcknowledgedDesktopEpoch = UUID()
+        visionMouseCenter.cancel()
+        #endif
         pointerFeed.reset()
         queue.async {
             self.pointerFeed.reset()
+            #if os(visionOS)
+            self.visionPointerSource = .none
+            self.visionDesktopSourceEpoch = UUID()
+            self.visionPointerGeometryRevision += 1
+            self.visionPointerFrameReady = false
+            #endif
             #if DEBUG
             self.pointerStaleLoggedAt = -.infinity
             self.pointerRestatementLoggedAt = -.infinity
@@ -3523,7 +4064,8 @@ final class StreamClient: ObservableObject {
     /// The layout harness (`-SillPointer`, ContentView): the mock's pointer in one of the plan's
     /// states, as the feed and this device's input would leave it: `mac@X,Y` (the Mac has it, over
     /// the stream), `hidden` (the Mac has it, off the stream), `device@X,Y` (this device's trackpad)
-    /// or `pencil@X,Y` (its Pencil); `pencilShows` is Q2's flip (`-SillPencilPointer 1`). False for
+    /// `spatial@X,Y` (visionOS hand/physical pointer), or `pencil@X,Y` (its Pencil);
+    /// `pencilShows` is Q2's flip (`-SillPencilPointer 1`). False for
     /// a state it does not know. Main thread.
     func debugSeedPointer(_ state: String, pencilShows: Bool) -> Bool {
         let parts = state.lowercased().split(separator: "@", maxSplits: 1).map(String.init)
@@ -3542,6 +4084,9 @@ final class StreamClient: ObservableObject {
         case ("device", let p?):
             _ = pointerFeed.sent(.pointer(p), now: CACurrentMediaTime())
             presence.setOwn(p, from: .trackpad)
+        case ("spatial", let p?):
+            _ = pointerFeed.sent(.pointer(p), now: CACurrentMediaTime())
+            presence.setOwn(p, from: .spatial)
         case ("pencil", let p?):
             _ = pointerFeed.sent(.pointer(p), now: CACurrentMediaTime())
             presence.setOwn(p, from: .pencil)
@@ -3597,13 +4142,61 @@ final class StreamClient: ObservableObject {
         }
     }
 
+    #if os(visionOS)
+    /// Parse the actual encoded frame dimensions without relying on display-view creation or
+    /// its change-only main-thread callback. Desktop capture is independent of scene viewport.
+    private static func spatialVideoSize(_ ps: ParameterSets) -> CGSize? {
+        guard let description = HEVCDisplayView.makeFormatDescription(ps) else { return nil }
+        let dimensions = CMVideoFormatDescriptionGetDimensions(description)
+        guard dimensions.width > 0, dimensions.height > 0 else { return nil }
+        return CGSize(width: Int(dimensions.width), height: Int(dimensions.height))
+    }
+    #endif
+
     /// On the network queue.
     private func handle(_ header: StreamHeader, _ data: Data) {
         switch header.kind {
         case .parameterSets:
             if let ps = ParameterSets(encoded: data) {
+                #if os(visionOS)
+                if lastParameterSets?.sets != ps.sets || lastParameterSets?.nalUnitHeaderLength != ps.nalUnitHeaderLength {
+                    pointerFeed.reset()
+                    visionPointerGeometryRevision += 1
+                    visionPointerFrameReady = false
+                    // Invalidate main readiness before any failed commit completion retries.
+                    let from = connection
+                    DispatchQueue.main.async {
+                        guard self.connection === from else { return }
+                        self.visionReadySource = .none
+                    }
+                }
+                #endif
                 lastParameterSets = ps
                 onParameterSets?(ps)
+                #if os(visionOS)
+                // The source catalog and parameter sets share this ordered network queue. Wait
+                // for a set after Desktop's acknowledgment rather than reusing an old picture.
+                // Repeated keyframe sets still count when the decoder's format did not change.
+                if visionPointerSource == .desktop, let size = Self.spatialVideoSize(ps) {
+                    let from = connection, epoch = visionDesktopSourceEpoch
+                    DispatchQueue.main.async {
+                        guard self.connection === from, self.connected, self.active == .desktop,
+                              self.visionAcknowledgedDesktopEpoch == epoch else {
+                            #if DEBUG
+                            print("NATIVE_GEOMETRY discarded Desktop format from retired source/session")
+                            #endif
+                            return
+                        }
+                        if self.spatialDesktopVideoSize != size {
+                            VisionGeometryDiagnostics.record(phase: 8, sourceKind: 2, source: size)
+                            #if DEBUG
+                            print("NATIVE_GEOMETRY accepted Desktop HEVC dimensions=\(size)")
+                            #endif
+                            self.spatialDesktopVideoSize = size
+                        }
+                    }
+                }
+                #endif
             }
         case .frame:
             // Every frame is a sample, stamped on arrival before the hand-off to the display layer:
@@ -3614,13 +4207,51 @@ final class StreamClient: ObservableObject {
             if age.isFinite { frameAgeSamples.append(min(max(age, 0), Self.sampleCeilingMs)) }
             frameCounter += 1
             onFrame?(data, header.isKeyframe)
+            #if os(visionOS)
+            if !visionPointerFrameReady, visionPointerSource != .none {
+                visionPointerFrameReady = true
+                let source = visionPointerSource, revision = visionPointerGeometryRevision
+                let from = connection
+                DispatchQueue.main.async {
+                    guard self.connection === from, self.connected, self.active == source else { return }
+                    self.visionReadySource = source
+                    self.visionReadyGeometryRevision = revision
+                    // Let the source boundary update cancel the previous input surface first.
+                    DispatchQueue.main.async { self.attemptVisionMouseCenter() }
+                }
+            }
+            #endif
         case .windowList:
             guard let list = Wire.decode(WindowList.self, from: data) else { return }
+            #if os(visionOS)
+            if visionPointerSource != list.active {
+                visionDesktopSourceEpoch = UUID()
+                visionPointerSource = list.active
+                visionPointerGeometryRevision += 1
+                visionPointerFrameReady = false
+                pointerFeed.reset()
+            }
+            let desktopEpoch = visionDesktopSourceEpoch
+            #endif
             let from = connection
             DispatchQueue.main.async {
                 // Only from the current connection: a list queued by a replaced one must not
                 // describe the next session.
                 guard self.connection === from else { return }
+                #if os(visionOS)
+                let independent = list.independentSessions == 1
+                guard !(self.requiresSpatialCapability || self.pendingSpatialSource != nil) || independent else {
+                    self.disconnect()
+                    self.status = "Update Sill on your Mac to open independent windows."
+                    return
+                }
+                if let workspace = self.pendingSpatialWorkspace, self.session?.macID != workspace.macID {
+                    self.disconnect(preservingWorkspace: true)
+                    self.status = "This Mac’s pairing changed. Choose a Mac to reconnect."
+                    return
+                }
+                self.supportsSpatialWindows = independent
+                #endif
                 // A remote session, and one at home over TLS, is connected at its first window list,
                 // not at `.ready`: the Mac has admitted this device's key.
                 self.remoteSessionReady()
@@ -3631,6 +4262,9 @@ final class StreamClient: ObservableObject {
                 if self.hostVersion != list.hostVersion { self.hostVersion = list.hostVersion }
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
+                #if os(visionOS)
+                self.hostEditableFocus = list.editableFocus
+                #endif
                 // The clipboard: subscribe (or stop) as the Mac's word and this device's switch say.
                 self.hostClipboardChanged(list.clipboard)
                 if !self.sessionListed {
@@ -3649,18 +4283,90 @@ final class StreamClient: ObservableObject {
                     // their top level now and again whenever it changes (a Mac from before them skips it).
                     self.subscribeToMenus()
                     #if DEBUG
+                    #if !os(visionOS)
                     InputScript.sessionListed(self)   // -SillInputScript: its clock starts here
                     SettingsScript.sessionListed(self)   // -SillSettingsScript: and this one's
+                    #endif
                     if let test = UserDefaults.standard.string(forKey: "SillMoveHomeTest") { self.beginMoveHomeTest(test) }
                     #endif
                 }
                 if self.macName != list.macName { self.macName = list.macName; self.loadWindowOrder() }
+                #if os(visionOS)
+                self.visionAcknowledgedDesktopEpoch = desktopEpoch
+                #endif
                 let previous = self.active
-                self.windows = list.windows
-                self.active = list.active
-                // Forget thumbnails for windows that are gone.
+                // A selection acknowledges the full catalog again, often unchanged. Publishing
+                // equal values invalidates every observer of this client, including the top bar.
+                if self.runningApps != list.runningApps { self.runningApps = list.runningApps }
+                if self.windows != list.windows { self.windows = list.windows }
+                if self.active != list.active {
+                    #if os(visionOS)
+                    self.spatialDesktopVideoSize = nil
+                    #endif
+                    self.active = list.active
+                }
+                // Keep existing image objects and publish only when a thumbnail really disappears.
                 let live = Set(list.windows.map(\.id))
-                self.thumbnails = self.thumbnails.filter { live.contains($0.key) }
+                if self.thumbnails.keys.contains(where: { !live.contains($0) }) {
+                    self.thumbnails = self.thumbnails.filter { live.contains($0.key) }
+                }
+                #if os(visionOS)
+                if let workspace = self.pendingSpatialWorkspace {
+                    guard let from else { return }
+                    if let requested = self.pendingSpatialWorkspaceSource {
+                        guard list.active == requested else { return }
+                        self.cancelSpatialSourceTimeout()
+                        self.pendingSpatialWorkspace = nil
+                        self.pendingSpatialWorkspaceSource = nil
+                    } else if let exact = workspace.reconciledSource(in: list.windows, allowFallback: false) {
+                        self.requestSpatialWorkspaceSource(exact, workspace: workspace, from: from)
+                        return
+                    } else {
+                        // A fresh independent pipeline can publish a partial catalog. Wait a
+                        // bounded grace before using a sole-app or Desktop fallback.
+                        if self.pendingSpatialSourceTimeout == nil {
+                            let timeoutID = UUID()
+                            self.pendingSpatialSourceTimeoutID = timeoutID
+                            let timeout = DispatchWorkItem { [weak self] in
+                                guard let self, self.connection === from, self.pendingSpatialWorkspace == workspace,
+                                      self.pendingSpatialWorkspaceSource == nil,
+                                      self.pendingSpatialSourceTimeoutID == timeoutID else { return }
+                                self.requestSpatialWorkspaceSource(workspace.source(in: self.windows), workspace: workspace, from: from)
+                            }
+                            self.pendingSpatialSourceTimeout = timeout
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: timeout)
+                        }
+                        return
+                    }
+                }
+                if let source = self.pendingSpatialSource {
+                    if case .window(let id) = source, !list.windows.contains(where: { $0.id == id }) {
+                        // A new independent host pipeline can still be reading its catalog (or
+                        // retrying a timed-out read). Keep the seed until its window arrives.
+                        // Bound this wait, and tie its error to this exact connection and request.
+                        if self.pendingSpatialSourceTimeout == nil {
+                            let timeoutID = UUID()
+                            self.pendingSpatialSourceTimeoutID = timeoutID
+                            let timeout = DispatchWorkItem { [weak self] in
+                                guard let self, self.connection === from,
+                                      self.pendingSpatialSource == source,
+                                      self.pendingSpatialSourceTimeoutID == timeoutID else { return }
+                                self.disconnect()
+                                self.status = "Couldn’t open that Mac window. Reconnect and choose another window."
+                            }
+                            self.pendingSpatialSourceTimeout = timeout
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: timeout)
+                        }
+                        return
+                    }
+                    self.cancelSpatialSourceTimeout()
+                    self.pendingSpatialSource = nil
+                    let sourceSize = self.pendingSpatialSourceSize
+                    self.pendingSpatialSourceSize = nil
+                    self.request(source, spatialSnapshot: sourceSize)
+                    return
+                }
+                #endif
                 // The first list after a move without a fence: if the Mac stopped the stream meanwhile,
                 // what this device was watching is picked again (`resumeSource`).
                 if let resume = self.resumeSource {
@@ -3680,6 +4386,10 @@ final class StreamClient: ObservableObject {
                 // (its capture stopped: issue #69), and when the window being watched has closed. Not
                 // when a pick failed (the host still lists the window): that is the user's to retry. At
                 // most once every 10 s, so a host that cannot start the Desktop does not loop.
+                #if os(visionOS)
+                if self.suppressSpatialAutoDesktop { return }
+                #endif
+                if self.awaitingAppSelection(active: list.active, windows: list.windows) { return }
                 if list.active == .none, !Self.noAutoDesktop {
                     let watched: DiscoveryPolicy.Watched
                     switch previous {
@@ -3729,6 +4439,19 @@ final class StreamClient: ObservableObject {
         case .cursorShape:
             guard let (hotspot, size, png) = CursorShapeBlob.decode(data), let image = UIImage(data: png) else { return }
             DispatchQueue.main.async { self.cursorShape = CursorShape(image: image, hotspot: hotspot, size: size) }
+        case .editableFocus:
+            #if os(visionOS)
+            guard let reply = Wire.decode(EditableFocus.self, from: data) else { return }
+            let from = connection
+            DispatchQueue.main.async {
+                guard self.connection === from,
+                      self.visionEditableFocus.receive(reply, session: self.connectedAt,
+                        source: self.active, mode: self.visionMouseEpoch,
+                        enabled: self.connected && !self.inputPaused && self.appInForeground && UIApplication.shared.applicationState == .active,
+                        now: ProcessInfo.processInfo.systemUptime) else { return }
+                self.editableFocusActivation = reply.token
+            }
+            #endif
         case .macPointer:
             receivePointer(data)
         case .hostSettings:
@@ -4152,7 +4875,9 @@ extension StreamClient {
             print("menubar: \(title) was built from version \(builtVersion); version \(current) has none")
             #endif
             completion(.message(MacMenuState.changedNote))
+            #if !os(visionOS)
             MacMenuHub.shared.menusChanged(self)
+            #endif
             return
         }
         #if DEBUG
@@ -4224,7 +4949,9 @@ extension StreamClient {
                   + (menus.stale ? ", stale" : "") + (menus.note.map { ": \($0)" } ?? ""))
             pressFromLaunchArgument()
             #endif
+            #if !os(visionOS)
             MacMenuHub.shared.menusChanged(self)
+            #endif
         }
         if let refusal { menuRefused(refusal) }
         scheduleMenusExpiry()
@@ -4233,7 +4960,9 @@ extension StreamClient {
     /// A choice not made: the warning haptic (iPhones; an iPad has no Taptic Engine) and VoiceOver's
     /// announcement. Nothing on screen: the Mac's picture says what happened (plan's Q9).
     private func menuRefused(_ refusal: MacMenuState.Refusal) {
+        #if !os(visionOS)
         UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        #endif
         UIAccessibility.post(notification: .announcement, argument: refusal.announcement)
         #if DEBUG
         print(refusal.byMac ? "menus: the Mac refused \(refusal.title) (\(refusal.id)): \(refusal.note)"
@@ -4294,7 +5023,9 @@ extension StreamClient {
         #if DEBUG
         menuAsked = [:]
         #endif
+        #if !os(visionOS)
         MacMenuHub.shared.menusChanged(self)
+        #endif
     }
 
     /// A move handed the session to its new connection (`finishMove`): what waits settles, and the
@@ -4368,11 +5099,15 @@ extension StreamClient {
     /// app it streams, and each menu opened is validated by that app.
     var menuHarnessRefusal: String? {
         guard connection != nil else { return nil }
+        #if os(visionOS)
+        return "the iPad menu harness is unavailable in the spatial client"
+        #else
         if let why = InputScript.refusal(endpoint: connection?.endpoint, hostVersion: hostVersion) {
             return why.replacingOccurrences(of: ", which posts input to this Mac", with: "")
         }
         guard menus.app == "menufixture" else { return "the menus are \(menus.app ?? "no app")'s, not the test app's (menufixture)" }
         return nil
+        #endif
     }
 
     /// `-SillMenuPress 'File/Save'`: once the first top level is in, the item at that path is chosen

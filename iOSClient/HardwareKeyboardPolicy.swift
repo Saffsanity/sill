@@ -22,6 +22,9 @@ struct HardwareKeyboardPolicy: Equatable {
     /// screen's, where no input view is on screen.
     enum Taker: String, CaseIterable, Hashable {
         case settings, pairing, tour, drawer, menus
+        #if os(visionOS)
+        case inactive
+        #endif
     }
 
     /// Who holds the keyboard now: nobody, this rule for the hardware keyboard, or the person.
@@ -66,13 +69,23 @@ struct HardwareKeyboardPolicy: Equatable {
     /// (after a presentation): the same again.
     private(set) var lastHeld: Hold = .none
 
-    init(attached: Bool = false) {
+    /// visionOS must never acquire a shared physical keyboard merely because it is connected.
+    private let automaticCapture: Bool
+    init(attached: Bool = false, automaticCapture: Bool = Self.platformAutomaticCapture) {
         self.attached = attached
+        self.automaticCapture = automaticCapture
+    }
+    static var platformAutomaticCapture: Bool {
+        #if os(visionOS)
+        return false
+        #else
+        return true
+        #endif
     }
 
     /// The hardware keyboard's hold is wanted: a session's input view in a window, a keyboard attached,
     /// nothing open that takes the keyboard.
-    var wantsAutomatic: Bool { onScreen && attached && takers.isEmpty }
+    var wantsAutomatic: Bool { automaticCapture && onScreen && attached && takers.isEmpty }
 
     /// The person's own keyboard is up: the Keyboard button lights, the tour counts it.
     var isOwn: Bool { hold == .own }
@@ -115,7 +128,7 @@ struct HardwareKeyboardPolicy: Equatable {
     mutating func takers(_ now: Set<Taker>) -> [Action] {
         let was = takers
         takers = now
-        if !now.isEmpty { return hold == .automatic ? [.letGo] : [] }
+        if !now.isEmpty { return hold == .automatic || (!automaticCapture && hold == .own) ? [.letGo] : [] }
         return was.isEmpty ? [] : takeIfWanted
     }
 

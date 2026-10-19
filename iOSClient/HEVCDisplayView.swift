@@ -76,7 +76,11 @@ final class HEVCDisplayView: UIView {
     override func didMoveToWindow() {
         super.didMoveToWindow()
         // A standalone layer renders at 1× unless told otherwise; the arrow should be crisp.
+        #if os(visionOS)
+        cursorLayer.contentsScale = traitCollection.displayScale
+        #else
         if let scale = window?.screen.scale { cursorLayer.contentsScale = scale }
+        #endif
     }
 
     override func layoutSubviews() {
@@ -137,6 +141,47 @@ final class HEVCDisplayView: UIView {
             layer.addSublayer(frame)
             debugFrame = frame
         }
+        setNeedsLayout()
+        placeCursor()
+    }
+
+    /// `-SillPointerVideo 1`: exercise the real video layer with an uncompressed blue sample.
+    /// Unlike the gray mock rectangle this is an enqueued video image, so simulator screenshots
+    /// can catch video/overlay compositing failures. No capture, host, network or HEVC fixture.
+    func debugVideoFrame(size: CGSize) {
+        pointerVideoSize = size
+        debugFrame?.removeFromSuperlayer()
+        debugFrame = nil
+        var buffer: CVPixelBuffer?
+        let width = Int(size.width), height = Int(size.height)
+        guard width > 0, height > 0,
+              CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA,
+                [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &buffer) == kCVReturnSuccess,
+              let buffer else { preconditionFailure("Synthetic video pixel buffer failed") }
+        CVPixelBufferLockBaseAddress(buffer, [])
+        let bytes = CVPixelBufferGetBaseAddress(buffer)!.assumingMemoryBound(to: UInt8.self)
+        let stride = CVPixelBufferGetBytesPerRow(buffer)
+        for y in 0..<height {
+            for x in 0..<width {
+                let pixel = bytes.advanced(by: y * stride + x * 4)
+                pixel[0] = 160; pixel[1] = 70; pixel[2] = 20; pixel[3] = 255
+            }
+        }
+        CVPixelBufferUnlockBaseAddress(buffer, [])
+        var description: CMVideoFormatDescription?
+        guard CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault,
+                imageBuffer: buffer, formatDescriptionOut: &description) == noErr,
+              let description else { preconditionFailure("Synthetic video format failed") }
+        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: .zero, decodeTimeStamp: .invalid)
+        var sample: CMSampleBuffer?
+        guard CMSampleBufferCreateReadyWithImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: buffer,
+                formatDescription: description, sampleTiming: &timing, sampleBufferOut: &sample) == noErr,
+              let sample else { preconditionFailure("Synthetic video sample failed") }
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true) as NSArray?,
+           let first = attachments.firstObject as? NSMutableDictionary {
+            first[kCMSampleAttachmentKey_DisplayImmediately as String] = true
+        }
+        displayLayer.enqueue(sample)
         setNeedsLayout()
         placeCursor()
     }
@@ -233,21 +278,7 @@ final class HEVCDisplayView: UIView {
         let encoded = ps.encoded()
         if encoded == lastParameterSets, formatDescription != nil { return }
         lastParameterSets = encoded
-        let buffers = ps.sets.map { set -> UnsafeMutablePointer<UInt8> in
-            let p = UnsafeMutablePointer<UInt8>.allocate(capacity: set.count)
-            set.copyBytes(to: p, count: set.count)
-            return p
-        }
-        defer { buffers.forEach { $0.deallocate() } }
-        let pointers = buffers.map { UnsafePointer($0) }
-        let sizes = ps.sets.map(\.count)
-
-        var desc: CMVideoFormatDescription?
-        let status = CMVideoFormatDescriptionCreateFromHEVCParameterSets(
-            allocator: nil, parameterSetCount: pointers.count, parameterSetPointers: pointers,
-            parameterSetSizes: sizes, nalUnitHeaderLength: Int32(ps.nalUnitHeaderLength),
-            extensions: nil, formatDescriptionOut: &desc)
-        guard status == noErr, let desc else { print("format description failed: \(status)"); return }
+        guard let desc = Self.makeFormatDescription(ps) else { return }
         formatDescription = desc
         waitingForKeyframe = true
         let dimensions = CMVideoFormatDescriptionGetDimensions(desc)
@@ -262,6 +293,27 @@ final class HEVCDisplayView: UIView {
         // Remove the last frame too: switching sources should show black until the new keyframe,
         // not the previous window frozen in place.
         displayLayer.flushAndRemoveImage()
+    }
+
+    /// Shared with visionOS source geometry. Repeated parameter sets can identify a new
+    /// source even when the display layer legitimately keeps its identical format.
+    static func makeFormatDescription(_ ps: ParameterSets) -> CMVideoFormatDescription? {
+        let buffers = ps.sets.map { set -> UnsafeMutablePointer<UInt8> in
+            let p = UnsafeMutablePointer<UInt8>.allocate(capacity: set.count)
+            set.copyBytes(to: p, count: set.count)
+            return p
+        }
+        defer { buffers.forEach { $0.deallocate() } }
+        let pointers = buffers.map { UnsafePointer($0) }
+        let sizes = ps.sets.map(\.count)
+
+        var desc: CMVideoFormatDescription?
+        let status = CMVideoFormatDescriptionCreateFromHEVCParameterSets(
+            allocator: nil, parameterSetCount: pointers.count, parameterSetPointers: pointers,
+            parameterSetSizes: sizes, nalUnitHeaderLength: Int32(ps.nalUnitHeaderLength),
+            extensions: nil, formatDescriptionOut: &desc)
+        guard status == noErr, let desc else { print("format description failed: \(status)"); return nil }
+        return desc
     }
 
     /// Session over: drop the picture and forget the format so the next Mac starts clean.

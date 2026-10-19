@@ -63,11 +63,15 @@ extension View {
     /// width sideways; shown everywhere else, as before. In a background, so that hiding and
     /// showing it never rebuilds the screen's views; off the Duo it adds nothing.
     func duoStatusBar(_ posture: DuoPosture, size: CGSize) -> some View {
+        #if os(visionOS)
+        self
+        #else
         background {
             if DuoPosture.hidesStatusBar(posture.pose(size)) {
                 Color.clear.statusBarHidden(true)
             }
         }
+        #endif
     }
 
     /// The stream screen's fold for everything under it, and, in DEBUG, one console line each time
@@ -87,6 +91,7 @@ private struct DuoPostureReader: ViewModifier {
     @State private var hinge: DuoPosture.Hinge = .unknown
 
     func body(content: Content) -> some View {
+        #if os(iOS) && !SILL_FLAT_REFERENCE
         if #available(iOS 27.1, *) {
             content
                 .environment(\.duoEnvironment, DuoEnvironment(hinge: hinge))
@@ -101,9 +106,13 @@ private struct DuoPostureReader: ViewModifier {
         } else {
             content
         }
+        #else
+        content
+        #endif
     }
 }
 
+#if os(iOS) && !SILL_FLAT_REFERENCE
 @available(iOS 27.1, *)
 extension DuoPosture.Hinge {
     init(_ context: DeviceHingeContext) {
@@ -119,6 +128,7 @@ extension DuoPosture.Hinge {
     }
 }
 
+#endif
 extension DuoPosture {
     /// The posture as the view `geo` measures sees it: the hinge from the environment (before its
     /// first report, from the fold: `hinge(reported:regionActive:)`), the fold in that view's own
@@ -132,12 +142,14 @@ extension DuoPosture {
             let origin = geo.frame(in: .named(displaySpace)).origin
             return DuoPosture(hinge: environment.hinge, fold: fold?.offsetBy(dx: -origin.x, dy: -origin.y))
         case .reservedRegions:
+            #if os(iOS) && !SILL_FLAT_REFERENCE
             if #available(iOS 27.1, *) {
                 let region = geo.reservedRegions(kind: .division, options: .includeInactive).first
                 let hinge = hinge(reported: environment.hinge, regionActive: region?.isActive)
                 guard hinge != .unknown else { return .unknown }
                 return DuoPosture(hinge: hinge, fold: region?.frame)
             }
+            #endif
             return .unknown
         }
     }

@@ -280,6 +280,25 @@ struct One: WindowRestore.Access {
 }
 
 do {
+    // The same physical window can have two viewers. Losing its fit owner preserves the
+    // original placement and current size while another viewer remains; only the last close
+    // restores it, even after the remaining viewer changes text size.
+    var shared = WindowRestore.Ledger<Int>()
+    var window = One(at: Sf)
+    shared.fitted(7, handle: 7, before: O, after: Sf, asked: Sz)
+    eq(shared.restore(keeping: Set<CGWindowID>([7]), staged: nil, on: &window).count, 0, "shared fit: second viewer keeps window")
+    eq(window.calls.count, 0, "shared fit: keeping a viewer performs no AX calls")
+    eq(shared.record(7)?.original, O, "shared fit: owner leaves, original retained")
+    let refit = R(100, 100, 640, 400)
+    window.at = refit
+    shared.fitted(7, handle: 7, before: Sf, after: refit, asked: refit.size)
+    eq(shared.record(7)?.original, O, "shared fit: new owner's fit retains first original")
+    eq(shared.restore(keeping: Set<CGWindowID>(), staged: nil, on: &window).count, 1, "shared fit: last viewer restores once")
+    eq(window.at, O, "shared fit: original geometry restored after last viewer")
+    eq(shared.restore(keeping: Set<CGWindowID>(), staged: nil, on: &window).count, 0, "shared fit: no duplicate restoration")
+}
+
+do {
     // A window in full screen: nothing read or written but that.
     var a = One(at: R(0, 0, 1512, 982), full: true)
     eq(WindowRestore.fit(1, to: Sz, fallback: .zero, on: &a), .fullScreen, "fit: not in full screen")

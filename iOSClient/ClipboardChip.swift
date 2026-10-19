@@ -96,9 +96,13 @@ struct ClipboardPasteButton: View {
     @ObservedObject var client: StreamClient
 
     var body: some View {
+        let session = client.connectedAt
         PasteButton(payloadType: String.self) { strings in
             // On the main thread whatever queue the system hands it on.
-            DispatchQueue.main.async { client.sendClipboard(strings) }
+            DispatchQueue.main.async {
+                guard client.connected, session == client.connectedAt else { return }
+                client.sendClipboard(strings)
+            }
         }
         .buttonBorderShape(.capsule)
         .labelStyle(.titleAndIcon)

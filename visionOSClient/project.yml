@@ -1,0 +1,48 @@
+name: SillVision
+options:
+  bundleIdPrefix: me.saffer.sill
+packages:
+  Sill:
+    path: ..
+settings:
+  base:
+    SWIFT_VERSION: 5.0
+    SWIFT_STRICT_CONCURRENCY: minimal
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: 0.37.0
+    CURRENT_PROJECT_VERSION: 37
+targets:
+  SillVision:
+    type: application
+    platform: visionOS
+    deploymentTarget: "2.0"
+    sources:
+      - path: .
+        excludes: [project.yml, README.md, VERIFICATION.md, PARITY.md, SillVision.xcodeproj]
+      - path: ../iOSClient
+        excludes: [SillApp.swift, SillAppDelegate.swift, Sill.xcodeproj, Info.plist, Info-Debug.plist, Assets.xcassets]
+    dependencies:
+      - package: Sill
+        product: StreamProtocol
+    info:
+      path: Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDisplayName: Sill
+        CFBundleURLTypes:
+          - CFBundleURLName: me.saffer.sill.pair
+            CFBundleURLSchemes: [sill]
+        NSLocalNetworkUsageDescription: Find and connect to your Mac to stream its windows.
+        NSBonjourServices: ["_sill._tcp"]
+        ITSAppUsesNonExemptEncryption: false
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        PRODUCT_BUNDLE_IDENTIFIER: me.saffer.sill.vision
+        INFOPLIST_KEY_CFBundleDisplayName: Sill
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: Find and connect to your Mac to stream its windows.
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES

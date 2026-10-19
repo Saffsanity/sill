@@ -111,7 +111,10 @@ public struct Hello: Codable, Sendable, Equatable {
     /// "iPad (iPad14,1)", as ClientStats.device. The host cleans it (SafeText.label).
     public var device: String?
 
-    public init(appVersion: String? = nil, build: String? = nil, protocol: Int? = nil, device: String? = nil) {
-        self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device
+    /// Opt in to a connection-owned pipeline. Only generation 1 is currently supported.
+    public var independentSession: Int?
+
+    public init(appVersion: String? = nil, build: String? = nil, protocol: Int? = nil, device: String? = nil, independentSession: Int? = nil) {
+        self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device; self.independentSession = independentSession
     }
 }

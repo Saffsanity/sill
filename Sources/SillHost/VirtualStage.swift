@@ -4,7 +4,7 @@ import ApplicationServices
 import ScreenCaptureKit
 import StreamProtocol
 
-/// `--virtual-display`: the one owner of the virtual display and of the window moved onto it.
+/// One pipeline’s virtual display and the window moved onto it.
 ///
 /// Why: ScreenCaptureKit only delivers frames when a window repaints, and macOS stops repainting
 /// a window that is fully covered, so a streamed window buried on the Mac froze on the device. A
@@ -140,6 +140,8 @@ final class VirtualStage {
     /// not the Mac's user taking over the pointer (PointerWatch.sillMoved). Before the warp, never
     /// after, for the reason InputInjector's `watch` gives. Main actor.
     var onWarp: (() -> Void)?
+    /// Never evict another pipeline’s owned window, even during display rearrangement.
+    var canEvict: ((CGWindowID) -> Bool)?
 
     let sizer: WindowSizer
     let catalog: WindowCatalog
@@ -148,11 +150,14 @@ final class VirtualStage {
     /// 8192 px, its ceiling.
     static let minSide: CGFloat = 320
     static let maxSide: CGFloat = 4096
-    /// Fixed identity, so System Settings › Displays keeps one remembered "Sill" entry across runs
-    /// (the probe used serial 0xF00D and does not collide).
-    static let vendorID: UInt32 = 0x5111, productID: UInt32 = 0x0001, serialNum: UInt32 = 1
+    /// Shared vendor/product and a stable simultaneous-session serial keep display identities
+    /// distinct. The probe uses serial 0xF00D.
+    static let vendorID: UInt32 = 0x5111, productID: UInt32 = 0x0001
+    let serialNum: UInt32
+    private let snapshotID = UUID()
 
-    init(sizer: WindowSizer, catalog: WindowCatalog) {
+    init(sizer: WindowSizer, catalog: WindowCatalog, serialNum: UInt32 = 1) {
+        self.serialNum = serialNum
         self.sizer = sizer
         self.catalog = catalog
     }
@@ -320,7 +325,7 @@ final class VirtualStage {
         // there — Ctrl-C's `shutdownForExit`, the display-lost callback, the coordinator's catch —
         // only restores what `placement` names. The sizes are recorded once the move has settled.
         placement = p
-        EmergencySnapshot.set((p.element, p.originalFrame))
+        EmergencySnapshot.set((p.element, p.originalFrame), for: snapshotID)
         catalog.stagedWindowID = p.windowID
 
         // (5b) Full screen. A window the user put in a full-screen Space (a video made full screen,
@@ -457,7 +462,7 @@ final class VirtualStage {
                 // Record it again before the second placement, or the next switch would leave it
                 // on the virtual display and a later select would take that spot for its home.
                 placement = p
-                EmergencySnapshot.set((p.element, p.originalFrame))
+                EmergencySnapshot.set((p.element, p.originalFrame), for: snapshotID)
                 catalog.stagedWindowID = p.windowID
                 continue
             }
@@ -527,7 +532,7 @@ final class VirtualStage {
         let d: VirtualDisplay
         do {
             d = try VirtualDisplay(name: "Sill", widthPt: Int(env.width), heightPt: Int(env.height + menuInset), scale: 2,
-                                   refreshHz: Double(refreshHz), vendorID: Self.vendorID, productID: Self.productID, serialNum: Self.serialNum)
+                                   refreshHz: Double(refreshHz), vendorID: Self.vendorID, productID: Self.productID, serialNum: serialNum)
         } catch {
             creationFailures += 1
             if creationFailures >= 2 { disabledReason = "creating the display failed \(creationFailures) times (\(error))" }
@@ -606,6 +611,7 @@ final class VirtualStage {
                   let b = info[kCGWindowBounds as String] as? NSDictionary,
                   let rect = CGRect(dictionaryRepresentation: b as CFDictionary),
                   rect.width >= 100, rect.height >= 100, rect.intersects(bounds) else { continue }
+            guard canEvict?(id) != false else { continue }
             let name = (info[kCGWindowName as String] as? String) ?? ""
             if name.lowercased().contains("layerprobe") { continue }
             let owner = (info[kCGWindowOwnerName as String] as? String) ?? "?"
@@ -663,7 +669,17 @@ final class VirtualStage {
         if let d = display, d.isAlive, let here = CGEvent(source: nil)?.location, CGDisplayBounds(d.displayID).contains(here) {
             let main = CGDisplayBounds(CGMainDisplayID())
             onWarp?()
-            CGWarpMouseCursorPosition(cursorBefore ?? CGPoint(x: main.midX, y: main.midY))
+            let home = cursorBefore.flatMap { point -> CGPoint? in
+                // A sibling display may have supplied the original pointer location. It can
+                // disappear independently, so restore only to a real screen.
+                guard NSScreen.screens.contains(where: { screen in
+                    guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
+                          CGDisplayVendorNumber(id) != Self.vendorID else { return false }
+                    return CGDisplayBounds(id).contains(point)
+                }) else { return nil }
+                return point
+            }
+            CGWarpMouseCursorPosition(home ?? CGPoint(x: main.midX, y: main.midY))
         }
         cursorBefore = nil
         fullScreen = false
@@ -673,7 +689,7 @@ final class VirtualStage {
         askedDest = nil
         captureRect = .zero
         catalog.stagedWindowID = nil
-        EmergencySnapshot.set(nil)
+        EmergencySnapshot.set(nil, for: snapshotID)
     }
 
     /// Removes the display. Call `releaseWindow()` first while both displays exist, so the window
@@ -710,13 +726,13 @@ final class VirtualStage {
     /// Last resort from `atexit`, on any thread, with no main-actor state: the window's element and
     /// original frame were snapshotted when it was placed. The display dies with the process.
     nonisolated static func emergencyRestore() {
-        guard let snapshot = EmergencySnapshot.take() else { return }
-        let (element, frame) = snapshot
-        var origin = frame.origin, size = frame.size
-        guard let pos = AXValueCreate(.cgPoint, &origin), let sz = AXValueCreate(.cgSize, &size) else { return }
-        AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, pos)
-        AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, sz)
-        AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, pos)
+        for (element, frame) in EmergencySnapshot.takeAll() {
+            var origin = frame.origin, size = frame.size
+            guard let pos = AXValueCreate(.cgPoint, &origin), let sz = AXValueCreate(.cgSize, &size) else { continue }
+            AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, pos)
+            AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, sz)
+            AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, pos)
+        }
     }
 }
 
@@ -724,8 +740,8 @@ final class VirtualStage {
 /// purpose: `atexit` handlers run wherever `exit` was called.
 private enum EmergencySnapshot {
     private static let lock = NSLock()
-    nonisolated(unsafe) private static var value: (AXUIElement, CGRect)?
+    nonisolated(unsafe) private static var values: [UUID: (AXUIElement, CGRect)] = [:]
 
-    static func set(_ v: (AXUIElement, CGRect)?) { lock.lock(); value = v; lock.unlock() }
-    static func take() -> (AXUIElement, CGRect)? { lock.lock(); defer { value = nil; lock.unlock() }; return value }
+    static func set(_ v: (AXUIElement, CGRect)?, for owner: UUID) { lock.lock(); values[owner] = v; lock.unlock() }
+    static func takeAll() -> [(AXUIElement, CGRect)] { lock.lock(); defer { values.removeAll(); lock.unlock() }; return Array(values.values) }
 }

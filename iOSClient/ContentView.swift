@@ -4,12 +4,54 @@ import StreamProtocol
 
 struct ContentView: View {
     @StateObject private var client = StreamClient()
+    #if os(visionOS)
+    private let spatialSeed: VisionWindowSeed?
+    private let spatialManualConnect: Bool
+    @State private var spatialStartupPerformed = false
+    @Binding private var spatialWorkspace: String
+    @Environment(\.spatialSceneID) private var spatialSceneID
+    @Environment(\.spatialNativeSession) private var spatialNativeSession
+
+    init(spatialSeed: VisionWindowSeed? = nil, spatialManualConnect: Bool = false, spatialWorkspace: Binding<String> = .constant("")) {
+        self.spatialSeed = spatialSeed
+        self.spatialManualConnect = spatialManualConnect
+        _spatialWorkspace = spatialWorkspace
+    }
+    #endif
     /// Tells the host what this device sees, once a second while connected. Also covers the DEBUG
     /// harness's `-SillLive 1` session, which runs on this same client.
     @StateObject private var statsReporter = ClientStatsReporter()
 
     var body: some View {
         root.onAppear { statsReporter.attach(to: client) }
+        #if os(visionOS)
+            .background(VisionWindowGeometry(client: client, hasRestoredWorkspace: VisionWorkspace.decode(spatialWorkspace) != nil).frame(width: 1, height: 1).accessibilityHidden(true))
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.onChange(of: geometry.size, initial: true) { _, size in
+                        client.noteSpatialPresentationSize(size, source: client.active, session: client.connectedAt)
+                    }
+                }
+            }
+            .onChange(of: client.active) { _, _ in saveSpatialWorkspace() }
+            .onChange(of: client.windows) { _, _ in saveSpatialWorkspace() }
+            .onChange(of: client.savedMacs) { _, saved in
+                if let workspace = VisionWorkspace.decode(spatialWorkspace),
+                   !saved.contains(where: { $0.macID == workspace.macID && $0.revoked != true && $0.newKey != true }) {
+                    spatialWorkspace = ""
+                }
+                let admitted = Set(saved.filter { $0.revoked != true && $0.newKey != true && $0.fingerprintData != nil }.map(\.macID))
+                VisionSceneSetRecovery.shared.prune(admitted: admitted)
+            }
+            .onChange(of: client.connected) { _, _ in saveSpatialWorkspace() }
+            .onChange(of: client.spatialPresentationSize) { _, _ in saveSpatialWorkspace() }
+            .onChange(of: client.spatialWorkspaceClearGeneration) { _, _ in
+                spatialWorkspace = ""
+                if let spatialNativeSession {
+                    VisionSceneSetRecovery.shared.clear(spatialSceneID, session: spatialNativeSession)
+                }
+            }
+        #endif
     }
 
     @ViewBuilder private var root: some View {
@@ -28,9 +70,16 @@ struct ContentView: View {
 
     private var app: some View {
         ZStack {
+            #if os(visionOS)
+            Color.clear.ignoresSafeArea()
+            #else
             Color.black.ignoresSafeArea()
+            #endif
             if client.connected {
                 StreamScreen(client: client)
+                    #if os(visionOS)
+                    .id(client.connectedAt)
+                    #endif
             } else {
                 ConnectScreen(client: client)
             }
@@ -43,6 +92,27 @@ struct ContentView: View {
             #if DEBUG
             SecondWindow.openFromLaunchArgument()   // -SillSecondWindow 1
             #endif
+            #if os(visionOS)
+            if spatialStartupPerformed {
+                if !client.connected { client.startBrowsing() }
+                return
+            }
+            spatialStartupPerformed = true
+            if spatialSeed == nil, let workspace = VisionWorkspace.decode(spatialWorkspace) {
+                client.restoreSpatialWorkspace(workspace, independent: spatialManualConnect)
+                return
+            }
+            if spatialManualConnect {
+                client.prepareSpatialWindowForManualConnection()
+                client.startBrowsing()
+                client.status = "Choose a Mac to reconnect this restored Sill window."
+                return
+            }
+            if let spatialSeed {
+                client.startSpatialWindow(seed: spatialSeed)
+                return
+            }
+            #endif
             client.startBrowsing()
             client.startRemote()                 // saved Macs without a key are cleared; DEBUG pairing arguments
             #if DEBUG
@@ -54,18 +124,29 @@ struct ContentView: View {
         .onOpenURL { client.handleOpenURL($0) }
     }
 
+    #if os(visionOS)
+    private func saveSpatialWorkspace() {
+        if let workspace = client.spatialWorkspaceSnapshot {
+            let encoded = workspace.encoded
+            if encoded != spatialWorkspace { spatialWorkspace = encoded }
+        }
+    }
+    #endif
+
     #if DEBUG
     /// `-SillOrientation landscape|portrait`: the normal app asks its window scene for that
     /// orientation at launch, so a phone simulator shows the real layout sideways, its safe areas
     /// included, with no hand on the simulator (the harness's fake screen has no insets).
     private static func orientFromLaunchArgument() {
         guard let raw = UserDefaults.standard.string(forKey: "SillOrientation") else { return }
+        #if !os(visionOS)
         let mask: UIInterfaceOrientationMask = raw == "portrait" ? .portrait : .landscapeRight
         for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
             scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
                 print("orientation: \(raw) refused: \(error.localizedDescription)")
             }
         }
+        #endif
     }
     #endif
 }
@@ -99,6 +180,7 @@ struct ContentView: View {
 ///   `-SillDrawerSearch <text>`: the open drawer searches for that text with the keyboard up for its
 ///   field (in a live session the real keyboard), so a photo shows what the keyboard leaves in view.
 /// * `-SillScaleOpen 1` — start with the Aa slider unfolded (as while a finger holds it);
+///   on visionOS, presents the native picker 1.5 s after attachment instead.
 ///   `-SillScale 1.5` sets the scale it opens at.
 /// * `-SillWindowMenu 1` — open the first thumbnail's traffic lights and keep them open.
 /// * `-SillKeyboard 1` — start with the software keyboard shown: in the mock only the Keyboard
@@ -278,6 +360,9 @@ struct ContentView: View {
 ///   insertion) and `-SillSecondWindow 1` (a second window opens 2 s after launch: with two, the bar
 ///   gets none of the Mac's menus). The console's "menus: …" and "menubar: …" lines say what
 ///   happened.
+/// * `-SillPointerVideo 1` — with `-SillPointer`, enqueue a blue uncompressed video sample in the
+///   real AVSampleBufferDisplayLayer instead of the gray mock layer. `spatial@X,Y` exercises the
+///   visionOS spatial pointer feed; `mac@X,Y` and `hidden` compare visible and hidden sprites.
 /// * `-SillPointer <state>` — the pointer sprite in one of docs/pointer-visibility-plan.md's states,
 ///   over the mock's 2800×1800 frame, drawn as a dim rectangle so a photo shows where the frame is
 ///   (the mock never streams): `mac@0.40,0.30` (the Mac has the pointer, over the stream: its arrow
@@ -520,14 +605,18 @@ struct LayoutHarness: View {
         GeometryReader { geo in
             let fit = Fit(screen: spec.size, room: geo.size)
             ZStack {
+                #if !os(visionOS)
                 Color.black
+                #endif
                 insetScreen
                     .environment(\.duoEnvironment, spec.duoEnvironment)
                     .frame(width: spec.size.width, height: spec.size.height)
                     .coordinateSpace(.named(DuoPosture.displaySpace))
                     .clipped()
                     .padding(1)
+                    #if !os(visionOS)
                     .background(Color(hex: 0x333333))
+                    #endif
                     .rotationEffect(.degrees(fit.turned ? 90 : 0))
                     // Only the drawing shrinks: the stream screen still lays out at the fake size.
                     .scaleEffect(fit.scale)
@@ -813,12 +902,14 @@ enum InputScript {
         case .wheel(let dx, let dy): if let overlay { overlay.scriptScroll(dx: dx, dy: dy, from: .wheel) } else { done = false }
         case .keyboard(let attached): HardwareKeyboardMonitor.shared.scriptSet(attached: attached)
         case .orient(let orientation):
+            #if !os(visionOS)
             let mask: UIInterfaceOrientationMask = orientation == "portrait" ? .portrait : .landscapeRight
             for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
                 scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
                     print("input script: orient \(orientation) refused: \(error.localizedDescription)")
                 }
             }
+            #endif
         }
         print(String(format: "input script: t=%.2f ", at) + (done ? "\(step)" : "\(step): nothing to take it in this layout"))
     }
@@ -962,7 +1053,13 @@ struct ConnectScreen: View {
             // A field has the keyboard: the column goes to the top (the half-folded Duo's is already
             // in the top half), so Pair stays above the keyboard. The screen ignores the keyboard's
             // safe area below, so nothing else moves (the footer stays under the keyboard).
+
+            #if os(visionOS)
+            // The spatial keyboard floats outside this window; moving its field breaks focus aim.
+            let toTop = true
+            #else
             let toTop = editing && !layout.topHalf
+            #endif
             // The column where it sat before there was a footer, and the footer along the bottom:
             // the footer never moves the title. Only a column that would come within the gap of the
             // footer rises to keep it; one too tall for that even at the top (many Macs on a phone
@@ -1016,6 +1113,10 @@ struct ConnectScreen: View {
             }
             .duoLog(posture, size: geo.size, screen: "connect screen")
         }
+        #if os(visionOS)
+        // Scope glass to discovery/pairing; the connected picture's floating gap stays clear.
+        .glassBackgroundEffect(in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+        #endif
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .onChange(of: client.pairing) { old, new in
             // Paired but no session came (10 s): the card closes, and the Mac is a saved row.
@@ -1050,6 +1151,22 @@ struct ConnectScreen: View {
 
     private func column(_ layout: ConnectLayout) -> some View {
         VStack(alignment: .leading, spacing: 6) {
+            #if os(visionOS)
+            HStack(spacing: 14) {
+                Image("SillLogo")
+                    .resizable().scaledToFit()
+                    .frame(width: 72, height: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .accessibilityHidden(true)
+                Text("Sill")
+                    .font(.largeTitle.weight(.semibold))
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 24)
+            .padding(.bottom, 18)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+            #endif
             // Leading, so the title never jumps sideways when the hint, a row or the card widens the
             // column. Vertically it is still centred (ColumnOverFooter): what adds height moves it up
             // by half as much. It wraps, never truncates, under the home card ("Pair with" and a

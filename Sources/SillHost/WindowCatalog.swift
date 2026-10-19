@@ -1,11 +1,12 @@
 import Foundation
 import AppKit
+import ApplicationServices
 import ScreenCaptureKit
 import ImageIO
 import UniformTypeIdentifiers
 import StreamProtocol
 
-/// Knows what is on the Mac: the on-screen windows, a small JPEG thumbnail of each, app icons,
+/// Knows what is on the Mac: the selectable windows across Spaces, a small JPEG thumbnail of each, app icons,
 /// and the installed apps for the drawer. Everything here runs on the main actor; callbacks fire
 /// there too and the coordinator forwards to the network.
 ///
@@ -19,6 +20,8 @@ final class WindowCatalog {
     private(set) var infos: [WindowInfo] = []
     private(set) var display: SCDisplay?
     private(set) var installedApps: [AppInfo] = []
+    private(set) var runningApps: [AppInfo] = []
+    var onRunningAppsChanged: (() -> Void)?
     /// This process as ScreenCaptureKit lists it, from the last look: the Desktop stream leaves it
     /// out, so Sill's own windows (the pairing code above all) never reach a device. Nil when it
     /// is not listed (the CLI has no windows; see `resolveOwnApplication`).
@@ -144,6 +147,22 @@ final class WindowCatalog {
         return all.windows.first { $0.windowID == id && !Self.isOwn($0) }
     }
 
+    /// A picked off-Space window may need a Space activation before it repaints. Always fetch
+    /// fresh handles for that exact ID; never substitute the app’s first window or a cached handle.
+    func freshWindowAfterActivation(id: UInt32) async -> SCWindow? {
+        let deadline = Date().addingTimeInterval(1.5)
+        var latest: SCWindow?
+        repeat {
+            if let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 0.5),
+               let window = all.windows.first(where: { $0.windowID == id && !Self.isOwn($0) }) {
+                latest = window
+                if window.isOnScreen { return window }
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+        } while Date() < deadline && !Task.isCancelled
+        return latest
+    }
+
     /// `ownApplication`, else one look at every window (on screen or not) for this process. The
     /// on-screen look can miss Sill while it shows nothing on screen: its status item's window
     /// leaves the list while a full-screen app hides the menu bar, and a Desktop stream started
@@ -162,8 +181,8 @@ final class WindowCatalog {
     /// `SCShareableContent`, but never for longer than `timeout`. Measured 2026-09-22: in a process
     /// without Screen Recording the call never returned once a virtual display existed (it returns
     /// promptly, with no windows, without one). The virtual-display paths use this so a hang there
-    /// costs seconds and a fallback, not the coordinator's `switching` flag for good. The default
-    /// path's `refreshWindows` keeps the plain call it always had.
+    /// costs seconds and a fallback, not the coordinator's `switching` flag for good. Catalog
+    /// refreshes use this bound too, including the full list needed across Spaces.
     nonisolated static func shareableContent(excludingDesktopWindows: Bool, onScreenWindowsOnly: Bool, timeout: TimeInterval) async -> SCShareableContent? {
         final class Once: @unchecked Sendable {
             private let lock = NSLock(); private var done = false
@@ -226,25 +245,28 @@ final class WindowCatalog {
 
     // MARK: Windows
 
+    private var windowRefresh: Task<Void, Never>?
+
     func refreshWindows() async {
+        // Startup, polling and a pick can ask together. Share this one fresh read instead of
+        // starting overlapping sets of AX workers while a slow app is being checked.
+        if let windowRefresh { await windowRefresh.value; return }
+        let refresh = Task { await self.readFreshWindows() }
+        windowRefresh = refresh
+        await refresh.value
+        windowRefresh = nil
+    }
+
+    private func readFreshWindows() async {
+        refreshRunningApps()
         refreshSeq += 1
         let seq = refreshSeq
-        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else { return }
-        // The staged window, if the on-screen list dropped it: one extra SCShareableContent call per
-        // poll, and only then. Fetched before the sequence check so its await cannot let an older
-        // refresh overwrite a newer one.
-        var pinned: SCWindow? = nil
-        if let id = stagedWindowID, !content.windows.contains(where: { $0.windowID == id }),
-           let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) {
-            pinned = all.windows.first { $0.windowID == id && !Self.isOwn($0) }
-            if pinned != nil { print("Catalog: the staged window \(id) is not in the on-screen list; pinned it from the full list.") }
-        }
-        guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
-        appliedSeq = seq
-        ownApplication = content.applications.first { $0.processID == Self.ownPID }
-        display = preferMainDisplay
-            ? (content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first)
-            : content.displays.first
+        // A full-screen app owns a separate Space. The on-screen-only catalog loses the
+        // other Space's live windows, making it impossible for a device to switch back.
+        // Use fresh shareable handles, then admit off-screen windows only after checking AX:
+        // the full list also contains minimized windows, which must stay out of the bar.
+        guard let content = await Self.shareableContent(excludingDesktopWindows: false,
+                                                        onScreenWindowsOnly: false, timeout: 3) else { return }
         var visible = content.windows.filter { w in
             guard let app = w.owningApplication, !app.applicationName.isEmpty else { return false }
             return w.windowLayer == 0                                  // drops widgets, wallpaper, backstop
@@ -252,7 +274,15 @@ final class WindowCatalog {
                 && app.processID != Self.ownPID
                 && !Self.isSystemHelperWindow(w)
         }
-        if let pinned, !visible.contains(where: { $0.windowID == pinned.windowID }) { visible.append(pinned) }
+        let offscreen = await Self.selectableOffscreenWindows(visible.filter { !$0.isOnScreen && $0.windowID != stagedWindowID })
+        guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
+        appliedSeq = seq
+        ownApplication = content.applications.first { $0.processID == Self.ownPID }
+        let physicalDisplays = content.displays.filter { CGDisplayVendorNumber($0.displayID) != VirtualStage.vendorID }
+        display = preferMainDisplay
+            ? (physicalDisplays.first { $0.displayID == CGMainDisplayID() } ?? physicalDisplays.first)
+            : content.displays.first
+        visible = visible.filter { $0.isOnScreen || $0.windowID == stagedWindowID || offscreen.contains($0.windowID) }
         // The system's order is not front-to-back and shuffles between polls. The brief wants a
         // fixed order in the bar, so keep first-seen order and append newcomers.
         let byID = Dictionary(uniqueKeysWithValues: visible.map { ($0.windowID, $0) })
@@ -272,6 +302,90 @@ final class WindowCatalog {
             infos = newInfos
             onWindowsChanged?(newInfos)
         }
+    }
+
+    /// NSWorkspace includes minimized, hidden, windowless and full-screen apps across Spaces.
+    /// Regular activation policy omits agents/helpers; the host itself must never be a target.
+    private func refreshRunningApps() {
+        var seen = Set<String>()
+        let apps = NSWorkspace.shared.runningApplications.filter {
+            $0.activationPolicy == .regular && !$0.isTerminated && $0.processIdentifier != Self.ownPID
+        }.compactMap { app -> AppInfo? in
+            guard let id = app.bundleIdentifier, !id.isEmpty, seen.insert(id).inserted else { return nil }
+            if !announcedIcons.contains(id), let image = app.icon, let png = Self.png(image, size: 64) {
+                announce(bundleID: id, png: png)
+            }
+            return AppInfo(name: app.localizedName ?? id, bundleID: id)
+        }.sorted {
+            let order = $0.name.localizedStandardCompare($1.name)
+            return order == .orderedSame ? $0.bundleID < $1.bundleID : order == .orderedAscending
+        }
+        guard apps != runningApps else { return }
+        runningApps = apps
+        onRunningAppsChanged?()
+    }
+
+    /// Off-Space is not the same as minimized. AX supplies the distinction. Read each app's
+    /// windows once, with short IPC timeouts and a separate budget for each app. Unknown, ambiguous,
+    /// hidden, untrusted and unanswered windows stay out; no old SCWindow is kept alive here.
+    private struct OffscreenCandidate: Sendable {
+        let id: CGWindowID
+        let pid: pid_t
+        let frame: CGRect
+        let appHidden: Bool?
+    }
+
+    private static func selectableOffscreenWindows(_ windows: [SCWindow]) async -> Set<CGWindowID> {
+        let candidates = windows.compactMap { window -> OffscreenCandidate? in
+            guard let pid = window.owningApplication?.processID else { return nil }
+            return OffscreenCandidate(id: window.windowID, pid: pid, frame: window.frame,
+                                      appHidden: NSRunningApplication(processIdentifier: pid)?.isHidden)
+        }
+        // AX is synchronous IPC: even short timeouts must not stall input on the main actor.
+        // Four workers visit every app; one hung app cannot consume another app's allowance.
+        let grouped = Dictionary(grouping: candidates, by: \.pid)
+        let apps = grouped.keys.sorted().compactMap { grouped[$0] }
+        return await Task.detached(priority: .utility) {
+            await WindowCatalogPolicy.scanApps(apps) { readOffscreenApp($0) }
+        }.value
+    }
+
+    nonisolated private static func readOffscreenApp(_ windows: [OffscreenCandidate]) -> Set<CGWindowID> {
+        guard AXIsProcessTrusted(), let first = windows.first, first.appHidden == false else { return [] }
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.35
+        let app = AXUIElementCreateApplication(first.pid)
+        AXUIElementSetMessagingTimeout(app, 0.05)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
+              let elements = value as? [AXUIElement] else { return [] }
+        var frames: [CGRect?] = []
+        for element in elements {
+            guard ProcessInfo.processInfo.systemUptime < deadline else { return [] }
+            AXUIElementSetMessagingTimeout(element, 0.05)
+            frames.append(offscreenFrame(of: element))
+        }
+        var admitted = Set<CGWindowID>()
+        for window in windows {
+            guard ProcessInfo.processInfo.systemUptime < deadline else { break }
+            guard let index = WindowCatalogPolicy.uniqueFrameMatch(window.frame, in: frames) else { continue }
+            var minimized: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(elements[index], kAXMinimizedAttribute as CFString, &minimized) == .success,
+                  WindowCatalogPolicy.includesOffscreen(appHidden: window.appHidden, minimized: minimized as? Bool) else { continue }
+            admitted.insert(window.id)
+        }
+        return admitted
+    }
+
+    nonisolated private static func offscreenFrame(of element: AXUIElement) -> CGRect? {
+        var position: CFTypeRef?, size: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &position) == .success,
+              AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &size) == .success,
+              let position, let size,
+              CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID() else { return nil }
+        var point = CGPoint.zero, dimensions = CGSize.zero
+        guard AXValueGetValue(position as! AXValue, .cgPoint, &point),
+              AXValueGetValue(size as! AXValue, .cgSize, &dimensions) else { return nil }
+        return CGRect(origin: point, size: dimensions)
     }
 
     /// Thumbnail cadence, per window: every pass (2 s) if its `WindowInfo` changed since its last

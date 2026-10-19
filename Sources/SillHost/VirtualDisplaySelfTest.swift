@@ -48,7 +48,7 @@ package enum VirtualDisplaySelfTest {
             let args = CommandLine.arguments
             let hz = args.firstIndex(of: "--virtual-display-selftest").flatMap { i in args.count > i + 1 ? Double(args[i + 1]) : nil } ?? 60
             d = try VirtualDisplay(name: "Sill", widthPt: 1000, heightPt: 700, scale: 2, refreshHz: hz,
-                                   vendorID: VirtualStage.vendorID, productID: VirtualStage.productID, serialNum: VirtualStage.serialNum)
+                                   vendorID: VirtualStage.vendorID, productID: VirtualStage.productID, serialNum: 1)
             print("  requested refresh: \(Int(hz)) Hz")
         } catch {
             print("  FAIL create: \(error)")

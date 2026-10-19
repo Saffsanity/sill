@@ -111,6 +111,14 @@ jobs:
             -destination 'generic/platform=iOS Simulator' -configuration Debug \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" CODE_SIGNING_ALLOWED=NO ARCHS=arm64 build
 
+      # Uses the same selected Xcode and checked-in project as the iOS build. No signing or
+      # headset is needed; this catches unavailable API use in the shared native source.
+      - name: Build the visionOS app for the simulator (Debug, arm64, not signed)
+        run: |
+          xcodebuild -project visionOSClient/SillVision.xcodeproj -scheme SillVision \
+            -destination 'generic/platform=visionOS Simulator' -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData-visionOS" CODE_SIGNING_ALLOWED=NO ARCHS=arm64 build
+
       # Only the CLI's paths that end before the host starts: a refused flag, and
       # --print-reachability, which reads this machine's network configuration once (read-only)
       # and prints the addresses a paired device would be given away from home.

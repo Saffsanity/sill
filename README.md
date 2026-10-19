@@ -188,6 +188,10 @@ The iPhone and iPad app:
 flag, the test tools and the simulator harness, permissions and how to reset
 them, Remote Access, troubleshooting and releases.
 
+The native visionOS client is documented in
+[visionOSClient/README.md](visionOSClient/README.md), including portable build
+commands, host compatibility and remaining device checks.
+
 ## Contributing
 
 Issues are welcome: bug reports, questions and ideas. For a pull request, keep

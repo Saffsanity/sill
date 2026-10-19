@@ -173,6 +173,9 @@ struct PortraitStreamScreen: View {
     /// The Duo's fold across this screen (StreamScreen, iOS 27.1): where the halves split.
     @Environment(\.duoFold) private var duoFold
 
+    @Binding var keyboardTools: Bool
+    let showKeyboard: () -> Void
+
     var body: some View {
         GeometryReader { geo in
             if metrics.phone {
@@ -181,6 +184,36 @@ struct PortraitStreamScreen: View {
                 halves(geo.size)
             }
         }
+        #if os(visionOS)
+        .popover(isPresented: $keyboardTools) {
+            VisionKeyboardTools(client: client, shown: keyboardShown, overlay: overlay) {
+                keyboardTools = false
+                showKeyboard()
+            }
+        }
+        #endif
+    }
+
+    private func keyboardTapped() {
+        setSettings(false, false)
+        openKeyboardTools()
+    }
+
+    private func presentKeyboardTools() {
+        #if os(visionOS)
+        client.cancelRemoteKeyboardRequest()
+        setSettings(false, false)
+        keyboardTools = true
+        #endif
+    }
+
+    private func openKeyboardTools() {
+        #if os(visionOS)
+        client.cancelRemoteKeyboardRequest()
+        showKeyboard()
+        #else
+        overlay.toggleKeyboard()
+        #endif
     }
 
     // MARK: Two halves: the inner display, an iPad window
@@ -192,10 +225,15 @@ struct PortraitStreamScreen: View {
                                              controls: metrics.controlsHeight)
         let half = split.picture
         return ZStack(alignment: .topLeading) {
+            #if !os(visionOS)
             Color.black
+            #endif
 
             VStack(spacing: split.controls - half) {
                 picturePane(measured: true).padding(8).frame(height: half)
+                    #if os(visionOS)
+                    .padding(.bottom, 12)
+                    #endif
                 controls(width: size.width).frame(height: size.height - split.controls)
             }
 
@@ -247,6 +285,10 @@ struct PortraitStreamScreen: View {
         .padding(.top, metrics.padTop)
         .padding(.horizontal, metrics.padSide)
         .padding(.bottom, metrics.padBottom)
+        #if os(visionOS)
+        .glassBackgroundEffect(in: RoundedRectangle(cornerRadius: 24))
+        .padding(.top, 12)
+        #endif
     }
 
     /// The same Apps button and thumbnails as landscape, at the board's tighter size, with no
@@ -255,7 +297,12 @@ struct PortraitStreamScreen: View {
     private func windowBar(width: CGFloat) -> some View {
         // Apps, Menus, Aa, Desktop, Settings, and the strip: Menus only where the row holds it and
         // still a whole thumbnail (not in a 320 pt Slide Over).
-        let menusFit = MacMenuButton.fits(width: width, buttons: 5, buttonWidth: metrics.buttonWidth, gap: 12,
+        #if os(visionOS)
+        let buttonCount = 6
+        #else
+        let buttonCount = 5
+        #endif
+        let menusFit = MacMenuButton.fits(width: width, buttons: buttonCount, buttonWidth: metrics.buttonWidth, gap: 12,
                                           thumbWidth: metrics.thumbWidth)
         return HStack(spacing: 12) {
             appsButton()
@@ -279,6 +326,12 @@ struct PortraitStreamScreen: View {
                              radius: metrics.buttonRadius, pointsPerStep: 36)
                 .tourTarget(.textSize)
 
+            #if os(visionOS)
+            VisionMouseModeButton(client: client, width: metrics.buttonWidth, height: metrics.buttonHeight,
+                                  radius: metrics.buttonRadius, iconSize: metrics.buttonIcon, spacing: metrics.buttonSpacing)
+                .opacity(scaleOpen ? 0 : 1)
+                .allowsHitTesting(!scaleOpen)
+            #endif
             desktopButton()
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
@@ -380,7 +433,12 @@ struct PortraitStreamScreen: View {
     /// no touch until it folds. `menus`: Larger Picture's row 1 while the Mac sent menus, the Menus
     /// button after Apps, six to the row (`buttonsBesideMenus`), where the landscape bar has it.
     private func phoneRow1(_ layout: PhonePortraitLayout, menus: Bool) -> some View {
+        #if os(visionOS)
+        let count: CGFloat = menus ? 7 : 6
+        let width = max(0, (layout.row1.width - PhonePortraitLayout.gap * (count - 1)) / count)
+        #else
         let width = (menus ? layout.buttonsBesideMenus : layout.buttons)[PhonePortraitLayout.Button.apps.rawValue].width
+        #endif
         return HStack(spacing: PhonePortraitLayout.gap) {
             appsButton(width: width)
                 .opacity(scaleOpen ? 0 : 1)
@@ -388,7 +446,12 @@ struct PortraitStreamScreen: View {
                 .tourTarget(.apps)
 
             if menus {
-                MacMenuButton(client: client, width: layout.menus.width, height: layout.menus.height,
+                #if os(visionOS)
+                let menuWidth = width
+                #else
+                let menuWidth = layout.menus.width
+                #endif
+                MacMenuButton(client: client, width: menuWidth, height: layout.menus.height,
                               radius: metrics.buttonRadius, iconSize: metrics.buttonIcon, spacing: metrics.buttonSpacing,
                               iconBox: PortraitMetrics.phoneIconBox, onOpen: menusOpened, onClose: menusClosed)
                     .opacity(scaleOpen ? 0 : 1)
@@ -403,15 +466,22 @@ struct PortraitStreamScreen: View {
                 .tourTarget(.textSize)
 
             barButton(open: keyboardShown, symbol: "keyboard", label: "Keyboard", width: width,
-                      accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
-                      action: {
-                          setSettings(false, false)
-                          overlay.toggleKeyboard()
-                      })
+                      accessibilityLabel: keyboardButtonLabel(shown: keyboardShown),
+                      action: keyboardTapped)
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
                 .tourTarget(.keyboard)
+                #if os(visionOS)
+                .visionKeyboardToolsGesture(tap: keyboardTapped, hold: presentKeyboardTools)
+                #endif
 
+            #if os(visionOS)
+            VisionMouseModeButton(client: client, width: width, height: metrics.buttonHeight,
+                                  radius: metrics.buttonRadius, iconSize: metrics.buttonIcon, spacing: metrics.buttonSpacing,
+                                  iconBox: PortraitMetrics.phoneIconBox)
+                .opacity(scaleOpen ? 0 : 1)
+                .allowsHitTesting(!scaleOpen)
+            #endif
             desktopButton(width: width)
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
@@ -457,13 +527,20 @@ struct PortraitStreamScreen: View {
         ZStack {
             StreamView(client: client)
             InputOverlay(videoSize: client.videoSize,
-                         send: { client.sendInput($0) },
-                         setOwnPointer: { client.setOwnPointer($0, from: $1) },
+                         send: client.surfaceInputSender,
+                         setOwnPointer: client.surfacePointerSender,
+                             pointerFeed: { client.pointerFeedState },
+                             cancelRemoteKeyboardRequest: {
+                                 #if os(visionOS)
+                                 client.cancelRemoteKeyboardRequest()
+                                 #endif
+                             },
                          proxy: overlay,
                          isKeyboardShown: $keyboardShown,
                          latchedModifiers: latched,
                          onModifiersConsumed: { latched = [] },
                          sendGesture: { client.sendGesture($0, fingers: $1) })
+                .spatialInputBoundary(client: client)
         }
         .background(Palette.panel)
         .overlay(alignment: .top) { LinkLineView(text: linkLine) }
@@ -485,13 +562,14 @@ struct PortraitStreamScreen: View {
     private func keyRow(_ keys: KeyRow.Keys) -> some View {
         KeyRow(metrics: metrics, keys: keys, latched: $latched, keyboardShown: keyboardShown,
                send: { client.sendFromKeyRow($0) },
-               toggleKeyboard: { overlay.toggleKeyboard() },
+               toggleKeyboard: { openKeyboardTools() },
+               keyboardToolsHeld: presentKeyboardTools,
                showSpotlight: client.active == .desktop)
             .tourTarget(.keys)
     }
 
     private func trackpad(verticalSpan: CGFloat?) -> some View {
-        Trackpad(send: { client.sendInput($0) },
+        Trackpad(send: client.surfaceInputSender,
                  setPointer: { client.setOwnPointer($0, from: .trackpad) },
                  feed: { let f = client.pointerFeedState; return (f.anchor, f.reseeds) },
                  onFingers: { client.trackpadFingers($0) },
@@ -499,6 +577,7 @@ struct PortraitStreamScreen: View {
                  onModifiersConsumed: { latched = [] },
                  verticalSpan: verticalSpan,
                  sendGesture: { client.sendGesture($0, fingers: $1) })
+            .spatialInputBoundary(client: client)
             .tourTarget(.trackpad)
     }
 
@@ -735,6 +814,7 @@ private struct KeyRow: View {
     let keyboardShown: Bool
     let send: (InputEvent) -> Void
     let toggleKeyboard: () -> Void
+    let keyboardToolsHeld: () -> Void
     /// Spotlight's panel is its own Mac window, so it only shows up in the stream while the whole
     /// desktop is the source. Anywhere else the key would be a cap that does something invisible.
     let showSpotlight: Bool
@@ -803,12 +883,15 @@ private struct KeyRow: View {
             latchKey(key, title, flag, label: label)
         case .keyboard:
             cap(open: keyboardShown,
-                label: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
+                label: keyboardButtonLabel(shown: keyboardShown),
                 action: { tap(key) }) {
                 Image(systemName: "keyboard")
                     .font(.system(size: 20))
                     .foregroundStyle(keyboardShown ? Palette.accent : Palette.text)
             }
+            #if os(visionOS)
+            .visionKeyboardToolsGesture(tap: toggleKeyboard, hold: keyboardToolsHeld)
+            #endif
         case .spotlight:
             cap(open: false, label: "Open Spotlight on the Mac", action: { tap(key) }) {
                 Image(systemName: Spotlight.symbol)
@@ -900,5 +983,14 @@ private struct KeyRow: View {
             }
         }
     }
+    #endif
+}
+
+/// visionOS's Keyboard control enables a session; iPad keeps its existing toggle.
+private func keyboardButtonLabel(shown: Bool) -> String {
+    #if os(visionOS)
+    shown ? "Keyboard enabled" : "Enable keyboard"
+    #else
+    shown ? "Hide the keyboard" : "Show the keyboard"
     #endif
 }
