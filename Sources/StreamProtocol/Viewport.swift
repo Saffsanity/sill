@@ -20,9 +20,16 @@ public struct Viewport: Codable, Hashable {
     /// The host runs the stream at the highest rate among its connected clients and restarts the
     /// pipeline when that changes.
     public var fps: Int?
+    /// The device shows the Desktop in full screen and wants it as a display of its own: the host
+    /// makes a virtual display of this viewport's size (÷ `scale`) the Mac's main display while the
+    /// Desktop streams, as Screen Sharing's High Performance mode does. nil or false (an older
+    /// client, or not in full screen) is the Mac's real screen. An older host ignores the key.
+    public var deviceDesktop: Bool?
 
-    public init(width: Double, height: Double, scale: Double?, localCursor: Bool? = nil, fps: Int? = nil) {
+    public init(width: Double, height: Double, scale: Double?, localCursor: Bool? = nil, fps: Int? = nil,
+                deviceDesktop: Bool? = nil) {
         self.width = width; self.height = height; self.scale = scale; self.localCursor = localCursor; self.fps = fps
+        self.deviceDesktop = deviceDesktop
     }
 }
 
