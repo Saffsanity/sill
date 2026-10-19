@@ -6,7 +6,8 @@ to a typed address), opens a session, and writes the first keyframe's decoded fr
 PNG. No discovery, no live window, no input, no signing or distribution yet.
 
 C# on .NET 10: an exception to the repository's Swift-only convention, chosen for this
-spike for .NET's TLS (SslStream), crypto and Media Foundation access on Windows.
+spike for .NET's TLS (SslStream), crypto and Media Foundation access on Windows
+(`docs/adr/0001-windows-client-in-csharp.md`).
 
 ## Layout
 
