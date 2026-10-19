@@ -85,7 +85,8 @@ streaming; it holds the
 virtual display, frame rate, quality and resolution controls, Direct Wireless
 Connection, Remote Access… and Pair iPhone or iPad… (see Pairing at home and
 Remote access below), Launch at Login, Permissions, Show Log… and Settings…
-(⌘,). Settings › Devices lists the paired devices, with Require pairing.
+(⌘,). Settings › Devices lists the paired devices, with Require pairing and
+Show the pairing window to screen sharing.
 Changes apply at once; a change to a streaming setting restarts the current
 stream for a moment. Opening Sill.app while it runs (Finder,
 Spotlight) shows Settings, which is also where Quit Sill is when the menu bar
@@ -660,6 +661,26 @@ paired for Remote Access connects at home with no further step.
   keychain, not in its defaults: in the data-protection keychain in the Sill
   for Mac you download (0.4.0 and later), and in the login keychain in a
   Sill.app you build yourself without the Developer ID provisioning profile.
+- **Through Screen Sharing** (a Mac without a display, or one you use from afar
+  with Screen Sharing, Apple Remote Desktop or a VNC app such as Screens): Sill
+  keeps its pairing window out of what these apps show, so through them Pair
+  iPhone or iPad… seems to open nothing (issue #108). Turn on **Show the
+  pairing window to screen sharing** in Settings › Devices (off by default; it
+  applies at once, to a window already open too), then tap the Mac's row on
+  the device, or choose Pair iPhone or iPad… in the Sill menu: the window, its
+  QR code and its code show in the remote view. What the switch changes is
+  what Screen Sharing, Apple Remote Desktop and VNC viewers see: while it is
+  on, anyone who can see the Mac's screen through them can read a code, so
+  turn it off once the device has paired. A screen recording, or the screen
+  shared in a video call, may show the code either way: ScreenCaptureKit is
+  reported to ignore the window's `.none` from macOS 15. The switch covers the
+  pairing window alone, whoever opened it; the cable notice and Sill's other
+  windows are as before, and no device streaming the Mac sees the
+  window either way (the Desktop stream leaves Sill's own windows out). Sill.log
+  says "Pairing window: shown to screen sharing …" when it turns on, and at
+  each launch while it is on; the bare app takes `-SillSetAfter '<s>
+  showPairingWindowToScreenSharing=1'`. Over the USB cable a device pairs by
+  itself, with no window to read.
 - **Older builds:** a device from before pairing at home dials the home door
   without TLS and can no longer connect to this Sill.app; the menu says "An
   iPhone or iPad Needs Sill Updated". Update the device first, then the Mac. A
@@ -813,7 +834,8 @@ on a phone held upright, who moves the Mac's pointer, the Mac's menus on both
 ends, which three-finger strokes are gestures and what the Mac does with one,
 which modifiers a device's keys leave set on the Mac,
 the first-run tour, pairing at home (the doors, the cable, the device's rows),
-which keychain Sill.app keeps its identity in, the away quality and the link's
+whether screen sharing shows the pairing window, which keychain Sill.app keeps
+its identity in, the away quality and the link's
 judgement, the iPhone Duo's layouts, what of the clipboard goes between the Mac
 and a device, and which type encodings the virtual display's private API may
 report) on their own with a check each, and

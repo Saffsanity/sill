@@ -219,7 +219,9 @@ Each such pairing is logged, listed as "over the USB cable" and shown in a notic
   - a code shown at a stranger's request could end up in a screen share (`sharingType = .none` on
     the window is best effort on macOS 15 and later); it would still work only at the home door,
     from this Mac's own network or nearby, within the window's 5 minutes, and only if the real
-    device has not used it first;
+    device has not used it first. With Settings › Devices' "Show the pairing window to screen
+    sharing" on (issue #108, PR #157; off by default, for a Mac used through Screen Sharing), it
+    does end up there: every remote viewer sees the window, whoever opened it;
   - an app on this Mac that can record the screen can read the code of any window while it is up:
     one the Mac's user opened, or one a device opened, including one it made come up itself by
     asking from an address that is not this Mac's own: a virtual machine it runs (the
@@ -1446,7 +1448,7 @@ the code Mac mini shows." Esc, Cancel or the escape gesture fold it back to the 
 | An app on this Mac, or the Simulator, dialing this Mac's own address on the cable interface (the Simulator browses through this Mac's mDNSResponder, so while a device is plugged in its row for the Mac says "Wired"; Sill.log has it at 169.254.178.234 twice on 2026-09-24) | Never the cable: its source is this Mac's own address (§4.3, rule 2), and an IPv4 one never counts. Its ask is from this Mac: `openOnMac` in Sill.app and no menu item, unless a window the Mac's user opened is up |
 | Another Mac over USB-C or Thunderbolt Bridge | No iPhone or iPad above the interface: never the cable |
 | A stranger asking again and again | One window; after Cancel, expiry or five wrong codes, 10 minutes of quiet per key and address; at most 3 windows in 10 minutes; never the keyboard; never while locked; the menu's item otherwise; one log line a minute per address |
-| A device-opened window while the Mac's screen is shared in a meeting | The code could be read. It works only at the home door (this Mac's network, or nearby), within 5 minutes, and only if the real device has not used it; `sharingType = .none` is best effort; "Didn’t ask for this? Click Cancel." |
+| A device-opened window while the Mac's screen is shared in a meeting | The code could be read. It works only at the home door (this Mac's network, or nearby), within 5 minutes, and only if the real device has not used it; `sharingType = .none` is best effort, and not set at all while Settings › Devices' "Show the pairing window to screen sharing" is on (PR #157); "Didn’t ask for this? Click Cancel." |
 | An ask while the Mac's user has a window open for pairing someone away | `shown`: the device scans that window's code; the first valid proof wins and the other gets `closed` and asks again |
 | Direct Wireless turned off mid-pairing over AWDL | The home door's pending connections on peer-to-peer Wi‑Fi are cancelled with its sessions; the device pairs on the network, or with Direct Wireless on again |
 | Require pairing turned on while unpaired devices are connected | Each gets goodbye `pairingRequired`; paired ones stream on; the TXT record says `p=1` |
