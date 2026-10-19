@@ -21,8 +21,9 @@ import StreamProtocol
 /// Picture, `StreamClient.largerPictureKey`, on an iPhone without a hinge whose picture it makes
 /// larger, `largerPictureOffered`; Share Clipboard, `StreamClient.clipboardKey`, while the Mac shares
 /// its clipboard, with the system's Paste for this device's text; Three-Finger Gestures,
-/// `StreamClient.gesturesKey`), and whose gesture rows, as accessibility actions, do their gestures
-/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour.
+/// `StreamClient.gesturesKey`; on an iPad, Pencil Pressure, `StreamClient.pencilKey`), and whose
+/// gesture rows, as accessibility actions, do their gestures (`client.sendGesture`), since
+/// VoiceOver keeps three fingers for itself; then Take the Tour.
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
@@ -50,6 +51,9 @@ struct HostSettingsPanel: View {
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
+    /// This device's switch for the Apple Pencil as a pen (docs/pencil-pressure-plan.md §5.4): on
+    /// unless turned off, read as each stroke begins (`StreamClient.pencilAsPen`), never sent.
+    @AppStorage(StreamClient.pencilKey) private var pencilOn = true
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -67,15 +71,20 @@ struct HostSettingsPanel: View {
     }
     /// DEBUG `-SillSettingsScroll gestures`: the rows start scrolled to the This iPad group, so a
     /// photo of a short screen shows its switch and rows, which the footnote under them pushes out
-    /// of `-SillSettingsEnd`'s view.
-    private static var startsAtGestures: Bool {
+    /// of `-SillSettingsEnd`'s view; `pencil`, to the iPad's Pencil Pressure row.
+    private static var startsAt: String? {
         #if DEBUG
-        return UserDefaults.standard.string(forKey: "SillSettingsScroll") == "gestures"
+        switch UserDefaults.standard.string(forKey: "SillSettingsScroll") {
+        case "gestures": return gesturesGroupID
+        case "pencil": return pencilRowID
+        default: return nil
+        }
         #else
-        return false
+        return nil
         #endif
     }
     private static let gesturesGroupID = "thisDevice"
+    private static let pencilRowID = "pencil"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
     static var voiceOverRunning: Bool {
@@ -96,7 +105,7 @@ struct HostSettingsPanel: View {
                         .scrollIndicatorsFlash(onAppear: true)
                         .scrollBounceBehavior(.basedOnSize)
                         .defaultScrollAnchor(Self.startsAtEnd ? .bottom : .top)
-                        .onAppear { if Self.startsAtGestures { reader.scrollTo(Self.gesturesGroupID, anchor: .top) } }
+                        .onAppear { if let id = Self.startsAt { reader.scrollTo(id, anchor: .top) } }
                 }
             }
             foot
@@ -328,16 +337,18 @@ struct HostSettingsPanel: View {
                 .padding(.horizontal, 4)
             }
             // After everything of the Mac's, whatever state its settings are in: while they load, and
-            // for a Mac without them too. Both are this device's own: its gestures, then the tour.
+            // for a Mac without them too. All are this device's own: its gestures, its Pencil (an
+            // iPad's), then the tour.
             thisDevice
+            pencil
             tour
         }
     }
 
     /// The last group: this device's, not the Mac's, so after everything about the Mac, and there
     /// whatever the Mac is (while settings load, and for a Mac without them). It sends nothing. It
-    /// comes after This iPad's gestures, under their footnote, so it needs no space of its own above
-    /// it even while the Mac's settings load.
+    /// comes after This iPad's gestures and Pencil, under their footnote, so it needs no space of
+    /// its own above it even while the Mac's settings load.
     @ViewBuilder private var tour: some View {
         Rows {
             Button(action: takeTour) {
@@ -531,6 +542,30 @@ struct HostSettingsPanel: View {
     /// once Aa sets its text size (or on the virtual display), and that a change applies as the panel
     /// closes (StreamScreen's `largerPictureHeld`).
     static let largerPictureFooter = "Held upright, a window’s picture takes the place of the window thumbnails and reaches down to where the keyboard comes up. The Desktop keeps the thumbnails. Switch windows with Apps: tap an open app again for its next window. To fill the taller picture with a window, set its text size with Aa. A change applies when you close Settings."
+
+    /// This iPad's switch for the Apple Pencil as a pen, under the gestures' footnote and in the same
+    /// group (an iPhone has no Pencil, so none there). Off, a Pencil is the mouse, as on a Mac that
+    /// does not take a pen; the switch reaches nothing on the Mac, and a stroke under way keeps the
+    /// way it began (PenStrokes).
+    @ViewBuilder private var pencil: some View {
+        if device == "iPad" {
+            Rows {
+                Toggle(isOn: $pencilOn) {
+                    Text("Pencil Pressure").foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+            }
+            .id(Self.pencilRowID)
+            Footnote(text: pencilFooter)
+        }
+    }
+
+    /// Under the Pencil's switch: what it does, or why a Pencil is the mouse.
+    private var pencilFooter: String {
+        guard pencilOn else { return "Apple Pencil works as a mouse while this is off." }
+        guard (client.hostPencil ?? 0) >= PenInput.generation else { return "Update Sill on \(mac) to use this." }
+        return "Apple Pencil pressure and tilt reach Mac apps that support drawing tablets."
+    }
 
     /// What each gesture does on the Mac, and what the row does as an accessibility action: its one
     /// gesture, or, for the Spaces, one action each way (natural direction: a swipe left brings the

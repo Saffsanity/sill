@@ -137,7 +137,7 @@ enum MockCatalog {
     /// display view is told of since no parameter sets ever arrive; `pencilPointer` is Q2's flip.
     private static func seedPointer(_ client: StreamClient, _ state: String, pencilPointer: Bool) {
         guard client.debugSeedPointer(state, pencilShows: pencilPointer) else {
-            print("-SillPointer \(state): not a state (mac@X,Y, device@X,Y, hidden or pencil@X,Y)")
+            print("-SillPointer \(state): not a state (mac@X,Y, device@X,Y, hidden, pencil@X,Y or pen@X,Y)")
             return
         }
         client.displayView.debugFrameSize(client.videoSize)
@@ -396,9 +396,10 @@ enum MockCatalog {
             client.route = nil
         default: client.route = .wifi
         }
-        // A Mac from this build takes the trackpad gestures (its window list says so); an older one
-        // does not, and its Settings panel says to update it.
+        // A Mac from this build takes the trackpad gestures and the Pencil as a pen (its window list
+        // says so); an older one does not, and its Settings panel says to update it.
         client.hostGestures = c == .legacy ? nil : TrackpadGesture.generation
+        client.hostPencil = c == .legacy ? nil : PenInput.generation
         // …and shares its clipboard (`WindowList.clipboard` 1): the Settings panel's Share Clipboard.
         client.hostClipboard = c == .legacy ? nil : ClipboardPolicy.generation
         guard c != .legacy else { return }

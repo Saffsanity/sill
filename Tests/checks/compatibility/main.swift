@@ -164,7 +164,12 @@ check(!json(list).contains("gestures"), "a list without them leaves the key out:
 check(decodedOld != nil && decodedOld?.gestures == nil, "an older host's list decodes, gestures nil")
 check(Wire.decode(WindowList.self, from: Wire.encode(takes))?.gestures == 1, "gestures round-trips")
 check(StreamMessageKind.gesture.rawValue == 28 && StreamMessageKind(rawValue: 28) == .gesture, "kind 28 is gesture")
-check(StreamMessageKind(rawValue: 27) == .fetchMenu && StreamMessageKind(rawValue: 29) == nil, "27 is the menus' fetch, 29 not this build's")
+check(StreamMessageKind(rawValue: 27) == .fetchMenu && StreamMessageKind(rawValue: 30) == nil, "27 is the menus' fetch, 30 not this build's")
+// Kind 46, CursorKind: whether the cursor of the kind 14 after it is a standard one (Viewport.swift).
+check(StreamMessageKind.cursorKind.rawValue == 46 && StreamMessageKind(rawValue: 46) == .cursorKind, "kind 46 is cursorKind")
+check(String(decoding: Wire.encode(CursorKind(standard: false)), as: UTF8.self) == #"{"standard":false}"#, "an app's own cursor: {\"standard\":false}")
+check(Wire.decode(CursorKind.self, from: Data(#"{"standard":true,"later":1}"#.utf8)) == CursorKind(standard: true), "a later field is skipped")
+check(Wire.decode(CursorKind.self, from: Data("{}".utf8)) == CursorKind(standard: nil), "an empty one decodes, standard nil")
 let gestureMessage = StreamMessage(kind: .gesture, timestamp: 1, isKeyframe: false, payload: Wire.encode(gesture)).serialized()
 check(StreamMessage.parseHeader(gestureMessage)?.kind == .gesture, "the gesture's header parses")
 check(gestureMessage.count == StreamMessage.headerLength + Wire.encode(gesture).count, "one header, then the JSON")
@@ -186,6 +191,69 @@ check(Wire.decode(Clipboard.self, from: Data(#"{"text":"a","image":"AQID","later
 let clipboardMessage = StreamMessage(kind: .clipboard, timestamp: 1, isKeyframe: false, payload: Wire.encode(clip)).serialized()
 check(StreamMessage.parseHeader(clipboardMessage)?.kind == .clipboard && clipboardMessage.count == StreamMessage.headerLength + Wire.encode(clip).count,
       "the clipboard's header parses, then the JSON")
+// Kind 45, the Apple Pencil as a pen (docs/pencil-pressure-plan.md §3), and the window list's
+// `pencil`: additive both ways.
+check(PenInput.phases == ["hover", "down", "move", "up", "cancel", "leave"], "the six phases, in order: \(PenInput.phases)")
+check(Set(PenInput.phases).count == 6, "the six phases are distinct")
+check(PenInput.generation == 1 && PenInput.maxSamples == 32, "pencil 1: the six; 32 samples a message")
+let penSample = PenSample(x: 0.512344, y: 0.4, p: 0.42, alt: 1.05, az: 0.3, t: 4.2)
+let penMove = PenInput(phase: PenInput.move, samples: [penSample, PenSample(x: 0.52, y: 0.4, p: 0.5)])
+check(json(penMove) == #"{"phase":"move","samples":[{"alt":1.05,"az":0.3,"p":0.42,"t":4.2,"x":0.51234,"y":0.4},{"p":0.5,"x":0.52,"y":0.4}]}"#,
+      "a move's keys, a position at 5 places, nil fields left out: \(json(penMove))")
+check(json(PenInput(phase: PenInput.leave)) == #"{"phase":"leave"}"#, "a leave: its phase alone")
+check(json(PenSample(x: 0.123456789, y: 0.987654321, p: 0.123456, alt: 1.234567, az: -2.345678, t: 4.16)) == #"{"alt":1.2346,"az":-2.3457,"p":0.1235,"t":4.2,"x":0.12346,"y":0.98765}"#,
+      "rounded: a position to 5 places, pressure and angles to 4, a time to 1")
+check(Wire.decode(PenInput.self, from: Wire.encode(penMove)) == penMove, "a move round-trips")
+check(Wire.decode(PenInput.self, from: Data(#"{"phase":"move","samples":[{"x":0.5,"y":0.5,"p":0.3,"roll":1.2}],"pencil":"pro"}"#.utf8))
+      == PenInput(phase: "move", samples: [PenSample(x: 0.5, y: 0.5, p: 0.3)]), "unknown keys are skipped (a later Pencil's fields)")
+check(Wire.decode(PenInput.self, from: Data(#"{"phase":"squeeze"}"#.utf8))?.phase == "squeeze", "a later phase decodes as a string")
+check(Wire.decode(PenInput.self, from: Data(#"{"samples":[]}"#.utf8)) == nil, "no phase: no message")
+check(Wire.decode(PenInput.self, from: Data(#"{"phase":3}"#.utf8)) == nil, "a number as the phase does not decode")
+check(Wire.decode(PenInput.self, from: Data(#"{"phase":"down","samples":[{"x":0.5}]}"#.utf8)) == nil, "a sample without y does not decode")
+check(Wire.decode(PenInput.self, from: Data(#"{"phase":"down","samples":[{"x":0.5,"y":0.5,"p":"hard"}]}"#.utf8)) == nil, "a string as the pressure does not decode")
+// What a host acts on (`checked`).
+let one = [PenSample(x: 0.5, y: 0.5, p: 0.3)]
+for phase in [PenInput.hover, PenInput.down, PenInput.up] {
+    check(PenInput(phase: phase, samples: one).checked() == PenInput(phase: phase, samples: one), "\(phase) with one sample: taken")
+    check(PenInput(phase: phase).checked() == nil && PenInput(phase: phase, samples: []).checked() == nil, "\(phase) without a sample: skipped")
+    check(PenInput(phase: phase, samples: one + one).checked() == nil, "\(phase) with two samples: skipped")
+}
+check(PenInput(phase: PenInput.move, samples: one + one + one).checked()?.samples?.count == 3, "a move with three samples: taken")
+check(PenInput(phase: PenInput.move).checked() == nil, "a move without samples: skipped")
+check(PenInput(phase: PenInput.move, samples: Array(repeating: one[0], count: 32)).checked()?.samples?.count == 32, "32 samples: taken")
+check(PenInput(phase: PenInput.move, samples: Array(repeating: one[0], count: 33)).checked() == nil, "33 samples: skipped")
+check(PenInput(phase: PenInput.cancel).checked() == PenInput(phase: PenInput.cancel), "a cancel without a sample: taken")
+check(PenInput(phase: PenInput.cancel, samples: one).checked() == PenInput(phase: PenInput.cancel, samples: one), "a cancel with one: taken")
+check(PenInput(phase: PenInput.cancel, samples: one + one).checked() == nil, "a cancel with two: skipped")
+check(PenInput(phase: PenInput.leave, samples: one).checked() == PenInput(phase: PenInput.leave), "a leave: taken, its samples dropped")
+check(PenInput(phase: PenInput.leave, samples: Array(repeating: one[0], count: 33)).checked() == nil, "a leave with 33 samples: skipped")
+check(PenInput(phase: "squeeze", samples: one).checked() == nil, "a phase this build does not know: skipped")
+var wild = PenSample(x: 0.5, y: 0.5)
+wild.p = 1.7; wild.alt = 3; wild.az = 9; wild.t = -4
+check(wild.checked() == { var s = PenSample(x: 0.5, y: 0.5); s.p = 1; s.alt = .pi / 2; s.az = 9; s.t = 0; return s }(),
+      "pressure clamped to 1, altitude to π/2, a negative time to 0, the azimuth left")
+wild.p = -0.2; wild.alt = -1
+check(wild.checked()?.p == 0 && wild.checked()?.alt == 0, "pressure and altitude clamped to 0")
+check(PenSample(x: 1.4, y: -0.2).checked() == PenSample(x: 1.4, y: -0.2), "a position off the frame is passed on")
+for bad in [Double.nan, .infinity, -.infinity] {
+    var s = PenSample(x: 0.5, y: 0.5, p: 0.5)
+    s.x = bad; check(s.checked() == nil, "x \(bad): no sample")
+    s.x = 0.5; s.p = bad; check(s.checked() == nil, "pressure \(bad): no sample")
+    s.p = 0.5; s.az = bad; check(s.checked() == nil, "azimuth \(bad): no sample")
+    check(PenInput(phase: PenInput.move, samples: one + [s]).checked() == nil, "one bad sample: the message is skipped")
+}
+let withPencil = WindowList(macName: "Mac mini", windows: [], active: .desktop, launchID: "L", hostVersion: "0.6", protocol: 1,
+                            gestures: TrackpadGesture.generation, pencil: PenInput.generation)
+check(json(withPencil).contains(#""pencil":1"#), "a list from a host that takes the Pencil says pencil 1: \(json(withPencil))")
+check(!json(list).contains("pencil") && !json(takes).contains("pencil"), "a list without it leaves the key out")
+check(decodedOld != nil && decodedOld?.pencil == nil, "an older host's list decodes, pencil nil")
+check(Wire.decode(WindowList.self, from: Wire.encode(withPencil))?.pencil == 1 && Wire.decode(WindowList.self, from: Wire.encode(withPencil))?.gestures == 1,
+      "pencil round-trips, beside gestures")
+check(StreamMessageKind.pen.rawValue == 45 && StreamMessageKind(rawValue: 45) == .pen, "kind 45 is pen")
+check(StreamMessageKind(rawValue: 47) == nil, "47, after the pen's 45 and the cursor's kind 46, not this build's")
+let penMessage = StreamMessage(kind: .pen, timestamp: 1, isKeyframe: false, payload: Wire.encode(penMove)).serialized()
+check(StreamMessage.parseHeader(penMessage)?.kind == .pen, "the pen's header parses")
+check(penMessage.first == 45 && penMessage.count == StreamMessage.headerLength + Wire.encode(penMove).count, "kind 45 first, one header, then the JSON")
 
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil
@@ -199,6 +267,8 @@ if let out {
         "windowListGestures": String(decoding: Wire.encode(takes), as: UTF8.self),
         "windowListClipboard": String(decoding: Wire.encode(shares), as: UTF8.self),
         "clipboardMessage": clipboardMessage.base64EncodedString(),
+        "penMessage": penMessage.base64EncodedString(),
+        "windowListPencil": String(decoding: Wire.encode(withPencil), as: UTF8.self),
     ]
     try! JSONSerialization.data(withJSONObject: payloads, options: [.sortedKeys, .prettyPrinted]).write(to: URL(fileURLWithPath: out))
 }

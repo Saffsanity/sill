@@ -128,13 +128,17 @@ serves the root or `/docs`, never `/site`. So:
       Pages on (main, / root) and the custom domain set. Republish when `site/` changes, right
       after the release whose builds the change describes (part 2, the last item):
 - Words on main for a release not out yet are marked: the clipboard's (PR #78) between
-  `<!-- Clipboard` and `<!-- /Clipboard -->`. A republish before that release (for words that hold
+  `<!-- Clipboard` and `<!-- /Clipboard -->`, and the Apple Pencil's (issue #81: privacy.html's
+  stroke and Pencil Pressure items) between `<!-- Pencil` and `<!-- /Pencil -->`, each cut by its
+  own perl line below until its release. A republish before that release (for words that hold
   for the builds already out, such as support.html's on a Mac asleep or restarted) deletes those
   blocks in the sill-site copy after the rsync below (the perl line) and puts privacy.html's date
   back to the one last published; then `grep -n -i clipboard ../sill-site/*.html` prints only
   privacy.html's log line ("which devices share the clipboard", true of the builds out too, as "what
-  you copy" in its lede and "never what you copy" in both log lines are). The release that ships it
-  deletes the markers in `site/` and keeps the words.
+  you copy" in its lede and "never what you copy" in both log lines are), and `grep -n -i pencil
+  ../sill-site/*.html` only the lines that were there before (index.html's intro, terms.html's
+  trademarks). The release that ships each feature deletes its markers in `site/` and keeps the
+  words.
 - Once sill is public, it can serve the site itself: `git subtree push --prefix site origin gh-pages`,
   then Settings › Pages › gh-pages, / (root). Retire sill-site then.
 
@@ -142,6 +146,7 @@ serves the root or `/docs`, never `/site`. So:
 git clone https://github.com/Saffsanity/sill-site.git ../sill-site     # once
 rsync -a --delete --exclude .git --exclude .github --exclude .nojekyll site/ ../sill-site/   # when the site changes
 perl -0pi -e 's/[ \t]*<!-- Clipboard:.*?<!-- \/Clipboard -->\n//gs' ../sill-site/*.html   # only before the clipboard's release
+perl -0pi -e 's/[ \t]*<!-- Pencil:.*?<!-- \/Pencil -->\n//gs' ../sill-site/*.html   # only before the Apple Pencil's release
 git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" && git -C ../sill-site push
 ```
 

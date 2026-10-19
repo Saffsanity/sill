@@ -29,7 +29,7 @@ let layouts = [(false, "landscape"), (true, "portrait")]
 // The Mac (or another device) moved it last: the Mac's pointer while it is over the stream, in every
 // layout, whatever drew this device's own pointer before.
 for (portrait, layout) in layouts {
-    for origin in [P.Origin.trackpad, .pencil, .none] {
+    for origin in [P.Origin.trackpad, .pencil, .penHover, .none] {
         check(presence(.elsewhere, mac: macAt, inside: true, own: ownAt, origin: origin, portrait: portrait).sprite(now: 0) == macAt,
               "the Mac has it, over the stream: its pointer (\(layout), own from \(origin))")
         check(presence(.elsewhere, mac: macAt, inside: false, own: ownAt, origin: origin, portrait: portrait).sprite(now: 0) == nil,
@@ -58,9 +58,29 @@ for (portrait, layout) in layouts {
     check(p.sprite(now: 0) == ownAt, "the Pencil with Q2's flip: shown (\(layout))")
 }
 check(P.pencilShowsPointerByDefault == false && P().pencilShowsPointer == false, "Q2's default: no Pencil arrow")
+// This device, the Pencil hovering as a pen (kind 29): shown in every layout, Q2's flip or not, while
+// the Mac's cursor is an app's own (kind 46), so a drawing app's brush outline is under it; hidden
+// over a standard cursor, and when no kind 46 said (an older Mac); the tip landing makes it
+// `.pencil` again, hidden.
+check(P().cursorIsAppOwn == false, "no kind 46 yet: a standard cursor, as far as the Pencil goes")
+for (portrait, layout) in layouts {
+    for flip in [false, true] {
+        var p = presence(.here, own: ownAt, origin: .penHover, portrait: portrait)
+        p.pencilShowsPointer = flip
+        check(p.sprite(now: 0) == nil, "a pen's hover over a standard cursor: hidden (\(layout), flip \(flip))")
+        p.cursorIsAppOwn = true
+        check(p.sprite(now: 0) == ownAt, "a pen's hover over an app's own cursor: shown (\(layout), flip \(flip))")
+        p.setOwn(ownAt, from: .pencil)
+        check(p.sprite(now: 0) == (flip ? ownAt : nil), "its tip landing: hidden again unless flipped (\(layout), flip \(flip))")
+    }
+    var moved = presence(.elsewhere, mac: macAt, inside: true, own: ownAt, origin: .penHover, portrait: portrait)
+    check(moved.sprite(now: 0) == macAt, "a pen's hover, then the Mac moved it: the Mac's (\(layout))")
+    moved.cursorIsAppOwn = true
+    check(moved.sprite(now: 0) == macAt, "the Mac's over an app's own cursor too (\(layout))")
+}
 // Nothing streams: nothing shows, in any row.
 for (portrait, layout) in layouts {
-    for (control, origin) in [(P.Control.elsewhere, P.Origin.none), (.here, .trackpad), (.here, .pencil), (.here, .none)] {
+    for (control, origin) in [(P.Control.elsewhere, P.Origin.none), (.here, .trackpad), (.here, .pencil), (.here, .penHover), (.here, .none)] {
         var p = presence(control, mac: macAt, inside: true, own: ownAt, origin: origin, portrait: portrait, streaming: false)
         p.pencilShowsPointer = true
         check(p.sprite(now: 0) == nil, "nothing streams: hidden (\(control), \(origin), \(layout))")
@@ -159,7 +179,7 @@ do {
     let unknown = presence(.elsewhere, mac: nil, inside: true, own: ownAt, origin: .trackpad, portrait: true).ownForKeyRow()
     check(unknown != nil && unknown?.own == nil, "the Mac's, inside but no position: none either")
     // This device has it already: its own stays as it is (shown or not).
-    for origin in [P.Origin.trackpad, .pencil, .none] {
+    for origin in [P.Origin.trackpad, .pencil, .penHover, .none] {
         check(presence(.here, own: ownAt, origin: origin, portrait: true).ownForKeyRow() == nil,
               "the key row while this device has the pointer (\(origin)): unchanged")
     }
@@ -177,6 +197,9 @@ do {
     check(!pencil.recentresOnNewFrame(now: 0), "the Pencil's, hidden by default: not")
     pencil.pencilShowsPointer = true
     check(pencil.recentresOnNewFrame(now: 0), "…shown with Q2's flip: re-centred")
+    var hovering = presence(.here, own: ownAt, origin: .penHover, portrait: true)
+    hovering.cursorIsAppOwn = true
+    check(hovering.sprite(now: 0) != nil && !hovering.recentresOnNewFrame(now: 0), "a hovering Pencil's, shown: not (its next hover says where it is)")
     check(!presence(.here, own: ownAt, origin: .trackpad, portrait: true, streaming: false).recentresOnNewFrame(now: 0),
           "nothing streams: not")
     var lingered = presence(.here, own: ownAt, origin: .trackpad, portrait: true)

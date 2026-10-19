@@ -391,6 +391,8 @@ final class StreamClient: ObservableObject {
     struct CursorShape { let image: UIImage; let hotspot: CGPoint; let size: CGSize }
     var cursorShape: CursorShape? { didSet { onCursorShapeChange?(cursorShape) } }
     var onCursorShapeChange: ((CursorShape?) -> Void)?
+    /// On `queue`: the kind 46 just read, until the kind 14 it comes before.
+    private var pendingCursorKind: CursorKind?
 
     /// What this device measured over the last second: frames, frame age and round trip. The
     /// network queue closes a window every second while connected and publishes it here; nil
@@ -813,6 +815,8 @@ final class StreamClient: ObservableObject {
     /// its timeout (`receiptWait`).
     var clipboardReceipt: ClipboardReceipt?
     var clipboardReceiptExpiry: DispatchWorkItem?
+    /// Whether the Mac takes an Apple Pencil as a pen (`WindowList.pencil`); nil from a Mac before it.
+    @Published var hostPencil: Int?
     /// This device's path (status, interfaces, cost), for "did it leave home since the loss".
     var pathSignature = ""
     var pathMonitor: NWPathMonitor?
@@ -874,7 +878,7 @@ final class StreamClient: ObservableObject {
 
     // Pointer-move coalescing, all touched on `queue` only.
     private static let moveInterval = 0.008   // 125 Hz ceiling; a Pencil can report at 120+ Hz
-    private var pendingMove: InputEvent?
+    private var pendingMove: (kind: StreamMessageKind, payload: Data)?   // a pointer move, or a Pencil's hover
     private var lastMoveAt = 0.0              // CACurrentMediaTime
     private var moveFlushScheduled = false
 
@@ -3110,7 +3114,7 @@ final class StreamClient: ObservableObject {
         sessionHost = nil
         refusedListing = nil
         resetHomeMove()
-        queue.async { self.lastParameterSets = nil; self.pendingMove = nil; self.stopMeasuring() }
+        queue.async { self.lastParameterSets = nil; self.pendingMove = nil; self.pendingCursorKind = nil; self.stopMeasuring() }
         firstListDeadline?.cancel()
         firstListDeadline = nil
         session = nil
@@ -3119,6 +3123,7 @@ final class StreamClient: ObservableObject {
         hostVersion = nil
         hostProtocol = nil
         hostGestures = nil
+        hostPencil = nil
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -3137,6 +3142,7 @@ final class StreamClient: ObservableObject {
         // session's viewport may reach the next connection, which may already be dialling.
         forgetViewport()
         cursorShape = nil
+        presence.cursorIsAppOwn = false
         connected = false
         connectedDirectly = false
         route = nil
@@ -3276,21 +3282,27 @@ final class StreamClient: ObservableObject {
                 self.send(.input, Wire.encode(event))
                 return
             }
-            let now = CACurrentMediaTime()
-            let due = self.lastMoveAt + Self.moveInterval
-            if now >= due {
-                self.pendingMove = nil
-                self.lastMoveAt = now
-                self.send(.input, Wire.encode(event))
-            } else {
-                self.pendingMove = event   // replaces any older pending move
-                if !self.moveFlushScheduled {
-                    self.moveFlushScheduled = true
-                    self.queue.asyncAfter(deadline: .now() + (due - now)) { [weak self] in
-                        guard let self else { return }
-                        self.moveFlushScheduled = false
-                        self.flushPendingMove()
-                    }
+            self.sendLatest(.input, Wire.encode(event))
+        }
+    }
+
+    /// On `queue`: a message of which only the newest matters (a pointer move, a Pencil's hover), at
+    /// most one per `moveInterval`; one that comes sooner waits, replacing any that waited.
+    private func sendLatest(_ kind: StreamMessageKind, _ payload: Data) {
+        let now = CACurrentMediaTime()
+        let due = lastMoveAt + Self.moveInterval
+        if now >= due {
+            pendingMove = nil
+            lastMoveAt = now
+            send(kind, payload)
+        } else {
+            pendingMove = (kind, payload)   // replaces any older pending move
+            if !moveFlushScheduled {
+                moveFlushScheduled = true
+                queue.asyncAfter(deadline: .now() + (due - now)) { [weak self] in
+                    guard let self else { return }
+                    self.moveFlushScheduled = false
+                    self.flushPendingMove()
                 }
             }
         }
@@ -3341,7 +3353,66 @@ final class StreamClient: ObservableObject {
         guard let move = pendingMove else { return }
         pendingMove = nil
         lastMoveAt = CACurrentMediaTime()
-        send(.input, Wire.encode(move))
+        send(move.kind, move.payload)
+    }
+
+    // MARK: - Apple Pencil (docs/pencil-pressure-plan.md §5)
+
+    /// This device's switch for the Pencil as a pen (the Settings panel's This iPad group): on unless
+    /// turned off. The device's own preference, never sent to the Mac; read as each stroke begins.
+    static let pencilKey = "Sill.pencilPressure"
+    static var pencilPressureOn: Bool {
+        let defaults = UserDefaults.standard   // `bool(forKey:)`, as `gesturesOn` reads its key
+        return defaults.object(forKey: pencilKey) == nil || defaults.bool(forKey: pencilKey)
+    }
+
+    /// Whether a Pencil's next stroke goes to the Mac as a pen's (kind 45) rather than the mouse's
+    /// (kind 8): the switch on, and a Mac whose window list says it takes one. Main thread.
+    var pencilAsPen: Bool {
+        PenStrokes.penMode(switchOn: Self.pencilPressureOn, connected: connected, hostPencil: hostPencil,
+                           generation: PenInput.generation)
+    }
+
+    /// One Pencil message to the Mac (kind 45), as `sendInput` sends kind 8: it counts as input for the
+    /// tour's rule and hands this device the pointer; a hover goes as pointer moves do, the newest
+    /// only, and everything else at once, after a move or hover still waiting. Main thread.
+    func sendPen(_ input: PenInput) {
+        lastInputAt = ProcessInfo.processInfo.systemUptime
+        #if DEBUG
+        if inputPaused { print("tour: INPUT SENT WHILE THE TOUR SHOWED: pen \(input.phase)") }
+        #endif
+        let payload = Wire.encode(input)
+        let place = input.samples?.last.map { CGPoint(x: $0.x, y: $0.y) }
+        let latestOnly = input.phase == PenInput.hover
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.pointerNote(place.map { .pointer($0) } ?? .other)
+            if latestOnly {
+                self.sendLatest(.pen, payload)
+            } else {
+                self.flushPendingMove()
+                self.send(.pen, payload)
+            }
+        }
+    }
+
+    /// The Pencil's tip on the glass, for the fingers that say nothing meanwhile (PenStrokes.Palm):
+    /// shared by the stream's overlay, which sees the Pencil, and the portrait trackpad under it,
+    /// where the hand that holds it rests. Main thread.
+    private var palm = PenStrokes.Palm()
+
+    /// The Pencil's tip landed (`true`) or lifted, at `time` (a touch's clock).
+    func pencilTouching(_ touching: Bool, at time: TimeInterval) { palm.pencil(touching: touching, at: time) }
+
+    /// Whether a finger stroke that began at `began` (a touch's clock) says nothing: a resting palm.
+    func fingersSilent(strokeBeganAt began: TimeInterval) -> Bool { palm.silent(strokeBeganAt: began) }
+
+    /// What the stream's surfaces need of this client for a Pencil.
+    var penLink: PenLink {
+        PenLink(asPen: { [weak self] in self?.pencilAsPen ?? false },
+                send: { [weak self] in self?.sendPen($0) },
+                touching: { [weak self] in self?.pencilTouching($0, at: $1) },
+                fingersSilent: { [weak self] in self?.fingersSilent(strokeBeganAt: $0) ?? false })
     }
 
     private func send(_ kind: StreamMessageKind, _ payload: Data) {
@@ -3461,12 +3532,16 @@ final class StreamClient: ObservableObject {
     /// position among those it sent lately (a hand-over's carry-over reads them); main is told only
     /// when the pointer came here with it.
     private func pointerNoteSent(_ event: InputEvent) {
-        let sent: PointerFeedState.Sent
         switch event {
-        case .pointer(_, let x, let y): sent = .pointer(CGPoint(x: x, y: y))
-        case .scroll(let x, let y, _, _), .scrollGesture(_, let x, let y): sent = .scroll(CGPoint(x: x, y: y))
-        case .text, .key: sent = .other
+        case .pointer(_, let x, let y): pointerNote(.pointer(CGPoint(x: x, y: y)))
+        case .scroll(let x, let y, _, _), .scrollGesture(_, let x, let y): pointerNote(.scroll(CGPoint(x: x, y: y)))
+        case .text, .key: pointerNote(.other)
         }
+    }
+
+    /// The same for what was sent, whichever kind carried it (a Pencil's message is a pointer event at
+    /// its last sample; its leave has no place).
+    private func pointerNote(_ sent: PointerFeedState.Sent) {
         guard pointerFeed.sent(sent, now: CACurrentMediaTime()) else { return }
         #if DEBUG
         print("pointer: this device has it")
@@ -3522,8 +3597,9 @@ final class StreamClient: ObservableObject {
     #if DEBUG
     /// The layout harness (`-SillPointer`, ContentView): the mock's pointer in one of the plan's
     /// states, as the feed and this device's input would leave it: `mac@X,Y` (the Mac has it, over
-    /// the stream), `hidden` (the Mac has it, off the stream), `device@X,Y` (this device's trackpad)
-    /// or `pencil@X,Y` (its Pencil); `pencilShows` is Q2's flip (`-SillPencilPointer 1`). False for
+    /// the stream), `hidden` (the Mac has it, off the stream), `device@X,Y` (this device's trackpad),
+    /// `pencil@X,Y` (its Pencil) or `pen@X,Y` (its Pencil hovering as a pen); `pencilShows` is Q2's
+    /// flip (`-SillPencilPointer 1`). False for
     /// a state it does not know. Main thread.
     func debugSeedPointer(_ state: String, pencilShows: Bool) -> Bool {
         let parts = state.lowercased().split(separator: "@", maxSplits: 1).map(String.init)
@@ -3545,6 +3621,10 @@ final class StreamClient: ObservableObject {
         case ("pencil", let p?):
             _ = pointerFeed.sent(.pointer(p), now: CACurrentMediaTime())
             presence.setOwn(p, from: .pencil)
+        case ("pen", let p?):
+            _ = pointerFeed.sent(.pointer(p), now: CACurrentMediaTime())
+            presence.setOwn(p, from: .penHover)
+            presence.cursorIsAppOwn = true   // over an app's own cursor (a brush outline), where it shows
         default:
             return false
         }
@@ -3633,6 +3713,7 @@ final class StreamClient: ObservableObject {
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
                 // The clipboard: subscribe (or stop) as the Mac's word and this device's switch say.
                 self.hostClipboardChanged(list.clipboard)
+                if self.hostPencil != list.pencil { self.hostPencil = list.pencil }
                 if !self.sessionListed {
                     self.sessionListed = true
                     #if DEBUG
@@ -3726,9 +3807,20 @@ final class StreamClient: ObservableObject {
         case .appList:
             guard let apps = Wire.decode([AppInfo].self, from: data) else { return }
             DispatchQueue.main.async { self.apps = apps }
+        case .cursorKind:
+            // Kept until the kind 14 it comes before, so the shape and whether it is a standard cursor
+            // change together (PointerPresence.cursorIsAppOwn).
+            pendingCursorKind = Wire.decode(CursorKind.self, from: data)
         case .cursorShape:
+            let kind = pendingCursorKind
+            pendingCursorKind = nil
             guard let (hotspot, size, png) = CursorShapeBlob.decode(data), let image = UIImage(data: png) else { return }
-            DispatchQueue.main.async { self.cursorShape = CursorShape(image: image, hotspot: hotspot, size: size) }
+            DispatchQueue.main.async {
+                self.cursorShape = CursorShape(image: image, hotspot: hotspot, size: size)
+                // None before it (a Mac from before kind 46): a standard cursor, as far as the Pencil goes.
+                let appOwn = kind?.standard == false
+                if self.presence.cursorIsAppOwn != appOwn { self.presence.cursorIsAppOwn = appOwn; self.renderPointer() }
+            }
         case .macPointer:
             receivePointer(data)
         case .hostSettings:

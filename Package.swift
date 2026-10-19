@@ -28,5 +28,9 @@ let package = Package(
         // is a symlink to the host's copy. Not shipped.
         .executableTarget(name: "CaptureProbe"),
         .executableTarget(name: "VirtualDisplayProbe"),
+        // Step 0 of docs/pencil-pressure-plan.md: posts test strokes of synthesized tablet events
+        // (PenEvents), to see whether drawing apps take their pressure and tilt. Posts to the Mac
+        // only with --post-to-this-mac. Not shipped.
+        .executableTarget(name: "PenProbe", dependencies: ["SillHostCore"]),
     ]
 )

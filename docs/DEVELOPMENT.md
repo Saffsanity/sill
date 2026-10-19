@@ -245,8 +245,9 @@ docs/reconnect-after-sleep-plan.md has the rules;
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom. After the Mac's settings
 come the device's own: This iPad (or iPhone), with Larger Picture on an iPhone
-(below; off unless turned on) and Three-Finger Gestures (below, Trackpad
-gestures; on unless turned off), neither ever sent to the Mac, and last Take
+(below; off unless turned on), Three-Finger Gestures (below, Trackpad
+gestures; on unless turned off) and, on an iPad, Pencil Pressure (below, Apple
+Pencil; on unless turned off), none ever sent to the Mac, and last Take
 the Tour.
 
 On the iPhone Duo (docs/iphone-duo-plan.md) the layout follows the hinge,
@@ -570,6 +571,52 @@ over (the receipt and its note included; through `sillrelay.py
 <s>` holds the Settings panel over the chip until then; the console's
 "clipboard: …" lines say what happened.
 
+## Apple Pencil
+
+An Apple Pencil on the stream draws in a Mac app as a drawing tablet's pen does
+(docs/pencil-pressure-plan.md): a harder press gives a heavier line, and a
+tilted Pencil shades, in apps that read pressure and tilt from macOS's tablet
+events (`NSEvent.pressure` and `tilt`). An app that talks to a tablet driver of
+its own may not. Everywhere else the Pencil is the mouse, as it always was: it
+clicks, drags, selects and hovers. The device sends each stroke as kind 45, every
+reading the Pencil gives (up to 240 a second), and the Mac posts the mouse
+events it would post anyway with the tablet fields on them, and tells apps the
+pen came into range before its first point and left after its last. On an
+iPad and Pencil that support hover, the Pencil moves the pointer while it
+hovers, with the Mac cursor under it when that is an app's own, a drawing app's brush
+outline (never a standard arrow, I-beam or hand; hidden while the tip draws), and leaves range a tenth of a second after it is neither touching nor
+hovering, however long it is held still; one that cannot hover leaves a second
+after its last stroke. As with Sidecar's Pencil, the Pencil's button is its
+own: a stroke draws while another pointer holds the Mac's button (the Mac's
+trackpad, the portrait trackpad's press-and-hold), goes on when that pointer
+lets go, and ends at the Pencil's own lift; mouse input never takes the pen
+out of range.
+
+While the Pencil's tip is on the glass, and for half a second after it lifts,
+a finger stroke on the stream or the portrait trackpad sends nothing, so a
+palm resting on the glass neither clicks nor scrolls nor ends the stroke. A
+palm already resting for a moment before the tip first lands is a long press,
+a right-click, before Sill can know a Pencil is coming.
+
+Settings › This iPad › Pencil Pressure (`Sill.pencilPressure`, on by default,
+never sent to the Mac) turns it off: the Pencil is then the mouse, the way out
+for a Mac app that mishandles tablet events. A stroke keeps the way it began. A
+Mac from before it gets the mouse, and the switch's footnote says to update
+Sill on it. The Mac's log has no line of the Pencil's own: a pen's down in a
+streamed window is a "Click at …" line as a finger's tap is, and the stats lines
+count the Pencil's events (`in.pen`, `in.penProximity`).
+
+`swift run -c release SillHost --pen-selftest` builds the events the host
+would post, turns each into the `NSEvent` an app would get and prints what
+AppKit reads, posting nothing. `PenProbe` is the probe that settled whether
+apps take synthesized tablet events: `--canvas` is a window that draws what it
+receives and prints its readings, and `--post-to-this-mac` posts three test
+strokes where the pointer is after a countdown (it moves your pointer and
+draws, so run it by hand over an empty canvas; the terminal needs
+Accessibility). A synthetic host posts none of it: with `SILL_TEST_INPUT_LOG=1`
+it prints the pen entering, each point's pressure and tilt, and the pen
+leaving.
+
 ## The Mac's menus on the device
 
 The app a device streams keeps its menu bar on the Mac, and the device shows
@@ -811,7 +858,8 @@ encoder session, the device floor, how a session ends, how the device reads the
 Mac's messages, the update check, the disk image's window, where everything goes
 on a phone held upright, who moves the Mac's pointer, the Mac's menus on both
 ends, which three-finger strokes are gestures and what the Mac does with one,
-which modifiers a device's keys leave set on the Mac,
+an Apple Pencil's strokes as a tablet pen's on both ends, which modifiers a
+device's keys leave set on the Mac,
 the first-run tour, pairing at home (the doors, the cable, the device's rows),
 which keychain Sill.app keeps its identity in, the away quality and the link's
 judgement, the iPhone Duo's layouts, what of the clipboard goes between the Mac
@@ -858,11 +906,19 @@ python3 Scripts/sillclient.py PORT 3 desktop --input='{"key":{"hidUsage":44,"dow
 
 (`$T/path` holds one line, `0 756 474`: the scripted pointer gives the test
 pattern a place for input to land.) `--gesture=NAME[,FINGERS]@T` sends a
-trackpad gesture (kind 28), and, like the input flags, only to a `--synthetic`
-host on this Mac, which posts nothing. The clipboard's flags (`--clipboard`,
-`--copy`, `--copy-bytes`, `--raw32`, `--expect=clipboard=`) are under The
-clipboard, above: with `SILL_TEST_PASTEBOARD` the host's pasteboard is a
-private one, never this Mac's clipboard.
+trackpad gesture (kind 28), and `--pen=PHASE[,X,Y[,P[,ALT,AZ]]]@T` (or
+`--raw45=JSON@T`) an Apple Pencil's message (kind 45), both, like the input
+flags, only to a `--synthetic` host on this Mac, which posts nothing:
+
+```
+python3 Scripts/sillclient.py PORT 5 desktop --pen=hover,0.3,0.5@1.5 --pen=down,0.3,0.5,0.2@2 \
+    --pen=move,0.4,0.5,0.8,1.0,0@2.2 --pen=up,0.4,0.5@2.4 --pen=leave@2.6
+```
+
+The clipboard's flags (`--clipboard`, `--copy`, `--copy-bytes`, `--raw32`,
+`--expect=clipboard=`) are under The clipboard, above: with
+`SILL_TEST_PASTEBOARD` the host's pasteboard is a private one, never this Mac's
+clipboard.
 
 `Scripts/sillrelay.py --listen 0 --to HOST:PORT [--delay-ms N] [--rate-mbps R]
 [--blackhole-after S] [--record PREFIX]` sits between a client and a host, and
@@ -1065,6 +1121,12 @@ simulator:
   one run, `-SillSettingsScroll gestures` opens the Settings panel at that
   group, and `-SillVoiceOver 1` shows it as with VoiceOver on. Under `-SillLive 1`, `-SillInputScript '3 gesture swipeUp'` sends a
   gesture through the app's own path, only to a test host on this Mac.
+- `-Sill.pencilPressure 0` turns Pencil Pressure off for one run, and
+  `-SillSettingsScroll pencil` opens the Settings panel at it (an iPad's).
+  Under `-SillLive 1`, `-SillInputScript` takes `pen hover|down|move|up,X,Y[,P[,ALT,AZ]]`
+  and `pen away`: an Apple Pencil over the stream, with no Pencil, through the
+  app's own path (as a pen's, or the mouse's with the switch off or a Mac that
+  takes no pen), only to a test host on this Mac.
 - `-SillMacMenu code|blender|long|stale|noaccess|none|slow|timeout|refuse`: the
   mock Mac's menus. `-SillMenusOpen 1` opens the Menus pull-down after launch,
   `-SillMenusOpen 'File/Open Recent'` opens it on that menu, and
@@ -1341,7 +1403,7 @@ record field by field.
 
 - `Sources/`: the Swift package. `StreamProtocol` (the wire format, shared
   with the iOS app), `SillHost` (the host library), `SillHostCLI` (the
-  `SillHost` command), `SillMenuBar` (Sill.app) and two probes.
+  `SillHost` command), `SillMenuBar` (Sill.app) and three probes.
 - `iOSClient/`: the iPhone and iPad app, `Sill.xcodeproj`.
 - `Packaging/`: Sill.app's Info.plist and entitlements, and the iOS app's
   export options for App Store Connect.

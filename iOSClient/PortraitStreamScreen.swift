@@ -463,7 +463,8 @@ struct PortraitStreamScreen: View {
                          isKeyboardShown: $keyboardShown,
                          latchedModifiers: latched,
                          onModifiersConsumed: { latched = [] },
-                         sendGesture: { client.sendGesture($0, fingers: $1) })
+                         sendGesture: { client.sendGesture($0, fingers: $1) },
+                         pen: client.penLink)
         }
         .background(Palette.panel)
         .overlay(alignment: .top) { LinkLineView(text: linkLine) }
@@ -498,7 +499,8 @@ struct PortraitStreamScreen: View {
                  latched: latched,
                  onModifiersConsumed: { latched = [] },
                  verticalSpan: verticalSpan,
-                 sendGesture: { client.sendGesture($0, fingers: $1) })
+                 sendGesture: { client.sendGesture($0, fingers: $1) },
+                 fingersSilent: { client.fingersSilent(strokeBeganAt: $0) })
             .tourTarget(.trackpad)
     }
 

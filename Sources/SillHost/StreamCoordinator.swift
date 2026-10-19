@@ -433,9 +433,12 @@ package final class StreamCoordinator {
                 }
             }
         }
-        cursorShapes.onChange = { [weak self] blob in
-            self?.server.broadcast(StreamMessage(kind: .cursorShape, timestamp: Date().timeIntervalSince1970,
-                                                 isKeyframe: false, payload: blob))
+        cursorShapes.onChange = { [weak self] blob, standard in
+            // Whether it is a standard cursor goes first (kind 46), so a device applies both together.
+            let now = Date().timeIntervalSince1970
+            self?.server.broadcast(StreamMessage(kind: .cursorKind, timestamp: now, isKeyframe: false,
+                                                 payload: Wire.encode(CursorKind(standard: standard))))
+            self?.server.broadcast(StreamMessage(kind: .cursorShape, timestamp: now, isKeyframe: false, payload: blob))
         }
         catalog.onInstalledAppsReady = { [weak self] apps in
             guard let self else { return }
@@ -931,6 +934,26 @@ package final class StreamCoordinator {
             if !synthetic { raiseIfInteracting(event) }
             deliver(event, in: rect, from: device)
             desktopInputMayActivate(event)
+        case .pen:
+            // An Apple Pencil as a pen (docs/pencil-pressure-plan.md §4.3): the mouse events of kind
+            // 8 with a tablet pen's pressure and tilt, so it goes through kind 8's rules as the
+            // pointer event it amounts to (PenTablet.pointerEvent): a down closes a gesture's view
+            // and brings the window forward, as a click does.
+            guard let pen = Wire.decode(PenInput.self, from: message.payload)?.checked() else { return }
+            let device = ObjectIdentifier(connection)
+            guard let rect = currentSourceRect() else {
+                // Nowhere to land: the up of a button the Mac has down still goes, where the pointer
+                // is, and the pen's leave (PenTablet.stillGoes), as kind 8's ups do above.
+                if injector.penStillGoes(pen) { deliver(pen: pen, in: .null, from: device) }
+                return
+            }
+            let event = PenTablet.pointerEvent(for: pen)
+            if let event {
+                gestureChords.input(Self.gestureInput(event))
+                if !synthetic { raiseIfInteracting(event) }
+            }
+            deliver(pen: pen, in: rect, from: device)
+            if let event { desktopInputMayActivate(event) }
         case .gesture:
             // A three- or four-finger gesture (docs/trackpad-gestures-plan.md §7.4), which the Mac
             // turns into its own shortcut. At most `gesturesPerSecond` a second per connection: a
@@ -1260,6 +1283,8 @@ package final class StreamCoordinator {
                 if injector.isUpOfSomethingDown(event) { injector.apply(event, in: .null, from: device) }
             case .chord(let keyCode, let flags):
                 injector.chord(keyCode: keyCode, flags: flags)
+            case .pen(let pen, _, let device):
+                if injector.penStillGoes(pen) { injector.pen(pen, in: .null, from: device) }
             }
         }
         releaseKeysOfDevicesThatLeft()
@@ -1516,7 +1541,10 @@ package final class StreamCoordinator {
     /// Input held for an activation, replayed in order once the app is up, each with the device that
     /// sent it (its keys are its own, KeyStrokes); a gesture's chord that arrives meanwhile waits
     /// behind it, so a click just before the gesture lands first.
-    private enum Held { case input(InputEvent, CGRect, KeyStrokes.Device), chord(keyCode: UInt16, flags: UInt64) }
+    private enum Held {
+        case input(InputEvent, CGRect, KeyStrokes.Device), chord(keyCode: UInt16, flags: UInt64)
+        case pen(PenInput, CGRect, KeyStrokes.Device)
+    }
     private var heldInput: [Held] = []
     private var holdUntil: CFAbsoluteTime = 0
     /// Devices that left while input was held: their keys go up after it (`releaseKeys`).
@@ -1531,6 +1559,13 @@ package final class StreamCoordinator {
         injector.apply(event, in: rect, from: device)
     }
 
+    /// The same for an Apple Pencil's message: held in order with the input around it.
+    private func deliver(pen: PenInput, in rect: CGRect, from device: KeyStrokes.Device) {
+        if !heldInput.isEmpty || CFAbsoluteTimeGetCurrent() < holdUntil { heldInput.append(.pen(pen, rect, device)); return }
+        if let event = PenTablet.pointerEvent(for: pen) { logClick(event, in: rect) }
+        injector.pen(pen, in: rect, from: device)
+    }
+
     private func releaseHeldInput() {
         holdUntil = 0
         let held = heldInput
@@ -1539,6 +1574,9 @@ package final class StreamCoordinator {
             switch item {
             case .input(let event, let rect, let device): logClick(event, in: rect); injector.apply(event, in: rect, from: device)
             case .chord(let keyCode, let flags): injector.chord(keyCode: keyCode, flags: flags)
+            case .pen(let pen, let rect, let device):
+                if let event = PenTablet.pointerEvent(for: pen) { logClick(event, in: rect) }
+                injector.pen(pen, in: rect, from: device)
             }
         }
         releaseKeysOfDevicesThatLeft()
@@ -2322,7 +2360,8 @@ package final class StreamCoordinator {
         StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                       payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
                                                       hostVersion: hostVersion, protocol: SillProtocol.current,
-                                                      gestures: TrackpadGesture.generation, clipboard: clipboard.advertised)))
+                                                      gestures: TrackpadGesture.generation, clipboard: clipboard.advertised,
+                                                      pencil: PenInput.generation)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }
@@ -2350,6 +2389,8 @@ package final class StreamCoordinator {
         server.send(StreamMessage(kind: .appList, timestamp: now, isKeyframe: false,
                                   payload: Wire.encode(catalog.installedApps)), to: connection)
         if let shape = cursorShapes.current {
+            server.send(StreamMessage(kind: .cursorKind, timestamp: now, isKeyframe: false,
+                                      payload: Wire.encode(CursorKind(standard: cursorShapes.currentIsStandard))), to: connection)
             server.send(StreamMessage(kind: .cursorShape, timestamp: now, isKeyframe: false, payload: shape), to: connection)
         }
     }

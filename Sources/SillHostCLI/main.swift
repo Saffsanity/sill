@@ -104,6 +104,13 @@ if let app = MenuSelfTest.requested(in: CommandLine.arguments) {
     MenuSelfTest.run(app: app)
 }
 
+// `SillHost --pen-selftest`: what AppKit reads from the tablet events Sill would post for an Apple
+// Pencil's pressure and tilt (docs/pencil-pressure-plan.md, H0). Builds and reads them back only:
+// nothing is posted and no permission is needed. Exits 0 when every reading is what was written.
+if CommandLine.arguments.contains("--pen-selftest") {
+    PenSelfTest.run()
+}
+
 // ScreenCaptureKit talks to the window server through CoreGraphics, which must be
 // initialized on the main thread before any other thread touches it. In a CLI tool
 // nothing does that for us, so prime it here and keep stream setup on the main actor.

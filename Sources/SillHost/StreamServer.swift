@@ -1376,14 +1376,18 @@ final class StreamServer {
                 return
             }
             let deliver = { (payload: Data) in
-                if header.kind == .input {
+                // An Apple Pencil's message (kind 45) is input as kind 8 is: the ticks, the count
+                // kind 26's `seen` carries (the device counts both, SessionLink) and the pointer.
+                if header.kind == .input || header.kind == .pen {
                     self.lastInputAt = Date().timeIntervalSince1970
                     if self.tickTimer == nil { self.updateTicking() }
                     // This device moves the Mac's pointer now. The count and the controller change
                     // in the same queue turn as every sample, so no kind 26 carries the new count
                     // with the old controller (docs/pointer-visibility-plan.md §3.3).
                     client.inputsRead += 1
-                    self.pointerWatch?.inputArrived(from: ObjectIdentifier(c), movesPointer: PointerControl.movesPointer(payload: payload))
+                    let moves = header.kind == .pen ? PenTablet.movesPointer(payload: payload)
+                                                    : PointerControl.movesPointer(payload: payload)
+                    self.pointerWatch?.inputArrived(from: ObjectIdentifier(c), movesPointer: moves)
                 }
                 if header.kind == .ping {
                     // Echo straight back from the network queue: the round trip should measure the

@@ -4,6 +4,19 @@ import UIKit.UIGestureRecognizerSubclass
 import GameController
 import StreamProtocol
 
+/// What the stream's surfaces need of the client for an Apple Pencil (`StreamClient.penLink`).
+struct PenLink {
+    /// Whether a stroke that begins now goes to the Mac as a pen's (kind 45): the switch, and the Mac.
+    var asPen: () -> Bool = { false }
+    /// One Pencil message (`StreamClient.sendPen`).
+    var send: (PenInput) -> Void = { _ in }
+    /// The tip landed (`true`) or lifted, at a touch's time.
+    var touching: (Bool, TimeInterval) -> Void = { _, _ in }
+    /// Whether a finger stroke that began at this time says nothing: a palm resting while the Pencil
+    /// draws (PenStrokes.Palm).
+    var fingersSilent: (TimeInterval) -> Bool = { _ in false }
+}
+
 /// The touch layer over the streamed video. Direct-touch model: where you touch is where the Mac's
 /// pointer goes, and the Apple Pencil is the mouse. Everything leaves here as an `InputEvent` whose
 /// position is a fraction of the *video frame*, not of this view — the video is drawn aspect-fit by
@@ -66,6 +79,13 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// of the stroke reaches the Mac but its gesture (`strokes.silent`, each finger handler's first
     /// line).
     private let strokes = StrokeObserver()
+    /// The Pencil as a pen (docs/pencil-pressure-plan.md §5.2): the client's side of it, and this
+    /// view's stroke and hover (PenStrokes), which say what goes to the Mac as kind 45.
+    var pen = PenLink()
+    private var penStrokes = PenStrokes()
+    /// A finger stroke that says nothing because the Pencil's tip is, or just was, on the glass: a
+    /// resting palm must not click, right-click, scroll or make a gesture (each finger handler).
+    private var palm: Bool { pen.fingersSilent(strokes.strokeBeganAt) }
     /// The finger pan, for where a scroll that a stroke's silence closes ends.
     private weak var scrollPan: UIPanGestureRecognizer?
     /// The iPad's trackpad (two fingers) or a Magic Mouse, and a mouse's wheel: scroll events over the
@@ -137,7 +157,10 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         // recognizers above and delays none.
         scrollPan = pan
         strokes.onSilenced = { [weak self] in self?.strokeSilenced() }
-        strokes.onGesture = { [weak self] gesture, fingers in _ = self?.sendGesture(gesture, fingers) }
+        strokes.onGesture = { [weak self] gesture, fingers in
+            guard let self, !self.palm else { return }
+            _ = self.sendGesture(gesture, fingers)
+        }
         addGestureRecognizer(strokes)
     }
 
@@ -177,7 +200,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// Single tap: put the pointer there first, then click. The move matters — the Mac's cursor is
     /// wherever the last event left it, and hover state (menus, tooltips) follows it.
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
-        guard !strokes.silent else { return }
+        guard !strokes.silent, !palm else { return }
         tap(at: gesture.location(in: self))
     }
 
@@ -191,7 +214,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
 
     /// Long press: the right button, since there is no second finger to spare for it.
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-        guard !strokes.silent else { return }
+        guard !strokes.silent, !palm else { return }
         guard gesture.state == .began else { return }
         setOwnPointer(nil, .none)
         let point = gesture.location(in: self)
@@ -207,6 +230,9 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// positive dy).
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         guard !strokes.silent else { return }
+        // The Pencil landed during this scroll, or the scroll is a palm's: it ends here, with no
+        // coast, as a stroke that goes silent ends one.
+        if palm { strokeSilenced(); return }
         scroll(gesture, .finger)
     }
 
@@ -345,7 +371,10 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window == nil { momentum.stop(); releaseForwardedKeys() }
+        if window == nil {
+            momentum.stop(); releaseForwardedKeys()
+            if penStrokes.gone() { pen.send(PenInput(phase: PenInput.leave)) }   // the Mac's pen is no longer here
+        }
         // A session's start, a rotation's other layout, a reconnect's new screen: the proxy takes the
         // keyboard for a hardware keyboard (on the next turn, once this view is settled in the window).
         if window != nil { keyboardProxy?.joined(self) } else { keyboardProxy?.left(self) }
@@ -366,6 +395,38 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         let rect = videoRect
         guard rect.width > 0, rect.height > 0 else { return }
         tap(at: CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height))
+    }
+
+    /// `pen hover|down|move|up|away X,Y[,P[,ALT,AZ]]`: a Pencil at that fraction of the video frame,
+    /// through the Pencil's own path below the touch callbacks, as a pen's or, when the stroke is the
+    /// mouse's (the switch off, a Mac that takes no pen), as the mouse events those callbacks send.
+    /// Says which.
+    func scriptPen(_ what: String, x: Double, y: Double, pressure: Double?, altitude: Double?, azimuth: Double?) -> String {
+        let now = ProcessInfo.processInfo.systemUptime
+        let reading = PenStrokes.Reading(x: x, y: y, pressure: pressure ?? 0.5, altitude: altitude, azimuth: azimuth, time: now)
+        switch what {
+        case "hover":
+            switch penStrokes.hover(isPencil: true, penMode: pen.asPen()) {
+            case .ignore: return "ignored: the tip is down"
+            case .pen: pencilHover((x, y), altitude: altitude ?? .pi / 2, azimuth: azimuth ?? 0); return "a pen's"
+            case .mouse: send(.pointer(.move, x: x, y: y))
+            }
+        case "down":
+            if pencilDown(reading, at: now) { return "a pen's" }
+            send(.pointer(.move, x: x, y: y)); send(.pointer(.leftDown, x: x, y: y))
+        case "move":
+            if pencilMoved([reading]) { return "a pen's" }
+            send(.pointer(.move, x: x, y: y))
+        case "up":
+            if pencilUp(reading, at: now, as: PenInput.up) { return "a pen's" }
+            send(.pointer(.leftUp, x: x, y: y))
+        case "away":
+            pencilHoverEnded()
+            return "the hover ended"
+        default:
+            return "not a pen step"
+        }
+        return "the mouse's"
     }
 
     /// `key USAGE`: a hardware key, down and up with no modifier, as `pressesBegan` and
@@ -441,11 +502,106 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         case .began, .changed:
             if gesture.state == .began { hoverIsPencil = false }
             if gesture.zOffset > 0 || gesture.altitudeAngle > 0 { hoverIsPencil = true }
+            switch penStrokes.hover(isPencil: hoverIsPencil, penMode: pen.asPen()) {
+            case .ignore:
+                return   // stale: the Pencil's tip is on the glass (PenStrokes.hover)
+            case .pen:
+                // As a pen (kind 45): the hover with the Pencil's angles, so the Mac's app sees a pen
+                // in range, leaning as it leans.
+                pencilHover(normalized(gesture.location(in: self), clamped: true),
+                            altitude: Double(gesture.altitudeAngle), azimuth: Double(gesture.azimuthAngle(in: self)))
+                return
+            case .mouse:
+                break
+            }
             let at = sendPointer(.move, at: gesture.location(in: self), clamped: true)
             if hoverIsPencil { setOwnPointer(at, .pencil) } else { setOwnPointer(nil, .none) }
         default:
+            // The tip landed, or the Pencil left: which, a moment later (`leaveCheck`).
+            if hoverIsPencil { pencilHoverEnded() }
             hoverIsPencil = false
         }
+    }
+
+    // MARK: - The Pencil as a pen
+    //
+    // What the touch and hover callbacks below do with a Pencil in pen mode, apart from reading the
+    // touch: each returns true when it took the event as a pen's (kind 45), and false when the
+    // stroke is the mouse's and the callback goes on as before. DEBUG's `-SillInputScript` calls
+    // them too, with readings of its own.
+
+    /// A pen's hover at `p` (nil with no picture to place it in), with its angles, once
+    /// `PenStrokes.hover` has said it is one. The arrow shows where it hovers, in the Mac cursor's
+    /// shape (`.penHover`: a drawing app's brush outline), until the tip lands.
+    private func pencilHover(_ p: (x: Double, y: Double)?, altitude: Double, azimuth: Double) {
+        guard let p else { return }
+        pen.send(PenStrokes.message(PenInput.hover, PenStrokes.Reading(x: p.x, y: p.y, pressure: nil, altitude: altitude, azimuth: azimuth,
+                                                                      time: ProcessInfo.processInfo.systemUptime)))
+        setOwnPointer(CGPoint(x: p.x, y: p.y), .penHover)
+    }
+
+    /// The hover ended: the tip landed, or the Pencil left. Which, a moment later (`leaveCheck`).
+    private func pencilHoverEnded() {
+        penStrokes.hoverEnded(now: ProcessInfo.processInfo.systemUptime)
+        leaveCheck()
+    }
+
+    /// The Pencil's tip landed, at `time`: fingers say nothing from here (a resting palm), whichever
+    /// way the stroke goes. As a pen: the down with its pressure and tilt. A down off the picture
+    /// (no `reading`) is no down, as for the mouse; the Mac then takes the stroke's moves as a
+    /// hover's.
+    private func pencilDown(_ reading: PenStrokes.Reading?, at time: TimeInterval) -> Bool {
+        pen.touching(true, time)
+        guard penStrokes.touchBegan(penMode: pen.asPen()) == .pen else { return false }
+        guard let reading else { return true }
+        pen.send(PenStrokes.message(PenInput.down, reading))
+        setOwnPointer(CGPoint(x: reading.x, y: reading.y), .pencil)
+        return true
+    }
+
+    /// The tip moved: every reading since the last callback (the Pencil reports 240 a second, a
+    /// callback comes once a frame), oldest first, so a stroke loses none.
+    private func pencilMoved(_ readings: [PenStrokes.Reading]) -> Bool {
+        guard penStrokes.stroke == .pen else { return false }
+        for message in PenStrokes.moves(readings) { pen.send(message) }
+        if let last = readings.last { setOwnPointer(CGPoint(x: last.x, y: last.y), .pencil) }
+        return true
+    }
+
+    /// The tip lifted (`PenInput.up`) or the stroke was taken away (`PenInput.cancel`), at `time`. As
+    /// a pen: its end where the tip was, without pressure; with no picture to place it in, a cancel
+    /// alone, which lets the button up where the Mac's pointer is.
+    private func pencilUp(_ reading: PenStrokes.Reading?, at time: TimeInterval, as phase: String) -> Bool {
+        pen.touching(false, time)
+        guard penStrokes.touchEnded(now: time) == .pen else { return false }
+        if var reading {
+            reading.pressure = nil
+            pen.send(PenStrokes.message(phase, reading))
+            setOwnPointer(CGPoint(x: reading.x, y: reading.y), .pencil)
+        } else {
+            pen.send(PenInput(phase: PenInput.cancel))
+        }
+        leaveCheck()
+        return true
+    }
+
+    /// `PenStrokes.leaveDelay` after the Pencil stopped touching or hovering: tells the Mac it left,
+    /// unless it is doing either again by then (a hover ends as the tip lands and begins as it lifts).
+    private func leaveCheck() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + PenStrokes.leaveDelay + 0.01) { [weak self] in
+            guard let self, self.penStrokes.leaveDue(now: ProcessInfo.processInfo.systemUptime) else { return }
+            self.pen.send(PenInput(phase: PenInput.leave))
+        }
+    }
+
+    /// One reading of a Pencil touch: where its tip is in the frame (nil off the picture when not
+    /// `clamped`, as a tap there is no click), its force and its angles.
+    private func reading(of touch: UITouch, clamped: Bool) -> PenStrokes.Reading? {
+        guard let p = normalized(touch.preciseLocation(in: self), clamped: clamped) else { return nil }
+        return PenStrokes.Reading(x: p.x, y: p.y,
+                                  pressure: PenStrokes.pressure(force: Double(touch.force), maximum: Double(touch.maximumPossibleForce)),
+                                  altitude: Double(touch.altitudeAngle), azimuth: Double(touch.azimuthAngle(in: self)),
+                                  time: touch.timestamp)
     }
 
     // MARK: - Pencil
@@ -475,6 +631,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesBegan(touches, with: event); return
         }
+        if touch.type == .pencil, pencilDown(reading(of: touch, clamped: false), at: touch.timestamp) { return }
         let point = touch.location(in: self)
         guard let at = sendPointer(.move, at: point, clamped: false) else { return }
         ownPointer(at, for: touch)
@@ -487,6 +644,8 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesMoved(touches, with: event); return
         }
+        if touch.type == .pencil,
+           pencilMoved((event?.coalescedTouches(for: touch) ?? [touch]).compactMap({ reading(of: $0, clamped: true) })) { return }
         // A move while the button is down is a drag on the host's side.
         if let at = sendPointer(.move, at: touch.location(in: self), clamped: true) { ownPointer(at, for: touch) }
     }
@@ -495,6 +654,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesEnded(touches, with: event); return
         }
+        if touch.type == .pencil, pencilUp(reading(of: touch, clamped: true), at: touch.timestamp, as: PenInput.up) { return }
         if let at = sendPointer(pointerButtonIsSecondary ? .rightUp : .leftUp, at: touch.location(in: self), clamped: true) { ownPointer(at, for: touch) }
         pointerButtonIsSecondary = false
     }
@@ -503,6 +663,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesCancelled(touches, with: event); return
         }
+        if touch.type == .pencil, pencilUp(reading(of: touch, clamped: true), at: touch.timestamp, as: PenInput.cancel) { return }
         // Never leave the button stuck down.
         if let at = sendPointer(pointerButtonIsSecondary ? .rightUp : .leftUp, at: touch.location(in: self), clamped: true) { ownPointer(at, for: touch) }
         pointerButtonIsSecondary = false
@@ -950,6 +1111,8 @@ struct InputOverlay: UIViewRepresentable {
     var onModifiersConsumed: () -> Void = {}
     /// `StreamClient.sendGesture`; see `InputOverlayView.sendGesture`.
     var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
+    /// `StreamClient.penLink`; see `InputOverlayView.pen`.
+    var pen = PenLink()
 
     func makeUIView(context: Context) -> InputOverlayView {
         let view = InputOverlayView(frame: .zero)
@@ -964,6 +1127,7 @@ struct InputOverlay: UIViewRepresentable {
         uiView.setOwnPointer = setOwnPointer
         uiView.latchedModifiers = latchedModifiers
         uiView.sendGesture = sendGesture
+        uiView.pen = pen
         // Called straight from a UIKit text-input callback, never from inside a SwiftUI update,
         // so writing the binding here needs no hop.
         uiView.onModifiersConsumed = onModifiersConsumed
@@ -1003,6 +1167,9 @@ final class StrokeObserver: UIGestureRecognizer, UIGestureRecognizerDelegate {
     /// The decision, at the first lift of a finger that armed the stroke: the gesture and its
     /// fingers, 3 or 4.
     var onGesture: (TrackpadGestures.Gesture, Int) -> Void = { _, _ in }
+    /// When the first finger of the finger stroke under way, or the last one, landed (a touch's
+    /// clock): what a resting palm is judged by (PenStrokes.Palm).
+    private(set) var strokeBeganAt: TimeInterval = 0
     /// Each touch of the stroke, numbered as it lands.
     private var ids: [ObjectIdentifier: Int] = [:]
     private var nextID = 0
@@ -1032,6 +1199,7 @@ final class StrokeObserver: UIGestureRecognizer, UIGestureRecognizerDelegate {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         for touch in ordered(touches) {
             guard touch.type == .direct else { strokes.otherTouch(); continue }
+            if ids.isEmpty { strokeBeganAt = touch.timestamp }
             let id = nextID
             nextID += 1
             ids[ObjectIdentifier(touch)] = id

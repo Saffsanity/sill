@@ -36,6 +36,15 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --raw28=JSON@T     send this literal kind 28 payload T seconds in (split on the last @)
                      --gesture and --raw28 go only to a --synthetic host on this Mac, as input does:
                      it logs the shortcut it would post and posts nothing; any other host posts it
+  --pen=PHASE[,X,Y[,P[,ALT,AZ]]]@T  send an Apple Pencil message (kind 45) T seconds in: hover, down,
+                     move, up, cancel or leave, with one sample at the frame fraction X,Y (none for
+                     leave, and cancel may go without), pressure P (0…1) and the Pencil's altitude
+                     and azimuth in radians; e.g. --pen=down,0.3,0.5,0.2@2 --pen=move,0.4,0.5,0.8,1.0,0.5@2.1
+  --raw45=JSON@T     send this literal kind 45 payload T seconds in (split on the last @): several
+                     samples, a phase --pen does not make
+                     --pen and --raw45 go only to a --synthetic host on this Mac, as input does; the
+                     window list's line says pencil= when the host takes a pen (a host without it
+                     skips kind 45, and a device sends such a host its Pencil as kind 8)
   --hello=VER[,PROTO] send a hello (kind 23) first, before the select, as a device from 2026-09-25 on does:
                      {"appVersion": VER, "protocol": PROTO, "device": the --device name, else "sillclient"};
                      --hello=none sends {} (a hello with nothing in it). Without it no hello is sent: an
@@ -132,7 +141,7 @@ with status 2 (--raw17 and --input go out as written). Find PORT with: lsof -nP 
 The --synthetic hosts do not advertise over Bonjour, so this is the only way to reach them."""
 import json, re, socket, struct, sys, time
 
-KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye",24:"menu",26:"pointer",32:"clipboard"}
+KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye",24:"menu",26:"pointer",32:"clipboard",46:"cursorkind"}
 BOOL = {"1": True, "0": False, "true": True, "false": False, "on": True, "off": False, "yes": True, "no": False}
 BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "persistent", "virtualDisplayAvailable",
              "thisConnectionAway", "awayRunning"}
@@ -143,7 +152,7 @@ SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisp
 AWAY_KEYS = {"homeBitrate", "homeCaptureScale", "awayBitrate", "awayCaptureScale", "thisConnectionAway", "awayRunning"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "linkState", "clipboard"} | AWAY_KEYS
 TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "fetch", "press", "raw25", "raw27",
-         "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32")
+         "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32", "pen", "raw45")
 INPUT = ("move", "tap", "key", "input")
 # What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
 GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
@@ -194,6 +203,21 @@ def gesture(text):
     n = number(fingers, "--gesture's fingers") if fingers else 3
     if n not in (3, 4): raise ValueError(f"--gesture: 3 or 4 fingers, not {n}")
     return {"gesture": name, "fingers": n}
+
+# What --pen may send: PenInput's six phases (Pen.swift). Anything else goes with --raw45.
+PEN_PHASES = ("hover", "down", "move", "up", "cancel", "leave")
+
+def pen(text):
+    """PHASE[,X,Y[,P[,ALT,AZ]]] as a PenInput with at most one sample."""
+    phase, *rest = text.split(",")
+    if phase not in PEN_PHASES: raise ValueError(f"--pen: not a phase: {phase!r} ({', '.join(PEN_PHASES)})")
+    if phase == "leave" or (phase == "cancel" and not rest):
+        if rest: raise ValueError("--pen: leave takes no sample")
+        return {"phase": phase}
+    if len(rest) not in (2, 3, 5): raise ValueError(f"--pen: {phase} takes X,Y[,P[,ALT,AZ]], got {text!r}")
+    values = [number(v, "--pen", float) for v in rest]
+    if not all(v == v and abs(v) != float("inf") for v in values): raise ValueError("--pen: every number must be finite")
+    return {"phase": phase, "samples": [dict(zip(("x", "y", "p", "alt", "az"), values))]}
 
 def fractions(text, flag):
     """X,Y for --move and --tap: two finite numbers, frame fractions (outside 0…1 is allowed)."""
@@ -479,6 +503,7 @@ try:
                           else gesture(text) if name == "gesture"
                           else unescape(text) if name == "copy"
                           else "x" * number(text, "--copy-bytes") if name == "copy-bytes"
+                          else pen(text) if name == "pen"
                           else usage(text) if name == "key" else text)
             events.append((number(t, f"--{name}'s @T", float), i, name, text, parsed))
         elif name in VALUED:
@@ -543,6 +568,11 @@ try:
     if any(e[2] in ("gesture", "raw28") for e in events):
         if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
             raise ValueError(f"--gesture and --raw28 only go to a --synthetic host on this Mac, which posts no gesture; nothing on port {port} is one.")
+    # The Pencil likewise (docs/pencil-pressure-plan.md): a --synthetic host posts nothing; any other
+    # host would post its strokes on this Mac.
+    if any(e[2] in ("pen", "raw45") for e in events):
+        if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
+            raise ValueError(f"--pen and --raw45 only go to a --synthetic host on this Mac, which never posts input; nothing on port {port} is one.")
 except ValueError as e:
     print(f"sillclient.py: {e}", file=sys.stderr); sys.exit(2)
 show_pointer = "--pointer" in flags
@@ -742,6 +772,10 @@ def fire(e, now):
         s.sendall(msg(32, body)); print(f"  sent clipboard text, {len(parsed.encode())} bytes ({len(body)} of JSON) at {at}")
     elif name == "raw32":
         s.sendall(msg(32, text.encode())); print(f"  sent raw kind 32 {text} at {at}")
+    elif name == "pen":
+        s.sendall(msg(45, json.dumps(parsed).encode())); print(f"  sent pen {json.dumps(parsed)} at {at}")
+    elif name == "raw45":
+        s.sendall(msg(45, text.encode())); print(f"  sent raw kind 45 {text} at {at}")
 while time.time() - t0 < dur:
     now = time.time()
     while events and now - t0 >= events[0][0]:
@@ -788,7 +822,8 @@ while time.time() - t0 < dur:
         elif kind == 2:
             d = json.loads(payload)
             print(f"  windowList: {len(d.get('windows', []))} windows, active={d.get('active')}"
-                  + (f" clipboard={d['clipboard']}" if "clipboard" in d else ""))
+                  + (f" clipboard={d['clipboard']}" if "clipboard" in d else "")
+                  + (f" pencil={d['pencil']}" if "pencil" in d else ""))
         elif kind == 32:
             try:
                 d = json.loads(payload)
