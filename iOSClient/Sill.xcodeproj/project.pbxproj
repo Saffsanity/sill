@@ -54,6 +54,43 @@
 		A1000001000000000000A402 /* TourOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F402 /* TourOverlay.swift */; };
 		A1000001000000000000AB01 /* DuoPosture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FB01 /* DuoPosture.swift */; };
 		A1000001000000000000AB02 /* DuoPostureReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FB02 /* DuoPostureReader.swift */; };
+		A10000010000000000005D00 /* StreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F003 /* StreamClient.swift */; };
+		A10000010000000000005D01 /* StreamClient+Home.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F601 /* StreamClient+Home.swift */; };
+		A10000010000000000005D02 /* StreamClient+Remote.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F019 /* StreamClient+Remote.swift */; };
+		A10000010000000000005D03 /* StreamClient+Viewport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F011 /* StreamClient+Viewport.swift */; };
+		A10000010000000000005D04 /* SessionLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F015 /* SessionLink.swift */; };
+		A10000010000000000005D05 /* DeviceIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F01D /* DeviceIdentity.swift */; };
+		A10000010000000000005D06 /* SavedMacs.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F016 /* SavedMacs.swift */; };
+		A10000010000000000005D07 /* DiscoveryPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F014 /* DiscoveryPolicy.swift */; };
+		A10000010000000000005D08 /* RemoteConnector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F018 /* RemoteConnector.swift */; };
+		A10000010000000000005D09 /* RemoteDialPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F017 /* RemoteDialPolicy.swift */; };
+		A10000010000000000005D0A /* MessageReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F020 /* MessageReader.swift */; };
+		A10000010000000000005D0B /* HostSettingsLedger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F012 /* HostSettingsLedger.swift */; };
+		A10000010000000000005D0C /* AwayCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F801 /* AwayCopy.swift */; };
+		A10000010000000000005D0D /* GoodbyePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F01E /* GoodbyePolicy.swift */; };
+		A10000010000000000005D0E /* PointerPresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F301 /* PointerPresence.swift */; };
+		A10000010000000000005D0F /* MacMenuState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F040 /* MacMenuState.swift */; };
+		A10000010000000000005D10 /* TourPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F401 /* TourPolicy.swift */; };
+		A10000010000000000005D11 /* TrackpadGestures.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F701 /* TrackpadGestures.swift */; };
+		A10000010000000000005D12 /* KeyChords.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F901 /* KeyChords.swift */; };
+		A10000010000000000005D13 /* DiagnosticsHUD.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F010 /* DiagnosticsHUD.swift */; };
+		A10000010000000000005D14 /* DuoPosture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FB01 /* DuoPosture.swift */; };
+		A10000010000000000005D15 /* SillLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F201 /* SillLinks.swift */; };
+		A10000010000000000005A00 /* SillViewerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000010000000000005F00 /* SillViewerApp.swift */; };
+		A10000010000000000005A01 /* Pairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000010000000000005F01 /* Pairing.swift */; };
+		A10000010000000000005A02 /* StreamScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000010000000000005F02 /* StreamScreen.swift */; };
+		A10000010000000000005A03 /* StreamInputView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000010000000000005F03 /* StreamInputView.swift */; };
+		A10000010000000000005A04 /* HEVCDisplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000010000000000005F04 /* HEVCDisplayView.swift */; };
+		A10000010000000000005A05 /* MacKeyboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000010000000000005F05 /* MacKeyboard.swift */; };
+		A10000010000000000005A06 /* MacMenuHub.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000010000000000005F06 /* MacMenuHub.swift */; };
+		A10000010000000000005A07 /* PlatformShims.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000010000000000005F07 /* PlatformShims.swift */; };
+		A10000010000000000005A08 /* HarnessStubs.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000010000000000005F08 /* HarnessStubs.swift */; };
+		A10000010000000000005AA0 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000010000000000005FA0 /* Assets.xcassets */; };
+		A10000010000000000005AA1 /* StreamProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = A1000001000000000000D002 /* StreamProtocol */; };
+		A10000010000000000005A09 /* DevicesWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000010000000000005F09 /* DevicesWindow.swift */; };
+		A10000010000000000005A0A /* SessionWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000010000000000005F0A /* SessionWindow.swift */; };
+		A10000010000000000005D16 /* StreamClient+Clipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FC64 /* StreamClient+Clipboard.swift */; };
+		A10000010000000000005A0B /* ClipboardChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000010000000000005F0B /* ClipboardChip.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -106,6 +143,21 @@
 		A1000001000000000000F402 /* TourOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TourOverlay.swift; sourceTree = "<group>"; };
 		A1000001000000000000FB01 /* DuoPosture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuoPosture.swift; sourceTree = "<group>"; };
 		A1000001000000000000FB02 /* DuoPostureReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuoPostureReader.swift; sourceTree = "<group>"; };
+		A10000010000000000005F00 /* SillViewerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SillViewerApp.swift; sourceTree = "<group>"; };
+		A10000010000000000005F01 /* Pairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing.swift; sourceTree = "<group>"; };
+		A10000010000000000005F02 /* StreamScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamScreen.swift; sourceTree = "<group>"; };
+		A10000010000000000005F03 /* StreamInputView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamInputView.swift; sourceTree = "<group>"; };
+		A10000010000000000005F04 /* HEVCDisplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HEVCDisplayView.swift; sourceTree = "<group>"; };
+		A10000010000000000005F05 /* MacKeyboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacKeyboard.swift; sourceTree = "<group>"; };
+		A10000010000000000005F06 /* MacMenuHub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMenuHub.swift; sourceTree = "<group>"; };
+		A10000010000000000005F07 /* PlatformShims.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformShims.swift; sourceTree = "<group>"; };
+		A10000010000000000005F08 /* HarnessStubs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HarnessStubs.swift; sourceTree = "<group>"; };
+		A10000010000000000005FA0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A10000010000000000005FA1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A1000001000000000000F00E /* Sill Viewer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Sill Viewer.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000010000000000005F09 /* DevicesWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevicesWindow.swift; sourceTree = "<group>"; };
+		A10000010000000000005F0A /* SessionWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionWindow.swift; sourceTree = "<group>"; };
+		A10000010000000000005F0B /* ClipboardChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardChip.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -114,6 +166,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1000001000000000000A006 /* StreamProtocol in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1000001000000000000B012 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000010000000000005AA1 /* StreamProtocol in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -171,6 +231,7 @@
 				A1000001000000000000F101 /* PrivacyInfo.xcprivacy */,
 				A1000001000000000000F006 /* Info.plist */,
 				A1000001000000000000F00D /* Info-Debug.plist */,
+				A1000001000000000000C004 /* MacClient */,
 				A1000001000000000000C002 /* Frameworks */,
 				A1000001000000000000C003 /* Products */,
 			);
@@ -187,8 +248,31 @@
 			isa = PBXGroup;
 			children = (
 				A1000001000000000000F007 /* Sill.app */,
+				A1000001000000000000F00E /* Sill Viewer.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		A1000001000000000000C004 /* MacClient */ = {
+			isa = PBXGroup;
+			children = (
+				A10000010000000000005F00 /* SillViewerApp.swift */,
+				A10000010000000000005F0B /* ClipboardChip.swift */,
+				A10000010000000000005F0A /* SessionWindow.swift */,
+				A10000010000000000005F09 /* DevicesWindow.swift */,
+				A10000010000000000005F01 /* Pairing.swift */,
+				A10000010000000000005F02 /* StreamScreen.swift */,
+				A10000010000000000005F03 /* StreamInputView.swift */,
+				A10000010000000000005F04 /* HEVCDisplayView.swift */,
+				A10000010000000000005F05 /* MacKeyboard.swift */,
+				A10000010000000000005F06 /* MacMenuHub.swift */,
+				A10000010000000000005F07 /* PlatformShims.swift */,
+				A10000010000000000005F08 /* HarnessStubs.swift */,
+				A10000010000000000005FA0 /* Assets.xcassets */,
+				A10000010000000000005FA1 /* Info.plist */,
+			);
+			name = MacClient;
+			path = ../MacClient;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -214,6 +298,26 @@
 			productReference = A1000001000000000000F007 /* Sill.app */;
 			productType = "com.apple.product-type.application";
 		};
+		A1000001000000000000E002 /* Sill Viewer */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000010000000000009004 /* Build configuration list for PBXNativeTarget "Sill Viewer" */;
+			buildPhases = (
+				A1000001000000000000B011 /* Sources */,
+				A1000001000000000000B012 /* Frameworks */,
+				A1000001000000000000B013 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "Sill Viewer";
+			packageProductDependencies = (
+				A1000001000000000000D002 /* StreamProtocol */,
+			);
+			productName = "Sill Viewer";
+			productReference = A1000001000000000000F00E /* Sill Viewer.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -226,6 +330,9 @@
 				TargetAttributes = {
 					A1000001000000000000E001 = {
 						CreatedOnToolsVersion = 15.0;
+					};
+					A1000001000000000000E002 = {
+						CreatedOnToolsVersion = 27.0;
 					};
 				};
 			};
@@ -246,6 +353,7 @@
 			projectRoot = "";
 			targets = (
 				A1000001000000000000E001 /* Sill */,
+				A1000001000000000000E002 /* Sill Viewer */,
 			);
 		};
 /* End PBXProject section */
@@ -257,6 +365,14 @@
 			files = (
 				A1000001000000000000A005 /* Assets.xcassets in Resources */,
 				A1000001000000000000A101 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1000001000000000000B013 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000010000000000005AA0 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -311,6 +427,48 @@
 				A1000001000000000000A042 /* MacMenuHub.swift in Sources */,
 				A1000001000000000000A043 /* SillAppDelegate.swift in Sources */,
 				A1000001000000000000A044 /* MacMenuButton.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1000001000000000000B011 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000010000000000005A00 /* SillViewerApp.swift in Sources */,
+				A10000010000000000005A0B /* ClipboardChip.swift in Sources */,
+				A10000010000000000005A0A /* SessionWindow.swift in Sources */,
+				A10000010000000000005A09 /* DevicesWindow.swift in Sources */,
+				A10000010000000000005A01 /* Pairing.swift in Sources */,
+				A10000010000000000005A02 /* StreamScreen.swift in Sources */,
+				A10000010000000000005A03 /* StreamInputView.swift in Sources */,
+				A10000010000000000005A04 /* HEVCDisplayView.swift in Sources */,
+				A10000010000000000005A05 /* MacKeyboard.swift in Sources */,
+				A10000010000000000005A06 /* MacMenuHub.swift in Sources */,
+				A10000010000000000005A07 /* PlatformShims.swift in Sources */,
+				A10000010000000000005A08 /* HarnessStubs.swift in Sources */,
+				A10000010000000000005D00 /* StreamClient.swift in Sources */,
+				A10000010000000000005D01 /* StreamClient+Home.swift in Sources */,
+				A10000010000000000005D02 /* StreamClient+Remote.swift in Sources */,
+				A10000010000000000005D03 /* StreamClient+Viewport.swift in Sources */,
+				A10000010000000000005D04 /* SessionLink.swift in Sources */,
+				A10000010000000000005D05 /* DeviceIdentity.swift in Sources */,
+				A10000010000000000005D06 /* SavedMacs.swift in Sources */,
+				A10000010000000000005D07 /* DiscoveryPolicy.swift in Sources */,
+				A10000010000000000005D08 /* RemoteConnector.swift in Sources */,
+				A10000010000000000005D09 /* RemoteDialPolicy.swift in Sources */,
+				A10000010000000000005D0A /* MessageReader.swift in Sources */,
+				A10000010000000000005D0B /* HostSettingsLedger.swift in Sources */,
+				A10000010000000000005D0C /* AwayCopy.swift in Sources */,
+				A10000010000000000005D0D /* GoodbyePolicy.swift in Sources */,
+				A10000010000000000005D0E /* PointerPresence.swift in Sources */,
+				A10000010000000000005D0F /* MacMenuState.swift in Sources */,
+				A10000010000000000005D10 /* TourPolicy.swift in Sources */,
+				A10000010000000000005D11 /* TrackpadGestures.swift in Sources */,
+				A10000010000000000005D12 /* KeyChords.swift in Sources */,
+				A10000010000000000005D13 /* DiagnosticsHUD.swift in Sources */,
+				A10000010000000000005D14 /* DuoPosture.swift in Sources */,
+				A10000010000000000005D15 /* SillLinks.swift in Sources */,
+				A10000010000000000005D16 /* StreamClient+Clipboard.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -504,6 +662,68 @@
 			};
 			name = Release;
 		};
+		A10000010000000000009311 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 4;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ../MacClient/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Sill Viewer";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright 2026 Noah Saffer. Apache License 2.0.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.5.1;
+				PRODUCT_BUNDLE_IDENTIFIER = me.saffer.sill.viewer;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A10000010000000000009312 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 4;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ../MacClient/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Sill Viewer";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright 2026 Noah Saffer. Apache License 2.0.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.5.1;
+				PRODUCT_BUNDLE_IDENTIFIER = me.saffer.sill.viewer;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -525,6 +745,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		A10000010000000000009004 /* Build configuration list for PBXNativeTarget "Sill Viewer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000010000000000009311 /* Debug */,
+				A10000010000000000009312 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -536,6 +765,10 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		A1000001000000000000D001 /* StreamProtocol */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = StreamProtocol;
+		};
+		A1000001000000000000D002 /* StreamProtocol */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = StreamProtocol;
 		};

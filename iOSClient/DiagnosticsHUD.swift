@@ -1,5 +1,8 @@
 import Combine
+import Foundation
+#if canImport(UIKit)
 import UIKit
+#endif
 import StreamProtocol
 
 // MARK: - Client stats reporter
@@ -49,8 +52,16 @@ final class ClientStatsReporter: ObservableObject {
         return id.isEmpty ? name : "\(name) (\(id))"
     }()
 
-    /// "iPad14,1", or "iPad16,6 simulator": also what a pairing request gives as the model.
+    /// "iPad14,1", or "iPad16,6 simulator": also what a pairing request gives as the model. On a
+    /// Mac, its model ("Mac14,9"): uname's machine there is only the architecture.
     static var hardwareIdentifier: String {
+        #if os(macOS)
+        var size = 0
+        sysctlbyname("hw.model", nil, &size, nil, 0)
+        var model = [CChar](repeating: 0, count: max(size, 1))
+        sysctlbyname("hw.model", &model, &size, nil, 0)
+        return String(cString: model)
+        #else
         if let simulated = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] {
             return "\(simulated) simulator"
         }
@@ -59,12 +70,13 @@ final class ClientStatsReporter: ObservableObject {
         return withUnsafeBytes(of: &info.machine) { raw in
             String(decoding: raw.prefix(while: { $0 != 0 }), as: UTF8.self)
         }
+        #endif
     }
 }
 
 // MARK: - HUD (DEBUG only)
 
-#if DEBUG
+#if DEBUG && canImport(UIKit)
 /// The on-screen readout: "58 fps · age 9/24 ms · rtt 7/80 ms · 3024×1898" in a translucent
 /// capsule at the display view's top-right; each pair is the last second's median/max, "–" for a
 /// second without a sample. Only built when launched with `-SillHUD 1`; never in Release.

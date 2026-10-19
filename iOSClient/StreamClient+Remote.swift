@@ -1,7 +1,11 @@
 import Foundation
 import Network
 import CryptoKit
+#if canImport(UIKit)
 import UIKit
+#else
+import AppKit
+#endif
 import StreamProtocol
 
 // Remote access on the device (docs/remote-access-plan.md §7): pairing, saved Macs, remote dials,
@@ -143,7 +147,13 @@ enum RemoteCopy {
 
 extension StreamClient {
     /// "iPhone" or "iPad", for copy about this device.
-    static var deviceWord: String { UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad" }
+    static var deviceWord: String {
+        #if os(macOS)
+        return "Mac"
+        #else
+        return UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad"
+        #endif
+    }
 
     /// DEBUG builds keep 127.0.0.1 for the simulator's tests against a host on this Mac.
     static var keepsLoopback: Bool {
@@ -171,9 +181,26 @@ extension StreamClient {
         updateDiscovery()
     }
 
-    /// Writes the list only (`recomputeMacs` itself writes what it learns of a Mac's door).
+    /// Writes the list only (`recomputeMacs` itself writes what it learns of a Mac's door), and tells
+    /// the process's other clients (another iPad window, another Mac viewer window), which then read
+    /// it back before they change it themselves: each writes the whole list, so one working from an
+    /// older copy would drop the other's pairing.
     func storeSavedMacs() {
-        if !savedMacsSeeded { UserDefaults.standard.set(SavedMacs.encode(savedMacs), forKey: SavedMacs.defaultsKey) }
+        guard !savedMacsSeeded else { return }
+        UserDefaults.standard.set(SavedMacs.encode(savedMacs), forKey: SavedMacs.defaultsKey)
+        NotificationCenter.default.post(name: Self.savedMacsChanged, object: self)
+    }
+
+    static let savedMacsChanged = Notification.Name("me.saffer.sill.savedMacsChanged")
+
+    /// Another client of this process wrote the list (`storeSavedMacs`). Main thread.
+    func savedMacsChangedElsewhere() {
+        guard !savedMacsSeeded else { return }
+        let stored = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
+        guard stored != savedMacs else { return }
+        savedMacs = stored
+        recomputeMacs()
+        updateDiscovery()
     }
 
     /// Forget: the record only. The Mac lists this device until it is removed there, and the

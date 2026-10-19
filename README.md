@@ -184,6 +184,19 @@ The iPhone and iPad app:
    Mac. The first time, a Sill for Mac built from this repository asks you to
    pair: scan the code it shows, or connect the device with a USB cable.
 
+Sill Viewer, the same client on a Mac (show a window of one Mac on another,
+used with the second Mac's mouse, trackpad and keyboard):
+
+1. Open `iOSClient/Sill.xcodeproj` and pick the Sill Viewer scheme (its sources
+   are the iOS app's client files plus `MacClient/`).
+2. In the Sill Viewer target's Signing & Capabilities, pick your team, and
+   change the bundle identifier `me.saffer.sill.viewer` to one of your own.
+3. Run it, and click the other Mac in the list. Pairing works as on iPhone and
+   iPad, with the code typed. The streamed app's menus appear in the menu bar,
+   ⌘ shortcuts go to the other Mac (Stream › Send Keyboard Shortcuts to the
+   Mac, ⌃⌥⌘K, turns that off), and Text Size sizes the other Mac's window to
+   the viewer's.
+
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) has the rest: every command-line
 flag, the test tools and the simulator harness, permissions and how to reset
 them, Remote Access, troubleshooting and releases.
