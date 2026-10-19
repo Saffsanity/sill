@@ -180,6 +180,9 @@ struct StreamScreen: View {
     /// streams changing meanwhile (a window closed on the Mac, another device's pick). It applies as
     /// the panel goes, in the same motion.
     @State private var largerPictureHeld: Bool? = nil
+    /// The zoom level for the stream view on iPhone: 1.0 is normal, up to 5.0.
+    @State private var zoomScale: CGFloat = 1.0
+    @State private var zoomCursor = CGPoint(x: 0.5, y: 0.5)
     #if DEBUG
     /// The console says once when a decision starts to wait.
     @State private var tourWaitLogged: Double? = nil
@@ -1065,26 +1068,39 @@ struct StreamScreen: View {
         ZStack(alignment: .topLeading) {
             Color.black
 
-            ZStack {
-                StreamView(client: client)
-                // Same frame as the video, so a touch maps straight onto the streamed frame.
-                InputOverlay(videoSize: client.videoSize,
-                             send: { client.sendInput($0) },
-                             setOwnPointer: { client.setOwnPointer($0, from: $1) },
-                             proxy: overlay,
-                             isKeyboardShown: $keyboardShown,
-                             latchedModifiers: latched,
-                             onModifiersConsumed: { latched = [] },
-                             sendGesture: { client.sendGesture($0, fingers: $1) })
+            VStack(spacing: 0) {
+                ZoomableStream(scale: zoomScale, cursor: zoomCursor) {
+                    ZStack {
+                        StreamView(client: client, zoomScale: zoomScale, onPointerPositionChange: { point in
+                            if let point { zoomCursor = point }
+                        })
+                        // Same frame as the video, so a touch maps straight onto the streamed frame.
+                        InputOverlay(videoSize: client.videoSize,
+                                     send: { client.sendInput($0) },
+                                     setOwnPointer: { client.setOwnPointer($0, from: $1) },
+                                     proxy: overlay,
+                                     isKeyboardShown: $keyboardShown,
+                                     latchedModifiers: latched,
+                                     onModifiersConsumed: { latched = [] },
+                                     sendGesture: { client.sendGesture($0, fingers: $1) })
+                    }
+                }
+                .background(Palette.panel)
+                .overlay(alignment: .top) { LinkLineView(text: shownLinkLine) }
+                .clipShape(streamShape)
+                .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
+                // The panel itself, inside the padding: the size the host fits the Mac window to.
+                .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { panelSize = $0 })
+                .tourTarget(.stream)
+                .padding(8)
+
+                // Zoom slider on iPhone: below the stream, above the drawer and settings layers.
+                if DuoLayout.phoneArrangement {
+                    ZoomSlider(scale: $zoomScale)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 4)
+                }
             }
-            .background(Palette.panel)
-            .overlay(alignment: .top) { LinkLineView(text: shownLinkLine) }
-            .clipShape(streamShape)
-            .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
-            // The panel itself, inside the padding: the size the host fits the Mac window to.
-            .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { panelSize = $0 })
-            .tourTarget(.stream)
-            .padding(8)
 
             // The dim comes after the overlay on purpose: with the drawer open a tap on the dim
             // closes the drawer instead of clicking the Mac.
@@ -2113,5 +2129,91 @@ extension PhonePortraitLayout.Streaming {
         case .desktop: self = .desktop
         case .window: self = .window
         }
+    }
+}
+
+// MARK: - Zoom slider
+
+/// A slider that controls the stream's magnification on an iPhone, shown below the stream.
+/// Range 1×–5×, with a 1× detent (snaps back when close). The slider is compact: a 🔍 icon,
+/// the track, and the current multiplier label.
+struct ZoomSlider: View {
+    @Binding var scale: CGFloat
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Palette.muted)
+            Slider(value: $scale, in: 1...5, step: 0.1)
+                .tint(Palette.accent)
+                .onChange(of: scale) { _, newValue in
+                    if newValue < 1.05 { scale = 1.0 }
+                }
+            Text(String(format: "%.1f×", scale))
+                .font(.system(size: 12, weight: .medium).monospacedDigit())
+                .foregroundStyle(Palette.barLabel)
+                .frame(width: 32, alignment: .trailing)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(Palette.bar.opacity(0.85))
+        .clipShape(Capsule())
+    }
+}
+
+// MARK: - Zoomable stream wrapper
+
+/// Magnifies around the centre and only pans when the pointer leaves a broad central dead zone.
+/// The cursor can move freely inside that zone without making the picture follow it. Panning is
+/// clamped to the enlarged image, and no gesture recognizer is added so InputOverlay stays live.
+struct ZoomableStream<Content: View>: View {
+    let scale: CGFloat
+    let cursor: CGPoint
+    let content: () -> Content
+    @State private var pan = CGSize.zero
+
+    var body: some View {
+        GeometryReader { geometry in
+            content()
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .scaleEffect(scale, anchor: .center)
+                .offset(pan)
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .clipped()
+                .onChange(of: cursor) { _, point in
+                    pan = adjustedPan(pan, for: point, size: geometry.size)
+                }
+                .onChange(of: scale) { _, newScale in
+                    pan = adjustedPan(pan, for: cursor, size: geometry.size, scale: newScale)
+                }
+                .onChange(of: geometry.size) { _, newSize in
+                    pan = adjustedPan(pan, for: cursor, size: newSize)
+                }
+        }
+        .clipped()
+    }
+
+    private func adjustedPan(_ current: CGSize, for point: CGPoint, size: CGSize, scale zoom: CGFloat? = nil) -> CGSize {
+        let zoom = max(1, zoom ?? scale)
+        guard zoom > 1, size.width > 0, size.height > 0 else { return .zero }
+
+        // Let the pointer roam through the middle 70% before the viewport starts following it.
+        let low: CGFloat = 0.15
+        let high: CGFloat = 0.85
+        let x = min(max(point.x, 0), 1)
+        let y = min(max(point.y, 0), 1)
+        let screenX = size.width / 2 + (x - 0.5) * size.width * zoom + current.width
+        let screenY = size.height / 2 + (y - 0.5) * size.height * zoom + current.height
+        var next = current
+        if screenX < low * size.width { next.width += low * size.width - screenX }
+        if screenX > high * size.width { next.width -= screenX - high * size.width }
+        if screenY < low * size.height { next.height += low * size.height - screenY }
+        if screenY > high * size.height { next.height -= screenY - high * size.height }
+
+        let maxX = (zoom - 1) * size.width / 2
+        let maxY = (zoom - 1) * size.height / 2
+        return CGSize(width: min(max(next.width, -maxX), maxX),
+                      height: min(max(next.height, -maxY), maxY))
     }
 }

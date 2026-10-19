@@ -138,6 +138,8 @@ struct PortraitMetrics {
 /// in both; each arrangement places them.
 struct PortraitStreamScreen: View {
     @ObservedObject var client: StreamClient
+    @State private var zoomScale: CGFloat = 1.0
+    @State private var zoomCursor = CGPoint(x: 0.5, y: 0.5)
     var metrics: PortraitMetrics = .regular
     @Binding var drawerOpen: Bool
     @Binding var keyboardShown: Bool
@@ -326,10 +328,10 @@ struct PortraitStreamScreen: View {
 
     private func phoneStack(_ layout: PhonePortraitLayout, span: CGFloat) -> some View {
         let larger = layout.largerPicture
-        // In reading order, which is also top to bottom: the picture, row 1, the strip (none with
-        // Larger Picture), the key row, the trackpad.
-        let rects: [CGRect] = larger ? [layout.pane(video: client.videoSize), layout.row1, layout.keys, layout.trackpad]
-                                     : [layout.picture, layout.row1, layout.strip, layout.keys, layout.trackpad]
+        // In reading order, which is also top to bottom: the picture and zoom slider, row 1, the
+        // strip (none with Larger Picture), the key row, the trackpad.
+        let rects: [CGRect] = larger ? [layout.pane(video: client.videoSize), layout.zoomSlider, layout.row1, layout.keys, layout.trackpad]
+                                     : [layout.picture, layout.zoomSlider, layout.row1, layout.strip, layout.keys, layout.trackpad]
         return ZStack(alignment: .topLeading) {
             Color.black
 
@@ -340,6 +342,8 @@ struct PortraitStreamScreen: View {
             // beside them.
             PhoneRows(size: layout.size, rects: rects) {
                 picturePane(measured: false).accessibilityHidden(drawerOpen)
+                // PhoneRows assigns this exact rect, just like it does for the picture and controls.
+                ZoomSlider(scale: $zoomScale)
                 phoneRow1(layout, menus: larger && client.menus.hasMenus)
                 if !larger {
                     phoneRow2(layout)
@@ -454,8 +458,11 @@ struct PortraitStreamScreen: View {
     /// a phone sends its layout's picture instead (`phone`), the same rect or, with Larger Picture,
     /// the room this pane sits at the top of.
     private func picturePane(measured: Bool) -> some View {
-        ZStack {
-            StreamView(client: client)
+        ZoomableStream(scale: zoomScale, cursor: zoomCursor) {
+            ZStack {
+                StreamView(client: client, zoomScale: zoomScale, onPointerPositionChange: { point in
+                    if let point { zoomCursor = point }
+                })
             InputOverlay(videoSize: client.videoSize,
                          send: { client.sendInput($0) },
                          setOwnPointer: { client.setOwnPointer($0, from: $1) },
@@ -464,6 +471,7 @@ struct PortraitStreamScreen: View {
                          latchedModifiers: latched,
                          onModifiersConsumed: { latched = [] },
                          sendGesture: { client.sendGesture($0, fingers: $1) })
+            }
         }
         .background(Palette.panel)
         .overlay(alignment: .top) { LinkLineView(text: linkLine) }
@@ -498,6 +506,7 @@ struct PortraitStreamScreen: View {
                  latched: latched,
                  onModifiersConsumed: { latched = [] },
                  verticalSpan: verticalSpan,
+                 zoomScale: zoomScale,
                  sendGesture: { client.sendGesture($0, fingers: $1) })
             .tourTarget(.trackpad)
     }
@@ -607,7 +616,7 @@ private struct AfterRow1: ViewModifier {
 }
 
 /// The phone's parts at their `PhonePortraitLayout` rects, each proposed exactly its rect, in the
-/// order they are declared (picture, row 1, strip, key row, trackpad; no strip with Larger Picture),
+/// order they are declared (picture, zoom slider, row 1, strip, key row, trackpad; no strip with Larger Picture),
 /// which is the reading order VoiceOver takes.
 private struct PhoneRows: Layout {
     let size: CGSize

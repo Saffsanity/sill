@@ -38,6 +38,9 @@ struct PhonePortraitLayout: Equatable {
     static let aspect: CGFloat = 1.6
     /// From the picture's margin to row 1's band.
     static let underPicture: CGFloat = 10
+    /// Compact magnification control directly below the stream pane.
+    static let zoomHeight: CGFloat = 34
+    static let zoomGap: CGFloat = 3
     /// Row 1 sits in a band 12 pt taller than its buttons, the buttons centred, as the compact window
     /// bar holds its 50 pt buttons in 62: 6 pt above and below them. So 24 pt from the picture to the
     /// buttons (8 + 10 + 6) and 16 from the buttons to the strip (6 + 10), whose thumbnails sit 6 pt
@@ -112,6 +115,7 @@ struct PhonePortraitLayout: Equatable {
     /// fits windows to. With Larger Picture, the picture's room: the viewport still, but the frame is
     /// the picture's own shape inside it (`pane(video:)`).
     let picture: CGRect
+    let zoomSlider: CGRect
     /// Row 1's buttons, across the row and 50 pt tall (their band is 6 pt more above and below).
     let row1: CGRect
     /// Row 1's buttons, in `Button` order.
@@ -160,14 +164,14 @@ struct PhonePortraitLayout: Equatable {
 
     /// Everything but the picture and the trackpad, top to bottom: 240 pt.
     static var fixedHeight: CGFloat {
-        margin + margin + underPicture + band + buttonHeight + band + rowGap + stripHeight + rowGap + capHeight
+        margin + margin + zoomGap + zoomHeight + underPicture + band + buttonHeight + band + rowGap + stripHeight + rowGap + capHeight
             + rowGap + bottom
     }
 
     /// Larger Picture: everything but the picture above the keyboard's top, top to bottom: 152 pt
     /// (no strip; the key row `keyboardClearance` above the keyboard).
     static var largerFixedHeight: CGFloat {
-        margin + margin + underPicture + band + buttonHeight + band + capHeight + rowGap + keyboardClearance
+        margin + margin + zoomGap + zoomHeight + underPicture + band + buttonHeight + band + capHeight + rowGap + keyboardClearance
     }
 
     /// `keyboard`: Larger Picture above a software keyboard this tall (`PhonePortraitLayout.keyboard(for:…)`),
@@ -187,10 +191,12 @@ struct PhonePortraitLayout: Equatable {
         let footprint = keyboard.map { max($0, Self.minTrackpad + Self.bottom) }
         let largerHeight = footprint.map { max(0, (height - $0 - Self.largerFixedHeight).rounded(.down)) }
         picture = CGRect(x: Self.margin, y: Self.margin, width: pictureWidth, height: largerHeight ?? pictureHeight)
+        zoomSlider = CGRect(x: Self.side, y: picture.maxY + Self.zoomGap,
+                            width: max(0, width - 2 * Self.side), height: Self.zoomHeight)
 
         // Row 1: five equal buttons across the row, `gap` apart, centred in their band.
         let rowWidth = max(0, width - 2 * Self.side)
-        row1 = CGRect(x: Self.side, y: picture.maxY + Self.margin + Self.underPicture + Self.band,
+        row1 = CGRect(x: Self.side, y: zoomSlider.maxY + Self.underPicture + Self.band,
                       width: rowWidth, height: Self.buttonHeight)
         buttons = Self.split(row1, count: Button.allCases.count, gap: Self.gap)
 
