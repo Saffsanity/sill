@@ -97,6 +97,21 @@ The log: `tail -F ~/Library/Logs/Sill/Sill.log` (`-F`, not `-f`: at 10 MB the
 file moves to Sill.1.log and a new one starts), or Show Log… in the menu.
 Settings: `defaults read me.saffer.sill.mac`.
 
+When the Mac is about to sleep, Sill tells every connected device so before it
+does (a goodbye, kind 22, "sleep", with the Mac's words, "Noah’s MacBook Pro is
+going to sleep.") and closes its connection, so the device says why at once;
+the log says "The Mac is going to sleep: 1 device told.". When macOS quits Sill
+for a restart or a shut down, its quit says which, and the devices hear that
+("restart", "shutdown"; the log first "Quit: macOS asked Sill to quit for a
+restart."); a log out, Quit from the menu or a signal is "quit" as before. One
+goodbye per connection, the first: a Quit right after the sleep's tells a
+device nothing more. Words for a device from before these reasons are the
+Mac's own, which it shows as they are (issue #105; docs/update-notice-plan.md
+§7.3; `Sources/SillHost/HostGoodbye.swift`, checked in `Tests/checks/goodbye`).
+The command-line host does the same for sleep only with `--virtual-display`
+(it runs the AppKit loop then, where NSWorkspace says the Mac is about to
+sleep); without it, a device finds out by its liveness, as before.
+
 Updates: once a day (and when you click Check Now in Settings › General),
 Sill asks GitHub (api.github.com) whether a newer Sill has been released, and
 when one has, the menu offers "Sill 0.6 Is Available…" and Settings › General
@@ -212,8 +227,16 @@ Sill is stuck), again 5, 10, 20 and every 30 s after, 12 times at most and only
 while Sill is in front. After the third the status line says the Mac may be
 asleep, and after the twelfth that it stopped trying. The row listed afresh
 (the Mac's Sill relaunched), Sill back from the background, or a tap starts
-again. Back from the background the device also makes its Bonjour browser again
-(and the nearby one, if it runs), since iOS cuts a suspended app's connection
+again. When the Mac said why it went (Sill.app above), the device says so too:
+"Mac mini went to sleep. This iPad reconnects when it wakes.", and counts the
+Mac as asleep from the start, so a row listed then (a sleep proxy's) is first
+dialled 20 s later, then every 30 s, with the lines above from that dial on,
+and a row listed afresh (the Mac awake) at once; "Mac mini is restarting." (or
+"is shutting down.") "This iPad reconnects when it’s back.", and nothing is
+dialled until the Mac is listed afresh. Neither dials the Mac's addresses
+remotely unless the session came that way, and then not before 20 s. Back
+from the background the device also makes its Bonjour browser again (and the
+nearby one, if it runs), since iOS cuts a suspended app's connection
 to mDNSResponder and a browser made before then lists what it saw then; the
 rows it had stay up for the new browser's first 3 s, so a Mac that stays listed
 never blinks. A Desktop stream that the Mac stops (its capture stopped) is
@@ -898,7 +921,17 @@ settings in the defaults domain `SillMenuBar` (delete it after), and takes:
 - `--synthetic`: the test pattern, off Bonjour; the port is in the "Status:
   Test Pattern Mode" line.
 - `-SillLogFile <path>`, `-SillSetAfter '<s> key=value[,key=value][; <s> …]'`
-  and `-SillQuitAfter <s>`.
+  and `-SillQuitAfter <s>`. `-SillQuitAfter '<s> restart'` (or `shutdown`,
+  `logout`) quits with that reason instead: a quit Apple event to the app itself
+  carrying it, as macOS sends every app at a restart, a shut down or a log out,
+  read where Sill.app reads it. `-SillSleepAfter <s>`: as if the Mac were about
+  to sleep (the goodbye every device hears then, and the closed connections).
+  With `SILL_TEST_SERVICE_TYPE=_silltest._tcp` and `-requirePairing NO` a
+  simulator's Sill taps the test host's row (`-SillServiceType _silltest._tcp
+  -SillTapRow "Sill test ‹pid›"`) and shows what follows; a goodbye staged at
+  the device gate (`SILL_TEST_MIN_DEVICE_VERSION=99` with
+  `SILL_TEST_GOODBYE='{"reason":"sleep","message":"…","reconnect":true}'`)
+  shows the device's wait without a session.
 - `-SillRenderPreviews <dir>`: the Settings panes, the menu's cards, the
   glyphs and `menu.txt`, with no permission needed. Render them from
   `.build/Sill.app/Contents/MacOS/Sill` to see what Sill.app looks like: only

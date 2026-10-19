@@ -41,8 +41,11 @@ package enum HostShutdown {
 
     /// The app's Quit: the same window-home and display-gone as a signal, once, with the same
     /// watchdog, but no exit: the caller returns to AppKit, which ends the process (exit code 0).
+    /// `quitReason`: the reason macOS gave the quit (`kAEQuitReason`, read by the app's
+    /// applicationShouldTerminate), nil for a quit from the menu; a restart's or a shut down's tells
+    /// every device so (HostGoodbye.forQuit).
     @MainActor
-    package static func releaseForQuit(coordinator: StreamCoordinator?) {
+    package static func releaseForQuit(coordinator: StreamCoordinator?, quitReason: UInt32? = nil) {
         guard !began else { return }
         began = true
         print("Shutting down: putting the window back and removing the virtual display.")
@@ -50,7 +53,7 @@ package enum HostShutdown {
             print("Shutdown timed out; exiting anyway.")
             exit(0)
         }
-        coordinator?.shutdownForExit()
+        coordinator?.shutdownForExit(quitReason: quitReason)
     }
 
     static func begin(code: Int32, coordinator: () -> StreamCoordinator?) {

@@ -128,6 +128,10 @@ final class StreamServer {
         /// The last kind 26 sent to it; nil also while it drives the pointer, so the next one goes out
         /// whatever it says.
         var lastPointer: MacPointer?
+        /// It was told why its connection is about to close (kind 22): the first goodbye says why,
+        /// and no second one follows it (a Quit right after the Mac's sleep goodbye, or after the
+        /// device was removed, never replaces what the device was told). On `queue`.
+        var told = false
         init(_ c: NWConnection) { connection = c }
     }
 
@@ -1039,9 +1043,14 @@ final class StreamServer {
 
     /// Tells one admitted client why it is about to be closed, then closes it once the message is
     /// handed to the network or `within` has passed, whichever comes first: a registered client,
-    /// whose connection the stream and the catalog share. A connection that was never registered
-    /// closes with `closeWithGoodbye`. On `queue`.
+    /// whose connection the stream and the catalog share. One already told why (`told`) is closed
+    /// with nothing more said. A connection that was never registered closes with `closeWithGoodbye`.
+    /// On `queue`.
     func goodbye(_ goodbye: Goodbye, to connection: NWConnection, within: TimeInterval = 0.25) {
+        if let client = clients[ObjectIdentifier(connection)] {
+            guard !client.told else { connection.cancel(); return }
+            client.told = true
+        }
         Self.sayGoodbye(payload: Wire.encode(goodbye), on: connection, queue: queue, within: within)
     }
 
@@ -1053,22 +1062,46 @@ final class StreamServer {
         queue.asyncAfter(deadline: .now() + within) { connection.cancel() }
     }
 
-    /// Every admitted client, home and remote, gets `goodbye` (the app's Quit and the signal path:
-    /// "quit"); returns once each message was handed to the network or after `within`. Call from
-    /// any thread but the network queue.
-    func goodbyeAll(_ goodbye: Goodbye, within: TimeInterval) {
+    /// Every admitted client, home and remote, that was not told why already (`told`) gets
+    /// `goodbye`: the app's Quit and the signal path, "quit", or the reason macOS gave the Quit,
+    /// "restart" or "shutdown" (HostGoodbye.forQuit); the Mac about to sleep, "sleep". With `close`
+    /// (the sleep's) its connection then closes, as `goodbye(_:to:)` closes one, once the message is
+    /// handed to the network or after `within`: the device's session ends at once, with those words,
+    /// not when its liveness gives up on a Mac that went silent. Without it the process is about to
+    /// end and its end closes them. Returns how many were told, once each message was handed to the
+    /// network or after `within` (those not reached by then are not counted). Call from any thread
+    /// but the network queue.
+    @discardableResult
+    func goodbyeAll(_ goodbye: Goodbye, within: TimeInterval, close: Bool = false) -> Int {
         let group = DispatchGroup()
+        let count = TellCount()
         group.enter()
         queue.async { [self] in
             let data = StreamMessage(kind: .goodbye, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                                      payload: Wire.encode(goodbye)).serialized()
-            for client in clients.values where client.connection.state == .ready {
+            for client in clients.values where client.connection.state == .ready && !client.told {
+                client.told = true
+                count.add()
                 group.enter()
-                client.connection.send(content: data, completion: .contentProcessed { _ in group.leave() })
+                let c = client.connection
+                c.send(content: data, completion: .contentProcessed { _ in
+                    if close { c.cancel() }
+                    group.leave()
+                })
+                if close { queue.asyncAfter(deadline: .now() + within) { c.cancel() } }
             }
             group.leave()
         }
         _ = group.wait(timeout: .now() + within)
+        return count.value
+    }
+
+    /// How many `goodbyeAll` told, written on the network queue and read by its caller.
+    private final class TellCount: @unchecked Sendable {
+        private let lock = NSLock()
+        private var n = 0
+        func add() { lock.lock(); n += 1; lock.unlock() }
+        var value: Int { lock.lock(); defer { lock.unlock() }; return n }
     }
 
     // MARK: The device gate (DeviceGate)

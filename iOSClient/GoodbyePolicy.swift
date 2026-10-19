@@ -9,11 +9,19 @@ import StreamProtocol
 /// The five reasons hosts have sent since remote access keep their words and their reconnects, and
 /// so does "pairingRequired" (pairing at home: Require pairing turned on while this unpaired device
 /// was connected; StreamClient+Home ends such a session at home with these words). "update" (a Mac
-/// whose device floor is above this device's version, DeviceGate) and any other
-/// reason are notices: the host's own words (its `message`, cleaned), shown as the status line, and
-/// a reconnect only when the Mac asks for one (`"reconnect":true`); "update" also offers the App
-/// Store. Before this rule a reason the device did not know showed "‹Mac› disconnected…" and
-/// reconnected at once, so a Mac that refused the device was dialled again and again.
+/// whose device floor is above this device's version, DeviceGate) and any other reason are notices:
+/// the host's own words (its `message`, cleaned), shown as the status line, and a reconnect only
+/// when the Mac asks for one (`"reconnect":true`); "update" also offers the App Store. Before this
+/// rule a reason the device did not know showed "‹Mac› disconnected…" and reconnected at once, so a
+/// Mac that refused the device was dialled again and again.
+///
+/// The Mac's own going (issue #105): "sleep", "shutdown" and "restart" are notices too (said whatever
+/// the session's state, a remote dial's before its first window list included), in this build's
+/// words and always with a reconnect, which waits as `went` says (DiscoveryPolicy: the Mac counted as
+/// asleep, or a Mac going down left alone until it is listed afresh), and through the remote door
+/// only for a session that came that way: at home such a dial would only replace the words while
+/// the Mac is away, and the Mac's row brings it back. A device from before them shows the Mac's
+/// `message` ("‹Mac› is going to sleep.") and follows its `reconnect`.
 enum GoodbyePolicy {
     struct Outcome: Equatable {
         /// The connect screen's status line.
@@ -24,10 +32,19 @@ enum GoodbyePolicy {
         var remoteAllowed: Bool
         /// "Update Sill in the App Store" under the status line ("update" only).
         var storeLink = false
-        /// The Mac's own words: a goodbye this build shows as the host wrote it. Looked at before a
-        /// remote dial's failure rules (RemoteDialPolicy), which know only the older reasons.
+        /// Said whatever the session's state, before a remote dial's failure rules (RemoteDialPolicy),
+        /// which know only the older reasons: the Mac's own words ("update", a reason this build does
+        /// not know), or this build's for the Mac going to sleep, shutting down or restarting.
         var isNotice: Bool
+        /// How the Mac said it went, for the reconnect's waits (DiscoveryPolicy's `quitAt`,
+        /// `asleepAt`, `offAt`): nil for every other end.
+        var went: Went? = nil
     }
+
+    /// How the Mac said it went: Sill quit (a Mac row listed since before the goodbye is the
+    /// registration that is going), the Mac is going to sleep (the Mac counted as asleep), or it is
+    /// shutting down or restarting (a row listed since before it left alone until listed afresh).
+    enum Went: Equatable { case quit, asleep, off }
 
     /// The longest message shown, in characters (SafeText.label).
     static let messageLimit = 300
@@ -45,8 +62,9 @@ enum GoodbyePolicy {
 
     /// The session ended with `goodbye` (nil: no goodbye came). `mac` is what the status line calls
     /// the Mac (its saved name, else its Bonjour name or the address dialled), `device` "iPad" or
-    /// "iPhone", `saved` whether the Mac is a saved one (its remote door may be dialled).
-    static func outcome(_ goodbye: Goodbye?, mac: String, device: String, saved: Bool) -> Outcome {
+    /// "iPhone", `saved` whether the Mac is a saved one (its remote door may be dialled), `remote`
+    /// whether the session came through the remote door.
+    static func outcome(_ goodbye: Goodbye?, mac: String, device: String, saved: Bool, remote: Bool = false) -> Outcome {
         guard let goodbye else {
             return Outcome(text: saved ? "\(mac) disconnected. Sill will reconnect when it can reach it."
                                        : "\(mac) disconnected. It will reconnect when the Mac is back.",
@@ -55,7 +73,18 @@ enum GoodbyePolicy {
         switch goodbye.reason {
         case Goodbye.quit:
             return Outcome(text: "\(mac) quit Sill. This \(device) reconnects when it’s back.",
-                           reconnect: true, remoteAllowed: saved, isNotice: false)
+                           reconnect: true, remoteAllowed: saved, isNotice: false, went: .quit)
+        // The Mac's own going: this build's words, and notices (not in `knownReasons`), as "update"
+        // is, so they are said whatever the session's state, a remote dial's before its first list too.
+        case Goodbye.sleep:
+            return Outcome(text: "\(mac) went to sleep. This \(device) reconnects when it wakes.",
+                           reconnect: true, remoteAllowed: saved && remote, isNotice: true, went: .asleep)
+        case Goodbye.shutdown:
+            return Outcome(text: "\(mac) is shutting down. This \(device) reconnects when it’s back.",
+                           reconnect: true, remoteAllowed: saved && remote, isNotice: true, went: .off)
+        case Goodbye.restart:
+            return Outcome(text: "\(mac) is restarting. This \(device) reconnects when it’s back.",
+                           reconnect: true, remoteAllowed: saved && remote, isNotice: true, went: .off)
         case Goodbye.removed:
             return Outcome(text: "\(mac) removed this \(device). To use it again, pair it again.",
                            reconnect: false, remoteAllowed: false, isNotice: false)

@@ -210,10 +210,10 @@ public struct PairResult: Codable, Sendable {
 /// sent before 2026-09-25 are still, byte for byte, `{"reason":"quit"}` and the like.
 public struct Goodbye: Codable, Sendable, Equatable {
     /// "removed", "remoteOff", "internetOff", "quit", "busy", "pairingRequired" (Require pairing was
-    /// turned on while this unpaired device was connected at home) or "update". Always sent: a
-    /// device from before 2026-09-25 decodes nothing without it. A device from then on treats a
-    /// reason it does not know by `message` and `reconnect`, so a later host can tell it anything
-    /// (GoodbyePolicy).
+    /// turned on while this unpaired device was connected at home), "update", or the Mac's own going:
+    /// "sleep", "shutdown" or "restart". Always sent: a device from before 2026-09-25 decodes nothing
+    /// without it. A device from then on treats a reason it does not know by `message` and
+    /// `reconnect`, so a later host can tell it anything (GoodbyePolicy).
     public var reason: String
     /// Shown word for word as the connect screen's status line (after SafeText.label, at most 300
     /// characters). "update" always carries one, and a new reason should. Nil: the device's own words.
@@ -233,4 +233,27 @@ public struct Goodbye: Codable, Sendable, Equatable {
     public static let pairingRequired = "pairingRequired"
     /// The host no longer serves this device's version: update it (DeviceGate).
     public static let update = "update"
+    /// The Mac is going to sleep ("sleep": NSWorkspace says so under the AppKit loop, in Sill.app and
+    /// the CLI with --virtual-display), shutting down ("shutdown") or restarting ("restart": the
+    /// reason macOS gives Sill.app's Quit; a log out is a "quit", the Mac staying up). Each with
+    /// the Mac's words, which say what happened in plain words for a device from before these
+    /// reasons (it shows a reason it does not know by its `message`), and a reconnect, which such a
+    /// device follows as after any end. This build's words and its waits: GoodbyePolicy and
+    /// DiscoveryPolicy (docs/update-notice-plan.md §7.3). Additive: three reason strings.
+    public static let sleep = "sleep", shutdown = "shutdown", restart = "restart"
+
+    /// "‹Mac› is going to sleep."
+    public static func asleep(mac: String) -> Goodbye {
+        Goodbye(reason: sleep, message: "\(mac) is going to sleep.", reconnect: true)
+    }
+
+    /// "‹Mac› is shutting down."
+    public static func shuttingDown(mac: String) -> Goodbye {
+        Goodbye(reason: shutdown, message: "\(mac) is shutting down.", reconnect: true)
+    }
+
+    /// "‹Mac› is restarting."
+    public static func restarting(mac: String) -> Goodbye {
+        Goodbye(reason: restart, message: "\(mac) is restarting.", reconnect: true)
+    }
 }

@@ -597,6 +597,7 @@ package final class StreamCoordinator {
         }
         if let testMenuLine { print(testMenuLine) }   // TEST ONLY, and only with SILL_TEST_MENU_PID set
         server.start()
+        observeSleep()               // under the AppKit loop: the Mac about to sleep tells every device why
         remote?.apply(config)        // the remote door, when Remote Access is on (or a pairing window opens later)
         if promptForPermissions || CGPreflightScreenCaptureAccess() { await catalog.refreshWindows() }
         if let match = preselect?.lowercased(),
@@ -1883,17 +1884,59 @@ package final class StreamCoordinator {
     /// Called by HostShutdown on the main queue just before `exit` (or, for the app's Quit, just
     /// before AppKit exits): every key and button a device holds down on the Mac goes up (a modifier
     /// left down would outlive Sill: the Mac's next click a ⌘-click), every connected device hears why
-    /// (kind 22 "quit", at most 0.1 s), then a window Sill sized goes back to its own frame
-    /// (`restoreFits`), the staged window home, display gone. Capture and encoder need no stop; the
-    /// process is about to end. The CLI without --virtual-display lets go of the keys, puts a sized
-    /// window back and dies of the signal with no goodbye (`releaseKeysForExit`): its devices notice
-    /// by liveness.
-    package func shutdownForExit() {
+    /// (kind 22, at most 0.1 s: "quit", or for the app's Quit at a restart or a shut down the reason
+    /// macOS gave it, `quitReason`, HostGoodbye.forQuit; one line then; a device already told why, by
+    /// the Mac's sleep goodbye, hears nothing more), then a window Sill sized goes back to its own
+    /// frame (`restoreFits`), the staged window home, display gone. Capture and encoder need no stop;
+    /// the process is about to end. The CLI without --virtual-display lets go of the keys, puts a
+    /// sized window back and dies of the signal with no goodbye (`releaseKeysForExit`): its devices
+    /// notice by liveness.
+    package func shutdownForExit(quitReason: UInt32? = nil) {
         injector.releaseAll()
-        server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
+        let goodbye = HostGoodbye.forQuit(reason: quitReason, mac: macName)
+        let told = server.goodbyeAll(goodbye, within: 0.1)
+        if let line = HostGoodbye.line(goodbye, devices: told) { print(line) }
         shuttingDown = true
         restoreFits(keeping: nil)
         stage.release()
+    }
+
+    /// The Mac about to sleep, while the AppKit loop runs (Sill.app, and the CLI with
+    /// --virtual-display): NSWorkspace's willSleep, which it posts on the main thread and lets the Mac
+    /// sleep only once its observers return, so the goodbye goes out first (`goodbyeBeforeSleep`).
+    /// Without the AppKit loop (the CLI's dispatchMain) NSWorkspace says nothing, and a process that
+    /// registers for the Mac's sleep there without answering holds it up to 30 s: nothing is
+    /// registered, and its devices notice by liveness, as before. Once, from `start`.
+    private func observeSleep() {
+        guard appKitLoop, sleepObserver == nil else { return }
+        let sleep = SleepGoodbye(server: server, mac: macName)
+        // The block runs on the posting thread (queue nil), the main thread, synchronously: it reads
+        // no main-actor state, only what it captured, so no hop is needed.
+        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification,
+                                                                          object: nil, queue: nil) { _ in sleep.send() }
+    }
+    private var sleepObserver: NSObjectProtocol?
+
+    /// The same, now: the bare binary's `-SillSleepAfter` (TEST ONLY, DebugHooks), as if the Mac were
+    /// about to sleep.
+    package func goodbyeBeforeSleep() {
+        SleepGoodbye(server: server, mac: macName).send()
+    }
+
+    /// The Mac is about to sleep: every connected device hears why (kind 22 "sleep", the Mac's words
+    /// and a reconnect), and its connection closes right after, at most 0.1 s in all, so its status
+    /// line says so at once rather than when its liveness gives up on a Mac gone silent, and its
+    /// reconnect counts the Mac as asleep (GoodbyePolicy, DiscoveryPolicy). One line, only when a
+    /// device was connected. From any thread but the network queue: the server hops onto it
+    /// (`goodbyeAll`), and the Mac's name is a copy.
+    private struct SleepGoodbye: @unchecked Sendable {
+        let server: StreamServer
+        let mac: String
+        func send() {
+            let goodbye = Goodbye.asleep(mac: mac)
+            let told = server.goodbyeAll(goodbye, within: 0.1, close: true)
+            if let line = HostGoodbye.line(goodbye, devices: told) { print(line) }
+        }
     }
 
     /// The CLI's default path at a signal (HostShutdown.installKeyRelease), just before it dies of it:

@@ -75,12 +75,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// full screen first, waiting up to 2 s on a run-loop timer; a 4 s watchdog exits regardless,
     /// and the atexit restore still runs then. No confirmation. Signals do not come through here:
     /// HostShutdown handles them synchronously, with exit code 128 + the signal.
+    /// When macOS asks Sill to quit for a restart, a shut down or a log out, its quit Apple event
+    /// says which (`kAEQuitReason`), readable only while it is handled, here: a restart's or a shut
+    /// down's goodbye tells every device so (HostGoodbye), and the log says which.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if terminating { return .terminateNow }
         terminating = true
+        let quitReason = NSAppleEventManager.shared().currentAppleEvent?
+            .attributeDescriptor(forKeyword: AEKeyword(kAEQuitReason))?.enumCodeValue
+        if let line = HostGoodbye.quitLine(reason: quitReason) { print(line) }
         let coordinator = model.coordinator
         guard let c = coordinator, c.stagedWindowIsFullScreen else {
-            HostShutdown.releaseForQuit(coordinator: coordinator)
+            HostShutdown.releaseForQuit(coordinator: coordinator, quitReason: quitReason)
             return .terminateNow
         }
         print("Quit: taking the streamed window out of full screen first.")
@@ -90,7 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated {
                 guard c.stagedWindowSettled || Date() >= deadline else { return }
                 timer.invalidate()
-                HostShutdown.releaseForQuit(coordinator: c)
+                HostShutdown.releaseForQuit(coordinator: c, quitReason: quitReason)
                 NSApp.reply(toApplicationShouldTerminate: true)
             }
         }

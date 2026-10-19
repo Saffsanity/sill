@@ -738,9 +738,14 @@ final class StreamClient: ObservableObject {
         var rememberedDirect: Bool
         var remoteFailures = 0
         var nextRemoteAt = 0.0
-        /// The session ended with goodbye `quit`: a row listed since before `lostAt` is the Mac's
-        /// registration that is going, left alone for DiscoveryPolicy.quitWait (`reconnectRow`).
-        var afterQuit = false
+        /// How the Mac said it went (GoodbyePolicy.Went), at `lostAt`: `quit`, a row listed since
+        /// before is the Mac's registration that is going, left alone for DiscoveryPolicy.quitWait
+        /// (`reconnectRow`); `asleep`, the Mac counted as asleep (`listingStart`, and no remote dial
+        /// before `asleepWait`); `off`, a row listed since before never dialled (`reconnectRow`'s
+        /// `offAt`). Nil for every other end.
+        var went: GoodbyePolicy.Went?
+        /// When the Mac said it is going to sleep: `lostAt` after a goodbye `sleep`, else nil.
+        var asleepAt: Double? { went == .asleep ? lostAt : nil }
         /// The listing of the Mac's row the reconnect dials (its `sightings.since`, `directSince` for a
         /// Direct row), the dials of it so far, none of which connected, and when the last started
         /// (DiscoveryPolicy.redialRow, issue #69). A listing seen afresh, and the app's return from
@@ -760,11 +765,34 @@ final class StreamClient: ObservableObject {
     var reconnectCheck: DispatchWorkItem?
     /// A remote session's first window list must come within 10 s of `.ready`.
     var firstListDeadline: DispatchWorkItem?
-    /// A kind 22 on the current connection: why the Mac is about to close it, and what to do then
-    /// (GoodbyePolicy). One that does not decode reads as reason "", a reason this build does not know.
-    var goodbye: Goodbye?
-    /// The Mac's own words from the goodbye that ended the last session, when it was a notice
-    /// ("update", or a reason this build does not know): the connect screen's status line
+    /// A kind 22 and the connection it came on (`goodbyeOn`): why the Mac is about to close that
+    /// connection, and what to do then (GoodbyePolicy). It speaks for that connection's end only:
+    /// a move that carries the session on over another connection drops it (`finishMove`), a rescue
+    /// is refused only for the connection it came on, and a new session starts without one
+    /// (`connect`, `adopt`, `tearDown`), so a goodbye is never shown for a later connection's end.
+    /// One that does not decode reads as reason "", a reason this build does not know. Main thread.
+    private(set) var goodbye: Goodbye?
+    private var goodbyeOn: ObjectIdentifier?
+
+    /// The Mac said why it is about to close `c` (main thread).
+    private func heardGoodbye(_ goodbye: Goodbye, on c: NWConnection) {
+        self.goodbye = goodbye
+        goodbyeOn = ObjectIdentifier(c)
+    }
+
+    /// No goodbye stands: a new session, or the session carried on over another connection.
+    private func forgetGoodbye() {
+        goodbye = nil
+        goodbyeOn = nil
+    }
+
+    /// Whether the Mac said goodbye on `c`.
+    private func saidGoodbye(on c: NWConnection) -> Bool {
+        goodbye != nil && goodbyeOn == ObjectIdentifier(c)
+    }
+    /// The words of the goodbye that ended the last session, when it was a notice (the Mac's own for
+    /// "update" or a reason this build does not know; this build's for the Mac going to sleep,
+    /// shutting down or restarting): the connect screen's status line
     /// (GoodbyePolicy), and for "update" the App Store link under it, shown while the status line
     /// still says it: the next status (a tap, a dial, Forget) takes the link away. Cleared by the
     /// next session's tear-down.
@@ -1013,8 +1041,9 @@ final class StreamClient: ObservableObject {
         rebuildIfDue(.network, cameForward: true)
         if nearbyBrowser != nil { rebuildIfDue(.nearby, cameForward: true) }
         if var r = reconnect {
-            r.rowDials = 0
-            r.lastRowDialAt = nil
+            // Where a fresh look at its listing would start it: none, or, for a Mac that said it is
+            // going to sleep while it was listed, asleep (DiscoveryPolicy.listingStart).
+            (r.rowDials, r.lastRowDialAt) = DiscoveryPolicy.listingStart(listedSince: r.rowListing, asleepAt: r.asleepAt)
             reconnect = r
         }
         discoveryChanged()
@@ -1521,7 +1550,7 @@ final class StreamClient: ObservableObject {
         if case .service(let service, _, _, _) = endpoint { bonjourName = service }
         session = Session(route: peerToPeer ? .direct : .network, macID: macID, bonjourName: bonjourName, home: trust, row: row,
                           endpoint: endpoint)
-        goodbye = nil
+        forgetGoodbye()
         status = peerToPeer ? "Connecting to \(name) directly…" : "Connecting to \(name)…"
         #if DEBUG
         if trust.tls { print("home: dialing \(name) over TLS, \(DiscoveryPolicy.pin(trust) == .anyKey ? "any key" : "pinned")") }
@@ -2246,7 +2275,7 @@ final class StreamClient: ObservableObject {
         let reason = goodbye.reason.isEmpty ? "unreadable" : goodbye.reason
         if sessionDead {
             print("path: the Mac said goodbye (\(reason)) on the new connection: the session ends with its words")
-            self.goodbye = goodbye
+            heardGoodbye(goodbye, on: c)   // its close ends the move, and the session with it (`moveEnded`)
             return
         }
         switch move.kind {
@@ -2302,6 +2331,9 @@ final class StreamClient: ObservableObject {
             print("path: no fence (the old connection\(reconnected ? " is gone" : "'s path is gone")): \(released?.held ?? 0) held messages went out on the new connection\(waiting)")
             #endif
         }
+        // A goodbye the Mac said on the connection moved from spoke for that one: the session goes on
+        // over `c`, whose end is its own.
+        forgetGoodbye()
         // The Mac takes the new connection for a new device and reports the pointer to it at once,
         // having read nothing on it: while this device had the pointer, that report is its own doing
         // and must not bring up the Mac's arrow (docs/pointer-visibility-plan.md §7.3). Its control
@@ -2619,7 +2651,7 @@ final class StreamClient: ObservableObject {
     /// goodbye on (kind 22: it closed it on purpose, "quit" at home, and the session ends with the
     /// words that goodbye deserves rather than after a dial to a Mac that is going). Main thread.
     private func rescue(from c: NWConnection) -> Bool {
-        guard connected, sessionListed, goodbye == nil else { return false }
+        guard connected, sessionListed, !saidGoodbye(on: c) else { return false }
         // The remote connection went while the move home is under way (the hotspot dropped as the
         // home Wi-Fi joined): the move carries the session, without a fence (nothing sent on a dead
         // connection comes back). What the device sends waits from this moment: unlike a move to
@@ -3005,7 +3037,7 @@ final class StreamClient: ObservableObject {
         resetHomeMove()
         resetPointerFeed()   // the Mac has the pointer until this device's first input (Q6)
         session = s
-        goodbye = nil
+        forgetGoodbye()
         // Its way in is its route line's (`remoteRoute`, at its first window list), never a link word.
         if route != nil { route = nil }
         c.stateUpdateHandler = { [weak self] state in
@@ -3114,7 +3146,7 @@ final class StreamClient: ObservableObject {
         firstListDeadline?.cancel()
         firstListDeadline = nil
         session = nil
-        goodbye = nil
+        forgetGoodbye()
         notice = nil
         hostVersion = nil
         hostProtocol = nil
@@ -3772,8 +3804,8 @@ final class StreamClient: ObservableObject {
             let goodbye = Wire.decode(Goodbye.self, from: data) ?? Goodbye(reason: "")
             let from = connection
             DispatchQueue.main.async {
-                guard self.connection === from else { return }
-                self.goodbye = goodbye
+                guard let from, self.connection === from else { return }
+                self.heardGoodbye(goodbye, on: from)
             }
         case .clipboard:
             // Text copied on the Mac (StreamClient+Clipboard): written to this device's clipboard while

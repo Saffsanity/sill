@@ -8,6 +8,69 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**The Mac says when it goes to sleep, shuts down or restarts (2026-10-19, PR #100 by addhumal, branch
+`goodbye-sleep` on addhumal/sill with main at 5c323e6 merged in; issue #105; finished on the branch from
+the triage of 2026-10-16 and 2026-10-19, `~/Downloads/sill-handoff/triage/`).** Noah: "Work on finishing
+... The Mac telling devices it is going to sleep or shutting down". Additive: kind 22 gains the reasons
+"sleep", "shutdown" and "restart", each with the Mac's words and `"reconnect":true`.
+- Wire (Remote.swift): `Goodbye.asleep`, `.shuttingDown`, `.restarting`, whose words say what happened
+  in plain words for a device from before them, which shows a reason it does not know by its message
+  ("Noah’s MacBook Pro is going to sleep.", "… is shutting down.", "… is restarting."): 0.5.1 shows
+  them until its reconnect's first dial, which comes at once while the Mac's row is still listed.
+- Host: one goodbye per connection, the first (StreamServer's `told`: a Quit right after the sleep's,
+  or after Remove, says nothing more on it). The Mac about to sleep: NSWorkspace's willSleep under the
+  AppKit loop (`StreamCoordinator.observeSleep`: Sill.app, and the CLI with --virtual-display; a
+  synchronous observer that reads no main-actor state), "sleep" to every device and each connection
+  closed right after (`goodbyeAll(close:)`), 0.1 s at most, one line ("The Mac is going to sleep: 2
+  devices told."). Not under the CLI's dispatchMain: NSWorkspace says nothing there, and a power
+  client that nobody answers holds the Mac's sleep up to 30 s. Sill.app's Quit reads the reason macOS
+  gives (`kAEQuitReason` in applicationShouldTerminate: 'rest' and 'rrst' a restart, 'shut' and 'rsdn'
+  a shut down; a log out, the menu, a signal: "quit"), with a line ("Quit: macOS asked Sill to quit
+  for a restart.", "The Mac is restarting: 1 device told."). willPowerOff is not used: it fires for a
+  log out a person may still cancel, and says neither which nor when. `HostGoodbye` (pure) chooses and
+  words it. TEST ONLY on the bare binary: `-SillSleepAfter <s>`, `-SillQuitAfter '<s> restart|shutdown|
+  logout'` (a quit Apple event to itself with that reason).
+- Device: GoodbyePolicy's three notices in this build's words ("‹Mac› went to sleep. This ‹iPad›
+  reconnects when it wakes.", "‹Mac› is shutting down." or "is restarting." "This ‹iPad› reconnects
+  when it’s back."), always a reconnect, `went` (quit, asleep, off) for its waits, the remote door
+  only after a session that came through it (`remote`). DiscoveryPolicy: after "sleep" a row listed at
+  the goodbye counts as asleep (`listingStart`: three dials that did not connect, the last at the
+  goodbye, so the first comes 20 s later, `asleepWait`, then every 30 s, nine in all, with #69's lines
+  from that dial on; until it the goodbye's words stay, `waitingLine`), a row listed afresh is dialled
+  at once, and the return from the background starts the count there again; after "shutdown" or
+  "restart" a row listed at the goodbye is never dialled (`reconnectRow`'s `offAt`), one listed afresh
+  at once; the first remote dial no sooner than 20 s (`firstRemoteDial`). StreamClient keeps a goodbye
+  with the connection it came on (`goodbyeOn`): a move's hand-over drops it, a rescue is refused only
+  for that connection, a new session starts without one.
+- The triage's three faults, each reproduced on the PR's head (485149e) and fixed: the quit overwrote
+  the shutdown (`-SillSleepAfter '6 shutdown' -SillQuitAfter 6.05`: one connection got "shutdown",
+  then "quit" 45 ms later); the stale goodbye (after "sleep" the connection streamed on, frames and
+  pongs for 5 s, the goodbye kept; now it closes at once, and the device's goodbye is its connection's
+  alone); the unheld redial (a notice's reconnect dialled the listed row at once).
+- 8aee786's wording for an end in the background or while locked is out (7425327), for a pull request
+  of its own (`git cherry-pick 8aee786`, read with #152). The contributor's 9b59e0d and 34872a5,
+  pushed meanwhile (that observer's guard; a quit's 3 s and a Reconnecting note for sleep and
+  shutdown, and willPowerOff's flag against the quit), are merged in (8754a4f) with this design kept.
+- Verified: `goodbye` 107 checks and 61 of 61 mutants (GoodbyePolicy, HostGoodbye and Remote.swift's
+  goodbyes); `policy` 480 and 177 of 177 mutants; `run-all.sh` all 44; `swift build -c release` (only the
+  CaptureProbe warning); the iOS app as CI builds it (only the StreamClient capture warning); live on a
+  private iPad simulator (iOS 27.0) against the bare app on loopback (software encoder, a test service
+  type): a streaming session's sleep goodbye, the device's words at once, its dial 20 s later and the
+  session back (20.5 s); a restart quit (the quit Apple event), the words, no dial; paired, a restart,
+  then the same Mac relaunched (its identity, a new listing): dialled at once, back 0.4 s after it was
+  listed; sleep and a shut-down quit in one moment: one goodbye, "went to sleep"; SIGTERM: "quit Sill";
+  through the device gate (SILL_TEST_MIN_DEVICE_VERSION, SILL_TEST_GOODBYE): "sleep" every 20 s, never
+  at once, and "restart" with its row still listed for a minute: never dialled.
+- **Untested, for Noah** (Sill.app from this branch, the iPad on this branch's build): sleep the Mac
+  (Apple menu › Sleep, and the lid) while it streams: "‹Mac› went to sleep…" at once, Sill.log's "The
+  Mac is going to sleep: 1 device told.", and after waking it the session back by itself (at once
+  without a sleep proxy, within 30 s behind an Apple TV or HomePod); Restart and Shut Down with the
+  iPad streaming: "‹Mac› is restarting…" (Sill.log "Quit: macOS asked Sill to quit for a restart."),
+  the session back once the Mac is up and Sill open on it (Launch at Login); Log Out: "quit Sill"; a
+  Restart cancelled by another app (Sill may already have quit: the words stay until it is opened
+  again); an older build (0.5.1 from the App Store) against this Sill.app: the Mac's message, then its
+  own Reconnecting; through Tailscale, a sleep: its remote dials from 20 s on.
+
 **The clipboard both ways (2026-10-14, branch `clipboard` from main at 985a733; issue #64; PR #78;
 the plan, its open questions with the default taken for each, the results and the review's fixes are
 in `docs/clipboard-plan.md`).** Noah: work on the clipboard (after #67/#68, #69, #59, #57, #58), text
@@ -4943,7 +5006,8 @@ good.
   answered and published as kind 16; a pick made during a restart runs after
   it), keeps each connection's route (home or the remote door's: kind 21 only
   from near the Mac, Direct Wireless never from away), sends kind 18 with the
-  catalog, says goodbye (kind 22) at quit, sends the streamed app's menus to
+  catalog, says goodbye (kind 22) at quit, by the quit's reason, and as the Mac
+  is about to sleep (`observeSleep`, under the AppKit loop), sends the streamed app's menus to
   the devices that ask (`MenuMirror`; a window source's app made active and
   its window key first, as a click does: `focusForMenus`), and writes
   `HostStatus`),
@@ -5022,9 +5086,14 @@ good.
   `VirtualStage` (`--virtual-display`: owns the display and the moved window,
   geometry, prepare/release, emergency restore), `HostShutdown` (signal
   sources + atexit, installed only with the flag in the CLI, always in the app;
-  `releaseForQuit` for the app's Quit; `installKeyRelease` for the CLI's
-  default path: a device's keys let go and a sized window goes back, then the
-  signal's own end),
+  `releaseForQuit` for the app's Quit, with the reason macOS gave it;
+  `installKeyRelease` for the CLI's default path: a device's keys let go and a
+  sized window goes back, then the signal's own end), `HostGoodbye` (the
+  goodbye every device hears as Sill or the Mac goes: a Quit's by the quit
+  Apple event's `kAEQuitReason`, "restart" or "shutdown" with the Mac's words,
+  else "quit", a log out included; the Mac about to sleep, "sleep"; the log's
+  lines; pure, `Tests/checks/goodbye`; StreamServer's `told`: one goodbye per
+  connection, the first),
   `VirtualDisplaySelfTest`
   (`--virtual-display-selftest`), `Stats` (1 s lines while active, 30 s
   heartbeat when idle). Remote access: `OriginPolicy` + `InterfaceSnapshot`
@@ -5320,7 +5389,10 @@ good.
   (`rebuildBrowser`, `browserFailures`, `browserResults`), when the automatic
   reconnect dials a row that stays listed and its line (`redialRow`,
   `reconnectLine`), and when the device asks for the Desktop by itself
-  (`autoDesktop`; issue #69); pairing at home's rows and words, a tap's dial, the device's
+  (`autoDesktop`; issue #69); after the Mac said it went (issue #105), its row
+  counted asleep (`listingStart`, `waitingLine`, `asleepWait`), or left alone
+  until listed afresh (`reconnectRow`'s `offAt`), and the first remote dial
+  (`firstRemoteDial`); pairing at home's rows and words, a tap's dial, the device's
   cable check and how a session at home ends: `rowWord`, `homeDial`,
   `onCable`, `rowMac`, `reconnectEnd`, `macInfoNamesSession`,
   `removalRevokes`; pure, checked with swiftc), `StreamScreen`
@@ -5411,8 +5483,10 @@ good.
   pbxproj A601/F601), `AddMacCard` (the card, the fields, `EscapeKey`; the
   home card for a row), `CodeScanner` (VisionKit),
   `PairingOverlay` (Pair This iPad…), `GoodbyePolicy` (the words and the
-  reconnect after a session ends, a Mac's notice included; pure, checked with
-  swiftc). The Mac's menus (docs/menu-bar-plan.md §7): `MacMenuState` (one
+  reconnect after a session ends, a Mac's notice included, and the Mac's own
+  going, "sleep", "shutdown" and "restart", with how it went for the
+  reconnect's waits; pure, `Tests/checks/goodbye`; StreamClient keeps a
+  goodbye only for the connection it came on). The Mac's menus (docs/menu-bar-plan.md §7): `MacMenuState` (one
   connection's view: the top level, the menus asked for and the choices sent,
   each opened menu's completion settled exactly once, the rows and sections;
   pure, `Tests/checks/menu-state`), `MacMenuElements` (the one builder of
@@ -5638,7 +5712,10 @@ menu click; the CLI keeps a device's change until SillHost quits. Test arguments
 defaults domain `SillMenuBar`; delete it after): `--synthetic` (test pattern,
 off Bonjour; the port is in the "Status: Test Pattern Mode" line),
 `-SillLogFile <path>`, `-SillSetAfter '<s> key=value[,key=value][; <s> …]'`,
-`-SillQuitAfter <s>`, `-SillRenderPreviews <dir>` (panes, cards, glyphs,
+`-SillQuitAfter <s>` (`'<s> restart|shutdown|logout'`: a quit Apple event to
+itself with that reason, as macOS sends at a restart, a shut down or a log out),
+`-SillSleepAfter <s>` (as if the Mac were about to sleep: the goodbye every
+device hears, its connection closed), `-SillRenderPreviews <dir>` (panes, cards, glyphs,
 menu.txt; no permission needed), and for the Settings window's height
 `-SillSettingsAfter '<s> <tab>|close|report|end|height=<points>[; …]'` (opens it,
 then prints its frame, the pane's whole height and how much shows),

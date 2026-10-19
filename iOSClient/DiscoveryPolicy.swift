@@ -307,8 +307,19 @@ enum DiscoveryPolicy {
     /// goodbye by about a second: it is not taken until `quitWait` has passed, so the words "‹Mac›
     /// quit Sill…" stay instead of a dial to a Mac that is going. A row listed again since the quit
     /// (Sill is back) is taken by the rules above.
+    /// After a goodbye `shutdown` or `restart` (`offAt`, the moment the session ended), a row listed
+    /// since then or before is never taken: the registration of a Sill that quit with the goodbye,
+    /// on its way out. Only a row listed afresh since (the Mac back, and Sill open on it again) is
+    /// taken, by the rules above; until then the words "‹Mac› is restarting…" stay, and nothing is
+    /// dialled.
     static func reconnectRow<Row>(network: Row?, networkSince: Double? = nil, direct: Row?, directSince: Double?, networkLeftAt: Double?,
-                                  quitAt: Double? = nil, now: Double) -> (take: Row?, recheckAt: Double?) {
+                                  quitAt: Double? = nil, offAt: Double? = nil, now: Double) -> (take: Row?, recheckAt: Double?) {
+        if let offAt {
+            let fresh = { (since: Double?) -> Bool in since.map { $0 > offAt } ?? false }
+            return reconnectRow(network: fresh(networkSince) ? network : nil, networkSince: networkSince,
+                                direct: fresh(directSince) ? direct : nil, directSince: directSince,
+                                networkLeftAt: networkLeftAt, now: now)
+        }
         if let quitAt, now < quitAt + quitWait {
             let fresh = { (since: Double?) -> Bool in since.map { $0 > quitAt } ?? false }
             let choice = reconnectRow(network: fresh(networkSince) ? network : nil, direct: fresh(directSince) ? direct : nil,
@@ -736,7 +747,8 @@ enum DiscoveryPolicy {
     /// `failed` dials of this listing that did not connect, the last of them started at `lastDialAt`:
     /// the first at once; each next `reconnectRetry` after the last started; none after
     /// `reconnectDials`; none in the background, whose end looks again. Which row, and when a
-    /// Direct row or a row after a goodbye `quit` may be taken at all, is `reconnectRow`'s.
+    /// Direct row or a row after a goodbye `quit`, `shutdown` or `restart` may be taken at all, is
+    /// `reconnectRow`'s; where a listing's count starts (after a goodbye `sleep`), `listingStart`'s.
     static func redialRow(failed: Int, lastDialAt: Double?, foreground: Bool, now: Double) -> (dial: Bool, recheckAt: Double?) {
         guard foreground, failed < reconnectDials else { return (false, nil) }
         guard failed > 0, let last = lastDialAt else { return (true, nil) }
@@ -755,6 +767,49 @@ enum DiscoveryPolicy {
             return "\(mac) isn\u{2019}t answering. It may be asleep. Sill keeps trying, or tap it to try now."
         }
         return direct ? "Reconnecting to \(mac) directly\u{2026}" : "Reconnecting to \(mac)\u{2026}"
+    }
+
+    // The Mac said it is going to sleep (goodbye "sleep", issue #105). The dials of #69 count up to
+    // the Mac being asleep, and here the Mac has said so: its row, listed when it said it, is a
+    // Bonjour Sleep Proxy's record or the registration that is going, and a dial through a sleep
+    // proxy may wake a Mac someone put to sleep. So that listing starts where the dials would have
+    // got to: asleep, its first dial `asleepWait` after the goodbye, then every 30 s, `reconnectDials`
+    // in all, with the words those dials have. A row listed afresh since is the Mac awake again, and
+    // is dialled at once. (After "shutdown" or "restart" nothing listed before is dialled at all:
+    // `reconnectRow`'s `offAt`.)
+
+    /// How long after the Mac said it is going to sleep its row as listed then is first dialled
+    /// (`listingStart`), and after it said it is going to sleep, shutting down or restarting its
+    /// addresses (`firstRemoteDial`): the wait `redialRow` gives the dial after `reconnectQuietAfter`
+    /// that did not connect, 20 s. A row listed afresh (the Mac back) is never held.
+    static var asleepWait: Double { reconnectRetry[reconnectQuietAfter - 1] }
+
+    /// The dials a listing of the Mac's row starts with (`redialRow`'s `failed` and `lastDialAt`):
+    /// none, unless the Mac said it is going to sleep (`asleepAt`, the moment the session ended)
+    /// while that row was listed (`listedSince` at or before it, or unknown): then `reconnectQuietAfter`
+    /// dials that did not connect, the last at `asleepAt`, so its first dial comes `asleepWait` later.
+    /// The app's return from the background starts the count here again (StreamClient.cameForward):
+    /// a listing counted asleep stays so, and once `asleepWait` has passed the return dials at once,
+    /// as #69's return does.
+    static func listingStart(listedSince: Double?, asleepAt: Double?) -> (failed: Int, lastDialAt: Double?) {
+        guard let asleepAt, (listedSince ?? -.infinity) <= asleepAt else { return (0, nil) }
+        return (reconnectQuietAfter, asleepAt)
+    }
+
+    /// The status line while the automatic reconnect waits on a listed row it does not dial now:
+    /// `reconnectLine`'s for the dials so far; nil, which keeps the line the session's end left
+    /// ("‹Mac› went to sleep. This ‹iPad› reconnects when it wakes."), while a listing counted asleep
+    /// (`listingStart`) has had no dial since the goodbye (`lastDialAt` still `asleepAt`).
+    static func waitingLine(mac: String, failed: Int, lastDialAt: Double?, direct: Bool, asleepAt: Double?) -> String? {
+        if let asleepAt, lastDialAt == asleepAt { return nil }
+        return reconnectLine(mac: mac, failed: failed, direct: direct)
+    }
+
+    /// The soonest the automatic reconnect may first dial a lost saved Mac's addresses
+    /// (`remoteDialDue` decides whether one is due): `asleepWait` after the Mac said it is going to
+    /// sleep, shutting down or restarting (`macWentAt`, the moment the session ended), else no wait.
+    static func firstRemoteDial(macWentAt: Double?) -> Double {
+        macWentAt.map { $0 + asleepWait } ?? 0
     }
 
     /// What this device watched when a window list says nothing streams (`autoDesktop`).
