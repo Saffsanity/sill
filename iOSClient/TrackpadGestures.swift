@@ -282,3 +282,42 @@ struct TrackpadGestures {
         return (true, windowStreams)
     }
 }
+
+/// How long holding a window thumbnail in the bar takes to open its close, minimize and full
+/// screen lights and start a drag (#113): 0.5 s by default (iOS's standard long-press duration),
+/// or 1 s, 1.5 s, 2 s or 3 s in Settings › This iPad / This iPhone (`Sill.thumbnailHold`).
+enum ThumbnailHold: String, CaseIterable, Equatable {
+    case halfSecond = "0.5"
+    case oneSecond = "1.0"
+    case oneAndHalf = "1.5"
+    case twoSeconds = "2.0"
+    case threeSeconds = "3.0"
+
+    static let defaultsKey = "Sill.thumbnailHold"
+
+    static func stored(_ raw: String?) -> ThumbnailHold {
+        raw.flatMap(ThumbnailHold.init(rawValue:)) ?? .halfSecond
+    }
+
+    var seconds: TimeInterval {
+        switch self {
+        case .halfSecond: return 0.5
+        case .oneSecond: return 1.0
+        case .oneAndHalf: return 1.5
+        case .twoSeconds: return 2.0
+        case .threeSeconds: return 3.0
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .halfSecond: return "0.5 s"
+        case .oneSecond: return "1 s"
+        case .oneAndHalf: return "1.5 s"
+        case .twoSeconds: return "2 s"
+        case .threeSeconds: return "3 s"
+        }
+    }
+
+    static let footnote = "How long to hold a window thumbnail before its close, minimize and full screen controls appear and it can be dragged to reorder."
+}

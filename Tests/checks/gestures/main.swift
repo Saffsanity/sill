@@ -860,5 +860,15 @@ check("5,000 random strokes (\(tallies.sorted { $0.key < $1.key }.map { "\($0.ke
 check("the random strokes reach every gesture, with three fingers and with four", G.Gesture.allCases.allSatisfy { g in tallies["\(g.rawValue)3"] != nil }
       && tallies.keys.contains { $0.hasSuffix("4") })
 
+// MARK: - Window thumbnail hold duration (#113)
+
+check("ThumbnailHold: default is 0.5 s, unknown falls back to 0.5 s",
+      ThumbnailHold.defaultsKey == "Sill.thumbnailHold" && ThumbnailHold.stored(nil) == .halfSecond
+      && ThumbnailHold.stored("") == .halfSecond && ThumbnailHold.stored("9") == .halfSecond)
+check("ThumbnailHold: five durations in ascending order (0.5 s to 3 s)",
+      ThumbnailHold.allCases.map(\.seconds) == [0.5, 1.0, 1.5, 2.0, 3.0]
+      && ThumbnailHold.allCases.map(\.title) == ["0.5 s", "1 s", "1.5 s", "2 s", "3 s"]
+      && ThumbnailHold.allCases.allSatisfy { ThumbnailHold.stored($0.rawValue) == $0 })
+
 print("\(passes + fails) checks, \(fails) failed")
 exit(fails == 0 ? 0 : 1)

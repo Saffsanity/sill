@@ -65,6 +65,9 @@ MUTANTS = {
                                            "        if !done, armedBy.contains(id)"),
     "M44 fingers counted as every finger down (a resting thumb counted)": ("let fingers = min(3 + movers.count, 4)", "let fingers = min(fingersDown.count, 4)"),
     "M45 two fingers go silent": (GATE, GATE.replace("count >= 3", "count >= 2")),
+    "M46 ThumbnailHold.stored ignores saved value": ("raw.flatMap(ThumbnailHold.init(rawValue:)) ?? .halfSecond", ".halfSecond"),
+    "M47 ThumbnailHold default is 1.5 s instead of 0.5 s": ("raw.flatMap(ThumbnailHold.init(rawValue:)) ?? .halfSecond", "raw.flatMap(ThumbnailHold.init(rawValue:)) ?? .oneAndHalf"),
+    "M48 ThumbnailHold.halfSecond is 1.5 s": ("case .halfSecond: return 0.5", "case .halfSecond: return 1.5"),
 }
 # M33: silence only once the stroke arms, as before the review (the review's F1): the silence moves into the
 # arming branch, so three fingers placed slowly, or beside a resting thumb, are not silent.
