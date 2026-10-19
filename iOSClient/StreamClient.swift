@@ -505,6 +505,10 @@ final class StreamClient: ObservableObject {
     /// The app is not in the background (UIApplication's notifications): the automatic reconnect dials
     /// a listed row, and a failed browser is made again, only then (issue #69). Main thread.
     private(set) var appInForeground = UIApplication.shared.applicationState != .background
+    /// UIKit grants a short, system-controlled grace period for an active stream when the app is
+    /// backgrounded. It is ended on return or by UIKit's expiration handler; it cannot keep the
+    /// stream alive indefinitely, and the existing foreground reconnect handles later returns.
+    private var streamBackgroundTask = UIBackgroundTaskIdentifier.invalid
     #if DEBUG
     /// `-SillBrowserFail N`: each of the first N network browsers is reported failed with
     /// kDNSServiceErr_DefunctConnection (-65569) half a second after it starts, as iOS reports a
@@ -911,14 +915,37 @@ final class StreamClient: ObservableObject {
         // and the browsers, whose connection to mDNSResponder iOS may have made defunct meanwhile, are
         // made again (`cameForward`, issue #69).
         NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.endStreamBackgroundTask()
             self?.resetLiveness()
             self?.cameForward()
+        }
+        // Ask for UIKit's bounded background runtime before suspension, but only while actually
+        // streaming. This lets the existing socket and keepalives continue briefly when switching
+        // apps, then the system suspends us and `cameForward()` restores the session on return.
+        NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.beginStreamBackgroundTaskIfNeeded()
         }
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             self?.appInForeground = false
         }
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.endStreamBackgroundTask()
+        }
         // The clipboard's chip looks when Sill becomes active (StreamClient+Clipboard).
         observeClipboardActivation()
+    }
+
+    private func beginStreamBackgroundTaskIfNeeded() {
+        guard connected, active != .none, streamBackgroundTask == .invalid else { return }
+        streamBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Keep Sill stream responsive") { [weak self] in
+            DispatchQueue.main.async { self?.endStreamBackgroundTask() }
+        }
+    }
+
+    private func endStreamBackgroundTask() {
+        guard streamBackgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(streamBackgroundTask)
+        streamBackgroundTask = .invalid
     }
 
     /// Starts the network browser, once; from then on it is only made again (`rebuildBrowser`). The
@@ -3103,6 +3130,7 @@ final class StreamClient: ObservableObject {
     /// never delivered its window list: the connect screen never left, and its Remote rows must not
     /// vanish for another 3 s. Main thread.
     func tearDown(status: String, restartSearch: Bool = true) {
+        endStreamBackgroundTask()
         abandonMove()
         resetPath()
         lastMoveAttempt = nil
