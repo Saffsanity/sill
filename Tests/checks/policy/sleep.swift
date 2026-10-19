@@ -101,7 +101,7 @@ func afterSleepPolicy() {
     }
     var cablePaths = sight(S(), [("Mac", [en0, anpi0])], 5)
     cablePaths = sight(cablePaths, shown([("Mac", [en0])], firstReport), firstReport)
-    check("cable model: the new browser's first report lists the Mac on Wi-Fi alone: so do the rows, the cable unlisted",
+    check("cable model: the new browser's first report lists the host on Wi-Fi alone: so do the rows, the cable unlisted",
           cablePaths.wired.isEmpty && cablePaths.wiredSince.isEmpty && cablePaths.wifi == ["Mac": "en0"])
     check("cable model: with the pong from before the trip, a working cable session would move to Wi-Fi",
           plan(pin(.wired, now: firstReport, pong: lastPongBefore, wifi: "en0")) == .moveTo(.wifi, interface: "en0"))
@@ -139,7 +139,7 @@ func afterSleepPolicy() {
           (0...2).allSatisfy { P.reconnectLine(mac: mini, failed: $0, direct: false) == "Reconnecting to Mac mini\u{2026}" })
     check("reconnectLine: a Direct row's say directly, as before",
           (0...2).allSatisfy { P.reconnectLine(mac: mini, failed: $0, direct: true) == "Reconnecting to Mac mini directly\u{2026}" })
-    check("reconnectLine: after 3 that did not connect, the Mac may be asleep, through every later dial",
+    check("reconnectLine: after 3 that did not connect, the host may be asleep, through every later dial",
           (3...11).allSatisfy { P.reconnectLine(mac: mini, failed: $0, direct: false) == quiet && P.reconnectLine(mac: mini, failed: $0, direct: true) == quiet })
     check("reconnectLine: after 12, stopped, in the remote path's words", P.reconnectLine(mac: mini, failed: 12, direct: false) == stopped
           && P.reconnectLine(mac: mini, failed: 40, direct: true) == stopped)
@@ -183,7 +183,7 @@ func afterSleepPolicy() {
     // A Mac a sleep proxy answers for, that never wakes: twelve dials in about 4.6 minutes, the quiet
     // line after the third, then stopped; never two dials closer than 5 s.
     let asleep = reconnect(until: 3600)
-    check("reconnect model (a sleep proxy, the Mac never answers): 12 dials, at 0, 5, 15, 35, then every 30 s",
+    check("reconnect model (a sleep proxy, the host never answers): 12 dials, at 0, 5, 15, 35, then every 30 s",
           asleep.dials == [0, 5, 15, 35, 65, 95, 125, 155, 185, 215, 245, 275])
     check("reconnect model (a sleep proxy): the quiet line 20 s after the loss, stopped at 280 s",
           asleep.lines.map(\.at) == [0, 20, 280] && asleep.lines.map(\.line) == ["Reconnecting to Mac mini\u{2026}", quiet, stopped])
@@ -209,7 +209,7 @@ func afterSleepPolicy() {
 
     typealias W = DiscoveryPolicy.Watched
     check("autoDesktop: nothing watched (a connection's first list): the Desktop at once", P.autoDesktop(watched: .nothing, sinceLastAuto: 1e9) == .ask)
-    check("autoDesktop: the Desktop the Mac stopped: asked for again at once", P.autoDesktop(watched: .desktop, sinceLastAuto: 30) == .ask)
+    check("autoDesktop: the Desktop the host stopped: asked for again at once", P.autoDesktop(watched: .desktop, sinceLastAuto: 30) == .ask)
     check("autoDesktop: a window that left the list: after the closed window's wait",
           P.autoDesktop(watched: .window(listed: false), sinceLastAuto: 30) == .askAfterWait)
     check("autoDesktop: a window still listed (a pick that failed): left to the person",

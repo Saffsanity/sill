@@ -213,9 +213,9 @@ final class StreamClient: ObservableObject {
 
     /// The connect screen's idle status lines: only these follow the nearby search and Local Network
     /// access (updateDiscovery); any other status (a disconnect, a failure) stays as it was set.
-    static let lookingOnNetwork = "Looking for Macs on this network"
-    static let lookingNearby = "Looking for Macs on this network and nearby"
-    static let allowLocalNetwork = "To find your Mac, allow Local Network for Sill in Settings."
+    static let lookingOnNetwork = "Looking for hosts on this network"
+    static let lookingNearby = "Looking for hosts on this network and nearby"
+    static let allowLocalNetwork = "To find your host, allow Local Network for Sill in Settings."
 
     // Switcher catalog, as the host sends it. Published on main.
     @Published var macName = ""
@@ -1346,7 +1346,7 @@ final class StreamClient: ObservableObject {
 
     /// What the status line calls the Mac we are connected to (or were, if it dropped): its Bonjour
     /// name, its saved name, or the address dialed.
-    var hostName = "Mac"
+    var hostName = "Host"
 
     static func serviceName(of result: NWBrowser.Result) -> String {
         if case .service(let name, _, _, _) = result.endpoint { return name }
@@ -1515,7 +1515,7 @@ final class StreamClient: ObservableObject {
         sessionHost = nil
         refusedListing = nil
         resetHomeMove()       // …and what a remote session knew of its move home
-        resetPointerFeed()    // …and the Mac has the pointer until this device's first input (Q6)
+        resetPointerFeed()    // …and the host has the pointer until this device's first input (Q6)
         hostName = name
         var bonjourName: String?
         if case .service(let service, _, _, _) = endpoint { bonjourName = service }
@@ -2202,7 +2202,7 @@ final class StreamClient: ObservableObject {
             if !DiscoveryPolicy.sameHost(sessionHost, host) {
                 why = "\(hostName) on the network is another launch of Sill, or another Mac"
             } else if !homeInfoChecks(macInfo) {
-                why = "the home door's kind 18 is not this Mac's, or older than this session's"
+                why = "the home door's kind 18 is not this host's, or older than this session's"
             } else {
                 why = nil
             }
@@ -2245,7 +2245,7 @@ final class StreamClient: ObservableObject {
         guard let move = moving, move.connection === c else { return }   // given up meanwhile
         let reason = goodbye.reason.isEmpty ? "unreadable" : goodbye.reason
         if sessionDead {
-            print("path: the Mac said goodbye (\(reason)) on the new connection: the session ends with its words")
+            print("path: the host said goodbye (\(reason)) on the new connection: the session ends with its words")
             self.goodbye = goodbye
             return
         }
@@ -2699,7 +2699,7 @@ final class StreamClient: ObservableObject {
         guard pathSignals.reported != before.reported || pathSignals.hinted != before.hinted else { return }
         #if DEBUG
         let interfaces = Self.listed(path.availableInterfaces)
-        print("path: iOS says the session's path is \(path.status)\(address ? "" : " (for the service, not the Mac's address)"): \(interfaces)")
+        print("path: iOS says the session's path is \(path.status)\(address ? "" : " (for the service, not the host's address)"): \(interfaces)")
         #endif
         followBestPath()
     }
@@ -2948,7 +2948,7 @@ final class StreamClient: ObservableObject {
                 : path.remoteEndpoint.map { " without an address (for \($0))" } ?? " without an endpoint"
             print("session: kept \(route?.word ?? "no word"); ignored a path update\(status)\(endpoint): \(interfaces)")
         } else if fresh || next != route {
-            let witness = scope.map { "the Mac's address on \(Self.listed([$0])); " }
+            let witness = scope.map { "the host's address on \(Self.listed([$0])); " }
                 ?? local.map { "this device's address on \(Self.listed([$0])); " } ?? ""
             print("session: \(next?.word ?? "no word"), read from \(witness)path \(interfaces)")
         }
@@ -3003,7 +3003,7 @@ final class StreamClient: ObservableObject {
         sessionHost = nil
         refusedListing = nil
         resetHomeMove()
-        resetPointerFeed()   // the Mac has the pointer until this device's first input (Q6)
+        resetPointerFeed()   // the host has the pointer until this device's first input (Q6)
         session = s
         goodbye = nil
         // Its way in is its route line's (`remoteRoute`, at its first window list), never a link word.
@@ -3312,6 +3312,11 @@ final class StreamClient: ObservableObject {
     /// does (`PhonePortraitLayout.largerPicture(switchOn:streaming:)`).
     static let largerPictureKey = "Sill.largerPicture"
 
+    /// This device's Keep Screen On (the Settings panel's This iPad group): on unless turned off. While
+    /// it is on and a stream screen shows, iOS's idle timer is off (`ScreenAwake`), so a stream only
+    /// watched never dims or locks. The device's own preference, never sent to the Mac.
+    static let keepScreenOnKey = "Sill.keepScreenOn"
+
     /// A three- or four-finger gesture a surface decided (TrackpadGestures, StrokeObserver), to the
     /// Mac as kind 28, which turns it into its own shortcut (docs/trackpad-gestures-plan.md §6.3):
     /// only while this device's switch is on and the Mac says it takes gestures. While a window
@@ -3490,22 +3495,22 @@ final class StreamClient: ObservableObject {
             #if DEBUG
             if now - pointerStaleLoggedAt >= 1 {
                 pointerStaleLoggedAt = now
-                print("pointer: ignored a position the Mac sent before reading this device's input (seen \(report.seen ?? 0), sent \(sentOnSession)\(movePending ? ", a move waiting" : ""))")
+                print("pointer: ignored a position the host sent before reading this device's input (seen \(report.seen ?? 0), sent \(sentOnSession)\(movePending ? ", a move waiting" : ""))")
             }
             #endif
         case .restatement:
             #if DEBUG
             if now - pointerRestatementLoggedAt >= 1 {
                 pointerRestatementLoggedAt = now
-                print("pointer: ignored the Mac restating this device's own position on the new connection")
+                print("pointer: ignored the host restating this device's own position on the new connection")
             }
             #endif
         case .news(let tookOver, let changed):
             #if DEBUG
             // Once per hand-over, and the session's first report: not per position.
             if tookOver || !pointerHeard {
-                print(position.map { String(format: "pointer: the Mac has it at %.4f,%.4f", Double($0.x), Double($0.y)) }
-                      ?? "pointer: the Mac has it, off the stream")
+                print(position.map { String(format: "pointer: the host has it at %.4f,%.4f", Double($0.x), Double($0.y)) }
+                      ?? "pointer: the host has it, off the stream")
             }
             pointerHeard = true
             #endif
@@ -3593,7 +3598,7 @@ final class StreamClient: ObservableObject {
         if c === connection {
             handle(header, data)
         } else if header.kind == .pong, let released = link.fenceReturned(data, on: c) {
-            fenceEnded(c, released, why: "the Mac has read all the direct connection carried")
+            fenceEnded(c, released, why: "the host has read all the direct connection carried")
         }
     }
 
@@ -3690,7 +3695,7 @@ final class StreamClient: ObservableObject {
                     switch DiscoveryPolicy.autoDesktop(watched: watched, sinceLastAuto: Date().timeIntervalSince(self.lastAutoDesktop)) {
                     case .ask:
                         #if DEBUG
-                        if watched == .desktop { print("session: the Mac stopped the Desktop; asking for it again") }
+                        if watched == .desktop { print("session: the host stopped the Desktop; asking for it again") }
                         #endif
                         self.lastAutoDesktop = Date()
                         self.request(.desktop)
@@ -3972,7 +3977,7 @@ extension StreamClient {
         }
         let quality = QualityPreset.name(forBitrate: new.bitrate)
         guard new.isBehind else {
-            print("link: \(new.state) (cannot carry \(quality); the Mac's alone: nothing shown)")
+            print("link: \(new.state) (cannot carry \(quality); the host's alone: nothing shown)")
             return
         }
         let suggesting = AwayCopy.suggestion(new).map { "suggesting \($0.title)" } ?? "nothing lower to suggest"
@@ -4018,7 +4023,7 @@ extension StreamClient {
         if mockFrozen { return }
         #endif
         if settings.expire(now: ProcessInfo.processInfo.systemUptime, timeout: settingsTimeout) {
-            settingsProblem = "\(macName.isEmpty ? "The Mac" : macName) didn’t answer. Try again."
+            settingsProblem = "\(macName.isEmpty ? "The host" : macName) didn’t answer. Try again."
         }
         scheduleSettingsExpiry()   // a later pick, or a timeout that grew with the RTT
     }
@@ -4236,7 +4241,7 @@ extension StreamClient {
         UINotificationFeedbackGenerator().notificationOccurred(.warning)
         UIAccessibility.post(notification: .announcement, argument: refusal.announcement)
         #if DEBUG
-        print(refusal.byMac ? "menus: the Mac refused \(refusal.title) (\(refusal.id)): \(refusal.note)"
+        print(refusal.byMac ? "menus: the host refused \(refusal.title) (\(refusal.id)): \(refusal.note)"
                             : "menus: not sent: \(refusal.title) (\(refusal.id)): \(refusal.note)")
         #endif
     }

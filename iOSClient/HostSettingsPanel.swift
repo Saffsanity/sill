@@ -21,7 +21,7 @@ import StreamProtocol
 /// Picture, `StreamClient.largerPictureKey`, on an iPhone without a hinge whose picture it makes
 /// larger, `largerPictureOffered`; Share Clipboard, `StreamClient.clipboardKey`, while the Mac shares
 /// its clipboard, with the system's Paste for this device's text; Three-Finger Gestures,
-/// `StreamClient.gesturesKey`), and whose gesture rows, as accessibility actions, do their gestures
+/// `StreamClient.gesturesKey`; Keep Screen On, `StreamClient.keepScreenOnKey`), and whose gesture rows, as accessibility actions, do their gestures
 /// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour.
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
@@ -50,11 +50,12 @@ struct HostSettingsPanel: View {
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
+    @AppStorage(StreamClient.keepScreenOnKey) private var keepScreenOn = true
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
 
-    private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
+    private var mac: String { client.macName.isEmpty ? "the host" : client.macName }
     private static let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
     /// DEBUG `-SillSettingsEnd 1`: the rows start scrolled to their end, so a photo of a short
     /// screen shows the last groups (Direct Wireless, Away from home, This iPad, Take the Tour).
@@ -145,7 +146,7 @@ struct HostSettingsPanel: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(client.macName.isEmpty ? "Mac" : client.macName)
+                Text(client.macName.isEmpty ? "Host" : client.macName)
                     .font(.headline)
                     .foregroundStyle(Palette.text)
                     .lineLimit(1)
@@ -454,7 +455,7 @@ struct HostSettingsPanel: View {
 
     /// With Remote Access off on the Mac: how to reach it away from home.
     static func turnOnRemoteAccess(_ mac: String) -> String {
-        "To reach \(mac) away from home, turn on Remote Access in Sill’s Settings on the Mac."
+        "To reach \(mac) away from home, turn on Remote Access in Sill’s Settings on the host."
     }
 
     // MARK: This device
@@ -462,7 +463,7 @@ struct HostSettingsPanel: View {
     /// This device's own group, after the Mac's: on an iPhone its switch for Larger Picture, then Share
     /// Clipboard while the Mac shares its clipboard, with Paste on ‹Mac› (the system's Paste control)
     /// under it while on, then its switch for three-finger gestures, and what each does when the Mac
-    /// takes them (Take the Tour follows it). After the Mac's rows because it is the least changed, and
+    /// takes them, then Keep Screen On (Take the Tour follows it). After the Mac's rows because it is the least changed, and
     /// the compact halves' 259 pt show the Mac's rows first. The switches reach nothing on the Mac but
     /// the clipboard's, which subscribes or stops; a gesture row, activated by VoiceOver, Voice Control
     /// or Switch Control, does its gesture on the Mac as three fingers would (`sendGesture`: the switch,
@@ -520,6 +521,19 @@ struct HostSettingsPanel: View {
             }
         }
         Footnote(text: gesturesFooter)
+        Rows {
+            Toggle(isOn: $keepScreenOn) {
+                Text("Keep Screen On").foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        Footnote(text: Self.keepScreenOnFooter(mac: mac, device: device, on: keepScreenOn))
+    }
+
+    /// Under Keep Screen On: what it does while connected, on or off (StreamScreen's `ScreenAwake`).
+    static func keepScreenOnFooter(mac: String, device: String, on: Bool) -> String {
+        on ? "While connected to \(mac), this \(device) doesn’t dim or lock by itself, so a stream you only watch stays in view."
+           : "This \(device) dims and locks by itself while connected, as it does elsewhere."
     }
 
     /// The Mac's window list said it takes the gestures (`WindowList.gestures`).
@@ -634,7 +648,7 @@ struct HostSettingsPanel: View {
         let wanted = StreamClient.wantedFPS(remote: away)
         guard wanted < 120 else { return text }
         if away, StreamClient.wantedFPS() > wanted {
-            text += " Away from home, this \(device) asks for \(wanted) fps, which halves the data your Mac sends."
+            text += " Away from home, this \(device) asks for \(wanted) fps, which halves the data your host sends."
         } else if ProcessInfo.processInfo.isLowPowerModeEnabled, StreamClient.screenMaximumFPS() >= 120 {
             text += " Low Power Mode holds this \(device) to \(wanted) fps."
         } else {

@@ -63,7 +63,7 @@ struct RemoteAccessPane: View {
                     Warning("Remote access isn’t available: Sill couldn’t use the keychain (\(reason)).")
                 }
             } footer: {
-                Footnote("Lets the iPhone and iPad you pair connect to this Mac from other networks: through a VPN such as Tailscale, or through a port you forward on your router. Sill turns away every device you haven’t paired, and encrypts everything the paired ones send and receive.")
+                Footnote("Lets the devices you pair connect to this Mac from other networks: through a VPN such as Tailscale, or through a port you forward on your router. Sill turns away every device you haven’t paired, and encrypts everything the paired ones send and receive.")
             }
             if on { addresses }
             pairedDevices
@@ -121,7 +121,7 @@ struct RemoteAccessPane: View {
                 Text("\(name) — Not connected").foregroundStyle(.secondary)
             }
             if !rows.contains(where: { $0.vpn }) && status.vpnDown.isEmpty {
-                Text("No VPN is running on this Mac. Install one such as Tailscale on this Mac and on your iPhone or iPad, or allow connections from the internet below.")
+                Text("No VPN is running on this Mac. Install one such as Tailscale on this Mac and on your device, or allow connections from the internet below.")
                     .foregroundStyle(.secondary)
             }
             portRow
@@ -201,7 +201,7 @@ struct RemoteAccessPane: View {
 
     // MARK: Paired devices
 
-    /// One row: the list, Remove and Pair iPhone or iPad… are in Settings › Devices, since the same
+    /// One row: the list, Remove and Pair a Device… are in Settings › Devices, since the same
     /// devices connect at home too.
     private var pairedDevices: some View {
         Section {

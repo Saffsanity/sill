@@ -114,7 +114,7 @@ struct MacMenuTrigger: UIViewRepresentable {
                 if isOpen { onOpen() } else { onClose() }
             }
         }
-        button.accessibilityLabel = "\(client.menus.app ?? "Mac") menus"
+        button.accessibilityLabel = "\(client.menus.app ?? "Host") menus"
         let top = client.menus.top
         guard context.coordinator.built != top else { return }
         context.coordinator.built = top

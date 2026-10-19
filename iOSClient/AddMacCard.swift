@@ -113,16 +113,16 @@ struct AddMacCard: View {
                 .foregroundStyle(Palette.text)
                 .fixedSize(horizontal: false, vertical: true)
         } else if editing && (layout.compactPortrait || layout.short) {
-            Text("Type the address and code from your Mac.")
+            Text("Type the address and code from your host.")
                 .font(.system(size: 13))
                 .foregroundStyle(Palette.muted)
         } else {
-            Text("Pair once, and Sill reaches your Mac from anywhere, through your VPN or the internet.")
+            Text("Pair once, and Sill reaches your host from anywhere, through your VPN or the internet.")
                 .font(.system(size: 13))
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(typed ? "Type the address and code that Sill shows on your Mac."
-                       : "On your Mac, choose Pair iPhone or iPad… in the Sill menu, then point this \(device) at the code.")
+            Text(typed ? "Type the address and code that Sill shows on your host."
+                       : "On your host, choose Pair a Device… in the Sill menu, then point this \(device) at the code.")
                 .font(.system(size: 13))
                 .foregroundStyle(Palette.text)
                 .fixedSize(horizontal: false, vertical: true)
@@ -371,7 +371,7 @@ struct EscapeKey: UIViewRepresentable {
             }
             #if DEBUG
             let elsewhere = live.filter { $0.window !== window }.count
-            print("escape: Esc to what is on screen in its window (its EscapeKey), not to the Mac"
+            print("escape: Esc to what is on screen in its window (its EscapeKey), not to the host"
                   + (elsewhere == 0 ? "" : "; \(elsewhere) in other windows, left alone"))
             #endif
             anchor.action?()
@@ -405,7 +405,7 @@ struct LinkConfirmation: View {
                 .foregroundStyle(Palette.text)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
-            Text("Only pair with a code your own Mac shows.")
+            Text("Only pair with a code your own host shows.")
                 .font(.system(size: 13))
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)

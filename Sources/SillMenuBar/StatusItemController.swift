@@ -22,7 +22,7 @@ struct MenuEntry: Equatable {
         /// Settings on one tab (Remote Access…); the plain `showSettings` stays for ⌘,. (Swift
         /// allows no second case named `showSettings`.)
         case showSettingsTab(SettingsTab)
-        /// Pair iPhone or iPad…: a pairing window, or the open one brought forward.
+        /// Pair a Device…: a pairing window, or the open one brought forward.
         case showPairing
         /// "‹device› Wants to Pair": the window that shows its code brought forward, else one
         /// opened on the Mac, asked by that device.
@@ -135,7 +135,7 @@ enum MenuBuilder {
         menu.append(.separator)
 
         if p.remoteAccessNote != nil {
-            menu.append(MenuEntry(kind: .item, title: "Pair iPhone or iPad…", enabled: p.canPair, action: .showPairing))
+            menu.append(MenuEntry(kind: .item, title: "Pair a Device…", enabled: p.canPair, action: .showPairing))
         }
         menu.append(MenuEntry(kind: .item, title: "Show Log…", action: .showLog))
         menu.append(MenuEntry(kind: .item, title: "Settings…", key: ",", action: .showSettings))

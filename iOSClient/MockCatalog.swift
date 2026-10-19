@@ -151,7 +151,7 @@ enum MockCatalog {
     enum MenuCase: String {
         case code       // VS Code's ten menus: File with shortcuts, sections, a ✓, a disabled item and Open Recent ▸; Code › Settings ▸ Themes ▸ three deep; View › Appearance with ✓s and a mixed mark; Run with disabled items
         case blender    // only Blender and Window, as Blender's menu bar reads over Accessibility
-        case long       // a Window menu of 300 windows, and a History of 600 (500 sent, and "100 more on the Mac")
+        case long       // a Window menu of 300 windows, and a History of 600 (500 sent, and "100 more on the host")
         case stale      // Code not answering on the Mac: every menu disabled under the note
         case noaccess   // no Accessibility for Sill on the Mac: the note, no menus
         case none       // no menus (nothing streams, Sill itself frontmost): no Menus button
@@ -218,7 +218,7 @@ enum MockCatalog {
                             fetchDelay: 0.2, refusesChoices: false)
         case .noaccess:
             return MacMenus(topLevel: MacMenu(version: 3, app: "Code", bundleID: vscode, menus: [],
-                                              note: "Allow Accessibility for Sill on the Mac (System Settings › Privacy & Security › Accessibility)."),
+                                              note: "Allow Accessibility for Sill on the host (System Settings › Privacy & Security › Accessibility)."),
                             tree: [:], fetchDelay: 0.2, refusesChoices: false)
         case .none:
             return MacMenus(topLevel: MacMenu(version: 3, menus: []), tree: [:], fetchDelay: 0.2, refusesChoices: false)
@@ -294,7 +294,7 @@ enum MockCatalog {
         case `default`   // Sill.app: saved, the virtual display available and off
         case cli         // SillHost without --virtual-display: kept until it quits, the switch off and disabled
         case software    // the hardware encoder is down: the callout, a 1440×900 stream under Retina / 120 fps targets
-        case custom      // a bitrate set by hand on the Mac: "Custom — 12 Mbps"
+        case custom      // a bitrate set by hand on the host: "Custom — 12 Mbps"
         case vdproblem   // the virtual display on, but off for this session after repeated losses
         case vdstream    // a window streaming from the virtual display, 120 fps at Extreme, 300 Mbps: the longest readout
         case legacy      // an older Sill on the Mac: no state ever arrives (connected 10 s ago)
@@ -322,7 +322,7 @@ enum MockCatalog {
         case linkbehind      // away at Pro · Retina on a link that cannot carry it: the callout and "Use Low · Standard"
         case linkmixed       // behind while a device at home keeps Pro: the callout without a button
         case linklow         // behind at Low · Standard: "even at Low", no button
-        case linkstalled     // stalled: the Mac's alone, so no callout
+        case linkstalled     // stalled: the host's alone, so no callout
     }
 
     /// The away and link cases: the Mac's two qualities (home Pro · Retina, away Low · Standard unless
@@ -491,7 +491,7 @@ enum MockCatalog {
         case methods   // every word a row can end in: Wired, Wi-Fi, none, long names with Wired and Wi-Fi, Direct
         case denied    // Local Network access denied: the status says what to do, and no hint
         case update    // a Mac refused this version: its words, a Wi‑Fi row, the App Store link (with -SillAppStoreURL)
-        case notice    // a goodbye reason this build does not know: the Mac's two-line message, no link
+        case notice    // a goodbye reason this build does not know: the host's two-line message, no link
         case remote        // a network row, a Direct row and two Remote rows (a long name, a "(2)")
         case addmac        // Add a Mac unfolded, scanning (a drawn viewfinder: the simulator has no camera)
         case addcode       // the typed path, empty
@@ -507,8 +507,8 @@ enum MockCatalog {
         case homecard        // the Mac shows its code: the home card, scanning (a drawn viewfinder)
         case homecode        // the home card's typed path, empty
         case homecodeerror   // the typed path after a wrong code: "That code didn’t work… 4 tries left."
-        case homelocked      // the Mac is locked (a Wired row over the cable): "Unlock Mac mini, then tap it again."
-        case homeopenonmac   // the Mac showed no code by itself: "…choose Pair iPhone or iPad… in the Sill menu…"
+        case homelocked      // the host is locked (a Wired row over the cable): "Unlock Mac mini, then tap it again."
+        case homeopenonmac   // the host showed no code by itself: "…choose Pair a Device… in the Sill menu…"
         case homerevoked     // the Mac removed this device: its row reads Not paired
         case homecabledone   // paired over the cable, the session on its way: "Paired with Mac mini over the cable."
         case homeolder       // a tap on an Update Sill row: "Mac mini runs an older Sill…"
@@ -606,7 +606,7 @@ enum MockCatalog {
                           minimumVersion: "1.2", reconnect: false)
                 // A reason this build does not know ("pairingRequired" is pairing at home's own now).
                 : Goodbye(reason: "pairAgain",
-                          message: "Mac mini now lets in only the devices it has paired with. On the Mac, choose Pair iPhone or iPad…, then scan its code with this \(StreamClient.deviceWord).",
+                          message: "Mac mini now lets in only the devices it has paired with. On the host, choose Pair a Device…, then scan its code with this \(StreamClient.deviceWord).",
                           reconnect: false)
             let outcome = GoodbyePolicy.outcome(goodbye, mac: "Mac mini", device: StreamClient.deviceWord, saved: false)
             client.status = outcome.text

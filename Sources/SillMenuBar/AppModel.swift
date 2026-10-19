@@ -257,7 +257,7 @@ final class AppModel {
     /// The host's remote access, once the coordinator is up.
     var remote: RemoteAccess? { coordinator?.remote }
 
-    /// Pair iPhone or iPad… (the menu, the panes, -SillPairAfter): opens a pairing window, or
+    /// Pair a Device… (the menu, the panes, -SillPairAfter): opens a pairing window, or
     /// brings the open one forward with its code (one a device opened becomes the remote door's too).
     func pairDevice() {
         // A window up already comes forward at once; the offer made again (with addresses, when a

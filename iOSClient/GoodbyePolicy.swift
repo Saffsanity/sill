@@ -49,7 +49,7 @@ enum GoodbyePolicy {
     static func outcome(_ goodbye: Goodbye?, mac: String, device: String, saved: Bool) -> Outcome {
         guard let goodbye else {
             return Outcome(text: saved ? "\(mac) disconnected. Sill will reconnect when it can reach it."
-                                       : "\(mac) disconnected. It will reconnect when the Mac is back.",
+                                       : "\(mac) disconnected. It will reconnect when the host is back.",
                            reconnect: true, remoteAllowed: saved, isNotice: false)
         }
         switch goodbye.reason {

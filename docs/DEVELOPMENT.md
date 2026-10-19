@@ -70,7 +70,7 @@ rate, frame age, round trip and how it is connected ("Wired", "Wi-Fi" or
 "Direct"; from away, "through Tailscale" or "over the internet"), and what is
 streaming; it holds the
 virtual display, frame rate, quality and resolution controls, Direct Wireless
-Connection, Remote Access… and Pair iPhone or iPad… (see Pairing at home and
+Connection, Remote Access… and Pair a Device… (see Pairing at home and
 Remote access below), Launch at Login, Permissions, Show Log… and Settings…
 (⌘,). Settings › Devices lists the paired devices, with Require pairing.
 Changes apply at once; a change to a streaming setting restarts the current
@@ -335,7 +335,7 @@ the package reference. Nothing else. A new source file needs its four
 
 ## Settings from a device
 
-A connected iPhone or iPad changes the same settings from its own Settings
+A connected device changes the same settings from its own Settings
 panel (the gear, the last button of its bar): Quality, Resolution, Frame Rate,
 Prioritize Encoding Speed, Virtual Display and Direct Wireless Connection, with
 exactly the Mac's choices. Sill.app saves a device's change like a menu click,
@@ -609,11 +609,11 @@ paired for Remote Access connects at home with no further step.
   code, or choose Enter Code Instead and type the 12 digits. Cancel on the Mac
   closes a window you did not ask for. A Mac opens at most three such windows
   in ten minutes, and none for ten minutes to a device after you click Cancel
-  on the Mac or after five wrong codes; the device then says to choose Pair
-  iPhone or iPad… in the Sill menu, which always works. A locked Mac shows no
+  on the Mac or after five wrong codes; the device then says to choose Pair a
+  Device… in the Sill menu, which always works. A locked Mac shows no
   code ("Unlock Mac mini, then tap it again."), and an ask from the Mac itself
-  (the Simulator, another app) never opens a window: pair those with Pair
-  iPhone or iPad….
+  (the Simulator, another app) never opens a window: pair those with Pair a
+  Device….
 - **Over the USB cable:** an unpaired iPhone or iPad on the Mac's cable reads
   "Wired". Tap it, and while the Mac is unlocked it pairs by itself, with no
   code; the Mac shows a notice with Remove for ten seconds. Both ends check
@@ -635,8 +635,8 @@ paired for Remote Access connects at home with no further step.
   for Mac you download (0.4.0 and later), and in the login keychain in a
   Sill.app you build yourself without the Developer ID provisioning profile.
 - **Older builds:** a device from before pairing at home dials the home door
-  without TLS and can no longer connect to this Sill.app; the menu says "An
-  iPhone or iPad Needs Sill Updated". Update the device first, then the Mac. A
+  without TLS and can no longer connect to this Sill.app; the menu says "A
+  Device Needs Sill Updated". Update the device first, then the Mac. A
   Release build of the iPhone and iPad app never connects without TLS ("Update
   Sill" on the row of a Mac with an older Sill); a Debug build still dials an
   older Sill.app's plain door until it has seen that Mac speak TLS (launch it
@@ -669,8 +669,8 @@ connect (TLS 1.3, each end pinned to the other's key).
    device will use: your Tailscale address and its MagicDNS name, another VPN,
    this network's address.
 2. Pair each device once, at home or away (a device already paired at home is
-   paired for this too): Pair iPhone or iPad… in the Sill menu shows a QR code
-   and a 12-digit code for five minutes. On the device, tap Add a Mac… at the
+   paired for this too): Pair a Device… in the Sill menu shows a QR code
+   and a 12-digit code for five minutes. On the device, tap Add a Host… at the
    bottom of the connect screen and point it at the code, or choose Enter Code
    Instead and type the address and the code the window shows. With Tailscale,
    the address is the Mac's MagicDNS name or the Tailscale IP address under it;
@@ -769,6 +769,64 @@ profile keeps them in Keychain Access › login: the key "Sill Remote Access" an
 the passwords of service `me.saffer.sill.remote`. Deleting those makes that
 build new to every device, which must pair again. On the device, a paired
 Mac's row has Forget in its menu (touch and hold).
+
+## Windows and Android clients
+
+`clients/` is a Gradle build of Sill's clients that are not Swift (docs/clients-plan.md has the
+design, the decisions and what is verified): `core` (the wire, pairing, TLS with pinned keys,
+discovery and the session, in Kotlin with no dependency), `desktop` (the Windows client: Swing,
+FFmpeg for HEVC, jpackage) and `android` (MediaCodec, platform APIs only, minSdk 29). Nothing in it
+touches the Mac or iPad builds. It needs a JDK 17 or later; `./gradlew` fetches Gradle 8.14.3
+(checksum pinned). `:android` is built only where an Android SDK is configured (`ANDROID_HOME`, or
+`sdk.dir` in `clients/local.properties`).
+
+```
+cd clients
+./gradlew :core:test                      # the core: the wire vectors, crypto, TLS (with openssl), mDNS, the session, the whole client against the model Mac
+SILL_LIVE_MDNS=1 ./gradlew :core:test     # also a live python-zeroconf responder on this machine's network (pip install zeroconf)
+./gradlew :desktop:test                   # the HEVC decoder on real libx265 streams, input mapping, the stream end to end
+xvfb-run -a ./gradlew :desktop:uiTest     # the Windows client's real windows, clicked and typed into (any display; screenshots in desktop/build/ui-shots)
+./gradlew :desktop:run                    # run the Windows client (SILL_DECODER=software: no Direct3D; SILL_DEV_PLAIN=1: dial a plain door, the CLI's)
+./gradlew :desktop:jpackage               # on Windows with WiX 3: desktop/build/jpackage/Sill-0.6.0.msi; elsewhere an app image
+desktop/build/jpackage/Sill/bin/Sill --self-test   # the packaged runtime: FFmpeg's decoder, the identity, TLS 1.3 (Sill.exe on Windows)
+./gradlew :android:lintDebug :android:assembleDebug  # android/build/outputs/apk/debug/android-debug.apk
+```
+
+The wire's vectors come from the Mac's own code: `clients/wire-vectors/generate.sh` compiles
+Sources/StreamProtocol with swiftc (Xcode, or swift.org's toolchain on Linux) and writes
+`clients/core/src/test/resources/sill/vectors.json`. A change to a payload in StreamProtocol
+regenerates it (commit the result) and updates `Payloads.kt` to match; `generate.sh --verify` fails
+until both are done, and `generate.sh --check` decodes the Kotlin core's encodings (written by
+`:core:test`) with the Mac's types. `mdns_fixture.py` and `hevc_sample.sh` remake the other fixtures.
+
+### Windows and Linux hosts
+
+`clients/host-core` and `clients/host` make a Windows or Linux computer a Sill host: devices list it
+beside the Macs and stream its windows (docs/clients-plan.md, "Hosts"). The host builds and runs
+with JDK 25 (the foreign function API reaches Xlib, XTest and user32); Gradle fetches one where
+none is installed. Linux needs an X11 session (Xorg, or XWayland's windows under Wayland) with
+libX11 and libXtst. The host listens on port 7455 and answers mDNS on 5353 beside the system's
+own responder; its key, paired devices and settings are in `~/.config/sill-host/host.json`
+(`%APPDATA%\Sill Host\host.json` on Windows, 0600 elsewhere), its log in `host.log` beside it. Delete the file to start over: every device then pairs again.
+
+```
+cd clients
+./gradlew :host-core:test                 # the door, pairing, sessions and catalog against the Kotlin client on a fake platform
+xvfb-run -a ./gradlew :host:test          # the Linux host end to end: openbox and an xterm on the display (install both), pairing, video decoded, typing, Aa, close
+./gradlew :host:run                       # the host's window: the pairing code, paired devices, Require pairing, quality
+./gradlew :host:run --args="--headless --pair"   # no window: the code and the link on stdout (--port N for another port)
+./gradlew :host:jpackage                  # on Windows with WiX 3: host/build/jpackage/SillHost-0.6.0.msi; elsewhere an app image
+host/build/jpackage/SillHost/bin/SillHost --self-test   # HEVC encoding, the platform, a screen capture, the store, the door's TLS (SillHost.exe on Windows)
+host/build/jpackage/SillHost/bin/SillHost --input-probe # the platform's input typed into a text field of its own, read back
+SILL_ENCODER=libx265 ./gradlew :host:run  # force one encoder (hevc_nvenc, hevc_qsv, hevc_vaapi, hevc_mf, libx265)
+```
+CI's `clients.yml` runs all of it, the Android build and the Windows client's tests on Windows.
+
+To try a client against Sill.app: the Mac and the PC or phone on the same network, the client's
+Connect on the Mac's row ("Not paired"), and the code the Mac's pairing window shows. Away from
+home: Add a Host… with the address and code from Pair a Device…. Against a test host on this
+Mac, `SillHost --synthetic --pairing` is the TLS home door; the clients do not dial the CLI's plain
+door unless `SILL_DEV_PLAIN=1` (Windows client).
 
 ## Test tools
 

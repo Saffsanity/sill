@@ -166,7 +166,7 @@ check(C.macAccessHint(.notAsked)!.hasPrefix("Click Allow in System Settings: mac
       && C.macAccessHint(.asks) == C.macAccessHint(.denied) && C.macAccessHint(.asks)!.contains("Paste from Other Apps"),
       "the way to allow it: asked once first while macOS has not asked about Sill (it is not listed until then)")
 check(C.macAccessButton == "Allow in System Settings…", "the button")
-check(C.macFootnote == "Text you copy here can be pasted on a connected iPhone or iPad, and text sent from one with Paste becomes this Mac’s. Copies a password manager marks as concealed stay on this Mac.",
+check(C.macFootnote == "Text you copy here can be pasted on a connected device, and text sent from one with Paste becomes this Mac’s. Copies a password manager marks as concealed stay on this Mac.",
       "Settings › General's footnote: only what a password manager marks stays, and a device's text comes with Paste")
 check(C.macAccessLine(.allowed).hasPrefix("Clipboard: macOS lets Sill read the clipboard again")
       && C.macAccessLine(.asks).hasPrefix("Clipboard: macOS asks before Sill reads the clipboard")

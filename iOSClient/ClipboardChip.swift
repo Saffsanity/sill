@@ -8,7 +8,7 @@ import StreamProtocol
 struct ClipboardChip: View {
     @ObservedObject var client: StreamClient
 
-    private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
+    private var mac: String { client.macName.isEmpty ? "the host" : client.macName }
 
     var body: some View {
         ZStack(alignment: .trailing) {
@@ -103,7 +103,7 @@ struct ClipboardPasteButton: View {
         .buttonBorderShape(.capsule)
         .labelStyle(.titleAndIcon)
         .tint(Palette.accent)
-        .accessibilityHint(ClipboardPolicy.Copy.pasteHint(mac: client.macName.isEmpty ? "the Mac" : client.macName,
+        .accessibilityHint(ClipboardPolicy.Copy.pasteHint(mac: client.macName.isEmpty ? "the host" : client.macName,
                                                           device: StreamClient.deviceWord))
     }
 }

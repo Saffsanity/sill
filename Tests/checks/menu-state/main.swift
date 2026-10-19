@@ -81,7 +81,7 @@ do {
     check(!s.receive(top(nil, ["X"]), now: 1).topChanged && s.version == 4 && s.menus.count == 10, "a top level without a version is ignored")
     let none = s.receive(MacMenu(version: 5, menus: []), now: 2)
     check(none.topChanged && !s.hasMenus && s.app == nil && s.menus.isEmpty, "no menus: no button")
-    _ = s.receive(MacMenu(version: 6, app: "Code", menus: [], note: "Allow Accessibility for Sill on the Mac (System Settings › Privacy & Security › Accessibility)."), now: 3)
+    _ = s.receive(MacMenu(version: 6, app: "Code", menus: [], note: "Allow Accessibility for Sill on the host (System Settings › Privacy & Security › Accessibility)."), now: 3)
     check(s.hasMenus && s.menus.isEmpty && s.note?.hasPrefix("Allow Accessibility") == true, "a note alone shows the button")
     check(s.top == S.Top(version: 6, app: "Code", menus: [], stale: false, note: s.note), "the top's snapshot")
 }
@@ -195,7 +195,7 @@ do {
     check(keys(e) == [1, 2] && e.allSatisfy { $0.content == .message("Mac mini didn’t answer. Open the menu again.") }, "at 4 s exactly, the fetch and the one that joined it")
     check(s.waitingKeys == [3] && s.oldestWait == 12, "the later fetch still waits")
     check(s.expire(now: 19.99, timeout: 8, mac: "").isEmpty, "a longer timeout (a slow link)")
-    check(s.expire(now: 20, timeout: 8, mac: "") == [S.Done(key: 3, content: .message("The Mac didn’t answer. Open the menu again."))], "no name: The Mac")
+    check(s.expire(now: 20, timeout: 8, mac: "") == [S.Done(key: 3, content: .message("The host didn’t answer. Open the menu again."))], "no name: The host")
     check(s.receive(answer(3, token: 1, fileItems), now: 21).done.isEmpty, "an answer after its timeout is dropped")
     check(s.expire(now: 100, timeout: 4, mac: "x").isEmpty, "nothing twice")
 }
@@ -238,7 +238,7 @@ do {
     check(s.press(Row(kind: .item, id: nil, title: "Untitled", version: 3), token: 24) == nil, "no id: nothing")
     check(s.press(Row(kind: .item, id: "2.5", title: "Save", version: nil), token: 25) == nil, "no version: nothing")
     check(s.press(Row(kind: .item, id: "2.5", title: "Save", version: 2), token: 26) == .send(PressMenuItem(version: 2, id: "2.5", title: "Save", token: 26)),
-          "a row of an older version goes with that version, for the Mac to refuse")
+          "a row of an older version goes with that version, for the host to refuse")
     check(s.receive(pressed(3, token: 20, true), now: 1).refusal == nil, "pressed: nothing to tell")
     let refused = s.receive(pressed(4, token: 26, false, note: changed), now: 1)
     check(refused.refusal == S.Refusal(title: "Save", id: "2.5", note: changed, byMac: true) && refused.done.isEmpty && !refused.topChanged, "a refusal")
@@ -247,7 +247,7 @@ do {
     _ = s.press(save, token: 27)
     check(s.receive(pressed(3, token: 27, false), now: 2).refusal?.note == changed, "a refusal without a note: the menus changed")
     _ = s.press(save, token: 28)
-    check(s.receive(pressed(3, token: 28, false, note: "It isn’t available right now."), now: 2).refusal?.note == "It isn’t available right now.", "the Mac's note")
+    check(s.receive(pressed(3, token: 28, false, note: "It isn’t available right now."), now: 2).refusal?.note == "It isn’t available right now.", "the host's note")
     _ = s.press(save, token: 29)
     check(s.receive(MacMenu(version: 3, answering: 29), now: 2).refusal == nil, "an answer that says nothing refuses nothing")
     for t in 100..<120 { _ = s.press(save, token: t) }
@@ -298,15 +298,15 @@ do {
     check(secs([]) == [["No items"]], "no items: No items")
     check(secs([sep, sep]) == [["No items"]], "only separators: No items")
     check(secs([], note: changed) == [[changed]], "a refusal: the note alone")
-    check(secs([], more: 5) == [["5 more on the Mac"]], "nothing read but more on the Mac: that row alone")
-    check(secs([a, b], more: 100) == [["A", "B"], ["100 more on the Mac"]], "more: a last row")
-    check(secs([a], note: "Blender isn’t responding.", more: 3) == [["Blender isn’t responding."], ["A"], ["3 more on the Mac"]], "the note first, then the items, then more")
+    check(secs([], more: 5) == [["5 more on the host"]], "nothing read but more on the host: that row alone")
+    check(secs([a, b], more: 100) == [["A", "B"], ["100 more on the host"]], "more: a last row")
+    check(secs([a], note: "Blender isn’t responding.", more: 3) == [["Blender isn’t responding."], ["A"], ["3 more on the host"]], "the note first, then the items, then more")
     let all = S.sections([a, item("1.1", "Sub", key: "⌘K", submenu: true), item("1.2", "Off", enabled: false),
                           item("1.3", "No id").with(id: nil), item("1.4", "Keyed", key: "  ⇧⌘S \n")],
                          stale: false, note: nil, more: 0, version: v)
     let flat = all.flatMap { $0 }
     check(flat.map(\.kind) == [.item, .submenu, .item, .item, .item], "kinds")
-    check(flat.map(\.enabled) == [true, true, false, false, true], "enabled unless the Mac said false, or no id")
+    check(flat.map(\.enabled) == [true, true, false, false, true], "enabled unless the host said false, or no id")
     check(flat[1].key == nil && flat[4].key == "⇧⌘S", "a submenu has no shortcut; a shortcut cleaned")
     check(flat.allSatisfy { $0.version == v }, "every row carries the version")
     check(S.sections([a, b], stale: true, note: nil, more: 0, version: v).flatMap { $0 }.allSatisfy { !$0.enabled }, "stale: every row disabled")
@@ -328,7 +328,7 @@ do {
     let window = (0..<500).map { item("9.\($0)", "Window \($0)") }
     let r = s.receive(answer(3, token: 1, menu: "9", window, more: 100), now: 0.2)
     guard case .sections(let sections, let more)? = r.done.first?.content else { check(false, "the long menu's content"); exit(1) }
-    check(more == 100 && sections.count == 2 && sections[0].count == 500 && sections[1] == [Row.note("100 more on the Mac")], "500 rows and 100 more on the Mac")
+    check(more == 100 && sections.count == 2 && sections[0].count == 500 && sections[1] == [Row.note("100 more on the host")], "500 rows and 100 more on the host")
     _ = s.fetch("9", title: t("9"), version: 3, key: 2, token: 2, now: 1)
     let neg = s.receive(answer(3, token: 2, menu: "9", [], more: -4), now: 1)
     check(neg.done.first?.content == .sections([[Row.note("No items")]], more: 0), "a negative more counts as none")

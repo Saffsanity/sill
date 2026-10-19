@@ -182,7 +182,7 @@ var memory = fresh
 var walk = TourPolicy.run(owed: TourPolicy.owed(L, voiceOver: false, memory))!
 memory = TourPolicy.passed(walk.at, memory); walk = TourPolicy.next(walk)!
 memory = TourPolicy.passed(walk.at, memory); walk = TourPolicy.next(walk)!
-check(walk.at == .settings && memory.seen == [.touch, .bar], "two passed, the Mac quits at the third")
+check(walk.at == .settings && memory.seen == [.touch, .bar], "two passed, the host quits at the third")
 check(TourPolicy.run(owed: TourPolicy.owed(L, voiceOver: false, memory)) == TourRun(steps: [.settings], at: .settings, replay: false), "the next session: settings alone")
 check(TourPolicy.run(owed: TourPolicy.owed(P, voiceOver: false, memory))?.steps == [.settings, .laptop], "or upright: settings, then laptop")
 
@@ -387,7 +387,7 @@ check(largerMacShape.stream == CGRect(x: 8, y: 8, width: 424, height: 275) && la
       && largerMacShape.union(.bar)! == CGRect(x: 14, y: 454, width: 272, height: 50) && largerMacShape.targets[.keys]!.minY == 520
       && largerMacShape.targets[.trackpad]! == CGRect(x: 14, y: 574, width: 412, height: 304), "the 18 Pro Max with Larger Picture and a window of the Desktop's shape: \(largerMacShape.targets)")
 check(largerFitted.stream == largerFitted.room!, "a window fitted to the room: the picture is the room")
-check(largerFive.union(.bar)! == CGRect(x: 14, y: 454, width: 244, height: 50), "before the Mac's menus come: Apps, Aa and Keyboard of five")
+check(largerFive.union(.bar)! == CGRect(x: 14, y: 454, width: 244, height: 50), "before the host's menus come: Apps, Aa and Keyboard of five")
 
 // MARK: - Where the card goes: an oracle from the plan's words
 
@@ -842,8 +842,8 @@ check(touchPad.rows[0].spans == [TourSpan(text: "Tap", strong: true), TourSpan(t
 check(touchPad.hint == "The picture of Mac mini fills the screen below the bar.", "touch's hint sideways")
 check(words(.touch, P).hint == "The picture of Mac mini fills the top half of the screen.", "touch's hint upright")
 check(texts(words(.touch, L, device: "iPhone")) == ["Tap to click.", "Touch and hold to right-click.", "Drag to scroll."], "no Pencil row on iPhone")
-check(words(.touch, L, mac: "").subtitle == "What you do here happens on your Mac." && words(.touch, P, mac: "").hint == "The picture of your Mac fills the top half of the screen.",
-      "the “your Mac” fallback")
+check(words(.touch, L, mac: "").subtitle == "What you do here happens on your host." && words(.touch, P, mac: "").hint == "The picture of your host fills the top half of the screen.",
+      "the “your host” fallback")
 let barL = words(.bar, L)
 check(barL.title == "Windows and Text Size" && barL.subtitle == nil, "bar: title, no subtitle")
 check(texts(barL) == ["Touch and hold a window to close, minimize or go full screen. Keep holding and drag to move it.",
@@ -852,7 +852,7 @@ check(texts(barL) == ["Touch and hold a window to close, minimize or go full scr
 check(barL.rows.map(\.symbol) == ["hand.point.up.left", "textformat.size", "keyboard"], "bar's symbols")
 check(texts(words(.bar, P)) == Array(texts(barL).prefix(2)), "bar upright: no Keyboard row (it is a cap)")
 check(barL.hint == "In the bar at the top, after Apps." && words(.bar, P).hint == "In the bar below the picture, after Apps.", "bar's hints")
-check(texts(words(.bar, L, mac: "Studio")).last == "Keyboard types on Studio, on screen or with a hardware keyboard.", "the Mac's name in the Keyboard row")
+check(texts(words(.bar, L, mac: "Studio")).last == "Keyboard types on Studio, on screen or with a hardware keyboard.", "the host's name in the Keyboard row")
 let settingsL = words(.settings, L)
 check(settingsL.title == "Settings" && settingsL.subtitle == nil && settingsL.hint == "The last button in the bar.", "settings: title, hint")
 check(texts(settingsL) == ["Disconnect is at the bottom of Settings.", "Take the Tour is there too, to see this again.",
@@ -921,7 +921,7 @@ check(words(.laptop, F, device: "iPhone", first: true, thumbnails: false).hint =
 check([TourTopic.touch, .settings].allSatisfy { words($0, F, device: "iPhone", thumbnails: false) == words($0, F, device: "iPhone") },
       "Larger Picture's other cards as before")
 check(texts(words(.bar, F, mac: "Studio", device: "iPhone", thumbnails: false)).first == "Apps lists the apps on Studio: tap an open one again for its next window.",
-      "the Mac's name in Apps' row")
+      "the host's name in Apps' row")
 check([L, P].allSatisfy { layout in all.allSatisfy { words($0, layout, thumbnails: false) == words($0, layout) } },
       "no thumbnails changes no words sideways or in the halves")
 // Under VoiceOver: no touch card, no trackpad rows, and no gesture VoiceOver cannot make.

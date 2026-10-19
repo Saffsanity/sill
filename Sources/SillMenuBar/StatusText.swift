@@ -44,7 +44,7 @@ struct StatusPresentation: Equatable {
     /// Under the menu's Remote Access… item: "Off", "On · Tailscale"… Nil on a host without
     /// remote access (no item then).
     var remoteAccessNote: String?
-    /// Pair iPhone or iPad… can open a pairing window (the Mac has an identity).
+    /// Pair a Device… can open a pairing window (the Mac has an identity).
     var canPair = false
     /// Every connected device is away from home, so the away quality is the target: the menu's
     /// Quality subtitle says so (docs/remote-bundle-plan.md §5.7).
@@ -96,7 +96,7 @@ enum StatusText {
         let request = pairingRequest(s.remote, now: now)
         if let request { attention.append(request) }
         if let at = s.remote?.olderDeviceAt, now.timeIntervalSince(at) < olderDeviceShownFor {
-            attention.append(.init(title: "An iPhone or iPad Needs Sill Updated", subtitle: "It tried to connect with an older Sill.",
+            attention.append(.init(title: "A Device Needs Sill Updated", subtitle: "It tried to connect with an older Sill.",
                                    action: .none))
         }
         let homeDoorClosed = homeDoorUnavailable(s.remote)
@@ -196,7 +196,7 @@ enum StatusText {
             return ("Not Visible on the Network", "\(error). Quit and reopen Sill to try again.")
         case .waiting:
             return ("Waiting for the Network",
-                    "Sill appears on your iPhone and iPad once this Mac is on Wi-Fi or Ethernet and Local Network access is allowed.")
+                    "Sill appears on your devices once this Mac is on Wi-Fi or Ethernet and Local Network access is allowed.")
         case .notAdvertised(let port):
             return ("Test Pattern Mode", "Not advertised; test clients connect to port \(port).")
         case .registering, .advertising:
@@ -213,7 +213,7 @@ enum StatusText {
             return ("\(connected) Connected", "Pick a window on the device to start streaming.")
         }
         if case .advertising(let name) = s.network {
-            return ("Waiting for a Device", "Open Sill on your iPhone or iPad. This Mac appears as “\(name)”.")
+            return ("Waiting for a Device", "Open Sill on your device. This Mac appears as “\(name)”.")
         }
         return ("Waiting for a Device", "Registering on the local network…")
     }

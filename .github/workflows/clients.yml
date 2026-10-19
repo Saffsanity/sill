@@ -1,0 +1,184 @@
+# The apps that are not Swift (clients/, docs/clients-plan.md): the shared Kotlin core, the
+# Windows client, the Android app, and the Windows and Linux hosts. On pull requests and pushes to
+# main that touch them, the wire they speak (Sources/StreamProtocol) or the iOS app their design
+# comes from (iOSClient), and by hand. Nothing here signs or uses a secret.
+#
+# - core: the core's and the Windows client's tests (the decoder on real HEVC, the model Mac end
+#   to end), the Windows client's real windows under Xvfb (every control at StreamLayout's
+#   rectangles and the iOS app's colours, at 100 % and at 200 %), and the wire against the Mac's own Swift
+#   types (clients/wire-vectors: vectors regenerated from Sources/StreamProtocol must match the
+#   committed ones, and Swift decodes what the Kotlin core writes), and the design layer against
+#   the iOS app (clients/design: Tokens.kt and ui-vectors.json regenerated from iOSClient's Swift
+#   must match the committed ones, and the core's words must still be the iOS app's).
+# - android: the Android app's JVM tests (the fold mapping, the layouts), Android lint (the core
+#   included) and the debug APK.
+# - windows: the Windows client's tests on Windows (FFmpeg's Windows build), and its packaged
+#   runtime (jpackage's app image, no installer) running its self-test.
+# - hosts-linux: the hosts' shared rules against the Kotlin client (the status card's and menu's
+#   words against Sill.app's, the QR code against python-qrcode's), the Linux host end to end on a
+#   real X server (Xvfb, openbox, xterm): pairing, x11grab and HEVC decoded to the terminal's colour,
+#   typing into it, Aa, close; its UI (the tray menu, Settings, the pairing window) drawn at 1x and
+#   2x in both appearances, kept as screenshots; then the packaged host's self-test.
+# - hosts-windows: the hosts' shared rules on Windows, and the packaged Windows host's self-test
+#   (user32 windows and input, FFmpeg's GPL build encoding HEVC, the door's TLS; a gdigrab of the
+#   runner's screen reported). The hosts build with JDK 25, which Gradle fetches (foojay).
+#
+# Cost: free for a public repository; Linux and Windows minutes otherwise (about 10 minutes each).
+name: Clients
+
+on:
+  pull_request:
+    paths: ['clients/**', 'Sources/StreamProtocol/**', 'iOSClient/**', '.github/workflows/clients.yml']
+  push:
+    branches: [main]
+    paths: ['clients/**', 'Sources/StreamProtocol/**', 'iOSClient/**', '.github/workflows/clients.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: clients-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Use Java 21
+        run: echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+
+      - name: The core's and the Windows client's tests
+        working-directory: clients
+        run: |
+          # python-zeroconf lets MdnsTest read this core's queries with another implementation.
+          python3 -m pip install --quiet --user 'zeroconf==0.151.5' || echo "zeroconf not installed: that cross-check skips"
+          ./gradlew --no-daemon :core:test :swing-ui:test :desktop:test
+
+      - name: The Windows client's windows, under Xvfb
+        working-directory: clients
+        # uiTest, then uiTestHiDpi (-Dsun.java2d.uiScale=2) after it; the halves need 1000 logical rows.
+        run: xvfb-run -a -s "-screen 0 1600x1200x24" ./gradlew --no-daemon :desktop:uiTest
+
+      - name: The wire and the design against the Mac's and the iOS app's Swift
+        run: |
+          command -v swiftc >/dev/null || { echo "no Swift toolchain on this runner"; exit 1; }
+          swiftc --version
+          clients/wire-vectors/generate.sh --verify
+          clients/wire-vectors/generate.sh --check
+          clients/design/generate.sh --verify
+
+      - name: Keep the windows' screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-client-screenshots
+          path: clients/desktop/build/ui-shots/
+          if-no-files-found: warn
+          retention-days: 14
+
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Use Java 21
+        run: echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+
+      - name: Lint and build the APK
+        working-directory: clients
+        run: |
+          [ -n "${ANDROID_HOME:-}" ] || { echo "no Android SDK on this runner"; exit 1; }
+          ./gradlew --no-daemon :android:testDebugUnitTest :android:lintDebug :android:assembleDebug
+
+      - name: Keep the APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sill-android-debug
+          path: clients/android/build/outputs/apk/debug/android-debug.apk
+          retention-days: 14
+
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Use Java 21
+        run: echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+
+      - name: The Windows client's tests on Windows
+        working-directory: clients
+        run: ./gradlew --no-daemon :swing-ui:test :desktop:test
+
+      - name: The packaged runtime's self-test
+        working-directory: clients
+        run: |
+          ./gradlew --no-daemon :desktop:jpackage -Psill.jpackageType=app-image
+          # jpackage leaves java.exe out of the runtime it bundles: the app's own launcher runs the check.
+          desktop/build/jpackage/Sill/Sill.exe --self-test
+
+  hosts-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Use Java 21 for Gradle
+        run: echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+
+      - name: An X server's window manager and terminal
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq openbox xterm libasound2t64 libpulse0 libva2 libva-drm2 libdrm2 libxcb-shm0  # FFmpeg's avdevice links them
+
+      - name: The hosts' rules, and the Linux host end to end
+        working-directory: clients
+        run: |
+          ./gradlew --no-daemon :host-core:test
+          xvfb-run -a -s "-screen 0 1600x1000x24" ./gradlew --no-daemon :host:test
+
+      - name: The packaged Linux host's self-test
+        working-directory: clients
+        run: |
+          ./gradlew --no-daemon :host:jpackage
+          xvfb-run -a -s "-screen 0 1600x1000x24" host/build/jpackage/SillHost/bin/SillHost --self-test
+
+      - name: Keep the host's UI screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: host-ui-screenshots
+          path: clients/host/build/ui-shots/
+          if-no-files-found: warn
+          retention-days: 14
+
+  hosts-windows:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Use Java 21 for Gradle
+        run: echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+
+      - name: The hosts' rules on Windows
+        working-directory: clients
+        run: ./gradlew --no-daemon :host-core:test
+
+      - name: The packaged Windows host's self-test
+        working-directory: clients
+        run: |
+          ./gradlew --no-daemon :host:jpackage -Psill.jpackageType=app-image
+          host/build/jpackage/SillHost/SillHost.exe --self-test

@@ -507,7 +507,7 @@ SET UP THE MAC (about 2 minutes)
 
 CONNECT AND PAIR (once per device)
 5. Open Sill on the iPhone or iPad and allow Local Network access.
-6. The Mac appears under "Connect to a Mac", marked "Not paired". Tap it.
+6. The Mac appears under "Connect to a Host", marked "Not paired". Tap it.
 7. The Mac shows a QR code and a 12-digit code. Scan it with the device's camera, or tap Enter Code Instead and type it. The Mac's desktop appears. Over a USB-C cable the device pairs by itself while the Mac is unlocked.
 
 WHAT TO TRY
@@ -785,15 +785,15 @@ Safe:
   `URLSession` or web address.
 - The UI names in the review notes and the shot list match the code: the
   connect screen, the bars (Apps, Keyboard, Desktop, Settings), the panel, the
-  Mac's Permissions pane and menu, and on remote-access "Add a Mac…",
-  "Remote Access…", "Pair iPhone or iPad…" and "Enter Code Instead".
+  Mac's Permissions pane and menu, and on remote-access "Add a Host…",
+  "Remote Access…", "Pair a Device…" and "Enter Code Instead".
 - No em-dashes in this file; its only email address is support@getsill.app.
 - Pairing at home (PR #37, 2026-09-27): the description, the review notes,
   the export compliance, the privacy answers, the demo video and the
   screenshot steps describe it, since every connection at home is TLS with
   pairing from then on and a Release build never connects to an older Sill for
   Mac. The names in them match the code: "Not paired" (the row), "Enter Code
-  Instead" (the home card, as Add a Mac…'s), "Pair iPhone or iPad…" and
+  Instead" (the home card, as Add a Host…'s), "Pair a Device…" and
   Settings › Devices (the Mac), and an ask from the Mac itself (the simulator)
   gets no window by itself (`DoorPolicy.ask`).
 
