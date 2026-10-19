@@ -30,7 +30,7 @@ struct PairingOverlay: View {
         _typed = State(initialValue: typed || (scannerMode == .live && !CodeScanner.isSupported))
     }
 
-    private var mac: String { client.macName.isEmpty ? "your Mac" : client.macName }
+    private var mac: String { client.macName.isEmpty ? "your host" : client.macName }
     private var working: Bool { if case .working = client.pairing { return true }; return false }
 
     var body: some View {

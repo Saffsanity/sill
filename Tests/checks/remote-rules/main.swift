@@ -24,7 +24,7 @@ func due(_ now: Double, listed: Bool = false, lost: Double = 100, left: Double? 
 }
 check("dial due: not at 2.99 s after the loss, recheck at 3 s", due(102.99) == (false, 103))
 check("dial due: at 3 s", due(103).0)
-check("dial due: never while a row lists the Mac", !due(103, listed: true).0 && due(103, listed: true).1 == nil)
+check("dial due: never while a row lists the host", !due(103, listed: true).0 && due(103, listed: true).1 == nil)
 check("dial due: a remembered Direct Mac waits 6 s", due(105.9, direct: true) == (false, 106) && due(106, direct: true).0)
 check("dial due: the network listed it 1 s before the loss: not until 10 s after that", due(103, left: 99) == (false, 109) && due(109, left: 99).0)
 check("dial due: the path changed since the loss: the grace is skipped", due(103, left: 99, changed: true).0)
@@ -65,7 +65,7 @@ let away = R.order(mac, remotePort: 7455, lastWorked: nil, localIPv4: [([172, 20
 check("order: away, the LAN addresses go last", Array(away.suffix(2)) == ["192.168.1.20", "10.0.5.9"])
 check("order: the address that last worked first", R.order(mac, remotePort: 7455, lastWorked: "203.0.113.9|7455", localIPv4: home).first?.host == "203.0.113.9")
 check("order: a stale lastWorked changes nothing", R.order(mac, remotePort: 7455, lastWorked: "1.2.3.4|7455", localIPv4: home).map { "\($0.host):\($0.port)" } == o1)
-check("order: the Mac's port for addresses without one", R.order([a("100.64.0.1", "vpn", "Tailscale")], remotePort: 7460, lastWorked: nil, localIPv4: []).first?.port == 7460)
+check("order: the host's port for addresses without one", R.order([a("100.64.0.1", "vpn", "Tailscale")], remotePort: 7460, lastWorked: nil, localIPv4: []).first?.port == 7460)
 check("order: a test host's loopback address first (the simulator on the same Mac), whatever came before it",
       R.order([a("100.64.0.2", "vpn", "Tailscale"), a("127.0.0.1", "lan", "This Mac"), a("192.168.1.20", "lan", "Wi-Fi")], remotePort: 7455,
               lastWorked: nil, localIPv4: home).map(\.host) == ["127.0.0.1", "100.64.0.2", "192.168.1.20"])
@@ -90,7 +90,7 @@ let netC = R.Candidate(host: "203.0.113.9", port: 7455, kind: "internet", via: "
 let nameC = R.Candidate(host: "home.example.net", port: 17455, kind: "internet", via: "Address name")
 check("pin failed: wrong Mac", R.classify(.tls(-9808), candidate: vpnC, usedTunnel: true) == .wrongMac && R.classify(.tls(-9808), candidate: netC, usedTunnel: false) == .wrongMac)
 check("pin failed on a LAN address: does not count", R.classify(.tls(-9808), candidate: lanC, usedTunnel: false) == nil)
-check("the Mac refused our key: revoked", R.classify(.tlsAfterReady(-9825), candidate: vpnC, usedTunnel: true) == .revoked
+check("the host refused our key: revoked", R.classify(.tlsAfterReady(-9825), candidate: vpnC, usedTunnel: true) == .revoked
       && R.classify(.tlsAfterReady(-9829), candidate: netC, usedTunnel: nil) == .revoked && R.classify(.goodbye("removed"), candidate: netC, usedTunnel: nil) == .revoked)
 check("refused, and closed before TLS", R.classify(.posix(ECONNREFUSED), candidate: netC, usedTunnel: false) == .refused
       && R.classify(.posix(ECONNRESET), candidate: vpnC, usedTunnel: true) == .refused && R.classify(.tls(-9816), candidate: netC, usedTunnel: nil) == .refused)
@@ -154,7 +154,7 @@ check("a saved host must parse without a port",
 let info = MacInfo(macID: m1.macID, name: "Studio\u{202E}", issuedAt: 60, remoteAccess: true, remotePort: 7460, internet: false,
                    addresses: [a("mac.tail1.ts.net", "vpn", "Tailscale"), a("fe80::1", "lan", "Wi-Fi"), a("127.0.0.1", "lan", "This Mac"), a("192.168.1.5", "lan", "Wi-Fi")])
 let r1 = SavedMacs.refreshed(m1, info: info, fingerprint: key(1), allowLoopback: false)
-check("refresh: name (clean), port and the Mac's addresses; typed and lastWorked kept; link-local and loopback dropped",
+check("refresh: name (clean), port and the host's addresses; typed and lastWorked kept; link-local and loopback dropped",
       r1?.name == "Studio" && r1?.remotePort == 7460 && r1?.addresses.map(\.host) == ["mac.tail1.ts.net", "192.168.1.5"]
       && r1?.typedAddresses == m1.typedAddresses && r1?.lastWorked == m1.lastWorked && r1?.infoIssuedAt == 60)
 check("refresh: loopback kept when allowed (DEBUG)", SavedMacs.refreshed(m1, info: info, fingerprint: key(1), allowLoopback: true)?.addresses.map(\.host).contains("127.0.0.1") == true)

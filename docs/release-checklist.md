@@ -1,7 +1,9 @@
 # Releasing Sill
 
 The order of work for putting the iOS app in the App Store and Sill for Mac on the web: part 1
-once, part 2 on every release. The texts and answers App Store Connect asks for, ready to paste,
+once, part 2 on every release. The apps in `clients/` are not released yet; when one is, its binary goes
+out on a tag of its own and never as the latest release (docs/clients-plan.md, decision 11), so
+nothing here, Sill.app's update check or the site's download link ever picks it up. The texts and answers App Store Connect asks for, ready to paste,
 are in `docs/app-store-metadata.md` ("metadata §N" below). The pages are in `site/` (plain HTML,
 no build step), `Scripts/release.sh` makes the notarized Mac downloads (the disk image `Sill.dmg`,
 with `Scripts/make-dmg.sh`, and the zip `Sill.zip`), and `Scripts/release-ios.sh` the iOS app's
@@ -464,7 +466,7 @@ the other's older release (docs/home-pairing-plan.md §3.4, read again against t
   nothing spaces the tries while the Mac is listed (its 2 s timer only covers a Mac that is not),
   so it can flicker several times a second. Nobody has watched it on a device; the plan's "every
   2 s" was read from that timer. No notice can reach it through a failed handshake. The Mac's menu
-  says "An iPhone or iPad Needs Sill Updated" from a source's third plain try within a minute, for
+  says "A Device Needs Sill Updated" from a source's third plain try within a minute, for
   10 minutes; those tries never start the door's backoff, so the updated device gets in at once.
   Remote Access still serves it (the remote door was TLS already), away from home.
 - 0.5 (2), or any Release build from PR #37 on, at Sill for Mac 0.3.1 or earlier: that Sill

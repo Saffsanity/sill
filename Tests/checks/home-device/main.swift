@@ -91,8 +91,8 @@ check("hint: Update Sill: \"Mac mini’s Sill is too old for this iPad.\" (a typ
 check("hint: a method row keeps today's (Direct: \"Connects without a shared Wi‑Fi network\", else none)",
       W.method(.direct).hint(name: mini, device: "iPad", direct: true) == "Connects without a shared Wi\u{2011}Fi network"
       && W.method(.wifi).hint(name: mini, device: "iPad", direct: false) == "")
-check("status: \"Mac mini runs an older Sill. Update Sill on the Mac to connect.\"",
-      P.updateSillStatus(mac: mini) == "Mac mini runs an older Sill. Update Sill on the Mac to connect.")
+check("status: \"Mac mini runs an older Sill. Update Sill on the host to connect.\"",
+      P.updateSillStatus(mac: mini) == "Mac mini runs an older Sill. Update Sill on the host to connect.")
 
 // MARK: §7.4, every combination against the table
 
@@ -196,7 +196,7 @@ func ip(_ s: String) -> [UInt8] {
 }
 let en2 = I(name: "en2", type: .wiredEthernet), anpi0 = I(name: "anpi0", type: .wiredEthernet), en0 = I(name: "en0", type: .wifi)
 let awdl0 = I(name: "awdl0", type: .wifi), lo0 = I(name: "lo0", type: .loopback), en3 = I(name: "en3", type: .wiredEthernet)
-let macOnCable = ip("fe80::18c2:af60:ec0d:47ea")                     // the Mac's end, as the iPad sees it on en2
+let macOnCable = ip("fe80::18c2:af60:ec0d:47ea")                     // the host's end, as the iPad sees it on en2
 // This device's addresses: the cable's ends carry only link-local ones; Wi-Fi the LAN's.
 var ownEn2 = ip("fe80::1c0f:2a:6e1:9b3"); ownEn2[2] = 0; ownEn2[3] = 0x07  // as getifaddrs gives it, scope embedded
 let iPadOwn: [(interface: String, address: [UInt8])] = [
@@ -206,7 +206,7 @@ let iPadOwn: [(interface: String, address: [UInt8])] = [
     ("en3", ip("fe80::3:3:3:3")), ("en3", ip("10.128.0.77")),                // a USB Ethernet adapter on the LAN (DHCP)
 ]
 let yes = P.onCable(mac: macOnCable, scope: en2, own: iPadOwn)
-check("cable: the Mac's fe80 scoped to en2, which carries only link-local addresses", yes.cable && yes.console == "cable: yes, en2 carries only link-local addresses")
+check("cable: the host's fe80 scoped to en2, which carries only link-local addresses", yes.cable && yes.console == "cable: yes, en2 carries only link-local addresses")
 check("cable: the same over anpi0", P.onCable(mac: macOnCable, scope: anpi0, own: iPadOwn).cable)
 let adapter = P.onCable(mac: ip("fe80::99"), scope: en3, own: iPadOwn)
 check("cable: a USB Ethernet adapter with a DHCP address is not (\"cable: no, en3 has 10.128.0.77\")", !adapter.cable && adapter.console == "cable: no, en3 has 10.128.0.77")
@@ -216,7 +216,7 @@ check("cable: with a unique local address (fd…) it is not", !P.onCable(mac: ma
 check("cable: an iPhone sharing its connection over USB (its end carries 172.20.10.1) is not",
       !P.onCable(mac: macOnCable, scope: en2, own: [("en2", ip("fe80::1")), ("en2", ip("172.20.10.1"))]).cable)
 let mine = P.onCable(mac: ip("fe80::1c0f:2a:6e1:9b3"), scope: en2, own: iPadOwn)
-check("cable: the Mac's address is one of this device's own (stored with its embedded scope): not", !mine.cable && mine.console.hasPrefix("cable: no, fe80::1c0f:2a:6e1:9b3 is this device"))
+check("cable: the host's address is one of this device's own (stored with its embedded scope): not", !mine.cable && mine.console.hasPrefix("cable: no, fe80::1c0f:2a:6e1:9b3 is this device"))
 check("cable: an own address given with its embedded scope matches too", !P.onCable(mac: ownEn2, scope: en2, own: [("en2", ip("fe80::1c0f:2a:6e1:9b3"))]).cable)
 check("cable: IPv4 link-local never counts", !P.onCable(mac: ip("169.254.1.1"), scope: en2, own: iPadOwn).cable)
 check("cable: a routed IPv6 Mac address is not", !P.onCable(mac: ip("2601:600:1:2::34"), scope: en2, own: iPadOwn).cable)
@@ -231,9 +231,9 @@ check("cable: loopback is not", !P.onCable(mac: ip("fe80::5"), scope: lo0, own: 
 check("cable: no interface is not", !P.onCable(mac: macOnCable, scope: nil, own: iPadOwn).cable)
 check("cable: an interface with no address here is not (nothing read)", !P.onCable(mac: macOnCable, scope: I(name: "en5", type: .wiredEthernet), own: iPadOwn).cable)
 check("cable: a malformed address is not", !P.onCable(mac: [], scope: en2, own: iPadOwn).cable && !P.onCable(mac: [0xFE], scope: en2, own: iPadOwn).cable)
-check("console: IPv4 and other interfaces say why", P.onCable(mac: ip("169.254.1.1"), scope: en2, own: iPadOwn).console == "cable: no, the Mac\u{2019}s address 169.254.1.1 is not IPv6 link-local"
+check("console: IPv4 and other interfaces say why", P.onCable(mac: ip("169.254.1.1"), scope: en2, own: iPadOwn).console == "cable: no, the host\u{2019}s address 169.254.1.1 is not IPv6 link-local"
       && P.onCable(mac: ip("fe80::5"), scope: en0, own: iPadOwn).console == "cable: no, en0 is not wired Ethernet"
-      && P.onCable(mac: macOnCable, scope: nil, own: iPadOwn).console == "cable: no, the Mac\u{2019}s address names no interface")
+      && P.onCable(mac: macOnCable, scope: nil, own: iPadOwn).console == "cable: no, the host\u{2019}s address names no interface")
 
 // The row: Wired over the cable pairs by itself; Wired over an adapter reads Not paired.
 check("row: en2 carries only link-local addresses", P.carriesOnlyLinkLocal("en2", own: iPadOwn) && P.carriesOnlyLinkLocal("anpi0", own: iPadOwn))
@@ -391,14 +391,14 @@ check("copy: Pairing with Mac mini…, …over the cable…", C.pairing(mac: min
       && C.pairing(mac: mini, cable: true) == "Pairing with Mac mini over the cable\u{2026}")
 check("copy: Paired with Mac mini over the cable.", C.pairedOverCable(mac: mini) == "Paired with Mac mini over the cable.")
 check("copy: Mac mini is showing a code. Point this iPad at it.", C.showing(mac: mini, device: "iPad") == "Mac mini is showing a code. Point this iPad at it.")
-check("copy: openOnMac", C.openOnMac(mac: mini) == "Mac mini didn\u{2019}t show a code. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap Mac mini again.")
+check("copy: openOnMac", C.openOnMac(mac: mini) == "Mac mini didn\u{2019}t show a code. On the host, choose Pair a Device\u{2026} in the Sill menu, then tap Mac mini again.")
 check("copy: locked", C.locked(mac: mini) == "Unlock Mac mini, then tap it again.")
 check("copy: removed", C.removed(mac: mini, device: "iPad") == "Mac mini removed this iPad. Tap it to pair again."
       && C.removed(mac: mini, device: "iPhone") == "Mac mini removed this iPhone. Tap it to pair again.")
 check("copy: pairingRequired", C.pairingRequired(mac: mini, device: "iPad") == "Mac mini now asks devices to pair. Tap it to pair this iPad.")
-check("copy: the home card's errors", C.stopped(mac: mini) == "Mac mini stopped pairing after too many wrong codes. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap Mac mini again."
+check("copy: the home card's errors", C.stopped(mac: mini) == "Mac mini stopped pairing after too many wrong codes. On the host, choose Pair a Device\u{2026} in the Sill menu, then tap Mac mini again."
       && C.expired(mac: mini) == "That code expired. Tap Mac mini for a new one."
-      && C.closed(mac: mini) == "That code no longer works. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap Mac mini again."
+      && C.closed(mac: mini) == "That code no longer works. On the host, choose Pair a Device\u{2026} in the Sill menu, then tap Mac mini again."
       && C.proofFailed(mac: mini) == "Pairing didn\u{2019}t finish: Mac mini couldn\u{2019}t show it knows the code. Tap it to try again.")
 
 // A refused proof at home (the security review, 2026-09-27): kind 20's reason → the card's words.
@@ -421,7 +421,7 @@ func refusalWords(_ r: R) -> String {
     }
 }
 check("refusal: stopped and closed send the person to the Sill menu before a tap",
-      [R.stopped, .closed].allSatisfy { refusalWords($0).contains("choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap Mac mini again") })
+      [R.stopped, .closed].allSatisfy { refusalWords($0).contains("choose Pair a Device\u{2026} in the Sill menu, then tap Mac mini again") })
 check("refusal: expired, and only expired, says a tap alone gets a new code",
       refusalWords(.expired).hasSuffix("Tap Mac mini for a new one.") && ![R.stopped, .closed].contains { refusalWords($0).contains("for a new") })
 check("copy: no answer", C.noAnswer(mac: mini) == "Mac mini didn\u{2019}t answer. Check that Sill is open on it, then tap it again.")
@@ -462,7 +462,7 @@ check("away: a remote session never pairs at a home door", remoteNeverAtHome && 
 
 check("copy: the home card's title, \"Pair with Mac mini\"", C.cardTitle(mac: mini) == "Pair with Mac mini")
 check("copy: the typed path's line (and the collapsed one), \"Type the code Mac mini shows.\"", C.typeCode(mac: mini) == "Type the code Mac mini shows.")
-check("copy: the viewfinder's caption and spoken label name the Mac",
+check("copy: the viewfinder's caption and spoken label name the host",
       C.viewfinderCaption(mac: mini) == "Point at the code on Mac mini" && C.viewfinderLabel(mac: mini) == "Camera. Point it at the code on Mac mini.")
 check("copy: the scan line is the status line while the card is up", C.showing(mac: mini, device: "iPhone") == "Mac mini is showing a code. Point this iPhone at it.")
 check("copy: Pair This iPad… over an unpaired session at home",
@@ -478,12 +478,12 @@ check("copy: the card's own errors (under the field) end at the row, the overlay
 // MARK: Pair This iPad…'s line over a session at home that speaks TLS (the security review, 2026-09-27)
 
 let everyAnswer: [P.AskAnswer?] = [nil, .shown, .openOnMac, .locked, .busy(1), .refused, .invalid, .pairedOverCable]
-check("overlay: a code is said to show only when the Mac answered shown",
+check("overlay: a code is said to show only when the host answered shown",
       everyAnswer.allSatisfy { a in (P.overlayLine(a, mac: mini, device: "iPad") == C.overlayShowing(mac: mini)) == (a == .shown) })
 check("overlay: \"Mac mini is showing a code now.\" for shown", P.overlayLine(.shown, mac: mini, device: "iPad") == "Mac mini is showing a code now.")
-check("overlay: no code by itself (openOnMac, refused, a second busy, an ok it does not take): the Mac's menu",
+check("overlay: no code by itself (openOnMac, refused, a second busy, an ok it does not take): the host's menu",
       [P.AskAnswer.openOnMac, .refused, .busy(2), .invalid, .pairedOverCable].allSatisfy {
-          P.overlayLine($0, mac: mini, device: "iPad") == "Mac mini didn\u{2019}t show a code by itself. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu."
+          P.overlayLine($0, mac: mini, device: "iPad") == "Mac mini didn\u{2019}t show a code by itself. On the host, choose Pair a Device\u{2026} in the Sill menu."
       })
 check("overlay: locked: \"Unlock Mac mini, then choose Pair This iPad… again.\"",
       P.overlayLine(.locked, mac: mini, device: "iPad") == "Unlock Mac mini, then choose Pair This iPad\u{2026} again.")

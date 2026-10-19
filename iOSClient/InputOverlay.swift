@@ -677,7 +677,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         let modifiers = UInt64(command.modifierFlags.rawValue)
         let events = forwarded.commanded(HIDKey.escape, modifiers: modifiers, at: ProcessInfo.processInfo.systemUptime)
         Self.hwkey(HIDKey.escape, down: true, via: "keyCommand", modifiers: modifiers,
-                   to: events.isEmpty ? "already down through pressesBegan" : "to the Mac")
+                   to: events.isEmpty ? "already down through pressesBegan" : "to the host")
         guard !events.isEmpty else { return }
         setOwnPointer(nil, .none)
         events.forEach(send)
@@ -744,7 +744,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
             switch outcome {
             case .send(let event):
                 send(event)
-                Self.hwkey(usage, down: down, via: channel, modifiers: modifiers, to: "to the Mac")
+                Self.hwkey(usage, down: down, via: channel, modifiers: modifiers, to: "to the host")
             case .text:
                 unhandled.insert(press)
                 Self.hwkey(usage, down: down, via: channel, modifiers: modifiers, to: "the text system's")

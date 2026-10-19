@@ -587,12 +587,12 @@ enum DiscoveryPolicy {
             case .remote: return "a remote session moves only home, once the network lists its Mac"
             case .cable: return "on the cable"
             case .cableUnlisted: return "on the cable, which the network no longer lists; its pongs say it works"
-            case .wifi: return "on Wi\u{2011}Fi, and the Mac is on no cable"
+            case .wifi: return "on Wi\u{2011}Fi, and the host is on no cable"
             case .cableSettling: return "the cable appeared; waiting for it to settle"
             case .upTooSoon: return "the cable is up, but the last move to it was under 5 s ago"
             case .cableFailing: return "the cable is up, but the last move to it did not complete; the next waits longer"
             case .cableRefused: return "the cable reaches another Mac, or another launch of Sill; not tried again until it is plugged in again"
-            case .noWifi: return "the cable went away, and the Mac is not on Wi\u{2011}Fi"
+            case .noWifi: return "the cable went away, and the host is not on Wi\u{2011}Fi"
             case .downTooSoon: return "the cable went away, but the last move to Wi\u{2011}Fi was under 5 s ago"
             case .lost: return "Wi\u{2011}Fi's path is gone, and there is no cable"
             }
@@ -1029,7 +1029,7 @@ enum DiscoveryPolicy {
 
     /// The status line after a tap that dialed nothing because the Mac's Sill is too old.
     static func updateSillStatus(mac: String) -> String {
-        "\(mac) runs an older Sill. Update Sill on the Mac to connect."
+        "\(mac) runs an older Sill. Update Sill on the host to connect."
     }
 
     /// Whether this device's connection runs over the USB cable to the Mac, as this device sees it
@@ -1046,10 +1046,10 @@ enum DiscoveryPolicy {
     /// addresses (getifaddrs), each with its interface.
     static func onCable(mac: [UInt8], scope: Interface?, own: [(interface: String, address: [UInt8])]) -> CableCheck {
         guard mac.count == 16, isLinkLocal(mac) else {
-            return CableCheck(cable: false, console: "cable: no, the Mac\u{2019}s address \(addressText(mac)) is not IPv6 link-local")
+            return CableCheck(cable: false, console: "cable: no, the host\u{2019}s address \(addressText(mac)) is not IPv6 link-local")
         }
         guard let scope else {
-            return CableCheck(cable: false, console: "cable: no, the Mac\u{2019}s address names no interface")
+            return CableCheck(cable: false, console: "cable: no, the host\u{2019}s address names no interface")
         }
         guard scope.type == .wiredEthernet, !isPeerToPeer(scope.name) else {
             return CableCheck(cable: false, console: "cable: no, \(scope.name) is not wired Ethernet")
@@ -1256,7 +1256,7 @@ enum DiscoveryPolicy {
         case pairedOverCable
         /// The Mac shows its code now: the home card, to scan it or type it.
         case shown
-        /// The Mac showed no code by itself: choose Pair iPhone or iPad… on the Mac.
+        /// The Mac showed no code by itself: choose Pair a Device… on the Mac.
         case openOnMac
         /// The Mac is locked.
         case locked
@@ -1415,7 +1415,7 @@ enum DiscoveryPolicy {
         }
         /// Pair This iPad…'s errors over a stream at home, where no row can be tapped: the Mac
         /// could not prove it knows the code; nothing answered the pairing connection. (A refused
-        /// code says what the remote path's does: choose Pair iPhone or iPad… on the Mac.)
+        /// code says what the remote path's does: choose Pair a Device… on the Mac.)
         static func proofFailedOverStream(mac: String) -> String {
             "Pairing didn\u{2019}t finish: \(mac) couldn\u{2019}t show it knows the code."
         }
@@ -1426,13 +1426,13 @@ enum DiscoveryPolicy {
         static func overlayAsking(mac: String) -> String { "Asking \(mac) for a code\u{2026}" }
         static func overlayShowing(mac: String) -> String { "\(mac) is showing a code now." }
         static func overlayOpenOnMac(mac: String) -> String {
-            "\(mac) didn\u{2019}t show a code by itself. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu."
+            "\(mac) didn\u{2019}t show a code by itself. On the host, choose Pair a Device\u{2026} in the Sill menu."
         }
         static func overlayLocked(mac: String, device: String) -> String {
             "Unlock \(mac), then choose Pair This \(device)\u{2026} again."
         }
         static func openOnMac(mac: String) -> String {
-            "\(mac) didn\u{2019}t show a code. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap \(mac) again."
+            "\(mac) didn\u{2019}t show a code. On the host, choose Pair a Device\u{2026} in the Sill menu, then tap \(mac) again."
         }
         static func locked(mac: String) -> String { "Unlock \(mac), then tap it again." }
         static func removed(mac: String, device: String) -> String { "\(mac) removed this \(device). Tap it to pair again." }
@@ -1447,11 +1447,11 @@ enum DiscoveryPolicy {
         /// or a closed code the Mac keeps this device quiet (a cancel on the Mac, a stop), so the
         /// words send the person to its menu first; after an expiry a tap is enough.
         static func stopped(mac: String) -> String {
-            "\(mac) stopped pairing after too many wrong codes. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap \(mac) again."
+            "\(mac) stopped pairing after too many wrong codes. On the host, choose Pair a Device\u{2026} in the Sill menu, then tap \(mac) again."
         }
         static func expired(mac: String) -> String { "That code expired. Tap \(mac) for a new one." }
         static func closed(mac: String) -> String {
-            "That code no longer works. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap \(mac) again."
+            "That code no longer works. On the host, choose Pair a Device\u{2026} in the Sill menu, then tap \(mac) again."
         }
         static func proofFailed(mac: String) -> String {
             "Pairing didn\u{2019}t finish: \(mac) couldn\u{2019}t show it knows the code. Tap it to try again."

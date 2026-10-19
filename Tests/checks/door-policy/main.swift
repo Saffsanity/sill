@@ -231,7 +231,7 @@ check("handshake: an older Sill's plain bytes (-9836) at home count toward no ba
       D.handshakeRefusal(.home, status: -9836) == .olderSill && D.handshakeRefusal(.home, status: -9858) == .refused("unpaired"))
 check("handshake: the remote door keeps -9836 as unpaired, toward the backoff (unchanged)", D.handshakeRefusal(.remote, status: -9836) == .refused("unpaired"))
 
-// The menu's "An iPhone or iPad Needs Sill Updated" (the security review, 2026-09-27): a TLS 1.2
+// The menu's "A Device Needs Sill Updated" (the security review, 2026-09-27): a TLS 1.2
 // client fails with -9836 too, but tries once; an older Sill tries again and again (a tap, then its
 // reconnect every 2 to 10 s). The item waits for a source's third plain try within a minute.
 check("older Sill: 3 tries in 60 s", D.olderSillTries == 3 && D.olderSillSpan == 60)

@@ -7,10 +7,10 @@ S = "iOSClient/SavedMacs.swift"
 W = "Sources/SillHost/PairingWindow.swift"
 M = [
     ("the card's closed words say a tap is enough (as before the review)", F,
-     "            \"That code no longer works. On the Mac, choose Pair iPhone or iPad\\u{2026} in the Sill menu, then tap \\(mac) again.\"",
+     "            \"That code no longer works. On the host, choose Pair a Device\\u{2026} in the Sill menu, then tap \\(mac) again.\"",
      "            \"That code no longer works. Tap \\(mac) for a new one.\""),
     ("the card's stopped words say a tap is enough (as before the review)", F,
-     "            \"\\(mac) stopped pairing after too many wrong codes. On the Mac, choose Pair iPhone or iPad\\u{2026} in the Sill menu, then tap \\(mac) again.\"",
+     "            \"\\(mac) stopped pairing after too many wrong codes. On the host, choose Pair a Device\\u{2026} in the Sill menu, then tap \\(mac) again.\"",
      "            \"\\(mac) stopped pairing after too many wrong codes. Tap \\(mac) for a new code.\""),
     ("an expired window quiets again", W, "case .cancelled, .stopped: return true\n        case .used, .expired, .withdrawn, .none: return false",
      "case .cancelled, .stopped, .expired: return true\n        case .used, .withdrawn, .none: return false"),
@@ -30,7 +30,7 @@ M = [
     ("markingNewKey marks nothing", S, "            next.newKey = true\n", ""),
     ("markingNewKey marks again", S, "$0.macID == id && $0.newKey != true", "$0.macID == id"),
     ("replacingNewKey drops an unmarked Mac", S, "$0.macID == old && $0.newKey == true", "$0.macID == old"),
-    ("replacingNewKey drops the Mac just paired", S, "        guard old != new, list.contains", "        guard list.contains"),
+    ("replacingNewKey drops the host just paired", S, "        guard old != new, list.contains", "        guard list.contains"),
     ("replacingNewKey drops the marked Mac before the new one is saved", S, "        guard old != new, list.contains(where: { $0.macID == new }),", "        guard old != new,"),
     ("replacingNewKey keeps the marked Mac", S, "        return list.filter { $0.macID != old }", "        return list"),
     ("recognize: any tag names the first Mac", S, "        return list.first { mac in mac.recognitionKeyData.map { RecognitionTag.matches(tag, recognitionKey: $0) } ?? false }?.macID",

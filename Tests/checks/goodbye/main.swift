@@ -17,7 +17,7 @@ func g(_ reason: String, _ message: String? = nil, min: String? = nil, reconnect
 
 // No goodbye: the connection just ended.
 check(out(nil, saved: true) == O(text: "Mac mini disconnected. Sill will reconnect when it can reach it.", reconnect: true, remoteAllowed: true, isNotice: false), "none, saved")
-check(out(nil) == O(text: "Mac mini disconnected. It will reconnect when the Mac is back.", reconnect: true, remoteAllowed: false, isNotice: false), "none, unsaved")
+check(out(nil) == O(text: "Mac mini disconnected. It will reconnect when the host is back.", reconnect: true, remoteAllowed: false, isNotice: false), "none, unsaved")
 // Today's five, their words and reconnects unchanged.
 check(out(g("quit"), saved: true) == O(text: "Mac mini quit Sill. This iPad reconnects when it’s back.", reconnect: true, remoteAllowed: true, isNotice: false), "quit, saved")
 check(out(g("quit"), device: "iPhone").text == "Mac mini quit Sill. This iPhone reconnects when it’s back." && !out(g("quit")).remoteAllowed, "quit, an unsaved iPhone")
@@ -39,8 +39,8 @@ check(out(g("pairingRequired", "x", reconnect: true), device: "iPhone") == O(tex
                                                                           reconnect: false, remoteAllowed: false, isNotice: false),
       "pairingRequired keeps its rule")
 // A reason this build does not know: the Mac's words, a reconnect only when asked.
-let later = g("pairAgain", "Pair this iPad with Mac mini again: choose Pair iPhone or iPad… on the Mac.", reconnect: false)
-check(out(later, saved: true) == O(text: "Pair this iPad with Mac mini again: choose Pair iPhone or iPad… on the Mac.", reconnect: false, remoteAllowed: true, isNotice: true), "a later reason, reconnect false")
+let later = g("pairAgain", "Pair this iPad with Mac mini again: choose Pair a Device… on the host.", reconnect: false)
+check(out(later, saved: true) == O(text: "Pair this iPad with Mac mini again: choose Pair a Device… on the host.", reconnect: false, remoteAllowed: true, isNotice: true), "a later reason, reconnect false")
 check(out(g("later", "Back soon.", reconnect: true), saved: true) == O(text: "Back soon.", reconnect: true, remoteAllowed: true, isNotice: true), "a later reason, reconnect true")
 check(out(g("later", "Back soon.")).reconnect == false, "reconnect nil is false")
 check(out(g("later")).text == "Mac mini closed the connection. Tap it to try again.", "no message, no reconnect")

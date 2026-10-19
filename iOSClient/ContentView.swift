@@ -802,7 +802,7 @@ enum InputScript {
             client.sendFromKeyRow(.key(hidUsage: usage, down: false, modifiers: 0))
         case .gesture(let g, let fingers):
             let went = client.sendGesture(g, fingers: fingers)
-            print(String(format: "input script: t=%.2f ", at) + "\(step): " + (went ? "sent" : "not sent (the switch is off, or the Mac takes none)"))
+            print(String(format: "input script: t=%.2f ", at) + "\(step): " + (went ? "sent" : "not sent (the switch is off, or the host takes none)"))
             return
         case .esc(let names):
             let taken = overlay?.scriptEscape(Step.flags(names) ?? []) ?? false
@@ -938,9 +938,9 @@ struct ConnectScreen: View {
     /// "Pair with Mac mini" over the home card; "Add a Mac" over Add a Mac and an outside link's
     /// confirmation.
     private var title: String {
-        if client.pendingLink != nil || adding { return "Add a Mac" }
+        if client.pendingLink != nil || adding { return "Add a Host" }
         if let mac = homeCard { return DiscoveryPolicy.HomeCopy.cardTitle(mac: mac) }
-        return "Connect to a Mac"
+        return "Connect to a Host"
     }
 
     private var device: String { StreamClient.deviceWord }
@@ -1139,7 +1139,7 @@ struct ConnectScreen: View {
         }
 
         if client.showsNearbyHint {
-            Text("Your Mac has to be on the same Wi\u{2011}Fi network as this \(device), or have Direct Wireless Connection turned on in Sill. Away from home, add it once with a code from your Mac.")
+            Text("Your host has to be on the same Wi\u{2011}Fi network as this \(device), or have Direct Wireless Connection turned on in Sill. Away from home, add it once with a code from your host.")
                 .font(.system(size: 13))
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1167,13 +1167,13 @@ struct ConnectScreen: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityHint("Also looks for a Mac with Direct Wireless Connection turned on, without a Wi\u{2011}Fi network.")
+                .accessibilityHint("Also looks for a host with Direct Wireless Connection turned on, without a Wi\u{2011}Fi network.")
             }
         }
 
         // Always the last line, from the first frame, so nothing moves when it is needed.
         Button(action: unfold) {
-            Text("Add a Mac…")
+            Text("Add a Host…")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Palette.accent)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -1181,7 +1181,7 @@ struct ConnectScreen: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityHint("Pairs this \(device) with a Mac so you can reach it away from home.")
+        .accessibilityHint("Pairs this \(device) with a host so you can reach it away from home.")
     }
 
     /// A saved Mac's row: Connect (a Remote row) or Connect Remotely (its network row, to try the
@@ -1199,7 +1199,7 @@ struct ConnectScreen: View {
     }
 
     private func unfold() {
-        client.cancelHomeAsk()      // a tap's ask still waiting for its answer: Add a Mac is another way
+        client.cancelHomeAsk()      // a tap's ask still waiting for its answer: Add a Host is another way
         client.pairing = .idle
         typed = !scannerUsable
         withAnimation(reduceMotion ? .easeOut(duration: 0.18) : .spring(duration: 0.3, bounce: 0.1)) { adding = true }
@@ -1246,7 +1246,7 @@ struct ConnectScreen: View {
     /// openURL), and VoiceOver reads it as a link. The addresses are SillLinks'.
     private func footer(_ layout: ConnectLayout) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Needs the free Sill app on your Mac.")
+            Text("Needs the free Sill app on your computer.")
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
             // All three on one line while they fit, else the download link over the other two,

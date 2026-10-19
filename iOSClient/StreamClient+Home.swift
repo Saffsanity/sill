@@ -990,7 +990,7 @@ extension StreamClient {
                                   replacing replaces: String? = nil, bonjourName: String?, info: MacInfo? = nil) -> String? {
         guard let macID = r.macID, let recognition = r.recognitionKey else { return nil }
         let label = SafeText.label(r.name ?? fallbackName)
-        var mac = SavedMac(macID: macID, fingerprint: Base64URL.encode(fingerprint), name: label.isEmpty ? "Mac" : label,
+        var mac = SavedMac(macID: macID, fingerprint: Base64URL.encode(fingerprint), name: label.isEmpty ? "Host" : label,
                            recognitionKey: recognition, remotePort: HostConfigDefaults.remotePort, addresses: [], typedAddresses: nil,
                            infoIssuedAt: 0, bonjourName: bonjourName, lastWorked: nil, pairedAt: Date(), method: method,
                            lastConnectedAt: nil, lastRoute: nil, homeTLS: true, revoked: nil)
@@ -1115,7 +1115,7 @@ extension StreamClient {
         case .ipv4(let a):
             return DiscoveryPolicy.onCable(mac: [UInt8](a.rawValue), scope: nil, own: Self.ownAddresses())
         default:
-            return DiscoveryPolicy.CableCheck(cable: false, console: "cable: no, the Mac has a name, not an address")
+            return DiscoveryPolicy.CableCheck(cable: false, console: "cable: no, the host has a name, not an address")
         }
     }
 

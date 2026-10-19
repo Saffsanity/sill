@@ -20,7 +20,7 @@ MUTANTS = [
     ("a stale menu asked anyway (rule 7)", "if stale {\n            return .settled(", "if stale && false {\n            return .settled("),
     ("before a top level: the menus changed (rule 1)", "guard let current = version else { return .settled(.message(Self.notConnected)) }", "guard let current = version else { return .settled(.message(Self.changedNote)) }"),
     ("a bar menu asking by its old id (rule 11)", "return menus.first { $0.title == title }?.id", "return menus.first { $0.id == builtID }?.id"),
-    ("no row for what the Mac left out", "if more > 0 { out.append([.note(moreOnTheMac(more))]) }", "if more > 99_999 { out.append([.note(moreOnTheMac(more))]) }"),
+    ("no row for what the host left out", "if more > 0 { out.append([.note(moreOnTheMac(more))]) }", "if more > 99_999 { out.append([.note(moreOnTheMac(more))]) }"),
     ("No items under a note", "if out.isEmpty { out = [[.note(noItems)]] }", "if out.count <= 1 { out.append([.note(noItems)]) }"),
     ("two menus with one id", "guard let id = item.id, isTopID(id), !ids.contains(id),", "guard let id = item.id, isTopID(id),"),
     ("a leading zero allowed", "guard (1...4).contains(id.count), id.first != \"0\" else { return false }", "guard (1...4).contains(id.count) else { return false }"),

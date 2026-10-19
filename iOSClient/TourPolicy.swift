@@ -512,7 +512,7 @@ enum TourPolicy {
     /// is about Apps where the thumbnails were.
     static func copy(_ t: TourTopic, _ layout: TourLayout, mac: String, device: String,
                      voiceOver: Bool, firstOfRun: Bool, keysOnItsSide: Bool = false, thumbnails: Bool = true) -> TourCopy {
-        let mac = mac.isEmpty ? "your Mac" : mac
+        let mac = mac.isEmpty ? "your host" : mac
         let iPad = device == "iPad"
         let keyboardRow = row("keyboard", [strong("Keyboard"), plain(" types on \(mac), on screen or with a hardware keyboard.")])
         switch t {

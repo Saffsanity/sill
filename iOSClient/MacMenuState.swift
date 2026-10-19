@@ -132,8 +132,8 @@ struct MacMenuState: Equatable {
     static let changedNote = "The menus changed. Open the menu again."
     static let notConnected = "Not connected."
     static let noItems = "No items"
-    static func noAnswer(mac: String) -> String { "\(mac.isEmpty ? "The Mac" : mac) didn’t answer. Open the menu again." }
-    static func moreOnTheMac(_ count: Int) -> String { "\(count) more on the Mac" }
+    static func noAnswer(mac: String) -> String { "\(mac.isEmpty ? "The host" : mac) didn’t answer. Open the menu again." }
+    static func moreOnTheMac(_ count: Int) -> String { "\(count) more on the host" }
     static let maxMenus = 32
     static let titleLimit = 100, keyLimit = 16, noteLimit = 300
     /// Choices waiting for their answer, at most (each is answered, or the connection ends).

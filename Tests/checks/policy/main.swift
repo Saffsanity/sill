@@ -35,7 +35,7 @@ func run(_ i: P.Input, from: Double, to: Double, _ body: (P.Output) -> Bool) -> 
 
 // decide
 var i = input(0); i.onNetwork = ["Studio"]; i.listed = 1
-check("home, default: never browses and never hints (0.4–60 s, the Mac listed at 0.4 s)",
+check("home, default: never browses and never hints (0.4–60 s, the host listed at 0.4 s)",
       run(i, from: 0.4, to: 60) { !$0.browseNearby && !$0.showHint })
 i = input(0); i.remembered = ["Studio"]
 check("home, remembered: nothing before the network's 3 s", run(i, from: 0, to: 2.99) { !$0.browseNearby })
@@ -298,7 +298,7 @@ m = sameName({ ($0 >= 5 && !($0 >= 20 && $0 < 20.3)) ? ["Studio"] : [] }, host: 
 check("model: ...its row blinks at 20–20.3 s: a new listing, tried at 22.3 s and refused again (\(m.events))",
       m.events == ["7.00 refused", "22.30 refused"])
 m = sameName({ ($0 >= 5 && !($0 >= 20 && $0 < 20.3)) ? ["Studio"] : [] }, host: { $0 < 20 ? "B" : "A" })
-check("model: ...B leaves at 20 s and this Mac is listed at 20.3 s: moved at 22.3 s (\(m.events))",
+check("model: ...B leaves at 20 s and this host is listed at 20.3 s: moved at 22.3 s (\(m.events))",
       m.events == ["7.00 refused", "22.30 moved"])
 m = sameName({ $0 >= 5 ? ["Studio"] : [] }, host: { _ in nil }, session: nil)
 check("model: two hosts from before the ID: moved at 7.0 s by name, as before (\(m.events))", m.events == ["7.00 moved"])
@@ -361,7 +361,7 @@ check("method: wired only (the cable, Wi-Fi off): Wired", net([en2]) == .wired)
 check("method: Wi-Fi only: Wi-Fi", net([en0]) == .wifi)
 check("method: both (the cable plugged in at home): Wired, in either order", net([en0, en2]) == .wired && net([en2, en0]) == .wired)
 check("method: several of each: Wired", net([en0, ("en3", .wiredEthernet), en2, ("en1", .wifi)]) == .wired)
-check("method: the Mac's own service as the simulator sees it (lo0 loopback, en0 wifi): Wi-Fi", net([("lo0", .loopback), en0]) == .wifi)
+check("method: the host's own service as the simulator sees it (lo0 loopback, en0 wifi): Wi-Fi", net([("lo0", .loopback), en0]) == .wifi)
 check("method: an unknown type alone: no word", net([("anpi0", .other)]) == nil)
 check("method: a VPN, cellular or loopback alone: no word",
       net([("utun3", .other)]) == nil && net([("pdp_ip0", .cellular)]) == nil && net([("lo0", .loopback)]) == nil)
@@ -431,18 +431,18 @@ check("rows+method: the cable in and out, Wi-Fi off and on: Wi-Fi, Wired, Wired,
 // they all agree, else none. Noah, 2026-09-24: the path the live session uses, next to the bitrate.
 func one(_ i: (String, I.Kind)) -> I { I(name: i.0, type: i.1) }
 let lo0: (String, I.Kind) = ("lo0", .loopback)
-check("route: over the cable, the Mac's address scoped to a wired interface: Wired", P.route(scope: one(en2), path: ifs([en2])) == .wired)
-check("route: over AWDL, the Mac's address on awdl0 (typed wifi): Direct", P.route(scope: one(awdl0), path: ifs([awdl0])) == .direct)
+check("route: over the cable, the host's address scoped to a wired interface: Wired", P.route(scope: one(en2), path: ifs([en2])) == .wired)
+check("route: over AWDL, the host's address on awdl0 (typed wifi): Direct", P.route(scope: one(awdl0), path: ifs([awdl0])) == .direct)
 check("route: over llw0, with no path: Direct", P.route(scope: one(llw0), path: []) == .direct)
-check("route: a Wi-Fi link-local address of the Mac: Wi-Fi", P.route(scope: one(en0), path: ifs([en0])) == .wifi)
+check("route: a Wi-Fi link-local address of the host: Wi-Fi", P.route(scope: one(en0), path: ifs([en0])) == .wifi)
 check("route: the scope decides over the path",
       P.route(scope: one(en2), path: ifs([en0])) == .wired && P.route(scope: one(en0), path: ifs([en2, awdl0])) == .wifi
       && P.route(scope: one(awdl0), path: ifs([en0, lo0])) == .direct)
 check("route: a scope of no known kind: no word, whatever the path says",
       P.route(scope: I(name: "anpi0", type: .other), path: ifs([en0])) == nil && P.route(scope: one(lo0), path: ifs([en0])) == nil)
-check("route: no scope, a Wi-Fi path (IPv4 to the Mac): Wi-Fi", P.route(scope: nil, path: ifs([en0])) == .wifi)
+check("route: no scope, a Wi-Fi path (IPv4 to the host): Wi-Fi", P.route(scope: nil, path: ifs([en0])) == .wifi)
 check("route: no scope, a wired path: Wired", P.route(scope: nil, path: ifs([en2])) == .wired)
-check("route: no scope, the simulator to this Mac's own address (lo0 alone): no word", P.route(scope: nil, path: ifs([lo0])) == nil)
+check("route: no scope, the simulator to this host's own address (lo0 alone): no word", P.route(scope: nil, path: ifs([lo0])) == nil)
 check("route: no scope, a path that says two things: no word",
       P.route(scope: nil, path: ifs([en0, lo0])) == nil && P.route(scope: nil, path: ifs([en0, en2])) == nil
       && P.route(scope: nil, path: ifs([en2, en0])) == nil && P.route(scope: nil, path: ifs([awdl0, en0])) == nil)
@@ -495,19 +495,19 @@ func replay(_ readings: [Reading]) -> [P.Method?] {
 }
 let firstOnCable = Reading(fresh: true, scope: one(en2), path: ifs([en2]))
 let defaultRoute = Reading(address: false, path: ifs([en0, en0]))   // what iPadOS sent later (satisfied)
-check("session: the cable's first reading (the Mac's address on en2, path en2): Wired", take(nil, firstOnCable) == .wired)
-check("session: a later update without the Mac's address listing en0, en0 keeps Wired", take(.wired, defaultRoute) == .wired)
-check("session: a later update without the Mac's address and no interfaces keeps Wired (satisfied or not)",
+check("session: the cable's first reading (the host's address on en2, path en2): Wired", take(nil, firstOnCable) == .wired)
+check("session: a later update without the host's address listing en0, en0 keeps Wired", take(.wired, defaultRoute) == .wired)
+check("session: a later update without the host's address and no interfaces keeps Wired (satisfied or not)",
       take(.wired, Reading(address: false, path: [])) == .wired && take(.wired, Reading(address: false, satisfied: false, path: [])) == .wired)
 check("session: 2026-09-25 replayed (ready on en2, then en0+en0 updates, an empty one): Wired throughout",
       replay([firstOnCable, defaultRoute, defaultRoute, Reading(address: false, path: []), defaultRoute]) == [.wired, .wired, .wired, .wired, .wired])
-check("session: an unsatisfied update keeps the word, even one naming the Mac's address",
+check("session: an unsatisfied update keeps the word, even one naming the host's address",
       take(.wired, Reading(satisfied: false, scope: one(en0), path: ifs([en0]))) == .wired
       && take(.wifi, Reading(satisfied: false, scope: one(awdl0), path: ifs([awdl0]))) == .wifi)
-check("session: over AWDL (the Mac's address on awdl0): Direct, at the first reading or a later update",
+check("session: over AWDL (the host's address on awdl0): Direct, at the first reading or a later update",
       take(nil, Reading(fresh: true, scope: one(awdl0), path: ifs([awdl0]))) == .direct
       && take(.wifi, Reading(scope: one(awdl0), path: ifs([awdl0]))) == .direct)
-check("session: over Wi-Fi (the Mac's address on en0): Wi-Fi, at the first reading or a later update",
+check("session: over Wi-Fi (the host's address on en0): Wi-Fi, at the first reading or a later update",
       take(nil, Reading(fresh: true, scope: one(en0), path: ifs([en0]))) == .wifi
       && take(.wired, Reading(scope: one(en0), path: ifs([en0]))) == .wifi)
 check("session: a later update that describes the connection changes the word (Wi-Fi to Wired on en2)",
@@ -532,12 +532,12 @@ check("session: IPv4 over the cable (no scope, this device's address on en2): Wi
 check("session: IPv4 over Wi-Fi (this device's address on en0): Wi-Fi, whatever the path lists",
       take(nil, Reading(fresh: true, local: one(en0), path: ifs([en0]))) == .wifi
       && take(nil, Reading(fresh: true, local: one(en0), path: ifs([en2]))) == .wifi)
-check("session: the Mac's scope beats this device's address",
+check("session: the host's scope beats this device's address",
       take(nil, Reading(fresh: true, scope: one(en0), local: one(en2), path: ifs([en2]))) == .wifi
       && take(nil, Reading(fresh: true, scope: one(en2), local: one(en0), path: ifs([en0]))) == .wired)
 check("session: neither address names an interface: the path's list, when it agrees",
       take(nil, Reading(fresh: true, path: ifs([en2]))) == .wired && take(nil, Reading(fresh: true, path: ifs([en0, en2]))) == nil)
-check("session: an update without the Mac's address keeps the word whatever this device's address says",
+check("session: an update without the host's address keeps the word whatever this device's address says",
       take(.wired, Reading(address: false, local: one(en0), path: ifs([en0]))) == .wired)
 // Exhaustive: a reading that does not describe the connection never changes the word, and one that
 // does gives route(scope ?? local, path) whatever the word was.
@@ -554,7 +554,7 @@ for w in sessionWords { for s in witnesses { for l in witnesses { for p in pathL
     let want = d ? P.route(scope: s ?? l, path: p) : w
     if got != want { readingsOK = false; print("   mismatch:", w as Any, s as Any, l as Any, p, d) }
 }}}}}
-check("session: describesFlow over its 8 cases: a fresh reading, or the Mac's address and satisfied", truthOK)
+check("session: describesFlow over its 8 cases: a fresh reading, or the host's address and satisfied", truthOK)
 check("session: every reading (\(readingCount)): kept unless it describes the connection, else route(scope ?? local, path)", readingsOK)
 
 // dialInterface (prefer-cable, 2026-09-25): the interface a row's Mac is dialled on. Noah's iPad on the
@@ -658,7 +658,7 @@ check("sightings: back at 6: since 6 (a break starts it again)", ps.wiredSince =
 ps = sight(ps, [("Studio", [anpi0])], 7)
 check("sightings: Wi-Fi goes at 7: remembered as en0, left at 7", ps.wifi.isEmpty && ps.wifiLeft == ["Studio": S.WifiLeft(interface: "en0", at: 7)])
 ps = sight(ps, [], 9)
-check("sightings: the Mac gone at 9: the Wi-Fi memory kept (7), the cable dropped", ps.wifiLeft == ["Studio": S.WifiLeft(interface: "en0", at: 7)] && ps.wiredSince.isEmpty)
+check("sightings: the host gone at 9: the Wi-Fi memory kept (7), the cable dropped", ps.wifiLeft == ["Studio": S.WifiLeft(interface: "en0", at: 7)] && ps.wiredSince.isEmpty)
 check("sightings: fresh Wi-Fi at 11.999 (under 5 s since 7), not at 12", P.freshWifi(ps, name: "Studio", now: 11.999) == "en0" && P.freshWifi(ps, name: "Studio", now: 12) == nil)
 ps = sight(ps, [], 12)
 check("sightings: forgotten once wifiFresh has passed", ps.wifiLeft.isEmpty)
@@ -696,7 +696,7 @@ check("plan (a): on Wi-Fi with no cable: stays (never Wi-Fi to Wi-Fi)", plan(pin
       && plan(pin(.wifi, wifi: "en1")) == .stay(.wifi, recheckAt: nil))
 check("plan (a): a wired name without a since (not listed) never moves", plan(pin(.wifi, wired: "anpi0", since: nil)) == .stay(.wifi, recheckAt: nil))
 // (b) the cable goes while the session runs over it.
-check("plan (b): on the cable, iOS reports its path gone, the Mac on Wi-Fi: to Wi-Fi on en0 at once",
+check("plan (b): on the cable, iOS reports its path gone, the host on Wi-Fi: to Wi-Fi on en0 at once",
       plan(pin(.wired, reported: true, wifi: "en0")) == .moveTo(.wifi, interface: "en0"))
 check("plan (b): ...even while the browser still lists the cable (iOS's word on the connection counts)",
       plan(pin(.wired, reported: true, wired: "anpi0", since: 1, wifi: "en0")) == .moveTo(.wifi, interface: "en0"))
@@ -707,7 +707,7 @@ check("plan (b): a move down 2 s before: waits for its 5 s (at 13), then moves",
       && plan(pin(.wired, now: 13, reported: true, wifi: "en0", down: 8)) == .moveTo(.wifi, interface: "en0"))
 check("plan (b): a move up just before does not hold a move down back (each way apart)",
       plan(pin(.wired, now: 10, reported: true, wifi: "en0", up: 9.9)) == .moveTo(.wifi, interface: "en0"))
-check("plan (b): dead over the cable, the Mac on Wi-Fi: reconnect over Wi-Fi now",
+check("plan (b): dead over the cable, the host on Wi-Fi: reconnect over Wi-Fi now",
       plan(pin(.wired, dead: true, wifi: "en0")) == .reconnectNow(.wifi, interface: "en0"))
 check("plan (b): ...even within 5 s of a move down (nothing is left to keep)",
       plan(pin(.wired, now: 10, dead: true, wifi: "en0", down: 9)) == .reconnectNow(.wifi, interface: "en0"))
@@ -716,13 +716,13 @@ check("plan (b): dead over Wi-Fi, the cable listed or not: the ordinary reconnec
       plan(pin(.wifi, dead: true, wired: "anpi0", since: 0, wifi: "en0")) == .stay(.lost, recheckAt: nil)
       && plan(pin(.wifi, dead: true, wifi: "en0")) == .stay(.lost, recheckAt: nil))
 // Never off a cable that works.
-check("plan: on a working cable, the Mac listed on both: stays", plan(pin(.wired, wired: "anpi0", since: 1, wifi: "en0")) == .stay(.cable, recheckAt: nil))
+check("plan: on a working cable, the host listed on both: stays", plan(pin(.wired, wired: "anpi0", since: 1, wifi: "en0")) == .stay(.cable, recheckAt: nil))
 check("plan: on the cable, the browser drops it but pongs come: stays, and looks again at the silence mark",
       plan(pin(.wired, now: 10, pong: 9.75, wifi: "en0")) == .stay(.cableUnlisted, recheckAt: 10.75))
 check("plan: ...no pong for 0.999 s: stays; for exactly 1.0 s: to Wi-Fi",
       plan(pin(.wired, now: 10.749, pong: 9.75, wifi: "en0")) == .stay(.cableUnlisted, recheckAt: 10.75)
       && plan(pin(.wired, now: 10.75, pong: 9.75, wifi: "en0")) == .moveTo(.wifi, interface: "en0"))
-check("plan: silence with the browser still listing the cable: stays (the Mac may be busy)",
+check("plan: silence with the browser still listing the cable: stays (the host may be busy)",
       plan(pin(.wired, now: 20, pong: 10, wired: "anpi0", since: 1, wifi: "en0")) == .stay(.cable, recheckAt: nil))
 check("plan: an unsatisfied update naming only the service: to Wi-Fi once the browser has dropped the cable, not before",
       plan(pin(.wired, hinted: true, wifi: "en0")) == .moveTo(.wifi, interface: "en0")
@@ -738,7 +738,7 @@ check("plan: a session whose path says nothing (the simulator by 127.0.0.1) neve
 check("plan: on Wi-Fi with its path gone and no cable: stays; the reconnect takes over", plan(pin(.wifi, reported: true, wifi: "en0")) == .stay(.lost, recheckAt: nil))
 check("plan: the reasons read as the console prints them",
       P.Keep.cable.text == "on the cable" && P.Keep.cableSettling.text == "the cable appeared; waiting for it to settle"
-      && P.Keep.noWifi.text == "the cable went away, and the Mac is not on Wi\u{2011}Fi")
+      && P.Keep.noWifi.text == "the cable went away, and the host is not on Wi\u{2011}Fi")
 
 var goneOK = true, goneCount = 0
 for route in [nil, P.Method.wired, .wifi, .direct] { for dead in [false, true] { for reported in [false, true] { for hinted in [false, true] {
@@ -874,7 +874,7 @@ check("model (b): ...iOS reports it and the connection dies after: moved at 10.0
 ev = live(World(cable: { $0 < 10 }, wifiListed: { _ in false }, diesAfter: 5), from: .wired)
 check("model (b): the cable alone (no Wi-Fi), pulled at 10: stays until the connection ends at 15, then the ordinary reconnect (\(ev))", ev == ["15.00 lost"])
 ev = live(World(cable: { $0 < 10 }, wifiListed: { $0 < 5.05 }), from: .wired)
-check("model (b): the Mac left Wi-Fi at 5.05, the cable pulled at 10: still fresh, to Wi-Fi at 10.0 (\(ev))", ev == ["10.00 down en0"])
+check("model (b): the host left Wi-Fi at 5.05, the cable pulled at 10: still fresh, to Wi-Fi at 10.0 (\(ev))", ev == ["10.00 down en0"])
 ev = live(World(cable: { $0 < 10 }, wifiListed: { $0 < 5 }, diesAfter: 1), from: .wired)
 check("model (b): ...left at 5.0: 5 s old at 10, so not; lost when the connection ends at 11 (\(ev))", ev == ["11.00 lost"])
 ev = live(World(cable: { _ in true }, browserBlink: { $0 >= 10 && $0 < 10.5 }), from: .wired)
@@ -947,17 +947,17 @@ check("review: the memberwise defaults: no refused listing, no failures",
 // The model: the Mac closes the connection over a cable that works (the app back from 4 s and more in
 // the background), before the fix a move to Wi-Fi and back to the cable 2 s later.
 ev = live(World(cable: { _ in true }, evictAt: 10), from: .wired)
-check("model (review): on the cable, the Mac closes the connection at 10, the cable fine: made again over the cable at 10.0, and nothing more (\(ev))",
+check("model (review): on the cable, the host closes the connection at 10, the cable fine: made again over the cable at 10.0, and nothing more (\(ev))",
       ev == ["10.00 reconnect anpi0"])
 ev = live(World(cable: { _ in true }, wifiListed: { _ in false }, evictAt: 10), from: .wired)
-check("model (review): ...with the Mac on no Wi-Fi at all: the same (\(ev))", ev == ["10.00 reconnect anpi0"])
+check("model (review): ...with the host on no Wi-Fi at all: the same (\(ev))", ev == ["10.00 reconnect anpi0"])
 ev = live(World(cable: { $0 < 10 }, browserLag: 0.5, iosReports: false, diesAfter: 0.2), from: .wired)
 check("model (review): the cable pulled at 10 with iOS silent and the connection dead at 10.2, the browser 0.5 s late: over the cable first, whose dial cannot go on, so the row as listed takes Wi-Fi, and no move up after (\(ev))",
       ev == ["10.20 reconnect anpi0, landed on Wi-Fi"])
 ev = live(World(cable: { _ in false }, evictAt: 10), from: .wifi)
-check("model (review): on Wi-Fi, the Mac closes the connection: the ordinary reconnect, as before (\(ev))", ev == ["10.00 lost"])
+check("model (review): on Wi-Fi, the host closes the connection: the ordinary reconnect, as before (\(ev))", ev == ["10.00 lost"])
 ev = live(World(cable: { _ in true }, evictAt: 10), from: .wifi)
-check("model (review): on Wi-Fi, the cable listed from 0: up at 2, and the Mac closing the connection at 10 is made again over the cable (\(ev))",
+check("model (review): on Wi-Fi, the cable listed from 0: up at 2, and the host closing the connection at 10 is made again over the cable (\(ev))",
       ev == ["2.00 up anpi0", "10.00 reconnect anpi0"])
 
 // The model: moves up that do not complete, against the real plan and the client's glue (the failures
@@ -1030,7 +1030,7 @@ check("remote: a session is at home unless said otherwise (PathInput.remote fals
 check("remote: on Wi-Fi with the cable listed and settled: stays (at home: up to the cable)",
       plan(rpin(.wifi, wired: "anpi0", since: 0, wifi: "en0")) == .stay(.remote, recheckAt: nil)
       && plan(pin(.wifi, wired: "anpi0", since: 0, wifi: "en0")) == .moveTo(.wired, interface: "anpi0"))
-check("remote: on the cable, its path reported gone, the Mac on Wi-Fi: stays (at home: down to Wi-Fi)",
+check("remote: on the cable, its path reported gone, the host on Wi-Fi: stays (at home: down to Wi-Fi)",
       plan(rpin(.wired, reported: true, wifi: "en0")) == .stay(.remote, recheckAt: nil)
       && plan(pin(.wired, reported: true, wifi: "en0")) == .moveTo(.wifi, interface: "en0"))
 check("remote: on the cable, the browser dropped it and no pong for 2 s: stays, no look again (at home: to Wi-Fi)",
@@ -1113,7 +1113,7 @@ func pick(_ rows: [(String, P.HomeDoor)], refused: Set<String> = [], tries: [Str
                   newKey: newKey, savedPin: pin)?.id
 }
 let lookalike = ("network:Look-alike", P.HomeDoor.pairingRequired), macRow = ("network:Studio", P.HomeDoor.pairingRequired)
-check("home row: the Mac's one row at a door that requires pairing", pick([macRow]) == "network:Studio")
+check("home row: the host's one row at a door that requires pairing", pick([macRow]) == "network:Studio")
 check("home row: dialed pinned to the saved key",
       P.moveHomeRow(rows: [(id: "network:Studio", door: .open)], known: P.HomeRows(), revoked: false, newKey: false, savedPin: rowPin)?.trust == .saved(pin: rowPin))
 check("home row: a pin-refused row does not block another row with the same tag", pick([lookalike, macRow], refused: ["network:Look-alike"]) == "network:Studio")
@@ -1196,16 +1196,16 @@ check("model (home): ...listed afresh at 41: tried once more at 43, then never (
 // The review's runs (2026-10-08, a private simulator): a look-alike replaying the Mac's tag at another key,
 // listed at 4.85, and the Mac's own row from 20.0; the look-alike gone at 45.
 ht = homeTries([ModelRow(id: "network:Look-alike", at: 4.85, goneAt: 45, end: .refused), ModelRow(id: "network:Studio", at: 20, end: .moves)], until: 120)
-check("model (home rows): a look-alike refused at its pin, then the Mac's own row: tried at once, home (\(ht.starts))",
+check("model (home rows): a look-alike refused at its pin, then the host's own row: tried at once, home (\(ht.starts))",
       ht.starts == ["6.85 Look-alike", "20.00 Studio"] && ht.home)
 ht = homeTries([ModelRow(id: "network:Look-alike", at: 10, end: .refused), ModelRow(id: "network:Studio", at: 10, end: .moves)], until: 120)
-check("model (home rows): both listed together, the look-alike first: refused, then the Mac at once (\(ht.starts))",
+check("model (home rows): both listed together, the look-alike first: refused, then the host at once (\(ht.starts))",
       ht.starts == ["12.00 Look-alike", "17.00 Studio"] && ht.home)
 ht = homeTries([ModelRow(id: "network:Plain", door: .plain, end: .moves), ModelRow(id: "network:Studio", end: .moves)], until: 60)
-check("model (home rows): the Mac's tag on a plain row listed first: the TLS row is the move (\(ht.starts))",
+check("model (home rows): the host's tag on a plain row listed first: the TLS row is the move (\(ht.starts))",
       ht.starts == ["12.00 Studio"] && ht.home)
 ht = homeTries([ModelRow(id: "network:Look-alike", at: 10, end: .fails), ModelRow(id: "network:Studio", at: 10, end: .moves)], until: 120)
-check("model (home rows): a look-alike that never answers, first: the next try, 10 s on, is the Mac's row (\(ht.starts))",
+check("model (home rows): a look-alike that never answers, first: the next try, 10 s on, is the host's row (\(ht.starts))",
       ht.starts == ["12.00 Look-alike", "22.00 Studio"] && ht.home)
 ht = homeTries([ModelRow(id: "network:Look-alike", at: 10, end: .refused)], until: 120)
 check("model (home rows): a look-alike alone: one try, never again while listed (\(ht.starts))", ht.starts == ["12.00 Look-alike"] && !ht.home)
@@ -1221,12 +1221,12 @@ info.remote(100)
 check("home info: the session's kind 18, and no move: nothing accepted (no floor)", info.latest == 100 && info.floor == nil && !info.accepts(200))
 info.moveStarted()
 check("home info: a move's floor is the session's newest kind 18 as it starts", info.floor == 100)
-check("home info: the home door's kind 18, signed since: the Mac's", info.accepts(101))
+check("home info: the home door's kind 18, signed since: the host's", info.accepts(101))
 check("home info: ...one exactly as new as the floor too", info.accepts(100))
 check("home info: one from before the session's (a capture): refused", !info.accepts(99.5))
 info.remote(105)
-check("home info: a kind 18 the Mac broadcasts mid-move raises the newest, not the move's floor", info.latest == 105 && info.floor == 100)
-check("home info: the race: the home door's catalog kind 18 (103), signed before that broadcast (105), is still the Mac's", info.accepts(103))
+check("home info: a kind 18 the host broadcasts mid-move raises the newest, not the move's floor", info.latest == 105 && info.floor == 100)
+check("home info: the race: the home door's catalog kind 18 (103), signed before that broadcast (105), is still the host's", info.accepts(103))
 info.moveEnded()
 check("home info: the move over: no floor, nothing accepted", info.floor == nil && !info.accepts(200))
 info.moveStarted()
@@ -1237,7 +1237,7 @@ check("home info: an older kind 18 read late never lowers the newest", info.late
 // and the Mac broadcasts 104 before the device reads that catalog; the probe judged after both.
 var race = P.HomeMoveInfo()
 race.remote(100); race.moveStarted(); race.remote(104)
-check("home info (the race): the Mac's own row is not refused for a broadcast in the same moment", race.accepts(103))
+check("home info (the race): the host's own row is not refused for a broadcast in the same moment", race.accepts(103))
 var replay = P.HomeMoveInfo()
 replay.remote(100); replay.moveStarted()
 check("home info (a replay): a kind 18 captured before this session is refused, whatever came after", !replay.accepts(50))

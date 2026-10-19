@@ -10,11 +10,11 @@ func homeRemote() {
     check("homeEnd reads Goodbye's removed and pairingRequired", Goodbye.removed == "removed" && Goodbye.pairingRequired == "pairingRequired"
           && P.homeEnd(trust: .saved(pin: Data([1])), goodbye: Goodbye.removed, tls: nil) == .removed
           && P.homeEnd(trust: .open(seen: nil), goodbye: Goodbye.pairingRequired, tls: nil) == .pairingRequired)
-    check("homeEnd: every other goodbye the Mac sends is the ordinary end", [Goodbye.quit, Goodbye.busy, Goodbye.remoteOff, Goodbye.internetOff]
+    check("homeEnd: every other goodbye the host sends is the ordinary end", [Goodbye.quit, Goodbye.busy, Goodbye.remoteOff, Goodbye.internetOff]
           .allSatisfy { P.homeEnd(trust: .saved(pin: Data([1])), goodbye: $0, tls: nil) == .other })
     check("askAnswer reads PairResult's reasons and method", PairResult.shown == "shown" && PairResult.openOnMac == "openOnMac" && PairResult.locked == "locked"
           && PairResult.busy == "busy" && PairResult.cable == "cable")
-    check("askAnswer: closed, expired, stopped and code after an ask are refusals (the Mac's menu)", [PairResult.closed, PairResult.expired, PairResult.stopped, PairResult.code]
+    check("askAnswer: closed, expired, stopped and code after an ask are refusals (the host's menu)", [PairResult.closed, PairResult.expired, PairResult.stopped, PairResult.code]
           .allSatisfy { P.askAnswer(ok: false, method: nil, hasProof: false, reason: $0, retryAfter: nil, askedCable: true, macIDMatches: true, recognitionKeyBytes: 32) == .refused })
     // The TXT record's door, as StreamClient.door(of:) maps it case for case.
     func mapped(_ d: HomeDoorTXT.Door) -> P.HomeDoor { switch d { case .plain: return .plain; case .pairingRequired: return .pairingRequired; case .open: return .open } }
@@ -74,7 +74,7 @@ func homeRemote() {
     r = row(door: .pairingRequired, method: .wired, cable: true, tag: tagM)
     check("1 unpaired on the cable: Wired; a tap asks", r.word == .pairsOverCable && r.word.word == "Wired" && r.tap == .ask(pinned: false))
     // 2. The ask over the cable, claimed, answered with the cable's ok: saved (method cable, homeTLS), then a pinned session.
-    check("2 the Mac's cable ok to the claimed ask: paired", answer(cableOK, askedCable: true, key: fpM) == .pairedOverCable)
+    check("2 the host's cable ok to the claimed ask: paired", answer(cableOK, askedCable: true, key: fpM) == .pairedOverCable)
     saved = SavedMacs.adding(SavedMac(macID: macM, fingerprint: Base64URL.encode(fpM), name: "Mac mini", recognitionKey: Base64URL.encode(rkM),
                                       remotePort: 7455, addresses: [], typedAddresses: nil, infoIssuedAt: 0, bonjourName: "Mac mini", lastWorked: nil,
                                       pairedAt: Date(timeIntervalSince1970: 1_790_000_000), method: PairResult.cable, lastConnectedAt: nil, lastRoute: nil,
@@ -83,7 +83,7 @@ func homeRemote() {
     check("2 then its row: its tag names the saved Mac, it reads Wired as a method, a tap dials pinned to its key", r.id == macM && r.word == .method(.wired)
           && r.tap == .pinned && P.sessionTrust(r.tap, savedPin: saved[0].fingerprintData) == .saved(pin: fpM))
     check("2 the automatic reconnect dials it pinned too", r.reconnect == .pinned)
-    check("2 every connection of that session (a move, a hop to Wi-Fi) is pinned to the Mac's key", P.pin(.saved(pin: fpM)) == .key(fpM))
+    check("2 every connection of that session (a move, a hop to Wi-Fi) is pinned to the host's key", P.pin(.saved(pin: fpM)) == .key(fpM))
     // 3. Removed on the Mac: goodbye removed.
     check("3 goodbye removed: removed", P.homeEnd(trust: .saved(pin: fpM), goodbye: Goodbye.removed, tls: nil) == .removed)
     saved = SavedMacs.revoking(macM, in: saved)!

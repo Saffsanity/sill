@@ -27,22 +27,24 @@ body:
   - type: input
     id: mac
     attributes:
-      label: Your Mac and its macOS
-      placeholder: MacBook Air (M3), macOS 26.1
+      label: Your Mac (or PC host) and its system
+      placeholder: MacBook Air (M3), macOS 26.1; or a Linux PC, Ubuntu 24.04 on X11
     validations:
       required: true
   - type: input
     id: mac-sill
     attributes:
-      label: Sill for Mac's version
-      description: The line at the foot of Sill's Settings › General, such as "Sill 0.5.1 (563)".
+      label: Sill for Mac's version (or the PC host's)
+      description: >-
+        The line at the foot of Sill's Settings › General, such as "Sill 0.5.1 (563)"; on a PC host,
+        the line at the foot of Sill Host's Settings › General.
     validations:
       required: true
   - type: input
     id: device
     attributes:
-      label: Your iPhone or iPad and its iOS or iPadOS
-      placeholder: iPad mini (A17 Pro), iPadOS 26.1
+      label: Your device and its system
+      placeholder: iPad mini (A17 Pro), iPadOS 26.1; Pixel 9, Android 16; or Windows 11 24H2
     validations:
       required: true
   - type: input
@@ -50,12 +52,12 @@ body:
     attributes:
       label: The Sill app's version
       description: >-
-        Settings › General › iPhone Storage (or iPad Storage) › Sill shows it. Sill's log on your
-        Mac names it too, on its "Client hello" line.
+        Settings › General › iPhone Storage (or iPad Storage) › Sill shows it; on Android, Settings ›
+        Apps › Sill; on Windows, Settings › Apps › Installed apps › Sill. Sill's log on your Mac names it too, on its "Client hello" line.
   - type: dropdown
     id: route
     attributes:
-      label: How the device reached the Mac
+      label: How the device reached the Mac or PC
       description: The word at the end of your Mac's row on the device.
       options:
         - Wi-Fi
@@ -71,9 +73,10 @@ body:
   - type: textarea
     id: log
     attributes:
-      label: Sill's log on your Mac
+      label: Sill's log on your Mac or PC
       description: >-
-        Optional. Show Log… in the Sill menu, or ~/Library/Logs/Sill/Sill.log. Paste only the lines
+        Optional. Show Log… in the Sill menu, or ~/Library/Logs/Sill/Sill.log (on a Linux host,
+        ~/.config/sill-host/host.log). Paste only the lines
         around the problem. The log names your windows, your devices and their network addresses,
         and this issue is public: take out what you don't want to share, or email the lines to
         support@getsill.app instead.

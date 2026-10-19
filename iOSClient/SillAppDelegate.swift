@@ -92,7 +92,7 @@ enum MacMenuBar {
         let once: UIMenu.Identifier
         switch layout {
         case .one:
-            inserted = [UIMenu(title: app ?? "Mac", identifier: MacMenuElements.barWrapper, children: menus)]
+            inserted = [UIMenu(title: app ?? "Host", identifier: MacMenuElements.barWrapper, children: menus)]
             once = MacMenuElements.barWrapper
         case .perMenu, .replace:
             inserted = menus

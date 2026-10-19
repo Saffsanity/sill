@@ -70,17 +70,17 @@ enum PairingProblem: Equatable {
         case .address: return "That doesn’t look like an address. Try 100.101.102.103 or mac.example.net."
         case .zone: return "Remove the part after %: it only works on this network."
         case .codeLength: return "A code has 12 digits."
-        case .codeTypo: return "That code has a typo. Check it against your Mac."
+        case .codeTypo: return "That code has a typo. Check it against your host."
         case .wrongCode(let left):
             // A no-break space keeps the count with its word when the line wraps ("4 / tries left").
-            return "That code didn’t work. Check the code on your Mac. \(left)\u{00A0}tr\(left == 1 ? "y" : "ies") left."
-        case .notPairing(let mac): return "\(mac) isn’t pairing right now. On your Mac, choose Pair iPhone or iPad… first."
+            return "That code didn’t work. Check the code on your host. \(left)\u{00A0}tr\(left == 1 ? "y" : "ies") left."
+        case .notPairing(let mac): return "\(mac) isn’t pairing right now. On your host, choose Pair a Device… first."
         case .stopped(let mac):
-            return "\(mac) stopped pairing after too many wrong codes. Choose Pair iPhone or iPad… on your Mac for a new code."
-        case .expired: return "This code expired. Choose Pair iPhone or iPad… on your Mac for a new one."
+            return "\(mac) stopped pairing after too many wrong codes. Choose Pair a Device… on your host for a new code."
+        case .expired: return "This code expired. Choose Pair a Device… on your host for a new one."
         case .proofFailed(let host):
-            return "Pairing didn’t finish: the Mac at \(host) couldn’t show it knows the code. Pair from the same network as your Mac, or scan the code instead."
-        case .nothingAnswered(let host): return "Nothing answered at \(host). Check the address, and that Sill is open on your Mac."
+            return "Pairing didn’t finish: the host at \(host) couldn’t show it knows the code. Pair from the same network as your host, or scan the code instead."
+        case .nothingAnswered(let host): return "Nothing answered at \(host). Check the address, and that Sill is open on your host."
         case .notSill(let host): return "Something answered at \(host), but it isn’t Sill, or its Sill is too old to pair."
         case .localNetwork(let host): return "To reach \(host), allow Local Network for Sill in Settings."
         case .notALink: return "That’s not a Sill code."
@@ -106,7 +106,7 @@ enum RemoteCopy {
         case .wrongMac:
             return "This isn’t the \(mac) this \(device) paired with. If Sill was set up again on it, forget it here and pair again."
         case .revoked:
-            return "\(mac) no longer accepts this \(device). Pair it again from Sill’s Settings on the Mac."
+            return "\(mac) no longer accepts this \(device). Pair it again from Sill’s Settings on the host."
         case .remoteOff:
             return "\(mac) turned off Remote Access."
         case .busy:
@@ -127,9 +127,9 @@ enum RemoteCopy {
             return "Something answered at \(at), but it isn’t Sill. Your home’s internet address may have changed."
         case .noAnswer:
             if let c = candidate, c.kind == MacAddress.internet, !c.isName {
-                return "\(mac) didn’t answer at \(at). If your home’s internet address changed, connect at home once to update it, or add an address name on the Mac."
+                return "\(mac) didn’t answer at \(at). If your home’s internet address changed, connect at home once to update it, or add an address name on the host."
             }
-            return vpnName.map { "\(mac) didn’t answer. It may be asleep, or \($0) may be off on the Mac." } ?? "\(mac) didn’t answer. It may be asleep."
+            return vpnName.map { "\(mac) didn’t answer. It may be asleep, or \($0) may be off on the host." } ?? "\(mac) didn’t answer. It may be asleep."
         }
     }
 
@@ -160,7 +160,7 @@ extension StreamClient {
 
     /// "Mac mini", or "Mac mini (2)" for the second of that name.
     func displayName(_ macID: String) -> String {
-        SavedMacs.displayNames(savedMacs)[macID] ?? savedMac(macID)?.name ?? "Mac"
+        SavedMacs.displayNames(savedMacs)[macID] ?? savedMac(macID)?.name ?? "Host"
     }
 
     /// Writes the list, except in a DEBUG run seeded with `-Sill.savedMacs` (for that run alone), and
@@ -179,13 +179,13 @@ extension StreamClient {
     /// Forget: the record only. The Mac lists this device until it is removed there, and the
     /// status line says so.
     func forget(_ macID: String) {
-        let name = savedMac(macID) != nil ? displayName(macID) : (macs.first { $0.macID == macID }?.name ?? "the Mac")
+        let name = savedMac(macID) != nil ? displayName(macID) : (macs.first { $0.macID == macID }?.name ?? "the host")
         if reconnect?.macID == macID { reconnect = nil }
         savedMacs.removeAll { $0.macID == macID }
         savedSightings.since[macID] = nil
         savedSightings.leftAt[macID] = nil
         persistSavedMacs()
-        status = "Forgot \(name). It still lists this \(Self.deviceWord) until you remove it in Sill’s Settings on the Mac."
+        status = "Forgot \(name). It still lists this \(Self.deviceWord) until you remove it in Sill’s Settings on the host."
     }
 
     /// The card's Cancel while a pairing dial runs: it stops, nothing is saved. The home card's too:
@@ -548,7 +548,7 @@ extension StreamClient {
         }
         reconnect = outcome.reconnect ? lostReconnect(session: s, saved: saved, name: name, remoteAllowed: outcome.remoteAllowed) : nil
         #if DEBUG
-        print("session: the Mac said goodbye (\(goodbye.reason.isEmpty ? "unreadable" : goodbye.reason)): “\(outcome.text)”; \(outcome.reconnect ? "reconnecting" : "not reconnecting")")
+        print("session: the host said goodbye (\(goodbye.reason.isEmpty ? "unreadable" : goodbye.reason)): “\(outcome.text)”; \(outcome.reconnect ? "reconnecting" : "not reconnecting")")
         #endif
         discoveryChanged()
         if outcome.reconnect { scheduleReconnectRetry() }
@@ -891,7 +891,7 @@ extension StreamClient {
             return
         }
         pairingDial?.cancel()
-        let shown = macName ?? candidates.first?.display ?? "your Mac"
+        let shown = macName ?? candidates.first?.display ?? "your host"
         pairing = .working("Pairing with \(shown)…")
         #if DEBUG
         print("remote: pairing with \(shown) (\(method)) at \(candidates.map(\.key))")
@@ -923,7 +923,7 @@ extension StreamClient {
                         }
                         self.pairing = .failed(Self.problem(for: r, mac: macName ?? w.candidate.display))
                     case .notPairing:
-                        self.pairing = .failed(.notPairing(macName ?? "The Mac at \(w.candidate.display)"))
+                        self.pairing = .failed(.notPairing(macName ?? "The host at \(w.candidate.display)"))
                     case .noProof:
                         self.pairing = .failed(.proofFailed(w.candidate.display))
                     }
@@ -939,7 +939,7 @@ extension StreamClient {
                 case .refused, .revoked:
                     // Nothing listening (Remote Access off and no pairing window), or a door that
                     // turned the pairing away in its handshake.
-                    self.pairing = .failed(.notPairing(macName ?? "The Mac at \(host)"))
+                    self.pairing = .failed(.notPairing(macName ?? "The host at \(host)"))
                 case .notSill, .wrongMac: self.pairing = .failed(.notSill(host))
                 case .localNetwork: self.pairing = .failed(.localNetwork(host))
                 default: self.pairing = .failed(.nothingAnswered(host))
@@ -1033,7 +1033,7 @@ extension StreamClient {
     private func paired(_ r: PairResult, key: SymmetricKey, winner w: RemoteConnector.Winner, identity: RemoteIdentity, method: String,
                         linkName: String?, port: Int, addresses: [MacAddress], typed: MacAddress?, overlay: Bool) {
         guard let macID = r.macID, let recognition = r.recognitionKey else { return }
-        let name = SafeText.label(r.name ?? linkName ?? "Mac").isEmpty ? "Mac" : SafeText.label(r.name ?? linkName ?? "Mac")
+        let name = SafeText.label(r.name ?? linkName ?? "Host").isEmpty ? "Host" : SafeText.label(r.name ?? linkName ?? "Host")
         var mac = SavedMac(macID: macID, fingerprint: Base64URL.encode(w.fingerprint), name: name, recognitionKey: recognition,
                            remotePort: port, addresses: SavedMacs.filtered(addresses, allowLoopback: Self.keepsLoopback),
                            typedAddresses: typed.map { SavedMacs.filtered([$0], allowLoopback: Self.keepsLoopback) },

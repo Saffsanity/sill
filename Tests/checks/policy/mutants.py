@@ -21,13 +21,13 @@ MUTANTS = {
     # sessionRoute and describesFlow (the wired fix, 2026-09-25)
     "S1 every update read (the bug: describesFlow ignored)": ("        guard describesFlow else { return current }\n", ""),
     "S2 never re-read (always the current word)": ("        return route(scope: scope ?? local, path: path)\n", "        return current\n"),
-    "S3 a fresh reading must also name the Mac": ("        fresh || (hasAddress && satisfied)\n", "        hasAddress && satisfied\n"),
-    "S4 an update without the Mac's address counts": ("        fresh || (hasAddress && satisfied)\n", "        fresh || satisfied\n"),
+    "S3 a fresh reading must also name the host": ("        fresh || (hasAddress && satisfied)\n", "        hasAddress && satisfied\n"),
+    "S4 an update without the host's address counts": ("        fresh || (hasAddress && satisfied)\n", "        fresh || satisfied\n"),
     "S5 an unsatisfied update counts": ("        fresh || (hasAddress && satisfied)\n", "        fresh || hasAddress\n"),
     "S6 either witness counts": ("        fresh || (hasAddress && satisfied)\n", "        fresh || hasAddress || satisfied\n"),
     "S7 no update ever counts": ("        fresh || (hasAddress && satisfied)\n", "        fresh\n"),
     "S8 this device's address ignored": ("        return route(scope: scope ?? local, path: path)\n", "        return route(scope: scope, path: path)\n"),
-    "S9 this device's address beats the Mac's scope": ("        return route(scope: scope ?? local, path: path)\n", "        return route(scope: local ?? scope, path: path)\n"),
+    "S9 this device's address beats the host's scope": ("        return route(scope: scope ?? local, path: path)\n", "        return route(scope: local ?? scope, path: path)\n"),
     "S10 a reading with no word keeps the old one": ("        return route(scope: scope ?? local, path: path)\n", "        return route(scope: scope ?? local, path: path) ?? current\n"),
     # dialInterface and wiredWait (prefer-cable, 2026-09-25)
     "D1 a Direct row dialled on a wired interface": ("        guard !direct else { return nil }\n        return interfaces.first { $0.type == .wiredEthernet", "        return interfaces.first { $0.type == .wiredEthernet"),
@@ -243,7 +243,7 @@ MUTANTS = {
     "S4 linkRows: the asked row not left out": ("        return rows.filter { $0.door != .plain && !(askedKey != nil && $0.id == askedRow) }.map(\\.id)", "        return rows.filter { $0.door != .plain }.map(\\.id)"),
     "S4 copy: over the cable dropped": ("            cable ? \"Pairing with \\(mac) over the cable\\u{2026}\" : \"Pairing with \\(mac)\\u{2026}\"", "            \"Pairing with \\(mac)\\u{2026}\""),
     "S4 copy: removed says the old remote words": ("        static func removed(mac: String, device: String) -> String { \"\\(mac) removed this \\(device). Tap it to pair again.\" }", "        static func removed(mac: String, device: String) -> String { \"\\(mac) removed this \\(device). To use it again, pair it again.\" }"),
-    "S4 copy: openOnMac names no menu": ("\"\\(mac) didn\\u{2019}t show a code. On the Mac, choose Pair iPhone or iPad\\u{2026} in the Sill menu, then tap \\(mac) again.\"", "\"\\(mac) didn\\u{2019}t show a code.\""),
+    "S4 copy: openOnMac names no menu": ("\"\\(mac) didn\\u{2019}t show a code. On the host, choose Pair a Device\\u{2026} in the Sill menu, then tap \\(mac) again.\"", "\"\\(mac) didn\\u{2019}t show a code.\""),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

@@ -537,14 +537,14 @@ struct PortraitStreamScreen: View {
 
     private func desktopButton(width: CGFloat? = nil) -> some View {
         barButton(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop", width: width,
-                  accessibilityLabel: "Show the full Mac desktop",
+                  accessibilityLabel: "Show the host’s whole desktop",
                   action: { client.select(.desktop) })
     }
 
     /// Leave's old slot: Disconnect is the Settings panel's pinned last row now.
     private func settingsButton(width: CGFloat? = nil) -> some View {
         barButton(open: settingsOpen, symbol: "gearshape", label: "Settings", width: width,
-                  accessibilityLabel: settingsOpen ? "Close settings" : "Settings for \(client.macName.isEmpty ? "the Mac" : client.macName)",
+                  accessibilityLabel: settingsOpen ? "Close settings" : "Settings for \(client.macName.isEmpty ? "the host" : client.macName)",
                   action: { setSettings(!settingsOpen, true) })
             .tourTarget(.settings)
     }
@@ -810,7 +810,7 @@ private struct KeyRow: View {
                     .foregroundStyle(keyboardShown ? Palette.accent : Palette.text)
             }
         case .spotlight:
-            cap(open: false, label: "Open Spotlight on the Mac", action: { tap(key) }) {
+            cap(open: false, label: "Open search on the host", action: { tap(key) }) {
                 Image(systemName: Spotlight.symbol)
                     .font(.system(size: 19))
                     .foregroundStyle(Palette.text)
