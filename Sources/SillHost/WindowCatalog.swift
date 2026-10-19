@@ -242,9 +242,12 @@ final class WindowCatalog {
         guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
         appliedSeq = seq
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
+        // Sill's own virtual displays (the window stage's, the device desktop's, which can be the
+        // main display while it streams) are never the Desktop source's real screen.
+        let real = content.displays.filter { CGDisplayVendorNumber($0.displayID) != VirtualStage.vendorID }
         display = preferMainDisplay
-            ? (content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first)
-            : content.displays.first
+            ? (real.first { $0.displayID == CGMainDisplayID() } ?? real.first ?? content.displays.first)
+            : (real.first ?? content.displays.first)
         var visible = content.windows.filter { w in
             guard let app = w.owningApplication, !app.applicationName.isEmpty else { return false }
             return w.windowLayer == 0                                  // drops widgets, wallpaper, backstop
