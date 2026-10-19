@@ -87,10 +87,20 @@ enum SavedMacs {
     /// only on the Mac itself; none is ever saved (loopback stays in DEBUG builds, for the
     /// simulator's tests against a host on the same Mac).
     static func keepable(_ host: String, allowLoopback: Bool) -> Bool {
-        let h = host.lowercased()
-        if h.isEmpty || h.contains("%") { return false }
-        if h.hasPrefix("169.254.") || h.hasPrefix("fe8") || h.hasPrefix("fe9") || h.hasPrefix("fea") || h.hasPrefix("feb") { return false }
-        if h.hasPrefix("127.") || h == "::1" || h == "localhost" { return allowLoopback }
+        // Classify the parsed host, not a prefix shared by DNS names ("fearless.ts.net").
+        // The parser also normalizes expanded and IPv4-mapped IPv6 before these checks.
+        guard case .success(let address) = AddressParser.parse(host), address.port == nil else { return false }
+        let h = address.host.lowercased()
+        switch address.kind {
+        case .ipv4:
+            if h.hasPrefix("169.254.") { return false }
+            if h.hasPrefix("127.") { return allowLoopback }
+        case .ipv6:
+            if ["fe8", "fe9", "fea", "feb"].contains(where: { h.hasPrefix($0) }) { return false }
+            if h == "::1" { return allowLoopback }
+        case .name:
+            if h == "localhost" || h == "localhost." { return allowLoopback }
+        }
         return true
     }
 
@@ -196,16 +206,23 @@ enum SavedMacs {
     /// After a dial of `old` completed its handshake with `new`'s key at `proof` ("host|port", one of
     /// `old`'s addresses; RemoteDialPolicy.successors said `new` may answer there): `old` is gone,
     /// since the Mac it named now holds `new`'s key. `new` keeps what `old` knew that it lacks: the
-    /// typed addresses, `homeTLS`, and `proof` as the address that last worked. Nothing changes
-    /// when either is not saved or they are the same record.
+    /// typed addresses (at their original effective ports), `homeTLS`, and `proof` as the address
+    /// that last worked. Nothing changes when either is not saved or they are the same record.
     static func superseding(old: String, by new: String, proof: String, in list: [SavedMac]) -> [SavedMac] {
         guard old != new, let o = list.first(where: { $0.macID == old }), list.contains(where: { $0.macID == new }) else { return list }
         return list.compactMap { mac in
             if mac.macID == old { return nil }
             guard mac.macID == new else { return mac }
             var next = mac
-            let have = Set(next.allAddresses.map { "\($0.host.lowercased())|\($0.port ?? next.remotePort)" })
-            let carried = (o.typedAddresses ?? []).filter { !have.contains("\($0.host.lowercased())|\($0.port ?? next.remotePort)") }
+            var have = Set(next.allAddresses.map { "\($0.host.lowercased())|\($0.port ?? next.remotePort)" })
+            let carried = (o.typedAddresses ?? []).compactMap { address -> MacAddress? in
+                var address = address
+                // A missing port belongs to the old record. Moving it unchanged would dial the
+                // new record's port, and could also mistake a different destination for a duplicate.
+                if address.port == nil, o.remotePort != next.remotePort { address.port = o.remotePort }
+                let key = "\(address.host.lowercased())|\(address.port ?? next.remotePort)"
+                return have.insert(key).inserted ? address : nil
+            }
             if !carried.isEmpty { next.typedAddresses = (next.typedAddresses ?? []) + carried }
             if o.homeTLS == true { next.homeTLS = true }
             next.lastWorked = proof
