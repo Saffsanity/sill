@@ -4969,7 +4969,11 @@ good.
   set, `HostConfig` ↔ wire), `HostLog` (the print shadow, the app's ring and
   log file),
   `WindowCatalog` (polls windows and thumbnails only while a client is
-  connected; icons; installed apps in the background),
+  connected; icons; installed apps in the background), `InstalledApps`
+  (where those are found: each applications folder and the folders inside it,
+  at any depth (#135's), never inside a bundle, another package or a
+  framework, and never through a link inside a scanned folder (one given that
+  is itself a link is followed), #76; pure, `Tests/checks/installed-apps`),
   `WindowCapture` (ScreenCaptureKit), `SyntheticCapture` (test pattern for
   `--synthetic`; SILL_TEST_PATTERN=noise adds a square of noise,
   SILL_TEST_PATTERN=picture:<path> shows a still picture instead), `HEVCEncoder` (VideoToolbox with one frame inside, a
@@ -5534,7 +5538,8 @@ good.
   `tour` and `phone-portrait` take the Duo's real sizes too), `encoder-mailbox`,
   `encoder-slowstate`, `fence`, `gesture-chords`, `gestures`, `goodbye`,
   `hardware-keyboard` (iOSClient's HardwareKeyboardPolicy),
-  `home-device`, `home-model`, `home-records`, `home-txt`, `key-strokes` (the
+  `home-device`, `home-model`, `home-records`, `home-txt`, `installed-apps`
+  (InstalledApps on a fake applications folder), `key-strokes` (the
   host's KeyStrokes and the device's KeyChords, against a model of the Mac's
   HID state table and of a Mac from before), `ledger`,
   `menu-state` (iOSClient's MacMenuState), `menus` (the host's MenuFormat and
