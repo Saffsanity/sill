@@ -22,16 +22,20 @@ MUTANTS = [
     ("TLS failures read as offline", "UpdatePolicy.swift", "return (tlsCodes.contains(code) ? \"Couldn’t check: \\(description)\" : \"Couldn’t check: this Mac isn’t connected to the internet.\", true)", "return (\"Couldn’t check: this Mac isn’t connected to the internet.\", true)"),
     ("Check Now enabled in test pattern mode", "UpdatePolicy.swift", "let canCheck = hasVersion && !testPatternOnly", "let canCheck = hasVersion"),
     ("Check Now enabled while checking", "UpdatePolicy.swift", "var p = Pane(line: notCheckedLine, releasePage: offer?.url, canCheck: canCheck && !checking, resultID: resultID)", "var p = Pane(line: notCheckedLine, releasePage: offer?.url, canCheck: canCheck, resultID: resultID)"),
+    ("empty contributor name not ignored", "Compatibility.swift", "if let name, !name.isEmpty {", "if let name {"),
+    ("contributorLine ignores maxShown cap", "Compatibility.swift", "guard maxShown > 0, !contributors.isEmpty else { return \"\" }", "guard !contributors.isEmpty else { return \"\" }"),
+    ("contributorLine omits remainder count", "Compatibility.swift", "let rest = contributors.count - shown.count\n        return rest > 0 ? \"\\(list) and \\(rest) more\" : list", "return list"),
 ]
 caught = 0
-for name, _, old, new in MUTANTS:
-    src = open(F).read()
+for name, filename, old, new in MUTANTS:
+    target = os.path.join(WT, "Sources/SillMenuBar", filename) if filename == "UpdatePolicy.swift" else os.path.join(WT, "Sources/StreamProtocol", filename)
+    src = open(target).read()
     if src.count(old) != 1:
         print(f"{name}: NOT APPLIED (pattern found {src.count(old)} times)"); continue
     with tempfile.TemporaryDirectory() as t:
-        mf = os.path.join(t, "UpdatePolicy.swift"); open(mf, "w").write(src.replace(old, new, 1))
+        mf = os.path.join(t, filename); open(mf, "w").write(src.replace(old, new, 1))
         exe = os.path.join(t, "c")
-        subprocess.run([os.path.join(HERE, "build.sh"), WT, exe, mf], capture_output=True, text=True)
+        subprocess.run([os.path.join(HERE, "build.sh"), WT, exe, mf, filename], capture_output=True, text=True)
         if not os.path.exists(exe): print(f"{name}: did not compile"); continue
         r = subprocess.run([exe], capture_output=True, text=True, timeout=300)
         failed = [l for l in r.stdout.splitlines() if l.startswith("FAIL")]

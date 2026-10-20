@@ -175,5 +175,26 @@ check(pane(offer: offer04, lastCheck: last) == P.Pane(line: "Sill 0.4 is availab
 check(pane(hasVersion: false) == P.Pane(line: "This build of Sill has no version number, so it can’t check.", canCheck: false, resultID: 3), "pane: no version")
 check(pane(lastCheck: last, testPattern: true) == P.Pane(line: "Sill doesn’t check for updates in test pattern mode.", canCheck: false, resultID: 3), "pane: test pattern")
 check(P.footnote.contains("GitHub sees this Mac’s IP address and which version of Sill it has; nothing else is sent."), "the footnote says what is sent")
+
+// Supporters & Contributors acknowledgements (issue #154).
+typealias A = Acknowledgements
+check(!A.contributors.isEmpty, "contributors list is non-empty")
+check(A.contributors.map { $0.handle.lowercased() } == A.contributors.map { $0.handle.lowercased() }.sorted(),
+      "contributors are sorted alphabetically by handle")
+check(Set(A.contributors.map(\.id)).count == A.contributors.count, "contributor handles are unique")
+let ilias = A.Contributor(handle: "ipavlidakis", name: "Ilias Pavlidakis", summary: "Universal Mac app build")
+let anon = A.Contributor(handle: "Anubhav-Rai", name: nil, summary: "Apps in subfolders of Applications")
+let emptyName = A.Contributor(handle: "eco-null", name: "", summary: "Saved remote destinations")
+check(ilias.displayName == "Ilias Pavlidakis (@ipavlidakis)", "named contributor displayName: \(ilias.displayName)")
+check(anon.displayName == "@Anubhav-Rai", "handle-only contributor displayName: \(anon.displayName)")
+check(emptyName.displayName == "@eco-null", "empty name falls back to @handle: \(emptyName.displayName)")
+check(ilias.profileURL.absoluteString == "https://github.com/ipavlidakis", "profileURL")
+check(A.contributorsURL.absoluteString == "https://github.com/Saffsanity/sill/graphs/contributors", "contributorsURL")
+check(A.contributorLine(maxShown: 2) == "@Anubhav-Rai, @eco-null and 5 more", "truncated contributorLine: \(A.contributorLine(maxShown: 2))")
+check(A.contributorLine(maxShown: 20).hasPrefix("@Anubhav-Rai, @eco-null") && !A.contributorLine(maxShown: 20).contains("more"),
+      "full contributorLine: \(A.contributorLine(maxShown: 20))")
+check(A.contributorLine(maxShown: 0) == "", "zero maxShown returns empty string")
+check(!A.Copy.header.isEmpty && !A.Copy.supportersBody.isEmpty && !A.Copy.contributorsFootnote.isEmpty, "copy strings non-empty")
+
 print("\(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

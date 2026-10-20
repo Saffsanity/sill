@@ -163,6 +163,7 @@ private struct GeneralPane: View {
                     .disabled(HostLog.shared.fileURL == nil)
                 }
             }
+            AcknowledgementsSection(openURL: { NSWorkspace.shared.open($0) })
             Section {
                 // A way out when the status item is hidden (a crowded menu bar, the notch).
                 Button("Quit Sill") { NSApp.terminate(nil) }
@@ -253,6 +254,41 @@ struct UpdatesSection: View {
             }
         } footer: {
             Footnote(UpdatePolicy.footnote)
+        }
+    }
+}
+
+// MARK: Supporters & Contributors
+
+/// Settings › General's supporters and open-source contributors section (issue #154).
+struct AcknowledgementsSection: View {
+    var openURL: (URL) -> Void = { _ in }
+    @State private var expanded = false
+
+    var body: some View {
+        Section {
+            DisclosureGroup(Acknowledgements.Copy.header, isExpanded: $expanded) {
+                Text(Acknowledgements.Copy.supportersBody)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(Acknowledgements.contributors) { contributor in
+                    LabeledContent {
+                        Text(contributor.summary)
+                            .foregroundStyle(.secondary)
+                    } label: {
+                        Button(contributor.displayName) {
+                            openURL(contributor.profileURL)
+                        }
+                        .buttonStyle(.link)
+                    }
+                }
+                Button(Acknowledgements.Copy.githubButton) {
+                    openURL(Acknowledgements.contributorsURL)
+                }
+            }
+        } footer: {
+            Footnote(Acknowledgements.Copy.contributorsFootnote)
         }
     }
 }

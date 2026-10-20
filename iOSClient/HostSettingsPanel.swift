@@ -53,6 +53,7 @@ struct HostSettingsPanel: View {
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
+    @State private var acknowledgementsOpen = false
 
     private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
     private static let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -351,6 +352,72 @@ struct HostSettingsPanel: View {
             .rowFrame()
         }
         Footnote(text: TourPolicy.takeTourFootnote(device: device))
+        acknowledgements
+    }
+
+    /// Supporters and open-source contributors (issue #154): expands inline inside the panel.
+    @ViewBuilder private var acknowledgements: some View {
+        Rows {
+            Button(action: { withAnimation(.easeOut(duration: 0.18)) { acknowledgementsOpen.toggle() } }) {
+                HStack(spacing: 8) {
+                    Text(Acknowledgements.Copy.rowTitle)
+                        .foregroundStyle(Palette.text)
+                    Spacer(minLength: 8)
+                    Image(systemName: acknowledgementsOpen ? "chevron.down" : "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Palette.muted)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .rowFrame()
+            if acknowledgementsOpen {
+                RowDivider()
+                Text(Acknowledgements.Copy.supportersBody)
+                    .font(.footnote)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                ForEach(Acknowledgements.contributors) { contributor in
+                    RowDivider()
+                    Link(destination: contributor.profileURL) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(contributor.displayName)
+                                    .foregroundStyle(Palette.accent)
+                                Text(contributor.summary)
+                                    .font(.footnote)
+                                    .foregroundStyle(Palette.muted)
+                            }
+                            Spacer(minLength: 8)
+                            Image(systemName: "arrow.up.right")
+                                .font(.footnote)
+                                .foregroundStyle(Palette.muted)
+                        }
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .rowFrame()
+                }
+                RowDivider()
+                Link(destination: Acknowledgements.contributorsURL) {
+                    HStack(spacing: 8) {
+                        Text(Acknowledgements.Copy.githubButton)
+                            .foregroundStyle(Palette.accent)
+                        Spacer(minLength: 8)
+                        Image(systemName: "arrow.up.right")
+                            .font(.footnote)
+                            .foregroundStyle(Palette.muted)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .rowFrame()
+            }
+        }
+        Footnote(text: Acknowledgements.Copy.contributorsFootnote)
     }
 
     /// Most-changed first, so the compact halves' 259 pt shows Quality, Resolution and Frame Rate

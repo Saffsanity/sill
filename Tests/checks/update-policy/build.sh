@@ -4,6 +4,11 @@
 # stripped).
 WT=$1; OUT=$2; T=$(mktemp -d)
 cp "$WT"/Sources/StreamProtocol/*.swift "$T"/
-sed '/^import StreamProtocol$/d' "${3:-$WT/Sources/SillMenuBar/UpdatePolicy.swift}" > "$T/UpdatePolicy.swift"
+if [ "${4:-UpdatePolicy.swift}" = "UpdatePolicy.swift" ]; then
+    sed '/^import StreamProtocol$/d' "${3:-$WT/Sources/SillMenuBar/UpdatePolicy.swift}" > "$T/UpdatePolicy.swift"
+else
+    sed '/^import StreamProtocol$/d' "$WT/Sources/SillMenuBar/UpdatePolicy.swift" > "$T/UpdatePolicy.swift"
+    cp "$3" "$T/$4"
+fi
 cp "$(dirname "$0")/main.swift" "$T/main.swift"
 swiftc -O "$T"/*.swift -o "$OUT" 2>&1 | grep -E "error" ; rm -rf "$T"

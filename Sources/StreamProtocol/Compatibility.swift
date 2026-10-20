@@ -115,3 +115,62 @@ public struct Hello: Codable, Sendable, Equatable {
         self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device
     }
 }
+
+/// Supporters and open-source contributors acknowledged in both the Mac and iOS Settings panels
+/// (issue #154). Pure (`Foundation` only).
+public enum Acknowledgements {
+    public struct Contributor: Equatable, Sendable, Identifiable {
+        public var id: String { handle }
+        public let handle: String
+        public let name: String?
+        public let summary: String
+
+        public init(handle: String, name: String?, summary: String) {
+            self.handle = handle
+            self.name = name
+            self.summary = summary
+        }
+
+        public var displayName: String {
+            if let name, !name.isEmpty {
+                return "\(name) (@\(handle))"
+            }
+            return "@\(handle)"
+        }
+
+        public var profileURL: URL {
+            URL(string: "https://github.com/\(handle)")!
+        }
+    }
+
+    public static let contributors: [Contributor] = [
+        Contributor(handle: "Anubhav-Rai", name: nil, summary: "Apps in subfolders of Applications"),
+        Contributor(handle: "eco-null", name: nil, summary: "Saved remote destinations"),
+        Contributor(handle: "grub-basket", name: nil, summary: "Shift+Return and Shift+Tab on iPad"),
+        Contributor(handle: "ipavlidakis", name: "Ilias Pavlidakis", summary: "Universal Mac app build"),
+        Contributor(handle: "itssali", name: nil, summary: "App Store Tailscale tunnel discovery"),
+        Contributor(handle: "K007-K", name: "K Karthik", summary: "Build script path quoting"),
+        Contributor(handle: "kyleparisi", name: "Kyle Parisi", summary: "Intel virtual display encoding"),
+    ]
+
+    public static let contributorsURL = URL(string: "https://github.com/Saffsanity/sill/graphs/contributors")!
+    public static let repositoryURL = URL(string: "https://github.com/Saffsanity/sill")!
+
+    public static func contributorLine(maxShown: Int = 7) -> String {
+        guard maxShown > 0, !contributors.isEmpty else { return "" }
+        let shown = contributors.prefix(maxShown).map { "@\($0.handle)" }
+        let list = shown.joined(separator: ", ")
+        let rest = contributors.count - shown.count
+        return rest > 0 ? "\(list) and \(rest) more" : list
+    }
+
+    public enum Copy {
+        public static let header = "Supporters & Contributors"
+        public static let rowTitle = "Supporters & Contributors"
+        public static let supportersHeading = "Supporters"
+        public static let supportersBody = "Thank you to everyone who supports Sill and shares feedback, bug reports and ideas. Sill is free, open source and has no subscription or servers."
+        public static let contributorsHeading = "Contributors"
+        public static let contributorsFootnote = "Built by Noah Saffer and contributors on GitHub under the Apache 2.0 license."
+        public static let githubButton = "View Contributors on GitHub…"
+    }
+}
