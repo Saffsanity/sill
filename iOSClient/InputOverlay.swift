@@ -736,6 +736,9 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
 
     /// The hardware keys down on the Mac, so each one's up follows its down.
     private var forwarded = ForwardedKeys()
+    private var activeRepeat: ForwardedKeys.Repeating?
+    private var keyRepeatDelayTimer: Timer?
+    private var keyRepeatTimer: Timer?
 
     private func forward(_ presses: Set<UIPress>, down: Bool, via channel: String) -> Set<UIPress> {
         var unhandled: Set<UIPress> = []
@@ -764,7 +767,38 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
                 Self.hwkey(usage, down: down, via: channel, modifiers: modifiers, to: "the key command sent it")
             }
         }
+        updateKeyRepeat()
         return unhandled
+    }
+
+    private func stopKeyRepeat() {
+        activeRepeat = nil
+        keyRepeatDelayTimer?.invalidate(); keyRepeatDelayTimer = nil
+        keyRepeatTimer?.invalidate(); keyRepeatTimer = nil
+    }
+
+    private func updateKeyRepeat() {
+        guard forwarded.repeating != activeRepeat else { return }
+        stopKeyRepeat()
+        guard let target = forwarded.repeating else { return }
+        activeRepeat = target
+        keyRepeatDelayTimer = Timer.scheduledTimer(withTimeInterval: ForwardedKeys.repeatDelay, repeats: false) { [weak self] timer in
+            guard let self, self.isFirstResponder, self.forwarded.repeating == target else {
+                timer.invalidate()
+                self?.stopKeyRepeat()
+                return
+            }
+            if let event = self.forwarded.repeated() { self.send(event) }
+            self.keyRepeatTimer = Timer.scheduledTimer(withTimeInterval: ForwardedKeys.repeatInterval, repeats: true) { [weak self] timer in
+                guard let self, self.isFirstResponder, self.forwarded.repeating == target,
+                      let event = self.forwarded.repeated() else {
+                    timer.invalidate()
+                    self?.stopKeyRepeat()
+                    return
+                }
+                self.send(event)
+            }
+        }
     }
 
     #if DEBUG
@@ -794,6 +828,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// panel took the keyboard, the tour showed) or is leaving the screen, and UIKit sends it no
     /// release for them.
     private func releaseForwardedKeys() {
+        stopKeyRepeat()
         for up in forwarded.releaseAll() { send(up) }
     }
 }

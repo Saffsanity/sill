@@ -158,6 +158,18 @@ MUTANTS = [
     # Shifted return and tab
     ("shifted return and tab to the text system (the shift lost)", CHORDS, "            || (shiftedKeyUsages.contains(usage) && modifiers & KeyModifiers.shift.rawValue != 0)\n", ""),
     ("return and tab as keys whatever is held", CHORDS, "(shiftedKeyUsages.contains(usage) && modifiers & KeyModifiers.shift.rawValue != 0)", "shiftedKeyUsages.contains(usage)"),
+    ("a held key never repeats (#162)", CHORDS, "        if !isModifier, usage != 0x29 { repeating = Repeating(usage: usage, modifiers: modifiers | held) }\n", ""),
+    ("a text-system key does not stop an arrow repeat", CHORDS, "        repeating = nil\n        guard Self.goesAsKey(usage, modifiers: modifiers) else { return nil }", "        guard Self.goesAsKey(usage, modifiers: modifiers) else { return nil }\n        repeating = nil"),
+    ("a modifier key repeats on its own", CHORDS, "if !isModifier, usage != 0x29", "if usage != 0x29"),
+    ("Esc repeats while held", CHORDS, "if !isModifier, usage != 0x29", "if !isModifier"),
+    ("a repeat drops its modifiers", CHORDS, "return .key(hidUsage: r.usage, down: true, modifiers: r.modifiers)",
+     "return .key(hidUsage: r.usage, down: true, modifiers: 0)"),
+    ("releasing a modifier keeps the chord repeating", CHORDS,
+     "defer { if repeating?.usage == usage || KeyModifiers.flag(forKey: usage) != nil { repeating = nil } }",
+     "defer { if repeating?.usage == usage { repeating = nil } }"),
+    ("a repeat down forgets the Mac's own held modifier", STROKES,
+     "let outside = downs[stroke.virtualKey]?.outside ?? (table & ~posted & ~unreadFlags & Self.modifiers)",
+     "let outside = table & ~posted & ~unreadFlags & Self.modifiers"),
 ]
 caught = 0
 for name, rel, old, new in MUTANTS:
