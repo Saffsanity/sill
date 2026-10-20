@@ -27,6 +27,10 @@ MUTANTS = [
     ("spread left out of the names", "Gesture.swift", "public static let names = [swipeUp, swipeDown, swipeLeft, swipeRight, pinch, spread]", "public static let names = [swipeUp, swipeDown, swipeLeft, swipeRight, pinch]"),
     ("kind 28 as 29", "StreamMessage.swift", "case gesture = 28", "case gesture = 29"),
     ("device never nil", "Compatibility.swift", "self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device", "self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device ?? \"\""),
+    ("kind 45 as 46", "StreamMessage.swift", "case microphone = 45", "case microphone = 46"),
+    ("MicrophonePackets segmentStart bit ignored", "Clipboard.swift", "segmentStart: flags & 1 == 1", "segmentStart: false"),
+    ("MicrophonePackets trailing bytes allowed", "Clipboard.swift", "guard offset == d.count else { return nil }", "guard offset <= d.count else { return nil }"),
+    ("MicrophoneCodec.choose ignores order", "Clipboard.swift", "offered.first { accepts.contains($0) }", "offered.last { accepts.contains($0) }"),
 ]
 caught = 0
 for name, file, old, new in MUTANTS:

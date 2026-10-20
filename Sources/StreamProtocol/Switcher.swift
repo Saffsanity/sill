@@ -60,6 +60,9 @@ public struct WindowList: Codable {
     /// pull request #66's `Bool` (never released) does not decode here and becomes an Int as it
     /// rebases.
     public var clipboard: Int?
+    /// What this host takes of the device's microphone (kind 45, MicrophoneMessage): 1 is 48 kHz
+    /// mono PCM16 / AAC-ELD. Nil from hosts before microphone support or synthetic test hosts.
+    public var microphone: Int?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
                 hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil) {

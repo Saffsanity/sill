@@ -75,6 +75,9 @@ public enum StreamMessageKind: UInt8 {
                              // on), its text becomes the Mac's clipboard, and `stop` ends the subscription; only
                              // to a host whose window list says `clipboard` 1 or more. Host → device: text copied
                              // on the Mac (or sent by another device), only to a connection that subscribed
+    case microphone = 45     // device → host: MicrophoneMessage (type 1 JSON MicrophoneFormat, type 2 binary
+                             // MicrophonePackets) — the device's microphone audio, only to a host whose window
+                             // list says `microphone` 1 or more
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

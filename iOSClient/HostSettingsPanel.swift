@@ -50,6 +50,8 @@ struct HostSettingsPanel: View {
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
+    /// This device's switch for streaming its microphone to the Mac (Roadmap Item 9): off by default.
+    @AppStorage(StreamClient.microphoneKey) private var microphoneOn = false
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -504,6 +506,16 @@ struct HostSettingsPanel: View {
                     .accessibilityHidden(true)      // announced as it came
             }
             Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, mac: mac, device: device))
+        }
+        if (client.hostMicrophone ?? 0) >= MicrophoneCodec.generation {
+            Rows {
+                Toggle(isOn: $microphoneOn) {
+                    Text("Share Microphone").foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+                .onChange(of: microphoneOn) { _, _ in client.updateMicrophoneCapture() }
+            }
+            Footnote(text: "Streams this \(device)’s microphone to \(mac) while connected.")
         }
         Rows {
             Toggle(isOn: $gesturesOn) {
