@@ -15,6 +15,8 @@ struct LiveRemoteAccessPane: View {
                          internetAccess: $settings.config.internetAccess,
                          port: settings.config.remotePort,
                          addressName: settings.remoteAddressName,
+                         privacyMode: $settings.privacyMode,
+                         lockOnDisconnect: $settings.lockOnDisconnect,
                          actions: RemoteAccessPane.Actions(
                              setPort: { settings.config.remotePort = $0 },
                              setAddressName: { settings.remoteAddressName = $0 },
@@ -41,6 +43,8 @@ struct RemoteAccessPane: View {
     let port: Int
     /// The address name setting, as saved.
     let addressName: String
+    var privacyMode: Binding<Bool> = .constant(false)
+    var lockOnDisconnect: Binding<Bool> = .constant(false)
     let actions: Actions
 
     @State private var editingPort = false
@@ -75,6 +79,14 @@ struct RemoteAccessPane: View {
                     Text("Sleep")
                     Text("This Mac can’t be reached while it’s asleep. While a device is connected from away, Sill keeps it from going to sleep by itself.")
                 }
+            }
+            Section {
+                Toggle(PrivacyModePolicy.Copy.blankToggle, isOn: privacyMode)
+                Toggle(PrivacyModePolicy.Copy.lockToggle, isOn: lockOnDisconnect)
+            } header: {
+                Text(PrivacyModePolicy.Copy.sectionHeader)
+            } footer: {
+                Footnote(PrivacyModePolicy.Copy.footnote)
             }
         }
     }
