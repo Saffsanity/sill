@@ -15,11 +15,11 @@ import StreamProtocol
 ///                                              a control would (maxFPS, captureScale, bitrate,
 ///                                              awayBitrate, awayCaptureScale,
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
-///                                              remoteAccess, remotePort, internetAccess,
-///                                              remoteAddressName=host[:port], updateCheck,
-///                                              requirePairing=0|1). Saved like any change
-///                                              (requirePairing in the identity store: memory, or
-///                                              SILL_TEST_REMOTE_DIR)
+///                                              sendAudio, remoteAccess, remotePort, internetAccess,
+///                                              shareClipboard, remoteAddressName=host[:port],
+///                                              updateCheck, requirePairing=0|1). Saved like any
+///                                              change (requirePairing in the identity store:
+///                                              memory, or SILL_TEST_REMOTE_DIR)
 ///     -requirePairing YES|NO                   Require pairing at launch, saved in the identity
 ///                                              store as the Devices pane saves it
 ///     -SillPairAfter <s>                       open a pairing window (Pair iPhone or iPad…) s
@@ -344,6 +344,7 @@ enum DebugHooks {
         case "prioritizeSpeed": config.prioritizeSpeed = flag
         case "virtualDisplay": config.virtualDisplay = flag
         case "directWireless": config.directWireless = flag
+        case "sendAudio": config.sendAudio = flag
         case "remoteAccess": config.remoteAccess = flag
         case "remotePort": if let v = Int(value) { config.remotePort = v }
         case "internetAccess": config.internetAccess = flag
@@ -448,7 +449,8 @@ enum DebugHooks {
                        appearance: appearance, to: out.appendingPathComponent("card-\(sample.name)-\(name).png"))
             }
             var config = model.settings.config
-            config.virtualDisplay = sample.snapshot.virtualDisplayOn     // the checkmark matches the sample
+            config.virtualDisplay = sample.snapshot.virtualDisplayOn     // the checkmarks match the sample
+            config.sendAudio = sample.snapshot.audio != nil
             let entries = MenuBuilder.entries(presentation: p, config: config, login: login, permissions: sample.permissions)
             menuText += "=== \(sample.name) (glyph: \(p.glyph), tooltip: \(p.tooltip))\n"
             menuText += MenuBuilder.dump(entries, card: p) + "\n"
@@ -564,6 +566,11 @@ enum DebugHooks {
         // The same device while the away quality runs (docs/remote-bundle-plan.md §5.7): the menu's
         // Quality subtitle says so, and the stream runs at Low · Standard.
         list.append(Sample(name: "remote-away", snapshot: remoteAway()))
+        // The same device with the Mac's sound: the widest source row there is with it, ending in
+        // "through Tailscale · virtual display · sound".
+        var remoteSound = remote
+        remoteSound.audio = HostStatusSnapshot.Audio(source: "Safari", devices: 1)
+        list.append(Sample(name: "remote-sound", snapshot: remoteSound))
         // Pairing at home (docs/home-pairing-plan.md §6.4): a device's ask while its window shows
         // the code, while the limits kept one from opening, and while this Mac was locked; an older
         // device refused at the home door; the keychain unusable, so no home door at all.
@@ -660,6 +667,10 @@ enum DebugHooks {
         streaming.virtualDisplayOn = true
         var two = streaming
         two.devices = [ipad, iphone]
+        // The Mac's sound going to the one device (Send Audio on), on the virtual display over Wi-Fi,
+        // ending in "sound" (`remote-sound` is the same from away).
+        var sound = streaming
+        sound.audio = HostStatusSnapshot.Audio(source: "Safari", devices: 1)
         // A still window on the Mac's own screen (virtual display off) to one device, at the most the
         // menu offers (Maximum at 120 fps: 80 Mbps) over the widest word: the source row stays on one
         // line, as it does while the picture changes, so the open menu keeps its height. The device
@@ -700,6 +711,7 @@ enum DebugHooks {
             Sample(name: "streaming", snapshot: streaming),
             Sample(name: "still-window", snapshot: still),
             Sample(name: "two-devices", snapshot: two),
+            Sample(name: "sound", snapshot: sound),
             Sample(name: "software-encoder", snapshot: software),
             Sample(name: "software-encoder-stuck", snapshot: stuck),
             Sample(name: "virtual-display-fallback", snapshot: fallback),

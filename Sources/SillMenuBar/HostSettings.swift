@@ -45,6 +45,7 @@ final class HostSettings {
         static let logShowsStats = "logShowsStats"
         static let updateCheck = "updateCheck"
         static let shareClipboard = "shareClipboard"
+        static let sendAudio = "sendAudio"
     }
 
     var config: HostConfig {
@@ -113,6 +114,8 @@ final class HostSettings {
             Key.updateCheck: true,
             // On, like the CLI: each device has its own switch, and a password manager's copies never go.
             Key.shareClipboard: standard.shareClipboard,
+            // Off, like the CLI: the Mac keeps playing its own sound (docs/audio-plan.md, Q1).
+            Key.sendAudio: standard.sendAudio,
         ])
         config = HostConfig(maxFPS: defaults.integer(forKey: Key.maxFPS),
                             captureScale: CGFloat(defaults.double(forKey: Key.captureScale)),
@@ -129,7 +132,8 @@ final class HostSettings {
                             // (the identity store), from which AppModel reads it at launch, before
                             // the host starts, and to which the Devices pane saves it.
                             requirePairing: HostConfig.standard.requirePairing,
-                            shareClipboard: defaults.bool(forKey: Key.shareClipboard)).validated()
+                            shareClipboard: defaults.bool(forKey: Key.shareClipboard),
+                            sendAudio: defaults.bool(forKey: Key.sendAudio)).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         updateCheck = defaults.bool(forKey: Key.updateCheck)
         settingsTab = defaults.string(forKey: Key.settingsTab).flatMap(SettingsTab.init(rawValue:)) ?? .general
@@ -154,6 +158,7 @@ final class HostSettings {
         if config.remotePort != old.remotePort { defaults.set(config.remotePort, forKey: Key.remotePort) }
         if config.internetAccess != old.internetAccess { defaults.set(config.internetAccess, forKey: Key.internetAccess) }
         if config.shareClipboard != old.shareClipboard { defaults.set(config.shareClipboard, forKey: Key.shareClipboard) }
+        if config.sendAudio != old.sendAudio { defaults.set(config.sendAudio, forKey: Key.sendAudio) }
     }
 
     // MARK: Remote devices seen (display only)

@@ -244,9 +244,10 @@ let panelsRule = Rule("the drawer and the panel from 8 under row 1 to the trackp
 let anchorRule = Rule("the panel's anchor is its top-trailing corner")
 let dimRule = Rule("the dim covers everything but row 1's buttons, in two pieces")
 let menusRule = Rule("row 2 with the Mac's menus: the Menus button under Settings and as wide, 50 tall, centred in the strip's 62; the strip from 6 to 8 before it, a whole 80 pt thumbnail and its 8 pt ends in it")
+let soundRule = Rule("row 2 with the Mac's sound (docs/audio-plan.md §7.6): Sound under Settings and as wide, 50 tall, centred in the strip's 62; with Menus too, Menus under Desktop beside it and the strip from 6 to 8 before Menus, a whole 80 pt thumbnail and its 8 pt ends in it; Sound alone takes Menus' place (the strip 8 before it); row 1 keeps its five whichever shows")
 let gainsRule = Rule("Larger Picture applies (its keyboard the estimate, the switch offered) exactly where its room above the estimated keyboard is taller than today's picture and row 1's six buttons are 44 pt or more; never with the switch off or a hinge")
 let sourceRule = Rule("Larger Picture only while a window streams: with the switch on a window gets that keyboard, the Desktop and nothing streaming none (the standard arrangement); the switch off none, and a hinge none, whatever streams")
-let rules = [inside, ordered, gaps, pictureRule, buttonsRule, capsRule, alignRule, spanRule, rulerRule, panelsRule, anchorRule, dimRule, menusRule, gainsRule, sourceRule]
+let rules = [inside, ordered, gaps, pictureRule, buttonsRule, capsRule, alignRule, spanRule, rulerRule, panelsRule, anchorRule, dimRule, menusRule, soundRule, gainsRule, sourceRule]
 
 func within(_ r: CGRect, _ size: CGSize) -> Bool {
     r.minX >= -0.001 && r.minY >= -0.001 && r.maxX <= size.width + 0.001 && r.maxY <= size.height + 0.001 && r.width >= 0 && r.height >= 0
@@ -262,7 +263,8 @@ for w in 300...599 {
         let l = L(size: size)
         gridSizes += 1
 
-        let all = [l.picture, l.row1, l.strip, l.menus, l.stripBesideMenus, l.keys, l.trackpad, l.ruler, l.drawer, l.settings]
+        let all = [l.picture, l.row1, l.strip, l.menus, l.stripBesideMenus, l.sound, l.menusBesideSound, l.stripBesideBoth,
+                   l.keys, l.trackpad, l.ruler, l.drawer, l.settings]
             + l.buttons + l.caps + l.dim
         inside.expect(all.allSatisfy { within($0, size) }, size, all.first { !within($0, size) }.map(str) ?? "")
 
@@ -323,6 +325,20 @@ for w in 300...599 {
                          && near(l.menus.minX - l.stripBesideMenus.maxX, 8) && l.stripBesideMenus.width - 16 >= 80, size,
                          "menus \(str(l.menus)), strip \(str(l.stripBesideMenus))")
 
+        // Row 1 keeps its five whichever shows: the standard arrangement's row 1 is `buttons`, and
+        // `buttonsBesideMenus` the same five.
+        let row1Kept = l.buttonsBesideMenus == b
+        soundRule.expect(near(l.sound.minX, b[4].minX) && near(l.sound.width, b[4].width) && l.sound.height == 50
+                         && near(l.sound.midY, l.strip.midY) && l.sound == l.menus
+                         && near(l.menusBesideSound.minX, b[3].minX) && near(l.menusBesideSound.width, b[3].width)
+                         && l.menusBesideSound.minY == l.sound.minY && l.menusBesideSound.height == 50
+                         && near(l.sound.minX - l.menusBesideSound.maxX, 8) && !l.menusBesideSound.intersects(l.sound)
+                         && l.stripBesideBoth.minX == l.strip.minX && l.stripBesideBoth.minY == l.strip.minY
+                         && l.stripBesideBoth.height == l.strip.height && near(l.menusBesideSound.minX - l.stripBesideBoth.maxX, 8)
+                         && l.stripBesideBoth.width - 16 >= 80
+                         && (W < 375 || (l.stripBesideBoth.width - 16 + 12) / (80 + 12) >= 2) && row1Kept, size,
+                         "sound \(str(l.sound)), menus \(str(l.menusBesideSound)), strip \(str(l.stripBesideBoth))")
+
         let estimate = L.keyboardHeight(for: size)
         let applies = L(size: size, keyboard: estimate).picture.height > l.picture.height && (W - 68) / 6 >= 44
         let given = L.keyboard(for: size, largerPicture: true, foldable: false)
@@ -368,6 +384,23 @@ do {
     check("320 pt (Display Zoom): the button 52 wide at 254, the strip 240 (two whole thumbnails)",
           near(w320.menus.minX, 254) && near(w320.menus.width, 52) && near(w320.stripBesideMenus.width, 240)
             && (w320.stripBesideMenus.width - 16) / (80 + 12) >= 2.4)
+}
+// Row 2 with the Mac's sound, and its menus too (docs/audio-plan.md §7.6): a whole thumbnail left at
+// 320 pt, two from 375.
+do {
+    let se = L(size: se.container)
+    check("iPhone SE (375 wide): Sound \(str(se.sound)) under Settings, Menus \(str(se.menusBesideSound)) under Desktop, the strip 6 to \(se.stripBesideBoth.maxX): two whole thumbnails",
+          near(se.sound, CGRect(x: 298, y: se.strip.minY + 6, width: 63, height: 50))
+            && near(se.menusBesideSound, CGRect(x: 227, y: se.strip.minY + 6, width: 63, height: 50))
+            && near(se.stripBesideBoth.width, 213) && (se.stripBesideBoth.width - 16 + 12) / (80 + 12) >= 2)
+    let w320 = L(size: CGSize(width: 320, height: 548))
+    check("320 pt (Display Zoom): Sound at 254, Menus at 194, the strip 180: one whole thumbnail and most of the next",
+          near(w320.sound.minX, 254) && near(w320.menusBesideSound.minX, 194) && near(w320.stripBesideBoth.width, 180)
+            && (w320.stripBesideBoth.width - 16) / (80 + 12) >= 1.7)
+    let pm = L(size: proMax.container)
+    check("iPhone 18 Pro Max: Sound under Settings (\(str(pm.sound))), Menus under Desktop, the strip 6 to \(pm.stripBesideBoth.maxX)",
+          near(pm.sound.minX, pm.buttons[4].minX) && near(pm.menusBesideSound.minX, pm.buttons[3].minX)
+            && near(pm.stripBesideBoth.maxX, pm.buttons[3].minX - 8))
 }
 check("the size is all it depends on", L(size: pro.container) == L(size: pro.container) && L(size: pro.container) != L(size: proMax.container))
 
@@ -493,7 +526,7 @@ for row in largerTable {
           l.picture == CGRect(x: 8, y: 8, width: row.room.width, height: row.room.height) && L(size: size).picture.height == row.today)
     check("\(n): row 1 at \(Int(row.row1.0))–\(Int(row.row1.1)), 24 pt under the room",
           l.row1 == CGRect(x: 14, y: row.row1.0, width: size.width - 28, height: 50) && l.row1.minY - l.picture.maxY == 24)
-    check("\(n): no thumbnails' row", l.strip.height == 0 && l.stripBesideMenus.height == 0)
+    check("\(n): no thumbnails' row", l.strip.height == 0 && l.stripBesideMenus.height == 0 && l.stripBesideBoth.height == 0)
     check("\(n): the key row at \(Int(row.keys.0))–\(Int(row.keys.1)), 16 pt under row 1's buttons",
           l.keys == CGRect(x: 14, y: row.keys.0, width: size.width - 28, height: 44) && l.keys.minY - l.row1.maxY == 16)
     check("\(n): the key row 10 pt above the keyboard's top (\(Int(size.height - k)) in the stream screen, \(Int(row.phone.screen.height - k)) on the screen)",
@@ -654,6 +687,19 @@ do {
           near(L(size: se.container, keyboard: 233).menus.width, 307.0 / 6) && near(L(size: mini.container, keyboard: 310).menus.width, 307.0 / 6))
 }
 
+// No Sound button in Larger Picture's row 1 (docs/audio-plan.md, Q10, the beta's default: row 1 stays as
+// Noah approved it): the Mac's sound is the Settings panel's switch alone there, on every phone. `sound`
+// and `stripBesideBoth` are the strip's empty place under row 1, as `strip` and `stripBesideMenus` are,
+// and Menus beside Sound is Menus' own place in row 1.
+do {
+    for p in [proMax, pro, fifteenPro, seventeenE, mini, se] {
+        let l = L(size: p.container, keyboard: p.keyboard!)
+        check("\(p.name), \(Int(p.container.width)) pt, Larger Picture: no Sound button (\(str(l.sound))), Menus beside it at its own place in row 1",
+              l.sound.height == 0 && l.sound == l.strip && l.stripBesideBoth == l.strip && l.menusBesideSound == l.menus
+                && l.menus.minY == l.row1.minY && !l.buttons.contains { $0.intersects(l.sound) })
+    }
+}
+
 // The frame: the picture's own shape inside the room, from its top (the 18 Pro Max's room, 424×422).
 do {
     let l = L(size: proMax.container, keyboard: 320)
@@ -696,8 +742,9 @@ let lRow1 = Rule("Larger Picture: five equal buttons as today, and beside the Ma
 let lCaps = Rule("Larger Picture: six equal caps, 44 tall, 8 apart, from 14 to W − 14")
 let lRulers = Rule("Larger Picture: both rulers over row 1, centred on their Aa, inside the row, 36 a detent where they fit")
 let lPanels = Rule("Larger Picture: the panel from 8 under row 1 to 16 off the bottom, the drawer from 8 to 8 above row 1 (128 above the keyboard), both across row 1; the anchor the panel's corner; the dim all but row 1")
+let lSound = Rule("Larger Picture and the Mac's sound (Q10): no Sound button in row 1 or anywhere (the panel's switch alone): `sound` and `stripBesideBoth` the strip's empty place under row 1, Menus beside Sound its own place in row 1, row 1 as without the sound")
 let lFrames = Rule("Larger Picture: each frame inside the room, from its top, whole points, at the picture's shape (to a point), centred across when taller than the room; the span the pad's width × the frame's shape")
-let largerRules = [lInside, lOrdered, lGaps, lRoom, lRow1, lCaps, lRulers, lPanels, lFrames]
+let largerRules = [lInside, lOrdered, lGaps, lRoom, lRow1, lCaps, lRulers, lPanels, lSound, lFrames]
 let frameVideos = [CGSize.zero, CGSize(width: 3024, height: 1964), CGSize(width: 2560, height: 1080), CGSize(width: 1000, height: 1000),
                    CGSize(width: 1000, height: 2000), CGSize(width: 1512, height: 949)]
 var largerSizes = 0
@@ -737,6 +784,9 @@ for keyboard: CGFloat in [233, 301, 310, 320] {
                            && l.drawer == CGRect(x: 14, y: 8, width: W - 28, height: l.row1.minY - 16) && l.drawer.maxY == H - keyboard - 128
                            && near(l.settingsAnchor.x, l.settings.maxX / W, 0.0001) && near(l.settingsAnchor.y, l.settings.minY / H, 0.0001)
                            && l.dim == [CGRect(x: 0, y: 0, width: W, height: l.row1.minY), CGRect(x: 0, y: l.row1.maxY, width: W, height: H - l.row1.maxY)], size)
+            let soundOK = l.sound.height == 0 && l.sound == l.strip && l.stripBesideBoth == l.strip && l.menusBesideSound == l.menus
+                && !(l.buttons + l.buttonsBesideMenus + [l.menus]).contains { $0.intersects(l.sound) }
+            lSound.expect(soundOK, size)
             var framesOK = true, bad = ""
             for v in frameVideos {
                 let f = l.pane(video: v)

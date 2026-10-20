@@ -47,6 +47,11 @@ MUTANTS = {
     "M29 the Menus button under Aa": ("let settingsButton = buttons[Button.settings.rawValue]", "let settingsButton = buttons[Button.textSize.rawValue]"),
     "M30 the strip running under the Menus button": ("width: max(0, menus.minX - Self.gap - strip.minX)", "width: strip.width"),
     "M31 the Menus button at the strip's top": ("y: strip.minY + (Self.stripHeight - Self.buttonHeight) / 2,", "y: strip.minY,"),
+    "M32 Sound under Desktop": ("            sound = menus\n", "            sound = CGRect(x: buttons[Button.desktop.rawValue].minX, y: menus.minY, width: menus.width, height: menus.height)\n"),
+    "M33 Menus not moved aside beside Sound": ("            let desktopButton = buttons[Button.desktop.rawValue]", "            let desktopButton = buttons[Button.settings.rawValue]"),
+    "M34 the strip not shortened beside both": ("width: max(0, menusBesideSound.minX - Self.gap - strip.minX),", "width: max(0, menus.minX - Self.gap - strip.minX),"),
+    "M35 Menus beside Sound with no gap": ("            menusBesideSound = CGRect(x: desktopButton.minX, y: menus.minY, width: desktopButton.width, height: Self.buttonHeight)",
+                                           "            menusBesideSound = CGRect(x: desktopButton.minX, y: menus.minY, width: desktopButton.width + Self.gap, height: Self.buttonHeight)"),
     # Larger Picture (docs/larger-picture-plan.md).
     "L1 no clearance above the keyboard": ("static let keyboardClearance: CGFloat = 10", "static let keyboardClearance: CGFloat = 0"),
     "L2 the room's fixed height without the clearance": ("band + capHeight + rowGap + keyboardClearance", "band + capHeight + rowGap"),
@@ -103,6 +108,11 @@ MUTANTS = {
     "S3 what streams ignored (the Desktop and nothing with Larger Picture, as before 2026-10-15)": ("switchOn && streaming == .window", "switchOn"),
     "S4 the switch ignored while a window streams": ("switchOn && streaming == .window", "streaming == .window"),
     "S5 the rule turned around (the Desktop larger, a window not)": ("switchOn && streaming == .window", "switchOn && streaming != .window"),
+    # No Sound button in Larger Picture's row 1 (docs/audio-plan.md, Q10): the panel's switch alone.
+    "A1 Sound in Larger Picture's row 1, at Settings' place": ("            sound = gone\n", "            sound = six[5]\n"),
+    "A2 Menus beside Sound moved in Larger Picture": ("            menusBesideSound = menus\n", "            menusBesideSound = six[2]\n"),
+    "A3 a strip beside both in Larger Picture": ("            stripBesideBoth = gone\n",
+                                                 "            stripBesideBoth = CGRect(origin: gone.origin, size: CGSize(width: gone.width, height: Self.stripHeight))\n"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

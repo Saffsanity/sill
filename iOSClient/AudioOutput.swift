@@ -1,0 +1,905 @@
+import AVFAudio
+import Foundation
+import QuartzCore
+import StreamProtocol
+import UIKit
+
+/// The Mac's sound on this device (docs/audio-plan.md §7.3, §7.4): kind 43's formats and packets in,
+/// through the playout model (AudioPlayout, which decides) and the decoder (AudioDecoder), onto an
+/// AVAudioPlayerNode → the main mixer → the output. Every line of Sill's runs on `queue`: the player
+/// node schedules, and the real-time code is Apple's (AVAudioSourceNode's real-time block is not for
+/// Swift, AVAudioSourceNode.h).
+///
+/// The engine runs while a format has come, sound is not muted, the app and this window's scene are
+/// in the foreground and a packet came within 10 s; the audio session (.playback, mixing with other
+/// audio, so it never stops the person's music and plays with the silent switch on, as a video app
+/// does) is active only while it runs, or another window's does (`SharedSession`). It stops on
+/// mute, in the background and at the session's end after a fade (the mixer's own ramp to the
+/// player's volume 0), after 10 s without a packet (rule 10's tail has faded it), and the next
+/// packet starts it again. While the sound cannot be heard (muted, in the background, the session
+/// refused during a call) nothing is decoded, and each packet still counts for the floor and the
+/// cover. Interruptions, route changes, a media services reset and the engine's configuration
+/// change are handled here; headphones taken out mute the sound and say so (`onRouteMuted`), as a
+/// video app pauses.
+///
+/// In the simulator, and in a DEBUG build asked with `-SillSoundSink manual`, the engine renders in
+/// manual (offline) mode instead: it never opens an output device and never activates the session, so
+/// nothing can reach a speaker, the Mac's included. A timer on `queue` pulls what a real output would,
+/// as the clock goes, with a stand-in IO buffer (5 ms) and output latency (10 ms), and the console says
+/// where each click of the test tone was heard. DEBUG `-SillSoundVolume 0` sets the player's volume to
+/// 0 besides. (`-SillSoundSink device` in a DEBUG simulator build opens the output, for a person at
+/// the simulator who wants to hear it.)
+///
+/// Threads: the client hands everything over from the network queue (formats, packets, frames,
+/// stamped there) and the main thread (mute, the session, the route); the player's completion handlers
+/// return buffers to the pool under its lock; the once-a-second stats are read under `statsLock`.
+final class AudioOutput {
+    let queue = DispatchQueue(label: "sill.audio", qos: .userInteractive)
+
+    /// Headphones taken out (the route's old device unavailable): the client mutes and says so. Main thread.
+    var onRouteMuted: (() -> Void)?
+
+    // On `queue`.
+    private var model = AudioPlayout()
+    private var decoder: AudioDecoder?
+    /// The epoch playing: its format, and whether this device plays its codec.
+    private var playing: (epoch: Int, framesPerPacket: Int, codec: String, playable: Bool)?
+    /// Each kept packet's frames (after its priming), by the model's id.
+    private var kept: [Int: (left: [Float], right: [Float])] = [:]
+    private var engine: SoundEngine?
+    private var muted = false
+    /// The app in the foreground, and this window's scene not in the background (a second window
+    /// minimized or swiped away leaves the app active): heard only with both.
+    private var appForeground = true
+    private var sceneForeground = true
+    private var foreground: Bool { appForeground && sceneForeground }
+    /// The session's connection is live (between `sessionStarted` and `sessionEnded`).
+    private var sessionLive = false
+    /// A session activation failed (a call): no start until the interruption ends or the app comes back.
+    private var activationBlocked = false
+    private var lastPacketAt: Double?
+    /// When this queue last finished starting or stopping an engine: a packet that came before then
+    /// waited for Sill, not the link, and the floor and the cover take when it came (rule 6).
+    private var engineBusyUntil = 0.0
+    private var deadlineTimer: DispatchSourceTimer?
+    private var secondTimer: DispatchSourceTimer?
+    private var refresh = 1.0 / 60
+    private var streamFPS = 60.0
+    private var away = false
+    /// The route's name as last read, for a route change's line.
+    private var routeSeen: String?
+    #if DEBUG
+    private var clicks = ClickFinder()
+    #endif
+
+    /// Whether a kind 43 format came this session: until one does (Send Audio off, a Mac without
+    /// sound), a video frame is not handed to `queue` at all, so a session without sound costs no hop
+    /// and no sorted insert per frame. Only the stamps of the last `framesKeptBeforeFormat` frames are
+    /// kept meanwhile (`framesBeforeFormat`), and the first format hands them to the model before
+    /// itself, so the guard (rule 3: the sound never ahead of the picture) holds from the sound's first
+    /// packet, as when every frame went to the model. Set by `format` on the network queue, cleared at
+    /// a session's start and end; a move's hand-over keeps it, as it keeps the sound. Under its own lock.
+    private let formatSeenLock = NSLock()
+    private var formatSeen = false
+    private var framesBeforeFormat: [(stamp: Double, arrival: Double)] = []
+    /// About half a second of frames at 60 fps: the median the guard starts from.
+    static let framesKeptBeforeFormat = 32
+
+    // The last closed second, for the client's stats (its network queue) and the HUD.
+    private let statsLock = NSLock()
+    private var lastSecond: AudioPlayout.Second?
+    private var lateSinceTaken = 0
+    private var anyPlayed = false
+
+    /// Idle: no packet for this long stops the engine (rule 14).
+    static let idleAfter = 10.0
+    /// A fading stop: the mixer's 25 ms ramp to the player's volume 0, and an IO buffer and more.
+    static let fadeWait = 0.05
+
+    /// The notification observers `init` added, removed in `deinit`: each window's client has an output
+    /// of its own, and a block-based observer stays registered until it is removed.
+    private var observers: [NSObjectProtocol] = []
+
+    init(refresh: Double) {
+        self.refresh = refresh
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil) { [weak self] _ in
+            self?.queue.async { self?.appForeground = false; self?.foregroundChanged() }
+        })
+        observers.append(center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: nil) { [weak self] _ in
+            self?.queue.async { self?.appForeground = true; self?.foregroundChanged() }
+        })
+        observers.append(center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: nil) { [weak self] _ in
+            self?.queue.async { self?.activationBlocked = false; self?.updateSilence() }
+        })
+        observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: nil) { [weak self] note in
+            self?.queue.async { self?.interrupted(note) }
+        })
+        observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil) { [weak self] note in
+            self?.queue.async { self?.routeChanged(note) }
+        })
+        observers.append(center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: nil) { [weak self] _ in
+            self?.queue.async { self?.servicesReset() }
+        })
+        // The output's format changed (a route at another rate, Bluetooth's call profile, another app
+        // changing the session's rate): the engine has stopped and uninitialized itself. Never torn
+        // down in the handler (Apple: it can deadlock there): on `queue`.
+        observers.append(center.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: nil) { [weak self] note in
+            let changed = note.object as AnyObject?
+            self?.queue.async { self?.configurationChanged(changed) }
+        })
+    }
+
+    /// A window's client is gone (its scene discarded): its observers go, and its timers. An engine
+    /// still playing goes with the output, and gives the app's session back as it goes (SoundEngine's
+    /// deinit), so another window's last stop can still let the session go.
+    deinit {
+        let center = NotificationCenter.default
+        for o in observers { center.removeObserver(o) }
+        deadlineTimer?.cancel()
+        secondTimer?.cancel()
+    }
+
+    // MARK: - From the client
+
+    /// A new session connection (a connect, a reconnect): nothing of the last one's sound is kept. A
+    /// move's hand-over is not one. Any thread.
+    func sessionStarted(away: Bool) {
+        formatSeenLock.withLock { formatSeen = false; framesBeforeFormat = [] }
+        queue.async { [self] in
+            stopEngine(reason: nil, fade: true)
+            _ = model.reset(.session)
+            kept = [:]
+            decoder = nil
+            playing = nil
+            sessionLive = true
+            self.away = away
+            model.away(away)
+            statsLock.withLock { lastSecond = nil; lateSinceTaken = 0; anyPlayed = false }
+            #if DEBUG
+            clicks = ClickFinder()
+            #endif
+        }
+    }
+
+    /// The session ended (a tear-down): the engine stops. Any thread.
+    func sessionEnded() {
+        formatSeenLock.withLock { formatSeen = false; framesBeforeFormat = [] }
+        queue.async { [self] in
+            sessionLive = false
+            stopEngine(reason: nil, fade: true)
+            _ = model.reset(.session)
+            kept = [:]
+            decoder = nil
+            playing = nil
+            lastPacketAt = nil
+            secondTimer?.cancel()
+            secondTimer = nil
+            statsLock.withLock { lastSecond = nil; lateSinceTaken = 0 }
+        }
+    }
+
+    /// This device's mute (the Sound button and switch): at once, locally; the Mac keeps sending, and
+    /// each packet still counts for the floor and the cover, so unmuting is quick. Any thread.
+    func setMuted(_ on: Bool) {
+        queue.async { [self] in
+            guard muted != on else { return }
+            muted = on
+            // Unmuting is the person asking for sound: a session refused during a call is tried again.
+            if !on { activationBlocked = false }
+            updateSilence()
+            if on {
+                stopEngine(reason: "muted", fade: true)
+            } else {
+                #if DEBUG
+                print("audio: unmuted")
+                #endif
+            }
+        }
+    }
+
+    /// This window's scene went to the background (`false`) or came back: with several windows the app
+    /// stays active while one is hidden. Any thread.
+    func setSceneForeground(_ on: Bool) {
+        queue.async { [self] in
+            guard sceneForeground != on else { return }
+            sceneForeground = on
+            foregroundChanged()
+        }
+    }
+
+    /// The session goes away from home or comes home (the cover's start and bounds). Any thread.
+    func setAway(_ on: Bool) { queue.async { [self] in away = on; model.away(on) } }
+
+    /// The stream's frame rate, for the guard's one frame. Any thread.
+    func setStreamFPS(_ fps: Int) { queue.async { [self] in if fps > 0 { streamFPS = Double(fps); readLatencies() } } }
+
+    /// The pings' median round trip of the last second (rule 13's threshold). Any thread.
+    func rtt(median ms: Int?) { queue.async { [self] in model.rtt(median: ms.map { Double($0) / 1000 }) } }
+
+    /// A video frame, stamped as the network queue took it (rule 3); until the session's first format
+    /// (`formatSeen`) only kept here, the last `framesKeptBeforeFormat` of them.
+    func frame(stamp: Double, arrival: Double) {
+        let seen = formatSeenLock.withLock { () -> Bool in
+            if formatSeen { return true }
+            if framesBeforeFormat.count >= Self.framesKeptBeforeFormat { framesBeforeFormat.removeFirst() }
+            framesBeforeFormat.append((stamp, arrival))
+            return false
+        }
+        guard seen else { return }
+        queue.async { [self] in model.frame(stamp: stamp, arrival: arrival) }
+    }
+
+    /// A kind 43 format: the session's first hands the frames kept before it to the model first.
+    func format(_ f: AudioFormat) {
+        let before = formatSeenLock.withLock { () -> [(stamp: Double, arrival: Double)] in
+            defer { formatSeen = true; framesBeforeFormat = [] }
+            return formatSeen ? [] : framesBeforeFormat
+        }
+        queue.async { [self] in
+            for frame in before { model.frame(stamp: frame.stamp, arrival: frame.arrival) }
+            receive(f)
+        }
+    }
+
+    /// A kind 43 packets message and its header's stamp, as the network queue took it.
+    func packets(_ p: AudioPackets, stamp: Double) {
+        let came = CACurrentMediaTime()
+        queue.async { [self] in receive(p, stamp: stamp, came: came) }
+    }
+
+    /// For the stats sent to the Mac once a second (`ClientStats.audioBehindMs`, `audioLate`): the last
+    /// closed second's median of how far the sound trailed the picture (nil: none played in it) and the
+    /// packets too late to play since the last call; nil before anything played this session. The two
+    /// seconds (this queue's and the client's) are not aligned: a report carries the latest. Any thread.
+    func takeSecond() -> (behindMs: Int?, late: Int)? {
+        statsLock.withLock {
+            guard anyPlayed else { return nil }
+            defer { lateSinceTaken = 0 }
+            return (lastSecond?.behindMs, lateSinceTaken)
+        }
+    }
+
+    /// The last second's numbers, for the HUD. Any thread.
+    var latestSecond: AudioPlayout.Second? { statsLock.withLock { lastSecond } }
+
+    // MARK: - Formats and packets
+
+    private func receive(_ f: AudioFormat) {
+        guard sessionLive, let epoch = f.epoch, let frames = f.framesPerPacket else { return }
+        let codec = f.codec ?? ""
+        let cookie = f.cookie ?? Data()
+        guard model.format(epoch: epoch, framesPerPacket: frames, primingFrames: f.primingFrames ?? 0, cookie: cookie) else { return }
+        let playable = AudioDecoder.codecs.contains(codec) && (f.sampleRate ?? 48_000) == 48_000 && (f.channels ?? 2) == 2
+        decoder = playable ? try? AudioDecoder(framesPerPacket: frames, cookie: cookie) : nil
+        playing = (epoch, frames, codec, playable && decoder != nil)
+        #if DEBUG
+        if playable, decoder != nil {
+            let what = f.app ?? (f.source == AudioFormat.sourceDesktop ? "the whole Mac" : f.source == AudioFormat.sourceTest ? "a test tone" : "?")
+            print("audio: format \(codec) \(f.sampleRate ?? 0) Hz \(f.channels ?? 0) ch, \(frames) frames (priming \(f.primingFrames ?? 0)), epoch \(epoch), \(what)")
+        } else {
+            print("audio: cannot play \(codec.isEmpty ? "an unnamed codec" : codec)\(playable ? " (its cookie was refused)" : "")")
+        }
+        #endif
+    }
+
+    private func receive(_ p: AudioPackets, stamp: Double, came: Double) {
+        guard sessionLive, let fmt = playing, p.epoch == fmt.epoch, fmt.playable, let decoder else { return }
+        let now = CACurrentMediaTime()
+        lastPacketAt = now
+        startSecondTimer()
+        if !muted, foreground, !activationBlocked, engine == nil { startEngine() }
+        for (i, data) in p.packets.enumerated() {
+            let now = CACurrentMediaTime()
+            feedReading(now)
+            let plan = model.packet(epoch: p.epoch, seq: p.seq &+ UInt32(i), stamp: stamp + Double(i * fmt.framesPerPacket) / AudioPlayout.rate,
+                                    segmentStart: p.segmentStart && i == 0, arrival: came < engineBusyUntil ? came : nil, now: now)
+            if plan.decode {
+                if plan.resetFirst { decoder.reset() }
+                let decoded = decoder.decode(data)
+                if let id = plan.id {
+                    let keep = fmt.framesPerPacket - plan.dropFront
+                    if let (l, r) = decoded, l.count == fmt.framesPerPacket, r.count == fmt.framesPerPacket {
+                        kept[id] = (Array(l.suffix(keep)), Array(r.suffix(keep)))
+                    } else {
+                        // Silence in its place; the decoder starts afresh at the next packet.
+                        model.decodeFailed()
+                        kept[id] = ([Float](repeating: 0, count: keep), [Float](repeating: 0, count: keep))
+                    }
+                }
+            }
+            apply(plan.output)
+        }
+        armDeadline()
+    }
+
+    /// What the model says: schedule, or forget.
+    private func apply(_ out: AudioPlayout.Output) {
+        for id in out.discards { kept[id] = nil }
+        for s in out.schedules { schedule(s) }
+        #if DEBUG
+        if let j = model.takeJump() { print("audio: jump \(String(format: "%+.0f", j.by * 1000)) ms (\(j.cause.rawValue))") }
+        #endif
+    }
+
+    private func schedule(_ s: AudioPlayout.Schedule) {
+        guard let pcm = kept[s.id] else { return }
+        defer { if s.part == .tail { kept[s.id] = nil } }
+        guard let engine else { return }
+        let end = min(s.offset + s.count, pcm.left.count)
+        guard s.offset < end else { return }
+        var l = Array(pcm.left[s.offset..<end])
+        var r = Array(pcm.right[s.offset..<end])
+        if s.change != 0 { AudioPlayout.change(&l, &r, by: s.change) }
+        if s.fadeIn { AudioPlayout.fade(&l, in: true); AudioPlayout.fade(&r, in: true) }
+        if s.fadeOut { AudioPlayout.fade(&l, in: false); AudioPlayout.fade(&r, in: false) }
+        engine.schedule(left: l, right: r, at: s.at)
+        #if DEBUG
+        clicks.scheduled(start: s.start, frames: l.count, stamp: s.stamp + Double(s.offset) / AudioPlayout.rate)
+        #endif
+    }
+
+    /// The player's timeline as the engine last rendered it.
+    private func feedReading(_ now: Double) {
+        guard let engine, let (sample, time) = engine.reading() else { return }
+        apply(model.played(sample: sample, at: time, now: now))
+    }
+
+    // MARK: - The tail's deadline and the second
+
+    private func armDeadline() {
+        deadlineTimer?.cancel()
+        deadlineTimer = nil
+        guard let d = model.deadline else { return }
+        let t = DispatchSource.makeTimerSource(queue: queue)
+        t.schedule(deadline: .now() + max(0, d - CACurrentMediaTime()), leeway: .nanoseconds(0))
+        t.setEventHandler { [weak self] in
+            guard let self else { return }
+            let now = CACurrentMediaTime()
+            self.feedReading(now)
+            // Its deadline as the fresh reading has it, and no later than now.
+            self.apply(self.model.tick(now: max(now, self.model.deadline ?? now)))
+            self.armDeadline()
+        }
+        t.resume()
+        deadlineTimer = t
+    }
+
+    /// Once a second while sound comes: the model's second closed for the stats, the console's line,
+    /// and the idle test (rule 14).
+    private func startSecondTimer() {
+        guard secondTimer == nil else { return }
+        let t = DispatchSource.makeTimerSource(queue: queue)
+        t.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(20))
+        t.setEventHandler { [weak self] in self?.closeSecond() }
+        t.resume()
+        secondTimer = t
+    }
+
+    private func closeSecond() {
+        let now = CACurrentMediaTime()
+        let s = model.takeSecond(now: now)
+        statsLock.withLock {
+            lastSecond = s
+            lateSinceTaken += s.late
+            if s.placed > 0 { anyPlayed = true }
+        }
+        #if DEBUG
+        if engine != nil || s.placed > 0 || s.duplicates > 0 {
+            let behind = s.behindMs.map { "\($0) ms behind the picture" } ?? "nothing played"
+            print("audio: \(behind); need \(Self.ms(s.need)) (jitter \(Self.ms(s.cover))); late \(s.late); error \(s.error.map { Self.signed($0) } ?? "–"); "
+                  + "frames +\(s.framesAdded) -\(s.framesDropped); jumps \(s.jumps)" + (s.duplicates > 0 ? "; duplicates \(s.duplicates)" : "")
+                  + (s.joins > 0 ? "; joins \(s.joins)" : ""))
+        }
+        #endif
+        if let last = lastPacketAt, now - last >= Self.idleAfter {
+            if engine != nil {
+                stopEngine(reason: "idle")
+                #if DEBUG
+                print("audio: idle, engine off")
+                #endif
+            }
+            secondTimer?.cancel()
+            secondTimer = nil
+            lastPacketAt = nil
+        }
+    }
+
+    // MARK: - The engine
+
+    private func startEngine() {
+        let sink = SoundEngine.sinkFromLaunchArguments
+        let made = SoundEngine(manual: sink == .manual, queue: queue)
+        switch made.start() {
+        case .success:
+            engine = made
+            apply(model.reset(.playback))   // a new timeline: what waited for the last one goes
+            readLatencies()
+            routeSeen = made.routeName
+            #if DEBUG
+            // A new engine's timeline starts at sample 0: what the finder kept of the last one's goes.
+            clicks = ClickFinder()
+            if made.manual {
+                made.onRendered = { [weak self, weak made] samples, from in
+                    guard let self, let made else { return }
+                    self.clicks.rendered(samples, from: from, engine: made, model: self.model)
+                }
+            }
+            let lag = model.pictureLag(now: CACurrentMediaTime())
+            let need = model.need(now: CACurrentMediaTime())
+            print("audio: engine on, \(made.routeName), output \(Self.ms(made.outputLatency)), IO \(Self.ms(made.ioBuffer)), "
+                  + "delay \(Self.ms(model.delay(now: CACurrentMediaTime(), lag: lag))) (need \(Self.ms(need)): jitter \(Self.ms(model.cover(now: CACurrentMediaTime()))), "
+                  + "packet \(Self.ms(Double(model.framesPerPacket) / AudioPlayout.rate)), IO \(Self.ms(made.ioBuffer)), output \(Self.ms(made.outputLatency)), margin 2; "
+                  + "picture \(lag.map { Self.ms($0) } ?? "none") + 1 frame \(Self.ms(1 / streamFPS)))")
+            #endif
+        case .failure(let reason):
+            activationBlocked = true
+            updateSilence()
+            print("audio: no sound: \(reason)")
+        }
+        engineBusyUntil = CACurrentMediaTime()
+    }
+
+    /// Stops the engine, which lets the session go once no engine of the app plays (`SharedSession`);
+    /// `fade` turns the player down first and stops the engine once the mixer has ramped it to silence.
+    /// The mixer ramps a volume change linearly over 1,200 of its frames (25 ms at 48 kHz; measured in
+    /// manual rendering, whatever the render's size), so a stop 20 ms in cut the sound at a fifth of its
+    /// level: it waits 50 ms.
+    private func stopEngine(reason: String?, fade: Bool = false) {
+        deadlineTimer?.cancel()
+        deadlineTimer = nil
+        apply(model.reset(.playback))
+        kept = [:]
+        guard let e = engine else { return }
+        engine = nil
+        let release = { [weak self] in
+            e.stop()
+            self?.engineBusyUntil = CACurrentMediaTime()
+        }
+        if fade {
+            e.turnDown()
+            queue.asyncAfter(deadline: .now() + Self.fadeWait, execute: release)
+        } else {
+            release()
+        }
+        #if DEBUG
+        if let reason, reason != "idle" { print("audio: engine off (\(reason))") }
+        #endif
+    }
+
+    private func readLatencies() {
+        guard let e = engine else { return }
+        model.latency(output: e.outputLatency, io: e.ioBuffer, refresh: refresh, streamFPS: streamFPS)
+    }
+
+    private func foregroundChanged() {
+        updateSilence()
+        if !foreground { stopEngine(reason: "in the background", fade: true) }
+    }
+
+    /// Nothing is decoded while the sound cannot be heard (§7.5): muted, in the background, or with the
+    /// session refused (a call). Each packet still counts for the floor and the cover, so it comes
+    /// back quickly; and once it can be heard again, the decoder's state is stale, so the next packet
+    /// starts it afresh (a `.playback` reset, rule 9).
+    private func updateSilence() {
+        let silent = muted || !foreground || activationBlocked
+        guard silent != model.muted else { return }
+        model.mute(silent)
+        if !silent { apply(model.reset(.playback)) }
+    }
+
+    /// AVAudioEngineConfigurationChange: the engine has stopped and uninitialized itself, its nodes
+    /// keeping their old formats. It goes, and the next packet builds one in the output's new format
+    /// and reads its latencies (placed by time: one jump). Not in manual rendering, which has no output.
+    private func configurationChanged(_ object: AnyObject?) {
+        guard let e = engine, !e.manual, e.owns(object) else { return }
+        stopEngine(reason: "the output's configuration changed")
+    }
+
+    private func interrupted(_ note: Notification) {
+        guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+        switch type {
+        case .began:
+            // The system has stopped the engine; nothing starts it again until the interruption ends.
+            activationBlocked = true
+            updateSilence()
+            stopEngine(reason: "interrupted")
+            #if DEBUG
+            print("audio: interrupted")
+            #endif
+        case .ended:
+            let options = (note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt).map { AVAudioSession.InterruptionOptions(rawValue: $0) } ?? []
+            // With "should resume" the next packet starts it; without, once the app is active again or
+            // the person unmutes.
+            activationBlocked = !options.contains(.shouldResume)
+            updateSilence()
+            #if DEBUG
+            print(options.contains(.shouldResume) ? "audio: resumed" : "audio: interruption over; waiting for the app to be active")
+            #endif
+        @unknown default:
+            break
+        }
+    }
+
+    private func routeChanged(_ note: Notification) {
+        guard let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: raw) else { return }
+        if reason == .oldDeviceUnavailable {
+            // Headphones out while the sound plays: muted here at once, as a video app pauses, and said
+            // (the client keeps it). Decided from the notification, not from the engine: a configuration
+            // change handled first has already let the engine go, and the next packet would start one
+            // on the speaker.
+            guard sessionLive, !muted, foreground, lastPacketAt != nil, SoundEngine.sinkFromLaunchArguments == .device else { return }
+            muted = true
+            updateSilence()
+            stopEngine(reason: nil, fade: true)
+            #if DEBUG
+            print("audio: muted (headphones disconnected)")
+            #endif
+            DispatchQueue.main.async { [weak self] in self?.onRouteMuted?() }
+            return
+        }
+        guard let e = engine, !e.manual else { return }
+        let before = (route: routeSeen ?? e.routeName, output: model.outputLatency, io: model.ioBuffer)
+        readLatencies()
+        routeSeen = e.routeName
+        // The need follows the route's latency, whatever it is (AirPlay's can be 2 s): the output
+        // latency moves the need and the ear alike, the IO buffer only the need, so the next packet is
+        // placed by time. A change that moved neither (the session's own category) is nothing.
+        guard e.routeName != before.route || abs(model.outputLatency - before.output) > 0.001
+                || abs(model.ioBuffer - before.io) > 0.001 else { return }
+        apply(model.reset(.jump))
+        #if DEBUG
+        let change = model.outputLatency - before.output
+        print("audio: route \(before.route) → \(e.routeName) (\(change >= 0 ? "+" : "")\(Int((change * 1000).rounded())) ms)")
+        #endif
+    }
+
+    private func servicesReset() {
+        // Every object of the old media services is gone: the next packet builds a new engine and session.
+        engine?.abandon()
+        engine = nil
+        apply(model.reset(.playback))
+        kept = [:]
+        #if DEBUG
+        print("audio: media services were reset")
+        #endif
+    }
+
+    // MARK: - Words
+
+    static func ms(_ s: Double) -> String { "\(Int((s * 1000).rounded())) ms" }
+    static func signed(_ s: Double) -> String { String(format: "%+.1f ms", s * 1000) }
+}
+
+// MARK: - The engine and its sink
+
+/// One AVAudioEngine with its player node: rendering to the device's output (the session active), or
+/// in manual rendering mode, which opens no output device (DEBUG, and every simulator build). Its
+/// methods run on the output's queue; its completion handlers return buffers to the pool.
+private final class SoundEngine {
+    enum Sink { case device, manual }
+    enum Started { case success, failure(String) }
+
+    let manual: Bool
+    private let queue: DispatchQueue
+    private let engine = AVAudioEngine()
+    private let player = AVAudioPlayerNode()
+    private let format = AVAudioFormat(standardFormatWithSampleRate: AudioPlayout.rate, channels: 2)!
+    private let pool = BufferPool()
+    private(set) var running = false
+    /// This engine counts in `SharedSession` (it plays on the device, and has not stopped).
+    private var holdsSession = false
+
+    // Manual rendering: the stand-in output's clock (engine sample 0 goes out at t0), and what has been
+    // rendered. The player starts with the engine, so its timeline is the engine's.
+    private var t0 = 0.0
+    private var rendered: AVAudioFramePosition = 0
+    private var renderTimer: DispatchSourceTimer?
+    private var renderBuffer: AVAudioPCMBuffer?
+    /// The player's own output (the left channel) and the sample it starts at, from a tap on it: the
+    /// click finder's, and unaffected by the player's volume, which the mixer applies after it. On `queue`.
+    var onRendered: (([Float], AVAudioFramePosition) -> Void)?
+    static let standInIO = 0.005
+    static let standInOutput = 0.010
+
+    init(manual: Bool, queue: DispatchQueue) {
+        self.manual = manual
+        self.queue = queue
+    }
+
+    /// Freed while it played (its window's client went with its output): stopped as `stop` stops it, so
+    /// the app's session is given back, or `SharedSession` would count it for good and no other window's
+    /// last stop could ever let the session go. (Holding the session implies running: `stop` and
+    /// `abandon` give it back as they end the run.)
+    deinit {
+        stop()
+    }
+
+    /// Which sink: the simulator never opens an output unless a DEBUG build asks (`-SillSoundSink
+    /// device`); a device opens it unless a DEBUG build asks for `manual`.
+    static var sinkFromLaunchArguments: Sink {
+        #if DEBUG
+        switch UserDefaults.standard.string(forKey: "SillSoundSink") {
+        case "manual"?: return .manual
+        case "device"?: return .device
+        default: break
+        }
+        #endif
+        #if targetEnvironment(simulator)
+        return .manual
+        #else
+        return .device
+        #endif
+    }
+
+    func start() -> Started {
+        engine.attach(player)
+        #if DEBUG
+        if let raw = UserDefaults.standard.string(forKey: "SillSoundVolume"), let v = Float(raw) { player.volume = v }
+        #endif
+        if manual {
+            do {
+                try engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 4096)
+            } catch {
+                return .failure("manual rendering: \(error.localizedDescription)")
+            }
+            engine.connect(player, to: engine.mainMixerNode, format: format)
+            #if DEBUG
+            player.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, when in
+                guard let self, let ch = buffer.floatChannelData, when.isSampleTimeValid else { return }
+                let samples = Array(UnsafeBufferPointer(start: ch[0], count: Int(buffer.frameLength)))
+                let from = when.sampleTime
+                self.queue.async { self.onRendered?(samples, from) }
+            }
+            #endif
+            do { try engine.start() } catch { return .failure("the engine: \(error.localizedDescription)") }
+            renderBuffer = AVAudioPCMBuffer(pcmFormat: engine.manualRenderingFormat, frameCapacity: 4096)
+            player.play()
+            t0 = CACurrentMediaTime() + Self.standInIO
+            rendered = 0
+            let t = DispatchSource.makeTimerSource(queue: queue)
+            t.schedule(deadline: .now(), repeating: 0.005, leeway: .microseconds(500))
+            t.setEventHandler { [weak self] in self?.render() }
+            t.resume()
+            renderTimer = t
+            running = true
+            return .success
+        }
+        do {
+            try SharedSession.take()
+        } catch {
+            return .failure("the audio session: \(error.localizedDescription)")
+        }
+        engine.connect(player, to: engine.mainMixerNode, format: format)
+        engine.prepare()
+        do {
+            try engine.start()
+        } catch {
+            SharedSession.give()
+            return .failure("the engine: \(error.localizedDescription)")
+        }
+        holdsSession = true
+        player.play()
+        running = true
+        return .success
+    }
+
+    /// The player down, before a stop: the mixer ramps to it over 25 ms from its next render.
+    func turnDown() { player.volume = 0 }
+
+    /// Whether a configuration change's object is this engine.
+    func owns(_ object: AnyObject?) -> Bool { object === engine }
+
+    /// Stops the player and the engine, and gives the app's session back (`SharedSession`).
+    func stop() {
+        renderTimer?.cancel()
+        renderTimer = nil
+        guard running else { return }
+        running = false
+        #if DEBUG
+        if manual { player.removeTap(onBus: 0) }
+        #endif
+        player.stop()
+        engine.stop()
+        giveSession()
+    }
+
+    /// The media services went away: nothing of this engine may be touched again.
+    func abandon() {
+        renderTimer?.cancel()
+        renderTimer = nil
+        running = false
+        giveSession()
+    }
+
+    private func giveSession() {
+        guard holdsSession else { return }
+        holdsSession = false
+        SharedSession.give()
+    }
+
+    /// The player's timeline: a sample of it and the device time it goes out at.
+    func reading() -> (Double, Double)? {
+        guard running else { return nil }
+        if manual {
+            // The next sample to render goes out at t0 + its place ÷ rate.
+            return (Double(rendered), t0 + Double(rendered) / AudioPlayout.rate)
+        }
+        guard let node = player.lastRenderTime, node.isSampleTimeValid, node.isHostTimeValid,
+              let playerTime = player.playerTime(forNodeTime: node), playerTime.isSampleTimeValid else { return nil }
+        return (Double(playerTime.sampleTime), AVAudioTime.seconds(forHostTime: node.hostTime))
+    }
+
+    /// The output latency as the model takes it: the session's, or the player's presentation latency
+    /// downstream if more. That one includes the output's own presentation latency (AVAudioNode.h),
+    /// which is what the session reports: added to it, it counted the device twice.
+    var outputLatency: Double {
+        manual ? Self.standInOutput : max(AVAudioSession.sharedInstance().outputLatency, player.outputPresentationLatency)
+    }
+
+    var ioBuffer: Double { manual ? Self.standInIO : AVAudioSession.sharedInstance().ioBufferDuration }
+
+    var routeName: String {
+        manual ? "manual rendering (no output device)" : AVAudioSession.sharedInstance().currentRoute.outputs.first?.portName ?? "no output"
+    }
+
+    func schedule(left: [Float], right: [Float], at: Double?) {
+        guard running, let buffer = pool.take(format: format, frames: left.count) else { return }
+        let n = min(left.count, right.count, Int(buffer.frameCapacity))
+        if let ch = buffer.floatChannelData, n > 0 {
+            left.withUnsafeBufferPointer { ch[0].update(from: $0.baseAddress!, count: n) }
+            right.withUnsafeBufferPointer { ch[1].update(from: $0.baseAddress!, count: n) }
+        }
+        buffer.frameLength = AVAudioFrameCount(n)
+        let when = at.map { AVAudioTime(sampleTime: AVAudioFramePosition($0.rounded()), atRate: AudioPlayout.rate) }
+        let pool = self.pool
+        player.scheduleBuffer(buffer, at: when, options: []) { pool.give(buffer) }
+    }
+
+    /// Manual rendering: what a real output would have pulled by now, the stand-in IO buffer ahead.
+    private func render() {
+        guard running, let buffer = renderBuffer else { return }
+        let target = AVAudioFramePosition(((CACurrentMediaTime() + Self.standInIO - t0) * AudioPlayout.rate).rounded(.down))
+        while rendered < target {
+            let n = AVAudioFrameCount(min(target - rendered, AVAudioFramePosition(buffer.frameCapacity)))
+            guard (try? engine.renderOffline(n, to: buffer)) == .success else { return }
+            rendered += AVAudioFramePosition(n)
+        }
+    }
+
+    /// When an engine sample goes out (manual rendering).
+    func outTime(ofEngineSample e: AVAudioFramePosition) -> Double { t0 + Double(e) / AudioPlayout.rate }
+}
+
+/// The app's one audio session, under every window's engine (each window's StreamClient has its own
+/// AudioOutput): active while any of them plays on the device. Deactivating it stops every engine's I/O,
+/// running or not (AVAudioSession.h), so it goes only when the last one stops. The lock is held across
+/// the session's calls, so one window's deactivation never lands after another's activation.
+private enum SharedSession {
+    private static let lock = NSLock()
+    private static var engines = 0
+
+    /// Activated (.playback, mixing with other audio) for one more engine.
+    static func take() throws {
+        try lock.withLock {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try? session.setPreferredSampleRate(AudioPlayout.rate)
+            try? session.setPreferredIOBufferDuration(0.005)
+            try session.setActive(true)
+            engines += 1
+        }
+    }
+
+    /// One engine fewer; the last lets the session go.
+    static func give() {
+        lock.withLock {
+            engines = max(0, engines - 1)
+            guard engines == 0 else { return }
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+    }
+}
+
+/// AVAudioPCMBuffers of the player's format, a packet and a frame long (a frame gained fits), 32 to
+/// start and more when all are out (the guard has no bound, and a picture a second late holds a
+/// hundred in the player). Returned by the player's completion handlers, on an AVFAudio queue.
+private final class BufferPool {
+    private let lock = NSLock()
+    private var free: [AVAudioPCMBuffer] = []
+    static let capacity: AVAudioFrameCount = 1024
+
+    init() {
+        let format = AVAudioFormat(standardFormatWithSampleRate: AudioPlayout.rate, channels: 2)!
+        free = (0..<32).compactMap { _ in AVAudioPCMBuffer(pcmFormat: format, frameCapacity: Self.capacity) }
+    }
+
+    func take(format: AVAudioFormat, frames: Int) -> AVAudioPCMBuffer? {
+        lock.lock()
+        if let b = free.popLast(), b.frameCapacity >= AVAudioFrameCount(frames) { lock.unlock(); return b }
+        lock.unlock()
+        return AVAudioPCMBuffer(pcmFormat: format, frameCapacity: max(Self.capacity, AVAudioFrameCount(frames)))
+    }
+
+    func give(_ b: AVAudioPCMBuffer) {
+        lock.lock()
+        free.append(b)
+        lock.unlock()
+    }
+}
+
+#if DEBUG
+// MARK: - The test tone's clicks (DEBUG)
+
+/// Where each click of a synthetic host's test tone (a 4 ms 2 kHz burst at each whole second of the
+/// stamps' clock, Sources/SillHost/TestTone.swift) was heard, from what the manual rendering produced:
+/// the console's "audio: click …" lines, the simulator gate's measure (docs/audio-plan.md S2).
+private struct ClickFinder {
+    /// The parts scheduled lately: where on the player's timeline, how long, and the stamp of their
+    /// first frame (for a sample's stamp).
+    private var parts: [(start: Double, frames: Int, stamp: Double)] = []
+    /// The rendered left channel and the engine sample it starts at (the last 2 s).
+    private var history: [Float] = []
+    private var historyStart: AVAudioFramePosition = 0
+    private var checked = Set<Int>()
+    private static let click: [Float] = {
+        let rate = AudioPlayout.rate, n = Int((0.004 * rate).rounded())
+        return (0..<n).map { i in
+            let x = Double(i)
+            return Float(pow(10, -6.0 / 20) * (0.5 - 0.5 * cos(2 * .pi * x / Double(n))) * sin(2 * .pi * 2000 * x / rate))
+        }
+    }()
+
+    mutating func scheduled(start: Double, frames: Int, stamp: Double) {
+        parts.append((start, frames, stamp))
+        if parts.count > 400 { parts.removeFirst(parts.count - 400) }
+    }
+
+    mutating func rendered(_ samples: [Float], from: AVAudioFramePosition, engine: SoundEngine, model: AudioPlayout?) {
+        if history.isEmpty { historyStart = from }
+        history += samples
+        let keep = Int(2 * AudioPlayout.rate)
+        if history.count > keep {
+            let drop = history.count - keep
+            history.removeFirst(drop)
+            historyStart += AVAudioFramePosition(drop)
+        }
+        let end = historyStart + AVAudioFramePosition(history.count)
+        let window = Int(0.020 * AudioPlayout.rate)
+        for p in parts {
+            // Each whole second of the stamps this part carries.
+            let first = Int(p.stamp.rounded(.up)), last = p.stamp + Double(p.frames) / AudioPlayout.rate
+            guard Double(first) < last, !checked.contains(first) else { continue }
+            let expected = p.start + (Double(first) - p.stamp) * AudioPlayout.rate
+            let lo = AVAudioFramePosition(expected) - AVAudioFramePosition(window)
+            let hi = AVAudioFramePosition(expected) + AVAudioFramePosition(window) + AVAudioFramePosition(Self.click.count)
+            guard lo >= historyStart, hi <= end else { continue }
+            checked.insert(first)
+            var best = -Double.infinity, at = 0
+            for lag in -window...window {
+                let base = Int(AVAudioFramePosition(expected) + AVAudioFramePosition(lag) - historyStart)
+                var acc = 0.0
+                for j in 0..<Self.click.count { acc += Double(Self.click[j]) * Double(history[base + j]) }
+                if acc > best { best = acc; at = lag }
+            }
+            let energy = Self.click.reduce(0.0) { $0 + Double($1) * Double($1) }
+            guard best > 0.3 * energy else {
+                print("audio: click :\(String(format: "%02d", first % 60)) not found near its place (volume 0?)")
+                continue
+            }
+            let heardSample = AVAudioFramePosition(expected) + AVAudioFramePosition(at)
+            let ear = engine.outTime(ofEngineSample: heardSample) + SoundEngine.standInOutput
+            var due = ""
+            if let m = model, let floor = m.floor {
+                let now = CACurrentMediaTime()
+                let d = Double(first) + floor + m.delay(now: now, lag: m.pictureLag(now: now))
+                due = ", \(AudioOutput.signed(ear - d)) from due now"
+            }
+            print("audio: click :\(String(format: "%02d", first % 60)) heard \(AudioOutput.signed(Double(at) / AudioPlayout.rate)) from where it was placed\(due)")
+        }
+        if checked.count > 200 { checked = Set(checked.sorted().suffix(100)) }
+    }
+}
+#endif

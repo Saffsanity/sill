@@ -9,12 +9,12 @@ import StreamProtocol
 extension HostConfig {
     /// As a device sees them: the quality its connection controls in `bitrate` and `captureScale`,
     /// the away pair for a connection the Mac counts as away (docs/remote-bundle-plan.md §4.2), the
-    /// home pair for any other; the other four are shared.
+    /// home pair for any other; the other five are shared.
     func streamSettings(away: Bool) -> StreamSettings {
         let pair = effective(away: away)
         return StreamSettings(maxFPS: maxFPS, bitrate: pair.bitrate, captureScale: Double(pair.captureScale),
                               prioritizeSpeed: prioritizeSpeed, virtualDisplay: virtualDisplay,
-                              directWireless: directWireless)
+                              directWireless: directWireless, sendAudio: sendAudio)
     }
 
     /// This config with a device's change laid over it; nil fields keep their value. `package`:
@@ -27,6 +27,7 @@ extension HostConfig {
         if let v = change.prioritizeSpeed { c.prioritizeSpeed = v }
         if let v = change.virtualDisplay { c.virtualDisplay = v }
         if let v = change.directWireless { c.directWireless = v }
+        if let v = change.sendAudio { c.sendAudio = v }
         return c
     }
 
@@ -49,21 +50,27 @@ extension HostConfig {
 /// counts as away, its bitrate and capture scale land on the away pair (`applyingAway`): the same
 /// whitelist decides both routes. Remote access, its port and
 /// internet access can never enter this whitelist: they widen who reaches the Mac, and only the
-/// Mac's own user may do that.
+/// Mac's own user may do that. Send Audio is the Mac's alone too, as Share Clipboard is
+/// (docs/audio-plan.md, Q8, the beta's default): it decides whether the sound of the Mac's apps
+/// leaves the Mac at all (a call among it) and what every connected device plays, unmuted until each
+/// one mutes it, so a device's change of it is refused from either door, and the device's row only
+/// shows it. It stays in kinds 16 and 17 (a later decision may let devices set it again, and #66's
+/// Mac viewer asked to); only the Mac's menu and Settings, and the CLI's `--audio`, set it.
 enum DeviceSettings {
     /// The fields of `c` a device may set: exactly the Mac menu's choices (`SettingsChoices`), and
     /// the virtual display on only where this host can run it (off is always allowed), and Direct
     /// Wireless either way on every host (on the synthetic one it changes only which interfaces the
     /// listener accepts on, since that host registers nothing a device browses), except from a
     /// remote connection (`fromRemote`): a device away from home cannot change how devices near the
-    /// Mac reach it. Refusal is per field: the rest of the same change still applies. The refused
-    /// fields are named for the log; the token is not carried (the handler answers with the
-    /// request's own). Each field is copied by name, so one added to `HostSettingsChange` but not
-    /// here is dropped without a refusal or a log line (StreamProtocol's HostSettings.swift lists
-    /// every place a new setting goes).
+    /// Mac reach it. Send Audio never, on or off, from anywhere (`sendAudioRefusal`). Refusal is per
+    /// field: the rest of the same change still applies. The refused fields are named for the log;
+    /// the token is not carried (the handler answers with the request's own). Each field is copied by
+    /// name, so one added to `HostSettingsChange` but not here is dropped without a refusal or a log
+    /// line (StreamProtocol's HostSettings.swift lists every place a new setting goes).
     static func accepted(_ c: HostSettingsChange, virtualDisplayAvailable: Bool, fromRemote: Bool = false) -> (HostSettingsChange, refused: [String]) {
         var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed)
         var refused: [String] = []
+        if c.sendAudio != nil { refused.append(sendAudioRefusal) }
         if let v = c.directWireless {
             if fromRemote { refused.append("direct wireless (not from a remote connection)") } else { ok.directWireless = v }
         }
@@ -81,4 +88,8 @@ enum DeviceSettings {
         }
         return (ok, refused)
     }
+
+    /// The log's words for a device's Send Audio ("Settings from iPad (iPad14,1) refused: send audio
+    /// (set on this Mac only)"): only the Mac's own menu and Settings, or the CLI's `--audio`, set it.
+    static let sendAudioRefusal = "send audio (set on this Mac only)"
 }
