@@ -7,7 +7,8 @@ namespace Sill.Viewer;
 /// The Settings panel, as the iPad's (iOSClient/HostSettingsPanel.swift): a card hanging under the
 /// bar on the right with the Mac's name and what streams, Done, the Mac's streaming settings
 /// (Quality, Resolution, Frame Rate, Prioritize Encoding Speed, Virtual Display, Direct Wireless)
-/// with the iPad's footnotes, and This PC's own (decoding on the GPU or in software, Share Clipboard). The values
+/// with the iPad's footnotes, and This PC's own (decoding on the GPU or in software, Share Clipboard,
+/// its name as the Mac sees it, Forget this Mac). The values
 /// come from the form's <see cref="SettingsLedger"/>; a control's pick goes back to the form, which
 /// sends it. Disconnect is pinned at the foot, as the iPad's, and only the rest scrolls. Drawn by
 /// hand; it takes no keyboard focus, so keys stay the Mac's.
@@ -20,10 +21,14 @@ sealed class SettingsPanel : Control
     public event Action? Done;
     /// <summary>The foot's Disconnect: back to the connect screen.</summary>
     public event Action? Disconnect;
+    /// <summary>This PC's Name clicked: the form asks for a new one.</summary>
+    public event Action? RenamePc;
+    /// <summary>Forget clicked twice: the form forgets the Mac and goes back to the connect screen.</summary>
+    public event Action? Forget;
 
     private const float CardWidth = 360, Pad = 16, Radius = 20, Row = 44, GroupRadius = 12, Gap = 8;
 
-    private enum Kind { Header, Title, Readout, Done, Group, RowTitle, Quality, Segments, Switch, Footnote, Note, Disconnect }
+    private enum Kind { Header, Title, Readout, Done, Group, RowTitle, Quality, Segments, Switch, Footnote, Note, Disconnect, Value, Forget }
     private sealed record Item(Kind Kind, RectangleF Rect, string Text = "", string[]? Options = null, int Selected = -1,
         bool On = false, bool Enabled = true, bool Pending = false, Action<int>? Choose = null, Color? Tint = null);
 
@@ -31,7 +36,10 @@ sealed class SettingsPanel : Control
     private string mac = "Mac", note = "";
     private bool gpuAvailable, software, shareClipboard = true;
     private bool? macShares;
-    private string gpuName = "";
+    private string gpuName = "", pcName = "";
+    private bool canForget;
+    private long forgetArmedAt;   // the first click on Forget, which asks for a second within 4 s
+    private bool ForgetArmed => forgetArmedAt != 0 && Environment.TickCount64 - forgetArmedAt < 4000;
     private List<Item> items = [];
     private float scroll, content, middle;
     private int hover = -1;
@@ -65,9 +73,9 @@ sealed class SettingsPanel : Control
     /// Mac's name, a note ("kept its setting"), this PC's decoder, and its Share Clipboard with
     /// whether the Mac shares its clipboard (null: not known yet).</summary>
     public void Show(SettingsLedger ledger, string mac, string note, bool gpuAvailable, string gpuName, bool software,
-        bool shareClipboard, bool? macShares)
+        bool shareClipboard, bool? macShares, string pcName, bool canForget)
     {
-        this.ledger = ledger; this.mac = mac; this.note = note;
+        this.ledger = ledger; this.mac = mac; this.note = note; this.pcName = pcName; this.canForget = canForget;
         this.gpuAvailable = gpuAvailable; this.gpuName = gpuName; this.software = software;
         this.shareClipboard = shareClipboard; this.macShares = macShares;
         Relayout();
@@ -170,6 +178,18 @@ sealed class SettingsPanel : Control
         y = Footnote(list, x, y, w, !shareClipboard ? $"Nothing you copy goes between this PC and {mac} while this is off."
             : macShares == false ? $"{mac} isn’t sharing its clipboard. Turn on Share clipboard with devices in Sill’s Settings › General on {mac}."
             : $"Text you copy on {mac} is ready to paste on this PC. Text you copy on this PC goes to {mac} when you come back to Sill, to paste there with Ctrl+V. Copies a password manager keeps private stay on this PC.");
+        y = Group(list, x, y, w, 1);
+        list.Add(new(Kind.RowTitle, RowRect(x, y, 0), "Name"));
+        list.Add(new(Kind.Value, RowRect(x, y, 0), pcName));
+        y += S(Row);
+        y = Footnote(list, x, y, w, $"How a Mac lists this PC when it pairs. {mac} keeps the name it was given; rename it in Sill’s Settings › Devices on {mac}.");
+        if (canForget)
+        {
+            y = Group(list, x, y, w, 1);
+            list.Add(new(Kind.Forget, RowRect(x, y, 0), ForgetArmed ? $"Click Again to Forget {mac}" : $"Forget {mac}"));
+            y += S(Row);
+            y = Footnote(list, x, y, w, $"This PC forgets {mac}’s key and goes back to the list; click {mac} there to pair again.");
+        }
 
         middle = y + S(Pad);
         content = middle + FootHeight;
@@ -303,6 +323,18 @@ sealed class SettingsPanel : Control
             case Kind.Footnote:
                 TextRenderer.DrawText(g, it.Text, smallFont, Rectangle.Round(r), it.Tint ?? Palette.Muted, TextFormatFlags.NoPadding | TextFormatFlags.WordBreak);
                 break;
+            case Kind.Value:
+            {
+                var valueSize = TextRenderer.MeasureText(it.Text + "  ›", rowFont);
+                var valueAt = new RectangleF(Math.Max(r.X + S(70), r.Right - valueSize.Width), r.Y, Math.Min(valueSize.Width, r.Width - S(70)), r.Height);
+                if (hovered) Palette.FillRounded(g, Palette.ControlHover, RectangleF.Inflate(valueAt, S(6), -S(6)), S(8));
+                TextRenderer.DrawText(g, it.Text + "  ›", rowFont, Rectangle.Round(valueAt), Palette.Accent, flags | TextFormatFlags.EndEllipsis);
+                break;
+            }
+            case Kind.Forget:
+                if (hovered) Palette.FillRounded(g, Palette.ControlHover, new RectangleF(r.X - S(14), r.Y, r.Width + S(28), r.Height), S(GroupRadius));
+                TextRenderer.DrawText(g, it.Text, rowFont, Rectangle.Round(r), Color.FromArgb(0xFF, 0x6B, 0x6B), flags | TextFormatFlags.EndEllipsis);
+                break;
             case Kind.Disconnect:
                 Palette.FillRounded(g, hovered ? Palette.ControlHover : Palette.Control, r, S(GroupRadius));
                 using (var icon = Palette.IconFont(15, DeviceDpi))
@@ -349,7 +381,7 @@ sealed class SettingsPanel : Control
     {
         for (int i = items.Count - 1; i >= 0; i--)
         {
-            if (items[i].Kind is not (Kind.Done or Kind.Quality or Kind.Segments or Kind.Switch or Kind.Disconnect) || !items[i].Enabled) continue;
+            if (items[i].Kind is not (Kind.Done or Kind.Quality or Kind.Segments or Kind.Switch or Kind.Disconnect or Kind.Value or Kind.Forget) || !items[i].Enabled) continue;
             if (Pinned(items[i]) ? items[i].Rect.Contains(p) : p.Y < Height - FootHeight && items[i].Rect.Contains(new PointF(p.X, p.Y + scroll))) return i;
         }
         return -1;
@@ -375,6 +407,15 @@ sealed class SettingsPanel : Control
         {
             case Kind.Done: Done?.Invoke(); break;
             case Kind.Disconnect: Disconnect?.Invoke(); break;
+            case Kind.Value: RenamePc?.Invoke(); break;
+            case Kind.Forget:
+                if (ForgetArmed) { forgetArmedAt = 0; Forget?.Invoke(); break; }
+                forgetArmedAt = Environment.TickCount64;
+                Relayout();
+                var disarm = new System.Windows.Forms.Timer { Interval = 4100 };
+                disarm.Tick += (_, _) => { disarm.Dispose(); if (!IsDisposed) Relayout(); };
+                disarm.Start();
+                break;
             case Kind.Switch: it.Choose?.Invoke(0); break;
             case Kind.Segments:
                 int seg = (int)((e.X - it.Rect.X) / (it.Rect.Width / it.Options!.Length));

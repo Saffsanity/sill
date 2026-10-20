@@ -29,6 +29,9 @@ public sealed record PairRequest(
     /// <summary>At the home door: "show your code" (no proof). The Mac answers "shown",
     /// "openOnMac" or "locked" (<see cref="PairResult"/>).</summary>
     public const string Ask = "ask";
+    /// <summary>At the home door, after an ask answered "shown": the device's Cancel, no proof;
+    /// the window that ask opened closes.</summary>
+    public const string Cancel = "cancel";
 }
 
 /// <summary>Kind 20: the Mac's answer; it closes the connection after it. Mirrors <c>PairResult</c>.</summary>

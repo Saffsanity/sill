@@ -12,11 +12,9 @@ static class SessionCommand
 {
     public static async Task<int> RunAsync(Dictionary<string, string> opts, string dir, string name)
     {
-        string macPath = Path.Combine(dir, "mac.json");
-        if (!File.Exists(macPath)) return Spike.Usage($"No paired Mac in {macPath}: run pair first.");
-        var mac = JsonSerializer.Deserialize<Spike.SavedMac>(File.ReadAllText(macPath));
-        byte[]? pin = mac is null ? null : Base64Url.Decode(mac.Fingerprint);
-        if (mac is null || pin is not { Length: 32 }) return Spike.Usage($"{macPath} is not a saved Mac.");
+        // The newest saved Mac (macs.json; a spike's mac.json is taken in on the way).
+        var mac = SavedMacs.Newest(new SavedMacsFile(dir).Load());
+        if (mac?.Pin is not { } pin) return Spike.Usage($"No paired Mac in {Path.Combine(dir, SavedMacsFile.FileName)}: run pair first.");
         if (!double.TryParse(opts.GetValueOrDefault("seconds") ?? "10", out double seconds) || seconds <= 0)
             return Spike.Usage("--seconds takes a number of seconds.");
         string host = mac.Host; int port = mac.Port;

@@ -9,7 +9,7 @@
 //   Sill.Spike decode --input <first-keyframe.h265> --out <frame.png> [--gpu 1 [--adapter N] [--compare 1]]
 //
 // Options: --identity <dir> (default %LOCALAPPDATA%\Sill\spike), --name <device name>.
-// A pairing saves the Mac in <dir>\mac.json; a session dials it (or --host), pinned to its key,
+// A pairing saves the Mac in <dir>\macs.json; a session dials the newest (or --host), pinned to its key,
 // asks for the Desktop and logs what arrives; --save writes the first keyframe's parameter sets
 // and access unit, --png decodes it (ticket 05); decode does the same from a saved file.
 // Exit: 0 paired (or a session that got a keyframe), 1 refused, unproven or no keyframe,
@@ -112,8 +112,8 @@ static class Spike
                 var r = outcome.Result!;
                 var saved = new SavedMac(Base64Url.Encode(outcome.MacFingerprint), r.MacId!, SafeText.Label(r.Name ?? mac, 64),
                                          r.RecognitionKey!, host, port, DateTimeOffset.UtcNow);
-                File.WriteAllText(Path.Combine(dir, "mac.json"), JsonSerializer.Serialize(saved, new JsonSerializerOptions { WriteIndented = true }));
-                Console.WriteLine($"Paired with {saved.Name} ({saved.MacId}); its proof checked. Saved to {Path.Combine(dir, "mac.json")}.");
+                new SavedMacsFile(dir).Add(saved);
+                Console.WriteLine($"Paired with {saved.Name} ({saved.MacId}); its proof checked. Saved to {Path.Combine(dir, SavedMacsFile.FileName)}.");
                 return 0;
             case PairingExchange.Verdict.Refused:
                 Console.WriteLine(PairingExchange.Words(outcome.Result!, mac));
@@ -134,9 +134,6 @@ static class Spike
         for (int i = 0; i < 600 && !File.Exists(path); i++) Thread.Sleep(500);
         return File.Exists(path) ? File.ReadAllText(path).Trim() : "";
     }
-
-    /// <summary>The Mac as a pairing leaves it, for the session (ticket 04).</summary>
-    public sealed record SavedMac(string Fingerprint, string MacId, string Name, string RecognitionKey, string Host, int Port, DateTimeOffset PairedAt);
 
     internal static Dictionary<string, string>? Options(string[] args)
     {

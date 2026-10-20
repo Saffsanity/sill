@@ -162,6 +162,26 @@ public class TlsPairingTests
         Assert.Equal(PairingExchange.Verdict.NoProof, outcome.Verdict);
     }
 
+    [WindowsFact]
+    public async Task TheAskAndItsCancelCarryNoProof()
+    {
+        using var device = DeviceIdentity.CreateEphemeral();
+        await using (var mac = new FakeMac(Code, (_, _) => new PairResult(false, Reason: PairResult.Shown)))
+        {
+            var (answer, key) = await PairingClient.AskAsync("127.0.0.1", mac.Port, device, "PC", "Windows", Soon);
+            Assert.Equal(PairResult.Shown, answer!.Reason);
+            Assert.Equal(mac.Key.Fingerprint, key);
+            var sent = JsonSerializer.Deserialize<PairRequest>((await mac.Served)!)!;
+            Assert.Equal(("ask", ""), (sent.Method, sent.Proof));
+        }
+        await using (var mac = new FakeMac(Code, (_, _) => new PairResult(false, Reason: PairResult.Closed)))
+        {
+            var (answer, _) = await PairingClient.CancelAskAsync("127.0.0.1", mac.Port, device, mac.Key.Fingerprint, "PC", "Windows", Soon);
+            Assert.Equal(PairResult.Closed, answer!.Reason);
+            Assert.Equal(("cancel", ""), JsonSerializer.Deserialize<PairRequest>((await mac.Served)!)! is var r ? (r.Method, r.Proof) : default);
+        }
+    }
+
     [Fact]
     public void TheDeviceIdentityKeepsItsKeyAcrossLoads()
     {

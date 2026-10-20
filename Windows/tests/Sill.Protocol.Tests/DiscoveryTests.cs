@@ -142,4 +142,17 @@ public class DiscoveryTests
     [Fact]
     public void InstanceNamesOfAnotherType() =>
         Assert.Equal("Sill test 123", DnsSdName.Instance("Sill test 123._silltest._tcp.local", "_silltest._tcp"));
+
+    [Fact]
+    public void ASavedMacWithANewKeyPairsAgainFromItsRows()
+    {
+        // By its tag, or (no tag) by its name: "Not paired", and the pairing replaces the record.
+        var marked = Saved with { NewKey = true };
+        var tagged = ConnectRows.Row(Service("Mac mini", ("p", "1"), ("r", RecognitionTag.Make(Rk))), [marked]);
+        Assert.Equal((MacRow.Kind.NotPaired, "Not paired", Saved.MacId), (tagged.State, tagged.Word, tagged.Replaces));
+        var byName = ConnectRows.Row(Service("Mac mini", ("p", "1")), [marked]);
+        Assert.Equal((MacRow.Kind.NotPaired, Saved.MacId), (byName.State, byName.Replaces));
+        Assert.Null(ConnectRows.Row(Service("Mac mini", ("p", "1"), ("r", RecognitionTag.Make(Rk))), [Saved]).Replaces);
+        Assert.Null(ConnectRows.Row(Service("Studio", ("p", "1")), [marked]).Replaces);
+    }
 }
