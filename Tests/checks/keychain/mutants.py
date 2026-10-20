@@ -22,6 +22,15 @@ MUTANTS = [
      "return .legacy\n    }", "return .dataProtection(accessGroup: entitledAccessGroup ?? \"\")\n    }"),
     ("a test host uses the legacy keychain",
      "return .memory\n        }", "return .legacy\n        }"),
+    ("--pair-code flag ignored",
+     "arguments.contains(flag)", "false"),
+    ("non-terminal --pair-code allowed",
+     "guard isTerminal else {", "if !isTerminal && false {"),
+    ("not-running --pair-code allowed",
+     "guard hostRunning else {", "if !hostRunning && false {"),
+    ("sub-minute expiry formatted as minutes",
+     "seconds >= 60 ? \"\\(minutes) minute\\(minutes == 1 ? \"\" : \"s\")\" : \"\\(seconds) s\"",
+     "\"\\(minutes) minutes\""),
 ]
 caught = 0
 for name, old, new in MUTANTS:

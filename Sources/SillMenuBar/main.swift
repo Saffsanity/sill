@@ -10,6 +10,10 @@ setvbuf(stdout, nil, _IOLBF, 0)
 // A write to a closed pipe (stdout of a Terminal that went away) must not end the host.
 signal(SIGPIPE, SIG_IGN)
 
+// Persistent headless pairing CLI (`Sill --pair-code`, issue #180): runs before HostLog is
+// configured so the single-use code is written only to the terminal and never to Sill.log.
+HeadlessPairing.runCLIIfRequested()
+
 // Before anything prints: the host's lines go to the Log window's ring and the log file too.
 HostLog.shared.configure(keepLines: 5_000, fileURL: DebugHooks.logFileURL)
 
