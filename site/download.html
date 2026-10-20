@@ -43,6 +43,17 @@
   </section>
   <p class="small">With <a href="https://brew.sh">Homebrew</a>, <code>brew install --cask saffsanity/sill/sill</code> in Terminal installs the same Sill.dmg from Sill’s own <a href="https://github.com/Saffsanity/homebrew-sill">tap</a>. To update it, quit Sill and run <code>brew upgrade --cask sill</code>.</p>
 
+  <!-- Windows: take this section out for a release without Sill for Windows. The links never change:
+       the release workflow uploads Sill-windows-x64.zip and Sill-windows-arm64.zip under these exact names. -->
+  <section class="card" aria-labelledby="windows">
+    <h2 id="windows">Sill for Windows</h2>
+    <p class="muted">Use your Mac from a Windows PC, on Windows 10 (version 1809 or later) or Windows 11, with HEVC Video Extensions from the Microsoft Store.</p>
+    <p><a class="button" href="https://github.com/Saffsanity/sill/releases/latest/download/Sill-windows-x64.zip">Download for Windows</a></p>
+    <p class="small">For most PCs. A PC with an Arm processor, such as a Snapdragon, takes <a href="https://github.com/Saffsanity/sill/releases/latest/download/Sill-windows-arm64.zip">Sill-windows-arm64.zip</a>.</p>
+    <p class="hash small">Checksums: <a href="https://github.com/Saffsanity/sill/releases/latest/download/Sill-windows-x64.zip.sha256">Sill-windows-x64.zip.sha256</a> and <a href="https://github.com/Saffsanity/sill/releases/latest/download/Sill-windows-arm64.zip.sha256">Sill-windows-arm64.zip.sha256</a>, beside the downloads on <a href="https://github.com/Saffsanity/sill/releases/latest">GitHub</a>.</p>
+  </section>
+  <!-- /Windows -->
+
   <section class="card" aria-labelledby="ios">
     <h2 id="ios">Sill for iPhone and iPad</h2>
     <p class="muted">Free on the App Store, for iPhone and iPad on iOS 17 or iPadOS 17 or later.</p>
@@ -65,8 +76,22 @@
   </ul>
   <p>If macOS asks whether Sill can find devices on your local network, click Allow. Then open Sill on your iPhone or iPad, tap your Mac and pair it once: scan the code your Mac shows, or type it. Over a USB cable, the two pair by themselves. Sill for iPhone and iPad is free on the <a href="https://apps.apple.com/app/id6816359860">App Store</a>.</p>
 
+  <!-- Windows: take this section out for a release without Sill for Windows. -->
+  <h2 id="windows-install">Install on Windows</h2>
+  <ol class="steps">
+    <li>Open Sill-windows-x64.zip from your Downloads folder and drag Sill.exe out of it, onto your desktop for example.</li>
+    <li>Open Sill.exe. Sill isn’t signed yet, so the first time Windows says “Windows protected your PC”. Click More info, then Run anyway.</li>
+    <li>Sill offers to install itself. Click Install: it copies itself to your Programs folder and adds Sill to the Start menu, for your account only, without asking for an administrator. Then you can delete the copy you downloaded.</li>
+    <li>In Sill, pair with your Mac once, with the 12-digit code your Mac shows. Sill for Mac has to be running on the Mac.</li>
+  </ol>
+  <p>Sill for Windows needs HEVC Video Extensions to show your Mac’s screen. Many PCs have it already; if yours doesn’t, get it from the Microsoft Store. Sill checks once a day whether a new version is out and says so, with a link to the release. To update, download the new zip and open the new Sill.exe: it replaces the installed one. To uninstall, delete the Sill folder in <code>%LOCALAPPDATA%\Programs</code> and Sill in the Start menu; your paired Macs and settings are in <code>%LOCALAPPDATA%\Sill</code>.</p>
+  <!-- /Windows -->
+
   <h2>Check the download</h2>
   <p>To make sure your copy is the one published here, open Terminal, type <code>shasum -a 256</code> and a space, drag Sill.dmg into the window and press Return. It should print the same SHA-256 as the release’s notes on GitHub and the Sill.dmg.sha256 file above.</p>
+  <!-- Windows: take this paragraph out for a release without Sill for Windows. -->
+  <p>On Windows, open PowerShell, type <code>Get-FileHash</code> and a space, drag the zip into the window and press Enter. Its hash should match the zip’s .sha256 file above (PowerShell prints it in capitals).</p>
+  <!-- /Windows -->
 
   <h2>Update</h2>
   <p>Sill doesn’t update itself, but it tells you when a new version is out: its menu and Settings say so, with a link to the release. To update, quit Sill from its menu, download the new version here and replace the old one in your Applications folder. Your settings and permissions stay.</p>
