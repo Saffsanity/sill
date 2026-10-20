@@ -155,6 +155,14 @@ package final class StreamCoordinator {
     }
     private var rectCache: (id: CGWindowID, rect: CGRect, at: CFAbsoluteTime)?
     private var pendingLaunch: String?
+    /// The catalog as `windowsChanged` last saw it (nil before the first): which windows are new.
+    private var lastCatalog: [WindowInfo]?
+    /// Every window ID a catalog has listed since the first device came: a window listed before
+    /// (minimized, hidden, on another Space) is not new when it comes back.
+    private var seenWindows: Set<UInt32> = []
+    /// The windows the stream followed away from (WindowFollow), most recent last: where it goes
+    /// back to when the window it followed closes. Cleared by any pick from a device.
+    private var followStack: [UInt32] = []
     private var switching = false
     /// A restart of the active source is in flight (a settings change, a resize, a rate change,
     /// the encoder fallback, a lost display): the source being restarted. Nil during a switch to
@@ -422,6 +430,8 @@ package final class StreamCoordinator {
                 // Nobody is watching: stop capturing and encoding. The next client picks afresh.
                 if count == 0 { self.viewport = nil; self.clientFPS = [:] }   // the next device starts from scratch
                 if count == 0 { self.gestureChords.forget() }                 // and did not open a view it could close
+                // WindowFollow starts afresh with the first device: no catalog from before it counts.
+                if count == 0 || wasEmpty { self.lastCatalog = nil; self.seenWindows = []; self.followStack = [] }
                 // On the software encoder, the hardware is checked only while someone watches.
                 if count == 0 { self.stopRecheck() } else { self.devicesPresent(firstArrived: wasEmpty) }
                 if count > 0 {
@@ -1187,6 +1197,7 @@ package final class StreamCoordinator {
     /// device, or a pick made before the device heard of the close, can still let it land during
     /// a restart that follows the user's pick, and then it is queued like the user's own.
     private func handlePick(_ source: StreamSource) async {
+        followStack = []                 // a device chose: nothing to go back to
         if switching {
             if let r = restartOf, source != r { pickArrivedWhileSwitching = source }
             return
@@ -2169,9 +2180,25 @@ package final class StreamCoordinator {
     private func windowsChanged(_ infos: [WindowInfo]) async {
         // The pointer's rectangle follows the catalog: the Desktop's display, a window's bounds.
         defer { pointer.setGeometry(pointerGeometry(), fps: fps) }
+        let previous = lastCatalog, seen = seenWindows
+        lastCatalog = infos
+        seenWindows.formUnion(infos.map(\.id))
         if let pending = pendingLaunch, let w = infos.first(where: { $0.bundleID == pending }) {
             pendingLaunch = nil
+            followStack = []
             await select(.window(w.id), bringForward: true)   // launched from the device to use it: a pick
+            return
+        }
+        // A window the streamed app put in front by itself (WindowFollow): the stream goes to it,
+        // as the Mac's own screen would show it, and back when it closes. Regular mode only; on by
+        // default (`defaults write … followNewWindows -bool NO` turns it off).
+        if !virtualDisplay, !switching, case .window(let id) = active,
+           UserDefaults.standard.object(forKey: WindowFollow.defaultsKey) as? Bool ?? true,
+           let next = WindowFollow.next(previous: previous, seen: seen, current: infos, activeID: id, topmost: Self.topmostWindow(at: nil)?.id) {
+            let app = infos.first { $0.id == next }?.appName ?? "?"
+            print("Following \(app)'s new window \(next) (from window \(id)).")
+            followStack.append(id)
+            await select(.window(next))
             return
         }
         if case .window(let id) = active {
@@ -2195,6 +2222,14 @@ package final class StreamCoordinator {
                     }
                     missingPolls = 0
                 }
+                // A window the stream followed closed: back to the one it followed from.
+                if !virtualDisplay, let back = WindowFollow.back(followStack, current: infos) {
+                    followStack = back.rest
+                    print("Window \(id) closed; back to window \(back.window).")
+                    await select(.window(back.window), bringForward: true)
+                    return
+                }
+                followStack = []
                 await select(.none); return
             }
             missingPolls = 0
