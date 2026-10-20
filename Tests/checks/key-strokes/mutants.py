@@ -124,13 +124,13 @@ MUTANTS = [
     ("the shift keys are control", CHORDS, "case 0xE1, 0xE5: return .shift", "case 0xE1, 0xE5: return .control"),
     # The device: its hardware keyboard
     ("an up whose down the text system had goes to the Mac", CHORDS,
-     "        guard let i = down.firstIndex(of: usage) else { return nil }\n        down.remove(at: i)",
-     "        guard let i = down.firstIndex(of: usage) else { return .key(hidUsage: usage, down: false, modifiers: held) }\n        down.remove(at: i)"),
+     "        guard let i = down.firstIndex(of: sent) else { return nil }\n",
+     "        guard let i = down.firstIndex(of: sent) else { return .key(hidUsage: sent, down: false, modifiers: held) }\n"),
     ("a key's up carries the modifier keys from before it", CHORDS,
-     "        down.remove(at: i)\n        return .key(hidUsage: usage, down: false, modifiers: held)",
-     "        let before = held\n        down.remove(at: i)\n        return .key(hidUsage: usage, down: false, modifiers: before)"),
-    ("a modifier's own key carries what UIKit says", CHORDS, "modifiers: isModifier ? held : modifiers)", "modifiers: modifiers)"),
-    ("a key's down carries only the modifier keys down on the Mac", CHORDS, "modifiers: isModifier ? held : modifiers)", "modifiers: held)"),
+     "        down.remove(at: i)\n        return .key(hidUsage: sent, down: false, modifiers: held)",
+     "        let before = held\n        down.remove(at: i)\n        return .key(hidUsage: sent, down: false, modifiers: before)"),
+    ("a modifier's own key carries what UIKit says", CHORDS, "modifiers: isModifier ? held : translated(modifiers))", "modifiers: translated(modifiers))"),
+    ("a key's down carries only the modifier keys down on the Mac", CHORDS, "modifiers: isModifier ? held : translated(modifiers))", "modifiers: held)"),
     ("⌘, ⌃ and ⌥ go to the text system on their own", CHORDS,
      "        0xE0, 0xE2, 0xE3, 0xE4, 0xE6, 0xE7,                                       // control, option, command, left and right\n", ""),
     ("escape goes to the text system", CHORDS, "        0x29, 0x4C,", "        0x4C,"),
@@ -158,6 +158,20 @@ MUTANTS = [
     # Shifted return and tab
     ("shifted return and tab to the text system (the shift lost)", CHORDS, "            || (shiftedKeyUsages.contains(usage) && modifiers & KeyModifiers.shift.rawValue != 0)\n", ""),
     ("return and tab as keys whatever is held", CHORDS, "(shiftedKeyUsages.contains(usage) && modifiers & KeyModifiers.shift.rawValue != 0)", "shiftedKeyUsages.contains(usage)"),
+    # Left Option as Command
+    ("left option sent as itself", CHORDS, "if leftOptionAsCommand, usage == Self.leftOption { sent = Self.leftCommand; sentAs[usage] = sent }", ""),
+    ("option flag never translated", CHORDS, "guard sentAs[Self.leftOption] != nil, modifiers & option != 0", "guard false, modifiers & option != 0"),
+    ("right option ignored", CHORDS, "return down.contains(Self.rightOption) ? modifiers | command : (modifiers & ~option) | command",
+     "return (modifiers & ~option) | command"),
+    ("both options down drop the ⌘ (the review's case)", CHORDS, "? modifiers | command :", "? modifiers :"),
+    ("up follows the switch, not the down", CHORDS, "let sent = sentAs.removeValue(forKey: usage) ?? usage", "let sent = leftOptionAsCommand && usage == Self.leftOption ? Self.leftCommand : usage"),
+    ("releaseAll keeps a stale remap", CHORDS, "        sentAs = [:]                     // their ups went out by the key the Mac has down\n", ""),
+    ("the first of two ⌘ holders lets ⌘ go (the review's case)", CHORDS,
+     "        if (sentAs[usage] ?? usage) == Self.leftCommand, commandHolders.remove(usage) != nil, !commandHolders.isEmpty {",
+     "        if false {"),
+    ("the left ⌘ itself never counted as a holder", CHORDS,
+     "        if sent == Self.leftCommand { commandHolders.insert(usage) }", "        if usage == Self.leftOption, sent == Self.leftCommand { commandHolders.insert(usage) }"),
+    ("a swallowed holder's remap kept", CHORDS, "            sentAs[usage] = nil\n            return .swallow", "            return .swallow"),
 ]
 caught = 0
 for name, rel, old, new in MUTANTS:

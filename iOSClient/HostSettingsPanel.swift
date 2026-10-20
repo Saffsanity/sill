@@ -50,6 +50,9 @@ struct HostSettingsPanel: View {
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
+    /// This device's Left Option as Command (InputOverlayView, ForwardedKeys): off unless turned on,
+    /// read at each key press, never sent.
+    @AppStorage(InputOverlayView.leftOptionAsCommandKey) private var leftOptionAsCommand = false
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -520,6 +523,15 @@ struct HostSettingsPanel: View {
             }
         }
         Footnote(text: gesturesFooter)
+        Rows {
+            Toggle(isOn: $leftOptionAsCommand) {
+                Text("Left Option Key as Command").foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        Footnote(text: "\(device == "iPad" ? "iPadOS" : "iOS") keeps ⌘Space and ⌘Tab for itself. With this on, "
+                 + "a hardware keyboard’s left Option key is Command on \(mac): ⌥Space opens Spotlight and "
+                 + "⌥Tab switches apps. The right Option key stays Option.")
     }
 
     /// The Mac's window list said it takes the gestures (`WindowList.gestures`).

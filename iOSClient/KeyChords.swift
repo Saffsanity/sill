@@ -136,22 +136,51 @@ struct ForwardedKeys {
             || (shiftedKeyUsages.contains(usage) && modifiers & KeyModifiers.shift.rawValue != 0)
     }
 
+    /// This device's Left Option as Command (InputOverlayView.leftOptionAsCommand), set before
+    /// each press: iPadOS keeps ⌘Space and ⌘Tab for itself and no app ever sees them, so the left
+    /// Option key goes to the Mac as the left Command key, and the option flag a key carries while
+    /// only it is held as the command flag: ⌥Space opens the Mac's Spotlight, ⌥Tab its app
+    /// switcher. The right Option key stays Option.
+    var leftOptionAsCommand = false
+    static let leftOption: UInt16 = 0xE2, rightOption: UInt16 = 0xE6, leftCommand: UInt16 = 0xE3
+    /// Keys whose down went to the Mac as another key (the left Option as the left Command): their
+    /// up goes as the same key, whatever the switch says by then.
+    private var sentAs: [UInt16: UInt16] = [:]
+    /// The keys on this keyboard holding the Mac's left Command down: the left Command itself and the
+    /// left Option sent as it. The Mac's left Command goes up only once the last of them does.
+    private var commandHolders: Set<UInt16> = []
+
     /// A key pressed, with the modifier flags UIKit gives it: its down, when it goes to the Mac as a
     /// key; nil when the text system takes it.
     mutating func began(_ usage: UInt16, modifiers: UInt64) -> InputEvent? {
         guard Self.goesAsKey(usage, modifiers: modifiers) else { return nil }
-        if !down.contains(usage) { down.append(usage) }
-        let isModifier = KeyModifiers.flag(forKey: usage) != nil
-        return .key(hidUsage: usage, down: true, modifiers: isModifier ? held : modifiers)
+        var sent = usage
+        if leftOptionAsCommand, usage == Self.leftOption { sent = Self.leftCommand; sentAs[usage] = sent }
+        if sent == Self.leftCommand { commandHolders.insert(usage) }
+        if !down.contains(sent) { down.append(sent) }
+        let isModifier = KeyModifiers.flag(forKey: sent) != nil
+        return .key(hidUsage: sent, down: true, modifiers: isModifier ? held : translated(modifiers))
+    }
+
+    /// UIKit's flags as the Mac should see them: while the left Option goes as Command, the option
+    /// flag (UIKit's for either Option key) says Command, and Option too only while the right Option
+    /// is down. A key's flags must keep the Command the Mac holds for the left Option: one without it
+    /// would make the Mac let go of that key (KeyStrokes' `letGo`).
+    private func translated(_ modifiers: UInt64) -> UInt64 {
+        let option = KeyModifiers.option.rawValue, command = KeyModifiers.command.rawValue
+        guard sentAs[Self.leftOption] != nil, modifiers & option != 0 else { return modifiers }
+        return down.contains(Self.rightOption) ? modifiers | command : (modifiers & ~option) | command
     }
 
     /// A key released, or its press cancelled (the app going to the background, the keyboard gone):
     /// its up, when its down went to the Mac, with the modifier keys still down there; nil when the
     /// text system had it.
     mutating func ended(_ usage: UInt16) -> InputEvent? {
-        guard let i = down.firstIndex(of: usage) else { return nil }
+        let sent = sentAs.removeValue(forKey: usage) ?? usage
+        guard let i = down.firstIndex(of: sent) else { return nil }
+        if sent == Self.leftCommand { commandHolders.removeAll() }
         down.remove(at: i)
-        return .key(hidUsage: usage, down: false, modifiers: held)
+        return .key(hidUsage: sent, down: false, modifiers: held)
     }
 
     /// Every key still down on the Mac going up, the last pressed first, each with the modifier keys
@@ -161,6 +190,8 @@ struct ForwardedKeys {
         var ups: [InputEvent] = []
         while let usage = down.last, let up = ended(usage) { ups.append(up) }
         swallowed.removeAll()
+        sentAs = [:]                     // their ups went out by the key the Mac has down
+        commandHolders.removeAll()
         return ups
     }
 
@@ -203,9 +234,14 @@ struct ForwardedKeys {
     }
 
     /// A key released or its press cancelled (pressesEnded, pressesCancelled): `ended`'s answer, or
-    /// swallowed when its press was.
+    /// swallowed when its press was, or when another key on this keyboard still holds the Mac's left
+    /// Command down (the left Command and the left Option sent as it, both held).
     mutating func released(_ usage: UInt16) -> Press {
         if swallowed.remove(usage) != nil { return .swallow }
+        if (sentAs[usage] ?? usage) == Self.leftCommand, commandHolders.remove(usage) != nil, !commandHolders.isEmpty {
+            sentAs[usage] = nil
+            return .swallow
+        }
         return ended(usage).map { .send($0) } ?? .text
     }
 
