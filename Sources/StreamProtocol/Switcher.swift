@@ -60,6 +60,9 @@ public struct WindowList: Codable {
     /// pull request #66's `Bool` (never released) does not decode here and becomes an Int as it
     /// rebases.
     public var clipboard: Int?
+    /// True: this host takes files dropped on its windows (kinds 34 and 35, FileChunk and FileDrop).
+    /// Nil from hosts before file drops, and from synthetic test hosts.
+    public var fileDrop: Bool?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
                 hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil) {

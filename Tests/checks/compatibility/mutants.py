@@ -27,6 +27,11 @@ MUTANTS = [
     ("spread left out of the names", "Gesture.swift", "public static let names = [swipeUp, swipeDown, swipeLeft, swipeRight, pinch, spread]", "public static let names = [swipeUp, swipeDown, swipeLeft, swipeRight, pinch]"),
     ("kind 28 as 29", "StreamMessage.swift", "case gesture = 28", "case gesture = 29"),
     ("device never nil", "Compatibility.swift", "self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device", "self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device ?? \"\""),
+    ("kind 34 as 36", "StreamMessage.swift", "case fileChunk = 34", "case fileChunk = 36"),
+    ("kind 35 as 36", "StreamMessage.swift", "case fileDrop = 35", "case fileDrop = 36"),
+    ("FileChunk offset read at wrong byte", "Clipboard.swift", "let offset = d.readBigEndian(UInt64.self, at: 14 + n)", "let offset = d.readBigEndian(UInt64.self, at: 6 + n)"),
+    ("FileChunk.safeName allows leading dot", "Clipboard.swift", "cleaned.isEmpty || cleaned.hasPrefix(\".\")", "cleaned.isEmpty"),
+    ("FileChunk.chunks drops empty file", "Clipboard.swift", "if data.isEmpty {\n            return [pack(id: id, name: name, total: 0, offset: 0, bytes: Data())]\n        }", "if data.isEmpty {\n            return []\n        }"),
 ]
 caught = 0
 for name, file, old, new in MUTANTS:

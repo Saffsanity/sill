@@ -335,4 +335,93 @@ extension StreamClient {
         clipboardNoteExpiry = work
         DispatchQueue.main.asyncAfter(deadline: .now() + ClipboardPolicy.noteLifetime, execute: work)
     }
+
+    // MARK: Files on the Mac (kinds 34 and 35, Roadmap Item 8 / pull request #66)
+
+    /// Sends `files` in 512 KiB chunks (kind 34 `fileChunk`) followed by `FileDrop` (kind 35 `fileDrop`)
+    /// at normalized coordinates `location` (`0...1`).
+    @discardableResult
+    func sendFiles(_ files: [(name: String, data: Data)], at location: CGPoint = CGPoint(x: 0.5, y: 0.5)) -> Bool {
+        guard connected, hostFileDrop, !files.isEmpty else { return false }
+        let mac = macName.isEmpty ? "the Mac" : macName
+        let totalBytes = files.reduce(UInt64(0)) { $0 + UInt64($1.data.count) }
+        guard totalBytes <= FileChunk.maxTotal else {
+            let msg = "Too large to send to \(mac) (over 512 MB)."
+            showClipboardNote(msg, spoken: msg, warning: true)
+            return false
+        }
+        let x = Double(min(max(location.x, 0), 1))
+        let y = Double(min(max(location.y, 0), 1))
+        var ids: [UInt32] = []
+        for file in files {
+            let id = UInt32.random(in: 1...UInt32.max)
+            ids.append(id)
+            for chunkPayload in FileChunk.chunks(id: id, name: file.name, data: file.data) {
+                send(.fileChunk, payload: chunkPayload)
+            }
+        }
+        let drop = FileDrop(files: ids, x: x, y: y)
+        send(.fileDrop, payload: Wire.encode(drop))
+        let names = files.map(\.name).joined(separator: ", ")
+        let msg = "Sent \(names) to \(mac)."
+        showClipboardNote(msg, spoken: msg, warning: false)
+        return true
+    }
+
+    /// Reads security-scoped file URLs from `.fileImporter` and sends them to the Mac.
+    func sendFileURLs(_ urls: [URL], at location: CGPoint = CGPoint(x: 0.5, y: 0.5)) {
+        guard connected, hostFileDrop, !urls.isEmpty else { return }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var loaded: [(name: String, data: Data)] = []
+            for url in urls {
+                let accessed = url.startAccessingSecurityScopedResource()
+                defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+                if let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
+                   UInt64(max(0, size)) <= FileChunk.maxTotal,
+                   let data = try? Data(contentsOf: url) {
+                    loaded.append((url.lastPathComponent, data))
+                }
+            }
+            DispatchQueue.main.async {
+                guard let self, !loaded.isEmpty else { return }
+                _ = self.sendFiles(loaded, at: location)
+            }
+        }
+    }
+
+    /// Handles drag-and-drop `NSItemProvider` items dropped onto the stream screen.
+    func handleFileDrop(_ providers: [NSItemProvider], at point: CGPoint, in streamRect: CGRect?) -> Bool {
+        guard connected, hostFileDrop, !providers.isEmpty else { return false }
+        let normalized: CGPoint
+        if let rect = streamRect, rect.width > 0, rect.height > 0 {
+            normalized = CGPoint(
+                x: min(max((point.x - rect.minX) / rect.width, 0), 1),
+                y: min(max((point.y - rect.minY) / rect.height, 0), 1)
+            )
+        } else {
+            normalized = CGPoint(x: 0.5, y: 0.5)
+        }
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var loaded: [(name: String, data: Data)] = []
+        for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.item.identifier) {
+            group.enter()
+            let fallbackName = provider.suggestedName ?? "file"
+            provider.loadFileRepresentation(forTypeIdentifier: UTType.item.identifier) { url, _ in
+                defer { group.leave() }
+                guard let url,
+                      let data = try? Data(contentsOf: url),
+                      UInt64(data.count) <= FileChunk.maxTotal else { return }
+                let name = url.lastPathComponent.isEmpty ? fallbackName : url.lastPathComponent
+                lock.lock()
+                loaded.append((name, data))
+                lock.unlock()
+            }
+        }
+        group.notify(queue: .main) { [weak self] in
+            guard let self, !loaded.isEmpty else { return }
+            _ = self.sendFiles(loaded, at: normalized)
+        }
+        return true
+    }
 }
