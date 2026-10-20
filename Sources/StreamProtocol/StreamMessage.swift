@@ -75,6 +75,8 @@ public enum StreamMessageKind: UInt8 {
                              // on), its text becomes the Mac's clipboard, and `stop` ends the subscription; only
                              // to a host whose window list says `clipboard` 1 or more. Host → device: text copied
                              // on the Mac (or sent by another device), only to a connection that subscribed
+    case camera = 46         // device → host: CameraMessage (type 1 JSON CameraFormat, type 2 binary CameraFrame) —
+                             // the device's camera video, only to a host whose window list says `camera` 1 or more
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

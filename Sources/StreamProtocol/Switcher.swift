@@ -60,6 +60,9 @@ public struct WindowList: Codable {
     /// pull request #66's `Bool` (never released) does not decode here and becomes an Int as it
     /// rebases.
     public var clipboard: Int?
+    /// What this host takes of the device's camera (kind 46, CameraMessage): 1 is JPEG / HEVC frames.
+    /// Nil from hosts before camera support or synthetic test hosts.
+    public var camera: Int?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
                 hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil) {
