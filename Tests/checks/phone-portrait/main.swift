@@ -758,5 +758,37 @@ for rule in largerRules {
     check("Larger Picture grid (\(largerSizes) layouts): \(rule.name)" + (rule.firstFailure.map { " — first failure at \($0)" } ?? ""), rule.firstFailure == nil)
 }
 
+// MARK: On-Screen Trackpad in Landscape on iPad (issue #63)
+
+typealias LT = LandscapeTrackpad
+check("LandscapeTrackpad.key", LT.key == "Sill.landscapeTrackpad")
+check("offered only on iPad without a hinge",
+      LT.offered(isPhone: false, foldable: false) == true
+      && LT.offered(isPhone: true, foldable: false) == false
+      && LT.offered(isPhone: false, foldable: true) == false
+      && LT.offered(isPhone: true, foldable: true) == false)
+
+check("active only when switchOn, landscape (!isPortrait), iPad (!isPhone, !foldable), and contentHeight >= 360",
+      LT.active(switchOn: true, isPortrait: false, isPhone: false, foldable: false, contentHeight: 360) == true
+      && LT.active(switchOn: false, isPortrait: false, isPhone: false, foldable: false, contentHeight: 700) == false
+      && LT.active(switchOn: true, isPortrait: true, isPhone: false, foldable: false, contentHeight: 700) == false
+      && LT.active(switchOn: true, isPortrait: false, isPhone: true, foldable: false, contentHeight: 700) == false
+      && LT.active(switchOn: true, isPortrait: false, isPhone: false, foldable: true, contentHeight: 700) == false
+      && LT.active(switchOn: true, isPortrait: false, isPhone: false, foldable: false, contentHeight: 359) == false)
+
+check("trackpadHeight clamps 28% of contentHeight to 160...220 whole points",
+      LT.trackpadHeight(for: 360) == 160
+      && LT.trackpadHeight(for: 600) == 168
+      && LT.trackpadHeight(for: 700) == 196
+      && LT.trackpadHeight(for: 900) == 220)
+
+check("showsPointer is true in portrait or when landscape trackpad is active",
+      LT.showsPointer(isPortrait: true, landscapeTrackpad: false) == true
+      && LT.showsPointer(isPortrait: false, landscapeTrackpad: true) == true
+      && LT.showsPointer(isPortrait: true, landscapeTrackpad: true) == true
+      && LT.showsPointer(isPortrait: false, landscapeTrackpad: false) == false)
+
+check("LandscapeTrackpad copy", !LT.Copy.toggleTitle.isEmpty && !LT.Copy.footnote.isEmpty)
+
 print("\(passes) passed, \(fails) failed")
 exit(fails == 0 ? 0 : 1)
