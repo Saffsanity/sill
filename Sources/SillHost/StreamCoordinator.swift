@@ -40,6 +40,17 @@ package final class StreamCoordinator {
     private var prioritizeSpeed: Bool { config.prioritizeSpeed }
 
     let server: StreamServer
+    /// A sleeping display gives the stream black frames (issue #134): a device's session connecting,
+    /// and what a person does to the Mac from it, are user activity on the Mac, declared as a key press
+    /// would be (`deviceActive`). DisplayWake alone decides which messages count and when (`handle`
+    /// forwards every one); DisplayActivity makes the call, off the main actor. Nothing is held: the
+    /// display sleeps again by the Mac's own setting once no device uses it. A test host
+    /// (`--synthetic`, as `injector.dryRun`) only counts `disp.wakeDry`.
+    private var displayWake: DisplayWake
+    private let displayActivity: DisplayActivity
+    /// The parameter sets that last went out, forgotten as each stream starts (`select`): a stream's
+    /// first, and any that differ, are a new frame size for the devices (`parameterSetsSent`).
+    private var lastParameterSets: Data?
     let catalog = WindowCatalog()
     let capture = WindowCapture()
     /// `--synthetic`: the Desktop source streams a test pattern instead of the screen.
@@ -295,7 +306,9 @@ package final class StreamCoordinator {
         let inputLog = InputInjector.testInputLog(synthetic: synthetic, environment: env)
         pointer = PointerWatch(synthetic: synthetic, path: path.path)
         softwareOnly = software.on
-        testHookLines = [path.line, software.line, inputLog.line].compactMap { $0 }
+        let userActive = DisplayWake.userActive(environment: env, testHost: synthetic)
+        displayActivity = DisplayActivity(remote: userActive.remote)
+        testHookLines = [path.line, software.line, inputLog.line, userActive.line].compactMap { $0 }
         status = HostStatus()
         var home = StreamServer.HomeDoorMode.plain
         if homePairing, let remote {
@@ -314,6 +327,7 @@ package final class StreamCoordinator {
         // executable: that narrowing is for the door and pairing hooks (TestHooks), and a gesture's
         // chord must never be posted from the test pattern.
         gesturesDry = synthetic                            // a test host never posts a gesture (§7.4)
+        displayWake = DisplayWake(testHost: synthetic)     // nor declares user activity (issue #134)
         testHotKeys = synthetic ? Self.testHotKeyTable() : nil
         menus = MenuMirror(server: server)
         let launch = UUID().uuidString
@@ -369,6 +383,8 @@ package final class StreamCoordinator {
                 }
                 // Home or away before its catalog: its settings state says which quality it sets.
                 self.routesChanged(joined: id, endpoint: "\(connection.endpoint)")
+                // A sleeping display gives black frames: the session's start wakes it, as a key would.
+                self.deviceActive(.connect, connection)
                 // Catalog first: the client's UI needs it even if the keyframe is slow to come.
                 self.catalog.thumbnailsWanted = true
                 self.sendCatalog(to: connection)
@@ -875,14 +891,20 @@ package final class StreamCoordinator {
     // MARK: Client messages
 
     private func handle(_ message: StreamMessage, from connection: NWConnection) async {
+        // Input decoded once, for the display's rule and for its case below.
+        let input = message.kind == .input ? Wire.decode(InputEvent.self, from: message.payload) : nil
+        // Every message goes to DisplayWake, which alone says which of them is a person at the device
+        // (a pick never is: the device asks for the Desktop by itself), issue #134.
+        deviceActive(.message(message.kind, input), connection)
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
             // A window picked comes forward on the Mac, which closes a view a gesture opened; the
             // Desktop picked (as a device does before a gesture made over a window) leaves it.
             if case .window = source { gestureChords.forget() }
-            // A pick from the device's switcher: the device never selects a window by itself (its
-            // automatic requests are for the Desktop only).
+            // A pick from the device's switcher, or the device's own request (StreamClient's window
+            // list: the Desktop at a connection's start or once the Mac stopped it, and after a move
+            // what it watched, the Desktop or a window).
             await handlePick(source)
         case .windowCommand:
             // The bar's long-press menu: the window's own traffic lights, pressed through
@@ -913,7 +935,7 @@ package final class StreamCoordinator {
                 if let error { print("Launch failed: \(error.localizedDescription)") }
             }
         case .input:
-            guard let event = Wire.decode(InputEvent.self, from: message.payload) else { return }
+            guard let event = input else { return }
             let device = ObjectIdentifier(connection)
             guard let rect = currentSourceRect() else {
                 // Nothing streams (between sources, or the stream stopped: the window closed under a
@@ -1038,6 +1060,28 @@ package final class StreamCoordinator {
         default:
             break
         }
+    }
+
+    /// A device's session connected, or it sent a message: DisplayWake says whether someone is using
+    /// the Mac from it, as a key press on it would say (issue #134), and whether this one declares it;
+    /// DisplayActivity makes the call on its own queue and says "Woke the display for …" only when the
+    /// display read asleep before and on half a second later. A test host counts `disp.wakeDry` and
+    /// touches nothing.
+    private func deviceActive(_ event: DisplayWake.Event, _ connection: NWConnection) {
+        switch displayWake.decide(event, at: CFAbsoluteTimeGetCurrent()) {
+        case .nothing: break
+        case .count: Stats.shared.bump(DisplayWake.dryKey)
+        case .declare(let activity): displayActivity.declare(for: deviceName(connection), activity)
+        }
+    }
+
+    /// Parameter sets went out at `time` (the encoder's callback, hopped here). A stream's first, and
+    /// any that differ from the last, are a new frame size for the devices, which move their own
+    /// pointer to its middle as they arrive (DisplayWake.recentre).
+    private func parameterSetsSent(_ sets: Data, at time: CFAbsoluteTime) {
+        guard sets != lastParameterSets else { return }
+        lastParameterSets = sets
+        displayWake.streamChanged(at: time)
     }
 
     // MARK: Where input lands
@@ -1265,6 +1309,7 @@ package final class StreamCoordinator {
         releaseKeysOfDevicesThatLeft()
         encoder = nil                  // deinit invalidates the VT session
         server.resetForNewStream()          // every client waits for the next parameter sets + keyframe
+        lastParameterSets = nil             // and the new stream's first go out as a new frame (DisplayWake)
         // New settings take effect here, between pipelines, before the rate, the scale and the
         // stage are worked out for the next one.
         var leftStage = false
@@ -1462,10 +1507,14 @@ package final class StreamCoordinator {
             }
         }
         let server = self.server
-        enc.onEncoded = { data, isKey, parameterSets in
+        enc.onEncoded = { [weak self] data, isKey, parameterSets in
             let now = Date().timeIntervalSince1970
             if let ps = parameterSets {
-                server.broadcast(StreamMessage(kind: .parameterSets, timestamp: now, isKeyframe: true, payload: ps.encoded()))
+                let sets = ps.encoded()
+                server.broadcast(StreamMessage(kind: .parameterSets, timestamp: now, isKeyframe: true, payload: sets))
+                // Every keyframe repeats them; a new frame size goes out with the first that differ.
+                let sentAt = CFAbsoluteTimeGetCurrent()
+                Task { @MainActor in self?.parameterSetsSent(sets, at: sentAt) }
             }
             server.broadcast(StreamMessage(kind: .frame, timestamp: now, isKeyframe: isKey, payload: data))
         }
