@@ -152,6 +152,47 @@ To measure decoding without a window: `Sill.Spike session --decode 1` (software)
 <png> --gpu 1 --compare 1` decodes a keyframe on the GPU, copies it back and compares it with the
 software decoder's picture.
 
+## Sill.exe: the release's app, installing itself and checking for updates
+
+The release names the viewer `Sill.exe` (`-p:SillExeName=Sill`; without it the project still makes
+`Sill.Viewer.exe`, so the spike's own launches are as before) and stamps Sill's one version
+(`Version` in `Directory.Build.props`, the release workflow's `-p:Version` from the tag):
+
+```
+dotnet publish Windows/src/Sill.Viewer -c Release -r win-x64 --self-contained -p:PublishSingleFile=true \
+  -p:IncludeNativeLibrariesForSelfExtract=true -p:SillExeName=Sill -o <dir>
+```
+
+Publish it on Windows (or on the runner): only a Windows build writes the exe's version resource,
+which the install offer compares. `.github/workflows/release.yml`'s windows job zips it per
+architecture and attaches the zips to the Mac's GitHub Release (`docs/release-checklist.md`, "Sill
+for Windows").
+
+- Installing (`SelfInstall`, `SelfInstallPolicy`): `Sill.exe` started with no options from anywhere
+  but `%LOCALAPPDATA%\Programs\Sill\Sill.exe` offers, in a task dialog, to install itself there
+  with `Sill.lnk` in the user's Start menu Programs folder, then opens the installed copy; an older
+  installed copy (or one with no version) is replaced, a same or newer one offered instead ("Open
+  Installed Sill"). Per user, no administrator, nothing in the registry; the download's
+  Zone.Identifier mark is not copied. "Don't ask again for this copy" is kept in
+  `%LOCALAPPDATA%\Sill\install.json`. `SILL_NO_SELF_INSTALL=1` skips the offer. Settings' half:
+  `SelfInstall.RemoveShortcut()`, `AddShortcut()`, `ShortcutExists`.
+- Updates (`UpdatePolicy`, `UpdateChecker`, ported from Sill.app's; the Viewer's `UpdatePrompt`):
+  `Sill.exe` asks https://api.github.com/repos/Saffsanity/sill/releases/latest 30 s after starting
+  when a check is due, then every 24 h plus up to 30 minutes, an hour after a check with no answer,
+  with `User-Agent: Sill-Windows/<version>`, GitHub's Accept and API version, `Accept-Language: en`,
+  If-None-Match; no cookies, cache or credentials; redirects only to api.github.com; 1 MB, 10 s. A
+  newer published release is said once ("Sill 0.6 Is Available…", Open Release Page opens it in the
+  browser); nothing downloads. State and the "Check for updates automatically" switch are in
+  `%LOCALAPPDATA%\Sill\update.json`, the log lines in `update.log` beside it. The spike's
+  `Sill.Viewer.exe` never checks. TEST ONLY: `SILL_TEST_UPDATE_FEED=http://127.0.0.1:P/latest` (a feed on
+  this PC only: `Scripts/sillfeed.py P` on the Mac and `ssh -R P:127.0.0.1:P <pc>`; it also makes
+  `Sill.Viewer.exe` check), `SILL_TEST_UPDATE_VERSION=0.4`, `SILL_TEST_UPDATE_NOW=1` (a check at
+  start), `SILL_TEST_UPDATE_INTERVAL=<s>` (24 h become s seconds). Never test against GitHub.
+
+To start over on a PC: delete `%LOCALAPPDATA%\Programs\Sill`, `Sill.lnk` in
+`%APPDATA%\Microsoft\Windows\Start Menu\Programs`, and `update.json`, `update.log` and
+`install.json` in `%LOCALAPPDATA%\Sill`.
+
 ## With Sill.app (Wi-Fi and Tailscale)
 
 Sill.app keeps its key, so a PC pairs with it once. With Sill.app running on the Mac:

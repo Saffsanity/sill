@@ -86,6 +86,10 @@ static class SelfInstall
         Directory.CreateDirectory(Path.GetDirectoryName(to)!);
         var temp = to + ".new";
         File.Copy(from, temp, overwrite: true);
+        // CopyFile carries the download's mark (the Zone.Identifier stream), which would have
+        // SmartScreen ask again at every start from the Start menu: the person already chose to run
+        // this file, and what an installer writes has no mark.
+        DeleteFileW(temp + ":Zone.Identifier");
         try { File.Move(temp, to, overwrite: true); }
         catch { try { File.Delete(temp); } catch (IOException) { } throw; }
         MakeShortcut(ShortcutPath, to);
@@ -136,6 +140,10 @@ static class SelfInstall
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeleteFileW(string path);
 
     // The shortcut, through the shell's own IShellLink (no WScript, no package).
 
