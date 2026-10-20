@@ -5022,7 +5022,12 @@ good.
   window and put it back over `WindowRestore.Access` (`fit`, `stop`,
   `stageHome`), `keepsStreaming` and `coversDisplay` for a window off the list
   on its way into or out of full screen, the ledger, the lines; pure,
-  `Tests/checks/window-restore`), `VirtualDisplay` (private-API wrapper),
+  `Tests/checks/window-restore`), `VirtualDisplay` (private-API wrapper; its
+  `TypeEncoding` says which type encodings the runtime may report for each method
+  it calls, a `BOOL` return spelled "B" or "c" (#87, #62); pure,
+  `Tests/checks/virtual-display-api`, which also runs `Runtime.method`'s decision
+  and the `applySettings:` call, through `methodProblem` and `applySettings(_:to:)`,
+  on classes it makes at run time),
   `VirtualStage` (`--virtual-display`: owns the display and the moved window,
   geometry, prepare/release, emergency restore), `HostShutdown` (signal
   sources + atexit, installed only with the flag in the CLI, always in the app;
@@ -5145,7 +5150,11 @@ good.
   iOSClient and Sources/StreamProtocol count), and an App Store address in
   `SillLinks.swift` that isn't one, and sourced it only defines its
   functions (docs/release-checklist.md, TestFlight). `Scripts/make-app.sh`
-  builds, iconizes, signs and installs the bundle; `Scripts/release.sh`
+  builds, iconizes, signs and installs the bundle (with `SILL_UNIVERSAL=1`
+  arm64 and x86_64, each in its own scratch path under `.build/universal`,
+  joined with lipo, for an Intel tester, #62; off by default, so releases
+  stay arm64, and `release.sh`'s `check_signature` reads every slice);
+  `Scripts/release.sh`
   (M6) makes the downloads from it:
   `make-app.sh --release`, `make-dmg.sh --prepare` (the image's tool and
   background, before anything goes to Apple), a zip (`ditto -c -k
@@ -5547,7 +5556,10 @@ good.
   `pairing-address`, `phone-portrait`, `pointer-control`, `pointer-presence`,
   `pointer-watch`, `policy` (with its `home.swift`), `protocol`,
   `remote-rules` (with its `home.swift`), `settings-window` (Sill.app's
-  `SettingsWindowFit`), `tour`, `update-policy`,
+  `SettingsWindowFit`), `tour`, `update-policy`, `virtual-display-api`
+  (VirtualDisplay.swift whole, as VirtualDisplayProbe compiles it: its surface,
+  TypeEncoding and Runtime.method's decision, on classes made at run time, against
+  the encodings measured on Apple silicon and reported from Intel machines),
   `window-restore` (WindowRestore's rule and sequences against a stand-in Mac,
   with a copy of the coordinator's glue around them) (the two encoder checks refuse a binary that links
   VideoToolbox). `run-all.sh
@@ -5615,6 +5627,7 @@ Scripts/pacing/run.sh                   # remote pacing and the link's judge, th
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_ORIGIN=vpn SILL_TEST_PATTERN=noise .build/release/SillHost --synthetic --remote   # an away session whose stream follows its quality
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
+SILL_UNIVERSAL=1 Scripts/make-app.sh    # .build/Sill.app for Apple silicon and Intel (arm64 and x86_64) for an Intel tester (#62): twice the build time; the x86_64 slice has not streamed on an Intel Mac
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release   # M6
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' SILL_NOTARY_PROFILE=sill-notary Scripts/release.sh [--dry-run]   # M6: the notarized download (docs/release-checklist.md)
 Scripts/release-ios.sh                  # the iOS app for App Store Connect: archive, export .build/ios/export/Sill.ipa, check it; uploads nothing
