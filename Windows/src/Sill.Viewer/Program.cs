@@ -23,7 +23,10 @@ static class Program
         // Sill.exe started with no options from anywhere but its installed place offers to install
         // itself (SelfInstall); the spike's Sill.Viewer.exe and any launch with options skip this.
         if (SelfInstall.OfferAtStartup(args)) return 0;
-        string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sill", "spike");
+        // TEST ONLY: SILL_TEST_IDENTITY_DIR is the default --identity, so a test of Sill.exe started
+        // with no options (the install offer, the update check) never dials the PC's own paired Mac.
+        string dir = Environment.GetEnvironmentVariable("SILL_TEST_IDENTITY_DIR") is { Length: > 0 } testDir ? testDir
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sill", "spike");
         var hosts = new List<string>();
         string decoder = "auto"; int? adapter = null;
         for (int i = 0; i + 1 < args.Length; i += 2)
