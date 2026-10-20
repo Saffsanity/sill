@@ -4,6 +4,14 @@ import os, shutil, subprocess, sys, tempfile
 WT = sys.argv[1]
 HERE = os.path.dirname(os.path.abspath(__file__))
 MUTANTS = [
+    ("Off is not offered", "TextScale.swift", "offered ? [off] + scales : scales", "scales"),
+    ("Off is always offered", "TextScale.swift", "offered ? [off] + scales : scales", "[off] + scales"),
+    ("an untouched Aa reads 1×", "TextScale.swift", "scale ?? (offered ? off : 1.0)", "scale ?? 1.0"),
+    ("Off sends a scale", "TextScale.swift", "position == off ? nil : position", "position"),
+    ("Off is titled 1×", "TextScale.swift", 'position == off ? "Off" : number(position) + "×"', 'number(position) + "×"'),
+    ("a decrement skips Off", "TextScale.swift", "detents[up ? min(i + 1, detents.count - 1) : max(i - 1, 0)]", "detents[up ? min(i + 1, detents.count - 1) : max(i - 1, offered ? 1 : 0)]"),
+    ("a fit never ends", "TextScale.swift", "previous != nil && now == nil", "false"),
+    ("any viewport without a scale ends a fit", "TextScale.swift", "previous != nil && now == nil", "now == nil"),
     ("Damm table entry swapped", "Pairing.swift", "[7, 0, 9, 2, 1, 5, 4, 8, 6, 3]", "[7, 0, 9, 2, 1, 5, 4, 8, 3, 6]"),
     ("typed-code check digit ignored", "Pairing.swift", "guard checkDigit(kept.compactMap { $0.wholeNumberValue }) == 0", "guard checkDigit(kept.compactMap { $0.wholeNumberValue }) >= 0"),
     ("proof_D label changed", "Pairing.swift", 'Data("\\(label) device".utf8)', 'Data("\\(label) devices".utf8)'),

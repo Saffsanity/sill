@@ -465,7 +465,7 @@ struct StreamScreen: View {
             let fps = StreamClient.wantedFPS(remote: client.awayCapsFrameRate)
             #if DEBUG
             print("viewport: \(Self.points(panelSize.width))×\(Self.points(panelSize.height)) pt, scale "
-                  + (textScale.map { TextScaleControl.label($0) } ?? "none") + ", \(fps) fps")
+                  + (textScale.map { TextScaleControl.label($0) } ?? "off") + ", \(fps) fps")
             #endif
             client.sendViewport(Viewport(width: Double(panelSize.width),
                                          height: Double(panelSize.height),
@@ -1270,7 +1270,8 @@ private struct TopBar: View {
             // the right, over the two buttons after it, which fade while it is open.
             TextScaleControl(scale: $textScale, open: $scaleOpen,
                              width: metrics.buttonWidth, height: metrics.buttonHeight,
-                             pointsPerStep: metrics.buttonHeight >= 60 ? 44 : 40)
+                             pointsPerStep: metrics.buttonHeight >= 60 ? 44 : 40,
+                             offered: client.settings.displayed?.virtualDisplay != true)
                 .tourTarget(.textSize)
 
             button(open: keyboardShown, symbol: "keyboard", label: "Keyboard",
@@ -1376,8 +1377,9 @@ struct BarButton<Content: View>: View {
 /// put at the button's centre and the ruler slides under it: five detents, 0.5× to 1.5× in 0.25
 /// steps, a tick of haptic at each. The bar fades the buttons next to it while `open` and brings
 /// them back on release, when the chosen value is applied once (every change restarts the stream,
-/// so nothing is sent mid-drag). A nil scale means the Mac window has never been asked to fit; it
-/// shows 1×.
+/// so nothing is sent mid-drag). A nil scale means the Mac window is not fitted: the leftmost detent,
+/// Off, one step below 0.5× (`TextScale`; issue #179). Off is not offered while the virtual display
+/// is on, where a nil scale is 1×.
 struct TextScaleControl: View {
     @Binding var scale: Double?
     @Binding var open: Bool
@@ -1392,14 +1394,18 @@ struct TextScaleControl: View {
     /// text, 2 pt over the value (every bar that has always had it).
     var iconBox: CGFloat? = nil
     var iconSpacing: CGFloat = 2
+    /// Whether the ruler has an Off detent (`TextScale.detents`).
+    var offered = true
 
-    static let steps: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5]
+    var steps: [Double] { TextScale.detents(offered: offered) }
     /// Padding either side of the visible ruler; two detents show each side of the thumb.
     static let sliderInset: CGFloat = 30
-    var sliderWidth: CGFloat { pointsPerStep * CGFloat(Self.steps.count - 1) + Self.sliderInset * 2 }
+    var sliderWidth: CGFloat { pointsPerStep * CGFloat(steps.count - 1) + Self.sliderInset * 2 }
 
     @State private var live: Double = 1.0
     @State private var startValue: Double = 1.0
+    /// Where the ruler has the scale now.
+    private var position: Double { TextScale.position(of: scale, offered: offered) }
     @State private var startX: CGFloat = 0
 
     var body: some View {
@@ -1414,7 +1420,7 @@ struct TextScaleControl: View {
                     .font(.system(size: height >= 60 ? 19 : 17, weight: .semibold))
                     .foregroundStyle(Palette.text)
             }
-            Text(Self.label(scale ?? 1.0) + "×")
+            Text(TextScale.title(at: position))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Palette.barLabel)
         }
@@ -1429,13 +1435,13 @@ struct TextScaleControl: View {
                 .allowsHitTesting(false)
         }
         .zIndex(open ? 1 : 0)
-        .onChange(of: open, initial: true) { _, isOpen in if isOpen { live = scale ?? 1.0 } }
+        .onChange(of: open, initial: true) { _, isOpen in if isOpen { live = position } }
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 0, coordinateSpace: .local)
                 .onChanged { g in
                     if !open {
-                        startValue = scale ?? 1.0
+                        startValue = position
                         live = startValue
                         startX = g.location.x
                         withAnimation(.spring(duration: 0.22, bounce: 0.15)) { open = true }
@@ -1443,26 +1449,25 @@ struct TextScaleControl: View {
                     // The ruler follows the finger: dragging right raises the value, and the ticks
                     // slide left under the fixed thumb.
                     let dx = g.location.x - startX
-                    let snapped = Self.snap(startValue + Double(dx / pointsPerStep) * 0.25)
+                    let snapped = TextScale.snap(startValue + Double(dx / pointsPerStep) * 0.25, offered: offered)
                     if snapped != live {
                         UISelectionFeedbackGenerator().selectionChanged()
                         withAnimation(.easeOut(duration: 0.1)) { live = snapped }
                     }
                 }
                 .onEnded { _ in
-                    if (scale ?? 1.0) != live { scale = live }     // a plain tap on an untouched control changes nothing
+                    if position != live { scale = TextScale.scale(at: live) }     // a plain tap on an untouched control changes nothing
                     withAnimation(.easeOut(duration: 0.2)) { open = false }
                 }
         )
         .onDisappear { open = false }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Text size")
-        .accessibilityValue("\(Self.label(scale ?? 1.0)) times")
+        .accessibilityValue(TextScale.spoken(at: position))
         .accessibilityAdjustableAction { direction in
-            let i = Self.steps.firstIndex(of: scale ?? 1.0) ?? 2
             switch direction {
-            case .increment: scale = Self.steps[min(i + 1, Self.steps.count - 1)]
-            case .decrement: scale = Self.steps[max(i - 1, 0)]
+            case .increment: scale = TextScale.scale(at: TextScale.step(from: position, up: true, offered: offered))
+            case .decrement: scale = TextScale.scale(at: TextScale.step(from: position, up: false, offered: offered))
             @unknown default: break
             }
         }
@@ -1476,17 +1481,18 @@ struct TextScaleControl: View {
         let midX = w / 2
         let midY = height / 2 + 4
         func x(_ value: Double) -> CGFloat { midX + CGFloat((value - live) / 0.25) * step }
+        let steps = self.steps
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Palette.controlOpen)
             ZStack(alignment: .topLeading) {
                 Capsule().fill(Palette.barLabel.opacity(0.35))
-                    .frame(width: step * CGFloat(Self.steps.count - 1), height: 3)
-                    .offset(x: x(Self.steps[0]), y: midY - 1.5)
-                ForEach(Self.steps, id: \.self) { value in
+                    .frame(width: step * CGFloat(steps.count - 1), height: 3)
+                    .offset(x: x(steps[0]), y: midY - 1.5)
+                ForEach(steps, id: \.self) { value in
                     Rectangle().fill(Palette.barLabel.opacity(0.6))
                         .frame(width: 2, height: 9)
                         .offset(x: x(value) - 1, y: midY - 4.5)
-                    Text(Self.label(value))
+                    Text(value == TextScale.off ? "Off" : TextScale.number(value))
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(value == live ? Palette.text : Palette.barLabel)
                         .frame(width: step, alignment: .center)
@@ -1507,7 +1513,7 @@ struct TextScaleControl: View {
             // (a phone's row 1, the compact window bar) `midY - 34` put the top of its digits 2 pt
             // outside the clip; it sits where the 58 pt bars put it (1 pt above the frame's top,
             // the digits 2 pt inside), and in the taller bars as it always has.
-            Text(Self.label(live) + "×")
+            Text(TextScale.title(at: live))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Palette.text)
                 .frame(width: 60, alignment: .center)
@@ -1517,19 +1523,8 @@ struct TextScaleControl: View {
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
     }
 
-    /// Nearest detent, clamped to the ends.
-    static func snap(_ value: Double) -> Double {
-        let clamped = min(max(value, steps[0]), steps[steps.count - 1])
-        return steps.min { abs($0 - clamped) < abs($1 - clamped) } ?? 1.0
-    }
-
     /// 0.5, 0.75, 1, 1.25, 1.5: trailing zeros dropped, and "1" rather than "1.0".
-    static func label(_ scale: Double) -> String {
-        var text = String(format: "%.2f", scale)
-        while text.hasSuffix("0") { text.removeLast() }
-        if text.hasSuffix(".") { text.removeLast() }
-        return text
-    }
+    static func label(_ scale: Double) -> String { TextScale.number(scale) }
 }
 
 // MARK: - Window thumbnails

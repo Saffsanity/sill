@@ -372,7 +372,7 @@ and open Sill again.
 
 Without the virtual display, Aa (text size) on the device resizes the window
 it streams on the Mac itself, through Accessibility, to the device's panel at
-that scale (nothing happens until Aa is first touched; a window in full screen
+that scale (nothing happens until Aa is first touched, and Aa's leftmost detent, Off, is the way back: the windows Sill sized go back to their own frames at once and no window is resized after; Off is not offered with the virtual display on, where no scale means 1×; a window in full screen
 is not resized: "Window sizing: ‹app› — ‹title› is full screen; not
 resizing."). The window goes back to its own frame when it stops streaming:
 another window or the Desktop picked, the last device disconnecting (with
