@@ -1,4 +1,6 @@
 import Foundation
+import AVFoundation
+import CoreImage
 import UIKit
 import UniformTypeIdentifiers
 import StreamProtocol
@@ -334,5 +336,127 @@ extension StreamClient {
         let work = DispatchWorkItem { [weak self] in self?.clipboardNote = nil }
         clipboardNoteExpiry = work
         DispatchQueue.main.asyncAfter(deadline: .now() + ClipboardPolicy.noteLifetime, execute: work)
+    }
+
+    // MARK: The camera (kind 46, Roadmap Item 10)
+
+    static let cameraKey = "Sill.shareCamera"
+    static var cameraOn: Bool {
+        UserDefaults.standard.bool(forKey: cameraKey)
+    }
+
+    func updateCameraCapture() {
+        let supported = (hostCamera ?? 0) >= CameraCodec.generation
+        if connected && supported && Self.cameraOn {
+            startCameraCapture()
+        } else {
+            stopCameraCapture(sendStop: connected && supported)
+        }
+    }
+
+    func startCameraCapture() {
+        if let existing = cameraSender as? DeviceCameraCapture, existing.isRunning { return }
+        let cap = DeviceCameraCapture { [weak self] message in
+            DispatchQueue.main.async {
+                guard let self, self.connected else { return }
+                self.send(.camera, payload: message.serialized())
+            }
+        }
+        cameraSender = cap
+        cap.start()
+    }
+
+    func stopCameraCapture(sendStop: Bool) {
+        if let existing = cameraSender as? DeviceCameraCapture {
+            existing.stop()
+            cameraSender = nil
+            if sendStop {
+                let stopMsg = CameraMessage.format(CameraFormat(stop: true))
+                send(.camera, payload: stopMsg.serialized())
+            }
+        }
+    }
+}
+
+final class DeviceCameraCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+    private let onMessage: (CameraMessage) -> Void
+    private let captureQueue = DispatchQueue(label: "me.saffer.sill.camera")
+    private let ciContext = CIContext()
+    private let colorSpace = CGColorSpaceCreateDeviceRGB()
+    private var session: AVCaptureSession?
+    private var epoch: Int = Int.random(in: 1...65_000)
+    private var seq: UInt32 = 0
+    private var lastFrameAt: CFTimeInterval = 0
+    private(set) var isRunning = false
+
+    init(onMessage: @escaping (CameraMessage) -> Void) {
+        self.onMessage = onMessage
+    }
+
+    func start() {
+        guard !isRunning else { return }
+        AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+            DispatchQueue.main.async {
+                guard granted, let self else { return }
+                self.beginSession()
+            }
+        }
+    }
+
+    private func beginSession() {
+        guard !isRunning else { return }
+        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
+                ?? AVCaptureDevice.default(for: .video),
+              let input = try? AVCaptureDeviceInput(device: device) else { return }
+        let sess = AVCaptureSession()
+        sess.beginConfiguration()
+        if sess.canSetSessionPreset(.vga640x480) {
+            sess.sessionPreset = .vga640x480
+        }
+        guard sess.canAddInput(input) else { sess.commitConfiguration(); return }
+        sess.addInput(input)
+        let output = AVCaptureVideoDataOutput()
+        output.alwaysDiscardsLateVideoFrames = true
+        output.setSampleBufferDelegate(self, queue: captureQueue)
+        guard sess.canAddOutput(output) else { sess.commitConfiguration(); return }
+        sess.addOutput(output)
+        sess.commitConfiguration()
+
+        epoch = (epoch + 1) & 0xFFFF
+        seq = 0
+        let pos = device.position == .back ? CameraCodec.positionBack : CameraCodec.positionFront
+        onMessage(.format(CameraFormat(codec: CameraCodec.jpeg, width: 640, height: 480, fps: 15, position: pos, epoch: epoch)))
+        session = sess
+        isRunning = true
+        captureQueue.async {
+            sess.startRunning()
+        }
+    }
+
+    func stop() {
+        guard isRunning else { return }
+        isRunning = false
+        let sess = session
+        session = nil
+        captureQueue.async {
+            sess?.stopRunning()
+        }
+    }
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        let now = CACurrentMediaTime()
+        guard now - lastFrameAt >= (1.0 / 15.0) else { return }
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        lastFrameAt = now
+        let w = CVPixelBufferGetWidth(pixelBuffer)
+        let h = CVPixelBufferGetHeight(pixelBuffer)
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        guard w > 0, h > 0,
+              let jpeg = ciContext.jpegRepresentation(of: ciImage, colorSpace: colorSpace,
+                                                      options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.65]),
+              jpeg.count <= CameraFrame.maxFrameBytes else { return }
+        let s = seq
+        seq &+= 1
+        onMessage(.frame(CameraFrame(epoch: epoch, seq: s, width: w, height: h, keyframe: true, data: jpeg)))
     }
 }

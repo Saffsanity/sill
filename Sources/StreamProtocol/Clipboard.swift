@@ -38,3 +38,107 @@ public struct Clipboard: Codable, Hashable, Sendable {
     /// be more than 1 MiB as JSON, and then it is not sent.
     public static let maxTextBytes = 256 * 1024
 }
+
+/// The device's camera on the Mac (kind 46, Roadmap Item 10).
+public enum CameraCodec {
+    public static let jpeg = "jpeg"
+    public static let hevc = "hevc"
+    public static let generation = 1
+    public static let positionFront = "front"
+    public static let positionBack = "back"
+}
+
+/// Device → host (kind 46, type 1): how to decode the camera frames that follow, or `stop: true`
+/// when the device turns its camera switch off.
+public struct CameraFormat: Codable, Hashable, Sendable {
+    public var codec: String?
+    public var width: Int?
+    public var height: Int?
+    public var fps: Int?
+    public var position: String?
+    public var epoch: Int?
+    public var stop: Bool?
+
+    public init(codec: String? = nil, width: Int? = nil, height: Int? = nil, fps: Int? = nil,
+                position: String? = nil, epoch: Int? = nil, stop: Bool? = nil) {
+        self.codec = codec; self.width = width; self.height = height
+        self.fps = fps; self.position = position; self.epoch = epoch; self.stop = stop
+    }
+}
+
+/// Device → host (kind 46, type 2): one camera frame of an epoch:
+/// `type 2 · epoch UInt16 · seq UInt32 · width UInt16 · height UInt16 · flags UInt8 · data`
+public struct CameraFrame: Hashable, Sendable {
+    public var epoch: Int
+    public var seq: UInt32
+    public var width: Int
+    public var height: Int
+    public var keyframe: Bool
+    public var data: Data
+
+    public static let headerBytes = 12
+    public static let maxFrameBytes = 512 * 1024
+
+    public init(epoch: Int, seq: UInt32, width: Int, height: Int, keyframe: Bool, data: Data) {
+        self.epoch = epoch; self.seq = seq; self.width = width; self.height = height
+        self.keyframe = keyframe; self.data = data
+    }
+
+    public func serialized() -> Data {
+        let kept = data.prefix(Self.maxFrameBytes)
+        var d = Data(capacity: Self.headerBytes + kept.count)
+        d.append(CameraMessage.typeFrame)
+        d.appendBigEndian(UInt16(truncatingIfNeeded: epoch))
+        d.appendBigEndian(seq)
+        d.appendBigEndian(UInt16(clamping: max(0, width)))
+        d.appendBigEndian(UInt16(clamping: max(0, height)))
+        d.append(keyframe ? 1 : 0)
+        d.append(kept)
+        return d
+    }
+}
+
+/// A kind 46 payload, either type 1 (`format`) or type 2 (`frame`).
+public enum CameraMessage: Hashable, Sendable {
+    case format(CameraFormat)
+    case frame(CameraFrame)
+
+    public static let typeFormat: UInt8 = 1
+    public static let typeFrame: UInt8 = 2
+    public static let maxFormatPayload = 4096
+    public static let maxFramePayload = CameraFrame.headerBytes + CameraFrame.maxFrameBytes
+
+    public func serialized() -> Data {
+        switch self {
+        case .format(let f):
+            var d = Data([Self.typeFormat])
+            d.append(Wire.encode(f))
+            return d
+        case .frame(let f):
+            return f.serialized()
+        }
+    }
+
+    public static func parse(_ payload: Data) -> CameraMessage? {
+        guard let type = payload.first else { return nil }
+        switch type {
+        case typeFormat:
+            guard payload.count <= maxFormatPayload,
+                  let f = Wire.decode(CameraFormat.self, from: Data(payload.dropFirst())) else { return nil }
+            return .format(f)
+        case typeFrame:
+            guard payload.count <= maxFramePayload, payload.count > CameraFrame.headerBytes else { return nil }
+            let d = Data(payload)
+            let epoch = Int(d.readBigEndian(UInt16.self, at: 1))
+            let seq = d.readBigEndian(UInt32.self, at: 3)
+            let width = Int(d.readBigEndian(UInt16.self, at: 7))
+            let height = Int(d.readBigEndian(UInt16.self, at: 9))
+            let flags = d[11]
+            let frameData = d.subdata(in: CameraFrame.headerBytes..<d.count)
+            guard width > 0, height > 0, !frameData.isEmpty else { return nil }
+            return .frame(CameraFrame(epoch: epoch, seq: seq, width: width, height: height, keyframe: flags & 1 == 1, data: frameData))
+        default:
+            return nil
+        }
+    }
+}

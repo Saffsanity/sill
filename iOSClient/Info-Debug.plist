@@ -24,7 +24,7 @@
 	</array>
 	<!-- Add a Mac: the embedded scanner reads the pairing code the Mac shows. -->
 	<key>NSCameraUsageDescription</key>
-	<string>Sill scans the code on your Mac to pair with it.</string>
+	<string>Sill scans the code on your Mac to pair with it, and streams your camera to your Mac when Share Camera is turned on.</string>
 	<!-- sill://pair links from the Camera or Messages. Never acted on without a confirmation, since
 	     another app could claim the scheme too; the in-app scanner is the main path. -->
 	<key>CFBundleURLTypes</key>

@@ -259,6 +259,7 @@ package final class StreamCoordinator {
     /// subscribed, while Share clipboard with devices (`HostConfig.shareClipboard`) is on. Looks at
     /// nothing while nobody subscribes.
     let clipboard: HostClipboard
+    private lazy var camera = HostCamera()
     /// TEST ONLY. `SILL_TEST_MENU_PID=<pid>` on a --synthetic host: the test pattern's menus are that
     /// process's (the gates' fixture, Scripts/menufixture.swift), read and pressed through the same
     /// code, never activated (the Desktop's rule). Nil otherwise; `testMenuLine` is what `start`
@@ -401,6 +402,7 @@ package final class StreamCoordinator {
                 if self.flipWait == id { self.flipWait = nil }
                 self.menus.clientLeft(connection)
                 self.clipboard.clientLeft(connection)
+                self.camera.clientLeft(connection)
                 self.releaseKeys(of: id)
                 self.status.update { $0.devices.removeAll { $0.id == id } }
                 // The last device at home left devices away behind: the away quality, at once.
@@ -1029,6 +1031,9 @@ package final class StreamCoordinator {
             // The clipboard (HostClipboard): a subscription, a device's text, or its stop. No `await`:
             // it reads and writes the pasteboard at once, and says nothing per copy.
             clipboard.received(message.payload, from: connection, who: deviceName(connection))
+        case .camera:
+            guard !synthetic else { return }
+            camera.received(message.payload, from: connection, who: deviceName(connection))
         case .pressMenuItem:
             guard let r = Wire.decode(PressMenuItem.self, from: message.payload) else { return }
             // One of the Mac's menu items chosen from a device acts as a click on it would, and may
@@ -2319,10 +2324,12 @@ package final class StreamCoordinator {
     // MARK: Catalog to clients
 
     private func listMessage() -> StreamMessage {
-        StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
-                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
-                                                      hostVersion: hostVersion, protocol: SillProtocol.current,
-                                                      gestures: TrackpadGesture.generation, clipboard: clipboard.advertised)))
+        var list = WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
+                              hostVersion: hostVersion, protocol: SillProtocol.current,
+                              gestures: TrackpadGesture.generation, clipboard: clipboard.advertised)
+        list.camera = synthetic ? nil : CameraCodec.generation
+        return StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
+                             payload: Wire.encode(list))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }
