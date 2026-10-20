@@ -41,6 +41,8 @@ struct HostSettingsPanel: View {
     /// This device's switch for three-finger gestures (docs/trackpad-gestures-plan.md §8): on unless
     /// turned off, read by `StreamClient.sendGesture` at each gesture, never sent.
     @AppStorage(StreamClient.gesturesKey) private var gesturesOn = true
+    /// This device's Picture Smoothing (PictureSmoothing), never sent.
+    @AppStorage(PictureSmoothing.defaultsKey) private var smoothingRaw = PictureSmoothing.automatic.rawValue
     /// This device's switch for Larger Picture (docs/larger-picture-plan.md): off unless turned on,
     /// read by the stream screen, never sent.
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
@@ -505,6 +507,17 @@ struct HostSettingsPanel: View {
             }
             Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, mac: mac, device: device))
         }
+        Rows {
+            AdaptiveRow(title: "Picture Smoothing", since: nil) {
+                Picker("Picture Smoothing", selection: Binding(get: { PictureSmoothing.stored(smoothingRaw) },
+                                                               set: { smoothingRaw = $0.rawValue; client.setSmoothing($0) })) {
+                    ForEach(PictureSmoothing.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+        }
+        Footnote(text: PictureSmoothing.footnote)
         Rows {
             Toggle(isOn: $gesturesOn) {
                 Text("Three-Finger Gestures").foregroundStyle(Palette.text)
