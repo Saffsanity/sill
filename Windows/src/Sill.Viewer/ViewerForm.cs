@@ -109,6 +109,9 @@ sealed class ViewerForm : Form
     private long askedAt;   // when the Desktop was last asked for
     private bool cmdTab, winDown, winUsed;
 
+    /// <summary>Closed by the Settings panel's Disconnect, not by the window's close button.</summary>
+    public bool Disconnecting { get; private set; }
+
     public ViewerForm(string dir, IReadOnlyList<string> hostOverrides, ViewerOptions options)
     {
         this.dir = dir; this.hostOverrides = hostOverrides; this.options = options;
@@ -142,6 +145,7 @@ sealed class ViewerForm : Form
             bar.SettingsOpen = true;
         };
         settings.Done += CloseSettings;
+        settings.Disconnect += () => { Disconnecting = true; Close(); };   // back to the connect screen (SillApp)
         settings.Pick += change =>
         {
             if (ledger.Pick(change, ++settingsToken, settingsClock.Elapsed.TotalSeconds) is { } send) Send(send.Encode());

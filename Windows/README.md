@@ -116,6 +116,16 @@ dotnet publish Windows/src/Sill.Viewer -c Release -r win-x64 --self-contained -p
 <dir>\Sill.Viewer.exe [--identity <dir>] [--host <address>:<port>]
 ```
 
+Without `--host` it opens on the connect screen, as the iPad's: the Macs Windows' own DNS-SD finds
+on this network (`_sill._tcp` through dnsapi.dll, Windows 10 1809 and later, no Bonjour), each with
+its word (Wired or Wi‑Fi for the Mac this PC paired with, known by its TXT tag `r`, never by name;
+"Not paired"; "Update Sill" for a Mac without `p`), Add a Mac… and the site's links. A click on the
+paired Mac connects at the address and port it resolved (the home door, TLS, pinned to the saved
+key); Settings › Disconnect, at the panel's foot, comes back here. Pairing from the screen is ticket
+10b; until then "Not paired" says to use `Sill.Spike pair`. TEST ONLY: `--service-type
+_silltest._tcp` (repeatable) browses other types. No firewall rule is needed: the DNS Client
+service owns UDP 5353 and Windows' built-in mDNS rules let its answers in.
+
 Self-contained, because an apphost can't find a .NET installed only in the user's folder. It shows
 the Mac's Desktop as it streams and sends the mouse and keys to it: left Ctrl is ⌘, right Ctrl ⌃,
 Alt ⌥; Alt+Tab is the Mac's ⌘Tab, and the Windows key alone opens Spotlight (held with another key

@@ -9,17 +9,20 @@ namespace Sill.Viewer;
 /// (Quality, Resolution, Frame Rate, Prioritize Encoding Speed, Virtual Display, Direct Wireless)
 /// with the iPad's footnotes, and This PC's own (decoding on the GPU or in software). The values
 /// come from the form's <see cref="SettingsLedger"/>; a control's pick goes back to the form, which
-/// sends it. Drawn by hand; it takes no keyboard focus, so keys stay the Mac's.
+/// sends it. Disconnect is pinned at the foot, as the iPad's, and only the rest scrolls. Drawn by
+/// hand; it takes no keyboard focus, so keys stay the Mac's.
 /// </summary>
 sealed class SettingsPanel : Control
 {
     public event Action<HostSettingsChange>? Pick;
     public event Action<bool>? SoftwareDecoding;
     public event Action? Done;
+    /// <summary>The foot's Disconnect: back to the connect screen.</summary>
+    public event Action? Disconnect;
 
     private const float CardWidth = 360, Pad = 16, Radius = 20, Row = 44, GroupRadius = 12, Gap = 8;
 
-    private enum Kind { Header, Title, Readout, Done, Group, RowTitle, Quality, Segments, Switch, Footnote, Note }
+    private enum Kind { Header, Title, Readout, Done, Group, RowTitle, Quality, Segments, Switch, Footnote, Note, Disconnect }
     private sealed record Item(Kind Kind, RectangleF Rect, string Text = "", string[]? Options = null, int Selected = -1,
         bool On = false, bool Enabled = true, bool Pending = false, Action<int>? Choose = null, Color? Tint = null);
 
@@ -28,7 +31,7 @@ sealed class SettingsPanel : Control
     private bool gpuAvailable, software;
     private string gpuName = "";
     private List<Item> items = [];
-    private float scroll, content;
+    private float scroll, content, middle;
     private int hover = -1;
     private Font titleFont, rowFont, smallFont, headerFont;
 
@@ -156,12 +159,22 @@ sealed class SettingsPanel : Control
             ? $"The GPU ({gpuName}) decodes and draws the picture; Software uses the processor. The picture reconnects when this changes."
             : "This PC's GPU can't decode the picture, so the processor does.");
 
-        content = y + S(Pad);
+        middle = y + S(Pad);
+        content = middle + FootHeight;
+        // The foot, pinned: drawn and hit at the panel's bottom, whatever the scroll (Pinned).
+        float footY = Math.Max(0, Math.Min(middle, Height - FootHeight)) + S(10);
+        string leave = $"Disconnect from {mac}";
+        if (TextRenderer.MeasureText(leave, rowFont).Width + S(60) > w) leave = "Disconnect";
+        list.Add(new(Kind.Disconnect, new RectangleF(x, footY, w, S(Row)), leave));
         items = list;
         hover = -1;
-        scroll = Math.Clamp(scroll, 0, Math.Max(0, content - Height));
+        scroll = Math.Clamp(scroll, 0, MaxScroll);
         Invalidate();
     }
+
+    private float FootHeight => S(10) + S(Row) + S(Pad);
+    private float MaxScroll => Math.Max(0, middle - (Height - FootHeight));
+    private static bool Pinned(Item it) => it.Kind == Kind.Disconnect;
 
     private RectangleF RowRect(float x, float groupTop, int index) => new(x + S(14), groupTop + index * S(Row), Width - 2 * S(Pad) - S(28), S(Row));
 
@@ -218,9 +231,13 @@ sealed class SettingsPanel : Control
         for (int i = 0; i < items.Count; i++)
         {
             var it = items[i];
-            if (it.Rect.Bottom - scroll < 0 || it.Rect.Y - scroll > Height) continue;
+            if (Pinned(it) || it.Rect.Bottom - scroll < 0 || it.Rect.Y - scroll > Height) continue;
             DrawItem(g, it with { Rect = new RectangleF(it.Rect.X, it.Rect.Y - scroll, it.Rect.Width, it.Rect.Height) }, i == hover);
         }
+        // The foot over whatever scrolled under it.
+        using (var foot = new SolidBrush(Palette.Bar)) g.FillRectangle(foot, 0, Height - FootHeight, Width, FootHeight);
+        for (int i = 0; i < items.Count; i++)
+            if (Pinned(items[i])) DrawItem(g, items[i], i == hover);
         using var edge = new Pen(Color.FromArgb(26, 255, 255, 255), S(1));
         using var outline = Palette.Rounded(new RectangleF(S(0.5f), S(0.5f), Width - S(1), Height - S(1)), S(Radius));
         g.DrawPath(edge, outline);
@@ -274,6 +291,14 @@ sealed class SettingsPanel : Control
             case Kind.Footnote:
                 TextRenderer.DrawText(g, it.Text, smallFont, Rectangle.Round(r), it.Tint ?? Palette.Muted, TextFormatFlags.NoPadding | TextFormatFlags.WordBreak);
                 break;
+            case Kind.Disconnect:
+                Palette.FillRounded(g, hovered ? Palette.ControlHover : Palette.Control, r, S(GroupRadius));
+                using (var icon = Palette.IconFont(15, DeviceDpi))
+                    TextRenderer.DrawText(g, "\uE711" /* a cross */, icon, Rectangle.Round(new RectangleF(r.X + S(14), r.Y, S(20), r.Height)), Palette.Accent,
+                        flags | TextFormatFlags.HorizontalCenter);
+                TextRenderer.DrawText(g, it.Text, rowFont, Rectangle.Round(new RectangleF(r.X + S(42), r.Y, r.Width - S(56), r.Height)), Palette.Accent,
+                    flags | TextFormatFlags.EndEllipsis);
+                break;
         }
     }
 
@@ -310,9 +335,11 @@ sealed class SettingsPanel : Control
 
     private int ItemAt(Point p)
     {
-        var at = new PointF(p.X, p.Y + scroll);
         for (int i = items.Count - 1; i >= 0; i--)
-            if (items[i].Kind is Kind.Done or Kind.Quality or Kind.Segments or Kind.Switch && items[i].Enabled && items[i].Rect.Contains(at)) return i;
+        {
+            if (items[i].Kind is not (Kind.Done or Kind.Quality or Kind.Segments or Kind.Switch or Kind.Disconnect) || !items[i].Enabled) continue;
+            if (Pinned(items[i]) ? items[i].Rect.Contains(p) : p.Y < Height - FootHeight && items[i].Rect.Contains(new PointF(p.X, p.Y + scroll))) return i;
+        }
         return -1;
     }
 
@@ -335,6 +362,7 @@ sealed class SettingsPanel : Control
         switch (it.Kind)
         {
             case Kind.Done: Done?.Invoke(); break;
+            case Kind.Disconnect: Disconnect?.Invoke(); break;
             case Kind.Switch: it.Choose?.Invoke(0); break;
             case Kind.Segments:
                 int seg = (int)((e.X - it.Rect.X) / (it.Rect.Width / it.Options!.Length));
@@ -356,7 +384,7 @@ sealed class SettingsPanel : Control
 
     protected override void OnMouseWheel(MouseEventArgs e)
     {
-        scroll = Math.Clamp(scroll - e.Delta / 120f * S(60), 0, Math.Max(0, content - Height));
+        scroll = Math.Clamp(scroll - e.Delta / 120f * S(60), 0, MaxScroll);
         Invalidate();
         if (e is HandledMouseEventArgs handled) handled.Handled = true;
     }
