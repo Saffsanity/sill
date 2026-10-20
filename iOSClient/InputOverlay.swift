@@ -532,8 +532,9 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     //
     //   • Shift alone changes what character the software keyboard produces, and it already did:
     //     `insertText` receives the shifted text. So a shift latch sends plain `.text`, exactly
-    //     like ordinary typing. (It earns its keep on the arrows and on clicks, where it rides
-    //     along in the modifier bits instead.)
+    //     like ordinary typing, but for return and tab, whose "\n" and "\t" carry no shift: those
+    //     go out as ⇧Return and ⇧Tab keys, as a hardware keyboard's do. (It earns its keep on the
+    //     arrows and on clicks too, where it rides along in the modifier bits instead.)
     //
     //   • Control, option and command never produce characters on a Mac — they make shortcuts —
     //     and the software keyboard has no way to express them. While one of them is latched a
@@ -546,6 +547,16 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         setOwnPointer(nil, .none)
         if !latchedModifiers.isDisjoint(with: .shortcutMakers), text.count == 1,
            let character = text.first, let usage = HIDKey.usage(for: character) {
+            sendLatched(usage)
+            return
+        }
+        // The key row's shift latched, then a return or tab from the text system (the software
+        // keyboard's, or a hardware one's without shift): ⇧Return and ⇧Tab as keys, as a hardware
+        // keyboard sends them with shift held (ForwardedKeys.shiftedKeyUsages), since "\n" and "\t"
+        // as text carry no shift.
+        if latchedModifiers.contains(.shift), text == "\n" || text == "\t",
+           let character = text.first, let usage = HIDKey.usage(for: character),
+           ForwardedKeys.shiftedKeyUsages.contains(usage) {
             sendLatched(usage)
             return
         }
@@ -707,15 +718,16 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     // The split between the two keyboard paths, which must not overlap or everything is typed twice:
     //
     //   • Text path (`insertText` / `deleteBackward`) owns every key that produces characters:
-    //     letters, digits, punctuation, space, return, tab and backspace, with or without shift.
-    //     Those arrive already composed — shifted, dead-keyed, from a Japanese IME, from dictation —
-    //     which is exactly what we want to send as `.text`.
+    //     letters, digits, punctuation, space and backspace, with or without shift, and return and
+    //     tab without it. Those arrive already composed — shifted, dead-keyed, from a Japanese IME,
+    //     from dictation — which is exactly what we want to send as `.text`.
     //
     //   • Raw path (`.key`) owns only what the text path never delivers: the arrows, escape, the
-    //     function keys, home/end/page up/down, forward delete, ⌘, ⌃ and ⌥ themselves, and *any* key
+    //     function keys, home/end/page up/down, forward delete, ⌘, ⌃ and ⌥ themselves, *any* key
     //     while command, control or option is held, because those combinations are shortcuts (⌘S,
-    //     ⌃A, ⌥←) and never reach `insertText`. Shift alone is not in that list: shift makes
-    //     characters. (ForwardedKeys.goesAsKey.)
+    //     ⌃A, ⌥←) and never reach `insertText`, and return and tab with shift, which the text path
+    //     would hand over as a bare "\n" and "\t" (⇧Return a plain Return on the Mac). Shift alone
+    //     is not otherwise in that list: shift makes characters. (ForwardedKeys.goesAsKey.)
     //
     // Which path a key takes is decided when it goes down, and its up takes the same one whatever the
     // flags say by then (ForwardedKeys): ⌘'s own release and a key let go after ⌘ reach the Mac, and

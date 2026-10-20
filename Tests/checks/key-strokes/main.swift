@@ -1187,12 +1187,27 @@ struct Keyboard {
 }
 
 // Which keys go to the Mac as keys: the ones the text system never delivers, ⌘, ⌃ and ⌥ themselves,
-// and any key while ⌘, ⌃ or ⌥ is held; shift alone makes characters.
+// any key while ⌘, ⌃ or ⌥ is held, and return and tab with shift (their "\n" and "\t" carry none);
+// shift alone otherwise makes characters.
 check([uLeft, uRight, 0x51, 0x52, uEsc, 0x4C, 0x4A, 0x4D, 0x4B, 0x4E, 0x3A, 0x45, uLCmd, uRCmd, uLCtrl, uRCtrl, uLOpt, uROpt]
         .allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: 0) },
       "arrows, escape, forward delete, home, end, page up and down, F1 and F12, ⌘, ⌃, ⌥: as keys")
-check(![uS, uSpace, uReturn, 0x2A, 0x2B, uLShift, uRShift, 0x39].contains { ForwardedKeys.goesAsKey($0, modifiers: shift | capsLock) },
-      "letters, space, return, delete, tab, shift and caps lock with shift: to the text system")
+check(![uS, uSpace, 0x2A, uLShift, uRShift, 0x39].contains { ForwardedKeys.goesAsKey($0, modifiers: shift | capsLock) },
+      "letters, space, delete, shift and caps lock with shift: to the text system")
+check([uReturn, 0x2B].allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: shift) && ForwardedKeys.goesAsKey($0, modifiers: shift | capsLock) },
+      "return and tab with shift: as keys (the text system's \\n and \\t carry no shift)")
+check(![uReturn, 0x2B].contains { ForwardedKeys.goesAsKey($0, modifiers: 0) || ForwardedKeys.goesAsKey($0, modifiers: capsLock) },
+      "return and tab alone, or with caps lock: to the text system (an IME's return confirms its text)")
+// ⇧Return and ⇧Tab: the key's down carries shift (the text system's, so no shift key went), its up
+// the keys down: none; either Mac is left nothing.
+for (u, name) in [(uReturn, "⇧Return"), (UInt16(0x2B), "⇧Tab")] {
+    var kb = Keyboard()
+    let events = kb.press(uLShift) + kb.press(u) + kb.release(u) + kb.release(uLShift)
+    check(events == [key(u, true, shift), key(u, false, 0)], "\(name): \(events)")
+    var mac = Mac(), old = OldMac(); let a = Conn()
+    mac.send(events + tap, from: a); old.send(events + tap)
+    check(mac.table == 0 && mac.broken.isEmpty && old.table == 0 && old.log.last == .pointer(0), "\(name) leaves nothing on either Mac")
+}
 check([uS, uSpace, uReturn, uLShift].allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: command) && ForwardedKeys.goesAsKey($0, modifiers: option)
                                                   && ForwardedKeys.goesAsKey($0, modifiers: control) },
       "any key while ⌘, ⌃ or ⌥ is held: as a key")
@@ -1347,9 +1362,10 @@ do {
 }
 
 // Random sessions on this device alone: its shortcuts (latched or Spotlight), the trackpad's modified
-// clicks and drags, a hardware keyboard (with presses cancelled and the overlay letting go, and Esc
-// through its key command in each order), text and taps. This Mac keeps the invariant after every event; a Mac from before this fix holds no
-// modifier whenever nothing is pressed on the device, and at the end.
+// clicks and drags, a hardware keyboard (with presses cancelled and the overlay letting go, Return
+// and Tab among its keys (⇧Return and ⇧Tab go as keys), and Esc through its key command in each
+// order), text and taps. This Mac keeps the invariant after every event; a Mac from before this fix
+// holds no modifier whenever nothing is pressed on the device, and at the end.
 do {
     var rng = Rng(state: 0xDE71_CE5E)
     var sessions = 0, oldBroken = 0, newBroken = 0, missed = 0, falseReports = 0
@@ -1377,7 +1393,7 @@ do {
                 if let m = drag { send([.pointer(.leftUp, x: 0.2, y: 0.2)] + KeyChord.modifiersUp(m)); drag = nil }
                 else { let m = latched(); send(KeyChord.modifiersDown(m) + [.pointer(.leftDown, x: 0.2, y: 0.2)]); drag = m }
             case 4, 5, 6:
-                let u = rng.pick([uLCmd, uRCmd, uLCtrl, uLOpt, uLShift, uC, uS, uLeft, uEsc, uSpace])
+                let u = rng.pick([uLCmd, uRCmd, uLCtrl, uLOpt, uLShift, uC, uS, uLeft, uEsc, uSpace, uReturn, 0x2B])
                 // Esc, half the time through its key command, in one of the three orders.
                 if u == uEsc, overlay, rng.chance(50) {
                     send(kb.esc(rng.pick([.commandOnly, .pressFirst, .commandFirst])))
