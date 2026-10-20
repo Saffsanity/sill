@@ -5468,7 +5468,18 @@ good.
   `Sill.tourSkipped`, `TouchWatcher`, a recognizer on the window that counts
   every touch and takes none, and DEBUG `TourDebug`); StreamScreen runs it
   (targets, the rule's inputs, the layer above the layouts and under the
-  pairing overlay, Take the Tour from the Settings panel's last row).
+  pairing overlay, Take the Tour from the Settings panel's last row). The
+  connect screen's tiles and groups (issue #116, PR #117): `ConnectionList`
+  (rows or tiles, `Sill.connectionStyle`, the rows by default; when a session's
+  end keeps a picture, `takesPreview`: only with tiles, from the session's own
+  window in front, for a saved Mac; group names, `Sill.macGroups`, and the
+  sections' order; a superseded record's group; the pictures' file names; pure,
+  `Tests/checks/connection-list`; pbxproj AF01/FF01). ConnectScreen draws them
+  (the switch beside the title, the tiles, a saved Mac's Group menu and New
+  Group…), StreamClient+Remote keeps them (`savePreview` with complete file
+  protection in Library/Caches/SillPreviews, `removeAllPreviews` when tiles go),
+  and `tearDown` takes the picture with HEVCDisplayView's `snapshot`, nil while
+  the layer has no picture.
   `Info-Debug.plist` is the Debug configuration's Info.plist: Info.plist's
   keys, with `_silltest._tcp` beside `_sill._tcp` for the harness's
   `-SillServiceType` (Release declares `_sill._tcp` alone).
@@ -5541,7 +5552,7 @@ good.
   sources with `import StreamProtocol` stripped), or a `module.txt` naming the
   files `module.py` compiles as one module (pairing at home's checks):
   `addresses`, `ask-limits`, `cable-link`, `clientlink`, `clipboard`, `compatibility`,
-  `device-gate`, `dmg-layout` (Scripts/dmg-layout's `.DS_Store` and alias
+  `connection-list`, `device-gate`, `dmg-layout` (Scripts/dmg-layout's `.DS_Store` and alias
   writer, against Finder's own layout of the file, make-dmg.sh's layout
   arguments and the SVG's size and edge), `door-policy`, `duo` (DuoPosture;
   `tour` and `phone-portrait` take the Duo's real sizes too), `encoder-mailbox`,

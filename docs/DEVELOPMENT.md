@@ -226,6 +226,21 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
    the cable. A session from away (Remote access, below) keeps its way in until
    it ends.
 
+The connect screen lists the Macs as rows, or, with the button beside "Connect
+to a Mac" (or Show as Tiles in a saved Mac's menu: touch and hold), as tiles:
+two columns from 340 pt wide, one on a narrower screen or at the accessibility
+text sizes. The rows are the default. With tiles on, a saved Mac's tile shows
+its screen as the last session with it ended, a 320 pt JPEG in
+Library/Caches/SillPreviews (never in a backup, unreadable while the device is
+locked), taken only from a window in front; Remove Preview Picture, Forget,
+the Mac's record going and switching back to the list delete it, and the list
+keeps none. A saved Mac's menu also puts it in a group, Home, Work, Personal
+or a name of your own (New Group…): grouped Macs are listed under their
+group's name, the three first, then the others alphabetically, then Other for
+the rest; with no group set the screen is the plain list it always was.
+`iOSClient/ConnectionList.swift` has the rules, checked in
+`Tests/checks/connection-list`.
+
 When a session ends by itself, the device reconnects: the Mac's row at once,
 then, while that row stays listed and nothing answers (a sleeping Mac whose
 record an Apple TV or HomePod keeps up as a Bonjour Sleep Proxy, or a Mac whose
@@ -995,7 +1010,17 @@ simulator:
 - `-SillDrawer 1`, `-SillSettings 1` (with `-SillSettingsCase …` for the
   settings of the mock Mac) and `-SillConnectCase …`: the drawer, the Settings
   panel or the connect screen in a given state.
-- `-SillHUD 1`: fps, frame age, round trip and frame size over the stream.
+- `-SillConnectCase tiles`: the connect screen's tiles (five Macs, three saved
+  with a picture, in Home, Work and Other); `-SillVideoSize 1920x1080` gives
+  the pictures that shape. `-Sill.connectionStyle tiles` (or `list`) and
+  `-Sill.macGroups '{"HOMEPAIRING6":"Home"}'` set the arrangement and the
+  saved Macs' groups, by Mac ID, for one run, in the mock and in the normal
+  app; the groups are never written back. A launch argument outranks the
+  switch beside the title, so to try the switch write the default instead:
+  `xcrun simctl spawn <udid> defaults write me.saffer.sill
+  Sill.connectionStyle tiles`.
+- `-SillHUD 1`: fps, frame age, round trip and frame size over the stream
+  (with tiles on, in the picture a session's end keeps for the Mac's tile).
 - `-SillBrowserFail N` (the normal app and `-SillLive 1`): each of the first N
   network browsers is reported failed as iOS reports a suspended app's
   (-65569), so the device makes it again after 1, 2, 4… s; the simulator's

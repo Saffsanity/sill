@@ -65,6 +65,48 @@ final class HEVCDisplayView: UIView {
                       width: size.width, height: size.height)
     }
 
+    /// Main thread: a keyframe has gone onto the layer since it last lost, or may have lost, its picture
+    /// (`apply`'s flush for a new format, a failed layer's flush in `enqueue`, `clear`). Until then the
+    /// layer shows black, and so would a snapshot of it.
+    private var showsPicture = false
+
+    /// The picture as it shows now, cropped to the video (no letterbox): Capture Screen (full size,
+    /// with the pointer sprite if it shows) or a saved Mac's tile preview (`maxWidth: 320,
+    /// includePointer: false`). Nil when there is no picture to take: no video yet, no frame since the
+    /// layer was flushed, the layer failed or interrupted (iOS takes the decoder from an app in the
+    /// background), or a drawing that came out incomplete (a window not on screen). Main thread.
+    func snapshot(maxWidth: CGFloat? = nil, includePointer: Bool = true) -> UIImage? {
+        let rect = Self.videoRect(in: bounds, videoSize: pointerVideoSize)
+        guard rect.width > 0, rect.height > 0, showsPicture,
+              displayLayer.status != .failed, !displayLayer.requiresFlushToResumeDecoding else { return nil }
+        let width = maxWidth.map { min($0, rect.width) } ?? rect.width
+        let scale = width / rect.width
+        // Whole points, rounded down: a size rounded up takes in a hairline of the letterbox's black.
+        let size = CGSize(width: width.rounded(.down), height: (rect.height * scale).rounded(.down))
+        guard size.width > 0, size.height > 0 else { return nil }
+        let format = UIGraphicsImageRendererFormat.preferred()
+        // The screen's pixels: drawHierarchy draws what the screen shows, so more would only enlarge it.
+        format.scale = maxWidth == nil ? (window?.screen.scale ?? 2) : 2
+        // Without the pointer: the sprite is held back while the picture is drawn, and drawn after the
+        // screen has caught up with that. drawHierarchy draws what the screen shows, which a hide still
+        // in this run loop's transaction has not reached (flushing it first was not enough: the
+        // pointer stayed in 1 picture of 3 in the simulator).
+        let hidesPointer = !includePointer && !cursorLayer.isHidden
+        if hidesPointer { pointerHeldBack = true; placeCursor() }
+        defer { if hidesPointer { pointerHeldBack = false; placeCursor() } }
+        var drawn = false
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            drawn = drawHierarchy(in: CGRect(x: -rect.minX * scale, y: -rect.minY * scale,
+                                             width: bounds.width * scale, height: bounds.height * scale),
+                                  afterScreenUpdates: hidesPointer)
+        }
+        return drawn ? image : nil
+    }
+
+    /// A snapshot without the pointer is being drawn: the sprite stays hidden whatever moves it meanwhile
+    /// (`placeCursor`, which a layout pass during the drawing runs). Main thread.
+    private var pointerHeldBack = false
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .black
@@ -180,7 +222,7 @@ final class HEVCDisplayView: UIView {
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
         let rect = Self.videoRect(in: bounds, videoSize: pointerVideoSize)
-        guard let p = pointer, rect.width > 0, rect.height > 0 else {
+        guard let p = pointer, rect.width > 0, rect.height > 0, !pointerHeldBack else {
             cursorLayer.isHidden = true
             return
         }
@@ -255,6 +297,7 @@ final class HEVCDisplayView: UIView {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.pointerVideoSize = size
+            self.showsPicture = false       // flushed below until the next keyframe (snapshot)
             self.onVideoSize?(size)
             self.placeCursor()
             self.onVideoSizeForPointer?(size)
@@ -273,12 +316,14 @@ final class HEVCDisplayView: UIView {
         // The pointer's copy of the size is main-thread state; the client zeroes its own alongside.
         DispatchQueue.main.async { [weak self] in
             self?.pointerVideoSize = .zero
+            self?.showsPicture = false
             self?.placeCursor()
         }
     }
 
     func enqueue(_ data: Data, isKeyframe: Bool) {
         guard let desc = formatDescription else { return }
+        let resuming = waitingForKeyframe
         if waitingForKeyframe {
             guard isKeyframe else { return }
             waitingForKeyframe = false
@@ -313,9 +358,12 @@ final class HEVCDisplayView: UIView {
             print("display layer failed: \(String(describing: displayLayer.error))")
             displayLayer.flush()
             waitingForKeyframe = true
+            DispatchQueue.main.async { [weak self] in self?.showsPicture = false }
             return
         }
         displayLayer.enqueue(sample)
+        // The keyframe that ends a wait gives the layer its picture again (snapshot).
+        if resuming { DispatchQueue.main.async { [weak self] in self?.showsPicture = true } }
     }
 }
 

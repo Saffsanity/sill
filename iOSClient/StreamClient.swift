@@ -159,6 +159,10 @@ final class StreamClient: ObservableObject {
     // Remote access (StreamClient+Remote.swift). Published on main; the DEBUG harness seeds them.
     /// The Macs this device paired with (SavedMacs), persisted in `SavedMacs.defaultsKey`.
     @Published var savedMacs: [SavedMac] = []
+    /// Custom group names assigned to saved Macs (ConnectionList), persisted in `ConnectionList.groupsKey`.
+    @Published var macGroups: [String: String] = [:]
+    /// Last-stream preview pictures for saved Macs (ConnectionList), stored in Caches/SillPreviews.
+    @Published var macPreviews: [String: UIImage] = [:]
     /// This connection's latest kind 18: who the Mac is and how to reach it from afar. Verified
     /// against the pin when the Mac is a saved one; otherwise decoded unverified, shown in the
     /// panel's Away from home group and never saved.
@@ -880,6 +884,8 @@ final class StreamClient: ObservableObject {
 
     /// DEBUG: saved Macs seeded for this run by `-Sill.savedMacs '<JSON>'`; nothing is written back.
     private(set) var savedMacsSeeded = false
+    /// DEBUG: Mac groups seeded for this run by `-Sill.macGroups '<JSON>'`; nothing is written back.
+    private(set) var macGroupsSeeded = false
 
     init() {
         // The hello is built here, on the main thread: it reads UIDevice (the device's name), which
@@ -895,6 +901,12 @@ final class StreamClient: ObservableObject {
         } else {
             savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
         }
+        if let i = arguments.firstIndex(of: "-" + ConnectionList.groupsKey), i + 1 < arguments.count {
+            macGroups = ConnectionList.decodeGroups(arguments[i + 1])
+            macGroupsSeeded = true
+        } else {
+            macGroups = ConnectionList.decodeGroups(UserDefaults.standard.string(forKey: ConnectionList.groupsKey))
+        }
         // A bracketed IPv6 address starts so too (`-SillConnect '[::1]:P'`): an address argument
         // the argument domain dropped goes into the registration domain (this run's memory, never
         // saved), where every reader of UserDefaults finds it. Its readers are this client's
@@ -906,7 +918,9 @@ final class StreamClient: ObservableObject {
         }
         #else
         savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
+        macGroups = ConnectionList.decodeGroups(UserDefaults.standard.string(forKey: ConnectionList.groupsKey))
         #endif
+        loadSavedPreviews()
         // Back from the background: the pings stopped while the app was suspended, which is no loss;
         // and the browsers, whose connection to mDNSResponder iOS may have made defunct meanwhile, are
         // made again (`cameForward`, issue #69).
@@ -3110,6 +3124,26 @@ final class StreamClient: ObservableObject {
         sessionHost = nil
         refusedListing = nil
         resetHomeMove()
+        // A saved Mac's tile shows its screen as the last session ended, kept only while tiles are on and
+        // only from this session's own window in front (ConnectionList.takesPreview): the window's
+        // scene, not the app, since one of two Sill windows can be behind while the app is active, and
+        // a window behind draws nothing. The snapshot is nil while the picture is black or interrupted.
+        if connected, videoSize != .zero, let macID = session?.macID {
+            let inFront = displayView.window?.windowScene?.activationState == .foregroundActive
+            if ConnectionList.takesPreview(style: connectionStyle, sceneActive: inFront, saved: savedMac(macID) != nil) {
+                if let preview = displayView.snapshot(maxWidth: 320, includePointer: false) {
+                    savePreview(preview, for: macID)
+                } else {
+                    #if DEBUG
+                    print("tiles: no picture of \(macID) kept: the layer had none to give (black or interrupted)")
+                    #endif
+                }
+            } else {
+                #if DEBUG
+                print("tiles: no picture of \(macID) kept: \(connectionStyle), window in front \(inFront), saved \(savedMac(macID) != nil)")
+                #endif
+            }
+        }
         queue.async { self.lastParameterSets = nil; self.pendingMove = nil; self.stopMeasuring() }
         firstListDeadline?.cancel()
         firstListDeadline = nil

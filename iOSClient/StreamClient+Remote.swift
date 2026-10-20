@@ -174,6 +174,10 @@ extension StreamClient {
     /// Writes the list only (`recomputeMacs` itself writes what it learns of a Mac's door).
     func storeSavedMacs() {
         if !savedMacsSeeded { UserDefaults.standard.set(SavedMacs.encode(savedMacs), forKey: SavedMacs.defaultsKey) }
+        pruneSavedPreviews()
+        guard !savedMacsSeeded else { return }
+        let kept = Set(savedMacs.map(\.macID))
+        for macID in macGroups.keys where !kept.contains(macID) { setGroup(nil, for: macID) }
     }
 
     /// Forget: the record only. The Mac lists this device until it is removed there, and the
@@ -184,8 +188,105 @@ extension StreamClient {
         savedMacs.removeAll { $0.macID == macID }
         savedSightings.since[macID] = nil
         savedSightings.leftAt[macID] = nil
+        setGroup(nil, for: macID)
+        removePreview(for: macID)
         persistSavedMacs()
         status = "Forgot \(name). It still lists this \(Self.deviceWord) until you remove it in Sill’s Settings on the Mac."
+    }
+
+    // MARK: Connection groups and preview pictures (ConnectionList)
+
+    func setGroup(_ group: String?, for macID: String) {
+        storeGroups(ConnectionList.settingGroup(group, for: macID, in: macGroups))
+    }
+
+    /// A record retired for a newer one of the same Mac (SavedMacs.superseding, a re-pairing that
+    /// replaced a record whose Mac has a new key) gives its group to that one; before the list is
+    /// stored, which drops the groups of records no longer saved.
+    func carryGroup(from old: String, to new: String) {
+        storeGroups(ConnectionList.carryingGroup(from: old, to: new, in: macGroups))
+    }
+
+    private func storeGroups(_ next: [String: String]) {
+        guard next != macGroups else { return }
+        macGroups = next
+        if !macGroupsSeeded {
+            UserDefaults.standard.set(ConnectionList.encodeGroups(macGroups), forKey: ConnectionList.groupsKey)
+        }
+    }
+
+    /// The connect screen's arrangement as stored (`Sill.connectionStyle`, which ConnectScreen's switch
+    /// and a saved Mac's menu set): pictures are kept only with tiles (ConnectionList.takesPreview).
+    var connectionStyle: ConnectionList.Style {
+        ConnectionList.storedStyle(UserDefaults.standard.string(forKey: ConnectionList.styleKey))
+    }
+
+    /// Caches: never in a backup, and iOS may empty it, which costs a tile its picture until the next
+    /// session ends.
+    private static var previewsDirectory: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("SillPreviews", isDirectory: true)
+    }
+
+    /// At launch: each saved Mac's picture while tiles are on. With the list there are none to show, and
+    /// none may stay: any left behind go.
+    func loadSavedPreviews() {
+        guard connectionStyle == .tiles else { removeAllPreviews(); return }
+        guard let dir = Self.previewsDirectory else { return }
+        var loaded: [String: UIImage] = [:]
+        for mac in savedMacs {
+            guard let name = ConnectionList.previewFileName(for: mac.macID),
+                  let data = try? Data(contentsOf: dir.appendingPathComponent(name)),
+                  let image = UIImage(data: data) else { continue }
+            loaded[mac.macID] = image
+        }
+        macPreviews = loaded
+        pruneSavedPreviews()
+    }
+
+    /// A session's end with tiles on (`tearDown`). The file has complete protection: unreadable while
+    /// the device is locked. Sill reads it only at launch and writes it only from a window in front, so
+    /// both happen while the device is unlocked.
+    func savePreview(_ image: UIImage, for macID: String) {
+        guard let name = ConnectionList.previewFileName(for: macID) else { return }
+        macPreviews[macID] = image
+        guard !savedMacsSeeded, let dir = Self.previewsDirectory,
+              let data = image.jpegData(compressionQuality: 0.72) else { return }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
+                                                 attributes: [.protectionKey: FileProtectionType.complete])
+        let file = dir.appendingPathComponent(name)
+        try? data.write(to: file, options: [.atomic, .completeFileProtection])
+        #if DEBUG
+        let protection = (try? FileManager.default.attributesOfItem(atPath: file.path))?[.protectionKey] as? FileProtectionType
+        print("tiles: kept the picture of \(macID), \(data.count / 1024) KB, protection \(protection?.rawValue ?? "not reported")")
+        #endif
+    }
+
+    func removePreview(for macID: String) {
+        macPreviews.removeValue(forKey: macID)
+        guard let dir = Self.previewsDirectory, let name = ConnectionList.previewFileName(for: macID) else { return }
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent(name))
+    }
+
+    /// Tiles turned off (ConnectScreen, for its switch and a saved Mac's menu), or the list at launch:
+    /// every picture goes, shown and stored.
+    func removeAllPreviews() {
+        if !macPreviews.isEmpty { macPreviews = [:] }
+        guard let dir = Self.previewsDirectory, FileManager.default.fileExists(atPath: dir.path) else { return }
+        try? FileManager.default.removeItem(at: dir)
+        #if DEBUG
+        print("tiles: the list: every picture deleted")
+        #endif
+    }
+
+    func pruneSavedPreviews() {
+        let kept = Set(savedMacs.map(\.macID))
+        if macPreviews.keys.contains(where: { !kept.contains($0) }) { macPreviews = macPreviews.filter { kept.contains($0.key) } }
+        guard !savedMacsSeeded, let dir = Self.previewsDirectory,
+              let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return }
+        for stale in ConnectionList.stalePreviewFiles(in: files, keepingMacIDs: kept) {
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent(stale))
+        }
     }
 
     /// The card's Cancel while a pairing dial runs: it stops, nothing is saved. The home card's too:
@@ -334,6 +435,7 @@ extension StreamClient {
                     print("remote: \(winner.candidate.key) answered with the key of \(newer.macID), saved after \(macID): \(macID) superseded")
                     #endif
                     self.savedMacs = SavedMacs.superseding(old: macID, by: newer.macID, proof: winner.candidate.key, in: self.savedMacs)
+                    if self.savedMac(macID) == nil { self.carryGroup(from: macID, to: newer.macID) }
                     self.persistSavedMacs()
                     if self.reconnect?.macID == macID { self.reconnect?.macID = newer.macID }
                     macID = newer.macID

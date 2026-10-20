@@ -996,7 +996,10 @@ extension StreamClient {
                            lastConnectedAt: nil, lastRoute: nil, homeTLS: true, revoked: nil)
         if let info { mac = SavedMacs.refreshed(mac, info: info, fingerprint: fingerprint, allowLoopback: Self.keepsLoopback) ?? mac }
         savedMacs = SavedMacs.adding(mac, to: savedMacs)
-        if let old = replaces { savedMacs = SavedMacs.replacingNewKey(old: old, new: macID, in: savedMacs) }
+        if let old = replaces {
+            savedMacs = SavedMacs.replacingNewKey(old: old, new: macID, in: savedMacs)
+            if savedMac(old) == nil { carryGroup(from: old, to: macID) }
+        }
         persistSavedMacs()
         return macID
     }
