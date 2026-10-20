@@ -362,3 +362,162 @@ package enum MacClipboard {
         }
     }
 }
+
+/// Files sent from a device (kinds 34 and 35, `FileChunk` and `FileDrop`, Roadmap Item 8 / pull
+/// request #66): chunks are written into `~/Downloads/From ‹device›/`, and when `FileDrop` arrives
+/// they are dragged onto the streamed window at the drop point (or revealed in Finder when no
+/// window rect is active). Main actor.
+@MainActor
+final class FileDrops: NSObject, NSDraggingSource {
+    private struct FileKey: Hashable {
+        let from: ObjectIdentifier
+        let id: UInt32
+    }
+    private struct Incoming {
+        let url: URL
+        let handle: FileHandle
+        let total: UInt64
+        var written: UInt64
+    }
+    private var incoming: [FileKey: Incoming] = [:]
+    private var done: [FileKey: URL] = [:]
+    private var panel: NSPanel?
+    private var pending: [URL] = []
+
+    func chunk(_ payload: Data, device: String, from connection: NWConnection) {
+        guard let c = FileChunk.unpack(payload),
+              c.total <= FileChunk.maxTotal,
+              c.offset <= c.total,
+              c.offset + UInt64(c.bytes.count) <= c.total else { return }
+        let key = FileKey(from: ObjectIdentifier(connection), id: c.id)
+        if c.offset == 0 {
+            if let old = incoming.removeValue(forKey: key) {
+                try? old.handle.close()
+                try? FileManager.default.removeItem(at: old.url)
+            }
+            if let oldDone = done.removeValue(forKey: key) {
+                try? FileManager.default.removeItem(at: oldDone)
+            }
+            let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+                ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads", isDirectory: true)
+            let folder = downloads.appendingPathComponent("From \(FileChunk.safeName(device))", isDirectory: true)
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let url = Self.unique(folder.appendingPathComponent(FileChunk.safeName(c.name)))
+            guard FileManager.default.createFile(atPath: url.path, contents: nil),
+                  let handle = try? FileHandle(forWritingTo: url) else {
+                print("File drop: could not write \(url.path)")
+                return
+            }
+            incoming[key] = Incoming(url: url, handle: handle, total: c.total, written: 0)
+        }
+        guard var file = incoming[key], c.offset == file.written else { return }
+        if !c.bytes.isEmpty {
+            file.handle.write(c.bytes)
+            file.written += UInt64(c.bytes.count)
+        }
+        if file.written >= file.total {
+            try? file.handle.close()
+            incoming[key] = nil
+            done[key] = file.url
+        } else {
+            incoming[key] = file
+        }
+    }
+
+    func clientLeft(_ connection: NWConnection) {
+        let gone = ObjectIdentifier(connection)
+        for (key, file) in incoming where key.from == gone {
+            try? file.handle.close()
+            try? FileManager.default.removeItem(at: file.url)
+            incoming[key] = nil
+        }
+        for (key, url) in done where key.from == gone {
+            done[key] = nil
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    func drop(_ drop: FileDrop, at point: CGPoint?, device: String, from connection: NWConnection) {
+        let owner = ObjectIdentifier(connection)
+        let urls = drop.files.compactMap { id -> URL? in
+            done.removeValue(forKey: FileKey(from: owner, id: id))
+        }
+        guard !urls.isEmpty else {
+            print("File drop from \(device): no file arrived whole; nothing dropped")
+            return
+        }
+        guard let point else {
+            print("File drop from \(device): saved \(urls.map(\.lastPathComponent).joined(separator: ", ")) in Downloads")
+            NSWorkspace.shared.activateFileViewerSelecting(urls)
+            return
+        }
+        print("File drop from \(device): \(urls.map(\.lastPathComponent).joined(separator: ", ")) at \(Int(point.x)),\(Int(point.y))")
+        showPanel(for: urls, at: point)
+        let source = CGEventSource(stateID: .hidSystemState)
+        func post(_ type: CGEventType, _ at: CGPoint, after: Double) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + after) {
+                CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: at, mouseButton: .left)?.post(tap: .cghidEventTap)
+            }
+        }
+        post(.mouseMoved, point, after: 0.05)
+        post(.leftMouseDown, point, after: 0.1)
+        post(.leftMouseDragged, CGPoint(x: point.x + 6, y: point.y + 6), after: 0.2)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.panel?.orderOut(nil) }
+        post(.leftMouseDragged, CGPoint(x: point.x + 2, y: point.y + 2), after: 0.4)
+        post(.leftMouseDragged, point, after: 0.55)
+        post(.leftMouseUp, point, after: 0.75)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.hidePanel() }
+    }
+
+    private func showPanel(for urls: [URL], at point: CGPoint) {
+        hidePanel()
+        pending = urls
+        let screenH = NSScreen.screens.first?.frame.height ?? 0
+        let p = NSPanel(contentRect: NSRect(x: point.x - 4, y: screenH - point.y - 4, width: 8, height: 8),
+                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        p.level = .screenSaver
+        p.isOpaque = false
+        p.backgroundColor = NSColor.black.withAlphaComponent(0.01)
+        p.hidesOnDeactivate = false
+        let view = FileDropStartView(frame: NSRect(x: 0, y: 0, width: 8, height: 8))
+        view.onPress = { [weak self] event in self?.begin(from: view, event: event) }
+        p.contentView = view
+        p.orderFrontRegardless()
+        panel = p
+    }
+
+    private func hidePanel() {
+        panel?.close()
+        panel = nil
+    }
+
+    private func begin(from view: NSView, event: NSEvent) {
+        let items = pending.map { url -> NSDraggingItem in
+            let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+            item.setDraggingFrame(NSRect(x: 0, y: 0, width: 8, height: 8), contents: NSWorkspace.shared.icon(forFile: url.path))
+            return item
+        }
+        guard !items.isEmpty else { return }
+        view.beginDraggingSession(with: items, event: event, source: self)
+    }
+
+    nonisolated func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        [.copy, .move, .generic, .link]
+    }
+
+    private static func unique(_ url: URL) -> URL {
+        var candidate = url, n = 2
+        let base = url.deletingPathExtension().lastPathComponent, ext = url.pathExtension
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            candidate = url.deletingLastPathComponent().appendingPathComponent(ext.isEmpty ? "\(base) \(n)" : "\(base) \(n).\(ext)")
+            n += 1
+        }
+        return candidate
+    }
+}
+
+private final class FileDropStartView: NSView {
+    var onPress: ((NSEvent) -> Void)?
+    override func mouseDown(with event: NSEvent) { onPress?(event) }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}

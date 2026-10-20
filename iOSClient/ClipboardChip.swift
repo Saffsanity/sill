@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import StreamProtocol
 
 /// The clipboard's chip over the stream (docs/clipboard-plan.md): "Paste on ‹Mac›", then press ⌘V
@@ -105,5 +106,35 @@ struct ClipboardPasteButton: View {
         .tint(Palette.accent)
         .accessibilityHint(ClipboardPolicy.Copy.pasteHint(mac: client.macName.isEmpty ? "the Mac" : client.macName,
                                                           device: StreamClient.deviceWord))
+    }
+}
+
+/// "Send Files to ‹Mac›…" in Settings › This iPad / This iPhone (Roadmap Item 8): opens the
+/// system file picker and sends the chosen files to `~/Downloads/From ‹device›/` on the Mac.
+struct SendFileRow: View {
+    @ObservedObject var client: StreamClient
+    let mac: String
+    @State private var importing = false
+
+    var body: some View {
+        Button(action: { importing = true }) {
+            HStack(spacing: 8) {
+                Text("Send Files to \(mac)…")
+                    .foregroundStyle(Palette.accent)
+                Spacer(minLength: 8)
+                Image(systemName: "arrow.up.doc")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Palette.muted)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .padding(.horizontal, 14)
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result {
+                client.sendFileURLs(urls)
+            }
+        }
     }
 }

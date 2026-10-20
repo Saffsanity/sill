@@ -787,6 +787,8 @@ final class StreamClient: ObservableObject {
     /// Mac takes and sends (`WindowList.clipboard`, 1 for text), nil from a Mac before it or with Share
     /// clipboard with devices off. Cleared with the session.
     @Published var hostClipboard: Int?
+    /// Whether this session's Mac accepts dropped files (`WindowList.fileDrop`, kinds 34 and 35).
+    @Published var hostFileDrop = false
     /// The chip "Paste on ‹Mac›" is offered (ClipboardPolicy.offersChip) until it is used, dismissed or
     /// its time is up; the stream screen hides it while something is open over the stream.
     @Published var clipboardChip = false
@@ -3119,6 +3121,7 @@ final class StreamClient: ObservableObject {
         hostVersion = nil
         hostProtocol = nil
         hostGestures = nil
+        hostFileDrop = false
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -3631,6 +3634,7 @@ final class StreamClient: ObservableObject {
                 if self.hostVersion != list.hostVersion { self.hostVersion = list.hostVersion }
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
+                if self.hostFileDrop != (list.fileDrop == true) { self.hostFileDrop = (list.fileDrop == true) }
                 // The clipboard: subscribe (or stop) as the Mac's word and this device's switch say.
                 self.hostClipboardChanged(list.clipboard)
                 if !self.sessionListed {
