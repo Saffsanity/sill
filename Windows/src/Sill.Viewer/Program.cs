@@ -17,6 +17,12 @@ static class Program
     [STAThread]
     static int Main(string[] args)
     {
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+        // Sill.exe started with no options from anywhere but its installed place offers to install
+        // itself (SelfInstall); the spike's Sill.Viewer.exe and any launch with options skip this.
+        if (SelfInstall.OfferAtStartup(args)) return 0;
         string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sill", "spike");
         var hosts = new List<string>();
         string decoder = "auto"; int? adapter = null;
@@ -28,10 +34,10 @@ static class Program
             else if (args[i] == "--adapter" && int.TryParse(args[i + 1], out int n)) adapter = n;
             else { MessageBox.Show($"Unknown option {args[i]}.", "Sill Viewer"); return 2; }
         }
-        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
-        Application.Run(new ViewerForm(dir, hosts, new ViewerOptions(decoder, adapter)));
+        var form = new ViewerForm(dir, hosts, new ViewerOptions(decoder, adapter));
+        // Sill.exe checks GitHub for a newer release (UpdatePrompt); the spike's Sill.Viewer.exe doesn't.
+        UpdatePrompt.Start(form);
+        Application.Run(form);
         return 0;
     }
 }

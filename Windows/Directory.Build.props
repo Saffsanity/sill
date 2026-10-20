@@ -7,5 +7,12 @@
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Sill's one version for every platform (docs/release-checklist.md): Packaging/Info.plist's
+         CFBundleShortVersionString and the iOS app's MARKETING_VERSION. The release workflow passes
+         the tag's (-p:Version=…) and checks that it equals this. -->
+    <Version>0.5.1</Version>
+    <Product>Sill</Product>
+    <Company>Noah Saffer</Company>
+    <Copyright>Copyright 2026 Noah Saffer</Copyright>
   </PropertyGroup>
 </Project>
