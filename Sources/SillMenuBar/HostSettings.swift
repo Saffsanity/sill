@@ -45,6 +45,7 @@ final class HostSettings {
         static let logShowsStats = "logShowsStats"
         static let updateCheck = "updateCheck"
         static let shareClipboard = "shareClipboard"
+        static let privacyMode = "privacyMode", lockOnDisconnect = "lockOnDisconnect"
     }
 
     var config: HostConfig {
@@ -89,6 +90,23 @@ final class HostSettings {
         }
     }
     @ObservationIgnored var onUpdateCheckChange: (@MainActor () -> Void)?
+    /// Privacy Mode (issues #133 and #141): blanks the Mac's physical displays while a device is
+    /// connected, and optionally locks the Mac when the last connected device disconnects.
+    var privacyMode: Bool {
+        didSet {
+            guard privacyMode != oldValue else { return }
+            defaults.set(privacyMode, forKey: Key.privacyMode)
+            onPrivacyChange?()
+        }
+    }
+    var lockOnDisconnect: Bool {
+        didSet {
+            guard lockOnDisconnect != oldValue else { return }
+            defaults.set(lockOnDisconnect, forKey: Key.lockOnDisconnect)
+            onPrivacyChange?()
+        }
+    }
+    @ObservationIgnored var onPrivacyChange: (@MainActor () -> Void)?
 
     @ObservationIgnored private let defaults: UserDefaults
 
@@ -113,6 +131,8 @@ final class HostSettings {
             Key.updateCheck: true,
             // On, like the CLI: each device has its own switch, and a password manager's copies never go.
             Key.shareClipboard: standard.shareClipboard,
+            Key.privacyMode: false,
+            Key.lockOnDisconnect: false,
         ])
         config = HostConfig(maxFPS: defaults.integer(forKey: Key.maxFPS),
                             captureScale: CGFloat(defaults.double(forKey: Key.captureScale)),
@@ -132,6 +152,8 @@ final class HostSettings {
                             shareClipboard: defaults.bool(forKey: Key.shareClipboard)).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         updateCheck = defaults.bool(forKey: Key.updateCheck)
+        privacyMode = defaults.bool(forKey: Key.privacyMode)
+        lockOnDisconnect = defaults.bool(forKey: Key.lockOnDisconnect)
         settingsTab = defaults.string(forKey: Key.settingsTab).flatMap(SettingsTab.init(rawValue:)) ?? .general
         permissionsOnboardingDismissed = defaults.bool(forKey: Key.permissionsOnboardingDismissed)
         askedScreenRecording = defaults.bool(forKey: Key.askedScreenRecording)

@@ -78,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if terminating { return .terminateNow }
         terminating = true
+        model.tearDownPrivacyForQuit()
         let coordinator = model.coordinator
         guard let c = coordinator, c.stagedWindowIsFullScreen else {
             HostShutdown.releaseForQuit(coordinator: coordinator)
