@@ -47,6 +47,9 @@ struct HostSettingsPanel: View {
     /// Whether the switch is offered here, the stream screen's say (`largerPictureOffered`): only on an
     /// iPhone without a hinge whose picture it makes larger.
     @Environment(\.largerPictureOffered) private var offersLargerPicture
+    /// This device's switch for On-Screen Trackpad in iPad landscape (issue #63): off unless turned on.
+    @AppStorage(LandscapeTrackpad.key) private var landscapeTrackpad = false
+    @Environment(\.landscapeTrackpadOffered) private var offersLandscapeTrackpad
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
@@ -485,6 +488,15 @@ struct HostSettingsPanel: View {
             }
             Footnote(text: Self.largerPictureFooter)
         }
+        if offersLandscapeTrackpad {
+            Rows {
+                Toggle(isOn: $landscapeTrackpad) {
+                    Text(LandscapeTrackpad.Copy.toggleTitle).foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+            }
+            Footnote(text: LandscapeTrackpad.Copy.footnote)
+        }
         // The clipboard (docs/clipboard-plan.md): only while the Mac says it shares it.
         if ClipboardPolicy.hostTakes(client.hostClipboard) {
             Rows {
@@ -890,4 +902,12 @@ extension EnvironmentValues {
         get { self[LargerPictureOfferedKey.self] }
         set { self[LargerPictureOfferedKey.self] = newValue }
     }
+    var landscapeTrackpadOffered: Bool {
+        get { self[LandscapeTrackpadOfferedKey.self] }
+        set { self[LandscapeTrackpadOfferedKey.self] = newValue }
+    }
+}
+
+private struct LandscapeTrackpadOfferedKey: EnvironmentKey {
+    static let defaultValue = false
 }

@@ -365,3 +365,42 @@ struct PhonePortraitLayout: Equatable {
         }
     }
 }
+
+/// On-Screen Trackpad in Landscape mode on an iPad (issue #63): when the switch is offered in
+/// Settings › This iPad, when the bottom trackpad is shown in landscape, how tall it is, and when
+/// the client-side pointer sprite is shown. Pure (`CoreGraphics` + `Foundation`).
+enum LandscapeTrackpad {
+    static let key = "Sill.landscapeTrackpad"
+    static let minContentHeight: CGFloat = 360
+    static let minHeight: CGFloat = 160
+    static let maxHeight: CGFloat = 220
+    static let heightFraction: CGFloat = 0.28
+    static let padSide: CGFloat = 14
+    static let padBottom: CGFloat = 14
+
+    /// Offered in Settings › This iPad only on an iPad (not a phone or a foldable Duo).
+    static func offered(isPhone: Bool, foldable: Bool) -> Bool {
+        !isPhone && !foldable
+    }
+
+    /// Active when the user turned on the switch, the screen is in landscape (`!isPortrait`),
+    /// the device is an iPad (`!isPhone && !foldable`), and the content area is at least 360 pt tall.
+    static func active(switchOn: Bool, isPortrait: Bool, isPhone: Bool, foldable: Bool, contentHeight: CGFloat) -> Bool {
+        switchOn && !isPortrait && !isPhone && !foldable && contentHeight >= minContentHeight
+    }
+
+    /// Height of the trackpad well in landscape: 28 % of the content area, clamped to 160…220 pt.
+    static func trackpadHeight(for contentHeight: CGFloat) -> CGFloat {
+        min(maxHeight, max(minHeight, (contentHeight * heightFraction).rounded(.down)))
+    }
+
+    /// Whether the device draws its own pointer sprite for the on-screen trackpad (`PointerPresence`).
+    static func showsPointer(isPortrait: Bool, landscapeTrackpad: Bool) -> Bool {
+        isPortrait || landscapeTrackpad
+    }
+
+    enum Copy {
+        static let toggleTitle = "On-Screen Trackpad"
+        static let footnote = "Adds a trackpad below the stream when this iPad is held sideways, so you can move the pointer, click and scroll with two fingers without a hardware trackpad or mouse."
+    }
+}

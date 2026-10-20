@@ -103,6 +103,25 @@ MUTANTS = {
     "S3 what streams ignored (the Desktop and nothing with Larger Picture, as before 2026-10-15)": ("switchOn && streaming == .window", "switchOn"),
     "S4 the switch ignored while a window streams": ("switchOn && streaming == .window", "streaming == .window"),
     "S5 the rule turned around (the Desktop larger, a window not)": ("switchOn && streaming == .window", "switchOn && streaming != .window"),
+    # On-Screen Trackpad in Landscape on iPad (issue #63).
+    "T1 offered on an iPhone": ("static func offered(isPhone: Bool, foldable: Bool) -> Bool {\n        !isPhone && !foldable",
+                                "static func offered(isPhone: Bool, foldable: Bool) -> Bool {\n        isPhone || !foldable"),
+    "T2 offered on the Duo": ("static func offered(isPhone: Bool, foldable: Bool) -> Bool {\n        !isPhone && !foldable",
+                              "static func offered(isPhone: Bool, foldable: Bool) -> Bool {\n        !isPhone"),
+    "T3 active with switch off": ("switchOn && !isPortrait && !isPhone && !foldable && contentHeight >= minContentHeight",
+                                  "!isPortrait && !isPhone && !foldable && contentHeight >= minContentHeight"),
+    "T4 active in portrait": ("switchOn && !isPortrait && !isPhone && !foldable && contentHeight >= minContentHeight",
+                              "switchOn && !isPhone && !foldable && contentHeight >= minContentHeight"),
+    "T5 active on an iPhone": ("switchOn && !isPortrait && !isPhone && !foldable && contentHeight >= minContentHeight",
+                               "switchOn && !isPortrait && !foldable && contentHeight >= minContentHeight"),
+    "T6 active on the Duo": ("switchOn && !isPortrait && !isPhone && !foldable && contentHeight >= minContentHeight",
+                             "switchOn && !isPortrait && !isPhone && contentHeight >= minContentHeight"),
+    "T7 active below 360 pt": ("contentHeight >= minContentHeight", "contentHeight > 0"),
+    "T8 trackpadHeight not clamped to minHeight": ("min(maxHeight, max(minHeight, (contentHeight * heightFraction).rounded(.down)))",
+                                                   "min(maxHeight, (contentHeight * heightFraction).rounded(.down))"),
+    "T9 trackpadHeight not clamped to maxHeight": ("min(maxHeight, max(minHeight, (contentHeight * heightFraction).rounded(.down)))",
+                                                   "max(minHeight, (contentHeight * heightFraction).rounded(.down))"),
+    "T10 showsPointer ignores landscapeTrackpad": ("isPortrait || landscapeTrackpad", "isPortrait"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

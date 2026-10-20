@@ -173,6 +173,8 @@ struct StreamScreen: View {
     /// This device's Larger Picture switch (the Settings panel's This iPhone; docs/larger-picture-plan.md).
     /// It acts only while a window streams (`largerPictureNow`).
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
+    /// This device's On-Screen Trackpad switch in iPad landscape (issue #63).
+    @AppStorage(LandscapeTrackpad.key) private var landscapeTrackpad = false
     /// Larger Picture as it was in effect when the Settings panel opened (`largerPictureNow`), which
     /// the arrangement keeps until the panel closes; nil while it is closed. The panel hangs under row
     /// 1, which the arrangement moves by the picture's growth (157 pt on an 18 Pro Max), so a change
@@ -234,13 +236,25 @@ struct StreamScreen: View {
             // makes larger, judged on this screen held upright, whichever way it is held now.
             let offersLarger = DuoLayout.phoneArrangement && posture.hinge == .unknown
                 && PhonePortraitLayout.offersLargerPicture(screen: geo.size)
+            let offersLandscapeTrackpad = LandscapeTrackpad.offered(isPhone: DuoLayout.phoneArrangement,
+                                                                    foldable: posture.hinge != .unknown)
+            let barHeight = duo == .innerLandscape ? BarMetrics.regular.height : BarMetrics.compact.height
+            let landscapePadActive = LandscapeTrackpad.active(
+                switchOn: landscapeTrackpad,
+                isPortrait: duo.isPortrait,
+                isPhone: DuoLayout.phoneArrangement,
+                foldable: posture.hinge != .unknown,
+                contentHeight: geo.size.height - barHeight
+            )
             ZStack {
                 Group {
                     switch duo {
                     case .innerLandscape:
-                        landscape(bar: .regular, width: geo.size.width, fold: posture.info(in: geo.size))
+                        landscape(bar: .regular, width: geo.size.width, fold: posture.info(in: geo.size),
+                                  trackpadHeight: landscapePadActive ? LandscapeTrackpad.trackpadHeight(for: geo.size.height - barHeight) : nil)
                     case .outerLandscape:
-                        landscape(bar: .compact, width: geo.size.width, fold: posture.info(in: geo.size))
+                        landscape(bar: .compact, width: geo.size.width, fold: posture.info(in: geo.size),
+                                  trackpadHeight: landscapePadActive ? LandscapeTrackpad.trackpadHeight(for: geo.size.height - barHeight) : nil)
                     case .innerPortrait:
                         portrait(metrics: .regular)
                     case .outerPortrait:
@@ -250,10 +264,10 @@ struct StreamScreen: View {
                 // Under the pairing overlay and the tour nothing takes a touch: not the bar, and
                 // not the stream's UIKit input view (nor, so, the Pencil, a hover or a key).
                 .allowsHitTesting(!overlayShown && tour == nil)
-                // The pointer sprite follows the layout: the trackpad's arrow shows only in the
-                // laptop layout, and a rotation re-renders it at once; the Mac's arrow stays.
-                .onChange(of: DuoLayout.of(geo.size).isPortrait, initial: true) { _, portrait in
-                    client.setPointerLayout(portrait: portrait)
+                // The pointer sprite follows the layout: the trackpad's arrow shows in the laptop
+                // layout and in iPad landscape when On-Screen Trackpad is active; the Mac's arrow stays.
+                .onChange(of: LandscapeTrackpad.showsPointer(isPortrait: duo.isPortrait, landscapeTrackpad: landscapePadActive), initial: true) { _, shows in
+                    client.setPointerLayout(portrait: shows)
                 }
                 // The clipboard's chip on screen or not: its 20 s run only while it is, and VoiceOver
                 // is told when it first shows (ClipboardPolicy.chipCounts).
@@ -314,6 +328,7 @@ struct StreamScreen: View {
             .duoFold(posture, size: geo.size, screen: "stream screen")
             .duoStatusBar(posture, size: geo.size)
             .environment(\.largerPictureOffered, offersLarger)
+            .environment(\.landscapeTrackpadOffered, offersLandscapeTrackpad)
             #if DEBUG
             // The console's line for the gates: what Larger Picture's rule made of the switch and of
             // what streams, on a phone held upright, each time one of them or the outcome changes.
@@ -1024,7 +1039,7 @@ struct StreamScreen: View {
         reduceMotion ? .opacity : .scale(scale: 0.94, anchor: anchor).combined(with: .opacity)
     }
 
-    private func landscape(bar plain: BarMetrics, width: CGFloat, fold: FoldInfo) -> some View {
+    private func landscape(bar plain: BarMetrics, width: CGFloat, fold: FoldInfo, trackpadHeight: CGFloat?) -> some View {
         // The book pose (docs/iphone-duo-plan.md, (a)): nothing on the fold's band; elsewhere as before.
         let (bar, stripWidth) = plain.clearing(fold, width: width)
         return VStack(spacing: 0) {
@@ -1038,7 +1053,7 @@ struct StreamScreen: View {
                    toggleKeyboard: { overlay.toggleKeyboard() },
                    setSettings: { setSettings($0, restoreKeyboard: $1) },
                    menusOpened: menusOpened, menusClosed: menusClosed)
-            contentArea(bar: bar)
+            contentArea(bar: bar, trackpadHeight: trackpadHeight)
         }
     }
 
@@ -1061,30 +1076,46 @@ struct StreamScreen: View {
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
 
-    private func contentArea(bar: BarMetrics) -> some View {
+    private func contentArea(bar: BarMetrics, trackpadHeight: CGFloat?) -> some View {
         ZStack(alignment: .topLeading) {
             Color.black
 
-            ZStack {
-                StreamView(client: client)
-                // Same frame as the video, so a touch maps straight onto the streamed frame.
-                InputOverlay(videoSize: client.videoSize,
-                             send: { client.sendInput($0) },
-                             setOwnPointer: { client.setOwnPointer($0, from: $1) },
-                             proxy: overlay,
-                             isKeyboardShown: $keyboardShown,
-                             latchedModifiers: latched,
+            VStack(spacing: 0) {
+                ZStack {
+                    StreamView(client: client)
+                    // Same frame as the video, so a touch maps straight onto the streamed frame.
+                    InputOverlay(videoSize: client.videoSize,
+                                 send: { client.sendInput($0) },
+                                 setOwnPointer: { client.setOwnPointer($0, from: $1) },
+                                 proxy: overlay,
+                                 isKeyboardShown: $keyboardShown,
+                                 latchedModifiers: latched,
+                                 onModifiersConsumed: { latched = [] },
+                                 sendGesture: { client.sendGesture($0, fingers: $1) })
+                }
+                .background(Palette.panel)
+                .overlay(alignment: .top) { LinkLineView(text: shownLinkLine) }
+                .clipShape(streamShape)
+                .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
+                // The panel itself, inside the padding: the size the host fits the Mac window to.
+                .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { panelSize = $0 })
+                .tourTarget(.stream)
+                .padding(8)
+
+                if let trackpadHeight {
+                    Trackpad(send: { client.sendInput($0) },
+                             setPointer: { client.setOwnPointer($0, from: .trackpad) },
+                             feed: { let f = client.pointerFeedState; return (f.anchor, f.reseeds) },
+                             onFingers: { client.trackpadFingers($0) },
+                             latched: latched,
                              onModifiersConsumed: { latched = [] },
+                             verticalSpan: nil,
                              sendGesture: { client.sendGesture($0, fingers: $1) })
+                        .frame(height: trackpadHeight)
+                        .padding(.horizontal, LandscapeTrackpad.padSide)
+                        .padding(.bottom, LandscapeTrackpad.padBottom)
+                }
             }
-            .background(Palette.panel)
-            .overlay(alignment: .top) { LinkLineView(text: shownLinkLine) }
-            .clipShape(streamShape)
-            .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
-            // The panel itself, inside the padding: the size the host fits the Mac window to.
-            .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { panelSize = $0 })
-            .tourTarget(.stream)
-            .padding(8)
 
             // The dim comes after the overlay on purpose: with the drawer open a tap on the dim
             // closes the drawer instead of clicking the Mac.
