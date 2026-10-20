@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 namespace Sill.Protocol;
 
 /// <summary>
-/// Where the viewer's window was when it closed, kept beside the device's key (<c>window.json</c>),
+/// Where the viewer's window was when it closed (and This PC's settings: decoding, the clipboard), kept beside the device's key (<c>window.json</c>),
 /// and where it goes at the next start: as it was if it still lands on a screen, else at the
 /// default size centred on the main one (a display unplugged, a resolution changed). Pure.
 /// </summary>
@@ -16,7 +16,8 @@ public sealed record WindowPlacement(
     [property: JsonPropertyName("height")] int Height,
     [property: JsonPropertyName("maximized")] bool Maximized,
     [property: JsonPropertyName("fullScreen")] bool FullScreen,
-    [property: JsonPropertyName("softwareDecoding")] bool SoftwareDecoding = false)
+    [property: JsonPropertyName("softwareDecoding")] bool SoftwareDecoding = false,
+    [property: JsonPropertyName("shareClipboard")] bool ShareClipboard = true)
 {
     [JsonIgnore] public Rectangle Bounds => new(X, Y, Width, Height);
 

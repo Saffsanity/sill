@@ -11,7 +11,7 @@ public static class SessionKinds
 {
     public const byte ParameterSets = 0, Frame = 1, WindowList = 2, Thumbnail = 3, AppIcon = 4, AppList = 5,
         SelectSource = 6, LaunchApp = 7, WindowCommand = 15, Gesture = 28, Viewport = 9,
-        Ping = 10, Pong = 11, ClientStats = 12, Tick = 13, CursorShape = 14, HostSettings = 16, MacInfo = 18, Goodbye = 22, Hello = 23;
+        Ping = 10, Pong = 11, ClientStats = 12, Tick = 13, CursorShape = 14, HostSettings = 16, MacInfo = 18, Goodbye = 22, Hello = 23, Clipboard = ClipboardPolicy.Kind;
 
     /// <summary>What a header from the Mac may announce (StreamMessage.swift's caps): frames
     /// 32 MiB, anything else 4 MiB. A reader refuses more and closes.</summary>
@@ -60,7 +60,8 @@ public sealed record WindowList(
     [property: JsonPropertyName("active")] JsonElement Active,
     [property: JsonPropertyName("hostVersion")] string? HostVersion = null,
     [property: JsonPropertyName("protocol")] int? Protocol = null,
-    [property: JsonPropertyName("gestures")] int? Gestures = null)
+    [property: JsonPropertyName("gestures")] int? Gestures = null,
+    [property: JsonPropertyName("clipboard")] int? Clipboard = null)
 {
     /// <summary>The streamed window's id, null for the Desktop or nothing.</summary>
     public uint? ActiveWindowId => Active.ValueKind == JsonValueKind.Object && Active.TryGetProperty("window", out var w)
