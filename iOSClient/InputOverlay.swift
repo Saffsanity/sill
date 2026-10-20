@@ -53,6 +53,9 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// True between the `.scrollGesture(.began)` this view sent and its `.ended`, so an end is
     /// never sent for a pan that could not begin (no video yet).
     private var scrollGestureOpen = false
+    /// -1 for the finger's drag while Reverse Scrolling is on, else 1 (`ScrollDirection`): read when a scroll
+    /// begins, so its coast after the lift keeps the direction the drag had.
+    private var scrollFactor = 1.0
     /// The coast after a flick.
     private let momentum = ScrollMomentum()
     /// True once the hover in progress has shown itself to be a Pencil. Sticky for the session so a
@@ -244,6 +247,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
             // A new pan while the last flick is still coasting ends the coast first, so the Mac
             // sees momentumEnded before this gesture's began. (touchesBegan has usually done it.)
             momentum.stop()
+            scrollFactor = ScrollDirection.factor(reversed: StreamClient.reverseScrollOn, finger: source == .finger)
             guard let p = normalized(location, clamped: true) else { return }
             if source.phased {
                 send(.scrollGesture(.began, x: p.x, y: p.y))
@@ -282,7 +286,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         let dy = (translation.y - lastPanTranslation.y) / rect.height
         lastPanTranslation = translation
         guard dx != 0 || dy != 0, let p = normalized(location, clamped: true) else { return }
-        send(.scroll(x: p.x, y: p.y, dx: Double(dx), dy: Double(dy)))
+        send(.scroll(x: p.x, y: p.y, dx: Double(dx) * scrollFactor, dy: Double(dy) * scrollFactor))
     }
 
     // MARK: Which recognizer may scroll
@@ -331,7 +335,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         // this view is torn down mid-coast.
         let send = self.send
         momentum.start(
-            velocity: velocity,
+            velocity: CGPoint(x: velocity.x * scrollFactor, y: velocity.y * scrollFactor),
             onBegin: { send(.scrollGesture(.momentumBegan, x: p.x, y: p.y)) },
             onStep: { [weak self] step in
                 guard let self else { return }

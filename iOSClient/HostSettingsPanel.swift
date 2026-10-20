@@ -41,6 +41,9 @@ struct HostSettingsPanel: View {
     /// This device's switch for three-finger gestures (docs/trackpad-gestures-plan.md §8): on unless
     /// turned off, read by `StreamClient.sendGesture` at each gesture, never sent.
     @AppStorage(StreamClient.gesturesKey) private var gesturesOn = true
+    /// This device's switch for Reverse Scrolling (issue #143): off unless turned on, read by the picture's
+    /// input view when a scroll begins, never sent.
+    @AppStorage(StreamClient.reverseScrollKey) private var reverseScroll = false
     /// This device's switch for Larger Picture (docs/larger-picture-plan.md): off unless turned on,
     /// read by the stream screen, never sent.
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
@@ -506,6 +509,13 @@ struct HostSettingsPanel: View {
             Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, mac: mac, device: device))
         }
         Rows {
+            Toggle(isOn: $reverseScroll) {
+                Text("Reverse Scrolling").foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        Footnote(text: Self.reverseScrollFooter)
+        Rows {
             Toggle(isOn: $gesturesOn) {
                 Text("Three-Finger Gestures").foregroundStyle(Palette.text)
             }
@@ -521,6 +531,10 @@ struct HostSettingsPanel: View {
         }
         Footnote(text: gesturesFooter)
     }
+
+    /// Under Reverse Scrolling's switch: whose scrolling it turns around. A trackpad or a mouse keeps the
+    /// direction in the device's own settings.
+    static let reverseScrollFooter = "Turns around the way dragging a finger on the picture scrolls. A trackpad or a mouse scrolls the way the system settings say."
 
     /// The Mac's window list said it takes the gestures (`WindowList.gestures`).
     private var macTakesGestures: Bool { (client.hostGestures ?? 0) >= TrackpadGesture.generation }

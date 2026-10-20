@@ -463,5 +463,11 @@ check("floor: every host offers sill/1 and sill-pair/1 (\(RemoteTLS.serverALPNs)
       RemoteTLS.serverALPNs.contains("sill/1") && RemoteTLS.serverALPNs.contains("sill-pair/1"))
 check("floor: the two names never change", RemoteTLS.sessionALPN == "sill/1" && RemoteTLS.pairingALPN == "sill-pair/1")
 
+// MARK: - Reverse Scrolling (issue #143): only a finger's drag turns around
+check("scroll direction: off, a finger's drag keeps the natural direction", ScrollDirection.factor(reversed: false, finger: true) == 1)
+check("scroll direction: on, a finger's drag is reversed", ScrollDirection.factor(reversed: true, finger: true) == -1)
+check("scroll direction: on, a trackpad's or a wheel's scroll keeps its own direction", ScrollDirection.factor(reversed: true, finger: false) == 1)
+check("scroll direction: off, a trackpad's or a wheel's scroll keeps its own direction", ScrollDirection.factor(reversed: false, finger: false) == 1)
+
 print(fails == 0 ? "ALL PASS (\(passes) checks)" : "\(fails) FAILED of \(passes + fails)")
 exit(Int32(min(fails, 100)))

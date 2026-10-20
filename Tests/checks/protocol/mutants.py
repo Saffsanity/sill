@@ -4,6 +4,9 @@ import os, shutil, subprocess, sys, tempfile
 WT = sys.argv[1]
 HERE = os.path.dirname(os.path.abspath(__file__))
 MUTANTS = [
+    ("reverse scrolling never reverses", "ScrollDirection.swift", "reversed && finger ? -1 : 1", "false ? -1 : 1"),
+    ("reverse scrolling reverses a trackpad too", "ScrollDirection.swift", "reversed && finger ? -1 : 1", "reversed ? -1 : 1"),
+    ("reverse scrolling is always on for a finger", "ScrollDirection.swift", "reversed && finger ? -1 : 1", "finger ? -1 : 1"),
     ("Damm table entry swapped", "Pairing.swift", "[7, 0, 9, 2, 1, 5, 4, 8, 6, 3]", "[7, 0, 9, 2, 1, 5, 4, 8, 3, 6]"),
     ("typed-code check digit ignored", "Pairing.swift", "guard checkDigit(kept.compactMap { $0.wholeNumberValue }) == 0", "guard checkDigit(kept.compactMap { $0.wholeNumberValue }) >= 0"),
     ("proof_D label changed", "Pairing.swift", 'Data("\\(label) device".utf8)', 'Data("\\(label) devices".utf8)'),
