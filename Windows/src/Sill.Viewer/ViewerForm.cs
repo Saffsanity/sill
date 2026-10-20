@@ -86,6 +86,7 @@ sealed class ViewerForm : Form
     // the UI thread; a note for a pick the Mac refused or never answered.
     private readonly SettingsPanel settings = new();
     private readonly SettingsLedger ledger = new();
+    private ClipboardBridge? clipboard;   // kind 32, made once the window is shown
     private readonly Stopwatch settingsClock = Stopwatch.StartNew();
     private int settingsToken;
     private string settingsNote = "";
@@ -157,6 +158,7 @@ sealed class ViewerForm : Form
             catch (ObjectDisposedException) { }  // between sessions: the next one does anyway
             RefreshSettings();
         };
+        settings.ShareClipboard += on => { if (clipboard is not null) clipboard.ShareOn = on; RefreshSettings(); };
         bar.DesktopClicked += () => Send(SessionMessages.SelectDesktop());
         bar.WindowClicked += id => Send(SessionMessages.SelectWindow(id));
         bar.WindowCommand += (id, action) => Send(SessionMessages.WindowCommand(id, action));
@@ -203,6 +205,7 @@ sealed class ViewerForm : Form
         else gpuFailed = true;
         try { hook = new KeyboardHook(SystemKey); }
         catch (Exception ex) { Log($"No keyboard hook ({ex.Message}): Alt+Tab and the Windows key stay Windows'."); }
+        clipboard = new ClipboardBridge(placement?.ShareClipboard ?? true, () => GetForegroundWindow() == Handle, Send, Log);
         _ = Task.Run(() => RunAsync(stop.Token));
         var timer = new System.Windows.Forms.Timer { Interval = 1000 };
         timer.Tick += (_, _) => { UpdateTitle(); PlaceCard(); SettingsTick(); };
@@ -231,9 +234,9 @@ sealed class ViewerForm : Form
         // maximized, full screen, and how it decodes.
         bool full = FormBorderStyle == FormBorderStyle.None;
         var normal = normalBounds.IsEmpty ? Bounds : normalBounds;
-        new WindowPlacement(normal.X, normal.Y, normal.Width, normal.Height, WindowState == FormWindowState.Maximized && !full, full, preferSoftware)
-            .Save(Path.Combine(dir, "window.json"));
-        hook?.Dispose(); stop.Cancel(); base.OnFormClosing(e);
+        new WindowPlacement(normal.X, normal.Y, normal.Width, normal.Height, WindowState == FormWindowState.Maximized && !full, full, preferSoftware,
+            clipboard?.ShareOn ?? placement?.ShareClipboard ?? true).Save(Path.Combine(dir, "window.json"));
+        hook?.Dispose(); clipboard?.Dispose(); stop.Cancel(); base.OnFormClosing(e);
     }
 
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
@@ -476,6 +479,8 @@ sealed class ViewerForm : Form
 
     // Leaving the window (Alt+Tab, a click elsewhere) lets go of everything held, so no key or
     // button stays down on the Mac.
+    protected override void OnActivated(EventArgs e) { base.OnActivated(e); clipboard?.CameToFront(); }
+
     protected override void OnDeactivate(EventArgs e)
     {
         base.OnDeactivate(e);
@@ -564,7 +569,8 @@ sealed class ViewerForm : Form
     private void RefreshSettings()
     {
         bool gpuUsable = gpu is not null && !gpuFailed;
-        settings.Show(ledger, macName, settingsNote, gpuUsable, gpu?.AdapterName ?? "", preferSoftware || !gpuUsable);
+        settings.Show(ledger, macName, settingsNote, gpuUsable, gpu?.AdapterName ?? "", preferSoftware || !gpuUsable,
+            clipboard?.ShareOn ?? true, clipboard?.MacShares);
         PlaceSettings();
     }
 
@@ -731,7 +737,7 @@ sealed class ViewerForm : Form
         connected = true;
         endReason = null;
         currentSession = sessionStop;
-        BeginInvoke(() => { ledger.Reset(); RefreshSettings(); });   // a new connection's settings come with it
+        BeginInvoke(() => { ledger.Reset(); clipboard?.SessionChanged(); RefreshSettings(); });   // a new connection's settings come with it
         pictured = false;
         ParameterSets? ps = null;
         HevcSps? sps = null;
@@ -765,6 +771,7 @@ sealed class ViewerForm : Form
                             {
                                 bar.SetWindows(list.Windows, list.ActiveWindowId, list.ActiveName == "desktop", list.Gestures >= 1);
                                 drawer.SetWindows(list.Windows, list.ActiveWindowId);
+                                if (clipboard?.HostSays(list.Clipboard) == true) RefreshSettings();
                             });
                         }
                         // As the iPad does: whenever the Mac says nothing streams, ask for the Desktop.
@@ -812,6 +819,9 @@ sealed class ViewerForm : Form
                                 if (ledger.Receive(hostSettings).Count > 0) Note($"{macName} kept its setting.");
                                 RefreshSettings();
                             });
+                        break;
+                    case SessionKinds.Clipboard:
+                        BeginInvoke(() => clipboard?.Received(payload));
                         break;
                     case SessionKinds.CursorShape:
                         if (ImageBlobs.Cursor(payload) is { } shape)

@@ -7,7 +7,7 @@ namespace Sill.Viewer;
 /// The Settings panel, as the iPad's (iOSClient/HostSettingsPanel.swift): a card hanging under the
 /// bar on the right with the Mac's name and what streams, Done, the Mac's streaming settings
 /// (Quality, Resolution, Frame Rate, Prioritize Encoding Speed, Virtual Display, Direct Wireless)
-/// with the iPad's footnotes, and This PC's own (decoding on the GPU or in software). The values
+/// with the iPad's footnotes, and This PC's own (decoding on the GPU or in software, Share Clipboard). The values
 /// come from the form's <see cref="SettingsLedger"/>; a control's pick goes back to the form, which
 /// sends it. Drawn by hand; it takes no keyboard focus, so keys stay the Mac's.
 /// </summary>
@@ -15,6 +15,7 @@ sealed class SettingsPanel : Control
 {
     public event Action<HostSettingsChange>? Pick;
     public event Action<bool>? SoftwareDecoding;
+    public event Action<bool>? ShareClipboard;
     public event Action? Done;
 
     private const float CardWidth = 360, Pad = 16, Radius = 20, Row = 44, GroupRadius = 12, Gap = 8;
@@ -25,7 +26,8 @@ sealed class SettingsPanel : Control
 
     private SettingsLedger? ledger;
     private string mac = "Mac", note = "";
-    private bool gpuAvailable, software;
+    private bool gpuAvailable, software, shareClipboard = true;
+    private bool? macShares;
     private string gpuName = "";
     private List<Item> items = [];
     private float scroll, content;
@@ -57,11 +59,14 @@ sealed class SettingsPanel : Control
     public int ContentHeight => (int)Math.Ceiling(content);
 
     /// <summary>What to show: the ledger (the Mac's settings with this PC's picks over them), the
-    /// Mac's name, a note ("kept its setting"), and this PC's decoder.</summary>
-    public void Show(SettingsLedger ledger, string mac, string note, bool gpuAvailable, string gpuName, bool software)
+    /// Mac's name, a note ("kept its setting"), this PC's decoder, and its Share Clipboard with
+    /// whether the Mac shares its clipboard (null: not known yet).</summary>
+    public void Show(SettingsLedger ledger, string mac, string note, bool gpuAvailable, string gpuName, bool software,
+        bool shareClipboard, bool? macShares)
     {
         this.ledger = ledger; this.mac = mac; this.note = note;
         this.gpuAvailable = gpuAvailable; this.gpuName = gpuName; this.software = software;
+        this.shareClipboard = shareClipboard; this.macShares = macShares;
         Relayout();
     }
 
@@ -155,6 +160,13 @@ sealed class SettingsPanel : Control
         y = Footnote(list, x, y, w, gpuAvailable
             ? $"The GPU ({gpuName}) decodes and draws the picture; Software uses the processor. The picture reconnects when this changes."
             : "This PC's GPU can't decode the picture, so the processor does.");
+        y = Group(list, x, y, w, 1);
+        list.Add(new(Kind.RowTitle, RowRect(x, y, 0), "Share Clipboard"));
+        list.Add(new(Kind.Switch, SwitchRect(x, y, 0, w), On: shareClipboard, Choose: _ => ShareClipboard?.Invoke(!shareClipboard)));
+        y += S(Row);
+        y = Footnote(list, x, y, w, !shareClipboard ? $"Nothing you copy goes between this PC and {mac} while this is off."
+            : macShares == false ? $"{mac} isn’t sharing its clipboard. Turn on Share clipboard with devices in Sill’s Settings › General on {mac}."
+            : $"Text you copy on {mac} is ready to paste on this PC. Text you copy on this PC goes to {mac} when you come back to Sill, to paste there with Ctrl+V. Copies a password manager keeps private stay on this PC.");
 
         content = y + S(Pad);
         items = list;

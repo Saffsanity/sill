@@ -128,6 +128,16 @@ has the size, pictures shown and received each second, the bitrate, the decode t
 trip, which path decodes (`GPU (…)` or `software`), the decode and draw times and the viewer's CPU
 (100% is one core); `viewer.log` beside the key has the same line each second.
 
+The clipboard goes both ways (kind 32, text, with a Mac whose window list says `clipboard` 1): text
+copied on the Mac lands on Windows' clipboard (kept out of Windows' cloud clipboard), and text copied
+on the PC goes to the Mac when it is copied with the viewer in front or when the viewer next comes to
+the front, so Ctrl+V (⌘V) pastes it there. Never a copy its app marks as private
+(`ExcludeClipboardContentFromMonitorProcessing`, or `CanIncludeInClipboardHistory` or
+`CanUploadToCloudClipboard` 0: password managers), never what was on the clipboard when the viewer
+started or the switch went on. Settings › This PC › Share Clipboard (on; kept in `window.json`)
+turns it off, which tells the Mac to stop. `viewer.log` has a `Clipboard:` line per decision with
+sizes, never contents.
+
 It decodes and draws on the GPU: Media Foundation's HEVC decoder given a Direct3D 11 device (DXVA),
 the picture drawn from its texture by the GPU's video processor into a swap chain, never copied
 back to the CPU. `--decoder software` keeps everything on the CPU (the old path); `--adapter N` picks
