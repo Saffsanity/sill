@@ -718,6 +718,7 @@ sealed class ViewerForm : Form
     {
         Log($"Viewer started (identity {dir}).");
         StartBrowsing();
+        if ((macId is { } chosen ? store.Find(chosen) : SavedMacs.Newest(store.Load())) is { } named) macName = named.Name;   // for the first line
         var clock = Stopwatch.StartNew();
         int failed = 0;
         double? lastDialAt = null;
