@@ -981,7 +981,7 @@ extension StreamClient {
             queue.async {
                 guard !finished else { return }
                 let proof = PairingProof.deviceProof(key: key, deviceFingerprint: fpDevice, macFingerprint: fpMac)
-                let request = PairRequest(method: method, proof: Base64URL.encode(proof), name: UIDevice.current.name,
+                let request = PairRequest(method: method, proof: Base64URL.encode(proof), name: ClientStatsReporter.plainDeviceName,
                                           model: ClientStatsReporter.hardwareIdentifier)
                 let message = StreamMessage(kind: .pairRequest, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                                             payload: Wire.encode(request))

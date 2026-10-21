@@ -597,5 +597,18 @@ check("reconnectEnd: a Mac marked newKey ends the reconnect with its words",
       && C.newKey(mac: noah, device: "iPad") == "Noah’s MacBook Pro has a new key since this iPad paired. Tap it to pair again.")
 check("a dial not the reconnect's ends after 10 s, the reconnect's own 5 s left as it is", P.tapDialDeadline == 10)
 
+// Custom device name (issue #118):
+typealias DN = CustomDeviceName
+check("CustomDeviceName.key", DN.key == "Sill.customDeviceName")
+check("resolvedName trims and cleans custom name, falls back when nil or blank",
+      DN.resolvedName(custom: "  Work iPad\n ", fallback: "iPad") == "Work iPad"
+      && DN.resolvedName(custom: "   ", fallback: "iPad") == "iPad"
+      && DN.resolvedName(custom: nil, fallback: "iPhone") == "iPhone")
+check("displayWithModel appends model in parentheses when present",
+      DN.displayWithModel(custom: "Studio iPad", fallback: "iPad", model: "iPad15,7") == "Studio iPad (iPad15,7)"
+      && DN.displayWithModel(custom: nil, fallback: "iPad", model: "iPad15,7") == "iPad (iPad15,7)"
+      && DN.displayWithModel(custom: "Studio iPad", fallback: "iPad", model: "") == "Studio iPad")
+check("CustomDeviceName copy", !DN.Copy.rowTitle.isEmpty && !DN.Copy.footnote(mac: noah, device: "iPad").isEmpty)
+
 print(fails == 0 ? "ALL PASS (\(passes))" : "\(fails) FAIL, \(passes) pass")
 if fails > 0 { exit(1) }

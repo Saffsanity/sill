@@ -1460,3 +1460,29 @@ enum DiscoveryPolicy {
         static func noAnswer(mac: String) -> String { "\(mac) didn\u{2019}t answer. Check that Sill is open on it, then tap it again." }
     }
 }
+
+/// Custom device name on iPhone and iPad (issue #118): on iOS 16+ `UIDevice.current.name` returns
+/// generic `"iPad"` or `"iPhone"`, so two devices of the same model appear identically as
+/// `"iPad (iPad15,7)"`. Setting `Sill.customDeviceName` gives this device a distinct name in
+/// `PairRequest`, `Hello`, and `ClientStats`. Pure (`Foundation` + `StreamProtocol`).
+enum CustomDeviceName {
+    static let key = "Sill.customDeviceName"
+
+    static func resolvedName(custom: String?, fallback: String) -> String {
+        guard let raw = custom else { return fallback }
+        let cleaned = String(raw.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64))
+        return cleaned.isEmpty ? fallback : cleaned
+    }
+
+    static func displayWithModel(custom: String?, fallback: String, model: String) -> String {
+        let base = resolvedName(custom: custom, fallback: fallback)
+        return model.isEmpty ? base : "\(base) (\(model))"
+    }
+
+    enum Copy {
+        static let rowTitle = "Name"
+        static func footnote(mac: String, device: String) -> String {
+            "How \(mac) lists this \(device) in Settings › Devices and the menu bar."
+        }
+    }
+}
