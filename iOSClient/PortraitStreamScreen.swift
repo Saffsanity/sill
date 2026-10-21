@@ -140,6 +140,9 @@ struct PortraitStreamScreen: View {
     @ObservedObject var client: StreamClient
     var metrics: PortraitMetrics = .regular
     @Binding var drawerOpen: Bool
+    /// The phone's Shortcuts drawer, which row 1's Shortcuts button opens (Desktop's old place: the
+    /// Desktop is the strip's first tile).
+    @Binding var shortcutsOpen: Bool
     @Binding var keyboardShown: Bool
     @Binding var textScale: Double?
     @Binding var scaleOpen: Bool
@@ -168,6 +171,10 @@ struct PortraitStreamScreen: View {
     /// switch on: `PhonePortraitLayout.largerPicture(switchOn:streaming:)`); nil for the phone's usual
     /// arrangement (the switch off, the Desktop or nothing streaming), and in the halves.
     var largerKeyboard: CGFloat? = nil
+    /// Full Screen on a phone held upright (`FullScreenLayout`), nil for the usual arrangement.
+    var fullScreen: FullScreenControls? = nil
+    /// Turns Full Screen on, where it is offered: the button at the end of a phone's row 2.
+    var enterFullScreen: (() -> Void)? = nil
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
     /// The Duo's fold across this screen (StreamScreen, iOS 27.1): where the halves split.
@@ -175,7 +182,9 @@ struct PortraitStreamScreen: View {
 
     var body: some View {
         GeometryReader { geo in
-            if metrics.phone {
+            if metrics.phone, let fullScreen {
+                fullScreenPhone(geo.size, fullScreen)
+            } else if metrics.phone {
                 phone(PhonePortraitLayout(size: geo.size, keyboard: largerKeyboard), origin: geo.frame(in: .global).origin)
             } else {
                 halves(geo.size)
@@ -188,7 +197,7 @@ struct PortraitStreamScreen: View {
     private func halves(_ size: CGSize) -> some View {
         // At the middle, as before; on the Duo (iOS 27.1) at the fold's real band half-folded, and
         // open flat at the picture's own shape (docs/iphone-duo-plan.md, (b1) and (b2)).
-        let split = DuoPosture.portraitSplit(size, duoFold, aspect: client.duoPaneAspect(textScale: textScale),
+        let split = DuoPosture.portraitSplit(size, duoFold, aspect: client.duoPaneAspect(textScale: textScale ?? AutoFit.steps[0]),
                                              controls: metrics.controlsHeight)
         let half = split.picture
         return ZStack(alignment: .topLeading) {
@@ -319,6 +328,9 @@ struct PortraitStreamScreen: View {
             // The viewport: the picture's pane, or with Larger Picture its whole room (never the pane
             // at the picture's shape, which would hold a window at the shape it has).
             .onChange(of: layout.picture.size, initial: true) { _, size in onPanelSize(size) }
+            // The picture's zoom, which Aa offers here alone (a turn sideways shows the whole frame).
+            .onAppear { client.zoom.offered() }
+            .onDisappear { client.zoom.withdrawn() }
             #if DEBUG
             .modifier(PhoneConsole(layout: layout, span: span, video: client.videoSize, origin: origin))
             #endif
@@ -339,15 +351,45 @@ struct PortraitStreamScreen: View {
             // past row 1's leading edge; the strip goes while either is open, so nothing cut shows
             // beside them.
             PhoneRows(size: layout.size, rects: rects) {
-                picturePane(measured: false).accessibilityHidden(drawerOpen)
+                picturePane(measured: false).accessibilityHidden(drawerOpen || shortcutsOpen)
                 phoneRow1(layout, menus: larger && client.menus.hasMenus)
                 if !larger {
                     phoneRow2(layout)
-                        .opacity(drawerOpen || settingsOpen ? 0 : 1)
-                        .accessibilityHidden(drawerOpen)
+                        .opacity(drawerOpen || shortcutsOpen || settingsOpen ? 0 : 1)
+                        .accessibilityHidden(drawerOpen || shortcutsOpen)
                 }
-                keyRow(.phone).accessibilityHidden(drawerOpen)
-                trackpad(verticalSpan: span).accessibilityHidden(drawerOpen)
+                keyRow(.phone).accessibilityHidden(drawerOpen || shortcutsOpen)
+                trackpad(verticalSpan: span).accessibilityHidden(drawerOpen || shortcutsOpen)
+            }
+
+            if shortcutsOpen {
+                ForEach(layout.dim.indices, id: \.self) { index in
+                    shortcutsDim.placed(layout.dim[index], in: layout.size)
+                }
+                ShortcutsDrawer(client: client, open: $shortcutsOpen, showsDesktop: larger)
+                    .modifier(AfterRow1(active: larger))
+                    .placed(layout.drawer, in: layout.size)
+                    .transition(.opacity)
+            }
+
+            // Full Screen's way in: a translucent button in the picture's bottom-trailing corner, a
+            // sibling after the picture so it takes its touches over the stream's input view.
+            if let enterFullScreen, !drawerOpen, !shortcutsOpen, !settingsOpen {
+                let frame = larger ? layout.pane(video: client.videoSize) : layout.picture
+                Button(action: enterFullScreen) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.white)
+                        .frame(width: 36, height: 36)
+                        .background(Circle().fill(Color.black.opacity(0.55)))
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Full Screen")
+                .placed(CGRect(x: frame.maxX - 48, y: frame.maxY - 48, width: 44, height: 44), in: layout.size)
+                .transition(.opacity)
             }
 
             if drawerOpen {
@@ -381,14 +423,24 @@ struct PortraitStreamScreen: View {
     /// button after Apps, six to the row (`buttonsBesideMenus`), where the landscape bar has it.
     private func phoneRow1(_ layout: PhonePortraitLayout, menus: Bool) -> some View {
         let width = (menus ? layout.buttonsBesideMenus : layout.buttons)[PhonePortraitLayout.Button.apps.rawValue].width
+        return row1Buttons(width: width, height: layout.row1.height,
+                           rulerStep: menus ? layout.rulerStepBesideMenus : layout.rulerStep,
+                           menus: menus ? layout.menus : nil)
+    }
+
+    /// Row 1's buttons, each `width` wide and `height` tall, Aa's ruler `rulerStep` a detent; the
+    /// Menus button after Apps at `menus`' size, where there is one. The usual arrangement's and Full
+    /// Screen's.
+    private func row1Buttons(width: CGFloat, height: CGFloat, rulerStep: CGFloat, menus menusRect: CGRect?) -> some View {
+        let menus = menusRect != nil
         return HStack(spacing: PhonePortraitLayout.gap) {
             appsButton(width: width)
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
                 .tourTarget(.apps)
 
-            if menus {
-                MacMenuButton(client: client, width: layout.menus.width, height: layout.menus.height,
+            if let menusRect {
+                MacMenuButton(client: client, width: menusRect.width, height: menusRect.height,
                               radius: metrics.buttonRadius, iconSize: metrics.buttonIcon, spacing: metrics.buttonSpacing,
                               iconBox: PortraitMetrics.phoneIconBox, onOpen: menusOpened, onClose: menusClosed)
                     .opacity(scaleOpen ? 0 : 1)
@@ -397,9 +449,10 @@ struct PortraitStreamScreen: View {
             }
 
             TextScaleControl(scale: $textScale, open: $scaleOpen,
-                             width: width, height: layout.row1.height,
-                             radius: metrics.buttonRadius, pointsPerStep: menus ? layout.rulerStepBesideMenus : layout.rulerStep,
-                             iconBox: PortraitMetrics.phoneIconBox, iconSpacing: metrics.buttonSpacing)
+                             width: width, height: height,
+                             radius: metrics.buttonRadius, pointsPerStep: rulerStep,
+                             iconBox: PortraitMetrics.phoneIconBox, iconSpacing: metrics.buttonSpacing,
+                             zoom: client.zoom)
                 .tourTarget(.textSize)
 
             barButton(open: keyboardShown, symbol: "keyboard", label: "Keyboard", width: width,
@@ -412,7 +465,7 @@ struct PortraitStreamScreen: View {
                 .allowsHitTesting(!scaleOpen)
                 .tourTarget(.keyboard)
 
-            desktopButton(width: width)
+            shortcutsButton(width: width)
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
 
@@ -422,6 +475,142 @@ struct PortraitStreamScreen: View {
         }
         .animation(.easeOut(duration: 0.16), value: scaleOpen)
         .animation(.easeOut(duration: 0.18), value: menus)
+    }
+
+    // MARK: Full Screen
+
+    /// Full Screen (`FullScreenLayout`): the picture edge to edge, the handle at the bottom, and row 1
+    /// with the key row over the picture while expanded. In touch mode the picture takes the finger
+    /// as it always has; in trackpad mode the whole picture is a trackpad over it (the overlay under
+    /// it still holds the keyboard). The viewport is the whole screen, so the Mac fits a window to it
+    /// once Aa sets its text size, as with Larger Picture.
+    private func fullScreenPhone(_ size: CGSize, _ controls: FullScreenControls) -> some View {
+        let keyboard = keyboardShown
+            ? PhonePortraitLayout.keyboardHeight(for: CGSize(width: size.width, height: size.height - controls.insets.top)) : nil
+        let layout = FullScreenLayout(size: size, top: controls.insets.top, bottom: controls.insets.bottom,
+                                      keyboard: keyboard, expanded: controls.expanded.wrappedValue)
+        let open = drawerOpen || shortcutsOpen
+        return ZStack(alignment: .topLeading) {
+            Color.black
+
+            ZStack {
+                StreamView(client: client)
+                InputOverlay(videoSize: client.videoSize,
+                             send: { client.sendInput($0) },
+                             zoom: client.zoom,
+                             setOwnPointer: { client.setOwnPointer($0, from: $1) },
+                             proxy: overlay,
+                             isKeyboardShown: $keyboardShown,
+                             latchedModifiers: latched,
+                             onModifiersConsumed: { latched = [] },
+                             sendGesture: { client.sendGesture($0, fingers: $1) })
+                if controls.trackpad.wrappedValue {
+                    TrackpadView(send: { client.sendInput($0) },
+                                 setPointer: { client.setOwnPointer($0, from: .trackpad) },
+                                 feed: { let f = client.pointerFeedState; return (f.anchor, f.reseeds) },
+                                 onFingers: { client.trackpadFingers($0) },
+                                 latched: latched,
+                                 onModifiersConsumed: { latched = [] },
+                                 verticalSpan: Self.fullScreenSpan(width: size.width, video: client.videoSize),
+                                 sendGesture: { client.sendGesture($0, fingers: $1) },
+                                 zoom: { [zoom = client.zoom] in zoom.effectiveScale })
+                }
+            }
+            .overlay(alignment: .top) { LinkLineView(text: linkLine) }
+            .clipped()
+            .accessibilityHidden(open)
+            .placed(layout.picture, in: size)
+
+            // What the clipboard's chip is placed in: the picture above the controls, under the top
+            // inset, so it never covers the handle.
+            Color.clear
+                .allowsHitTesting(false)
+                .tourTarget(.stream)
+                .placed(layout.picture, in: size)
+
+            if layout.expanded {
+                Rectangle().fill(Palette.bar.opacity(0.94))
+                    .clipShape(UnevenRoundedRectangle(topLeadingRadius: 20, topTrailingRadius: 20, style: .continuous))
+                    .placed(layout.ground, in: size)
+                let menus = client.menus.hasMenus
+                row1Buttons(width: (menus ? layout.buttonsBesideMenus : layout.buttons)[0].width, height: layout.row1.height,
+                            rulerStep: menus ? layout.rulerStepBesideMenus : layout.rulerStep,
+                            menus: menus ? layout.menus : nil)
+                    .placed(layout.row1, in: size)
+                keyRow(.phone)
+                    .accessibilityHidden(open)
+                    .placed(layout.keys, in: size)
+            }
+            fullScreenHandle(layout, controls)
+                .placed(layout.handle, in: size)
+
+            if drawerOpen || shortcutsOpen {
+                ForEach(layout.dim.indices, id: \.self) { index in
+                    (drawerOpen ? AnyView(dim) : AnyView(shortcutsDim)).placed(layout.dim[index], in: size)
+                }
+                Group {
+                    if drawerOpen { drawer } else { ShortcutsDrawer(client: client, open: $shortcutsOpen, showsDesktop: true) }
+                }
+                .placed(layout.drawer, in: size)
+                .transition(.opacity)
+            }
+
+            if settingsOpen {
+                ForEach(layout.dim.indices, id: \.self) { index in
+                    catcher.placed(layout.dim[index], in: size)
+                }
+                settingsPanel
+                    .frame(width: layout.settings.width)
+                    .frame(maxHeight: layout.settings.height, alignment: .top)
+                    .placed(at: layout.settings.origin, in: size)
+                    .transition(settingsTransition(UnitPoint(x: layout.settingsAnchor.x, y: layout.settingsAnchor.y)))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: controls.expanded.wrappedValue)
+        // The picture's room is the viewport, a display the Mac fits a window to: the keyboard coming
+        // up, or the controls folding away, makes it another (one restart, as a rotation).
+        .onChange(of: layout.picture.size, initial: true) { _, room in onPanelSize(room) }
+        .onAppear { client.zoom.offered(); client.zoom.alignTop = true }
+        .onDisappear { client.zoom.withdrawn(); client.zoom.alignTop = false }
+    }
+
+    /// The handle: the input mode (touch or trackpad), the controls collapsed or expanded, and the way
+    /// out of Full Screen. Translucent over the picture while collapsed.
+    private func fullScreenHandle(_ layout: FullScreenLayout, _ controls: FullScreenControls) -> some View {
+        let trackpad = controls.trackpad.wrappedValue
+        let expanded = controls.expanded.wrappedValue
+        func handleButton(_ symbol: String, _ label: String, _ action: @escaping () -> Void) -> some View {
+            Button(action: action) {
+                Image(systemName: symbol)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Palette.text)
+                    .frame(width: FullScreenLayout.handleButton, height: FullScreenLayout.handleHeight)
+                    .background(Capsule().fill(expanded ? Palette.control : Palette.bar.opacity(0.72)))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(label)
+        }
+        return HStack {
+            handleButton(trackpad ? "rectangle.and.hand.point.up.left" : "hand.tap",
+                         trackpad ? "Trackpad mode. Switch to touch" : "Touch mode. Switch to trackpad") {
+                controls.trackpad.wrappedValue.toggle()
+                UISelectionFeedbackGenerator().selectionChanged()
+            }
+            Spacer(minLength: 0)
+            handleButton(expanded ? "chevron.down" : "chevron.up", expanded ? "Hide the controls" : "Show the controls") {
+                if expanded { drawerOpen = false; shortcutsOpen = false; setSettings(false, false); scaleOpen = false }
+                controls.expanded.wrappedValue.toggle()
+            }
+            Spacer(minLength: 0)
+            handleButton("arrow.down.right.and.arrow.up.left", "Leave Full Screen", controls.exit)
+        }
+    }
+
+    /// The full-screen trackpad's vertical span: the pad (the screen) moves the pointer the frame's
+    /// width across, and as far down as across, whatever the frame's shape.
+    private static func fullScreenSpan(width: CGFloat, video: CGSize) -> CGFloat {
+        guard video.width > 0, video.height > 0 else { return width / PhonePortraitLayout.aspect }
+        return width * video.height / video.width
     }
 
     /// Row 2: the thumbnails, and at the row's end, under Settings, the Menus button while the Mac
@@ -458,6 +647,7 @@ struct PortraitStreamScreen: View {
             StreamView(client: client)
             InputOverlay(videoSize: client.videoSize,
                          send: { client.sendInput($0) },
+                         zoom: client.zoom,
                          setOwnPointer: { client.setOwnPointer($0, from: $1) },
                          proxy: overlay,
                          isKeyboardShown: $keyboardShown,
@@ -477,7 +667,7 @@ struct PortraitStreamScreen: View {
         WindowStrip(client: client, width: metrics.thumbWidth, height: metrics.thumbHeight,
                     radius: metrics.thumbRadius, spacing: metrics.thumbSpacing,
                     pad: metrics.thumbPad, fade: metrics.thumbFade, badge: metrics.badge,
-                    menuFor: $windowMenu)
+                    desktopFirst: metrics.phone, menuFor: $windowMenu)
             .tourTarget(.strip, inset: WindowStrip.tourBand(pad: metrics.thumbPad))
     }
 
@@ -498,7 +688,8 @@ struct PortraitStreamScreen: View {
                  latched: latched,
                  onModifiersConsumed: { latched = [] },
                  verticalSpan: verticalSpan,
-                 sendGesture: { client.sendGesture($0, fingers: $1) })
+                 sendGesture: { client.sendGesture($0, fingers: $1) },
+                 zoom: { [zoom = client.zoom] in zoom.effectiveScale })
             .tourTarget(.trackpad)
     }
 
@@ -531,8 +722,27 @@ struct PortraitStreamScreen: View {
                   accessibilityLabel: drawerOpen ? "Close the app list" : "Open the app list",
                   action: {
                       setSettings(false, false)
-                      withAnimation(.easeOut(duration: 0.18)) { drawerOpen.toggle() }
+                      withAnimation(.easeOut(duration: 0.18)) { shortcutsOpen = false; drawerOpen.toggle() }
                   })
+    }
+
+    /// A phone's row 1, in Desktop's old place: the Shortcuts drawer.
+    private func shortcutsButton(width: CGFloat? = nil) -> some View {
+        barButton(open: shortcutsOpen, symbol: "square.grid.2x2", label: "Shortcuts", width: width,
+                  accessibilityLabel: shortcutsOpen ? "Close shortcuts" : "Open shortcuts",
+                  action: {
+                      setSettings(false, false)
+                      withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false; shortcutsOpen.toggle() }
+                  })
+    }
+
+    /// The Shortcuts drawer's dim: a tap on it closes the drawer instead of clicking the Mac.
+    private var shortcutsDim: some View {
+        Color.black.opacity(0.58)
+            .contentShape(Rectangle())
+            .onTapGesture { withAnimation(.easeOut(duration: 0.18)) { shortcutsOpen = false } }
+            .accessibilityHidden(true)
+            .transition(.opacity)
     }
 
     private func desktopButton(width: CGFloat? = nil) -> some View {
@@ -901,4 +1111,13 @@ private struct KeyRow: View {
         }
     }
     #endif
+}
+
+/// Full Screen's state, owned by `StreamScreen`: the input mode, whether the controls show, the
+/// screen's insets (the picture, the controls and the panels keep clear of them), and the way out.
+struct FullScreenControls {
+    var trackpad: Binding<Bool>
+    var expanded: Binding<Bool>
+    var insets: UIEdgeInsets
+    var exit: () -> Void
 }

@@ -1,8 +1,8 @@
 import CoreGraphics
 
 /// Where everything goes on a phone held upright (Noah, 2026-09-27; docs/iphone-portrait-plan.md):
-/// the picture in a fixed 16:10 pane at the top, then row 1 (Apps, Aa, Keyboard, Desktop,
-/// Settings, widened to the row), row 2 (the window thumbnails), row 3 (esc, tab, ctrl, opt, cmd,
+/// the picture in a fixed 16:10 pane at the top, then row 1 (Apps, Aa, Keyboard, Shortcuts,
+/// Settings, widened to the row), row 2 (the Desktop, then the window thumbnails), row 3 (esc, tab, ctrl, opt, cmd,
 /// shift), and the trackpad in everything left. Every rectangle is a function of the stream
 /// screen's size alone, the screen less its top safe-area inset down to its bottom edge (the stream
 /// screen ignores the bottom inset and the keyboard), so nothing moves when the streamed window
@@ -98,8 +98,9 @@ struct PhonePortraitLayout: Equatable {
     /// touch target's least, so the arrangement needs a stream screen 332 pt wide or more.
     static let minButtonWidth: CGFloat = 44
 
-    /// Row 1, in the landscape bar's order.
-    enum Button: Int, CaseIterable { case apps, textSize, keyboard, desktop, settings }
+    /// Row 1, in the landscape bar's order but with Shortcuts in the Desktop's place: on a phone the
+    /// Desktop is the strip's first tile (Raffael, 2026-10-21).
+    enum Button: Int, CaseIterable { case apps, textSize, keyboard, shortcuts, settings }
     /// Row 3's caps: esc, tab, ctrl, opt, cmd, shift.
     static let capCount = 6
 
@@ -350,7 +351,7 @@ struct PhonePortraitLayout: Equatable {
 
     /// The ruler centred on `aa`, over `row`: as wide as the room between Aa's centre and the row's
     /// leading edge allows, at most `maxRulerStep` a detent.
-    private static func ruler(on aa: CGRect, in row: CGRect) -> (CGRect, CGFloat) {
+    static func ruler(on aa: CGRect, in row: CGRect) -> (CGRect, CGFloat) {
         let room = (aa.midX - row.minX) * 2 - 2 * rulerInset
         let rulerStep = max(0, min(maxRulerStep, room / rulerSpans))
         let rulerWidth = rulerStep * rulerSpans + 2 * rulerInset
@@ -358,10 +359,103 @@ struct PhonePortraitLayout: Equatable {
     }
 
     /// `count` equal parts of `row`, `gap` apart, filling it.
-    private static func split(_ row: CGRect, count: Int, gap: CGFloat) -> [CGRect] {
+    static func split(_ row: CGRect, count: Int, gap: CGFloat) -> [CGRect] {
         let each = max(0, (row.width - CGFloat(count - 1) * gap) / CGFloat(count))
         return (0..<count).map { i in
             CGRect(x: row.minX + CGFloat(i) * (each + gap), y: row.minY, width: each, height: row.height)
         }
+    }
+}
+
+/// Full Screen on a phone held upright (Raffael, 2026-10-21): the picture takes the whole screen, edge
+/// to edge, behind the status bar, and the controls float at the bottom over it: a handle (the input
+/// mode, collapse or expand, leave Full Screen) and, expanded, row 1 and the key row under it, as the
+/// usual arrangement has them. Collapsed, only the handle. A software keyboard up lifts them above it
+/// (`keyboard`), so row 1's Keyboard can take it down. The drawer and the Settings panel hang from the
+/// top, under the screen's top inset, down to just above the controls. Every rectangle is a function
+/// of the screen's size, its insets, the keyboard and whether the controls are expanded; pure, so
+/// `Tests/checks/phone-portrait` checks it with the usual arrangement.
+struct FullScreenLayout: Equatable {
+    static let handleHeight: CGFloat = 36
+    /// Around the controls' ground: above the handle, and under the key row to the bottom inset.
+    static let pad: CGFloat = 8
+    /// The handle's three buttons, each this wide (and the handle's height tall).
+    static let handleButton: CGFloat = 56
+
+    let size: CGSize
+    /// The picture's room, which is also its viewport (the Mac fits a window to it, as to a display):
+    /// from under the status bar and the notch to just above the controls (to the handle's top, collapsed), and so above
+    /// the keyboard while it is up.
+    let picture: CGRect
+    /// The handle's band, the rows' width; its buttons are `mode` (leading), `collapse` (centre) and
+    /// `exit` (trailing).
+    let handle: CGRect
+    let mode: CGRect
+    let collapse: CGRect
+    let exit: CGRect
+    /// Row 1 and the key row, expanded; zero height collapsed (nothing there).
+    let row1: CGRect
+    let buttons: [CGRect]
+    /// Row 1 while the Mac sent its menus: Menus after Apps, six across (no strip to hold it here).
+    let buttonsBesideMenus: [CGRect]
+    let menus: CGRect
+    let rulerBesideMenus: CGRect
+    let rulerStepBesideMenus: CGFloat
+    let keys: CGRect
+    let caps: [CGRect]
+    /// The controls' ground, from just above the handle to the screen's bottom; collapsed, none.
+    let ground: CGRect
+    let ruler: CGRect
+    let rulerStep: CGFloat
+    let drawer: CGRect
+    let settings: CGRect
+    let settingsAnchor: CGPoint
+    /// What the drawer's dim and the panel's tap catcher cover: everything above the controls.
+    let dim: [CGRect]
+    let expanded: Bool
+
+    /// `top` and `bottom`: the screen's safe-area insets (the status bar's and the home indicator's);
+    /// `keyboard`: the software keyboard's height while it is up, else nil.
+    init(size: CGSize, top: CGFloat, bottom: CGFloat, keyboard: CGFloat?, expanded: Bool) {
+        self.size = size
+        self.expanded = expanded
+        let width = size.width, height = size.height
+        let rowWidth = max(0, width - 2 * PhonePortraitLayout.side)
+        let lift = max(bottom, keyboard.map { $0 + PhonePortraitLayout.keyboardClearance } ?? 0, Self.pad)
+        let floor = height - lift
+        if expanded {
+            keys = CGRect(x: PhonePortraitLayout.side, y: floor - PhonePortraitLayout.capHeight,
+                          width: rowWidth, height: PhonePortraitLayout.capHeight)
+            row1 = CGRect(x: PhonePortraitLayout.side, y: keys.minY - PhonePortraitLayout.rowGap - PhonePortraitLayout.buttonHeight,
+                          width: rowWidth, height: PhonePortraitLayout.buttonHeight)
+            handle = CGRect(x: PhonePortraitLayout.side, y: row1.minY - PhonePortraitLayout.band - Self.handleHeight,
+                            width: rowWidth, height: Self.handleHeight)
+            ground = CGRect(x: 0, y: handle.minY - Self.pad, width: width, height: max(0, height - handle.minY + Self.pad))
+        } else {
+            handle = CGRect(x: PhonePortraitLayout.side, y: floor - Self.handleHeight, width: rowWidth, height: Self.handleHeight)
+            row1 = CGRect(x: PhonePortraitLayout.side, y: handle.maxY, width: rowWidth, height: 0)
+            keys = CGRect(x: PhonePortraitLayout.side, y: handle.maxY, width: rowWidth, height: 0)
+            ground = .zero
+        }
+        buttons = PhonePortraitLayout.split(row1, count: PhonePortraitLayout.Button.allCases.count, gap: PhonePortraitLayout.gap)
+        caps = PhonePortraitLayout.split(keys, count: PhonePortraitLayout.capCount, gap: PhonePortraitLayout.gap)
+        let b = Self.handleButton
+        mode = CGRect(x: handle.minX, y: handle.minY, width: b, height: handle.height)
+        collapse = CGRect(x: handle.midX - b / 2, y: handle.minY, width: b, height: handle.height)
+        exit = CGRect(x: handle.maxX - b, y: handle.minY, width: b, height: handle.height)
+        (ruler, rulerStep) = PhonePortraitLayout.ruler(on: buttons[PhonePortraitLayout.Button.textSize.rawValue], in: row1)
+        var withMenus = PhonePortraitLayout.split(row1, count: PhonePortraitLayout.Button.allCases.count + 1, gap: PhonePortraitLayout.gap)
+        menus = withMenus.remove(at: 1)
+        buttonsBesideMenus = withMenus
+        (rulerBesideMenus, rulerStepBesideMenus) = PhonePortraitLayout.ruler(
+            on: buttonsBesideMenus[PhonePortraitLayout.Button.textSize.rawValue], in: row1)
+        let panelTop = max(top, Self.pad) + PhonePortraitLayout.panelGap
+        let panelBottom = (expanded ? ground.minY : handle.minY) - PhonePortraitLayout.panelGap
+        drawer = CGRect(x: PhonePortraitLayout.side, y: panelTop, width: rowWidth, height: max(0, panelBottom - panelTop))
+        settings = drawer
+        settingsAnchor = CGPoint(x: settings.maxX / max(width, 1), y: settings.minY / max(height, 1))
+        dim = [CGRect(x: 0, y: 0, width: width, height: max(0, expanded ? ground.minY : handle.minY))]
+        // Under the status bar and the notch, never behind them (the status bar shows).
+        picture = CGRect(x: 0, y: top, width: width, height: max(0, (expanded ? ground.minY : handle.minY - Self.pad) - top))
     }
 }

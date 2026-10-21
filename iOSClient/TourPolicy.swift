@@ -22,7 +22,7 @@ enum TourTopic: String, CaseIterable, Comparable {
 /// their side, phones and iPads held sideways); the laptop layout's halves held upright (the Duo's
 /// inner display, an iPad, an iPad window narrower than 600 pt), the window bar and the keys under
 /// the picture's half; and a phone held upright (`PhonePortraitLayout`: the picture in a 16:10 pane
-/// at the top, then row 1 with Apps, Aa, Keyboard, Desktop and Settings, the thumbnails, six keys
+/// at the top, then row 1 with Apps, Aa, Keyboard, Shortcuts and Settings, the Desktop and the thumbnails, six keys
 /// and the trackpad; the Duo's outer display upright too). A phone with Larger Picture in effect (the
 /// switch on while a window streams: no thumbnails, a taller picture) is still `.phone` to the rule,
 /// so switching it, or a switch between the Desktop and a window that brings it or takes it away, is

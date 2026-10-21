@@ -47,6 +47,11 @@ struct HostSettingsPanel: View {
     /// Whether the switch is offered here, the stream screen's say (`largerPictureOffered`): only on an
     /// iPhone without a hinge whose picture it makes larger.
     @Environment(\.largerPictureOffered) private var offersLargerPicture
+    /// Full Screen on a phone held upright, how the Desktop shows in it, and Keep Screen On: this
+    /// device's own, read by the stream screen, never sent.
+    @AppStorage(StreamClient.fullScreenKey) private var fullScreen = false
+    @AppStorage(StreamClient.fullScreenDesktopKey) private var fullScreenDesktop = "fill"
+    @AppStorage(StreamClient.keepScreenOnKey) private var keepScreenOn = false
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
@@ -485,6 +490,33 @@ struct HostSettingsPanel: View {
             }
             Footnote(text: Self.largerPictureFooter)
         }
+        if DuoLayout.phoneArrangement {
+            Rows {
+                Toggle(isOn: $fullScreen) {
+                    Text("Full Screen").foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+                if fullScreen {
+                    RowDivider()
+                    Picker(selection: $fullScreenDesktop) {
+                        Text("Fill the Screen").tag("fill")
+                        Text("Whole Desktop").tag("fit")
+                    } label: {
+                        Text("Desktop").foregroundStyle(Palette.text)
+                    }
+                    .tint(Palette.muted)
+                    .rowFrame()
+                }
+            }
+            Footnote(text: Self.fullScreenFooter)
+        }
+        Rows {
+            Toggle(isOn: $keepScreenOn) {
+                Text("Keep Screen On").foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        Footnote(text: "While \(mac) shows here, this \(device) does not lock by itself.")
         // The clipboard (docs/clipboard-plan.md): only while the Mac says it shares it.
         if ClipboardPolicy.hostTakes(client.hostClipboard) {
             Rows {
@@ -530,6 +562,9 @@ struct HostSettingsPanel: View {
     /// it gives up, where windows come from instead, that the Mac fits a window to the taller picture
     /// once Aa sets its text size (or on the virtual display), and that a change applies as the panel
     /// closes (StreamScreen's `largerPictureHeld`).
+    /// Under Full Screen's switch.
+    static let fullScreenFooter = "Held upright, the picture fills the whole screen. The handle at the bottom switches between touch and trackpad, hides the controls and leaves Full Screen. Fill the Screen shows the Desktop as tall as the screen and follows the pointer; Whole Desktop shows all of it. To fill the screen with a window, set its text size with Aa."
+
     static let largerPictureFooter = "Held upright, a window’s picture takes the place of the window thumbnails and reaches down to where the keyboard comes up. The Desktop keeps the thumbnails. Switch windows with Apps: tap an open app again for its next window. To fill the taller picture with a window, set its text size with Aa. A change applies when you close Settings."
 
     /// What each gesture does on the Mac, and what the row does as an accessibility action: its one

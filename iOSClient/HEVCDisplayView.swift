@@ -5,11 +5,22 @@ import CoreMedia
 import SwiftUI
 import StreamProtocol
 
-/// A UIView whose layer is an AVSampleBufferDisplayLayer, which decodes HEVC in hardware itself.
-/// No VTDecompressionSession needed for the spike.
+/// A UIView whose picture is an AVSampleBufferDisplayLayer, which decodes HEVC in hardware itself.
+/// No VTDecompressionSession needed for the spike. The layer is a subview's (`videoView`), so the
+/// picture's zoom (`PictureZoom`) can magnify it while the pointer sprite and the readout above it
+/// keep their size.
 final class HEVCDisplayView: UIView {
-    override class var layerClass: AnyClass { AVSampleBufferDisplayLayer.self }
-    private var displayLayer: AVSampleBufferDisplayLayer { layer as! AVSampleBufferDisplayLayer }
+    /// The picture, filling this view; magnified and moved by a transform while zoomed.
+    private final class VideoView: UIView {
+        override class var layerClass: AnyClass { AVSampleBufferDisplayLayer.self }
+    }
+    private let videoView = VideoView(frame: .zero)
+    private var displayLayer: AVSampleBufferDisplayLayer { videoView.layer as! AVSampleBufferDisplayLayer }
+
+    /// The picture's zoom (`StreamClient.zoom`); nil draws the frame as it always was.
+    var zoom: PictureZoom? {
+        didSet { zoom?.onChange = { [weak self] animated in self?.applyZoom(animated: animated) } }
+    }
 
     private var formatDescription: CMVideoFormatDescription?
     private var waitingForKeyframe = true
@@ -68,8 +79,42 @@ final class HEVCDisplayView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .black
+        clipsToBounds = true
+        videoView.backgroundColor = .black
+        videoView.isUserInteractionEnabled = false
+        addSubview(videoView)
         displayLayer.videoGravity = .resizeAspect
         layer.addSublayer(cursorLayer)
+    }
+
+    /// Where the whole frame is drawn now in this view: the letterboxed rect, magnified and moved by
+    /// the zoom. The pointer sprite and a touch's mapping both go through it.
+    private var drawnRect: CGRect {
+        let rect = Self.videoRect(in: bounds, videoSize: pointerVideoSize)
+        return zoom?.rect(video: rect, bounds: bounds) ?? rect
+    }
+
+    /// Puts the picture where the zoom says: a transform on the video view (bounds and centre are
+    /// this view's, so the transform is its only change), and the sprite with it.
+    private func applyZoom(animated: Bool) {
+        let rect = Self.videoRect(in: bounds, videoSize: pointerVideoSize)
+        let drawn = drawnRect
+        var transform = CGAffineTransform.identity
+        if rect.width > 0, drawn != rect {
+            let scale = drawn.width / rect.width
+            transform = CGAffineTransform(translationX: drawn.midX - bounds.midX, y: drawn.midY - bounds.midY)
+                .scaledBy(x: scale, y: scale)
+        }
+        guard videoView.transform != transform || animated else { placeCursor(); return }
+        if animated && window != nil {
+            UIView.animate(withDuration: 0.2, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
+                self.videoView.transform = transform
+            }
+            placeCursor(animated: true)
+        } else {
+            videoView.transform = transform
+            placeCursor()
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -81,12 +126,15 @@ final class HEVCDisplayView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        placeCursor()   // rotation and letterbox changes move the video rect under it
+        // Bounds and centre, never frame: the zoom's transform stays on the video view.
+        videoView.bounds = CGRect(origin: .zero, size: bounds.size)
+        videoView.center = CGPoint(x: bounds.midX, y: bounds.midY)
+        applyZoom(animated: false)   // rotation and letterbox changes move the video rect, and the sprite with it
         #if DEBUG
         if let debugFrame {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            debugFrame.frame = Self.videoRect(in: bounds, videoSize: pointerVideoSize)
+            debugFrame.frame = drawnRect
             CATransaction.commit()
         }
         if let hud {
@@ -175,11 +223,17 @@ final class HEVCDisplayView: UIView {
     /// Puts the sprite's tip on the pointer inside the letterboxed video rect, or hides it when
     /// there is no pointer or no video yet. Never animated: an implicit 0.25 s action on a
     /// standalone layer is exactly the lag the sprite exists to remove. Main thread.
-    private func placeCursor() {
+    private func placeCursor(animated: Bool = false) {
         CATransaction.begin()
-        CATransaction.setDisableActions(true)
+        if animated {
+            // Only a zoom's jump, with the picture's own 0.2 s: the sprite stays on what it points at.
+            CATransaction.setAnimationDuration(0.2)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+        } else {
+            CATransaction.setDisableActions(true)
+        }
         defer { CATransaction.commit() }
-        let rect = Self.videoRect(in: bounds, videoSize: pointerVideoSize)
+        let rect = drawnRect
         guard let p = pointer, rect.width > 0, rect.height > 0 else {
             cursorLayer.isHidden = true
             return
@@ -256,7 +310,7 @@ final class HEVCDisplayView: UIView {
             guard let self else { return }
             self.pointerVideoSize = size
             self.onVideoSize?(size)
-            self.placeCursor()
+            self.applyZoom(animated: false)
             self.onVideoSizeForPointer?(size)
         }
         // Remove the last frame too: switching sources should show black until the new keyframe,
@@ -273,7 +327,7 @@ final class HEVCDisplayView: UIView {
         // The pointer's copy of the size is main-thread state; the client zeroes its own alongside.
         DispatchQueue.main.async { [weak self] in
             self?.pointerVideoSize = .zero
-            self?.placeCursor()
+            self?.applyZoom(animated: false)
         }
     }
 
@@ -342,7 +396,12 @@ struct StreamView: UIViewRepresentable {
         let client = self.client
         client.onCursorShapeChange = { [weak view] shape in view?.setCursorShape(shape) }
         view.setCursorShape(client.cursorShape)
-        client.onPointerChange = { [weak view] p in view?.setPointer(p) }
+        // The sprite first, where the pointer is in the picture as drawn; then the zoom follows it to
+        // the middle, carrying the sprite along.
+        client.onPointerChange = { [weak view, weak client] p in
+            view?.setPointer(p)
+            if let p { client?.zoom.follow(p) }
+        }
         // A new frame size (another source, an Aa resize) changes what a fraction means: this
         // device's own pointer, while it shows, starts again in the middle and the Mac's goes there
         // too (after the tour, while one shows: `pointerFrameChanged`); the Mac's arrow follows the

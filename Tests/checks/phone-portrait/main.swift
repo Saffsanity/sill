@@ -758,5 +758,63 @@ for rule in largerRules {
     check("Larger Picture grid (\(largerSizes) layouts): \(rule.name)" + (rule.firstFailure.map { " — first failure at \($0)" } ?? ""), rule.firstFailure == nil)
 }
 
+// MARK: Full Screen (FullScreenLayout)
+
+// An iPhone 12 Pro: 390×844, 47 pt above, 34 below; its keyboard 301 pt.
+let fsSize = CGSize(width: 390, height: 844)
+let fsOpen = FullScreenLayout(size: fsSize, top: 47, bottom: 34, keyboard: nil, expanded: true)
+check("full screen: the picture from under the notch down to the controls",
+      fsOpen.picture.minY == 47 && fsOpen.picture.width == 390 && near(fsOpen.picture.maxY, fsOpen.ground.minY))
+check("full screen: the key row ends at the home indicator", near(fsOpen.keys.maxY, 844 - 34) && fsOpen.keys.height == 44)
+check("full screen: row 1 10 pt above the keys, the handle 6 above row 1",
+      near(fsOpen.row1.maxY, fsOpen.keys.minY - 10) && near(fsOpen.handle.maxY, fsOpen.row1.minY - 6))
+check("full screen: five buttons and six caps across the rows",
+      fsOpen.buttons.count == 5 && fsOpen.caps.count == 6 && near(fsOpen.buttons[4].maxX, 376) && near(fsOpen.caps[5].maxX, 376))
+check("full screen: the ground from above the handle to the bottom",
+      near(fsOpen.ground.minY, fsOpen.handle.minY - 8) && near(fsOpen.ground.maxY, 844))
+check("full screen: the handle's three buttons at its ends and middle",
+      fsOpen.mode.minX == fsOpen.handle.minX && fsOpen.exit.maxX == fsOpen.handle.maxX && near(fsOpen.collapse.midX, fsOpen.handle.midX))
+check("full screen: the drawer under the top inset, above the controls",
+      near(fsOpen.drawer.minY, 47 + 8) && near(fsOpen.drawer.maxY, fsOpen.ground.minY - 8))
+check("full screen: the dim covers everything above the controls",
+      fsOpen.dim.count == 1 && near(fsOpen.dim[0].maxY, fsOpen.ground.minY))
+check("full screen with the Mac's menus: Menus after Apps, six across",
+      near(fsOpen.menus.minX, fsOpen.buttonsBesideMenus[0].maxX + 8) && fsOpen.buttonsBesideMenus.count == 5
+      && near(fsOpen.buttonsBesideMenus[4].maxX, 376) && fsOpen.menus.width >= 44)
+check("full screen: Aa's ruler over row 1", near(fsOpen.ruler.midX, fsOpen.buttons[1].midX) && fsOpen.ruler.minX >= fsOpen.row1.minX - 0.01)
+
+let fsShut = FullScreenLayout(size: fsSize, top: 47, bottom: 34, keyboard: nil, expanded: false)
+check("collapsed: only the handle, at the home indicator", near(fsShut.handle.maxY, 844 - 34) && fsShut.row1.height == 0
+      && fsShut.keys.height == 0 && fsShut.ground == .zero)
+check("collapsed: the drawer reaches down to the handle", near(fsShut.drawer.maxY, fsShut.handle.minY - 8))
+check("collapsed: the picture down to the handle", near(fsShut.picture.maxY, fsShut.handle.minY - 8)
+      && fsShut.picture.height > fsOpen.picture.height)
+
+let fsKeys = FullScreenLayout(size: fsSize, top: 47, bottom: 34, keyboard: 301, expanded: true)
+check("the keyboard up: the key row 10 pt above it", near(fsKeys.keys.maxY, 844 - 301 - 10))
+check("the keyboard up: the picture shrinks to the room above the controls",
+      near(fsKeys.picture.maxY, fsKeys.ground.minY) && fsKeys.picture.height < fsOpen.picture.height)
+let fsKeysShut = FullScreenLayout(size: fsSize, top: 47, bottom: 34, keyboard: 301, expanded: false)
+check("the keyboard up, collapsed: the handle above it", near(fsKeysShut.handle.maxY, 844 - 301 - 10))
+let fsNoInsets = FullScreenLayout(size: fsSize, top: 0, bottom: 0, keyboard: nil, expanded: true)
+check("no insets: still 8 pt from the bottom and the top", near(fsNoInsets.keys.maxY, 836) && near(fsNoInsets.drawer.minY, 16)
+      && fsNoInsets.picture.minY == 0)
+
+// Every phone's size, both states, with and without the keyboard: everything on screen, in order.
+var fsOK = true
+for (w, h) in [(320, 548), (375, 667), (375, 812), (390, 844), (393, 852), (402, 874), (430, 932), (440, 956)] {
+    for expanded in [true, false] {
+        for keyboard in [nil, PhonePortraitLayout.keyboardHeight(for: CGSize(width: w, height: h - 47))] as [CGFloat?] {
+            let l = FullScreenLayout(size: CGSize(width: w, height: h), top: 47, bottom: 34, keyboard: keyboard, expanded: expanded)
+            let floor = CGFloat(h) - max(34, (keyboard ?? 0) + (keyboard == nil ? 0 : 10))
+            fsOK = fsOK && l.handle.minY >= 0 && l.handle.maxY <= floor + 0.01 && (expanded ? near(l.keys.maxY, floor) : near(l.handle.maxY, floor))
+                && l.drawer.height >= 0 && l.drawer.maxY <= l.handle.minY && l.picture.minY == 47 && l.picture.width == CGFloat(w)
+                && l.picture.maxY <= l.handle.minY && l.picture.height > 100
+                && l.buttons.allSatisfy { $0.width >= 44 || !expanded }
+        }
+    }
+}
+check("full screen at every phone size: everything on screen, in order", fsOK)
+
 print("\(passes) passed, \(fails) failed")
 exit(fails == 0 ? 0 : 1)

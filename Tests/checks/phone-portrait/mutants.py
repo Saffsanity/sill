@@ -103,6 +103,21 @@ MUTANTS = {
     "S3 what streams ignored (the Desktop and nothing with Larger Picture, as before 2026-10-15)": ("switchOn && streaming == .window", "switchOn"),
     "S4 the switch ignored while a window streams": ("switchOn && streaming == .window", "streaming == .window"),
     "S5 the rule turned around (the Desktop larger, a window not)": ("switchOn && streaming == .window", "switchOn && streaming != .window"),
+    # Full Screen (Raffael, 2026-10-21).
+    "F1 the keyboard ignored": ("let lift = max(bottom, keyboard.map { $0 + PhonePortraitLayout.keyboardClearance } ?? 0, Self.pad)",
+                                "let lift = max(bottom, Self.pad)"),
+    "F2 the keyboard's clearance dropped": ("keyboard.map { $0 + PhonePortraitLayout.keyboardClearance }", "keyboard.map { $0 }"),
+    "F3 the home indicator ignored": ("let lift = max(bottom, keyboard", "let lift = max(0, keyboard"),
+    "F4 the handle on row 1": ("y: row1.minY - PhonePortraitLayout.band - Self.handleHeight,", "y: row1.minY - Self.handleHeight,"),
+    "F5 the drawer under the status bar": ("let panelTop = max(top, Self.pad) + PhonePortraitLayout.panelGap", "let panelTop = Self.pad + PhonePortraitLayout.panelGap"),
+    "F6 the drawer over the controls": ("let panelBottom = (expanded ? ground.minY : handle.minY) - PhonePortraitLayout.panelGap",
+                                        "let panelBottom = handle.minY - PhonePortraitLayout.panelGap"),
+    "F7 the dim over the controls": ("dim = [CGRect(x: 0, y: 0, width: width, height: max(0, expanded ? ground.minY : handle.minY))]",
+                                     "dim = [CGRect(x: 0, y: 0, width: width, height: height)]"),
+    "F9 full screen's Menus at the row's end": ("menus = withMenus.remove(at: 1)", "menus = withMenus.remove(at: 5)"),
+    "F8 the picture behind the controls": ("height: max(0, (expanded ? ground.minY : handle.minY - Self.pad) - top))",
+                                           "height: height - top)"),
+    "F10 the picture behind the notch": ("picture = CGRect(x: 0, y: top, width: width,", "picture = CGRect(x: 0, y: 0, width: width,"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():
