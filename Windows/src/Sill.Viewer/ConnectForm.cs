@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text.Json;
 using Sill.Protocol;
 
 namespace Sill.Viewer;
@@ -8,18 +7,14 @@ namespace Sill.Viewer;
 /// The window the viewer opens on when no <c>--host</c> is given: the <see cref="ConnectScreen"/>
 /// over a <see cref="MacBrowser"/> per service type. A paired Mac's row connects at the addresses
 /// and port the browser resolved (<see cref="Connect"/>, which <see cref="SillApp"/> turns into a
-/// <see cref="ViewerForm"/>, pinned to the saved key as before). "Not paired" and Add a Mac… raise
-/// <see cref="PairRequested"/> and <see cref="AddMacRequested"/>, which ticket 10b fills; until
-/// then the status line says to pair with the spike.
+/// <see cref="ViewerForm"/>, pinned to the saved key). A "Not paired" row asks its Mac for its code
+/// and Add a Mac… takes a link or an address and a code, both through a <see cref="PairingFlow"/>
+/// shown as a <see cref="PairCard"/>; a pairing connects at once.
 /// </summary>
 sealed class ConnectForm : Form
 {
-    /// <summary>A paired Mac clicked: the addresses to dial (<c>host:port</c>, in order) and its name.</summary>
-    public event Action<IReadOnlyList<string>, string>? Connect;
-    /// <summary>A "Not paired" row clicked (10b: the ask, then the code card).</summary>
-    public event Action<MacRow>? PairRequested;
-    /// <summary>Add a Mac… clicked (10b: a pasted link, or an address and a code).</summary>
-    public event Action? AddMacRequested;
+    /// <summary>A Mac to connect to: the addresses to dial (<c>host:port</c>, in order), its name and its Mac ID.</summary>
+    public event Action<IReadOnlyList<string>, string, string>? Connect;
 
     public const string LookingOnNetwork = "Looking for Macs on this network";
 
@@ -29,15 +24,24 @@ sealed class ConnectForm : Form
     private readonly IReadOnlyList<string> serviceTypes;
     private readonly Stopwatch since = Stopwatch.StartNew();
     private readonly WindowPlacement? placement;
+    private readonly ISavedMacs store;
+    private readonly PairCard card = new();
+    private DeviceIdentity? identity;
+    private PairingFlow? flow;
+    private MacRow? flowRow;
     private IReadOnlyList<KnownMac> saved = [];
     private IReadOnlyList<MacRow> rows = [];
-    private string status = LookingOnNetwork;
+    private string status;
     private string? busyRow;
     private bool listedOnce;
 
-    public ConnectForm(string dir, IReadOnlyList<string> serviceTypes)
+    /// <param name="status">The status line to open with (a session's end: a Mac with a new key, a
+    /// forgotten Mac); null for "Looking for Macs on this network".</param>
+    public ConnectForm(string dir, IReadOnlyList<string> serviceTypes, string? status = null)
     {
         this.dir = dir; this.serviceTypes = serviceTypes;
+        this.status = status ?? LookingOnNetwork;
+        store = new SavedMacsFile(dir);
         Text = "Sill";
         BackColor = Palette.Panel;
         ClientSize = new Size(1280, 800);
@@ -47,13 +51,14 @@ sealed class ConnectForm : Form
         Bounds = WindowPlacement.Fit(placement, Screen.AllScreens.Select(s => s.WorkingArea).ToList(), Size);
         Controls.Add(screen);
         screen.RowClicked += Clicked;
-        screen.AddMacClicked += () =>
-        {
-            if (AddMacRequested is { } add) { add(); return; }
-            Say("Adding a Mac by its code or a link comes next. For now, pair with Sill.Spike pair, then open Sill again.");
-        };
+        screen.AddMacClicked += () => Start(null);
+        card.Pair += (where, code) => _ = flow?.IsAddMac == true ? flow.SubmitAddAsync(where, code) : flow?.SubmitCodeAsync(code);
+        card.Cancelled += () => flow?.Cancel();
+        card.Rename += Rename;
         KeyPreview = true;
     }
+
+    private string PcName => ThisPc.Load(dir).NameOr(Environment.MachineName);
 
     protected override void OnHandleCreated(EventArgs e)
     {
@@ -66,7 +71,8 @@ sealed class ConnectForm : Form
         base.OnShown(e);
         if (placement?.Maximized == true) WindowState = FormWindowState.Maximized;
         saved = LoadSaved();
-        Log($"Connect screen: looking for {string.Join(", ", serviceTypes)}; {(saved.Count == 0 ? "no Mac saved" : $"saved: {saved[0].Name} ({saved[0].MacId})")}.");
+        Log($"Connect screen: looking for {string.Join(", ", serviceTypes)}; "
+            + (saved.Count == 0 ? "no Mac saved" : "saved: " + string.Join(", ", saved.Select(m => $"{m.Name} ({m.MacId}{(m.NewKey ? ", new key" : "")})"))) + ".");
         foreach (var type in serviceTypes)
         {
             var b = new MacBrowser(type);
@@ -106,20 +112,19 @@ sealed class ConnectForm : Form
 
     private void Clicked(MacRow row)
     {
-        Log($"Connect screen: clicked {row.Name}, {row.State}.");
+        Log($"Connect screen: clicked {row.Name}, {row.State}{(row.Replaces is { } r ? $" (pairs again in place of {r})" : "")}.");
         switch (row.State)
         {
             case MacRow.Kind.Paired:
+                flow?.Cancel();
                 var targets = row.DialTargets();
                 if (targets.Count == 0) { Say($"{row.Name} didn’t say where it is. Try again in a moment."); return; }
                 busyRow = row.Service.Id;
                 Say($"Connecting to {row.Name}…");
-                Connect?.Invoke(targets, row.Name);
+                Connect?.Invoke(targets, row.Name, row.MacId!);
                 break;
             case MacRow.Kind.NotPaired or MacRow.Kind.OpenDoor:
-                if (PairRequested is { } pair) { pair(row); return; }
-                Say($"{row.Name} isn’t paired with this PC yet. Pairing here comes next; for now, run "
-                    + $"Sill.Spike pair --ask 1 --host {row.DialTargets().FirstOrDefault() ?? row.Name}, then open Sill again.");
+                Start(row);
                 break;
             case MacRow.Kind.UpdateSill:
                 Say(ConnectRows.UpdateSillStatus(row.Name));
@@ -127,31 +132,106 @@ sealed class ConnectForm : Form
         }
     }
 
-    /// <summary>The Macs this PC paired with: today the one in mac.json (Sill.Spike pair's), its
-    /// recognition key included. 10c makes this a list.</summary>
-    private IReadOnlyList<KnownMac> LoadSaved()
+    // ---- pairing ----
+
+    /// <summary>A pairing: a row's ask (<paramref name="row"/>), or Add a Mac… (null). Any pairing
+    /// already under way stops first (its code withdrawn).</summary>
+    private void Start(MacRow? row)
     {
-        try
+        flow?.Cancel();
+        try { identity ??= DeviceIdentity.LoadOrCreate(dir); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
         {
-            using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(dir, "mac.json")));
-            var root = doc.RootElement;
-            string? Text(string name) => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
-            if (Text("MacId") is not { } id || Text("Name") is not { } name) return [];
-            var key = Text("RecognitionKey") is { } rk ? Base64Url.Decode(rk) : null;
-            return [new KnownMac(id, name, key is { Length: 32 } ? key : null, null)];
+            Say($"This PC couldn’t make its key ({e.Message}).");
+            return;
         }
-        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { return []; }
+        var door = new TlsPairingDoor(identity, () => PcName);
+        flowRow = row;
+        if (row is null)
+        {
+            flow = PairingFlow.AddMac(door, store);
+            Log("Pairing: Add a Mac.");
+        }
+        else
+        {
+            var targets = row.DialTargets().Select(DoorAddress.Parse).OfType<DoorAddress>().ToList();
+            if (targets.Count == 0) { Say($"{row.Name} didn’t say where it is. Try again in a moment."); return; }
+            flow = PairingFlow.Home(door, store, row.Name, targets, row.Replaces, row.Name);
+            Log($"Pairing: asking {row.Name} at {string.Join(", ", targets)}.");
+        }
+        var mine = flow;
+        mine.Changed += () => { if (flow == mine) FlowChanged(mine); };
+        if (row is null) FlowChanged(mine);
+        else _ = mine.AskAsync();
     }
+
+    private void FlowChanged(PairingFlow f)
+    {
+        Log($"Pairing: {f.Step}{(f.Line is { } l ? $", “{l}”" : "")}{(f.Problem is { } p ? $", problem “{p}”" : "")}.");
+        switch (f.Step)
+        {
+            case PairingFlow.Steps.Asking:
+                busyRow = flowRow?.Service.Id;
+                Say(f.Line ?? "");
+                break;
+            case PairingFlow.Steps.Code or PairingFlow.Steps.Proving:
+                if (!screen.Controls.Contains(card))
+                {
+                    screen.ShowCard(card);
+                    card.Open(f.IsAddMac ? null : f.Mac, PcName);   // on screen first, so its field takes the focus
+                }
+                card.Set(f);
+                busyRow = null;
+                status = f.IsAddMac ? "" : f.Step == PairingFlow.Steps.Code ? PairingCopy.Showing(f.Mac) : "";
+                screen.Show(rows, status, busyRow);
+                break;
+            case PairingFlow.Steps.Paired:
+                screen.ShowCard(null);
+                flow = null;
+                Say(f.Line ?? "");
+                var mac = f.Saved!;
+                saved = LoadSaved();
+                // The address the pairing reached first, then the row's others.
+                var targets = new List<string> { f.Reached!.Value.ToString() };
+                foreach (var t in flowRow?.DialTargets() ?? []) if (!targets.Contains(t)) targets.Add(t);
+                Log($"Pairing: paired with {mac.Name} ({mac.MacId}) at {f.Reached}; connecting.");
+                Connect?.Invoke(targets, mac.Name, mac.MacId);
+                break;
+            case PairingFlow.Steps.Ended:
+                screen.ShowCard(null);
+                flow = null;
+                busyRow = null;
+                saved = LoadSaved();
+                status = f.Line ?? LookingOnNetwork;
+                Refresh();
+                break;
+        }
+    }
+
+    private void Rename()
+    {
+        string current = ThisPc.Load(dir).Name ?? Environment.MachineName;
+        if (RenameDialog.Ask(this, current, DeviceDpi) is not { } next) return;
+        new ThisPc(next).Save(dir);
+        Log($"This PC's name: “{PcName}”.");
+        card.SetPcName(PcName);
+    }
+
+    /// <summary>The Macs this PC paired with (macs.json, or the spike's mac.json taken in once).</summary>
+    private IReadOnlyList<KnownMac> LoadSaved() => store.Load().Select(m => m.Known).ToList();
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        flow?.Cancel();
         foreach (var b in browsers) b.Dispose();
-        // Where it was, for the viewer's next window (the viewer's own full screen and decoding kept).
+        identity?.Dispose();
+        // Where it was, for the viewer's next window (the viewer's own full screen, decoding and clipboard kept).
         if (WindowState != FormWindowState.Minimized)
         {
             var normal = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
             new WindowPlacement(normal.X, normal.Y, normal.Width, normal.Height, WindowState == FormWindowState.Maximized,
-                placement?.FullScreen ?? false, placement?.SoftwareDecoding ?? false).Save(Path.Combine(dir, "window.json"));
+                placement?.FullScreen ?? false, placement?.SoftwareDecoding ?? false, placement?.ShareClipboard ?? true)
+                .Save(Path.Combine(dir, "window.json"));
         }
         base.OnFormClosing(e);
     }
@@ -167,7 +247,8 @@ sealed class ConnectForm : Form
 
 /// <summary>
 /// One window at a time: the connect screen, or the viewer it opened. The viewer's Disconnect (in
-/// its Settings panel) brings the connect screen back; closing either window quits.
+/// its Settings panel), Forget, or a Mac with a new key brings the connect screen back, with the
+/// viewer's last words as its status line; closing either window quits.
 /// </summary>
 sealed class SillApp : ApplicationContext
 {
@@ -178,29 +259,29 @@ sealed class SillApp : ApplicationContext
     public SillApp(string dir, IReadOnlyList<string> hosts, ViewerOptions options, IReadOnlyList<string> serviceTypes)
     {
         this.dir = dir; this.options = options; this.serviceTypes = serviceTypes;
-        if (hosts.Count > 0) ShowViewer(hosts);
-        else ShowConnect();
+        if (hosts.Count > 0) ShowViewer(hosts, null);
+        else ShowConnect(null);
     }
 
-    private void ShowConnect()
+    private void ShowConnect(string? status)
     {
-        var form = new ConnectForm(dir, serviceTypes);
-        IReadOnlyList<string>? next = null;
-        form.Connect += (targets, _) => { next = targets; form.Close(); };
+        var form = new ConnectForm(dir, serviceTypes, status);
+        (IReadOnlyList<string> Targets, string MacId)? next = null;
+        form.Connect += (targets, _, macId) => { next = (targets, macId); form.Close(); };
         form.FormClosed += (_, _) =>
         {
-            if (next is { } t) ShowViewer(t);
+            if (next is { } t) ShowViewer(t.Targets, t.MacId);
             else ExitThread();
         };
         form.Show();
     }
 
-    private void ShowViewer(IReadOnlyList<string> hosts)
+    private void ShowViewer(IReadOnlyList<string> hosts, string? macId)
     {
-        var form = new ViewerForm(dir, hosts, options);
+        var form = new ViewerForm(dir, hosts, options, macId);
         form.FormClosed += (_, _) =>
         {
-            if (form.Disconnecting) ShowConnect();
+            if (form.Disconnecting) ShowConnect(form.EndedWith);
             else ExitThread();
         };
         form.Show();

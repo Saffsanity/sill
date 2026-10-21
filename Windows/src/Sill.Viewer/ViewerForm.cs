@@ -22,10 +22,11 @@ namespace Sill.Viewer;
 /// </summary>
 sealed class ViewerForm : Form
 {
-    private sealed record SavedMac(string Fingerprint, string MacId, string Name, string RecognitionKey, string Host, int Port);
-
     private readonly string dir;
     private readonly IReadOnlyList<string> hostOverrides;
+    private readonly ISavedMacs store;
+    private string? macId;   // the saved Mac this window streams; null: the newest (--host)
+    private readonly bool fromRow;   // opened from the connect screen's row (or a pairing): a refused pin marks it
     private readonly ViewerOptions options;
     private readonly CancellationTokenSource stop = new();
     private readonly Lock gate = new();
@@ -113,9 +114,19 @@ sealed class ViewerForm : Form
     /// <summary>Closed by the Settings panel's Disconnect, not by the window's close button.</summary>
     public bool Disconnecting { get; private set; }
 
-    public ViewerForm(string dir, IReadOnlyList<string> hostOverrides, ViewerOptions options)
+    // This PC's name as the Mac sees it (pc.json), read once and again after a rename.
+    private string? pcName;
+    private string PcName => pcName ??= ThisPc.Load(dir).NameOr(Environment.MachineName);
+    /// <summary>The words the connect screen opens with after this window: a Mac with a new key, a forgotten Mac.</summary>
+    public string? EndedWith { get; private set; }
+
+    /// <param name="macId">The saved Mac the connect screen's row (or a pairing) chose, dialed at
+    /// <paramref name="hostOverrides"/>; null for <c>--host</c>, which dials the newest saved Mac.</param>
+    public ViewerForm(string dir, IReadOnlyList<string> hostOverrides, ViewerOptions options, string? macId = null)
     {
         this.dir = dir; this.hostOverrides = hostOverrides; this.options = options;
+        this.macId = macId; fromRow = macId is not null;
+        store = new SavedMacsFile(dir);
         Text = "Sill Viewer";
         BackColor = Palette.Panel;
         ClientSize = new Size(1280, 800);
@@ -147,6 +158,26 @@ sealed class ViewerForm : Form
         };
         settings.Done += CloseSettings;
         settings.Disconnect += () => { Disconnecting = true; Close(); };   // back to the connect screen (SillApp)
+        settings.Forget += () =>
+        {
+            // This PC forgets the Mac's key; the Mac lists this PC until it is removed there.
+            if (macId is { } id) store.Forget(id);
+            Log($"Forgot {macName} ({macId}).");
+            EndedWith = $"This PC forgot {macName}. To connect again, click it and pair. {macName} lists this PC in Sill’s Settings › Devices until you remove it there.";
+            Disconnecting = true;
+            Close();
+        };
+        settings.RenamePc += () =>
+        {
+            CloseSettings();
+            if (RenameDialog.Ask(this, ThisPc.Load(dir).Name ?? Environment.MachineName, DeviceDpi) is { } next)
+            {
+                new ThisPc(next).Save(dir);
+                pcName = null;
+                Log($"This PC's name: “{PcName}”.");
+            }
+            RefreshSettings();
+        };
         settings.Pick += change =>
         {
             if (ledger.Pick(change, ++settingsToken, settingsClock.Elapsed.TotalSeconds) is { } send) Send(send.Encode());
@@ -574,7 +605,7 @@ sealed class ViewerForm : Form
     {
         bool gpuUsable = gpu is not null && !gpuFailed;
         settings.Show(ledger, macName, settingsNote, gpuUsable, gpu?.AdapterName ?? "", preferSoftware || !gpuUsable,
-            clipboard?.ShareOn ?? true, clipboard?.MacShares);
+            clipboard?.ShareOn ?? true, clipboard?.MacShares, PcName, macId is not null);
         PlaceSettings();
     }
 
@@ -663,20 +694,16 @@ sealed class ViewerForm : Form
     /// <summary>One session; false when trying again is pointless (no paired Mac, a bad --host).</summary>
     private async Task<bool> SessionAsync(CancellationToken stopping)
     {
-        SavedMac? mac;
-        byte[]? pin;
-        try
-        {
-            mac = JsonSerializer.Deserialize<SavedMac>(File.ReadAllText(Path.Combine(dir, "mac.json")));
-            pin = mac is null ? null : Base64Url.Decode(mac.Fingerprint);
-            if (mac is null || pin is not { Length: 32 }) throw new InvalidDataException("mac.json is not a saved Mac.");
-        }
-        catch (Exception e) when (e is IOException or JsonException or InvalidDataException or UnauthorizedAccessException)
+        var all = store.Load();
+        var mac = macId is { } id ? all.FirstOrDefault(m => m.MacId == id) : SavedMacs.Newest(all);
+        if (mac?.Pin is not { } pin)
         {
             macName = "Sill";
-            Status($"This PC isn’t paired with a Mac yet. Pair it first (Sill.Spike pair), then open Sill again.\n({e.Message})", busy: false);
+            Status(macId is null ? "This PC isn’t paired with a Mac yet. Open Sill without --host, and click your Mac to pair."
+                                 : "This PC no longer knows this Mac. Disconnect, then click it to pair again.", busy: false);
             return false;
         }
+        macId = mac.MacId;
         macName = mac.Name;
         BeginInvoke(() => drawer.SetMacName(mac.Name));
         // The addresses to dial, in order: each --host, else the one saved at pairing.
@@ -693,6 +720,7 @@ sealed class ViewerForm : Form
         var ct = sessionStop.Token;
         SessionClient? session = null;
         string host = "", tried = "";
+        int pinRefused = 0;
         foreach (var (h, p) in targets)
         {
             Status($"Connecting at {h}:{p}…");
@@ -701,7 +729,7 @@ sealed class ViewerForm : Form
             try
             {
                 session = await SessionClient.ConnectAsync(h, p, DeviceIdentity.LoadOrCreate(dir), pin,
-                    new Hello("0.1", "viewer", Hello.CurrentProtocol, $"{Environment.MachineName} (Windows)"), dial.Token);
+                    new Hello("0.1", "viewer", Hello.CurrentProtocol, $"{PcName} (Windows)"), dial.Token);
                 host = $"{h}:{p}";
                 break;
             }
@@ -709,7 +737,22 @@ sealed class ViewerForm : Form
             {
                 tried += $"\n{h}:{p}: {Reason(e)}";
                 Log($"Couldn’t connect at {h}:{p}: {e.Message}");
+                for (var x = e; x is not null; x = x.InnerException) if (x is SillTls.PinMismatchException) { pinRefused++; break; }
             }
+        }
+        if (session is null && fromRow && pinRefused > 0)
+        {
+            // Another key answered as this Mac at its row and nothing else did: set up again (or a
+            // look-alike holds the row). Paired again as a Mac never seen: a click on its row asks,
+            // with any key, and the code the Mac shows proves it (the iPad's afterPinRefused).
+            store.MarkNewKey(mac.MacId);
+            string words = PairingCopy.NewKey(mac.Name);
+            Log($"Pin refused at every address of {mac.Name} ({mac.MacId}): marked new key.");
+            Status(words, busy: false);
+            EndedWith = words;
+            Disconnecting = true;
+            BeginInvoke(Close);
+            return false;
         }
         if (session is null)
         {
@@ -1064,7 +1107,7 @@ sealed class ViewerForm : Form
                 await session.SendAsync(SessionMessages.Ping(clock.Elapsed.TotalSeconds), ct);
                 if (nothingStreams && Stopwatch.GetElapsedTime(Interlocked.Read(ref askedAt)).TotalSeconds >= 3)
                     await AskForDesktopAsync(session, ct);
-                var stats = JsonSerializer.SerializeToUtf8Bytes(new { fps = picturesShown, frameAgeMs = -1, rttMs = -1, device = $"{Environment.MachineName} (Windows)" });
+                var stats = JsonSerializer.SerializeToUtf8Bytes(new { fps = picturesShown, frameAgeMs = -1, rttMs = -1, device = $"{PcName} (Windows)" });
                 await session.SendAsync(StreamHeader.Serialize(SessionKinds.ClientStats, 0, false, stats), ct);
             }
             while (await timer.WaitForNextTickAsync(ct));

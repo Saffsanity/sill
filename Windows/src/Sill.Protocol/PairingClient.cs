@@ -43,13 +43,26 @@ public static class PairingClient
     /// by itself and answers "shown", or says why not ("openOnMac", "locked", "busy"…). Returns the
     /// answer and the key the Mac presented, to pin the code's connection to.
     /// </summary>
-    public static async Task<(PairResult? Result, byte[] MacFingerprint)> AskAsync(string host, int port, DeviceIdentity identity,
-        string deviceName, string? model, CancellationToken ct)
+    public static Task<(PairResult? Result, byte[] MacFingerprint)> AskAsync(string host, int port, DeviceIdentity identity,
+        string deviceName, string? model, CancellationToken ct) =>
+        ProoflessAsync(PairRequest.Ask, host, port, identity, pin: null, deviceName, model, ct);
+
+    /// <summary>
+    /// The Cancel of an ask the Mac answered "shown" (kind 19 "cancel", StreamClient+Home.swift's
+    /// <c>withdrawAsk</c>): pinned to the key that answered, so the window the ask opened closes
+    /// instead of staying up its 5 minutes with a live code. The answer is always "closed".
+    /// </summary>
+    public static Task<(PairResult? Result, byte[] MacFingerprint)> CancelAskAsync(string host, int port, DeviceIdentity identity,
+        byte[] pin, string deviceName, string? model, CancellationToken ct) =>
+        ProoflessAsync(PairRequest.Cancel, host, port, identity, pin, deviceName, model, ct);
+
+    private static async Task<(PairResult? Result, byte[] MacFingerprint)> ProoflessAsync(string method, string host, int port,
+        DeviceIdentity identity, byte[]? pin, string deviceName, string? model, CancellationToken ct)
     {
-        var (ssl, macFp) = await SillTls.ConnectAsync(host, port, SillTls.Pairing, identity, pin: null, ct).ConfigureAwait(false);
+        var (ssl, macFp) = await SillTls.ConnectAsync(host, port, SillTls.Pairing, identity, pin, ct).ConfigureAwait(false);
         await using (ssl)
         {
-            var request = new PairRequest(PairRequest.Version, PairRequest.Ask, "", deviceName, model);
+            var request = new PairRequest(PairRequest.Version, method, "", deviceName, model);
             await ssl.WriteAsync(StreamHeader.Serialize(Kinds.PairRequest, 0, false,
                 System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(request, new System.Text.Json.JsonSerializerOptions
                 { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull })), ct).ConfigureAwait(false);

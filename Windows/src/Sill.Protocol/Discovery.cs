@@ -83,17 +83,21 @@ public sealed record FoundService(
 
 /// <summary>What this PC knows of a Mac it paired with, enough to recognise its row: its Mac ID,
 /// its name, the recognition key from pairing (32 bytes; null for a record without one), and the
-/// Bonjour name it was last reached under (for a row that carries no tag at all).</summary>
-public sealed record KnownMac(string MacId, string Name, byte[]? RecognitionKey, string? BonjourName);
+/// Bonjour name it was last reached under (for a row that carries no tag at all), and whether
+/// another key answered as it since (<c>NewKey</c>: its rows pair again).</summary>
+public sealed record KnownMac(string MacId, string Name, byte[]? RecognitionKey, string? BonjourName, bool NewKey = false);
 
-/// <summary>A row of the connect screen.</summary>
+/// <summary>A row of the connect screen. <c>MacId</c> is the saved Mac the row is: set for
+/// <see cref="Kind.Paired"/>, and for a <see cref="Kind.NotPaired"/> row of a saved Mac another key
+/// answered as (a Mac set up again), whose pairing replaces that record (<see cref="Replaces"/>).</summary>
 public sealed record MacRow(FoundService Service, MacRow.Kind State, string? MacId, bool TagNamed)
 {
     public enum Kind
     {
         /// <summary>A Mac this PC paired with on a TLS door: a click connects, pinned to its key.</summary>
         Paired,
-        /// <summary>Not paired with this PC (or another key's Mac under a saved Mac's name): a click pairs (ticket 10b).</summary>
+        /// <summary>Not paired with this PC (or another key's Mac under a saved Mac's name, or a saved
+        /// Mac with a new key): a click asks the Mac for its code.</summary>
         NotPaired,
         /// <summary>Not paired, and the Mac lets any device in (<c>p=0</c>). "Not paired" too, so it
         /// never reads like a paired Mac's row; a click pairs as well.</summary>
@@ -103,6 +107,9 @@ public sealed record MacRow(FoundService Service, MacRow.Kind State, string? Mac
     }
 
     public string Name => Service.Name;
+
+    /// <summary>The saved record a pairing from this row replaces: a Mac set up again.</summary>
+    public string? Replaces => State == Kind.NotPaired ? MacId : null;
 
     /// <summary>The word at the end of the row: Wired or Wi‑Fi for a paired Mac when the link says,
     /// "Not paired", "Update Sill".</summary>
@@ -152,6 +159,9 @@ public static class ConnectRows
         // No `p`: this client dials no plain door (a Release iPad's rule), whoever the Mac is.
         if (door == HomeDoorTxt.Door.Plain) return new MacRow(service, MacRow.Kind.UpdateSill, null, false);
         var mac = RowMac(service, saved);
+        // A saved Mac another key answered as: paired again with a click (an ask with any key), as
+        // the iPad's homeDial does for SavedMac.newKey.
+        if (mac is { } n && saved.Any(s => s.MacId == n.MacId && s.NewKey)) return new MacRow(service, MacRow.Kind.NotPaired, n.MacId, n.TagNamed);
         if (mac is { } m) return new MacRow(service, MacRow.Kind.Paired, m.MacId, m.TagNamed);
         return new MacRow(service, door == HomeDoorTxt.Door.Open ? MacRow.Kind.OpenDoor : MacRow.Kind.NotPaired, null, false);
     }

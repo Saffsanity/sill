@@ -71,7 +71,7 @@ dotnet run --project Windows/src/Sill.Spike -- pair --link "sill://pair?…" [--
 
 The code goes in one argument (quote it if it has spaces). The device's key is made on first use
 in `%LOCALAPPDATA%\Sill\spike\device.p12` (`--identity <dir>` for another), and a pairing saves
-the Mac in `mac.json` beside it. Exit status: 0 paired, 1 refused, 2 usage, 3 connection or TLS.
+the Mac in `macs.json` beside it. Exit status: 0 paired, 1 refused, 2 usage, 3 connection or TLS.
 The TLS tests (`WindowsFact`) run only on Windows.
 
 To test from a PC without opening a port on the Mac, keep the host on loopback and forward it
@@ -87,7 +87,7 @@ After `pair`, with the same host still running (`SillHost --pairing` makes a new
 dotnet run --project Windows/src/Sill.Spike -- session [--seconds 10] [--host <address>:<port>] [--save <dir>]
 ```
 
-It dials the Mac in `mac.json` pinned to its key, says hello, asks for the Desktop, and logs the
+It dials the newest Mac in `macs.json` pinned to its key, says hello, asks for the Desktop, and logs the
 parameter sets, each keyframe and one line a second. `--save <dir>` writes the first keyframe as
 `parameter-sets.bin`, `first-keyframe.bin` and `first-keyframe.h265` (Annex B: `ffmpeg -i
 first-keyframe.h265 frame.png` decodes it). To compare, `Scripts/sillclient.py <port> 8 desktop
@@ -122,8 +122,23 @@ on this network (`_sill._tcp` through dnsapi.dll, Windows 10 1809 and later, no 
 its word (Wired or Wi‑Fi for the Mac this PC paired with, known by its TXT tag `r`, never by name;
 "Not paired"; "Update Sill" for a Mac without `p`), Add a Mac… and the site's links. A click on the
 paired Mac connects at the address and port it resolved (the home door, TLS, pinned to the saved
-key); Settings › Disconnect, at the panel's foot, comes back here. Pairing from the screen is ticket
-10b; until then "Not paired" says to use `Sill.Spike pair`. TEST ONLY: `--service-type
+key); Settings › Disconnect, at the panel's foot, comes back here.
+
+Pairing takes clicks and the code, as on the iPad. A click on a "Not paired" row asks the Mac to
+show its code (kind 19 "ask"; the status line says what the Mac answered: showing a code, unlock
+it, open Sill's Pair iPhone or iPad…, or no answer), then a card asks for it: "Enter the Code from
+‹Mac›", 12 digits grouped in fours as they are typed, the check digit judged once all 12 are in, so
+a typo never costs one of the Mac's five tries; a wrong code says how many tries are left. The code
+goes to the address that answered, pinned to the key the ask met; paired, the viewer connects at
+once. Cancel (or Esc) tells the Mac to close its code window (kind 19 "cancel"). Add a Mac… takes a
+pasted `sill://pair` link (pinned to its key, at its own addresses) or an address (`host`, or
+`host:port`; 7455, the remote door, by default) and a code. A Mac set up again: when every address of
+a paired Mac's row answers with another key, the connect screen says "‹Mac› has a new key since this
+PC paired. Click it to pair again.", its row reads "Not paired", and that pairing replaces the old
+record. The saved Macs are `macs.json` beside the key (a spike's `mac.json` is taken in once and
+renamed `mac.json.migrated`). Settings › This PC › Name is how a Mac lists this PC when it pairs
+(`pc.json`; also in the hello), and Forget ‹Mac› (click twice) drops its key and goes back to the
+list. TEST ONLY: `--service-type
 _silltest._tcp` (repeatable) browses other types. No firewall rule is needed: the DNS Client
 service owns UDP 5353 and Windows' built-in mDNS rules let its answers in.
 

@@ -9,7 +9,9 @@ namespace Sill.Viewer;
 /// line, the Macs this PC finds on the network (each with its word: Wired, Wi‑Fi, Not paired,
 /// Update Sill), Add a Mac… last, and along the bottom the footer: "Needs the free Sill app on your
 /// Mac." with the download, support and privacy links. A column 380 px wide, centred, drawn by hand
-/// in the iPad's colours. It only shows and reports clicks; <see cref="ConnectForm"/> decides.
+/// in the iPad's colours. While a pairing's <see cref="PairCard"/> is up it takes the rows' and
+/// Add a Mac…'s place in the column (<see cref="ShowCard"/>). It only shows and reports clicks;
+/// <see cref="ConnectForm"/> decides.
 /// </summary>
 sealed class ConnectScreen : Control
 {
@@ -28,6 +30,7 @@ sealed class ConnectScreen : Control
     private IReadOnlyList<MacRow> rows = [];
     private string status = "";
     private string? busyRow;   // the row a click is dialing, lit as the iPad lights it
+    private PairCard? card;
     private Font titleFont, rowFont, smallFont, buttonFont, iconFont;
 
     private enum Hit { None, Row, Add, Link }
@@ -59,6 +62,22 @@ sealed class ConnectScreen : Control
         Invalidate();
     }
 
+    /// <summary>The pairing card in the column in place of the rows; null puts the rows back.</summary>
+    public void ShowCard(PairCard? next)
+    {
+        if (card == next) return;
+        if (card is not null) { card.Resized -= Invalidate; Controls.Remove(card); }
+        card = next;
+        if (card is not null)
+        {
+            card.Width = (int)ColumnPixels;
+            card.Resized += Invalidate;
+            Controls.Add(card);
+        }
+        hover = (Hit.None, -1);
+        Invalidate();
+    }
+
     // ---- layout ----
 
     private float ColumnPixels => Math.Min(S(ColumnWidth), Math.Max(S(200), Width - S(32)));
@@ -68,7 +87,8 @@ sealed class ConnectScreen : Control
         status.Length == 0 ? 0 : TextRenderer.MeasureText(status, smallFont, new Size((int)w, int.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.NoPadding).Height;
 
     private float ColumnHeight(float w) =>
-        S(24) + S(Spacing) + StatusHeight(w - S(20)) + S(4) + rows.Count * (S(RowHeight) + S(Spacing)) + S(ButtonHeight);
+        S(24) + S(Spacing) + StatusHeight(w - S(20)) + S(4)
+        + (card is not null ? card.Height : rows.Count * (S(RowHeight) + S(Spacing)) + S(ButtonHeight));
 
     private float FooterHeight => S(18) + S(8) + S(18) + S(LinkReach);
 
@@ -94,6 +114,15 @@ sealed class ConnectScreen : Control
             TextRenderer.DrawText(g, status, smallFont, Rectangle.Round(new RectangleF(x + S(10), y, w - S(20), sh)), Palette.Muted,
                 TextFormatFlags.NoPadding | TextFormatFlags.WordBreak);
         y += sh + S(4);
+
+        if (card is not null)
+        {
+            if (card.Width != (int)w) card.Width = (int)w;   // its Resized puts it right next paint
+            var at = new Point((int)x, (int)y);
+            if (card.Location != at) card.Location = at;
+            DrawFooter(g, x + S(10), footerTop);
+            return;
+        }
 
         for (int i = 0; i < rows.Count; i++)
         {
