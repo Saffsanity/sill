@@ -39,6 +39,19 @@ MUTANTS = [
      '"applySettings:", "c@:@", as: Runtime.ApplyFn.self)'),
     ("applySettings:'s NO read as YES", "return fn(display, sel, settings).boolValue",
      "return fn(display, sel, settings).boolValue || true"),
+    # HeadlessDesktopPolicy (issue #61)
+    ("headless display created when display already present",
+     "!hasDisplay && clientCount > 0 && appKitLoop && !synthetic && apiAvailable",
+     "clientCount > 0 && appKitLoop && !synthetic && apiAvailable"),
+    ("headless display created with 0 clients",
+     "!hasDisplay && clientCount > 0 && appKitLoop && !synthetic && apiAvailable",
+     "!hasDisplay && clientCount >= 0 && appKitLoop && !synthetic && apiAvailable"),
+    ("headless display created in synthetic mode",
+     "!hasDisplay && clientCount > 0 && appKitLoop && !synthetic && apiAvailable",
+     "!hasDisplay && clientCount > 0 && appKitLoop && apiAvailable"),
+    ("headless dimensions not rounded to even",
+     "let evenW = clampedW & ~1",
+     "let evenW = clampedW"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

@@ -178,5 +178,31 @@ for raw in Array(arm64macOS27.values) + Array(x86RosettaMacOS27.values) {
     check(Encoding.normalized(Encoding.normalized(raw)) == Encoding.normalized(raw), "\(raw): normalized twice is normalized once")
 }
 
+// Headless Mac / closed-lid MacBook virtual Desktop fallback (issue #61):
+typealias HDP = HeadlessDesktopPolicy
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true) == true,
+      "headless with connected client, AppKit loop and API available needs virtual Desktop")
+check(HDP.needsVirtualDesktop(hasDisplay: true, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true) == false,
+      "Mac with a display already does not need a headless fallback display")
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 0, appKitLoop: true, synthetic: false, apiAvailable: true) == false,
+      "0 connected clients does not create a headless display")
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: false, synthetic: false, apiAvailable: true) == false,
+      "without AppKit loop does not create a headless display")
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: true, apiAvailable: true) == false,
+      "synthetic test host does not create a headless display")
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: false) == false,
+      "when CGVirtualDisplay API is unavailable does not create a headless display")
+
+check(HDP.desktopDimensions(viewportWidth: nil, viewportHeight: nil) == HDP.Dimensions(widthPt: 1920, heightPt: 1080, scale: 2),
+      "no viewport defaults to 1920×1080 @2×")
+check(HDP.desktopDimensions(viewportWidth: 1366, viewportHeight: 1024) == HDP.Dimensions(widthPt: 1366, heightPt: 1024, scale: 2),
+      "iPad Pro viewport 1366×1024 kept")
+check(HDP.desktopDimensions(viewportWidth: 1195, viewportHeight: 835) == HDP.Dimensions(widthPt: 1194, heightPt: 834, scale: 2),
+      "odd viewport dimensions rounded down to even points")
+check(HDP.desktopDimensions(viewportWidth: 400, viewportHeight: 300) == HDP.Dimensions(widthPt: 1024, heightPt: 640, scale: 2),
+      "small viewport clamped to minimum 1024×640")
+check(HDP.desktopDimensions(viewportWidth: 6000, viewportHeight: 4000) == HDP.Dimensions(widthPt: 3840, heightPt: 2400, scale: 2),
+      "huge viewport clamped to maximum 3840×2400")
+
 print("virtual-display-api: \(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)
