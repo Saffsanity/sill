@@ -34,6 +34,7 @@ sealed class ViewerForm : Form
     private string? macId;   // the saved Mac this window streams; null: the newest (--host)
     private readonly bool fromRow;   // opened from the connect screen's row (or a pairing): a refused pin marks it
     private readonly ViewerOptions options;
+    private readonly UpdateChecker? updates;   // the app's (SillApp's), for Settings' update rows
     private readonly CancellationTokenSource stop = new();
     private readonly Lock gate = new();
     private Bitmap? front, back;
@@ -130,14 +131,15 @@ sealed class ViewerForm : Form
     /// connect screen clicked (none for a Remote row); else each <c>--host</c>.</param>
     /// <param name="macId">The saved Mac the connect screen's row (or a pairing) chose; null for
     /// <c>--host</c>, which dials the newest saved Mac.</param>
-    public ViewerForm(string dir, IReadOnlyList<string> targets, ViewerOptions options, string? macId = null)
+    /// <param name="updates">The app's update check, for Settings › This PC (null when this run doesn't check).</param>
+    public ViewerForm(string dir, IReadOnlyList<string> targets, ViewerOptions options, string? macId = null, UpdateChecker? updates = null)
     {
-        this.dir = dir; this.options = options;
+        this.dir = dir; this.options = options; this.updates = updates;
         this.macId = macId; fromRow = macId is not null;
         if (fromRow) { hostOverrides = []; rowTargets = targets; }
         else hostOverrides = targets;
         store = new SavedMacsFile(dir);
-        Text = "Sill Viewer";
+        Text = "Sill";
         BackColor = Palette.Panel;
         ClientSize = new Size(1280, 800);
         // Where it was left (window.json beside the key), if that is still on a screen.
@@ -204,6 +206,24 @@ sealed class ViewerForm : Form
             RefreshSettings();
         };
         settings.ShareClipboard += on => { if (clipboard is not null) clipboard.ShareOn = on; RefreshSettings(); };
+        settings.UpdateAutomatic += on => { updates?.SetAutomatic(on); Log($"Update: automatic checks {(on ? "on" : "off")}."); };
+        settings.CheckNow += () => updates?.CheckNow();
+        settings.OpenRelease += url => { Log($"Update: opening {url.AbsoluteUri}."); AppUpdates.OpenPage(url); };
+        settings.StartMenu += on =>
+        {
+            try
+            {
+                if (on) SelfInstall.AddShortcut();
+                else SelfInstall.RemoveShortcut();
+                Log($"Start menu shortcut {(on ? "added" : "removed")}: {SelfInstall.ShortcutPath}.");
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or COMException)
+            {
+                Log($"Start menu shortcut: {e.Message}");
+            }
+            RefreshSettings();
+        };
+        if (updates is not null) updates.Changed += UpdatesChanged;
         bar.DesktopClicked += () => Send(SessionMessages.SelectDesktop());
         bar.WindowClicked += id => Send(SessionMessages.SelectWindow(id));
         bar.WindowCommand += (id, action) => Send(SessionMessages.WindowCommand(id, action));
@@ -281,6 +301,7 @@ sealed class ViewerForm : Form
         var normal = normalBounds.IsEmpty ? Bounds : normalBounds;
         new WindowPlacement(normal.X, normal.Y, normal.Width, normal.Height, WindowState == FormWindowState.Maximized && !full, full, preferSoftware,
             clipboard?.ShareOn ?? placement?.ShareClipboard ?? true).Save(Path.Combine(dir, "window.json"));
+        if (updates is not null) updates.Changed -= UpdatesChanged;
         hook?.Dispose(); clipboard?.Dispose(); stop.Cancel();
         lock (rowGate) { foreach (var b in browsers) b.Dispose(); browsers.Clear(); }
         base.OnFormClosing(e);
@@ -619,8 +640,18 @@ sealed class ViewerForm : Form
     {
         bool gpuUsable = gpu is not null && !gpuFailed;
         settings.Show(ledger, macName, settingsNote, gpuUsable, gpu?.AdapterName ?? "", preferSoftware || !gpuUsable,
-            clipboard?.ShareOn ?? true, clipboard?.MacShares, PcName, macId is not null);
+            clipboard?.ShareOn ?? true, clipboard?.MacShares, PcName, macId is not null,
+            new SettingsPanel.AppRows(updates?.Pane, updates?.Automatic ?? true, AppUpdates.RunsInstalled ? SelfInstall.ShortcutExists : null));
         PlaceSettings();
+    }
+
+    // A check ended or the switch changed: Settings' update rows follow while they show; a newer
+    // release shown there counts as told (the connect screen offers it too).
+    private void UpdatesChanged()
+    {
+        if (IsDisposed || updates is null || !settings.Visible) return;
+        RefreshSettings();
+        if (updates.UnshownOffer is { } offer) updates.NoteShown(offer);
     }
 
     // Hanging under the bar on the right, as the iPad's: 22 pt in, 8 under, as tall as it needs.
@@ -838,7 +869,7 @@ sealed class ViewerForm : Form
         using var sessionStop = CancellationTokenSource.CreateLinkedTokenSource(stopping);
         var ct = sessionStop.Token;
         using var identity = DeviceIdentity.LoadOrCreate(dir);
-        var hello = new Hello("0.1", "viewer", Hello.CurrentProtocol, $"{PcName} (Windows)");
+        var hello = new Hello(AppVersion.Current, AppVersion.Build, Hello.CurrentProtocol, $"{PcName} (Windows)");
         HappyEyeballs.Result<SessionClient> race;
         try
         {

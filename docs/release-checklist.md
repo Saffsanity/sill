@@ -997,7 +997,8 @@ above is the macOS jobs' only) builds Sill for Windows from the same tag, after 
 - It runs the Windows solution's build and tests, then `dotnet publish src/Sill.Viewer` for
   `win-x64` and `win-arm64`, self-contained and single-file, with `-p:SillExeName=Sill` (the app
   is `Sill.exe`; without that property the project still makes the spike's `Sill.Viewer.exe`) and
-  `-p:Version=<version>`. It checks that each `Sill.exe` carries that version in its version
+  `-p:Version=<version>`, and `-p:SillBuild=<the commit count at the tag>` (the checkout has the
+  whole history for it): the hello's build number, as Sill.app's CFBundleVersion. It checks that each `Sill.exe` carries that version in its version
   resource (Sill.exe compares it to decide whether an installed copy is older), and zips each
   exe four ways: `Sill-<version>-windows-x64.zip`, `Sill-<version>-windows-arm64.zip`, and the
   version-free `Sill-windows-x64.zip` and `Sill-windows-arm64.zip` that the site's download page

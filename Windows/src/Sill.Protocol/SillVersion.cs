@@ -78,6 +78,13 @@ public static class AppVersion
     /// <summary>"0.5.1", or null for a process with no entry assembly.</summary>
     public static string? Current { get; } = Read(Assembly.GetEntryAssembly());
 
+    /// <summary>The build number the release stamps (<c>-p:SillBuild=…</c>: the commit count at the
+    /// tag, as Sill.app's CFBundleVersion), sent in the hello; null for a developer's build.</summary>
+    public static string? Build { get; } = ReadBuild(Assembly.GetEntryAssembly());
+
+    public static string? ReadBuild(Assembly? assembly) =>
+        assembly?.GetCustomAttributes<AssemblyMetadataAttribute>().FirstOrDefault(a => a.Key == "SillBuild")?.Value is { Length: > 0 } b ? b : null;
+
     public static string? Read(Assembly? assembly)
     {
         var text = assembly?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion

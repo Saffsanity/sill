@@ -198,12 +198,15 @@ software decoder's picture.
 ## Sill.exe: the release's app, installing itself and checking for updates
 
 The release names the viewer `Sill.exe` (`-p:SillExeName=Sill`; without it the project still makes
-`Sill.Viewer.exe`, so the spike's own launches are as before) and stamps Sill's one version
-(`Version` in `Directory.Build.props`, the release workflow's `-p:Version` from the tag):
+`Sill.Viewer.exe`, so the spike's own launches are as before; the libraries keep their names) and
+stamps Sill's one version (`Version` in `Directory.Build.props`, the release workflow's `-p:Version`
+from the tag) and its build number (`-p:SillBuild=`, the commit count at the tag, as Sill.app's
+CFBundleVersion). The hello carries both ("Client hello: ‹PC› (Windows), Sill 0.5.1 (812), protocol
+1" in the Mac's log); a developer's build sends its version and no build:
 
 ```
 dotnet publish Windows/src/Sill.Viewer -c Release -r win-x64 --self-contained -p:PublishSingleFile=true \
-  -p:IncludeNativeLibrariesForSelfExtract=true -p:SillExeName=Sill -o <dir>
+  -p:IncludeNativeLibrariesForSelfExtract=true -p:SillExeName=Sill -p:SillBuild=$(git rev-list --count HEAD) -o <dir>
 ```
 
 Publish it on Windows (or on the runner): only a Windows build writes the exe's version resource,
@@ -217,22 +220,29 @@ for Windows").
   installed copy (or one with no version) is replaced, a same or newer one offered instead ("Open
   Installed Sill"). Per user, no administrator, nothing in the registry; the download's
   Zone.Identifier mark is not copied. "Don't ask again for this copy" is kept in
-  `%LOCALAPPDATA%\Sill\install.json`. `SILL_NO_SELF_INSTALL=1` skips the offer. Settings' half:
-  `SelfInstall.RemoveShortcut()`, `AddShortcut()`, `ShortcutExists`.
-- Updates (`UpdatePolicy`, `UpdateChecker`, ported from Sill.app's; the Viewer's `UpdatePrompt`):
+  `%LOCALAPPDATA%\Sill\install.json`. `SILL_NO_SELF_INSTALL=1` skips the offer. The installed copy
+  has Settings › This PC › Start Menu Shortcut, which removes `Sill.lnk` or makes it again (a copy
+  anywhere else doesn't show the row).
+- Updates (`UpdatePolicy`, `UpdateChecker`, ported from Sill.app's; the Viewer's `AppUpdates`, one
+  checker for the whole run, owned by `SillApp` whichever window shows):
   `Sill.exe` asks https://api.github.com/repos/Saffsanity/sill/releases/latest 30 s after starting
   when a check is due, then every 24 h plus up to 30 minutes, an hour after a check with no answer,
   with `User-Agent: Sill-Windows/<version>`, GitHub's Accept and API version, `Accept-Language: en`,
   If-None-Match; no cookies, cache or credentials; redirects only to api.github.com; 1 MB, 10 s. A
-  newer published release is said once ("Sill 0.6 Is Available…", Open Release Page opens it in the
-  browser); nothing downloads. State and the "Check for updates automatically" switch are in
+  newer published release shows in place, as Sill.app's menu item and General pane do, never in a
+  dialog: on the connect screen "Sill 0.6 Is Available…" with "You have 0.5.1; opens its download
+  page" above the footer, for as long as it is out (a click opens the release page in the browser);
+  in Settings › This PC, Check for Updates Automatically, Open Release Page… while there is one,
+  Check Now, the line ("Checking…", Check Now's answer, "Sill 0.6 is available.", "Last checked …")
+  and the footnote saying what GitHub sees. Nothing downloads. State and the switch are in
   `%LOCALAPPDATA%\Sill\update.json`, the log lines in `update.log` beside it. The spike's
   `Sill.Viewer.exe` never checks. TEST ONLY: `SILL_TEST_UPDATE_FEED=http://127.0.0.1:P/latest` (a feed on
   this PC only: `Scripts/sillfeed.py P` on the Mac and `ssh -R P:127.0.0.1:P <pc>`; it also makes
   `Sill.Viewer.exe` check), `SILL_TEST_UPDATE_VERSION=0.4`, `SILL_TEST_UPDATE_NOW=1` (a check at
   start), `SILL_TEST_UPDATE_INTERVAL=<s>` (24 h become s seconds). Never test against GitHub: a test of
   `Sill.exe` sets `SILL_TEST_IDENTITY_DIR` (an empty folder, so it dials no paired Mac), which also
-  keeps it from checking anything but a test feed.
+  keeps it from checking anything but a test feed and puts its `update.json` and `update.log` in
+  that folder, not in `%LOCALAPPDATA%\Sill`.
 
 To start over on a PC: delete `%LOCALAPPDATA%\Programs\Sill`, `Sill.lnk` in
 `%APPDATA%\Microsoft\Windows\Start Menu\Programs`, and `update.json`, `update.log` and

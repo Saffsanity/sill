@@ -41,6 +41,16 @@ public static class SelfInstallPolicy
         processPath is not null && args.Count == 0 && noSelfInstall != "1"
         && string.Equals(FileName(processPath), ExeName, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Whether <paramref name="processPath"/> is the release's app, Sill.exe (anywhere), not
+    /// the spike's Sill.Viewer.exe.</summary>
+    public static bool IsSillExe(string? processPath) =>
+        processPath is not null && string.Equals(FileName(processPath), ExeName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Whether this process is the installed copy, the only one Settings offers the Start menu
+    /// shortcut to (a copy elsewhere would point it at the installed exe, or at none).</summary>
+    public static bool RunsInstalled(string? processPath, string localAppData) =>
+        processPath is not null && SamePath(processPath, InstalledPath(localAppData));
+
     private static string FileName(string path)
     {
         var p = path.Replace('/', '\\');

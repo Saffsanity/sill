@@ -236,4 +236,41 @@ public class UpdatePolicyTests
         Assert.Equal(new P.Pane(P.NoVersionLine, false, null, false, 3), Pane(hasVersion: false));
         Assert.Contains("GitHub sees this PC’s IP address and which version of Sill it has; nothing else is sent.", P.Footnote);
     }
+
+    [Theory]
+    // Sill.exe checks GitHub; the spike's Sill.Viewer.exe never does.
+    [InlineData(true, null, null, true)]
+    [InlineData(false, null, null, false)]
+    // A test feed makes any run check (it is the only feed the run asks).
+    [InlineData(false, "http://127.0.0.1:8123/latest", null, true)]
+    [InlineData(true, "http://127.0.0.1:8123/latest", @"C:\t\id", true)]
+    // A test run never asks GitHub.
+    [InlineData(true, null, @"C:\t\id", false)]
+    [InlineData(true, "", @"C:\t\id", false)]
+    [InlineData(true, "", "", true)]
+    public void ChecksThisRun(bool sillExe, string? feed, string? testDir, bool want) =>
+        Assert.Equal(want, P.ChecksThisRun(sillExe, feed, testDir));
+
+    [Fact]
+    public void StateDirectory()
+    {
+        Assert.Equal(@"C:\Users\jo\AppData\Local\Sill", P.StateDirectory(@"C:\Users\jo\AppData\Local", null));
+        Assert.Equal(@"C:\Users\jo\AppData\Local\Sill", P.StateDirectory(@"C:\Users\jo\AppData\Local\", ""));
+        Assert.Equal(@"C:\t\id", P.StateDirectory(@"C:\Users\jo\AppData\Local", @"C:\t\id"));
+    }
+
+    [Fact]
+    public void OfferWords()
+    {
+        Assert.Equal("Sill 0.4 Is Available…", P.MenuTitle(Offer04));
+        Assert.Equal("You have 0.3; opens its download page", P.MenuSubtitle(V03));
+    }
+
+    [Fact]
+    public void BuildNumber()
+    {
+        // The release stamps SillBuild (-p:SillBuild=…); the tests' assembly, like a developer's build, has none.
+        Assert.Null(AppVersion.ReadBuild(typeof(UpdatePolicyTests).Assembly));
+        Assert.Null(AppVersion.ReadBuild(null));
+    }
 }
