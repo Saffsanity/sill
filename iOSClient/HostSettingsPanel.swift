@@ -44,6 +44,8 @@ struct HostSettingsPanel: View {
     /// This device's switch for Larger Picture (docs/larger-picture-plan.md): off unless turned on,
     /// read by the stream screen, never sent.
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
+    /// This device's switch for hiding the top window bar in landscape (issue #92): off by default.
+    @AppStorage(TopBarVisibility.key) private var hideTopBar = false
     /// Whether the switch is offered here, the stream screen's say (`largerPictureOffered`): only on an
     /// iPhone without a hinge whose picture it makes larger.
     @Environment(\.largerPictureOffered) private var offersLargerPicture
@@ -485,6 +487,13 @@ struct HostSettingsPanel: View {
             }
             Footnote(text: Self.largerPictureFooter)
         }
+        Rows {
+            Toggle(isOn: $hideTopBar) {
+                Text(TopBarVisibility.Copy.toggleTitle).foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        Footnote(text: TopBarVisibility.Copy.footnote(device: device))
         // The clipboard (docs/clipboard-plan.md): only while the Mac says it shares it.
         if ClipboardPolicy.hostTakes(client.hostClipboard) {
             Rows {

@@ -103,6 +103,14 @@ MUTANTS = {
     "S3 what streams ignored (the Desktop and nothing with Larger Picture, as before 2026-10-15)": ("switchOn && streaming == .window", "switchOn"),
     "S4 the switch ignored while a window streams": ("switchOn && streaming == .window", "streaming == .window"),
     "S5 the rule turned around (the Desktop larger, a window not)": ("switchOn && streaming == .window", "switchOn && streaming != .window"),
+    # Hide Top Bar + Shake to Restore (issue #92).
+    "B1 barHidden ignores switchOn": ("switchOn && isLandscape && !overlayOpen", "isLandscape && !overlayOpen"),
+    "B2 barHidden hides in portrait": ("switchOn && isLandscape && !overlayOpen", "switchOn && !overlayOpen"),
+    "B3 barHidden hides while overlayOpen": ("switchOn && isLandscape && !overlayOpen", "switchOn && isLandscape"),
+    "B4 afterShake keeps switch on": ("guard switchOn else { return (false, nil) }\n        return (false, \"Top bar shown\")",
+                                      "guard switchOn else { return (false, nil) }\n        return (true, \"Top bar shown\")"),
+    "B5 afterShake announces when already off": ("guard switchOn else { return (false, nil) }",
+                                                 "if !switchOn && false { return (false, nil) }"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():
