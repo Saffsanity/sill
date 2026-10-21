@@ -2,9 +2,10 @@
 # (Actions › CI › Run workflow).
 #
 # One macOS job builds the Mac side with SwiftPM (release: the host library, the CLI, Sill.app's
-# executable and the probes), runs the pure checks in Tests/checks, builds the iOS app for the
-# simulator without signing, and runs the CLI where it exits before capturing, encoding or
-# listening. Nothing here signs anything or uses a secret. Run by hand with "mutants" ticked, it
+# executable and the probes), vets and tests the Go helpers (Helpers/: Reach from Anywhere), runs
+# the pure checks in Tests/checks, builds Sill.app with its helpers (signed ad hoc) and checks them,
+# builds the iOS app (with SillTailnet.xcframework) for the simulator without signing, and runs the
+# CLI where it exits before capturing, encoding or listening. Nothing here signs anything or uses a secret. Run by hand with "mutants" ticked, it
 # also runs every check's mutants, one job per check.
 #
 # Cost: GitHub-hosted runners are free for a public repository. For a private one, macOS minutes
@@ -52,7 +53,7 @@ jobs:
     # with: macOS 27 with Xcode 27.0, Xcode_27.1_beta.app and a 27.2 beta, a public preview, in
     # October 2026. macos-latest (macOS 26) has Xcode 26.6 at most. See docs/release-checklist.md.
     runs-on: xcode-27
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -87,8 +88,44 @@ jobs:
       - name: Build the Mac host, the CLI and the probes (swift build -c release)
         run: swift build -c release
 
+      # Reach from Anywhere's helpers and SillTailnet are Go (Helpers/, docs/relay-plan.md): the
+      # version Helpers/sill-net/go.mod names, its module cache keyed by every go.sum here.
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: Helpers/sill-net/go.mod
+          cache-dependency-path: Helpers/*/go.sum
+
+      # The helpers' own tests: the relay's registration and its strict URL check, the per-device key
+      # ledger, the device's forwarder, the control shim's key pinning (no network but loopback).
+      - name: Vet and test the Go helpers (Helpers/sill-net, Helpers/tailnet-mobile)
+        run: |
+          for m in Helpers/sill-net Helpers/tailnet-mobile; do
+            echo "== $m"
+            (cd "$m" && go vet ./... && go test -count=1 ./...)
+          done
+          unformatted="$(gofmt -l Helpers)"
+          if [ -n "$unformatted" ]; then echo "::error::gofmt would change: $unformatted"; exit 1; fi
+
       - name: Pure checks (Tests/checks/run-all.sh)
         run: Tests/checks/run-all.sh
+
+      # Sill.app as a release lays it out (make-app.sh, which builds the helpers with
+      # make-helpers.sh), signed ad hoc: both helpers in Contents/Helpers, each signed with the
+      # hardened runtime, and the bundle verifying deep.
+      - name: Build Sill.app with its helpers (Scripts/make-app.sh, signed ad hoc)
+        env:
+          SILL_SIGN_IDENTITY: '-'
+        run: |
+          Scripts/make-app.sh
+          app=.build/Sill.app
+          codesign --verify --strict --deep "$app"
+          for h in sill-net headscale; do
+            test -x "$app/Contents/Helpers/$h" || { echo "::error::Sill.app has no Contents/Helpers/$h"; exit 1; }
+            codesign -dv "$app/Contents/Helpers/$h" 2>&1 | grep -q 'flags=.*runtime' \
+              || { echo "::error::$h is not signed with the hardened runtime"; exit 1; }
+          done
+          echo "Sill.app $(du -sh "$app" | cut -f1): $(ls "$app/Contents/Helpers" | tr '\n' ' ')"
 
       # The iOS app needs the iOS 27.1 SDK (the iPhone Duo's hinge and fold, docs/iphone-duo-plan.md):
       # the newest Xcode 27.1 that is not a beta, else its newest beta (the image had only
@@ -101,6 +138,7 @@ jobs:
           version: '27.1'
           allow-beta: 'true'
 
+      # The SillTailnet target (Scripts/make-tailnet.sh) builds the xcframework first, with Go.
       # Not -quiet: with it, Xcode 27 heads each compile that only warned with "error: the following
       # command failed with exit code 0", which reads like a failure. ARCHS=arm64: the generic
       # simulator destination would also compile every file for x86_64 (Intel Macs' simulators),
@@ -134,7 +172,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [addresses, ask-limits, away-copy, away-quality, away-wire, cable-link, clientlink, clipboard, compatibility, device-gate, dmg-layout, door-policy, duo, encoder-mailbox, encoder-slowstate, fence, gesture-chords, gestures, goodbye, hardware-keyboard, home-device, home-model, home-records, home-txt, installed-apps, key-strokes, keychain, link-judge, menu-state, menus, message-reader, origin, pairing-address, phone-portrait, pointer-control, pointer-presence, pointer-watch, policy, protocol, remote-rules, settings-window, tour, update-policy, virtual-display-api, window-restore]
+        check: [addresses, ask-limits, away-copy, away-quality, away-wire, cable-link, clientlink, clipboard, compatibility, device-gate, dmg-layout, door-policy, duo, encoder-mailbox, encoder-slowstate, fence, gesture-chords, gestures, goodbye, hardware-keyboard, home-device, home-model, home-records, home-txt, installed-apps, key-strokes, keychain, link-judge, menu-state, menus, message-reader, origin, pairing-address, phone-portrait, pointer-control, pointer-presence, pointer-watch, policy, protocol, relay, remote-rules, settings-window, tour, update-policy, virtual-display-api, window-restore]
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
