@@ -110,19 +110,37 @@ To try colour without capturing the screen, give the test host a picture:
 
 ## The live viewer
 
-After pairing (`Sill.Spike pair`), on the PC:
+On the PC:
 
 ```
 dotnet publish Windows/src/Sill.Viewer -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o <dir>
-<dir>\Sill.Viewer.exe [--identity <dir>] [--host <address>:<port>]
+<dir>\Sill.Viewer.exe [--identity <dir>]
 ```
 
-Without `--host` it opens on the connect screen, as the iPad's: the Macs Windows' own DNS-SD finds
+A shortcut needs no arguments: it opens on the connect screen, as the iPad's: the Macs Windows' own DNS-SD finds
 on this network (`_sill._tcp` through dnsapi.dll, Windows 10 1809 and later, no Bonjour), each with
 its word (Wired or Wi‑Fi for the Mac this PC paired with, known by its TXT tag `r`, never by name;
 "Not paired"; "Update Sill" for a Mac without `p`), Add a Mac… and the site's links. A click on the
 paired Mac connects at the address and port it resolved (the home door, TLS, pinned to the saved
-key); Settings › Disconnect, at the panel's foot, comes back here.
+key), then at its saved addresses; Settings › Disconnect, at the panel's foot, comes back here.
+
+Away from home. Every session's kind 18 (the Mac's signed `MacInfo`: its name, the remote door's
+port, and while Remote Access is on its addresses for afar, Tailscale's name and address among them)
+is checked against the key this PC paired with and kept in `macs.json` when it is newer (an empty
+list, or one from a Mac with Remote Access off, keeps the old addresses). A saved Mac this network
+doesn't list is a "Remote" row after 3 s. A dial tries the Mac's row on this network first, then
+the saved addresses in the iPad's order (the one that last worked, Tailscale's name, its IPv4 and
+IPv6, this network's, the internet's), a second apart, the first to connect winning
+(`RemoteDialPolicy`, `HappyEyeballs`); when all fail the card says why in the iPad's words. So a
+router's new address for the Mac, a Sill.app relaunch (a new home door port) or a trip away change
+nothing. After a loss the viewer reconnects by itself as the iPad does (`ReconnectPolicy`): at once,
+then 5, 10, 20 and every 30 s, 12 at most ("Reconnecting to ‹Mac›…", after 3 "‹Mac› isn’t answering.
+It may be asleep…", after 12 "Stopped trying…"); the Mac's row listed afresh, or a click on the
+window, dials at once. A goodbye that forbids it (removed, Require pairing) waits for a click. TEST
+ONLY: `SILL_TEST_KEEP_LOOPBACK=1` keeps a test host's 127.0.0.1 from kind 18.
+
+`--host <address>:<port>` (repeatable; a developer's tool) dials the newest saved Mac at those
+addresses first, then at its saved ones.
 
 Pairing takes clicks and the code, as on the iPad. A click on a "Not paired" row asks the Mac to
 show its code (kind 19 "ask"; the status line says what the Mac answered: showing a code, unlock
@@ -185,15 +203,11 @@ Sill.app keeps its key, so a PC pairs with it once. With Sill.app running on the
 Sill.Spike pair --identity <dir> --ask 1 --host <the Mac's address>:<its home door port>
 ```
 
-Sill.app opens its Pair iPhone or iPad window with a code; type it on the PC. Then the viewer can
-use the remote door (Settings › Remote Access, port 7455 by default), which takes this network and
-VPNs such as Tailscale (the home door takes only this network):
-
-```
-Sill.Viewer.exe --identity <dir> --host <Wi-Fi address>:7455 --host <Tailscale name>:7455
-```
-
-The addresses are tried in order, so one shortcut works at home and away.
+Sill.app opens its Pair iPhone or iPad window with a code; type it on the PC (or click the Mac's
+"Not paired" row in the viewer, which does the same). With Remote Access on (Settings › Remote
+Access, port 7455 by default), the first session saves its addresses for afar, and the viewer with
+no arguments reaches it at home and through Tailscale. The spike's old shortcut,
+`--host <Wi-Fi address>:7455 --host <Tailscale name>:7455`, still works but is no longer needed.
 
 ## Security notes
 

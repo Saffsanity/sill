@@ -5,11 +5,12 @@
 //               [--service-type <type>]…
 //
 // --identity is where `Sill.Spike pair` saved this device's key and the Mac (default
-// %LOCALAPPDATA%\Sill\spike). Without --host the viewer opens on the connect screen: the Macs
+// %LOCALAPPDATA%\Sill\spike). Without arguments the viewer opens on the connect screen: the Macs
 // Windows' DNS-SD finds on this network (_sill._tcp; TEST ONLY --service-type, repeatable, browses
-// others instead, such as a synthetic host's _silltest._tcp), a paired one connected with a click
-// at the address and port it resolved. Each --host is an address to dial straight away instead,
-// tried in order (the Mac's Wi-Fi address, then its Tailscale name, say). The picture is
+// others instead, such as a synthetic host's _silltest._tcp), and a Remote row for each saved Mac
+// not listed here; a click connects at the row's address, then at the addresses the Mac's kind 18
+// gave. --host (a developer's tool, never needed by a shortcut) dials the newest saved Mac at that
+// address first, tried in order, then at its saved addresses. The picture is
 // decoded and drawn on the GPU unless --decoder software (auto and gpu both fall back to software
 // when the GPU path can't start or fails); --adapter picks DXGI's Nth adapter instead of Windows'
 // default (0 drives the display; 1 is often a laptop's discrete GPU).
@@ -37,10 +38,11 @@ static class Program
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        Application.Run(new SillApp(dir, hosts, new ViewerOptions(decoder, adapter), serviceTypes.Count > 0 ? serviceTypes : ["_sill._tcp"]));
+        Application.Run(new SillApp(dir, hosts, new ViewerOptions(decoder, adapter, serviceTypes.Count > 0 ? serviceTypes : ["_sill._tcp"])));
         return 0;
     }
 }
 
-/// <summary>How the viewer decodes: auto, gpu or software, and which DXGI adapter (null: Windows' default).</summary>
-sealed record ViewerOptions(string Decoder, int? Adapter);
+/// <summary>How the viewer decodes: auto, gpu or software, and which DXGI adapter (null: Windows'
+/// default); and the service types the connect screen and the reconnect browse.</summary>
+sealed record ViewerOptions(string Decoder, int? Adapter, IReadOnlyList<string> ServiceTypes);

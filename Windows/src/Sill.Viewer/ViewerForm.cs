@@ -23,7 +23,13 @@ namespace Sill.Viewer;
 sealed class ViewerForm : Form
 {
     private readonly string dir;
-    private readonly IReadOnlyList<string> hostOverrides;
+    private readonly IReadOnlyList<string> hostOverrides;   // --host: dialed first, as given
+    // The Mac's row on this network as this window's browsers list it (the connect screen's at
+    // first), and the reconnect's wake for a click or that row listed afresh.
+    private readonly List<MacBrowser> browsers = [];
+    private readonly Lock rowGate = new();
+    private IReadOnlyList<string> rowTargets = [];
+    private TaskCompletionSource wake = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ISavedMacs store;
     private string? macId;   // the saved Mac this window streams; null: the newest (--host)
     private readonly bool fromRow;   // opened from the connect screen's row (or a pairing): a refused pin marks it
@@ -120,12 +126,16 @@ sealed class ViewerForm : Form
     /// <summary>The words the connect screen opens with after this window: a Mac with a new key, a forgotten Mac.</summary>
     public string? EndedWith { get; private set; }
 
-    /// <param name="macId">The saved Mac the connect screen's row (or a pairing) chose, dialed at
-    /// <paramref name="hostOverrides"/>; null for <c>--host</c>, which dials the newest saved Mac.</param>
-    public ViewerForm(string dir, IReadOnlyList<string> hostOverrides, ViewerOptions options, string? macId = null)
+    /// <param name="targets">With <paramref name="macId"/>, the addresses of the Mac's row the
+    /// connect screen clicked (none for a Remote row); else each <c>--host</c>.</param>
+    /// <param name="macId">The saved Mac the connect screen's row (or a pairing) chose; null for
+    /// <c>--host</c>, which dials the newest saved Mac.</param>
+    public ViewerForm(string dir, IReadOnlyList<string> targets, ViewerOptions options, string? macId = null)
     {
-        this.dir = dir; this.hostOverrides = hostOverrides; this.options = options;
+        this.dir = dir; this.options = options;
         this.macId = macId; fromRow = macId is not null;
+        if (fromRow) { hostOverrides = []; rowTargets = targets; }
+        else hostOverrides = targets;
         store = new SavedMacsFile(dir);
         Text = "Sill Viewer";
         BackColor = Palette.Panel;
@@ -271,7 +281,9 @@ sealed class ViewerForm : Form
         var normal = normalBounds.IsEmpty ? Bounds : normalBounds;
         new WindowPlacement(normal.X, normal.Y, normal.Width, normal.Height, WindowState == FormWindowState.Maximized && !full, full, preferSoftware,
             clipboard?.ShareOn ?? placement?.ShareClipboard ?? true).Save(Path.Combine(dir, "window.json"));
-        hook?.Dispose(); clipboard?.Dispose(); stop.Cancel(); base.OnFormClosing(e);
+        hook?.Dispose(); clipboard?.Dispose(); stop.Cancel();
+        lock (rowGate) { foreach (var b in browsers) b.Dispose(); browsers.Clear(); }
+        base.OnFormClosing(e);
     }
 
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
@@ -372,6 +384,8 @@ sealed class ViewerForm : Form
         // A click beside the open drawer closes it and clicks nothing on the Mac, as a tap does on the iPad.
         if (drawer.Visible) { drawer.Close(); return; }
         if (settings.Visible) { CloseSettings(); return; }
+        // No session: a click is "try now" ("…or click it to try now"), as a tap on the iPad's row.
+        if (!connected) { Wake("clicked"); return; }
         var f = Fraction(e.Location);
         Send(InputMessages.PointerEvent(InputMessages.Pointer.Move, f.X, f.Y));
         if (e.Button == MouseButtons.Left) { leftDown = true; Send(InputMessages.PointerEvent(InputMessages.Pointer.LeftDown, f.X, f.Y)); }
@@ -680,86 +694,188 @@ sealed class ViewerForm : Form
         catch (UnauthorizedAccessException) { }
     }
 
-    // A session at a time; when one ends (the Mac gone, a restart, silence) the next starts 2 s later.
+    // ---- dialing and the reconnect ----
+
+    /// <summary>How a session ended, for <see cref="RunAsync"/>: whether it ran (its first window
+    /// list came, or this viewer ended it itself), what follows, and the words for the card.</summary>
+    private enum Next { Reconnect, ForGood, Stop }
+    private sealed record Ending(bool Ran, Next Next, string Words);
+
+    /// <summary>TEST ONLY: keep loopback addresses from kind 18 (a test host reached through an SSH forward).</summary>
+    private static readonly bool KeepLoopback = Environment.GetEnvironmentVariable("SILL_TEST_KEEP_LOOPBACK") == "1";
+
+    /// <summary>
+    /// A dial, then the session it brings, again and again (ReconnectPolicy, the iPad's back-off):
+    /// the first at once, then 5, 10, 20 and every 30 s after the last started while they don't
+    /// connect, 12 at most; the card says "Reconnecting to ‹Mac›…", after 3 that it may be asleep,
+    /// after 12 that this stopped. A session that ran and ended starts the count again, at once. A
+    /// click on the window, or the Mac's row listed afresh on this network (Sill.app relaunched on
+    /// a new port, the Mac back), dials now and starts the count again. An end that forbids it
+    /// (removed, another key at Tailscale's address, a goodbye that says no reconnect) waits for a
+    /// click.
+    /// </summary>
     private async Task RunAsync(CancellationToken ct)
     {
         Log($"Viewer started (identity {dir}).");
+        StartBrowsing();
+        var clock = Stopwatch.StartNew();
+        int failed = 0;
+        double? lastDialAt = null;
+        string? endWords = null;   // the last session's end, shown while the first redial runs
+        bool dialed = false;
         while (!ct.IsCancellationRequested)
         {
-            if (!await SessionAsync(ct)) return;
-            try { await Task.Delay(TimeSpan.FromSeconds(2), ct); } catch (OperationCanceledException) { return; }
+            var (dial, recheck) = ReconnectPolicy.Redial(failed, lastDialAt, clock.Elapsed.TotalSeconds);
+            if (!dial)
+            {
+                var wait = recheck is { } at ? TimeSpan.FromSeconds(Math.Max(0, at - clock.Elapsed.TotalSeconds)) : (TimeSpan?)null;
+                if (await WaitAsync(wait, ct)) { failed = 0; lastDialAt = null; }
+                continue;
+            }
+            lock (rowGate) wake = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            lastDialAt = clock.Elapsed.TotalSeconds;
+            string dialing = endWords ?? (dialed ? ReconnectPolicy.Line(macName, failed) : $"Connecting to {macName}…");
+            dialed = true;
+            var end = await SessionAsync(ct, dialing);
+            if (end is null || end.Next == Next.Stop) return;
+            endWords = null;
+            if (end.Ran) { failed = 0; lastDialAt = null; } else failed++;
+            if (end.Next == Next.ForGood)
+            {
+                Status(end.Words, busy: false);
+                Log("Reconnect: not by itself; waiting for a click.");
+                if (!await WaitAsync(null, ct)) return;
+                failed = 0; lastDialAt = null;
+                continue;
+            }
+            if (end.Ran) { endWords = end.Words; Status(end.Words); continue; }
+            string line = ReconnectPolicy.Line(macName, failed);
+            Status(failed >= ReconnectPolicy.QuietAfter ? line : $"{line}\n{end.Words}", busy: failed < ReconnectPolicy.Dials);
+            Log($"Reconnect: {failed} dial{(failed == 1 ? "" : "s")} did not connect.");
         }
     }
 
-    /// <summary>One session; false when trying again is pointless (no paired Mac, a bad --host).</summary>
-    private async Task<bool> SessionAsync(CancellationToken stopping)
+    /// <summary>Waits <paramref name="delay"/> (null: until woken); true when a click or the Mac's
+    /// row listed afresh woke it, false when it ran out or the window closed.</summary>
+    private async Task<bool> WaitAsync(TimeSpan? delay, CancellationToken ct)
+    {
+        Task woken;
+        lock (rowGate) woken = wake.Task;
+        var done = await Task.WhenAny(woken, Task.Delay(delay ?? Timeout.InfiniteTimeSpan, ct));
+        return done == woken && !ct.IsCancellationRequested;
+    }
+
+    /// <summary>A click, or the row listed afresh: the reconnect dials now.</summary>
+    private void Wake(string why)
+    {
+        lock (rowGate) if (!wake.Task.IsCompleted) { wake.TrySetResult(); Log($"Reconnect: {why}; dialing now."); }
+    }
+
+    /// <summary>This window's own browsers (the connect screen's types), so that the reconnect
+    /// dials the Mac where its row is listed now, not where it was when the window opened.</summary>
+    private void StartBrowsing()
+    {
+        foreach (var type in options.ServiceTypes)
+        {
+            var b = new MacBrowser(type);
+            b.Log += Log;
+            b.Changed += _ => RowChanged();
+            try { b.Start(); lock (rowGate) browsers.Add(b); }
+            catch (Exception ex) when (ex is PlatformNotSupportedException or InvalidOperationException or DllNotFoundException)
+            {
+                Log($"Browse: {ex.Message}");
+                b.Dispose();
+            }
+        }
+    }
+
+    private void RowChanged()
+    {
+        if (macId is not { } id || stop.IsCancellationRequested) return;
+        List<FoundService> services;
+        lock (rowGate) services = browsers.SelectMany(b => b.Current).ToList();
+        var row = ConnectRows.Build(services, store.Load().Select(m => m.Known).ToList())
+            .FirstOrDefault(r => r.State == MacRow.Kind.Paired && r.MacId == id);
+        IReadOnlyList<string> next = row?.DialTargets() ?? [];
+        bool fresh;
+        lock (rowGate) { fresh = next.Count > 0 && !next.SequenceEqual(rowTargets); rowTargets = next; }
+        if (fresh) Log($"Browse: {macName} listed on this network at {string.Join(", ", next)}.");
+        if (fresh && !connected) Wake($"{macName} listed afresh");
+    }
+
+    /// <summary>One dial and the session it brings; null when trying again is pointless (no
+    /// paired Mac, a bad --host).</summary>
+    private async Task<Ending?> SessionAsync(CancellationToken stopping, string dialing)
     {
         var all = store.Load();
         var mac = macId is { } id ? all.FirstOrDefault(m => m.MacId == id) : SavedMacs.Newest(all);
         if (mac?.Pin is not { } pin)
         {
             macName = "Sill";
-            Status(macId is null ? "This PC isn’t paired with a Mac yet. Open Sill without --host, and click your Mac to pair."
+            Status(macId is null ? "This PC isn’t paired with a Mac yet. Open Sill with no arguments, and click your Mac to pair."
                                  : "This PC no longer knows this Mac. Disconnect, then click it to pair again.", busy: false);
-            return false;
+            return null;
         }
         macId = mac.MacId;
         macName = mac.Name;
         BeginInvoke(() => drawer.SetMacName(mac.Name));
-        // The addresses to dial, in order: each --host, else the one saved at pairing.
-        var targets = new List<(string Host, int Port)>();
-        foreach (var h in hostOverrides.Count > 0 ? hostOverrides : [$"{mac.Host}:{mac.Port}"])
-        {
-            int colon = h.LastIndexOf(':');
-            if (colon <= 0 || !int.TryParse(h[(colon + 1)..], out int p)) { Status($"--host takes <address>:<port>, not {h}.", busy: false); return false; }
-            targets.Add((h[..colon].Trim('[', ']'), p));
-        }
+        // What to dial: each --host as given, else the Mac's row on this network as listed now; then
+        // its saved addresses (kind 18's, the one the pairing reached), happy eyeballs.
+        var row = new List<DoorAddress>();
+        if (hostOverrides.Count > 0)
+            foreach (var h in hostOverrides)
+            {
+                if (DoorAddress.Parse(h) is not { } d) { Status($"--host takes <address>:<port>, not {h}.", busy: false); return null; }
+                row.Add(d);
+            }
+        else lock (rowGate) row.AddRange(rowTargets.Select(DoorAddress.Parse).OfType<DoorAddress>());
+        var candidates = RemoteDialPolicy.Plan(row, mac, RemoteDialPolicy.LocalIPv4());
+        Status(dialing);
+        Log($"Dialing {mac.Name}: {string.Join(", ", candidates.Select(c => c.Display + (c.Row ? " (row)" : "")))}.");
 
         // This session's token: the watchdog cancels it when nothing has arrived for 10 s.
         using var sessionStop = CancellationTokenSource.CreateLinkedTokenSource(stopping);
         var ct = sessionStop.Token;
-        SessionClient? session = null;
-        string host = "", tried = "";
-        int pinRefused = 0;
-        foreach (var (h, p) in targets)
+        using var identity = DeviceIdentity.LoadOrCreate(dir);
+        var hello = new Hello("0.1", "viewer", Hello.CurrentProtocol, $"{PcName} (Windows)");
+        HappyEyeballs.Result<SessionClient> race;
+        try
         {
-            Status($"Connecting at {h}:{p}…");
-            using var dial = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            dial.CancelAfter(TimeSpan.FromSeconds(targets.Count > 1 ? 4 : 15));   // an address that isn't there now (away from home) gives way
-            try
+            race = await HappyEyeballs.RaceAsync(candidates,
+                (c, t) => SessionClient.ConnectAsync(c.Host, c.Port, identity, pin, hello, t),
+                s => s.DisposeAsync().AsTask(), RemoteDialPolicy.Stagger, RemoteDialPolicy.AttemptTimeout, RemoteDialPolicy.WholeDial, ct);
+        }
+        catch (OperationCanceledException) { return new Ending(false, Next.Stop, ""); }
+        foreach (var (c, e) in race.Failures) Log($"Couldn’t connect at {c.Display}: {RemoteDialPolicy.EndOf(e)} ({e.Message})");
+        if (race.Winner is not { } session)
+        {
+            var rowFailures = race.Failures.Where(f => f.Candidate.Row).ToList();
+            if (fromRow && rowFailures.Count > 0 && rowFailures.Count == candidates.Count(c => c.Row)
+                && rowFailures.All(f => RemoteDialPolicy.EndOf(f.Error) == RemoteDialPolicy.End.WrongKey))
             {
-                session = await SessionClient.ConnectAsync(h, p, DeviceIdentity.LoadOrCreate(dir), pin,
-                    new Hello("0.1", "viewer", Hello.CurrentProtocol, $"{PcName} (Windows)"), dial.Token);
-                host = $"{h}:{p}";
-                break;
+                // Another key answered as this Mac at every address of its row: set up again (or a
+                // look-alike holds the row). Paired again as a Mac never seen: a click on its row asks,
+                // with any key, and the code the Mac shows proves it (the iPad's afterPinRefused).
+                store.MarkNewKey(mac.MacId);
+                string words = PairingCopy.NewKey(mac.Name);
+                Log($"Pin refused at every address of {mac.Name}'s row ({mac.MacId}): marked new key.");
+                Status(words, busy: false);
+                EndedWith = words;
+                Disconnecting = true;
+                BeginInvoke(Close);
+                return new Ending(false, Next.Stop, words);
             }
-            catch (Exception e) when (!stopping.IsCancellationRequested)
-            {
-                tried += $"\n{h}:{p}: {Reason(e)}";
-                Log($"Couldn’t connect at {h}:{p}: {e.Message}");
-                for (var x = e; x is not null; x = x.InnerException) if (x is SillTls.PinMismatchException) { pinRefused++; break; }
-            }
+            var counted = race.Failures.Select(f => (f.Candidate, Failure: RemoteDialPolicy.Classify(RemoteDialPolicy.EndOf(f.Error), f.Candidate)))
+                .Where(f => f.Failure is not null).ToList();
+            var worst = RemoteDialPolicy.Worst(counted.Select(f => f.Failure!.Value)) ?? RemoteDialPolicy.Failure.NoAnswer;
+            var at = counted.FirstOrDefault(f => f.Failure == worst).Candidate ?? candidates.FirstOrDefault();
+            return new Ending(false, worst is RemoteDialPolicy.Failure.WrongMac or RemoteDialPolicy.Failure.Revoked ? Next.ForGood : Next.Reconnect,
+                RemoteCopy.DialFailure(worst, mac.Name, at, RemoteCopy.VpnName(mac)));
         }
-        if (session is null && fromRow && pinRefused > 0)
-        {
-            // Another key answered as this Mac at its row and nothing else did: set up again (or a
-            // look-alike holds the row). Paired again as a Mac never seen: a click on its row asks,
-            // with any key, and the code the Mac shows proves it (the iPad's afterPinRefused).
-            store.MarkNewKey(mac.MacId);
-            string words = PairingCopy.NewKey(mac.Name);
-            Log($"Pin refused at every address of {mac.Name} ({mac.MacId}): marked new key.");
-            Status(words, busy: false);
-            EndedWith = words;
-            Disconnecting = true;
-            BeginInvoke(Close);
-            return false;
-        }
-        if (session is null)
-        {
-            Status($"Couldn’t reach it. Trying again…{tried}");
-            return true;
-        }
-        Log($"Connected at {host}.");
+        var won = race.Won!;
+        Log($"Connected at {won.Display}{(won.Row ? " (its row)" : "")}.");
+        bool listed = false;   // the first window list came: the Mac admitted this PC
+        Goodbye? bye = null;
 
         await using var connection = session;
         Status("Connected. Waiting for the picture…");
@@ -810,6 +926,11 @@ sealed class ViewerForm : Form
                 {
                     case SessionKinds.WindowList:
                         var list = SessionMessages.Decode<WindowList>(payload);
+                        if (list is not null && !listed)
+                        {
+                            listed = true;
+                            store.Connected(mac.MacId, won.Row ? null : won.Key);   // a row's port is the home door's of the moment
+                        }
                         if (list is not null)
                         {
                             desktopActive = list.ActiveName == "desktop";
@@ -888,20 +1009,27 @@ sealed class ViewerForm : Form
                         lock (gate) rtt = Math.Max(rtt ?? 0, clock.Elapsed.TotalSeconds - sent);
                         lastRtt = clock.Elapsed.TotalSeconds - sent;
                         break;
+                    case SessionKinds.MacInfo:
+                        // Who the Mac is and how to reach it from afar: kept when its signature is the
+                        // key this connection is pinned to, and it is newer than the last.
+                        if (SignedMacInfo.Decode(payload) is { } signed && store.TakeMacInfo(signed, mac.MacId, pin, KeepLoopback))
+                            Log($"Kind 18: {mac.Name}'s addresses saved: "
+                                + string.Join(", ", store.Find(mac.MacId)?.Addresses?.Select(a => $"{a.Host} ({a.Via})") ?? []) + ".");
+                        break;
                     case SessionKinds.Goodbye:
-                        var bye = SessionMessages.Decode<Goodbye>(payload);
-                        Status($"It ended the session: {bye?.Message ?? bye?.Reason ?? "goodbye"}");
+                        bye = SessionMessages.Decode<Goodbye>(payload) ?? new Goodbye("");
+                        Log($"The Mac said goodbye: {bye.Reason}{(bye.Message is { } said ? $", “{said}”" : "")}.");
                         break;
                 }
             }
-            Status("It closed the session. Reconnecting…");
+            Log("The Mac closed the session.");
         }
         catch (OperationCanceledException) when (!stopping.IsCancellationRequested)
         {
-            Status(endReason ?? "Nothing heard from it for 10 s. Reconnecting…");
+            Log(endReason ?? "Nothing heard from the Mac for 10 s.");
         }
         catch (OperationCanceledException) { }
-        catch (Exception e) { Log(e.ToString()); Status($"The session ended ({e.Message}). Reconnecting…"); }
+        catch (Exception e) { Log(e.ToString()); }
         finally
         {
             connected = false;
@@ -913,7 +1041,23 @@ sealed class ViewerForm : Form
             BeginInvoke(() => { PlaceCard(); UpdateTitle(); });
             paintPending = false;
         }
-        return true;
+        if (stopping.IsCancellationRequested) return new Ending(listed, Next.Stop, "");
+        if (endReason is { } why) return new Ending(true, Next.Reconnect, why);   // this viewer's own end (decoding)
+        // The Mac's words first (GoodbyePolicy); a goodbye before the first window list is a dial
+        // that failed, worded as one (its notices aside).
+        if (bye is not null && (listed || GoodbyePolicy.IsNotice(bye)))
+        {
+            var o = GoodbyePolicy.For(bye, macName);
+            return new Ending(listed, o.Reconnect ? Next.Reconnect : Next.ForGood, o.Text);
+        }
+        if (bye is not null)
+        {
+            var f = RemoteDialPolicy.Classify(bye.Reason);
+            return new Ending(false, GoodbyePolicy.For(bye, macName).Reconnect && f != RemoteDialPolicy.Failure.Revoked ? Next.Reconnect : Next.ForGood,
+                RemoteCopy.DialFailure(f, macName, won, RemoteCopy.VpnName(mac)));
+        }
+        if (!listed) return new Ending(false, Next.Reconnect, RemoteCopy.DialFailure(RemoteDialPolicy.Failure.NoAnswer, macName, won, RemoteCopy.VpnName(mac)));
+        return new Ending(true, Next.Reconnect, GoodbyePolicy.For(null, macName).Text);
     }
 
     /// <summary>A frame for the video thread (Annex B, the SPS it belongs to), or a redraw.</summary>

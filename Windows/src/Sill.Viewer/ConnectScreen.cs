@@ -127,7 +127,7 @@ sealed class ConnectScreen : Control
         for (int i = 0; i < rows.Count; i++)
         {
             var r = new RectangleF(x, y, w, S(RowHeight));
-            DrawRow(g, rows[i], r, hover == (Hit.Row, i) || rows[i].Service.Id == busyRow);
+            DrawRow(g, rows[i], r, hover == (Hit.Row, i) || rows[i].Key == busyRow);
             targets.Add((Hit.Row, r, i));
             y += S(RowHeight) + S(Spacing);
         }
