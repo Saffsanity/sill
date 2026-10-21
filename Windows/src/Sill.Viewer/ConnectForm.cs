@@ -28,6 +28,7 @@ sealed class ConnectForm : Form
     private readonly WindowPlacement? placement;
     private readonly ISavedMacs store;
     private readonly PairCard card = new();
+    private readonly UpdateChecker? updates;
     private DeviceIdentity? identity;
     private PairingFlow? flow;
     private MacRow? flowRow;
@@ -40,9 +41,11 @@ sealed class ConnectForm : Form
 
     /// <param name="status">The status line to open with (a session's end: a Mac with a new key, a
     /// forgotten Mac); null for "Looking for Macs on this network".</param>
-    public ConnectForm(string dir, IReadOnlyList<string> serviceTypes, string? status = null)
+    /// <param name="updates">The app's update check (null when this run doesn't check): a newer
+    /// release shows as "Sill 0.6 Is Available…" above the footer.</param>
+    public ConnectForm(string dir, IReadOnlyList<string> serviceTypes, string? status = null, UpdateChecker? updates = null)
     {
-        this.dir = dir; this.serviceTypes = serviceTypes;
+        this.dir = dir; this.serviceTypes = serviceTypes; this.updates = updates;
         this.status = status ?? LookingOnNetwork;
         store = new SavedMacsFile(dir);
         Text = "Sill";
@@ -55,6 +58,8 @@ sealed class ConnectForm : Form
         Controls.Add(screen);
         screen.RowClicked += Clicked;
         screen.AddMacClicked += () => Start(null);
+        screen.UpdateClicked += offer => { Log($"Update: opening the release page of Sill {offer.Version}."); AppUpdates.OpenPage(offer.Url); };
+        if (updates is not null) updates.Changed += UpdatesChanged;
         card.Pair += (where, code) => _ = flow?.IsAddMac == true ? flow.SubmitAddAsync(where, code) : flow?.SubmitCodeAsync(code);
         card.Cancelled += () => flow?.Cancel();
         card.Rename += Rename;
@@ -92,7 +97,21 @@ sealed class ConnectForm : Form
             }
         }
         grace.Start();
+        UpdatesChanged();
         Refresh();
+    }
+
+    /// <summary>The offer, as Sill.app's menu item: shown for as long as a newer release is out.</summary>
+    private void UpdatesChanged()
+    {
+        if (IsDisposed || updates is null) return;
+        var offer = updates.Offer;
+        screen.ShowUpdate(offer, updates.Running);
+        if (offer is not null && updates.UnshownOffer is not null)
+        {
+            updates.NoteShown(offer);
+            Log($"Update: Sill {offer.Version} is available; offered on the connect screen.");
+        }
     }
 
     private new void Refresh()
@@ -236,6 +255,7 @@ sealed class ConnectForm : Form
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         flow?.Cancel();
+        if (updates is not null) updates.Changed -= UpdatesChanged;
         grace.Dispose();
         foreach (var b in browsers) b.Dispose();
         identity?.Dispose();
@@ -262,23 +282,48 @@ sealed class ConnectForm : Form
 /// <summary>
 /// One window at a time: the connect screen, or the viewer it opened. The viewer's Disconnect (in
 /// its Settings panel), Forget, or a Mac with a new key brings the connect screen back, with the
-/// viewer's last words as its status line; closing either window quits.
+/// viewer's last words as its status line; closing either window quits. The app's one update check
+/// (<see cref="AppUpdates"/>) lives here for the whole run, whichever window shows, and goes with
+/// the app.
 /// </summary>
 sealed class SillApp : ApplicationContext
 {
     private readonly string dir;
     private readonly ViewerOptions options;
+    private readonly UpdateChecker? updates;
 
     public SillApp(string dir, IReadOnlyList<string> hosts, ViewerOptions options)
     {
         this.dir = dir; this.options = options;
+        // The UI thread's context, so the checker's Changed comes on it (WinForms would install it
+        // with the first control; the checker starts before any).
+        if (SynchronizationContext.Current is not WindowsFormsSynchronizationContext)
+            SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+        updates = AppUpdates.Create(SynchronizationContext.Current);
+        if (updates is not null) Microsoft.Win32.SystemEvents.PowerModeChanged += Woke;
         if (hosts.Count > 0) ShowViewer(hosts, null);
         else ShowConnect(null);
     }
 
+    // Timers may not have counted the sleep: the next check is worked out again.
+    private void Woke(object? sender, Microsoft.Win32.PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == Microsoft.Win32.PowerModes.Resume) updates?.SystemDidWake();
+    }
+
+    protected override void ExitThreadCore()
+    {
+        if (updates is not null)
+        {
+            Microsoft.Win32.SystemEvents.PowerModeChanged -= Woke;
+            updates.Dispose();
+        }
+        base.ExitThreadCore();
+    }
+
     private void ShowConnect(string? status)
     {
-        var form = new ConnectForm(dir, options.ServiceTypes, status);
+        var form = new ConnectForm(dir, options.ServiceTypes, status, updates);
         (IReadOnlyList<string> Targets, string MacId)? next = null;
         form.Connect += (targets, _, macId) => { next = (targets, macId); form.Close(); };
         form.FormClosed += (_, _) =>
@@ -291,7 +336,7 @@ sealed class SillApp : ApplicationContext
 
     private void ShowViewer(IReadOnlyList<string> hosts, string? macId)
     {
-        var form = new ViewerForm(dir, hosts, options, macId);
+        var form = new ViewerForm(dir, hosts, options, macId, updates);
         form.FormClosed += (_, _) =>
         {
             if (form.Disconnecting) ShowConnect(form.EndedWith);

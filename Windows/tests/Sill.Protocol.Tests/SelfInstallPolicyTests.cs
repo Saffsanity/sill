@@ -61,4 +61,21 @@ public class SelfInstallPolicyTests
         Assert.Equal("Replace the installed Sill?", S.Words(D.OfferReplace, V("0.6"), null)!.Value.Heading);
         Assert.Equal("Sill 0.7 is already installed", S.Words(D.OfferOpenInstalled, V("0.6"), V("0.7"))!.Value.Heading);
     }
+
+    [Theory]
+    [InlineData(@"C:\Users\jo\Downloads\Sill.exe", true)]
+    [InlineData(@"C:\Users\jo\Downloads\SILL.EXE", true)]
+    [InlineData(@"C:\Users\jo\SillViewer\Sill.Viewer.exe", false)]
+    [InlineData(null, false)]
+    public void IsSillExe(string? path, bool want) => Assert.Equal(want, S.IsSillExe(path));
+
+    [Fact]
+    public void RunsInstalled()
+    {
+        // Settings offers the Start menu shortcut only to the installed copy.
+        Assert.True(S.RunsInstalled(Installed, Local));
+        Assert.True(S.RunsInstalled(@"c:\users\JO\appdata\local\programs\sill\sill.exe", Local));
+        Assert.False(S.RunsInstalled(@"C:\Users\jo\Downloads\Sill.exe", Local));
+        Assert.False(S.RunsInstalled(null, Local));
+    }
 }

@@ -42,7 +42,7 @@ static class Program
             else if (args[i] == "--service-type" && args[i + 1].EndsWith("._tcp", StringComparison.Ordinal)) serviceTypes.Add(args[i + 1]);
             else if (args[i] == "--decoder" && args[i + 1] is "auto" or "gpu" or "software") decoder = args[i + 1];
             else if (args[i] == "--adapter" && int.TryParse(args[i + 1], out int n)) adapter = n;
-            else { MessageBox.Show($"Unknown option {args[i]}.", "Sill Viewer"); return 2; }
+            else { MessageBox.Show($"Unknown option {args[i]}.", "Sill"); return 2; }
         }
         Application.Run(new SillApp(dir, hosts, new ViewerOptions(decoder, adapter, serviceTypes.Count > 0 ? serviceTypes : ["_sill._tcp"])));
         return 0;

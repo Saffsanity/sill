@@ -8,7 +8,8 @@ namespace Sill.Viewer;
 /// bar on the right with the Mac's name and what streams, Done, the Mac's streaming settings
 /// (Quality, Resolution, Frame Rate, Prioritize Encoding Speed, Virtual Display, Direct Wireless)
 /// with the iPad's footnotes, and This PC's own (decoding on the GPU or in software, Share Clipboard,
-/// its name as the Mac sees it, Forget this Mac). The values
+/// its name as the Mac sees it, the update check as Sill.app's General pane, the Start menu shortcut
+/// for the installed copy, Forget this Mac). The values
 /// come from the form's <see cref="SettingsLedger"/>; a control's pick goes back to the form, which
 /// sends it. Disconnect is pinned at the foot, as the iPad's, and only the rest scrolls. Drawn by
 /// hand; it takes no keyboard focus, so keys stay the Mac's.
@@ -25,10 +26,21 @@ sealed class SettingsPanel : Control
     public event Action? RenamePc;
     /// <summary>Forget clicked twice: the form forgets the Mac and goes back to the connect screen.</summary>
     public event Action? Forget;
+    /// <summary>"Check for Updates Automatically" switched.</summary>
+    public event Action<bool>? UpdateAutomatic;
+    public event Action? CheckNow;
+    /// <summary>Open Release Page…: the form opens the offer's page in the browser.</summary>
+    public event Action<Uri>? OpenRelease;
+    /// <summary>The Start menu shortcut switched (only shown for the installed copy).</summary>
+    public event Action<bool>? StartMenu;
+
+    /// <summary>This app's own rows, Sill.app's General pane's: the update check (null when this run
+    /// doesn't check), its switch, and the Start menu shortcut (null when this copy isn't the installed one).</summary>
+    public sealed record AppRows(UpdatePolicy.Pane? Update = null, bool Automatic = true, bool? StartMenu = null);
 
     private const float CardWidth = 360, Pad = 16, Radius = 20, Row = 44, GroupRadius = 12, Gap = 8;
 
-    private enum Kind { Header, Title, Readout, Done, Group, RowTitle, Quality, Segments, Switch, Footnote, Note, Disconnect, Value, Forget }
+    private enum Kind { Header, Title, Readout, Done, Group, RowTitle, Quality, Segments, Switch, Footnote, Note, Disconnect, Value, Forget, Action }
     private sealed record Item(Kind Kind, RectangleF Rect, string Text = "", string[]? Options = null, int Selected = -1,
         bool On = false, bool Enabled = true, bool Pending = false, Action<int>? Choose = null, Color? Tint = null);
 
@@ -38,6 +50,7 @@ sealed class SettingsPanel : Control
     private bool? macShares;
     private string gpuName = "", pcName = "";
     private bool canForget;
+    private AppRows app = new();
     private long forgetArmedAt;   // the first click on Forget, which asks for a second within 4 s
     private bool ForgetArmed => forgetArmedAt != 0 && Environment.TickCount64 - forgetArmedAt < 4000;
     private List<Item> items = [];
@@ -73,9 +86,9 @@ sealed class SettingsPanel : Control
     /// Mac's name, a note ("kept its setting"), this PC's decoder, and its Share Clipboard with
     /// whether the Mac shares its clipboard (null: not known yet).</summary>
     public void Show(SettingsLedger ledger, string mac, string note, bool gpuAvailable, string gpuName, bool software,
-        bool shareClipboard, bool? macShares, string pcName, bool canForget)
+        bool shareClipboard, bool? macShares, string pcName, bool canForget, AppRows app)
     {
-        this.ledger = ledger; this.mac = mac; this.note = note; this.pcName = pcName; this.canForget = canForget;
+        this.ledger = ledger; this.mac = mac; this.note = note; this.pcName = pcName; this.canForget = canForget; this.app = app;
         this.gpuAvailable = gpuAvailable; this.gpuName = gpuName; this.software = software;
         this.shareClipboard = shareClipboard; this.macShares = macShares;
         Relayout();
@@ -183,6 +196,30 @@ sealed class SettingsPanel : Control
         list.Add(new(Kind.Value, RowRect(x, y, 0), pcName));
         y += S(Row);
         y = Footnote(list, x, y, w, $"How a Mac lists this PC when it pairs. {mac} keeps the name it was given; rename it in Sill’s Settings › Devices on {mac}.");
+        if (app.Update is { } update)
+        {
+            // Sill.app's General pane: the switch, the line, Open Release Page… while there is one, Check Now.
+            bool page = update.ReleasePage is not null;
+            int n = page ? 3 : 2;
+            y = Group(list, x, y, w, n);
+            list.Add(new(Kind.RowTitle, RowRect(x, y, 0), "Check for Updates Automatically"));
+            list.Add(new(Kind.Switch, SwitchRect(x, y, 0, w), On: app.Automatic, Choose: _ => UpdateAutomatic?.Invoke(!app.Automatic)));
+            if (page) list.Add(new(Kind.Action, RowRect(x, y, 1), "Open Release Page…", Choose: _ => OpenRelease?.Invoke(update.ReleasePage!)));
+            list.Add(new(Kind.Action, RowRect(x, y, n - 1), "Check Now", Enabled: update.CanCheck, Choose: _ => CheckNow?.Invoke()));
+            y += n * S(Row);
+            y = Footnote(list, x, y, w, update.Line, update.Failed ? Color.FromArgb(0xFF, 0xB0, 0x5C) : Palette.Text);
+            y = Footnote(list, x, y - S(4), w, UpdatePolicy.Footnote);
+        }
+        if (app.StartMenu is { } shortcut)
+        {
+            y = Group(list, x, y, w, 1);
+            list.Add(new(Kind.RowTitle, RowRect(x, y, 0), "Start Menu Shortcut"));
+            list.Add(new(Kind.Switch, SwitchRect(x, y, 0, w), On: shortcut, Choose: _ => StartMenu?.Invoke(!shortcut)));
+            y += S(Row);
+            y = Footnote(list, x, y, w, shortcut
+                ? "Sill is in the Start menu for this Windows account."
+                : "Sill isn’t in the Start menu. It stays installed; turn this on to list it again.");
+        }
         if (canForget)
         {
             y = Group(list, x, y, w, 1);
@@ -331,6 +368,10 @@ sealed class SettingsPanel : Control
                 TextRenderer.DrawText(g, it.Text + "  ›", rowFont, Rectangle.Round(valueAt), Palette.Accent, flags | TextFormatFlags.EndEllipsis);
                 break;
             }
+            case Kind.Action:
+                if (hovered) Palette.FillRounded(g, Palette.ControlHover, new RectangleF(r.X - S(14), r.Y, r.Width + S(28), r.Height), S(GroupRadius));
+                TextRenderer.DrawText(g, it.Text, rowFont, Rectangle.Round(r), it.Enabled ? Palette.Accent : Palette.Muted, flags | TextFormatFlags.EndEllipsis);
+                break;
             case Kind.Forget:
                 if (hovered) Palette.FillRounded(g, Palette.ControlHover, new RectangleF(r.X - S(14), r.Y, r.Width + S(28), r.Height), S(GroupRadius));
                 TextRenderer.DrawText(g, it.Text, rowFont, Rectangle.Round(r), Color.FromArgb(0xFF, 0x6B, 0x6B), flags | TextFormatFlags.EndEllipsis);
@@ -381,7 +422,7 @@ sealed class SettingsPanel : Control
     {
         for (int i = items.Count - 1; i >= 0; i--)
         {
-            if (items[i].Kind is not (Kind.Done or Kind.Quality or Kind.Segments or Kind.Switch or Kind.Disconnect or Kind.Value or Kind.Forget) || !items[i].Enabled) continue;
+            if (items[i].Kind is not (Kind.Done or Kind.Quality or Kind.Segments or Kind.Switch or Kind.Disconnect or Kind.Value or Kind.Forget or Kind.Action) || !items[i].Enabled) continue;
             if (Pinned(items[i]) ? items[i].Rect.Contains(p) : p.Y < Height - FootHeight && items[i].Rect.Contains(new PointF(p.X, p.Y + scroll))) return i;
         }
         return -1;
@@ -416,7 +457,7 @@ sealed class SettingsPanel : Control
                 disarm.Tick += (_, _) => { disarm.Dispose(); if (!IsDisposed) Relayout(); };
                 disarm.Start();
                 break;
-            case Kind.Switch: it.Choose?.Invoke(0); break;
+            case Kind.Switch or Kind.Action: it.Choose?.Invoke(0); break;
             case Kind.Segments:
                 int seg = (int)((e.X - it.Rect.X) / (it.Rect.Width / it.Options!.Length));
                 if (seg >= 0 && seg < it.Options.Length && seg != it.Selected) it.Choose?.Invoke(seg);

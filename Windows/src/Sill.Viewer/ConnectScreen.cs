@@ -8,7 +8,8 @@ namespace Sill.Viewer;
 /// The connect screen, as the iPad's (iOSClient/ContentView.swift): "Connect to a Mac", a status
 /// line, the Macs this PC finds on the network (each with its word: Wired, Wi‑Fi, Not paired,
 /// Update Sill), Add a Mac… last, and along the bottom the footer: "Needs the free Sill app on your
-/// Mac." with the download, support and privacy links. A column 380 px wide, centred, drawn by hand
+/// Mac." with the download, support and privacy links, and above it, while a newer Sill is out,
+/// "Sill 0.6 Is Available…" (<see cref="ShowUpdate"/>). A column 380 px wide, centred, drawn by hand
 /// in the iPad's colours. While a pairing's <see cref="PairCard"/> is up it takes the rows' and
 /// Add a Mac…'s place in the column (<see cref="ShowCard"/>). It only shows and reports clicks;
 /// <see cref="ConnectForm"/> decides.
@@ -17,6 +18,8 @@ sealed class ConnectScreen : Control
 {
     public event Action<MacRow>? RowClicked;
     public event Action? AddMacClicked;
+    /// <summary>"Sill 0.6 Is Available…" clicked: the form opens its release page.</summary>
+    public event Action<UpdatePolicy.Offer>? UpdateClicked;
 
     public static readonly (string Text, string Url)[] Links =
     [
@@ -31,9 +34,11 @@ sealed class ConnectScreen : Control
     private string status = "";
     private string? busyRow;   // the row a click is dialing, lit as the iPad lights it
     private PairCard? card;
+    private UpdatePolicy.Offer? offer;
+    private SillVersion? running;
     private Font titleFont, rowFont, smallFont, buttonFont, iconFont;
 
-    private enum Hit { None, Row, Add, Link }
+    private enum Hit { None, Row, Add, Link, Update }
     private readonly List<(Hit Kind, RectangleF Rect, int Index)> targets = [];
     private (Hit Kind, int Index) hover = (Hit.None, -1);
 
@@ -59,6 +64,16 @@ sealed class ConnectScreen : Control
     public void Show(IReadOnlyList<MacRow> rows, string status, string? busyRow)
     {
         this.rows = rows; this.status = status; this.busyRow = busyRow;
+        Invalidate();
+    }
+
+    /// <summary>A newer release to offer above the footer, as Sill.app's "Sill 0.6 Is Available…"
+    /// item (with "You have 0.5.1; opens its download page" under it); null for none.</summary>
+    public void ShowUpdate(UpdatePolicy.Offer? next, SillVersion? runningVersion)
+    {
+        if (offer == next && running == runningVersion) return;
+        offer = next; running = runningVersion;
+        hover = (Hit.None, -1);
         Invalidate();
     }
 
@@ -90,7 +105,9 @@ sealed class ConnectScreen : Control
         S(24) + S(Spacing) + StatusHeight(w - S(20)) + S(4)
         + (card is not null ? card.Height : rows.Count * (S(RowHeight) + S(Spacing)) + S(ButtonHeight));
 
-    private float FooterHeight => S(18) + S(8) + S(18) + S(LinkReach);
+    private float FooterHeight => OfferHeight + S(18) + S(8) + S(18) + S(LinkReach);
+    // The offer's two lines and the gap under them, when there is one.
+    private float OfferHeight => offer is null ? 0 : S(20) + S(18) + S(14);
 
     // ---- drawing ----
 
@@ -163,6 +180,19 @@ sealed class ConnectScreen : Control
     private void DrawFooter(Graphics g, float x, float y)
     {
         var line = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine;
+        if (offer is not null)
+        {
+            string title = UpdatePolicy.MenuTitle(offer);
+            string subtitle = running is not null ? UpdatePolicy.MenuSubtitle(running) : "Opens its download page";
+            var titleSize = TextRenderer.MeasureText(title, buttonFont, Size.Empty, line);
+            var subSize = TextRenderer.MeasureText(subtitle, smallFont, Size.Empty, line);
+            TextRenderer.DrawText(g, title, buttonFont, new Point((int)x, (int)y), Palette.Accent, line);
+            if (hover.Kind == Hit.Update)
+                using (var under = new Pen(Palette.Accent, S(1))) g.DrawLine(under, x, y + titleSize.Height, x + titleSize.Width, y + titleSize.Height);
+            TextRenderer.DrawText(g, subtitle, smallFont, new Point((int)x, (int)(y + S(20))), Palette.Muted, line);
+            targets.Add((Hit.Update, new RectangleF(x, y - S(4), Math.Max(titleSize.Width, subSize.Width), S(20) + S(18) + S(4)), 0));
+            y += OfferHeight;
+        }
         TextRenderer.DrawText(g, "Needs the free Sill app on your Mac.", smallFont, new Point((int)x, (int)y), Palette.Muted, line);
         y += S(18) + S(8);
         var dot = TextRenderer.MeasureText(" · ", smallFont, Size.Empty, line);
@@ -212,6 +242,7 @@ sealed class ConnectScreen : Control
         {
             case Hit.Row when at.Index < rows.Count: RowClicked?.Invoke(rows[at.Index]); break;
             case Hit.Add: AddMacClicked?.Invoke(); break;
+            case Hit.Update when offer is not null: UpdateClicked?.Invoke(offer); break;
             case Hit.Link:
                 try { Process.Start(new ProcessStartInfo(Links[at.Index].Url) { UseShellExecute = true }); }
                 catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { }

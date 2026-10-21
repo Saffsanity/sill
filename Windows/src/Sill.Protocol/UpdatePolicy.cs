@@ -200,6 +200,23 @@ public static class UpdatePolicy
         return lastCheck!.Value + period + jitter;
     }
 
+    // This run
+
+    /// <summary>Whether this run checks at all: Sill.exe does (<paramref name="sillExe"/>), the spike's
+    /// Sill.Viewer.exe only with a test feed (SILL_TEST_UPDATE_FEED); and a test run
+    /// (SILL_TEST_IDENTITY_DIR) never asks GitHub, only a test feed if it gives one.</summary>
+    public static bool ChecksThisRun(bool sillExe, string? testFeed, string? testIdentityDir)
+    {
+        bool feed = !string.IsNullOrEmpty(testFeed);
+        if (feed) return true;
+        return sillExe && string.IsNullOrEmpty(testIdentityDir);
+    }
+
+    /// <summary>Where update.json and update.log go: <c>%LOCALAPPDATA%\Sill</c>, or a test run's own
+    /// folder (SILL_TEST_IDENTITY_DIR), so a test never touches the PC's real state.</summary>
+    public static string StateDirectory(string localAppData, string? testIdentityDir) =>
+        !string.IsNullOrEmpty(testIdentityDir) ? testIdentityDir : localAppData.TrimEnd('\\', '/') + "\\Sill";
+
     // Words
 
     /// <summary>"Sill 0.6 Is Available…": the item the app shows.</summary>
