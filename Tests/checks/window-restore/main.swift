@@ -1004,6 +1004,30 @@ let needed = ["first fit", "re-fit", "fit refused", "fit: full screen", "fit: no
 for k in needed { check((globalSeen[k] ?? 0) > 0, "model: never came up: \(k)") }
 print("window-restore: the model, \(sessions) sessions: " + needed.map { "\($0) \(globalSeen[$0] ?? 0)" }.joined(separator: ", "))
 
+// Display wake on connect & input, and restart on screen wake (issue #134):
+typealias DWP = DisplayWakePolicy
+check(DWP.inputThrottle == 2.0 && DWP.wakeRestartDelay == 1.0, "DisplayWakePolicy constants")
+check(DWP.shouldDeclareActivity(isConnect: true, lastDeclaredAt: 10.0, now: 10.5, synthetic: false) == true,
+      "connect always declares activity even within throttle window")
+check(DWP.shouldDeclareActivity(isConnect: false, lastDeclaredAt: nil, now: 10.0, synthetic: false) == true,
+      "first input declares activity")
+check(DWP.shouldDeclareActivity(isConnect: false, lastDeclaredAt: 10.0, now: 11.9, synthetic: false) == false,
+      "input within 2.0 s throttle does not declare activity again")
+check(DWP.shouldDeclareActivity(isConnect: false, lastDeclaredAt: 10.0, now: 12.0, synthetic: false) == true,
+      "input at 2.0 s declares activity")
+check(DWP.shouldDeclareActivity(isConnect: true, lastDeclaredAt: nil, now: 10.0, synthetic: true) == false,
+      "synthetic host never declares user activity")
+check(DWP.holdsSleepAssertion(connectedDevices: 1, synthetic: false) == true
+      && DWP.holdsSleepAssertion(connectedDevices: 0, synthetic: false) == false
+      && DWP.holdsSleepAssertion(connectedDevices: 1, synthetic: true) == false,
+      "sleep assertion held only while connectedDevices > 0 and not synthetic")
+check(DWP.shouldRestartOnScreenWake(connectedDevices: 1, active: true, shuttingDown: false, synthetic: false) == true
+      && DWP.shouldRestartOnScreenWake(connectedDevices: 0, active: true, shuttingDown: false, synthetic: false) == false
+      && DWP.shouldRestartOnScreenWake(connectedDevices: 1, active: false, shuttingDown: false, synthetic: false) == false
+      && DWP.shouldRestartOnScreenWake(connectedDevices: 1, active: true, shuttingDown: true, synthetic: false) == false
+      && DWP.shouldRestartOnScreenWake(connectedDevices: 1, active: true, shuttingDown: false, synthetic: true) == false,
+      "shouldRestartOnScreenWake requires connected client, active source, not shuttingDown, not synthetic")
+
 if failures == 0 {
     print("window-restore: all \(passes) checks passed")
     exit(0)

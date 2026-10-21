@@ -162,6 +162,22 @@ MUTANTS = [
     ("W48 a moved restore in whole's words",
      "return whole ? \"Restored \\(name) to \\(text(frame))\" : \"Restored \\(name) to \\(text(frame)), its own size where it was moved\"",
      "return \"Restored \\(name) to \\(text(frame))\""),
+    # DisplayWakePolicy (issue #134).
+    ("DW1 connect throttled like input",
+     "if isConnect { return true }",
+     "if isConnect && false { return true }"),
+    ("DW2 input throttle ignored",
+     "now - last >= throttle",
+     "now - last >= 0"),
+    ("DW3 synthetic host declares activity",
+     "guard !synthetic else { return false }",
+     "if synthetic && false { return false }"),
+    ("DW4 sleep assertion held at 0 devices",
+     "connectedDevices > 0 && !synthetic",
+     "connectedDevices >= 0 && !synthetic"),
+    ("DW5 screen wake restarts when shuttingDown",
+     "connectedDevices > 0 && active && !shuttingDown && !synthetic",
+     "connectedDevices > 0 && active && !synthetic"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

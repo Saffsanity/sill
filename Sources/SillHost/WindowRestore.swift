@@ -376,3 +376,37 @@ enum WindowRestore {
         "Could not restore \(name): it is not answering Accessibility"
     }
 }
+
+/// Waking the Mac's display on client connect and input, holding a display-sleep assertion while
+/// a device is connected, and restarting capture after `screensDidWakeNotification` (issue #134).
+/// Pure (`Foundation` only), compiled and checked by `Tests/checks/window-restore`.
+enum DisplayWakePolicy {
+    static let inputThrottle: Double = 2.0
+    static let wakeRestartDelay: Double = 1.0
+
+    static func shouldDeclareActivity(
+        isConnect: Bool,
+        lastDeclaredAt: Double?,
+        now: Double,
+        throttle: Double = inputThrottle,
+        synthetic: Bool
+    ) -> Bool {
+        guard !synthetic else { return false }
+        if isConnect { return true }
+        guard let last = lastDeclaredAt else { return true }
+        return now - last >= throttle
+    }
+
+    static func holdsSleepAssertion(connectedDevices: Int, synthetic: Bool) -> Bool {
+        connectedDevices > 0 && !synthetic
+    }
+
+    static func shouldRestartOnScreenWake(
+        connectedDevices: Int,
+        active: Bool,
+        shuttingDown: Bool,
+        synthetic: Bool
+    ) -> Bool {
+        connectedDevices > 0 && active && !shuttingDown && !synthetic
+    }
+}

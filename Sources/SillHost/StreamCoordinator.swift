@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import IOKit.pwr_mgt
 import Network
 import ScreenCaptureKit
 import StreamProtocol
@@ -156,6 +157,10 @@ package final class StreamCoordinator {
     private var rectCache: (id: CGWindowID, rect: CGRect, at: CFAbsoluteTime)?
     private var pendingLaunch: String?
     private var switching = false
+    /// Display wake and display-sleep assertion while devices are connected (issue #134).
+    private var lastActivityDeclaredAt: Double?
+    private var displaySleepAssertion: IOPMAssertionID = 0
+    private var screenWakeObserver: NSObjectProtocol?
     /// A restart of the active source is in flight (a settings change, a resize, a rate change,
     /// the encoder fallback, a lost display): the source being restarted. Nil during a switch to
     /// another source.
@@ -353,6 +358,7 @@ package final class StreamCoordinator {
         server.onClientConnected = { [weak self] connection, route, link in
             Task { @MainActor in
                 guard let self else { return }
+                self.declareUserActivity(isConnect: true)
                 let id = ObjectIdentifier(connection)
                 self.routes[id] = route
                 // A paired device shows its paired name until its own stats arrive, and a remote one
@@ -419,6 +425,7 @@ package final class StreamCoordinator {
                 guard let self else { return }
                 let wasEmpty = self.catalog.clientCount == 0
                 self.catalog.clientCount = count          // the catalog idles itself at 0
+                self.updateDisplaySleepAssertion(connectedDevices: count)
                 // Nobody is watching: stop capturing and encoding. The next client picks afresh.
                 if count == 0 { self.viewport = nil; self.clientFPS = [:] }   // the next device starts from scratch
                 if count == 0 { self.gestureChords.forget() }                 // and did not open a view it could close
@@ -589,6 +596,25 @@ package final class StreamCoordinator {
             if !hardwareResponds { enterSoftwareFallback(afterHang: false) }
         }
         if virtualDisplay { enableVirtualDisplay() }
+        if !synthetic && screenWakeObserver == nil {
+            screenWakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.screensDidWakeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(DisplayWakePolicy.wakeRestartDelay))
+                    guard let self else { return }
+                    guard DisplayWakePolicy.shouldRestartOnScreenWake(
+                        connectedDevices: self.catalog.clientCount,
+                        active: self.active != .none,
+                        shuttingDown: self.shuttingDown,
+                        synthetic: self.synthetic
+                    ) else { return }
+                    await self.select(self.active)
+                }
+            }
+        }
         catalog.start()
         // The only startup line Direct Wireless adds, and only when it is on: the default path
         // prints what it always printed.
@@ -914,6 +940,7 @@ package final class StreamCoordinator {
             }
         case .input:
             guard let event = Wire.decode(InputEvent.self, from: message.payload) else { return }
+            declareUserActivity(isConnect: false)
             let device = ObjectIdentifier(connection)
             guard let rect = currentSourceRect() else {
                 // Nothing streams (between sources, or the stream stopped: the window closed under a
@@ -1892,8 +1919,42 @@ package final class StreamCoordinator {
         injector.releaseAll()
         server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
         shuttingDown = true
+        updateDisplaySleepAssertion(connectedDevices: 0)
         restoreFits(keeping: nil)
         stage.release()
+    }
+
+    private func declareUserActivity(isConnect: Bool) {
+        let now = CFAbsoluteTimeGetCurrent()
+        guard DisplayWakePolicy.shouldDeclareActivity(
+            isConnect: isConnect,
+            lastDeclaredAt: lastActivityDeclaredAt,
+            now: now,
+            synthetic: synthetic
+        ) else { return }
+        lastActivityDeclaredAt = now
+        var id: IOPMAssertionID = 0
+        _ = IOPMAssertionDeclareUserActivity("Sill: device activity" as CFString, kIOPMUserActiveLocal, &id)
+    }
+
+    private func updateDisplaySleepAssertion(connectedDevices: Int) {
+        let shouldHold = DisplayWakePolicy.holdsSleepAssertion(connectedDevices: connectedDevices, synthetic: synthetic)
+        if shouldHold {
+            if displaySleepAssertion == 0 {
+                var id: IOPMAssertionID = 0
+                if IOPMAssertionCreateWithName(
+                    kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+                    IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                    "Sill: a device is connected" as CFString,
+                    &id
+                ) == kIOReturnSuccess {
+                    displaySleepAssertion = id
+                }
+            }
+        } else if displaySleepAssertion != 0 {
+            IOPMAssertionRelease(displaySleepAssertion)
+            displaySleepAssertion = 0
+        }
     }
 
     /// The CLI's default path at a signal (HostShutdown.installKeyRelease), just before it dies of it:
