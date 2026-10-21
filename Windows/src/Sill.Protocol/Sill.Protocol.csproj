@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The wire format, portable: no Windows API here, so it builds and tests on any OS. -->
+</Project>

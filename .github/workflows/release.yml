@@ -15,6 +15,10 @@
 #   creates the GitHub Release v<version> with Sill.dmg, Sill.zip and their .sha256 files, the
 #   files the site's download page links. The keychain is deleted at the end, whatever happened.
 #
+# Either way the windows job then builds Sill for Windows from the same tag (one version for every
+# platform) on a Windows runner: Sill.exe for x64 and arm64, zipped, with .sha256 files, kept as an
+# artifact, and with SILL_SIGN_IN_CI true attached to the release the Mac's job created. Unsigned.
+#
 # docs/release-checklist.md, "Releasing from GitHub Actions", lists every secret and variable, how
 # to make and rotate them, and what a run costs (free in a public repository; in a private one,
 # macOS minutes against the account's included minutes, then $0.062 a minute on 2026-09-25).
@@ -259,3 +263,113 @@ jobs:
             security delete-keychain "$keychain"
           fi
           echo "Keychains left: $(security list-keychains -d user | tr -d ' "' | tr '\n' ' ')"
+
+  # Sill for Windows, from the same tag: Sill.exe (Windows/src/Sill.Viewer published self-contained
+  # and single-file, named Sill.exe) zipped per architecture, x64 and arm64, each under its version's
+  # name and a version-free one (Sill-windows-x64.zip, the name the site's download page links through
+  # /releases/latest/download/, as Sill.dmg is the Mac's), with a .sha256 file each. Unsigned for now
+  # (docs/release-checklist.md, "Sill for Windows"): SmartScreen asks on first run.
+  #
+  # It runs after the Mac's job, so in the signed path the release that job created gets these files
+  # (gh release upload); without SILL_SIGN_IN_CI it keeps them as this run's artifact and publishes
+  # nothing. A Mac publish that failed stops it.
+  windows:
+    name: Sill for Windows (attached when publishing)
+    needs: publish
+    if: ${{ !cancelled() && (needs.publish.result == 'success' || (vars.SILL_SIGN_IN_CI != 'true' && needs.publish.result == 'skipped')) }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # gh release upload, with this repository's own token
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: Windows
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.SILL_RELEASE_TAG }}
+          persist-credentials: false
+          fetch-depth: 0 # the build number is the commit count at the tag, as make-app.sh's for the Mac
+
+      # As in windows.yml: .NET from Microsoft's own install script, the SDK global.json names.
+      - name: Install the .NET SDK
+        run: |
+          Invoke-WebRequest -Uri https://dot.net/v1/dotnet-install.ps1 -OutFile "$env:RUNNER_TEMP/dotnet-install.ps1"
+          & "$env:RUNNER_TEMP/dotnet-install.ps1" -JsonFile global.json -InstallDir "$env:RUNNER_TEMP/dotnet"
+          "$env:RUNNER_TEMP/dotnet" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          "DOTNET_ROOT=$env:RUNNER_TEMP/dotnet" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # One version for every platform: the tag's must be Directory.Build.props' Version (which in
+      # turn is Packaging/Info.plist's, as release.sh --check-tag checks for the Mac).
+      - name: Check the tag against Windows/Directory.Build.props
+        run: |
+          $tag = $env:SILL_RELEASE_TAG
+          if ($tag -notmatch '^v(\d+(\.\d+)*)$') { Write-Output "::error::The tag $tag is not v<version>."; exit 1 }
+          $version = $Matches[1]
+          $props = ([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          if ($props -ne $version) { Write-Output "::error::Windows/Directory.Build.props says Version $props, the tag $tag. Set it to $version (Sill's one version) and tag again."; exit 1 }
+          "SILL_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build and test
+        run: |
+          dotnet build Sill.Windows.slnx -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet test Sill.Windows.slnx -c Release --no-build
+
+      - name: Publish Sill.exe for x64 and arm64, and zip each
+        env:
+          SILL_SIGN_IN_CI: ${{ vars.SILL_SIGN_IN_CI }}
+        run: |
+          $version = $env:SILL_VERSION
+          # The hello's build, as Sill.app's CFBundleVersion: the commit count at the tag.
+          $build = "$(git rev-list --count HEAD)".Trim()
+          if ($LASTEXITCODE -ne 0 -or $build -notmatch '^\d+$') { Write-Output "::error::git rev-list --count HEAD gave '$build'."; exit 1 }
+          $dist = New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP/dist"
+          foreach ($arch in 'x64', 'arm64') {
+            $out = "$env:RUNNER_TEMP/publish-$arch"
+            dotnet publish src/Sill.Viewer -c Release -r "win-$arch" --self-contained `
+              -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+              -p:SillExeName=Sill -p:Version=$version -p:SillBuild=$build -o $out
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $exe = Join-Path $out 'Sill.exe'
+            if (-not (Test-Path $exe)) { Write-Output "::error::dotnet publish made no Sill.exe for $arch."; exit 1 }
+            # SelfInstall compares the installed copy's version resource, which only a Windows build stamps.
+            $stamped = (Get-Item $exe).VersionInfo.ProductVersion
+            if (-not "$stamped".StartsWith($version)) { Write-Output "::error::Sill.exe for $arch says version '$stamped', not $version."; exit 1 }
+            foreach ($name in "Sill-$version-windows-$arch.zip", "Sill-windows-$arch.zip") {
+              $zip = Join-Path $dist $name
+              Compress-Archive -Path $exe -DestinationPath $zip -Force
+              $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+              # shasum's format, as Sill.dmg.sha256: the hash, two spaces, the name.
+              "$hash  $name" | Out-File -FilePath "$zip.sha256" -Encoding ascii -NoNewline
+              "$name  $hash  $([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            }
+          }
+          if ($env:SILL_SIGN_IN_CI -ne 'true') {
+            "Nothing was published: the repository variable SILL_SIGN_IN_CI is not true. The zips are unsigned, as a release's are." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          }
+
+      - name: Keep the zips as this run's artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-${{ env.SILL_RELEASE_TAG }}
+          path: ${{ runner.temp }}/dist
+          retention-days: 14
+          if-no-files-found: error
+
+      # The Mac's job made the release v<version> (Scripts/release.sh --publish); these join it.
+      - name: Attach them to the release
+        if: vars.SILL_SIGN_IN_CI == 'true'
+        env:
+          SILL_RELEASE_REPO: ${{ vars.SILL_RELEASE_REPO || github.repository }}
+          GH_TOKEN: ${{ secrets.SILL_RELEASE_TOKEN || github.token }}
+        run: |
+          $files = Get-ChildItem "$env:RUNNER_TEMP/dist" | ForEach-Object { $_.FullName }
+          gh release upload $env:SILL_RELEASE_TAG @files --repo $env:SILL_RELEASE_REPO
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error::gh release upload failed for $env:SILL_RELEASE_TAG in $env:SILL_RELEASE_REPO (its message is above)."; exit 1 }
+          "Attached to $env:SILL_RELEASE_TAG in ${env:SILL_RELEASE_REPO}: $((Get-ChildItem "$env:RUNNER_TEMP/dist").Name -join ', ')" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append

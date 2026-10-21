@@ -1,0 +1,279 @@
+# Windows client spike: progress
+
+Read this first when picking up the Windows work. Keep it current: update it in the same
+commit as the work it describes (the status line, the ticket's row, a dated log entry, Next).
+
+## Status (2026-10-18)
+
+Tickets 01 to 05 are built and committed on `windows-spike`, which stays local for now (Jericho,
+2026-10-18: no push). Ticket 02
+is answered from the PC (`msi`, reached over SSH: `~/fleet/hosts/msi.md`): Windows 11 25H2, build
+26200, SChannel does TLS 1.3 with ALPN, HEVC Video Extensions is installed. Ticket 03 is done: the
+spike pairs with `SillHost --pairing` by typed code and by link, and a wrong code is refused.
+Ticket 04 is done: a session to the paired Mac gets the parameter sets and keyframes, its counts
+equal to `sillclient.py`'s on the same host, and the saved keyframe decodes (ffmpeg). Ticket 01's
+CI waits for a push. Ticket 05's decoder is done: Media Foundation's HEVC decoder turns the session's
+first keyframe into a PNG on the PC, and on a colour test card it is closer to the source (49.9 dB
+PSNR) than ffmpeg's decode. Ticket 06 ran against the real screen: the PC paired over Wi-Fi with
+`SillHost --pairing` capturing the Mac's 4K display and wrote a sharp 3840×2160 PNG of it. The spike's
+goal is met. Beyond the tickets: `Sill.Viewer`, a live window on the Mac's Desktop (view only),
+runs on the PC from `%USERPROFILE%\SillViewer\Sill.Viewer.exe` (the desktop's `Sill Viewer.cmd`),
+decoding in software at about 30 fps for 4K. Next: GPU decoding (Direct3D) and input.
+
+| Commit | What |
+|---|---|
+| `5d4acda` | The .NET skeleton, its CI job, this file, the agent-skills setup (`docs/agents/`, CLAUDE.md) |
+| `82a4924` | Ticket 02's probe, `src/Sill.Probe`, and its README section |
+| `d3a00b3` | Ticket 03's pure half: `Identity.cs`, `Pairing.cs`, `PairLink.cs`, `PairMessages.cs`, `SafeText.cs`, 57 tests |
+| `5033f42` | Ticket 03's TLS half (`DeviceIdentity`, `SillTls`, `PairingClient`, `Sill.Spike pair`), ticket 02's answer |
+| `38fc29e` | Ticket 04: `Session.cs`, `Sill.Spike session` |
+| `a08f069` | Ticket 05: `HevcDecoder`, `HevcSps`, `Nv12`, `Png`, `Sill.Spike decode`, `session --png` |
+
+## Where things are
+
+- Code: `Windows/` on branch `windows-spike` (not pushed). Build and test: `Windows/README.md`.
+- Plan: the wayfinder map at `.scratch/windows-integration/map.md`, tickets in
+  `.scratch/windows-integration/issues/` (local only: `.scratch/` is gitignored, see
+  `docs/agents/issue-tracker.md`). This file repeats what an agent without `.scratch/` needs.
+- Wire reference: `Sources/StreamProtocol/` (Swift). Test client: `Scripts/sillclient.py`.
+
+## Goal
+
+A Windows PC pairs with a Mac running `SillHost --pairing` over the LAN (a typed 12-digit
+code or a pasted `sill://pair` link, to a typed address), opens a session, and writes the
+first keyframe's decoded frame to a PNG. Windows as client only.
+
+## Decisions
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | Destination | A working spike, not a spec |
+| 2 | Hardware | A physical Windows PC |
+| 3 | Language | C# on .NET 10 (an exception to the Swift-only convention) |
+| 4 | Mac target | `SillHost --pairing`, real window capture, LAN |
+| 5 | Discovery | Typed address only, no mDNS |
+| 6 | Pairing | Typed code and pasted link; camera QR later |
+| 7 | Success | One decoded frame to a PNG from the first keyframe |
+| 8 | Tracker | Local markdown under `.scratch/`, gitignored |
+| 9 | Location | `Windows/` at the repo root, its own solution and CI job |
+| 10 | Windows PC | HEVC Video Extensions installed, Windows 11 or 10 22H2: `msi`, Windows 11 25H2 build 26200.9457 |
+| 11 | Mac capture | Screen Recording granted to Terminal, then `SillHost --pairing` |
+
+Out of scope: the Windows host, a Mac client, discovery, camera QR, signing and
+distribution, input, menus, gestures, clipboard.
+
+## Tickets
+
+| # | Ticket | Type | Blocked by | Status |
+|---|---|---|---|---|
+| 01 | Windows solution skeleton and CI job | task | none | claimed: done locally, CI not run (needs a push) |
+| 02 | Confirm the Windows facts (build, HEVC, TLS 1.3 + ALPN, decode) | research | none | done (decoding a frame moved to 05) |
+| 03 | Pairing client over TLS (`sill-pair/1`) | prototype | 01, 02 | done |
+| 04 | Session connection and frame parsing (`sill/1`) | prototype | 03 | done |
+| 05 | Decode one frame to a PNG (Media Foundation) | prototype | 04 | done |
+| 06 | Conformance run with the Mac side | task | 05 | done (sillclient.py's comparison on the real host still owed) |
+
+## Log
+
+- 2026-10-17: map and tickets made; ticket 01 built: `Sill.Protocol` (the 14-byte header,
+  matching the Swift serializer byte for byte), `Sill.Spike` (placeholder),
+  `Sill.Protocol.Tests` (10 tests pass); `.github/workflows/windows.yml`; `Windows/**` left
+  out of ci.yml. The .NET 10 SDK installed on the Mac with `brew install dotnet`.
+
+- 2026-10-17: ticket 02's probe, `src/Sill.Probe` (OS build, loopback TLS 1.3 with ALPN
+  and mutual P-256 keys, MF HEVC decoder count, optional handshake to a Mac). Built and run on
+  the Mac: everything but TLS works there (.NET on macOS has no TLS 1.3: "The requested
+  security protocol is not supported"). Single-file `win-x64` and `win-arm64` builds in
+  `Windows/artifacts/`. The Windows CI job runs it too (informational).
+
+- 2026-10-18: this file gained the status section and the open questions.
+
+- 2026-10-18: ticket 03's pure half in `Sill.Protocol`: `Base64Url`, `Spki` (equal to .NET's own
+  `ExportSubjectPublicKeyInfo`), `MacId`, `PairingCode` (Damm), `PairingProof` (PBKDF2 600k,
+  HMAC proofs), `PairLink`, `SafeText`, `PairRequest`/`PairResult` (nulls left out, as Swift),
+  `PairingExchange` (the kind 19 to send; a kind 20 judged as the iOS device judges it, with its
+  words) and `MessageStream.ReadAsync`. The plan's vectors (docs/remote-access-plan.md §3.4, §3.6)
+  match exactly; a link made with Python as `PairLink.url` escapes it parses. 67 tests pass on the
+  Mac. Simplification: a link's `a` addresses are kept as text, as sillclient.py does (the Swift
+  address parser isn't ported; the spike dials a typed address).
+
+- 2026-10-18: ticket 04. `Session.cs` in `Sill.Protocol`: `SessionClient` (TLS with `sill/1`
+  pinned to the saved key, the hello sent before anything else, reads with the Swift caps: frames
+  32 MiB, the rest 4 MiB, every kind returned), `Hello`, `Goodbye`, the parts of `WindowList` the
+  spike reads, `ParameterSets` (parse and encode), `AccessUnit` (the length-prefixed NAL units and
+  their types), the Desktop pick (`{"desktop":{}}`) and pings. `Sill.Spike session` dials the Mac
+  in `mac.json` (or `--host`), asks for the Desktop when the Mac says nothing streams (as the iOS
+  device does), pings once a second and sends ClientStats (frame age -1: the clocks differ), logs
+  the parameter sets, each keyframe, the first frames and one line a second, and with `--save` writes
+  the first keyframe as `parameter-sets.bin`, `first-keyframe.bin` and Annex B `first-keyframe.h265`.
+  11 new tests (2 TLS, Windows only): 84 pass on the PC, 77 with 7 skipped on the Mac. Live on the PC
+  against `SillHost --synthetic --pairing` (loopback, the reverse forward), pairing then the session
+  in one host run: the hello logged by the host ("MSI (Windows), Sill 0.1 (spike), protocol 1"), the
+  Desktop 0.25 s after the first window list, parameter sets of 73 B (VPS 23, SPS 34, PPS 8, NAL
+  length 4), a 1.2 KB IDR keyframe at once and every 4 s, about 57 fps with no malformed unit, the
+  host's `net.sent` each second equal to the PC's count, the PC's ClientStats in the host's log.
+  Beside `sillclient.py` on the same stream for 8 s: 465 frames and 61 KB against its 462 and 61 KB,
+  the same 73 B parameter sets, the same other kinds. `ffprobe` reads the saved keyframe as HEVC
+  1512×948 and `ffmpeg` decodes it to the test pattern. Learned: `sillclient.py` needs a Python
+  with TLS 1.3 (the Mac's /usr/bin/python3 3.9 is LibreSSL: "Unsupported protocol version 0x304");
+  `/opt/homebrew/bin/python3` has it.
+
+- 2026-10-18: ticket 05. `HevcDecoder` (Sill.Spike, Windows only): the first synchronous HEVC decoder
+  MFT Media Foundation lists (`HEVCVideoExtension`, from HEVC Video Extensions), called through its
+  vtables by slot (no interop package), fed one Annex B sample (the parameter sets, then the
+  keyframe), drained, NV12 out. It needs the frame size on the input type: without it NV12 output is
+  refused with MF_E_ATTRIBUTENOTFOUND (0xC00D36E6), so `HevcSps` (Sill.Protocol) reads the coded size
+  and conformance window from the SPS (1512×952 coded, 1512×948 shown). The decoder then reports a
+  stream change once and takes NV12 again. `Nv12.ToRgb` (BT.709 or 601, full or video range, as
+  the output type says: full range, BT.709 here; cropped to the shown size) and `Png.Encode` (one
+  IDAT, CRC-32, ZLibStream) are portable and tested. `Sill.Spike decode --input <file.h265> --out
+  <png>`, and `session --png <file>` decodes the session's first keyframe. 12 new tests: 96 pass on the
+  PC, 89 with 7 skipped on the Mac. On the PC: the saved test-pattern keyframe decoded in 56 ms,
+  pixel for pixel ffmpeg's PNG; live, with `SILL_TEST_PATTERN=picture:` showing ffmpeg's `testsrc2`
+  card, a 72.7 KB keyframe decoded in 173 ms; against the card itself the PC's PNG is 49.9 dB PSNR
+  (r 47.7, g 55.0, b 49.6) and ffmpeg's decode of the same keyframe 27.4 dB (ffmpeg converts this
+  untagged stream with another matrix). Still open: the probe saw no hardware decoder over SSH; count
+  again from the PC's desktop.
+
+- 2026-10-18: ticket 06 on the real Mac. `SillHost --pairing` capturing the screen needs a launcher
+  macOS lets record it: started from the agent's shell (T3 Code), ScreenCaptureKit delivered nothing
+  and dropped the stream after ~3 s (SCStreamErrorDomain -3805, ReplayKit's daemon connection
+  interrupted; `CGPreflightScreenCaptureAccess` said granted), twice; started by Jericho from
+  Ghostty it streamed. Over Wi-Fi (the PC at 192.168.100.9, the Mac at 192.168.100.185; the Mac's
+  Tailscale address took no TCP from the PC, unexplained): pairing by code (the agent's run) and by
+  link (Jericho's), proofs checked; the session's hello logged by the host; the Desktop at 3840×2160
+  (parameter sets 80 B: VPS 24, SPS 41, PPS 7), a 74 KB keyframe (SEI, IDR_N_LP), ~18 frames a
+  second while the screen was mostly still; the PC decoded the keyframe in software in 241 ms and the
+  PNG shows the screen sharply (44.2 dB from ffmpeg's decode of the same keyframe). Hardware: Media
+  Foundation lists no hardware HEVC decoder on the PC from its desktop session either (a scheduled
+  task in the console session: 1 decoder, 0 hardware); the GPUs reach HEVC through HEVC Video
+  Extensions' MFT given a Direct3D device (DXVA), which the spike does not set up.
+
+- 2026-10-18: the live viewer (Jericho: "how do I see the screen on windows?", then "go"). The decoder
+  moved to `src/Sill.Media` (Windows' media APIs, a library both apps use) and became a stream:
+  `HevcDecoder` takes each access unit and returns the newest NV12 picture (low-latency mode,
+  `CODECAPI_AVLowLatencyMode`; its output buffer reused, not 12 MB per 4K picture); `DecodeOne`
+  is ticket 05's path. `Bgra.FromNv12` converts in 16.16 fixed point with rows in parallel and
+  samples every Nth pixel when the window is smaller than the picture. `AnnexB` (Build, Nals) moved
+  to `Sill.Protocol`. `src/Sill.Viewer` (WinForms, `net10.0-windows`, `EnableWindowsTargeting` so the
+  solution builds on the Mac): connects to the Mac in `mac.json` (or `--host`), asks for the Desktop,
+  decodes every frame on its reader, converts and draws only when the last picture has been painted
+  (a slow paint drops pictures, never queues them), letterboxed; double-click or F11 for full screen,
+  Esc to leave it; the title has the size, pictures shown and received each second, the bitrate, the
+  decode time and the round trip. `Sill.Spike session --decode 1` decodes every frame headless and
+  prints the times. Measured on the PC against the real 4K screen: software decoding takes a median
+  33.6 ms a frame (95th 63 ms, worst 73), 150 frames to 149 pictures, so about 30 fps at most at 4K;
+  the viewer, launched in the console session by a scheduled task, showed the Mac's screen live
+  ("3840×2160 · 14 shown, 14 received … decode 12 ms … rtt 8 ms" on a still screen). Learned: an
+  apphost `.exe` can't find a .NET installed in the user's folder ("You must install .NET", left
+  waiting in a dialog), so the viewer is published self-contained and single-file (116 MB).
+
+- 2026-10-18: input in the viewer (Jericho: "i can view but i cant control anything"). `Input.cs` in
+  `Sill.Protocol`: kind 8 as Swift's synthesized `InputEvent` encodes it (pointer, scroll, key, text)
+  and `HidKeys` (Windows virtual keys to USB HID usages), 15 tests. The viewer sends the mouse (moves
+  at most 250 a second, left and right buttons, both wheels: a notch moves the content a 25th of the
+  frame, natural sign) and keys as HID usages with the held modifiers: left Ctrl is ⌘ (Ctrl+C copies
+  on the Mac), right Ctrl ⌃, Alt ⌥ (its window menu suppressed), the Windows key stays Windows'. Arrows
+  and Tab go to the Mac, not to focus; leaving the window lets go of every key and button; F11 toggles
+  full screen (double-click and Esc are the Mac's now). One writer keeps kind 8 in order. Not yet
+  tried against the Mac: the host needs Accessibility for the app it was started from (Ghostty).
+
+- 2026-10-18: the viewer made diagnosable. Jericho saw nothing after opening it: the window had sat on
+  "Waiting for the picture" (no picture ever drawn), and the `.cmd` launcher left a blank console window
+  over it. Now: `viewer.log` beside the key (each step, the first picture's time, every error); a
+  watchdog ends a session after 10 s with nothing from the Mac, and any session that ends is tried
+  again 2 s later (a host restart, Wi-Fi); a paint that never comes (a hidden window) no longer stops
+  pictures for good (a new one is drawn after 500 ms anyway). The desktop launcher is a `.lnk`
+  straight to the `.exe`. Relaunched in the console session: connected 0.24 s after start, first
+  picture 0.26 s after that (29 ms to decode), then 16–23 pictures a second on a mostly still screen.
+  The first stuck run's cause is not known (its window gave no reason; the log would now). Also
+  learned: on this Mac `lsof -iTCP:<port>` listed no connection while the viewer streamed, so it can't
+  tell whether a client is connected.
+
+- 2026-10-18: the iPad's bar on Windows (Jericho: Alt+Tab and the like stay Windows', so reaching
+  the Mac's other apps is tedious; "refer to how the ipad layout is"). `MacBar` across the top: Apps
+  (the `AppsDrawer`: kind 5's apps with kind 4's icons, a search field, a click or Return opens one,
+  kind 7), Desktop (kind 6), a thumbnail per Mac window (kind 2's windows, kind 3's JPEGs; click streams
+  it, right-click closes, minimizes or makes it full screen, kind 15), and the Mac's gestures as
+  buttons (kind 28, only when the window list says `gestures` 1; the Desktop first, as the iPad does):
+  Mission Control, App Exposé, the Spaces left and right, Show Desktop, Launchpad. Nothing in the bar
+  takes focus, so keys stay the Mac's; the Apps search keeps its own while open. `KeyboardHook`
+  (WH_KEYBOARD_LL, only while the viewer is in front): Alt+Tab is ⌘Tab (⌘ held until Alt comes up,
+  Shift+Tab backwards; Alt's own up still reaches Windows), the Windows key alone is Spotlight
+  (⌘Space) and held with another key is ⌃; Windows never sees the Windows key, so no Start menu.
+  Protocol: `WindowInfo`, `AppInfo`, `WindowList.Windows`/`ActiveWindowId`/`Gestures`, `SelectWindow`,
+  `LaunchApp`, `WindowCommand`, `Gesture`, `Gestures`' names, `ImageBlobs` (4 new tests, 115 on the PC).
+  Found while testing it: the viewer asked for the Desktop once, and a viewer opened a moment after
+  another closed asked while the Mac was still stopping that stream, which drops a pick, so it waited
+  black (35 s here, until another client asked; likely Jericho's earlier black window too). It now asks
+  whenever the Mac says nothing streams, again every 3 s, as the iPad does: relaunched straight after
+  a close, the first picture 0.22 s after connecting. Not tried here: the bar's clicks, the gestures
+  and the hook's keys (they would act on Jericho's Mac and need hands on the PC).
+
+- 2026-10-18: Tailscale and Sill.app (Jericho: does it work over Tailscale? then "yeah go"). The PC's
+  TCP to the Mac's Tailscale address works (a plain listener took it); the home door refuses it by
+  design (`OriginPolicy.homeAdmits`: loopback, Direct Wireless and this Mac's networks; a VPN only at
+  the remote door). Through a test host's remote door (`--pairing --remote=47456`) over Tailscale the
+  PC paired and streamed at 51 fps ("Remote client connected: MSI (Windows) through Tailscale"). Then
+  Sill.app 0.5.1 itself (home door 49870, Remote Access on 7455, its identity kept across launches):
+  `PairingClient.AskAsync` (kind 19 "ask", no proof; the answers "shown", "openOnMac", "locked" in
+  the iPad's words) and `Sill.Spike pair --ask 1 --host <home door>`, which asks, then pairs with the
+  typed code pinned to the key the ask met (`--code-from <file>` for a run with no console). Sill.app
+  opened its window ("MSI (Windows) at 192.168.100.9 asked to pair; showing the code"); Jericho typed
+  the code on the PC. Sessions to the remote door: by address over Wi-Fi and through Tailscale, both
+  pinned. The viewer takes several `--host`s, tried in order (4 s each when there are several): the
+  desktop shortcut is Sill.app's remote door at 192.168.100.185:7455, then
+  jerichos-mac-mini.tail8c9341.ts.net:7455; the first picture 0.53 s after start. The Mac counts a
+  Tailscale session as away (its away quality). Learned: reading the code off the Mac's screen from the
+  agent's shell set off macOS's "T3 Code is requesting to bypass the system private window picker",
+  the same consent that likely stopped the agent's own `SillHost` capture (-3805).
+
+## Open questions
+
+- Should an ADR record the C# exception to the Swift-only rule? Only if it meets all three of
+  the ADR criteria (`docs/agents/domain.md`). Not decided yet.
+- Glossary terms (Door, pairing code, pairing link, `sill/1`, `sill-pair/1`, SPKI pin): added
+  lazily when a ticket first needs them settled.
+
+- 2026-10-18: ticket 02 answered on the PC (`msi`, over SSH; the .NET 10.0.402 SDK installed in
+  the user's folder with `dotnet-install.ps1`, the branch copied as a git bundle). 67 tests pass
+  there. The probe: Windows 11 Home 25H2, build 26200.9457, x64; TLS 1.3 with `sill-pair/1` on
+  loopback (mutual P-256) and to `SillHost --synthetic --pairing` on the Mac, whose key matched its
+  own link's `k`. The host stayed on loopback (`SILL_TEST_LOOPBACK`), reached through an SSH reverse
+  forward (`ssh -R 47455:127.0.0.1:<port> msi`), so no port opened on the Mac. HEVC Video
+  Extensions 2.5.33 is installed and the PC has Intel UHD and an RTX 3050, yet Media Foundation
+  listed 1 HEVC decoder, 0 in hardware: probably because SSH is not the console's session; ticket
+  05 counts again from the desktop.
+
+- 2026-10-18: ticket 03's TLS half. `DeviceIdentity` (a P-256 key in a self-signed certificate,
+  `device.p12` in a directory, loaded through PKCS #12 because SChannel can't use an in-memory key),
+  `SillTls.ConnectAsync` (TLS 1.3, one ALPN, the device's certificate, trust by the Mac's SPKI
+  SHA-256 in the validation callback: any P-256 key on the typed path, the link's `k` on the link's;
+  `PinMismatchException`), `PairingClient` (one kind 19, one kind 20 within 15 s, judged by
+  `PairingExchange`), and `Sill.Spike pair` (`--code` with `--host`, or `--link` with an optional
+  `--host`; saves the Mac in `mac.json` for ticket 04). Six new tests, five of them TLS against a
+  stand-in Mac on loopback that run only on Windows (`WindowsFact`): 73 pass on the PC, 68 with 5
+  skipped on the Mac. Live on the PC against `SillHost --synthetic --pairing` (through the reverse
+  forward): a wrong code refused ("4 tries left", the host's "a wrong code … (4 tries left)"), the
+  right code then refused `busy` until the host's spacing after a wrong code ran out, then paired
+  ("Paired MSI (Windows) … with the code"), and a second identity paired by link ("… with the QR
+  code"); each checked proof_M and the Mac ID, and the saved fingerprint is the link's `k`.
+  Found: SChannel's TLS 1.3 sends the device's certificate before .NET's validation callback judges
+  the Mac's key, so a Mac the link does not name learns the device's public key (nothing else: no
+  proof, no request). iOS's verify block runs before its certificate goes out. A test pins this down
+  (`ALinkToAnotherKeySendsNothing`). Fixed on the way: the console's code page turned the Mac's
+  typographic words into `?`; the spike now writes UTF-8.
+
+
+## Next
+
+- GPU decoding: give the HEVC MFT a Direct3D 11 device (`MFT_MESSAGE_SET_D3D_MANAGER` with an
+  `IMFDXGIDeviceManager`) so the RTX 3050 or the Intel GPU decodes, and draw the NV12 texture with
+  Direct3D instead of converting on the CPU; the target is 60 fps at 4K. Decode on its own thread so
+  the reader keeps draining the socket.
+- Jericho's try of the bar, the gestures, Alt+Tab and the Windows key, now against Sill.app. Then: the Mac's cursor shape
+  (kind 14) instead of Windows' arrow; the strip's scrollbar styled; the clipboard (kind 32).
+- Push `windows-spike` only when Jericho says so; then the Windows CI job runs and ticket 01 closes.
+- The `sillclient.py` comparison on the real-capture host (ticket 06's leftover).
+- Decide whether the device certificate going to an unpinned key on Windows matters (it is public;
+  hiding it needs the validation before the client's flight, which SslStream doesn't offer).
