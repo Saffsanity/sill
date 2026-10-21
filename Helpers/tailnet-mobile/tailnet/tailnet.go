@@ -241,7 +241,26 @@ func (c *Controller) fail(err error, detail string) {
 func (c *Controller) Start(cfg Config) error {
 	c.mu.Lock()
 	if c.starting {
+		// A start is in flight. A key (or another tailnet) must not be lost to
+		// it: wait for it to finish, then start again with this config. A plain
+		// restart of the same tailnet is already what is running.
+		sameNet := strings.EqualFold(strings.TrimSpace(c.cfg.Fingerprint), strings.TrimSpace(cfg.Fingerprint))
 		c.mu.Unlock()
+		if cfg.PreauthKey == "" && sameNet {
+			return nil
+		}
+		go func() {
+			for i := 0; i < 1200; i++ {
+				c.mu.Lock()
+				busy := c.starting
+				c.mu.Unlock()
+				if !busy {
+					_ = c.Start(cfg)
+					return
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}()
 		return nil
 	}
 	sameNet := strings.EqualFold(strings.TrimSpace(c.cfg.Fingerprint), strings.TrimSpace(cfg.Fingerprint))

@@ -318,6 +318,9 @@ extension StreamClient {
             relayDial = Task { @MainActor [weak self] in
                 let forwarder = await TailnetController.shared.forwarder(for: relay, within: 8)
                 guard let self, !Task.isCancelled else { return }
+                if forwarder == nil, TailnetController.shared.status.phase == "removed" {
+                    self.relayRemoved(macID: macID, fingerprint: relay.fingerprint)
+                }
                 self.relayDial = nil
                 let firstFailed = self.relayFailure
                 self.relayFailure = nil
@@ -638,7 +641,7 @@ extension StreamClient {
         reconnectCheck = nil
         guard !connected, !moveUnderWay, var r = reconnect else { return false }
         let now = ProcessInfo.processInfo.systemUptime
-        let dialingAutomatically = remoteDial != nil || session?.why == .automatic
+        let dialingAutomatically = remoteDial != nil || relayDial != nil || session?.why == .automatic
         guard connection == nil || dialingAutomatically else { return false }
         func matches(_ m: FoundMac) -> Bool {
             // A row whose key was another's when the reconnect took it by name: never again (§7.6).

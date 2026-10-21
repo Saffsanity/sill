@@ -924,6 +924,8 @@ package final class RemoteAccess {
 
     private func relayInvited(_ device: String, _ invite: RelayInvite) {
         guard let c = inviteAskers.removeValue(forKey: device) else { return }
+        // Removed while sill-net minted it: never sent (sill-net's next `paired` takes the key back).
+        guard paired.contains(where: { $0.fingerprint == device }) else { return }
         server?.send(StreamMessage(kind: .relayInvite, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                                    payload: Wire.encode(invite)), to: c)
     }
@@ -998,6 +1000,9 @@ package final class RemoteAccess {
     }
 
     private func publishTrust() {
+        // sill-net removes the tailnet nodes of any device not on this list (devices removed while it
+        // was not running), so it must follow every pairing and removal, not only `apply`.
+        relay?.paired(paired.map(\.fingerprint))
         var map: [Data: String] = [:]
         for d in paired { if let fp = d.fingerprintData { map[fp] = d.displayName } }
         let open = window.isOpen, remoteOpen = remoteWindowOpen, on = remoteAccess, internet = internetAccess

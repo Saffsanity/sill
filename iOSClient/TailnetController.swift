@@ -53,6 +53,11 @@ final class TailnetController: ObservableObject {
     }
 
     @Published private(set) var status = Status()
+    /// A join with a key (kind 60) ended: its tailnet's fingerprint, and whether it runs. Only then
+    /// does the device keep the tailnet on its saved Mac, so a failed join is asked for again.
+    var onJoined: ((_ fingerprint: String, _ ok: Bool) -> Void)?
+    /// The fingerprint a keyed join is waiting on.
+    private var joining: String?
     /// The tailnet started now: its fingerprint.
     private(set) var current: String?
     private var poll: Task<Void, Never>?
@@ -98,7 +103,7 @@ final class TailnetController: ObservableObject {
             "stateDir": Self.stateDirectory(relay.fingerprint).path,
             "hostname": UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone",
         ]
-        if let key { cfg["preauthKey"] = key }
+        if let key { cfg["preauthKey"] = key; joining = relay.fingerprint }
         guard let data = try? JSONSerialization.data(withJSONObject: cfg), let json = String(data: data, encoding: .utf8) else { return }
         _ = Self.call { json.withCString { SillTailnetStart(UnsafeMutablePointer(mutating: $0)) } }
         beginPolling()
@@ -130,7 +135,8 @@ final class TailnetController: ObservableObject {
             refresh()
             if let f = forwarder(for: relay) { return f }
             if status.phase == "error" || status.phase == "removed" { return nil }
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            // A cancelled dial ends the wait at once (try? would turn every later sleep into none).
+            do { try await Task.sleep(nanoseconds: 250_000_000) } catch { return nil }
         }
         return nil
     }
@@ -178,6 +184,10 @@ final class TailnetController: ObservableObject {
             print("tailnet: \(s.phase) running=\(s.running) forwarder=\(s.proxyAddr) ip=\(s.tailnetIP) \(s.error)")
             #endif
             status = s
+        }
+        if let fp = joining, current == fp {
+            if s.running { joining = nil; onJoined?(fp, true) }
+            else if s.phase == "error" || s.phase == "removed" { joining = nil; onJoined?(fp, false) }
         }
         #endif
     }

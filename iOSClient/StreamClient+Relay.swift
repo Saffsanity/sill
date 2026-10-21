@@ -22,14 +22,36 @@ extension StreamClient {
         #endif
     }
 
+    /// The tailnet a saved Mac's dial waited for said it was removed (the Mac's Remove, or its
+    /// Headscale set up again): forget it there, so the next session asks for a fresh key.
+    func relayRemoved(macID: String, fingerprint: String) {
+        guard let i = savedMacs.firstIndex(where: { $0.macID == macID }), savedMacs[i].relay?.fingerprint == fingerprint else { return }
+        savedMacs[i].relay = nil
+        persistSavedMacs()
+    }
+
     /// Kind 60 on this session: join the tailnet with its key, and keep the tailnet on the saved Mac
     /// (never the key). Only for the tailnet this session's Mac offers in its signed kind 18
     /// (RelayPolicy.deviceTakes).
     func receiveRelayInvite(_ invite: RelayInvite) {
         guard let v = macInfoVerified, let i = savedMacs.firstIndex(where: { $0.macID == v.info.macID && $0.fingerprintData == v.fingerprint }),
               RelayPolicy.deviceTakes(invite, asked: relayAsked, offered: v.info.relay) else { return }
-        savedMacs[i].relay = invite.relay
-        persistSavedMacs()
+        // Kept on the saved Mac only once the join works (TailnetController.onJoined): a join that
+        // fails (no network within the key's ten minutes, the relay down) is asked for again at the
+        // next session, as is a tailnet this device was removed from (`relayFailed`).
+        let macID = savedMacs[i].macID
+        TailnetController.shared.onJoined = { [weak self] fingerprint, ok in
+            guard let self, fingerprint == invite.relay.fingerprint,
+                  let j = self.savedMacs.firstIndex(where: { $0.macID == macID }) else { return }
+            let next: RelayInfo? = ok ? invite.relay : nil
+            if self.savedMacs[j].relay != next {
+                self.savedMacs[j].relay = next
+                self.persistSavedMacs()
+            }
+            #if DEBUG
+            print("relay: \(ok ? "joined" : "couldn't join") \(self.displayName(macID))'s tailnet")
+            #endif
+        }
         TailnetController.shared.start(invite.relay, key: invite.key)
         #if DEBUG
         print("relay: joining \(displayName(v.info.macID))'s tailnet through \(invite.relay.domain)")

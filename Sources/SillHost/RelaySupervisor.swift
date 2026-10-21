@@ -64,6 +64,8 @@ package final class RelaySupervisor {
     private var restart: Task<Void, Never>?
     private var pairedDevices: [String] = []
     private var reportedFailure: String?
+    /// The last process `stop` let go of, until it has exited.
+    private var stopping: Process?
 
     /// `dataDir`: sill-net's state (~/Library/Application Support/Sill/net in Sill.app). `relayURL`:
     /// the HeadFwd relay, https://headfwd.net unless `defaults write me.saffer.sill.mac RelayURL …`.
@@ -82,7 +84,20 @@ package final class RelaySupervisor {
             state = .off
             return
         }
-        if process == nil, restart == nil { launch() } else if doorChanged, let p = doorPort { send(["cmd": "door", "door": "127.0.0.1:\(p)"]) }
+        if process == nil, restart == nil {
+            if let old = stopping, old.isRunning {
+                // Turned off and on again: the last sill-net (and its Headscale) is still letting go
+                // of the same folder. Start once it has.
+                restart = Task { @MainActor [weak self] in
+                    for _ in 0..<160 where old.isRunning { try? await Task.sleep(nanoseconds: 100_000_000) }
+                    guard let self, !Task.isCancelled, self.wanted, self.process == nil else { return }
+                    self.restart = nil
+                    self.launch()
+                }
+            } else {
+                launch()
+            }
+        } else if doorChanged, let p = doorPort { send(["cmd": "door", "door": "127.0.0.1:\(p)"]) }
     }
 
     /// The paired devices' fingerprints: sill-net removes the nodes of any device no longer here
@@ -128,7 +143,11 @@ package final class RelaySupervisor {
         p.standardInput = input
         p.standardOutput = output
         p.standardError = errors
-        lines(from: output.fileHandleForReading) { [weak self] line in self?.event(line) }
+        lines(from: output.fileHandleForReading) { [weak self, weak p] line in
+            // Lines from a process this supervisor already let go of change nothing.
+            guard let self, let p, p === self.process else { return }
+            self.event(line)
+        }
         lines(from: errors.fileHandleForReading) { line in print(line) }
         p.terminationHandler = { [weak self] proc in
             let status = proc.terminationStatus
@@ -140,8 +159,11 @@ package final class RelaySupervisor {
         }
         process = p
         stdin = input.fileHandleForWriting
+        // A write after sill-net exited (before `exited` runs) must fail, not raise SIGPIPE: the CLI
+        // does not ignore it, and would die of it.
+        _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         state = .starting
-        if !pairedDevices.isEmpty { send(["cmd": "paired", "devices": pairedDevices]) }
+        send(["cmd": "paired", "devices": pairedDevices])
         print("Reach from Anywhere: starting (\(url.lastPathComponent), relay \(relayURL)).")
     }
 
@@ -149,6 +171,7 @@ package final class RelaySupervisor {
         restart?.cancel(); restart = nil
         guard let p = process else { return }
         process = nil
+        stopping = p
         send(["cmd": "stop"], to: stdin)
         try? stdin?.close()
         stdin = nil
