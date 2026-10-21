@@ -107,6 +107,14 @@
     <li>If your iPhone or iPad says your Mac didn’t answer although your Mac is awake, connect them at home once with Remote Access on, then try again away.</li>
     <li>If your device says your Mac no longer accepts it, it was removed on your Mac. Pair it again.</li>
   </ul>
+  <!-- Reach from Anywhere: for the release that ships it (docs/relay-plan.md); a republish before that release takes this section out. -->
+  <h3 id="reach-from-anywhere">Reach from Anywhere</h3>
+  <p>No VPN? Turn on Reach from Anywhere under Remote Access on your Mac. Your Mac then runs a private network of its own, and a free relay (headfwd.net) helps your paired devices find it from any network, with no app to install and nothing to set on your router. Each device joins the next time it connects at home (or through your VPN) and lists the route as “through Sill Relay”. What you stream stays encrypted between your Mac and your device: the relay, and Tailscale’s public relays that carry the packets when a direct path isn’t possible, can’t see or change it.</p>
+  <ul>
+    <li>If your Mac says it can’t reach headfwd.net, check its internet connection; devices that already joined may still connect, and Sill keeps trying.</li>
+    <li>Removing a device in Settings › Devices also takes it off your Mac’s private network.</li>
+  </ul>
+  <!-- /Reach from Anywhere -->
   <!-- /Remote Access -->
 
   <h2 id="window-size">A window on your Mac changed size</h2>

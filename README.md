@@ -8,8 +8,9 @@ Sill for Mac captures the window, encodes it as HEVC video and sends it to the
 Sill app on your device. Your taps, clicks, scrolls and keys go back to your
 Mac. Your Mac and your device connect on the same network, over a USB cable,
 with Direct Wireless Connection when they share no network, or through your
-own VPN, such as Tailscale, with Remote Access. There is no account and no
-server in between.
+own VPN, such as Tailscale, with Remote Access. There is no account, and no
+server in between unless you turn on Reach from Anywhere, whose relay helps a
+device find your Mac but never sees what you stream.
 
 **[getsill.app](https://getsill.app)** ·
 [Download for Mac](https://getsill.app/download) ·
@@ -48,8 +49,8 @@ Sill has layouts of its own.
   camera when you scan your Mac's pairing code (you can type the code
   instead).
 - Your Mac and your device on the same network, joined by a USB cable, or near
-  each other with Direct Wireless Connection on. Away from home, your own VPN,
-  such as Tailscale, with Remote Access on.
+  each other with Direct Wireless Connection on. Away from home, Remote Access
+  on, with your own VPN such as Tailscale, or with Reach from Anywhere.
 
 ## How it works
 
@@ -107,6 +108,13 @@ Sill has layouts of its own.
   connection never starts at your home quality; your home quality comes back
   as soon as a device at home connects. When your device comes home and your
   network lists your Mac, the session moves to your network by itself.
+- **Reach from Anywhere** (off by default, under Remote Access) needs no VPN
+  app and no port forward. Your Mac runs a private network of its own, and a
+  free relay (headfwd.net) helps your devices find it from any network; the
+  packets then go directly when the networks allow, or through Tailscale's
+  public relays when they don't. A paired device joins the next time it
+  connects, and Sill's own encryption with both keys pinned carries every
+  session, so neither relay can see or change it ([docs/relay-plan.md](docs/relay-plan.md)).
 - **When the link can't keep up**, Sill for Mac notices that it is holding
   frames back and tells your device, which says so over the picture and, in
   its Settings, offers a quality the link can carry.

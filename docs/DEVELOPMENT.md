@@ -46,6 +46,27 @@ iPhone Duo's hinge and fold through the iOS 27.1 SDK (`if #available(iOS
 27.1, *)`, so it still runs on iOS 17), and built with the 27.0 SDK it would
 run on the Duo in a compatibility window, 871×669 and sideways only.
 
+Reach from Anywhere (docs/relay-plan.md) adds Go, the version
+`Helpers/sill-net/go.mod` names or newer (https://go.dev/dl, or `brew install
+go`): `Scripts/make-app.sh` builds Sill for Mac's two helpers with
+`Scripts/make-helpers.sh` (sill-net, and Headscale at the version
+`Helpers/tools/go.mod` pins), and the iOS project's SillTailnet target builds
+`SillTailnet.xcframework` with `Scripts/make-tailnet.sh`. Both skip the build
+when nothing they read changed, and both land in `.build`. Without Go,
+`SILL_NO_RELAY=1 Scripts/make-app.sh` builds Sill.app with no helpers (Reach
+from Anywhere then says so), and `swift build` needs no Go at all. The Go
+modules' own tests: `(cd Helpers/sill-net && go test ./...)` and the same in
+`Helpers/tailnet-mobile`.
+
+To try it without a device: `Scripts/make-helpers.sh`, then
+`SILL_NET_BINARY=$PWD/.build/helpers/sill-net .build/debug/SillHost --synthetic
+--remote=17460 --relay`, pair with its link (`Scripts/sillclient.py 17460 5
+none --tls --identity=<dir> --pair-url=<link> --relay-join`, which prints the
+kind 60 and, with `RELAY_INVITE_OUT=<file>`, saves it), then join as a device
+with `go run ./cmd/tailnet-try -state <dir> -hold 60s < <file>` in
+`Helpers/tailnet-mobile`, and dial the forwarder it prints with sillclient
+`--tls`.
+
 ### Sill.app, the menu bar host
 
 ```
