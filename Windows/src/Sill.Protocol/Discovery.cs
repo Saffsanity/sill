@@ -104,19 +104,30 @@ public sealed record MacRow(FoundService Service, MacRow.Kind State, string? Mac
         OpenDoor,
         /// <summary>No <c>p</c>: the Mac's Sill is from before pairing at home. Nothing is dialed.</summary>
         UpdateSill,
+        /// <summary>A saved Mac this network doesn't list (<see cref="RemoteRows"/>): a click dials
+        /// its saved addresses, through a VPN or the internet.</summary>
+        Remote,
     }
 
+    /// <summary>A Remote row: no service, only the saved Mac.</summary>
+    public static MacRow Remote(SavedMac mac) =>
+        new(new FoundService("remote", mac.Name, "", 0, [], new Dictionary<string, string?>(), null), Kind.Remote, mac.MacId, false);
+
     public string Name => Service.Name;
+
+    /// <summary>The row's identity while it is shown: its service's, or a Remote row's Mac ID.</summary>
+    public string Key => State == Kind.Remote ? "remote:" + MacId : Service.Id;
 
     /// <summary>The saved record a pairing from this row replaces: a Mac set up again.</summary>
     public string? Replaces => State == Kind.NotPaired ? MacId : null;
 
     /// <summary>The word at the end of the row: Wired or Wi‑Fi for a paired Mac when the link says,
-    /// "Not paired", "Update Sill".</summary>
+    /// "Not paired", "Update Sill", "Remote".</summary>
     public string? Word => State switch
     {
         Kind.Paired => Service.Link switch { MacLink.Wired => "Wired", MacLink.WiFi => "Wi‑Fi", _ => null },
         Kind.NotPaired or Kind.OpenDoor => "Not paired",
+        Kind.Remote => "Remote",
         _ => "Update Sill",
     };
 
