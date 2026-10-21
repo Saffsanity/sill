@@ -55,11 +55,17 @@ package struct HostConfig: Equatable, Sendable {
     /// HostSettingsChange, DeviceSettings.accepted, `applying` and `restartNeeded`, so no device turns
     /// it on. Applied at once (`StreamCoordinator.setTarget`), not between pipelines.
     package var shareClipboard: Bool
+    /// Reach from Anywhere (docs/relay-plan.md, RelaySupervisor): the Mac runs its own private
+    /// tailnet whose control plane devices reach through a HeadFwd relay, and a third door (the relay
+    /// door, on loopback) that the tailnet forwards to, with the remote door's rules and TLS. Counts
+    /// only while Remote Access is on. The Mac's alone, like Remote Access: absent from
+    /// StreamSettings, HostSettingsChange, DeviceSettings.accepted, `applying` and `restartNeeded`.
+    package var reachFromAnywhere: Bool
 
     /// Every knob is required, so the compiler finds each place that builds one when a knob is added.
     package init(maxFPS: Int, captureScale: CGFloat, bitrate: Int, awayBitrate: Int, awayCaptureScale: CGFloat,
                  prioritizeSpeed: Bool, virtualDisplay: Bool, directWireless: Bool, remoteAccess: Bool, remotePort: Int,
-                 internetAccess: Bool, requirePairing: Bool, shareClipboard: Bool) {
+                 internetAccess: Bool, requirePairing: Bool, shareClipboard: Bool, reachFromAnywhere: Bool) {
         self.maxFPS = maxFPS
         self.captureScale = captureScale
         self.bitrate = bitrate
@@ -73,6 +79,7 @@ package struct HostConfig: Equatable, Sendable {
         self.internetAccess = internetAccess
         self.requirePairing = requirePairing
         self.shareClipboard = shareClipboard
+        self.reachFromAnywhere = reachFromAnywhere
     }
 
     /// The spike's knobs, formerly the `let`s at the top of the CLI's main.swift, and the app's
@@ -83,12 +90,13 @@ package struct HostConfig: Equatable, Sendable {
     /// Standard (Noah, 2026-09-25): a slow connection never starts at the home quality. Require
     /// pairing on: a home door that speaks TLS admits only paired devices until the Mac's user says
     /// otherwise. Share clipboard with devices on (2026-10-14): each device has its own switch too, and
-    /// a password manager's copies never go.
+    /// a password manager's copies never go. Reach from Anywhere off (2026-10-20): it reaches a relay
+    /// on the internet, so only the Mac's own user turns it on.
     package static let standard = HostConfig(maxFPS: 120, captureScale: 2, bitrate: 15_000_000,
                                              awayBitrate: 4_000_000, awayCaptureScale: 1,
                                              prioritizeSpeed: false, virtualDisplay: false, directWireless: false,
                                              remoteAccess: false, remotePort: 7455, internetAccess: false,
-                                             requirePairing: true, shareClipboard: true)
+                                             requirePairing: true, shareClipboard: true, reachFromAnywhere: false)
 
     /// The remote door's port when none is set.
     package static let defaultRemotePort = 7455
@@ -111,7 +119,8 @@ package struct HostConfig: Equatable, Sendable {
     /// What differs from `new`, for the log: "frame rate limit 120 → 60 fps, bitrate 15 → 8 Mbps
     /// per 60 fps, Retina → points, away bitrate 4 → 15 Mbps per 60 fps, away points → Retina, speed
     /// off → on, virtual display off → on, direct wireless off → on, remote access off → on, remote
-    /// port 7455 → 7460, internet access off → on, require pairing on → off, share clipboard on → off".
+    /// port 7455 → 7460, internet access off → on, require pairing on → off, share clipboard on → off,
+    /// reach from anywhere off → on".
     package func changes(to new: HostConfig) -> String {
         func onOff(_ b: Bool) -> String { b ? "on" : "off" }
         func scaleName(_ s: CGFloat) -> String { s >= 1.5 ? "Retina" : "points" }
@@ -129,6 +138,7 @@ package struct HostConfig: Equatable, Sendable {
         if internetAccess != new.internetAccess { parts.append("internet access \(onOff(internetAccess)) → \(onOff(new.internetAccess))") }
         if requirePairing != new.requirePairing { parts.append("require pairing \(onOff(requirePairing)) → \(onOff(new.requirePairing))") }
         if shareClipboard != new.shareClipboard { parts.append("share clipboard \(onOff(shareClipboard)) → \(onOff(new.shareClipboard))") }
+        if reachFromAnywhere != new.reachFromAnywhere { parts.append("reach from anywhere \(onOff(reachFromAnywhere)) → \(onOff(new.reachFromAnywhere))") }
         return parts.isEmpty ? "no change" : parts.joined(separator: ", ")
     }
 

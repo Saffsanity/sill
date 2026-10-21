@@ -13,6 +13,7 @@ struct LiveRemoteAccessPane: View {
         RemoteAccessPane(status: model.coordinator?.status.snapshot.remote ?? RemoteStatus(),
                          remoteAccess: $settings.config.remoteAccess,
                          internetAccess: $settings.config.internetAccess,
+                         reachFromAnywhere: $settings.config.reachFromAnywhere,
                          port: settings.config.remotePort,
                          addressName: settings.remoteAddressName,
                          actions: RemoteAccessPane.Actions(
@@ -37,6 +38,8 @@ struct RemoteAccessPane: View {
     let status: RemoteStatus
     @Binding var remoteAccess: Bool
     @Binding var internetAccess: Bool
+    /// Reach from Anywhere (docs/relay-plan.md): this Mac's own tailnet, through a HeadFwd relay.
+    @Binding var reachFromAnywhere: Bool
     /// The configured port (the app's is never 0).
     let port: Int
     /// The address name setting, as saved.
@@ -65,6 +68,7 @@ struct RemoteAccessPane: View {
             } footer: {
                 Footnote("Lets the iPhone and iPad you pair connect to this Mac from other networks: through a VPN such as Tailscale, or through a port you forward on your router. Sill turns away every device you haven’t paired, and encrypts everything the paired ones send and receive.")
             }
+            if on { relaySection }
             if on { addresses }
             pairedDevices
             if on { internet }
@@ -197,6 +201,30 @@ struct RemoteAccessPane: View {
         if p == 5000 || p == 7000 { return ("Port \(p) belongs to AirPlay Receiver. Choose another.", true) }
         if p >= 49152 { return ("Ports from 49152 up can be taken by any app at any moment.", false) }
         return nil
+    }
+
+    // MARK: Reach from Anywhere
+
+    /// The switch, one line of state, and a footnote that names the two servers it uses.
+    private var relaySection: some View {
+        Section {
+            Toggle("Reach from Anywhere", isOn: $reachFromAnywhere)
+            if reachFromAnywhere {
+                switch status.relay {
+                case .off, .starting:
+                    Text("Starting…").foregroundStyle(.secondary)
+                case .ready(let info):
+                    Text("Ready. Paired devices join the next time they connect at home or through a VPN, then reach this Mac from any network (through \(info.domain)).")
+                        .foregroundStyle(.secondary)
+                case .relayDown(let info):
+                    Warning("Can’t reach \(info.domain) right now. Devices that already joined may still connect; Sill keeps trying.")
+                case .failed(let why):
+                    Warning("Reach from Anywhere isn’t working: \(why).")
+                }
+            }
+        } footer: {
+            Footnote("No VPN app or port forward needed. This Mac runs a private network of its own, and a free relay (headfwd.net) helps your devices find it; when a direct path isn’t possible, Tailscale’s public relays carry the packets. Neither can see or change what you stream: it stays encrypted end to end between this Mac and your paired devices, as always.")
+        }
     }
 
     // MARK: Paired devices

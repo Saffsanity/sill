@@ -162,6 +162,11 @@ final class AppModel {
         let store = makeIdentityStore()
         let remote = RemoteAccess(store: store)
         if let problem = remote.identityProblem { print("Remote access unavailable: \(problem)") }
+        // Reach from Anywhere's state (sill-net, Headscale): beside Sill's other files, kept across
+        // updates. The relay is headfwd.net unless `defaults write me.saffer.sill.mac RelayURL …`.
+        remote.relayDataDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("Sill/net", isDirectory: true)
+        if let url = UserDefaults.standard.string(forKey: "RelayURL"), url.hasPrefix("https://") { remote.relayURL = url }
         remote.restoreSeen(settings.remoteDevicesSeen())
         remote.onSeen = { [weak self, weak remote] prefix, at, route in
             let keep = Set(remote?.pairedPrefixes ?? [])

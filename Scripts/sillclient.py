@@ -84,6 +84,11 @@ The clipboard (kind 32; docs/clipboard-plan.md). Each kind 32 received is printe
                      {"stop":true} ends the subscription
   --expect=clipboard=TEXT  (with --expect's other keys, or alone) at exit, the last kind 32's text;
                      clipboard=none: none came
+Reach from Anywhere (kinds 60 and 61; docs/relay-plan.md):
+  --relay-join       a kind 61 {} right after the select, as a device sends it on a paired session to a
+                     Mac whose kind 18 carries `relay`; each kind 60 back is printed as "relayInvite at
+                     1.234s: fingerprint=… domain=… key=<length> chars", and written whole (the key too) as
+                     JSON to RELAY_INVITE_OUT when that is set, for a test device to join with
 The remote door (TLS 1.3, both keys pinned; PORT is the remote door's):
   --tls              a session (ALPN sill/1) with this client's identity, pinning the Mac's key saved by
                      an earlier pairing in --identity (or given with --pin)
@@ -132,7 +137,7 @@ with status 2 (--raw17 and --input go out as written). Find PORT with: lsof -nP 
 The --synthetic hosts do not advertise over Bonjour, so this is the only way to reach them."""
 import json, re, socket, struct, sys, time
 
-KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye",24:"menu",26:"pointer",32:"clipboard"}
+KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye",24:"menu",26:"pointer",32:"clipboard",60:"relayinvite"}
 BOOL = {"1": True, "0": False, "true": True, "false": False, "on": True, "off": False, "yes": True, "no": False}
 BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "persistent", "virtualDisplayAvailable",
              "thisConnectionAway", "awayRunning"}
@@ -484,7 +489,7 @@ try:
         elif name in VALUED:
             if not body: raise ValueError(f"--{name} needs a value")
             if name in ("big-payload", "flood") and number(body, f"--{name}") < 1: raise ValueError(f"--{name} must be at least 1")
-        elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--menus", "--pointer", "--no-select", "--pair-ask", "--clipboard",
+        elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--menus", "--pointer", "--no-select", "--pair-ask", "--clipboard", "--relay-join",
                        "--pair-ask=cable", "--pair-cancel") and not a.startswith(("--fps=", "--expect=")):
             raise ValueError(f"unknown flag {a!r}")
     events.sort(key=lambda e: (e[0], e[1]))
@@ -629,6 +634,9 @@ try:
     if "--clipboard" in flags:
         # The clipboard's subscription (kind 32 {}), as a device whose Share Clipboard is on sends it.
         s.sendall(msg(32, b"{}")); print("  sent clipboard subscription")
+    if "--relay-join" in flags:
+        # Reach from Anywhere: ask for a key to the Mac's tailnet (kind 61 {}).
+        s.sendall(msg(61, b"{}")); print("  sent relay join (kind 61)")
 except (OSError, ssl.SSLError) as e:
     print(f"TLS refused: {e}"); sys.exit(0 if expect_tls_fail else 1)
 if big_payload:
@@ -801,8 +809,16 @@ while time.time() - t0 < dur:
         elif kind == 18:
             ok, i = verify_macinfo(payload, mac_pin)
             addrs = ",".join(f"{a['host']}{':' + str(a['port']) if a.get('port') else ''}/{a['kind']}/{a['via']}" for a in i.get("addresses", []))
+            relay = i.get("relay")
             print(f"  macInfo at {time.time()-t0:.3f}s: verified={1 if ok else 0} macID={i.get('macID')} name={i.get('name')!r} "
-                  f"remoteAccess={1 if i.get('remoteAccess') else 0} port={i.get('remotePort')} internet={1 if i.get('internet') else 0} addresses=[{addrs}]")
+                  f"remoteAccess={1 if i.get('remoteAccess') else 0} port={i.get('remotePort')} internet={1 if i.get('internet') else 0} addresses=[{addrs}]"
+                  + (f" relay={relay.get('fingerprint')}@{relay.get('domain')}" if isinstance(relay, dict) else ""))
+        elif kind == 60:
+            d = json.loads(payload); r = d.get("relay") or {}
+            print(f"  relayInvite at {time.time()-t0:.3f}s: fingerprint={r.get('fingerprint')} domain={r.get('domain')} key={len(d.get('key', ''))} chars")
+            if os.environ.get("RELAY_INVITE_OUT"):
+                with open(os.environ["RELAY_INVITE_OUT"], "w") as f:
+                    json.dump({"Key": d.get("key"), "Fingerprint": r.get("fingerprint"), "Domain": r.get("domain")}, f)
         elif kind == 20:
             print(f"  pairResult at {time.time()-t0:.3f}s: {payload.decode(errors='replace')}")
         elif kind == 26 and show_pointer:
