@@ -113,6 +113,10 @@ struct StreamScreen: View {
     /// been asked to fit (the control shows 1× for it). Up here, like `latched`, so it survives
     /// rotation and both layouts share it.
     @State private var textScale: Double? = nil
+    /// Aa's Auto (`AutoFit`): the scale that fit each window in each room ("id@W×H"), once found.
+    @State private var autoScales: [String: Double] = [:]
+    /// The check that follows a viewport sent under Auto: whether the Mac's app took the window whole.
+    @State private var autoCheck: Task<Void, Never>?
     /// The Aa slider is unfolded (finger down): the bars fade their other buttons meanwhile.
     @State private var scaleOpen = false
     /// The thumbnail whose traffic-light submenu is open (held for 1.5 s). The bars clip their
@@ -355,7 +359,13 @@ struct StreamScreen: View {
             runLaunchArguments()
             #endif
         }
-        .onChange(of: client.active) { _, source in
+        .onChange(of: client.active, initial: true) { _, source in
+            // The zoom each source had (PictureZoom.source); nothing streaming keeps the last.
+            switch source {
+            case .desktop: client.zoom.source("desktop")
+            case .window(let id): client.zoom.source("window:\(id)")
+            case .none: break
+            }
             if source != .none { withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false } }
             // The host sizes a window as it selects it, from the last viewport it has; this repeat
             // is for a host that restarted, or a window that was picked from the Mac's side.
@@ -463,14 +473,48 @@ struct StreamScreen: View {
             }
             guard client.connected, panelSize.width > 0, panelSize.height > 0 else { return }
             let fps = StreamClient.wantedFPS(remote: client.awayCapsFrameRate)
+            let scale = textScale ?? autoScale
             #if DEBUG
             print("viewport: \(Self.points(panelSize.width))×\(Self.points(panelSize.height)) pt, scale "
-                  + (textScale.map { TextScaleControl.label($0) } ?? "none") + ", \(fps) fps")
+                  + TextScaleControl.label(scale) + (textScale == nil ? " (Auto)" : "") + ", \(fps) fps")
             #endif
             client.sendViewport(Viewport(width: Double(panelSize.width),
                                          height: Double(panelSize.height),
-                                         scale: textScale,
+                                         scale: scale,
                                          fps: fps))
+            if textScale == nil { checkAutoFit() }
+        }
+    }
+
+    /// Auto's key for the window streaming now in this room, nil for the Desktop or nothing.
+    private var autoKey: String? {
+        guard case .window(let id) = client.active else { return nil }
+        return "\(id)@\(Int(panelSize.width))x\(Int(panelSize.height))"
+    }
+
+    /// Auto's scale for what streams now: what fit before in this room, else 1×.
+    private var autoScale: Double { autoKey.flatMap { autoScales[$0] } ?? AutoFit.steps[0] }
+
+    /// Auto: once the Mac has had time to resize the window (and list it again), a window larger than
+    /// asked (its app's minimum) tries the next smaller scale, until one fits or none is left.
+    private func checkAutoFit() {
+        autoCheck?.cancel()
+        guard let key = autoKey, case .window(let id) = client.active else { return }
+        let scale = autoScale, room = panelSize
+        autoCheck = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled, textScale == nil, autoKey == key, panelSize == room,
+                  let w = client.windows.first(where: { $0.id == id }) else { return }
+            let window = CGSize(width: w.width, height: w.height)
+            guard !AutoFit.fits(window: window, room: room, scale: scale), let next = AutoFit.next(after: scale) else {
+                autoScales[key] = scale
+                return
+            }
+            #if DEBUG
+            print("auto: \(w.appName) is \(w.width)×\(w.height) pt, larger than asked at \(TextScaleControl.label(scale))×; trying \(TextScaleControl.label(next))×")
+            #endif
+            autoScales[key] = next
+            sendViewport()
         }
     }
 
@@ -1392,15 +1436,29 @@ struct TextScaleControl: View {
     /// text, 2 pt over the value (every bar that has always had it).
     var iconBox: CGFloat? = nil
     var iconSpacing: CGFloat = 2
+    /// The picture's zoom, where this Aa offers it (a phone's row 1): a tap turns it on and off, and
+    /// a hold shows its ruler above Aa's, which the finger reaches by moving up. nil: Aa alone.
+    var zoom: PictureZoom? = nil
 
-    static let steps: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5]
+    /// The detents, Auto first: 0 stands for Auto (`scale` nil), the Sill's own pick
+    /// (`AutoFit`): the largest text whose window the Mac's app takes whole.
+    static let steps: [Double] = [0, 0.5, 0.75, 1.0, 1.25, 1.5]
     /// Padding either side of the visible ruler; two detents show each side of the thumb.
     static let sliderInset: CGFloat = 30
     var sliderWidth: CGFloat { pointsPerStep * CGFloat(Self.steps.count - 1) + Self.sliderInset * 2 }
+    /// Between Aa's ruler and the zoom's above it.
+    static let rulerGap: CGFloat = 8
+    /// A touch that moves less than this and lifts within `tapTime` is a tap.
+    static let tapSlop: CGFloat = 8
+    static let tapTime: TimeInterval = 0.3
 
     @State private var live: Double = 1.0
     @State private var startValue: Double = 1.0
     @State private var startX: CGFloat = 0
+    /// The zoom ruler is the one the finger is on.
+    @State private var onZoom = false
+    @State private var liveZoom: Double = 1.0
+    @State private var touchStart: Date?
 
     var body: some View {
         VStack(spacing: iconBox == nil ? 2 : iconSpacing) {
@@ -1414,83 +1472,151 @@ struct TextScaleControl: View {
                     .font(.system(size: height >= 60 ? 19 : 17, weight: .semibold))
                     .foregroundStyle(Palette.text)
             }
-            Text(Self.label(scale ?? 1.0) + "×")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Palette.barLabel)
+            if let zoom {
+                ZoomValueLabel(zoom: zoom, text: Self.valueLabel(scale ?? 0))
+            } else {
+                Text(Self.valueLabel(scale ?? 0))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.barLabel)
+            }
         }
         .frame(width: width, height: height)
         .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Palette.control))
         .opacity(open ? 0 : 1)
         .overlay {
             // Centred on the button: the thumb is where the finger came down.
-            slider
+            slider(values: Self.steps, live: live, active: !onZoom)
                 .opacity(open ? 1 : 0)
                 .scaleEffect(open ? 1 : 0.6)
                 .allowsHitTesting(false)
         }
+        .overlay {
+            if zoom != nil {
+                // The zoom's ruler, over Aa's, on the picture's edge.
+                slider(values: PictureZoom.steps, live: liveZoom, active: onZoom)
+                    .offset(y: -(height + Self.rulerGap))
+                    .opacity(open ? 1 : 0)
+                    .scaleEffect(open ? 1 : 0.6, anchor: .bottom)
+                    .allowsHitTesting(false)
+            }
+        }
         .zIndex(open ? 1 : 0)
-        .onChange(of: open, initial: true) { _, isOpen in if isOpen { live = scale ?? 1.0 } }
+        .onChange(of: open, initial: true) { _, isOpen in
+            if isOpen { live = scale ?? 0; liveZoom = zoom?.scale ?? 1.0 }
+        }
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 0, coordinateSpace: .local)
                 .onChanged { g in
-                    if !open {
-                        startValue = scale ?? 1.0
+                    if touchStart == nil {
+                        let start = Date()
+                        touchStart = start
+                        onZoom = false
+                        startValue = scale ?? 0
                         live = startValue
+                        liveZoom = zoom?.scale ?? 1.0
                         startX = g.location.x
-                        withAnimation(.spring(duration: 0.22, bounce: 0.15)) { open = true }
+                        if zoom == nil {
+                            unfold()
+                        } else {
+                            // Where Aa offers the zoom a quick tap turns it on or off, so the rulers wait
+                            // for a hold or a move: a tap never flashes them (nor folds row 1 away).
+                            DispatchQueue.main.asyncAfter(deadline: .now() + Self.tapTime) {
+                                if touchStart == start, !open { unfold() }
+                            }
+                        }
+                    }
+                    if !open {
+                        guard hypot(g.translation.width, g.translation.height) >= Self.tapSlop else { return }
+                        unfold()
+                    }
+                    // Up past half a button's height: the zoom's ruler; back down: Aa's. A change of
+                    // ruler starts from where the finger is, so neither value jumps.
+                    let wantsZoom = zoom != nil && g.translation.height < -height / 2
+                    if wantsZoom != onZoom {
+                        onZoom = wantsZoom
+                        startX = g.location.x
+                        startValue = wantsZoom ? liveZoom : live
+                        UISelectionFeedbackGenerator().selectionChanged()
                     }
                     // The ruler follows the finger: dragging right raises the value, and the ticks
                     // slide left under the fixed thumb.
-                    let dx = g.location.x - startX
-                    let snapped = Self.snap(startValue + Double(dx / pointsPerStep) * 0.25)
-                    if snapped != live {
-                        UISelectionFeedbackGenerator().selectionChanged()
-                        withAnimation(.easeOut(duration: 0.1)) { live = snapped }
+                    let steps = Double((g.location.x - startX) / pointsPerStep)
+                    if onZoom {
+                        let snapped = Self.snap(startValue, by: steps, in: PictureZoom.steps)
+                        if snapped != liveZoom {
+                            UISelectionFeedbackGenerator().selectionChanged()
+                            withAnimation(.easeOut(duration: 0.1)) { liveZoom = snapped }
+                        }
+                    } else {
+                        let snapped = Self.snap(startValue, by: steps, in: Self.steps)
+                        if snapped != live {
+                            UISelectionFeedbackGenerator().selectionChanged()
+                            withAnimation(.easeOut(duration: 0.1)) { live = snapped }
+                        }
                     }
                 }
-                .onEnded { _ in
-                    if (scale ?? 1.0) != live { scale = live }     // a plain tap on an untouched control changes nothing
-                    withAnimation(.easeOut(duration: 0.2)) { open = false }
+                .onEnded { g in
+                    let tapped = hypot(g.translation.width, g.translation.height) < Self.tapSlop
+                        && Date().timeIntervalSince(touchStart ?? .distantPast) < Self.tapTime
+                    if let zoom, tapped {
+                        zoom.toggle()                                // a tap: the zoom on or off
+                    } else if onZoom {
+                        if let zoom, zoom.scale != liveZoom { zoom.scale = liveZoom }
+                    } else if (scale ?? 0) != live {
+                        scale = live == 0 ? nil : live     // a plain tap on an untouched control changes nothing
+                    }
+                    touchStart = nil
+                    withAnimation(.easeOut(duration: 0.2)) { open = false; onZoom = false }
                 }
         )
         .onDisappear { open = false }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Text size")
-        .accessibilityValue("\(Self.label(scale ?? 1.0)) times")
+        .accessibilityValue(scale.map { "\(Self.label($0)) times" } ?? "Auto")
         .accessibilityAdjustableAction { direction in
-            let i = Self.steps.firstIndex(of: scale ?? 1.0) ?? 2
+            let i = Self.steps.firstIndex(of: scale ?? 0) ?? 0
+            let next: Double
             switch direction {
-            case .increment: scale = Self.steps[min(i + 1, Self.steps.count - 1)]
-            case .decrement: scale = Self.steps[max(i - 1, 0)]
-            @unknown default: break
+            case .increment: next = Self.steps[min(i + 1, Self.steps.count - 1)]
+            case .decrement: next = Self.steps[max(i - 1, 0)]
+            @unknown default: return
             }
+            scale = next == 0 ? nil : next
         }
+        .modifier(ZoomActions(zoom: zoom))
     }
 
-    /// The ruler: a track with five ticks and labels that slides so the live value sits under the
-    /// fixed thumb; the ends fade out where they run past the panel.
-    private var slider: some View {
+    /// The rulers open, centred on Aa.
+    private func unfold() {
+        withAnimation(.spring(duration: 0.22, bounce: 0.15)) { open = true }
+    }
+
+    /// A ruler: a track with a tick and a label per value, sliding so the live value sits under the
+    /// fixed thumb; the ends fade out where they run past the panel. The ruler the finger is not on
+    /// is dimmed.
+    private func slider(values: [Double], live: Double, active: Bool) -> some View {
         let w = sliderWidth
         let step = pointsPerStep
         let midX = w / 2
         let midY = height / 2 + 4
-        func x(_ value: Double) -> CGFloat { midX + CGFloat((value - live) / 0.25) * step }
+        let liveIndex = CGFloat(values.firstIndex(of: live) ?? 0)
+        func x(_ index: Int) -> CGFloat { midX + (CGFloat(index) - liveIndex) * step }
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Palette.controlOpen)
             ZStack(alignment: .topLeading) {
                 Capsule().fill(Palette.barLabel.opacity(0.35))
-                    .frame(width: step * CGFloat(Self.steps.count - 1), height: 3)
-                    .offset(x: x(Self.steps[0]), y: midY - 1.5)
-                ForEach(Self.steps, id: \.self) { value in
+                    .frame(width: step * CGFloat(values.count - 1), height: 3)
+                    .offset(x: x(0), y: midY - 1.5)
+                ForEach(Array(values.enumerated()), id: \.offset) { index, value in
                     Rectangle().fill(Palette.barLabel.opacity(0.6))
                         .frame(width: 2, height: 9)
-                        .offset(x: x(value) - 1, y: midY - 4.5)
+                        .offset(x: x(index) - 1, y: midY - 4.5)
                     Text(Self.label(value))
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(value == live ? Palette.text : Palette.barLabel)
                         .frame(width: step, alignment: .center)
-                        .offset(x: x(value) - step / 2, y: midY + 9)
+                        .offset(x: x(index) - step / 2, y: midY + 9)
                 }
             }
             .frame(width: w, height: height, alignment: .topLeading)   // the mask below is sized to this
@@ -1499,7 +1625,7 @@ struct TextScaleControl: View {
                                        .init(color: .black, location: 0.88), .init(color: .clear, location: 1)],
                                startPoint: .leading, endPoint: .trailing)
             )
-            Circle().fill(Palette.accent)
+            Circle().fill(active ? Palette.accent : Palette.barLabel)
                 .frame(width: 22, height: 22)
                 .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
                 .offset(x: midX - 11, y: midY - 11)
@@ -1507,7 +1633,7 @@ struct TextScaleControl: View {
             // (a phone's row 1, the compact window bar) `midY - 34` put the top of its digits 2 pt
             // outside the clip; it sits where the 58 pt bars put it (1 pt above the frame's top,
             // the digits 2 pt inside), and in the taller bars as it always has.
-            Text(Self.label(live) + "×")
+            Text(Self.valueLabel(live))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Palette.text)
                 .frame(width: 60, alignment: .center)
@@ -1515,20 +1641,67 @@ struct TextScaleControl: View {
         }
         .frame(width: w, height: height, alignment: .topLeading)
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .opacity(active ? 1 : 0.55)
     }
 
-    /// Nearest detent, clamped to the ends.
-    static func snap(_ value: Double) -> Double {
-        let clamped = min(max(value, steps[0]), steps[steps.count - 1])
-        return steps.min { abs($0 - clamped) < abs($1 - clamped) } ?? 1.0
+    /// `values`' detent `steps` detents (rounded) from `start`, clamped to the ends.
+    static func snap(_ start: Double, by steps: Double, in values: [Double]) -> Double {
+        let from = values.firstIndex(of: start) ?? 0
+        let index = min(max(from + Int(steps.rounded()), 0), values.count - 1)
+        return values[index]
     }
 
-    /// 0.5, 0.75, 1, 1.25, 1.5: trailing zeros dropped, and "1" rather than "1.0".
+    /// Under Aa and over the thumb: "Auto", or "0.75×".
+    static func valueLabel(_ scale: Double) -> String { scale == 0 ? "Auto" : label(scale) + "×" }
+
+    /// 0.5, 0.75, 1, 1.25, 1.5: trailing zeros dropped, and "1" rather than "1.0"; 0 is Auto.
     static func label(_ scale: Double) -> String {
+        if scale == 0 { return "Auto" }
         var text = String(format: "%.2f", scale)
         while text.hasSuffix("0") { text.removeLast() }
         if text.hasSuffix(".") { text.removeLast() }
         return text
+    }
+}
+
+/// Aa's value line where Aa offers the zoom: Aa's value, and the zoom's beside it while zoomed.
+private struct ZoomValueLabel: View {
+    @ObservedObject var zoom: PictureZoom
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text(text)
+            if zoom.scale > 1 {
+                Image(systemName: "plus.magnifyingglass").font(.system(size: 9, weight: .semibold))
+                Text(TextScaleControl.label(zoom.scale) + "×")
+            }
+        }
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(zoom.scale > 1 ? Palette.text : Palette.barLabel)
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+    }
+}
+
+/// VoiceOver's way to the zoom: actions on Aa, where it offers one.
+private struct ZoomActions: ViewModifier {
+    let zoom: PictureZoom?
+
+    func body(content: Content) -> some View {
+        if let zoom {
+            content
+                .accessibilityAction(named: "Zoom in") {
+                    let i = PictureZoom.steps.firstIndex(of: zoom.scale) ?? 0
+                    zoom.scale = PictureZoom.steps[min(i + 1, PictureZoom.steps.count - 1)]
+                }
+                .accessibilityAction(named: "Zoom out") {
+                    let i = PictureZoom.steps.firstIndex(of: zoom.scale) ?? 0
+                    zoom.scale = PictureZoom.steps[max(i - 1, 0)]
+                }
+        } else {
+            content
+        }
     }
 }
 
