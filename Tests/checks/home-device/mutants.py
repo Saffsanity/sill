@@ -194,5 +194,11 @@ M = [
     ("removalRevokes: a remote session never revokes", F, "        if remote { return true }\n", "        if remote { return false }\n"),
     ("removalRevokes: no saved key still revokes", F, "        guard let savedKey else { return false }\n        if remote",
      "        guard let savedKey else { return remote }\n        if remote"),
+    # Custom device name (issue #118).
+    ("CustomDeviceName.resolvedName keeps blank custom name", F,
+     "guard let raw = custom else { return fallback }\n        let cleaned = String(raw.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64))\n        return cleaned.isEmpty ? fallback : cleaned",
+     "guard let raw = custom else { return fallback }\n        return raw"),
+    ("CustomDeviceName.displayWithModel drops model", F, "return model.isEmpty ? base : \"\\(base) (\\(model))\"",
+     "return base"),
 ]
 sys.exit(0 if module.mutate("home-device", M, sys.argv[1]) else 1)
