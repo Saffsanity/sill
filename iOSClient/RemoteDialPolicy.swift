@@ -84,6 +84,25 @@ enum RemoteDialPolicy {
         return ordered.filter { seen.insert($0.key.lowercased()).inserted }
     }
 
+    /// Reach from Anywhere (docs/relay-plan.md): the candidates with this device's relay forwarder
+    /// (SillTailnet's 127.0.0.1:<port>) after every other, so a Mac reachable at home, through the
+    /// person's own VPN or a port forward is reached that way first, and the relay is the fallback.
+    /// Kind "vpn" and via "Sill Relay": the route reads "through Sill Relay" and counts as away. The
+    /// same address that last worked goes first, as any. Unchanged when there is no forwarder.
+    static func withRelay(_ ordered: [Candidate], forwarder: (host: String, port: Int)?, lastWorked: String?) -> [Candidate] {
+        guard let forwarder, forwarder.port > 0 else { return ordered }
+        let relay = Candidate(host: forwarder.host, port: forwarder.port, kind: MacAddress.vpn, via: RelayPolicy.serviceName)
+        var out = ordered.filter { $0.key != relay.key }
+        if lastWorked == relayKey { out.insert(relay, at: 0) } else { out.append(relay) }
+        return out
+    }
+
+    /// How `SavedMac.lastWorked` names the relay: its forwarder's port changes with each launch.
+    static let relayKey = "relay"
+
+    /// Whether a candidate is the relay's forwarder.
+    static func isRelay(_ c: Candidate) -> Bool { c.via == RelayPolicy.serviceName && c.host.hasPrefix("127.") }
+
     /// Tailscale's shapes: 100.64/10, fd7a:115c:a1e0::/48, a .ts.net name. An address with one of
     /// them is a VPN address whatever kind it was saved with.
     static func isVPNAddress(_ host: String) -> Bool {

@@ -50,6 +50,11 @@ struct SavedMac: Codable, Hashable, Identifiable {
     /// asks with any key, the Mac proving itself with its code; the pairing that follows replaces
     /// this record (`replacingNewKey`). Optional, so a record from before it decodes.
     var newKey: Bool?
+    /// Reach from Anywhere (docs/relay-plan.md): the Mac's tailnet this device joined (its control
+    /// fingerprint and relay domain, from the Mac's signed kind 18 and kind 60; never the key). Dialed
+    /// through SillTailnet's forwarder as this Mac's last candidate. Optional, so a record from before
+    /// it decodes and an older build ignores it.
+    var relay: RelayInfo?
 
     var id: String { macID }
     var fingerprintData: Data? { Base64URL.decode(fingerprint).flatMap { $0.count == 32 ? $0 : nil } }

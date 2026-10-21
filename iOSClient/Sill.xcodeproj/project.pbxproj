@@ -6,7 +6,24 @@
 	objectVersion = 60;
 	objects = {
 
+/* Begin PBXAggregateTarget section */
+		A1000001000000000000BE61 /* SillTailnet */ = {
+			isa = PBXAggregateTarget;
+			buildConfigurationList = A1000001000000000000BE64 /* Build configuration list for PBXAggregateTarget "SillTailnet" */;
+			buildPhases = (
+				A1000001000000000000BE60 /* SillTailnet */,
+			);
+			dependencies = (
+			);
+			name = SillTailnet;
+			productName = SillTailnet;
+		};
+/* End PBXAggregateTarget section */
+
 /* Begin PBXBuildFile section */
+		A1000001000000000000AE60 /* TailnetController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FE60 /* TailnetController.swift */; };
+		A1000001000000000000AE61 /* StreamClient+Relay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FE61 /* StreamClient+Relay.swift */; };
+		A1000001000000000000AE62 /* SillTailnet.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FE62 /* SillTailnet.xcframework */; };
 		A1000001000000000000A001 /* SillApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F001 /* SillApp.swift */; };
 		A1000001000000000000A002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F002 /* ContentView.swift */; };
 		A1000001000000000000A003 /* StreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F003 /* StreamClient.swift */; };
@@ -56,7 +73,20 @@
 		A1000001000000000000AB02 /* DuoPostureReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FB02 /* DuoPostureReader.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		A1000001000000000000BE62 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000010000000000008001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A1000001000000000000BE61;
+			remoteInfo = SillTailnet;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		A1000001000000000000FE60 /* TailnetController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TailnetController.swift; sourceTree = "<group>"; };
+		A1000001000000000000FE61 /* StreamClient+Relay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StreamClient+Relay.swift"; sourceTree = "<group>"; };
+		A1000001000000000000FE62 /* SillTailnet.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = SillTailnet.xcframework; path = ../.build/tailnet/SillTailnet.xcframework; sourceTree = SOURCE_ROOT; };
 		A1000001000000000000F001 /* SillApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SillApp.swift; sourceTree = "<group>"; };
 		A1000001000000000000F002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A1000001000000000000F003 /* StreamClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamClient.swift; sourceTree = "<group>"; };
@@ -114,6 +144,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1000001000000000000A006 /* StreamProtocol in Frameworks */,
+				A1000001000000000000AE62 /* SillTailnet.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -158,6 +189,8 @@
 				A1000001000000000000F019 /* StreamClient+Remote.swift */,
 				A1000001000000000000F601 /* StreamClient+Home.swift */,
 				A1000001000000000000F018 /* RemoteConnector.swift */,
+				A1000001000000000000FE60 /* TailnetController.swift */,
+				A1000001000000000000FE61 /* StreamClient+Relay.swift */,
 				A1000001000000000000F017 /* RemoteDialPolicy.swift */,
 				A1000001000000000000F01E /* GoodbyePolicy.swift */,
 				A1000001000000000000F016 /* SavedMacs.swift */,
@@ -179,6 +212,7 @@
 		A1000001000000000000C002 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				A1000001000000000000FE62 /* SillTailnet.xcframework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -205,6 +239,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				A1000001000000000000BE63 /* PBXTargetDependency */,
 			);
 			name = Sill;
 			packageProductDependencies = (
@@ -246,6 +281,7 @@
 			projectRoot = "";
 			targets = (
 				A1000001000000000000E001 /* Sill */,
+				A1000001000000000000BE61 /* SillTailnet */,
 			);
 		};
 /* End PBXProject section */
@@ -261,6 +297,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A1000001000000000000BE60 /* SillTailnet */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = SillTailnet;
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "# Reach from Anywhere's tailnet (Helpers/tailnet-mobile): builds SillTailnet.xcframework into\n# .build/tailnet when its inputs changed (Scripts/make-tailnet.sh; seconds when nothing did).\nexec \"$SRCROOT/../Scripts/make-tailnet.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		A1000001000000000000B001 /* Sources */ = {
@@ -302,6 +360,8 @@
 				A1000001000000000000A019 /* StreamClient+Remote.swift in Sources */,
 				A1000001000000000000A601 /* StreamClient+Home.swift in Sources */,
 				A1000001000000000000A018 /* RemoteConnector.swift in Sources */,
+				A1000001000000000000AE60 /* TailnetController.swift in Sources */,
+				A1000001000000000000AE61 /* StreamClient+Relay.swift in Sources */,
 				A1000001000000000000A017 /* RemoteDialPolicy.swift in Sources */,
 				A1000001000000000000A01E /* GoodbyePolicy.swift in Sources */,
 				A1000001000000000000A016 /* SavedMacs.swift in Sources */,
@@ -315,6 +375,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A1000001000000000000BE63 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A1000001000000000000BE61 /* SillTailnet */;
+			targetProxy = A1000001000000000000BE62 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A10000010000000000009101 /* Debug */ = {
@@ -443,6 +511,13 @@
 		A10000010000000000009301 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lresolv",
+					"-framework",
+					Security,
+				);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
@@ -475,6 +550,13 @@
 		A10000010000000000009302 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lresolv",
+					"-framework",
+					Security,
+				);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
@@ -504,6 +586,22 @@
 			};
 			name = Release;
 		};
+		A1000001000000000000BE65 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		A1000001000000000000BE66 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -521,6 +619,15 @@
 			buildConfigurations = (
 				A10000010000000000009301 /* Debug */,
 				A10000010000000000009302 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1000001000000000000BE64 /* Build configuration list for PBXAggregateTarget "SillTailnet" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000001000000000000BE65 /* Debug */,
+				A1000001000000000000BE66 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

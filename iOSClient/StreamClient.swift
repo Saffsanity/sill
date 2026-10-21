@@ -170,6 +170,8 @@ final class StreamClient: ObservableObject {
     var macInfoVerified: (info: MacInfo, fingerprint: Data)?
     /// When this connection's first kind 18 arrived (the panel hides Away from home without one).
     @Published var macInfoAt: Date?
+    /// Reach from Anywhere (StreamClient+Relay): this session asked its Mac for a key (kind 61).
+    var relayAsked = false
     /// Pairing, as the Add a Mac card, the home card and the overlay show it.
     @Published var pairing = PairingPhase.idle {
         didSet {
@@ -754,6 +756,10 @@ final class StreamClient: ObservableObject {
     private var reconnectRetryChain = 0
     /// The dial in flight, remote or pairing: one at a time each.
     var remoteDial: RemoteConnector?
+    /// Reach from Anywhere: a dial waiting for this Mac's tailnet to come up (StreamClient+Relay).
+    var relayDial: Task<Void, Never>?
+    /// How the other candidates failed while that dial waited for the tailnet.
+    var relayFailure: (failure: RemoteDialPolicy.Failure, candidate: RemoteDialPolicy.Candidate?)?
     var pairingDial: RemoteConnector?
     /// The next look at the reconnect (a Direct row's `directWait` and `networkGrace`, a remote
     /// dial's due time, the end of `redialWindow`).
@@ -3124,6 +3130,7 @@ final class StreamClient: ObservableObject {
         macInfoSaved = false
         macInfoVerified = nil
         macInfoAt = nil
+        relayAsked = false
         // Pair This iPad…'s ask was this session's: its window, if the Mac showed one, runs out.
         endOverlayAsk(withdraw: false)
         linkStats = nil
@@ -3782,6 +3789,15 @@ final class StreamClient: ObservableObject {
             DispatchQueue.main.async {
                 guard self.connection === from else { return }
                 self.receiveClipboard(data)
+            }
+        case .relayInvite:
+            // Reach from Anywhere: a key to this session's Mac's tailnet (StreamClient+Relay), taken
+            // only on the session that asked and for the tailnet its signed kind 18 offers.
+            guard let invite = Wire.decode(RelayInvite.self, from: data) else { return }
+            let from = connection
+            DispatchQueue.main.async {
+                guard self.connection === from else { return }
+                self.receiveRelayInvite(invite)
             }
         case .macMenu:
             // The Mac's menus: a top level, or the answer to one of this connection's kind 27s or 25s
