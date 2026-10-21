@@ -140,6 +140,8 @@ struct StreamScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The stream panel's size in points, reported by whichever layout is showing.
     @State private var panelSize: CGSize = .zero
+    /// Pinch-to-zoom state on the stream picture (issue #65).
+    @State private var zoom = StreamZoom()
     /// The viewport send waiting out its debounce, if any.
     @State private var pendingViewport: Task<Void, Never>? = nil
     /// The line over the stream while the link cannot carry the quality (docs/remote-bundle-plan.md
@@ -356,6 +358,7 @@ struct StreamScreen: View {
             #endif
         }
         .onChange(of: client.active) { _, source in
+            zoom.reset()
             if source != .none { withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false } }
             // The host sizes a window as it selects it, from the last viewport it has; this repeat
             // is for a host that restarted, or a window that was picked from the Mac's side.
@@ -1056,7 +1059,8 @@ struct StreamScreen: View {
                              pairThisDevice: openPairingOverlay,
                              linkLine: shownLinkLine,
                              takeTour: takeTour,
-                             largerKeyboard: largerKeyboard)
+                             largerKeyboard: largerKeyboard,
+                             zoom: $zoom)
     }
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
@@ -1067,6 +1071,8 @@ struct StreamScreen: View {
 
             ZStack {
                 StreamView(client: client)
+                    .scaleEffect(zoom.scale)
+                    .offset(zoom.offset)
                 // Same frame as the video, so a touch maps straight onto the streamed frame.
                 InputOverlay(videoSize: client.videoSize,
                              send: { client.sendInput($0) },
@@ -1075,7 +1081,9 @@ struct StreamScreen: View {
                              isKeyboardShown: $keyboardShown,
                              latchedModifiers: latched,
                              onModifiersConsumed: { latched = [] },
-                             sendGesture: { client.sendGesture($0, fingers: $1) })
+                             sendGesture: { client.sendGesture($0, fingers: $1) },
+                             zoom: zoom,
+                             onZoomChange: { zoom = $0 })
             }
             .background(Palette.panel)
             .overlay(alignment: .top) { LinkLineView(text: shownLinkLine) }

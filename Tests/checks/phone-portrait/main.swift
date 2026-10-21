@@ -758,5 +758,57 @@ for rule in largerRules {
     check("Larger Picture grid (\(largerSizes) layouts): \(rule.name)" + (rule.firstFailure.map { " — first failure at \($0)" } ?? ""), rule.firstFailure == nil)
 }
 
+// MARK: Pinch-to-zoom on the stream (issue #65)
+
+typealias Z = StreamZoom
+let box = CGSize(width: 400, height: 300)
+var z = Z()
+check("default StreamZoom is 1x with zero offset and not zoomed",
+      z.scale == 1 && z.offset == .zero && !z.isZoomed)
+
+// Pinching at the centre (200, 150) by 2x keeps offset at zero.
+z.pinch(factor: 2.0, from: CGPoint(x: 200, y: 150), to: CGPoint(x: 200, y: 150), in: box)
+check("2x pinch at centre: scale 2, offset zero, isZoomed true",
+      near(z.scale, 2.0) && near(z.offset.width, 0) && near(z.offset.height, 0) && z.isZoomed)
+
+// Slight pinch-out from 2.0x to 1.5x does NOT snap back to 1.0x (Noah's decision).
+z.pinch(factor: 0.75, from: CGPoint(x: 200, y: 150), to: CGPoint(x: 200, y: 150), in: box)
+check("partial pinch-out to 1.5x stays at 1.5x (no snap back)",
+      near(z.scale, 1.5) && z.isZoomed)
+
+// Pinching all the way out to <= 1.0x returns to 1.0x and resets offset to zero.
+z.pinch(factor: 0.5, from: CGPoint(x: 100, y: 80), to: CGPoint(x: 100, y: 80), in: box)
+check("pinching all the way out returns to 1.0x and zero offset",
+      z.scale == 1.0 && z.offset == .zero && !z.isZoomed)
+
+// Capped at 5.0x.
+z.pinch(factor: 10.0, from: CGPoint(x: 200, y: 150), to: CGPoint(x: 200, y: 150), in: box)
+check("pinch scale capped at 5.0x", z.scale == Z.maxScale && Z.maxScale == 5.0)
+z.reset()
+check("reset returns to 1.0x and zero offset", z.scale == 1.0 && z.offset == .zero && !z.isZoomed)
+
+// Midpoint-anchored zoom: pinching 2x at (150, 120) inside 400×300 keeps unzoomed point (150, 120)
+// under screen point (150, 120).
+var zMid = Z()
+let mid = CGPoint(x: 150, y: 120)
+zMid.pinch(factor: 2.0, from: mid, to: mid, in: box)
+let mapped = zMid.unzoomedPoint(mid, in: box)
+check("midpoint-anchored 2x pinch keeps the pinch midpoint fixed on the same picture point",
+      near(mapped.x, mid.x) && near(mapped.y, mid.y) && near(zMid.offset.width, 50) && near(zMid.offset.height, 30))
+
+// Panning while pinching (from oldMid to newMid) moves offset by the midpoint delta, clamped to edges.
+zMid.pinch(factor: 1.0, from: mid, to: CGPoint(x: 170, y: 130), in: box)
+check("moving the two fingers pans the zoomed picture with the midpoint",
+      near(zMid.offset.width, 70) && near(zMid.offset.height, 40))
+
+// Clamping at edges: at 2x in 400×300, max offset is ±200 horizontally and ±150 vertically.
+zMid.pinch(factor: 1.0, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 1000, y: -1000), in: box)
+check("offset clamped to ±(size * (scale - 1) / 2)",
+      near(zMid.offset.width, 200) && near(zMid.offset.height, -150))
+
+// Delta scaling: a scroll delta on a 2x zoomed view moves 1/2 as much in unzoomed coordinates.
+let d = zMid.unzoomedDelta(CGPoint(x: 40, y: -20))
+check("unzoomedDelta divides by scale", near(d.x, 20) && near(d.y, -10))
+
 print("\(passes) passed, \(fails) failed")
 exit(fails == 0 ? 0 : 1)

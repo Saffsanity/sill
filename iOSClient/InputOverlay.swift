@@ -68,12 +68,17 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     private let strokes = StrokeObserver()
     /// The finger pan, for where a scroll that a stroke's silence closes ends.
     private weak var scrollPan: UIPanGestureRecognizer?
+    private weak var pinchRecognizer: UIPinchGestureRecognizer?
     /// The iPad's trackpad (two fingers) or a Magic Mouse, and a mouse's wheel: scroll events over the
     /// picture, which carry no touch (`handleTrackpadScroll`, `handleWheel`).
     private weak var trackpadScroll: UIPanGestureRecognizer?
     private weak var wheelScroll: UIPanGestureRecognizer?
     /// The Pencil's hover and the iPad's pointer, which the pointer's scrolls recognize alongside.
     private weak var hover: UIHoverGestureRecognizer?
+    /// Pinch-to-zoom state on the stream picture (issue #65).
+    var zoom = StreamZoom()
+    var onZoomChange: (StreamZoom) -> Void = { _ in }
+    private var lastPinchMidpoint: CGPoint?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -109,6 +114,12 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         pan.allowedTouchTypes = directOnly
         pan.delegate = self
         addGestureRecognizer(pan)
+
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch))
+        pinch.allowedTouchTypes = directOnly
+        pinch.delegate = self
+        addGestureRecognizer(pinch)
+        pinchRecognizer = pinch
 
         // Pencil hover on the iPads that support it, and the trackpad/mouse pointer everywhere.
         let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover))
@@ -154,8 +165,9 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     private func normalized(_ point: CGPoint, clamped: Bool) -> (x: Double, y: Double)? {
         let rect = videoRect
         guard rect.width > 0, rect.height > 0 else { return nil }
-        let x = (point.x - rect.minX) / rect.width
-        let y = (point.y - rect.minY) / rect.height
+        let u = zoom.unzoomedPoint(point, in: bounds.size)
+        let x = (u.x - rect.minX) / rect.width
+        let y = (u.y - rect.minY) / rect.height
         if x < 0 || x > 1 || y < 0 || y > 1 {
             guard clamped else { return nil }
             return (Double(min(max(x, 0), 1)), Double(min(max(y, 0), 1)))
@@ -206,8 +218,35 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// Deltas are fractions of the video rect, natural sign (finger down = content down =
     /// positive dy).
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
-        guard !strokes.silent else { return }
+        guard !strokes.silent,
+              pinchRecognizer?.state != .began,
+              pinchRecognizer?.state != .changed else { return }
         scroll(gesture, .finger)
+    }
+
+    /// Two-finger pinch on the stream picture (issue #65): zooms 1×–5× centred on the midpoint
+    /// between the two fingers (Photos-style).
+    @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        guard !strokes.silent else {
+            lastPinchMidpoint = nil
+            return
+        }
+        switch gesture.state {
+        case .began:
+            momentum.stop()
+            strokeSilenced()
+            lastPinchMidpoint = gesture.location(in: self)
+            gesture.scale = 1
+        case .changed:
+            let mid = gesture.location(in: self)
+            let prev = lastPinchMidpoint ?? mid
+            lastPinchMidpoint = mid
+            zoom.pinch(factor: gesture.scale, from: prev, to: mid, in: bounds.size)
+            gesture.scale = 1
+            onZoomChange(zoom)
+        default:
+            lastPinchMidpoint = nil
+        }
     }
 
     /// The iPad's trackpad (two fingers) or a Magic Mouse over the picture: the finger pan's path, at
@@ -278,8 +317,10 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     private func scrolled(to translation: CGPoint, at location: CGPoint) {
         let rect = videoRect
         guard rect.width > 0, rect.height > 0 else { return }
-        let dx = (translation.x - lastPanTranslation.x) / rect.width
-        let dy = (translation.y - lastPanTranslation.y) / rect.height
+        let rawDelta = CGPoint(x: translation.x - lastPanTranslation.x, y: translation.y - lastPanTranslation.y)
+        let scaled = zoom.unzoomedDelta(rawDelta)
+        let dx = scaled.x / rect.width
+        let dy = scaled.y / rect.height
         lastPanTranslation = translation
         guard dx != 0 || dy != 0, let p = normalized(location, clamped: true) else { return }
         send(.scroll(x: p.x, y: p.y, dx: Double(dx), dy: Double(dy)))
@@ -307,6 +348,10 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// fingers scroll.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        if (gestureRecognizer === pinchRecognizer && other === scrollPan)
+            || (gestureRecognizer === scrollPan && other === pinchRecognizer) {
+            return true
+        }
         let scrolls = [trackpadScroll, wheelScroll].compactMap { $0 }
         return (scrolls.contains { $0 === gestureRecognizer } && other === hover)
             || (scrolls.contains { $0 === other } && gestureRecognizer === hover)
@@ -337,8 +382,9 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
                 guard let self else { return }
                 let rect = self.videoRect
                 guard rect.width > 0, rect.height > 0 else { return }
+                let scaled = self.zoom.unzoomedDelta(step)
                 self.send(.scroll(x: p.x, y: p.y,
-                                  dx: Double(step.x / rect.width), dy: Double(step.y / rect.height)))
+                                  dx: Double(scaled.x / rect.width), dy: Double(scaled.y / rect.height)))
             },
             onEnd: { send(.scrollGesture(.momentumEnded, x: p.x, y: p.y)) })
     }
@@ -950,6 +996,8 @@ struct InputOverlay: UIViewRepresentable {
     var onModifiersConsumed: () -> Void = {}
     /// `StreamClient.sendGesture`; see `InputOverlayView.sendGesture`.
     var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
+    var zoom: StreamZoom = StreamZoom()
+    var onZoomChange: (StreamZoom) -> Void = { _ in }
 
     func makeUIView(context: Context) -> InputOverlayView {
         let view = InputOverlayView(frame: .zero)
@@ -964,6 +1012,8 @@ struct InputOverlay: UIViewRepresentable {
         uiView.setOwnPointer = setOwnPointer
         uiView.latchedModifiers = latchedModifiers
         uiView.sendGesture = sendGesture
+        uiView.zoom = zoom
+        uiView.onZoomChange = onZoomChange
         // Called straight from a UIKit text-input callback, never from inside a SwiftUI update,
         // so writing the binding here needs no hop.
         uiView.onModifiersConsumed = onModifiersConsumed

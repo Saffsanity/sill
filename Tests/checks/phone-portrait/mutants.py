@@ -103,6 +103,15 @@ MUTANTS = {
     "S3 what streams ignored (the Desktop and nothing with Larger Picture, as before 2026-10-15)": ("switchOn && streaming == .window", "switchOn"),
     "S4 the switch ignored while a window streams": ("switchOn && streaming == .window", "streaming == .window"),
     "S5 the rule turned around (the Desktop larger, a window not)": ("switchOn && streaming == .window", "switchOn && streaming != .window"),
+    # Pinch-to-zoom on the stream (issue #65).
+    "Z1 maxScale 4 instead of 5": ("static let maxScale: CGFloat = 5", "static let maxScale: CGFloat = 4"),
+    "Z2 partial pinch-out snaps back below 1.6": ("if nextScale <= Self.minScale + 0.001 {", "if nextScale <= 1.6 {"),
+    "Z3 pinch ignores midpoint anchor": ("let rawX = (to.x - cx) - (from.x - cx - offset.width) * ratio",
+                                         "let rawX = offset.width * ratio"),
+    "Z4 offset not clamped horizontally": ("width: min(maxX, max(-maxX, rawX)),", "width: rawX,"),
+    "Z5 offset not clamped vertically": ("height: min(maxY, max(-maxY, rawY))", "height: rawY"),
+    "Z6 unzoomedPoint ignores offset": ("x: cx + (point.x - cx - offset.width) / s,", "x: cx + (point.x - cx) / s,"),
+    "Z7 unzoomedDelta multiplies instead of dividing": ("CGPoint(x: delta.x / s, y: delta.y / s)", "CGPoint(x: delta.x * s, y: delta.y * s)"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

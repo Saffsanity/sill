@@ -365,3 +365,68 @@ struct PhonePortraitLayout: Equatable {
         }
     }
 }
+
+/// Pinch-to-zoom on the stream picture (issue #65, Noah's decision of 2026-10-19):
+/// - Two-finger pinch on the picture, capped at `1.0×...5.0×`, centred on the midpoint between the
+///   two fingers (Photos-style).
+/// - No slider, no cursor-centred zoom, and no view following the Mac's pointer.
+/// - A slight pinch out does not snap back to `1.0×`; only pinching all the way out returns to full screen.
+/// Pure (`CoreGraphics` + `Foundation`).
+struct StreamZoom: Equatable, Sendable {
+    static let minScale: CGFloat = 1
+    static let maxScale: CGFloat = 5
+
+    private(set) var scale: CGFloat = 1
+    private(set) var offset: CGSize = .zero
+
+    var isZoomed: Bool { scale > Self.minScale + 0.001 }
+
+    mutating func reset() {
+        scale = Self.minScale
+        offset = .zero
+    }
+
+    /// Updates `scale` by `factor` (`1.0...5.0`) while anchoring the unzoomed point that was under
+    /// `from` (the previous pinch midpoint) so it moves to `to` (the current pinch midpoint),
+    /// clamped to `container`'s edges.
+    mutating func pinch(factor: CGFloat, from: CGPoint, to: CGPoint, in container: CGSize) {
+        guard container.width > 0, container.height > 0, factor > 0 else { return }
+        let oldScale = max(Self.minScale, scale)
+        let nextScale = min(Self.maxScale, max(Self.minScale, oldScale * factor))
+        if nextScale <= Self.minScale + 0.001 {
+            reset()
+            return
+        }
+        let cx = container.width / 2
+        let cy = container.height / 2
+        let ratio = nextScale / oldScale
+        let rawX = (to.x - cx) - (from.x - cx - offset.width) * ratio
+        let rawY = (to.y - cy) - (from.y - cy - offset.height) * ratio
+        let maxX = container.width * (nextScale - 1) / 2
+        let maxY = container.height * (nextScale - 1) / 2
+        scale = nextScale
+        offset = CGSize(
+            width: min(maxX, max(-maxX, rawX)),
+            height: min(maxY, max(-maxY, rawY))
+        )
+    }
+
+    /// Maps a touch point in the `InputOverlayView`'s container coordinates back to the unzoomed
+    /// view coordinates before aspect-fit normalization.
+    func unzoomedPoint(_ point: CGPoint, in container: CGSize) -> CGPoint {
+        guard isZoomed, container.width > 0, container.height > 0 else { return point }
+        let cx = container.width / 2
+        let cy = container.height / 2
+        let s = max(Self.minScale, scale)
+        return CGPoint(
+            x: cx + (point.x - cx - offset.width) / s,
+            y: cy + (point.y - cy - offset.height) / s
+        )
+    }
+
+    /// Scales a scroll delta on the zoomed view into unzoomed view points.
+    func unzoomedDelta(_ delta: CGPoint) -> CGPoint {
+        let s = max(Self.minScale, scale)
+        return CGPoint(x: delta.x / s, y: delta.y / s)
+    }
+}
