@@ -48,7 +48,7 @@ static class SessionCommand
         SessionClient session;
         try
         {
-            var hello = new Hello("0.1", "spike", Hello.CurrentProtocol, $"{name} (Windows)");
+            var hello = new Hello(AppVersion.Current, "spike", Hello.CurrentProtocol, $"{name} (Windows)");
             session = await SessionClient.ConnectAsync(host, port, identity, pin, hello, stop.Token);
         }
         catch (Exception e)
