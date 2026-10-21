@@ -566,6 +566,11 @@ check_ipa() {
 # --unsigned). Checks the archive's version and build and its app, then says $4.
 make_archive() {
     local signed="$1" version="$2" build="$3" what="$4" archived_version archived_build identity
+    # SillTailnet.xcframework before the archive (Reach from Anywhere, docs/relay-plan.md): Xcode looks
+    # for an xcframework the app links before any target runs, so the SillTailnet target alone is too
+    # late on a clean checkout. Go is needed for it (Scripts/make-helpers.sh says how to get it).
+    run_logged "$out/tailnet.log" Scripts/make-tailnet.sh --device-only \
+        || fail "SillTailnet.xcframework could not be built (log: $out/tailnet.log); it needs Go."
     if [ "$signed" = 1 ]; then
         say "Archiving (Release, generic/platform=iOS) into $archive with automatic signing through $signer (log: $out/archive.log)"
         run_logged "$out/archive.log" xcodebuild -project "$project" -scheme "$scheme" -destination 'generic/platform=iOS' \

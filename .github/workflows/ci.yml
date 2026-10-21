@@ -138,13 +138,16 @@ jobs:
           version: '27.1'
           allow-beta: 'true'
 
-      # The SillTailnet target (Scripts/make-tailnet.sh) builds the xcframework first, with Go.
+      # SillTailnet.xcframework first (Scripts/make-tailnet.sh, with Go): Xcode looks for an
+      # xcframework the app links before any target runs, so on a clean checkout the SillTailnet
+      # target alone comes too late; it then finds the framework current and only refreshes it.
       # Not -quiet: with it, Xcode 27 heads each compile that only warned with "error: the following
       # command failed with exit code 0", which reads like a failure. ARCHS=arm64: the generic
       # simulator destination would also compile every file for x86_64 (Intel Macs' simulators),
       # twice the work on this arm64 runner, and no source depends on the architecture.
       - name: Build the iOS app for the simulator (Debug, arm64, not signed)
         run: |
+          Scripts/make-tailnet.sh
           xcodebuild -project iOSClient/Sill.xcodeproj -scheme Sill \
             -destination 'generic/platform=iOS Simulator' -configuration Debug \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" CODE_SIGNING_ALLOWED=NO ARCHS=arm64 build
