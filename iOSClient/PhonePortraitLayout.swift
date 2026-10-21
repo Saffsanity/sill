@@ -1,8 +1,8 @@
 import CoreGraphics
 
 /// Where everything goes on a phone held upright (Noah, 2026-09-27; docs/iphone-portrait-plan.md):
-/// the picture in a fixed 16:10 pane at the top, then row 1 (Apps, Aa, Keyboard, Desktop,
-/// Settings, widened to the row), row 2 (the window thumbnails), row 3 (esc, tab, ctrl, opt, cmd,
+/// the picture in a fixed 16:10 pane at the top, then row 1 (Apps, Aa, Keyboard, Shortcuts,
+/// Settings, widened to the row), row 2 (the Desktop, then the window thumbnails), row 3 (esc, tab, ctrl, opt, cmd,
 /// shift), and the trackpad in everything left. Every rectangle is a function of the stream
 /// screen's size alone, the screen less its top safe-area inset down to its bottom edge (the stream
 /// screen ignores the bottom inset and the keyboard), so nothing moves when the streamed window
@@ -98,8 +98,9 @@ struct PhonePortraitLayout: Equatable {
     /// touch target's least, so the arrangement needs a stream screen 332 pt wide or more.
     static let minButtonWidth: CGFloat = 44
 
-    /// Row 1, in the landscape bar's order.
-    enum Button: Int, CaseIterable { case apps, textSize, keyboard, desktop, settings }
+    /// Row 1, in the landscape bar's order but with Shortcuts in the Desktop's place: on a phone the
+    /// Desktop is the strip's first tile (Raffael, 2026-10-21).
+    enum Button: Int, CaseIterable { case apps, textSize, keyboard, shortcuts, settings }
     /// Row 3's caps: esc, tab, ctrl, opt, cmd, shift.
     static let capCount = 6
 
