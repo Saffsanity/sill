@@ -24,6 +24,8 @@ static class UpdatePrompt
         bool testFeed = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SILL_TEST_UPDATE_FEED"));
         bool product = string.Equals(Path.GetFileName(Environment.ProcessPath), SelfInstallPolicy.ExeName, StringComparison.OrdinalIgnoreCase);
         if (!product && !testFeed) return null;
+        // A test run (SILL_TEST_IDENTITY_DIR) never asks GitHub: only a test feed, if it gives one.
+        if (!testFeed && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SILL_TEST_IDENTITY_DIR"))) return null;
         var logPath = Path.Combine(Directory, "update.log");
         void Log(string line)
         {

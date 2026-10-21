@@ -187,7 +187,9 @@ for Windows").
   `Sill.Viewer.exe` never checks. TEST ONLY: `SILL_TEST_UPDATE_FEED=http://127.0.0.1:P/latest` (a feed on
   this PC only: `Scripts/sillfeed.py P` on the Mac and `ssh -R P:127.0.0.1:P <pc>`; it also makes
   `Sill.Viewer.exe` check), `SILL_TEST_UPDATE_VERSION=0.4`, `SILL_TEST_UPDATE_NOW=1` (a check at
-  start), `SILL_TEST_UPDATE_INTERVAL=<s>` (24 h become s seconds). Never test against GitHub.
+  start), `SILL_TEST_UPDATE_INTERVAL=<s>` (24 h become s seconds). Never test against GitHub: a test of
+  `Sill.exe` sets `SILL_TEST_IDENTITY_DIR` (an empty folder, so it dials no paired Mac), which also
+  keeps it from checking anything but a test feed.
 
 To start over on a PC: delete `%LOCALAPPDATA%\Programs\Sill`, `Sill.lnk` in
 `%APPDATA%\Microsoft\Windows\Start Menu\Programs`, and `update.json`, `update.log` and
