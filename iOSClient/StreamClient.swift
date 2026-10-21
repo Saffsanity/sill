@@ -432,11 +432,16 @@ final class StreamClient: ObservableObject {
         }
     }
 
+    /// The picture's zoom on this device (a phone's Aa): the display view draws through it, the touch
+    /// overlay maps through it, and it follows the pointer the sprite shows. Main thread.
+    let zoom = PictureZoom()
+
     /// The one display view for the whole session. Landscape and portrait both host it, so a
     /// rotation reparents the same layer (and its last decoded image) instead of creating a fresh
     /// view that would sit black until the next keyframe, up to 4 s later. Main thread.
     private(set) lazy var displayView: HEVCDisplayView = {
         let view = HEVCDisplayView(frame: .zero)
+        view.zoom = zoom
         view.onVideoSize = { [weak self] size in self?.videoSize = size }
         onParameterSets = { ps in view.apply(ps) }
         onFrame = { data, isKey in view.enqueue(data, isKeyframe: isKey) }

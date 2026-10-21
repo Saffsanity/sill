@@ -26,6 +26,9 @@ struct Trackpad: View {
     var verticalSpan: CGFloat? = nil
     /// A three- or four-finger gesture, for the Mac (`StreamClient.sendGesture`). True when it went.
     var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
+    /// The picture's zoom now (`PictureZoom.effectiveScale`): zoomed, a stroke moves the pointer less
+    /// of the frame. See `TrackpadSurface.zoom`.
+    var zoom: () -> CGFloat = { 1 }
 
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 22, style: .continuous) }
 
@@ -35,7 +38,7 @@ struct Trackpad: View {
             DotGrid().allowsHitTesting(false)
             TrackpadView(send: send, setPointer: setPointer, feed: feed, onFingers: onFingers,
                          latched: latched, onModifiersConsumed: onModifiersConsumed,
-                         verticalSpan: verticalSpan, sendGesture: sendGesture)
+                         verticalSpan: verticalSpan, sendGesture: sendGesture, zoom: zoom)
             VStack {
                 Spacer(minLength: 0)
                 Text("Drag to move the pointer. Tap to click, two fingers to scroll.")
@@ -85,6 +88,8 @@ struct TrackpadView: UIViewRepresentable {
     let onModifiersConsumed: () -> Void
     var verticalSpan: CGFloat? = nil
     var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
+    /// See `TrackpadSurface.zoom`.
+    var zoom: () -> CGFloat = { 1 }
 
     func makeUIView(context: Context) -> TrackpadSurface {
         let view = TrackpadSurface(frame: .zero)
@@ -104,6 +109,7 @@ struct TrackpadView: UIViewRepresentable {
         uiView.latchedModifiers = latched
         uiView.verticalSpan = verticalSpan
         uiView.sendGesture = sendGesture
+        uiView.zoom = zoom
         // Called from a gesture callback, never from inside a SwiftUI update, so the binding write
         // it performs needs no hop to the next runloop turn.
         uiView.onModifiersConsumed = onModifiersConsumed
@@ -131,6 +137,8 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// pointer as far down as across on a 16:10 picture, and the extra height is room, not a slower
     /// pointer. Pointer motion, two-finger scrolling and its coast all use it.
     var verticalSpan: CGFloat?
+    /// The picture's zoom now (`PictureZoom.effectiveScale`), 1 for none.
+    var zoom: () -> CGFloat = { 1 }
     /// `verticalSpan`, or the pad's height.
     private var ySpan: CGFloat { verticalSpan.flatMap { $0 > 0 ? $0 : nil } ?? bounds.height }
     /// A three- or four-finger gesture the pad decided, for the Mac (`StreamClient.sendGesture`,
@@ -268,7 +276,9 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     private func moveCursor(dx: CGFloat, dy: CGFloat) {
         guard bounds.width > 0, bounds.height > 0 else { return }
         catchUp()
-        pad.move(dx: Double(dx / bounds.width * Self.travel), dy: Double(dy / ySpan * Self.travel))
+        // Zoomed, the pointer moves as far on the glass as it would without zoom: finer on the frame.
+        let zoom = self.zoom()
+        pad.move(dx: Double(dx / bounds.width * Self.travel / zoom), dy: Double(dy / ySpan * Self.travel / zoom))
         // The sprite first, since it is the feedback the finger is waiting for; then the Mac, whose
         // cursor still has to follow for clicks to land there. No rate limit needed here:
         // sendInput coalesces moves to one every 8 ms.
