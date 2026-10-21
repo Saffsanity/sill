@@ -188,7 +188,7 @@ struct PortraitStreamScreen: View {
     private func halves(_ size: CGSize) -> some View {
         // At the middle, as before; on the Duo (iOS 27.1) at the fold's real band half-folded, and
         // open flat at the picture's own shape (docs/iphone-duo-plan.md, (b1) and (b2)).
-        let split = DuoPosture.portraitSplit(size, duoFold, aspect: client.duoPaneAspect(textScale: textScale),
+        let split = DuoPosture.portraitSplit(size, duoFold, aspect: client.duoPaneAspect(textScale: textScale ?? AutoFit.steps[0]),
                                              controls: metrics.controlsHeight)
         let half = split.picture
         return ZStack(alignment: .topLeading) {
@@ -319,6 +319,9 @@ struct PortraitStreamScreen: View {
             // The viewport: the picture's pane, or with Larger Picture its whole room (never the pane
             // at the picture's shape, which would hold a window at the shape it has).
             .onChange(of: layout.picture.size, initial: true) { _, size in onPanelSize(size) }
+            // The picture's zoom, which Aa offers here alone (a turn sideways shows the whole frame).
+            .onAppear { client.zoom.offered() }
+            .onDisappear { client.zoom.withdrawn() }
             #if DEBUG
             .modifier(PhoneConsole(layout: layout, span: span, video: client.videoSize, origin: origin))
             #endif
@@ -399,7 +402,8 @@ struct PortraitStreamScreen: View {
             TextScaleControl(scale: $textScale, open: $scaleOpen,
                              width: width, height: layout.row1.height,
                              radius: metrics.buttonRadius, pointsPerStep: menus ? layout.rulerStepBesideMenus : layout.rulerStep,
-                             iconBox: PortraitMetrics.phoneIconBox, iconSpacing: metrics.buttonSpacing)
+                             iconBox: PortraitMetrics.phoneIconBox, iconSpacing: metrics.buttonSpacing,
+                             zoom: client.zoom)
                 .tourTarget(.textSize)
 
             barButton(open: keyboardShown, symbol: "keyboard", label: "Keyboard", width: width,
@@ -458,6 +462,7 @@ struct PortraitStreamScreen: View {
             StreamView(client: client)
             InputOverlay(videoSize: client.videoSize,
                          send: { client.sendInput($0) },
+                         zoom: client.zoom,
                          setOwnPointer: { client.setOwnPointer($0, from: $1) },
                          proxy: overlay,
                          isKeyboardShown: $keyboardShown,
@@ -477,7 +482,7 @@ struct PortraitStreamScreen: View {
         WindowStrip(client: client, width: metrics.thumbWidth, height: metrics.thumbHeight,
                     radius: metrics.thumbRadius, spacing: metrics.thumbSpacing,
                     pad: metrics.thumbPad, fade: metrics.thumbFade, badge: metrics.badge,
-                    menuFor: $windowMenu)
+                    desktopFirst: metrics.phone, menuFor: $windowMenu)
             .tourTarget(.strip, inset: WindowStrip.tourBand(pad: metrics.thumbPad))
     }
 
@@ -498,7 +503,8 @@ struct PortraitStreamScreen: View {
                  latched: latched,
                  onModifiersConsumed: { latched = [] },
                  verticalSpan: verticalSpan,
-                 sendGesture: { client.sendGesture($0, fingers: $1) })
+                 sendGesture: { client.sendGesture($0, fingers: $1) },
+                 zoom: { [zoom = client.zoom] in zoom.effectiveScale })
             .tourTarget(.trackpad)
     }
 

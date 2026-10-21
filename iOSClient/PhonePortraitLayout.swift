@@ -2,7 +2,7 @@ import CoreGraphics
 
 /// Where everything goes on a phone held upright (Noah, 2026-09-27; docs/iphone-portrait-plan.md):
 /// the picture in a fixed 16:10 pane at the top, then row 1 (Apps, Aa, Keyboard, Desktop,
-/// Settings, widened to the row), row 2 (the window thumbnails), row 3 (esc, tab, ctrl, opt, cmd,
+/// Settings, widened to the row), row 2 (the Desktop, then the window thumbnails), row 3 (esc, tab, ctrl, opt, cmd,
 /// shift), and the trackpad in everything left. Every rectangle is a function of the stream
 /// screen's size alone, the screen less its top safe-area inset down to its bottom edge (the stream
 /// screen ignores the bottom inset and the keyboard), so nothing moves when the streamed window
