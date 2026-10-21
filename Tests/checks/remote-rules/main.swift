@@ -71,14 +71,30 @@ check("order: a test host's loopback address first (the simulator on the same Ma
               lastWorked: nil, localIPv4: home).map(\.host) == ["127.0.0.1", "100.64.0.2", "192.168.1.20"])
 check("order: a Tailscale-shaped address saved as internet is still a VPN address",
       R.order([a("203.0.113.9", "internet", "Router"), a("100.100.1.1", "internet", "")], remotePort: 7455, lastWorked: nil, localIPv4: []).first?.host == "100.100.1.1")
+check("order: a DNS name starting with 127. is not a loopback address",
+      R.order([a("100.64.0.2", "vpn", "Tailscale"), a("127.example.net", "internet", "")], remotePort: 7455, lastWorked: nil, localIPv4: []).map(\.host) == ["100.64.0.2", "127.example.net"])
+check("order: IPv6 and localhost loopback addresses go before VPNs too",
+      R.order([a("100.64.0.2", "vpn", "Tailscale"), a("::1", "lan", "This Mac"), a("localhost.", "lan", "This Mac")], remotePort: 7455,
+              lastWorked: nil, localIPv4: []).map(\.host) == ["::1", "localhost.", "100.64.0.2"])
+check("order: lastWorked matches a DNS name case-insensitively",
+      R.order([a("100.64.0.2", "vpn", "Tailscale"), a("Home.Example.NET", "internet", "")], remotePort: 7455,
+              lastWorked: "home.example.net|7455", localIPv4: []).first?.host == "Home.Example.NET")
 
 // MARK: Address shapes
 check("Tailscale shapes", R.isVPNAddress("100.64.0.1") && R.isVPNAddress("100.127.255.254") && !R.isVPNAddress("100.128.0.1")
-      && !R.isVPNAddress("100.63.255.255") && R.isVPNAddress("fd7a:115c:a1e0::9") && R.isVPNAddress("Mac.Tail1.TS.net") && !R.isVPNAddress("ts.net.example.com"))
+      && !R.isVPNAddress("100.63.255.255") && R.isVPNAddress("fd7a:115c:a1e0::9") && R.isVPNAddress("Mac.Tail1.TS.net") && !R.isVPNAddress("ts.net.example.com")
+      && R.isVPNAddress("mac.tail1.ts.net.") && R.isVPNAddress("0fd7a:115c:a1e0:0:0:0:0:1") && R.isVPNAddress("::ffff:100.64.0.1"))
 check("kinds of addresses without one", R.kind(ofHost: "192.168.0.4") == "lan" && R.kind(ofHost: "10.1.2.3") == "lan" && R.kind(ofHost: "172.31.0.1") == "lan"
       && R.kind(ofHost: "172.32.0.1") == "internet" && R.kind(ofHost: "203.0.113.9") == "internet" && R.kind(ofHost: "127.0.0.1") == "lan"
       && R.kind(ofHost: "fd12::1") == "lan" && R.kind(ofHost: "2001:db8::1") == "internet" && R.kind(ofHost: "100.90.1.1") == "vpn"
       && R.kind(ofHost: "home.example.net") == "internet")
+check("kinds of trailing-dot local names, full link-local /10 and mapped/expanded IPs",
+      R.kind(ofHost: "mac.local") == "lan" && R.kind(ofHost: "mac.local.") == "lan" && R.kind(ofHost: "localhost") == "lan"
+      && R.kind(ofHost: "localhost.") == "lan" && R.kind(ofHost: "fe80::1") == "lan" && R.kind(ofHost: "fe90::1") == "lan"
+      && R.kind(ofHost: "fea0::1") == "lan" && R.kind(ofHost: "febf::1") == "lan" && R.kind(ofHost: "fe7f::1") == "internet"
+      && R.kind(ofHost: "fec0::1") == "internet" && R.kind(ofHost: "0:0:0:0:0:0:0:1") == "lan"
+      && R.kind(ofHost: "::ffff:127.0.0.1") == "lan" && R.kind(ofHost: "::ffff:192.168.1.20") == "lan"
+      && R.kind(ofHost: "::ffff:169.254.3.4") == "lan" && R.kind(ofHost: "127.example.net") == "internet")
 check("shared subnet", R.IPv4.sameNetwork([192, 168, 1, 20], [192, 168, 1, 77], prefix: 24) && !R.IPv4.sameNetwork([192, 168, 2, 20], [192, 168, 1, 77], prefix: 24)
       && R.IPv4.sameNetwork([10, 1, 200, 3], [10, 1, 7, 9], prefix: 16) && !R.IPv4.sameNetwork([10, 1, 2, 3], [10, 1, 2, 3], prefix: 0))
 
@@ -210,6 +226,10 @@ for _ in 0..<2000 {
 check("2,000 tags of random keys match no saved Mac", wrong == 0)
 let parsed = try! AddressParser.parse("100.101.102.103:7460").get()
 check("a linked address gets its kind and Tailscale's name", R.address(for: parsed) == MacAddress(host: "100.101.102.103", port: 7460, kind: "vpn", via: "Tailscale"))
+check("a DNS name starting with 127. is an internet address, not This Mac; loopback is This Mac",
+      R.address(for: try! AddressParser.parse("127.example.net").get()) == MacAddress(host: "127.example.net", port: nil, kind: "internet", via: "")
+      && R.address(for: try! AddressParser.parse("127.0.0.1").get()) == MacAddress(host: "127.0.0.1", port: nil, kind: "lan", via: "This Mac")
+      && R.address(for: try! AddressParser.parse("mac.local.").get()) == MacAddress(host: "mac.local.", port: nil, kind: "lan", via: ""))
 
 // MARK: A Mac set up again: the old record superseded (2026-09-28)
 // Noah's devices: "Noah's MacBook Pro" (the old key, last reached at 500) and "(2)" (the new key,
@@ -230,7 +250,16 @@ check("successor: at a MagicDNS name, Tailscale IPv6, a public address or an int
 check("successor: none at a private, .local or other VPN's address (another network's Mac can hold it)",
       succ(cand("192.168.1.10", "lan")).isEmpty && succ(cand("10.8.0.6", "vpn")).isEmpty && succ(cand("172.16.0.2", "internet")).isEmpty
       && succ(cand("mac.local", "lan")).isEmpty && succ(cand("fd00::5", "lan")).isEmpty && succ(cand("home.example.net", "lan")).isEmpty)
+check("successor: none at a trailing-dot .local name, full link-local /10 or mapped private IP, even if marked internet",
+      succ(cand("mac.local.", "lan")).isEmpty && succ(cand("mac.local.", "internet")).isEmpty
+      && succ(cand("fe90::1", "internet")).isEmpty && succ(cand("fea0::1", "internet")).isEmpty && succ(cand("febf::1", "internet")).isEmpty
+      && succ(cand("::ffff:192.168.1.10", "internet")).isEmpty && succ(cand("::ffff:169.254.3.4", "internet")).isEmpty)
 check("successor: loopback only when allowed", succ(cand("127.0.0.1", "lan")).isEmpty && succ(cand("127.0.0.1", "lan"), loop: true) == [newRec.macID])
+check("successor: localhost., mapped and expanded loopback only when allowed; a 127. DNS name on LAN is not loopback",
+      succ(cand("localhost.", "internet")).isEmpty && succ(cand("localhost.", "lan"), loop: true) == [newRec.macID]
+      && succ(cand("::ffff:127.0.0.1", "internet")).isEmpty && succ(cand("::ffff:127.0.0.1", "lan"), loop: true) == [newRec.macID]
+      && succ(cand("0:0:0:0:0:0:0:1", "internet")).isEmpty && succ(cand("0:0:0:0:0:0:0:1", "lan"), loop: true) == [newRec.macID]
+      && succ(cand("127.example.net", "lan"), loop: true).isEmpty)
 check("successor: never another name", succ(cand("100.64.0.9", "vpn"), [oldRec, office]).isEmpty)
 var reached = oldRec; reached.lastConnectedAt = Date(timeIntervalSince1970: 950)
 check("successor: none paired before the old one was last reached (two Macs in use)", succ(cand("100.64.0.9", "vpn"), old: reached).isEmpty)

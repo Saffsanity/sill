@@ -71,22 +71,38 @@ enum RemoteDialPolicy {
         let vpns = all.filter(vpn)
         let lans = all.filter { !vpn($0) && $0.kind == MacAddress.lan }
         let internet = all.filter { !vpn($0) && $0.kind != MacAddress.lan }
-        func loopback(_ c: Candidate) -> Bool { c.host.hasPrefix("127.") || c.host == "::1" }
+        func loopback(_ c: Candidate) -> Bool { isLoopback(c.host) }
         var ordered = all.filter(loopback)
         ordered += vpns.filter(\.isName) + vpns.filter { !$0.isName && !$0.isIPv6 } + vpns.filter(\.isIPv6)
         ordered += lans.filter { shared($0) && !loopback($0) }
         ordered += internet.filter(\.isName) + internet.filter { !$0.isName }
         ordered += lans.filter { !shared($0) && !loopback($0) }
-        if let lastWorked, let i = ordered.firstIndex(where: { $0.key == lastWorked }) {
+        if let lastWorked, let i = ordered.firstIndex(where: { $0.key.lowercased() == lastWorked.lowercased() }) {
             ordered.insert(ordered.remove(at: i), at: 0)
         }
         var seen = Set<String>()
         return ordered.filter { seen.insert($0.key.lowercased()).inserted }
     }
 
+    private static func parsedHost(_ host: String) -> ParsedAddress? {
+        guard case .success(let address) = AddressParser.parse(host), address.port == nil else { return nil }
+        return address
+    }
+
+    static func isLoopback(_ host: String) -> Bool {
+        guard let address = parsedHost(host) else { return false }
+        let h = address.host.lowercased()
+        switch address.kind {
+        case .ipv4: return h.hasPrefix("127.")
+        case .ipv6: return h == "::1"
+        case .name: return h == "localhost" || h == "localhost."
+        }
+    }
+
     /// Tailscale's shapes: 100.64/10, fd7a:115c:a1e0::/48, a .ts.net name. An address with one of
     /// them is a VPN address whatever kind it was saved with.
     static func isVPNAddress(_ host: String) -> Bool {
+        let host = parsedHost(host)?.host ?? host
         if let a = IPv4.parse(host) { return a[0] == 100 && a[1] & 0xC0 == 64 }
         if host.lowercased().hasPrefix("fd7a:115c:a1e0:") { return true }
         return isTailscaleName(host)
@@ -110,7 +126,7 @@ enum RemoteDialPolicy {
     ///   simulator's test hosts on this Mac).
     static func successors(of old: SavedMac, at candidate: Candidate, in list: [SavedMac], allowLoopback: Bool) -> [SavedMac] {
         let h = candidate.host.lowercased()
-        let loopback = h.hasPrefix("127.") || h == "::1" || h == "localhost"
+        let loopback = isLoopback(h)
         let unique = isVPNAddress(h) || (candidate.kind != MacAddress.lan && kind(ofHost: h) == MacAddress.internet)
         guard unique || (loopback && allowLoopback) else { return [] }
         let lastReached = old.lastConnectedAt ?? old.pairedAt
@@ -129,6 +145,7 @@ enum RemoteDialPolicy {
     /// shapes are "vpn", private and link-local ranges "lan" (loopback too: "This Mac" in the
     /// tests), anything else "internet".
     static func kind(ofHost host: String) -> String {
+        let host = parsedHost(host)?.host ?? host
         if isVPNAddress(host) { return MacAddress.vpn }
         if let a = IPv4.parse(host) {
             let lan = a[0] == 10 || (a[0] == 172 && a[1] & 0xF0 == 16) || (a[0] == 192 && a[1] == 168)
@@ -137,16 +154,18 @@ enum RemoteDialPolicy {
         }
         let h = host.lowercased()
         if h.contains(":") {
-            let lan = h.hasPrefix("fc") || h.hasPrefix("fd") || h.hasPrefix("fe8") || h == "::1"
+            let lan = h.hasPrefix("fc") || h.hasPrefix("fd")
+                || ["fe8", "fe9", "fea", "feb"].contains(where: { h.hasPrefix($0) }) || h == "::1"
             return lan ? MacAddress.lan : MacAddress.internet
         }
-        return h.hasSuffix(".local") || h == "localhost" ? MacAddress.lan : MacAddress.internet
+        return h.hasSuffix(".local") || h.hasSuffix(".local.") || h == "localhost" || h == "localhost."
+            ? MacAddress.lan : MacAddress.internet
     }
 
     /// A MacAddress for an address that came without a kind or a name.
     static func address(for parsed: ParsedAddress) -> MacAddress {
         let kind = kind(ofHost: parsed.host)
-        let via = isVPNAddress(parsed.host) ? "Tailscale" : (parsed.host.hasPrefix("127.") ? "This Mac" : "")
+        let via = isVPNAddress(parsed.host) ? "Tailscale" : (isLoopback(parsed.host) ? "This Mac" : "")
         return MacAddress(host: parsed.host, port: parsed.port, kind: kind, via: via)
     }
 
