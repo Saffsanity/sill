@@ -10,6 +10,8 @@
 #                                          the signature is Developer ID; Scripts/release.sh --dry-run
 #                                          sets SILL_RELEASE_DRY_RUN=1, which only warns about the tag)
 #   SILL_INSTALL_DIR=~/Applications Scripts/make-app.sh --install   (another install folder)
+#   SILL_NO_RELAY=1 Scripts/make-app.sh   …without Reach from Anywhere's helpers (no Go needed; never
+#                                          with --release: every release carries them)
 #
 # Why a script: SwiftPM builds executables, not app bundles, and everything the host needs from
 # macOS belongs to an app bundle. Screen Recording, Accessibility, Local Network and Login Items
@@ -132,6 +134,24 @@ JSON
 fi
 cp "$icon_out"/compiled/* "$stage/Contents/Resources/" 2>/dev/null || true
 
+# Reach from Anywhere (docs/relay-plan.md): sill-net and the Headscale it runs, in Contents/Helpers,
+# built by Scripts/make-helpers.sh for the same architectures as Sill (SILL_UNIVERSAL). Each is
+# signed below before the bundle, with the same identity and runtime, no entitlements.
+helpers=()
+if [ "${SILL_NO_RELAY:-}" = 1 ]; then
+    if [ "$release" = 1 ]; then
+        rm -rf "$stage"; echo "error: SILL_NO_RELAY=1 is for development builds; a release carries Reach from Anywhere's helpers." >&2; exit 2
+    fi
+    echo "warning: SILL_NO_RELAY=1: this Sill.app has no relay helpers; Reach from Anywhere says so when turned on." >&2
+else
+    Scripts/make-helpers.sh
+    mkdir -p "$stage/Contents/Helpers"
+    for h in sill-net headscale; do
+        cp .build/helpers/$h "$stage/Contents/Helpers/$h"
+        helpers+=("$stage/Contents/Helpers/$h")
+    done
+fi
+
 # SILL_SIGN_IDENTITY (a name, part of one, or a SHA-1 hash), else the first Apple Development
 # identity in the keychain, by its SHA-1 hash: codesign refuses a name that two valid
 # certificates share, as they do after an early renewal until the old one expires. Either of them
@@ -144,6 +164,15 @@ if [ -z "$identity" ]; then
     echo "warning: no Apple Development identity in the keychain; signing ad hoc. Screen Recording and" >&2
     echo "         Accessibility will have to be granted again after every rebuild." >&2
 fi
+# The helpers first, inside out: hardened runtime, a secure timestamp on a release, no entitlements
+# (they need none: no sandbox, no keychain, no camera; their network access is the user's).
+for h in "${helpers[@]+"${helpers[@]}"}"; do
+    if [ "$release" = 1 ]; then
+        codesign --force --options runtime --timestamp --sign "$identity" "$h"
+    else
+        codesign --force --options runtime --timestamp=none --sign "$identity" "$h"
+    fi
+done
 if [ "$release" = 1 ]; then
     # Developer ID: hardened runtime and a secure timestamp (notarization needs both), no get-task-allow.
     #

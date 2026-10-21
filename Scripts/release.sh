@@ -285,6 +285,24 @@ check_signature() {
                 || fail "$app ($arch) embeds a provisioning profile but does not carry com.apple.application-identifier (a Mac profile grants no other application identifier); it would be killed at launch"
         fi
     done
+    # Reach from Anywhere's helpers (docs/relay-plan.md): present, and each signed as notarization
+    # wants it, for every architecture the app has.
+    local helper
+    for helper in sill-net headscale; do
+        local h="$app/Contents/Helpers/$helper"
+        [ -x "$h" ] || fail "$app has no Contents/Helpers/$helper: Reach from Anywhere needs it (make-app.sh builds it)"
+        [ "$(lipo -archs "$h" | tr ' ' '\n' | sort | tr '\n' ' ')" = "$(tr ' ' '\n' <<<"$archs" | sort | tr '\n' ' ')" ] \
+            || fail "$h is built for $(lipo -archs "$h"), the app for $archs"
+        for arch in $archs; do
+            details="$(codesign -dvvv --architecture "$arch" "$h" 2>&1)"
+            grep -q '^Authority=Developer ID Application: ' <<<"$details" || fail "$h ($arch) is not signed with Developer ID"
+            grep -q '^CodeDirectory .*flags=.*runtime' <<<"$details" || fail "$h ($arch) is not signed with the hardened runtime"
+            grep -q '^Timestamp=' <<<"$details" || fail "$h ($arch) has no secure timestamp"
+            if codesign -d --architecture "$arch" --entitlements - --xml "$h" 2>/dev/null | grep -q 'get-task-allow'; then
+                fail "$h ($arch) carries the get-task-allow entitlement, which notarization refuses"
+            fi
+        done
+    done
     # No profile means the login keychain, the safe fallback, worth naming in a release's log so it
     # is never a silent surprise.
     if [ -f "$app/Contents/embedded.provisionprofile" ]; then
