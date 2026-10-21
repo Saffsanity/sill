@@ -7,7 +7,9 @@ namespace Sill.Viewer;
 /// The window the viewer opens on when no <c>--host</c> is given: the <see cref="ConnectScreen"/>
 /// over a <see cref="MacBrowser"/> per service type. A paired Mac's row connects at the addresses
 /// and port the browser resolved (<see cref="Connect"/>, which <see cref="SillApp"/> turns into a
-/// <see cref="ViewerForm"/>, pinned to the saved key). A "Not paired" row asks its Mac for its code
+/// <see cref="ViewerForm"/>, pinned to the saved key), and its saved addresses after them. Once the
+/// network has had 3 s, each saved Mac it doesn't list is a Remote row (<see cref="RemoteRows"/>),
+/// which connects at its saved addresses alone: away from home, through Tailscale. A "Not paired" row asks its Mac for its code
 /// and Add a Mac… takes a link or an address and a code, both through a <see cref="PairingFlow"/>
 /// shown as a <see cref="PairCard"/>; a pairing connects at once.
 /// </summary>
@@ -29,7 +31,8 @@ sealed class ConnectForm : Form
     private DeviceIdentity? identity;
     private PairingFlow? flow;
     private MacRow? flowRow;
-    private IReadOnlyList<KnownMac> saved = [];
+    private IReadOnlyList<SavedMac> saved = [];
+    private readonly System.Windows.Forms.Timer grace = new() { Interval = (int)(RemoteRows.NetworkFirst * 1000) + 50 };
     private IReadOnlyList<MacRow> rows = [];
     private string status;
     private string? busyRow;
@@ -55,6 +58,7 @@ sealed class ConnectForm : Form
         card.Pair += (where, code) => _ = flow?.IsAddMac == true ? flow.SubmitAddAsync(where, code) : flow?.SubmitCodeAsync(code);
         card.Cancelled += () => flow?.Cancel();
         card.Rename += Rename;
+        grace.Tick += (_, _) => { grace.Stop(); Refresh(); };   // the Remote rows, once the network has had its seconds
         KeyPreview = true;
     }
 
@@ -72,7 +76,8 @@ sealed class ConnectForm : Form
         if (placement?.Maximized == true) WindowState = FormWindowState.Maximized;
         saved = LoadSaved();
         Log($"Connect screen: looking for {string.Join(", ", serviceTypes)}; "
-            + (saved.Count == 0 ? "no Mac saved" : "saved: " + string.Join(", ", saved.Select(m => $"{m.Name} ({m.MacId}{(m.NewKey ? ", new key" : "")})"))) + ".");
+            + (saved.Count == 0 ? "no Mac saved" : "saved: " + string.Join(", ", saved.Select(m => $"{m.Name} ({m.MacId}{(m.NewKey == true ? ", new key" : "")}, "
+                + $"{m.Addresses?.Count ?? 0} addresses from kind 18)"))) + ".");
         foreach (var type in serviceTypes)
         {
             var b = new MacBrowser(type);
@@ -86,13 +91,15 @@ sealed class ConnectForm : Form
                 b.Dispose();
             }
         }
+        grace.Start();
         Refresh();
     }
 
     private new void Refresh()
     {
         if (IsDisposed) return;
-        rows = ConnectRows.Build(browsers.SelectMany(b => b.Current), saved);
+        var listed = ConnectRows.Build(browsers.SelectMany(b => b.Current), saved.Select(m => m.Known).ToList());
+        rows = [.. listed, .. RemoteRows.Build(saved, listed, since.Elapsed.TotalSeconds)];
         if (rows.Count > 0 && !listedOnce)
         {
             listedOnce = true;
@@ -100,7 +107,7 @@ sealed class ConnectForm : Form
         }
         Log($"Connect screen: {(rows.Count == 0 ? "no Macs" : string.Join("; ", rows.Select(r => $"{r.Name} ({r.Service.ServiceType}): {r.State}, {r.Word ?? "no word"}")))} "
             + $"at {since.Elapsed.TotalSeconds:0.00} s.");
-        if (busyRow is not null && rows.All(r => r.Service.Id != busyRow)) busyRow = null;
+        if (busyRow is not null && rows.All(r => r.Key != busyRow)) busyRow = null;
         screen.Show(rows, status, busyRow);
     }
 
@@ -119,7 +126,7 @@ sealed class ConnectForm : Form
                 flow?.Cancel();
                 var targets = row.DialTargets();
                 if (targets.Count == 0) { Say($"{row.Name} didn’t say where it is. Try again in a moment."); return; }
-                busyRow = row.Service.Id;
+                busyRow = row.Key;
                 Say($"Connecting to {row.Name}…");
                 Connect?.Invoke(targets, row.Name, row.MacId!);
                 break;
@@ -128,6 +135,12 @@ sealed class ConnectForm : Form
                 break;
             case MacRow.Kind.UpdateSill:
                 Say(ConnectRows.UpdateSillStatus(row.Name));
+                break;
+            case MacRow.Kind.Remote:
+                flow?.Cancel();
+                busyRow = row.Key;
+                Say($"Connecting to {row.Name} remotely…");
+                Connect?.Invoke([], row.Name, row.MacId!);   // the viewer dials its saved addresses
                 break;
         }
     }
@@ -171,7 +184,7 @@ sealed class ConnectForm : Form
         switch (f.Step)
         {
             case PairingFlow.Steps.Asking:
-                busyRow = flowRow?.Service.Id;
+                busyRow = flowRow?.Key;
                 Say(f.Line ?? "");
                 break;
             case PairingFlow.Steps.Code or PairingFlow.Steps.Proving:
@@ -218,11 +231,12 @@ sealed class ConnectForm : Form
     }
 
     /// <summary>The Macs this PC paired with (macs.json, or the spike's mac.json taken in once).</summary>
-    private IReadOnlyList<KnownMac> LoadSaved() => store.Load().Select(m => m.Known).ToList();
+    private IReadOnlyList<SavedMac> LoadSaved() => store.Load();
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         flow?.Cancel();
+        grace.Dispose();
         foreach (var b in browsers) b.Dispose();
         identity?.Dispose();
         // Where it was, for the viewer's next window (the viewer's own full screen, decoding and clipboard kept).
@@ -254,18 +268,17 @@ sealed class SillApp : ApplicationContext
 {
     private readonly string dir;
     private readonly ViewerOptions options;
-    private readonly IReadOnlyList<string> serviceTypes;
 
-    public SillApp(string dir, IReadOnlyList<string> hosts, ViewerOptions options, IReadOnlyList<string> serviceTypes)
+    public SillApp(string dir, IReadOnlyList<string> hosts, ViewerOptions options)
     {
-        this.dir = dir; this.options = options; this.serviceTypes = serviceTypes;
+        this.dir = dir; this.options = options;
         if (hosts.Count > 0) ShowViewer(hosts, null);
         else ShowConnect(null);
     }
 
     private void ShowConnect(string? status)
     {
-        var form = new ConnectForm(dir, serviceTypes, status);
+        var form = new ConnectForm(dir, options.ServiceTypes, status);
         (IReadOnlyList<string> Targets, string MacId)? next = null;
         form.Connect += (targets, _, macId) => { next = (targets, macId); form.Close(); };
         form.FormClosed += (_, _) =>

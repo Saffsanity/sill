@@ -1,13 +1,19 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Sill.Protocol;
 
 /// <summary>
-/// A Mac this PC paired with, as a pairing leaves it (iOSClient/SavedMacs.swift's <c>SavedMac</c>,
-/// the fields this client uses so far): its key's SPKI SHA-256 (the pin), Mac ID, name, recognition
-/// key (all base64url), the address and port the pairing reached, when it paired, the Bonjour name
-/// it was listed under, and <see cref="NewKey"/>: another key answered as this Mac, so a click
-/// pairs it again. The JSON names are the spike's <c>mac.json</c>'s, so that file reads as one.
+/// A Mac this PC paired with (iOSClient/SavedMacs.swift's <c>SavedMac</c>, the fields this client
+/// uses): its key's SPKI SHA-256 (the pin), Mac ID, name, recognition key (all base64url), the
+/// address and port the pairing reached, when it paired, the Bonjour name it was listed under, and
+/// <see cref="NewKey"/>: another key answered as this Mac, so a click pairs it again. From its
+/// signed kind 18 (<see cref="SavedMacs.Refreshed"/>): the Mac's own addresses for afar, in its
+/// dial order, the remote door's port and the newest kind 18's time. <see cref="LastWorked"/> is
+/// the saved address ("host|port") that last won a dial, dialed first next time, and
+/// <see cref="LastConnectedAt"/> when a session last came up. The JSON names are the spike's
+/// <c>mac.json</c>'s, so that file reads as one; every field after <see cref="PairedAt"/> is
+/// optional, so a record written before it loads.
 /// </summary>
 public sealed record SavedMac(
     string Fingerprint,
@@ -18,28 +24,93 @@ public sealed record SavedMac(
     int Port,
     DateTimeOffset PairedAt,
     string? BonjourName = null,
-    bool? NewKey = null)
+    bool? NewKey = null,
+    IReadOnlyList<MacAddress>? Addresses = null,
+    int? RemotePort = null,
+    double? InfoIssuedAt = null,
+    string? LastWorked = null,
+    DateTimeOffset? LastConnectedAt = null)
 {
-    public byte[]? Pin => Base64Url.Decode(Fingerprint) is { Length: 32 } fp ? fp : null;
+    [JsonIgnore] public byte[]? Pin => Base64Url.Decode(Fingerprint) is { Length: 32 } fp ? fp : null;
+
+    /// <summary>Every saved address to dial: the Mac's own (kind 18), then the one the pairing
+    /// reached (a typed or linked address; at home, the home door, whose port changes at each
+    /// launch of Sill.app, so it is only a last try).</summary>
+    [JsonIgnore] public IReadOnlyList<MacAddress> AllAddresses =>
+        [.. Addresses ?? [], new MacAddress(Host, Port, RemoteDialPolicy.KindOfHost(Host), "")];
 
     /// <summary>What the connect screen needs to recognise its rows.</summary>
-    public KnownMac Known => new(MacId, Name, Base64Url.Decode(RecognitionKey) is { Length: 32 } rk ? rk : null, BonjourName, NewKey == true);
+    [JsonIgnore] public KnownMac Known => new(MacId, Name, Base64Url.Decode(RecognitionKey) is { Length: 32 } rk ? rk : null, BonjourName, NewKey == true);
 }
 
 /// <summary>The saved Macs as a list, pure (SavedMacs.swift's rules this client uses).</summary>
 public static class SavedMacs
 {
-    /// <summary>At most this many; the one paired longest ago goes first.</summary>
+    /// <summary>At most this many; the one used longest ago goes first.</summary>
     public const int Cap = 16;
 
     /// <summary><paramref name="mac"/> saved: a record of the same Mac ID replaced, the new one
-    /// last (the newest).</summary>
+    /// last (the newest). Over the cap, the one used longest ago (<c>LastConnectedAt ?? PairedAt</c>) goes.</summary>
     public static IReadOnlyList<SavedMac> Adding(SavedMac mac, IReadOnlyList<SavedMac> list)
     {
         var next = list.Where(m => m.MacId != mac.MacId).Append(mac).ToList();
-        while (next.Count > Cap) next.Remove(next.MinBy(m => m.PairedAt)!);
+        while (next.Count > Cap) next.Remove(next.MinBy(m => m.LastConnectedAt ?? m.PairedAt)!);
         return next;
     }
+
+    /// <summary>Link-local and zone-scoped addresses work only on the network they came from, and
+    /// loopback only on the Mac itself; none is saved (loopback only with
+    /// <paramref name="allowLoopback"/>, for a test host reached through an SSH forward).</summary>
+    public static bool Keepable(string host, bool allowLoopback)
+    {
+        string h = host.ToLowerInvariant();
+        if (h.Length == 0 || h.Contains('%')) return false;
+        if (h.StartsWith("169.254.") || h.StartsWith("fe8") || h.StartsWith("fe9") || h.StartsWith("fea") || h.StartsWith("feb")) return false;
+        if (h.StartsWith("127.") || h == "::1" || h == "localhost") return allowLoopback;
+        return true;
+    }
+
+    /// <summary>
+    /// A verified kind 18 laid over <paramref name="mac"/> (<c>refreshed</c> in SavedMacs.swift):
+    /// null unless the key that signed it is the pin, the Mac ID is the saved one and it is newer
+    /// than the last taken. Refreshes the name, the remote door's port and the Mac's addresses; the
+    /// address that last worked stays. An empty list, or one from a Mac with Remote Access off,
+    /// leaves the saved addresses alone: the Mac sends none while off, and a PC that took that at
+    /// home would have nothing to dial once away, after Remote Access came back on.
+    /// </summary>
+    public static SavedMac? Refreshed(SavedMac mac, MacInfo info, byte[] fingerprint, bool allowLoopback)
+    {
+        if (mac.Pin is not { } pin || !pin.AsSpan().SequenceEqual(fingerprint) || info.MacId != mac.MacId
+            || info.IssuedAt <= (mac.InfoIssuedAt ?? 0)) return null;
+        var next = mac with { InfoIssuedAt = info.IssuedAt };
+        if (SafeText.Label(info.Name ?? "", SafeText.LabelLimit) is { Length: > 0 } name) next = next with { Name = name };
+        if (info.RemotePort is >= 1 and <= 65535) next = next with { RemotePort = info.RemotePort };
+        var addresses = info.Addresses.Where(a => a.Host is not null && Keepable(a.Host, allowLoopback)).ToList();
+        if (info.RemoteAccess && addresses.Count > 0) next = next with { Addresses = addresses };
+        return next;
+    }
+
+    /// <summary>
+    /// A kind 18 received on a session with <paramref name="id"/>, a connection that showed
+    /// <paramref name="connectionKey"/> in its handshake: the list with that Mac refreshed, or null
+    /// when nothing changes. Only a signature that verifies, by the key the connection itself showed
+    /// (DiscoveryPolicy's <c>macInfoNamesSession</c>: a Mac hands its kind 18 to every session, so
+    /// another Mac can replay it), which is that saved Mac's pin, and newer than the last taken.
+    /// </summary>
+    public static IReadOnlyList<SavedMac>? Taking(SignedMacInfo signed, string id, byte[] connectionKey, IReadOnlyList<SavedMac> list,
+        bool allowLoopback)
+    {
+        if (signed.Verified() is not { } v || !v.Fingerprint.AsSpan().SequenceEqual(connectionKey)) return null;
+        var (info, fp) = v;
+        int i = list.ToList().FindIndex(m => m.MacId == id);
+        if (i < 0 || Refreshed(list[i], info, fp, allowLoopback) is not { } next) return null;
+        return list.Select((m, j) => j == i ? next : m).ToList();
+    }
+
+    /// <summary>A session with <paramref name="id"/> came up: when, and the saved address that won
+    /// (null for a row's address, whose port is the home door's of the moment).</summary>
+    public static IReadOnlyList<SavedMac> Connected(string id, string? lastWorked, DateTimeOffset at, IReadOnlyList<SavedMac> list) =>
+        list.Select(m => m.MacId == id ? m with { LastConnectedAt = at, LastWorked = lastWorked ?? m.LastWorked } : m).ToList();
 
     /// <summary><see cref="SavedMac.NewKey"/> set on <paramref name="id"/>; null when it isn't saved
     /// or already marked.</summary>
@@ -87,6 +158,17 @@ public static class SavedMacsStore
     }
 
     public static void Forget(this ISavedMacs store, string id) => store.Save(SavedMacs.Forgetting(id, store.Load()));
+
+    /// <summary>A session's kind 18 taken (<see cref="SavedMacs.Taking"/>); whether anything changed.</summary>
+    public static bool TakeMacInfo(this ISavedMacs store, SignedMacInfo signed, string id, byte[] connectionKey, bool allowLoopback)
+    {
+        if (SavedMacs.Taking(signed, id, connectionKey, store.Load(), allowLoopback) is not { } next) return false;
+        store.Save(next);
+        return true;
+    }
+
+    public static void Connected(this ISavedMacs store, string id, string? lastWorked) =>
+        store.Save(SavedMacs.Connected(id, lastWorked, DateTimeOffset.UtcNow, store.Load()));
 }
 
 /// <summary>
