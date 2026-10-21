@@ -50,6 +50,8 @@ struct HostSettingsPanel: View {
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
+    /// This device's switch for controlling Mac volume with the hardware volume buttons (issue #127).
+    @AppStorage(VolumeButtonChord.key) private var volumeButtonsOn = false
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -520,6 +522,14 @@ struct HostSettingsPanel: View {
             }
         }
         Footnote(text: gesturesFooter)
+        Rows {
+            Toggle(isOn: $volumeButtonsOn) {
+                Text(VolumeButtonChord.Copy.toggleTitle).foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+            .onChange(of: volumeButtonsOn) { _, _ in client.updateVolumeButtonObserver() }
+        }
+        Footnote(text: VolumeButtonChord.Copy.footnote(mac: mac, device: device))
     }
 
     /// The Mac's window list said it takes the gestures (`WindowList.gestures`).

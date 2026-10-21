@@ -212,3 +212,31 @@ struct ForwardedKeys {
     /// The modifier flags of the modifier keys down on the Mac.
     private var held: UInt64 { down.reduce(0) { $0 | (KeyModifiers.flag(forKey: $1)?.rawValue ?? 0) } }
 }
+
+/// Hardware volume buttons on iPhone and iPad (issue #127): when `Sill.volumeButtonsControlMac`
+/// is on, an `AVAudioSession.outputVolume` step maps to USB HID `0x80` (`volumeUp`) or `0x81`
+/// (`volumeDown`) key down + up events.
+enum VolumeButtonChord {
+    static let key = "Sill.volumeButtonsControlMac"
+    static let hidVolumeUp: UInt16 = 0x80
+    static let hidVolumeDown: UInt16 = 0x81
+    static let minDelta: Float = 0.001
+
+    static func events(switchOn: Bool, previousVolume: Float, newVolume: Float) -> [InputEvent] {
+        guard switchOn else { return [] }
+        let diff = newVolume - previousVolume
+        guard abs(diff) >= minDelta else { return [] }
+        let usage = diff > 0 ? hidVolumeUp : hidVolumeDown
+        return [
+            .key(hidUsage: usage, down: true, modifiers: 0),
+            .key(hidUsage: usage, down: false, modifiers: 0),
+        ]
+    }
+
+    enum Copy {
+        static let toggleTitle = "Volume Buttons Control Mac"
+        static func footnote(mac: String, device: String) -> String {
+            "Pressing the volume buttons on this \(device) adjusts \(mac)’s volume while connected."
+        }
+    }
+}

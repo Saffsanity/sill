@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import QuartzCore
 import CoreGraphics
 import ApplicationServices
@@ -454,11 +455,36 @@ final class InputInjector {
     private var keys = KeyStrokes()
 
     private func key(hidUsage: UInt16, down: Bool, modifiers: UInt64, from device: KeyStrokes.Device) {
+        if let media = VolumeButtonPolicy.mediaEvent(for: hidUsage, down: down) {
+            postMediaKey(media)
+            return
+        }
         guard let strokes = keys.key(usage: hidUsage, down: down, modifiers: modifiers, from: device) else {
             Stats.shared.bump("in.unknownKey")
             return
         }
         post(strokes)
+    }
+
+    private func postMediaKey(_ media: VolumeButtonPolicy.SystemMediaEvent) {
+        if testLog {
+            let name = media.keyType == VolumeButtonPolicy.nxSoundUp ? "volume up" : "volume down"
+            print("Test input: media key \(name) \(media.down ? "down" : "up")")
+        }
+        guard !dryRun else { return }
+        guard let nsEvent = NSEvent.otherEvent(
+            with: .systemDefined,
+            location: .zero,
+            modifierFlags: NSEvent.ModifierFlags(rawValue: media.flags),
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            subtype: VolumeButtonPolicy.systemDefinedSubtype,
+            data1: media.data1,
+            data2: -1
+        ), let cgEvent = nsEvent.cgEvent else { return }
+        cgEvent.post(tap: .cghidEventTap)
+        Stats.shared.bump("in.key")
     }
 
     /// Posts KeyStrokes' events in order, each made from `source` with exactly its flags (a modifier's

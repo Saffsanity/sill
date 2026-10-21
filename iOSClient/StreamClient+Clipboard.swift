@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import UIKit
 import UniformTypeIdentifiers
 import StreamProtocol
@@ -334,5 +335,62 @@ extension StreamClient {
         let work = DispatchWorkItem { [weak self] in self?.clipboardNote = nil }
         clipboardNoteExpiry = work
         DispatchQueue.main.asyncAfter(deadline: .now() + ClipboardPolicy.noteLifetime, execute: work)
+    }
+
+    // MARK: Volume buttons (issue #127)
+
+    static var volumeButtonsOn: Bool {
+        UserDefaults.standard.bool(forKey: VolumeButtonChord.key)
+    }
+
+    func updateVolumeButtonObserver() {
+        if connected && Self.volumeButtonsOn {
+            if volumeButtonObserver == nil {
+                let obs = DeviceVolumeButtonObserver { [weak self] oldVol, newVol in
+                    guard let self, self.connected else { return }
+                    for event in VolumeButtonChord.events(switchOn: Self.volumeButtonsOn, previousVolume: oldVol, newVolume: newVol) {
+                        self.sendInput(event)
+                    }
+                }
+                obs.start()
+                volumeButtonObserver = obs
+            }
+        } else {
+            stopVolumeButtonObserver()
+        }
+    }
+
+    func stopVolumeButtonObserver() {
+        if let obs = volumeButtonObserver as? DeviceVolumeButtonObserver {
+            obs.stop()
+            volumeButtonObserver = nil
+        }
+    }
+}
+
+final class DeviceVolumeButtonObserver {
+    private let onVolumeChange: (Float, Float) -> Void
+    private var observation: NSKeyValueObservation?
+
+    init(onVolumeChange: @escaping (Float, Float) -> Void) {
+        self.onVolumeChange = onVolumeChange
+    }
+
+    func start() {
+        guard observation == nil else { return }
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.ambient, options: [.mixWithOthers])
+        try? session.setActive(true)
+        observation = session.observe(\.outputVolume, options: [.old, .new]) { [weak self] _, change in
+            guard let oldVal = change.oldValue, let newVal = change.newValue else { return }
+            DispatchQueue.main.async {
+                self?.onVolumeChange(oldVal, newVal)
+            }
+        }
+    }
+
+    func stop() {
+        observation?.invalidate()
+        observation = nil
     }
 }

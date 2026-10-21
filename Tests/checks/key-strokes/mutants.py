@@ -158,6 +158,11 @@ MUTANTS = [
     # Shifted return and tab
     ("shifted return and tab to the text system (the shift lost)", CHORDS, "            || (shiftedKeyUsages.contains(usage) && modifiers & KeyModifiers.shift.rawValue != 0)\n", ""),
     ("return and tab as keys whatever is held", CHORDS, "(shiftedKeyUsages.contains(usage) && modifiers & KeyModifiers.shift.rawValue != 0)", "shiftedKeyUsages.contains(usage)"),
+    # Volume buttons (issue #127)
+    ("volume up mapped to sound down", STROKES, "case hidVolumeUp: keyType = nxSoundUp", "case hidVolumeUp: keyType = nxSoundDown"),
+    ("volume media event release code same as down", STROKES, "let code = down ? 0xa : 0xb", "let code = 0xa"),
+    ("volume switch off still sends events", CHORDS, "guard switchOn else { return [] }", "if !switchOn && false { return [] }"),
+    ("volume direction inverted", CHORDS, "let usage = diff > 0 ? hidVolumeUp : hidVolumeDown", "let usage = diff < 0 ? hidVolumeUp : hidVolumeDown"),
 ]
 caught = 0
 for name, rel, old, new in MUTANTS:
