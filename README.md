@@ -50,6 +50,13 @@ Sill has layouts of its own.
 - Your Mac and your device on the same network, joined by a USB cable, or near
   each other with Direct Wireless Connection on. Away from home, your own VPN,
   such as Tailscale, with Remote Access on.
+<!-- Windows: take this item out for a release without Sill for Windows. -->
+- On a Windows PC instead of an iPhone or iPad: Windows 10 (version 1809 or
+  later) or Windows 11, x64 or Arm, with HEVC Video Extensions from the
+  Microsoft Store. Sill for Windows is a zip on the same GitHub Release
+  (unsigned for now: SmartScreen asks first, More info, Run anyway); it installs
+  itself for your account, with no administrator. The code is in `Windows/`.
+<!-- /Windows -->
 
 ## How it works
 

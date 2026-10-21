@@ -10,6 +10,10 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <!-- No designer here: its serialization hints (WFO1000) don't apply. -->
     <NoWarn>$(NoWarn);WFO1000</NoWarn>
+    <!-- The release names the app Sill.exe: `dotnet publish -p:SillExeName=Sill` (a property only
+         this project reads, so the libraries keep their names). Without it, Sill.Viewer.exe as before. -->
+    <AssemblyName Condition="'$(SillExeName)' != ''">$(SillExeName)</AssemblyName>
+    <AssemblyTitle>Sill</AssemblyTitle>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Sill.Protocol\Sill.Protocol.csproj" />

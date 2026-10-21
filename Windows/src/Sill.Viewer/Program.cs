@@ -21,7 +21,16 @@ static class Program
     [STAThread]
     static int Main(string[] args)
     {
-        string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sill", "spike");
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+        // Sill.exe started with no options from anywhere but its installed place offers to install
+        // itself (SelfInstall); the spike's Sill.Viewer.exe and any launch with options skip this.
+        if (SelfInstall.OfferAtStartup(args)) return 0;
+        // TEST ONLY: SILL_TEST_IDENTITY_DIR is the default --identity, so a test of Sill.exe started
+        // with no options (the install offer, the update check) never dials the PC's own paired Mac.
+        string dir = Environment.GetEnvironmentVariable("SILL_TEST_IDENTITY_DIR") is { Length: > 0 } testDir ? testDir
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sill", "spike");
         var hosts = new List<string>();
         var serviceTypes = new List<string>();
         string decoder = "auto"; int? adapter = null;
@@ -34,9 +43,6 @@ static class Program
             else if (args[i] == "--adapter" && int.TryParse(args[i + 1], out int n)) adapter = n;
             else { MessageBox.Show($"Unknown option {args[i]}.", "Sill Viewer"); return 2; }
         }
-        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
         Application.Run(new SillApp(dir, hosts, new ViewerOptions(decoder, adapter), serviceTypes.Count > 0 ? serviceTypes : ["_sill._tcp"]));
         return 0;
     }
