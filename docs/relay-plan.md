@@ -196,6 +196,18 @@ end to end).
   `DuoPostureReader.swift`'s iOS 27.1 calls, since this Mac has Xcode 27.0 only (origin/main fails
   here the same way; CI uses the 27.1 beta).
 
+- **Review (2026-10-21)**: a read-through of the Swift side found seven problems, all fixed in their
+  own commit and checked again live: sill-net's list of paired devices went stale after a pairing (a
+  restart would prune the new device's node); a key could go to a device removed meanwhile; lines
+  from a sill-net being stopped could overwrite the new one's state, and a quick off and on ran two;
+  SIGPIPE could kill the CLI; the device kept the tailnet before the join worked, and then never
+  asked again; a cancelled wait for the tailnet spun for 8 s; and that wait didn't count as a dial
+  in flight, so the reconnect could start another.
+- **Fork CI** (pastudan/sill): CI green on the iOS 27.1 SDK, with every check's mutants; the Release
+  workflow's verify job green on a temporary tag (no secrets, nothing published). The TestFlight
+  workflow stops at its Xcode check on GitHub's image as it does on main (it selects 27.0 and
+  release-ios.sh wants 27.1), so the archive was not exercised in CI.
+
 ## Untested, for a device (Dan and Noah)
 
 1. An iPhone on cellular, Wi‑Fi off, no Tailscale installed: pair at home, leave, connect "through
