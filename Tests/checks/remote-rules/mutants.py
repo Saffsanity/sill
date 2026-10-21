@@ -85,6 +85,12 @@ M = [
     (S, "SUP with itself", "guard old != new, let o = list.first", "guard let o = list.first"),
     (S, "SUP remote order oldest first", "            out += byDate.filter { $0.name == mac.name }.reversed()", "            out += byDate.filter { $0.name == mac.name }"),
     (S, "SUP remote order newest first overall", "        let byDate = list.sorted { ($0.pairedAt, $0.macID) < ($1.pairedAt, $1.macID) }\n        var out", "        let byDate = list.sorted { ($0.pairedAt, $0.macID) > ($1.pairedAt, $1.macID) }\n        var out"),
+    (R, "lastWorked case-sensitive", "$0.key.lowercased() == lastWorked.lowercased()", "$0.key == lastWorked"),
+    (R, "DNS 127. treated as loopback", "case .ipv4: return h.hasPrefix(\"127.\")", "case .ipv4, .name: return h.hasPrefix(\"127.\")"),
+    (R, "localhost. not loopback", "case .name: return h == \"localhost\" || h == \"localhost.\"", "case .name: return h == \"localhost\""),
+    (R, ".local. kind is internet", "return h.hasSuffix(\".local\") || h.hasSuffix(\".local.\") || h == \"localhost\" || h == \"localhost.\"", "return h.hasSuffix(\".local\") || h == \"localhost\" || h == \"localhost.\""),
+    (R, "fe9-feb link-local kind is internet", "[\"fe8\", \"fe9\", \"fea\", \"feb\"].contains(where: { h.hasPrefix($0) })", "h.hasPrefix(\"fe8\")"),
+    (R, "kind ignores normalized IPv6", "let host = parsedHost(host)?.host ?? host\n        if isVPNAddress(host)", "if isVPNAddress(host)"),
 ]
 caught = 0
 for f, name, old, new in M:
