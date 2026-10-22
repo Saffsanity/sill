@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""Minimal Sill wire-format client for testing a host without a device.
 
-usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
+usage: sillclient.py PORT [seconds] [desktop|desktop:DISPLAY|none|window:ID] [flags...]
   --junk             also send two unknown message kinds (the host must skip them)
   --no-select        send no select at the start (the positional source is not sent): a device that
                      joins while something streams, as a device asks for the Desktop only when nothing
@@ -12,7 +12,8 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
                      in send order. Keys: maxFPS, bitrate, captureScale, prioritizeSpeed,
                      virtualDisplay, directWireless; booleans accept 1/0/true/false/on/off
   --raw17=JSON@T     send this literal kind 17 payload T seconds in (split on the last @)
-  --pick=SRC@T       a timed selectSource: none, desktop or window:ID
+  --pick=SRC@T       a timed selectSource: none, desktop, desktop:DISPLAY (the Desktop on the display with
+                     that ID, from the window list's `displays`, #91) or window:ID
   --stats            send ClientStats (kind 12) once a second as device "sillclient", so the host
                      logs a name for this client
   --expect=K=V[,...] at exit, compare the last kind 16's settings (and its top-level persistent
@@ -158,9 +159,10 @@ def msg(kind, payload=b"", key=False):
 
 def source(spec):
     if spec == "desktop": return {"desktop": {}}
+    if spec.startswith("desktop:") and spec[8:].isdigit(): return {"desktop": {}, "display": int(spec[8:])}   # DesktopPick (#91)
     if spec == "none": return {"none": {}}
     if spec.startswith("window:") and spec[7:].isdigit(): return {"window": {"_0": int(spec[7:])}}
-    raise ValueError(f"not a source: {spec!r} (desktop, none or window:ID)")
+    raise ValueError(f"not a source: {spec!r} (desktop, desktop:DISPLAY, none or window:ID)")
 
 def number(v, what, kind=int):
     try: return kind(v)
@@ -450,7 +452,7 @@ flags = [a for a in args if a.startswith("--")]
 # after the stream has started.
 events = []
 try:
-    if not pos: raise ValueError("no PORT (usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...])")
+    if not pos: raise ValueError("no PORT (usage: sillclient.py PORT [seconds] [desktop|desktop:DISPLAY|none|window:ID] [flags...])")
     port = number(pos[0], "PORT"); dur = number(pos[1], "seconds", float) if len(pos) > 1 else 12
     sel = source(pos[2] if len(pos) > 2 else "desktop")
     for i, a in enumerate(flags):
@@ -788,7 +790,8 @@ while time.time() - t0 < dur:
         elif kind == 2:
             d = json.loads(payload)
             print(f"  windowList: {len(d.get('windows', []))} windows, active={d.get('active')}"
-                  + (f" clipboard={d['clipboard']}" if "clipboard" in d else ""))
+                  + (f" clipboard={d['clipboard']}" if "clipboard" in d else "")
+                  + (f" displays={[x['id'] for x in d['displays']]} desktopDisplay={d.get('desktopDisplay')}" if d.get("displays") else ""))
         elif kind == 32:
             try:
                 d = json.loads(payload)

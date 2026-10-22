@@ -1280,9 +1280,10 @@ private struct TopBar: View {
                 .allowsHitTesting(!scaleOpen)
                 .tourTarget(.keyboard)
 
-            button(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop",
-                   accessibilityLabel: "Show the full Mac desktop",
-                   action: { client.select(.desktop) })
+            let desk = client.desktopButtonState
+            button(open: client.active == .desktop, symbol: "desktopcomputer", label: desk.label,
+                   accessibilityLabel: desk.accessibilityLabel,
+                   action: { client.tapDesktop() })
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
 

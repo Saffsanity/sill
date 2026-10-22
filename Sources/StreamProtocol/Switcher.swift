@@ -60,12 +60,102 @@ public struct WindowList: Codable {
     /// pull request #66's `Bool` (never released) does not decode here and becomes an Int as it
     /// rebases.
     public var clipboard: Int?
+    /// The host's own displays (never Sill's virtual ones), for a device that cycles which display
+    /// Desktop mode streams (#91); nil from an older host, whose Desktop is its main display.
+    public var displays: [DisplayInfo]?
+    /// Which display (`DisplayInfo.id`) the Desktop streams now.
+    public var desktopDisplay: UInt32?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
-                hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil) {
+                hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil,
+                displays: [DisplayInfo]? = nil, desktopDisplay: UInt32? = nil) {
         self.macName = macName; self.windows = windows; self.active = active; self.launchID = launchID
         self.hostVersion = hostVersion; self.protocol = `protocol`; self.gestures = gestures
-        self.clipboard = clipboard
+        self.clipboard = clipboard; self.displays = displays; self.desktopDisplay = desktopDisplay
+    }
+}
+
+/// One of the host's own displays (#91).
+public struct DisplayInfo: Codable, Hashable, Sendable, Identifiable {
+    public var id: UInt32
+    public var name: String
+    public var width: Double
+    public var height: Double
+    public var main: Bool?
+    public init(id: UInt32, name: String, width: Double, height: Double, main: Bool? = nil) {
+        self.id = id; self.name = name; self.width = width; self.height = height; self.main = main
+    }
+}
+
+/// A `.selectSource` (kind 6) payload that picks `.desktop` on a specific display (`display`:
+/// `DisplayInfo.id`). Encodes as `{"desktop":{},"display":ID}` (or `{"desktop":{}}` when `display`
+/// is nil), which every older host decodes as `StreamSource.desktop` while a host with #91 also
+/// reads `display`.
+public struct DesktopPick: Codable, Equatable, Sendable {
+    private struct Empty: Codable, Equatable {}
+    private var desktop = Empty()
+    public var display: UInt32?
+    public init(display: UInt32? = nil) { self.display = display }
+}
+
+/// What the Desktop button shows and what a tap on it picks (#91, Noah's decision of 2026-10-19):
+/// with one display (or an older host that lists none), it is the plain Desktop button as today;
+/// with two or more displays, it shows which display the Desktop is on (`Desktop 1`, `Desktop 2`, …)
+/// and, while the Desktop streams, a tap moves to the next display in order.
+public enum DesktopDisplays {
+    public struct ButtonState: Equatable, Sendable {
+        public var label: String
+        public var accessibilityLabel: String
+        public var nextDisplay: UInt32?
+        public init(label: String, accessibilityLabel: String, nextDisplay: UInt32?) {
+            self.label = label; self.accessibilityLabel = accessibilityLabel; self.nextDisplay = nextDisplay
+        }
+    }
+
+    /// The order the Desktop button numbers and steps through the displays: the main display
+    /// first, then the rest as they sit, left to right (top to bottom where two start at the same
+    /// x), the arrangement System Settings › Displays shows. A display's ID says nothing about
+    /// where it is. `x` and `y` are its top-left corner in global points (`SCDisplay.frame.origin`).
+    public static func comesBefore(_ a: (id: UInt32, x: Double, y: Double), _ b: (id: UInt32, x: Double, y: Double), main: UInt32) -> Bool {
+        if (a.id == main) != (b.id == main) { return a.id == main }
+        if a.x != b.x { return a.x < b.x }
+        if a.y != b.y { return a.y < b.y }
+        return a.id < b.id
+    }
+
+    public static func button(displays: [DisplayInfo], current: UInt32?, desktopActive: Bool) -> ButtonState {
+        guard displays.count > 1 else {
+            return ButtonState(label: "Desktop", accessibilityLabel: "Show the full Mac desktop", nextDisplay: nil)
+        }
+        let idx = displays.firstIndex(where: { $0.id == current })
+            ?? displays.firstIndex(where: { $0.main == true }) ?? 0
+        let activeDisplay = displays[idx]
+        let nextIdx = desktopActive ? (idx + 1) % displays.count : idx
+        let next = displays[nextIdx]
+        let label = "Desktop \(idx + 1)"
+        let name = activeDisplay.name.isEmpty ? label : activeDisplay.name
+        let nextName = next.name.isEmpty ? "Desktop \(nextIdx + 1)" : next.name
+        let ax = desktopActive
+            ? "\(name) (\(idx + 1) of \(displays.count)), showing now. Tap for \(nextName)."
+            : "Show \(name) (\(idx + 1) of \(displays.count))"
+        return ButtonState(label: label, accessibilityLabel: ax, nextDisplay: next.id)
+    }
+
+    /// What `select`'s defer owes after a switch completes (#91): a queued pick of a different
+    /// source (`queued != active`), or `.desktop` when the Desktop is streaming (`active == .desktop`
+    /// and `!synthetic`) and the catalog's chosen display (`selectedDisplay`) has moved off the
+    /// display the running pipeline captures (`streamedDisplay`) — including when a display pick
+    /// arrived while `select(.desktop)` was starting from `.none` or `.window` (where `queued` is nil).
+    public static func nextPickAfterSwitch(
+        queued: StreamSource?,
+        active: StreamSource,
+        synthetic: Bool,
+        selectedDisplay: UInt32?,
+        streamedDisplay: UInt32?
+    ) -> StreamSource? {
+        if let queued, queued != active { return queued }
+        if active == .desktop, !synthetic, selectedDisplay != streamedDisplay { return .desktop }
+        return nil
     }
 }
 
