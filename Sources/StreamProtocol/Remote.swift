@@ -53,12 +53,16 @@ public struct MacInfo: Codable, Hashable, Sendable {
     public var internet: Bool
     /// In dial order; empty while Remote Access is off and no pairing window is open.
     public var addresses: [MacAddress]
+    /// Reach from Anywhere (Relay.swift): the Mac's tailnet and its relay, while that is on and the
+    /// tailnet is up; nil otherwise, and from every Mac before it. Left out of the JSON when nil, so
+    /// a Mac without it signs the same bytes as before.
+    public var relay: RelayInfo?
 
     public init(v: Int = 1, macID: String, name: String, issuedAt: Double, remoteAccess: Bool, remotePort: Int,
-                internet: Bool, addresses: [MacAddress]) {
+                internet: Bool, addresses: [MacAddress], relay: RelayInfo? = nil) {
         self.v = v; self.macID = macID; self.name = name; self.issuedAt = issuedAt
         self.remoteAccess = remoteAccess; self.remotePort = remotePort; self.internet = internet
-        self.addresses = addresses
+        self.addresses = addresses; self.relay = relay
     }
 }
 

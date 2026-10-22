@@ -304,8 +304,48 @@ extension StreamClient {
         }
         hostName = name
         status = why == .automatic ? "Reconnecting to \(name) remotely…" : "Connecting to \(name) remotely…"
-        let candidates = RemoteDialPolicy.order(mac.allAddresses, remotePort: mac.remotePort, lastWorked: mac.lastWorked,
-                                                localIPv4: Self.localIPv4Networks())
+        let ordered = RemoteDialPolicy.order(mac.allAddresses, remotePort: mac.remotePort, lastWorked: mac.lastWorked,
+                                             localIPv4: Self.localIPv4Networks())
+        // Reach from Anywhere: this Mac's tailnet, when this device joined it. Its addresses are
+        // dialed at once while the tailnet starts (a few seconds); once its forwarder is up, the
+        // relay is dialed too: alone when those all failed meanwhile, else first of a fresh dial
+        // (by then the home and VPN paths had their chance). When the relay won last time it is
+        // waited for and dialed first.
+        if let relay = mac.relay, TailnetController.available {
+            TailnetController.shared.start(relay)
+            relayFailure = nil
+            let relayFirst = mac.lastWorked == RemoteDialPolicy.relayKey
+            relayDial = Task { @MainActor [weak self] in
+                let forwarder = await TailnetController.shared.forwarder(for: relay, within: 8)
+                guard let self, !Task.isCancelled else { return }
+                if forwarder == nil, TailnetController.shared.status.phase == "removed" {
+                    self.relayRemoved(macID: macID, fingerprint: relay.fingerprint)
+                }
+                self.relayDial = nil
+                let firstFailed = self.relayFailure
+                self.relayFailure = nil
+                guard let forwarder else {
+                    // No tailnet: what the other candidates said, or the relay's own silence.
+                    if relayFirst { self.dialSaved(macID, why: why, mac: mac, pin: pin, identity: identity, candidates: ordered) }
+                    else if let f = firstFailed { self.remoteDialFailed(macID: macID, why: why, failure: f.failure, candidate: f.candidate) }
+                    return
+                }
+                let relayOnly = RemoteDialPolicy.withRelay([], forwarder: forwarder, lastWorked: nil)
+                let candidates = firstFailed != nil ? relayOnly : relayOnly + ordered
+                self.dialSaved(macID, why: why, mac: mac, pin: pin, identity: identity, candidates: candidates)
+            }
+            if relayFirst { return }
+            dialSaved(macID, why: why, mac: mac, pin: pin, identity: identity, candidates: ordered, relayPending: true)
+            return
+        }
+        dialSaved(macID, why: why, mac: mac, pin: pin, identity: identity, candidates: ordered)
+    }
+
+    /// The dial itself, with its candidates. `relayPending`: the relay's forwarder is still coming up
+    /// (the tailnet starts); a dial that fails meanwhile waits for it rather than giving up.
+    private func dialSaved(_ macID: String, why: DialReason, mac: SavedMac, pin: Data, identity: RemoteIdentity,
+                           candidates: [RemoteDialPolicy.Candidate], relayPending: Bool = false) {
+        let name = displayName(macID)
         #if DEBUG
         print("remote: dialing \(name) (\(macID)) \(why): \(candidates.map(\.key))")
         #endif
@@ -320,11 +360,14 @@ extension StreamClient {
         }
         let connector = RemoteConnector(candidates: candidates, mode: .session(pin: pin), identity: identity, queue: queue,
                                         successors: successors)
+        remoteDial?.cancel()
         remoteDial = connector
         connector.onWinner = { [weak self, weak connector] winner in
             DispatchQueue.main.async {
                 guard let self, let connector, self.remoteDial === connector else { winner.connection.cancel(); return }
                 self.remoteDial = nil
+                self.relayDial?.cancel()          // won without the relay: its dial is not needed
+                self.relayDial = nil
                 var macID = macID
                 if winner.fingerprint != pin,
                    let newer = self.savedMacs.first(where: { $0.fingerprintData == winner.fingerprint && $0.macID != macID }),
@@ -351,6 +394,11 @@ extension StreamClient {
             DispatchQueue.main.async {
                 guard let self, let connector, self.remoteDial === connector else { return }
                 self.remoteDial = nil
+                // The relay is still coming up: its own dial follows, and says how that went.
+                if relayPending, self.relayDial != nil {
+                    self.relayFailure = (failed.failure, failed.candidate)
+                    return
+                }
                 self.remoteDialFailed(macID: macID, why: why, failure: failed.failure, candidate: failed.candidate)
             }
         }
@@ -375,6 +423,8 @@ extension StreamClient {
     func cancelRemoteDial() {
         remoteDial?.cancel()
         remoteDial = nil
+        relayDial?.cancel()
+        relayDial = nil
     }
 
     /// The first attempt to reach `.ready`: the session connection, not yet `connected`: with TLS
@@ -384,7 +434,8 @@ extension StreamClient {
         // VPN" (a LAN address reached through a VPN into the home network, an unnamed tunnel).
         let c0 = w.candidate
         let service = c0.kind == MacAddress.vpn && !c0.via.isEmpty && !c0.via.hasPrefix("VPN (") ? c0.via : nil
-        let route: RemoteRoute = Self.testRoute ?? (w.usedTunnel ? .vpn(service) : (c0.kind == MacAddress.internet ? .internet : .address))
+        let route: RemoteRoute = Self.testRoute ?? (RemoteDialPolicy.isRelay(c0) ? .vpn(RelayPolicy.serviceName)
+            : (w.usedTunnel ? .vpn(service) : (c0.kind == MacAddress.internet ? .internet : .address)))
         #if DEBUG
         print("remote: \(w.candidate.key) is ready (\(route.phrase)); waiting for the window list")
         #endif
@@ -418,7 +469,7 @@ extension StreamClient {
         if case .paired = pairing { pairing = .idle }
         resetLiveness()
         if let id = s.macID, let i = savedMacs.firstIndex(where: { $0.macID == id }) {
-            savedMacs[i].lastWorked = s.candidate?.key ?? savedMacs[i].lastWorked
+            savedMacs[i].lastWorked = s.candidate.map { RemoteDialPolicy.isRelay($0) ? RemoteDialPolicy.relayKey : $0.key } ?? savedMacs[i].lastWorked
             savedMacs[i].lastConnectedAt = Date()
             savedMacs[i].lastRoute = r.saved
             persistSavedMacs()
@@ -590,7 +641,7 @@ extension StreamClient {
         reconnectCheck = nil
         guard !connected, !moveUnderWay, var r = reconnect else { return false }
         let now = ProcessInfo.processInfo.systemUptime
-        let dialingAutomatically = remoteDial != nil || session?.why == .automatic
+        let dialingAutomatically = remoteDial != nil || relayDial != nil || session?.why == .automatic
         guard connection == nil || dialingAutomatically else { return false }
         func matches(_ m: FoundMac) -> Bool {
             // A row whose key was another's when the reconnect took it by name: never again (§7.6).
@@ -756,6 +807,7 @@ extension StreamClient {
             savedMacs[i] = mac
             persistSavedMacs()
         }
+        relayOffered(info.relay, macID: info.macID)
     }
 
     // MARK: Pairing
@@ -858,10 +910,18 @@ extension StreamClient {
         return false
     }
 
-    /// The QR path: the link's addresses one at a time, pinned to its key.
+    /// The QR path: the link's addresses one at a time, pinned to its key. A link that carries the
+    /// Mac's tailnet (Reach from Anywhere) also joins it at once, and when none of the addresses
+    /// answers in the time the tailnet takes to come up (away from home, another network), pairs
+    /// through its forwarder, with the same pin and proof.
     func pair(link: PairLink, overlay: Bool, scanned: Bool = false) {
         let addresses = link.addresses.map(RemoteDialPolicy.address(for:))
         let candidates = RemoteDialPolicy.order(addresses, remotePort: link.port, lastWorked: nil, localIPv4: Self.localIPv4Networks())
+        pairingRelay = nil
+        if let invite = link.relay, TailnetController.available {
+            pairingRelay = invite.relay
+            joinRelay(invite, macID: link.macID)
+        }
         startPairing(candidates: candidates, pin: link.fingerprint, key: { _ in PairingProof.qrKey(secret: link.secret) },
                      method: PairRequest.qr, macName: link.name, port: link.port, addresses: addresses, typed: nil,
                      overlay: overlay, scannedSecret: scanned ? link.secret : nil, busyRetried: false)
@@ -934,6 +994,23 @@ extension StreamClient {
             DispatchQueue.main.async {
                 guard let self, let connector, self.pairingDial === connector else { return }
                 self.pairingDial = nil
+                // Nothing at the link's addresses, and the link carries the Mac's tailnet: pair
+                // through it, once its forwarder is up (the tailnet joins as the code is scanned).
+                if let relay = self.pairingRelay, !candidates.contains(where: RemoteDialPolicy.isRelay) {
+                    self.pairing = .working("Pairing with \(shown) through Sill Relay…")
+                    Task { @MainActor [weak self] in
+                        let forwarder = await TailnetController.shared.forwarder(for: relay, within: 25)
+                        guard let self, self.pairingAttempt == attempt else { return }
+                        guard forwarder != nil else {
+                            self.pairing = .failed(.nothingAnswered(failed.candidate?.display ?? shown))
+                            return
+                        }
+                        self.startPairing(candidates: RemoteDialPolicy.withRelay([], forwarder: forwarder, lastWorked: nil), pin: pin, key: key,
+                                          method: method, macName: macName, port: port, addresses: addresses, typed: typed,
+                                          overlay: overlay, scannedSecret: scannedSecret, busyRetried: busyRetried)
+                    }
+                    return
+                }
                 let host = failed.candidate?.display ?? shown
                 switch failed.failure {
                 case .refused, .revoked:
@@ -1037,7 +1114,9 @@ extension StreamClient {
         var mac = SavedMac(macID: macID, fingerprint: Base64URL.encode(w.fingerprint), name: name, recognitionKey: recognition,
                            remotePort: port, addresses: SavedMacs.filtered(addresses, allowLoopback: Self.keepsLoopback),
                            typedAddresses: typed.map { SavedMacs.filtered([$0], allowLoopback: Self.keepsLoopback) },
-                           infoIssuedAt: 0, bonjourName: nil, lastWorked: w.candidate.key, pairedAt: Date(), method: method,
+                           infoIssuedAt: 0, bonjourName: nil,
+                           lastWorked: RemoteDialPolicy.isRelay(w.candidate) ? RemoteDialPolicy.relayKey : w.candidate.key,
+                           pairedAt: Date(), method: method,
                            lastConnectedAt: nil, lastRoute: nil)
         // Paired over a session at home (the overlay): that session's Mac is the one just paired
         // only when its kind 18 is signed by the key just paired. Then the session is with a saved
@@ -1053,6 +1132,9 @@ extension StreamClient {
             mac = SavedMacs.refreshed(mac, info: v.info, fingerprint: v.fingerprint, allowLoopback: Self.keepsLoopback) ?? mac
             session?.macID = macID
         }
+        // The link's tailnet: kept once it runs (now, or when the join it started ends).
+        if let relay = pairingRelay, TailnetController.shared.forwarder(for: relay) != nil { mac.relay = relay }
+        pairingRelay = nil
         savedMacs = SavedMacs.adding(mac, to: savedMacs)
         persistSavedMacs()
         pairing = .paired(displayName(macID))

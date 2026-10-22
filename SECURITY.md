@@ -24,6 +24,11 @@ who has it, and the newest iPhone and iPad app.
 - Remote Access's connection, and pairing, at home and away: the QR code, the
   typed code, `sill://pair` links, a USB cable's automatic pairing, Require
   pairing, and the paired devices and keys Sill for Mac keeps in the keychain.
+- Reach from Anywhere: sill-net and the Headscale it runs on the Mac, its
+  relay door, the keys a paired device is given to join the Mac's tailnet,
+  and the tailnet inside the iPhone and iPad app (docs/relay-plan.md has the
+  threat model). A relay or DERP server that misbehaves is in scope as far
+  as Sill trusts it, which should be not at all.
 - The update check, which asks GitHub's releases feed about once a day and
   downloads nothing.
 - The website, getsill.app.

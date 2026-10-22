@@ -66,6 +66,11 @@ final class Door {
     private let backoff: TimeInterval
     /// TEST ONLY: the interface that stands in for the USB cable (home door, test host).
     private let cableStandIn: String?
+    /// The relay door (RelayDoor): every connection comes from sill-net on 127.0.0.1, so the origin
+    /// is fixed (the relay is a VPN of the Mac's own: away from home) and so is its route's label,
+    /// and the per-source rules (2 pending, the backoff) are skipped, since one source is every
+    /// device on the relay; the door's 8 pending in all still hold. Nil at the other two doors.
+    private let fixedArrival: (origin: OriginPolicy.Origin, label: String)?
     /// Set right after the server's own init (the home door is made inside it); every connection
     /// comes after that.
     weak var server: StreamServer?
@@ -114,8 +119,10 @@ final class Door {
         }
     }()
 
-    init(_ kind: DoorPolicy.Door, queue: DispatchQueue, identity: HostIdentity, trust: TrustBox, testHost: Bool) {
+    init(_ kind: DoorPolicy.Door, queue: DispatchQueue, identity: HostIdentity, trust: TrustBox, testHost: Bool,
+         fixedArrival: (origin: OriginPolicy.Origin, label: String)? = nil) {
         self.kind = kind
+        self.fixedArrival = fixedArrival
         self.queue = queue
         self.identity = identity
         self.trust = trust
@@ -162,7 +169,7 @@ final class Door {
         let now = CFAbsoluteTimeGetCurrent()
         let source = sourceText(c)
         prune(now)
-        if let until = backoffUntil[source], now < until {
+        if fixedArrival == nil, let until = backoffUntil[source], now < until {
             c.cancel()
             refusals.count("limit")
             return
@@ -170,7 +177,7 @@ final class Door {
         // The origin before the connection starts: once started, TLS answers a ClientHello that is
         // already waiting with the whole server flight, the Mac's certificate included, before any
         // state callback could refuse it. A source this door does not admit gets no byte.
-        if let a = server.arrivalBeforeStart(of: c, remoteDoor: kind == .remote),
+        if let a = fixedArrival.map({ (origin: $0.origin, interface: nil as String?) }) ?? server.arrivalBeforeStart(of: c, remoteDoor: kind == .remote),
            let word = DoorPolicy.refusalBeforeStart(kind, origin: a.origin, internetAccess: trust.snapshot.internetAccess) {
             c.cancel()
             refusals.count(word)
@@ -178,7 +185,7 @@ final class Door {
             return
         }
         let fromSource = pending.values.filter { $0.source == source }.count
-        guard pending.count < Self.maxPending, fromSource < Self.maxPendingPerSource else {
+        guard pending.count < Self.maxPending, fixedArrival != nil || fromSource < Self.maxPendingPerSource else {
             c.cancel()
             refusals.count("limit")
             return
@@ -225,7 +232,7 @@ final class Door {
     private func checkOrigin(_ id: ObjectIdentifier, _ c: NWConnection) -> Bool {
         guard var p = pending[id], let server else { return false }
         if p.origin == nil {
-            let (origin, interface) = server.arrival(of: c, remoteDoor: kind == .remote)
+            let (origin, interface) = fixedArrival.map { ($0.origin, nil as String?) } ?? server.arrival(of: c, remoteDoor: kind == .remote)
             p.origin = origin
             p.interface = interface
             pending[id] = p
@@ -300,7 +307,8 @@ final class Door {
             switch self.kind {
             case .remote:
                 guard let paired = snapshot.paired[fp] else { c.cancel(); return }
-                let label = OriginPolicy.label(origin, interface: p.interface, serviceName: p.interface.flatMap { snapshot.serviceNames[$0] }) ?? "by address"
+                let label = self.fixedArrival?.label
+                    ?? OriginPolicy.label(origin, interface: p.interface, serviceName: p.interface.flatMap { snapshot.serviceNames[$0] }) ?? "by address"
                 server.serve(c, route: .remote(origin: origin, label: label, fingerprint: fp, name: paired), hello: hello,
                              admitted: { print("Remote client connected: \(paired) \(label) (\(endpoint))") })
             case .home:
@@ -469,6 +477,7 @@ final class Door {
 
     /// One failure for `source`; the fifth within a minute starts its backoff.
     private func countFailure(_ source: String, _ now: CFAbsoluteTime) {
+        guard fixedArrival == nil else { return }
         var list = (failures[source] ?? []).filter { now - $0 < Self.failureWindow }
         list.append(now)
         if list.count >= Self.failuresForBackoff {

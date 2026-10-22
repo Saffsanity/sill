@@ -51,6 +51,15 @@ grid.
   same Apple Account just appears. Manual "add by address" as fallback.
 - Remote: v1 is LAN + works-through-Tailscale-if-you-have-it. CloudKit
   signaling + ICE hole punching later, still no servers we run.
+- **Proposed 2026-10-20 (pull request from pastudan, not yet accepted by
+  Noah): Reach from Anywhere** (docs/relay-plan.md). The Mac runs its own
+  tailnet (Headscale and tsnet, Go helpers in Sill.app) whose control plane
+  devices reach through a HeadFwd relay (headfwd.net, free, not run by Sill);
+  packets go directly or through Tailscale's public DERP. Off by default.
+  It would be the exception that "Swift, Apple frameworks only" and "Zero
+  servers" allow for by a decision here: Go dependencies pinned by go.sum, two
+  third-party servers that carry only ciphertext (Sill's own pinned TLS inside),
+  zero operating cost for Sill. Accept or strike this paragraph.
 - Input: touch, keyboard, Pencil-as-pointer via CGEvents on the Mac.
   Companion needs Screen Recording + Accessibility permissions.
 - License: Apache-2.0, final since the repository went public on 2026-09-26

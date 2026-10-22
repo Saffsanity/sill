@@ -348,11 +348,16 @@ check_app() {
     plist_value NSCameraUsageDescription "$plist" >/dev/null || fail "$app has no NSCameraUsageDescription: Add a Mac…'s scanner would crash it."
     [ -f "$app/PrivacyInfo.xcprivacy" ] || fail "$app has no PrivacyInfo.xcprivacy: App Store Connect refuses an upload whose required-reason APIs aren't declared (ITMS-91053)."
     plutil -lint -s "$app/PrivacyInfo.xcprivacy" || fail "$app/PrivacyInfo.xcprivacy is not a valid property list."
+    # Reach from Anywhere (docs/relay-plan.md): SillTailnet is linked statically; its C API must be in
+    # the app's binary, or the relay never runs (a build that skipped Scripts/make-tailnet.sh).
+    local exe="$app/$(plist_value CFBundleExecutable "$plist" || echo Sill)"
+    { nm "$exe" 2>/dev/null; [ -f "$app/Sill.debug.dylib" ] && nm "$app/Sill.debug.dylib" 2>/dev/null; } | grep -q ' _SillTailnetStart$' \
+        || fail "$app's binary has no SillTailnet (Reach from Anywhere): build it with Scripts/make-tailnet.sh, which the SillTailnet target runs."
     value="$(plist_value DTPlatformVersion "$plist")" || value=""
     [ -n "$value" ] && version_at_least "$value" "$xcode_minimum" \
         || fail "$app was built with the iOS ${value:-(unknown)} SDK, and the iPhone Duo's layouts need the iOS $xcode_minimum SDK (Xcode $xcode_minimum; docs/iphone-duo-plan.md)."
     if [ "$quiet" = 0 ]; then
-        say "Checked its Sill.app: $version ($build), $bundle_id, the iOS $value SDK, ITSAppUsesNonExemptEncryption NO, the Local Network, Bonjour (_sill._tcp) and camera entries, PrivacyInfo.xcprivacy"
+        say "Checked its Sill.app: $version ($build), $bundle_id, the iOS $value SDK, ITSAppUsesNonExemptEncryption NO, the Local Network, Bonjour (_sill._tcp) and camera entries, PrivacyInfo.xcprivacy, SillTailnet"
     fi
 }
 
@@ -561,6 +566,11 @@ check_ipa() {
 # --unsigned). Checks the archive's version and build and its app, then says $4.
 make_archive() {
     local signed="$1" version="$2" build="$3" what="$4" archived_version archived_build identity
+    # SillTailnet.xcframework before the archive (Reach from Anywhere, docs/relay-plan.md): Xcode looks
+    # for an xcframework the app links before any target runs, so the SillTailnet target alone is too
+    # late on a clean checkout. Go is needed for it (Scripts/make-helpers.sh says how to get it).
+    run_logged "$out/tailnet.log" Scripts/make-tailnet.sh --device-only \
+        || fail "SillTailnet.xcframework could not be built (log: $out/tailnet.log); it needs Go."
     if [ "$signed" = 1 ]; then
         say "Archiving (Release, generic/platform=iOS) into $archive with automatic signing through $signer (log: $out/archive.log)"
         run_logged "$out/archive.log" xcodebuild -project "$project" -scheme "$scheme" -destination 'generic/platform=iOS' \

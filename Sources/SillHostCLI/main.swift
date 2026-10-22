@@ -67,6 +67,17 @@ if let remoteFlag {
     }
 }
 
+// `SillHost --remote --relay`: Reach from Anywhere for this run (docs/relay-plan.md): sill-net (from
+// .build/helpers, Scripts/make-helpers.sh, or SILL_NET_BINARY) runs this Mac's own tailnet, registered
+// with headfwd.net (or SILL_RELAY_URL), and paired devices away from home join it over their session.
+// Its state goes to SILL_RELAY_DIR, else a folder of its own under the temporary directory.
+let relayFlag = CommandLine.arguments.contains("--relay")
+if relayFlag && remoteFlag == nil {
+    print("--relay needs --remote.")
+    exit(2)
+}
+config.reachFromAnywhere = relayFlag
+
 // `SillHost --pairing`: the home door speaks TLS 1.3 with both keys pinned and pairing required
 // (docs/home-pairing-plan.md §5), as Sill.app's does: a device pairs once, over the USB cable by
 // itself or with the code or link printed here. A throwaway identity (the one --remote uses when
@@ -157,6 +168,9 @@ func makeRemoteAccess() -> RemoteAccess {
     }
     let remote = RemoteAccess(store: store)
     if let problem = remote.identityProblem { print("Remote access unavailable: \(problem)") }
+    let env = ProcessInfo.processInfo.environment
+    remote.relayDataDir = URL(fileURLWithPath: env["SILL_RELAY_DIR"] ?? NSTemporaryDirectory() + "sillhost-relay")
+    if let url = env["SILL_RELAY_URL"], !url.isEmpty { remote.relayURL = url }
     remote.reopensPairing = true
     remote.logsPairingWindows = false
     remote.userWindowsOpenRemoteDoor = config.remoteAccess

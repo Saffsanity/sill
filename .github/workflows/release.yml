@@ -4,7 +4,8 @@
 # SILL_SIGN_IN_CI (Settings › Secrets and variables › Actions › Variables):
 #
 # - Not set, or anything but true: verify only. It checks the tag against Packaging/Info.plist,
-#   runs the pure checks, builds Sill.app with Scripts/make-app.sh (signed ad hoc: the runner has
+#   runs the pure checks, builds Sill.app with Scripts/make-app.sh (with Reach from Anywhere's Go
+#   helpers, Helpers/; signed ad hoc: the runner has
 #   no identity), makes the disk image with Scripts/make-dmg.sh (signed ad hoc too), and keeps the
 #   app, zipped, and the image as this run's two artifacts for 14 days. It uses no secret and
 #   creates no release.
@@ -75,6 +76,14 @@ jobs:
 
       - name: Pure checks (Tests/checks/run-all.sh)
         run: Tests/checks/run-all.sh
+
+      # Reach from Anywhere's helpers and SillTailnet are Go (Helpers/, docs/relay-plan.md): the
+      # version Helpers/sill-net/go.mod names, its module cache keyed by every go.sum here.
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: Helpers/sill-net/go.mod
+          cache-dependency-path: Helpers/*/go.sum
 
       - name: Build Sill.app (Scripts/make-app.sh, signed ad hoc)
         run: Scripts/make-app.sh
@@ -161,6 +170,13 @@ jobs:
 
       - name: Pure checks (Tests/checks/run-all.sh)
         run: Tests/checks/run-all.sh
+
+      # make-app.sh --release builds Reach from Anywhere's helpers with Go and signs them first.
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: Helpers/sill-net/go.mod
+          cache-dependency-path: Helpers/*/go.sum
 
       - name: Check that every secret is set
         env:

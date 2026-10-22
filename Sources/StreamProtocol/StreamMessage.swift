@@ -75,6 +75,13 @@ public enum StreamMessageKind: UInt8 {
                              // on), its text becomes the Mac's clipboard, and `stop` ends the subscription; only
                              // to a host whose window list says `clipboard` 1 or more. Host → device: text copied
                              // on the Mac (or sent by another device), only to a connection that subscribed
+    // Reach from Anywhere (Relay.swift, docs/relay-plan.md). 60 and 61, well clear of the 33–46 that
+    // open pull requests use (audio, files, the camera, the microphone, a pencil). Older readers map
+    // them to `.unknown` and skip them.
+    case relayInvite = 60    // host → device: JSON RelayInvite — a single-use key to the Mac's tailnet, to the
+                             // paired device that asked alone
+    case relayJoin = 61      // device → host: JSON RelayJoin — ask for that key, on a paired session only, to a
+                             // Mac whose kind 18 carries `relay`
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

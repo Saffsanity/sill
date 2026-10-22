@@ -401,6 +401,7 @@ package final class StreamCoordinator {
                 if self.flipWait == id { self.flipWait = nil }
                 self.menus.clientLeft(connection)
                 self.clipboard.clientLeft(connection)
+                self.remote?.connectionClosed(connection)
                 self.releaseKeys(of: id)
                 self.status.update { $0.devices.removeAll { $0.id == id } }
                 // The last device at home left devices away behind: the away quality, at once.
@@ -758,7 +759,7 @@ package final class StreamCoordinator {
         // The doors', not the pipeline's: RemoteAccess starts, stops or moves the remote door, and
         // Require pairing changes who the home door admits (and its TXT record).
         if old.remoteAccess != next.remoteAccess || old.remotePort != next.remotePort || old.internetAccess != next.internetAccess
-            || old.requirePairing != next.requirePairing {
+            || old.requirePairing != next.requirePairing || old.reachFromAnywhere != next.reachFromAnywhere {
             remote?.apply(next)
         }
         catalog.preferMainDisplay = next.virtualDisplay   // the Desktop source must never capture the virtual display
@@ -1029,6 +1030,11 @@ package final class StreamCoordinator {
             // The clipboard (HostClipboard): a subscription, a device's text, or its stop. No `await`:
             // it reads and writes the pasteboard at once, and says nothing per copy.
             clipboard.received(message.payload, from: connection, who: deviceName(connection))
+        case .relayJoin:
+            // Reach from Anywhere: a key to the Mac's tailnet, for a paired key's session alone
+            // (RelayPolicy.hostInvites; RemoteAccess answers with kind 60 to this connection).
+            remote?.relayJoinAsked(on: connection, fingerprint: routes[ObjectIdentifier(connection)]?.fingerprint,
+                                   who: deviceName(connection))
         case .pressMenuItem:
             guard let r = Wire.decode(PressMenuItem.self, from: message.payload) else { return }
             // One of the Mac's menu items chosen from a device acts as a click on it would, and may
@@ -1894,6 +1900,7 @@ package final class StreamCoordinator {
         shuttingDown = true
         restoreFits(keeping: nil)
         stage.release()
+        remote?.relay?.shutdown()      // sill-net would also stop when Sill's end of its stdin closes
     }
 
     /// The CLI's default path at a signal (HostShutdown.installKeyRelease), just before it dies of it:

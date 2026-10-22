@@ -222,15 +222,19 @@ package struct RemoteStatus: Equatable {
     /// DoorPolicy.olderSillTry: a TLS 1.2 client fails the same way, but once), for the menu's
     /// "An iPhone or iPad Needs Sill Updated" (10 minutes from it).
     package var olderDeviceAt: Date?
+    /// Reach from Anywhere's state (RelaySupervisor): off unless it and Remote Access are on.
+    package var relay: RelaySupervisor.State
 
     package init(remoteAccess: Bool = false, internetAccess: Bool = false, listener: Listener = .off, addresses: [MacAddress] = [],
                  vpnDown: [String] = [], lanAddress: String? = nil, router: Router = .off, addressName: String = "",
                  pairing: Pairing = .closed, paired: [PairedDeviceSummary] = [], identityProblem: String? = nil,
-                 homeDoor: HomeDoor = .plain, pairingRequest: PairingRequest? = nil, olderDeviceAt: Date? = nil) {
+                 homeDoor: HomeDoor = .plain, pairingRequest: PairingRequest? = nil, olderDeviceAt: Date? = nil,
+                 relay: RelaySupervisor.State = .off) {
         self.remoteAccess = remoteAccess; self.internetAccess = internetAccess; self.listener = listener
         self.addresses = addresses; self.vpnDown = vpnDown; self.lanAddress = lanAddress; self.router = router
         self.addressName = addressName; self.pairing = pairing; self.paired = paired; self.identityProblem = identityProblem
         self.homeDoor = homeDoor; self.pairingRequest = pairingRequest; self.olderDeviceAt = olderDeviceAt
+        self.relay = relay
     }
 }
 

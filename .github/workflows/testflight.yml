@@ -67,6 +67,14 @@ jobs:
           version: '27'
           fallback: 'false'
 
+      # Reach from Anywhere's SillTailnet.xcframework is Go (Helpers/tailnet-mobile, docs/relay-plan.md):
+      # the archive's SillTailnet target builds it with the version Helpers/sill-net/go.mod names.
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: Helpers/sill-net/go.mod
+          cache-dependency-path: Helpers/*/go.sum
+
       # An if: can't read secrets, so this step reads them and says which run this is: unsigned,
       # export or upload.
       - name: Which run this is

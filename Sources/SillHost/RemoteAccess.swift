@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Network
 import Security
@@ -83,6 +84,26 @@ package final class RemoteAccess {
     private weak var server: StreamServer?
     private weak var status: HostStatus?
     private var door: RemoteServer?
+    /// Reach from Anywhere (docs/relay-plan.md): sill-net, and the door its tailnet forwards to.
+    /// Both run while Remote Access and Reach from Anywhere are on.
+    private var relayDoor: RelayDoor?
+    package private(set) var relay: RelaySupervisor?
+    private var reachFromAnywhere = false
+    private var relayDoorPort: Int?
+    /// When each connection last got a key (kind 60), so a device asks once a session.
+    private var lastInviteAt: [ObjectIdentifier: Date] = [:]
+    /// The connection that asked for each device's key, to answer that one alone.
+    private var inviteAskers: [String: NWConnection] = [:]
+    /// The open pairing window's QR key (Reach from Anywhere): its id (a hash of the window's secret,
+    /// never the secret), and the key once sill-net minted it. The QR code carries it, so a device
+    /// joins the tailnet from the code itself.
+    private var windowRelay: (id: String, invite: RelayInvite?)?
+    /// The open window was offered without a key; offer it again once its key arrives.
+    private var reofferWithKey = false
+    /// Where sill-net keeps its state; set by the app (Application Support), the CLI's own otherwise.
+    package var relayDataDir: URL?
+    /// The HeadFwd relay sill-net registers with.
+    package var relayURL = "https://headfwd.net"
     private var macName = "Mac"
     private var testHost = false
     /// The home door speaks TLS (Sill.app, SillHost --pairing): its asks and proofs come here, its
@@ -201,6 +222,10 @@ package final class RemoteAccess {
         }
         door.onPairAttempt = judgeHere
         self.door = door
+        let relayDoor = RelayDoor(server: server, identity: identity, trust: trust)
+        relayDoor.onPairAttempt = judgeHere
+        relayDoor.onPort = { [weak self] port in Task { @MainActor in self?.relayDoorPortChanged(port) } }
+        self.relayDoor = relayDoor
         if let home = server.homeDoor {
             home.onPairAttempt = judgeHere
             home.onOlderSill = { [weak self] in Task { @MainActor in self?.olderDeviceSeen() } }
@@ -229,6 +254,7 @@ package final class RemoteAccess {
         remotePort = config.remotePort
         internetAccess = config.remoteAccess && config.internetAccess
         requirePairing = config.requirePairing
+        reachFromAnywhere = config.reachFromAnywhere
         if wasOn, !remoteAccess {
             if let w = window.current, w.forRemote { window.close(.cancelled); windowClosed(.cancelled, reopen: false) }
             print("Remote access off.")
@@ -255,6 +281,7 @@ package final class RemoteAccess {
         }
         announceHomeDoor()
         updateDoor()
+        updateRelay()
         updateWatchers()
         publish()
         broadcastIfChanged()
@@ -451,6 +478,8 @@ package final class RemoteAccess {
     @discardableResult
     package func remove(fingerprint: String) -> String? {
         guard let i = paired.firstIndex(where: { $0.fingerprint == fingerprint }) else { return nil }
+        // Its tailnet nodes too (sill-net's ledger), or at sill-net's next start if it is not running.
+        relay?.remove(device: fingerprint)
         var rest = paired
         let device = rest.remove(at: i)
         do { try store?.savePaired(rest) } catch {
@@ -555,6 +584,8 @@ package final class RemoteAccess {
             paired.append(device)
             save()
             publishTrust()
+            // The QR code's tailnet key (if it carried one) is this device's now: Remove removes its node.
+            if let wr = windowRelay, wr.invite != nil { relay?.claim(window: wr.id, device: device.fingerprint); windowRelay = (wr.id, nil) }
             print("Paired \(device.displayName) (key \(RemoteIdentity.shortName(attempt.deviceFingerprint))…) from \(attempt.display), "
                   + "with \(attempt.request.method == PairRequest.qr ? "the QR code" : "the code").")
             pairingState = .paired(device.displayName)
@@ -776,6 +807,12 @@ package final class RemoteAccess {
         expiryTask?.cancel()
         expiryTask = nil
         offerPending = nil
+        reofferWithKey = false
+        if let wr = windowRelay {
+            // Used: `judge` has already handed its key to the device. Otherwise the key goes.
+            if reason != .used { relay?.forget(window: wr.id) }
+            windowRelay = nil
+        }
         if let asker = windowAsk, AskLimits.quiets(reason) {
             askLimits.closedUnused(fingerprint: asker.fingerprint, source: asker.source, now: monotonic())
         }
@@ -819,6 +856,9 @@ package final class RemoteAccess {
 
     private func deliverOfferIfReady(force: Bool) {
         guard let pendingOffer = offerPending, let identity, let w = window.current else { offerPending = nil; return }
+        let windowKey = relayWindowKey(w.secret)
+        // The QR code waits a moment (at most offerWait, as for the addresses) for this window's key.
+        if !force, windowKey.wanted, windowKey.invite == nil { return }
         let port: Int
         var links: [ParsedAddress] = []
         if w.forRemote {
@@ -836,7 +876,8 @@ package final class RemoteAccess {
         }
         offerPending = nil
         offerDeadline?.cancel()
-        let link = PairLink(fingerprint: identity.fingerprint, secret: w.secret, name: macName, port: port, addresses: links)
+        let link = PairLink(fingerprint: identity.fingerprint, secret: w.secret, name: macName, port: port, addresses: links,
+                            relay: w.forRemote ? windowKey.invite : nil)
         // A device-opened window the Mac's user has since opened over (`makeRemote`) is offered as
         // theirs: its link has addresses now, and the app shows it as it shows its own.
         onPairingOffer?(PairingOffer(url: link.url, code: w.code, expiresAt: Date(timeIntervalSince1970: w.expiresAt),
@@ -858,6 +899,96 @@ package final class RemoteAccess {
 
     private func updateDoor() {
         door?.set(wanted: remoteAccess || remoteWindowOpen, port: remotePort)
+    }
+
+    // MARK: Reach from Anywhere
+
+    /// The relay door and sill-net run while Remote Access and Reach from Anywhere are both on.
+    private func updateRelay() {
+        let wanted = identity != nil && remoteAccess && reachFromAnywhere
+        relayDoor?.set(wanted: wanted)
+        if wanted, relay == nil {
+            let dir = relayDataDir ?? FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/Sill/net", isDirectory: true)
+            let r = RelaySupervisor(dataDir: dir, relayURL: relayURL)
+            r.onState = { [weak self] _ in
+                self?.publish()
+                self?.broadcastIfChanged()
+                self?.relayReadyForWindow()
+            }
+            r.onInvite = { [weak self] device, invite in self?.relayInvited(device, invite) }
+            relay = r
+        }
+        relay?.paired(paired.map(\.fingerprint))
+        relay?.set(wanted: wanted, doorPort: relayDoorPort)
+    }
+
+    private func relayDoorPortChanged(_ port: Int?) {
+        relayDoorPort = port
+        if let relay, remoteAccess, reachFromAnywhere { relay.set(wanted: true, doorPort: port) }
+    }
+
+    /// This window's QR key: asked for once, when the window runs the remote door and the tailnet is
+    /// up. `wanted` is false when no key will come (Reach from Anywhere off, the tailnet not up).
+    private func relayWindowKey(_ secret: Data) -> (wanted: Bool, invite: RelayInvite?) {
+        guard let relay, remoteAccess, reachFromAnywhere, relay.advertised != nil, window.current?.forRemote == true else {
+            return (false, nil)
+        }
+        let id = Base64URL.encode(Data(SHA256.hash(data: secret)).prefix(12))
+        if windowRelay?.id != id {
+            if let old = windowRelay { relay.forget(window: old.id) }
+            windowRelay = (id, nil)
+            relay.invite(window: id)
+        }
+        return (true, windowRelay?.invite)
+    }
+
+    /// Kind 61 on a session: a key for the device whose key the session pinned, while the tailnet is
+    /// up, once in `RelayPolicy.inviteSpacing` per connection (RelayPolicy.hostInvites).
+    package func relayJoinAsked(on connection: NWConnection, fingerprint: Data?, who: String) {
+        let id = ObjectIdentifier(connection)
+        let pairedKey = fingerprint.flatMap { fp in paired.first { $0.fingerprintData == fp } }
+        let since = lastInviteAt[id].map { Date().timeIntervalSince($0) }
+        guard let device = pairedKey, let relay,
+              RelayPolicy.hostInvites(paired: true, relayReady: relay.advertised != nil, sinceLast: since) else { return }
+        lastInviteAt[id] = Date()
+        inviteAskers[device.fingerprint] = connection
+        relay.invite(device: device.fingerprint)
+        print("Reach from Anywhere: a key for \(device.displayName).")
+    }
+
+    /// The tailnet came up (or back) while a window the remote door runs for is open, and its QR
+    /// code carries no key yet: mint one, and offer the same window again with it (same code).
+    private func relayReadyForWindow() {
+        guard let w = window.current, w.forRemote, offerPending == nil else { return }
+        let k = relayWindowKey(w.secret)
+        guard k.wanted, k.invite == nil else { return }
+        reofferWithKey = true
+    }
+
+    private func relayInvited(_ device: String, _ invite: RelayInvite) {
+        if device.hasPrefix("pending:") {
+            guard let wr = windowRelay, "pending:" + wr.id == device else { relay?.forget(window: String(device.dropFirst(8))); return }
+            windowRelay = (wr.id, invite)
+            if offerPending != nil {
+                deliverOfferIfReady(force: false)
+            } else if reofferWithKey, let w = window.current {
+                reofferWithKey = false
+                makeOffer(requestedBy: w.requestedBy, again: true)
+            }
+            return
+        }
+        guard let c = inviteAskers.removeValue(forKey: device) else { return }
+        // Removed while sill-net minted it: never sent (sill-net's next `paired` takes the key back).
+        guard paired.contains(where: { $0.fingerprint == device }) else { return }
+        server?.send(StreamMessage(kind: .relayInvite, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
+                                   payload: Wire.encode(invite)), to: c)
+    }
+
+    /// A connection went away: its invite bookkeeping with it.
+    package func connectionClosed(_ connection: NWConnection) {
+        lastInviteAt[ObjectIdentifier(connection)] = nil
+        inviteAskers = inviteAskers.filter { $0.value !== connection }
     }
 
     /// Reachability runs with the door; the router is asked only with the internet switch on.
@@ -924,6 +1055,9 @@ package final class RemoteAccess {
     }
 
     private func publishTrust() {
+        // sill-net removes the tailnet nodes of any device not on this list (devices removed while it
+        // was not running), so it must follow every pairing and removal, not only `apply`.
+        relay?.paired(paired.map(\.fingerprint))
         var map: [Data: String] = [:]
         for d in paired { if let fp = d.fingerprintData { map[fp] = d.displayName } }
         let open = window.isOpen, remoteOpen = remoteWindowOpen, on = remoteAccess, internet = internetAccess
@@ -958,7 +1092,7 @@ package final class RemoteAccess {
                                   lanAddress: input.flatMap(AddressList.lanAddress), router: routerState,
                                   addressName: addressNameText, pairing: pairingState, paired: summaries,
                                   identityProblem: identityProblem, homeDoor: homeDoor, pairingRequest: pairingRequest,
-                                  olderDeviceAt: olderDeviceAt)
+                                  olderDeviceAt: olderDeviceAt, relay: relay?.state ?? .off)
         status.update { $0.remote = remote }
     }
 
@@ -976,7 +1110,8 @@ package final class RemoteAccess {
     private func currentInfo() -> MacInfo? {
         guard let identity else { return nil }
         return MacInfo(macID: identity.macID, name: macName, issuedAt: 0, remoteAccess: remoteAccess,
-                       remotePort: doorPort ?? remotePort, internet: internetAccess, addresses: reach == nil ? [] : addresses())
+                       remotePort: doorPort ?? remotePort, internet: internetAccess, addresses: reach == nil ? [] : addresses(),
+                       relay: remoteAccess && reachFromAnywhere ? relay?.advertised : nil)
     }
 
     /// Kind 18, signed, issued now: in every catalog right after kind 16.

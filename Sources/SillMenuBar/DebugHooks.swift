@@ -348,6 +348,7 @@ enum DebugHooks {
         case "remotePort": if let v = Int(value) { config.remotePort = v }
         case "internetAccess": config.internetAccess = flag
         case "shareClipboard": config.shareClipboard = flag
+        case "reachFromAnywhere": config.reachFromAnywhere = flag
         case "remoteAddressName": addressName = value
         case "requirePairing": requirePairing = flag
         case "updateCheck": updateCheck = flag
@@ -412,7 +413,8 @@ enum DebugHooks {
         }
         for sample in remotePaneSamples() {
             let pane = RemoteAccessPane(status: sample.status, remoteAccess: .constant(sample.status.remoteAccess),
-                                        internetAccess: .constant(sample.status.internetAccess), port: 7455,
+                                        internetAccess: .constant(sample.status.internetAccess),
+                                        reachFromAnywhere: .constant(sample.status.relay != .off), port: 7455,
                                         addressName: sample.status.addressName, actions: RemoteAccessPane.Actions())
                 .formStyle(.grouped)
                 .frame(width: 520)
@@ -840,6 +842,8 @@ extension DebugHooks {
             RemotePaneSample(name: "cgnat", status: internet(.carrierNAT("100.72.14.3"), tailscaleAddresses)),
             RemotePaneSample(name: "doublenat", status: internet(.doubleNAT, tailscaleAddresses)),
             RemotePaneSample(name: "inuse", status: on(tailscaleAddresses, listener: .portInUse(7455))),
+            RemotePaneSample(name: "relay", status: { var s = on(wifi); s.relay = .ready(RelayInfo(fingerprint: String(repeating: "a", count: 32), domain: "headfwd.net")); return s }()),
+            RemotePaneSample(name: "relaydown", status: { var s = on(wifi); s.relay = .relayDown(RelayInfo(fingerprint: String(repeating: "a", count: 32), domain: "headfwd.net")); return s }()),
             RemotePaneSample(name: "keychain",
                              status: RemoteStatus(identityProblem: "the key couldn’t be read: The user name or passphrase you entered is not correct.")),
         ]

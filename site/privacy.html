@@ -90,6 +90,9 @@
   <!-- Remote Access: take this paragraph out for a release without Remote Access. -->
   <p>While Remote Access is on, your Mac also tells the devices you paired the addresses it can be reached at from other networks, such as its VPN address, and they keep them to connect from there.</p>
   <!-- /Remote Access -->
+  <!-- Reach from Anywhere: for the release that ships it (docs/relay-plan.md); a republish before that release takes this paragraph out. -->
+  <p>While Reach from Anywhere is on, your Mac runs a private network of its own and registers it with a relay, headfwd.net, which is not run by the developer: the relay sees your Mac’s IP address, a public identifier for its private network, and encrypted control traffic, never what you stream. Your paired devices join that network with a single-use key your Mac gives them over their encrypted connection, and keep only the identifier and the relay’s name. When your device and your Mac can’t connect directly, Tailscale’s public relay servers (DERP) carry their encrypted packets. Inside, every connection is still Sill’s own TLS 1.3, pinned to the keys you paired.</p>
+  <!-- /Reach from Anywhere -->
 
   <p>Every connection between your devices and your Mac is encrypted with TLS 1.3. Once a device is paired, each end also checks that the other holds the key it paired with.</p>
 

@@ -8,6 +8,42 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Reach from Anywhere: the Mac's own tailnet through a HeadFwd relay (2026-10-20, branch `headfwd`
+from main at 4d990e9, a pull request from pastudan/sill; docs/relay-plan.md has the design, the threat
+model, the cost against the conventions, the open questions with the default taken for each, the
+results and what is untested).** Not asked for in an issue; proposed as an exception to "Swift, Apple
+frameworks only" and "nothing that needs a server", by a dated paragraph in docs/BRIEF.md for Noah to
+accept or strike.
+- Mac: `Helpers/sill-net` (Go, from Frigate Launcher's nvrd / Bridge's sidecar) runs Headscale (pinned
+  v0.29.4, built in: `sill-net headscale serve`) with a static ACL (`tag:sill-device` → `tag:sill-mac:7455` only), registers
+  with headfwd.net (HeadFwd's strict URL check), and forwards its tsnet node's :7455 to `RelayDoor`
+  (`Door(.remote)` on 127.0.0.1, `fixedArrival` origin `.vpn`, "through Sill Relay"). `RelaySupervisor`
+  runs it from `Contents/Helpers` over stdin/stdout JSON while Remote Access and
+  `HostConfig.reachFromAnywhere` (off) are on. Remove deletes the device's nodes (sill-net's ledger).
+  Settings › Remote Access: "Reach from Anywhere". `SillHost --remote --relay`.
+- Wire: `MacInfo.relay` (kind 18, left out when nil), kinds 60 `relayInvite` and 61 `relayJoin` (clear
+  of the 33–46 open pull requests use), `RelayPolicy` (Relay.swift) both ends. The pairing QR code
+  carries the tailnet (`PairLink.relay`: `&r=&f=&t=`, the window's own single-use key, claimed by the
+  device that pairs, expired when the window closes unused), so a scan joins and pairs through the
+  relay with no session first (Dan, 2026-10-21); kinds 60/61 remain for devices paired before.
+- Device: `SillTailnet.xcframework` (`Helpers/tailnet-mobile`, aggregate target `SillTailnet` running
+  `Scripts/make-tailnet.sh`), `TailnetController`, `StreamClient+Relay`; `SavedMac.relay` keeps the
+  fingerprint and domain, never the key; the forwarder (127.0.0.1:N → sill-mac:7455) is the last dial
+  candidate (`RemoteDialPolicy.withRelay`), first when it won last time. PrivacyInfo: FileTimestamp
+  C617.1 (Go's stat).
+- Build: `Scripts/make-helpers.sh`, `make-tailnet.sh`; make-app.sh signs the helpers in
+  Contents/Helpers first (`SILL_NO_RELAY=1` for development only); release.sh and release-ios.sh check
+  them; CI/Release/TestFlight set up Go (setup-go pinned by SHA), CI vets and tests it and builds
+  Sill.app with its helpers. Sill.app 7.3 → 54 MB (one helper).
+- Verified: Go tests; run-all.sh all 47 (relay: 96 checks, 33 of 33 mutants); live against headfwd.net
+  (join 2.8 s, rejoin 0.25 s, Remove refused, the ACL); SillHost --relay with sillclient and a test
+  device (60 fps through the relay, away quality, wrong pin and unpaired key refused); the iOS app in
+  the simulator joined and streamed through the relay alone. This Mac has Xcode 27.0, so the iOS
+  build here used a local stub of DuoPostureReader's 27.1 calls (never committed).
+- **Untested, for a device:** cellular without Tailscale, UDP blocked (DERP), restart and rejoin,
+  Remove, the relay down mid-session, Release size, memory and battery, Developer ID notarization of
+  the helpers.
+
 **The clipboard both ways (2026-10-14, branch `clipboard` from main at 985a733; issue #64; PR #78;
 the plan, its open questions with the default taken for each, the results and the review's fixes are
 in `docs/clipboard-plan.md`).** Noah: work on the clipboard (after #67/#68, #69, #59, #57, #58), text

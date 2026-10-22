@@ -430,6 +430,9 @@ struct HostSettingsPanel: View {
                     if let r = remoteRoute { Footnote(text: "Connected \(r.phrase).") }
                 case .reaches:
                     Footnote(text: "Away from home, Sill reaches \(mac) \(Self.reach(info)).")
+                    if info.relay != nil, client.savedMacs.contains(where: { $0.macID == info.macID && $0.relay?.fingerprint == info.relay?.fingerprint }) {
+                        Footnote(text: "Reach from Anywhere is on: this \(device) can also reach \(mac) through Sill Relay from any network.")
+                    }
                 case .turnOnRemoteAccess:
                     Footnote(text: Self.turnOnRemoteAccess(mac))
                 }

@@ -91,13 +91,22 @@ do {
     check(!off.validated().shareClipboard && standard.validated().shareClipboard, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: false)
+                          requirePairing: true, shareClipboard: false, reachFromAnywhere: false)
     check(!made.shareClipboard, "a HostConfig made with it off has it off (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
     check(!off.applying(all).shareClipboard && !off.applyingAway(all).shareClipboard
           && standard.applying(all).shareClipboard && standard.applyingAway(all).shareClipboard,
           "a device's change never moves it, at home or away")
+    // Reach from Anywhere (docs/relay-plan.md): off in standard, its log words, never a device's.
+    check(!standard.reachFromAnywhere, "standard: Reach from Anywhere off")
+    var relayOn = standard
+    relayOn.reachFromAnywhere = true
+    eq(standard.changes(to: relayOn), "reach from anywhere off → on", "changes: Reach from Anywhere's switch")
+    check(relayOn.validated().reachFromAnywhere, "validated keeps Reach from Anywhere on")
+    check(!standard.applying(all).reachFromAnywhere && !standard.applyingAway(all).reachFromAnywhere
+          && relayOn.applying(all).reachFromAnywhere && relayOn.applyingAway(all).reachFromAnywhere,
+          "a device's change never moves Reach from Anywhere, at home or away")
 }
 
 // MARK: DeviceSettings

@@ -128,7 +128,8 @@ serves the root or `/docs`, never `/site`. So:
       Pages on (main, / root) and the custom domain set. Republish when `site/` changes, right
       after the release whose builds the change describes (part 2, the last item):
 - Words on main for a release not out yet are marked: the clipboard's (PR #78) between
-  `<!-- Clipboard` and `<!-- /Clipboard -->`. A republish before that release (for words that hold
+  `<!-- Clipboard` and `<!-- /Clipboard -->`, and Reach from Anywhere's (docs/relay-plan.md) between
+  `<!-- Reach from Anywhere` and `<!-- /Reach from Anywhere -->`, handled the same way. A republish before that release (for words that hold
   for the builds already out, such as support.html's on a Mac asleep or restarted) deletes those
   blocks in the sill-site copy after the rsync below (the perl line) and puts privacy.html's date
   back to the one last published; then `grep -n -i clipboard ../sill-site/*.html` prints only
