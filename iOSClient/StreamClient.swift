@@ -758,6 +758,8 @@ final class StreamClient: ObservableObject {
     var remoteDial: RemoteConnector?
     /// Reach from Anywhere: a dial waiting for this Mac's tailnet to come up (StreamClient+Relay).
     var relayDial: Task<Void, Never>?
+    /// Reach from Anywhere: the tailnet the pairing in progress joined from its QR code.
+    var pairingRelay: RelayInfo?
     /// How the other candidates failed while that dial waited for the tailnet.
     var relayFailure: (failure: RemoteDialPolicy.Failure, candidate: RemoteDialPolicy.Candidate?)?
     var pairingDial: RemoteConnector?

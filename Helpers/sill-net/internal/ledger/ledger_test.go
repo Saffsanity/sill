@@ -36,3 +36,25 @@ func TestLedgerPersistsAndForgets(t *testing.T) {
 		t.Fatalf("devices after forget: %v", got)
 	}
 }
+
+func TestRenameAndPending(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "devices.json")
+	l, _ := Open(path)
+	_ = l.Add(PendingPrefix+"w1", "7")
+	if got := l.Stale(nil); len(got) != 0 {
+		t.Fatalf("a pending window's entry counted as stale: %v", got)
+	}
+	if err := l.Rename(PendingPrefix+"w1", "devC"); err != nil {
+		t.Fatal(err)
+	}
+	again, _ := Open(path)
+	if got := again.Keys("devC"); !reflect.DeepEqual(got, []string{"7"}) {
+		t.Fatalf("devC after rename: %v", got)
+	}
+	if got := again.Keys(PendingPrefix + "w1"); len(got) != 0 {
+		t.Fatalf("pending left behind: %v", got)
+	}
+	if err := again.Rename("nothing", "devD"); err != nil || len(again.Keys("devD")) != 0 {
+		t.Fatalf("renaming nothing: %v %v", err, again.Keys("devD"))
+	}
+}

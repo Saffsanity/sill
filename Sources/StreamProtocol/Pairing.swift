@@ -220,6 +220,13 @@ public enum HomeDoorTXT {
 /// The QR code's content, also a link another app can hand over (always behind a confirmation on
 /// the device): `sill://pair?v=1&m=<macID>&k=<fp>&s=<secret>&n=<Mac name>&p=<port>&a=<address>…`.
 /// About 230 bytes: a version 11 QR code at level M.
+///
+/// With Reach from Anywhere on (docs/relay-plan.md), also `&r=<relay domain>&f=<control
+/// fingerprint>&t=<tailnet key>`: the device joins the Mac's tailnet from the code itself and pairs
+/// through it when none of the addresses answer (away from home, or on another network). About 340
+/// bytes then, a version 13 code. All three or none; an older device ignores them (`parse` skips
+/// unknown parameters), so `v` stays 1. The key is the window's: single use, at most ten minutes,
+/// for joining alone; the pairing still needs the secret, and the session the pins.
 public struct PairLink: Hashable, Sendable {
     public static let maxAddresses = 5
     public static let nameLimit = 64
@@ -236,8 +243,10 @@ public struct PairLink: Hashable, Sendable {
     public var port: Int
     /// At most 5, in the Mac's dial order; each with its own port when it has one.
     public var addresses: [ParsedAddress]
+    /// Reach from Anywhere: the Mac's tailnet and a key to join it, when the Mac offers it.
+    public var relay: RelayInvite?
 
-    public init(fingerprint: Data, secret: Data, name: String, port: Int, addresses: [ParsedAddress]) {
+    public init(fingerprint: Data, secret: Data, name: String, port: Int, addresses: [ParsedAddress], relay: RelayInvite? = nil) {
         macID = MacID.make(fingerprint: fingerprint)
         self.fingerprint = fingerprint
         self.secret = secret
@@ -245,6 +254,7 @@ public struct PairLink: Hashable, Sendable {
         self.name = clean.isEmpty ? "Mac" : clean
         self.port = port
         self.addresses = Array(addresses.prefix(Self.maxAddresses))
+        self.relay = relay.flatMap { $0.isWellFormed ? $0 : nil }
     }
 
     /// Why a link was refused.
@@ -268,6 +278,9 @@ public struct PairLink: Hashable, Sendable {
         var items: [(String, String)] = [("v", "1"), ("m", macID), ("k", Base64URL.encode(fingerprint)),
                                          ("s", Base64URL.encode(secret)), ("n", name), ("p", String(port))]
         items += addresses.prefix(Self.maxAddresses).map { ("a", $0.text) }
+        if let relay {
+            items += [("r", relay.relay.domain), ("f", relay.relay.fingerprint), ("t", relay.key)]
+        }
         return "sill://pair?" + items.map { "\($0.0)=\(Self.escape($0.1))" }.joined(separator: "&")
     }
 
@@ -302,6 +315,14 @@ public struct PairLink: Hashable, Sendable {
             addresses.append(a)
         }
         let names = items.filter { $0.name == "n" }
-        return .success(PairLink(fingerprint: fp, secret: secret, name: names.first?.value ?? "", port: port, addresses: addresses))
+        // Reach from Anywhere: all three, each once and well formed, or the link carries no relay
+        // (a link of a later generation, or a damaged one, still pairs at its addresses).
+        var relay: RelayInvite?
+        if case .success(let r) = single("r"), case .success(let f) = single("f"), case .success(let t) = single("t") {
+            let invite = RelayInvite(relay: RelayInfo(fingerprint: f, domain: r), key: t)
+            if invite.isWellFormed { relay = invite }
+        }
+        return .success(PairLink(fingerprint: fp, secret: secret, name: names.first?.value ?? "", port: port, addresses: addresses,
+                                 relay: relay))
     }
 }

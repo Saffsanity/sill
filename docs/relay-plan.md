@@ -172,9 +172,16 @@ end to end).
 3. **Export compliance.** WireGuard is not Apple's crypto. `ITSAppUsesNonExemptEncryption` stays NO
    under the standard-algorithms exemption that WireGuard and Tailscale apps use; Noah to confirm
    in App Store Connect.
-4. **Joining from afar.** v1 joins only over a session the device already has (at home, or through a
-   VPN or port forward): the key never travels in a QR code or a link. A `sill://pair` link that also
-   carries a key could let a device join without ever being home; left for later.
+4. **Joining from the QR code** (decided 2026-10-21, Dan): the pairing window's QR code carries the
+   tailnet (`&r=<domain>&f=<fingerprint>&t=<key>`, about 340 bytes, still a QR code a phone reads at
+   once), so scanning it joins the tailnet at once, and the pairing itself goes through the relay when
+   none of the link's addresses answers: no session at home first, and no VPN. The key is the
+   window's alone: single use, ten minutes, minted when the window opens (the code is offered again
+   with it once the tailnet is up) and expired, with any node that joined with it, when the window
+   closes unused; the device that pairs through it owns it (sill-net's ledger: `claim`), so Remove
+   removes that node. It adds nothing an attacker could use that the code doesn't already give: the
+   QR code's secret pairs the device, and the key only reaches the door that asks for that pairing.
+   Devices paired before Reach from Anywhere was on still join over a session (kinds 61 and 60).
 5. **Licensing.** The ported Go is contributed under Apache-2.0; HeadFwd's own code it derives from is
    MIT (Dan's), Headscale and tailscale.com BSD-3. A ThirdPartyNotices file should ship in both apps
    before a release (not in this change).

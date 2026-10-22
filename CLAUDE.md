@@ -22,7 +22,10 @@ accept or strike.
   `HostConfig.reachFromAnywhere` (off) are on. Remove deletes the device's nodes (sill-net's ledger).
   Settings › Remote Access: "Reach from Anywhere". `SillHost --remote --relay`.
 - Wire: `MacInfo.relay` (kind 18, left out when nil), kinds 60 `relayInvite` and 61 `relayJoin` (clear
-  of the 33–46 open pull requests use), `RelayPolicy` (Relay.swift) both ends.
+  of the 33–46 open pull requests use), `RelayPolicy` (Relay.swift) both ends. The pairing QR code
+  carries the tailnet (`PairLink.relay`: `&r=&f=&t=`, the window's own single-use key, claimed by the
+  device that pairs, expired when the window closes unused), so a scan joins and pairs through the
+  relay with no session first (Dan, 2026-10-21); kinds 60/61 remain for devices paired before.
 - Device: `SillTailnet.xcframework` (`Helpers/tailnet-mobile`, aggregate target `SillTailnet` running
   `Scripts/make-tailnet.sh`), `TailnetController`, `StreamClient+Relay`; `SavedMac.relay` keeps the
   fingerprint and domain, never the key; the forwarder (127.0.0.1:N → sill-mac:7455) is the last dial

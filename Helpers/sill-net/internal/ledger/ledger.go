@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -78,6 +79,25 @@ func (l *Ledger) Forget(device string) error {
 	return l.flushLocked()
 }
 
+// Rename moves every key recorded for from (a pairing window's pending
+// entry) to to (the device that paired through it), so that removing the
+// device removes the node that joined with the window's key.
+func (l *Ledger) Rename(from, to string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	keys := l.keys[from]
+	if len(keys) == 0 {
+		return nil
+	}
+	delete(l.keys, from)
+	l.keys[to] = append(l.keys[to], keys...)
+	return l.flushLocked()
+}
+
+// PendingPrefix names a pairing window's entry: keys minted for a QR code,
+// before any device has paired with it.
+const PendingPrefix = "pending:"
+
 // Stale lists the devices with keys that are not in paired.
 func (l *Ledger) Stale(paired []string) []string {
 	want := map[string]bool{}
@@ -86,7 +106,7 @@ func (l *Ledger) Stale(paired []string) []string {
 	}
 	var out []string
 	for _, d := range l.Devices() {
-		if !want[d] {
+		if !want[d] && !strings.HasPrefix(d, PendingPrefix) {
 			out = append(out, d)
 		}
 	}

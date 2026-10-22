@@ -81,6 +81,40 @@ do {
     check("the init keeps the relay it is given (the host's currentInfo)", made.relay == relay)
 }
 
+// MARK: The QR code (PairLink's r, f and t)
+
+do {
+    let macFP = Data((0..<32).map { UInt8($0 &* 7 &+ 3) })
+    let secret = Data(repeating: 0x16, count: 16)
+    let addrs = ["192.168.1.20", "mac-mini.tail1234.ts.net", "100.101.102.103", "[fd7a:115c:a1e0::1234]", "home.example.net:17455"]
+        .compactMap { t -> ParsedAddress? in if case .success(let a) = AddressParser.parse(t) { return a }; return nil }
+    let realKey = "hskey-auth-" + String(repeating: "A", count: 77)        // Headscale's are 88 characters
+    let withRelay = PairLink(fingerprint: macFP, secret: secret, name: "Dan’s Mac mini", port: 7455, addresses: addrs,
+                             relay: RelayInvite(relay: relay, key: realKey))
+    let url = withRelay.url
+    check("a link with a relay carries r, f and t", url.contains("&r=headfwd.net") && url.contains("&f=\(fp)") && url.contains("&t=hskey-auth-"))
+    check("a link with a relay and five addresses is under 400 bytes (\(url.utf8.count)): a QR code a phone reads", url.utf8.count < 400)
+    if case .success(let back) = PairLink.parse(url) {
+        check("the relay round-trips", back.relay == RelayInvite(relay: relay, key: realKey))
+        check("the rest round-trips with it", back.fingerprint == macFP && back.secret == secret && back.addresses.count == 5)
+    } else { check("a link with a relay parses", false) }
+    let plain = PairLink(fingerprint: macFP, secret: secret, name: "Mac", port: 7455, addresses: addrs)
+    check("a link without a relay carries none of r, f, t", !plain.url.contains("&r=") && !plain.url.contains("&t=") && !plain.url.contains("&f="))
+    if case .success(let back) = PairLink.parse(plain.url) { check("…and parses with no relay", back.relay == nil) }
+    func parsedRelay(_ text: String) -> RelayInvite?? {
+        if case .success(let l) = PairLink.parse(text) { return .some(l.relay) }
+        return .none
+    }
+    let base = plain.url
+    check("r and f without t: no relay, still a link", parsedRelay(base + "&r=headfwd.net&f=\(fp)") == .some(nil))
+    check("a malformed f: no relay, still a link", parsedRelay(base + "&r=headfwd.net&f=XYZ&t=\(key)") == .some(nil))
+    check("a malformed r: no relay, still a link", parsedRelay(base + "&r=-bad&f=\(fp)&t=\(key)") == .some(nil))
+    check("two t: no relay, still a link", parsedRelay(base + "&r=headfwd.net&f=\(fp)&t=\(key)&t=\(key)") == .some(nil))
+    check("a t with a space: no relay", parsedRelay(base + "&r=headfwd.net&f=\(fp)&t=a%20b") == .some(nil))
+    check("an invalid relay given to the init is dropped",
+          PairLink(fingerprint: macFP, secret: secret, name: "Mac", port: 7455, addresses: [], relay: RelayInvite(relay: relay, key: "")).relay == nil)
+}
+
 // MARK: RelayPolicy, host
 
 check("host: a paired key, the tailnet up, first ask: a key", RelayPolicy.hostInvites(paired: true, relayReady: true, sinceLast: nil))

@@ -112,8 +112,9 @@ Sill has layouts of its own.
   app and no port forward. Your Mac runs a private network of its own, and a
   free relay (headfwd.net) helps your devices find it from any network; the
   packets then go directly when the networks allow, or through Tailscale's
-  public relays when they don't. A paired device joins the next time it
-  connects, and Sill's own encryption with both keys pinned carries every
+  public relays when they don't. Scan your Mac's pairing code anywhere
+  and your device joins (a device paired before joins the next time it
+  connects), and Sill's own encryption with both keys pinned carries every
   session, so neither relay can see or change it ([docs/relay-plan.md](docs/relay-plan.md)).
 - **When the link can't keep up**, Sill for Mac notices that it is holding
   frames back and tells your device, which says so over the picture and, in

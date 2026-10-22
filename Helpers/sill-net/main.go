@@ -66,10 +66,11 @@ type Event struct {
 
 // Command is one line on stdin.
 type Command struct {
-	Cmd     string   `json:"cmd"` // "invite", "remove", "paired", "door", "stop"
+	Cmd     string   `json:"cmd"` // "invite", "remove", "paired", "claim", "forget", "door", "stop"
 	Device  string   `json:"device,omitempty"`
 	Devices []string `json:"devices,omitempty"`
 	Door    string   `json:"door,omitempty"`
+	From    string   `json:"from,omitempty"`
 	ID      int      `json:"id,omitempty"`
 }
 
@@ -322,6 +323,22 @@ func (d *daemon) handle(ctx context.Context, c Command) {
 	case "invite":
 		err = d.invite(cctx, c.Device, c.ID)
 	case "remove":
+		err = d.remove(cctx, c.Device)
+	case "claim":
+		// A pairing window's QR key went to the device that paired with it.
+		if !strings.HasPrefix(c.From, ledger.PendingPrefix) || strings.TrimSpace(c.Device) == "" {
+			err = fmt.Errorf("claim needs a pending entry and a device")
+			break
+		}
+		err = d.devices.Rename(c.From, c.Device)
+	case "forget":
+		// A pairing window closed with no device paired through it: its QR
+		// key can no longer join, and a node that joined with it and then
+		// never paired is taken off the tailnet.
+		if !strings.HasPrefix(c.Device, ledger.PendingPrefix) {
+			err = fmt.Errorf("forget takes a pending entry only")
+			break
+		}
 		err = d.remove(cctx, c.Device)
 	case "paired":
 		// Devices removed while sill-net was not running.

@@ -7,6 +7,7 @@ R = "Sources/StreamProtocol/Relay.swift"
 M_ = "Sources/StreamProtocol/Remote.swift"
 K = "Sources/StreamProtocol/StreamMessage.swift"
 D = "iOSClient/RemoteDialPolicy.swift"
+P = "Sources/StreamProtocol/Pairing.swift"
 M = [
     ("relayInvite on 33", K, "    case relayInvite = 60 ", "    case relayInvite = 33 "),
     ("relayJoin on 62", K, "    case relayJoin = 61 ", "    case relayJoin = 62 "),
@@ -41,5 +42,8 @@ M = [
     ("relay: counts as lan", D, "kind: MacAddress.vpn, via: RelayPolicy.serviceName)", "kind: MacAddress.lan, via: RelayPolicy.serviceName)"),
     ("isRelay: any loopback", D, "c.via == RelayPolicy.serviceName && c.host.hasPrefix(\"127.\")", "c.host.hasPrefix(\"127.\")"),
     ("relay key is the port", D, "    static let relayKey = \"relay\"", "    static let relayKey = \"127.0.0.1|62000\""),
+    ("link: relay never written", P, '            items += [("r", relay.relay.domain), ("f", relay.relay.fingerprint), ("t", relay.key)]\n', ""),
+    ("link: relay never read", P, "            if invite.isWellFormed { relay = invite }", "            _ = invite"),
+    ("link: init keeps a malformed relay", P, "        self.relay = relay.flatMap { $0.isWellFormed ? $0 : nil }", "        self.relay = relay"),
 ]
 module.mutate("relay", M, sys.argv[1] if len(sys.argv) > 1 else os.getcwd())

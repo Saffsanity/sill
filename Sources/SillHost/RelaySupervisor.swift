@@ -112,6 +112,21 @@ package final class RelaySupervisor {
         send(["cmd": "invite", "device": device])
     }
 
+    /// A pairing window's QR key, under `pending:<window>` until a device pairs with it.
+    func invite(window: String) {
+        send(["cmd": "invite", "device": "pending:" + window])
+    }
+
+    /// The device that paired through `window` now owns the node that joined with its key.
+    func claim(window: String, device: String) {
+        send(["cmd": "claim", "from": "pending:" + window, "device": device])
+    }
+
+    /// `window` closed with no device paired through it: its key, and any node it joined, go.
+    func forget(window: String) {
+        send(["cmd": "forget", "device": "pending:" + window])
+    }
+
     /// Removes a device's nodes from the tailnet (the Mac's Remove).
     func remove(device: String) {
         send(["cmd": "remove", "device": device])
