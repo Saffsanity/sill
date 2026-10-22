@@ -86,7 +86,8 @@ final class WindowCatalog {
     var preferMainDisplay = false
     /// The display a device picked for the Desktop (#91); nil, or gone, falls back to the main display.
     var desktopDisplayID: CGDirectDisplayID?
-    /// This Mac's own displays (never Sill's virtual ones), sorted with the main display first.
+    /// This Mac's own displays (never Sill's virtual ones), in the Desktop button's order
+    /// (`DesktopDisplays.comesBefore`).
     private(set) var realDisplays: [SCDisplay] = []
     static func isSills(_ id: CGDirectDisplayID) -> Bool { CGDisplayVendorNumber(id) == VirtualStage.vendorID }
 
@@ -273,10 +274,7 @@ final class WindowCatalog {
         let mainID = CGMainDisplayID()
         realDisplays = content.displays
             .filter { !Self.isSills($0.displayID) }
-            .sorted { a, b in
-                if (a.displayID == mainID) != (b.displayID == mainID) { return a.displayID == mainID }
-                return a.displayID < b.displayID
-            }
+            .sorted { DesktopDisplays.comesBefore(($0.displayID, $0.frame.minX, $0.frame.minY), ($1.displayID, $1.frame.minX, $1.frame.minY), main: mainID) }
         display = realDisplays.first { $0.displayID == desktopDisplayID }
             ?? realDisplays.first ?? content.displays.first
         var visible = content.windows.filter { w in

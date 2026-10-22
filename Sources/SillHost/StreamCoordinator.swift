@@ -165,6 +165,10 @@ package final class StreamCoordinator {
     /// Desktop request can land then (StreamClient's window list handling) and must not override
     /// the user's pick.
     private var pickArrivedWhileSwitching: StreamSource?
+    /// The display the running Desktop pipeline captures (#91). A device's pick moves the catalog's
+    /// display at once, but the stream moves only when a pipeline starts there, so input, the
+    /// pointer and the window list follow this one, never a pick still on its way.
+    private var desktopStreamDisplay: CGDirectDisplayID?
     /// The client's last stream panel size and text scale. One stream, so with several clients
     /// the last one to report wins.
     private var viewport: Viewport?
@@ -1064,7 +1068,7 @@ package final class StreamCoordinator {
             // The test pattern with the TEST ONLY scripted pointer: its own space, where a test
             // client's input moves that pointer (a synthetic host posts nothing).
             if synthetic, pointer.hasTestPointer { return Self.testPatternRect }
-            return catalog.display?.frame
+            return desktopStreamFrame
         case .window(let id):
             // On the virtual display the video is the captured crop, not the whole window: an app
             // that took a larger size than asked overhangs the display and the overhang is not shown.
@@ -1077,6 +1081,16 @@ package final class StreamCoordinator {
             rectCache = (id, rect, now)
             return rect
         }
+    }
+
+    /// The streamed display's frame as the catalog last saw it, so a display moved in System
+    /// Settings is followed; nil once it is gone, and input is dropped rather than sent elsewhere.
+    /// The catalog's own display first: it is the streamed one unless a pick is on its way, and it
+    /// can be one `realDisplays` leaves out (Sill's virtual display on a Mac with no other).
+    private var desktopStreamFrame: CGRect? {
+        guard let id = desktopStreamDisplay else { return nil }
+        if let d = catalog.display, d.displayID == id { return d.frame }
+        return catalog.realDisplays.first { $0.displayID == id }?.frame
     }
 
     private static func liveBounds(of id: CGWindowID) -> CGRect? {
@@ -1107,7 +1121,7 @@ package final class StreamCoordinator {
             return nil
         case .desktop:
             if synthetic { return pointer.hasTestPointer ? .rect(Self.testPatternRect) : nil }
-            return catalog.display.map { .rect($0.frame) }
+            return desktopStreamFrame.map { .rect($0) }
         case .window(let id):
             guard !synthetic else { return nil }
             if virtualDisplay, stage.isStaged, let onScreen = stage.captureRectOnScreen { return .rect(onScreen) }
@@ -1234,7 +1248,8 @@ package final class StreamCoordinator {
                 }
             }
             if catalog.clientCount == 0 { pick = nil }
-            if let pick, pick != active {
+            let desktopMoved = active == .desktop && !synthetic && catalog.display?.displayID != desktopStreamDisplay
+            if let pick, pick != active || desktopMoved {
                 // The pick's own select fits the latest viewport. Run after it has started, the
                 // viewport tail would resize the old window, which `active` still names mid-switch.
                 viewportArrivedWhileSwitching = false
@@ -1407,6 +1422,7 @@ package final class StreamCoordinator {
                 title = "Test Pattern"; kind = .testPattern
             } else {
                 guard let d = catalog.display else { active = .none; broadcastList(); return }
+                desktopStreamDisplay = d.displayID
                 // Sill's own windows (Settings, Log, the pairing window with its code) never go out
                 // in a Desktop stream. Fixed here at pipeline start: a running SCStream is never
                 // reconfigured, so a host that can show a pairing code (remote access) looks for
@@ -2336,7 +2352,7 @@ package final class StreamCoordinator {
                                                              hostVersion: hostVersion, protocol: SillProtocol.current,
                                                              gestures: TrackpadGesture.generation, clipboard: clipboard.advertised,
                                                              displays: displays.isEmpty ? nil : displays,
-                                                             desktopDisplay: catalog.display?.displayID)))
+                                                             desktopDisplay: active == .desktop ? desktopStreamDisplay : catalog.display?.displayID)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }

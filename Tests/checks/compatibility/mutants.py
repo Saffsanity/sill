@@ -24,6 +24,8 @@ MUTANTS = [
     ("desktopDisplay never stored", "Switcher.swift", "self.clipboard = clipboard; self.displays = displays; self.desktopDisplay = desktopDisplay", "self.clipboard = clipboard; self.displays = displays; self.desktopDisplay = nil"),
     ("DesktopDisplays cycles even with 1 display", "Switcher.swift", "guard displays.count > 1 else {", "guard displays.isEmpty else {"),
     ("DesktopDisplays does not advance when Desktop is active", "Switcher.swift", "let nextIdx = desktopActive ? (idx + 1) % displays.count : idx", "let nextIdx = idx"),
+    ("displays numbered by ID, not where they sit", "Switcher.swift", "        if a.x != b.x { return a.x < b.x }\n", ""),
+    ("displays at one x not ordered top to bottom", "Switcher.swift", "        if a.y != b.y { return a.y < b.y }\n", ""),
     ("DesktopDisplays advances even when a window is active", "Switcher.swift", "let nextIdx = desktopActive ? (idx + 1) % displays.count : idx", "let nextIdx = (idx + 1) % displays.count"),
     ("kind 32 as 31", "StreamMessage.swift", "case clipboard = 32", "case clipboard = 31"),
     ("gestures never stored", "Switcher.swift", "self.protocol = `protocol`; self.gestures = gestures", "self.protocol = `protocol`; self.gestures = nil"),

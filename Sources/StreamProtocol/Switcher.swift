@@ -112,6 +112,17 @@ public enum DesktopDisplays {
         }
     }
 
+    /// The order the Desktop button numbers and steps through the displays: the main display
+    /// first, then the rest as they sit, left to right (top to bottom where two start at the same
+    /// x), the arrangement System Settings › Displays shows. A display's ID says nothing about
+    /// where it is. `x` and `y` are its top-left corner in global points (`SCDisplay.frame.origin`).
+    public static func comesBefore(_ a: (id: UInt32, x: Double, y: Double), _ b: (id: UInt32, x: Double, y: Double), main: UInt32) -> Bool {
+        if (a.id == main) != (b.id == main) { return a.id == main }
+        if a.x != b.x { return a.x < b.x }
+        if a.y != b.y { return a.y < b.y }
+        return a.id < b.id
+    }
+
     public static func button(displays: [DisplayInfo], current: UInt32?, desktopActive: Bool) -> ButtonState {
         guard displays.count > 1 else {
             return ButtonState(label: "Desktop", accessibilityLabel: "Show the full Mac desktop", nextDisplay: nil)
