@@ -216,6 +216,15 @@ check(DesktopDisplays.button(displays: [d1, d2], current: 1, desktopActive: true
       && DesktopDisplays.button(displays: [d1, d2], current: 2, desktopActive: true)
       == .init(label: "Desktop 2", accessibilityLabel: "Studio Display (2 of 2), showing now. Tap for Built-in Retina Display.", nextDisplay: 1),
       "while Desktop streams with 2 displays: shows which display is active and a tap moves to the next")
+// The order the displays are numbered in: a MacBook Pro (ID 1, main) under two identical 1080p
+// monitors, the left one ID 4 ("(1)" to macOS), the right one ID 2 ("(2)"), as one Mac reports them.
+let desk: [(id: UInt32, x: Double, y: Double)] = [(2, 834, -1080), (1, 0, 0), (4, -1086, -1080)]
+let deskOrder = desk.sorted { DesktopDisplays.comesBefore($0, $1, main: 1) }.map(\.id)
+check(deskOrder == [1, 4, 2], "the main display first, then the others left to right, not by ID: \(deskOrder)")
+let stacked: [(id: UInt32, x: Double, y: Double)] = [(3, 1512, 0), (5, 1512, -1080), (1, 0, 0)]
+let stackedOrder = stacked.sorted { DesktopDisplays.comesBefore($0, $1, main: 1) }.map(\.id)
+check(stackedOrder == [1, 5, 3], "two displays at the same x: the upper one first: \(stackedOrder)")
+
 
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil
