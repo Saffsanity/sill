@@ -140,6 +140,23 @@ public enum DesktopDisplays {
             : "Show \(name) (\(idx + 1) of \(displays.count))"
         return ButtonState(label: label, accessibilityLabel: ax, nextDisplay: next.id)
     }
+
+    /// What `select`'s defer owes after a switch completes (#91): a queued pick of a different
+    /// source (`queued != active`), or `.desktop` when the Desktop is streaming (`active == .desktop`
+    /// and `!synthetic`) and the catalog's chosen display (`selectedDisplay`) has moved off the
+    /// display the running pipeline captures (`streamedDisplay`) — including when a display pick
+    /// arrived while `select(.desktop)` was starting from `.none` or `.window` (where `queued` is nil).
+    public static func nextPickAfterSwitch(
+        queued: StreamSource?,
+        active: StreamSource,
+        synthetic: Bool,
+        selectedDisplay: UInt32?,
+        streamedDisplay: UInt32?
+    ) -> StreamSource? {
+        if let queued, queued != active { return queued }
+        if active == .desktop, !synthetic, selectedDisplay != streamedDisplay { return .desktop }
+        return nil
+    }
 }
 
 public struct LaunchApp: Codable {

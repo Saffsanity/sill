@@ -224,6 +224,21 @@ check(deskOrder == [1, 4, 2], "the main display first, then the others left to r
 let stacked: [(id: UInt32, x: Double, y: Double)] = [(3, 1512, 0), (5, 1512, -1080), (1, 0, 0)]
 let stackedOrder = stacked.sorted { DesktopDisplays.comesBefore($0, $1, main: 1) }.map(\.id)
 check(stackedOrder == [1, 5, 3], "two displays at the same x: the upper one first: \(stackedOrder)")
+// Mid-switch display picks (select's defer): even when queued is nil (a pick that arrived while
+// switching from a window or .none into .desktop, before active became .desktop), a moved display
+// queues .desktop; a queued pick of another source wins; synthetic or non-Desktop streams do not.
+check(DesktopDisplays.nextPickAfterSwitch(queued: nil, active: .desktop, synthetic: false, selectedDisplay: 2, streamedDisplay: 1) == .desktop,
+      "mid-switch display change with nil queued pick (switching from window/none into Desktop) still queues .desktop")
+check(DesktopDisplays.nextPickAfterSwitch(queued: .desktop, active: .desktop, synthetic: false, selectedDisplay: 1, streamedDisplay: 2) == .desktop,
+      "mid-switch display change while already on Desktop queues .desktop")
+check(DesktopDisplays.nextPickAfterSwitch(queued: .desktop, active: .desktop, synthetic: false, selectedDisplay: 2, streamedDisplay: 2) == nil,
+      "same display already streaming needs no follow-up pick")
+check(DesktopDisplays.nextPickAfterSwitch(queued: .window(7), active: .desktop, synthetic: false, selectedDisplay: 2, streamedDisplay: 1) == .window(7),
+      "a queued window pick wins over a display change")
+check(DesktopDisplays.nextPickAfterSwitch(queued: nil, active: .window(7), synthetic: false, selectedDisplay: 2, streamedDisplay: 1) == nil
+      && DesktopDisplays.nextPickAfterSwitch(queued: nil, active: .none, synthetic: false, selectedDisplay: 2, streamedDisplay: nil) == nil
+      && DesktopDisplays.nextPickAfterSwitch(queued: nil, active: .desktop, synthetic: true, selectedDisplay: 2, streamedDisplay: nil) == nil,
+      "no display follow-up when a window or nothing streams, or on a synthetic host")
 
 
 // For H4: what cb0ec55's StreamProtocol must read.

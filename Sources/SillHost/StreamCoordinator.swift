@@ -146,6 +146,7 @@ package final class StreamCoordinator {
     package private(set) var active: StreamSource = .none {
         didSet {
             if case .window(let id) = active { catalog.activeWindowID = id } else { catalog.activeWindowID = nil }
+            if active != .desktop { desktopStreamDisplay = nil }
             if active == .none { status.update { $0.stream = nil } }
             server.setStreaming(active != .none)   // link keepalive ticks while a source is live
             cursorShapes.running = active != .none
@@ -1246,15 +1247,23 @@ package final class StreamCoordinator {
                 }
             }
             if catalog.clientCount == 0 { pick = nil }
-            let desktopMoved = active == .desktop && !synthetic && catalog.display?.displayID != desktopStreamDisplay
-            if let pick, pick != active || desktopMoved {
+            let nextPick = catalog.clientCount > 0
+                ? DesktopDisplays.nextPickAfterSwitch(
+                    queued: pick,
+                    active: active,
+                    synthetic: synthetic,
+                    selectedDisplay: catalog.display?.displayID,
+                    streamedDisplay: desktopStreamDisplay
+                )
+                : nil
+            if let nextPick {
                 // The pick's own select fits the latest viewport. Run after it has started, the
                 // viewport tail would resize the old window, which `active` still names mid-switch.
                 viewportArrivedWhileSwitching = false
                 // Through the handler's rule again, not straight to `select`: another restart can
                 // start before this Task runs (a viewport's new rate, an encoder hang, a lost
                 // display), and `select` would drop the pick; the rule queues it behind that one.
-                Task { @MainActor in await self.handlePick(pick) }
+                Task { @MainActor in await self.handlePick(nextPick) }
             } else if viewportArrivedWhileSwitching {
                 viewportArrivedWhileSwitching = false
                 Task { @MainActor in await self.applyViewportToActiveWindow() }
