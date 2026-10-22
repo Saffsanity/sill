@@ -48,9 +48,9 @@ run on the Duo in a compatibility window, 871×669 and sideways only.
 
 Reach from Anywhere (docs/relay-plan.md) adds Go, the version
 `Helpers/sill-net/go.mod` names or newer (https://go.dev/dl, or `brew install
-go`): `Scripts/make-app.sh` builds Sill for Mac's two helpers with
-`Scripts/make-helpers.sh` (sill-net, and Headscale at the version
-`Helpers/tools/go.mod` pins), and the iOS project's SillTailnet target builds
+go`): `Scripts/make-app.sh` builds Sill for Mac's helper with
+`Scripts/make-helpers.sh` (sill-net, with Headscale built in at the version
+its `go.mod` pins), and the iOS project's SillTailnet target builds
 `SillTailnet.xcframework` with `Scripts/make-tailnet.sh`. Both skip the build
 when nothing they read changed, and both land in `.build`. Without Go,
 `SILL_NO_RELAY=1 Scripts/make-app.sh` builds Sill.app with no helpers (Reach

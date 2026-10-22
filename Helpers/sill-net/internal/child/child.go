@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -33,11 +32,15 @@ func (p *Proc) KillStale() {
 		return
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-	if err != nil || pid <= 1 {
+	if err != nil || pid <= 1 || pid == os.Getpid() {
 		return
 	}
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
-	if err != nil || !strings.Contains(string(out), filepath.Base(p.Bin)) {
+	// The same program, running the same command: Headscale runs as this very
+	// binary (`sill-net headscale serve --config <path>`), so the name alone
+	// would also match a sill-net that is not Headscale. ps -ww: never cut.
+	out, err := exec.Command("ps", "-ww", "-p", strconv.Itoa(pid), "-o", "args=").Output()
+	args := strings.TrimSpace(string(out))
+	if err != nil || !strings.HasPrefix(args, p.Bin+" ") || !strings.HasSuffix(args, strings.Join(p.Args, " ")) {
 		return
 	}
 	_ = syscall.Kill(pid, syscall.SIGTERM)

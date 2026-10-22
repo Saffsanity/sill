@@ -285,10 +285,10 @@ check_signature() {
                 || fail "$app ($arch) embeds a provisioning profile but does not carry com.apple.application-identifier (a Mac profile grants no other application identifier); it would be killed at launch"
         fi
     done
-    # Reach from Anywhere's helpers (docs/relay-plan.md): present, and each signed as notarization
-    # wants it, for every architecture the app has.
+    # Reach from Anywhere's helper (docs/relay-plan.md, Headscale built in): present, and signed as
+    # notarization wants it, for every architecture the app has.
     local helper
-    for helper in sill-net headscale; do
+    for helper in sill-net; do
         local h="$app/Contents/Helpers/$helper"
         [ -x "$h" ] || fail "$app has no Contents/Helpers/$helper: Reach from Anywhere needs it (make-app.sh builds it)"
         [ "$(lipo -archs "$h" | tr ' ' '\n' | sort | tr '\n' ' ')" = "$(tr ' ' '\n' <<<"$archs" | sort | tr '\n' ' ')" ] \

@@ -134,9 +134,9 @@ JSON
 fi
 cp "$icon_out"/compiled/* "$stage/Contents/Resources/" 2>/dev/null || true
 
-# Reach from Anywhere (docs/relay-plan.md): sill-net and the Headscale it runs, in Contents/Helpers,
-# built by Scripts/make-helpers.sh for the same architectures as Sill (SILL_UNIVERSAL). Each is
-# signed below before the bundle, with the same identity and runtime, no entitlements.
+# Reach from Anywhere (docs/relay-plan.md): sill-net, with Headscale built in, in Contents/Helpers,
+# built by Scripts/make-helpers.sh for the same architectures as Sill (SILL_UNIVERSAL). Signed
+# below before the bundle, with the same identity and runtime, no entitlements.
 helpers=()
 if [ "${SILL_NO_RELAY:-}" = 1 ]; then
     if [ "$release" = 1 ]; then
@@ -146,7 +146,7 @@ if [ "${SILL_NO_RELAY:-}" = 1 ]; then
 else
     Scripts/make-helpers.sh
     mkdir -p "$stage/Contents/Helpers"
-    for h in sill-net headscale; do
+    for h in sill-net; do
         cp .build/helpers/$h "$stage/Contents/Helpers/$h"
         helpers+=("$stage/Contents/Helpers/$h")
     done

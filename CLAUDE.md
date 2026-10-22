@@ -15,7 +15,7 @@ results and what is untested).** Not asked for in an issue; proposed as an excep
 frameworks only" and "nothing that needs a server", by a dated paragraph in docs/BRIEF.md for Noah to
 accept or strike.
 - Mac: `Helpers/sill-net` (Go, from Frigate Launcher's nvrd / Bridge's sidecar) runs Headscale (pinned
-  v0.29.4, `Helpers/tools`) with a static ACL (`tag:sill-device` → `tag:sill-mac:7455` only), registers
+  v0.29.4, built in: `sill-net headscale serve`) with a static ACL (`tag:sill-device` → `tag:sill-mac:7455` only), registers
   with headfwd.net (HeadFwd's strict URL check), and forwards its tsnet node's :7455 to `RelayDoor`
   (`Door(.remote)` on 127.0.0.1, `fixedArrival` origin `.vpn`, "through Sill Relay"). `RelaySupervisor`
   runs it from `Contents/Helpers` over stdin/stdout JSON while Remote Access and
@@ -31,7 +31,7 @@ accept or strike.
 - Build: `Scripts/make-helpers.sh`, `make-tailnet.sh`; make-app.sh signs the helpers in
   Contents/Helpers first (`SILL_NO_RELAY=1` for development only); release.sh and release-ios.sh check
   them; CI/Release/TestFlight set up Go (setup-go pinned by SHA), CI vets and tests it and builds
-  Sill.app with its helpers. Sill.app 7.3 → 73 MB.
+  Sill.app with its helpers. Sill.app 7.3 → 54 MB (one helper).
 - Verified: Go tests; run-all.sh all 47 (relay: 96 checks, 33 of 33 mutants); live against headfwd.net
   (join 2.8 s, rejoin 0.25 s, Remove refused, the ACL); SillHost --relay with sillclient and a test
   device (60 fps through the relay, away quality, wrong pin and unpaired key refused); the iOS app in

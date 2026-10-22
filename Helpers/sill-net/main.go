@@ -78,6 +78,7 @@ type daemon struct {
 	hsDir    string
 	hsURL    string
 	hsBin    string
+	hsArgs   []string // ["headscale"] when Headscale runs inside this binary
 	relayURL string
 	domain   string
 	devices  *ledger.Ledger
@@ -161,6 +162,7 @@ func (d *daemon) bringUpOnce(ctx context.Context) error {
 		BaseURL:    d.hsURL,
 		KeyPath:    filepath.Join(d.hsDir, "api-key"),
 		Binary:     d.hsBin,
+		BinArgs:    d.hsArgs,
 		ConfigPath: filepath.Join(d.hsDir, "config.yaml"),
 		Logf:       d.logf,
 	})
@@ -356,10 +358,14 @@ func freePort() (int, error) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "headscale" {
+		runHeadscale(os.Args[2:])
+		return
+	}
 	home, _ := os.UserHomeDir()
 	var (
 		dataDir  = flag.String("data", filepath.Join(home, "Library", "Application Support", "Sill", "net"), "state directory")
-		hsBin    = flag.String("headscale", "", "the headscale binary (default: next to this one)")
+		hsBin    = flag.String("headscale", "", "a separate headscale binary (default: the one built into sill-net)")
 		relayURL = flag.String("relay", relay.DefaultRelay, "the HeadFwd relay to register with")
 		door     = flag.String("door", "", "Sill's relay door, 127.0.0.1:<port>")
 	)
@@ -367,13 +373,16 @@ func main() {
 	log.SetFlags(0)
 	log.SetPrefix("sill-net: ")
 
-	bin := *hsBin
+	// Headscale is built into this binary (headscale_cmd.go) and runs as its
+	// own process: `sill-net headscale serve …`. One Go runtime, tsnet and
+	// gvisor instead of two copies (docs/relay-plan.md, size).
+	bin, binArgs := *hsBin, []string(nil)
 	if bin == "" {
 		self, err := os.Executable()
 		if err != nil {
 			log.Fatal(err)
 		}
-		bin = filepath.Join(filepath.Dir(self), "headscale")
+		bin, binArgs = self, []string{"headscale"}
 	}
 	domain, err := relay.BaseDomain(*relayURL)
 	if err != nil {
@@ -398,6 +407,7 @@ func main() {
 		hsDir:    filepath.Join(*dataDir, "headscale"),
 		hsURL:    fmt.Sprintf("http://127.0.0.1:%d", port),
 		hsBin:    bin,
+		hsArgs:   binArgs,
 		relayURL: strings.TrimRight(*relayURL, "/"),
 		domain:   domain,
 		devices:  devices,
@@ -420,7 +430,7 @@ func main() {
 	hsProc := &child.Proc{
 		Name:    "headscale",
 		Bin:     d.hsBin,
-		Args:    []string{"serve", "--config", cfgPath},
+		Args:    append(append([]string(nil), d.hsArgs...), "serve", "--config", cfgPath),
 		LogPath: filepath.Join(d.dataDir, "logs", "headscale.log"),
 		PidPath: filepath.Join(d.hsDir, "headscale.pid"),
 		Logf:    d.logf,

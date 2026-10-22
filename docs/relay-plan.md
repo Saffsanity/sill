@@ -71,8 +71,12 @@ preauth key, and its tsnet state is excluded from backups.
 - **`Helpers/sill-net`** (Go, ported from Frigate Launcher's `nvrd`, itself from Bridge's
   tailnet sidecar; the relay client is wire-compatible with HeadFwd at registration protocol v2,
   its crypto test vector shared):
-  - Runs `headscale serve` (pinned v0.29.4, `Helpers/tools/go.mod`/`go.sum`) as a supervised child on
-    a free loopback port, with a config and a **static ACL policy** it writes:
+  - Runs Headscale (pinned v0.29.4 in its `go.mod`/`go.sum`, **built into sill-net** and started as
+    `sill-net headscale serve`, so the Go runtime, tsnet and gvisor ship once) as a supervised child
+    on a free loopback port, with a config and a **static ACL policy** it writes. That child stops by
+    itself if sill-net dies, even by SIGKILL (macOS has no parent-death signal: it watches its
+    parent), and a stale one from a crash is stopped at the next start only if it runs that exact
+    command:
     `tag:sill-device` → `tag:sill-mac:7455`, nothing else, no SSH.
   - Settles Headscale's admin API key (rotating before expiry), registers with the relay, holds the
     WSS tunnel, and brings up the tsnet node `sill-mac` that forwards :7455 to the relay door.
@@ -123,12 +127,12 @@ preauth key, and its tsnet state is excluded from backups.
 
 ### Build and release
 
-- `Scripts/make-helpers.sh` (sill-net and Headscale, `CGO_ENABLED=0`, `-trimpath`, universal under
+- `Scripts/make-helpers.sh` (sill-net with Headscale built in, `CGO_ENABLED=0`, `-trimpath`, universal under
   `SILL_UNIVERSAL=1`) and `Scripts/make-tailnet.sh` (the xcframework), each skipped when its inputs'
   hash is unchanged.
-- `make-app.sh` copies both helpers into `Contents/Helpers` and signs them first (hardened runtime;
+- `make-app.sh` copies the helper into `Contents/Helpers` and signs it first (hardened runtime;
   a timestamp on a release); `SILL_NO_RELAY=1` skips them for development and is refused with
-  `--release`. `release.sh` checks each helper's Developer ID, runtime, timestamp and architectures.
+  `--release`. `release.sh` checks the helper's Developer ID, runtime, timestamp and architectures.
   `release-ios.sh` refuses an app whose binary lacks `SillTailnetStart`.
 - CI, Release and TestFlight set up Go (`actions/setup-go`, pinned by SHA). CI also vets, tests and
   gofmt-checks both modules, builds Sill.app with its helpers (ad hoc) and checks them, and runs the
@@ -145,9 +149,16 @@ This breaks three of CLAUDE.md's conventions, on purpose, and asks for a dated d
    (control only; free, run by Dan; HeadFwd's proxy is open source and a Mac can point at any
    instance with `defaults write me.saffer.sill.mac RelayURL https://…`), and Tailscale's DERP (only
    when a direct path fails). Zero operating cost for Sill.
-3. **Size**: Sill.app 7.3 MB → 73 MB (Headscale 46 MB, sill-net 20 MB, uncompressed arm64); the iOS
-   app gains the Go runtime and tsnet (a 50 MB static archive before dead-stripping; to be measured
-   on the App Store's thinned download).
+3. **Size**: Sill.app 7.3 MB → 54 MB uncompressed (one 49 MB helper, arm64); the zipped download
+   grows by about 14 MB. Measured: Headscale's own code is under 1 MB; the rest is what any
+   tsnet/WireGuard control plane carries: the Go runtime and its function tables (about 18 MB of
+   `__gopclntab`), tsnet and gvisor's netstack, crypto, gRPC/protobuf (Headscale's API), its SQLite
+   (a pure-Go port, 1.9 MB) and the Postgres driver it always links (1.3 MB). Shipping Headscale as a
+   separate binary cost 20 MB more (73 MB): the two shared 7.9 MB of 8.3 MB of code. Tailscale's
+   `ts_omit_*` build tags save only 0.3 MB on top, and some that compile panic at runtime (peerapi),
+   so none are used. Dropping SQLite or Postgres needs a fork of Headscale. The iOS app gains the Go
+   runtime and tsnet (a 50 MB static archive before dead-stripping; to be measured on the App
+   Store's thinned download).
 
 What it buys: the brief's "remote access without requiring Tailscale", with no VPN app, no account,
 no router settings, through CGNAT and double NAT, with the security story unchanged (Sill's own pins
@@ -190,8 +201,10 @@ end to end).
 - **Live, the iOS app in the simulator** (iPhone 17 Pro): paired at 127.0.0.1, asked, took the key,
   joined through headfwd.net in about 2.5 s; relaunched with every saved address replaced by
   192.0.2.1 (nothing answers), it connected "through Sill Relay" and streamed at 60 fps.
-- **Sill.app**: built with both helpers, ad hoc, `codesign --verify --strict --deep` passes; the
-  bundled sill-net finds its Headscale.
+- **Sill.app**: built with its helper, ad hoc, `codesign --verify --strict --deep` passes; the
+  bundled sill-net runs its built-in Headscale. With Headscale built in (2026-10-21), the live tests
+  above were run again: registration, join, the ACL, Remove, SillHost `--relay` streaming through
+  the relay, and a SIGKILLed sill-net whose Headscale stops by itself.
 - **Builds**: `swift build` clean; the iOS app builds for the simulator, but only with a local stub of
   `DuoPostureReader.swift`'s iOS 27.1 calls, since this Mac has Xcode 27.0 only (origin/main fails
   here the same way; CI uses the 27.1 beta).

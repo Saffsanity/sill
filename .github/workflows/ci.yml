@@ -111,16 +111,16 @@ jobs:
         run: Tests/checks/run-all.sh
 
       # Sill.app as a release lays it out (make-app.sh, which builds the helpers with
-      # make-helpers.sh), signed ad hoc: both helpers in Contents/Helpers, each signed with the
-      # hardened runtime, and the bundle verifying deep.
-      - name: Build Sill.app with its helpers (Scripts/make-app.sh, signed ad hoc)
+      # make-helpers.sh), signed ad hoc: its helper in Contents/Helpers (sill-net, Headscale built in),
+      # signed with the hardened runtime, and the bundle verifying deep.
+      - name: Build Sill.app with its helper (Scripts/make-app.sh, signed ad hoc)
         env:
           SILL_SIGN_IDENTITY: '-'
         run: |
           Scripts/make-app.sh
           app=.build/Sill.app
           codesign --verify --strict --deep "$app"
-          for h in sill-net headscale; do
+          for h in sill-net; do
             test -x "$app/Contents/Helpers/$h" || { echo "::error::Sill.app has no Contents/Helpers/$h"; exit 1; }
             codesign -dv "$app/Contents/Helpers/$h" 2>&1 | grep -q 'flags=.*runtime' \
               || { echo "::error::$h is not signed with the hardened runtime"; exit 1; }

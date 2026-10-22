@@ -2,7 +2,7 @@ import Foundation
 import StreamProtocol
 
 /// Reach from Anywhere's helper on the Mac (docs/relay-plan.md): runs `sill-net` (Helpers/sill-net,
-/// in Sill.app/Contents/Helpers beside its `headscale`) while the Mac's user has Reach from Anywhere
+/// in Sill.app/Contents/Helpers, with Headscale built in) while the Mac's user has Reach from Anywhere
 /// and Remote Access on, and talks to it over its stdin and stdout, one JSON object a line. Its
 /// stderr goes to this host's log, one line each, prefixed "sill-net:".
 ///

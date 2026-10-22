@@ -81,10 +81,11 @@ type apiKeyRow struct {
 // KeyBootstrap carries what EnsureAPIKey needs to mint via the CLI when no
 // valid key exists yet.
 type KeyBootstrap struct {
-	BaseURL    string // http://127.0.0.1:<port>
-	KeyPath    string // file holding the key, 0600
-	Binary     string // headscale binary
-	ConfigPath string // headscale config.yaml
+	BaseURL    string   // http://127.0.0.1:<port>
+	KeyPath    string   // file holding the key, 0600
+	Binary     string   // the binary that runs Headscale's CLI
+	BinArgs    []string // its leading arguments: ["headscale"] when it is sill-net itself
+	ConfigPath string   // headscale config.yaml
 	Logf       func(format string, args ...any)
 }
 
@@ -133,7 +134,8 @@ func EnsureAPIKey(ctx context.Context, b KeyBootstrap) (key string, rotatedFrom 
 	}
 
 	// No valid key to authenticate with: the one step that needs the CLI.
-	cmd := exec.CommandContext(ctx, b.Binary, "--config", b.ConfigPath, "apikeys", "create", "--expiration", "90d")
+	args := append(append([]string(nil), b.BinArgs...), "--config", b.ConfigPath, "apikeys", "create", "--expiration", "90d")
+	cmd := exec.CommandContext(ctx, b.Binary, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", "", fmt.Errorf("headscale apikeys create: %v: %s", err, strings.TrimSpace(string(out)))
