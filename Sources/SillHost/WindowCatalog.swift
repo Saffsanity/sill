@@ -80,10 +80,6 @@ final class WindowCatalog {
     /// because its contents are the ones changing. Nil is fine: it is then treated like any other.
     var activeWindowID: UInt32?
 
-    /// `--virtual-display`: the Desktop source must capture the Mac's real main display, never the
-    /// virtual one. `SCShareableContent.displays` order is not guaranteed once a second display
-    /// exists, so pick by ID. Off by default: the default path keeps `displays.first`.
-    var preferMainDisplay = false
     /// The display a device picked for the Desktop (#91); nil, or gone, falls back to the main display.
     var desktopDisplayID: CGDirectDisplayID?
     /// This Mac's own displays (never Sill's virtual ones), in the Desktop button's order

@@ -342,7 +342,6 @@ package final class StreamCoordinator {
         // The identity's TXT record (its tag, and `p` on a TLS home door) must be in the first
         // registration: set before `server.start()`.
         remote?.attach(server: server, status: status, macName: macName, requirePairing: config.requirePairing)
-        catalog.preferMainDisplay = virtualDisplay   // the Desktop source must never capture the virtual display
         stage.onLost = { [weak self] in Task { @MainActor in await self?.stageLost() } }
         status.update { $0.synthetic = synthetic; $0.virtualDisplayOn = config.virtualDisplay }
         // Every change of the snapshot re-publishes the devices' settings state (deduplicated, so
@@ -765,7 +764,6 @@ package final class StreamCoordinator {
             || old.requirePairing != next.requirePairing {
             remote?.apply(next)
         }
-        catalog.preferMainDisplay = next.virtualDisplay   // the Desktop source must never capture the virtual display
         if old.virtualDisplay && !next.virtualDisplay {
             stage.release()        // idempotent: select has already sent a staged window home
             status.update { $0.lastStageFailure = nil }
