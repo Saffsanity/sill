@@ -298,21 +298,27 @@ static class RenameDialog
         var label = new Label
         {
             Text = "The name your Mac lists this PC under when it pairs. A Mac already paired keeps the name it was given (rename it in Sill’s Settings › Devices on the Mac).",
-            ForeColor = Palette.Muted, Location = new Point((int)(16 * s), (int)(12 * s)), Size = new Size((int)(348 * s), (int)(48 * s)),
+            ForeColor = Palette.Muted, Location = new Point((int)(16 * s), (int)(12 * s)),
         };
+        // As tall as its words wrap at this width and font (a fixed two lines cut the third off).
+        int labelHeight = TextRenderer.MeasureText(label.Text, form.Font, new Size((int)(348 * s), int.MaxValue),
+            TextFormatFlags.WordBreak | TextFormatFlags.NoPadding).Height + (int)(4 * s);
+        label.Size = new Size((int)(348 * s), labelHeight);
+        int below = label.Bottom + (int)(6 * s);
         var box = new TextBox
         {
             Text = current, BorderStyle = BorderStyle.FixedSingle, BackColor = Palette.Control, ForeColor = Palette.Text,
-            Font = Palette.UiFont(15, dpi), Location = new Point((int)(16 * s), (int)(66 * s)), Width = (int)(348 * s), MaxLength = 64,
+            Font = Palette.UiFont(15, dpi), Location = new Point((int)(16 * s), below), Width = (int)(348 * s), MaxLength = 64,
         };
         Button Make(string text, DialogResult result, int x) => new()
         {
             Text = text, DialogResult = result, FlatStyle = FlatStyle.Flat, BackColor = result == DialogResult.OK ? Palette.Accent : Palette.Control,
-            ForeColor = result == DialogResult.OK ? Color.Black : Palette.Text, Location = new Point(x, (int)(104 * s)),
+            ForeColor = result == DialogResult.OK ? Color.Black : Palette.Text, Location = new Point(x, box.Bottom + (int)(10 * s)),
             Size = new Size((int)(88 * s), (int)(32 * s)),
         };
         var ok = Make("OK", DialogResult.OK, (int)(276 * s));
         var cancel = Make("Cancel", DialogResult.Cancel, (int)(180 * s));
+        form.ClientSize = new Size(form.ClientSize.Width, ok.Bottom + (int)(14 * s));
         ok.FlatAppearance.BorderSize = 0; cancel.FlatAppearance.BorderSize = 0;
         form.Controls.AddRange([label, box, ok, cancel]);
         form.AcceptButton = ok; form.CancelButton = cancel;
