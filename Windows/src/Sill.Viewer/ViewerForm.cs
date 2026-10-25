@@ -46,6 +46,8 @@ sealed class ViewerForm : Form
 
     // Once-a-second figures for the title.
     private int framesIn, framesDecoded, picturesShown; private long bytesIn; private double decodeMs, worstDecodeMs, drawMs; private double? rtt;
+    // The last whole second's figures, for ClientStats (the counters above are mid-second when it is sent).
+    private int lastSecondShown; private double? lastSecondRtt;
     private string size = "";
     private volatile bool pictured;   // this session has shown a picture: the title gives figures, not the status
     private TimeSpan cpuAtLastTitle;
@@ -619,6 +621,7 @@ sealed class ViewerForm : Form
             if (framesIn > 0 || picturesShown > 0)
                 Log($"second: {size} {decodePath}, {picturesShown} shown, {framesIn} received, decode {decodeMs / Math.Max(framesDecoded, 1):0.0} ms (worst {worstDecodeMs:0}), "
                     + $"draw {drawMs / Math.Max(picturesShown, 1):0.0} ms, CPU {cpu:0}%");
+            lastSecondShown = picturesShown; lastSecondRtt = rtt;
             framesIn = framesDecoded = picturesShown = 0; bytesIn = 0; decodeMs = worstDecodeMs = drawMs = 0; rtt = null;
         }
         Text = $"{macName} — {figures}";
@@ -1283,7 +1286,10 @@ sealed class ViewerForm : Form
                 await session.SendAsync(SessionMessages.Ping(clock.Elapsed.TotalSeconds), ct);
                 if (nothingStreams && Stopwatch.GetElapsedTime(Interlocked.Read(ref askedAt)).TotalSeconds >= 3)
                     await AskForDesktopAsync(session, ct);
-                var stats = JsonSerializer.SerializeToUtf8Bytes(new { fps = picturesShown, frameAgeMs = -1, rttMs = -1, device = $"{PcName} (Windows)" });
+                int shown; double? lastRtt;
+                lock (gate) { shown = lastSecondShown; lastRtt = lastSecondRtt; }
+                int rttMs = lastRtt is { } r ? (int)Math.Round(r * 1000) : -1;
+                var stats = JsonSerializer.SerializeToUtf8Bytes(new { fps = shown, frameAgeMs = -1, rttMs, device = $"{PcName} (Windows)", rttMaxMs = rttMs });
                 await session.SendAsync(StreamHeader.Serialize(SessionKinds.ClientStats, 0, false, stats), ct);
             }
             while (await timer.WaitForNextTickAsync(ct));
