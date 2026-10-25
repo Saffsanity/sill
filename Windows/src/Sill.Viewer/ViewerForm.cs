@@ -1071,6 +1071,9 @@ sealed class ViewerForm : Form
             jobs = null;
             video.Writer.TryComplete();
             try { await videoThread; } catch (Exception e) { Log($"Video thread: {e.Message}"); }
+            // The session is over: its watchdog, pings and input writer stop with it (the watchdog
+            // otherwise went on and said "Nothing from the Mac for 10 s" 10 s after any end).
+            sessionStop.Cancel();
             // Only once the video thread has stopped: its last draw would set it again.
             pictured = false;
             BeginInvoke(() => { PlaceCard(); UpdateTitle(); });
