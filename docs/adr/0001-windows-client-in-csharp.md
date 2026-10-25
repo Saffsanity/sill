@@ -29,4 +29,4 @@ against byte fixtures from it.
 - The Windows code builds and tests on its own solution and CI job (`.github/workflows/windows.yml`),
   outside `swift build` and `Tests/checks`.
 - SChannel's TLS 1.3 sends the device's certificate before .NET judges the Mac's key
-  (Windows/README.md, Security notes).
+  (Windows/README.md, Security notes; accepted in ADR 0002).
