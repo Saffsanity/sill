@@ -7,7 +7,7 @@
 //   Tests/checks/display-wake/run.sh   (build.sh compiles the three files with this one)
 //
 // What it checks: the constants; which of a device's messages are a person at it, every kind there
-// is (a connect, kinds 7, 8, 15, 25, 28; never 6, 9, 17, 21, 27, 32, nor any other, nor input that
+// is (a connect, kinds 7, 8, 15, 25, 28; never 6, 9, 17, 21, 27, 32, 44, nor any other, nor input that
 // does not decode), every input event; the device's own move to a new frame's middle (a bare pointer
 // move under 2 s after the host's stream restart or new frame size; at 2 s a person's again), the
 // latest change counting, a clock set back ending the window; the interval (a connect every time,
@@ -101,9 +101,10 @@ for raw in 0...255 {
     eq(fresh.activity(msg(kind, kind == .input ? tap : nil), at: 100), personKinds[UInt8(raw)], "kind \(raw) (\(kind))")
 }
 // A kind added to the wire fails this until it is decided here (and in the rule).
-eq(kinds, 31, "every kind there is decided (a new kind: say here whether it is a person at the device)")
+eq(kinds, 32, "every kind there is decided (a new kind: say here whether it is a person at the device)")
 for (raw, what) in [(6, "a pick, the device's own Desktop request among them"), (9, "the viewport"), (17, "a settings change"),
-                    (21, "show your pairing code"), (27, "a menu fetched"), (32, "the clipboard")] as [(UInt8, String)] {
+                    (21, "show your pairing code"), (27, "a menu fetched"), (32, "the clipboard"),
+                    (44, "a keyframe request")] as [(UInt8, String)] {
     let kind = Kind(rawValue: raw)!
     eq(fresh.activity(msg(kind), at: 100), nil, "never kind \(raw), \(what)")
     eq(fresh.activity(msg(kind, tap), at: 100), nil, "never kind \(raw), whatever input rides with it")
