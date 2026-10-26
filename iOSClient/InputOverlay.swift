@@ -736,6 +736,10 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
 
     /// The hardware keys down on the Mac, so each one's up follows its down.
     private var forwarded = ForwardedKeys()
+    /// This device's switch: the left Option key is Command on the Mac (ForwardedKeys), since iPadOS
+    /// keeps ⌘Space and ⌘Tab for itself. Off unless turned on; never sent to the Mac.
+    static let leftOptionAsCommandKey = "Sill.leftOptionAsCommand"
+    static var leftOptionAsCommand: Bool { UserDefaults.standard.bool(forKey: leftOptionAsCommandKey) }
 
     private func forward(_ presses: Set<UIPress>, down: Bool, via channel: String) -> Set<UIPress> {
         var unhandled: Set<UIPress> = []
@@ -752,6 +756,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
                 continue
             }
             #endif
+            if down { forwarded.leftOptionAsCommand = Self.leftOptionAsCommand }
             let outcome = down ? forwarded.pressed(usage, modifiers: modifiers, at: press.timestamp) : forwarded.released(usage)
             switch outcome {
             case .send(let event):
