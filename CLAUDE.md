@@ -37,11 +37,12 @@ the Mac's words and `"reconnect":true`.
   "shutdown" ("… is shutting down."), a log out "quit"; lines "macOS says the Mac is about to log out,
   restart or shut down.", "Quit: macOS asked Sill to quit for a restart.", "The Mac is restarting: 1
   device told."; Sill.log flushed before the exit (`HostLog.flush`). Observed: a restart begun from
-  another account ended Sill.app with SIGTERM (launchd's "exit(143) during system shutdown"), no
-  willPowerOff, "quit"; in a probe, AppKit posts willPowerOff only as it handles a quit Apple event whose
-  reason is an attribute (none for a parameter or no reason). Inferred: a log out, restart or shut
-  down begun in Sill's own session sends Sill.app such an event (loginwindow's kill attempt fails, Sill
-  turning sudden termination off). TEST ONLY on the bare binary: `-SillSleepAfter <s>`,
+  another account ended Sill.app with SIGTERM (launchd's "exit(143) during system shutdown") with no
+  log out in its own session, so "quit" (no quit Apple event, and so, by the probe, no willPowerOff
+  there); in a probe, AppKit posts willPowerOff only as it handles a quit Apple event whose reason is
+  an attribute (none for a parameter or no reason). Inferred: a log out, restart or shut down begun in
+  Sill's own session sends Sill.app such an event (loginwindow's kill attempt fails, Sill turning
+  sudden termination off). TEST ONLY on the bare binary: `-SillSleepAfter <s>`,
   `-SillPowerOffAfter <s>` (willPowerOff posted to the app alone), `-SillQuitAfter '<s> restart|shutdown|
   logout[ parameter]'` (a quit Apple event to itself with that reason).
 - Device: GoodbyePolicy's three notices in this build's words ("‹Mac› went to sleep. This ‹iPad›
