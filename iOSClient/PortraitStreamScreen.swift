@@ -168,6 +168,12 @@ struct PortraitStreamScreen: View {
     /// switch on: `PhonePortraitLayout.largerPicture(switchOn:streaming:)`); nil for the phone's usual
     /// arrangement (the switch off, the Desktop or nothing streaming), and in the halves.
     var largerKeyboard: CGFloat? = nil
+    /// A window fills this screen: no bar, no inset, no rounded frame. The phone's arrangement
+    /// keeps its own rows (Larger Picture). Pinch on the picture still reaches `onFillPinch`.
+    var fillScreen: Bool = false
+    var onFillPinch: (Bool) -> Void = { _ in }
+    var keyboardDoubleTap: Bool = false
+    var onKeyboardDoubleTap: () -> Void = {}
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
     /// The Duo's fold across this screen (StreamScreen, iOS 27.1): where the halves split.
@@ -185,7 +191,16 @@ struct PortraitStreamScreen: View {
 
     // MARK: Two halves: the inner display, an iPad window
 
-    private func halves(_ size: CGSize) -> some View {
+    @ViewBuilder private func halves(_ size: CGSize) -> some View {
+        if fillScreen {
+            picturePane(measured: true, filled: true)
+                .frame(width: size.width, height: size.height)
+        } else {
+            halvesChrome(size)
+        }
+    }
+
+    private func halvesChrome(_ size: CGSize) -> some View {
         // At the middle, as before; on the Duo (iOS 27.1) at the fold's real band half-folded, and
         // open flat at the picture's own shape (docs/iphone-duo-plan.md, (b1) and (b2)).
         let split = DuoPosture.portraitSplit(size, duoFold, aspect: client.duoPaneAspect(textScale: textScale),
@@ -453,7 +468,7 @@ struct PortraitStreamScreen: View {
     /// its size is the panel the video is fitted into, which the viewport sends the Mac (the halves);
     /// a phone sends its layout's picture instead (`phone`), the same rect or, with Larger Picture,
     /// the room this pane sits at the top of.
-    private func picturePane(measured: Bool) -> some View {
+    private func picturePane(measured: Bool, filled: Bool = false) -> some View {
         ZStack {
             StreamView(client: client)
             InputOverlay(videoSize: client.videoSize,
@@ -463,12 +478,19 @@ struct PortraitStreamScreen: View {
                          isKeyboardShown: $keyboardShown,
                          latchedModifiers: latched,
                          onModifiersConsumed: { latched = [] },
-                         sendGesture: { client.sendGesture($0, fingers: $1) })
+                         sendGesture: { client.sendGesture($0, fingers: $1) },
+                         onFillPinch: onFillPinch,
+                         keyboardDoubleTap: keyboardDoubleTap,
+                         onKeyboardDoubleTap: onKeyboardDoubleTap)
         }
         .background(Palette.panel)
         .overlay(alignment: .top) { LinkLineView(text: linkLine) }
-        .clipShape(streamShape)
-        .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: filled ? 0 : 12, style: .continuous))
+        .overlay {
+            if !filled {
+                streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
+            }
+        }
         .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { if measured { onPanelSize($0) } })
         .tourTarget(.stream)
     }

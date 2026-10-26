@@ -221,6 +221,13 @@ struct ContentView: View {
 ///   clipboard rows. `-SillClipboardChip 1` offers the clipboard's chip over the mock's stream (as
 ///   after a copy on this device; it stays), and `-SillClipboardNote sent|long|notsent` shows a Paste's
 ///   note in its place and under the group's Paste (docs/clipboard-plan.md).
+/// * `-Sill.fillScreen 1` — not a harness argument either: Fill the Screen on for one run. While a
+///   window streams, the bar, the inset and the rounded frame go and the viewport is the whole
+///   screen. Pinch open on the picture does the same; pinch closed brings the bar back. The Desktop
+///   keeps the bar either way.
+/// * `-Sill.keyboardDoubleTap 1` — not a harness argument either: two fingers tapped twice on the
+///   picture show or hide the on-screen keyboard. Off unless set, so a two-finger drag still scrolls.
+///   Nothing happens while a hardware keyboard is attached.
 /// * `-Sill.largerPicture 1` — not a harness argument either: this device's Larger Picture switch
 ///   (the Settings panel's This iPhone group; docs/larger-picture-plan.md) on for one run, in the
 ///   normal app too. A phone held upright then has, while a window streams, no thumbnails, the

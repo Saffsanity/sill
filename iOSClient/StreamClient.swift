@@ -3312,6 +3312,17 @@ final class StreamClient: ObservableObject {
     /// does (`PhonePortraitLayout.largerPicture(switchOn:streaming:)`).
     static let largerPictureKey = "Sill.largerPicture"
 
+    /// This device's Fill the Screen (the Settings panel's This iPad group): off unless a pinch
+    /// opens on a window's picture, or the switch is turned on. The device's own preference, never
+    /// sent. The stream screen acts on it only while a window streams; the Desktop keeps the bar.
+    /// Pinch closed, or the switch off, brings the bar back and the Mac sizes the window again.
+    static let fillScreenKey = "Sill.fillScreen"
+
+    /// Two fingers tapped twice on the picture show or hide the on-screen keyboard. Off unless
+    /// turned on, so a two-finger drag keeps scrolling. Never sent. Ignored while a hardware
+    /// keyboard is attached.
+    static let keyboardDoubleTapKey = "Sill.keyboardDoubleTap"
+
     /// A three- or four-finger gesture a surface decided (TrackpadGestures, StrokeObserver), to the
     /// Mac as kind 28, which turns it into its own shortcut (docs/trackpad-gestures-plan.md §6.3):
     /// only while this device's switch is on and the Mac says it takes gestures. While a window

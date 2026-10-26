@@ -74,6 +74,17 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     private weak var wheelScroll: UIPanGestureRecognizer?
     /// The Pencil's hover and the iPad's pointer, which the pointer's scrolls recognize alongside.
     private weak var hover: UIHoverGestureRecognizer?
+    /// Pinch open fills the screen; pinch closed brings the bar back. Fingers or a trackpad.
+    /// A parallel two-finger scroll barely changes the scale, so it is left to scroll.
+    var onFillPinch: (Bool) -> Void = { _ in }
+    private weak var fillPinch: UIPinchGestureRecognizer?
+    /// Set once a pinch has crossed into a mode change, until that pinch ends. Scroll started
+    /// with it is closed and nothing further from it is sent.
+    private var fillPinchDecided = false
+    /// Two fingers, tapped twice, with the setting on: show or hide the on-screen keyboard.
+    var keyboardDoubleTap = false
+    var onKeyboardDoubleTap: () -> Void = {}
+    private weak var keyboardTap: UITapGestureRecognizer?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -109,6 +120,28 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         pan.allowedTouchTypes = directOnly
         pan.delegate = self
         addGestureRecognizer(pan)
+
+        // Pinch open (fingers apart) fills the screen; pinch closed brings the bar back. It does
+        // not cancel touches, so a two-finger scroll still scrolls until the scale has clearly
+        // left a parallel drag. A trackpad's pinch is the same recognizer.
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handleFillPinch))
+        pinch.cancelsTouchesInView = false
+        pinch.delegate = self
+        addGestureRecognizer(pinch)
+        fillPinch = pinch
+
+        // Off until Settings turns it on, so today's two-finger drag is unchanged. It does not
+        // delay or cancel the scroll: a tap that moved already failed.
+        let keyboardTap = UITapGestureRecognizer(target: self, action: #selector(handleKeyboardDoubleTap))
+        keyboardTap.numberOfTapsRequired = 2
+        keyboardTap.numberOfTouchesRequired = 2
+        keyboardTap.allowedTouchTypes = directOnly
+        keyboardTap.cancelsTouchesInView = false
+        keyboardTap.delaysTouchesBegan = false
+        keyboardTap.delaysTouchesEnded = false
+        keyboardTap.isEnabled = false
+        addGestureRecognizer(keyboardTap)
+        self.keyboardTap = keyboardTap
 
         // Pencil hover on the iPads that support it, and the trackpad/mouse pointer everywhere.
         let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover))
@@ -220,6 +253,58 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// coast, which the Mac posts as a wheel's.
     @objc private func handleWheel(_ gesture: UIPanGestureRecognizer) { scroll(gesture, .wheel) }
 
+    /// Pinch open fills the screen (the picture grows into the bar's place). Pinch closed brings
+    /// the bar back. One decision per gesture, once the fingers have clearly spread or closed, so
+    /// a two-finger scroll's small scale wobble changes nothing.
+    @objc private func handleFillPinch(_ gesture: UIPinchGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            fillPinchDecided = false
+        case .changed:
+            // Three fingers is a Mac gesture (pinch for Apps, spread for the Desktop), not this.
+            guard gesture.numberOfTouches <= 2 else { return }
+            guard !fillPinchDecided else { return }
+            let open: Bool?
+            if gesture.scale >= 1.28 { open = true }
+            else if gesture.scale <= 0.78 { open = false }
+            else { open = nil }
+            guard let open else { return }
+            fillPinchDecided = true
+            closeScrollForFill()
+            onFillPinch(open)
+        case .ended, .cancelled, .failed:
+            fillPinchDecided = false
+        default:
+            break
+        }
+    }
+
+    /// A scroll that turned out to be a pinch ends without a coast, so the Mac is not left in a
+    /// scroll and is not flung as the picture changes size.
+    private func closeScrollForFill() {
+        guard scrollGestureOpen else { return }
+        scrollGestureOpen = false
+        momentum.stop()
+        let location = scrollPan?.location(in: self)
+            ?? trackpadScroll?.location(in: self)
+            ?? CGPoint(x: bounds.midX, y: bounds.midY)
+        let p = normalized(location, clamped: true) ?? (x: 0.5, y: 0.5)
+        send(.scrollGesture(.ended, x: p.x, y: p.y))
+    }
+
+    /// The recognizer stays out of a two-finger drag until the setting is on.
+    func setKeyboardDoubleTapEnabled(_ on: Bool) {
+        keyboardTap?.isEnabled = on
+    }
+
+    /// Two fingers tapped twice, and they did not move (a scroll fails the tap). Direct touches
+    /// only, and nothing while a hardware keyboard is attached: that keyboard keeps its hold.
+    @objc private func handleKeyboardDoubleTap(_ gesture: UITapGestureRecognizer) {
+        guard gesture.state == .ended, keyboardDoubleTap else { return }
+        guard !HardwareKeyboardMonitor.shared.attached else { return }
+        onKeyboardDoubleTap()
+    }
+
     /// Where a scroll on the picture comes from: a finger, the iPad's trackpad, or a wheel.
     enum ScrollSource: String {
         case finger, trackpad, wheel
@@ -237,6 +322,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// pointer), its translation since it began and, at its end, its velocity (points per second).
     func scroll(_ state: UIGestureRecognizer.State, at location: CGPoint, translation: CGPoint,
                 velocity: CGPoint, from source: ScrollSource) {
+        if fillPinchDecided, state == .began || state == .changed { return }
         switch state {
         case .began:
             setOwnPointer(nil, .none)
@@ -292,7 +378,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// changes for the finger pan: no other scroll was ever open before these.
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if gestureRecognizer === scrollPan || gestureRecognizer === trackpadScroll || gestureRecognizer === wheelScroll {
-            return !scrollGestureOpen
+            return !scrollGestureOpen && !fillPinchDecided
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
@@ -307,6 +393,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// fingers scroll.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer === fillPinch || other === fillPinch { return true }
         let scrolls = [trackpadScroll, wheelScroll].compactMap { $0 }
         return (scrolls.contains { $0 === gestureRecognizer } && other === hover)
             || (scrolls.contains { $0 === other } && gestureRecognizer === hover)
@@ -950,6 +1037,11 @@ struct InputOverlay: UIViewRepresentable {
     var onModifiersConsumed: () -> Void = {}
     /// `StreamClient.sendGesture`; see `InputOverlayView.sendGesture`.
     var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
+    /// Pinch open (`true`) fills the screen; pinch closed brings the bar back.
+    var onFillPinch: (Bool) -> Void = { _ in }
+    /// The Settings switch for a two-finger double-tap that shows the on-screen keyboard.
+    var keyboardDoubleTap: Bool = false
+    var onKeyboardDoubleTap: () -> Void = {}
 
     func makeUIView(context: Context) -> InputOverlayView {
         let view = InputOverlayView(frame: .zero)
@@ -964,6 +1056,10 @@ struct InputOverlay: UIViewRepresentable {
         uiView.setOwnPointer = setOwnPointer
         uiView.latchedModifiers = latchedModifiers
         uiView.sendGesture = sendGesture
+        uiView.onFillPinch = onFillPinch
+        uiView.keyboardDoubleTap = keyboardDoubleTap
+        uiView.onKeyboardDoubleTap = onKeyboardDoubleTap
+        uiView.setKeyboardDoubleTapEnabled(keyboardDoubleTap)
         // Called straight from a UIKit text-input callback, never from inside a SwiftUI update,
         // so writing the binding here needs no hop.
         uiView.onModifiersConsumed = onModifiersConsumed

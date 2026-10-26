@@ -19,7 +19,9 @@ import StreamProtocol
 /// only. Errors show inline, never in alerts. After the Mac's settings come the device's own groups:
 /// This iPad (or iPhone), whose switches are preferences here and send nothing to the Mac (Larger
 /// Picture, `StreamClient.largerPictureKey`, on an iPhone without a hinge whose picture it makes
-/// larger, `largerPictureOffered`; Share Clipboard, `StreamClient.clipboardKey`, while the Mac shares
+/// larger, `largerPictureOffered`; Fill the Screen, `StreamClient.fillScreenKey`, which a pinch on
+/// a window's picture also sets; Double-Tap for the Keyboard, `StreamClient.keyboardDoubleTapKey`;
+/// Share Clipboard, `StreamClient.clipboardKey`, while the Mac shares
 /// its clipboard, with the system's Paste for this device's text; Three-Finger Gestures,
 /// `StreamClient.gesturesKey`), and whose gesture rows, as accessibility actions, do their gestures
 /// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour.
@@ -50,6 +52,8 @@ struct HostSettingsPanel: View {
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
+    @AppStorage(StreamClient.fillScreenKey) private var fillScreen = false
+    @AppStorage(StreamClient.keyboardDoubleTapKey) private var keyboardDoubleTap = false
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -485,6 +489,20 @@ struct HostSettingsPanel: View {
             }
             Footnote(text: Self.largerPictureFooter)
         }
+        Rows {
+            Toggle(isOn: $fillScreen) {
+                Text("Fill the Screen").foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        Footnote(text: Self.fillScreenFooter)
+        Rows {
+            Toggle(isOn: $keyboardDoubleTap) {
+                Text("Double-Tap for the Keyboard").foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        Footnote(text: Self.keyboardDoubleTapFooter(device: device))
         // The clipboard (docs/clipboard-plan.md): only while the Mac says it shares it.
         if ClipboardPolicy.hostTakes(client.hostClipboard) {
             Rows {
@@ -531,6 +549,15 @@ struct HostSettingsPanel: View {
     /// once Aa sets its text size (or on the virtual display), and that a change applies as the panel
     /// closes (StreamScreen's `largerPictureHeld`).
     static let largerPictureFooter = "Held upright, a window’s picture takes the place of the window thumbnails and reaches down to where the keyboard comes up. The Desktop keeps the thumbnails. Switch windows with Apps: tap an open app again for its next window. To fill the taller picture with a window, set its text size with Aa. A change applies when you close Settings."
+
+    /// Under Fill the Screen: the pinch, that the Mac resizes the window, and that the Desktop
+    /// keeps the bar. A change from the switch applies as Settings closes.
+    static let fillScreenFooter = "Pinch open on a window’s picture to fill the screen, and pinch closed to bring the bar back. The Mac sizes the window to the picture. The Desktop keeps the bar. A change applies when you close Settings."
+
+    /// Under Double-Tap for the Keyboard. Fingers only, and a hardware keyboard is left alone.
+    static func keyboardDoubleTapFooter(device: String) -> String {
+        "Two fingers tapped twice on the picture show or hide the on-screen keyboard. Fingers that move still scroll. With a keyboard attached to this \(device), nothing changes."
+    }
 
     /// What each gesture does on the Mac, and what the row does as an accessibility action: its one
     /// gesture, or, for the Spaces, one action each way (natural direction: a swipe left brings the
