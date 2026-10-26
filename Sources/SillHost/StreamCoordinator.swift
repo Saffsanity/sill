@@ -775,7 +775,7 @@ package final class StreamCoordinator {
     /// window again.
     package func retryVirtualDisplay() async {
         enableVirtualDisplay()
-        if virtualDisplay, case .window = active { await select(active) }
+        if virtualDisplay, active != .none { await select(active) }
     }
 
     /// The app keeps running when the Bonjour listener fails, with the failure in its menu; the
@@ -1488,6 +1488,21 @@ package final class StreamCoordinator {
                     print("Could not start streaming \(fallback): \(error)")
                     active = .none
                 }
+            } else if virtualDisplay, stage.desktopStaged, let d = catalog.display {
+                print("Capture on the virtual display failed: \(error); retrying with the main display.")
+                status.update { $0.lastStageFailure = "capture on the display failed" }
+                stage.release()
+                let fallbackFilter = catalog.ownApplication.map { SCContentFilter(display: d, excludingApplications: [$0], exceptingWindows: []) }
+                    ?? SCContentFilter(display: d, excludingWindows: [])
+                let fallback = "the whole desktop\(useSoftwareEncoder ? " (software encoder)" : "")"
+                do {
+                    try await startPipeline(source: source, filter: fallbackFilter, sourceRect: nil,
+                                            width: evenPixels(CGFloat(d.width) * captureScale), height: evenPixels(CGFloat(d.height) * captureScale),
+                                            describe: fallback, title: title, kind: kind)
+                } catch {
+                    print("Could not start streaming \(fallback): \(error)")
+                    active = .none
+                }
             } else {
                 print("Could not start streaming \(describe): \(error)")
                 if virtualDisplay { stage.release() }   // nothing streams: never leave a window on the virtual display
@@ -1531,7 +1546,8 @@ package final class StreamCoordinator {
         print("Streaming \(describe) at \(width)×\(height), \(fps) fps, \(streamBitrate / 1_000_000) Mbps")
         status.update {
             $0.stream = HostStatusSnapshot.Stream(kind: kind, title: title, width: width, height: height, fps: fps,
-                                                  mbps: streamBitrate / 1_000_000, onVirtualDisplay: sourceRect != nil,
+                                                  mbps: streamBitrate / 1_000_000,
+                                                  onVirtualDisplay: sourceRect != nil || (virtualDisplay && stage.desktopStaged),
                                                   softwareEncoder: useSoftwareEncoder)
         }
         // Frames can reach the encoder while `capture.start` is still awaiting, so its watchdog
