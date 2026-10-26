@@ -103,6 +103,10 @@ MUTANTS = {
     "M49b the status bar never hidden upright": ("case (669, 951): return statusBarHidden ? (0, 0, 34, 0) : (82, 0, 34, 0)",
                                                  "case (669, 951): return (82, 0, 34, 0)"),
     "M49c the cover's strip gone with the status bar": ("case (466, 678): return (0, 0, 34, 84)", "case (466, 678): return statusBarHidden ? (0, 0, 34, 0) : (0, 0, 34, 84)"),
+    # Issue #215: Keyboard button in the halves' window bar while the software keyboard is up.
+    "M54 the halves' window bar never shows the Keyboard button": ("static func halvesBarShowsKeyboard(keyboardShown: Bool) -> Bool {\n        keyboardShown",
+                                                                   "static func halvesBarShowsKeyboard(keyboardShown: Bool) -> Bool {\n        false"),
+    "M55 the halves' top padding kept while the keyboard is up": ("keyboardShown ? 0 : defaultPadTop", "defaultPadTop"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

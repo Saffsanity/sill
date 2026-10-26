@@ -201,6 +201,7 @@ struct PortraitStreamScreen: View {
 
             // Same order as landscape: the dim goes over the stream so a tap with the drawer
             // open closes the drawer instead of clicking the Mac. It covers both halves.
+            let padTop = DuoPosture.halvesPadTop(defaultPadTop: metrics.padTop, keyboardShown: keyboardShown)
             if drawerOpen {
                 dim
 
@@ -209,7 +210,7 @@ struct PortraitStreamScreen: View {
                     .frame(maxHeight: .infinity)
                     .padding(.leading, 22)
                     // Hangs from just under the window bar, so the button that opened it stays visible.
-                    .padding(.top, split.controls + metrics.padTop + metrics.barHeight + 8)
+                    .padding(.top, split.controls + padTop + metrics.barHeight + 8)
                     .padding(.bottom, metrics.padBottom)
                     .transition(.opacity)
             }
@@ -220,7 +221,7 @@ struct PortraitStreamScreen: View {
             // halves, as the drawer's dim does, so a tap anywhere outside closes the panel first
             // and never reaches the Mac.
             if settingsOpen {
-                let top = split.controls + metrics.padTop + metrics.barHeight + 8
+                let top = split.controls + padTop + metrics.barHeight + 8
                 catcher
 
                 settingsPanel
@@ -239,23 +240,26 @@ struct PortraitStreamScreen: View {
     }
 
     private func controls(width: CGFloat) -> some View {
-        VStack(spacing: metrics.rowGap) {
+        let padTop = DuoPosture.halvesPadTop(defaultPadTop: metrics.padTop, keyboardShown: keyboardShown)
+        return VStack(spacing: metrics.rowGap) {
             windowBar(width: width - 2 * metrics.padSide)
             keyRow(.full)
             trackpad(verticalSpan: nil)
         }
-        .padding(.top, metrics.padTop)
+        .padding(.top, padTop)
         .padding(.horizontal, metrics.padSide)
         .padding(.bottom, metrics.padBottom)
     }
 
     /// The same Apps button and thumbnails as landscape, at the board's tighter size, with no
-    /// Keyboard button (it is in the key row) but with the Aa control, whose ruler opens centred on
-    /// it; the strip's end and the Desktop button fade while it is open. `width`: the bar's row.
+    /// Keyboard button while the software keyboard is down (it is in the key row), and with the
+    /// Keyboard button in the bar while the software keyboard covers the key row (#215). `width`:
+    /// the bar's row.
     private func windowBar(width: CGFloat) -> some View {
-        // Apps, Menus, Aa, Desktop, Settings, and the strip: Menus only where the row holds it and
-        // still a whole thumbnail (not in a 320 pt Slide Over).
-        let menusFit = MacMenuButton.fits(width: width, buttons: 5, buttonWidth: metrics.buttonWidth, gap: 12,
+        let showKeyboard = DuoPosture.halvesBarShowsKeyboard(keyboardShown: keyboardShown)
+        // Apps, Menus, Aa, (Keyboard when up), Desktop, Settings, and the strip: Menus only where
+        // the row holds it and still a whole thumbnail (not in a 320 pt Slide Over).
+        let menusFit = MacMenuButton.fits(width: width, buttons: showKeyboard ? 6 : 5, buttonWidth: metrics.buttonWidth, gap: 12,
                                           thumbWidth: metrics.thumbWidth)
         return HStack(spacing: 12) {
             appsButton()
@@ -278,6 +282,17 @@ struct PortraitStreamScreen: View {
                              width: metrics.buttonWidth, height: metrics.buttonHeight,
                              radius: metrics.buttonRadius, pointsPerStep: 36)
                 .tourTarget(.textSize)
+
+            if showKeyboard {
+                barButton(open: keyboardShown, symbol: "keyboard", label: "Keyboard",
+                          accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
+                          action: {
+                              setSettings(false, false)
+                              overlay.toggleKeyboard()
+                          })
+                    .opacity(scaleOpen ? 0 : 1)
+                    .allowsHitTesting(!scaleOpen)
+            }
 
             desktopButton()
                 .opacity(scaleOpen ? 0 : 1)

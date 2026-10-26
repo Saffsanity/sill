@@ -351,5 +351,18 @@ for (hinge, s, info) in [(DuoPosture.Hinge.partiallyOpen, book, FoldInfo.known(b
     check(DuoPosture(hinge: hinge, fold: DuoPosture.standInFold(s)).info(in: s) == info, "the stand-in, \(hinge) \(s)")
 }
 
+// Issue #215: in the laptop pose (669×951), the software keyboard (top at y = 570) covers keyRow
+// (y = 596..644). While keyboardShown is true, the window bar shows the Keyboard toggle button and
+// drops its 12 pt top padding so its 58 pt buttons (y = 506..564) sit clear above y = 570.
+check(DuoPosture.halvesBarShowsKeyboard(keyboardShown: true) == true
+      && DuoPosture.halvesBarShowsKeyboard(keyboardShown: false) == false,
+      "the halves' window bar shows the Keyboard button while the software keyboard is up (#215)")
+check(DuoPosture.halvesPadTop(defaultPadTop: 12, keyboardShown: false) == 12
+      && DuoPosture.halvesPadTop(defaultPadTop: 12, keyboardShown: true) == 0,
+      "the halves' top padding drops to 0 while the software keyboard is up (#215)")
+let laptopControlsTop = DuoPosture.portraitSplit(upright, .known(laptopFold), aspect: 1.6, controls: 170).controls
+let barButtonsMaxY = laptopControlsTop + DuoPosture.halvesPadTop(defaultPadTop: 12, keyboardShown: true) + (78 - 58) / 2 + 58
+check(barButtonsMaxY <= 570, "in the laptop pose with the keyboard up, the window bar's buttons (\(barButtonsMaxY)) end above the keyboard at 570 (#215)")
+
 print(failures == 0 ? "ok: \(checks) checks" : "FAILED: \(failures) of \(checks) checks")
 exit(failures == 0 ? 0 : 1)

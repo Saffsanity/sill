@@ -207,6 +207,19 @@ extension DuoPosture {
         guard !fitsWindowToPane, video.width > 0, video.height > 0 else { return defaultAspect }
         return video.width / video.height
     }
+
+    /// Issue #215: in the laptop pose (669×951), the software keyboard (top at y = 570) covers
+    /// `keyRow(.full)` (y = 596..644) and has no built-in dismiss button on iPhone (`userInterfaceIdiom == .phone`).
+    /// While the software keyboard is up (`keyboardShown`), the window bar above it shows a
+    /// Keyboard toggle button and drops its 12 pt top padding so its 58 pt buttons (y = 506..564)
+    /// sit clear above the keyboard.
+    static func halvesBarShowsKeyboard(keyboardShown: Bool) -> Bool {
+        keyboardShown
+    }
+
+    static func halvesPadTop(defaultPadTop: CGFloat, keyboardShown: Bool) -> CGFloat {
+        keyboardShown ? 0 : defaultPadTop
+    }
 }
 
 // MARK: - The book pose: the fold down the middle of a screen held sideways
