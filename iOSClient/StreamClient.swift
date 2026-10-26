@@ -432,12 +432,37 @@ final class StreamClient: ObservableObject {
         }
     }
 
+    /// When the device asks the Mac for a keyframe after its picture was interrupted (issue #101).
+    /// Main thread.
+    private var keyframeRecovery = KeyframeRecovery()
+    /// The next look at the recovery: an ask the spacing holds back, when it is due, or an ask that is
+    /// out, when its keyframe is overdue. Main thread.
+    private var keyframeAskWork: DispatchWorkItem?
+
     /// The one display view for the whole session. Landscape and portrait both host it, so a
     /// rotation reparents the same layer (and its last decoded image) instead of creating a fresh
     /// view that would sit black until the next keyframe, up to 4 s later. Main thread.
     private(set) lazy var displayView: HEVCDisplayView = {
         let view = HEVCDisplayView(frame: .zero)
+        view.renderQueue = queue
         view.onVideoSize = { [weak self] size in self?.videoSize = size }
+        // The picture interrupted, then back (HEVCDisplayView.checkLayer): KeyframeRecovery decides
+        // when to ask the Mac for a keyframe, which a still window never sends by itself.
+        view.onNeedsKeyframe = { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.keyframeRecovery.interrupted(now: ProcessInfo.processInfo.systemUptime)
+                self.considerKeyframeAsk()
+            }
+        }
+        view.onPictureBack = { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                // A keyframe that comes while the window is away is the background's (KeyframeRecovery).
+                self.keyframeRecovery.pictureBack(now: ProcessInfo.processInfo.systemUptime, active: self.pictureActive)
+                self.keyframeAskWork?.cancel(); self.keyframeAskWork = nil
+            }
+        }
         onParameterSets = { ps in view.apply(ps) }
         onFrame = { data, isKey in view.enqueue(data, isKeyframe: isKey) }
         return view
@@ -919,6 +944,89 @@ final class StreamClient: ObservableObject {
         }
         // The clipboard's chip looks when Sill becomes active (StreamClient+Clipboard).
         observeClipboardActivation()
+        // The picture's window going away and coming back (KeyframeRecovery).
+        observePictureActivation()
+    }
+
+    // MARK: - The picture's recovery
+
+    /// Sill (or the picture's own window: each Sill window has its own client) going away and coming
+    /// back. From init.
+    private func observePictureActivation() {
+        let center = NotificationCenter.default
+        // A scene's notification counts only for this session's window (any, before it has one).
+        let ours: (Notification) -> Bool = { [weak self] note in
+            guard let scene = note.object as? UIScene, let own = self?.displayView.window?.windowScene else { return true }
+            return scene === own
+        }
+        for name in [UIApplication.didBecomeActiveNotification, UIScene.didActivateNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                guard let self, ours(note) else { return }
+                // A layer iOS stopped meanwhile is flushed now: a still window sends no frame that
+                // would show it. And an ask held back while away goes out.
+                let view = self.displayView
+                self.queue.async { view.checkLayer("as its window became active") }
+                self.considerKeyframeAsk()
+            }
+        }
+        for name in [UIApplication.willResignActiveNotification, UIScene.willDeactivateNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                guard let self, ours(note) else { return }
+                self.keyframeRecovery.leftForeground()
+                self.keyframeAskWork?.cancel(); self.keyframeAskWork = nil
+            }
+        }
+    }
+
+    /// Whether the picture can be shown now: its window's scene is in the foreground and active, or,
+    /// while it is in no window, Sill is active. Main thread.
+    private var pictureActive: Bool {
+        if let scene = displayView.window?.windowScene { return scene.activationState == .foregroundActive }
+        return UIApplication.shared.applicationState == .active
+    }
+
+    /// Asks the Mac for one keyframe (kind 44) when KeyframeRecovery says one is owed and due, and looks
+    /// again when an ask the spacing holds back is due, or when the keyframe of an ask that is out is
+    /// overdue (`answerWait`: 4 s, or four of the worst round trips), so it can ask again. Never a pick
+    /// of the source again, which would restart every device's stream and, in regular mode, raise the
+    /// window on the Mac. A Mac from before kind 44 skips every ask, and the picture waits for the
+    /// stream's next keyframe, as it did. Main thread.
+    private func considerKeyframeAsk() {
+        keyframeAskWork?.cancel(); keyframeAskWork = nil
+        let now = ProcessInfo.processInfo.systemUptime
+        let wait = KeyframeRecovery.answerWait(worstRttMs: lastRttMaxMs)
+        let wasOut = keyframeRecovery.asked
+        let decision = keyframeRecovery.consider(now: now, active: pictureActive, streaming: active != .none, wait: wait)
+        #if DEBUG
+        // An ask that was out and is owed again (it goes now, or waits for the spacing): no keyframe came.
+        var unanswered = false
+        if wasOut { switch decision { case .askNow, .askAt: unanswered = true; case .nothing, .keyframeDue: break } }
+        let why = unanswered ? "no keyframe \(String(format: "%.1f", wait)) s after the last ask" : "the picture was interrupted"
+        #endif
+        switch decision {
+        case .nothing:
+            break
+        case .askNow:
+            send(.keyframeRequest, payload: Data())
+            lookAtKeyframeRecovery(at: now + wait, from: now)
+            #if DEBUG
+            print("keyframe: \(why); asked the Mac for a keyframe (spacing \(Int(keyframeRecovery.spacingNow)) s)")
+            #endif
+        case .askAt(let at):
+            lookAtKeyframeRecovery(at: at, from: now)
+            #if DEBUG
+            print("keyframe: \(why); the ask waits \(String(format: "%.1f", at - now)) s for the spacing")
+            #endif
+        case .keyframeDue(let at):
+            lookAtKeyframeRecovery(at: at, from: now)
+        }
+    }
+
+    /// `considerKeyframeAsk` again at `at` (uptime seconds). Main thread.
+    private func lookAtKeyframeRecovery(at: TimeInterval, from now: TimeInterval) {
+        let work = DispatchWorkItem { [weak self] in self?.considerKeyframeAsk() }
+        keyframeAskWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, at - now), execute: work)
     }
 
     /// Starts the network browser, once; from then on it is only made again (`rebuildBrowser`). The
@@ -3156,6 +3264,10 @@ final class StreamClient: ObservableObject {
         apps = []
         videoSize = .zero
         displayView.clear()
+        // Nor an interruption of its picture: the next session's starts afresh.
+        keyframeRecovery = KeyframeRecovery()
+        keyframeAskWork?.cancel()
+        keyframeAskWork = nil
         // Nothing of a Mac's settings outlives its connection: the next one sends them afresh.
         settings.reset()
         settingsProblem = nil

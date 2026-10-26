@@ -122,6 +122,14 @@ final class WindowCatalog {
 
     static let ownPID = ProcessInfo.processInfo.processIdentifier
 
+    /// TEST ONLY (SILL_TEST_NO_SCREEN=1 on a --synthetic host, set by the coordinator): the catalog
+    /// never touches ScreenCaptureKit: no window list (it stays empty), no thumbnails, no display
+    /// lookup, so a test host that an agent runs with a client connected asks macOS for no screen
+    /// recording (every ScreenCaptureKit call is checked against the responsible app's grant, and
+    /// macOS reminds the person about it once a month and after every rebuilt binary). The Desktop
+    /// is the test pattern anyway. Read off the main actor by the bounded lookup below.
+    nonisolated(unsafe) static var screenless = false
+
     /// Starts the one-time installed-app scan, and polling if a client is already connected.
     /// Does not read the window list itself: the coordinator awaits `refreshWindows()` right after.
     func start() {
@@ -165,6 +173,7 @@ final class WindowCatalog {
     /// costs seconds and a fallback, not the coordinator's `switching` flag for good. The default
     /// path's `refreshWindows` keeps the plain call it always had.
     nonisolated static func shareableContent(excludingDesktopWindows: Bool, onScreenWindowsOnly: Bool, timeout: TimeInterval) async -> SCShareableContent? {
+        if screenless { return nil }                 // TEST ONLY: ScreenCaptureKit never asked
         final class Once: @unchecked Sendable {
             private let lock = NSLock(); private var done = false
             func first() -> Bool { lock.lock(); defer { lock.unlock() }; if done { return false }; done = true; return true }
@@ -229,6 +238,7 @@ final class WindowCatalog {
     func refreshWindows() async {
         refreshSeq += 1
         let seq = refreshSeq
+        guard !Self.screenless else { return }      // TEST ONLY: ScreenCaptureKit never asked
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else { return }
         // The staged window, if the on-screen list dropped it: one extra SCShareableContent call per
         // poll, and only then. Fetched before the sequence check so its await cannot let an older
@@ -279,6 +289,7 @@ final class WindowCatalog {
     /// still catches content changing inside a window of fixed size and title. A window is
     /// stamped before the capture, so one that fails to capture also backs off to 6 s.
     private func refreshThumbnails() async {
+        guard !Self.screenless else { return }      // TEST ONLY: no captures either
         // 2× the 104×66 pt tile in the client's bar. Fit each window's aspect inside that box.
         let box = CGSize(width: 208, height: 132)
         let now = ContinuousClock.now

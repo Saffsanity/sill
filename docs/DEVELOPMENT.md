@@ -141,6 +141,8 @@ swift run -c release SillHost --direct-wireless      # also over peer-to-peer Wi
 swift run -c release SillHost --no-clipboard         # share nothing of the clipboard with devices (on by default, as in Sill.app)
 swift run -c release SillHost --synthetic            # the Desktop streams a test pattern; no Screen Recording needed
 SILL_TEST_PATTERN=picture:/path/to.jpg swift run -c release SillHost --synthetic   # the Desktop a still picture instead (TEST ONLY)
+SILL_TEST_STILL_AFTER=3 swift run -c release SillHost --synthetic   # no frame from 3 s on, as a window that stopped changing (TEST ONLY)
+SILL_TEST_KEYFRAME_IGNORE=1 swift run -c release SillHost --synthetic   # the first keyframe request ignored, as a Mac from before kind 44 ignores every one (TEST ONLY)
 swift run -c release SillHost --remote               # the remote door for this run, on any free port (--remote=PORT)
 swift run -c release SillHost --remote --internet    # also admit paired devices from the internet
 swift run -c release SillHost --print-reachability   # the addresses a device would get away from home, then exit
@@ -405,6 +407,89 @@ sequences that fit a window and put it back (over `WindowRestore.Access`, which
 `Tests/checks/window-restore` against a stand-in Mac;
 docs/restore-window-frames-plan.md has the reasons, and The restore probe
 (below) checks it against a real window.
+
+The lights a held thumbnail shows (close, minimize, full screen; kind 15) press
+the window's own buttons through Accessibility, on the host's main actor, each
+element with a timeout: 1 s for Close's button, which is a new element every
+time (it had the system's default of several seconds, so an app whose close
+asks about unsaved changes, or one that hangs, held up input, picks and
+settings for every device that long; issue #101). The log says what came of
+each: "Window 104 close: done", "refused", or, after 1 s, "no answer in time
+(the app is busy, or asking about unsaved changes); it may still act" (a
+minimize or full screen with no answer says only that the app is busy, and
+that the window may still minimize, or go in or out of full screen). "done"
+means the app took the press, whatever it asks next: a close that asks about
+unsaved changes in a sheet (a document's, as in TextEdit) most likely answers
+at once and leaves the sheet on the Mac, while one that asks in an alert of its
+own, or an app that hangs, gives "no answer in time".
+`Scripts/menu-check/run.sh close` presses Close on the menus' test app's Slow
+Close window (below).
+## A sleeping display
+
+While the Mac's display is asleep (the Mac idle, or locked) macOS draws nothing
+new, so the stream is black (issue #134). The host tells macOS that someone is
+using the Mac, as a key press on it does (`IOPMAssertionDeclareUserActivity`
+with `kIOPMUserActiveLocal`, the declaration `caffeinate -u` makes), when a
+person is at a device: when its session connects (every connection), and when
+it opens an app or sends input (a touch, a key, text, a scroll, a pointer move,
+a trackpad gesture, a menu item chosen, a window's buttons), at most once every
+5 s. Never for what the device sends by itself: no pick counts (the device asks
+for the Desktop on its own when a connection starts, when the Mac stopped the
+Desktop it streamed and when the window it watched closed, and picks again what
+it watched after a move; a person's pick is followed by their input), nor its
+viewport, settings, menu fetches or clipboard, nor a pointer move within 2 s
+after the host's own stream restart or new frame size (the device moves its own
+pointer to the middle of a new frame by itself). A display that was asleep
+powers on (a locked Mac wakes to its lock screen), and the stream shows it
+again once it is on, as when someone wakes it at the Mac. Nothing is held: the
+display sleeps again by the Mac's own setting (System Settings › Lock Screen),
+counted from the last declaration, which can be up to 5 s before the device's
+last input. So a device left connected and untouched lets the display sleep,
+the picture goes black, and the device's next input wakes it again. A tap on a
+black picture is a click, posted at once at a spot nobody can see; a pointer
+move on the trackpad, or ⌘, ⌥ or ⌃ pressed alone on a keyboard attached to the
+device, wakes the display without clicking. Shift alone does not: the device's
+text system takes it, and it reaches the Mac only in what it shifts
+(`ForwardedKeys.goesAsKey`); nor do the key row's modifiers, which only latch,
+sending nothing by themselves.
+Every session the host admits counts: a paired device, any device at home with
+Require pairing off, and with the CLI's plain home door (no `--pairing`) any
+device on this Mac's networks or over Direct Wireless; a request to pair does
+not. A connection the device opens by itself counts as a connect too (its
+reconnect after a dropped connection, a move to the cable, to Wi-Fi or home
+from away), and so does its own pointer move to a new frame's middle when it
+reaches the Mac more than 2 s after the new stream's first parameter sets left
+(a slow link): either can wake a sleeping display once with nobody at the
+device. It wakes a display, never a Mac that is asleep, and cannot light a
+closed laptop's display.
+
+The log says "Woke the display for iPad (iPad14,1), which connected." (or
+"…, which opened an app.", "…, which sent input.", "…, which pressed a window’s
+button.", "…, which chose a menu item.", "…, which made a trackpad gesture.")
+when the main display read asleep just before a declaration and on 0.5 s after
+it, once for one wake (two devices connecting together share it). Any other
+declaration says "Declared activity for iPad (iPad14,1), which sent input." at
+most once a minute, a woke line counting as that minute's, with ", but the
+display read asleep 0.5 s later." when it did (a closed lid, a display slow to
+wake). The stats line counts each declaration as `disp.wake`, and `pmset -g
+assertions` lists it as `UserIsActive named: "Sill: a device is using this
+Mac"` (its "Timeout will fire in" should count down from the display-sleep
+setting, as WindowServer's does after a key press). A test host
+(`--synthetic`, in the CLI and in the app alike) declares nothing and touches
+no display: it counts `disp.wakeDry` instead, so a test client's connect and
+input show what a real host would declare.
+
+TEST ONLY: `SILL_TEST_USER_ACTIVE=remote` declares the user as connected over
+the network (`kIOPMUserActiveRemote`) instead of in front of the Mac. Every
+real host takes it, Sill.app included, and says so in a "TEST:" line at start
+(a test host ignores it with a line; `local` is the default). IOPMLib.h says
+parts of the system are kept at different power levels by where the user is,
+and sends network clients that need the framebuffer to it, so it may keep the
+picture live with the panel dark (issue #133), or wake nothing: untried. To
+try it, quit Sill, then `open --env SILL_TEST_USER_ACTIVE=remote
+/Applications/Sill.app`; the next plain launch declares local again.
+`Sources/SillHost/DisplayWake.swift` is the rule (`Tests/checks/display-wake`),
+`DisplayActivity.swift` the call.
 
 ## Trackpad gestures
 
@@ -732,7 +817,8 @@ If it doesn't connect:
 
 - "didn't answer": the Mac is asleep or off, or the VPN is off on the Mac.
   While a device is connected remotely Sill keeps the Mac from going to sleep
-  by itself (the display may still sleep), but it cannot wake a sleeping Mac:
+  by itself (the display may still sleep, and a device's input wakes it: A
+  sleeping display, above), but it cannot wake a sleeping Mac:
   for a Mac that should stay reachable, prevent automatic sleeping in System
   Settings › Energy (or Battery).
 - "Tailscale looks off on this iPad": turn it on on the device.
@@ -815,8 +901,9 @@ which modifiers a device's keys leave set on the Mac,
 the first-run tour, pairing at home (the doors, the cable, the device's rows),
 which keychain Sill.app keeps its identity in, the away quality and the link's
 judgement, the iPhone Duo's layouts, what of the clipboard goes between the Mac
-and a device, and which type encodings the virtual display's private API may
-report) on their own with a check each, and
+and a device, which type encodings the virtual display's private API may report,
+and when the Mac's display is woken for a device) on their own with a check
+each, and
 runs them: about five minutes, no device, permission or encoder. `--mutants`
 also checks that each check fails when its file is changed in one place (well
 over an hour).
@@ -836,7 +923,8 @@ python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=b
 
 Its docstring lists every flag: timed changes and picks, stats as a named
 device, the remote door with pairing, the Mac's menus (`--menus`, `--fetch`,
-`--press`), and more. It checks every argument
+`--press`), a keyframe request (`--keyframe@T`: the summary's "keyframes at"
+shows the one it brought), and more. It checks every argument
 before it connects, and a bad one exits 2. The synthetic hosts do not
 advertise over Bonjour, so this client, or the simulator's `-SillConnect`, is
 how to reach them; `lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>` finds the port.
@@ -863,6 +951,7 @@ host on this Mac, which posts nothing. The clipboard's flags (`--clipboard`,
 `--copy`, `--copy-bytes`, `--raw32`, `--expect=clipboard=`) are under The
 clipboard, above: with `SILL_TEST_PASTEBOARD` the host's pasteboard is a
 private one, never this Mac's clipboard.
+`SILL_TEST_NO_SCREEN=1` (a `--synthetic` host only) keeps the window catalog off ScreenCaptureKit altogether: the window list stays empty and no thumbnail is taken, so a headless test host asks macOS for no screen recording, which otherwise counts against the grant of whatever launched it and brings up macOS's reminder after every rebuilt binary.
 
 `Scripts/sillrelay.py --listen 0 --to HOST:PORT [--delay-ms N] [--rate-mbps R]
 [--blackhole-after S] [--record PREFIX]` sits between a client and a host, and
@@ -896,8 +985,12 @@ touching a real app; the fetches and choices of `sillclient.py` refuse to run
 without that variable (a fetch carries the title its menu was shown under, as a
 device's does: the host reads a menu only under that title).
 `Scripts/menu-check/run.sh` runs the host's menu reader and mirror against the
-fixture without a host (it needs Accessibility for whatever runs it). The
-file's header says how to build and run it.
+fixture without a host (it needs Accessibility for whatever runs it, and an
+unlocked screen: nothing presses a menu under the login window), and its
+`close` step WindowSizer's Close against the fixture's second window, Slow
+Close, also off every display, whose close holds the fixture 4 s: the press
+must come back within its own 1 s, as no answer. The file's header says how to
+build and run it.
 
 ### The restore probe
 
@@ -996,6 +1089,21 @@ simulator:
   settings of the mock Mac) and `-SillConnectCase …`: the drawer, the Settings
   panel or the connect screen in a given state.
 - `-SillHUD 1`: fps, frame age, round trip and frame size over the stream.
+- `-SillLayerFail <s>[,<s>…]` (the normal app and `-SillLive 1`): at each of
+  these seconds after the launch's first picture a frame that cannot decode
+  goes onto the display layer, so the picture's recovery runs for real (the
+  layer's notification, the flush, one ask for a keyframe, the Mac's keyframe;
+  If the picture freezes, below). Against a synthetic host with
+  `SILL_TEST_STILL_AFTER=3`, a still window whose picture comes back only
+  through that ask, `-SillLayerFail 6,6.6,12` shows the spacing: one ask at
+  once, then a repeat held for 4 s and one for 8 s; the host logs one
+  "Keyframe for …" per ask and no second "Synthetic capture". With
+  `SILL_TEST_KEYFRAME_IGNORE=1` on that host the first ask goes unanswered,
+  and the device asks again 4 s later ("keyframe: no keyframe 4.0 s after the
+  last ask; asked again"). `-SillKeyframeLost <n>` throws the first n
+  keyframes that end a wait away, as though the layer still read failed when
+  they came: the picture counts as back and lost again ("flushed with the
+  keyframe it waited for"), and the next ask waits a repeat's 4 s.
 - `-SillBrowserFail N` (the normal app and `-SillLive 1`): each of the first N
   network browsers is reported failed as iOS reports a suspended app's
   (-65569), so the device makes it again after 1, 2, 4… s; the simulator's
@@ -1196,6 +1304,12 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
 - Read the host's stats line. `cap` counting with `enc.out` stuck at zero means
   the encoder, not the capture. `cap` at zero means the window is not
   repainting (covered on the Mac, or the app is idle).
+- Black windows, thumbnails too: the Mac's display is probably asleep. A
+  device's connect or input wakes it (A sleeping display, above): move the
+  pointer on the trackpad or press ⌘ on a keyboard attached to the device (not
+  Shift, which sends nothing by itself), since a tap on the black picture clicks
+  at a spot nobody can see. The log's "Woke the display for …" says it was
+  asleep and is on again.
 - The Mac has one hardware video encoder, shared by every app. When it keeps
   a frame for 1.5 s the log says "switching to the software encoder" and the
   stream restarts at half resolution on the CPU, up to 60 fps (a launch probe
@@ -1218,6 +1332,33 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
   back the host stops checking and says so, and the menu shows "Hardware
   Encoder Stuck" until one of those frames does come back ("so it is not
   stuck; checks resume").
+- On the device, a picture iOS stopped (Sill in the background, another app
+  taking the decoder) or one that could not decode is flushed, and the device
+  asks the Mac for a keyframe (kind 44; `KeyframeRecovery`, issue #101): the
+  host's log says "Keyframe for ‹device›: its picture was interrupted." and the
+  picture is back a round trip later, a still window's too (the encoder
+  encodes its last frame again; every device gets that keyframe, as when one
+  joins). One ask per interruption while its keyframe is due, held while Sill
+  is not active and owed again after a trip away, 2 s apart at least; an ask
+  whose keyframe has not come within 4 s (or four of the worst round trips on a
+  slow link) is made again, and a keyframe the layer throws away with its flush
+  counts as the picture back and lost again. A picture that fails again within
+  10 s of its keyframe, or an ask that goes unanswered, waits 4, 8, 16, then
+  32 s for the next ask, so a decoder that cannot keep up never costs every
+  device a keyframe every 2 s, and a trip to the background starts that at 2 s
+  again; the host takes at most one a second from a device ("Keyframe requests
+  ignored: …"). It never picks the source again, which would restart every
+  device's stream and, in regular mode, raise the window. A Mac from before
+  kind 44 (Sill for Mac 0.5.1) skips every ask without a line, and the picture
+  comes back with the stream's next keyframe, as before: the encoder makes one
+  every fps × 4 frames it encodes (4 s of a window that keeps changing at 60
+  fps, longer for one that changes less, and none while it stays still), when
+  a device joins or when the stream restarts, never because the window
+  changed. Meanwhile the device asks again after 4, 8 and 16 s, then every
+  32 s. The DEBUG console says "display: the picture was interrupted …",
+  "keyframe: …" and "display: the picture is back, N ms after it was
+  interrupted"; `-SillLayerFail` (The iOS debug harness) makes it happen on a
+  simulator, whose layer never stops for a trip to the background.
 - `swift run -c release SillHost --synthetic` streams a moving test pattern as
   the Desktop source with no Screen Recording needed: if the device shows the
   bar sweeping, the encoder, fallback and network are fine and the problem is
@@ -1353,7 +1494,7 @@ record field by field.
   link, for tests), `sillfeed.py` (a stand-in for GitHub's releases feed,
   for the update check's tests), `pacing/` (the pacing harness, above),
   `menufixture.swift` and `menu-check/` (the menus' test app, and the menu
-  reader's checks against it), and `restore-probe/` (a window Sill sized goes
+  reader's checks and a window's Close against it), and `restore-probe/` (a window Sill sized goes
   back, against a window of its own, above).
 - `Tests/checks/`: the pure checks (above). `Tests/touchrig/`: the touch rig
   (above). `Tests/duorig/`: folds and turns the iPhone Duo simulator (TEST
