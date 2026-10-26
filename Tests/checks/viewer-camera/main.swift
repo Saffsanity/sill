@@ -277,5 +277,16 @@ for session in 0..<2000 {
     }
 }
 print("random sessions: 2000, \(steps) steps, \(passes - savedPasses) checks")
+// The keyboard reduces the camera's room, including at Fit. Follow uses that same room.
+var keyboardCamera = camera(proMax, retina1610)
+let room = CGSize(width: proMax.width, height: 390)
+keyboardCamera.layout(screen: room, video: retina1610)
+check("keyboard: Fit stays entirely above the keyboard", keyboardCamera.rect.minY >= 0 && keyboardCamera.rect.maxY <= room.height)
+keyboardCamera.pinch(scale: 2, from: CGPoint(x: 220, y: 195), to: CGPoint(x: 220, y: 195))
+keyboardCamera.follow(CGPoint(x: 0.5, y: 0.8))
+check("keyboard: follow brings the pointer above its lower edge", keyboardCamera.onScreen(CGPoint(x: 0.5, y: 0.8)).y <= room.height - C.edge + 0.01)
+keyboardCamera.zoom = 1
+keyboardCamera.layout(screen: proMax, video: retina1610)
+check("keyboard: closing restores Fit in the full screen", near(keyboardCamera.rect.midY, proMax.height / 2))
 print("\(passes) passed, \(fails) failed")
 exit(fails == 0 ? 0 : 1)

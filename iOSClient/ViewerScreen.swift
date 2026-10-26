@@ -29,6 +29,7 @@ struct ViewerScreen: View {
     let linkLine: String?
 
     @State private var camera = ViewerCamera()
+    @State private var keyboardFrame: CGRect = .null
     @AppStorage("Sill.viewerBarShown") private var barShown = true
     @State private var panel: ViewerPanel? = nil
     @State private var pinchAt: CGPoint? = nil
@@ -38,6 +39,11 @@ struct ViewerScreen: View {
     var body: some View {
         GeometryReader { geo in
             let size = geo.size
+            let bounds = geo.frame(in: .global)
+            let overlap = bounds.intersection(keyboardFrame)
+            // Keep the camera above the keyboard even though the stream screen ignores its safe area.
+            let visibleSize = CGSize(width: size.width, height: overlap.isNull || overlap.isEmpty
+                                     ? size.height : max(1, overlap.minY - bounds.minY))
             ZStack(alignment: .top) {
                 Color.black
 
@@ -90,7 +96,7 @@ struct ViewerScreen: View {
                 }
             }
             .onAppear {
-                layout(size)
+                layout(visibleSize, panel: size)
                 #if DEBUG
                 // -SillViewerZoom 2.5: the harness's zoomed-in picture (docs/iphone-viewer-plan.md).
                 let z = UserDefaults.standard.double(forKey: "SillViewerZoom")
@@ -98,8 +104,21 @@ struct ViewerScreen: View {
                                         to: CGPoint(x: size.width / 2, y: size.height / 2)) }
                 #endif
             }
-            .onChange(of: size) { _, now in layout(now) }
-            .onChange(of: client.videoSize) { _, _ in layout(size) }
+            .onChange(of: size) { _, now in layout(visibleSize, panel: now) }
+            .onChange(of: client.videoSize) { _, _ in layout(visibleSize, panel: size) }
+            .onChange(of: visibleSize) { _, now in
+                layout(now, panel: size)
+                if let lastPointer { camera.follow(lastPointer) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+                updateKeyboard(note)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidChangeFrameNotification)) { note in
+                updateKeyboard(note)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                keyboardFrame = .null
+            }
         }
         .background(Color.black)
         .animation(.easeOut(duration: 0.18), value: barShown)
@@ -108,9 +127,15 @@ struct ViewerScreen: View {
         .animation(.easeOut(duration: 0.18), value: settingsOpen)
     }
 
-    private func layout(_ size: CGSize) {
+    private func updateKeyboard(_ note: Notification) {
+        guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+        let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+        withAnimation(.easeOut(duration: duration)) { keyboardFrame = frame }
+    }
+
+    private func layout(_ size: CGSize, panel: CGSize) {
         camera.layout(screen: size, video: client.videoSize)
-        onPanelSize(size)
+        onPanelSize(panel)
     }
 
     private func pinch(_ state: UIGestureRecognizer.State, _ scale: CGFloat, _ at: CGPoint) {
