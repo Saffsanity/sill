@@ -2,6 +2,7 @@
 # Builds Sill.app, the menu bar Mac host, from this SwiftPM package.
 #
 #   Scripts/make-app.sh                    .build/Sill.app, signed with your Apple Development identity
+#   SILL_UNIVERSAL=1 Scripts/make-app.sh   …for Apple silicon and Intel Macs (arm64 and x86_64; #62)
 #   Scripts/make-app.sh --install          …then replace /Applications/Sill.app (a running copy quits first)
 #   Scripts/make-app.sh --install --open   …and launch it: Noah's one command after any change
 #   SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release
@@ -58,8 +59,25 @@ fi
 
 bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' Packaging/Info.plist)"
 
-swift build -c release --product SillMenuBar
-bin="$(swift build -c release --product SillMenuBar --show-bin-path)"
+# SILL_UNIVERSAL=1: one Sill.app for Apple silicon and Intel Macs (#62), one build per architecture
+# joined with lipo. Not one `swift build --arch arm64 --arch x86_64`: that needs Xcode's XCBuild, and
+# the Command Line Tools alone must still build this. Each architecture has its own scratch path: in
+# one shared .build, every switch of triple costs a relink (16 s measured), so no rebuild stays at
+# ~2 s. Off by default: it doubles every build (50 to 97 s cold, 21 to 42 s after a one-line change,
+# measured 2026-10-20), the x86_64 slice had not streamed on an Intel Mac by then, and releases stay
+# arm64 until #62 decides (release.sh names the architectures it built). Unset, the build is for this
+# Mac's own architecture, as it always was.
+if [ "${SILL_UNIVERSAL:-}" = 1 ]; then
+    bin=.build/universal
+    for arch in arm64 x86_64; do
+        swift build -c release --product SillMenuBar --triple "$arch-apple-macosx" --scratch-path "$bin/$arch"
+        cp "$(swift build -c release --product SillMenuBar --triple "$arch-apple-macosx" --scratch-path "$bin/$arch" --show-bin-path)/SillMenuBar" "$bin/SillMenuBar-$arch"
+    done
+    lipo -create "$bin/SillMenuBar-arm64" "$bin/SillMenuBar-x86_64" -output "$bin/SillMenuBar"
+else
+    swift build -c release --product SillMenuBar
+    bin="$(swift build -c release --product SillMenuBar --show-bin-path)"
+fi
 app=.build/Sill.app
 stage=.build/Sill.app.partial      # assembled aside, so a failed run never leaves half a bundle
 rm -rf "$stage"
