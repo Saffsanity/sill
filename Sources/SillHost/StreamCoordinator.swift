@@ -741,7 +741,7 @@ package final class StreamCoordinator {
         let newScale = useSoftwareEncoder ? min(pair.captureScale, 1.0) : pair.captureScale
         if newFPS != fps || newScale != captureScale { return true }
         if pair.bitrate != bitrate || new.prioritizeSpeed != config.prioritizeSpeed { return true }
-        if new.virtualDisplay != config.virtualDisplay, case .window = active { return true }
+        if new.virtualDisplay != config.virtualDisplay, active != .none { return true }
         return false
     }
 
@@ -1053,6 +1053,7 @@ package final class StreamCoordinator {
             // The test pattern with the TEST ONLY scripted pointer: its own space, where a test
             // client's input moves that pointer (a synthetic host posts nothing).
             if synthetic, pointer.hasTestPointer { return Self.testPatternRect }
+            if virtualDisplay, stage.desktopStaged, let onScreen = stage.captureRectOnScreen { return onScreen }
             return catalog.display?.frame
         case .window(let id):
             // On the virtual display the video is the captured crop, not the whole window: an app
@@ -1096,6 +1097,7 @@ package final class StreamCoordinator {
             return nil
         case .desktop:
             if synthetic { return pointer.hasTestPointer ? .rect(Self.testPatternRect) : nil }
+            if virtualDisplay, stage.desktopStaged, let onScreen = stage.captureRectOnScreen { return .rect(onScreen) }
             return catalog.display.map { .rect($0.frame) }
         case .window(let id):
             guard !synthetic else { return nil }
@@ -1137,6 +1139,20 @@ package final class StreamCoordinator {
         // A different rate (a ProMotion device joined, Low Power Mode toggled) needs a new capture
         // interval and encoder session: one restart, whatever the source.
         if active != .none, effectiveFPS != fps { await select(active); return }
+        if case .desktop = active {
+            let wanted = viewport.flatMap { v in
+                DesktopVirtualDisplay.targetSize(viewportWidth: v.width, viewportHeight: v.height,
+                                                 scale: v.scale, virtualDisplayOn: virtualDisplay && stage.disabledReason == nil)
+            }
+            if let wanted {
+                if !stage.matchesDesktop(width: wanted.width, height: wanted.height) {
+                    await select(.desktop)
+                }
+            } else if stage.desktopStaged {
+                await select(.desktop)
+            }
+            return
+        }
         if virtualDisplay, stage.isStaged, case .window(let id) = active {
             // One restart: prepare re-places the window on the same display (the display is only
             // recreated if the envelope grew). The client's identical re-send after a switch is a
@@ -1301,13 +1317,24 @@ package final class StreamCoordinator {
         if virtualDisplay {
             // The stage follows the selection. A different window sends the staged one home first
             // and keeps the display for the newcomer; the same window keeps its place (prepare then
-            // skips the move); none or desktop puts the window back and removes the display.
-            if case .window(let id) = source {
+            // skips the move); desktop with Aa set reuses or creates the display at the device's
+            // aspect; none (or desktop with Aa Off) puts the window back and removes the display.
+            switch source {
+            case .window(let id):
+                if stage.desktopStaged { stage.destroyDisplay() }
                 if let staged = stage.placement, staged.windowID != id {
                     await stage.leaveFullScreenIfNeeded()
                     stage.releaseWindow()
                 }
-            } else {
+            case .desktop:
+                await stage.leaveFullScreenIfNeeded()
+                stage.releaseWindow()
+                let wanted = viewport.flatMap { v in
+                    DesktopVirtualDisplay.targetSize(viewportWidth: v.width, viewportHeight: v.height,
+                                                     scale: v.scale, virtualDisplayOn: stage.disabledReason == nil)
+                }
+                if wanted == nil { stage.destroyDisplay() }
+            case .none:
                 await stage.leaveFullScreenIfNeeded()
                 stage.release()
             }
@@ -1395,26 +1422,49 @@ package final class StreamCoordinator {
                 describe = "a synthetic test pattern\(useSoftwareEncoder ? " (software encoder)" : "")"
                 title = "Test Pattern"; kind = .testPattern
             } else {
-                guard let d = catalog.display else { active = .none; broadcastList(); return }
-                // Sill's own windows (Settings, Log, the pairing window with its code) never go out
-                // in a Desktop stream. Fixed here at pipeline start: a running SCStream is never
-                // reconfigured, so a host that can show a pairing code (remote access) looks for
-                // Sill among every window when the last on-screen look missed it; excluding nothing
-                // would let a pairing window opened later reach the devices. Without Sill anywhere
-                // (the CLI has no windows), as before.
                 var own = catalog.ownApplication
                 if own == nil, remote != nil {
                     own = await catalog.resolveOwnApplication()
                     guard !shuttingDown else { active = .none; broadcastList(); return }
                 }
-                if let own {
-                    filter = SCContentFilter(display: d, excludingApplications: [own], exceptingWindows: [])
-                } else {
-                    filter = SCContentFilter(display: d, excludingWindows: [])
+                var stagedDesktop: VirtualStage.Prepared?
+                if virtualDisplay, stage.disabledReason == nil,
+                   let v = viewport,
+                   let wanted = DesktopVirtualDisplay.targetSize(viewportWidth: v.width, viewportHeight: v.height,
+                                                                 scale: v.scale, virtualDisplayOn: true) {
+                    do {
+                        stagedDesktop = try await stage.prepareDesktop(width: wanted.width, height: wanted.height,
+                                                                       refreshHz: fps, excluding: own)
+                        guard !shuttingDown else { stage.release(); active = .none; broadcastList(); return }
+                        status.update { $0.lastStageFailure = nil }
+                    } catch {
+                        print("Virtual display fallback for Desktop: \(error). Streaming the main display instead.")
+                        Stats.shared.bump("vd.fallback")
+                        stage.release()
+                        let why = (error as? VirtualStage.Failure)?.summary ?? "\(error)"
+                        status.update {
+                            $0.lastStageFailure = why
+                            if let off = stage.disabledReason { $0.virtualDisplayProblem = off }
+                        }
+                    }
                 }
-                width = evenPixels(CGFloat(d.width) * captureScale); height = evenPixels(CGFloat(d.height) * captureScale)
-                describe = "the whole desktop\(useSoftwareEncoder ? " (software encoder)" : "")"
-                title = "Whole Desktop"; kind = .desktop
+                if let prepared = stagedDesktop {
+                    filter = prepared.filter
+                    width = evenPixels(prepared.sourceRect.width * captureScale)
+                    height = evenPixels(prepared.sourceRect.height * captureScale)
+                    describe = prepared.describe + (useSoftwareEncoder ? " (software encoder)" : "")
+                    title = "Whole Desktop"; kind = .desktop
+                } else {
+                    guard let d = catalog.display else { active = .none; broadcastList(); return }
+                    if let own {
+                        filter = SCContentFilter(display: d, excludingApplications: [own], exceptingWindows: [])
+                    } else {
+                        filter = SCContentFilter(display: d, excludingWindows: [])
+                    }
+                    width = evenPixels(CGFloat(d.width) * captureScale); height = evenPixels(CGFloat(d.height) * captureScale)
+                    describe = "the whole desktop\(useSoftwareEncoder ? " (software encoder)" : "")"
+                    title = "Whole Desktop"; kind = .desktop
+                }
             }
         }
 

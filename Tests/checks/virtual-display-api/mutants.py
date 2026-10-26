@@ -39,6 +39,16 @@ MUTANTS = [
      '"applySettings:", "c@:@", as: Runtime.ApplyFn.self)'),
     ("applySettings:'s NO read as YES", "return fn(display, sel, settings).boolValue",
      "return fn(display, sel, settings).boolValue || true"),
+    # DesktopVirtualDisplay (#212, #213)
+    ("DesktopVirtualDisplay stages when Virtual Display is off (#212)",
+     "guard virtualDisplayOn, let scale, scale > 0", "guard let scale, scale > 0"),
+    ("DesktopVirtualDisplay multiplies instead of dividing by scale (#212)",
+     "viewportWidth / scale", "viewportWidth * scale"),
+    ("DesktopVirtualDisplay skips minSide clamp (#212)",
+     "max(Int((viewportWidth / scale).rounded()), minSide)", "Int((viewportWidth / scale).rounded())"),
+    ("DesktopVirtualDisplay.matches ignores height (#212)",
+     "abs(currentWidth - wantedWidth) <= 2 && abs(currentHeight - wantedHeight) <= 2",
+     "abs(currentWidth - wantedWidth) <= 2"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
