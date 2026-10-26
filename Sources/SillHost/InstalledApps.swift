@@ -56,4 +56,17 @@ enum InstalledApps {
         }
         return found
     }
+
+    /// Windows AppKit, SwiftUI, WindowServer, and XPC helpers make for themselves ("LayerProbeParent",
+    /// or untitled backdrop/placeholder windows from processes with no bundle identifier or system
+    /// helper services, issue #114): they carry no user content and show up as blank duplicate tiles
+    /// with the default macOS app icon in the window strip.
+    static func isBlankOrHelperWindow(title: String?, bundleID: String?) -> Bool {
+        let trimmed = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+        if lower.contains("layerprobe") { return true }
+        guard trimmed.isEmpty else { return false }
+        let id = (bundleID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return id.isEmpty || id == "com.apple.windowserver" || id == "com.apple.dock" || id.hasPrefix("com.apple.appkit.xpc.")
+    }
 }

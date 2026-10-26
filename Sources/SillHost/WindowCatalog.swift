@@ -89,12 +89,13 @@ final class WindowCatalog {
     /// the client's bar and the coordinator can still find it.
     var stagedWindowID: CGWindowID?
 
-    /// Windows AppKit and SwiftUI make for themselves when a display appears ("LayerProbeParent":
-    /// an off-screen window that probes layer backing on the new screen). They carry the app's
-    /// name and no content, showed up as duplicate tiles with blank thumbnails, and the window
-    /// server drops them onto a real display when a virtual display goes away.
+    /// Windows AppKit, SwiftUI, WindowServer, and XPC helpers make for themselves ("LayerProbeParent",
+    /// or untitled backdrop/placeholder windows from processes with no bundle identifier or system
+    /// helper services, issue #114): they carry no user content, showed up as duplicate tiles with
+    /// blank thumbnails and default macOS app icons, and the window server drops them onto a real
+    /// display when a virtual display goes away.
     static func isSystemHelperWindow(_ w: SCWindow) -> Bool {
-        (w.title ?? "").lowercased().contains("layerprobe")
+        InstalledApps.isBlankOrHelperWindow(title: w.title, bundleID: w.owningApplication?.bundleIdentifier)
     }
 
     /// Window list and thumbnails, while a client is connected.

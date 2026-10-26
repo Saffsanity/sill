@@ -31,6 +31,14 @@ MUTANTS = [
      ", !seen.contains(id) else", " else"),
     ("sorted backwards",
      "== .orderedAscending }\n    }", "== .orderedDescending }\n    }"),
+    ("LayerProbeParent window kept",
+     'lower.contains("layerprobe")', "false"),
+    ("untitled window with empty bundleID kept (#114)",
+     "id.isEmpty ||", ""),
+    ("untitled WindowServer or Dock backdrop kept (#114)",
+     'id == "com.apple.windowserver" || id == "com.apple.dock"', "false"),
+    ("untitled AppKit XPC helper window kept (#114)",
+     'id.hasPrefix("com.apple.appkit.xpc.")', "false"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
