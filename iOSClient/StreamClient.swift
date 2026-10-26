@@ -1,7 +1,11 @@
 import Foundation
 import Network
 import QuartzCore
+#if canImport(UIKit)
 import UIKit
+#else
+import AppKit
+#endif
 import StreamProtocol
 
 /// A Mac on the connect screen: one the network browser lists, one seen only over peer-to-peer
@@ -907,6 +911,12 @@ final class StreamClient: ObservableObject {
         #else
         savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
         #endif
+        // Another client of this process saved a pairing or forgot a Mac: read the list back.
+        // Delivered at once on the posting thread, main, so no change of this one can come between.
+        NotificationCenter.default.addObserver(forName: Self.savedMacsChanged, object: nil, queue: nil) { [weak self] note in
+            guard let self, note.object as AnyObject? !== self else { return }
+            self.savedMacsChangedElsewhere()
+        }
         // Back from the background: the pings stopped while the app was suspended, which is no loss;
         // and the browsers, whose connection to mDNSResponder iOS may have made defunct meanwhile, are
         // made again (`cameForward`, issue #69).

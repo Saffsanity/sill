@@ -2,7 +2,11 @@ import Foundation
 import Network
 import Security
 import CryptoKit
+#if canImport(UIKit)
 import UIKit
+#else
+import AppKit
+#endif
 import StreamProtocol
 
 // Pairing at home on the device (docs/home-pairing-plan.md §7): the one TLS builder every

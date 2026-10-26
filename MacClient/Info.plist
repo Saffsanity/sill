@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Sill Viewer, the iPhone and iPad app's client on a Mac. Its keys follow iOSClient/Info.plist:
+	     a key added there that the Mac needs goes here too. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<!-- macOS 15 and later ask before an app reaches the local network (Bonjour included). -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Finds your other Mac on the local network.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_sill._tcp</string>
+		<!-- DEBUG's -SillServiceType _silltest._tcp, as iOSClient/Info-Debug.plist has it. -->
+		<string>_silltest._tcp</string>
+	</array>
+	<!-- sill://pair links, never acted on without a confirmation (ConnectScreen's card). Sill for
+	     Mac, the host, claims no scheme. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>me.saffer.sill.pair</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>sill</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
