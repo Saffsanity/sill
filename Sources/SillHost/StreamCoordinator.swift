@@ -69,8 +69,8 @@ package final class StreamCoordinator {
     /// encoder, the launch probe never runs and the re-check never starts, so no test touches the
     /// Mac's one hardware encoder while Noah streams (PointerTestHooks).
     private let softwareOnly: Bool
-    /// The TEST ONLY hooks' lines (PointerTestHooks, InputInjector.testInputLog), printed as `start`
-    /// begins; empty without them.
+    /// The TEST ONLY hooks' lines (PointerTestHooks, InputInjector.testInputLog, `keyframeIgnoreHook`),
+    /// printed as `start` begins; empty without them.
     private let testHookLines: [String]
     /// A picked window streams from its own HiDPI display (see VirtualStage): the CLI's
     /// `--virtual-display`, or the app's setting. Every branch this adds is behind this flag;
@@ -201,6 +201,19 @@ package final class StreamCoordinator {
     private lazy var gestureDrops = RefusalSummary(queue: .main, categories: ["gestures"]) { counts in
         "Gestures ignored: \(counts["gestures"] ?? 0) in a minute, from devices sending more than \(StreamCoordinator.gesturesPerSecond) a second."
     }
+    /// A device's keyframe requests (kind 44, issue #101: its picture was interrupted): when each
+    /// connection's last one was taken, at most one a second, the rest dropped with one line a minute.
+    /// A device asks once per interruption, again only when the keyframe has not come in 4 s or more,
+    /// 2 s apart at least (KeyframeRecovery), and each costs a keyframe to every device.
+    private var keyframeRequestAt: [ObjectIdentifier: CFAbsoluteTime] = [:]
+    /// TEST ONLY. `SILL_TEST_KEYFRAME_IGNORE=<n>` on a --synthetic host: the first n keyframe requests
+    /// it takes are ignored, with a line each, as a Mac from before kind 44 skips every one, so a
+    /// device's ask again after its wait runs for real (`keyframeIgnoreHook`). Zero otherwise.
+    private var keyframeRequestsToIgnore: Int
+    static let keyframeRequestSpacing: CFTimeInterval = 1
+    private lazy var keyframeRequestDrops = RefusalSummary(queue: .main, categories: ["keyframes"]) { counts in
+        "Keyframe requests ignored: \(counts["keyframes"] ?? 0) in a minute, from devices asking more than once a second."
+    }
     /// Gestures waiting for a switch in flight to finish, in arrival order, and the task posting them.
     private var pendingGestures: [(gesture: TrackpadGesture, device: String)] = []
     private var gestureDrain: Task<Void, Never>?
@@ -304,11 +317,15 @@ package final class StreamCoordinator {
         let path = PointerTestHooks.pointerPath(synthetic: synthetic, environment: env)
         let software = PointerTestHooks.softwareEncoder(synthetic: synthetic, environment: env)
         let inputLog = InputInjector.testInputLog(synthetic: synthetic, environment: env)
+        let noScreen = PointerTestHooks.noScreen(synthetic: synthetic, environment: env)
+        WindowCatalog.screenless = noScreen.on
+        let keyframeIgnore = Self.keyframeIgnoreHook(synthetic: synthetic, environment: env)
         pointer = PointerWatch(synthetic: synthetic, path: path.path)
         softwareOnly = software.on
         let userActive = DisplayWake.userActive(environment: env, testHost: synthetic)
         displayActivity = DisplayActivity(remote: userActive.remote)
-        testHookLines = [path.line, software.line, inputLog.line, userActive.line].compactMap { $0 }
+        keyframeRequestsToIgnore = keyframeIgnore.count
+        testHookLines = [path.line, software.line, inputLog.line, userActive.line, keyframeIgnore.line, noScreen.line].compactMap { $0 }
         status = HostStatus()
         var home = StreamServer.HomeDoorMode.plain
         if homePairing, let remote {
@@ -409,6 +426,7 @@ package final class StreamCoordinator {
                 self.settingsIgnoredLineAt[ObjectIdentifier(connection)] = nil
                 let id = ObjectIdentifier(connection)
                 self.gestureArrivals[id] = nil
+                self.keyframeRequestAt[id] = nil
                 self.routes[id] = nil
                 self.lastPairingWanted[id] = nil
                 self.connections[id] = nil
@@ -911,15 +929,15 @@ package final class StreamCoordinator {
             // Accessibility. The staged window's element is already matched; others are looked up.
             guard let cmd = Wire.decode(WindowCommand.self, from: message.payload) else { return }
             gestureChords.forget()              // a window's own button: a view a gesture opened is left behind
-            let done: Bool
+            let outcome: WindowSizer.CommandOutcome
             if virtualDisplay, let p = stage.placement, p.windowID == cmd.id {
-                done = WindowSizer.perform(cmd.action, element: p.element)
+                outcome = WindowSizer.perform(cmd.action, element: p.element)
             } else if let w = catalog.window(id: cmd.id) {
-                done = sizer.perform(cmd.action, on: w)
+                outcome = sizer.perform(cmd.action, on: w)
             } else {
-                done = false
+                outcome = .refused
             }
-            print("Window \(cmd.id) \(cmd.action.rawValue): \(done ? "done" : "refused")")
+            print("Window \(cmd.id) \(cmd.action.rawValue): \(outcome.words(for: cmd.action))")
             Stats.shared.bump("win.\(cmd.action.rawValue)")
             await catalog.refreshWindows()      // show the result now, not at the next poll
         case .launchApp:
@@ -969,6 +987,27 @@ package final class StreamCoordinator {
             recent.append(now)
             gestureArrivals[id] = recent
             queueGesture(gesture, from: deviceName(connection))
+        case .keyframeRequest:
+            // A device's picture was interrupted (its display layer failed, or iOS stopped it while
+            // Sill was away) and waits for a keyframe, which a still window never sends. The encoder
+            // makes one from the next repaint, or encodes a still window's last frame again
+            // (HEVCEncoder.requestKeyframe); every device gets it, as when a device joins. Never a
+            // restart or a pick: nothing else streams again and no window comes forward.
+            let id = ObjectIdentifier(connection)
+            let now = CFAbsoluteTimeGetCurrent()
+            if let last = keyframeRequestAt[id], now >= last, now - last < Self.keyframeRequestSpacing {
+                keyframeRequestDrops.count("keyframes")
+                return
+            }
+            keyframeRequestAt[id] = now
+            if keyframeRequestsToIgnore > 0 {      // TEST ONLY: SILL_TEST_KEYFRAME_IGNORE
+                keyframeRequestsToIgnore -= 1
+                print("Test keyframes: ignored a keyframe request from \(deviceName(connection)) (\(keyframeRequestsToIgnore) more to ignore).")
+                return
+            }
+            guard active != .none, let encoder else { return }     // nothing streams: the next stream starts with one
+            print("Keyframe for \(deviceName(connection)): its picture was interrupted.")
+            encoder.requestKeyframe()
         case .viewport:
             guard let v = Wire.decode(Viewport.self, from: message.payload) else { return }
             viewport = v
@@ -1899,6 +1938,17 @@ package final class StreamCoordinator {
             try? await Task.sleep(for: .milliseconds(20))
         }
         return Self.activePID(trustAppKit: appKitLoop) == pid
+    }
+
+    /// TEST ONLY: `SILL_TEST_KEYFRAME_IGNORE=<n>`, honoured only by a --synthetic host, with the one
+    /// line `start` prints about it. Nothing, and no line, without it.
+    static func keyframeIgnoreHook(synthetic: Bool, environment env: [String: String]) -> (count: Int, line: String?) {
+        guard let raw = env["SILL_TEST_KEYFRAME_IGNORE"], !raw.isEmpty else { return (0, nil) }
+        let shown = SafeText.label(raw, limit: 32)
+        guard synthetic else { return (0, "SILL_TEST_KEYFRAME_IGNORE=\(shown) ignored: only a --synthetic host takes it.") }
+        guard let n = Int(raw), n > 0 else { return (0, "SILL_TEST_KEYFRAME_IGNORE=\(shown) ignored: a number of requests, 1 or more.") }
+        let which = n == 1 ? "the first keyframe request (kind 44)" : "the first \(n) keyframe requests (kind 44)"
+        return (n, "Test keyframes: \(which) ignored, as a Mac from before kind 44 skips every one (SILL_TEST_KEYFRAME_IGNORE).")
     }
 
     /// TEST ONLY: `SILL_TEST_MENU_PID`, honoured only by a --synthetic host (which does not

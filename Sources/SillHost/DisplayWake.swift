@@ -17,7 +17,7 @@ import StreamProtocol
 ///   when the Mac stopped the Desktop it streamed, when the watched window closed) and picks again
 ///   what it watched after a move, with nobody at it; a person's pick is followed by their input.
 ///   Never the viewport (9), a settings change (17), "show your pairing code" (21), a menu fetched
-///   (27), the clipboard (32), input that does not decode, nor any other kind.
+///   (27), the clipboard (32), a keyframe request (44), input that does not decode, nor any other kind.
 /// - Never a bare pointer move within `recentre` after the host's own stream restart or new frame
 ///   size (`streamChanged`): the device moves its own pointer to the new frame's middle by itself
 ///   (StreamClient.pointerFrameChanged), with nobody at it.
