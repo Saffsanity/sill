@@ -935,7 +935,9 @@ package final class StreamCoordinator {
                 if let error { print("Launch failed: \(error.localizedDescription)") }
             }
         case .input:
-            guard let event = input else { return }
+            guard let rawEvent = input else { return }
+            let sleepingPhysical = !synthetic && !(virtualDisplay && stage.isStaged) && CGDisplayIsAsleep(CGMainDisplayID()) != 0
+            guard let event = displayWake.filterWakeInput(rawEvent, displayAsleep: sleepingPhysical) else { return }
             let device = ObjectIdentifier(connection)
             guard let rect = currentSourceRect() else {
                 // Nothing streams (between sources, or the stream stopped: the window closed under a

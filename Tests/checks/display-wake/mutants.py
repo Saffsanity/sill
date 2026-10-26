@@ -85,6 +85,11 @@ MUTANTS = {
     "M59 another value echoed": ('return (false, "\\(userActiveVariable) ignored: it takes local or remote; user activity is declared as local.")',
                                  'return (false, "\\(userActiveVariable)=\\(value) ignored: it takes local or remote; user activity is declared as local.")'),
     "M60 the variable's name": ('static let userActiveVariable = "SILL_TEST_USER_ACTIVE"', 'static let userActiveVariable = "SILL_TEST_USERACTIVE"'),
+    # Swallowing the waking click on a sleeping display
+    "M61 a waking left press still clicks": ("if displayAsleep { swallowedLeft = true; return .pointer(.move, x: x, y: y) }", "if false { swallowedLeft = true; return .pointer(.move, x: x, y: y) }"),
+    "M62 a swallowed left press's release still goes through": ("if swallowedLeft { swallowedLeft = false; return nil }", "if false { swallowedLeft = false; return nil }"),
+    "M63 a waking right press still clicks": ("if displayAsleep { swallowedRight = true; return .pointer(.move, x: x, y: y) }", "if false { swallowedRight = true; return .pointer(.move, x: x, y: y) }"),
+    "M64 a swallowed right press's release still goes through": ("if swallowedRight { swallowedRight = false; return nil }", "if false { swallowedRight = false; return nil }"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

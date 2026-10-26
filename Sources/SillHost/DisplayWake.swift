@@ -91,8 +91,36 @@ struct DisplayWake {
     private(set) var lastDeclared: TimeInterval?
     /// When the host last restarted its stream or sent a new frame size (`streamChanged`); nil before.
     private(set) var streamChangedAt: TimeInterval?
+    /// Whether the current left or right button press arrived while the display was asleep and was
+    /// turned into a pointer move, so its matching release is swallowed too.
+    private(set) var swallowedLeft = false
+    private(set) var swallowedRight = false
 
     init(testHost: Bool) { self.testHost = testHost }
+
+    /// Filters a device's `InputEvent` against whether the display being clicked is currently asleep:
+    /// a button press on a sleeping display moves the pointer to the tap spot without clicking an
+    /// unseen control, and its matching button release is swallowed even if the display wakes first.
+    mutating func filterWakeInput(_ event: InputEvent, displayAsleep: Bool) -> InputEvent? {
+        switch event {
+        case .pointer(.leftDown, let x, let y):
+            if displayAsleep { swallowedLeft = true; return .pointer(.move, x: x, y: y) }
+            swallowedLeft = false
+            return event
+        case .pointer(.leftUp, _, _):
+            if swallowedLeft { swallowedLeft = false; return nil }
+            return event
+        case .pointer(.rightDown, let x, let y):
+            if displayAsleep { swallowedRight = true; return .pointer(.move, x: x, y: y) }
+            swallowedRight = false
+            return event
+        case .pointer(.rightUp, _, _):
+            if swallowedRight { swallowedRight = false; return nil }
+            return event
+        default:
+            return event
+        }
+    }
 
     /// The host restarted its stream or sent a new frame size: the coordinator calls it when a new
     /// stream's first parameter sets go out, and when parameter sets that differ from the last ones
