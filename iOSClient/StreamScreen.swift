@@ -100,6 +100,29 @@ enum DuoLayout {
 
 // MARK: - Screen
 
+/// Coordinates `UIApplication.shared.isIdleTimerDisabled` across all open Sill windows using
+/// `DeviceIdlePolicy` (`HardwareKeyboardPolicy.swift`). Main thread.
+enum DeviceIdleTimer {
+    private static var policy = DeviceIdlePolicy<ObjectIdentifier>()
+
+    static func update(client: ObjectIdentifier, active: Bool, streaming: Bool) {
+        policy.update(scene: client, active: active, streaming: streaming)
+        apply()
+    }
+
+    static func remove(client: ObjectIdentifier) {
+        policy.remove(scene: client)
+        apply()
+    }
+
+    private static func apply() {
+        let wanted = policy.disablesIdleTimer
+        if UIApplication.shared.isIdleTimerDisabled != wanted {
+            UIApplication.shared.isIdleTimerDisabled = wanted
+        }
+    }
+}
+
 struct StreamScreen: View {
     @ObservedObject var client: StreamClient
     @State private var drawerOpen = false
@@ -339,6 +362,9 @@ struct StreamScreen: View {
         .onChange(of: scenePhase) { _, phase in
             // A gesture cut short by a scene change never ends: put the transient UI away.
             if phase != .active { scaleOpen = false; windowMenu = nil }
+            DeviceIdleTimer.update(client: ObjectIdentifier(client),
+                                   active: phase == .active,
+                                   streaming: client.connected && client.active != .none)
         }
         // One thing open at a time: the Aa ruler and a thumbnail's traffic lights put the Settings
         // panel away. (Opening the panel closes them, the drawer and the keyboard.)
@@ -349,6 +375,9 @@ struct StreamScreen: View {
             // A fresh connection starts on the Desktop (the client asks for it as soon as the host
             // reports nothing streaming), so the drawer stays closed until the user opens it.
             sendViewport()
+            DeviceIdleTimer.update(client: ObjectIdentifier(client),
+                                   active: scenePhase == .active,
+                                   streaming: client.connected && client.active != .none)
             // A link that came in before this connection did waits here now.
             if client.pendingLink != nil { openLinkOverlay() }
             #if DEBUG
@@ -357,11 +386,17 @@ struct StreamScreen: View {
         }
         .onChange(of: client.active) { _, source in
             if source != .none { withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false } }
+            DeviceIdleTimer.update(client: ObjectIdentifier(client),
+                                   active: scenePhase == .active,
+                                   streaming: client.connected && source != .none)
             // The host sizes a window as it selects it, from the last viewport it has; this repeat
             // is for a host that restarted, or a window that was picked from the Mac's side.
             sendViewport()
         }
         .onChange(of: client.connected) { _, up in
+            DeviceIdleTimer.update(client: ObjectIdentifier(client),
+                                   active: scenePhase == .active,
+                                   streaming: up && client.active != .none)
             if up { sendViewport() }
         }
         // A hardware keyboard (docs/hardware-keyboard-plan.md §2): the input view takes the keyboard by
@@ -404,6 +439,7 @@ struct StreamScreen: View {
         .onDisappear {
             tourWait?.cancel()
             tourWait = nil
+            DeviceIdleTimer.remove(client: ObjectIdentifier(client))
         }
     }
 

@@ -245,6 +245,9 @@ final class StreamClient: ObservableObject {
                 presence.streaming = streaming
                 renderPointer()
             }
+            if !streaming {
+                DeviceIdleTimer.remove(client: ObjectIdentifier(self))
+            }
         }
     }
     @Published var thumbnails: [UInt32: UIImage] = [:] // by window ID

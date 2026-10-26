@@ -58,6 +58,14 @@ MUTANTS = [
     ("M29 what was asked ignored: always the keyboard's", "            hold = automatic ? .automatic : .own", "            hold = .automatic"),
     ("M30 a resignation forgets what was held", "        if hold != .none { lastHeld = hold }\n", ""),
     ("M31 a resignation keeps the hold", "        if hold != .none { lastHeld = hold }\n        hold = .none\n", "        if hold != .none { lastHeld = hold }\n"),
+    ("M32 DeviceIdlePolicy disables idle timer when scene is not foreground active",
+     "scenes.values.contains { $0.active && $0.streaming }", "scenes.values.contains { $0.streaming }"),
+    ("M33 DeviceIdlePolicy disables idle timer when nothing streams",
+     "scenes.values.contains { $0.active && $0.streaming }", "scenes.values.contains { $0.active }"),
+    ("M34 DeviceIdlePolicy remove clears all scenes (breaks second window)",
+     "scenes.removeValue(forKey: scene)", "scenes.removeAll()"),
+    ("M35 DeviceIdlePolicy prune keeps closed scenes",
+     "scenes = scenes.filter { openScenes.contains($0.key) }", ""),
 ]
 caught = 0
 for name, old, new in MUTANTS:
