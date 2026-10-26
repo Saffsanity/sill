@@ -11,12 +11,15 @@ namespace Sill.Viewer;
 /// network has had 3 s, each saved Mac it doesn't list is a Remote row (<see cref="RemoteRows"/>),
 /// which connects at its saved addresses alone: away from home, through Tailscale. A "Not paired" row asks its Mac for its code
 /// and Add a Mac… takes a link or an address and a code, both through a <see cref="PairingFlow"/>
-/// shown as a <see cref="PairCard"/>; a pairing connects at once.
+/// shown as a <see cref="PairCard"/>; a pairing connects at once. Opened at the start of a run, it
+/// clicks the Mac this PC connected to last by itself once its row is there (<see cref="LaunchDial"/>),
+/// unless another click comes first.
 /// </summary>
 sealed class ConnectForm : Form
 {
-    /// <summary>A Mac to connect to: the addresses to dial (<c>host:port</c>, in order), its name and its Mac ID.</summary>
-    public event Action<IReadOnlyList<string>, string, string>? Connect;
+    /// <summary>A Mac to connect to: the addresses to dial (<c>host:port</c>, in order), its name, its
+    /// Mac ID, and whether it is the start's own dial (one try: back here if it doesn't connect).</summary>
+    public event Action<IReadOnlyList<string>, string, string, bool>? Connect;
 
     public const string LookingOnNetwork = "Looking for Macs on this network";
 
@@ -38,14 +41,18 @@ sealed class ConnectForm : Form
     private string status;
     private string? busyRow;
     private bool listedOnce;
+    private SavedMac? launchMac;   // the start's own dial, until its row is clicked or another click comes
+    private readonly bool atLaunch;
+    private readonly System.Windows.Forms.Timer launchWait = new() { Interval = (int)((RemoteRows.NetworkFirst + 1) * 1000) + 50 };
 
     /// <param name="status">The status line to open with (a session's end: a Mac with a new key, a
     /// forgotten Mac); null for "Looking for Macs on this network".</param>
     /// <param name="updates">The app's update check (null when this run doesn't check): a newer
     /// release shows as "Sill 0.6 Is Available…" above the footer.</param>
-    public ConnectForm(string dir, IReadOnlyList<string> serviceTypes, string? status = null, UpdateChecker? updates = null)
+    /// <param name="atLaunch">The run's first window: dial the Mac connected to last by itself.</param>
+    public ConnectForm(string dir, IReadOnlyList<string> serviceTypes, string? status = null, UpdateChecker? updates = null, bool atLaunch = false)
     {
-        this.dir = dir; this.serviceTypes = serviceTypes; this.updates = updates;
+        this.dir = dir; this.serviceTypes = serviceTypes; this.updates = updates; this.atLaunch = atLaunch;
         this.status = status ?? LookingOnNetwork;
         store = new SavedMacsFile(dir);
         Text = "Sill";
@@ -64,6 +71,7 @@ sealed class ConnectForm : Form
         card.Cancelled += () => flow?.Cancel();
         card.Rename += Rename;
         grace.Tick += (_, _) => { grace.Stop(); Refresh(); };   // the Remote rows, once the network has had its seconds
+        launchWait.Tick += (_, _) => { launchWait.Stop(); Refresh(); };   // the start's dial gives up waiting for a row
         KeyPreview = true;
     }
 
@@ -83,6 +91,13 @@ sealed class ConnectForm : Form
         Log($"Connect screen: looking for {string.Join(", ", serviceTypes)}; "
             + (saved.Count == 0 ? "no Mac saved" : "saved: " + string.Join(", ", saved.Select(m => $"{m.Name} ({m.MacId}{(m.NewKey == true ? ", new key" : "")}, "
                 + $"{m.Addresses?.Count ?? 0} addresses from kind 18)"))) + ".");
+        if (atLaunch && LaunchDial.Mac(saved) is { } last)
+        {
+            launchMac = last;
+            status = $"Connecting to {last.Name}…";
+            launchWait.Start();
+            Log($"Connect at launch: {last.Name} ({last.MacId}), last connected {last.LastConnectedAt!.Value.ToLocalTime():yyyy-MM-dd HH:mm}; waiting for its row.");
+        }
         foreach (var type in serviceTypes)
         {
             var b = new MacBrowser(type);
@@ -128,6 +143,20 @@ sealed class ConnectForm : Form
             + $"at {since.Elapsed.TotalSeconds:0.00} s.");
         if (busyRow is not null && rows.All(r => r.Key != busyRow)) busyRow = null;
         screen.Show(rows, status, busyRow);
+        if (launchMac is { } mac)
+        {
+            if (LaunchDial.Row(mac.MacId, rows) is { } row)
+            {
+                Log($"Connect at launch: dialing {row.Name} ({row.State}) at {since.Elapsed.TotalSeconds:0.00} s.");
+                Dial(row, once: true);
+            }
+            else if (LaunchDial.GivesUp(mac.MacId, rows, since.Elapsed.TotalSeconds))
+            {
+                launchMac = null;
+                Log($"Connect at launch: no row to dial for {mac.Name}; waiting for a click.");
+                Say(LookingOnNetwork);
+            }
+        }
     }
 
     private void Say(string line)
@@ -139,6 +168,15 @@ sealed class ConnectForm : Form
     private void Clicked(MacRow row)
     {
         Log($"Connect screen: clicked {row.Name}, {row.State}{(row.Replaces is { } r ? $" (pairs again in place of {r})" : "")}.");
+        Dial(row, once: false);
+    }
+
+    /// <summary>A row clicked, by the person or by the start's own dial (<paramref name="once"/>).
+    /// Either way the start's dial is over.</summary>
+    private void Dial(MacRow row, bool once)
+    {
+        launchMac = null;
+        launchWait.Stop();
         switch (row.State)
         {
             case MacRow.Kind.Paired:
@@ -147,7 +185,7 @@ sealed class ConnectForm : Form
                 if (targets.Count == 0) { Say($"{row.Name} didn’t say where it is. Try again in a moment."); return; }
                 busyRow = row.Key;
                 Say($"Connecting to {row.Name}…");
-                Connect?.Invoke(targets, row.Name, row.MacId!);
+                Connect?.Invoke(targets, row.Name, row.MacId!, once);
                 break;
             case MacRow.Kind.NotPaired or MacRow.Kind.OpenDoor:
                 Start(row);
@@ -159,7 +197,7 @@ sealed class ConnectForm : Form
                 flow?.Cancel();
                 busyRow = row.Key;
                 Say($"Connecting to {row.Name} remotely…");
-                Connect?.Invoke([], row.Name, row.MacId!);   // the viewer dials its saved addresses
+                Connect?.Invoke([], row.Name, row.MacId!, once);   // the viewer dials its saved addresses
                 break;
         }
     }
@@ -171,6 +209,7 @@ sealed class ConnectForm : Form
     private void Start(MacRow? row)
     {
         flow?.Cancel();
+        if (launchMac is not null) { launchMac = null; launchWait.Stop(); Log("Connect at launch: called off by a click."); }
         try { identity ??= DeviceIdentity.LoadOrCreate(dir); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
         {
@@ -227,7 +266,7 @@ sealed class ConnectForm : Form
                 var targets = new List<string> { f.Reached!.Value.ToString() };
                 foreach (var t in flowRow?.DialTargets() ?? []) if (!targets.Contains(t)) targets.Add(t);
                 Log($"Pairing: paired with {mac.Name} ({mac.MacId}) at {f.Reached}; connecting.");
-                Connect?.Invoke(targets, mac.Name, mac.MacId);
+                Connect?.Invoke(targets, mac.Name, mac.MacId, false);
                 break;
             case PairingFlow.Steps.Ended:
                 screen.ShowCard(null);
@@ -257,6 +296,7 @@ sealed class ConnectForm : Form
         flow?.Cancel();
         if (updates is not null) updates.Changed -= UpdatesChanged;
         grace.Dispose();
+        launchWait.Dispose();
         foreach (var b in browsers) b.Dispose();
         identity?.Dispose();
         // Where it was, for the viewer's next window (the viewer's own full screen, decoding and clipboard kept).
@@ -302,7 +342,7 @@ sealed class SillApp : ApplicationContext
         updates = AppUpdates.Create(SynchronizationContext.Current);
         if (updates is not null) Microsoft.Win32.SystemEvents.PowerModeChanged += Woke;
         if (hosts.Count > 0) ShowViewer(hosts, null);
-        else ShowConnect(null);
+        else ShowConnect(null, atLaunch: true);
     }
 
     // Timers may not have counted the sleep: the next check is worked out again.
@@ -321,22 +361,22 @@ sealed class SillApp : ApplicationContext
         base.ExitThreadCore();
     }
 
-    private void ShowConnect(string? status)
+    private void ShowConnect(string? status, bool atLaunch = false)
     {
-        var form = new ConnectForm(dir, options.ServiceTypes, status, updates);
-        (IReadOnlyList<string> Targets, string MacId)? next = null;
-        form.Connect += (targets, _, macId) => { next = (targets, macId); form.Close(); };
+        var form = new ConnectForm(dir, options.ServiceTypes, status, updates, atLaunch);
+        (IReadOnlyList<string> Targets, string MacId, bool Once)? next = null;
+        form.Connect += (targets, _, macId, once) => { next = (targets, macId, once); form.Close(); };
         form.FormClosed += (_, _) =>
         {
-            if (next is { } t) ShowViewer(t.Targets, t.MacId);
+            if (next is { } t) ShowViewer(t.Targets, t.MacId, t.Once);
             else ExitThread();
         };
         form.Show();
     }
 
-    private void ShowViewer(IReadOnlyList<string> hosts, string? macId)
+    private void ShowViewer(IReadOnlyList<string> hosts, string? macId, bool once = false)
     {
-        var form = new ViewerForm(dir, hosts, options, macId, updates);
+        var form = new ViewerForm(dir, hosts, options, macId, updates, once);
         form.FormClosed += (_, _) =>
         {
             if (form.Disconnecting) ShowConnect(form.EndedWith);

@@ -33,6 +33,7 @@ sealed class ViewerForm : Form
     private readonly ISavedMacs store;
     private string? macId;   // the saved Mac this window streams; null: the newest (--host)
     private readonly bool fromRow;   // opened from the connect screen's row (or a pairing): a refused pin marks it
+    private bool once;   // the start's own dial: one try, back to the connect screen if it doesn't connect
     private readonly ViewerOptions options;
     private readonly UpdateChecker? updates;   // the app's (SillApp's), for Settings' update rows
     private readonly CancellationTokenSource stop = new();
@@ -134,9 +135,12 @@ sealed class ViewerForm : Form
     /// <param name="macId">The saved Mac the connect screen's row (or a pairing) chose; null for
     /// <c>--host</c>, which dials the newest saved Mac.</param>
     /// <param name="updates">The app's update check, for Settings › This PC (null when this run doesn't check).</param>
-    public ViewerForm(string dir, IReadOnlyList<string> targets, ViewerOptions options, string? macId = null, UpdateChecker? updates = null)
+    /// <param name="once">The start's own dial (<see cref="LaunchDial"/>): if it doesn't connect, the
+    /// window closes back to the connect screen with its words, and nothing redials.</param>
+    public ViewerForm(string dir, IReadOnlyList<string> targets, ViewerOptions options, string? macId = null, UpdateChecker? updates = null,
+                      bool once = false)
     {
-        this.dir = dir; this.options = options; this.updates = updates;
+        this.dir = dir; this.options = options; this.updates = updates; this.once = once;
         this.macId = macId; fromRow = macId is not null;
         if (fromRow) { hostOverrides = []; rowTargets = targets; }
         else hostOverrides = targets;
@@ -773,6 +777,15 @@ sealed class ViewerForm : Form
             dialed = true;
             var end = await SessionAsync(ct, dialing);
             if (end is null || end.Next == Next.Stop) return;
+            if (once && !end.Ran)
+            {
+                Log("Connect at launch: the dial did not connect; back to the connect screen.");
+                EndedWith = end.Words;
+                Disconnecting = true;
+                BeginInvoke(Close);
+                return;
+            }
+            once = false;
             endWords = null;
             if (end.Ran) { failed = 0; lastDialAt = null; } else failed++;
             if (end.Next == Next.ForGood)

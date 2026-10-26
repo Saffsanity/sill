@@ -17,7 +17,7 @@ namespace Sill.Viewer;
 /// </summary>
 static class SelfInstall
 {
-    private static string LocalAppData => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+    private static string LocalAppData => DataFolder.LocalAppData();
     /// <summary>The user's Start Menu\Programs folder (not All Users': no administrator).</summary>
     private static string Programs => Environment.GetFolderPath(Environment.SpecialFolder.Programs);
 
