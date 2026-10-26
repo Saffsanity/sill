@@ -99,6 +99,9 @@ do {
           "closing the child window returns to the parent window")
     check(activeFollow.parentStack.isEmpty, "the return stack is popped when returning to the parent")
     _ = activeFollow.poll(windows: [w1, w2, other], activeWindowID: 101, now: 20, lastActivityAt: 19)
+    check(activeFollow.poll(windows: [w1, other], activeWindowID: 102, now: 21, lastActivityAt: 19, keepMissingActive: true) == nil
+          && activeFollow.parentStack == [101],
+          "a window temporarily missing during a full-screen transition keeps the parent stack intact")
     activeFollow.reset()
     check(activeFollow.parentStack.isEmpty, "an explicit user pick clears the return stack")
 }

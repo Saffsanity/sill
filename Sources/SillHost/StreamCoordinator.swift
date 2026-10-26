@@ -2231,20 +2231,22 @@ package final class StreamCoordinator {
         let activeID: UInt32? = { if case .window(let id) = active { return id }; return nil }()
         let entries = infos.map { (id: $0.id, bundleID: $0.bundleID) }
         if case .window(let id) = active {
-            if let followed = windowFollow.poll(windows: entries, activeWindowID: id,
-                                                now: CFAbsoluteTimeGetCurrent(),
-                                                lastActivityAt: displayWake.lastDeclared) {
-                await select(.window(followed), bringForward: true)
-                return
-            }
             guard let w = infos.first(where: { $0.id == id }) else {
                 // Alive on the virtual display even if the on-screen list dropped it.
-                if virtualDisplay, stage.isStaged, Self.liveBounds(of: id) != nil { broadcastList(); return }
+                if virtualDisplay, stage.isStaged, Self.liveBounds(of: id) != nil {
+                    _ = windowFollow.poll(windows: entries, activeWindowID: id, now: CFAbsoluteTimeGetCurrent(),
+                                          lastActivityAt: displayWake.lastDeclared, keepMissingActive: true)
+                    broadcastList(); return
+                }
                 // Leaving full screen, a window is off every list for a second or two. Give it
                 // three polls before calling it closed, then restart so the stage re-places it.
                 if virtualDisplay, stage.isStaged, stage.fullScreen {
                     missingPolls += 1
-                    if missingPolls <= 3 { broadcastList(); return }
+                    if missingPolls <= 3 {
+                        _ = windowFollow.poll(windows: entries, activeWindowID: id, now: CFAbsoluteTimeGetCurrent(),
+                                              lastActivityAt: displayWake.lastDeclared, keepMissingActive: true)
+                        broadcastList(); return
+                    }
                     missingPolls = 0
                 } else if !(virtualDisplay && stage.isStaged) {
                     // In regular mode too: one that was full screen when last listed, or that Sill fitted
@@ -2253,13 +2255,26 @@ package final class StreamCoordinator {
                     missingPolls += 1
                     var windows = WindowSizer.AXWindows(sizer: sizer)
                     if WindowRestore.keepsStreaming(fits.entries[id]?.handle, looks: missingPolls, wasFullScreen: listedFullScreen == id, on: &windows) {
+                        _ = windowFollow.poll(windows: entries, activeWindowID: id, now: CFAbsoluteTimeGetCurrent(),
+                                              lastActivityAt: displayWake.lastDeclared, keepMissingActive: true)
                         broadcastList(); return
                     }
                     missingPolls = 0
                 }
+                if let parent = windowFollow.poll(windows: entries, activeWindowID: id,
+                                                  now: CFAbsoluteTimeGetCurrent(),
+                                                  lastActivityAt: displayWake.lastDeclared) {
+                    await select(.window(parent), bringForward: true); return
+                }
                 await select(.none); return
             }
             missingPolls = 0
+            if let followed = windowFollow.poll(windows: entries, activeWindowID: id,
+                                                now: CFAbsoluteTimeGetCurrent(),
+                                                lastActivityAt: displayWake.lastDeclared) {
+                await select(.window(followed), bringForward: true)
+                return
+            }
             if !(virtualDisplay && stage.isStaged), let scw = catalog.window(id: id) {
                 listedFullScreen = WindowRestore.coversDisplay(scw.frame, WindowSizer.displayFrames()) ? id : nil
             }

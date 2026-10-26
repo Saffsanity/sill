@@ -76,7 +76,8 @@ struct WindowFollowPolicy: Equatable {
     mutating func poll(windows: [(id: UInt32, bundleID: String)],
                        activeWindowID: UInt32?,
                        now: TimeInterval,
-                       lastActivityAt: TimeInterval?) -> UInt32? {
+                       lastActivityAt: TimeInterval?,
+                       keepMissingActive: Bool = false) -> UInt32? {
         let currentIDs = Set(windows.map(\.id))
         let previousIDs = knownWindowIDs
         let wasSeeded = seeded
@@ -101,6 +102,7 @@ struct WindowFollowPolicy: Equatable {
             return nil
         }
 
+        if keepMissingActive { return nil }
         return parentStack.popLast()
     }
 }

@@ -40,6 +40,8 @@ MUTANTS = [
     ("WindowFollowPolicy reset keeps parent stack",
      "    mutating func reset() {\n        parentStack.removeAll()\n    }",
      "    mutating func reset() {\n    }"),
+    ("WindowFollowPolicy pops parent during full-screen transition",
+     "if keepMissingActive { return nil }", ""),
 ]
 caught = 0
 for name, old, new in MUTANTS:
