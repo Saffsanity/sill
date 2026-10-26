@@ -5,11 +5,12 @@
 //               [--service-type <type>]…
 //
 // --identity is where this device's key and the saved Macs are (default %LOCALAPPDATA%\Sill, the
-// data folder, where the first start moves the spike's %LOCALAPPDATA%\Sill\spike: DataFolder). Without arguments the viewer opens on the connect screen: the Macs
-// Windows' DNS-SD finds on this network (_sill._tcp; TEST ONLY --service-type, repeatable, browses
-// others instead, such as a synthetic host's _silltest._tcp), and a Remote row for each saved Mac
-// not listed here; a click connects at the row's address, then at the addresses the Mac's kind 18
-// gave. --host (a developer's tool, never needed by a shortcut) dials the newest saved Mac at that
+// data folder, where the first start moves the spike's %LOCALAPPDATA%\Sill\spike: DataFolder).
+// Without arguments the viewer opens on the connect screen: the Macs Windows' DNS-SD finds on this
+// network (_sill._tcp; TEST ONLY --service-type, repeatable, browses others instead, such as a
+// synthetic host's _silltest._tcp), and a Remote row for each saved Mac not listed here; a click
+// connects at the row's address, then at the addresses the Mac's kind 18 gave, and at the start the
+// screen clicks the Mac connected to last by itself, once (LaunchDial). --host (a developer's tool, never needed by a shortcut) dials the newest saved Mac at that
 // address first, tried in order, then at its saved addresses. The picture is
 // decoded and drawn on the GPU unless --decoder software (auto and gpu both fall back to software
 // when the GPU path can't start or fails); --adapter picks DXGI's Nth adapter instead of Windows'

@@ -123,6 +123,11 @@ its word (Wired or Wi‑Fi for the Mac this PC paired with, known by its TXT tag
 "Not paired"; "Update Sill" for a Mac without `p`), Add a Mac… and the site's links. A click on the
 paired Mac connects at the address and port it resolved (the home door, TLS, pinned to the saved
 key), then at its saved addresses; Settings › Disconnect, at the panel's foot, comes back here.
+At a start the connect screen clicks, by itself, the Mac this PC connected to last (the newest
+`LastConnectedAt` in `macs.json`, never a Mac with a new key; `LaunchDial`): "Connecting to ‹Mac›…"
+at once, then its row as soon as this network lists it, or its Remote row after 3 s. One dial: if it
+doesn't connect, the connect screen comes back with the usual words and nothing redials. A click on
+another row, or Add a Mac…, first calls it off.
 
 Away from home. Every session's kind 18 (the Mac's signed `MacInfo`: its name, the remote door's
 port, and while Remote Access is on its addresses for afar, Tailscale's name and address among them)

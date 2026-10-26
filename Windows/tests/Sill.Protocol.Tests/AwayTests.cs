@@ -378,4 +378,44 @@ public class AwayTests
         Assert.Empty(row.DialTargets());
         Assert.Equal([a.MacId, b.MacId], RemoteRows.Build([b, a], [], 10).Select(r => r.MacId));
     }
+
+    // ---- the start's own dial ----
+
+    [Fact]
+    public void TheStartDialsTheMacConnectedToLast()
+    {
+        var a = Saved(MacKey) with { LastConnectedAt = DateTimeOffset.UnixEpoch.AddDays(2) };
+        var b = Saved(OtherKey) with { Name = "Studio", LastConnectedAt = DateTimeOffset.UnixEpoch.AddDays(5) };
+        var never = Saved(ECDsa.Create(ECCurve.NamedCurves.nistP256)) with { Name = "Never" };
+        var marked = Saved(ECDsa.Create(ECCurve.NamedCurves.nistP256)) with { Name = "Set up again", LastConnectedAt = DateTimeOffset.UnixEpoch.AddDays(9), NewKey = true };
+        Assert.Null(LaunchDial.Mac([]));                  // a fresh install
+        Assert.Null(LaunchDial.Mac([never]));             // paired, never connected
+        Assert.Equal(b.MacId, LaunchDial.Mac([b, a, never, marked])!.MacId);   // not the list's newest, nor a Mac with a new key
+        Assert.Equal(a.MacId, LaunchDial.Mac([a, never])!.MacId);
+        Assert.Null(LaunchDial.Mac([marked, never]));
+    }
+
+    [Fact]
+    public void TheStartClicksItsRowOrItsRemoteRow()
+    {
+        var a = Saved(MacKey);
+        var b = Saved(OtherKey) with { Name = "Studio" };
+        MacRow Listed(string id, MacRow.Kind kind) =>
+            new(new FoundService("_sill._tcp", "Mac mini", "mac.local.", 49870, [], new Dictionary<string, string?>(), MacLink.WiFi), kind, id, true);
+        // Nothing listed yet: wait.
+        Assert.Null(LaunchDial.Row(a.MacId, []));
+        Assert.False(LaunchDial.GivesUp(a.MacId, [], 0.5));
+        // Its row on this network, before any Remote row.
+        var row = Listed(a.MacId, MacRow.Kind.Paired);
+        Assert.Same(row, LaunchDial.Row(a.MacId, [Listed(b.MacId, MacRow.Kind.Paired), row]));
+        // Not listed here: its Remote row once the network has had its seconds.
+        var rows = RemoteRows.Build([a, b], [], RemoteRows.NetworkFirst);
+        Assert.Equal((MacRow.Kind.Remote, a.MacId), (LaunchDial.Row(a.MacId, rows)!.State, LaunchDial.Row(a.MacId, rows)!.MacId));
+        // Listed some other way (Update Sill): a click is the person's, once the Remote rows' second has passed.
+        var other = Listed(a.MacId, MacRow.Kind.UpdateSill);
+        Assert.Null(LaunchDial.Row(a.MacId, [other]));
+        Assert.False(LaunchDial.GivesUp(a.MacId, [other], RemoteRows.NetworkFirst + 0.5));
+        Assert.True(LaunchDial.GivesUp(a.MacId, [other], RemoteRows.NetworkFirst + 1));
+        Assert.False(LaunchDial.GivesUp(a.MacId, [row], 30));
+    }
 }

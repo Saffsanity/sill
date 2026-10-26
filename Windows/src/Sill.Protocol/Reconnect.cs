@@ -101,3 +101,29 @@ public static class RemoteRows
             .ToList();
     }
 }
+
+/// <summary>
+/// The dial a start makes by itself (no <c>--host</c>): the saved Mac this PC connected to last,
+/// clicked as its row would be once the connect screen lists it, its row on this network or, after
+/// <see cref="RemoteRows.NetworkFirst"/>, its Remote row. One dial: if it doesn't connect, the
+/// connect screen stays with its words, and no reconnect follows. Pure.
+/// </summary>
+public static class LaunchDial
+{
+    /// <summary>The Mac to dial: the one with the newest <see cref="SavedMac.LastConnectedAt"/>, never
+    /// one marked with a new key (its row pairs it again) or one never connected to.</summary>
+    public static SavedMac? Mac(IReadOnlyList<SavedMac> saved) =>
+        saved.Where(m => m.NewKey != true && m.LastConnectedAt is not null).MaxBy(m => m.LastConnectedAt);
+
+    /// <summary>The row to click for <paramref name="macId"/>: its paired row on this network, or its
+    /// Remote row; null while there is none yet.</summary>
+    public static MacRow? Row(string macId, IReadOnlyList<MacRow> rows) =>
+        rows.FirstOrDefault(r => r.MacId == macId && r.State == MacRow.Kind.Paired)
+        ?? rows.FirstOrDefault(r => r.MacId == macId && r.State == MacRow.Kind.Remote);
+
+    /// <summary>Whether to stop waiting for a row: the browse has had a second past the Remote rows'
+    /// <see cref="RemoteRows.NetworkFirst"/> and the Mac is still listed some other way (Update
+    /// Sill, say), so a click is the person's to make.</summary>
+    public static bool GivesUp(string macId, IReadOnlyList<MacRow> rows, double browsing) =>
+        browsing >= RemoteRows.NetworkFirst + 1 && Row(macId, rows) is null;
+}
