@@ -33,12 +33,16 @@ package final class StreamCoordinator {
     /// watching a window different from `active` (#210).
     private final class SecondaryPipeline: @unchecked Sendable {
         let windowID: UInt32
+        let width: Int
+        let height: Int
         let capture = WindowCapture()
         let encoder: HEVCEncoder
         private let lock = NSLock()
         private var psData: Data?
-        init(windowID: UInt32, encoder: HEVCEncoder) {
+        init(windowID: UInt32, width: Int, height: Int, encoder: HEVCEncoder) {
             self.windowID = windowID
+            self.width = width
+            self.height = height
             self.encoder = encoder
         }
         var lastParameterSets: Data? {
@@ -2235,6 +2239,12 @@ package final class StreamCoordinator {
     private func windowsChanged(_ infos: [WindowInfo]) async {
         // The pointer's rectangle follows the catalog: the Desktop's display, a window's bounds.
         defer { pointer.setGeometry(pointerGeometry(), fps: fps) }
+        let openIDs = Set(infos.map(\.id))
+        let pruned = PerClientStreamRouting.pruningClosedWindows(clientSources: clientSources, openWindowIDs: openIDs)
+        if pruned != clientSources || !secondaryPipelines.isEmpty {
+            clientSources = pruned
+            await reconcileSecondaryStreams()
+        }
         if let pending = pendingLaunch, let w = infos.first(where: { $0.bundleID == pending }) {
             pendingLaunch = nil
             await select(.window(w.id), bringForward: true)   // launched from the device to use it: a pick
@@ -2406,11 +2416,20 @@ package final class StreamCoordinator {
     /// Starts or stops secondary window pipelines so each connected device watching a window
     /// different from `active` gets its own stream (#210, #208).
     private func reconcileSecondaryStreams() async {
+        let previouslyExcluded = secondaryBox.excludedFromPrimary
         let wantedIDs = Set(PerClientStreamRouting.secondaryWindowIDs(clientSources: clientSources, primaryActive: active))
-        for (wid, pipe) in secondaryPipelines where !wantedIDs.contains(wid) {
-            await pipe.capture.stop()
-            pipe.capture.onFrame = nil
-            secondaryPipelines[wid] = nil
+        for (wid, pipe) in secondaryPipelines {
+            let resized: Bool
+            if let w = catalog.window(id: wid) {
+                resized = evenPixels(w.frame.width * scale) != pipe.width || evenPixels(w.frame.height * scale) != pipe.height
+            } else {
+                resized = true
+            }
+            if !wantedIDs.contains(wid) || resized {
+                await pipe.capture.stop()
+                pipe.capture.onFrame = nil
+                secondaryPipelines[wid] = nil
+            }
         }
         var byWindow: [UInt32: Set<ObjectIdentifier>] = [:]
         var excluded = Set<ObjectIdentifier>()
@@ -2422,13 +2441,18 @@ package final class StreamCoordinator {
             }
         }
         secondaryBox.update(byWindow: byWindow, excluded: excluded)
+        let returnedToPrimary = previouslyExcluded.subtracting(excluded)
+        if !returnedToPrimary.isEmpty {
+            for id in returnedToPrimary { server.resetForNewStream(client: id) }
+            encoder?.requestKeyframe()
+        }
         for wid in wantedIDs where secondaryPipelines[wid] == nil {
             guard let w = catalog.window(id: wid) else { continue }
             let width = evenPixels(w.frame.width * scale)
             let height = evenPixels(w.frame.height * scale)
             guard let enc = try? HEVCEncoder(width: width, height: height, fps: fps, bitrate: streamBitrate,
                                              prioritizeSpeed: prioritizeSpeed, software: useSoftwareEncoder) else { continue }
-            let pipe = SecondaryPipeline(windowID: wid, encoder: enc)
+            let pipe = SecondaryPipeline(windowID: wid, width: width, height: height, encoder: enc)
             let server = self.server
             let box = self.secondaryBox
             enc.onEncoded = { [weak pipe] data, isKey, parameterSets in
@@ -2441,13 +2465,15 @@ package final class StreamCoordinator {
                     server.broadcast(psMsg, to: subs, lastParameterSets: pipe?.lastParameterSets)
                 }
                 let frameMsg = StreamMessage(kind: .frame, timestamp: now, isKeyframe: isKey, payload: data)
-                server.broadcast(frameMsg, to: subs, lastParameterSets: pipe?.lastParameterSets)
+                server.broadcast(frameMsg, to: subs, lastParameterSets: pipe?.lastParameterSets,
+                                 onKeyframeNeeded: { [weak pipe] in pipe?.encoder.requestKeyframe() })
             }
             pipe.capture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
             do {
                 try await pipe.capture.start(filter: SCContentFilter(desktopIndependentWindow: w),
                                              width: width, height: height, fps: fps, showsCursor: false, sourceRect: nil)
                 secondaryPipelines[wid] = pipe
+                for id in byWindow[wid] ?? [] { server.resetForNewStream(client: id) }
                 enc.requestKeyframe()
             } catch {
                 pipe.capture.onFrame = nil

@@ -203,6 +203,10 @@ check(PerClientStreamRouting.secondaryWindowIDs(clientSources: ["A": .window(101
 check(PerClientStreamRouting.primaryRecipients(allClients: ["iPadA", "iPadB", "iPhone"], clientSources: picks, primaryActive: .window(101))
       == ["iPadA", "iPhone"],
       "PerClientStreamRouting.primaryRecipients: includes clients on primaryActive or unset, excludes secondary-window clients (#210)")
+let pruned = PerClientStreamRouting.pruningClosedWindows(clientSources: ["iPadA": .window(101), "iPadB": .window(202), "iPhone": .desktop],
+                                                         openWindowIDs: [101])
+check(pruned == ["iPadA": .window(101), "iPhone": .desktop],
+      "PerClientStreamRouting.pruningClosedWindows: drops closed secondary windows and keeps open windows and desktop (#210)")
 
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil

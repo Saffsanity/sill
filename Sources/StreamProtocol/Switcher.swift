@@ -156,4 +156,14 @@ public enum PerClientStreamRouting {
                                                            primaryActive: StreamSource) -> [Client] {
         allClients.filter { !isSecondaryWindow(for: $0, clientSources: clientSources, primaryActive: primaryActive) }
     }
+
+    public static func pruningClosedWindows<Client: Hashable>(clientSources: [Client: StreamSource],
+                                                              openWindowIDs: Set<UInt32>) -> [Client: StreamSource] {
+        var next: [Client: StreamSource] = [:]
+        for (client, source) in clientSources {
+            if case .window(let id) = source, !openWindowIDs.contains(id) { continue }
+            next[client] = source
+        }
+        return next
+    }
 }

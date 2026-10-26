@@ -1493,20 +1493,28 @@ final class StreamServer {
     }
 
     /// Sends a secondary window stream's parameter sets or frame to `recipients` (`#210`).
-    func broadcast(_ message: StreamMessage, to recipients: Set<ObjectIdentifier>, lastParameterSets psData: Data?) {
+    func broadcast(_ message: StreamMessage, to recipients: Set<ObjectIdentifier>, lastParameterSets psData: Data?,
+                   onKeyframeNeeded: (() -> Void)? = nil) {
         guard !recipients.isEmpty else { return }
         let data = message.serialized()
         queue.async { [self] in
+            var wantKeyframe = false
+            defer { if wantKeyframe { onKeyframeNeeded?() } }
             for id in recipients {
                 guard let client = clients[id], client.connection.state == .ready else { continue }
                 if message.kind == .frame {
                     if client.needsKeyframe {
-                        guard message.isKeyframe, let ps = psData else { continue }
+                        guard message.isKeyframe, let ps = psData else {
+                            if !client.awaitingFirstKeyframe { client.withheldThisSecond += 1 }
+                            continue
+                        }
                         send(ps, to: client)
                         client.needsKeyframe = false
                         client.awaitingFirstKeyframe = false
                     } else if client.inflight > 2 && !message.isKeyframe {
+                        client.withheldThisSecond += 1
                         client.needsKeyframe = true
+                        wantKeyframe = true
                         continue
                     }
                     client.sentThisSecond += 1

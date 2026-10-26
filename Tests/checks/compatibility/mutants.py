@@ -37,6 +37,9 @@ MUTANTS = [
     ("PerClientStreamRouting.primaryRecipients sends primary frames to secondary-window clients (#210)", "Switcher.swift",
      "        allClients.filter { !isSecondaryWindow(for: $0, clientSources: clientSources, primaryActive: primaryActive) }",
      "        allClients"),
+    ("PerClientStreamRouting.pruningClosedWindows keeps closed windows (#210)", "Switcher.swift",
+     "            if case .window(let id) = source, !openWindowIDs.contains(id) { continue }",
+     ""),
 ]
 caught = 0
 for name, file, old, new in MUTANTS:
