@@ -19,8 +19,9 @@ import StreamProtocol
 /// only. Errors show inline, never in alerts. After the Mac's settings come the device's own groups:
 /// This iPad (or iPhone), whose switches are preferences here and send nothing to the Mac (Larger
 /// Picture, `StreamClient.largerPictureKey`, on an iPhone without a hinge whose picture it makes
-/// larger, `largerPictureOffered`; Fill the Screen, `StreamClient.fillScreenKey`, which a pinch on
-/// a window's picture also sets; Double-Tap for the Keyboard, `StreamClient.keyboardDoubleTapKey`;
+/// larger, `largerPictureOffered`; Pinch to Fill the Screen, `StreamClient.pinchToFillKey`, which
+/// allows a pinch on one window's picture to hide that window's bar; Double-Tap for the Keyboard,
+/// `StreamClient.keyboardDoubleTapKey`;
 /// Share Clipboard, `StreamClient.clipboardKey`, while the Mac shares
 /// its clipboard, with the system's Paste for this device's text; Three-Finger Gestures,
 /// `StreamClient.gesturesKey`), and whose gesture rows, as accessibility actions, do their gestures
@@ -52,7 +53,7 @@ struct HostSettingsPanel: View {
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
-    @AppStorage(StreamClient.fillScreenKey) private var fillScreen = false
+    @AppStorage(StreamClient.pinchToFillKey) private var pinchToFill = true
     @AppStorage(StreamClient.keyboardDoubleTapKey) private var keyboardDoubleTap = false
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
@@ -490,8 +491,8 @@ struct HostSettingsPanel: View {
             Footnote(text: Self.largerPictureFooter)
         }
         Rows {
-            Toggle(isOn: $fillScreen) {
-                Text("Fill the Screen").foregroundStyle(Palette.text)
+            Toggle(isOn: $pinchToFill) {
+                Text("Pinch to Fill the Screen").foregroundStyle(Palette.text)
             }
             .rowFrame()
         }
@@ -550,9 +551,9 @@ struct HostSettingsPanel: View {
     /// closes (StreamScreen's `largerPictureHeld`).
     static let largerPictureFooter = "Held upright, a window’s picture takes the place of the window thumbnails and reaches down to where the keyboard comes up. The Desktop keeps the thumbnails. Switch windows with Apps: tap an open app again for its next window. To fill the taller picture with a window, set its text size with Aa. A change applies when you close Settings."
 
-    /// Under Fill the Screen: the pinch, that the Mac resizes the window, and that the Desktop
-    /// keeps the bar. A change from the switch applies as Settings closes.
-    static let fillScreenFooter = "Pinch open on a window’s picture to fill the screen, and pinch closed to bring the bar back. The Mac sizes the window to the picture. The Desktop keeps the bar. A change applies when you close Settings."
+    /// Under Pinch to Fill the Screen: the switch allows the gesture. The pinch, on one window,
+    /// hides or shows that window's bar. The Desktop keeps its bar.
+    static let fillScreenFooter = "Turn this on, then pinch open on a window’s picture to hide the bar on that window, and pinch closed to bring it back. Other windows stay as they are. The Desktop keeps the bar. Turning this off brings the bars back."
 
     /// Under Double-Tap for the Keyboard. Fingers only, and a hardware keyboard is left alone.
     static func keyboardDoubleTapFooter(device: String) -> String {

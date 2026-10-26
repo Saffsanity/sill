@@ -3312,11 +3312,10 @@ final class StreamClient: ObservableObject {
     /// does (`PhonePortraitLayout.largerPicture(switchOn:streaming:)`).
     static let largerPictureKey = "Sill.largerPicture"
 
-    /// This device's Fill the Screen (the Settings panel's This iPad group): off unless a pinch
-    /// opens on a window's picture, or the switch is turned on. The device's own preference, never
-    /// sent. The stream screen acts on it only while a window streams; the Desktop keeps the bar.
-    /// Pinch closed, or the switch off, brings the bar back and the Mac sizes the window again.
-    static let fillScreenKey = "Sill.fillScreen"
+    /// This device's Pinch to Fill (the Settings panel's This iPad group): the gesture is allowed.
+    /// On unless turned off. It does not itself hide the bar. Each window decides that with a
+    /// pinch, and only that window changes. Never sent. The Desktop keeps the bar either way.
+    static let pinchToFillKey = "Sill.pinchToFill"
 
     /// Two fingers tapped twice on the picture show or hide the on-screen keyboard. Off unless
     /// turned on, so a two-finger drag keeps scrolling. Never sent. Ignored while a hardware

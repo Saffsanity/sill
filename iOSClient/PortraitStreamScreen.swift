@@ -172,6 +172,8 @@ struct PortraitStreamScreen: View {
     /// keeps its own rows (Larger Picture). Pinch on the picture still reaches `onFillPinch`.
     var fillScreen: Bool = false
     var onFillPinch: (Bool) -> Void = { _ in }
+    /// The Settings switch. Off, a pinch on the picture changes nothing.
+    var pinchToFill: Bool = true
     var keyboardDoubleTap: Bool = false
     var onKeyboardDoubleTap: () -> Void = {}
 
@@ -480,6 +482,7 @@ struct PortraitStreamScreen: View {
                          onModifiersConsumed: { latched = [] },
                          sendGesture: { client.sendGesture($0, fingers: $1) },
                          onFillPinch: onFillPinch,
+                         pinchToFill: pinchToFill,
                          keyboardDoubleTap: keyboardDoubleTap,
                          onKeyboardDoubleTap: onKeyboardDoubleTap)
         }

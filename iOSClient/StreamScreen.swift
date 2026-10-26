@@ -109,10 +109,11 @@ struct StreamScreen: View {
     @State private var latched: KeyModifiers = []
     /// The bar's Keyboard button drives the overlay's first responder through this.
     @State private var overlay = InputOverlayProxy()
-    /// The Aa control's text scale, device points per Mac point; nil means the Mac window has never
-    /// been asked to fit (the control shows 1× for it). Up here, like `latched`, so it survives
-    /// rotation and both layouts share it.
-    @State private var textScale: Double? = nil
+    /// The Aa control's text scale, device points per Mac point. It starts at 1×, so the Mac window
+    /// matches the picture from the first viewport and follows an iPad window resize. Nil (the
+    /// harness, before `-SillScale`) means it has never been asked to fit; the control shows 1×
+    /// either way. Up here, like `latched`, so it survives rotation and both layouts share it.
+    @State private var textScale: Double? = 1
     /// The Aa slider is unfolded (finger down): the bars fade their other buttons meanwhile.
     @State private var scaleOpen = false
     /// The thumbnail whose traffic-light submenu is open (held for 1.5 s). The bars clip their
@@ -180,11 +181,13 @@ struct StreamScreen: View {
     /// streams changing meanwhile (a window closed on the Mac, another device's pick). It applies as
     /// the panel goes, in the same motion.
     @State private var largerPictureHeld: Bool? = nil
-    /// Fill the Screen (This iPad): a window's picture takes the bar's place. Off until a pinch
-    /// opens on the picture, or the switch is turned on. Never sent.
-    @AppStorage(StreamClient.fillScreenKey) private var fillScreen = false
+    /// Pinch to Fill (This iPad): the gesture is allowed. It does not hide the bar by itself.
+    /// On unless turned off. Never sent. Each window keeps its own mode (`pictureFills`).
+    @AppStorage(StreamClient.pinchToFillKey) private var pinchToFill = true
+    /// This window only. Pinch open hides the bar; pinch closed brings it back.
+    @State private var pictureFills = false
     /// The mode the Settings panel opened with, kept until it closes so the panel does not jump
-    /// under the finger. Nil while Settings is closed.
+    /// under the finger when the gesture is turned off. Nil while Settings is closed.
     @State private var fillScreenHeld: Bool? = nil
     /// Two-finger double-tap shows the on-screen keyboard. Off until turned on.
     @AppStorage(StreamClient.keyboardDoubleTapKey) private var keyboardDoubleTap = false
@@ -199,7 +202,7 @@ struct StreamScreen: View {
     /// DEBUG only, for the layout harness: start on a given state so a posture can be photographed
     /// with the drawer already open. `StreamScreen(client:)` still means exactly what it did.
     init(client: StreamClient, drawerOpen: Bool = false, keyboardShown: Bool = false,
-         scaleOpen: Bool = false, textScale: Double? = nil, settingsOpen: Bool = false,
+         scaleOpen: Bool = false, textScale: Double? = 1, settingsOpen: Bool = false,
          pairingOverlay: Bool = false, scannerOverride: CodeScanner.Mode? = nil) {
         self.client = client
         _drawerOpen = State(initialValue: drawerOpen)
@@ -215,11 +218,7 @@ struct StreamScreen: View {
             ? PhonePortraitLayout.largerPicture(switchOn: UserDefaults.standard.bool(forKey: StreamClient.largerPictureKey),
                                                 streaming: .init(client.active))
             : nil)
-        var heldFill: Bool? = nil
-        if settingsOpen, UserDefaults.standard.bool(forKey: StreamClient.fillScreenKey) {
-            if case .window = client.active { heldFill = true }
-        }
-        _fillScreenHeld = State(initialValue: heldFill)
+        _fillScreenHeld = State(initialValue: nil)
         _pairingOverlay = State(initialValue: pairingOverlay)
         self.scannerOverride = scannerOverride
     }
@@ -321,6 +320,11 @@ struct StreamScreen: View {
                     windowMenu = nil
                     scaleOpen = false
                 }
+            }
+            // The switch is this device's, so another window's Settings turns the gesture off here
+            // too. A panel open on this window keeps its layout until it closes (`setSettings`).
+            .onChange(of: pinchToFill) { _, on in
+                if !on, fillScreenHeld == nil { pictureFills = false }
             }
             .onChange(of: largerKeyboard != nil) { _, _ in
                 #if DEBUG
@@ -699,23 +703,26 @@ struct StreamScreen: View {
         PhonePortraitLayout.largerPicture(switchOn: largerPicture, streaming: .init(client.active))
     }
 
-    /// Fill the Screen in effect now: the switch, while a window streams. The Desktop keeps the
-    /// bar and the inset, and so does nothing streaming. While Settings is open, the mode it
-    /// opened with (`fillScreenHeld`).
+    /// This window fills the screen: a pinch opened on its picture, the gesture is allowed, and a
+    /// window is streaming. The Desktop keeps the bar, and so does nothing streaming. While
+    /// Settings is open, the mode it opened with (`fillScreenHeld`), so turning the gesture off
+    /// does not move the panel under the finger.
     private var fillScreenNow: Bool {
-        let on = fillScreenHeld ?? fillScreen
+        let on = fillScreenHeld ?? (pinchToFill && pictureFills)
         guard on else { return false }
         if case .window = client.active { return true }
         return false
     }
 
-    /// A pinch on the picture, one way or the other. Pinch open fills the screen; pinch closed
-    /// brings the bar back. Each is a real change of size, so the viewport follows and the Mac
-    /// fits the window, the same as a rotation. Nothing on the Desktop.
+    /// A pinch on this window's picture, one way or the other. It changes only this window.
+    /// Pinch open fills the screen; pinch closed brings the bar back. Each is a real change of
+    /// size, so the viewport follows and the Mac fits the window, the same as a rotation.
+    /// Nothing while the gesture is off, and nothing on the Desktop.
     private func fillPinched(open: Bool) {
+        guard pinchToFill else { return }
         guard case .window = client.active else { return }
-        guard open != fillScreen else { return }
-        withAnimation(.easeOut(duration: 0.22)) { fillScreen = open }
+        guard open != pictureFills else { return }
+        withAnimation(.easeOut(duration: 0.22)) { pictureFills = open }
         AccessibilityNotification.Announcement(open ? "The picture fills the screen" : "The bar is back").post()
         #if DEBUG
         print("fill: \(open ? "pinch open, the picture fills the screen" : "pinch closed, the bar is back")")
@@ -746,6 +753,9 @@ struct StreamScreen: View {
             // panel never moves under the finger: a change of the switch, or of what streams,
             // applies as the panel goes.
             largerPictureHeld = open ? largerPictureNow : nil
+            // Turning the gesture off brings this window's bar back as the panel goes. Other
+            // windows already did, when the switch changed (`pinchToFill`).
+            if !open, !pinchToFill { pictureFills = false }
             fillScreenHeld = open ? fillScreenNow : nil
         }
         if !open {
@@ -1106,6 +1116,7 @@ struct StreamScreen: View {
                              largerKeyboard: largerKeyboard,
                              fillScreen: fillScreenNow && !metrics.phone,
                              onFillPinch: fillPinched(open:),
+                             pinchToFill: pinchToFill,
                              keyboardDoubleTap: keyboardDoubleTap,
                              onKeyboardDoubleTap: { overlay.toggleKeyboard() })
     }
@@ -1128,6 +1139,7 @@ struct StreamScreen: View {
                              onModifiersConsumed: { latched = [] },
                              sendGesture: { client.sendGesture($0, fingers: $1) },
                              onFillPinch: fillPinched(open:),
+                             pinchToFill: pinchToFill,
                              keyboardDoubleTap: keyboardDoubleTap,
                              onKeyboardDoubleTap: { overlay.toggleKeyboard() })
             }
@@ -1436,7 +1448,7 @@ struct BarButton<Content: View>: View {
 /// steps, a tick of haptic at each. The bar fades the buttons next to it while `open` and brings
 /// them back on release, when the chosen value is applied once (every change restarts the stream,
 /// so nothing is sent mid-drag). A nil scale means the Mac window has never been asked to fit; it
-/// shows 1×.
+/// shows 1×. A live stream starts at 1×, so the window is asked to match the picture at once.
 struct TextScaleControl: View {
     @Binding var scale: Double?
     @Binding var open: Bool

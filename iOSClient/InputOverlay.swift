@@ -76,7 +76,9 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     private weak var hover: UIHoverGestureRecognizer?
     /// Pinch open fills the screen; pinch closed brings the bar back. Fingers or a trackpad.
     /// A parallel two-finger scroll barely changes the scale, so it is left to scroll.
+    /// Off until Settings allows it (`pinchToFill`), so a pinch then changes nothing.
     var onFillPinch: (Bool) -> Void = { _ in }
+    var pinchToFill = true
     private weak var fillPinch: UIPinchGestureRecognizer?
     /// Set once a pinch has crossed into a mode change, until that pinch ends. Scroll started
     /// with it is closed and nothing further from it is sent.
@@ -253,10 +255,16 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// coast, which the Mac posts as a wheel's.
     @objc private func handleWheel(_ gesture: UIPanGestureRecognizer) { scroll(gesture, .wheel) }
 
+    /// The recognizer stays out until Settings allows the pinch.
+    func setPinchToFillEnabled(_ on: Bool) {
+        fillPinch?.isEnabled = on
+    }
+
     /// Pinch open fills the screen (the picture grows into the bar's place). Pinch closed brings
     /// the bar back. One decision per gesture, once the fingers have clearly spread or closed, so
     /// a two-finger scroll's small scale wobble changes nothing.
     @objc private func handleFillPinch(_ gesture: UIPinchGestureRecognizer) {
+        guard pinchToFill else { return }
         switch gesture.state {
         case .began:
             fillPinchDecided = false
@@ -1039,6 +1047,8 @@ struct InputOverlay: UIViewRepresentable {
     var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
     /// Pinch open (`true`) fills the screen; pinch closed brings the bar back.
     var onFillPinch: (Bool) -> Void = { _ in }
+    /// The Settings switch. Off, the pinch recognizer does nothing.
+    var pinchToFill: Bool = true
     /// The Settings switch for a two-finger double-tap that shows the on-screen keyboard.
     var keyboardDoubleTap: Bool = false
     var onKeyboardDoubleTap: () -> Void = {}
@@ -1057,6 +1067,8 @@ struct InputOverlay: UIViewRepresentable {
         uiView.latchedModifiers = latchedModifiers
         uiView.sendGesture = sendGesture
         uiView.onFillPinch = onFillPinch
+        uiView.pinchToFill = pinchToFill
+        uiView.setPinchToFillEnabled(pinchToFill)
         uiView.keyboardDoubleTap = keyboardDoubleTap
         uiView.onKeyboardDoubleTap = onKeyboardDoubleTap
         uiView.setKeyboardDoubleTapEnabled(keyboardDoubleTap)
