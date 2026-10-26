@@ -339,6 +339,22 @@ struct ContentView: View {
 ///   never makes an app's connection defunct. The console says what happened ("browser: …"; the return
 ///   from the background makes the network browser again too, and the nearby one if it runs, "browser:
 ///   rebuilt … (back from the background)"), and the automatic reconnect its dials ("reconnect: …").
+/// * `-SillLayerFail <s>[,<s>…]` — in the normal app and under `-SillLive 1`: at each of these seconds
+///   after the launch's first picture, a frame that cannot decode goes onto the display layer, so the
+///   picture's recovery runs for real (issue #101): the layer's own notification, the flush, the one
+///   ask for a keyframe (kind 44, KeyframeRecovery; a repeat within 10 s waits 4, 8, 16, then 32 s
+///   from the last ask, "the ask waits N s for the spacing") and the Mac's keyframe. The console says what happened
+///   ("display: the picture was interrupted …", "keyframe: … asked the Mac for a keyframe", "display:
+///   the picture is back, N ms after it was interrupted"), and the host "Keyframe for ‹device›: its
+///   picture was interrupted." A synthetic host with `SILL_TEST_STILL_AFTER=<s>` stands in for a
+///   still window, whose picture comes back only through that ask; with `SILL_TEST_KEYFRAME_IGNORE=<n>`
+///   it ignores the first n asks, as a Mac from before kind 44 ignores every one, and the device asks
+///   again once its keyframe is overdue ("keyframe: no keyframe 4.0 s after the last ask; asked
+///   again").
+/// * `-SillKeyframeLost <n>` — with `-SillLayerFail`: the first n keyframes that end a wait after an
+///   interruption are thrown away by the layer's flush, as though the layer still read failed when they
+///   came (as it can while another app holds the decoder): the console's "flushed with the keyframe it
+///   waited for", the picture counted back and lost again, and the next ask a repeat's 4 s later.
 /// * Pairing at home, in the normal app and under `-SillLive 1` (§7.9): `-SillServiceType
 ///   _silltest._tcp` (the browsers look for that type: a test host registered with
 ///   SILL_TEST_SERVICE_TYPE is a real row, and no real Mac is; the Debug build's Info.plist

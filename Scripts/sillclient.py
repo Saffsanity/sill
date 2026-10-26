@@ -31,6 +31,9 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --stop-ping@T      from T seconds in, send no more pings and no stats: a silent client
   --stop-read@T      from T seconds in, read nothing more (pings go on): a client that stopped draining
   --pairing-wanted@T send kind 21 ("show your pairing code") T seconds in
+  --keyframe@T       send kind 44 (a keyframe request, empty: a device's picture was interrupted) T
+                     seconds in: the host's encoder makes a keyframe, which every client gets (the
+                     summary's "keyframes at"), at most one request a second per connection
   --gesture=NAME[,FINGERS]@T  send a trackpad gesture (kind 28) T seconds in: swipeUp, swipeDown,
                      swipeLeft, swipeRight, pinch or spread, and 3 or 4 fingers (3 when left out)
   --raw28=JSON@T     send this literal kind 28 payload T seconds in (split on the last @)
@@ -142,8 +145,8 @@ SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisp
 # Away from home (docs/remote-bundle-plan.md): read from the state's `away`, and its `link`'s state.
 AWAY_KEYS = {"homeBitrate", "homeCaptureScale", "awayBitrate", "awayCaptureScale", "thisConnectionAway", "awayRunning"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "linkState", "clipboard"} | AWAY_KEYS
-TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "fetch", "press", "raw25", "raw27",
-         "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32")
+TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "keyframe", "fetch", "press", "raw25",
+         "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32")
 INPUT = ("move", "tap", "key", "input")
 # What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
 GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
@@ -454,12 +457,12 @@ try:
     port = number(pos[0], "PORT"); dur = number(pos[1], "seconds", float) if len(pos) > 1 else 12
     sel = source(pos[2] if len(pos) > 2 else "desktop")
     for i, a in enumerate(flags):
-        bare = re.fullmatch(r"--(stop-ping|stop-read|pairing-wanted)@([^=]*)", a)     # timed flags without a value
+        bare = re.fullmatch(r"--(stop-ping|stop-read|pairing-wanted|keyframe)@([^=]*)", a)     # timed flags without a value
         name, _, body = (bare.group(1), "", "@" + bare.group(2)) if bare else a[2:].partition("=")
         if name in TIMED:
             text, at, t = body.rpartition("@")
             if not at: raise ValueError(f"--{name}: no @T (seconds in) in {a!r}")
-            if name in ("stop-ping", "stop-read", "pairing-wanted") and text: raise ValueError(f"--{name}@T takes no value")
+            if name in ("stop-ping", "stop-read", "pairing-wanted", "keyframe") and text: raise ValueError(f"--{name}@T takes no value")
             if name in MENU_SENDS and not os.environ.get("SILL_TEST_MENU_PID"):
                 raise ValueError("--fetch and --press would open and choose the menus of whatever app this Mac has in front; "
                                  "run them against a host started with SILL_TEST_MENU_PID.")
@@ -708,6 +711,8 @@ def fire(e, now):
         global reading; reading = False; print(f"  stopped reading at {at}")
     elif name == "pairing-wanted":
         s.sendall(msg(21)); print(f"  sent kind 21 (pairing wanted) at {at}")
+    elif name == "keyframe":
+        s.sendall(msg(44)); print(f"  sent kind 44 (keyframe request) at {at}")
     elif name == "fetch":
         mid, n, ftitle = parsed
         ftitle = ftitle if ftitle is not None else menu_titles.get(mid)
