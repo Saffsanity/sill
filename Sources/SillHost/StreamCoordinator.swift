@@ -172,6 +172,12 @@ package final class StreamCoordinator {
     /// issue #57): recorded at the first fit (`fitToViewport`), put back when the window stops
     /// streaming (`restoreFits`), handed to the virtual display's stage when it takes the window.
     private var fits = WindowRestore.Ledger<WindowSizer.Placement>()
+    /// iPad windows that asked for their own stream (Hello.lane). The first window of a device
+    /// does not: it stays on `active`. Keyed by the connection.
+    private var lanes: [ObjectIdentifier: PrivateLane] = [:]
+    private var nextLaneSerial: UInt32 = 2
+    /// A launch from a window's own stream: its first window is picked there, not on `active`.
+    private var pendingLaunchLane: ObjectIdentifier?
     /// The window streaming in regular mode was in full screen when the catalog last listed it (its
     /// frame covered a display), or when it was picked: off the list, it may be leaving full screen
     /// (`windowsChanged`, WindowRestore.keepsStreaming).
@@ -388,6 +394,11 @@ package final class StreamCoordinator {
         server.onClientDisconnected = { [weak self] connection in
             Task { @MainActor in
                 guard let self else { return }
+                let gone = ObjectIdentifier(connection)
+                if let lane = self.lanes.removeValue(forKey: gone) {
+                    self.server.setOwnStream(gone, false)
+                    await lane.stop()
+                }
                 self.clientFPS[ObjectIdentifier(connection)] = nil
                 self.settingsArrivals[ObjectIdentifier(connection)] = nil
                 self.settingsIgnoredLineAt[ObjectIdentifier(connection)] = nil
@@ -419,12 +430,13 @@ package final class StreamCoordinator {
                 guard let self else { return }
                 let wasEmpty = self.catalog.clientCount == 0
                 self.catalog.clientCount = count          // the catalog idles itself at 0
-                // Nobody is watching: stop capturing and encoding. The next client picks afresh.
+                // Windows with their own stream do not keep the shared encoder running.
+                let shared = count - self.lanes.count
                 if count == 0 { self.viewport = nil; self.clientFPS = [:] }   // the next device starts from scratch
                 if count == 0 { self.gestureChords.forget() }                 // and did not open a view it could close
                 // On the software encoder, the hardware is checked only while someone watches.
                 if count == 0 { self.stopRecheck() } else { self.devicesPresent(firstArrived: wasEmpty) }
-                if count > 0 {
+                if shared > 0 {
                     self.deselectWhenSettled = false
                 } else if self.switching {
                     self.deselectWhenSettled = true     // `select` would refuse it now; its tail applies it
@@ -492,9 +504,21 @@ package final class StreamCoordinator {
         server.onClientHello = { [weak self] connection, hello in
             let id = ObjectIdentifier(connection)
             let name = SafeText.label(hello.device ?? "")
-            guard !name.isEmpty else { return }
             Task { @MainActor in
-                self?.status.update {
+                guard let self else { return }
+                if let token = hello.lane, !token.isEmpty, self.lanes[id] == nil {
+                    let lane = PrivateLane(connection: connection, server: self.server, sizer: self.sizer,
+                                           catalog: self.catalog, serial: self.nextLaneSerial)
+                    self.nextLaneSerial += 1
+                    lane.owner = self
+                    self.lanes[id] = lane
+                    self.server.setOwnStream(id, true)
+                    let who = name.isEmpty ? "\(connection.endpoint)" : name
+                    print("Own stream for \(who).")
+                    self.server.send(self.listMessage(showing: StreamSource.none), to: connection)
+                }
+                guard !name.isEmpty else { return }
+                self.status.update {
                     guard let i = $0.devices.firstIndex(where: { $0.id == id }), $0.devices[i].name == nil else { return }
                     $0.devices[i].name = name
                 }
@@ -686,6 +710,7 @@ package final class StreamCoordinator {
         // A restart, not a pick. Turning the virtual display off still brings the staged window
         // forward as it comes home: select's commit decides that, from the value it actually takes.
         await select(active)   // committed inside select
+        await refreshPrivateLanes()
     }
 
     /// Home or away (docs/remote-bundle-plan.md §5.4): a device registered (`joined`, before its
@@ -878,6 +903,12 @@ package final class StreamCoordinator {
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
+            if let lane = lanes[ObjectIdentifier(connection)] {
+                if case .window = source { gestureChords.forget() }
+                await lane.select(source, knobs: knobsForLane(fps: lane.askedFPS), bringForward: true)
+                broadcastList()
+                return
+            }
             // A window picked comes forward on the Mac, which closes a view a gesture opened; the
             // Desktop picked (as a device does before a gesture made over a window) leaves it.
             if case .window = source { gestureChords.forget() }
@@ -905,6 +936,7 @@ package final class StreamCoordinator {
                   let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: req.bundleID) else { return }
             gestureChords.forget()              // the app comes forward, which closes a view a gesture opened
             pendingLaunch = req.bundleID
+            pendingLaunchLane = lanes[ObjectIdentifier(connection)] == nil ? nil : ObjectIdentifier(connection)
             let config = NSWorkspace.OpenConfiguration()
             // The launch itself takes no focus on the Mac. Its first window is then picked for the
             // device (`windowsChanged`), which in regular mode brings it forward like any pick.
@@ -915,6 +947,16 @@ package final class StreamCoordinator {
         case .input:
             guard let event = Wire.decode(InputEvent.self, from: message.payload) else { return }
             let device = ObjectIdentifier(connection)
+            if let lane = lanes[device] {
+                let rect = lane.aim
+                guard rect.width > 0, rect.height > 0 else {
+                    if injector.isUpOfSomethingDown(event) { injector.apply(event, in: .null, from: device) }
+                    return
+                }
+                gestureChords.input(Self.gestureInput(event))
+                injector.apply(event, in: rect, from: device)
+                return
+            }
             guard let rect = currentSourceRect() else {
                 // Nothing streams (between sources, or the stream stopped: the window closed under a
                 // drag): input has nowhere to land. The up of a key or a button the Mac has down still
@@ -949,8 +991,14 @@ package final class StreamCoordinator {
             queueGesture(gesture, from: deviceName(connection))
         case .viewport:
             guard let v = Wire.decode(Viewport.self, from: message.payload) else { return }
-            viewport = v
             let id = ObjectIdentifier(connection)
+            if let lane = lanes[id] {
+                if lane.setViewport(v), !lane.switching {
+                    await lane.select(lane.source, knobs: knobsForLane(fps: v.fps ?? 60), bringForward: false)
+                }
+                return
+            }
+            viewport = v
             clientFPS[id] = v.fps ?? 60
             // The flip its connection made waited for this, its rate (`flipAwaits`): the restart the
             // rate needs takes the flip too, and the flip alone restarts once when the rate needs none.
@@ -1068,7 +1116,7 @@ package final class StreamCoordinator {
         }
     }
 
-    private static func liveBounds(of id: CGWindowID) -> CGRect? {
+    static func liveBounds(of id: CGWindowID) -> CGRect? {
         guard let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]],
               let bounds = list.first?[kCGWindowBounds as String] as? NSDictionary else { return nil }
         return CGRect(dictionaryRepresentation: bounds as CFDictionary)
@@ -1114,12 +1162,17 @@ package final class StreamCoordinator {
     /// it later), is a fit for `fits`: the window goes back to its own frame when it stops streaming
     /// (`restoreFits`, issue #57). None once the host is shutting down: nothing would put it back.
     private func fitToViewport(_ window: SCWindow) -> CGSize? {
-        guard !shuttingDown, let v = viewport, let textScale = v.scale, textScale > 0, v.width > 0, v.height > 0 else { return nil }
+        fitWindow(window, using: viewport, book: &fits)
+    }
+
+    /// A window's own stream sizes into its own ledger, so the shared stream's restore leaves it.
+    func fitWindow(_ window: SCWindow, using shown: Viewport?, book: inout WindowRestore.Ledger<WindowSizer.Placement>) -> CGSize? {
+        guard !shuttingDown, let v = shown, let textScale = v.scale, textScale > 0, v.width > 0, v.height > 0 else { return nil }
         let target = CGSize(width: (v.width / textScale).rounded(), height: (v.height / textScale).rounded())
         let current = Self.liveBounds(of: window.windowID)?.size ?? window.frame.size
         if abs(current.width - target.width) <= 2, abs(current.height - target.height) <= 2 { return nil }
         guard let fit = sizer.resize(window: window, to: target) else { return nil }
-        fits.fitted(window.windowID, handle: fit.placement, before: fit.before, after: fit.after, asked: target)
+        book.fitted(window.windowID, handle: fit.placement, before: fit.before, after: fit.after, asked: target)
         let actual = fit.after.size
         // Asked again for a size the app already refused (its minimum): nothing moved.
         guard abs(actual.width - current.width) >= 1 || abs(actual.height - current.height) >= 1 else { return nil }
@@ -1632,7 +1685,7 @@ package final class StreamCoordinator {
     /// Every AX call here is synchronous on the main actor, and a hung app (a beach ball, a
     /// debugger pause) holds every device's input and the catalog for a second per call: raise
     /// and key share one window lookup, and none is made once the activation ran into its timeout.
-    private func activateAndRaise(window w: SCWindow) {
+    func activateAndRaise(window w: SCWindow) {
         guard let pid = w.owningApplication?.processID else { return }
         guard activate(pid: pid) else {
             print("\(w.owningApplication?.applicationName ?? "?") is not answering Accessibility; its window is not raised.")
@@ -1927,9 +1980,42 @@ package final class StreamCoordinator {
     /// way home when it takes the window (`VirtualStage.prepare(…, home:)`); nil when it has no
     /// record, or would stay as it is.
     private func stageHome(for id: CGWindowID) -> CGRect? {
-        guard let entry = fits.entries[id] else { return nil }
+        homeForStage(id, book: fits)
+    }
+
+    func homeForStage(_ id: CGWindowID, book: WindowRestore.Ledger<WindowSizer.Placement>) -> CGRect? {
+        guard let entry = book.entries[id] else { return nil }
         var windows = WindowSizer.AXWindows(sizer: sizer)
         return WindowRestore.stageHome(entry.handle, entry.record, on: &windows)
+    }
+
+    /// Puts back the windows one iPad window sized, when that stream stops.
+    func restorePrivate(_ book: WindowRestore.Ledger<WindowSizer.Placement>) {
+        var book = book
+        var windows = WindowSizer.AXWindows(sizer: sizer)
+        for s in book.restore(keeping: nil, staged: nil, on: &windows) {
+            if case .restore = s.decision { Stats.shared.bump(s.done ? "win.restored" : "win.restoreFailed") }
+            if let line = s.line { print(line) }
+        }
+    }
+
+    /// The capture of a window's own stream ended (the window closed). Its list shows nothing
+    /// picked; it does not start a second Desktop.
+    func privateWindowClosed() {
+        broadcastList()
+    }
+
+    private func knobsForLane(fps asked: Int) -> PrivateLane.Knobs {
+        let cap = useSoftwareEncoder ? min(maxFPS, 60) : maxFPS
+        return PrivateLane.Knobs(fps: min(cap, max(24, asked > 0 ? asked : 60)),
+                                 bitrate: bitrate, captureScale: captureScale, software: useSoftwareEncoder,
+                                 virtualDisplay: config.virtualDisplay, prioritizeSpeed: prioritizeSpeed)
+    }
+
+    private func refreshPrivateLanes() async {
+        for lane in lanes.values {
+            await lane.select(lane.source, knobs: knobsForLane(fps: lane.askedFPS), bringForward: false)
+        }
     }
 
     /// An encoder's watchdog fired. A hardware hang is remembered whichever encoder reports it, as
@@ -1939,9 +2025,14 @@ package final class StreamCoordinator {
     /// later, and must not disturb its successor. A hardware hang: switch to the software encoder
     /// and restart the source; the re-check brings it back. If even the software encoder dies
     /// repeatedly, stop streaming rather than loop.
-    private func encoderHung(_ enc: HEVCEncoder, attempt: Int = 0) async {
+    func encoderHung(_ enc: HEVCEncoder, attempt: Int = 0) async {
         if !enc.software, !useSoftwareEncoder, enc.serial > returnSerial {
             enterSoftwareFallback(afterHang: true)
+        }
+        if let lane = lanes.values.first(where: { $0.owns(enc) }) {
+            if active != .none, !switching { await select(active) }
+            await lane.select(lane.source, knobs: knobsForLane(fps: lane.askedFPS), bringForward: false)
+            return
         }
         guard enc === encoder, active != .none else { return }
         if switching {
@@ -1963,6 +2054,7 @@ package final class StreamCoordinator {
             }
         }
         await select(active)
+        await refreshPrivateLanes()
     }
 
     // MARK: The software fallback and the way back
@@ -2138,6 +2230,7 @@ package final class StreamCoordinator {
         if active != .none {
             print("Hardware encoder is back (\(test)); restarting the stream on it.")
             await select(active)   // nothing awaited since `switching` read false: this select runs
+            await refreshPrivateLanes()
         } else {
             print("Hardware encoder is back (\(test)); the next stream uses it.")
         }
@@ -2170,7 +2263,14 @@ package final class StreamCoordinator {
         // The pointer's rectangle follows the catalog: the Desktop's display, a window's bounds.
         defer { pointer.setGeometry(pointerGeometry(), fps: fps) }
         if let pending = pendingLaunch, let w = infos.first(where: { $0.bundleID == pending }) {
+            let fromLane = pendingLaunchLane
             pendingLaunch = nil
+            pendingLaunchLane = nil
+            if let fromLane, let lane = lanes[fromLane] {
+                await lane.select(.window(w.id), knobs: knobsForLane(fps: lane.askedFPS), bringForward: true)
+                broadcastList()
+                return
+            }
             await select(.window(w.id), bringForward: true)   // launched from the device to use it: a pick
             return
         }
@@ -2318,14 +2418,19 @@ package final class StreamCoordinator {
 
     // MARK: Catalog to clients
 
-    private func listMessage() -> StreamMessage {
+    private func listMessage(showing: StreamSource? = nil) -> StreamMessage {
         StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
-                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
+                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: showing ?? active, launchID: launchID,
                                                       hostVersion: hostVersion, protocol: SillProtocol.current,
                                                       gestures: TrackpadGesture.generation, clipboard: clipboard.advertised)))
     }
 
-    private func broadcastList() { server.broadcast(listMessage()) }
+    private func broadcastList() {
+        server.broadcast(listMessage())
+        for lane in lanes.values {
+            server.send(listMessage(showing: lane.source), to: lane.connection)
+        }
+    }
 
     private func sendCatalog(to connection: NWConnection) {
         let now = Date().timeIntervalSince1970

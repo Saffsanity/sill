@@ -151,6 +151,11 @@ final class VirtualStage {
     /// Fixed identity, so System Settings › Displays keeps one remembered "Sill" entry across runs
     /// (the probe used serial 0xF00D and does not collide).
     static let vendorID: UInt32 = 0x5111, productID: UInt32 = 0x0001, serialNum: UInt32 = 1
+    /// The shared stage is "Sill", serial 1. A window's own stream uses another name and serial,
+    /// so two displays exist at once, and it does not overwrite the shared stage's way home.
+    var displayName = "Sill"
+    var displaySerial: UInt32 = VirtualStage.serialNum
+    var primary = true
 
     init(sizer: WindowSizer, catalog: WindowCatalog) {
         self.sizer = sizer
@@ -320,8 +325,7 @@ final class VirtualStage {
         // there — Ctrl-C's `shutdownForExit`, the display-lost callback, the coordinator's catch —
         // only restores what `placement` names. The sizes are recorded once the move has settled.
         placement = p
-        EmergencySnapshot.set((p.element, p.originalFrame))
-        catalog.stagedWindowID = p.windowID
+        rememberStaged(p)
 
         // (5b) Full screen. A window the user put in a full-screen Space (a video made full screen,
         // 2026-09-23) fills the display and refuses moves and sizes; treating that as a misplaced
@@ -457,8 +461,7 @@ final class VirtualStage {
                 // Record it again before the second placement, or the next switch would leave it
                 // on the virtual display and a later select would take that spot for its home.
                 placement = p
-                EmergencySnapshot.set((p.element, p.originalFrame))
-                catalog.stagedWindowID = p.windowID
+                rememberStaged(p)
                 continue
             }
             let inside = Self.fraction(of: live, inside: displayBounds)
@@ -526,8 +529,8 @@ final class VirtualStage {
         let t0 = Date()
         let d: VirtualDisplay
         do {
-            d = try VirtualDisplay(name: "Sill", widthPt: Int(env.width), heightPt: Int(env.height + menuInset), scale: 2,
-                                   refreshHz: Double(refreshHz), vendorID: Self.vendorID, productID: Self.productID, serialNum: Self.serialNum)
+            d = try VirtualDisplay(name: displayName, widthPt: Int(env.width), heightPt: Int(env.height + menuInset), scale: 2,
+                                   refreshHz: Double(refreshHz), vendorID: Self.vendorID, productID: Self.productID, serialNum: displaySerial)
         } catch {
             creationFailures += 1
             if creationFailures >= 2 { disabledReason = "creating the display failed \(creationFailures) times (\(error))" }
@@ -672,6 +675,18 @@ final class VirtualStage {
         askedSize = nil
         askedDest = nil
         captureRect = .zero
+        forgetStaged()
+    }
+
+    /// The shared stage's way home, for Quit and a signal. A window's own stream keeps its own.
+    private func rememberStaged(_ p: WindowSizer.Placement) {
+        guard primary else { return }
+        EmergencySnapshot.set((p.element, p.originalFrame))
+        catalog.stagedWindowID = p.windowID
+    }
+
+    private func forgetStaged() {
+        guard primary else { return }
         catalog.stagedWindowID = nil
         EmergencySnapshot.set(nil)
     }

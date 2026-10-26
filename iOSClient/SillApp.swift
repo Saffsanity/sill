@@ -6,11 +6,25 @@ struct SillApp: App {
     @UIApplicationDelegateAdaptor(SillAppDelegate.self) var appDelegate
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "main") {
             // iOS 27.1 on the iPhone Duo: the hinge for the layouts (DuoPostureReader); nothing
             // before iOS 27.1 or on a device without a hinge.
             ContentView()
                 .readsDuoPosture()
         }
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                NewWindowButton()
+            }
+        }
+    }
+}
+
+private struct NewWindowButton: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("New Window") { openWindow(id: "main") }
+            .keyboardShortcut("n", modifiers: .command)
     }
 }

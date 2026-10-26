@@ -112,6 +112,8 @@ check(json(Hello()) == "{}", "an empty hello is {}")
 check(Wire.decode(Hello.self, from: Data("{}".utf8)) == Hello(), "{} decodes")
 check(Wire.decode(Hello.self, from: Data(#"{"appVersion":"1.2","protocol":1,"extra":[1,2]}"#.utf8)) == Hello(appVersion: "1.2", protocol: 1),
       "unknown keys are skipped")
+check(json(Hello(lane: "w2")) == #"{"lane":"w2"}"#, "a window's own stream names its lane: \(json(Hello(lane: "w2")))")
+check(Wire.decode(Hello.self, from: Data(#"{"lane":"w2"}"#.utf8))?.lane == "w2", "a lane decodes")
 check(Wire.decode(Hello.self, from: Data(#"{"appVersion":12}"#.utf8)) == nil, "a number as the version does not decode")
 check(Wire.decode(Hello.self, from: Data("[]".utf8)) == nil, "not an object")
 // The five goodbyes this branch sends, byte for byte, through the host's own encoder (Wire).
