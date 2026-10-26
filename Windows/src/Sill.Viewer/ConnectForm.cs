@@ -96,7 +96,7 @@ sealed class ConnectForm : Form
             launchMac = last;
             status = $"Connecting to {last.Name}…";
             launchWait.Start();
-            Log($"Connect at launch: {last.Name} ({last.MacId}), last connected {last.LastConnectedAt:yyyy-MM-dd HH:mm}; waiting for its row.");
+            Log($"Connect at launch: {last.Name} ({last.MacId}), last connected {last.LastConnectedAt!.Value.ToLocalTime():yyyy-MM-dd HH:mm}; waiting for its row.");
         }
         foreach (var type in serviceTypes)
         {
