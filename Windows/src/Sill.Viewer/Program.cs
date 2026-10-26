@@ -4,8 +4,8 @@
 //   Sill.Viewer [--identity <dir>] [--host <address>:<port>]… [--decoder auto|gpu|software] [--adapter N]
 //               [--service-type <type>]…
 //
-// --identity is where `Sill.Spike pair` saved this device's key and the Mac (default
-// %LOCALAPPDATA%\Sill\spike). Without arguments the viewer opens on the connect screen: the Macs
+// --identity is where this device's key and the saved Macs are (default %LOCALAPPDATA%\Sill, the
+// data folder, where the first start moves the spike's %LOCALAPPDATA%\Sill\spike: DataFolder). Without arguments the viewer opens on the connect screen: the Macs
 // Windows' DNS-SD finds on this network (_sill._tcp; TEST ONLY --service-type, repeatable, browses
 // others instead, such as a synthetic host's _silltest._tcp), and a Remote row for each saved Mac
 // not listed here; a click connects at the row's address, then at the addresses the Mac's kind 18
@@ -15,6 +15,7 @@
 // when the GPU path can't start or fails); --adapter picks DXGI's Nth adapter instead of Windows'
 // default (0 drives the display; 1 is often a laptop's discrete GPU).
 
+using Sill.Protocol;
 using Sill.Viewer;
 
 static class Program
@@ -30,8 +31,12 @@ static class Program
         if (SelfInstall.OfferAtStartup(args)) return 0;
         // TEST ONLY: SILL_TEST_IDENTITY_DIR is the default --identity, so a test of Sill.exe started
         // with no options (the install offer, the update check) never dials the PC's own paired Mac.
-        string dir = Environment.GetEnvironmentVariable("SILL_TEST_IDENTITY_DIR") is { Length: > 0 } testDir ? testDir
-            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sill", "spike");
+        // Otherwise the data folder, the spike's moved into it first if it is still there.
+        var opened = DataFolder.Open(DataFolder.LocalAppData(), Environment.GetEnvironmentVariable("SILL_TEST_IDENTITY_DIR"));
+        string dir = opened.Directory;
+        if (opened.Line is { } line)
+            try { File.AppendAllText(Path.Combine(dir, "viewer.log"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {line}{Environment.NewLine}"); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         var hosts = new List<string>();
         var serviceTypes = new List<string>();
         string decoder = "auto"; int? adapter = null;

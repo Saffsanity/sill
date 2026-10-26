@@ -18,7 +18,7 @@ public static class SelfInstallPolicy
     /// <summary>The Start menu entry, in <paramref name="programs"/> (the user's Start Menu\Programs).</summary>
     public static string ShortcutPath(string programs) => Join(programs, ShortcutName);
     /// <summary><c>%LOCALAPPDATA%\Sill\install.json</c>: the copies whose offer was turned down for good.</summary>
-    public static string StatePath(string localAppData) => Join(localAppData, "Sill", "install.json");
+    public static string StatePath(string localAppData) => Join(DataFolder.Root(localAppData), "install.json");
 
     private static string Join(params string[] parts) =>
         string.Join('\\', parts.Select((p, i) => i == 0 ? p.TrimEnd('\\', '/') : p.Trim('\\', '/')));

@@ -70,8 +70,8 @@ dotnet run --project Windows/src/Sill.Spike -- pair --link "sill://pair?…" [--
 ```
 
 The code goes in one argument (quote it if it has spaces). The device's key is made on first use
-in `%LOCALAPPDATA%\Sill\spike\device.p12` (`--identity <dir>` for another), and a pairing saves
-the Mac in `macs.json` beside it. Exit status: 0 paired, 1 refused, 2 usage, 3 connection or TLS.
+in `%LOCALAPPDATA%\Sill\device.p12`, the app's data folder (`--identity <dir>` for another), and a
+pairing saves the Mac in `macs.json` beside it. Exit status: 0 paired, 1 refused, 2 usage, 3 connection or TLS.
 The TLS tests (`WindowsFact`) run only on Windows.
 
 To test from a PC without opening a port on the Mac, keep the host on loopback and forward it
@@ -114,7 +114,7 @@ On the PC:
 
 ```
 dotnet publish Windows/src/Sill.Viewer -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o <dir>
-<dir>\Sill.Viewer.exe [--identity <dir>]
+<dir>\Sill.Viewer.exe [--identity <dir>]   # default: %LOCALAPPDATA%\Sill
 ```
 
 A shortcut needs no arguments: it opens on the connect screen, as the iPad's: the Macs Windows' own DNS-SD finds
@@ -244,9 +244,21 @@ for Windows").
   keeps it from checking anything but a test feed and puts its `update.json` and `update.log` in
   that folder, not in `%LOCALAPPDATA%\Sill`.
 
+- The data folder (`DataFolder`): `%LOCALAPPDATA%\Sill` holds the device's key (`device.p12`), the
+  saved Macs (`macs.json`), this PC's name (`pc.json`), the window (`window.json`), the log
+  (`viewer.log`), `update.json`, `update.log` and `install.json`. The spike kept the first five in
+  `%LOCALAPPDATA%\Sill\spike`: the first start of a build with the data folder, before anything
+  reads it, moves them up when the data folder has no key and no saved Macs yet (a file already
+  there is never replaced), then renames the old folder `spike.migrated` (what else was in it, such
+  as `mac.json.migrated`, stays there), with one line in `viewer.log`. Should any step fail, what was
+  put in the data folder is taken out again, the run uses the spike's folder as it was, and the next
+  start tries again. `SILL_TEST_IDENTITY_DIR` is the folder instead and never moves anything. TEST
+  ONLY: `SILL_TEST_LOCALAPPDATA=<dir>` stands in for `%LOCALAPPDATA%` whole (the data folder, the
+  install place, the update check's state), since Windows' own ignores the `LOCALAPPDATA` variable.
+
 To start over on a PC: delete `%LOCALAPPDATA%\Programs\Sill`, `Sill.lnk` in
-`%APPDATA%\Microsoft\Windows\Start Menu\Programs`, and `update.json`, `update.log` and
-`install.json` in `%LOCALAPPDATA%\Sill`.
+`%APPDATA%\Microsoft\Windows\Start Menu\Programs`, and `%LOCALAPPDATA%\Sill` (then remove the PC
+in Sill's Settings › Devices on the Mac).
 
 ## With Sill.app (Wi-Fi and Tailscale)
 

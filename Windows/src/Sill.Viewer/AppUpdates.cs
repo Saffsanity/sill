@@ -14,7 +14,7 @@ namespace Sill.Viewer;
 /// </summary>
 static class AppUpdates
 {
-    private static string LocalAppData => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+    private static string LocalAppData => DataFolder.LocalAppData();
 
     /// <summary>The checker for this run, started with <paramref name="context"/> (the UI thread's), or
     /// null when this run does not check.</summary>

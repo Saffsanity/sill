@@ -8,7 +8,7 @@
 //   Sill.Spike session [--seconds 10] [--host <address>:<port>] [--save <dir>] [--png <file>] [--decode 1 [--gpu 1] [--adapter N]]
 //   Sill.Spike decode --input <first-keyframe.h265> --out <frame.png> [--gpu 1 [--adapter N] [--compare 1]]
 //
-// Options: --identity <dir> (default %LOCALAPPDATA%\Sill\spike), --name <device name>.
+// Options: --identity <dir> (default %LOCALAPPDATA%\Sill, the app's data folder: DataFolder), --name <device name>.
 // A pairing saves the Mac in <dir>\macs.json; a session dials the newest (or --host), pinned to its key,
 // asks for the Desktop and logs what arrives; --save writes the first keyframe's parameter sets
 // and access unit, --png decodes it (ticket 05); decode does the same from a saved file.
@@ -34,8 +34,13 @@ static class Spike
                        + "Sill.Spike decode --input <file.h265> --out <file.png>");
         var opts = Options(args[1..]);
         if (opts is null) return Usage("Every option takes a value.");
-        string dir = opts.GetValueOrDefault("identity")
-            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sill", "spike");
+        string? dir = opts.GetValueOrDefault("identity");
+        if (dir is null)
+        {
+            var opened = DataFolder.Open(DataFolder.LocalAppData(), null);
+            if (opened.Line is { } line) Console.WriteLine(line);
+            dir = opened.Directory;
+        }
         string name = opts.GetValueOrDefault("name") ?? Environment.MachineName;
         return args[0] == "pair" ? await PairAsync(opts, dir, name) : await SessionCommand.RunAsync(opts, dir, name);
     }

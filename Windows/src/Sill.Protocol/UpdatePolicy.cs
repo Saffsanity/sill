@@ -212,10 +212,11 @@ public static class UpdatePolicy
         return sillExe && string.IsNullOrEmpty(testIdentityDir);
     }
 
-    /// <summary>Where update.json and update.log go: <c>%LOCALAPPDATA%\Sill</c>, or a test run's own
-    /// folder (SILL_TEST_IDENTITY_DIR), so a test never touches the PC's real state.</summary>
+    /// <summary>Where update.json and update.log go: the data folder, <c>%LOCALAPPDATA%\Sill</c>
+    /// (<see cref="DataFolder"/>), or a test run's own folder (SILL_TEST_IDENTITY_DIR), so a test never
+    /// touches the PC's real state.</summary>
     public static string StateDirectory(string localAppData, string? testIdentityDir) =>
-        !string.IsNullOrEmpty(testIdentityDir) ? testIdentityDir : localAppData.TrimEnd('\\', '/') + "\\Sill";
+        !string.IsNullOrEmpty(testIdentityDir) ? testIdentityDir : DataFolder.Root(localAppData);
 
     // Words
 
