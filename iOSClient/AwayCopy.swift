@@ -111,9 +111,20 @@ enum AwayCopy {
         away == nil && remote && slowLink
     }
 
-    /// The stream screen's line while the link is behind: "The link can’t keep up with Pro. Lower it in
-    /// Settings." when the panel offers something to pick, else "The link to Mac mini can’t keep up."
-    static func streamLine(link: LinkReport?, away: AwayQuality?, mac: String) -> String? {
+    /// The Settings panel's callout while the Mac's user session is off the console (macOS Fast User
+    /// Switching, issue #211): nil when on the console (`true` or `nil`).
+    static func offConsoleCallout(sessionOnConsole: Bool?, mac: String) -> String? {
+        guard sessionOnConsole == false else { return nil }
+        return "\(mac) is switched to another user account, so touches and keys won’t reach this session until it’s switched back."
+    }
+
+    /// The stream screen's line while the Mac's user session is off the console (#211) or while the
+    /// link is behind: "The link can’t keep up with Pro. Lower it in Settings." when the panel offers
+    /// something to pick, else "The link to Mac mini can’t keep up."
+    static func streamLine(link: LinkReport?, away: AwayQuality?, mac: String, sessionOnConsole: Bool? = nil) -> String? {
+        if sessionOnConsole == false {
+            return "\(mac) is switched to another user account. Input is paused."
+        }
         guard let c = callout(link: link, away: away, mac: mac), let link else { return nil }
         if c.button != nil { return "The link can’t keep up with \(QualityPreset.name(forBitrate: link.bitrate)). Lower it in Settings." }
         return "The link to \(mac) can’t keep up."

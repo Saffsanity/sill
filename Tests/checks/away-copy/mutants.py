@@ -26,6 +26,9 @@ MUTANTS = {
     "AC15 titles that may wrap": [('text.replacingOccurrences(of: " ", with: "\\u{00A0}")', "text")],
     # The review of 2026-09-27: the linger is for a line on screen only.
     "AC17 a line off screen lingers (Done after the callout's button brings the cleared line up)": [("if now >= since + Self.linger || !allowed {", "if now >= since + Self.linger {")],
+    # Issue #211: off-console session warning.
+    "AC18 offConsoleCallout shown when sessionOnConsole is true": [("guard sessionOnConsole == false else { return nil }", "guard sessionOnConsole != nil else { return nil }")],
+    "AC19 streamLine ignores sessionOnConsole == false": [("if sessionOnConsole == false {\n            return \"\\(mac) is switched to another user account. Input is paused.\"\n        }", "")],
 }
 caught = 0
 for name, edits in MUTANTS.items():

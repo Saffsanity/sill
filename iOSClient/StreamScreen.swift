@@ -412,7 +412,9 @@ struct StreamScreen: View {
     /// What the Mac's report says for the line now: nil while the link keeps up.
     private var linkReportLine: String? {
         let host = client.settings.host
-        return AwayCopy.streamLine(link: host?.link, away: host?.away, mac: client.macName.isEmpty ? "the Mac" : client.macName)
+        return AwayCopy.streamLine(link: host?.link, away: host?.away,
+                                   mac: client.macName.isEmpty ? "the Mac" : client.macName,
+                                   sessionOnConsole: host?.sessionOnConsole)
     }
 
     /// Nothing open over the stream: the Settings panel (which has the callout), the drawer, the

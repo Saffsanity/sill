@@ -241,6 +241,9 @@ struct HostSettingsPanel: View {
                     // software encoder until they relaunch, newer ones go back by themselves.
                     Callout(text: "\(mac)’s hardware encoder is busy or not responding, so for now streams run at up to 60 fps at Standard.")
                 }
+                if let offConsole = AwayCopy.offConsoleCallout(sessionOnConsole: state.sessionOnConsole, mac: mac) {
+                    Callout(text: offConsole)
+                }
                 if let problem = client.settingsProblem {
                     Callout(text: problem)
                 }

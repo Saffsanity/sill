@@ -132,6 +132,8 @@ package struct HostStatusSnapshot: Equatable {
     /// connected device is away, so the away quality is the target. The menu's Quality subtitle
     /// and the Streaming pane say so.
     package var away = false
+    /// Whether this Mac's user session owns the console (macOS Fast User Switching, issue #211).
+    package var sessionOnConsole = true
 
     /// Devices connected through the remote door: while any is, the app keeps the Mac from idle
     /// sleep (it could not be woken from away).

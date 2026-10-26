@@ -589,6 +589,13 @@ package final class StreamCoordinator {
             if !hardwareResponds { enterSoftwareFallback(afterHang: false) }
         }
         if virtualDisplay { enableVirtualDisplay() }
+        if !synthetic {
+            SessionLock.shared.watchNotifications()
+            status.update { $0.sessionOnConsole = SessionLock.shared.isOnConsole }
+            SessionLock.shared.onConsoleChanged = { [weak self] onConsole in
+                self?.status.update { $0.sessionOnConsole = onConsole }
+            }
+        }
         catalog.start()
         // The only startup line Direct Wireless adds, and only when it is on: the default path
         // prints what it always printed.
@@ -2389,7 +2396,8 @@ package final class StreamCoordinator {
                                  stream: s.stream?.wire,
                                  answering: answering,
                                  away: away,
-                                 link: link)
+                                 link: link,
+                                 sessionOnConsole: s.sessionOnConsole ? nil : false)
     }
 
     /// The Mac's Virtual Display pane in its order (SettingsPanes.swift, `statusText`), without the

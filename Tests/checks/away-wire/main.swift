@@ -129,6 +129,12 @@ do {
     let brokenJSON = try! JSONSerialization.data(withJSONObject: broken)
     check(decode(HostSettingsState.self, brokenJSON) == nil, "a state whose away is {} does not decode")
     check(decode(BaseState.self, brokenJSON) != nil, "…while an older device still reads it")
+    let offConsole = HostSettingsState(settings: settings, persistent: true, virtualDisplayAvailable: true,
+                                       softwareEncoder: false, sessionOnConsole: false)
+    let offJSON = encode(offConsole)
+    check(keys(offJSON).contains("sessionOnConsole"), "sessionOnConsole is sent when set")
+    check(decode(HostSettingsState.self, offJSON)?.sessionOnConsole == false, "sessionOnConsole round-trips")
+    check(decode(BaseState.self, offJSON) != nil, "an older device decodes a state carrying sessionOnConsole")
 }
 
 // MARK: QualityPreset's helpers

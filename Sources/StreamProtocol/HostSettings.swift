@@ -193,14 +193,19 @@ public struct HostSettingsState: Codable, Hashable, Sendable {
     public var away: AwayQuality?
     /// This connection's link while it cannot keep up; nil while it does, and from older hosts.
     public var link: LinkReport?
+    /// False while this Mac's user session is not on the console (macOS Fast User Switching to
+    /// another logged-in account or the login window, issue #211), where macOS WindowServer discards
+    /// injected input events; nil while on the console, and from older hosts.
+    public var sessionOnConsole: Bool?
 
     public init(settings: StreamSettings, persistent: Bool, virtualDisplayAvailable: Bool,
                 virtualDisplayNote: String? = nil, softwareEncoder: Bool, stream: RunningStream? = nil,
-                answering: Int? = nil, away: AwayQuality? = nil, link: LinkReport? = nil) {
+                answering: Int? = nil, away: AwayQuality? = nil, link: LinkReport? = nil,
+                sessionOnConsole: Bool? = nil) {
         self.settings = settings; self.persistent = persistent
         self.virtualDisplayAvailable = virtualDisplayAvailable; self.virtualDisplayNote = virtualDisplayNote
         self.softwareEncoder = softwareEncoder; self.stream = stream; self.answering = answering
-        self.away = away; self.link = link
+        self.away = away; self.link = link; self.sessionOnConsole = sessionOnConsole
     }
 }
 

@@ -179,5 +179,20 @@ do {
     check(!covered.visible && covered.text == nil, "…and something opened over it ends the linger: closed again, no line")
 }
 
+// MARK: Fast user switching (off-console session, issue #211)
+
+eq(AwayCopy.offConsoleCallout(sessionOnConsole: false, mac: "Mac mini"),
+   "Mac mini is switched to another user account, so touches and keys won’t reach this session until it’s switched back.",
+   "off-console callout in Settings")
+check(AwayCopy.offConsoleCallout(sessionOnConsole: true, mac: "Mac mini") == nil
+      && AwayCopy.offConsoleCallout(sessionOnConsole: nil, mac: "Mac mini") == nil,
+      "on console or nil (older Mac): no off-console callout")
+eq(AwayCopy.streamLine(link: nil, away: away(), mac: "Mac mini", sessionOnConsole: false),
+   "Mac mini is switched to another user account. Input is paused.",
+   "stream line when Mac is switched to another user account")
+eq(AwayCopy.streamLine(link: link(), away: away(), mac: "Mac mini", sessionOnConsole: false),
+   "Mac mini is switched to another user account. Input is paused.",
+   "off-console stream line takes priority over a behind link report")
+
 print(failures == 0 ? "away-copy: all passed" : "away-copy: \(failures) FAILED")
 exit(failures == 0 ? 0 : 1)
