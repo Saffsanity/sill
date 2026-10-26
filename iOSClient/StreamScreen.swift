@@ -116,6 +116,13 @@ enum DeviceIdleTimer {
     }
 
     private static func apply() {
+        let activeSceneCount = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .filter { $0.activationState == .foregroundActive }
+            .count
+        if activeSceneCount == 0 {
+            policy.prune(keeping: [])
+        }
         let wanted = policy.disablesIdleTimer
         if UIApplication.shared.isIdleTimerDisabled != wanted {
             UIApplication.shared.isIdleTimerDisabled = wanted

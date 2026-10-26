@@ -922,6 +922,10 @@ final class StreamClient: ObservableObject {
         }
         // The clipboard's chip looks when Sill becomes active (StreamClient+Clipboard).
         observeClipboardActivation()
+        NotificationCenter.default.addObserver(forName: UIScene.didDisconnectNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self, !self.connected || self.active == .none else { return }
+            DeviceIdleTimer.remove(client: ObjectIdentifier(self))
+        }
     }
 
     /// Starts the network browser, once; from then on it is only made again (`rebuildBrowser`). The
