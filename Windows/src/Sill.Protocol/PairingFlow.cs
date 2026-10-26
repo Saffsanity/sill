@@ -53,9 +53,7 @@ public static class PairingCopy
     /// the Mac's own words when it sent some.</summary>
     public static string HomeRefusal(PairResult r, string mac)
     {
-        string[] known = [PairResult.WrongCode, PairResult.Closed, PairResult.Expired, PairResult.Stopped, PairResult.Busy,
-                          PairResult.Shown, PairResult.OpenOnMac, PairResult.Locked];
-        if (!known.Contains(r.Reason) && SafeText.Label(r.Message ?? "", 300) is { Length: > 0 } said) return said;
+        if (!PairResult.KnownReasons.Contains(r.Reason) && SafeText.Label(r.Message ?? "", 300) is { Length: > 0 } said) return said;
         return r.Reason switch
         {
             PairResult.WrongCode => WrongCode(Math.Max(0, r.TriesLeft ?? 0)),
@@ -316,9 +314,7 @@ public sealed class PairingFlow
                 default:
                     // openOnMac, a second busy, any refusal: the Mac's menu, which always works; a
                     // reason this build doesn't know shows the Mac's own words when it sent some.
-                    string[] known = [PairResult.WrongCode, PairResult.Closed, PairResult.Expired, PairResult.Stopped, PairResult.Busy,
-                                      PairResult.Shown, PairResult.OpenOnMac, PairResult.Locked];
-                    string? said = known.Contains(r.Reason) ? null : SafeText.Label(r.Message ?? "", 300);
+                    string? said = PairResult.KnownReasons.Contains(r.Reason) ? null : SafeText.Label(r.Message ?? "", 300);
                     Set(Steps.Ended, said is { Length: > 0 } ? said : PairingCopy.OpenOnMac(Mac));
                     return;
             }

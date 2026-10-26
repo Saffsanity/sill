@@ -205,12 +205,8 @@ public static class UpdatePolicy
     /// <summary>Whether this run checks at all: Sill.exe does (<paramref name="sillExe"/>), the spike's
     /// Sill.Viewer.exe only with a test feed (SILL_TEST_UPDATE_FEED); and a test run
     /// (SILL_TEST_IDENTITY_DIR) never asks GitHub, only a test feed if it gives one.</summary>
-    public static bool ChecksThisRun(bool sillExe, string? testFeed, string? testIdentityDir)
-    {
-        bool feed = !string.IsNullOrEmpty(testFeed);
-        if (feed) return true;
-        return sillExe && string.IsNullOrEmpty(testIdentityDir);
-    }
+    public static bool ChecksThisRun(bool sillExe, string? testFeed, string? testIdentityDir) =>
+        !string.IsNullOrEmpty(testFeed) || (sillExe && string.IsNullOrEmpty(testIdentityDir));
 
     /// <summary>Where update.json and update.log go: the data folder, <c>%LOCALAPPDATA%\Sill</c>
     /// (<see cref="DataFolder"/>), or a test run's own folder (SILL_TEST_IDENTITY_DIR), so a test never

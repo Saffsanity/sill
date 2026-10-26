@@ -184,7 +184,7 @@ public sealed class SavedMacsFile(string directory) : ISavedMacs
     private static readonly JsonSerializerOptions Json = new()
     {
         WriteIndented = true,
-        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
     private sealed record Book(List<SavedMac> Macs);

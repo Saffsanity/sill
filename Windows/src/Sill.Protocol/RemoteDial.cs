@@ -142,7 +142,7 @@ public static class RemoteDialPolicy
     public static Failure? Worst(IEnumerable<Failure> failures)
     {
         var set = failures.ToHashSet();
-        return Priority.Cast<Failure?>().FirstOrDefault(f => set.Contains(f!.Value));
+        return Priority.Where(set.Contains).Cast<Failure?>().FirstOrDefault();
     }
 
     /// <summary>One attempt's end as .NET threw it.</summary>

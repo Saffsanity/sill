@@ -49,6 +49,10 @@ public sealed record PairResult(
 {
     public const string WrongCode = "code", Closed = "closed", Expired = "expired", Stopped = "stopped", Busy = "busy",
         Shown = "shown", OpenOnMac = "openOnMac", Locked = "locked";
+
+    /// <summary>The reasons this build words itself (<c>PairResult.knownReasons</c>); for any other the
+    /// Mac's <see cref="Message"/> shows, when it sent one.</summary>
+    public static readonly string[] KnownReasons = [WrongCode, Closed, Expired, Stopped, Busy, Shown, OpenOnMac, Locked];
 }
 
 /// <summary>
@@ -59,11 +63,6 @@ public sealed record PairResult(
 /// </summary>
 public sealed class PairingExchange
 {
-    private static readonly JsonSerializerOptions Json = new()
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
-
     private readonly byte[] key;
     private readonly byte[] macFingerprint;
     private readonly byte[] deviceFingerprint;
@@ -93,7 +92,7 @@ public sealed class PairingExchange
 
     /// <summary>The whole kind 19 message: header and JSON.</summary>
     public byte[] RequestMessage(string deviceName, string? model) =>
-        StreamHeader.Serialize(Kinds.PairRequest, 0, false, JsonSerializer.SerializeToUtf8Bytes(Request(deviceName, model), Json));
+        StreamHeader.Serialize(Kinds.PairRequest, 0, false, JsonSerializer.SerializeToUtf8Bytes(Request(deviceName, model), SessionMessages.Json));
 
     public enum Verdict { Paired, Refused, NoProof, Malformed }
 
@@ -101,7 +100,7 @@ public sealed class PairingExchange
     /// not decode.</summary>
     public Verdict Judge(ReadOnlySpan<byte> payload, out PairResult? result)
     {
-        try { result = JsonSerializer.Deserialize<PairResult>(payload, Json); }
+        try { result = JsonSerializer.Deserialize<PairResult>(payload, SessionMessages.Json); }
         catch (JsonException) { result = null; }
         if (result is null) return Verdict.Malformed;
         if (!result.Ok) return Verdict.Refused;
@@ -120,9 +119,7 @@ public sealed class PairingExchange
     /// </summary>
     public static string Words(PairResult r, string mac)
     {
-        string[] known = [PairResult.WrongCode, PairResult.Closed, PairResult.Expired, PairResult.Stopped, PairResult.Busy,
-                          "shown", "openOnMac", "locked"];
-        if (!r.Ok && !known.Contains(r.Reason) && SafeText.Label(r.Message ?? "", 300) is { Length: > 0 } said) return said;
+        if (!r.Ok && !PairResult.KnownReasons.Contains(r.Reason) && SafeText.Label(r.Message ?? "", 300) is { Length: > 0 } said) return said;
         switch (r.Reason)
         {
             case PairResult.WrongCode:
@@ -151,7 +148,11 @@ public static class MessageStream
     /// <summary>The next message, or null at a clean end before a header. Throws
     /// <see cref="InvalidDataException"/> for a payload over <paramref name="maxPayload"/> and
     /// <see cref="EndOfStreamException"/> for an end mid-message.</summary>
-    public static async Task<(StreamHeader Header, byte[] Payload)?> ReadAsync(Stream stream, int maxPayload, CancellationToken ct = default)
+    public static Task<(StreamHeader Header, byte[] Payload)?> ReadAsync(Stream stream, int maxPayload, CancellationToken ct = default) =>
+        ReadAsync(stream, _ => maxPayload, ct);
+
+    /// <summary>As above, with a cap for each kind (<see cref="SessionKinds.MaxPayload"/>).</summary>
+    public static async Task<(StreamHeader Header, byte[] Payload)?> ReadAsync(Stream stream, Func<byte, int> maxPayload, CancellationToken ct = default)
     {
         var head = new byte[StreamHeader.Length];
         int got = 0;
@@ -166,8 +167,9 @@ public static class MessageStream
             got += n;
         }
         var header = StreamHeader.Parse(head);
-        if (header.PayloadLength > (uint)maxPayload)
-            throw new InvalidDataException($"A kind {header.Kind} of {header.PayloadLength} bytes is over the {maxPayload}-byte cap.");
+        int cap = maxPayload(header.Kind);
+        if (header.PayloadLength > (uint)cap)
+            throw new InvalidDataException($"A kind {header.Kind} of {header.PayloadLength} bytes is over the {cap}-byte cap.");
         var payload = new byte[header.PayloadLength];
         await stream.ReadExactlyAsync(payload, ct).ConfigureAwait(false);
         return (header, payload);

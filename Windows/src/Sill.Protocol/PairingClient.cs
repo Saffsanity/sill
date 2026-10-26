@@ -64,8 +64,7 @@ public static class PairingClient
         {
             var request = new PairRequest(PairRequest.Version, method, "", deviceName, model);
             await ssl.WriteAsync(StreamHeader.Serialize(Kinds.PairRequest, 0, false,
-                System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(request, new System.Text.Json.JsonSerializerOptions
-                { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull })), ct).ConfigureAwait(false);
+                System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(request, SessionMessages.Json)), ct).ConfigureAwait(false);
             using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
             wait.CancelAfter(AnswerWait);
             var m = await MessageStream.ReadAsync(ssl, StreamHeader.MaxPairingPayload, wait.Token).ConfigureAwait(false);

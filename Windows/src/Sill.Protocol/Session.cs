@@ -218,27 +218,8 @@ public sealed class SessionClient : IAsyncDisposable
 
     /// <summary>The next message, or null when the Mac ends the connection cleanly. Every kind is
     /// returned, those this build does not know included, for the caller to skip.</summary>
-    public async Task<(StreamHeader Header, byte[] Payload)?> ReadAsync(CancellationToken ct)
-    {
-        var head = new byte[StreamHeader.Length];
-        int got = 0;
-        while (got < head.Length)
-        {
-            int n = await ssl.ReadAsync(head.AsMemory(got), ct).ConfigureAwait(false);
-            if (n == 0)
-            {
-                if (got == 0) return null;
-                throw new EndOfStreamException("The connection ended inside a header.");
-            }
-            got += n;
-        }
-        var header = StreamHeader.Parse(head);
-        if (header.PayloadLength > (uint)SessionKinds.MaxPayload(header.Kind))
-            throw new InvalidDataException($"A kind {header.Kind} of {header.PayloadLength} bytes is over its cap.");
-        var payload = new byte[header.PayloadLength];
-        await ssl.ReadExactlyAsync(payload, ct).ConfigureAwait(false);
-        return (header, payload);
-    }
+    public Task<(StreamHeader Header, byte[] Payload)?> ReadAsync(CancellationToken ct) =>
+        MessageStream.ReadAsync(ssl, SessionKinds.MaxPayload, ct);
 
     public async ValueTask DisposeAsync()
     {

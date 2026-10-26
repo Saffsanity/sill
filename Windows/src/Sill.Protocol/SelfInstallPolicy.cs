@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Sill.Protocol;
 
 /// <summary>
@@ -37,13 +39,12 @@ public static class SelfInstallPolicy
     /// <summary>Whether this start should consider installing at all: Sill.exe started with no
     /// arguments (a double-click, the Start menu), never the spike's Sill.Viewer.exe or a launch with
     /// options (a developer's, a test's), and not with SILL_NO_SELF_INSTALL=1.</summary>
-    public static bool Applies(string? processPath, IReadOnlyList<string> args, string? noSelfInstall) =>
-        processPath is not null && args.Count == 0 && noSelfInstall != "1"
-        && string.Equals(FileName(processPath), ExeName, StringComparison.OrdinalIgnoreCase);
+    public static bool Applies([NotNullWhen(true)] string? processPath, IReadOnlyList<string> args, string? noSelfInstall) =>
+        IsSillExe(processPath) && args.Count == 0 && noSelfInstall != "1";
 
     /// <summary>Whether <paramref name="processPath"/> is the release's app, Sill.exe (anywhere), not
     /// the spike's Sill.Viewer.exe.</summary>
-    public static bool IsSillExe(string? processPath) =>
+    public static bool IsSillExe([NotNullWhen(true)] string? processPath) =>
         processPath is not null && string.Equals(FileName(processPath), ExeName, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Whether this process is the installed copy, the only one Settings offers the Start menu

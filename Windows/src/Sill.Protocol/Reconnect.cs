@@ -94,7 +94,7 @@ public static class RemoteRows
     public static IReadOnlyList<MacRow> Build(IReadOnlyList<SavedMac> saved, IReadOnlyList<MacRow> listed, double browsing)
     {
         if (browsing < NetworkFirst) return [];
-        var here = listed.Where(r => r.MacId is not null).Select(r => r.MacId!).ToHashSet();
+        var here = listed.Select(r => r.MacId).OfType<string>().ToHashSet();
         return saved.Where(m => m.NewKey != true && !here.Contains(m.MacId))
             .OrderBy(m => m.PairedAt)
             .Select(MacRow.Remote)
