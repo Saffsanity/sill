@@ -50,6 +50,8 @@ struct HostSettingsPanel: View {
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
+    /// This device's touch mode on the stream picture (`TouchMode`, issue #178): Direct Touch by default.
+    @AppStorage(TouchMode.defaultsKey) private var touchModeRaw = TouchMode.direct.rawValue
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -485,6 +487,18 @@ struct HostSettingsPanel: View {
             }
             Footnote(text: Self.largerPictureFooter)
         }
+        Rows {
+            AdaptiveRow(title: "Touch Mode", since: nil) {
+                Picker("Touch Mode", selection: $touchModeRaw) {
+                    ForEach(TouchMode.allCases, id: \.rawValue) { mode in
+                        Text(mode.title).tag(mode.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+        }
+        Footnote(text: TouchMode.footnote)
         // The clipboard (docs/clipboard-plan.md): only while the Mac says it shares it.
         if ClipboardPolicy.hostTakes(client.hostClipboard) {
             Rows {

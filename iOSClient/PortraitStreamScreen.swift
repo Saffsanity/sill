@@ -168,6 +168,8 @@ struct PortraitStreamScreen: View {
     /// switch on: `PhonePortraitLayout.largerPicture(switchOn:streaming:)`); nil for the phone's usual
     /// arrangement (the switch off, the Desktop or nothing streaming), and in the halves.
     var largerKeyboard: CGFloat? = nil
+    /// This device's touch mode on the stream picture (`TouchMode`, issue #178).
+    @AppStorage(TouchMode.defaultsKey) private var touchModeRaw = TouchMode.direct.rawValue
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
     /// The Duo's fold across this screen (StreamScreen, iOS 27.1): where the halves split.
@@ -464,6 +466,16 @@ struct PortraitStreamScreen: View {
                          latchedModifiers: latched,
                          onModifiersConsumed: { latched = [] },
                          sendGesture: { client.sendGesture($0, fingers: $1) })
+            if TouchMode.stored(touchModeRaw) == .trackpad {
+                TrackpadView(send: { client.sendInput($0) },
+                             setPointer: { client.setOwnPointer($0, from: .trackpad) },
+                             feed: { let f = client.pointerFeedState; return (f.anchor, f.reseeds) },
+                             onFingers: { client.trackpadFingers($0) },
+                             latched: latched,
+                             onModifiersConsumed: { latched = [] },
+                             verticalSpan: nil,
+                             sendGesture: { client.sendGesture($0, fingers: $1) })
+            }
         }
         .background(Palette.panel)
         .overlay(alignment: .top) { LinkLineView(text: linkLine) }

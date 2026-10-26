@@ -173,6 +173,8 @@ struct StreamScreen: View {
     /// This device's Larger Picture switch (the Settings panel's This iPhone; docs/larger-picture-plan.md).
     /// It acts only while a window streams (`largerPictureNow`).
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
+    /// This device's touch mode on the stream picture (`TouchMode`, issue #178): Direct Touch by default.
+    @AppStorage(TouchMode.defaultsKey) private var touchModeRaw = TouchMode.direct.rawValue
     /// Larger Picture as it was in effect when the Settings panel opened (`largerPictureNow`), which
     /// the arrangement keeps until the panel closes; nil while it is closed. The panel hangs under row
     /// 1, which the arrangement moves by the picture's growth (157 pt on an 18 Pro Max), so a change
@@ -250,10 +252,12 @@ struct StreamScreen: View {
                 // Under the pairing overlay and the tour nothing takes a touch: not the bar, and
                 // not the stream's UIKit input view (nor, so, the Pencil, a hover or a key).
                 .allowsHitTesting(!overlayShown && tour == nil)
-                // The pointer sprite follows the layout: the trackpad's arrow shows only in the
-                // laptop layout, and a rotation re-renders it at once; the Mac's arrow stays.
-                .onChange(of: DuoLayout.of(geo.size).isPortrait, initial: true) { _, portrait in
-                    client.setPointerLayout(portrait: portrait)
+                // The pointer sprite follows the layout and touch mode: the trackpad's arrow shows in
+                // the laptop layout or when Trackpad mode is chosen (#178), and a rotation or mode change
+                // re-renders it at once; the Mac's arrow stays.
+                .onChange(of: TouchMode.showsPointer(isPortrait: DuoLayout.of(geo.size).isPortrait,
+                                                     mode: TouchMode.stored(touchModeRaw)), initial: true) { _, show in
+                    client.setPointerLayout(portrait: show)
                 }
                 // The clipboard's chip on screen or not: its 20 s run only while it is, and VoiceOver
                 // is told when it first shows (ClipboardPolicy.chipCounts).
@@ -1076,6 +1080,16 @@ struct StreamScreen: View {
                              latchedModifiers: latched,
                              onModifiersConsumed: { latched = [] },
                              sendGesture: { client.sendGesture($0, fingers: $1) })
+                if TouchMode.stored(touchModeRaw) == .trackpad {
+                    TrackpadView(send: { client.sendInput($0) },
+                                 setPointer: { client.setOwnPointer($0, from: .trackpad) },
+                                 feed: { let f = client.pointerFeedState; return (f.anchor, f.reseeds) },
+                                 onFingers: { client.trackpadFingers($0) },
+                                 latched: latched,
+                                 onModifiersConsumed: { latched = [] },
+                                 verticalSpan: nil,
+                                 sendGesture: { client.sendGesture($0, fingers: $1) })
+                }
             }
             .background(Palette.panel)
             .overlay(alignment: .top) { LinkLineView(text: shownLinkLine) }
