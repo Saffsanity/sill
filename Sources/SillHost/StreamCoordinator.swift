@@ -48,6 +48,9 @@ package final class StreamCoordinator {
     /// (`--synthetic`, as `injector.dryRun`) only counts `disp.wakeDry`.
     private var displayWake: DisplayWake
     private let displayActivity: DisplayActivity
+    /// Follows a newly opened window of the streamed app after recent device input, and returns
+    /// to the parent window when the child window closes (`WindowFollowPolicy`).
+    private var windowFollow = WindowFollowPolicy()
     /// The parameter sets that last went out, forgotten as each stream starts (`select`): a stream's
     /// first, and any that differ, are a new frame size for the devices (`parameterSetsSent`).
     private var lastParameterSets: Data?
@@ -899,6 +902,7 @@ package final class StreamCoordinator {
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
+            windowFollow.reset()
             // A window picked comes forward on the Mac, which closes a view a gesture opened; the
             // Desktop picked (as a device does before a gesture made over a window) leaves it.
             if case .window = source { gestureChords.forget() }
@@ -2220,10 +2224,19 @@ package final class StreamCoordinator {
         defer { pointer.setGeometry(pointerGeometry(), fps: fps) }
         if let pending = pendingLaunch, let w = infos.first(where: { $0.bundleID == pending }) {
             pendingLaunch = nil
+            windowFollow.reset()
             await select(.window(w.id), bringForward: true)   // launched from the device to use it: a pick
             return
         }
+        let activeID: UInt32? = { if case .window(let id) = active { return id }; return nil }()
+        let entries = infos.map { (id: $0.id, bundleID: $0.bundleID) }
         if case .window(let id) = active {
+            if let followed = windowFollow.poll(windows: entries, activeWindowID: id,
+                                                now: CFAbsoluteTimeGetCurrent(),
+                                                lastActivityAt: displayWake.lastDeclared) {
+                await select(.window(followed), bringForward: true)
+                return
+            }
             guard let w = infos.first(where: { $0.id == id }) else {
                 // Alive on the virtual display even if the on-screen list dropped it.
                 if virtualDisplay, stage.isStaged, Self.liveBounds(of: id) != nil { broadcastList(); return }
@@ -2274,6 +2287,10 @@ package final class StreamCoordinator {
                 await select(active)
                 return
             }
+        } else {
+            _ = windowFollow.poll(windows: entries, activeWindowID: activeID,
+                                  now: CFAbsoluteTimeGetCurrent(),
+                                  lastActivityAt: displayWake.lastDeclared)
         }
         broadcastList()
     }

@@ -76,6 +76,33 @@ check(found.map(\.name) == found.map(\.name).sorted { $0.localizedCaseInsensitiv
       "sorted by display name")
 check(found.first { $0.bundleID == "com.adobe.Photoshop" }?.name == "Adobe Photoshop 2026", "the name drops .app")
 check(InstalledApps.find(in: [root.appendingPathComponent("Missing").path]).isEmpty, "a missing folder gives nothing")
+
+// WindowFollowPolicy: RAIL-style child/dialog window following and return-on-close.
+do {
+    var follow = WindowFollowPolicy()
+    let w1: (id: UInt32, bundleID: String) = (101, "com.apple.Safari")
+    let w2: (id: UInt32, bundleID: String) = (102, "com.apple.Safari")
+    let other: (id: UInt32, bundleID: String) = (201, "com.apple.Terminal")
+    check(follow.poll(windows: [w1, other], activeWindowID: 101, now: 10, lastActivityAt: 10) == nil,
+          "first poll seeds known windows without switching")
+    check(follow.poll(windows: [w1, other, (202, "com.apple.Terminal")], activeWindowID: 101, now: 11, lastActivityAt: 10) == nil,
+          "a new window from another app is not followed")
+    check(follow.poll(windows: [w1, w2, other], activeWindowID: 101, now: 20, lastActivityAt: 10) == nil,
+          "a new window from the same app more than 5 s after device activity is not followed")
+    // Seed again with w1 + other, then open w2 within 5 s of activity:
+    var activeFollow = WindowFollowPolicy()
+    _ = activeFollow.poll(windows: [w1, other], activeWindowID: 101, now: 10, lastActivityAt: 10)
+    check(activeFollow.poll(windows: [w1, w2, other], activeWindowID: 101, now: 12, lastActivityAt: 10) == 102,
+          "a new window from the streamed app within 5 s of device activity is followed")
+    check(activeFollow.parentStack == [101], "the parent window is pushed onto the return stack")
+    check(activeFollow.poll(windows: [w1, other], activeWindowID: 102, now: 18, lastActivityAt: 10) == 101,
+          "closing the child window returns to the parent window")
+    check(activeFollow.parentStack.isEmpty, "the return stack is popped when returning to the parent")
+    _ = activeFollow.poll(windows: [w1, w2, other], activeWindowID: 101, now: 20, lastActivityAt: 19)
+    activeFollow.reset()
+    check(activeFollow.parentStack.isEmpty, "an explicit user pick clears the return stack")
+}
+
 // exit() skips the top-level defer, so the fake folder goes first.
 try? fm.removeItem(at: root)
 if failures > 0 { print("installed-apps: \(failures) failed"); exit(1) }

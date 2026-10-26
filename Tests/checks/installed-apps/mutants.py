@@ -31,6 +31,15 @@ MUTANTS = [
      ", !seen.contains(id) else", " else"),
     ("sorted backwards",
      "== .orderedAscending }\n    }", "== .orderedDescending }\n    }"),
+    ("WindowFollowPolicy follows windows from other apps",
+     "$0.bundleID == activeEntry.bundleID", "true"),
+    ("WindowFollowPolicy ignores activityWindow timeout",
+     "now - last <= Self.activityWindow", "true"),
+    ("WindowFollowPolicy does not return to parent when child closes",
+     "return parentStack.popLast()", "return nil"),
+    ("WindowFollowPolicy reset keeps parent stack",
+     "    mutating func reset() {\n        parentStack.removeAll()\n    }",
+     "    mutating func reset() {\n    }"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
