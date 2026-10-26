@@ -124,3 +124,36 @@ public enum ImageBlob {
         return (id, d.subdata(in: (idStart + len)..<d.endIndex))
     }
 }
+
+/// Pure routing rules for independent window streams per connected device (issues #210 and #208),
+/// checked in `Tests/checks/compatibility`.
+public enum PerClientStreamRouting {
+    public static func effectiveSource<Client: Hashable>(for client: Client,
+                                                         clientSources: [Client: StreamSource],
+                                                         primaryActive: StreamSource) -> StreamSource {
+        if let picked = clientSources[client], picked != .none { return picked }
+        return primaryActive
+    }
+
+    public static func isSecondaryWindow<Client: Hashable>(for client: Client,
+                                                           clientSources: [Client: StreamSource],
+                                                           primaryActive: StreamSource) -> Bool {
+        guard case .window = clientSources[client], let picked = clientSources[client] else { return false }
+        return picked != primaryActive
+    }
+
+    public static func secondaryWindowIDs<Client: Hashable>(clientSources: [Client: StreamSource],
+                                                            primaryActive: StreamSource) -> [UInt32] {
+        var ids = Set<UInt32>()
+        for source in clientSources.values {
+            if case .window(let id) = source, source != primaryActive { ids.insert(id) }
+        }
+        return ids.sorted()
+    }
+
+    public static func primaryRecipients<Client: Hashable>(allClients: [Client],
+                                                           clientSources: [Client: StreamSource],
+                                                           primaryActive: StreamSource) -> [Client] {
+        allClients.filter { !isSecondaryWindow(for: $0, clientSources: clientSources, primaryActive: primaryActive) }
+    }
+}

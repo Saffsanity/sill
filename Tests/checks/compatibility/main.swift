@@ -187,6 +187,23 @@ let clipboardMessage = StreamMessage(kind: .clipboard, timestamp: 1, isKeyframe:
 check(StreamMessage.parseHeader(clipboardMessage)?.kind == .clipboard && clipboardMessage.count == StreamMessage.headerLength + Wire.encode(clip).count,
       "the clipboard's header parses, then the JSON")
 
+// PerClientStreamRouting (#210, #208): independent window streams per connected device.
+let picks: [String: StreamSource] = ["iPadA": .window(101), "iPadB": .window(202)]
+check(PerClientStreamRouting.effectiveSource(for: "iPadA", clientSources: picks, primaryActive: .desktop) == .window(101)
+      && PerClientStreamRouting.effectiveSource(for: "iPadB", clientSources: picks, primaryActive: .desktop) == .window(202)
+      && PerClientStreamRouting.effectiveSource(for: "iPhone", clientSources: picks, primaryActive: .desktop) == .desktop,
+      "PerClientStreamRouting.effectiveSource: returns each client's picked source, or primaryActive when unset (#210)")
+check(!PerClientStreamRouting.isSecondaryWindow(for: "iPadA", clientSources: picks, primaryActive: .window(101))
+      && PerClientStreamRouting.isSecondaryWindow(for: "iPadB", clientSources: picks, primaryActive: .window(101))
+      && !PerClientStreamRouting.isSecondaryWindow(for: "iPhone", clientSources: picks, primaryActive: .window(101)),
+      "PerClientStreamRouting.isSecondaryWindow: true only for a client watching a window different from primaryActive (#210)")
+check(PerClientStreamRouting.secondaryWindowIDs(clientSources: ["A": .window(101), "B": .window(202), "C": .window(202), "D": .desktop],
+                                                primaryActive: .window(101)) == [202],
+      "PerClientStreamRouting.secondaryWindowIDs: sorted unique window IDs excluding primaryActive (#210)")
+check(PerClientStreamRouting.primaryRecipients(allClients: ["iPadA", "iPadB", "iPhone"], clientSources: picks, primaryActive: .window(101))
+      == ["iPadA", "iPhone"],
+      "PerClientStreamRouting.primaryRecipients: includes clients on primaryActive or unset, excludes secondary-window clients (#210)")
+
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil
 if let out {

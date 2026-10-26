@@ -27,6 +27,41 @@ package final class StreamCoordinator {
     /// highest, so a ProMotion device is not held to a 60 Hz one beside it; a re-sent viewport
     /// from either is then a no-op instead of a restart. Cleared when the client leaves.
     private var clientFPS: [ObjectIdentifier: Int] = [:]
+    /// Each connected client's picked source (`#210`, `#208`: independent window streams per device).
+    private var clientSources: [ObjectIdentifier: StreamSource] = [:]
+    /// Secondary window pipelines (`windowID -> (capture, encoder, lastParameterSets)`) for clients
+    /// watching a window different from `active` (#210).
+    private final class SecondaryPipeline: @unchecked Sendable {
+        let windowID: UInt32
+        let capture = WindowCapture()
+        let encoder: HEVCEncoder
+        private let lock = NSLock()
+        private var psData: Data?
+        init(windowID: UInt32, encoder: HEVCEncoder) {
+            self.windowID = windowID
+            self.encoder = encoder
+        }
+        var lastParameterSets: Data? {
+            get { lock.lock(); defer { lock.unlock() }; return psData }
+            set { lock.lock(); psData = newValue; lock.unlock() }
+        }
+    }
+    private var secondaryPipelines: [UInt32: SecondaryPipeline] = [:]
+    private final class SecondarySubscribersBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var byWindow: [UInt32: Set<ObjectIdentifier>] = [:]
+        private var excluded: Set<ObjectIdentifier> = []
+        func update(byWindow: [UInt32: Set<ObjectIdentifier>], excluded: Set<ObjectIdentifier>) {
+            lock.lock(); self.byWindow = byWindow; self.excluded = excluded; lock.unlock()
+        }
+        func subscribers(for windowID: UInt32) -> Set<ObjectIdentifier> {
+            lock.lock(); defer { lock.unlock() }; return byWindow[windowID] ?? []
+        }
+        var excludedFromPrimary: Set<ObjectIdentifier> {
+            lock.lock(); defer { lock.unlock() }; return excluded
+        }
+    }
+    private let secondaryBox = SecondarySubscribersBox()
     private var wantedFPS: Int { min(maxFPS, max(24, clientFPS.values.max() ?? 60)) }
     /// What the next pipeline will run at: the software encoder is not asked for more than 60.
     private var effectiveFPS: Int { useSoftwareEncoder ? min(wantedFPS, 60) : wantedFPS }
@@ -392,6 +427,7 @@ package final class StreamCoordinator {
                 self.settingsArrivals[ObjectIdentifier(connection)] = nil
                 self.settingsIgnoredLineAt[ObjectIdentifier(connection)] = nil
                 let id = ObjectIdentifier(connection)
+                self.clientSources[id] = nil
                 self.gestureArrivals[id] = nil
                 self.routes[id] = nil
                 self.lastPairingWanted[id] = nil
@@ -403,6 +439,7 @@ package final class StreamCoordinator {
                 self.clipboard.clientLeft(connection)
                 self.releaseKeys(of: id)
                 self.status.update { $0.devices.removeAll { $0.id == id } }
+                await self.reconcileSecondaryStreams()
                 // The last device at home left devices away behind: the away quality, at once.
                 let flipped = self.routesChanged(joined: nil, endpoint: nil)
                 // A 120 Hz device left a 60 Hz one behind: come down to its rate. The restart takes
@@ -420,7 +457,12 @@ package final class StreamCoordinator {
                 let wasEmpty = self.catalog.clientCount == 0
                 self.catalog.clientCount = count          // the catalog idles itself at 0
                 // Nobody is watching: stop capturing and encoding. The next client picks afresh.
-                if count == 0 { self.viewport = nil; self.clientFPS = [:] }   // the next device starts from scratch
+                if count == 0 {
+                    self.viewport = nil
+                    self.clientFPS = [:]
+                    self.clientSources = [:]
+                    await self.reconcileSecondaryStreams()
+                }   // the next device starts from scratch
                 if count == 0 { self.gestureChords.forget() }                 // and did not open a view it could close
                 // On the software encoder, the hardware is checked only while someone watches.
                 if count == 0 { self.stopRecheck() } else { self.devicesPresent(firstArrived: wasEmpty) }
@@ -878,12 +920,25 @@ package final class StreamCoordinator {
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
+            let id = ObjectIdentifier(connection)
+            clientSources[id] = source
             // A window picked comes forward on the Mac, which closes a view a gesture opened; the
             // Desktop picked (as a device does before a gesture made over a window) leaves it.
             if case .window = source { gestureChords.forget() }
-            // A pick from the device's switcher: the device never selects a window by itself (its
-            // automatic requests are for the Desktop only).
+            // When two or more devices are connected and another device is already watching the
+            // primary stream, a window pick starts an independent secondary stream for this device (#210).
+            let othersOnPrimary = connections.keys.contains { other in
+                other != id && !PerClientStreamRouting.isSecondaryWindow(for: other, clientSources: clientSources, primaryActive: active)
+            }
+            if active != .none, othersOnPrimary, case .window = source, source != active {
+                server.resetForNewStream(client: id)
+                await reconcileSecondaryStreams()
+                broadcastList()
+                return
+            }
+            server.resetForNewStream(client: id)
             await handlePick(source)
+            await reconcileSecondaryStreams()
         case .windowCommand:
             // The bar's long-press menu: the window's own traffic lights, pressed through
             // Accessibility. The staged window's element is already matched; others are looked up.
@@ -915,7 +970,14 @@ package final class StreamCoordinator {
         case .input:
             guard let event = Wire.decode(InputEvent.self, from: message.payload) else { return }
             let device = ObjectIdentifier(connection)
-            guard let rect = currentSourceRect() else {
+            let rect: CGRect?
+            if PerClientStreamRouting.isSecondaryWindow(for: device, clientSources: clientSources, primaryActive: active),
+               case .window(let wid) = clientSources[device] {
+                rect = Self.liveBounds(of: wid) ?? catalog.window(id: wid)?.frame
+            } else {
+                rect = currentSourceRect()
+            }
+            guard let rect else {
                 // Nothing streams (between sources, or the stream stopped: the window closed under a
                 // drag): input has nowhere to land. The up of a key or a button the Mac has down still
                 // goes (DroppedInput), a button's where the pointer is (`.null`), so no modifier this
@@ -1462,12 +1524,16 @@ package final class StreamCoordinator {
             }
         }
         let server = self.server
+        let box = self.secondaryBox
         enc.onEncoded = { data, isKey, parameterSets in
             let now = Date().timeIntervalSince1970
+            let excluded = box.excludedFromPrimary
             if let ps = parameterSets {
-                server.broadcast(StreamMessage(kind: .parameterSets, timestamp: now, isKeyframe: true, payload: ps.encoded()))
+                server.broadcast(StreamMessage(kind: .parameterSets, timestamp: now, isKeyframe: true, payload: ps.encoded()),
+                                 excluding: excluded)
             }
-            server.broadcast(StreamMessage(kind: .frame, timestamp: now, isKeyframe: isKey, payload: data))
+            server.broadcast(StreamMessage(kind: .frame, timestamp: now, isKeyframe: isKey, payload: data),
+                             excluding: excluded)
         }
         if let filter {
             capture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
@@ -2318,14 +2384,76 @@ package final class StreamCoordinator {
 
     // MARK: Catalog to clients
 
-    private func listMessage() -> StreamMessage {
+    private func listMessage(active source: StreamSource? = nil) -> StreamMessage {
         StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
-                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
+                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: source ?? active, launchID: launchID,
                                                       hostVersion: hostVersion, protocol: SillProtocol.current,
                                                       gestures: TrackpadGesture.generation, clipboard: clipboard.advertised)))
     }
 
-    private func broadcastList() { server.broadcast(listMessage()) }
+    private func broadcastList() {
+        guard !connections.isEmpty else {
+            server.broadcast(listMessage())
+            return
+        }
+        let messages = connections.map { (id, conn) in
+            let eff = PerClientStreamRouting.effectiveSource(for: id, clientSources: clientSources, primaryActive: active)
+            return (conn, listMessage(active: eff))
+        }
+        server.send(each: messages)
+    }
+
+    /// Starts or stops secondary window pipelines so each connected device watching a window
+    /// different from `active` gets its own stream (#210, #208).
+    private func reconcileSecondaryStreams() async {
+        let wantedIDs = Set(PerClientStreamRouting.secondaryWindowIDs(clientSources: clientSources, primaryActive: active))
+        for (wid, pipe) in secondaryPipelines where !wantedIDs.contains(wid) {
+            await pipe.capture.stop()
+            pipe.capture.onFrame = nil
+            secondaryPipelines[wid] = nil
+        }
+        var byWindow: [UInt32: Set<ObjectIdentifier>] = [:]
+        var excluded = Set<ObjectIdentifier>()
+        for (id, source) in clientSources {
+            if PerClientStreamRouting.isSecondaryWindow(for: id, clientSources: clientSources, primaryActive: active),
+               case .window(let wid) = source {
+                byWindow[wid, default: []].insert(id)
+                excluded.insert(id)
+            }
+        }
+        secondaryBox.update(byWindow: byWindow, excluded: excluded)
+        for wid in wantedIDs where secondaryPipelines[wid] == nil {
+            guard let w = catalog.window(id: wid) else { continue }
+            let width = evenPixels(w.frame.width * scale)
+            let height = evenPixels(w.frame.height * scale)
+            guard let enc = try? HEVCEncoder(width: width, height: height, fps: fps, bitrate: streamBitrate,
+                                             prioritizeSpeed: prioritizeSpeed, software: useSoftwareEncoder) else { continue }
+            let pipe = SecondaryPipeline(windowID: wid, encoder: enc)
+            let server = self.server
+            let box = self.secondaryBox
+            enc.onEncoded = { [weak pipe] data, isKey, parameterSets in
+                let now = Date().timeIntervalSince1970
+                let subs = box.subscribers(for: wid)
+                guard !subs.isEmpty else { return }
+                if let ps = parameterSets {
+                    let psMsg = StreamMessage(kind: .parameterSets, timestamp: now, isKeyframe: true, payload: ps.encoded())
+                    pipe?.lastParameterSets = psMsg.serialized()
+                    server.broadcast(psMsg, to: subs, lastParameterSets: pipe?.lastParameterSets)
+                }
+                let frameMsg = StreamMessage(kind: .frame, timestamp: now, isKeyframe: isKey, payload: data)
+                server.broadcast(frameMsg, to: subs, lastParameterSets: pipe?.lastParameterSets)
+            }
+            pipe.capture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
+            do {
+                try await pipe.capture.start(filter: SCContentFilter(desktopIndependentWindow: w),
+                                             width: width, height: height, fps: fps, showsCursor: false, sourceRect: nil)
+                secondaryPipelines[wid] = pipe
+                enc.requestKeyframe()
+            } catch {
+                pipe.capture.onFrame = nil
+            }
+        }
+    }
 
     private func sendCatalog(to connection: NWConnection) {
         let now = Date().timeIntervalSince1970

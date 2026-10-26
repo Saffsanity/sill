@@ -27,6 +27,16 @@ MUTANTS = [
     ("spread left out of the names", "Gesture.swift", "public static let names = [swipeUp, swipeDown, swipeLeft, swipeRight, pinch, spread]", "public static let names = [swipeUp, swipeDown, swipeLeft, swipeRight, pinch]"),
     ("kind 28 as 29", "StreamMessage.swift", "case gesture = 28", "case gesture = 29"),
     ("device never nil", "Compatibility.swift", "self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device", "self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device ?? \"\""),
+    ("PerClientStreamRouting.effectiveSource ignores client pick (#210)", "Switcher.swift",
+     "        if let picked = clientSources[client], picked != .none { return picked }\n", ""),
+    ("PerClientStreamRouting.isSecondaryWindow treats primary window as secondary (#210)", "Switcher.swift",
+     "        return picked != primaryActive", "        return true"),
+    ("PerClientStreamRouting.secondaryWindowIDs includes primary window (#210)", "Switcher.swift",
+     "            if case .window(let id) = source, source != primaryActive { ids.insert(id) }",
+     "            if case .window(let id) = source { ids.insert(id) }"),
+    ("PerClientStreamRouting.primaryRecipients sends primary frames to secondary-window clients (#210)", "Switcher.swift",
+     "        allClients.filter { !isSecondaryWindow(for: $0, clientSources: clientSources, primaryActive: primaryActive) }",
+     "        allClients"),
 ]
 caught = 0
 for name, file, old, new in MUTANTS:
