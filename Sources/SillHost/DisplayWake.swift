@@ -248,4 +248,12 @@ struct DisplayWake {
             return (false, "\(userActiveVariable) ignored: it takes local or remote; user activity is declared as local.")
         }
     }
+
+    /// Whether to declare `kIOPMUserActiveRemote` instead of `kIOPMUserActiveLocal`: when every
+    /// connected device is away from home (`awayRunning`) or when a window is staged on Sill's own
+    /// off-screen `CGVirtualDisplay` (`stagedOnVirtualDisplay`), so the GPU and framebuffer stay
+    /// active without lighting the Mac's physical monitor in an empty room.
+    static func declaresRemote(awayRunning: Bool, stagedOnVirtualDisplay: Bool) -> Bool {
+        awayRunning || stagedOnVirtualDisplay
+    }
 }

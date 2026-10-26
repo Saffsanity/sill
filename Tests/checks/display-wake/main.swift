@@ -369,6 +369,14 @@ do {
     check(userActive("remote", testHost: true) == (false, "SILL_TEST_USER_ACTIVE ignored: a test host declares no user activity (it counts disp.wakeDry)."),
           "remote on a test host: ignored, with one line")
     check(W.userActive(environment: ["SILL_TEST_USERACTIVE": "remote"], testHost: false) == (false, nil), "another variable: nothing")
+    check(!W.declaresRemote(awayRunning: false, stagedOnVirtualDisplay: false),
+          "declaresRemote: at home on a real display declares local (lights the panel)")
+    check(W.declaresRemote(awayRunning: true, stagedOnVirtualDisplay: false),
+          "declaresRemote: away from home declares remote (keeps the physical panel dark)")
+    check(W.declaresRemote(awayRunning: false, stagedOnVirtualDisplay: true),
+          "declaresRemote: staged on Sill's virtual display declares remote (need not light the physical panel)")
+    check(W.declaresRemote(awayRunning: true, stagedOnVirtualDisplay: true),
+          "declaresRemote: away and staged declares remote")
 }
 
 // MARK: - 20,000 random sessions: the rule

@@ -27,11 +27,14 @@ final class DisplayActivity: @unchecked Sendable {
     init(remote: Bool = false) { userType = remote ? kIOPMUserActiveRemote : kIOPMUserActiveLocal }
 
     /// Declares user activity for `device` (its name for the line) because of `activity`.
-    func declare(for device: String, _ activity: DisplayWake.Activity) {
+    /// When `remote` is true (away from home or staged on Sill's virtual display), or when
+    /// `SILL_TEST_USER_ACTIVE=remote` is set, declares `kIOPMUserActiveRemote`.
+    func declare(for device: String, _ activity: DisplayWake.Activity, remote: Bool = false) {
         queue.async { [self] in
             let wasAsleep = Self.mainDisplayAsleep()
             var id = assertionID
-            let result = IOPMAssertionDeclareUserActivity(DisplayWake.assertionName as CFString, userType, &id)
+            let type = remote ? kIOPMUserActiveRemote : userType
+            let result = IOPMAssertionDeclareUserActivity(DisplayWake.assertionName as CFString, type, &id)
             if result == kIOReturnSuccess {
                 assertionID = id
                 Stats.shared.bump(DisplayWake.declaredKey)

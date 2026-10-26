@@ -1071,7 +1071,10 @@ package final class StreamCoordinator {
         switch displayWake.decide(event, at: CFAbsoluteTimeGetCurrent()) {
         case .nothing: break
         case .count: Stats.shared.bump(DisplayWake.dryKey)
-        case .declare(let activity): displayActivity.declare(for: deviceName(connection), activity)
+        case .declare(let activity):
+            let remote = DisplayWake.declaresRemote(awayRunning: awayWanted,
+                                                    stagedOnVirtualDisplay: virtualDisplay && stage.isStaged)
+            displayActivity.declare(for: deviceName(connection), activity, remote: remote)
         }
     }
 

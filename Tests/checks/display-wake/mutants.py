@@ -85,6 +85,9 @@ MUTANTS = {
     "M59 another value echoed": ('return (false, "\\(userActiveVariable) ignored: it takes local or remote; user activity is declared as local.")',
                                  'return (false, "\\(userActiveVariable)=\\(value) ignored: it takes local or remote; user activity is declared as local.")'),
     "M60 the variable's name": ('static let userActiveVariable = "SILL_TEST_USER_ACTIVE"', 'static let userActiveVariable = "SILL_TEST_USERACTIVE"'),
+    "M61 awayRunning does not declare remote": ("awayRunning || stagedOnVirtualDisplay", "stagedOnVirtualDisplay"),
+    "M62 stagedOnVirtualDisplay does not declare remote": ("awayRunning || stagedOnVirtualDisplay", "awayRunning"),
+    "M63 always declares remote even at home on physical display": ("awayRunning || stagedOnVirtualDisplay", "true"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():
