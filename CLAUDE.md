@@ -9,7 +9,7 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **The Mac says when it goes to sleep, shuts down or restarts (2026-10-19, PR #100 by addhumal, branch
-`goodbye-sleep` on addhumal/sill with main at 9a8e30c merged in; issue #105; finished on the branch from
+`goodbye-sleep` on addhumal/sill with main at 4d990e9 merged in; issue #105; finished on the branch from
 the triage of 2026-10-16 and 2026-10-19, `~/Downloads/sill-handoff/triage/`, and fixed after the
 verifier's review of 2026-10-20).** Noah: "Work on finishing ... The Mac telling devices it is going to
 sleep or shutting down". Additive: kind 22 gains the reasons "sleep", "shutdown" and "restart", each with
@@ -125,14 +125,16 @@ the Mac's words and `"reconnect":true`.
   picked (Aa set, and once with Virtual Display on) and note what the Mac's window does and what the
   device shows after (the Desktop, since nothing streams on the new session). Restart and Shut Down
   from the Apple menu with the iPad streaming: Sill.log "macOS says the Mac is about to log out,
-  restart or shut down." and "Quit: macOS asked Sill to quit for a restart." (only "Shutting down…"
-  and no goodbye line means it went by a signal, and the inference is wrong: send the lines), the
-  device's words, the session back once the Mac is up and Sill open on it (Launch at Login); a restart
+  restart or shut down." and "Quit: macOS asked Sill to quit for a restart." (only "Shutting down…",
+  with neither of those lines nor a "The Mac is …" one, means Sill went by a signal or a quit without
+  a reason, with no willPowerOff before it, and the inference is wrong: send the lines), the device's
+  words, the session back once the Mac is up and Sill open on it (Launch at Login); a restart
   begun from another account ("quit", as observed); Log Out ("quit"); the iPad locked or Sill in the
   background through a sleep and through a restart, back a minute later: the Mac dialled as soon as it
   is listed, not after 10 minutes, the words until then; an older build (0.5.1 from the App Store)
   against this Sill.app: the Mac's message, then its own Reconnecting; through Tailscale, a sleep: its
-  remote dials from 20 s on.
+  remote dials from 20 s on. As each passes, its words waiting in docs/update-notice-plan.md §7.3
+  ("Words that wait for a device") go into the support page and the next What's New.
 
 **The clipboard both ways (2026-10-14, branch `clipboard` from main at 985a733; issue #64; PR #78;
 the plan, its open questions with the default taken for each, the results and the review's fixes are

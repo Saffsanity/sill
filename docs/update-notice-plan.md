@@ -867,6 +867,16 @@ not a window list came:
   nothing else follows a goodbye on it. The device keeps a goodbye only for the connection it came
   on (a move that carries the session over to another connection drops it; a new session starts
   without one).
+- Words that wait for a device (PR #100): README's Good to know, the support page and the next
+  What's New say nothing of these goodbyes yet. The sleep's has shown only through the bare app's
+  test hook and a simulator, and the restart's and shut down's rest on the inference above. Once
+  Noah's real Sleep, Restart and Shut Down pass, they gain what passed, for example the support
+  page's "Your Mac isn’t listed": "If your iPhone or iPad was showing your Mac when it went to sleep,
+  restarted or shut down, it says so, and connects again once your Mac is back with Sill open."; and
+  the next What's New: "When your Mac goes to sleep, restarts or shuts down, your iPhone or iPad now
+  says so, and connects again once your Mac is back." The site's line goes between `<!-- Goodbye`
+  and `<!-- /Goodbye -->` markers, with a perl line in docs/release-checklist.md part 1 §3, as the
+  Clipboard's does, until the release that ships Sill for Mac with these goodbyes.
 - `message` is shown after `SafeText.label(message, limit: 300)`: one line, without control or
   bidirectional characters. Empty after cleaning counts as absent. The status line is
   `Text(client.status)`, which SwiftUI shows verbatim for a String: no Markdown, and no link from
