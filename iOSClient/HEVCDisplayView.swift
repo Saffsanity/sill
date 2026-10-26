@@ -19,9 +19,6 @@ final class HEVCDisplayView: UIView {
     private var ownRenderer: MetalStreamRenderer?
     /// The same renderer, whose layer is shown over the system layer's and laid out here. Main thread.
     private var shownRenderer: MetalStreamRenderer?
-    /// The stream's serial queue, so `layoutSubviews` can schedule Metal drawable sizing/redraw in
-    /// order with `decode`.
-    var renderQueue: DispatchQueue?
 
     /// The streamed frame's pixel size, reported on main whenever new parameter sets arrive.
     /// Input needs it: touches are normalized against the video, not against this view.
