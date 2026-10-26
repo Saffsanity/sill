@@ -75,6 +75,16 @@ public enum StreamMessageKind: UInt8 {
                              // on), its text becomes the Mac's clipboard, and `stop` ends the subscription; only
                              // to a host whose window list says `clipboard` 1 or more. Host → device: text copied
                              // on the Mac (or sent by another device), only to a connection that subscribed
+    // The picture's recovery (issue #101), after the numbers open pull requests hold (29 to 31 and 33
+    // to 43). Older hosts map it to `.unknown` and skip it: the device's picture then waits for the
+    // stream's next keyframe, as it always did.
+    case keyframeRequest = 44 // device → host, empty payload: this device's picture was interrupted (its display
+                             // layer failed, or iOS stopped it while Sill was away) and waits for a keyframe,
+                             // which a still window never sends by itself. The host asks its encoder for one
+                             // (every device gets it, as when a device joins); never a pick of the source again.
+                             // From the device once per interruption while its keyframe is due, again when it
+                             // has not come in 4 s (or four round trips), 2 s apart at least (KeyframeRecovery);
+                             // at most one a second per connection on the host
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

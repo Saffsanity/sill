@@ -386,6 +386,17 @@ enum PointerTestHooks {
         }
     }
 
+    /// SILL_TEST_NO_SCREEN=1: the window catalog never touches ScreenCaptureKit (no window list, no
+    /// thumbnails, no display lookup), so a test host that an agent runs with a client connected asks
+    /// macOS for no screen recording; its Desktop is the test pattern anyway. Any other value is
+    /// ignored with one line.
+    static func noScreen(synthetic: Bool, environment env: [String: String]) -> (on: Bool, line: String?) {
+        guard let value = env["SILL_TEST_NO_SCREEN"], !value.isEmpty else { return (false, nil) }
+        guard synthetic else { return (false, "SILL_TEST_NO_SCREEN ignored: only a --synthetic host takes it.") }
+        guard value == "1" else { return (false, "SILL_TEST_NO_SCREEN=\(value) ignored: 1 turns it on.") }
+        return (true, "Test screen: ScreenCaptureKit is never asked (SILL_TEST_NO_SCREEN); the window list stays empty and no thumbnail is taken.")
+    }
+
     /// SILL_TEST_SOFTWARE_ENCODER=1: streams start on the software encoder, the launch probe never
     /// runs and the re-check never starts, so a gate never touches the Mac's one hardware encoder
     /// while Noah streams. Any other value is ignored with one line.
