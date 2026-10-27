@@ -9,7 +9,8 @@ import CoreGraphics
 package struct HostConfig: Equatable, Sendable {
     /// Ceiling for the stream rate; each device asks for its own panel's rate (60 until it does).
     package var maxFPS: Int
-    /// 2 = Retina capture, 1 = points (much cheaper).
+    /// 2 = Retina capture, 1 = points (much cheaper). Pixels per point at most: a capture runs at the
+    /// lesser of this and its display's own scale (CaptureScale), so on a 1x display both are 1x.
     package var captureScale: CGFloat
     /// Bits per second per 60 fps; a faster stream gets proportionally more.
     package var bitrate: Int

@@ -66,6 +66,10 @@ final class InputInjector {
     private var lastKeyFlags: UInt64 = 0
     /// Where the last pointer event went: a synthetic host's pointer, which it never reads.
     private var lastPointerLocation: CGPoint = .zero
+    /// The streamed source's display's own pixel scale (StreamCoordinator sets it as each pipeline
+    /// starts; nil for the test pattern): a position lands at most on that display's last pixel row
+    /// and column (InputLanding).
+    var displayScale: CGFloat?
 
     // MARK: Entry point
 
@@ -101,11 +105,12 @@ final class InputInjector {
         }
     }
 
-    /// Where a device's position lands on the Mac: its fraction of `rect`; with no source to place it
-    /// on (`.null`), where the pointer is now.
+    /// Where a device's position lands on the Mac: its fraction of `rect`, held to the rectangle's
+    /// last pixel row and column (InputLanding: a device's bottom edge, y = 1, is `rect.maxY`, the row
+    /// past the last); with no source to place it on (`.null`), where the pointer is now.
     private func point(_ x: Double, _ y: Double, in rect: CGRect) -> CGPoint {
         if rect.isNull { return pointerNow() }
-        return CGPoint(x: rect.minX + CGFloat(x) * rect.width, y: rect.minY + CGFloat(y) * rect.height)
+        return InputLanding.point(x: x, y: y, in: rect, displayScale: displayScale)
     }
 
     /// Where the Mac's pointer is: read (no permission) on a host that posts; on a synthetic host,

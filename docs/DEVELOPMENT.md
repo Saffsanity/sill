@@ -248,7 +248,10 @@ First run: macOS asks for Screen Recording for Terminal
 Knobs live in `Sources/SillHost/HostConfig.swift` (`HostConfig.standard`):
 maxFPS, captureScale, bitrate, prioritizeSpeed. The CLI uses them as they are;
 Sill.app starts from them and changes them from its menu and Settings. Start
-at the defaults, change one at a time.
+at the defaults, change one at a time. captureScale (Resolution: 2 Retina, 1
+Standard) is pixels per point at most: a capture runs at the lesser of it and
+its display's own scale, so on a 1x display both are 1x (a window captured
+there at 2x showed in the top-left quarter of the picture before 2026-10-27).
 The stream rate is the device's own: each client reports its panel's ceiling
 (120 on ProMotion iPads and iPhones, 60 on the iPad mini) and 60 while Low
 Power Mode is on; the host runs capture, encoder and the virtual display at
@@ -710,6 +713,166 @@ hold, letters, Esc (through `pressesBegan`), ⌘W and two-finger scrolling all
 reached the Mac, and Esc closed Settings without reaching it. A Magic Keyboard
 itself, and which channel brings its Esc, are still untested.
 
+## Other languages and dictation
+
+The stream's input view is a text input (`UITextInput`, issue #138), so typing in
+a language whose input method composes its text, and dictation, reach the Mac.
+An input method (Chinese Zhuyin or Pinyin, Japanese, Korean and the like)
+composes on the device: what it is composing shows at the top middle of the
+picture, its candidates show where iPadOS puts them (on the on-screen keyboard,
+or with a hardware keyboard beside the composition), and only the text chosen
+goes to the Mac, typed as any text is. While it composes, every key is the input
+method's (the arrows move through its candidates, Return chooses, Esc does what
+that input method does with it, and a shortcut such as Command-S goes to it too,
+not to the Mac), so nothing of it reaches the Mac until it is chosen. What is
+still composed when the input view stops taking the keyboard (Settings, the Apps
+list or the tour opens, the device turns) goes to the Mac as it stands, as a
+text field on the device keeps it, and so does what is still
+composed when a click, a key or a pick is about to move the Mac's caret (a tap on
+the picture, say, though not one on the black bars beside it, which clicks
+nothing and sends nothing): it goes first, where the caret was, as a tap elsewhere
+in a text field keeps a composition. Dictation types what is said, and the
+corrections it makes a moment later go to the Mac as backspaces back to the first
+change, then the rest typed again. Korean builds each syllable in the text
+itself, not in a composition: as each letter comes, its keyboard selects the
+syllable it is building, deletes it and types it again. The input view keeps
+what the text system selects of what was typed for its next edit, as a text
+field does (text typed over the selection, a backspace, or a composition that
+starts over it replaces it), so at each letter the Mac gets backspaces over the
+syllables being rebuilt and those syllables again, and 한글 arrives once.
+
+There is no setting for it in Sill: the input view follows the keyboards and
+dictation languages set up in the device's Settings › General › Keyboard
+(Keyboards, and Dictation Languages under Dictation). With keyboards in two
+languages or more there, Control-Space switches between them on the device, as
+in any text field there and as on a Mac with several input sources. With
+keyboards in one language (Emoji and dictation aside), Control-Space goes to the
+Mac as before: Xcode's completions, VS Code's suggestions, the Mac's own input
+source switch. Control-Shift-Space, Control-Option-Space and
+Control-Command-Space always go to the Mac. The Globe key switches the device's
+keyboard too. Whenever the keyboard switches while the input view holds it, with
+a hardware keyboard or the on-screen one, the new keyboard's name shows over the
+picture for a second (not Emoji's or dictation's, and not while something is
+being composed).
+
+A correction needs what is just before the Mac's caret, so the device remembers
+what was typed since the caret last moved some other way, and forgets it at
+anything that may move the caret: a click or a key from any part of Sill (the
+picture, the portrait trackpad, the key row, a hardware keyboard, Esc, and
+Shift-Return and Shift-Tab, which go as keys), another window or the Desktop
+picked by anyone, an app opened, a window's buttons, a menu item, a
+three-finger gesture. A Return or a Tab typed as text (a hardware one without
+Shift, the on-screen keyboard's return key, dictation's "new line", alone or
+in the middle of what is being dictated) goes whole and keeps what was typed,
+but makes everything up to it final: in a chat it may have sent the line, in a
+terminal run the command, in a form moved to the next field. A correction that
+would change anything before the last Return or Tab typed sends nothing, rather
+than backspacing over it and typing the line and the Return again (the message
+sent twice, the command run twice, backspaces into the next field), whether
+the text system hands back the range it took or builds it again from offsets it
+kept; what follows the Return or the Tab, in the same text or typed after it,
+is corrected as any typing is. So dictation that hears "new line" in the middle
+of a sentence types no word twice (in every way of sending its updates the
+verifications modelled), and a late touch to the line before the Return (its
+capital, its full stop) is left out, in an editor too, where that line keeps
+the words it had. Such a correction also takes with it whatever it adds after
+the Return, and dictation that sends its whole utterance again with each update
+carries a word it revised before the Return into every update after, each of
+which then sends nothing too, so the words said after that never reach the Mac.
+Heard as "send the bill", "send the bill⏎deploy", "send the build⏎deploy it",
+"send the build⏎deploy it now" and "Send the build.⏎Deploy it now." (⏎ the
+Return), such updates leave the Mac with "send the bill⏎deploy", in an editor
+too: " it now" never arrives (the third verification's harness). Nothing is
+sent twice either way, and where dictation types new words at the caret and
+makes each revision a replacement of its own, every word arrives and only the
+revision is left out; which way iPadOS's dictation goes is for the testers'
+"new line" step on a device to show (below). A later change could apply such an
+update's text from after its k-th Return or Tab, k being the Returns and Tabs
+in what is final, instead of refusing all of it. The person's own backspace
+still goes back across a Return (in an editor it joins the lines; in a chat
+that sent the line it deletes nothing), and what was before the deleted Return
+stays final. Korean's keyboard rebuilds the character before the syllable it is
+building together with it, so right after a Return it deletes the Return with
+the syllable and types both again: only the syllable goes from the Mac and
+back, and the Return goes once.
+
+After a click, a key or a pick, a correction of what was forgotten sends
+nothing when the text system hands back the range it took before (dictation's
+last touch to a phrase, its punctuation or capitals, arriving just after a
+click), or builds one again from offsets it kept that starts past what was
+typed since. One built again that starts where what was typed began (the usual
+case: a phrase dictated right after a click, a pick or the start of the
+session starts there) cannot be told from a range taken since, and its
+correction is typed where the caret is now: its words a second time. That
+holds for a click, a key or a pick, as it did before. After a Return or a Tab
+nothing is forgotten: the same correction would change what is final, and
+sends nothing.
+Typing on the Mac itself, and another device's input, Sill does not see: a
+correction made right after either can land in the wrong place. Past 4,000
+characters typed with no click, key or pick in between (a Return or a Tab
+typed is none), all but the last 1,000 are forgotten.
+Scribble never writes over the picture (the Apple Pencil is the Mac's mouse
+there), and Writing Tools, math results and grammar suggestions are off in the
+input view, as autocorrection and predictions are: each would rewrite text the
+Mac already has. To VoiceOver the input view is still no element, as before it
+was a text input (it would read as an unlabeled text field over the picture,
+first on the screen); what an input method composes is a label it can read.
+
+`iOSClient/TextComposition.swift` is the rule, checked in
+`Tests/checks/text-composition`. Debug builds print `hwkey: usage 44 down via
+pressesBegan (control): iPadOS's keyboard switch` for a Control-Space that
+stays on the device, and a `textinput:` line for each call iPadOS's text system
+makes and for what went to the Mac (`textinput: setMarkedText "ㄋㄧ" (2,0)`,
+`textinput: unmarkText`, `textinput: sent "你好"`, `textinput: selected (0,2) of
+what was typed, for the next edit`, `textinput: sent "\n"; what was typed up to
+its last Return or Tab is final: 15 of 15 units`, `textinput: replace (0,14)
+with "Send the build.", it would change what went before a Return or a Tab
+typed: nothing sent`, and each time the input view
+takes the keyboard `textinput: first responder; the keyboards set up: en-US,
+zh-Hant, emoji; this one zh-Hant`): what to read in Xcode's console when an
+input method or dictation types something twice, or not at all.
+
+On a device so far: the pull request's author, on an iPad Air (4th generation)
+with a Magic Keyboard against Sill for Mac 0.5.1, typed Zhuyin on the Magic
+Keyboard and on the on-screen keyboard, switched with Control-Space and the
+Globe key, and dictated in Chinese (2026-10-17). In the iPad simulator (iOS
+27.0, keys from `Tests/keyrig`'s virtual keyboard, against `SillHost
+--synthetic` on loopback with `SILL_TEST_INPUT_LOG=1`, 2026-10-26): Zhuyin
+(ㄋㄧˇㄏㄠˇ, then Return), Pinyin (nihao, then Space), Japanese (nihonn, then
+Return) and Korean (2-Set's g k s r m f) each reached the host once, as 你好,
+你好, 日本 and 한글; a tap on the picture mid-composition sent the composition
+first, then the click; Control-Space stayed on the device with keyboards in two
+languages and reached the host with one; Esc and Command-S reached it as keys,
+and Command-S pressed mid-composition went to the input method, nothing of it to
+the host. Again on the tree merged with main at 36e7212, the same day, with the
+same results. With the verification's fixes, on the tree merged with main at
+c215514: a phrase typed, then Return, reached the host as its letters and one
+"\n", and what was typed was forgotten right after it; a tap on the black bars
+mid-composition sent nothing, and one on the picture the composition, then the
+click; and with a Debug step of the verification's own standing in for
+dictation (its text typed, then replaced through the range it held), a
+correction after a hardware Return sent nothing, where the build before the
+fix sent 15 backspaces and the line again, and one with no Return went as
+before. With the second verification's fix (2026-10-27): the same step's text
+with a Return inside it went whole, the last pass over its whole phrase sent
+nothing, and a correction of only the words after its Return went as
+backspaces and those words; Korean typed after a Return (2-Set's g k s r m f,
+Return, then again) reached the host as 한글, Return, 한글, Return, once (its
+keyboard deletes the Return with the first syllable after it and types both
+again, and the Return was not sent twice); Zhuyin's 你, Return, 你, Return
+once; and a Backspace right after a Return deleted it.
+That simulator did not read the keyboards written to its `AppleKeyboards`
+preference; launching Sill with `-AppleLanguages '(zh-Hant-TW, en-US)'
+-AppleLocale zh_TW` (or `ko-KR`, `ja-JP`, `zh-Hans-CN`) gives it that
+language's own keyboards. Not yet on a device: Pinyin, Japanese, Korean,
+English dictation and its corrections, Return pressed right after dictating
+(in Messages, Slack or Terminal: the line goes once), dictation with "new line"
+said in the middle of a sentence and the talking going on (in TextEdit and in
+Messages or Slack, in English and in Chinese: every word arrives once, and
+nothing is sent twice), Control-Space with one keyboard, a shortcut
+mid-composition, an Apple Pencil over the picture, and
+VoiceOver.
+
 ## The clipboard
 
 Text goes both ways between the Mac and a device (kind 32; the plan and its
@@ -1043,14 +1206,14 @@ encoder session, the device floor, how a session ends, how the device reads the
 Mac's messages, the update check, the disk image's window, where everything goes
 on a phone held upright, who moves the Mac's pointer, the Mac's menus on both
 ends, which three-finger strokes are gestures and what the Mac does with one,
-which modifiers a device's keys leave set on the Mac,
-the first-run tour, pairing at home (the doors, the cable, the device's rows),
-whether screen sharing shows the pairing window, which keychain Sill.app keeps
-its identity in, the away quality and the link's
-judgement, the iPhone Duo's layouts, what of the clipboard goes between the Mac
-and a device, which type encodings the virtual display's private API may report,
-and when the Mac's display is woken for a device) on their own with a check
-each, and
+which modifiers a device's keys leave set on the Mac, what an input method or
+dictation sends the Mac and whose Control-Space it is, the first-run tour,
+pairing at home (the doors, the cable, the device's rows), whether screen
+sharing shows the pairing window, which keychain Sill.app keeps its identity
+in, the away quality and the link's judgement, the iPhone Duo's layouts, what
+of the clipboard goes between the Mac and a device, which type encodings the
+virtual display's private API may report, and when the Mac's display is woken
+for a device) on their own with a check each, and
 runs them: about five minutes, no device, permission or encoder. `--mutants`
 also checks that each check fails when its file is changed in one place (well
 over an hour).
@@ -1488,8 +1651,14 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
   ms each …; a new session takes 9 ms …"); if a new session is no faster
   (another app sharing the encoder, say), the log says that and the stream
   keeps it.
-- Resolution: Standard (`captureScale: 1`, four times fewer pixels to encode;
-  it never hit the slow state).
+- Resolution: Standard (`captureScale: 1`, four times fewer pixels to encode
+  on a Retina display; it never hit the slow state). On a display that is not
+  Retina (1x: an external 2560×1440 display at its own resolution, say) the
+  two capture alike: a capture never runs above its display's own pixel scale
+  (CaptureScale, from ScreenCaptureKit's `pointPixelScale`), so Retina there
+  is 1x already and Standard changes nothing. The capture line says which
+  ("Capture started: 2560×1440 … filter (2560.0, 1440.0) scale 1.0, capturing
+  at 1x, the display's own (2x asked)").
 - Prioritize encoding speed (`prioritizeSpeed: true`).
 - Lower bitrate, or wire the phone to the Mac and repeat to isolate Wi-Fi.
 - Check the Mac's Console for "dropped" from the capture; raise `queueDepth`.

@@ -91,6 +91,11 @@ package final class StreamCoordinator {
     /// Why that check failed, if it did: the virtual display then stays off for the whole run.
     private var apiProblem: String?
     private var encoder: HEVCEncoder? { didSet { encoderBox.current = encoder } }
+    /// The display's own pixel scale under the running pipeline (CaptureScale): ScreenCaptureKit's for
+    /// its filter (`pointPixelScale`), Sill's virtual display's (2) for a staged window, nil for the
+    /// test pattern. Set with `active` as a pipeline starts (`startPipeline`); the injector lands
+    /// input on that display's last pixel row and column at most (InputLanding).
+    private var streamDisplayScale: CGFloat?
     /// Hardware HEVC normally. When a hardware session stops returning frames, or the launch probe
     /// gets no answer, the stream runs on the software encoder at half the capture scale and up to
     /// 60 fps, slow but alive (`enterSoftwareFallback`), until a re-check finds the hardware keeping
@@ -390,7 +395,7 @@ package final class StreamCoordinator {
         menus.prepare = { [weak self] in await self?.focusForMenus() ?? true }
         menus.currentTarget = { [weak self] in self?.menuTarget() }
         menus.onSubscribersChanged = { [weak self] any in self?.watchFrontmostApp(any) }
-        catalog.onPolled = { [weak self] in self?.menusPolled() }
+        catalog.onPolled = { [weak self] in self?.catalogPolled() }
         // The sound's messages go straight from its queue to the network queue; its status to the Mac's.
         let server = self.server
         audio.onFormat = { data, epoch in server.broadcastAudio(format: data, epoch: epoch) }
@@ -786,7 +791,10 @@ package final class StreamCoordinator {
     /// quality (`away`): its rate (the devices' highest under the new limit, 60 at most on the
     /// software encoder), capture scale and bitrate (the pair `away` picks), encoder speed, or, for a
     /// window, the virtual display. The Desktop never uses the display. Direct Wireless is
-    /// deliberately absent: it is the listener's (`adopt` hands it over).
+    /// deliberately absent: it is the listener's (`adopt` hands it over). The capture scale is the
+    /// knob's: on a 1x display Retina and Standard are one capture (CaptureScale), and a change between
+    /// them still restarts once, to the same size, so the devices' links are judged afresh at a new
+    /// setting as everywhere else (`judgeLinks`).
     ///
     /// A new bitrate needs a new encoder session. VideoToolbox accepts AverageBitRate on a live
     /// session and reads it back, but the hardware HEVC encoder's rate control does not follow it
@@ -914,7 +922,8 @@ package final class StreamCoordinator {
         case .behind, .stalled:
             let behind = v.state == .behind
             let fps = status.snapshot.stream?.fps ?? self.fps
-            let suggestion = LinkJudge.suggestion(carriedKbps: v.carriedKbps, bitrate: bitrate, fps: fps, captureScale: Double(captureScale))
+            // Against what the capture runs at: on a 1x display Standard would change nothing.
+            let suggestion = LinkJudge.suggestion(carriedKbps: v.carriedKbps, bitrate: bitrate, fps: fps, captureScale: Double(streamPixelScale))
             let report = LinkReport(state: behind ? LinkReport.behind : LinkReport.stalled, withheldPerSecond: v.withheld,
                                     bitrate: bitrate, carriedKbps: v.carriedKbps,
                                     suggestedBitrate: suggestion?.bitrate, suggestedCaptureScale: suggestion?.captureScale)
@@ -1438,6 +1447,9 @@ package final class StreamCoordinator {
         var filter: SCContentFilter?     // nil only for the synthetic test pattern
         var sourceRect: CGRect? = nil    // set only when the window streams from the virtual display
         var picked: SCWindow?            // the resolved window, for the fallback after a failed start
+        // The source's display's own pixel scale (CaptureScale): its filter's, the virtual display's
+        // for a staged window, none for the test pattern. The capture runs at the knob held to it.
+        var displayScale: CGFloat? = nil
         let width: Int, height: Int
         var describe = ""
         var title = ""                   // for the app's menu: "Safari — Apple Developer", "Whole Desktop"
@@ -1467,12 +1479,15 @@ package final class StreamCoordinator {
                 // streamed): the stage keeps the frame it would have gone back to as its way home.
                 let home = stageHome(for: id)
                 do {
-                    let prepared = try await stage.prepare(window: w, wanted: want.size, envelope: want.envelope, captureScale: captureScale,
+                    // Sill's own display is 2x: the knob, as before (CaptureScale.virtualDisplay).
+                    let stageScale = CaptureScale.effective(knob: captureScale, displayScale: CaptureScale.virtualDisplay)
+                    let prepared = try await stage.prepare(window: w, wanted: want.size, envelope: want.envelope, captureScale: stageScale,
                                                            refreshHz: fps, home: home)
                     _ = fits.take(id)     // the stage puts it back from now on; a staging that failed keeps the record
                     guard !shuttingDown else { stage.release(); active = .none; broadcastList(); return }
                     filter = prepared.filter
                     sourceRect = prepared.sourceRect
+                    displayScale = CaptureScale.virtualDisplay
                     size = prepared.outputSize ?? prepared.sourceRect.size
                     describe = prepared.describe + (useSoftwareEncoder ? " (software encoder)" : "")
                     status.update { $0.lastStageFailure = nil }
@@ -1490,8 +1505,11 @@ package final class StreamCoordinator {
                 }
             }
             if sourceRect == nil {
-                // Today's path: capture the window where it is.
-                filter = SCContentFilter(desktopIndependentWindow: w)
+                // Today's path: capture the window where it is, at most at its display's own scale
+                // (a window on a 1x display drawn at 1x into a 2x buffer filled its top-left quarter).
+                let windowFilter = SCContentFilter(desktopIndependentWindow: w)
+                filter = windowFilter
+                displayScale = Self.displayScale(of: windowFilter)
                 // Regular mode raises the picked window (2026-09-23, Noah: the Mac must show the
                 // picked window). A covered window stops repainting, so it would stream frozen, and
                 // keys go to the active app's key window. Done before capture starts, so the first
@@ -1503,7 +1521,8 @@ package final class StreamCoordinator {
                 if let resized = fitToViewport(w) { size = Self.liveBounds(of: id)?.size ?? resized }
                 describe = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")\(useSoftwareEncoder ? " (software encoder)" : "")"
             }
-            width = evenPixels(size.width * captureScale); height = evenPixels(size.height * captureScale)
+            let pixelScale = CaptureScale.effective(knob: captureScale, displayScale: displayScale)
+            width = evenPixels(size.width * pixelScale); height = evenPixels(size.height * pixelScale)
             // Staged on the virtual display, nothing is activated or raised on select: the window
             // cannot be covered there, and the AX moves that put it there touch no focus.
         case .desktop:
@@ -1526,20 +1545,22 @@ package final class StreamCoordinator {
                     own = await catalog.resolveOwnApplication()
                     guard !shuttingDown else { active = .none; broadcastList(); return }
                 }
-                if let own {
-                    filter = SCContentFilter(display: d, excludingApplications: [own], exceptingWindows: [])
-                } else {
-                    filter = SCContentFilter(display: d, excludingWindows: [])
-                }
-                width = evenPixels(CGFloat(d.width) * captureScale); height = evenPixels(CGFloat(d.height) * captureScale)
+                let displayFilter = own.map { SCContentFilter(display: d, excludingApplications: [$0], exceptingWindows: []) }
+                    ?? SCContentFilter(display: d, excludingWindows: [])
+                filter = displayFilter
+                // At most the display's own scale: ScreenCaptureKit scales a display up to fill a larger
+                // buffer (5120×2880 for a 1x 2560×1440 display: four times the pixels to encode).
+                displayScale = Self.displayScale(of: displayFilter)
+                let pixelScale = CaptureScale.effective(knob: captureScale, displayScale: displayScale)
+                width = evenPixels(CGFloat(d.width) * pixelScale); height = evenPixels(CGFloat(d.height) * pixelScale)
                 describe = "the whole desktop\(useSoftwareEncoder ? " (software encoder)" : "")"
                 title = "Whole Desktop"; kind = .desktop
             }
         }
 
         do {
-            try await startPipeline(source: source, filter: filter, sourceRect: sourceRect, width: width, height: height, describe: describe,
-                                    title: title, kind: kind)
+            try await startPipeline(source: source, filter: filter, sourceRect: sourceRect, displayScale: displayScale,
+                                    width: width, height: height, describe: describe, title: title, kind: kind)
         } catch {
             // `picked`, not a catalog lookup: a staged window may have left the on-screen list.
             if virtualDisplay, stage.isStaged, let w = picked {
@@ -1549,9 +1570,12 @@ package final class StreamCoordinator {
                 stage.release()
                 if comeForward, !shuttingDown { activateAndRaise(window: w) }   // regular mode now: a pick comes forward
                 let fallback = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")\(useSoftwareEncoder ? " (software encoder)" : "")"
+                let windowFilter = SCContentFilter(desktopIndependentWindow: w)
+                let windowScale = Self.displayScale(of: windowFilter)
+                let pixelScale = CaptureScale.effective(knob: captureScale, displayScale: windowScale)
                 do {
-                    try await startPipeline(source: source, filter: SCContentFilter(desktopIndependentWindow: w), sourceRect: nil,
-                                            width: evenPixels(w.frame.width * captureScale), height: evenPixels(w.frame.height * captureScale),
+                    try await startPipeline(source: source, filter: windowFilter, sourceRect: nil, displayScale: windowScale,
+                                            width: evenPixels(w.frame.width * pixelScale), height: evenPixels(w.frame.height * pixelScale),
                                             describe: fallback, title: title, kind: kind)
                 } catch {
                     print("Could not start streaming \(fallback): \(error)")
@@ -1569,8 +1593,11 @@ package final class StreamCoordinator {
 
     /// Encoder, then capture (ScreenCaptureKit for a filter, the test pattern without one), then
     /// `active`. Throws with `active` untouched if either refuses; the caller decides what to do.
-    /// `title` and `kind` describe the stream in the app's menu.
-    private func startPipeline(source: StreamSource, filter: SCContentFilter?, sourceRect: CGRect?, width: Int, height: Int, describe: String,
+    /// `title` and `kind` describe the stream in the app's menu. `displayScale`: the source's display's
+    /// own pixel scale (nil for the test pattern), which `width` and `height` were held to
+    /// (CaptureScale) and the injector lands input by (InputLanding).
+    private func startPipeline(source: StreamSource, filter: SCContentFilter?, sourceRect: CGRect?, displayScale: CGFloat?,
+                               width: Int, height: Int, describe: String,
                                title: String, kind: HostStatusSnapshot.Stream.Kind) async throws {
         let enc = try HEVCEncoder(width: width, height: height, fps: fps, bitrate: streamBitrate, prioritizeSpeed: prioritizeSpeed,
                                   software: useSoftwareEncoder)
@@ -1594,13 +1621,16 @@ package final class StreamCoordinator {
         }
         if let filter {
             capture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
-            try await capture.start(filter: filter, width: width, height: height, fps: fps, showsCursor: false, sourceRect: sourceRect)
+            try await capture.start(filter: filter, width: width, height: height, fps: fps, showsCursor: false, sourceRect: sourceRect,
+                                    scaleWords: CaptureScale.words(knob: captureScale, displayScale: displayScale))
         } else {
             syntheticCapture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
             syntheticCapture.start(width: width, height: height, fps: fps)
         }
         encoder = enc
         active = source
+        streamDisplayScale = displayScale
+        injector.displayScale = displayScale
         print("Streaming \(describe) at \(width)×\(height), \(fps) fps, \(streamBitrate / 1_000_000) Mbps")
         status.update {
             $0.stream = HostStatusSnapshot.Stream(kind: kind, title: title, width: width, height: height, fps: fps,
@@ -1798,7 +1828,7 @@ package final class StreamCoordinator {
         let now = CFAbsoluteTimeGetCurrent()
         guard now - lastClickLog > 1 else { return }
         lastClickLog = now
-        let p = CGPoint(x: rect.minX + rect.width * x, y: rect.minY + rect.height * y)
+        let p = InputLanding.point(x: x, y: y, in: rect, displayScale: streamDisplayScale)
         let top = Self.topmostWindow(at: p)
         let verdict = top?.id == id ? "the streamed window" : "window \(top.map { String($0.id) } ?? "none"), not the streamed \(id)"
         print("Click at (\(Int(p.x)),\(Int(p.y))) in (\(Int(rect.minX)),\(Int(rect.minY)),\(Int(rect.width))×\(Int(rect.height))) → \(verdict)")
@@ -1809,7 +1839,7 @@ package final class StreamCoordinator {
         guard let rect = currentSourceRect() else { return nil }
         switch event {
         case .pointer(_, let x, let y), .scroll(let x, let y, _, _), .scrollGesture(_, let x, let y):
-            return CGPoint(x: rect.minX + rect.width * x, y: rect.minY + rect.height * y)
+            return InputLanding.point(x: x, y: y, in: rect, displayScale: streamDisplayScale)
         default: return nil
         }
     }
@@ -1839,8 +1869,24 @@ package final class StreamCoordinator {
         return topmostWindow(at: nil)?.pid
     }
 
-    /// Retina normally; points when the software encoder is carrying the stream.
+    /// The Resolution knob of the pair that runs: Retina normally; points when the software encoder is
+    /// carrying the stream. A capture runs at it held to its display's own scale (CaptureScale).
     private var captureScale: CGFloat { useSoftwareEncoder ? min(scale, 1.0) : scale }
+
+    /// The pixels a point the running pipeline captures at: the knob held to its display's own scale.
+    private var streamPixelScale: CGFloat { CaptureScale.effective(knob: captureScale, displayScale: streamDisplayScale) }
+
+    /// A filter's display scale as ScreenCaptureKit gives it (`pointPixelScale`: the scale it draws that
+    /// content at), nil when it gives none.
+    private static func displayScale(of filter: SCContentFilter) -> CGFloat? {
+        CaptureScale.displayScale(pointPixelScale: filter.pointPixelScale)
+    }
+
+    /// The pixels a point a capture of `w` would run at now, in regular mode: the knob held to the
+    /// scale ScreenCaptureKit has for the window as it is (its filter's, made afresh).
+    private func capturePixelScale(of w: SCWindow) -> CGFloat {
+        CaptureScale.effective(knob: captureScale, displayScale: Self.displayScale(of: SCContentFilter(desktopIndependentWindow: w)))
+    }
 
     /// "Safari — Apple Developer" for the app's menu; just the app for an untitled window.
     private static func menuTitle(for w: SCWindow) -> String {
@@ -1892,6 +1938,22 @@ package final class StreamCoordinator {
     private func menuTargetChanged() {
         guard menus.hasSubscribers else { return }
         menus.setTarget(menuTarget())
+    }
+
+    /// Every catalog poll (2 s) while a device is connected: the menus, and a window streaming in
+    /// regular mode that moved onto a display of another scale. That keeps its size in points, so the
+    /// list does not change and `windowsChanged` never hears of it, and its capture would go on at the
+    /// old display's scale (from a 2x display onto a 1x one at Retina: the window in the top-left
+    /// quarter of the picture). Only the scale is compared here, never the size, which a list read
+    /// before a fit landed can still give at its old value; a resize is `windowsChanged`'s.
+    private func catalogPolled() {
+        menusPolled()
+        guard !switching, !shuttingDown, case .window(let id) = active, !(virtualDisplay && stage.isStaged),
+              let w = catalog.window(id: id), capturePixelScale(of: w) != streamPixelScale else { return }
+        Task { @MainActor in
+            guard !self.switching, self.active == .window(id) else { return }
+            await self.select(.window(id))
+        }
     }
 
     /// Every catalog poll (2 s) while a device is connected.
@@ -2426,15 +2488,23 @@ package final class StreamCoordinator {
     }
 
     /// The size a hardware stream would have now: the running one's at the full capture scale, or
-    /// the Desktop's while nothing streams (a device asks for the Desktop first).
+    /// the Desktop's while nothing streams (a device asks for the Desktop first); either held to its
+    /// display's own scale (CaptureScale), as the stream would be.
     private var hardwareProbeSize: (width: Int, height: Int) {
         if let size = Self.testProbeSize { return size }
         if active != .none, let enc = encoder {
-            let factor = enc.software ? scale / min(scale, 1.0) : 1   // the software encoder runs at points
+            // The software encoder runs at points: the hardware's stream would run at the knob, both
+            // held to the display's own scale (on a 1x display the two are one size).
+            let hardware = CaptureScale.effective(knob: scale, displayScale: streamDisplayScale)
+            let software = CaptureScale.effective(knob: min(scale, 1.0), displayScale: streamDisplayScale)
+            let factor = enc.software ? hardware / software : 1
             return (evenPixels(CGFloat(enc.width) * factor), evenPixels(CGFloat(enc.height) * factor))
         }
         if synthetic { return (evenPixels(1512 * scale), evenPixels(949 * scale)) }
-        if let d = catalog.display { return (evenPixels(CGFloat(d.width) * scale), evenPixels(CGFloat(d.height) * scale)) }
+        if let d = catalog.display {
+            let s = CaptureScale.effective(knob: scale, displayScale: Self.displayScale(of: SCContentFilter(display: d, excludingWindows: [])))
+            return (evenPixels(CGFloat(d.width) * s), evenPixels(CGFloat(d.height) * s))
+        }
         return (evenPixels(1920 * scale), evenPixels(1080 * scale))
     }
 
@@ -2541,12 +2611,16 @@ package final class StreamCoordinator {
                 broadcastList()
                 return
             }
-            // The encoder is fixed to one size, so a resized window means a fresh pipeline.
-            if let scw = catalog.window(id: id),
-               evenPixels(scw.frame.width * captureScale) != encoderWidth || evenPixels(scw.frame.height * captureScale) != encoderHeight {
-                _ = w
-                await select(active)
-                return
+            // The encoder is fixed to one size, so a resized window means a fresh pipeline: its size
+            // at the scale its capture would run at now (CaptureScale; a move to a display of another
+            // scale alone is `catalogPolled`'s).
+            if let scw = catalog.window(id: id) {
+                let s = capturePixelScale(of: scw)
+                if evenPixels(scw.frame.width * s) != encoderWidth || evenPixels(scw.frame.height * s) != encoderHeight {
+                    _ = w
+                    await select(active)
+                    return
+                }
             }
         }
         broadcastList()

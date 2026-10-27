@@ -450,6 +450,8 @@ Reverse Scrolling, in Settings: a finger dragged over the picture, or two finger
 
 Fixed: after Sill sat in the background for hours, it could stop finding your Mac until you closed and reopened it. Sill now looks again when you come back, keeps trying for a few minutes while your Mac doesn’t answer (when it’s asleep, say), and connects when it does.
 
+Type in Chinese, Japanese, Korean and other languages that compose their text, and dictate: you compose and choose on your iPhone or iPad, with the keyboards and dictation languages you set up in Settings, and what you choose is typed on your Mac.
+
 Sound from your Mac, a beta feature: turn on Send Audio in the Sill menu on your Mac, and your iPhone or iPad plays the sound of the window you’re using, or of every app for the Desktop, a moment behind the picture. Tap the Sound button to mute it on one device. It needs Sill for Mac from this release.
 ```
 
@@ -459,6 +461,13 @@ as the description's bullet does, for its device tests (Before you submit).
 Esc and scrolling with a trackpad or a mouse showed on the iPad through Universal Control on 2026-10-15
 (docs/hardware-keyboard-plan.md, "Words that wait for a device"), so their words are in: this draft, the
 description's keyboard bullet, README's How it works and the support page.
+
+Other languages and dictation (#147, issue #138, 247 characters) rest on its author's device test: Zhuyin on a
+Magic Keyboard and on the on-screen keyboard, and Chinese dictation, on an iPad Air against Sill for Mac 0.5.1
+(2026-10-17), and on Pinyin, Japanese and Korean in the iPad simulator, each committed once (2026-10-26,
+docs/DEVELOPMENT.md). Its words are in this draft, README's How it works and the support page; the reporter's
+test of the TestFlight build (Pinyin, Japanese, Korean, English dictation, Control-Space with one keyboard) is
+still to come.
 
 ## 6. Export compliance (encryption)
 
@@ -816,6 +825,11 @@ Safe:
   in the next What's New: the draft 1,017 characters; the rest unchanged. With
   the sound's paragraph too (#159 merged into PR #94's branch, 2026-10-26),
   the draft 1,322 characters.
+- With other languages and dictation (PR #147, merged with main after #159,
+  2026-10-26), its paragraph of 247 characters in the next What's New: the
+  draft 1,266 characters; the rest unchanged. With the sound's paragraph too
+  (main at 74d099c, #94, merged into PR #147's branch, 2026-10-27), the
+  draft 1,571 characters, the languages' paragraph before the sound's.
 - The encryption key, now in `iOSClient/Info.plist`: Release builds of this
   branch for the simulator and for a device each have
   `"ITSAppUsesNonExemptEncryption" => false` in the built Sill.app's
