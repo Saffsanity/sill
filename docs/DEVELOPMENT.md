@@ -85,7 +85,8 @@ streaming; it holds the
 virtual display, frame rate, quality and resolution controls, Direct Wireless
 Connection, Remote Access… and Pair iPhone or iPad… (see Pairing at home and
 Remote access below), Launch at Login, Permissions, Show Log… and Settings…
-(⌘,). Settings › Devices lists the paired devices, with Require pairing.
+(⌘,). Settings › Devices lists the paired devices, with Require pairing and
+Show the pairing window to screen sharing.
 Changes apply at once; a change to a streaming setting restarts the current
 stream for a moment. Opening Sill.app while it runs (Finder,
 Spotlight) shows Settings, which is also where Quit Sill is when the menu bar
@@ -105,6 +106,16 @@ USB cable or very fast Wi-Fi; if the picture lags (the device's frame age in
 the menu climbs), step down. Any other value from 1 to 200 Mbps can be set by
 hand (quit Sill, `defaults write me.saffer.sill.mac bitrate -int 60000000`,
 open it again) and shows as Custom; a device can pick only the presets.
+
+Virtual Display is on by default (2026-10-27): on a Mac whose `virtualDisplay`
+key was never set, a window a device picks moves onto Sill's virtual display
+while it streams (The command-line host, below, says how) and comes back where
+it was when it stops. The default is registered, never written
+(`HostConfig.app` in `HostSettings`), so a key set from the menu, Settings ›
+Virtual Display or a device always wins: a Mac that turned it off keeps it
+off. To go back to the default, quit Sill, run `defaults delete
+me.saffer.sill.mac virtualDisplay` and open it again. The command-line host
+keeps it off unless it runs with `--virtual-display`.
 
 The log: `tail -F ~/Library/Logs/Sill/Sill.log` (`-F`, not `-f`: at 10 MB the
 file moves to Sill.1.log and a new one starts), or Show Log… in the menu.
@@ -138,6 +149,7 @@ swift run -c release SillHost                        # nothing streams until a d
 swift run -c release SillHost Safari                 # optional: preselect a matching window
 swift run -c release SillHost --virtual-display      # each streamed window on its own HiDPI display; Ctrl-C restores it
 swift run -c release SillHost --direct-wireless      # also over peer-to-peer Wi-Fi, for a device with no shared network
+swift run -c release SillHost --audio                # Send Audio (a beta) for this run: devices that play it get the streamed app's sound
 swift run -c release SillHost --no-clipboard         # share nothing of the clipboard with devices (on by default, as in Sill.app)
 swift run -c release SillHost --synthetic            # the Desktop streams a test pattern; no Screen Recording needed
 SILL_TEST_PATTERN=picture:/path/to.jpg swift run -c release SillHost --synthetic   # the Desktop a still picture instead (TEST ONLY)
@@ -149,7 +161,7 @@ swift run -c release SillHost --print-reachability   # the addresses a device wo
 swift run -c release SillHost --pairing              # the home door speaks TLS with pairing required, as Sill.app's does
 swift run -c release SillHost --print-cable          # what the USB cable rule reads on this Mac, then exit
 swift run -c release SillHost --encoder-selftest     # is the hardware encoder alive? 5 s, then it exits
-swift run -c release SillHost --virtual-display-selftest   # create and destroy one display, report what sees it
+swift run -c release SillHost --virtual-display-selftest   # create and destroy one display, report what sees it ([Hz] [WxH] after it)
 swift run -c release SillHost --menu-selftest=TextEdit     # the menus a device would get for an app (a pid, or its name), read once
 ```
 
@@ -168,12 +180,17 @@ too; `SillHost` saves nothing, so a change lasts until it quits, and the
 device's panel says so. Its Virtual Display switch works only when `SillHost`
 runs with `--virtual-display`. `--direct-wireless` starts it with Direct
 Wireless Connection on (see Direct Wireless Connection below); it is off by
-default here too. The clipboard is shared as in Sill.app (The clipboard,
-below); `--no-clipboard` turns it off for the run.
+default here too. `--audio` starts it with Send Audio on (The Mac's sound
+below, a beta), off by default too; a device turns it on or off from its
+Settings panel, until `SillHost` quits; with `--synthetic` the sound is a
+test tone. The
+clipboard is shared as in Sill.app (The clipboard, below); `--no-clipboard`
+turns it off for the run.
 
-`--virtual-display` (off by default, 2026-09-22) moves the picked window onto a
-virtual HiDPI display created with a private CoreGraphics API and captures that
-display, so the window keeps repainting whatever covers its old spot on the Mac.
+`--virtual-display` (off by default here since 2026-09-22; Sill.app has it on
+since 2026-10-27) moves the picked window onto a virtual HiDPI display created
+with a private CoreGraphics API and captures that display, so the window keeps
+repainting whatever covers its old spot on the Mac.
 It needs Screen Recording and Accessibility for the terminal that runs it. Every
 failure (API missing, display never listed, Accessibility refused, window would
 not move) falls back to today's real-window capture with a line in the log, and
@@ -181,7 +198,13 @@ deselecting, switching, the last client leaving, Ctrl-C, `kill` or a hangup put
 the window back where it was and remove the display. Private API means the Mac
 companion is Developer ID distribution, never the Mac App Store.
 `swift run -c release SillHost --virtual-display-selftest` creates and destroys
-one display and reports what CoreGraphics, AppKit and ScreenCaptureKit see of it.
+one display and reports what CoreGraphics, AppKit and ScreenCaptureKit see of it
+and the mode it came up at; a refresh rate (`120`) and a size in points
+(`800x830`) after the flag ask for those. It moves the pointer onto the display
+and back. Every side of the display Sill makes is 800 points or more
+(`VirtualDisplaySize`, in Sources/SillHost/CaptureScale.swift): an iPhone held
+upright asked 754×784, and macOS ran that at 800×832 at 1x, five times in one
+Mac's log, where every display with a side of 800 or more came up at 2x.
 Before anything else it checks each private class and selector the display needs,
 with its type encoding, against `VirtualDisplay.privateAPISurface`; one missing or
 changed fails it, and makes the host stream real windows ("Virtual display
@@ -197,7 +220,14 @@ First run: macOS asks for Screen Recording for Terminal
 Knobs live in `Sources/SillHost/HostConfig.swift` (`HostConfig.standard`):
 maxFPS, captureScale, bitrate, prioritizeSpeed. The CLI uses them as they are;
 Sill.app starts from them and changes them from its menu and Settings. Start
-at the defaults, change one at a time.
+at the defaults, change one at a time. captureScale (Resolution: 2 Retina, 1
+Standard) is pixels per point at most: a capture runs at the lesser of it and
+its display's own scale, so on a 1x display both are 1x (a window captured
+there at 2x showed in the top-left quarter of the picture before 2026-10-27).
+A window drawn at its display's own scale asks one pixel more on an odd side
+("Capture started: 1118×610 … filter (1117.0, 610.0)"): ScreenCaptureKit
+draws it 1:1 with one black column or row past it, where a pixel fewer had it
+shrink the window by one (CaptureScale.windowPixels).
 The stream rate is the device's own: each client reports its panel's ceiling
 (120 on ProMotion iPads and iPhones, 60 on the iPad mini) and 60 while Low
 Power Mode is on; the host runs capture, encoder and the virtual display at
@@ -228,6 +258,57 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
    the cable. A session from away (Remote access, below) keeps its way in until
    it ends.
 
+The connect screen shows the Macs as tiles, two columns from 340 pt wide, one
+on a narrower screen or at the accessibility text sizes, or, with the button
+beside "Connect to a Mac" (or Show as List in a saved Mac's menu: touch and
+hold), as rows. Tiles are the default since 2026-10-27
+(`ConnectionList.defaultStyle`; the rows were until then): an install whose
+person never chose shows tiles, and a choice, stored as `Sill.connectionStyle`
+(`list` or `tiles`), always wins. The button always shows, whichever style is on and
+whether or not a Mac is listed (Noah, 2026-10-27; #117 showed it for tiles
+alone, which with tiles the default took it away from someone with no saved Mac
+who chose the list). With tiles on, a saved Mac's tile shows
+its screen as the last session with it ended, a 320 pt JPEG in
+Library/Caches/SillPreviews (never in a backup, unreadable while the device is
+locked), taken only for a session that ended in a window in front while tiles
+show. Switching to the list hides the pictures and keeps their files, so
+switching back to tiles shows them again at once; only Remove Preview Picture,
+Forget and the Mac's record going delete one (a launch and a change of style
+also delete the files of Macs no longer saved), and a session that ends while
+the list shows leaves the kept picture as it was: a Mac's screen is kept on the
+device unless its person chose the list (`ConnectionList.takesPreview`,
+`previewPlan`). The picture is never a
+snapshot of the screen: on a device the video is composited outside the app's
+own drawing, so a snapshot of the stream drew black where it was (the
+simulator composites it in software, so its photos looked right). The device
+keeps the session's last keyframe with the parameter sets it came with (one
+frame, replaced at each keyframe, dropped with the session) and decodes it as
+the session ends, with a VideoToolbox session of its own, off the main thread,
+given up after a second (`iOSClient/KeyframePicture.swift`); the tile shows it
+once it lands. The Mac's cursor is never in the video and the device's pointer
+is a layer of its own, so the picture has neither (nor the `-SillHUD`
+readout). Disconnect first asks the Mac for a keyframe (kind 44, every Mac, as
+the picture's recovery does) and ends the session when it comes or after 300
+ms, so the picture is the last thing on screen, another window brought forward
+on the Mac included: a Mac from main on answers within a frame, and one that
+skips the request (Sill for Mac 0.5.1) costs that 300 ms pause before the
+connect screen, its picture the keyframe kept. A session lost or ended by the
+Mac gives the keyframe kept. A decode that fails, or a picture black
+throughout, writes nothing, and the old picture stays. Every tile of one Mac
+shows its one picture, whichever way the tile reaches it: a network or Direct
+row whose tag names the saved Mac, one with no tag taken for it by its Bonjour
+name (as a tap dials it), and its Remote row, which stays listed beside a row
+taken by name; another Mac's tiles show its own, and a row of no saved Mac the
+placeholder (`ConnectionList.tileMac`, which also lists each row under its
+Mac's group).
+
+A saved Mac's menu also puts it in a group, Home, Work, Personal or a name of
+your own (New Group…): grouped Macs are listed under their group's name, the
+three first, then the others alphabetically, then Other for the rest; with no
+group set the screen is the plain list it always was.
+`iOSClient/ConnectionList.swift` has the rules, checked in
+`Tests/checks/connection-list`.
+
 When a session ends by itself, the device reconnects: the Mac's row at once,
 then, while that row stays listed and nothing answers (a sleeping Mac whose
 record an Apple TV or HomePod keeps up as a Bonjour Sleep Proxy, or a Mac whose
@@ -247,9 +328,9 @@ docs/reconnect-after-sleep-plan.md has the rules;
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom. After the Mac's settings
 come the device's own: This iPad (or iPhone), with Larger Picture on an iPhone
-(below; off unless turned on) and Three-Finger Gestures (below, Trackpad
-gestures; on unless turned off), neither ever sent to the Mac, and last Take
-the Tour.
+(below; off unless turned on), Reverse Scrolling (below; off unless turned on)
+and Three-Finger Gestures (below, Trackpad gestures; on unless turned off),
+none of them ever sent to the Mac, and last Take the Tour.
 
 On the iPhone Duo (docs/iphone-duo-plan.md) the layout follows the hinge,
 which iOS 27.1 reports with the fold's place. Open, Sill is on the inner
@@ -360,19 +441,59 @@ the package reference. Nothing else. A new source file needs its four
 
 A connected iPhone or iPad changes the same settings from its own Settings
 panel (the gear, the last button of its bar): Quality, Resolution, Frame Rate,
-Prioritize Encoding Speed, Virtual Display and Direct Wireless Connection, with
-exactly the Mac's choices. Sill.app saves a device's change like a menu click,
+Prioritize Encoding Speed, Virtual Display, Send Audio (a beta: The Mac's
+sound, below) and Direct Wireless Connection, with exactly the Mac's choices.
+Sill.app saves a device's change like a menu click,
 and its Settings window and menu show it; the change applies to every connected
 device, and a streaming setting restarts the stream for a moment. A device away
 from home sets the away quality instead (Remote access, below). To put one
 setting back to its default, quit Sill, run `defaults delete
 me.saffer.sill.mac <key>` (`bitrate`, `maxFPS`, `captureScale`, `awayBitrate`,
-`awayCaptureScale`, `prioritizeSpeed`, `virtualDisplay` or `directWireless`)
-and open Sill again.
+`awayCaptureScale`, `prioritizeSpeed`, `virtualDisplay`, `sendAudio` or
+`directWireless`) and open Sill again.
+
+## The Mac's sound (beta)
+
+Send Audio is a beta (2026-10-20; docs/audio-plan.md's header says what ends
+it), on by default in Sill.app since 2026-10-27 (`HostConfig.app`; the CLI's
+`--audio` opts in): Sill.app's status menu ("Send Audio (Beta)") and
+Settings › Streaming ("Send audio (beta)"), the CLI's `--audio`, whose line
+says "(beta)", or a device's Settings panel, whose Send Audio switch has a
+"Beta" tag: a device's change applies to every connected device and Sill.app
+saves it, as Quality's (Noah, 2026-10-27; the log says "Settings from
+‹device›: send audio off → on"). A Mac from the beta (2026-10-20 to 27)
+refuses a device's change, and the device's switch goes back. It
+sends the sound of what streams to every connected device that plays it: the
+streamed window's app (every window of it: macOS captures sound per app), or
+every app but Sill for the Desktop. The Mac keeps playing it too. It comes
+from a second, audio-only ScreenCaptureKit stream, so rotating, Aa, a quality
+change or the encoder's fallback never interrupt it, and it needs no
+permission beyond Screen Recording. AAC-ELD at 128 kbps, 10 ms packets, as
+kind 43 on the session's own connection, only to a device whose hello lists
+the codec (a device from before 2026-09-27 is sent none); away from home the
+sound's bytes count in remote pacing's backlog, which drops frames and never
+the sound. The log says what the sound is of ("Audio: capturing Safari's sound
+(every window of it).") and why it stops; the stats line gains `aud.in`,
+`aud.out`, `aud.sent`, `aud.drop` and `aud.gap` while it runs. `defaults
+delete me.saffer.sill.mac sendAudio` puts it back to off. docs/audio-plan.md
+has the design.
+
+On the device, the Settings panel's Mute switch (right under Send Audio, off by default, for every
+Mac with sound, Send Audio on or off; no bar has a Sound button since
+2026-10-27) mutes it on that device alone, remembered across launches
+(`Sill.soundMuted`); the Mac keeps sending. It plays mixed with the device's own
+audio, on silent too, as a video app does, and never in the background.
+Headphones taken out mute it and say so. The device keeps it a little behind
+the picture, never ahead: the console's `audio:` lines (DEBUG) say how far each
+second, and each jump with its size and cause. The simulator never opens an
+output: its engine renders offline (manual rendering), and `-SillSoundVolume 0`
+turns the player down besides, so a test makes no sound; in manual rendering
+the console says where each click of a synthetic host's test tone was heard.
 
 ## Windows sized for a device
 
-Without the virtual display, Aa (text size) on the device resizes the window
+Without the virtual display (the command-line host's default; Sill.app's once
+it is turned off), Aa (text size) on the device resizes the window
 it streams on the Mac itself, through Accessibility, to the device's panel at
 that scale (nothing happens until Aa is first touched; a window in full screen
 is not resized: "Window sizing: ‹app› — ‹title› is full screen; not
@@ -534,6 +655,23 @@ logs the shortcut it would post with "(not posted: a test host)", so
 without touching the Mac, and `SILL_TEST_HOTKEYS=108=off` (or `defaults`) gives
 such a host a table of its own instead of this Mac's shortcuts.
 
+## Reverse Scrolling
+
+A finger dragged over the picture scrolls the Mac's content the way it moves,
+as on the iPad itself, and so do two fingers on the portrait trackpad, as a
+Mac's trackpad does with Natural Scrolling on. Reverse Scrolling, in the
+Settings panel's This iPad group (This iPhone on a phone; issue #143), turns
+both around, the coast after a flick too: a drag down then moves the content
+up. It is off unless turned on (`Sill.reverseScroll`), the device's own, never
+sent to the Mac, so it works with every Sill for Mac. A trackpad or mouse
+connected to the iPad (below) is left alone: its scroll events come already
+turned the way iPadOS's own Natural Scrolling setting says (with the
+trackpad's and the mouse's settings, under Settings › General), and turning
+them again would undo it; the switch's footnote says so on an iPad. Each
+scroll reads the switch as it begins and keeps that direction to the end of
+its coast. `Sources/StreamProtocol/ScrollDirection.swift` is the rule, checked
+in `Tests/checks/protocol`.
+
 ## A hardware keyboard and trackpad on the device
 
 With a keyboard attached to the iPhone or iPad (a Magic Keyboard, a Smart
@@ -583,6 +721,166 @@ it through Universal Control (2026-10-15, the plan's Results): the automatic
 hold, letters, Esc (through `pressesBegan`), ⌘W and two-finger scrolling all
 reached the Mac, and Esc closed Settings without reaching it. A Magic Keyboard
 itself, and which channel brings its Esc, are still untested.
+
+## Other languages and dictation
+
+The stream's input view is a text input (`UITextInput`, issue #138), so typing in
+a language whose input method composes its text, and dictation, reach the Mac.
+An input method (Chinese Zhuyin or Pinyin, Japanese, Korean and the like)
+composes on the device: what it is composing shows at the top middle of the
+picture, its candidates show where iPadOS puts them (on the on-screen keyboard,
+or with a hardware keyboard beside the composition), and only the text chosen
+goes to the Mac, typed as any text is. While it composes, every key is the input
+method's (the arrows move through its candidates, Return chooses, Esc does what
+that input method does with it, and a shortcut such as Command-S goes to it too,
+not to the Mac), so nothing of it reaches the Mac until it is chosen. What is
+still composed when the input view stops taking the keyboard (Settings, the Apps
+list or the tour opens, the device turns) goes to the Mac as it stands, as a
+text field on the device keeps it, and so does what is still
+composed when a click, a key or a pick is about to move the Mac's caret (a tap on
+the picture, say, though not one on the black bars beside it, which clicks
+nothing and sends nothing): it goes first, where the caret was, as a tap elsewhere
+in a text field keeps a composition. Dictation types what is said, and the
+corrections it makes a moment later go to the Mac as backspaces back to the first
+change, then the rest typed again. Korean builds each syllable in the text
+itself, not in a composition: as each letter comes, its keyboard selects the
+syllable it is building, deletes it and types it again. The input view keeps
+what the text system selects of what was typed for its next edit, as a text
+field does (text typed over the selection, a backspace, or a composition that
+starts over it replaces it), so at each letter the Mac gets backspaces over the
+syllables being rebuilt and those syllables again, and 한글 arrives once.
+
+There is no setting for it in Sill: the input view follows the keyboards and
+dictation languages set up in the device's Settings › General › Keyboard
+(Keyboards, and Dictation Languages under Dictation). With keyboards in two
+languages or more there, Control-Space switches between them on the device, as
+in any text field there and as on a Mac with several input sources. With
+keyboards in one language (Emoji and dictation aside), Control-Space goes to the
+Mac as before: Xcode's completions, VS Code's suggestions, the Mac's own input
+source switch. Control-Shift-Space, Control-Option-Space and
+Control-Command-Space always go to the Mac. The Globe key switches the device's
+keyboard too. Whenever the keyboard switches while the input view holds it, with
+a hardware keyboard or the on-screen one, the new keyboard's name shows over the
+picture for a second (not Emoji's or dictation's, and not while something is
+being composed).
+
+A correction needs what is just before the Mac's caret, so the device remembers
+what was typed since the caret last moved some other way, and forgets it at
+anything that may move the caret: a click or a key from any part of Sill (the
+picture, the portrait trackpad, the key row, a hardware keyboard, Esc, and
+Shift-Return and Shift-Tab, which go as keys), another window or the Desktop
+picked by anyone, an app opened, a window's buttons, a menu item, a
+three-finger gesture. A Return or a Tab typed as text (a hardware one without
+Shift, the on-screen keyboard's return key, dictation's "new line", alone or
+in the middle of what is being dictated) goes whole and keeps what was typed,
+but makes everything up to it final: in a chat it may have sent the line, in a
+terminal run the command, in a form moved to the next field. A correction that
+would change anything before the last Return or Tab typed sends nothing, rather
+than backspacing over it and typing the line and the Return again (the message
+sent twice, the command run twice, backspaces into the next field), whether
+the text system hands back the range it took or builds it again from offsets it
+kept; what follows the Return or the Tab, in the same text or typed after it,
+is corrected as any typing is. So dictation that hears "new line" in the middle
+of a sentence types no word twice (in every way of sending its updates the
+verifications modelled), and a late touch to the line before the Return (its
+capital, its full stop) is left out, in an editor too, where that line keeps
+the words it had. Such a correction also takes with it whatever it adds after
+the Return, and dictation that sends its whole utterance again with each update
+carries a word it revised before the Return into every update after, each of
+which then sends nothing too, so the words said after that never reach the Mac.
+Heard as "send the bill", "send the bill⏎deploy", "send the build⏎deploy it",
+"send the build⏎deploy it now" and "Send the build.⏎Deploy it now." (⏎ the
+Return), such updates leave the Mac with "send the bill⏎deploy", in an editor
+too: " it now" never arrives (the third verification's harness). Nothing is
+sent twice either way, and where dictation types new words at the caret and
+makes each revision a replacement of its own, every word arrives and only the
+revision is left out; which way iPadOS's dictation goes is for the testers'
+"new line" step on a device to show (below). A later change could apply such an
+update's text from after its k-th Return or Tab, k being the Returns and Tabs
+in what is final, instead of refusing all of it. The person's own backspace
+still goes back across a Return (in an editor it joins the lines; in a chat
+that sent the line it deletes nothing), and what was before the deleted Return
+stays final. Korean's keyboard rebuilds the character before the syllable it is
+building together with it, so right after a Return it deletes the Return with
+the syllable and types both again: only the syllable goes from the Mac and
+back, and the Return goes once.
+
+After a click, a key or a pick, a correction of what was forgotten sends
+nothing when the text system hands back the range it took before (dictation's
+last touch to a phrase, its punctuation or capitals, arriving just after a
+click), or builds one again from offsets it kept that starts past what was
+typed since. One built again that starts where what was typed began (the usual
+case: a phrase dictated right after a click, a pick or the start of the
+session starts there) cannot be told from a range taken since, and its
+correction is typed where the caret is now: its words a second time. That
+holds for a click, a key or a pick, as it did before. After a Return or a Tab
+nothing is forgotten: the same correction would change what is final, and
+sends nothing.
+Typing on the Mac itself, and another device's input, Sill does not see: a
+correction made right after either can land in the wrong place. Past 4,000
+characters typed with no click, key or pick in between (a Return or a Tab
+typed is none), all but the last 1,000 are forgotten.
+Scribble never writes over the picture (the Apple Pencil is the Mac's mouse
+there), and Writing Tools, math results and grammar suggestions are off in the
+input view, as autocorrection and predictions are: each would rewrite text the
+Mac already has. To VoiceOver the input view is still no element, as before it
+was a text input (it would read as an unlabeled text field over the picture,
+first on the screen); what an input method composes is a label it can read.
+
+`iOSClient/TextComposition.swift` is the rule, checked in
+`Tests/checks/text-composition`. Debug builds print `hwkey: usage 44 down via
+pressesBegan (control): iPadOS's keyboard switch` for a Control-Space that
+stays on the device, and a `textinput:` line for each call iPadOS's text system
+makes and for what went to the Mac (`textinput: setMarkedText "ㄋㄧ" (2,0)`,
+`textinput: unmarkText`, `textinput: sent "你好"`, `textinput: selected (0,2) of
+what was typed, for the next edit`, `textinput: sent "\n"; what was typed up to
+its last Return or Tab is final: 15 of 15 units`, `textinput: replace (0,14)
+with "Send the build.", it would change what went before a Return or a Tab
+typed: nothing sent`, and each time the input view
+takes the keyboard `textinput: first responder; the keyboards set up: en-US,
+zh-Hant, emoji; this one zh-Hant`): what to read in Xcode's console when an
+input method or dictation types something twice, or not at all.
+
+On a device so far: the pull request's author, on an iPad Air (4th generation)
+with a Magic Keyboard against Sill for Mac 0.5.1, typed Zhuyin on the Magic
+Keyboard and on the on-screen keyboard, switched with Control-Space and the
+Globe key, and dictated in Chinese (2026-10-17). In the iPad simulator (iOS
+27.0, keys from `Tests/keyrig`'s virtual keyboard, against `SillHost
+--synthetic` on loopback with `SILL_TEST_INPUT_LOG=1`, 2026-10-26): Zhuyin
+(ㄋㄧˇㄏㄠˇ, then Return), Pinyin (nihao, then Space), Japanese (nihonn, then
+Return) and Korean (2-Set's g k s r m f) each reached the host once, as 你好,
+你好, 日本 and 한글; a tap on the picture mid-composition sent the composition
+first, then the click; Control-Space stayed on the device with keyboards in two
+languages and reached the host with one; Esc and Command-S reached it as keys,
+and Command-S pressed mid-composition went to the input method, nothing of it to
+the host. Again on the tree merged with main at 36e7212, the same day, with the
+same results. With the verification's fixes, on the tree merged with main at
+c215514: a phrase typed, then Return, reached the host as its letters and one
+"\n", and what was typed was forgotten right after it; a tap on the black bars
+mid-composition sent nothing, and one on the picture the composition, then the
+click; and with a Debug step of the verification's own standing in for
+dictation (its text typed, then replaced through the range it held), a
+correction after a hardware Return sent nothing, where the build before the
+fix sent 15 backspaces and the line again, and one with no Return went as
+before. With the second verification's fix (2026-10-27): the same step's text
+with a Return inside it went whole, the last pass over its whole phrase sent
+nothing, and a correction of only the words after its Return went as
+backspaces and those words; Korean typed after a Return (2-Set's g k s r m f,
+Return, then again) reached the host as 한글, Return, 한글, Return, once (its
+keyboard deletes the Return with the first syllable after it and types both
+again, and the Return was not sent twice); Zhuyin's 你, Return, 你, Return
+once; and a Backspace right after a Return deleted it.
+That simulator did not read the keyboards written to its `AppleKeyboards`
+preference; launching Sill with `-AppleLanguages '(zh-Hant-TW, en-US)'
+-AppleLocale zh_TW` (or `ko-KR`, `ja-JP`, `zh-Hans-CN`) gives it that
+language's own keyboards. Not yet on a device: Pinyin, Japanese, Korean,
+English dictation and its corrections, Return pressed right after dictating
+(in Messages, Slack or Terminal: the line goes once), dictation with "new line"
+said in the middle of a sentence and the talking going on (in TextEdit and in
+Messages or Slack, in English and in Chinese: every word arrives once, and
+nothing is sent twice), Control-Space with one keyboard, a shortcut
+mid-composition, an Apple Pencil over the picture, and
+VoiceOver.
 
 ## The clipboard
 
@@ -745,6 +1043,26 @@ paired for Remote Access connects at home with no further step.
   keychain, not in its defaults: in the data-protection keychain in the Sill
   for Mac you download (0.4.0 and later), and in the login keychain in a
   Sill.app you build yourself without the Developer ID provisioning profile.
+- **Through Screen Sharing** (a Mac without a display, or one you use from afar
+  with Screen Sharing, Apple Remote Desktop or a VNC app such as Screens): Sill
+  keeps its pairing window out of what these apps show, so through them Pair
+  iPhone or iPad… seems to open nothing (issue #108). Turn on **Show the
+  pairing window to screen sharing** in Settings › Devices (off by default; it
+  applies at once, to a window already open too), then tap the Mac's row on
+  the device, or choose Pair iPhone or iPad… in the Sill menu: the window, its
+  QR code and its code show in the remote view. What the switch changes is
+  what Screen Sharing, Apple Remote Desktop and VNC viewers see: while it is
+  on, anyone who can see the Mac's screen through them can read a code, so
+  turn it off once the device has paired. A screen recording, or the screen
+  shared in a video call, may show the code either way: ScreenCaptureKit is
+  reported to ignore the window's `.none` from macOS 15. The switch covers the
+  pairing window alone, whoever opened it; the cable notice and Sill's other
+  windows are as before, and no device streaming the Mac sees the
+  window either way (the Desktop stream leaves Sill's own windows out). Sill.log
+  says "Pairing window: shown to screen sharing …" when it turns on, and at
+  each launch while it is on; the bare app takes `-SillSetAfter '<s>
+  showPairingWindowToScreenSharing=1'`. Over the USB cable a device pairs by
+  itself, with no window to read.
 - **Older builds:** a device from before pairing at home dials the home door
   without TLS and can no longer connect to this Sill.app; the menu says "An
   iPhone or iPad Needs Sill Updated". Update the device first, then the Mac. A
@@ -752,6 +1070,19 @@ paired for Remote Access connects at home with no further step.
   Sill" on the row of a Mac with an older Sill); a Debug build still dials an
   older Sill.app's plain door until it has seen that Mac speak TLS (launch it
   once with `-SillForgetHomeTLS 1` to forget).
+- **A row keeps its Mac's TXT record** (the door's `p` and the recognition tag)
+  for as long as the same browser keeps listing that Mac, whatever interfaces
+  come and go: with the USB cable pulled, iPadOS listed the Mac on its other
+  interfaces with no record at all (2026-10-27: until this rule the row read
+  "Update Sill"). A name that leaves the browser's results is forgotten, and so
+  is all a browser saw once Sill makes it again (back from the background, or
+  after it failed): a service that took the Mac's name meanwhile is read only
+  with what it advertises itself, so a Mac that really went back to an older
+  Sill, or another service under its name, reads "Update Sill" once it is listed
+  afresh. Only within one browser's listing can another service that takes the
+  name without a removal the browser reports be read as the Mac
+  (DiscoveryPolicy.rowRecords says what follows). The DEBUG console's
+  `discovery:` lines say "TXT record kept" or "no TXT record".
 - **The command-line host** keeps its plain, open door (The command-line host,
   above). With `--pairing` it prints its code and link in Terminal, and again
   after each device's ask; `--print-cable` prints what the cable rule reads on
@@ -897,13 +1228,14 @@ encoder session, the device floor, how a session ends, how the device reads the
 Mac's messages, the update check, the disk image's window, where everything goes
 on a phone held upright, who moves the Mac's pointer, the Mac's menus on both
 ends, which three-finger strokes are gestures and what the Mac does with one,
-which modifiers a device's keys leave set on the Mac,
-the first-run tour, pairing at home (the doors, the cable, the device's rows),
-which keychain Sill.app keeps its identity in, the away quality and the link's
-judgement, the iPhone Duo's layouts, what of the clipboard goes between the Mac
-and a device, which type encodings the virtual display's private API may report,
-and when the Mac's display is woken for a device) on their own with a check
-each, and
+which modifiers a device's keys leave set on the Mac, what an input method or
+dictation sends the Mac and whose Control-Space it is, the first-run tour,
+pairing at home (the doors, the cable, the device's rows), whether screen
+sharing shows the pairing window, which keychain Sill.app keeps its identity
+in, the away quality and the link's judgement, the iPhone Duo's layouts, what
+of the clipboard goes between the Mac and a device, which type encodings the
+virtual display's private API may report, and when the Mac's display is woken
+for a device) on their own with a check each, and
 runs them: about five minutes, no device, permission or encoder. `--mutants`
 also checks that each check fails when its file is changed in one place (well
 over an hour).
@@ -932,7 +1264,9 @@ how to reach them; `lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>` finds the port.
 Input (`--move`, `--tap`, `--key`, `--input`) goes only to a `--synthetic` host
 on this Mac, which posts nothing. With `SILL_TEST_INPUT_LOG=1` such a host
 prints each event it would have posted, a key with its flags and a click with
-the modifiers the last key would have left for it and where it goes, and the
+the modifiers the last key would have left for it and where it goes, a scroll
+with its point deltas and phase (`Test input: scroll dy -12 dx 0, gesture
+changed (none)`; positive dy moves the content down), and the
 check each key's up arms (`KeyUpCheck`, read on a real host a quarter of a
 second later), so what a device's keys and buttons leave behind (the Spotlight
 key's ⌘, a modifier held when a device leaves or the host stops, a button
@@ -970,6 +1304,20 @@ host judged of each device's link ("Link: behind …" in its log): about 25
 minutes, `--full` about 45, and it waits while the Mac is busy (a load average
 of 20 or more), since a busy Mac makes a stalled path of any link. `--list`
 shows the cases.
+
+### The sound harness
+
+`Scripts/audio/run.sh` checks the Mac's sound end to end with no encoder,
+capture, speaker or device (docs/audio-plan.md H5, H6, H8): the real
+StreamServer and the sound's host files with the test tone (440 Hz and a click
+at each whole second of the wall clock) and fake frames, both doors on
+127.0.0.1, and `Scripts/audiocheck.swift`, a device that decodes every packet
+and finds each click where its stamp says; at home, 1024-frame chunks, pauses
+and a source change on two devices, and away through Scripts/pacing's
+bottleneck and the relay. About 7 minutes; `--cases` and `--list` as for the
+pacing harness. `Scripts/pacing/run.sh --sound` runs the pacing cases without
+and with the sound (the host's and the stand-in device's `--audio`), so its
+gates judge the run with sound.
 
 ### The menus' test app
 
@@ -1088,7 +1436,33 @@ simulator:
 - `-SillDrawer 1`, `-SillSettings 1` (with `-SillSettingsCase …` for the
   settings of the mock Mac) and `-SillConnectCase …`: the drawer, the Settings
   panel or the connect screen in a given state.
+- `-SillConnectCase tiles`: the connect screen's tiles (six, in Home, Work and
+  Other: the Mac mini twice, its Wired row taken for it by its name and its
+  Remote row, with its one picture; two more saved Macs with a picture each;
+  the Office iMac, not saved, and the Mac mini (2), no picture kept, with the
+  placeholder); `-SillVideoSize 1920x1080` gives the pictures that shape. `-Sill.connectionStyle list` (or `tiles`) and
+  `-Sill.macGroups '{"HOMEPAIRING6":"Home"}'` set the arrangement and the
+  saved Macs' groups, by Mac ID, for one run, in the mock and in the normal
+  app; the groups are never written back. With neither the argument nor a
+  stored choice the arrangement is tiles, the default since 2026-10-27, so
+  every connect case shows tiles unless `-Sill.connectionStyle list` gives
+  the list main showed by default before. A launch argument outranks the
+  switch beside the title, so to try the switch write the default instead
+  (with Sill not running, `plutil -replace Sill.connectionStyle -string list
+  "$(xcrun simctl get_app_container <udid> me.saffer.sill data)/Library/Preferences/me.saffer.sill.plist"`;
+  a `simctl spawn … defaults write` never reaches the app), or let `-SillStyleToggleAt <s>[,<s>…]` toggle
+  it at those seconds after the connect screen shows, as the switch does (the
+  choice is stored); the console says `connect: tiles (Sill.connectionStyle
+  unset)` as each connect screen shows, and `connect: tiles → list at 4.0 s`
+  at each toggle.
 - `-SillHUD 1`: fps, frame age, round trip and frame size over the stream.
+- With tiles on, the console's `tiles:` lines say whether Disconnect asked the
+  Mac for a keyframe, when it came, and how the picture was decoded or why
+  none was kept. In a live session to a synthetic host on this Mac's
+  loopback, `-SillSettingsScript '8 disconnect'` takes the panel's Disconnect
+  8 s after the first window list; `SILL_TEST_KEYFRAME_IGNORE=1` on the host
+  stands in for a Mac that skips the request (the picture is the keyframe
+  kept, 300 ms later).
 - `-SillLayerFail <s>[,<s>…]` (the normal app and `-SillLive 1`): at each of
   these seconds after the launch's first picture a frame that cannot decode
   goes onto the display layer, so the picture's recovery runs for real (the
@@ -1173,6 +1547,17 @@ simulator:
   one run, `-SillSettingsScroll gestures` opens the Settings panel at that
   group, and `-SillVoiceOver 1` shows it as with VoiceOver on. Under `-SillLive 1`, `-SillInputScript '3 gesture swipeUp'` sends a
   gesture through the app's own path, only to a test host on this Mac.
+- `-Sill.reverseScroll 1` turns the device's Reverse Scrolling on for one run
+  (in the normal app too), and `-SillSettingsScroll reverse` opens the Settings
+  panel at its switch. Under `-SillLive 1`, in a layout with the portrait
+  trackpad (`-SillLayout 710x1000`), `-SillInputScript '3 drag 0,60; 6
+  padscroll 0,40; 9 scroll 0,40; 12 wheel 0,-30'` drags a finger over the
+  picture, scrolls two fingers on the pad (both with their coast), and scrolls
+  a connected trackpad and a mouse's wheel, each through the app's own path and
+  only to a test host on this Mac. A synthetic host with `SILL_TEST_INPUT_LOG=1`
+  and `SILL_TEST_POINTER_PATH` prints each scroll's deltas, so the switch shows
+  in their sign: the drag's and the pad's turn around, the trackpad's and the
+  wheel's never.
 - `-SillMacMenu code|blender|long|stale|noaccess|none|slow|timeout|refuse`: the
   mock Mac's menus. `-SillMenusOpen 1` opens the Menus pull-down after launch,
   `-SillMenusOpen 'File/Open Recent'` opens it on that menu, and
@@ -1220,9 +1605,11 @@ surfaces as they are at REV, and `Tests/touchrig/compare.py BASE.log NEW.log
 [OFF.log]` checks that one- and two-finger strokes send what they sent before
 (and the same right after a gesture as made fresh) and that each stroke of three
 or more fingers, placed slowly, beside a resting thumb or with a brief extra
-contact too, sends its one gesture, or nothing, and nothing else. It runs on
-a simulator of its own (`SILL_TOUCHRIG_SIM`, made and deleted when missing),
-never XCUITest or a recording.
+contact too, sends its one gesture, or nothing, and nothing else. Reverse
+Scrolling is off there (`Stubs.swift`), so every scroll goes the natural way,
+as at a revision from before the switch. It runs on a simulator of its own
+(`SILL_TOUCHRIG_SIM`, made and deleted when missing), never XCUITest or a
+recording.
 
 ### The key rig
 
@@ -1293,8 +1680,14 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
   ms each …; a new session takes 9 ms …"); if a new session is no faster
   (another app sharing the encoder, say), the log says that and the stream
   keeps it.
-- Resolution: Standard (`captureScale: 1`, four times fewer pixels to encode;
-  it never hit the slow state).
+- Resolution: Standard (`captureScale: 1`, four times fewer pixels to encode
+  on a Retina display; it never hit the slow state). On a display that is not
+  Retina (1x: an external 2560×1440 display at its own resolution, say) the
+  two capture alike: a capture never runs above its display's own pixel scale
+  (CaptureScale, from ScreenCaptureKit's `pointPixelScale`), so Retina there
+  is 1x already and Standard changes nothing. The capture line says which
+  ("Capture started: 2560×1440 … filter (2560.0, 1440.0) scale 1.0, capturing
+  at 1x, the display's own (2x asked)").
 - Prioritize encoding speed (`prioritizeSpeed: true`).
 - Lower bitrate, or wire the phone to the Mac and repeat to isolate Wi-Fi.
 - Check the Mac's Console for "dropped" from the capture; raise `queueDepth`.
@@ -1312,7 +1705,8 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
   asleep and is on again.
 - The Mac has one hardware video encoder, shared by every app. When it keeps
   a frame for 1.5 s the log says "switching to the software encoder" and the
-  stream restarts at half resolution on the CPU, up to 60 fps (a launch probe
+  stream restarts on the CPU at 1x (Standard: half the resolution each way on
+  a Retina display, the same on a 1x one), up to 60 fps (a launch probe
   with no answer, "Hardware encoder probe: no answer", starts there). Almost
   always the encoder is busy, not broken: the iOS Simulator's screen recorder
   (`xcrun simctl io … recordVideo`) runs at a higher priority in the encoder
@@ -1493,6 +1887,7 @@ record field by field.
   wire-format test client), `sillrelay.py` (a relay that slows or cuts the
   link, for tests), `sillfeed.py` (a stand-in for GitHub's releases feed,
   for the update check's tests), `pacing/` (the pacing harness, above),
+  `audio/` and `audiocheck.swift` (the sound harness and its device, above),
   `menufixture.swift` and `menu-check/` (the menus' test app, and the menu
   reader's checks and a window's Close against it), and `restore-probe/` (a window Sill sized goes
   back, against a window of its own, above).

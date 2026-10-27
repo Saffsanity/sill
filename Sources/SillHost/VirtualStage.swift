@@ -16,8 +16,9 @@ import StreamProtocol
 /// exactly where it was and removes the display.
 ///
 /// Geometry: the display is not sized to the client's panel but to an *envelope* — a square whose
-/// side is the panel's longer edge ÷ 0.5 (the smallest Aa scale), plus the menu bar — and reused
-/// as long as the wanted window fits, so a rotation or an Aa step only re-places the window and
+/// side is the panel's longer edge ÷ 0.5 (the smallest Aa scale), 800 points at least (an iPhone's
+/// 754 came up at 1x: VirtualDisplaySize), plus the menu bar — and reused as long as the wanted
+/// window fits, so a rotation or an Aa step only re-places the window and
 /// restarts the pipeline; no display is recreated and nothing flashes on the Mac. The encoded
 /// frame is always exactly the window's rectangle (`sourceRect`), so the envelope is invisible on
 /// the device. To get the task's literal "display sized to the panel", make `envelope` return
@@ -144,10 +145,6 @@ final class VirtualStage {
     let sizer: WindowSizer
     let catalog: WindowCatalog
 
-    /// Display bounds: 320 is VirtualDisplay's floor; 4096 keeps the 2× backing store at or under
-    /// 8192 px, its ceiling.
-    static let minSide: CGFloat = 320
-    static let maxSide: CGFloat = 4096
     /// Fixed identity, so System Settings › Displays keeps one remembered "Sill" entry across runs
     /// (the probe used serial 0xF00D and does not collide).
     static let vendorID: UInt32 = 0x5111, productID: UInt32 = 0x0001, serialNum: UInt32 = 1
@@ -204,16 +201,11 @@ final class VirtualStage {
     }
 
     /// The display size (without the menu bar) that fits this panel at every Aa scale and in both
-    /// orientations: a square of the longer edge ÷ 0.5 (the slider's smallest step). No viewport →
-    /// the window's own size.
+    /// orientations: a square of the longer edge ÷ 0.5 (the slider's smallest step), every side 800
+    /// to 4096 points (VirtualDisplaySize, pure, where the rule and its reasons are). No viewport →
+    /// the window's own size, held the same way.
     static func envelope(for v: Viewport?, windowSize: CGSize) -> CGSize {
-        guard let v, v.width > 0, v.height > 0 else { return clamp(windowSize) }
-        let side = ceil(max(v.width, v.height) / 0.5)
-        return clamp(CGSize(width: side, height: side))
-    }
-
-    static func clamp(_ s: CGSize) -> CGSize {
-        CGSize(width: min(max(s.width, minSide), maxSide), height: min(max(s.height, minSide), maxSide))
+        VirtualDisplaySize.envelope(panel: v.map { CGSize(width: $0.width, height: $0.height) }, windowSize: windowSize)
     }
 
     /// The NSScreen for a display ID, as the area below its menu bar in CG (top-left) coordinates.
@@ -507,15 +499,15 @@ final class VirtualStage {
     /// so one grown to an app's minimum is not grown a second time after a rate change. Throws
     /// with the display destroyed if it never came up or SCK never saw it.
     private func ensureDisplay(atLeast env: CGSize) async throws {
-        var env = Self.clamp(env)
-        env.height = min(env.height, Self.maxSide - menuInset)   // the menu bar counts toward the 8192 px ceiling
+        var env = VirtualDisplaySize.clamp(env)
+        env.height = min(env.height, VirtualDisplaySize.maxSide - menuInset)   // the menu bar counts toward the 8192 px ceiling
         if let d = display, d.isAlive, scDisplay != nil, Int(d.refreshHz) == refreshHz,
            CGFloat(d.widthPt) >= env.width, CGFloat(d.heightPt) - menuInset >= env.height {
             Stats.shared.bump("vd.reused")
             return
         }
         if let d = display {
-            env = Self.clamp(CGSize(width: max(env.width, CGFloat(d.widthPt)), height: max(env.height, CGFloat(d.heightPt) - menuInset)))
+            env = VirtualDisplaySize.clamp(CGSize(width: max(env.width, CGFloat(d.widthPt)), height: max(env.height, CGFloat(d.heightPt) - menuInset)))
         }
         // Recreating under a staged window (rate change, envelope grew) would let the window server
         // dump it anywhere on a real display until the new one is up: send it home first. prepare
@@ -586,7 +578,10 @@ final class VirtualStage {
         }
         scDisplay = listed
         Stats.shared.bump("vd.created")
-        print("Virtual display \(d.widthPt)×\(d.heightPt) pt @2× id \(d.displayID): created \(created) ms, online \(onlineMs) ms, "
+        // The mode it came up at, not the one asked for: a display macOS kept at 1x read "@2×" here
+        // until 2026-10-27 (the line before this one said so, "online but not at …").
+        let b = d.bounds
+        print("Virtual display \(Int(b.width))×\(Int(b.height)) pt @\(d.currentScale)× id \(d.displayID): created \(created) ms, online \(onlineMs) ms, "
               + "listed by ScreenCaptureKit after \(Self.ms(since: t1)) ms, menu bar \(Int(menuInset)) pt\(insetMeasured ? "" : " (assumed)")")
     }
 

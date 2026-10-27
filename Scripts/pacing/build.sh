@@ -22,6 +22,9 @@ git rev-parse --verify --quiet "$base^{commit}" > /dev/null || { echo "build.sh:
 # (PR #39) it judges each device's link (LinkJudge).
 host_files=(StreamServer CableLink ClientLink DeviceGate Door DoorPolicy HostIdentity HostLog InterfaceSnapshot LinkJudge
             OriginPolicy PairingWindow PointerControl PointerWatch RefusalSummary Stats)
+# The Mac's sound (docs/audio-plan.md H6): where a side has these, they are compiled in with SILL_AUDIO
+# defined, and main.swift's --audio runs the test tone through the real pipeline and send path.
+audio_files=(AudioPipeline AudioPacketizer AudioEncoder SyntheticAudio TestTone)
 
 # put DEST: stdin to DEST, only if it differs.
 put() {
@@ -33,8 +36,12 @@ put() {
 
 # side NAME REF: the package for REF ("" = the working tree).
 side() {
-    local name="$1" ref="$2" pkg="$out/$1" f keep=()
+    local name="$1" ref="$2" pkg="$out/$1" f keep=() sound=1
     mkdir -p "$pkg/Sources/StreamProtocol" "$pkg/Sources/Harness"
+    for f in "${audio_files[@]}"; do
+        if [ -z "$ref" ]; then [ -f "Sources/SillHost/$f.swift" ] || sound=0
+        else git cat-file -e "$ref:Sources/SillHost/$f.swift" 2> /dev/null || sound=0; fi
+    done
     # StreamProtocol, whole.
     if [ -z "$ref" ]; then
         for f in Sources/StreamProtocol/*.swift; do put "$pkg/$f" < "$f"; keep+=("$pkg/$f"); done
@@ -43,7 +50,9 @@ side() {
             case "$f" in *.swift) git show "$ref:$f" | put "$pkg/$f"; keep+=("$pkg/$f") ;; esac
         done < <(git ls-tree --name-only "$ref" Sources/StreamProtocol/)
     fi
-    for f in "${host_files[@]}"; do
+    local files=("${host_files[@]}")
+    [ "$sound" = 1 ] && files+=("${audio_files[@]}")
+    for f in "${files[@]}"; do
         local src="Sources/SillHost/$f.swift" dest="$pkg/Sources/Harness/$f.swift"
         if [ -z "$ref" ]; then
             [ -f "$src" ] || continue
@@ -59,7 +68,8 @@ side() {
     # A StreamServer from before pairing at home (PR #37) serves a session as `serve(_:route:)`, its
     # home route without a peer; main.swift calls whichever this side's has. One that judges each
     # device's link (LinkJudge, away from home, PR #39) has onClientLinkChanged: main.swift's Link
-    # lines compile under LINK_JUDGE (summarize.py reads the new build's).
+    # lines compile under LINK_JUDGE (summarize.py reads the new build's). One with the sound's files
+    # compiles them under SILL_AUDIO.
     local defines="" settings=""
     if ! grep -q 'func serve(_ connection: NWConnection, route: ClientRoute, hello: Hello?' "$pkg/Sources/Harness/StreamServer.swift"; then
         defines='.define("PACING_SERVE_BEFORE_HOME_PAIRING")'
@@ -67,6 +77,7 @@ side() {
     if grep -q 'var onClientLinkChanged' "$pkg/Sources/Harness/StreamServer.swift"; then
         defines="${defines:+$defines, }.define(\"LINK_JUDGE\")"
     fi
+    if [ "$sound" = 1 ]; then defines="${defines:+$defines, }.define(\"SILL_AUDIO\")"; fi
     if [ -n "$defines" ]; then settings=", swiftSettings: [$defines]"; fi
     put "$pkg/Package.swift" <<SWIFT
 // swift-tools-version:5.9
@@ -88,7 +99,7 @@ SWIFT
         for k in "${keep[@]}"; do [ "$k" = "$f" ] && found=1 && break; done
         [ "$found" = 1 ] || rm -f "$f"
     done < <(find "$pkg/Sources" -name '*.swift')
-    echo "==> $name: StreamServer.swift of ${ref:-the working tree} (md5 $(md5 -q "$pkg/Sources/Harness/StreamServer.swift"))"
+    echo "==> $name: StreamServer.swift of ${ref:-the working tree} (md5 $(md5 -q "$pkg/Sources/Harness/StreamServer.swift"))$([ "$sound" = 1 ] && echo ", with the sound")"
     if ! swift build -c release --package-path "$pkg" > "$out/$name-build.log" 2>&1; then
         grep -E 'error:' "$out/$name-build.log" | head -20 >&2 || true
         echo "build.sh: the $name harness did not build; the log is $out/$name-build.log" >&2
