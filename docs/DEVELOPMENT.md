@@ -292,7 +292,12 @@ passed; the words stay until the first dial. A goodbye can wait in the
 connection while Sill is suspended and be read only as it comes back, when the
 Mac may have said it long before: then what the browser made again at that
 return lists is the Mac as it is now, dialled at once (not for a goodbye on a
-session dialled after the return, which is the Mac's now). Neither dials the Mac's
+session dialled after the return, which is the Mac's now). The session's first
+liveness check after the return (its pings stop while Sill is suspended) does
+not count the time away as silence, so such a goodbye is read before the
+connection is judged lost; if iOS reclaimed the connection while Sill was
+suspended the goodbye is gone with it, and the device says "Mac mini
+disconnected…" and dials at once, as before. Neither dials the Mac's
 addresses remotely unless the session came that way, and then not before 20 s.
 Back from the background the device also makes its Bonjour browser again (and the
 nearby one, if it runs), since iOS cuts a suspended app's connection

@@ -312,6 +312,17 @@ MUTANTS = {
     "S4 linkRows: the asked row not left out": ("        return rows.filter { $0.door != .plain && !(askedKey != nil && $0.id == askedRow) }.map(\\.id)", "        return rows.filter { $0.door != .plain }.map(\\.id)"),
     "S4 copy: over the cable dropped": ("            cable ? \"Pairing with \\(mac) over the cable\\u{2026}\" : \"Pairing with \\(mac)\\u{2026}\"", "            \"Pairing with \\(mac)\\u{2026}\""),
     "S4 copy: removed says the old remote words": ("        static func removed(mac: String, device: String) -> String { \"\\(mac) removed this \\(device). Tap it to pair again.\" }", "        static func removed(mac: String, device: String) -> String { \"\\(mac) removed this \\(device). To use it again, pair it again.\" }"),
+    # The liveness verdict after the app ran again (the verifier's review of PR #100, 2026-10-26)
+    "L1 no gap rule (the review's race: the suspension judged as silence)": ('        if let last = lastTickAt, now - last >= livenessGap { return .resumed }\n', ""),
+    "L2 the gap 10 s": ("    static let livenessGap = 1.0\n", "    static let livenessGap = 10.0\n"),
+    "L3 the gap a ping's 0.25 s (every tick resumed)": ("    static let livenessGap = 1.0\n", "    static let livenessGap = 0.25\n"),
+    "L4 a gap of exactly a second judged": ('        if let last = lastTickAt, now - last >= livenessGap { return .resumed }\n', '        if let last = lastTickAt, now - last > livenessGap { return .resumed }\n'),
+    "L5 silent at exactly the limit": ('        if now - lastReceivedAt > limit { return .silent }\n', '        if now - lastReceivedAt >= limit { return .silent }\n'),
+    "L6 never silent": ('        if now - lastReceivedAt > limit { return .silent }\n', ""),
+    "L7 never unviable": ('        if let since = unviableSince, now - since > viabilityLimit { return .unviable }\n', ""),
+    "L8 unviable before silent": ('        if now - lastReceivedAt > limit { return .silent }\n        if let since = unviableSince, now - since > viabilityLimit { return .unviable }\n', '        if let since = unviableSince, now - since > viabilityLimit { return .unviable }\n        if now - lastReceivedAt > limit { return .silent }\n'),
+    "L9 the gap after the silence (the race again)": ('        if let last = lastTickAt, now - last >= livenessGap { return .resumed }\n        if now - lastReceivedAt > limit { return .silent }\n', '        if now - lastReceivedAt > limit { return .silent }\n        if let last = lastTickAt, now - last >= livenessGap { return .resumed }\n'),
+    "L10 a first tick resumed": ('        if let last = lastTickAt, now - last >= livenessGap { return .resumed }\n', "        if (lastTickAt.map { now - $0 >= livenessGap } ?? true) { return .resumed }\n"),
     "S4 copy: openOnMac names no menu": ("\"\\(mac) didn\\u{2019}t show a code. On the Mac, choose Pair iPhone or iPad\\u{2026} in the Sill menu, then tap \\(mac) again.\"", "\"\\(mac) didn\\u{2019}t show a code.\""),
 }
 caught = 0

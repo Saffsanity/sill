@@ -458,6 +458,75 @@ func afterSleepPolicy() {
     check("goodbye model (quit): a row listed through the goodbye is dialled at 3 s, not before",
           afterGoodbye("quit", until: 60, answersFrom: 0, listing: { _ in -1000 }).connectedAt == 3)
 
+    // MARK: Liveness after the app ran again (the verifier's review of PR #100, 2026-10-26)
+
+    typealias L = DiscoveryPolicy.Liveness
+    func live(_ now: Double, tick: Double?, received: Double, limit: Double = 6, unviable: Double? = nil) -> L {
+        P.liveness(now: now, lastTickAt: tick, lastReceivedAt: received, limit: limit, unviableSince: unviable, viabilityLimit: 3)
+    }
+    check("liveness: the gap is a second, four of the ping's 0.25 s", P.livenessGap == 1)
+    check("liveness: a tick 0.25 s after the last, a byte 1 s ago: alive", live(100, tick: 99.75, received: 99) == .alive)
+    check("liveness: no byte for 6 s on regular ticks: alive at 6, silent just past it",
+          live(106, tick: 105.75, received: 100) == .alive && live(106.01, tick: 105.76, received: 100) == .silent)
+    check("liveness: the limit is the caller's (four times a slow round trip)", live(108, tick: 107.75, received: 100, limit: 9) == .alive
+          && live(109.5, tick: 109.25, received: 100, limit: 9) == .silent)
+    check("liveness: a connection's first tick judges as usual", live(106.5, tick: nil, received: 100) == .silent
+          && live(100.25, tick: nil, received: 100) == .alive)
+    check("liveness: a tick 600 s after the last (the app suspended), silent all that time: resumed, no verdict",
+          live(700, tick: 99.75, received: 99.5) == .resumed)
+    check("liveness: a gap of exactly a second is resumed, just under it is judged",
+          live(110, tick: 109, received: 100) == .resumed && live(110, tick: 109.01, received: 100) == .silent)
+    check("liveness: a gap of 1.5 s after a long silence: resumed", live(201.5, tick: 200, received: 100) == .resumed)
+    check("liveness: a remote path not viable for more than 3 s: unviable, at 3 s not yet",
+          live(110.01, tick: 109.76, received: 109.9, unviable: 107) == .unviable && live(110, tick: 109.75, received: 109.9, unviable: 107) == .alive)
+    check("liveness: silent and unviable together: silent (its line)", live(110, tick: 109.75, received: 100, unviable: 105) == .silent)
+    check("liveness: resumed comes before both", live(700, tick: 100, received: 100, unviable: 100) == .resumed)
+    check("liveness: no unviable time (viable, or a session at home): never unviable", live(1e6, tick: 1e6 - 0.25, received: 1e6 - 1) == .alive)
+    // A model of StreamClient's glue on the session's queue: a ping tick every 0.25 s while the app runs
+    // (none while it is suspended, one overdue as it runs again), bytes as they arrive (a pong every tick,
+    // and what waited in the connection read once the app runs), the verdict at each tick, a `resumed`
+    // counting both afresh from that tick. How the session ends: the goodbye read, or lost by silence.
+    enum End: Equatable { case goodbye(Double), lost(Double), on }
+    func session(suspended: ClosedRange<Double>?, goodbyeAt: Double?, deadAfter: Double = .infinity, until: Double = 900,
+                 resumeHopAfter: Double = 0.02, gapRule: Bool = true) -> End {
+        var lastTick: Double? = nil, lastReceived = 0.0, t = 0.25
+        var readGoodbyeAt: Double? = nil
+        if let g = goodbyeAt {
+            // Read as it arrives while the app runs, else the moment it runs again, just after the overdue tick.
+            if let s = suspended, s.contains(g) { readGoodbyeAt = s.upperBound + 0.01 } else { readGoodbyeAt = g }
+        }
+        var resetAt: Double? = suspended.map { $0.upperBound + resumeHopAfter }   // willEnterForeground's hop
+        while t <= until {
+            if let s = suspended, t > s.lowerBound, t < s.upperBound { t = s.upperBound; continue }  // one overdue tick, at the return
+            if let g = readGoodbyeAt, g < t { return .goodbye(g) }
+            if let r = resetAt, r <= t { lastReceived = max(lastReceived, r); resetAt = nil }
+            let verdict = gapRule ? P.liveness(now: t, lastTickAt: lastTick, lastReceivedAt: lastReceived, limit: 6, unviableSince: nil, viabilityLimit: 3)
+                                  : (t - lastReceived > 6 ? .silent : .alive)
+            lastTick = t
+            switch verdict {
+            case .silent, .unviable: return .lost(t)
+            case .resumed: lastReceived = t
+            case .alive: break
+            }
+            if t < deadAfter { lastReceived = t }    // the tick's ping, answered at once on a live connection
+            t += 0.25
+        }
+        return .on
+    }
+    check("liveness model: a goodbye that waited while the iPad was locked 10 minutes is read, not the silence",
+          session(suspended: 60...660, goodbyeAt: 100) == .goodbye(660.01))
+    check("liveness model: before the rule (the review's race), the same session was lost to the silence at the return",
+          session(suspended: 60...660, goodbyeAt: 100, gapRule: false) == .lost(660))
+    check("liveness model: the hop landing first changed nothing before (no goodbye lost then)",
+          session(suspended: 60...660, goodbyeAt: 100, resumeHopAfter: -0.01, gapRule: false) == .goodbye(660.01))
+    check("liveness model: a connection dead across the suspension is still lost, 6 s after the return",
+          session(suspended: 60...660, goodbyeAt: nil, deadAfter: 59) == .lost(666.25))
+    check("liveness model: a connection that dies while the app runs is lost 6 s later, as before",
+          session(suspended: nil, goodbyeAt: nil, deadAfter: 100) == .lost(106)
+          && session(suspended: nil, goodbyeAt: nil, deadAfter: 100, gapRule: false) == .lost(106))
+    check("liveness model: a live session across a suspension goes on", session(suspended: 60...660, goodbyeAt: nil, until: 700) == .on)
+    check("liveness model: a goodbye read while the app runs ends it then", session(suspended: nil, goodbyeAt: 30) == .goodbye(30))
+
     // MARK: The Desktop after a stop
 
     typealias W = DiscoveryPolicy.Watched

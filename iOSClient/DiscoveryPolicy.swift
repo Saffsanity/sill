@@ -868,6 +868,48 @@ enum DiscoveryPolicy {
         macWentAt.map { $0 + asleepWait } ?? 0
     }
 
+    // The session's liveness after the app ran again (the verifier's review of PR #100, 2026-10-26). A
+    // suspended app's ping timer, a dispatch timer on the session's queue, fires once as soon as the app
+    // runs again, overdue; willEnterForeground's resetLiveness reaches that queue only by a hop from the
+    // main thread, often behind it. So the first verdict after a return judged the time the app spent
+    // suspended as silence ("connection silent for 600 s: lost"), and the session ended there, before its
+    // reader got to a goodbye that had waited in the connection meanwhile (the Mac went to sleep, or
+    // restarted, while the iPad was locked): "‹Mac› disconnected…" and a dial at once, where the Mac's
+    // own words and its wait were due. The verdict now tells such a tick by itself, on that queue.
+
+    /// A ping tick this long or more after the one before it (`liveness`): the app did not run in
+    /// between (suspended in the background, or the session's queue held up that long), four times the
+    /// ping's 0.25 s.
+    static let livenessGap = 1.0
+
+    /// What a ping tick says of the session's connection (StreamClient.checkLiveness).
+    enum Liveness: Equatable {
+        /// Something arrived recently enough: the session goes on.
+        case alive
+        /// Nothing arrived for `limit`: the connection is lost.
+        case silent
+        /// A remote path not viable for longer than `viabilityLimit`: the connection is lost.
+        case unviable
+        /// The tick came `livenessGap` or more after the one before: what passed meanwhile says nothing
+        /// of the connection (no ping went out, nothing was read), so no verdict, and the caller counts
+        /// the silence and the viability afresh from now, as resetLiveness does at the return; a goodbye
+        /// that waited in the connection is then read before any verdict could end the session.
+        case resumed
+    }
+
+    /// The verdict at a ping tick at `now` (CACurrentMediaTime): `lastTickAt` the tick before on this
+    /// connection (nil: its first), `lastReceivedAt` the last byte's arrival, `limit` the silence
+    /// allowed (StreamClient's livenessFloor, or four times the worst recent round trip),
+    /// `unviableSince` when a remote path stopped being viable (nil: viable, or not a remote session).
+    /// A gap since the last tick comes first; then the silence, then the viability.
+    static func liveness(now: Double, lastTickAt: Double?, lastReceivedAt: Double, limit: Double,
+                         unviableSince: Double?, viabilityLimit: Double) -> Liveness {
+        if let last = lastTickAt, now - last >= livenessGap { return .resumed }
+        if now - lastReceivedAt > limit { return .silent }
+        if let since = unviableSince, now - since > viabilityLimit { return .unviable }
+        return .alive
+    }
+
     /// What this device watched when a window list says nothing streams (`autoDesktop`).
     enum Watched: Equatable {
         /// Nothing: the connection's first list, or a pick that never started streaming.

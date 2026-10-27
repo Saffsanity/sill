@@ -873,7 +873,13 @@ not a window list came:
   back (in the background just before the return, or within 3 s after it on a session up before that
   return) counts the rows the browser made at that return lists as listed afresh, after "sleep" too,
   since the Mac may have said it long before (DiscoveryPolicy's `returnRenews`); one on a session
-  dialled after the return is the Mac's now. One goodbye per connection, the first: a
+  dialled after the return is the Mac's now. Such a goodbye is read at all only because the
+  session's first ping tick after the return judges nothing (the review of 2026-10-26;
+  DiscoveryPolicy's `liveness`: a tick a second or more after the one before is `resumed`, and the
+  silence is counted afresh from it): the suspended app's overdue tick ran before
+  willEnterForeground's resetLiveness reached the session's queue, and ended the session as
+  "connection silent … lost" before its reader got to the goodbye. A connection iOS reclaimed while
+  the app was suspended (TN2277) loses its goodbye anyway: "‹Mac› disconnected…" and a dial at once. One goodbye per connection, the first: a
   Quit right after the sleep's goodbye, or after Remove, sends nothing more on that connection, and
   nothing else follows a goodbye on it. The device keeps a goodbye only for the connection it came
   on (a move that carries the session over to another connection drops it; a new session starts

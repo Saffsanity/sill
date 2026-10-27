@@ -6023,8 +6023,10 @@ good.
   counted asleep (`listingStart`, `waitingLine`, `asleepWait`), or left alone
   until listed afresh, the return from the background or 10 minutes
   (`reconnectRow`'s `offAt`, `offHold`), what a browser made at a return lists
-  counted as listed afresh (`returnRenews`, `renewed`), and the first remote
-  dial (`firstRemoteDial`); pairing at home's rows and words, a tap's dial, the device's
+  counted as listed afresh (`returnRenews`, `renewed`), the first remote
+  dial (`firstRemoteDial`), and the session's liveness at each ping, a tick a
+  second or more after the last (the app suspended) judging nothing
+  (`liveness`, `livenessGap`); pairing at home's rows and words, a tap's dial, the device's
   cable check and how a session at home ends: `rowWord`, `homeDial`,
   `onCable`, `rowMac`, `reconnectEnd`, `macInfoNamesSession`,
   `removalRevokes`; pure, checked with swiftc), `StreamScreen`

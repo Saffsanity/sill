@@ -940,6 +940,9 @@ final class StreamClient: ObservableObject {
     private var worstRecentRttMs: Double?
     /// A remote connection's path stopped being viable at this time; nil while viable.
     private var unviableSince: Double?
+    /// The last ping tick's time on this connection (CACurrentMediaTime), nil before its first: a tick
+    /// far after it is the app running again (DiscoveryPolicy.liveness's `resumed`).
+    private var lastPingTickAt: Double?
     /// The current connection is a remote one (the viability rule applies).
     private var remoteOnQueue = false
     /// No byte for this long (or four times the worst recent round trip) is a lost connection.
@@ -4048,6 +4051,7 @@ final class StreamClient: ObservableObject {
         lastReceivedAt = windowOpenedAt
         worstRecentRttMs = nil
         unviableSince = nil
+        lastPingTickAt = nil
         remoteOnQueue = remote
         let window = DispatchSource.makeTimerSource(queue: queue)
         window.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(10))
@@ -4116,17 +4120,34 @@ final class StreamClient: ObservableObject {
 
     /// Liveness, on every route: nothing received for `livenessFloor` seconds, or four times the
     /// worst recent round trip on a slow link, and the connection is gone; a remote path that has
-    /// not been viable for `viabilityLimit` seconds too. Checked at each ping. On `queue`.
+    /// not been viable for `viabilityLimit` seconds too. Checked at each ping (DiscoveryPolicy.liveness).
+    /// The first tick after the app ran again (a second or more after the one before: it was
+    /// suspended) judges nothing and counts both afresh from now, as `resetLiveness` does at the
+    /// return, whose hop from the main thread can land after it: the time suspended is no silence,
+    /// and a goodbye that waited in the connection is read before any verdict. On `queue`.
     private func checkLiveness(_ c: NWConnection) -> Bool {
         let now = CACurrentMediaTime()
         let limit = max(Self.livenessFloor, 4 * (worstRecentRttMs ?? 0) / 1000)
-        let silent = now - lastReceivedAt > limit
-        let unviable = remoteOnQueue && unviableSince.map { now - $0 > Self.viabilityLimit } == true
-        guard silent || unviable else { return true }
-        print(silent ? "connection silent for \(Int(now - lastReceivedAt)) s: lost" : "connection not viable for 3 s: lost")
-        connectionLost(c)
-        c.cancel()
-        return false
+        let previous = lastPingTickAt
+        let verdict = DiscoveryPolicy.liveness(now: now, lastTickAt: previous, lastReceivedAt: lastReceivedAt, limit: limit,
+                                               unviableSince: remoteOnQueue ? unviableSince : nil, viabilityLimit: Self.viabilityLimit)
+        lastPingTickAt = now
+        switch verdict {
+        case .alive:
+            return true
+        case .resumed:
+            #if DEBUG
+            print("liveness: a ping tick \(String(format: "%.1f", now - (previous ?? now))) s after the last (the app ran again): no verdict, counted afresh")
+            #endif
+            lastReceivedAt = now
+            unviableSince = nil
+            return true
+        case .silent, .unviable:
+            print(verdict == .silent ? "connection silent for \(Int(now - lastReceivedAt)) s: lost" : "connection not viable for 3 s: lost")
+            connectionLost(c)
+            c.cancel()
+            return false
+        }
     }
 
     /// Returning to the foreground is never a loss by itself: the pings stopped while suspended, so
