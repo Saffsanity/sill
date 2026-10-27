@@ -1273,7 +1273,7 @@ final class StreamClient: ObservableObject {
     /// was made at or after `renewedFrom`. Main thread.
     func listedAfreshByBrowser(_ mac: FoundMac, renewedFrom: Double?) -> Bool {
         let life = mac.direct ? nearbyLife : networkLife
-        return DiscoveryPolicy.renewed(listedByBrowser: life.fresh.contains { Self.serviceName(of: $0) == mac.name },
+        return DiscoveryPolicy.renewed(listedByBrowser: life.fresh.contains { Self.serviceName(of: $0.result) == mac.name },
                                        browserMadeAt: life.startedAt, renewedFrom: renewedFrom)
     }
 
