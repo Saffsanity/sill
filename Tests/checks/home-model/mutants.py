@@ -35,5 +35,17 @@ M = [
     ("replacingNewKey keeps the marked Mac", S, "        return list.filter { $0.macID != old }", "        return list"),
     ("recognize: any tag names the first Mac", S, "        return list.first { mac in mac.recognitionKeyData.map { RecognitionTag.matches(tag, recognitionKey: $0) } ?? false }?.macID",
      "        return list.first?.macID"),
+    # 13: a row keeps its TXT record while its result stays listed (the cable pulled, 2026-10-27); a browser
+    # made again starts afresh (the review of #232).
+    ("rowRecords: a result without a record reads as none (the rule undone, as before the fix)", F,
+     "            next[item.key] = item.record ?? previous[item.key]", "            next[item.key] = item.record"),
+    ("rowRecords: a record kept after its result left the results", F,
+     "        var next: [RowRecordKey: RowRecord] = [:], seen = Set<RowRecordKey>()",
+     "        var next: [RowRecordKey: RowRecord] = previous, seen = Set<RowRecordKey>()"),
+    ("rowRecords: the kept record wins over one that comes", F,
+     "            next[item.key] = item.record ?? previous[item.key]", "            next[item.key] = previous[item.key] ?? item.record"),
+    ("rowRecords: a record kept across browsers (a browser made again no break, as #232 first had it)", F,
+     "            next[item.key] = item.record ?? previous[item.key]",
+     "            next[item.key] = item.record ?? previous.first(where: { $0.key.name == item.key.name && $0.key.domain == item.key.domain })?.value"),
 ]
 sys.exit(0 if module.mutate("home-model", M, sys.argv[1]) else 1)
