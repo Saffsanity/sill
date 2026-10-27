@@ -317,15 +317,21 @@ extension StreamClient {
                               onPinRefused: onPinRefused)
     }
 
-    /// A browse result's home door, from its TXT record's `p` (HomeDoorTXT, entry by entry: a bare
-    /// `p` reads as "1"), as DiscoveryPolicy spells it.
-    static func door(of result: NWBrowser.Result) -> DiscoveryPolicy.HomeDoor {
-        guard case .bonjour(let txt) = result.metadata else { return .plain }
+    /// A browse result's TXT record as its row reads it, as DiscoveryPolicy spells it: its recognition
+    /// tag (`r`) and its home door (`p`, HomeDoorTXT entry by entry: a bare `p` reads as "1"). Nil
+    /// when the result carries none: metadata other than `.bonjour`, or a record without an entry (an
+    /// empty TXT record, one zero byte on the wire, reads so). DiscoveryPolicy.rowRecords then keeps
+    /// the last record that result carried while its browser listed it: with the USB cable pulled,
+    /// iPadOS listed the Mac on its other interfaces with none (Noah's iPad, 2026-10-27).
+    static func record(of result: NWBrowser.Result) -> DiscoveryPolicy.RowRecord? {
+        guard case .bonjour(let txt) = result.metadata, !txt.isEmpty else { return nil }
+        let door: DiscoveryPolicy.HomeDoor
         switch HomeDoorTXT.door(txt) {
-        case .plain: return .plain
-        case .pairingRequired: return .pairingRequired
-        case .open: return .open
+        case .plain: door = .plain
+        case .pairingRequired: door = .pairingRequired
+        case .open: door = .open
         }
+        return DiscoveryPolicy.RowRecord(tag: txt[RecognitionTag.txtKey], door: door)
     }
 
     // MARK: The session gate over TLS
@@ -996,7 +1002,10 @@ extension StreamClient {
                            lastConnectedAt: nil, lastRoute: nil, homeTLS: true, revoked: nil)
         if let info { mac = SavedMacs.refreshed(mac, info: info, fingerprint: fingerprint, allowLoopback: Self.keepsLoopback) ?? mac }
         savedMacs = SavedMacs.adding(mac, to: savedMacs)
-        if let old = replaces { savedMacs = SavedMacs.replacingNewKey(old: old, new: macID, in: savedMacs) }
+        if let old = replaces {
+            savedMacs = SavedMacs.replacingNewKey(old: old, new: macID, in: savedMacs)
+            if savedMac(old) == nil { carryGroup(from: old, to: macID) }
+        }
         persistSavedMacs()
         return macID
     }

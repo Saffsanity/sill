@@ -4,6 +4,7 @@
 // record saved, the pinned session, a removal, a new pairing, an older Sill.app, an open door, a
 // look-alike. docs/home-pairing-plan.md §7.2–7.7.
 import Foundation
+import Network
 var fails = 0, passes = 0
 func check(_ name: String, _ ok: Bool) { if ok { passes += 1; print("ok   \(name)") } else { fails += 1; print("FAIL \(name)") }; fflush(stdout) }
 typealias P = DiscoveryPolicy
@@ -19,7 +20,7 @@ check("askAnswer reads PairResult's reasons and method", PairResult.shown == "sh
       && PairResult.busy == "busy" && PairResult.cable == "cable")
 check("askAnswer: closed, expired, stopped and code after an ask are refusals (the Mac's menu)", [PairResult.closed, PairResult.expired, PairResult.stopped, PairResult.code]
       .allSatisfy { P.askAnswer(ok: false, method: nil, hasProof: false, reason: $0, retryAfter: nil, askedCable: true, macIDMatches: true, recognitionKeyBytes: 32) == .refused })
-// The TXT record's door, as StreamClient.door(of:) maps it case for case.
+// The TXT record's door, as StreamClient.record(of:) maps it case for case.
 func mapped(_ d: HomeDoorTXT.Door) -> P.HomeDoor { switch d { case .plain: return .plain; case .pairingRequired: return .pairingRequired; case .open: return .open } }
 check("the door: no p plain, p=1 and any other value pairing required, p=0 open", mapped(HomeDoorTXT.door([:])) == .plain
       && mapped(HomeDoorTXT.door(["p": "1"])) == .pairingRequired && mapped(HomeDoorTXT.door(["p": "0"])) == .open
@@ -271,6 +272,102 @@ check("12 replacingNewKey keeps M unmarked, M itself, and M while N is not saved
       && SavedMacs.replacingNewKey(old: macM, new: macN, in: keep).map(\.macID) == [macM])
 check("12 the same key answering after all: its pairing replaces the marked record, unmarked",
       SavedMacs.adding(savedMac(macM, fp: fpM, rk: rkM), to: keep).first.map { $0.macID == macM && $0.newKey == nil } == true)
+
+// MARK: 13. The cable pulled on the connect screen (Noah's iPad, 2026-10-27: the Mac listed on anpi0,
+// en2 and en0 with its TXT record, then on en2 and en0, then on en0 alone, with none, and its row read
+// "Update Sill")
+
+// A browse result's record as StreamClient.record(of:) reads it, on the metadata NWBrowser gives it.
+func rowRecord(_ metadata: NWBrowser.Result.Metadata) -> P.RowRecord? {
+    guard case .bonjour(let txt) = metadata, !txt.isEmpty else { return nil }
+    return P.RowRecord(tag: txt[RecognitionTag.txtKey], door: mapped(HomeDoorTXT.door(txt)))
+}
+// The Mac's record as HostIdentity.txtRecord builds it for a TLS home door that requires pairing.
+let txtM = NWTXTRecord([RecognitionTag.txtKey: tagM, HomeDoorTXT.key: HomeDoorTXT.value(requirePairing: true)])
+var bareP = NWTXTRecord([RecognitionTag.txtKey: tagM])
+_ = bareP.setEntry(.none, for: HomeDoorTXT.key)
+check("13 the Mac's own record (r and p=1): its tag and a door that requires pairing",
+      rowRecord(.bonjour(txtM)) == P.RowRecord(tag: tagM, door: .pairingRequired))
+check("13 no metadata, an empty TXT record (one zero byte, as a plain door registers none) or one with no entry: no record",
+      rowRecord(.none) == nil && rowRecord(.bonjour(NWTXTRecord(Data([0])))) == nil && rowRecord(.bonjour(NWTXTRecord())) == nil)
+check("13 a bare p is a record that requires pairing; r alone is a record of a plain door (the Mac's own word)",
+      rowRecord(.bonjour(bareP)) == P.RowRecord(tag: tagM, door: .pairingRequired)
+      && rowRecord(.bonjour(NWTXTRecord([RecognitionTag.txtKey: tagM]))) == P.RowRecord(tag: tagM, door: .plain))
+// M saved, seen over TLS, reached as "Mac mini"; its rows as recomputeMacs builds them in a DEBUG build.
+let unplugSaved = [savedMac(macM, fp: fpM, rk: rkM)]
+let unplugNames = unplugSaved.map { (macID: $0.macID, bonjourName: $0.bonjourName) }
+func unplugRow(_ record: P.RowRecord?, _ interfaces: [P.Interface]) -> (word: P.RowWord, tap: P.HomeDial, macID: String?) {
+    let id = SavedMacs.recognize(tag: record?.tag, in: unplugSaved)
+    let carries = !(record?.tag ?? "").isEmpty
+    let named = P.rowMac(tagged: id, carriesTag: carries, name: "Mac mini", saved: unplugNames)
+    let mac = named.flatMap { n in unplugSaved.first { $0.macID == n.macID } }
+    let door = P.rowDoor(record?.door ?? .plain, otherTagUnderSavedName: P.otherTagUnderSavedName(tagged: id, carriesTag: carries,
+                                                                                                    name: "Mac mini", saved: unplugNames))
+    let method = P.method(direct: false, interfaces: interfaces)
+    return (P.rowWord(door: door, saved: mac != nil, revoked: false, homeTLS: mac?.homeTLS == true, debug: true, method: method, cable: false),
+            P.homeDial(door: door, saved: mac != nil, revoked: false, homeTLS: mac?.homeTLS == true, debug: true, tap: true), id)
+}
+let iAnpi0 = P.Interface(name: "anpi0", type: .wiredEthernet), iEn2 = P.Interface(name: "en2", type: .wiredEthernet)
+let iEn0 = P.Interface(name: "en0", type: .wifi)
+/// "Mac mini"'s result from browser `b` (the first unless said), in the local domain, as recomputeMacs keys it.
+func macMini(_ b: Int = 1) -> P.RowRecordKey { P.RowRecordKey(browser: b, name: "Mac mini", domain: "local.") }
+let office = P.RowRecordKey(browser: 1, name: "Office", domain: "local.")
+var shownRecords: [P.RowRecordKey: P.RowRecord] = [:]
+var unplugged: [(word: P.RowWord, tap: P.HomeDial, macID: String?)] = []
+for (metadata, interfaces) in [(NWBrowser.Result.Metadata.bonjour(txtM), [iAnpi0, iEn2, iEn0]), (.none, [iEn2, iEn0]), (.none, [iEn0])] {
+    shownRecords = P.rowRecords(shownRecords, listed: [(macMini(), rowRecord(metadata))])
+    unplugged.append(unplugRow(shownRecords[macMini()], interfaces))
+}
+check("13 the cable pulled: Wired, Wired, then Wi‑Fi, the row M's by its tag all along",
+      unplugged.map(\.word) == [.method(.wired), .method(.wired), .method(.wifi)] && unplugged.allSatisfy { $0.macID == macM })
+check("13 each tap dials M pinned to its key (sill/1), in DEBUG too",
+      unplugged.allSatisfy { $0.tap == .pinned && P.sessionTrust($0.tap, savedPin: unplugSaved[0].fingerprintData) == .saved(pin: fpM) })
+check("13 before the fix, each listing's own record alone: Update Sill, nothing dialed, M by its name alone",
+      unplugRow(rowRecord(.none), [iEn0]).word == .updateSill && unplugRow(rowRecord(.none), [iEn0]).tap == .updateSill
+      && unplugRow(rowRecord(.none), [iEn0]).macID == nil)
+shownRecords = P.rowRecords(shownRecords, listed: [(macMini(), rowRecord(.bonjour(txtM)))])
+check("13 its record again: as before", unplugRow(shownRecords[macMini()], [iEn0]) == (.method(.wifi), .pinned, macM))
+let openM = NWTXTRecord([RecognitionTag.txtKey: tagM, HomeDoorTXT.key: HomeDoorTXT.value(requirePairing: false)])
+shownRecords = P.rowRecords(shownRecords, listed: [(macMini(), rowRecord(.none))])
+shownRecords = P.rowRecords(shownRecords, listed: [(macMini(), rowRecord(.bonjour(openM)))])
+check("13 Require pairing turned off on the Mac (its record updated in place, p=0): read; M's row says Wi‑Fi, dialed pinned",
+      shownRecords[macMini()]?.door == .open && unplugRow(shownRecords[macMini()], [iEn0]) == (.method(.wifi), .pinned, macM))
+shownRecords = P.rowRecords(shownRecords, listed: [(macMini(), rowRecord(.bonjour(NWTXTRecord([RecognitionTag.txtKey: tagM]))))])
+shownRecords = P.rowRecords(shownRecords, listed: [(macMini(), rowRecord(.none))])
+check("13 a record with M's tag and no p, then none: a plain door, Update Sill, nothing dialed",
+      unplugRow(shownRecords[macMini()], [iEn0]) == (.updateSill, .updateSill, macM))
+// A Mac that really went back to a plain door: its registration goes (the browser removes the name),
+// then an older Sill's comes, with an empty TXT record.
+var downgradedM = P.rowRecords([:], listed: [(macMini(), rowRecord(.bonjour(txtM)))])
+downgradedM = P.rowRecords(downgradedM, listed: [])
+downgradedM = P.rowRecords(downgradedM, listed: [(macMini(), rowRecord(.bonjour(NWTXTRecord(Data([0])))))])
+check("13 the Mac gone back to a plain door, listed afresh with an empty record: Update Sill, nothing dialed (no downgrade)",
+      downgradedM.isEmpty && unplugRow(downgradedM[macMini()], [iEn0]).word == .updateSill && unplugRow(downgradedM[macMini()], [iEn0]).tap == .updateSill)
+var goneM = P.rowRecords([:], listed: [(macMini(), rowRecord(.bonjour(txtM)))])
+goneM = P.rowRecords(goneM, listed: [(office, nil)])
+goneM = P.rowRecords(goneM, listed: [(office, nil), (macMini(), rowRecord(.none))])
+check("13 the name gone and back with no metadata: no record kept, Update Sill", goneM.isEmpty
+      && unplugRow(goneM[macMini()], [iEn0]).word == .updateSill)
+
+// The review of #232: a browser made again after the background (or a failure), M's registration gone
+// meanwhile and "Mac mini" taken by another service with an empty TXT record (an older Sill, the CLI). The
+// old browser's last result, shown beside the new one's while it settles, still carries M's record; the new
+// browser lists the name with the empty record, and that result is read with nothing of the old browser's.
+var rebuiltM = P.rowRecords([:], listed: [(macMini(), rowRecord(.bonjour(txtM)))])
+rebuiltM = P.rowRecords(rebuiltM, listed: [(macMini(), rowRecord(.bonjour(txtM)))])      // the settle: the old result, kept
+rebuiltM = P.rowRecords(rebuiltM, listed: [(macMini(2), rowRecord(.bonjour(NWTXTRecord(Data([0])))))])
+let strangerRow = unplugRow(rebuiltM[macMini(2)], [iEn0])
+check("13 a browser made again, \"Mac mini\" now another service with an empty record: Update Sill, nothing dialed, M by its name alone",
+      rebuiltM.isEmpty && strangerRow == (.updateSill, .updateSill, nil))
+check("13 …M's Remote row stays, and the reconnect's refused pinned dial of that row would only skip it, never newKey",
+      P.remoteRows(saved: [(macID: macM, name: "Mac mini")], listedIDs: Set([strangerRow.macID].compactMap { $0 }), now: 10, searchingSince: 0,
+                   localNetworkDenied: false).map(\.macID) == [macM]
+      && P.afterPinRefused(macID: macM, tried: ["network:Mac mini"], rows: [("network:Mac mini", nil)], tagNamed: false, tapped: false) == .skipRow)
+var sameKeyM = P.rowRecords([:], listed: [(macMini(), rowRecord(.bonjour(txtM)))])
+sameKeyM = P.rowRecords(sameKeyM, listed: [(macMini(), rowRecord(.bonjour(NWTXTRecord(Data([0])))))])
+check("13 …where one key for both browsers (the rule as #232 first had it) read it as M: dialed pinned, a refusal marking M newKey",
+      unplugRow(sameKeyM[macMini()], [iEn0]) == (.method(.wifi), .pinned, macM)
+      && P.afterPinRefused(macID: macM, tried: ["network:Mac mini"], rows: [("network:Mac mini", macM)], tagNamed: true, tapped: false) == .newKey)
 
 print(fails == 0 ? "ALL PASS (\(passes))" : "\(fails) FAIL, \(passes) pass")
 if fails > 0 { exit(1) }
