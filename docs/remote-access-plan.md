@@ -1148,7 +1148,11 @@ An `NSWindowController` hosting a SwiftUI `PairDeviceView`.
 - A standalone window titled "Pair iPhone or iPad": not a sheet, because a device can open it while
   Settings is closed.
 - `sharingType = .none`, as a best effort (reports say ScreenCaptureKit ignores it on macOS 15+; the
-  Desktop filter is what counts).
+  Desktop filter is what counts). Since issue #108 (PR #157), Settings › Devices' "Show the pairing
+  window to screen sharing", off by default, makes it `.readOnly`, AppKit's default: Screen Sharing,
+  Apple Remote Desktop and VNC apps then show it, whoever opened it, so a Mac used through them (one
+  without a display, or one used from afar) can pair. A change applies at once to a window already
+  open (`PairingWindowSharing`).
 - One instance: opening it again brings it forward with the same code.
 - Closing it cancels the window, and the code dies with it.
 
