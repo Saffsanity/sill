@@ -300,7 +300,8 @@ Each one a default the approval left open, reversible in a line or two (where is
    stays on the leading page (22–402).
 4. **(b1) The laptop pose** splits at the fold's real band in whole points: the picture's pane above
    it (0–455), the window bar, keys and trackpad from 496; the drawer and the Settings panel hang
-   from the bar, below the fold.
+   from the bar, below the fold. With the software keyboard up (#215, 2026-10-27, below), the key row
+   alone between the fold and the keyboard's glass, the window bar hidden until the keyboard goes.
 5. **(b2) Open flat upright**, the pane takes the picture's own shape across the width (the video's
    pixels: the synthetic Desktop's 1512×948 gives a 653×409 picture, a 16:10 one 653×408) and the
    trackpad the rest; never under 160 pt, always leaving the trackpad 200. While the Mac fits a
@@ -475,6 +476,81 @@ Verified 2026-10-08 (14:30–16:10) on this Mac, Xcode 27.1 RC (27A9275), "Sill 
 - **Photos**: `/Users/noah/Downloads/sill-handoff/duo/final/` with its INDEX.md: `live/` (private:
   this Mac's windows and name), `mock/` (shareable), `background/` and `sweep/` (private).
 
+## The software keyboard in the laptop pose (#215, 2026-10-27)
+
+matt-cahill (#215): in the laptop pose the software keyboard covers the key row, its Keyboard cap
+with it, so nothing takes the keyboard down. addhumal's PR #220 put a Keyboard button in the window
+bar while the keyboard was up and took the bar's top padding away (buttons 506–564, for a keyboard
+it took to begin at 570); Noah chose another way after the mock of two strips (2026-10-27: "Let's
+start with A, and move to B in the future if we deem it necessary"): while the keyboard is up, the
+key row alone in the room between the fold and the keyboard, nothing else, the window bar back with
+the keyboard down. B, a two-row strip (the bar's buttons and app icons over the key row), is
+deferred. Built on #220 with maintainer edits (his commit kept); device only, no wire change.
+
+**What UIKit reports** (the iOS 27.1 simulator's Duo folded into the laptop pose by duorig, the
+dark keyboard with no predictive bar, as in the reporter's screenshot; DEBUG `-SillKeyboardProbe
+1`): shown, the keyboard's frame is the whole lower page from the fold's top edge, (0, 455.5,
+669×495.5), its begin frame zero; going, the keyboard's own frame, (0, 555, 669×396), as the hide's
+begin frame, and (0, 951, 669×396) below the foot as its end frame. A screenshot has the glass's edge
+at 555.0 pt (a 1 pt lighter rim at the middle, the rounded corners lower) and the first keys at 568,
+as the reporter's screenshot does (2007×2853: the glass at 555, the keys 568–635, 649–716, 730–797,
+811–878). So the report is not the glass, and #220's 570 (a 381 pt keyboard) is neither. The
+glass draws nothing above the keyboard's own frame; the region between the fold and the glass
+(496–555) is Sill's: XCUITest taps there reach it (the row's esc arrived at a synthetic host as key
+53, its Keyboard cap took the keyboard down). The Chinese (Pinyin) and emoji keyboards draw their
+glass from 506 (445 pt: a band for candidates, or the emoji search field, over the same keys at 568),
+are reported shown as the same lower page, and going as (0, 506, 669×445) (the frame below the foot
+said 395 for Pinyin: only the hide's begin frame is the glass). A switch from the English keyboard to
+emoji while it is up sends no keyboard notification at all. No in-process view shows the glass either
+(the text-effects window's placeholder is the same page, 455.67–951). Open flat upright reports the
+lower page first, then the keyboard's own frame (600, 351 pt tall for Pinyin), and keeps main's halves.
+
+**The rule** (`DuoPosture.visibleKeyboardTop`, `keyboardRow`; `Tests/checks/duo`): a report that
+begins at or above the fold's lower edge is the lower page, and the glass begins the keyboard's own
+height above the foot: the height of the frame it last left as it went at that width
+(`KeyboardFrameMonitor`'s own heights), unless that would put the glass at or above the fold's edge,
+or else the measured 396; any other report is the glass's own top. The row's caps are the
+room less 8, at most 58 and at least 20, with as much black above as below (whole points above, the
+odd point below): 4 + 51 + 4 under the Duo's keyboard (59 pt), 8 + 58 + 8 at 74; 14 pt from the
+sides, 6 pt between the caps (twelve ≈ 48 pt wide across 641; the halves' key row keeps its 8). No row
+off the laptop pose (open flat, the book pose, before iOS 27.1, an iPad: as they were), without the
+person's keyboard (a hardware keyboard raises none; the hold's empty input view reports none), and
+while the keyboard leaves the window bar and the key row in view (148 pt and more).
+
+**The layout** (`PortraitStreamScreen.halves`): the key row's caps as they are, esc, tab, ctrl, opt,
+cmd, shift, the four arrows, the Keyboard cap (lit; a tap takes the keyboard down) and Spotlight while
+the Desktop streams, at the row. The window bar, the key row and the trackpad stay under it, hidden
+from sight, touch and VoiceOver, and come back as they were (the thumbnails' scroll with them).
+#220's `halvesBarShowsKeyboard` and `halvesPadTop` went with their checks and mutants.
+
+**Open, for Noah: the 445 pt keyboards.** Under the emoji or the Chinese keyboard the room between the
+fold and the glass is 10 pt: no row fits under the fold. The rule then puts the least caps (20 pt) at
+the fold's edge, 496–516, their top 10 pt above the glass (still a tap target, labels cut); before
+such a keyboard has once gone, and after a switch to emoji while the keyboard is up (unreported), it
+places the row for 396 and the glass covers all of it but its top 6 pt. The emoji keyboard's ABC and
+the Chinese keyboard's own keys bring the person back, and nothing is worse than before #215 (the key
+row was under every keyboard), but a Chinese keyboard user has no row. Ways on: the row over the
+picture's foot (above the fold) while a keyboard is up, the Keyboard cap alone there when the room is
+under the least row, or B's strip; each a change of the approved A.
+
+**Results** (2026-10-27, the iOS 27.1 runtime only, the private simulator "Sill 215 duo" folded by
+duorig; photos and logs in `~/Downloads/sill-handoff/device-tests/2026-10-27/215/` with a README):
+- Keyboard down, the laptop pose in the mock (a window, the Desktop, the drawer, Settings; default and
+  accessibility-extra-large text): this branch's build pixel for pixel main's (3c257485) and #220's
+  (2e351725).
+- Keyboard up: the row at 500–551 (pixels: the caps from 1500 to 1653 px, the black 1653–1665, the
+  glass from 1665), twelve caps with Spotlight while the Desktop streams, eleven over a window (the
+  mock's Code window); identical at accessibility-extra-large (the caps' sizes are fixed). #220's build
+  beside it: its bar 506–564, its foot under the glass.
+- Live against `SillHost --synthetic` on loopback (software encoder, `SILL_TEST_NO_SCREEN`,
+  `SILL_TEST_INPUT_LOG`, a scripted pointer), XCUITest taps on the row (the devicerig runner from its own
+  branch, 85940f19, not on main; simulator only, no screen recording): esc (key 53), ←, ↓, ↑, → (123, 125, 126, 124), cmd then a
+  typed c (55 down with command, 8 with command, 55 up), and the Keyboard cap took the keyboard down
+  and brought the window bar back. VoiceOver's order (`-SillAXDump`): Escape, Tab, Control, Option,
+  Command, Shift, the four arrows, "Hide the keyboard", "Open Spotlight on the Mac", nothing else.
+- `Tests/checks/duo` 263,693 checks and 90 of 90 mutants; `run-all.sh` all 55; the iOS app Debug and
+  Release for the simulator and Debug for a device, the known `StreamClient` warning alone.
+
 ## For Noah, on an iPhone Duo (a build made with Xcode 27.1), from Oct 23
 
 TestFlight 0.5 (3) was built with Xcode 27.0: on a Duo it runs in the compatibility window (871×669,
@@ -513,6 +589,15 @@ inner display in every pose, shown on every other screen; P1 and P4 below check 
   `DeviceSupportsEnhancedMultitasking` false): Sill beside another app in the book and laptop poses.
 - P13 The connect screen in the laptop pose with five Macs or more: the list scrolls above the fold
   (with the status bar there, five rows show); Add a Mac… side by side above it.
+- P14 The keyboard in the laptop pose (#215): the Keyboard cap, then the key row alone just above the
+  keyboard's glass, black above and below it, the window bar gone; esc, ⌘C and the arrows reach the
+  Mac; the Keyboard cap takes the keyboard down and the bar comes back as it was. The console's
+  `keyboard frame:` and `keyboard row:` lines (the device's report and glass: 455.5 and 555 here).
+  Then the emoji keyboard and Chinese or Japanese input with candidates (the row must stay clear of
+  the glass: the first appearance assumes 396 pt until the keyboard has once gone), Display Zoom if
+  the Duo offers it, a hardware keyboard (nothing should change), open flat with the keyboard up (as
+  before: the halves' key row partly under the keyboard), and VoiceOver (the row read alone, left to
+  right).
 
 ## Left
 

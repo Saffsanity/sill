@@ -8,6 +8,46 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**The keyboard in the Duo's laptop pose (2026-10-27, PR #220 from addhumal's `duo-laptop-keyboard`,
+finished on it with maintainer edits, his commit 2e35172 kept; issue #215, matt-cahill; the measurements,
+the rule, the results and the open question are in docs/iphone-duo-plan.md, "The software keyboard in the
+laptop pose").** The software keyboard covered the laptop pose's key row, its Keyboard cap with it, so
+nothing took the keyboard down. #220 put a Keyboard button in the window bar; Noah chose another way after
+a mock of two strips ("Let's start with A, and move to B in the future if we deem it necessary"): while the
+person's software keyboard is up there, the key row alone between the fold and the keyboard, the window bar
+hidden and back as it was with the keyboard down; B (a two-row strip with app icons) deferred. Device only,
+no wire change; every Duo build and photo on the iOS 27.1 runtime.
+- What UIKit reports in the laptop pose (iOS 27.1 simulator; DEBUG `-SillKeyboardProbe 1`): shown, every
+  keyboard as the whole lower page from the fold's top edge, (0, 455.5, 669×495.5), begin frame zero; going,
+  the glass as the hide's begin frame: the English keyboard (0, 555, 669×396), the Chinese (Pinyin) and
+  emoji keyboards (0, 506, 669×445); a switch to emoji while up sends nothing. Screenshots: the English
+  glass's edge at 555.0, keys from 568 (the reporter's screenshot the same; #220's 570 was neither).
+  Taps between the fold and the glass reach Sill.
+- The rule (DuoPosture, pure; `Tests/checks/duo` 263,693 checks, 90 of 90 mutants): `visibleKeyboardTop`
+  (a report at or above the fold's lower edge is the page; the glass begins the keyboard's own height
+  above the foot: the one it last went with at that width (`KeyboardFrameMonitor`, InputOverlay.swift),
+  else the measured 396); `keyboardRow` (the caps the room less 8, at most 58, at least 20, the black above
+  and below alike, 14 pt sides, 6 pt between the caps: 4 + 51 + 4 under the English keyboard's 59 pt, 8 +
+  58 + 8 at 74; nil off the laptop pose, without the person's keyboard, and while the bar and the key row
+  stay in view). PortraitStreamScreen: the caps as they are (the Keyboard cap lit, Spotlight while the
+  Desktop streams) at the row; the controls under it hidden from sight, touch and VoiceOver. #220's
+  `halvesBarShowsKeyboard` and `halvesPadTop` went (PortraitStreamScreen.swift main's but for the row).
+- Open, for Noah: the 445 pt keyboards (emoji, Chinese) leave 10 pt under the fold: the least caps at
+  496–516, their top 10 pt above the glass once such a keyboard has gone once, else (and after an
+  unreported switch to emoji) the row under the glass but its top 6 pt. No placement under the fold fits;
+  the plan names the ways on (the row over the picture's foot, the Keyboard cap alone there, B).
+- Verified (2026-10-27, the plan's Results): keyboard down pixel for pixel main's (3c257485) and #220's
+  builds in the mock (a window, the Desktop, the drawer, Settings, default and accessibility-extra-large);
+  keyboard up the row at 500–551 to the pixel, twelve caps on the Desktop and eleven over a window, the
+  same at accessibility-extra-large; live against a loopback synthetic host, XCUITest taps on the row
+  (esc, the arrows, cmd then c as ⌘C) reached it and the Keyboard cap took the keyboard down; VoiceOver
+  reads the row alone; `run-all.sh` all 55; the iOS app Debug and Release for the simulator and Debug for
+  a device, the known `StreamClient` warning alone. Photos in
+  `~/Downloads/sill-handoff/device-tests/2026-10-27/215/`.
+- **Untested, for Noah:** the plan's P14 on a Duo (the row over the device's own keyboard and its
+  console lines, esc and ⌘C on the Mac, the cap, the emoji and Chinese keyboards, a hardware keyboard,
+  open flat, VoiceOver).
+
 **Capture scale follow-ups (2026-10-27, branch `capture-scale-followups` from main at b4caa910; PR #234).**
 The post-merge verification of #233 (sill-handoff's
 `triage/2026-10-20-reports/verdicts-2026-10-26/pr233-verdict.md`) left small follow-ups, all taken here.
