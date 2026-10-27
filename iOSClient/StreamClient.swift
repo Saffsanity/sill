@@ -25,7 +25,9 @@ struct FoundMac: Identifiable, Hashable {
     /// stranger's until its key says otherwise.
     let savedByName: String?
     /// The row's TXT record carries a recognition tag (any, a saved Mac's or not). A row whose tag
-    /// names no saved Mac is never one (DiscoveryPolicy.rowMac, `reconnectMatches`).
+    /// names no saved Mac is never one (DiscoveryPolicy.rowMac, `reconnectMatches`). The record is
+    /// the result's own, else the last one that result carried while its browser listed it
+    /// (DiscoveryPolicy.rowRecords; a browser made again starts afresh), and so is `door`'s.
     let carriesTag: Bool
     /// How the Mac is reachable, the word at the end of a network or Direct row ("Wired", "Wi-Fi",
     /// "Direct"), or nil when the interfaces it was seen on do not say (DiscoveryPolicy.method), and
@@ -159,6 +161,13 @@ final class StreamClient: ObservableObject {
     // Remote access (StreamClient+Remote.swift). Published on main; the DEBUG harness seeds them.
     /// The Macs this device paired with (SavedMacs), persisted in `SavedMacs.defaultsKey`.
     @Published var savedMacs: [SavedMac] = []
+    /// Custom group names assigned to saved Macs (ConnectionList), persisted in `ConnectionList.groupsKey`.
+    @Published var macGroups: [String: String] = [:]
+    /// Last-stream preview pictures for saved Macs (ConnectionList), stored in Caches/SillPreviews: those
+    /// shown, which is none while the list shows (the files stay: `syncPreviews`).
+    @Published var macPreviews: [String: UIImage] = [:]
+    /// The style the shown pictures follow (`syncPreviews`); nil before the first look at launch.
+    var previewStyle: ConnectionList.Style?
     /// This connection's latest kind 18: who the Mac is and how to reach it from afar. Verified
     /// against the pin when the Mac is a saved one; otherwise decoded unverified, shown in the
     /// panel's Away from home group and never saved.
@@ -328,6 +337,14 @@ final class StreamClient: ObservableObject {
     /// Where the sprite's tip goes, a fraction of the video frame, or nil to hide it: the display
     /// view's `setPointer`, set by `StreamView.wirePointer`. Up to 120 times a second. Main thread.
     var onPointerChange: ((CGPoint?) -> Void)?
+    /// Something that may move the Mac's caret is about to go to the Mac: a click or a key going down
+    /// (TextInputRules.movesCaret), whichever view sent it, a pick, a launch, a window's button, a menu
+    /// item or a gesture. Called before it is queued, so what the stream screen's input view sends of a
+    /// composition still in progress goes out first, where the caret still is; the view then forgets what
+    /// it remembers of what was typed (InputOverlayProxy.caretMayHaveMoved, #138). Typed text never calls
+    /// it, a Return or a Tab among it neither: the input view keeps what was typed, and what came before
+    /// the Return final (TextComposition.fence). Set by StreamScreen. Main thread.
+    var onCaretMayMove: (() -> Void)?
     /// Q1's flip only (`PointerPresence.trackpadLinger`): the one timer that re-renders when the
     /// trackpad's pointer is due to go. Idle while the linger is nil, as it is by default.
     private var lingerRender: DispatchWorkItem?
@@ -386,6 +403,20 @@ final class StreamClient: ObservableObject {
     /// re-measuring; nil once the session ends (`forgetViewport`). Main thread.
     var lastViewport: Viewport?
 
+    // The Mac's sound (kind 43; docs/audio-plan.md §7.5, StreamClient+Audio.swift, AudioOutput).
+    /// This device's mute, the Settings panel's Mute switch (right under Send Audio; off by default): local, remembered
+    /// (`Sill.soundMuted`; the switch saves it through `setSoundMuted`), never sent to the Mac. Main thread.
+    @Published var soundMuted = UserDefaults.standard.bool(forKey: StreamClient.soundMutedKey) {
+        didSet { if soundMuted != oldValue { sound.setMuted(soundMuted) } }
+    }
+    /// Whether the Mac had sound (`macHasSound`) when a move handed the session over: the panel's Mute
+    /// switch stays until the new connection's first kind 16 says (the same Mac). Nil outside a move. Main.
+    var soundAcrossMove: Bool?
+    /// The sound's output: its queue, the playout, the decoder and the engine. The panel's refresh is
+    /// this device's screen's, as the viewport reads it (`screenMaximumFPS`: the scene's screen, not
+    /// `UIScreen.main`), once, as the client is made on the main thread.
+    let sound = AudioOutput(refresh: 1 / Double(StreamClient.screenMaximumFPS()))
+
     /// The Mac's current cursor image (hotspot and size in points), for the pointer sprite, whichever
     /// pointer it shows. Not @Published for the same reason as `presence`. Main thread.
     struct CursorShape { let image: UIImage; let hotspot: CGPoint; let size: CGSize }
@@ -414,6 +445,11 @@ final class StreamClient: ObservableObject {
         var frameAge: MedianMax?
         /// Ping round trips, over the pongs that came back during the second. nil: none did.
         var rtt: MedianMax?
+        /// The Mac's sound: how far it trailed the picture over the last second the sound closed (ms,
+        /// -1 for one with none played), and the packets too late to play since the last report; both
+        /// nil before any sound played this session (ClientStats' `audioBehindMs`, `audioLate`).
+        var soundBehindMs: Int? = nil
+        var soundLate: Int? = nil
     }
 
     /// The typical and the worst of one second's samples, in whole milliseconds.
@@ -496,10 +532,24 @@ final class StreamClient: ObservableObject {
     }
     private var networkBrowser: NWBrowser?
     private var nearbyBrowser: NWBrowser?
+    /// A browse result and the browser that delivered it, by its number (`browsersMade`).
+    private struct Listing {
+        let result: NWBrowser.Result
+        let browser: Int
+    }
     /// What the rows are read from (DiscoveryPolicy.browserResults): each browser's own results, and
     /// while a browser made again settles, those of the one it replaced beside them.
-    private var networkResults: [NWBrowser.Result] = []
-    private var nearbyResults: [NWBrowser.Result] = []
+    private var networkResults: [Listing] = []
+    private var nearbyResults: [Listing] = []
+    /// The TXT record each result those show is read with (DiscoveryPolicy.rowRecords): its own, else
+    /// the last one it carried while its browser listed it. Keyed by the browser that delivered it as
+    /// well as the service, so a browser made again reads its own results with what it delivers
+    /// itself, and the records of the one it replaced serve only that one's results while they are
+    /// shown beside them: the replaced browser may have been suspended, its connection defunct, and
+    /// reported no removal.
+    private var rowRecordMemory: [DiscoveryPolicy.RowRecordKey: DiscoveryPolicy.RowRecord] = [:]
+    /// Browsers made so far, of either kind; each browser's results carry its number.
+    private var browsersMade = 0
     /// The two browsers across their rebuilds (issue #69): iOS makes a suspended app's connection to
     /// mDNSResponder defunct, so each is made again on the return from the background and after it
     /// fails (DiscoveryPolicy.rebuildBrowser).
@@ -512,8 +562,8 @@ final class StreamClient: ObservableObject {
         var failures = 0
         var failedAt: Double?
         /// Its own results, and those of the browser it replaced, shown beside them until `settleEnds`.
-        var fresh: [NWBrowser.Result] = []
-        var kept: [NWBrowser.Result] = []
+        var fresh: [Listing] = []
+        var kept: [Listing] = []
         var settleEnds: Double?
         /// The rebuild a failure waits for, and the settle's end.
         var rebuildWork: DispatchWorkItem?
@@ -861,6 +911,14 @@ final class StreamClient: ObservableObject {
     private let link = SessionLink()
     let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
     private var lastParameterSets: ParameterSets?
+    /// The session's last keyframe with the parameter sets it came with (the Mac sends them before
+    /// every keyframe): a saved Mac's tile picture, decoded when the session ends (KeyframePicture),
+    /// since no snapshot of the screen can take the display layer's video on a device. One frame,
+    /// replaced at each keyframe, dropped with the session (`tearDown`). On `queue`.
+    private var lastKeyframe: (frame: Data, parameterSets: ParameterSets)?
+    /// Disconnect waits for a keyframe (`freshPictureWait`'s token): the next to come is told to the
+    /// main thread. On `queue`.
+    private var keyframeWanted: Int?
 
     // Liveness, on `queue` (docs/remote-access-plan.md §7.6). The host answers every ping, so a
     // live connection never goes quiet for long; a dead path used to keep a frozen picture.
@@ -905,6 +963,8 @@ final class StreamClient: ObservableObject {
 
     /// DEBUG: saved Macs seeded for this run by `-Sill.savedMacs '<JSON>'`; nothing is written back.
     private(set) var savedMacsSeeded = false
+    /// DEBUG: Mac groups seeded for this run by `-Sill.macGroups '<JSON>'`; nothing is written back.
+    private(set) var macGroupsSeeded = false
 
     init() {
         // The hello is built here, on the main thread: it reads UIDevice (the device's name), which
@@ -920,6 +980,12 @@ final class StreamClient: ObservableObject {
         } else {
             savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
         }
+        if let i = arguments.firstIndex(of: "-" + ConnectionList.groupsKey), i + 1 < arguments.count {
+            macGroups = ConnectionList.decodeGroups(arguments[i + 1])
+            macGroupsSeeded = true
+        } else {
+            macGroups = ConnectionList.decodeGroups(UserDefaults.standard.string(forKey: ConnectionList.groupsKey))
+        }
         // A bracketed IPv6 address starts so too (`-SillConnect '[::1]:P'`): an address argument
         // the argument domain dropped goes into the registration domain (this run's memory, never
         // saved), where every reader of UserDefaults finds it. Its readers are this client's
@@ -931,7 +997,9 @@ final class StreamClient: ObservableObject {
         }
         #else
         savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
+        macGroups = ConnectionList.decodeGroups(UserDefaults.standard.string(forKey: ConnectionList.groupsKey))
         #endif
+        syncPreviews(to: connectionStyle)
         // Back from the background: the pings stopped while the app was suspended, which is no loss;
         // and the browsers, whose connection to mDNSResponder iOS may have made defunct meanwhile, are
         // made again (`cameForward`, issue #69).
@@ -944,6 +1012,8 @@ final class StreamClient: ObservableObject {
         }
         // The clipboard's chip looks when Sill becomes active (StreamClient+Clipboard).
         observeClipboardActivation()
+        sound.setMuted(soundMuted)
+        sound.onRouteMuted = { [weak self] in self?.headphonesOut() }
         // The picture's window going away and coming back (KeyframeRecovery).
         observePictureActivation()
     }
@@ -1052,10 +1122,12 @@ final class StreamClient: ObservableObject {
         if kind == .nearby { params.includePeerToPeer = true }
         let browser = NWBrowser(for: .bonjourWithTXTRecord(type: Self.serviceType, domain: nil), using: params)
         let key = browserKey(kind)
+        browsersMade += 1
+        let number = browsersMade
         browser.browseResultsChangedHandler = { [weak self, weak browser] results, _ in
             DispatchQueue.main.async {
                 guard let self, let browser, self[keyPath: key] === browser else { return }
-                self[keyPath: self.lifeKey(kind)].fresh = Array(results)
+                self[keyPath: self.lifeKey(kind)].fresh = results.map { Listing(result: $0, browser: number) }
                 self.showResults(kind)
             }
         }
@@ -1086,7 +1158,7 @@ final class StreamClient: ObservableObject {
     private func lifeKey(_ kind: BrowserKind) -> ReferenceWritableKeyPath<StreamClient, BrowserLife> {
         kind == .network ? \.networkLife : \.nearbyLife
     }
-    private func resultsKey(_ kind: BrowserKind) -> ReferenceWritableKeyPath<StreamClient, [NWBrowser.Result]> {
+    private func resultsKey(_ kind: BrowserKind) -> ReferenceWritableKeyPath<StreamClient, [Listing]> {
         kind == .network ? \.networkResults : \.nearbyResults
     }
 
@@ -1097,13 +1169,13 @@ final class StreamClient: ObservableObject {
         let key = lifeKey(kind)
         let now = ProcessInfo.processInfo.systemUptime
         let life = self[keyPath: key]
-        self[keyPath: resultsKey(kind)] = DiscoveryPolicy.browserResults(kept: life.kept, fresh: life.fresh, name: Self.serviceName(of:),
+        self[keyPath: resultsKey(kind)] = DiscoveryPolicy.browserResults(kept: life.kept, fresh: life.fresh, name: { Self.serviceName(of: $0.result) },
                                                                          settleEnds: life.settleEnds, now: now)
         if let ends = life.settleEnds, now >= ends {
             self[keyPath: key].kept = []
             self[keyPath: key].settleEnds = nil
             #if DEBUG
-            print("browser: the new \(kind.rawValue) browser has settled: \(life.fresh.map(Self.serviceName(of:)).sorted())")
+            print("browser: the new \(kind.rawValue) browser has settled: \(life.fresh.map { Self.serviceName(of: $0.result) }.sorted())")
             #endif
         }
         discoveryChanged()
@@ -1228,7 +1300,7 @@ final class StreamClient: ObservableObject {
         makeBrowser(kind)
         DispatchQueue.main.asyncAfter(deadline: .now() + DiscoveryPolicy.rebuildSettle, execute: settle)
         #if DEBUG
-        print("browser: rebuilt the \(kind.rawValue) browser (\(why)); \(life.kept.map(Self.serviceName(of:)).sorted()) kept beside it for "
+        print("browser: rebuilt the \(kind.rawValue) browser (\(why)); \(life.kept.map { Self.serviceName(of: $0.result) }.sorted()) kept beside it for "
               + "\(Int(DiscoveryPolicy.rebuildSettle)) s")
         #endif
     }
@@ -1263,7 +1335,11 @@ final class StreamClient: ObservableObject {
     /// session's Mac is on (DiscoveryPolicy.pathSightings), which `followBestPath` follows. A row
     /// whose TXT tag this device resolves is that saved Mac, whatever its Bonjour name; a result
     /// without a tag is no saved Mac (an older host, or briefly during a re-registration: the
-    /// reconnect still finds it by the Bonjour name last used with it). Then a Remote row for each
+    /// reconnect still finds it by the Bonjour name last used with it). A result without a TXT
+    /// record at all is read with the last one it carried while its browser has listed it
+    /// (DiscoveryPolicy.rowRecords): with the USB cable pulled, iPadOS listed the Mac on its other
+    /// interfaces with none, and its row read "Update Sill" (2026-10-27). A browser made again starts
+    /// afresh: a name it lists is read with what it delivers itself. Then a Remote row for each
     /// saved Mac neither browser lists, once the network has had its 3 s. Each row also carries its
     /// home door, from its TXT record's `p`, and the word that follows from it and from what this
     /// device knows of that Mac (DiscoveryPolicy.rowWord: "Not paired", "Update Sill"…); a saved Mac
@@ -1274,38 +1350,53 @@ final class StreamClient: ObservableObject {
         if mockDiscovery { return }
         #endif
         // Each result's interfaces twice, as NWInterface, to dial on, and as the policy spells them,
-        // its TXT tag, which names a saved Mac, and its home door (`p`). `stands` is the DEBUG test
-        // rows' saved Mac (they carry no tag): the one a `-SillConnect` address counts as, and the
-        // remote session's for `-SillMoveHomeTest`'s row.
+        // its key (the browser that delivered it, its name and domain: DiscoveryPolicy.RowRecordKey)
+        // and its TXT record (its tag, which names a saved Mac, and its home door, `p`), nil when it
+        // carries none. The DEBUG test rows, which no browser lists (browser 0), carry a record of their
+        // own making, no tag and the door they stand for, so a kept record never changes them; `stands`
+        // is their saved Mac: the one a `-SillConnect` address counts as, and the remote session's for
+        // `-SillMoveHomeTest`'s row.
         typealias Seen = (name: String, endpoint: NWEndpoint, interfaces: [NWInterface], policy: [DiscoveryPolicy.Interface],
-                          tag: String?, door: DiscoveryPolicy.HomeDoor, stands: String?)
-        var network: [Seen] = networkResults.map {
-            (Self.serviceName(of: $0), $0.endpoint, Array($0.interfaces), $0.interfaces.map(Self.policyInterface), Self.tag(of: $0),
-             Self.door(of: $0), nil)
+                          key: DiscoveryPolicy.RowRecordKey, record: DiscoveryPolicy.RowRecord?, stands: String?)
+        func seen(_ listing: Listing) -> Seen {
+            let r = listing.result, name = Self.serviceName(of: r)
+            return (name, r.endpoint, Array(r.interfaces), r.interfaces.map(Self.policyInterface),
+                    DiscoveryPolicy.RowRecordKey(browser: listing.browser, name: name, domain: Self.serviceDomain(of: r)), Self.record(of: r), nil)
         }
+        var network: [Seen] = networkResults.map(seen)
         #if DEBUG
         // The move and path tests' rows are the -SillConnect address's Mac: with `-SillHomeDoor`, the
         // one saved Mac when exactly one is saved (docs/home-pairing-plan.md §7.9).
         let stands = Self.testHomeDoor != .plain && savedMacs.count == 1 ? savedMacs[0].macID : nil
-        network += testNetworkRows.map { ($0.name, $0.endpoint, [], [], nil, Self.testHomeDoor, stands) }
+        let testKey = { (name: String) in DiscoveryPolicy.RowRecordKey(browser: 0, name: name, domain: "local.") }
+        network += testNetworkRows.map {
+            ($0.name, $0.endpoint, [], [], testKey($0.name), DiscoveryPolicy.RowRecord(tag: nil, door: Self.testHomeDoor), stands)
+        }
         // The move home test's row is the remote session's saved Mac at a home door that speaks TLS
         // (`-SillMoveHomeTest`: its host runs --pairing, as Sill.app's home door does).
-        network += testHomeRows.map { ($0.name, $0.endpoint, [], [], nil, .pairingRequired, $0.macID) }
-        if let row = pathTest?.row { network.append((row.name, row.endpoint, [], row.interfaces, nil, Self.testHomeDoor, stands)) }
-        #endif
-        let nearby: [Seen] = nearbyResults.map {
-            (Self.serviceName(of: $0), $0.endpoint, Array($0.interfaces), $0.interfaces.map(Self.policyInterface), Self.tag(of: $0),
-             Self.door(of: $0), nil)
+        network += testHomeRows.map {
+            ($0.name, $0.endpoint, [], [], testKey($0.name), DiscoveryPolicy.RowRecord(tag: nil, door: .pairingRequired), $0.macID)
         }
+        if let row = pathTest?.row {
+            network.append((row.name, row.endpoint, [], row.interfaces, testKey(row.name), DiscoveryPolicy.RowRecord(tag: nil, door: Self.testHomeDoor),
+                            stands))
+        }
+        #endif
+        let nearby: [Seen] = nearbyResults.map(seen)
         let rows = DiscoveryPolicy.rows(network: network.map(\.name), nearby: nearby.map { ($0.name, $0.policy.map(\.name)) })
         let now = ProcessInfo.processInfo.systemUptime
         directSince = DiscoveryPolicy.directSince(directSince, rows: rows, now: now)
         sightings = DiscoveryPolicy.sightings(sightings, listed: Set(network.map(\.name)), now: now)
         paths = DiscoveryPolicy.pathSightings(paths, network: network.map { ($0.name, $0.policy) }, now: now)
+        // The record each result is read with: its own, else the last one it carried while its browser
+        // listed it (DiscoveryPolicy.rowRecords; by browser, so one made again starts afresh). A row is
+        // read with the record of the result it is built from, its name's first.
+        rowRecordMemory = DiscoveryPolicy.rowRecords(rowRecordMemory, listed: (network + nearby).map { ($0.key, $0.record) })
+        let records = rowRecordMemory
+        let record = { (row: (name: String, direct: Bool)) in (row.direct ? nearby : network).first { $0.name == row.name }.flatMap { records[$0.key] } }
         // A saved Mac seen with `p` has a door that speaks TLS: remembered first, so a row of it
         // without `p` (a replayed tag, or an older Sill.app put back) reads "Update Sill" at once.
-        let listed = rows.compactMap { row in (row.direct ? nearby : network).first { $0.name == row.name } }
-        let seenTLS = Set(listed.filter { $0.door != .plain }.compactMap { SavedMacs.recognize(tag: $0.tag, in: savedMacs) })
+        let seenTLS = Set(rows.compactMap(record).filter { $0.door != .plain }.compactMap { SavedMacs.recognize(tag: $0.tag, in: savedMacs) })
         if let marked = SavedMacs.seenOverTLS(seenTLS, in: savedMacs) {
             savedMacs = marked
             storeSavedMacs()
@@ -1324,14 +1415,15 @@ final class StreamClient: ObservableObject {
             guard let seen = (row.direct ? nearby : network).first(where: { $0.name == row.name }) else { return nil }
             let wired = DiscoveryPolicy.dialInterface(direct: row.direct, interfaces: seen.policy)
             let wifi = DiscoveryPolicy.wifiInterface(direct: row.direct, interfaces: seen.policy)
-            let macID = SavedMacs.recognize(tag: seen.tag, in: savedMacs) ?? seen.stands
-            let carriesTag = !(seen.tag ?? "").isEmpty
+            let read = records[seen.key]
+            let macID = SavedMacs.recognize(tag: read?.tag, in: savedMacs) ?? seen.stands
+            let carriesTag = !(read?.tag ?? "").isEmpty
             let named = DiscoveryPolicy.rowMac(tagged: macID, carriesTag: carriesTag, name: row.name, saved: byName)
             let savedByName = named?.tagNamed == false ? named?.macID : nil
             let saved = named.flatMap { n in savedMacs.first { $0.macID == n.macID } }
             // A tag that names no saved Mac under a saved Mac's name: a Mac set up again (a new key),
             // or a look-alike; either way a tap asks, whatever its `p` (DiscoveryPolicy.rowDoor).
-            let door = DiscoveryPolicy.rowDoor(seen.door, otherTagUnderSavedName: DiscoveryPolicy.otherTagUnderSavedName(
+            let door = DiscoveryPolicy.rowDoor(read?.door ?? .plain, otherTagUnderSavedName: DiscoveryPolicy.otherTagUnderSavedName(
                 tagged: macID, carriesTag: carriesTag, name: row.name, saved: byName))
             let method = DiscoveryPolicy.method(direct: row.direct, interfaces: seen.policy)
             let word = DiscoveryPolicy.rowWord(door: door, saved: saved != nil, revoked: saved?.revoked == true,
@@ -1356,13 +1448,18 @@ final class StreamClient: ObservableObject {
         next += remote.map { FoundMac(name: $0.name, endpoint: nil, route: .remote, macID: $0.macID) }
         guard next != macs else { return }
         #if DEBUG
-        // What each row's word was read from, to check it on a device (the cable in and out).
+        // What each row's word was read from, to check it on a device (the cable in and out): its
+        // interfaces, its door and, when its result carries no TXT record, whether the row keeps the
+        // last one that result carried (DiscoveryPolicy.rowRecords).
         for mac in next where mac.route != .remote {
             let seen = (mac.direct ? nearby : network).first { $0.name == mac.name }
             let named = seen.map { s in s.interfaces.isEmpty ? s.policy.map { "\($0.name) (\($0.type))" } : s.interfaces.map { "\($0.name) (\($0.type))" } } ?? []
-            let door = mac.door == .plain ? "" : " (p=\(mac.door == .open ? "0" : "1")\(mac.homeWord == .method(mac.method) ? "" : ", \(mac.homeWord.word ?? "no word")"))"
+            let word = mac.homeWord == .method(mac.method) ? "" : ", \(mac.homeWord.word ?? "no word")"
+            let door = mac.door == .plain ? (word.isEmpty ? "" : " (no p\(word))") : " (p=\(mac.door == .open ? "0" : "1")\(word))"
             let byName = mac.savedByName.map { " (saved Mac \($0) by its name alone)" } ?? ""
-            print("discovery: \(mac.name): \(mac.method?.word ?? "no word"), seen on \(named.joined(separator: ", "))\(byName)\(door)")
+            let kept = seen == nil || seen?.record != nil ? ""
+                : seen.flatMap({ records[$0.key] }) == nil ? " (no TXT record)" : " (TXT record kept: this result carries none)"
+            print("discovery: \(mac.name): \(mac.method?.word ?? "no word"), seen on \(named.joined(separator: ", "))\(byName)\(door)\(kept)")
         }
         #endif
         macs = next
@@ -1373,12 +1470,6 @@ final class StreamClient: ObservableObject {
             DispatchQueue.main.async { self.connect(to: mac) }
         }
         #endif
-    }
-
-    /// A result's recognition tag (TXT `r`), if it carries one.
-    static func tag(of result: NWBrowser.Result) -> String? {
-        if case .bonjour(let txt) = result.metadata { return txt[RecognitionTag.txtKey] }
-        return nil
     }
 
     /// An interface as DiscoveryPolicy spells it, case for case.
@@ -1403,7 +1494,7 @@ final class StreamClient: ObservableObject {
         #endif
         let now = ProcessInfo.processInfo.systemUptime
         let out = DiscoveryPolicy.decide(DiscoveryPolicy.Input(
-            now: now, connected: connected, onNetwork: Set(networkResults.map(Self.serviceName(of:))),
+            now: now, connected: connected, onNetwork: Set(networkResults.map { Self.serviceName(of: $0.result) }),
             remembered: Set(directWirelessMacs), searchingSince: searchingSince, askedNearby: askedNearby,
             nearbyRunning: nearbyBrowser != nil, listed: macs.count, localNetworkDenied: localNetworkDenied))
         if out.browseNearby, nearbyBrowser == nil {
@@ -1459,6 +1550,12 @@ final class StreamClient: ObservableObject {
     static func serviceName(of result: NWBrowser.Result) -> String {
         if case .service(let name, _, _, _) = result.endpoint { return name }
         return "\(result.endpoint)"
+    }
+
+    /// A result's Bonjour domain ("local."), or "" when its endpoint is not a service.
+    static func serviceDomain(of result: NWBrowser.Result) -> String {
+        if case .service(_, _, let domain, _) = result.endpoint { return domain }
+        return ""
     }
 
     /// A row of the connect screen. Only a Direct row is connected with peer-to-peer allowed; a row
@@ -1624,6 +1721,7 @@ final class StreamClient: ObservableObject {
         refusedListing = nil
         resetHomeMove()       // …and what a remote session knew of its move home
         resetPointerFeed()    // …and the Mac has the pointer until this device's first input (Q6)
+        sound.sessionStarted(away: false)   // …and its sound starts afresh (a move's hand-over keeps it)
         hostName = name
         var bonjourName: String?
         if case .service(let service, _, _, _) = endpoint { bonjourName = service }
@@ -1853,7 +1951,9 @@ final class StreamClient: ObservableObject {
         if let v = UserDefaults.standard.string(forKey: "SillHelloVersion"), !v.isEmpty { version = v }
         #endif
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-        return Wire.encode(Hello(appVersion: version, build: build, protocol: SillProtocol.current, device: ClientStatsReporter.deviceName))
+        // The codecs of the Mac's sound it plays: a Mac sends kind 43 only to a device that lists one.
+        return Wire.encode(Hello(appVersion: version, build: build, protocol: SillProtocol.current, device: ClientStatsReporter.deviceName,
+                                 audio: AudioCodec.devicePlays))
     }()
 
     /// The hello, the first thing on every session connection, written straight to `c` before
@@ -2438,6 +2538,7 @@ final class StreamClient: ObservableObject {
                 persistSavedMacs()
             }
             remoteRoute = nil
+            sound.setAway(false)   // the jitter cover takes home's bounds, and nothing else resets (rules 2 and 7)
             homeInfo = DiscoveryPolicy.HomeMoveInfo()
             failedHomeMoves = nil
             homeMoveTrust = nil
@@ -2450,6 +2551,7 @@ final class StreamClient: ObservableObject {
         lastPongAt = ProcessInfo.processInfo.systemUptime
         setRoute(from: c.currentPath, fresh: true)   // the new connection's, which carries the session now
         status = "Connected to \(hostName)"
+        soundAcrossMove = macHasSound
         settings.reset()
         settingsProblem = nil
         settingsExpiry?.cancel()
@@ -3112,6 +3214,9 @@ final class StreamClient: ObservableObject {
         refusedListing = nil
         resetHomeMove()
         resetPointerFeed()   // the Mac has the pointer until this device's first input (Q6)
+        // Away from home through a VPN or the internet: away's cover, its start and bounds (rule 2). By
+        // address (a LAN address through the remote door) is home, as the Mac's AwayPolicy counts it.
+        sound.sessionStarted(away: s.route != .remote(.address))
         session = s
         goodbye = nil
         // Its way in is its route line's (`remoteRoute`, at its first window list), never a link word.
@@ -3145,8 +3250,25 @@ final class StreamClient: ObservableObject {
         }
     }
 
-    /// The user chose to leave. No reconnect.
+    /// The user chose to leave. No reconnect. With tiles on, a saved Mac's picture is the last thing
+    /// on screen: the Mac is asked for a keyframe first, every Mac as the picture's recovery asks, and
+    /// the session ends when it comes or after 300 ms, whichever is first (ConnectionList.freshPicture);
+    /// meanwhile the stream screen stays, and a second tap does nothing. A Mac from before kind 44 skips
+    /// the ask: its picture is the keyframe kept, 300 ms later.
     func disconnect() {
+        guard freshPictureWait == nil else { return }
+        switch freshPictureOnLeaving() {
+        case .stored:
+            finishDisconnect()
+        case .ask:
+            waitForFreshKeyframe(asked: true)
+        case .awaitAsked:
+            waitForFreshKeyframe(asked: false)
+        }
+    }
+
+    private func finishDisconnect() {
+        freshPictureWait = nil
         reconnect = nil
         cancelRemoteDial()
         let c = connection
@@ -3154,6 +3276,117 @@ final class StreamClient: ObservableObject {
         c?.cancel()
         tearDown(status: Self.lookingOnNetwork)
         updateDiscovery()
+    }
+
+    /// Disconnect waiting for its keyframe (`waitForFreshKeyframe`): the wait's token. Main thread.
+    private var freshPictureWait: Int?
+    private var freshPictureToken = 0
+    /// When the wait began (uptime), for the DEBUG line.
+    private var freshPictureAskedAt: TimeInterval = 0
+
+    /// What Disconnect does first for the tile's picture (ConnectionList.freshPicture). Main thread.
+    private func freshPictureOnLeaving() -> ConnectionList.FreshPicture {
+        guard connected, videoSize != .zero, let macID = session?.macID else { return .stored }
+        let inFront = displayView.window?.windowScene?.activationState == .foregroundActive
+        let takes = ConnectionList.takesPreview(style: connectionStyle, sceneActive: inFront, saved: savedMac(macID) != nil)
+        let now = ProcessInfo.processInfo.systemUptime
+        let decision = ConnectionList.freshPicture(takesPreview: takes, streaming: active != .none,
+                                                   sinceLastAsk: keyframeRecovery.lastAsk.map { now - $0 },
+                                                   askOut: keyframeRecovery.asked)
+        #if DEBUG
+        if takes, decision == .stored {
+            let why = active == .none ? "nothing streams" : "the picture's recovery asked for one under 2 s ago, and it came"
+            print("tiles: no keyframe asked for the picture of \(macID): \(why)")
+        }
+        #endif
+        return decision
+    }
+
+    /// Asks the Mac for a keyframe (`asked`; else one the picture's recovery asked for is due) and
+    /// ends the session when it comes or after `ConnectionList.freshKeyframeWait`. The wait is told of
+    /// the keyframe on `queue` (`keyframeWanted`), set there before the ask goes out, so its answer
+    /// cannot slip past it. Main thread.
+    private func waitForFreshKeyframe(asked: Bool) {
+        freshPictureToken += 1
+        let token = freshPictureToken
+        freshPictureWait = token
+        freshPictureAskedAt = ProcessInfo.processInfo.systemUptime
+        queue.async { self.keyframeWanted = token }
+        if asked {
+            send(.keyframeRequest, payload: Data())
+            // The picture's recovery asks nothing more: the session ends within the wait, and its own
+            // ask, due meanwhile while an interruption's keyframe is overdue, would come within the
+            // Mac's second of this one and be refused (KeyframeRecovery keeps asks 2 s apart for that).
+            keyframeAskWork?.cancel(); keyframeAskWork = nil
+        }
+        #if DEBUG
+        print("tiles: \(asked ? "asked the Mac for a keyframe" : "waiting for the keyframe the picture's recovery asked for") "
+              + "before the session ends, for the picture of \(session?.macID ?? "?"); at most \(Int(ConnectionList.freshKeyframeWait * 1000)) ms")
+        #endif
+        DispatchQueue.main.asyncAfter(deadline: .now() + ConnectionList.freshKeyframeWait) { [weak self] in
+            self?.freshKeyframeCame(token, timedOut: true)
+        }
+    }
+
+    /// The keyframe Disconnect waited for came (it is kept already: `lastKeyframe`), or the wait ran
+    /// out: the session ends now. Nothing when that wait is over (the session ended another way, or
+    /// the other of the two came first). Main thread.
+    private func freshKeyframeCame(_ token: Int, timedOut: Bool) {
+        guard freshPictureWait == token else { return }
+        queue.async { if self.keyframeWanted == token { self.keyframeWanted = nil } }
+        #if DEBUG
+        let ms = Int(((ProcessInfo.processInfo.systemUptime - freshPictureAskedAt) * 1000).rounded())
+        print(timedOut ? "tiles: no keyframe in \(ms) ms; the picture from the one kept"
+                       : "tiles: the keyframe came \(ms) ms after the ask; the picture from it")
+        #endif
+        finishDisconnect()
+    }
+
+    /// The tile's picture of `macID`: the keyframe kept (`lastKeyframe`), decoded off the main thread
+    /// within ConnectionList.decodeBound (KeyframePicture), and kept when it lands while tiles are still
+    /// on and the Mac still saved (ConnectionList.keepsDecodedPicture): `savePreview` puts it on the tile
+    /// at once (the connect screen may be showing by then) and writes its JPEG. Nothing, and the old
+    /// file stays, when no keyframe came, the decode fails or gives no answer in time, or the picture is
+    /// black. From `tearDown`, whose next block on `queue` drops the keyframe. Main thread.
+    private func takePreview(of macID: String) {
+        queue.async { [weak self] in
+            guard let kept = self?.lastKeyframe else {
+                #if DEBUG
+                print("tiles: no picture of \(macID) kept: no keyframe came in this session")
+                #endif
+                return
+            }
+            #if DEBUG
+            let started = CACurrentMediaTime()
+            #endif
+            KeyframePicture.make(frame: kept.frame, parameterSets: kept.parameterSets, bound: ConnectionList.decodeBound) { result in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    #if DEBUG
+                    let ms = Int(((CACurrentMediaTime() - started) * 1000).rounded())
+                    #endif
+                    switch result {
+                    case .success(let picture):
+                        guard ConnectionList.keepsDecodedPicture(style: self.connectionStyle, saved: self.savedMac(macID) != nil) else {
+                            #if DEBUG
+                            print("tiles: no picture of \(macID) kept: decoded in \(ms) ms, but the list is on or the Mac is no longer saved")
+                            #endif
+                            return
+                        }
+                        #if DEBUG
+                        print("tiles: decoded the picture of \(macID) from its \(kept.frame.count / 1024) KB keyframe in \(ms) ms, \(picture.width)×\(picture.height)")
+                        #endif
+                        self.savePreview(UIImage(cgImage: picture, scale: ConnectionList.previewScale, orientation: .up), for: macID)
+                    case .failure(let why):
+                        #if DEBUG
+                        print("tiles: no picture of \(macID) kept: \(why) (\(ms) ms); the old one stays")
+                        #else
+                        _ = why
+                        #endif
+                    }
+                }
+            }
+        }
     }
 
     /// The connection ended: the Mac went away (host quit, Wi-Fi dropped, connection reset, a
@@ -3168,6 +3401,8 @@ final class StreamClient: ObservableObject {
         if let released = link.release(c) { fenceEnded(c, released, why: "the direct connection closed") }
         DispatchQueue.main.async {
             guard self.connection === c else { return }   // stale callback from a connection we already replaced
+            // A Disconnect waiting for its keyframe: the person's leave stands, with no reconnect.
+            if self.freshPictureWait != nil { self.finishDisconnect(); return }
             // A move carries the session on (`rescue`), not when this device closed the connection
             // itself (`end`: a message no Sill sends): that one ends with the words it deserves.
             if self.sessionDead || (end == nil && self.rescue(from: c)) { return }
@@ -3181,6 +3416,7 @@ final class StreamClient: ObservableObject {
     /// that was to carry a session whose connection had gone on did not (`moveEnded`,
     /// `followBestPath`). Main thread.
     private func endSession(error: NWError? = nil, end: RemoteDialPolicy.End? = nil) {
+        if freshPictureWait != nil { finishDisconnect(); return }    // a Disconnect waiting for its keyframe stands
         connection = nil
         #if DEBUG
         if connected { print("session: over; back to the connect screen") }
@@ -3218,7 +3454,29 @@ final class StreamClient: ObservableObject {
         sessionHost = nil
         refusedListing = nil
         resetHomeMove()
-        queue.async { self.lastParameterSets = nil; self.pendingMove = nil; self.stopMeasuring() }
+        // A saved Mac's tile shows its screen as the last session ended, kept only while tiles are on and
+        // only from this session's own window in front (ConnectionList.takesPreview): the window's
+        // scene, not the app, since one of two Sill windows can be behind while the app is active. The
+        // picture is the session's last keyframe, decoded (KeyframePicture): never a snapshot of the
+        // screen, where a device draws the video black. A Disconnect asked for a fresh one first; a
+        // session lost or ended by the Mac gives the one kept.
+        freshPictureWait = nil
+        if connected, videoSize != .zero, let macID = session?.macID {
+            let inFront = displayView.window?.windowScene?.activationState == .foregroundActive
+            if ConnectionList.takesPreview(style: connectionStyle, sceneActive: inFront, saved: savedMac(macID) != nil) {
+                takePreview(of: macID)
+            } else {
+                #if DEBUG
+                print("tiles: no picture of \(macID) kept: \(connectionStyle), window in front \(inFront), saved \(savedMac(macID) != nil)")
+                #endif
+            }
+        }
+        // After the picture's keyframe was taken (the block above queued first): nothing of this
+        // session's stream outlives it.
+        queue.async {
+            self.lastParameterSets = nil; self.lastKeyframe = nil; self.keyframeWanted = nil
+            self.pendingMove = nil; self.stopMeasuring()
+        }
         firstListDeadline?.cancel()
         firstListDeadline = nil
         session = nil
@@ -3270,6 +3528,7 @@ final class StreamClient: ObservableObject {
         keyframeAskWork = nil
         // Nothing of a Mac's settings outlives its connection: the next one sends them afresh.
         settings.reset()
+        soundAcrossMove = nil
         settingsProblem = nil
         connectedAt = nil
         settingsExpiry?.cancel()
@@ -3278,6 +3537,8 @@ final class StreamClient: ObservableObject {
         // Nor its menus: an open one says "Not connected.", the button goes, and the iPad's bar
         // loses the Mac's menus at its next rebuild.
         resetMenus()
+        // Nor its sound: the engine stops, and the next session's floor and cover start afresh.
+        sound.sessionEnded()
         // Nor the clipboard's subscription, its chip or its note.
         resetClipboard()
     }
@@ -3296,7 +3557,8 @@ final class StreamClient: ObservableObject {
     /// is not the person's doing.
     private func request(_ source: StreamSource) {
         choicesSent += 1
-        send(.selectSource, Wire.encode(source))
+        onCaretMayMove?()   // the Mac raises what it picks: its caret is in another window
+        sendAfterInput(.selectSource, Wire.encode(source))
         #if DEBUG
         // Layout harness (mock, no connection): show the pick locally so taps can be checked.
         if connection == nil { DispatchQueue.main.async { self.active = source } }
@@ -3306,7 +3568,8 @@ final class StreamClient: ObservableObject {
     /// The bar's long-press menu: close, minimize or full-screen a window on the Mac.
     func command(_ action: WindowCommand.Action, window id: UInt32) {
         noteAction()
-        send(.windowCommand, Wire.encode(WindowCommand(id: id, action: action)))
+        onCaretMayMove?()
+        sendAfterInput(.windowCommand, Wire.encode(WindowCommand(id: id, action: action)))
     }
 
     // MARK: Bar order
@@ -3350,7 +3613,8 @@ final class StreamClient: ObservableObject {
     func launch(bundleID: String) {
         noteAction()
         choicesSent += 1   // the host picks the launched app's window: a choice, like a pick
-        send(.launchApp, Wire.encode(LaunchApp(bundleID: bundleID)))
+        onCaretMayMove?()
+        sendAfterInput(.launchApp, Wire.encode(LaunchApp(bundleID: bundleID)))
     }
 
     /// Send one input event to the Mac. Safe to call from the main thread; the work hops to the
@@ -3372,6 +3636,8 @@ final class StreamClient: ObservableObject {
         // Every input passes here, a hover and a flick's coast included: the tour's rule counts it
         // as something happening (StreamScreen.considerTour).
         lastInputAt = ProcessInfo.processInfo.systemUptime
+        // A click or a key from any view: what the input view remembers of what was typed goes (#138).
+        if TextInputRules.movesCaret(event) { onCaretMayMove?() }
         #if DEBUG
         // The tour takes every touch and the keyboard while it shows, and holds back the pointer's
         // move to a new frame's middle, so nothing should get here then; the one case expected is a
@@ -3418,6 +3684,14 @@ final class StreamClient: ObservableObject {
         return defaults.object(forKey: gesturesKey) == nil || defaults.bool(forKey: gesturesKey)
     }
 
+    /// This device's switch for Reverse Scrolling (the Settings panel's This iPad group; issue #143): off
+    /// unless turned on. While on, a finger dragged over the picture and two fingers on the on-screen
+    /// trackpad scroll the content the other way, their coast too; a connected trackpad or mouse keeps
+    /// iPadOS's own Natural Scrolling (`ScrollDirection`). The device's own preference, never sent to
+    /// the Mac; read as each scroll begins (`InputOverlayView`, `TrackpadSurface`).
+    static let reverseScrollKey = "Sill.reverseScroll"
+    static var reverseScrollOn: Bool { UserDefaults.standard.bool(forKey: reverseScrollKey) }
+
     /// This device's switch for Larger Picture (the Settings panel's This iPhone group; issue #58,
     /// docs/larger-picture-plan.md): off unless turned on. The device's own preference, never sent to
     /// the Mac; the stream screen reads it with what streams (`active`): it acts only while a window
@@ -3439,6 +3713,7 @@ final class StreamClient: ObservableObject {
                                             generation: TrackpadGesture.generation, windowStreams: windowStreams)
         guard plan.send else { return false }
         if plan.desktopFirst { select(.desktop) }
+        onCaretMayMove?()
         let payload = Wire.encode(TrackpadGesture(gesture: gesture.rawValue, fingers: fingers))
         queue.async { [weak self] in
             guard let self else { return }
@@ -3460,6 +3735,14 @@ final class StreamClient: ObservableObject {
         let message = StreamMessage(kind: kind, timestamp: Date().timeIntervalSince1970,
                                     isKeyframe: false, payload: payload)
         link.send(message.serialized())
+    }
+
+    /// A pick, a launch, a window's button or a menu item, behind the input already on its way
+    /// (`sendInput` hops to `queue`, which is serial): what an input method was still composing, sent
+    /// just before as `onCaretMayMove` let go of it, and anything typed a moment earlier reach the Mac
+    /// before it moves the caret, where the caret was. Sent straight away, it could overtake them.
+    private func sendAfterInput(_ kind: StreamMessageKind, _ payload: Data) {
+        queue.async { [weak self] in self?.send(kind, payload) }
     }
 
     // MARK: - The pointer (docs/pointer-visibility-plan.md §7.3)
@@ -3725,6 +4008,14 @@ final class StreamClient: ObservableObject {
             let age = (Date().timeIntervalSince1970 - header.timestamp) * 1000
             if age.isFinite { frameAgeSamples.append(min(max(age, 0), Self.sampleCeilingMs)) }
             frameCounter += 1
+            if header.isKeyframe, let ps = lastParameterSets {
+                lastKeyframe = (data, ps)       // the tile's picture (ConnectionList); its payload, not a copy
+                if let token = keyframeWanted {
+                    keyframeWanted = nil
+                    DispatchQueue.main.async { self.freshKeyframeCame(token, timedOut: false) }
+                }
+            }
+            frameForSound(header)
             onFrame?(data, header.isKeyframe)
         case .windowList:
             guard let list = Wire.decode(WindowList.self, from: data) else { return }
@@ -3843,6 +4134,9 @@ final class StreamClient: ObservableObject {
             DispatchQueue.main.async { self.cursorShape = CursorShape(image: image, hotspot: hotspot, size: size) }
         case .macPointer:
             receivePointer(data)
+        case .audio:
+            // The Mac's sound: a format, or packets (StreamClient+Audio, AudioOutput).
+            receiveAudio(header, data)
         case .hostSettings:
             guard let state = Wire.decode(HostSettingsState.self, from: data) else { return }
             let from = connection
@@ -3959,11 +4253,14 @@ final class StreamClient: ObservableObject {
         windowOpenedAt = now
         // Per second of the window's real length, which is a second unless the app was suspended.
         let fps = elapsed > 0 ? Int((Double(frameCounter) / elapsed).rounded()) : frameCounter
-        let stats = LinkStats(fps: fps, frameAge: MedianMax(frameAgeSamples), rtt: MedianMax(rttSamples))
+        let audio = sound.takeSecond()
+        let stats = LinkStats(fps: fps, frameAge: MedianMax(frameAgeSamples), rtt: MedianMax(rttSamples),
+                              soundBehindMs: audio.map { $0.behindMs ?? -1 }, soundLate: audio?.late)
         frameCounter = 0
         frameAgeSamples.removeAll(keepingCapacity: true)
         rttSamples.removeAll(keepingCapacity: true)
         if let rtt = stats.rtt { worstRecentRttMs = Double(rtt.max) }
+        sound.rtt(median: stats.rtt?.median)
         DispatchQueue.main.async {
             guard self.connection === c else { return }   // torn down meanwhile: stay nil
             self.linkStats = stats
@@ -4062,6 +4359,7 @@ extension StreamClient {
         let linkBefore = settings.host?.link
         #endif
         let refused = settings.receive(state)
+        if let fps = state.stream?.fps { sound.setStreamFPS(fps) }
         if state.answering != nil { settingsProblem = nil }
         if !refused.isEmpty { settingsRefusals += 1 }
         scheduleSettingsExpiry()
@@ -4312,7 +4610,8 @@ extension StreamClient {
         switch menus.press(row, token: menuToken) {
         case .send(let request)?:
             menuToken += 1
-            send(.pressMenuItem, payload: Wire.encode(request))
+            onCaretMayMove?()
+            sendAfterInput(.pressMenuItem, Wire.encode(request))
             #if DEBUG
             print("menus: chose \(row.title) (\(request.id ?? ""))")
             if connection == nil { mockAnswer(request) }

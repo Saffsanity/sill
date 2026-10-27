@@ -7,9 +7,13 @@ struct ContentView: View {
     /// Tells the host what this device sees, once a second while connected. Also covers the DEBUG
     /// harness's `-SillLive 1` session, which runs on this same client.
     @StateObject private var statsReporter = ClientStatsReporter()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         root.onAppear { statsReporter.attach(to: client) }
+            // This window's sound: a scene in the background is not heard, though another keeps the app
+            // active (inactive is still on screen: Control Center over it, a headless simulator).
+            .onChange(of: scenePhase, initial: true) { _, phase in client.sound.setSceneForeground(phase != .background) }
     }
 
     @ViewBuilder private var root: some View {
@@ -189,8 +193,9 @@ struct ContentView: View {
 /// * `-SillSettingsEnd 1` — with `-SillSettings 1`: the panel's rows start scrolled to their end,
 ///   so a photo of a short screen shows the last groups (Direct Wireless, Away from home, This
 ///   iPad, Take the Tour). `-SillSettingsScroll gestures` starts them at the This iPad group
-///   instead (its switch and rows, which the footnotes under them push out of the end's view on a
-///   short screen).
+///   instead (its switches and rows, which the footnotes under them push out of the end's view on a
+///   short screen), `-SillSettingsScroll sound` at the Send Audio row, `-SillSettingsScroll mute` at
+///   the Mute row under Send Audio, and `-SillSettingsScroll reverse` at its Reverse Scrolling switch.
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
@@ -287,18 +292,20 @@ struct ContentView: View {
 ///   `-SillLive 1`, whose session shows the real thing.
 /// * `-SillInputScript '<t> <step>; …'` — with `-SillLive 1` only: input for the simulator gates,
 ///   which have no finger (`InputScript`): `t` is seconds since the session's first window list, and
-///   a step is `down`, `pad DX,DY`, `lift` or `click` on the portrait pad, `tap X,Y` on the stream
-///   (a frame fraction), `key USAGE` (a hardware key) or `row USAGE` (a key of the portrait key
-///   row), `esc [MODS]`, `scroll DX,DY`, `wheel DX,DY`, `keyboard attach|detach` or `orient
-///   landscape|portrait` (InputScript has them all). The console says "input script: …" at each.
+///   a step is `down`, `pad DX,DY`, `lift`, `click` or `padscroll DX,DY` on the portrait pad, `tap
+///   X,Y` (a frame fraction) or `drag DX,DY` on the stream, `key USAGE` (a hardware key) or `row
+///   USAGE` (a key of the portrait key row), `esc [MODS]`, `scroll DX,DY`, `wheel DX,DY`, `keyboard
+///   attach|detach` or `orient landscape|portrait` (InputScript has them all). The console says
+///   "input script: …" at each.
 ///   It runs only when the session was dialled by `-SillConnect` to a loopback address and the
 ///   host's first window list has no version
 ///   (Sill.app's always has, and would post the input to this Mac): else "input script: refused:
 ///   …" and nothing is sent. Point it only at `--synthetic` hosts.
 /// * `-SillSettingsScript '<t> <step>; …'` — the Settings panel's controls for the simulator gates,
 ///   in the normal app too: `set K=V[,K=V]` (a control's change), `suggestion` (the link
-///   callout's button) or `paste TEXT` (the clipboard's Paste with TEXT, as the system's Paste control
-///   hands it over), `t` seconds after the session's first window list, under `-SillInputScript`'s
+///   callout's button), `paste TEXT` (the clipboard's Paste with TEXT, as the system's Paste control
+///   hands it over) or `disconnect` (the panel's Disconnect: with tiles on, the fresh keyframe first),
+///   `t` seconds after the session's first window list, under `-SillInputScript`'s
 ///   guard (a session dialled to a loopback address whose host sends no version: never Sill.app).
 ///   The console says "settings script: …" (`SettingsScript`).
 /// * `-SillMoveHomeTest to:HOST:PORT|refused|other:PORT` — with `-SillDialSaved 1`: a second after the
@@ -329,7 +336,13 @@ struct ContentView: View {
 ///   wrong code), `homelocked`, `homeopenonmac`, `homerevoked`, `homecabledone`, `homeolder` (a tap
 ///   on an "Update Sill" row) or `pairingrequired`; or `asleep` (issue #69: a saved Mac's row stays
 ///   listed and the automatic reconnect's dials of it have not connected: "Mac mini isn’t answering.
-///   It may be asleep. Sill keeps trying, or tap it to try now."). Ignored with `-SillLive 1`. The
+///   It may be asleep. Sill keeps trying, or tap it to try now."); or `tiles` (issue #116: the Macs as
+///   tiles, six of them in Home, Work and Other: the Mac mini twice, its Wired row taken for it by its
+///   name and its Remote row, showing its one picture (ConnectionList.tileMac), two more saved Macs with
+///   a picture each, and two with the placeholder, the Office iMac (not saved) and the Mac mini (2) (no
+///   picture kept); the mock's groups unless `-Sill.macGroups` gives others, and its pictures 208×132
+///   unless `-SillVideoSize WxH` gives them that shape, 320 pt wide as a session's end keeps them).
+///   Ignored with `-SillLive 1`. The
 ///   mock never browses; Search Nearby and a row's tap only change what it shows (see
 ///   `MockCatalog.ConnectCase`).
 /// * `-SillBrowserFail N` — in the normal app and under `-SillLive 1`: each of the first N network
@@ -383,6 +396,25 @@ struct ContentView: View {
 ///   memory of Macs seen with Direct Wireless on, which a launch argument sets for one run (`'()'`
 ///   empties it), in the normal app and under `-SillLive 1`. Unlike `-Sill.savedMacs`, what the
 ///   run learns is still saved.
+/// * `-Sill.connectionStyle tiles|list` and `-Sill.macGroups '{"HOMEPAIRING6":"Home"}'` — not harness
+///   arguments either: the connect screen's arrangement and the saved Macs' groups (ConnectionList),
+///   by Mac ID, for one run, in the mock, under `-SillLive 1` and in the normal app. Without either, and
+///   with nothing stored, the arrangement is tiles, the default since 2026-10-27
+///   (ConnectionList.defaultStyle); `-Sill.connectionStyle list` shows the list as main did by default.
+///   `-Sill.macGroups` writes nothing back (`'{}'` empties). A launch argument outranks what the app
+///   saves, so under `-Sill.connectionStyle` the switch beside the title changes nothing until the next
+///   run: to try the switch, write the default instead (with Sill not running, `plutil -replace
+///   Sill.connectionStyle -string list "$(xcrun simctl get_app_container <udid> me.saffer.sill
+///   data)/Library/Preferences/me.saffer.sill.plist"`; a `simctl spawn … defaults write` never reaches
+///   the app), or let `-SillStyleToggleAt <s>[,<s>…]` toggle it at
+///   those seconds after the connect screen shows, as the switch does (it stores the choice; the
+///   console says "connect: tiles → list at 4.0 s, …", and "connect: tiles (Sill.connectionStyle unset)"
+///   as each connect screen shows). With tiles, a saved Mac's session that ends keeps its picture in
+///   Library/Caches/SillPreviews (none is taken while the list shows, which hides the kept ones and keeps
+///   their files until tiles come back: ConnectionList.previewPlan, StreamClient.syncPreviews): the session's
+///   last keyframe, decoded (KeyframePicture), never a snapshot of the screen, and Disconnect asks the
+///   Mac for a fresh one first (kind 44, every Mac) and waits up to 300 ms for it; the console's `tiles:`
+///   lines say what came of it.
 /// * Versions, in the normal app too: `-SillHelloVersion <v>` is the version this device's hello
 ///   (kind 23) gives, for a host's device floor under test (`SILL_TEST_MIN_DEVICE_VERSION`);
 ///   `-SillAppStoreURL <https url>` is the App Store link's address while SillLinks has none.
@@ -405,6 +437,22 @@ struct ContentView: View {
 /// * `-SillOrientation landscape|portrait` — the normal app only: asks the window scene for that
 ///   orientation at launch (a phone simulator sideways, with its real safe areas). The Duo's inner
 ///   display refuses it (UISceneErrorDomain 101): fold and turn its simulator with Tests/duorig.
+/// * The Mac's sound (docs/audio-plan.md §7.8): the Settings panel's two switches, Send Audio (the
+///   Mac's, for every device) and Mute right under it (this device's own). In the mock: `-SillSound
+///   on|muted` makes the mock Mac send its sound and this device play it or have it muted (Mute off or
+///   on; the mock plays nothing), and `-SillSettingsCase sound|soundoff|soundnote|nosound` the Send
+///   Audio row on, off, on with the Mac's note (why no sound comes), or a Mac without sound (the row
+///   disabled, "Update Sill…", no Mute). In the normal app and under `-SillLive 1`: `-SillSoundSink
+///   manual|device` (the engine renders offline and opens no output device, the simulator's default
+///   in every build, or it plays to the output; `device` in the simulator plays through the Mac's
+///   speakers: never in a gate), `-SillSoundVolume 0` (the player's volume, a second guard),
+///   `-SillSoundToggle <s>[,<s>…]` (Mute flipped at those seconds after the stream screen shows, as
+///   a tap on the switch would) and `-SillSoundSwitchAt <s>` (Mute on, then off a second later);
+///   `-SillSettingsScript`'s `set sendAudio=1` is the Send Audio switch. The console's "audio: …"
+///   lines say what happened: the format, the engine and its latencies, a line a second while sound
+///   plays (how far it trails the picture, the need, late packets, the error, frames added and
+///   dropped, jumps, duplicates), and in manual rendering where each click of a synthetic host's test
+///   tone was heard, against where it was placed and when it was due.
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
@@ -648,7 +696,12 @@ struct LayoutHarness: View {
 /// * `pad DX,DY` — that finger moves DX, DY points (a stroke starts first if none is down);
 /// * `lift` — it comes up;
 /// * `click` — a tap on the pad: a click where its cursor is;
+/// * `padscroll DX,DY` — two fingers on the pad: a scroll of DX, DY points in five steps, lifted at
+///   600 pt/s (so it coasts), through the pad's own scroll path (Reverse Scrolling turns it around);
 /// * `tap X,Y` — a finger's tap on the stream at that fraction of the frame;
+/// * `drag DX,DY` — a finger dragged over the stream: a scroll of DX, DY points in five steps at the
+///   picture's middle, lifted at 600 pt/s (so it coasts), through the finger pan's scroll path
+///   (Reverse Scrolling turns it around);
 /// * `key USAGE` — a hardware key (a HID usage), down and up: this device's pointer hides;
 /// * `row USAGE` — a key of the portrait key row: what the sprite shows stays;
 /// * `gesture NAME[,FINGERS]` — a three-finger (or four-finger) gesture a surface decided, through
@@ -659,8 +712,10 @@ struct LayoutHarness: View {
 ///   (`shift+command` and the like), only while the input view takes Esc (it holds the keyboard and no
 ///   EscapeKey is on screen in its window); the console says whether it went;
 /// * `scroll DX,DY` — the iPad's trackpad: a two-finger scroll of DX, DY points in five steps, lifted at
-///   600 pt/s (so it coasts), through the scroll path its recognizer takes;
-/// * `wheel DX,DY` — a mouse's wheel: the same steps as plain deltas, no gesture, no coast;
+///   600 pt/s (so it coasts), through the scroll path its recognizer takes (iPadOS's own Natural
+///   Scrolling has set its direction: Reverse Scrolling leaves it);
+/// * `wheel DX,DY` — a mouse's wheel: the same steps as plain deltas, no gesture, no coast (and, as a
+///   trackpad's, never turned around);
 /// * `keyboard attach|detach` — a hardware keyboard attaching or going, as GameController says it;
 /// * `orient landscape|portrait` — the scene asked for that orientation (an iPhone's).
 /// The pad and the overlay register themselves as they join a window, and each step calls their
@@ -675,7 +730,8 @@ struct LayoutHarness: View {
 /// `--synthetic` would post the input, so never point a script at one.
 enum InputScript {
     enum Step: Equatable, CustomStringConvertible {
-        case down, pad(dx: Double, dy: Double), lift, click, tap(x: Double, y: Double), key(UInt16), row(UInt16)
+        case down, pad(dx: Double, dy: Double), lift, click, padScroll(dx: Double, dy: Double)
+        case tap(x: Double, y: Double), drag(dx: Double, dy: Double), key(UInt16), row(UInt16)
         case gesture(TrackpadGestures.Gesture, fingers: Int)
         case esc(modifiers: String), scroll(dx: Double, dy: Double), wheel(dx: Double, dy: Double)
         case keyboard(attached: Bool), orient(String)
@@ -686,7 +742,9 @@ enum InputScript {
             case .pad(let dx, let dy): return "pad \(dx),\(dy)"
             case .lift: return "lift"
             case .click: return "click"
+            case .padScroll(let dx, let dy): return "padscroll \(dx),\(dy)"
             case .tap(let x, let y): return "tap \(x),\(y)"
+            case .drag(let dx, let dy): return "drag \(dx),\(dy)"
             case .key(let usage): return "key \(usage)"
             case .row(let usage): return "row \(usage)"
             case .gesture(let g, let fingers): return "gesture \(g.rawValue)" + (fingers == 3 ? "" : ",\(fingers)")
@@ -733,7 +791,9 @@ enum InputScript {
             case ("lift", 2): step = .lift
             case ("click", 2): step = .click
             case ("pad", 3) where pair.count == 2: step = .pad(dx: pair[0], dy: pair[1])
+            case ("padscroll", 3) where pair.count == 2: step = .padScroll(dx: pair[0], dy: pair[1])
             case ("tap", 3) where pair.count == 2: step = .tap(x: pair[0], y: pair[1])
+            case ("drag", 3) where pair.count == 2: step = .drag(dx: pair[0], dy: pair[1])
             case ("key", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .key(usage)
             case ("row", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .row(usage)
             case ("gesture", 3):
@@ -811,7 +871,9 @@ enum InputScript {
         case .pad(let dx, let dy): if let pad { pad.scriptMove(dx: dx, dy: dy) } else { done = false }
         case .lift: if let pad { pad.scriptLift() } else { done = false }
         case .click: if let pad { pad.scriptClick() } else { done = false }
+        case .padScroll(let dx, let dy): if let pad { pad.scriptScroll(dx: dx, dy: dy) } else { done = false }
         case .tap(let x, let y): if let overlay { overlay.scriptTap(x: x, y: y) } else { done = false }
+        case .drag(let dx, let dy): if let overlay { overlay.scriptScroll(dx: dx, dy: dy, from: .finger) } else { done = false }
         case .key(let usage): if let overlay { overlay.scriptKey(usage) } else { done = false }
         case .row(let usage):
             client.sendFromKeyRow(.key(hidUsage: usage, down: true, modifiers: 0))
@@ -842,11 +904,12 @@ enum InputScript {
 
 /// `-SillSettingsScript '<t> <step>; …'`: the Settings panel's controls for the simulator gates, which
 /// have no finger (docs/remote-bundle-plan.md S3): `t` is seconds since the session's first window
-/// list; a step is `set K=V[,K=V]` (maxFPS, bitrate, captureScale, prioritizeSpeed, virtualDisplay:
-/// a control's change, through `changeSettings` as the panel sends it), `suggestion` (the link
-/// callout's button: the Mac's suggestion as the panel offers it, or nothing when it offers none) or
+/// list; a step is `set K=V[,K=V]` (maxFPS, bitrate, captureScale, prioritizeSpeed, virtualDisplay,
+/// sendAudio: a control's change, through `changeSettings` as the panel sends it), `suggestion` (the link
+/// callout's button: the Mac's suggestion as the panel offers it, or nothing when it offers none),
 /// `paste TEXT` (the clipboard's Paste, as the system's Paste control hands TEXT over, through
-/// `sendClipboard`, the receipt and its note included: docs/clipboard-plan.md). The
+/// `sendClipboard`, the receipt and its note included: docs/clipboard-plan.md) or `disconnect` (the
+/// panel's Disconnect, through `disconnect`: with tiles on, the tile's fresh keyframe first). The
 /// console says "settings script: …" at each. It runs in the normal app too, under InputScript's
 /// guard: only a session dialled to a loopback address (a remote dial's winner through a relay
 /// counts) whose host's first window list has no version, so never Sill.app's settings.
@@ -881,6 +944,11 @@ enum SettingsScript {
             }
             print(when + "suggestion: the callout's button, “\(button.title)”")
             client.changeSettings(button.change)
+        case "disconnect":
+            // The panel's Disconnect, as its button calls it: with tiles on, the fresh keyframe first
+            // (ConnectionList.freshPicture), then the session's end and the tile's picture.
+            print(when + "disconnect")
+            client.disconnect()
         case "paste" where words.count >= 2:
             // The Settings group's Paste (or the chip's), as the system's Paste control hands over
             // what it read: the rest of the step is the text (docs/clipboard-plan.md, the receipt).
@@ -899,6 +967,7 @@ enum SettingsScript {
                 case "captureScale": change.captureScale = Double(kv[1])
                 case "prioritizeSpeed": change.prioritizeSpeed = on
                 case "virtualDisplay": change.virtualDisplay = on
+                case "sendAudio": change.sendAudio = on
                 default: print(when + "no setting \(kv[0])")
                 }
             }
@@ -937,8 +1006,23 @@ struct ConnectScreen: View {
     let scannerOverride: CodeScanner.Mode?
     @AccessibilityFocusState private var titleFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
     /// The Duo's hinge (iOS 27.1): with the fold, where the column goes (ConnectLayout).
     @Environment(\.duoEnvironment) private var duoEnvironment
+    /// Rows or tiles on the connect screen (ConnectionList): what the switch beside the title or a saved
+    /// Mac's menu stored, nil while nothing is, which `ConnectionList.storedStyle` reads as the default
+    /// (tiles). Written only by `toggleStyle`.
+    @AppStorage(ConnectionList.styleKey) private var styleRaw: String?
+    /// The saved Mac whose New Group… alert is up, and the name typed there.
+    @State private var newGroupFor: String?
+    @State private var newGroupName = ""
+
+    private var style: ConnectionList.Style {
+        #if DEBUG
+        if UserDefaults.standard.string(forKey: "SillConnectCase") == "tiles" { return .tiles }
+        #endif
+        return ConnectionList.storedStyle(styleRaw)
+    }
 
     init(client: StreamClient, adding: Bool = false, typed: Bool = false, scannerOverride: CodeScanner.Mode? = nil) {
         self.client = client
@@ -1033,6 +1117,20 @@ struct ConnectScreen: View {
             .duoLog(posture, size: geo.size, screen: "connect screen")
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
+        .alert("New Group", isPresented: Binding(get: { newGroupFor != nil }, set: { if !$0 { newGroupFor = nil } })) {
+            TextField("Name", text: $newGroupName)
+            // A blank name, or Other (where the Macs with no group already are), names no group: Add
+            // would only take the Mac out of the one it is in.
+            Button("Add") { if let id = newGroupFor { client.setGroup(newGroupName, for: id) } }
+                .disabled(ConnectionList.cleanGroup(newGroupName) == nil)
+            Button("Cancel", role: .cancel) {}
+        }
+        // The switch beside the title or a saved Mac's menu: the list hides the pictures and keeps their
+        // files, and tiles show them again at once (ConnectionList.previewPlan); none is taken while the
+        // list shows (ConnectionList.takesPreview).
+        .onChange(of: styleRaw) { _, raw in
+            client.syncPreviews(to: ConnectionList.storedStyle(raw))
+        }
         .onChange(of: client.pairing) { old, new in
             // Paired but no session came (10 s): the card closes, and the Mac is a saved row.
             if case .paired = old, new == .idle, !client.connected { fold() }
@@ -1054,7 +1152,15 @@ struct ConnectScreen: View {
         // "Stopped trying…", "… is saved", Forget, and the line a session ended with (why the Mac
         // closed it), which is already set when this screen comes back. A changed Text alone is
         // never spoken, and the rows keep the focus.
-        .onAppear { announce(client.status) }
+        .onAppear {
+            announce(client.status)
+            // The style changed in another Sill window while this one streamed: its pictures follow it.
+            client.syncPreviews(to: ConnectionList.storedStyle(styleRaw))
+            #if DEBUG
+            print("connect: \(style.rawValue) (Sill.connectionStyle \(styleRaw ?? "unset"))")
+            scheduleStyleToggles()
+            #endif
+        }
         .onChange(of: client.status) { _, line in announce(line) }
     }
 
@@ -1063,6 +1169,32 @@ struct ConnectScreen: View {
         guard !line.isEmpty, line != StreamClient.lookingOnNetwork, line != StreamClient.lookingNearby else { return }
         AccessibilityNotification.Announcement(line).post()
     }
+
+    /// The switch beside the title, and Show as List/Tiles in a saved Mac's menu: stores the other style,
+    /// the person's choice from then on (ConnectionList.storedStyle), in every Sill window.
+    private func toggleStyle() {
+        styleRaw = style.toggled.rawValue
+    }
+
+    #if DEBUG
+    /// `-SillStyleToggleAt <s>[,<s>…]`: at each of these seconds after the connect screen shows, the
+    /// style is toggled as the switch beside the title toggles it (`toggleStyle`), so the gates, which
+    /// have no finger, store a choice and see it across a relaunch. Once per run.
+    private static var styleTogglesScheduled = false
+
+    private func scheduleStyleToggles() {
+        guard !Self.styleTogglesScheduled, let spec = UserDefaults.standard.string(forKey: "SillStyleToggleAt") else { return }
+        Self.styleTogglesScheduled = true
+        let times = spec.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        for at in times {
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [self] in
+                let from = style
+                toggleStyle()
+                print("connect: \(from.rawValue) → \(from.toggled.rawValue) at \(at) s, as the switch beside the title does (Sill.connectionStyle \(UserDefaults.standard.string(forKey: ConnectionList.styleKey) ?? "unset"))")
+            }
+        }
+    }
+    #endif
 
     private func column(_ layout: ConnectLayout) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1077,6 +1209,29 @@ struct ConnectScreen: View {
                 .padding(.horizontal, 10)
                 .accessibilityAddTraits(carded ? .isHeader : [])
                 .accessibilityFocused($titleFocused)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                // The switch between rows and tiles: a 44 pt target over the title's line, which it
+                // overhangs above and below (an overlay, so the column is laid out as before it). Always
+                // (Noah, 2026-10-27: "The list/tiles switch should always show"), whichever style is on
+                // and whether or not a Mac is listed; only the card, which takes the title's place, and a
+                // link's confirmation leave it out. #117 showed it for tiles alone while the list was the
+                // default, which with tiles the default left someone with no Mac who chose the list no way
+                // back.
+                .overlay(alignment: .trailing) {
+                    if !carded, client.pendingLink == nil {
+                        Button {
+                            toggleStyle()
+                        } label: {
+                            Image(systemName: style == .tiles ? "list.bullet" : "square.grid.2x2")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(Palette.accent)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(style == .tiles ? "Show as list" : "Show as tiles")
+                    }
+                }
 
             if let link = client.pendingLink {
                 LinkConfirmation(link: link, pair: {
@@ -1101,12 +1256,12 @@ struct ConnectScreen: View {
                     .padding(.top, 4)
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
             } else {
-                rows
+                rows(layout)
             }
         }
     }
 
-    @ViewBuilder private var rows: some View {
+    @ViewBuilder private func rows(_ layout: ConnectLayout) -> some View {
         Text(client.status)
             .font(.system(size: 13))
             .foregroundStyle(Palette.muted)
@@ -1130,28 +1285,37 @@ struct ConnectScreen: View {
             .accessibilityHint("Opens the App Store.")
         }
 
-        ForEach(client.macs) { mac in
-            // The kind of link, never the Wi-Fi network's name: that needs Location access, which
-            // Sill does not ask for (DiscoveryPolicy.method); "Remote" for a saved Mac dialed away
-            // from home; at home, what a tap does first when it pairs ("Not paired", "Wired" over
-            // the cable) or cannot connect ("Update Sill"), with VoiceOver's label and hint for it
-            // (DiscoveryPolicy.RowWord). The row a tap's ask is waiting on is lit, as the drawer
-            // lights the app on screen, while the status line says "Pairing with…".
-            DrawerRow(height: 50, highlighted: client.homeAsk.map { $0.phase == .asking && $0.target.row == mac.id } ?? false,
-                      title: mac.name, trailing: mac.word,
-                      action: { client.connect(to: mac) }) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.iconFallback)
-                    Image(systemName: "desktopcomputer")
-                        .font(.system(size: 16))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 32, height: 32)
+        // Every row of one Mac in its group, a row taken for it by its name too (ConnectionList.tileMac).
+        let sections = ConnectionList.sections(for: client.macs, macID: { ConnectionList.tileMac(macID: $0.macID, savedByName: $0.savedByName) },
+                                               groups: client.macGroups)
+        if style == .list, sections.count <= 1, sections.first?.title == nil {
+            ForEach(client.macs) { mac in
+                macRow(mac)
             }
-            .accessibilityLabel(mac.route == .remote ? "\(mac.name), Remote" : mac.homeWord.label(name: mac.name))
-            .accessibilityHint(mac.route == .remote ? "Connects through your VPN or the internet."
-                               : mac.homeWord.hint(name: mac.name, device: device, direct: mac.direct))
-            .contextMenu { menu(for: mac) }
+        } else {
+            ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
+                if let sectionTitle = section.title {
+                    Text(sectionTitle)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Palette.muted)
+                        .padding(.horizontal, 10)
+                        .padding(.top, 4)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                if style == .tiles {
+                    let cols = ConnectionList.columns(forWidth: layout.columnWidth, accessibleText: typeSize.isAccessibilitySize)
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: cols), spacing: 10) {
+                        ForEach(section.items) { mac in
+                            macTile(mac)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                } else {
+                    ForEach(section.items) { mac in
+                        macRow(mac)
+                    }
+                }
+            }
         }
 
         if client.showsNearbyHint {
@@ -1200,8 +1364,9 @@ struct ConnectScreen: View {
         .accessibilityHint("Pairs this \(device) with a Mac so you can reach it away from home.")
     }
 
-    /// A saved Mac's row: Connect (a Remote row) or Connect Remotely (its network row, to try the
-    /// VPN path at home), and Forget. Other Macs' rows have no menu.
+    /// A saved Mac's row or tile: Connect (a Remote row) or Connect Remotely (its network row, to
+    /// try the VPN path at home), Group, Show as Tiles/List, Remove Preview Picture, and Forget.
+    /// Other Macs' rows have no menu.
     @ViewBuilder private func menu(for mac: FoundMac) -> some View {
         if let id = mac.macID {
             if mac.route == .remote {
@@ -1209,9 +1374,130 @@ struct ConnectScreen: View {
             } else if mac.route == .network {
                 Button { client.connectRemotely(id) } label: { Label("Connect Remotely", systemImage: "globe") }
             }
+            let currentGroup = ConnectionList.cleanGroup(client.macGroups[id])
+            Menu {
+                // One choice of None and the groups: the system's checkmark on the current one, and
+                // VoiceOver's "selected".
+                Picker("Group", selection: Binding(get: { currentGroup }, set: { client.setGroup($0, for: id) })) {
+                    Text("None").tag(String?.none)
+                    ForEach(ConnectionList.availableGroups(in: client.macGroups), id: \.self) { group in
+                        Text(group).tag(String?.some(group))
+                    }
+                }
+                .pickerStyle(.inline)
+                Divider()
+                Button { newGroupName = ""; newGroupFor = id } label: {
+                    Label("New Group…", systemImage: "folder.badge.plus")
+                }
+            } label: {
+                Label(currentGroup.map { "Group: \($0)" } ?? "Group", systemImage: "folder")
+            }
+            Button {
+                toggleStyle()
+            } label: {
+                Label(style == .tiles ? "Show as List" : "Show as Tiles",
+                      systemImage: style == .tiles ? "list.bullet" : "square.grid.2x2")
+            }
+            if style == .tiles, client.macPreviews[id] != nil {
+                Button(role: .destructive) { client.removePreview(for: id) } label: {
+                    Label("Remove Preview Picture", systemImage: "photo.badge.minus")
+                }
+            }
             let name = client.savedMac(id) != nil ? client.displayName(id) : mac.name
             Button(role: .destructive) { client.forget(id) } label: { Label("Forget \(name)", systemImage: "trash") }
         }
+    }
+
+    private func macRow(_ mac: FoundMac) -> some View {
+        // The kind of link, never the Wi-Fi network's name: that needs Location access, which
+        // Sill does not ask for (DiscoveryPolicy.method); "Remote" for a saved Mac dialed away
+        // from home; at home, what a tap does first when it pairs ("Not paired", "Wired" over
+        // the cable) or cannot connect ("Update Sill"), with VoiceOver's label and hint for it
+        // (DiscoveryPolicy.RowWord). The row a tap's ask is waiting on is lit, as the drawer
+        // lights the app on screen, while the status line says "Pairing with…".
+        DrawerRow(height: 50, highlighted: asking(mac),
+                  title: mac.name, trailing: mac.word,
+                  action: { client.connect(to: mac) }) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.iconFallback)
+                Image(systemName: "desktopcomputer")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 32, height: 32)
+        }
+        .accessibilityLabel(rowLabel(mac))
+        .accessibilityHint(rowHint(mac))
+        .contextMenu { menu(for: mac) }
+    }
+
+    /// The row or tile a tap's ask is waiting on.
+    private func asking(_ mac: FoundMac) -> Bool {
+        client.homeAsk.map { $0.phase == .asking && $0.target.row == mac.id } ?? false
+    }
+
+    private func rowLabel(_ mac: FoundMac) -> String {
+        mac.route == .remote ? "\(mac.name), Remote" : mac.homeWord.label(name: mac.name)
+    }
+
+    private func rowHint(_ mac: FoundMac) -> String {
+        mac.route == .remote ? "Connects through your VPN or the internet."
+            : mac.homeWord.hint(name: mac.name, device: device, direct: mac.direct)
+    }
+
+    private func macTile(_ mac: FoundMac) -> some View {
+        let highlighted = asking(mac)
+        // Every row of one Mac shows its one picture: Wired, Wi-Fi, Direct and Remote (ConnectionList.tileMac).
+        let preview = ConnectionList.tileMac(macID: mac.macID, savedByName: mac.savedByName).flatMap { client.macPreviews[$0] }
+        return Button(action: { client.connect(to: mac) }) {
+            VStack(alignment: .leading, spacing: 0) {
+                // The band sets the size; the picture fills it as an overlay, which never sizes the
+                // tile, and is clipped to it. In the band's place, a picture wider than its cell (a
+                // 16:9 or 2.39:1 screen) made the tile wider than its column.
+                Rectangle()
+                    .fill(Palette.iconFallback.opacity(0.35))
+                    .frame(height: 92)
+                    .overlay {
+                        if let preview {
+                            Image(uiImage: preview)
+                                .resizable()
+                                .scaledToFill()
+                        } else {
+                            Image(systemName: "desktopcomputer")
+                                .font(.system(size: 24))
+                                .foregroundStyle(.white.opacity(0.85))
+                        }
+                    }
+                    .clipped()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(mac.name)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Palette.text)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    if let word = mac.word {
+                        Text(word)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.muted)
+                            .lineLimit(1)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+            }
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(highlighted ? Palette.accent.opacity(0.22) : Palette.control))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(highlighted ? Palette.accent.opacity(0.55) : Color.white.opacity(0.08), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(rowLabel(mac))
+        .accessibilityHint(rowHint(mac))
+        .contextMenu { menu(for: mac) }
     }
 
     private func unfold() {
