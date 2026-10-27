@@ -351,6 +351,76 @@ for (hinge, s, info) in [(DuoPosture.Hinge.partiallyOpen, book, FoldInfo.known(b
     check(DuoPosture(hinge: hinge, fold: DuoPosture.standInFold(s)).info(in: s) == info, "the stand-in, \(hinge) \(s)")
 }
 
+// MARK: - The laptop pose with the software keyboard up: the key row alone (#215)
+
+// What UIKit reported on the iOS 27.1 simulator's Duo in the laptop pose, the dark keyboard with no
+// predictive bar (the reporter's): shown, the whole lower page from the fold's top edge (0, 455.5,
+// 669×495.5); going, its own frame (0, 555, 669×396), whose top is the glass's edge in a screenshot (the
+// reporter's too: the glass at 555, the keys from 568).
+let deckTop: CGFloat = 455.5, glassTop: CGFloat = 555
+func visible(_ reported: CGFloat?, own: CGFloat? = nil, height: CGFloat = 951, controls: CGFloat = 496) -> CGFloat? {
+    DuoPosture.visibleKeyboardTop(reported: reported, screenHeight: height, controlsTop: controls, ownHeight: own)
+}
+check(DuoPosture.laptopKeyboardHeight == 396, "the Duo's keyboard upright: 396 pt, the glass from 555")
+check(visible(deckTop) == glassTop, "the lower page reported: the glass 396 above the foot, 555")
+check(visible(deckTop, own: 396) == glassTop, "the same with the height the keyboard showed going")
+check(visible(deckTop, own: 420) == 531, "a taller keyboard's own height, once it has shown it: its glass")
+check(visible(deckTop, own: 495.5) == deckTop && visible(deckTop, own: 600) == deckTop, "never above the report")
+check(visible(496) == glassTop && visible(495.9) == glassTop, "a report at the fold's lower edge is the page too")
+check(visible(570) == 570 && visible(496.5) == 496.5 && visible(700, own: 100) == 700, "a report under the fold's edge: the keyboard as itself")
+check(visible(nil) == nil && visible(951) == nil && visible(960) == nil, "none up, or one gone below the foot: none")
+check(visible(373.5, height: 869, controls: 414) == 473, "the status bar shown (669×869): the page from 373.5, the glass at 473")
+
+func keyRow(_ top: CGFloat?, controls: CGFloat = 496, fold: FoldInfo = .known(laptopFold), size s: CGSize = upright,
+            standard: CGFloat = 148) -> CGRect? {
+    DuoPosture.keyboardRow(size: s, fold: fold, controlsTop: controls, keyboardTop: top, standardRows: standard, sides: 14)
+}
+// Noah's numbers: the caps the room less 8, at most 58, the black above and below alike.
+check(keyRow(glassTop) == rect(14, 500, 641, 51), "the Duo's keyboard: 4 + 51 + 4, \(String(describing: keyRow(glassTop)))")
+check(keyRow(570) == rect(14, 504, 641, 58), "a 381 pt keyboard: 8 + 58 + 8")
+check(keyRow(571) == rect(14, 504, 641, 58), "75 pt: 58 caps, 8 above and 9 below (within a point)")
+check(keyRow(552) == rect(14, 500, 641, 48), "56 pt: the halves' own 48 pt caps")
+check(keyRow(524) == rect(14, 500, 641, 20), "28 pt: the least caps, 4 and 4")
+check(keyRow(523) == rect(14, 499, 641, 20), "27 pt: the least caps, 3 above")
+check(keyRow(506) == rect(14, 496, 641, 20) && keyRow(480) == rect(14, 496, 641, 20),
+      "a keyboard over the fold's edge: the least caps from the fold's edge, never onto the fold")
+check(keyRow(643) == rect(14, 540, 641, 58), "147 pt: 58 caps in the middle")
+check(keyRow(644) == nil && keyRow(700) == nil, "148 pt and more: the window bar and the key row in view, as they are")
+check(keyRow(nil) == nil && keyRow(951) == nil && keyRow(1000) == nil, "no keyboard: as they are")
+check(keyRow(951, standard: 1000) == nil && keyRow(960, standard: 1000) == nil, "a keyboard at or below the foot is none, whatever the rows take")
+check(keyRow(glassTop, fold: .inferred) == nil && keyRow(glassTop, fold: .known(nil)) == nil && keyRow(glassTop, fold: .known(bookFold)) == nil,
+      "off the laptop pose (before iOS 27.1, open flat, the book pose's fold): as they are")
+check(keyRow(473, controls: 414, size: size(669, 869)) == rect(14, 418, 641, 51), "the status bar shown: 4 + 51 + 4 from 414")
+// The whole chain, as the device reports it.
+check(keyRow(visible(deckTop)) == rect(14, 500, 641, 51), "the lower page reported: the row 500–551 over the glass at 555")
+// Twelve caps (the Desktop: Spotlight's too) and eleven across the row.
+check(abs(DuoPosture.keyboardRowCap(count: 12, width: 641) - 47.917) < 0.001, "twelve caps ≈ 48 pt wide")
+check(abs(DuoPosture.keyboardRowCap(count: 11, width: 641) - 52.818) < 0.001 && DuoPosture.keyboardRowCap(count: 0, width: 641) == 0,
+      "eleven caps (a window: no Spotlight) ≈ 53; none: none")
+check(DuoPosture.keyboardRowGap == 6 && DuoPosture.keyboardRowMost == 58 && DuoPosture.keyboardRowMargins == 8 && DuoPosture.keyboardRowLeast == 20,
+      "the row's numbers")
+// Every keyboard top, every controls' top: the row's rules hold.
+for controls in [CGFloat(414), 496, 500.5, 600] {
+    for top in stride(from: controls - 60, through: 960, by: 0.5) {
+        let row = keyRow(top, controls: controls)
+        let room = top - controls
+        check((row == nil) == (top >= 951 || room >= 148), "\(controls) \(top): a row exactly while the keyboard covers the key row")
+        guard let row else { continue }
+        let caps = max(20, min(58, room - 8))
+        check(row.height == caps, "\(controls) \(top): the caps the room less 8, 20 to 58")
+        check(row.minY >= controls, "\(controls) \(top): never onto the fold")
+        check(row.minX == 14 && row.width == 641, "\(controls) \(top): the row's sides")
+        if room >= caps {
+            let above = row.minY - controls, below = top - row.maxY
+            check(above == above.rounded() && below - above >= 0 && below - above < 2 && (room != room.rounded() || below - above <= 1),
+                  "\(controls) \(top): the black above and below alike, the odd point below (\(above), \(below))")
+            if room - 8 <= 58 && room >= 28 { check(above == 4, "\(controls) \(top): 4 above while the caps fill") }
+        } else {
+            check(row.minY == controls, "\(controls) \(top): a keyboard too tall for the least caps: from the fold's edge")
+        }
+    }
+}
+
 // Issue #215: in the laptop pose (669×951), the software keyboard (top at y = 570) covers keyRow
 // (y = 596..644). While keyboardShown is true, the window bar shows the Keyboard toggle button and
 // drops its 12 pt top padding so its 58 pt buttons (y = 506..564) sit clear above y = 570.
