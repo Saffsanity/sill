@@ -1360,6 +1360,44 @@ do {
           "pressed and released for S and ←")
     check(f.commanded(uS, modifiers: 0, at: 2).isEmpty, "a key the text system takes: no command sends it")
 }
+// Holding a key or modified combo repeats (#162: ⌥←, ⌘→, ⇧⌥←, ←), and stops when released, when a
+// modifier is released, when another key is pressed, or on releaseAll; modifiers and Esc never repeat.
+do {
+    check(ForwardedKeys.repeatDelay == 0.4 && ForwardedKeys.repeatInterval == 0.05, "repeat timing: 0.4 s then 20 Hz")
+    var f = ForwardedKeys()
+    _ = f.pressed(uLOpt, modifiers: option, at: 1.0)
+    check(f.repeated() == nil && !f.isRepeating, "a modifier alone does not repeat")
+    _ = f.pressed(uLeft, modifiers: option, at: 1.1)
+    check(f.isRepeating && f.repeated() == key(uLeft, true, option) && f.repeated() == key(uLeft, true, option),
+          "holding ⌥← repeats key(←, down, option)")
+    _ = f.released(uLeft)
+    check(!f.isRepeating && f.repeated() == nil, "releasing ← stops the repeat")
+    _ = f.pressed(uRight, modifiers: shift | option, at: 1.5)
+    check(f.repeated() == key(uRight, true, shift | option), "holding ⇧⌥→ repeats with shift and option")
+    _ = f.released(uLOpt)
+    check(f.repeated() == nil, "releasing ⌥ while → is held stops the chord repeat")
+    _ = f.released(uRight)
+    _ = f.pressed(uLCmd, modifiers: command, at: 2.0)
+    _ = f.pressed(uLeft, modifiers: command, at: 2.1)
+    check(f.repeated() == key(uLeft, true, command), "holding ⌘← repeats key(←, down, command)")
+    _ = f.releaseAll()
+    check(f.repeated() == nil, "releaseAll stops the repeat")
+    _ = f.pressed(uEsc, modifiers: 0, at: 3.0)
+    check(f.repeated() == nil, "Esc does not repeat")
+    _ = f.released(uEsc)
+    _ = f.pressed(uLeft, modifiers: 0, at: 3.5)
+    check(f.repeated() == key(uLeft, true, 0), "holding ← repeats")
+    check(f.pressed(uS, modifiers: 0, at: 3.6) == .text && f.repeated() == nil && !f.isRepeating,
+          "pressing a text-system key while ← is held stops ← from repeating")
+    _ = f.released(uLeft)
+
+    // Repeated ⌥← through the Mac model and KeyUpCheck, including with the Mac's own ⌥ held.
+    let seq = [key(uLOpt, true, option), key(uLeft, true, option), key(uLeft, true, option),
+               key(uLeft, true, option), key(uLeft, false, option), key(uLOpt, false, 0)]
+    tripwire(seq, ["58: option"], ignoring: .modifierUps, "repeated ⌥←")
+    let ownOpt = upChecks([key(uLeft, true, option), key(uLeft, true, option), key(uLeft, false, 0)], own: option)
+    check(ownOpt.armed.isEmpty && ownOpt.reported.isEmpty, "repeated ⌥← while the Mac's own ⌥ is held: \(ownOpt)")
+}
 
 // Random sessions on this device alone: its shortcuts (latched or Spotlight), the trackpad's modified
 // clicks and drags, a hardware keyboard (with presses cancelled and the overlay letting go, Return

@@ -263,7 +263,8 @@ package struct KeyUpCheck: Sendable {
     package mutating func posting(_ stroke: KeyStroke, table: UInt64, posted: UInt64) -> (id: Int, cleared: UInt64)? {
         if stroke.down {
             let unreadFlags = unread.values.reduce(0, |)
-            downs[stroke.virtualKey] = (stroke.flags & Self.modifiers, table & ~posted & ~unreadFlags & Self.modifiers)
+            let outside = downs[stroke.virtualKey]?.outside ?? (table & ~posted & ~unreadFlags & Self.modifiers)
+            downs[stroke.virtualKey] = (stroke.flags & Self.modifiers, outside)
             return nil
         }
         guard let down = downs.removeValue(forKey: stroke.virtualKey) else { return nil }
