@@ -67,14 +67,20 @@ public enum StreamMessageKind: UInt8 {
     case gesture = 28        // device → host: JSON TrackpadGesture — a three- or four-finger gesture the device
                              // recognized, which the Mac turns into its own shortcut (Mission Control, a Space,
                              // Apps…). Only to a host whose window list says `gestures` 1 or more
-    // The clipboard (Clipboard.swift, ClipboardPolicy.swift), after the gesture's 28: 29 is the audio
-    // plan's, 30 and 31 the Mac client's side streams (pull request #66, which shares this number and
-    // shape). Older readers map it to `.unknown` and skip it.
+    // The clipboard (Clipboard.swift, ClipboardPolicy.swift), after the gesture's 28: 29, 30 and 31 are the Mac
+    // client's side streams (pull request #66, which shares this number and shape). Older readers map it to
+    // `.unknown` and skip it.
     case clipboard = 32      // both ways: JSON Clipboard. Device → host: any kind 32 subscribes the connection to
                              // the Mac's copies (an empty one at connect, while the device's Share Clipboard is
                              // on), its text becomes the Mac's clipboard, and `stop` ends the subscription; only
                              // to a host whose window list says `clipboard` 1 or more. Host → device: text copied
                              // on the Mac (or sent by another device), only to a connection that subscribed
+    // The Mac's sound (Audio.swift), after the menus' 24, 25 and 27, the pointer's 26 and the trackpad gesture's 28,
+    // and after 29–42, which PR #66 (Sill Viewer, with #72 and #73) and #78 (the clipboard's 32) take. Older readers
+    // map it to `.unknown` and skip it.
+    case audio = 43          // host → device: AudioMessage — the sound of what streams: a format (JSON AudioFormat),
+                             // then packets (binary AudioPackets). Only to a device whose hello lists the codec
+                             // (Hello.audio), and only while Send Audio is on
     // The picture's recovery (issue #101), after the numbers open pull requests hold (29 to 31 and 33
     // to 43). Older hosts map it to `.unknown` and skip it: the device's picture then waits for the
     // stream's next keyframe, as it always did.
