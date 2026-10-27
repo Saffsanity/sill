@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreSpotlight
 import Network
 import StreamProtocol
 
@@ -10,10 +11,20 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        root.onAppear { statsReporter.attach(to: client) }
-            // This window's sound: a scene in the background is not heard, though another keeps the app
-            // active (inactive is still on screen: Control Center over it, a headless simulator).
-            .onChange(of: scenePhase, initial: true) { _, phase in client.sound.setSceneForeground(phase != .background) }
+        root.onAppear {
+            statsReporter.attach(to: client)
+            #if DEBUG
+            // `-SillSpotlightTap mac:<Mac ID>`: a tap on that saved Mac's Spotlight item, at launch.
+            if let id = UserDefaults.standard.string(forKey: "SillSpotlightTap") { client.openFromSpotlight(id) }
+            #endif
+        }
+        // A saved Mac tapped in Spotlight (StreamClient.indexSavedMacs): dialed as a tap on its row.
+        .onContinueUserActivity(CSSearchableItemActionType) { activity in
+            if let id = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String { client.openFromSpotlight(id) }
+        }
+        // This window's sound: a scene in the background is not heard, though another keeps the app
+        // active (inactive is still on screen: Control Center over it, a headless simulator).
+        .onChange(of: scenePhase, initial: true) { _, phase in client.sound.setSceneForeground(phase != .background) }
     }
 
     @ViewBuilder private var root: some View {
