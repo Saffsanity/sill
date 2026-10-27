@@ -143,9 +143,10 @@ sleep or shutting down". Additive: kind 22 gains the reasons "sleep", "shutdown"
   client 0.5 s after it admitted and streaming (on 697e6c0's build, aed225a's, a921209's and the head's,
   alike); with
   `-sendAudio 1` and a scratch copy of sillclient printing every message after its goodbye, the sleep's
-  goodbye in three runs: no sound packet after it on this head, 100 on each connection (600 in all) on
-  the merge's own build, 7789575, in the second until the cancel; the Quit's: none on this head over 22
-  connections, 3 of 22 on the merge's build; `-SillPowerOffAfter 3` then SIGTERM, exit 143, "poweroff"
+  goodbye in three runs: no sound packet after it on aed225a's build (nor on the head's, in its sleep
+  run), 100 on each connection (600 in all) on the merge's own build, 7789575, in the second until the
+  cancel; the Quit's: none over 22 connections on 697e6c0's and aed225a's builds, 3 of 22 on the
+  merge's build (the told rule and the sound's send path unchanged since); `-SillPowerOffAfter 3` then SIGTERM, exit 143, "poweroff"
   ("… is shutting down or restarting.") and "The Mac is shutting down or restarting: 2 devices told.";
   `-SillQuitAfter '5 shutdown'`, "shutdown" ("… is shutting down.") after willPowerOff's line, and as
   a parameter without it; `-SillQuitAfter '5 restart'`, "restart". No simulator this round (the last
