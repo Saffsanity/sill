@@ -172,15 +172,20 @@ enum DebugHooks {
                     var requirePairing: Bool?
                     var updateCheck: Bool?
                     var pairingSharing: Bool?
+                    var privacyMode: Bool?
+                    var lockOnDisconnect: Bool?
                     for change in changes {
-                        apply(change, to: &config, addressName: &addressName, requirePairing: &requirePairing, updateCheck: &updateCheck,
-                              pairingSharing: &pairingSharing)
+                        apply(change, to: &config, addressName: &addressName, requirePairing: &requirePairing,
+                              updateCheck: &updateCheck, pairingSharing: &pairingSharing,
+                              privacyMode: &privacyMode, lockOnDisconnect: &lockOnDisconnect)
                     }
                     print("SillSetAfter \(parts[0]) s: \(changes.joined(separator: ", "))")
                     model.settings.config = config    // one assignment: several keys, one apply
                     if let addressName { model.settings.remoteAddressName = addressName }
                     if let updateCheck { model.settings.updateCheck = updateCheck }
                     if let pairingSharing { model.settings.showPairingWindowToScreenSharing = pairingSharing }
+                    if let privacyMode { model.settings.privacyMode = privacyMode }
+                    if let lockOnDisconnect { model.settings.lockOnDisconnect = lockOnDisconnect }
                     // Through the identity store first, as the Devices pane's switch goes.
                     if let requirePairing { model.setRequirePairing(requirePairing) }
                 }
@@ -334,7 +339,8 @@ enum DebugHooks {
     }
 
     private static func apply(_ change: String, to config: inout HostConfig, addressName: inout String?, requirePairing: inout Bool?,
-                              updateCheck: inout Bool?, pairingSharing: inout Bool?) {
+                              updateCheck: inout Bool?, pairingSharing: inout Bool?,
+                              privacyMode: inout Bool?, lockOnDisconnect: inout Bool?) {
         let kv = change.split(separator: "=", maxSplits: 1).map(String.init)
         guard kv.count == 2 else { print("SillSetAfter: can’t read “\(change)”"); return }
         let (key, value) = (kv[0], kv[1])
@@ -357,6 +363,8 @@ enum DebugHooks {
         case "requirePairing": requirePairing = flag
         case "updateCheck": updateCheck = flag
         case "showPairingWindowToScreenSharing": pairingSharing = flag
+        case "privacyMode": privacyMode = flag
+        case "lockOnDisconnect": lockOnDisconnect = flag
         default: print("SillSetAfter: no setting called \(key)")
         }
     }

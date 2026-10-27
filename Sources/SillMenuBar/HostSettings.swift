@@ -52,6 +52,7 @@ final class HostSettings {
         static let shareClipboard = "shareClipboard"
         static let sendAudio = "sendAudio"
         static let showPairingWindowToScreenSharing = "showPairingWindowToScreenSharing"
+        static let privacyMode = "privacyMode", lockOnDisconnect = "lockOnDisconnect"
     }
 
     var config: HostConfig {
@@ -96,6 +97,23 @@ final class HostSettings {
         }
     }
     @ObservationIgnored var onUpdateCheckChange: (@MainActor () -> Void)?
+    /// Privacy Mode (issues #133 and #141): blanks the Mac's physical displays while a device is
+    /// connected, and optionally locks the Mac when the last connected device disconnects.
+    var privacyMode: Bool {
+        didSet {
+            guard privacyMode != oldValue else { return }
+            defaults.set(privacyMode, forKey: Key.privacyMode)
+            onPrivacyChange?()
+        }
+    }
+    var lockOnDisconnect: Bool {
+        didSet {
+            guard lockOnDisconnect != oldValue else { return }
+            defaults.set(lockOnDisconnect, forKey: Key.lockOnDisconnect)
+            onPrivacyChange?()
+        }
+    }
+    @ObservationIgnored var onPrivacyChange: (@MainActor () -> Void)?
 
     /// "Show the pairing window to screen sharing" (Settings › Devices; issue #108): Screen Sharing,
     /// Apple Remote Desktop and VNC apps show the pairing window, its QR code and its code, so a Mac
@@ -142,6 +160,8 @@ final class HostSettings {
             Key.sendAudio: base.sendAudio,
             // Off: whoever can see this Mac's screen remotely could read a code (PairingWindowSharing).
             Key.showPairingWindowToScreenSharing: false,
+            Key.privacyMode: false,
+            Key.lockOnDisconnect: false,
         ])
         config = HostConfig(maxFPS: defaults.integer(forKey: Key.maxFPS),
                             captureScale: CGFloat(defaults.double(forKey: Key.captureScale)),
@@ -163,6 +183,8 @@ final class HostSettings {
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         updateCheck = defaults.bool(forKey: Key.updateCheck)
         showPairingWindowToScreenSharing = defaults.bool(forKey: Key.showPairingWindowToScreenSharing)
+        privacyMode = defaults.bool(forKey: Key.privacyMode)
+        lockOnDisconnect = defaults.bool(forKey: Key.lockOnDisconnect)
         settingsTab = defaults.string(forKey: Key.settingsTab).flatMap(SettingsTab.init(rawValue:)) ?? .general
         permissionsOnboardingDismissed = defaults.bool(forKey: Key.permissionsOnboardingDismissed)
         askedScreenRecording = defaults.bool(forKey: Key.askedScreenRecording)
