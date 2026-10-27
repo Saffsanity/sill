@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B10000010000000000000001 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000002 /* Localizable.xcstrings */; };
+		B10000010000000000000003 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000004 /* InfoPlist.xcstrings */; };
 		A1000001000000000000A001 /* SillApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F001 /* SillApp.swift */; };
 		A1000001000000000000A002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F002 /* ContentView.swift */; };
 		A1000001000000000000A003 /* StreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F003 /* StreamClient.swift */; };
@@ -65,6 +67,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B10000010000000000000002 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		B10000010000000000000004 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; };
 		A1000001000000000000F001 /* SillApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SillApp.swift; sourceTree = "<group>"; };
 		A1000001000000000000F002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A1000001000000000000F003 /* StreamClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamClient.swift; sourceTree = "<group>"; };
@@ -194,6 +198,8 @@
 				A1000001000000000000F005 /* Assets.xcassets */,
 				A1000001000000000000F101 /* PrivacyInfo.xcprivacy */,
 				A1000001000000000000F006 /* Info.plist */,
+				B10000010000000000000002 /* Localizable.xcstrings */,
+				B10000010000000000000004 /* InfoPlist.xcstrings */,
 				A1000001000000000000F00D /* Info-Debug.plist */,
 				A1000001000000000000C002 /* Frameworks */,
 				A1000001000000000000C003 /* Products */,
@@ -259,6 +265,8 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+				"zh-Hans",
+				"zh-Hant",
 				Base,
 			);
 			mainGroup = A1000001000000000000C001;
@@ -279,6 +287,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B10000010000000000000001 /* Localizable.xcstrings in Resources */,
+				B10000010000000000000003 /* InfoPlist.xcstrings in Resources */,
 				A1000001000000000000A005 /* Assets.xcassets in Resources */,
 				A1000001000000000000A101 /* PrivacyInfo.xcprivacy in Resources */,
 			);

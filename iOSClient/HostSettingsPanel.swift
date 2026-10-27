@@ -491,9 +491,9 @@ struct HostSettingsPanel: View {
                 }
                 switch reach {
                 case .connected:
-                    if let r = remoteRoute { Footnote(text: "Connected \(r.phrase).") }
+                    if let r = remoteRoute { Footnote(text: r.connectedDescription) }
                 case .reaches:
-                    Footnote(text: "Away from home, Sill reaches \(mac) \(Self.reach(info)).")
+                    Footnote(text: Self.remoteReachDescription(info, mac: mac))
                 case .turnOnRemoteAccess:
                     Footnote(text: Self.turnOnRemoteAccess(mac))
                 }
@@ -509,7 +509,7 @@ struct HostSettingsPanel: View {
                     .rowFrame()
                 }
                 Footnote(text: atHome ? DiscoveryPolicy.HomeCopy.pairThisDeviceAtHome(mac: mac, device: device)
-                                      : "Pair once to reach \(mac) through your VPN or the internet. \(mac) shows a code; scan it with this \(device).")
+                                      : String(localized: "Pair once to reach \(mac) through your VPN or the internet. \(mac) shows a code; scan it with this \(device)."))
             case .turnOnRemoteAccess:
                 Footnote(text: Self.turnOnRemoteAccess(mac))
             }
@@ -518,7 +518,7 @@ struct HostSettingsPanel: View {
 
     /// With Remote Access off on the Mac: how to reach it away from home.
     static func turnOnRemoteAccess(_ mac: String) -> String {
-        "To reach \(mac) away from home, turn on Remote Access in Sill’s Settings on the Mac."
+        String(localized: "To reach \(mac) away from home, turn on Remote Access in Sill’s Settings on the Mac.")
     }
 
     // MARK: This device
@@ -656,15 +656,18 @@ struct HostSettingsPanel: View {
         return text
     }
 
-    /// "through Tailscale (mac-mini.tail1234.ts.net)": the first VPN or internet address the Mac
-    /// gave; otherwise "through your VPN or the internet".
-    static func reach(_ info: MacInfo) -> String {
+    /// Keep the reachability sentence whole so each language controls where names and addresses go.
+    private static func remoteReachDescription(_ info: MacInfo, mac: String) -> String {
         guard let a = info.addresses.first(where: { $0.kind == MacAddress.vpn || $0.kind == MacAddress.internet }) else {
-            return "through your VPN or the internet"
+            return String(localized: "Away from home, Sill reaches \(mac) through your VPN or the internet.")
         }
-        if a.kind == MacAddress.internet { return "over the internet (\(a.host))" }
-        let name = a.via.isEmpty || a.via.hasPrefix("VPN (") ? "your VPN" : a.via
-        return "through \(name) (\(a.host))"
+        if a.kind == MacAddress.internet {
+            return String(localized: "Away from home, Sill reaches \(mac) over the internet (\(a.host)).")
+        }
+        if a.via.isEmpty || a.via.hasPrefix("VPN (") {
+            return String(localized: "Away from home, Sill reaches \(mac) through your VPN (\(a.host)).")
+        }
+        return String(localized: "Away from home, Sill reaches \(mac) through \(a.via) (\(a.host)).")
     }
 
     // MARK: Copy

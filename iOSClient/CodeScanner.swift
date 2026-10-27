@@ -86,10 +86,10 @@ struct CodeScanner: View {
                 }
             }
             .accessibilityElement(children: denied ? .contain : .ignore)
-            .accessibilityLabel(denied ? "" : mac.map(DiscoveryPolicy.HomeCopy.viewfinderLabel) ?? "Camera. Point it at the code on your Mac.")
+            .accessibilityLabel(denied ? "" : mac.map(DiscoveryPolicy.HomeCopy.viewfinderLabel) ?? String(localized: "Camera. Point it at the code on your Mac."))
             if !denied {
-                Text(notSill ? "That’s not a Sill code." : retryNeedsTap ? "Tap the code to try again."
-                     : mac.map(DiscoveryPolicy.HomeCopy.viewfinderCaption) ?? "Point at the code on your Mac")
+                Text(notSill ? String(localized: "That’s not a Sill code.") : retryNeedsTap ? String(localized: "Tap the code to try again.")
+                     : mac.map(DiscoveryPolicy.HomeCopy.viewfinderCaption) ?? String(localized: "Point at the code on your Mac"))
                     .font(.system(size: 13))
                     .foregroundStyle(notSill ? Color.orange : Palette.muted)
                     .accessibilityHidden(!notSill && !retryNeedsTap)
