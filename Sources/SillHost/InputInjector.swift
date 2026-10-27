@@ -56,7 +56,9 @@ final class InputInjector {
     /// input: key 49 up (none)"), a pointer or scroll event with those the last keyboard event would
     /// have left in the HID state table, which it would start from ("Test input: left mouse down
     /// (none) at 756,474", a button's with where it goes): what a device's keys leave for its next
-    /// click, without posting anything; and the check a key's up arms (`KeyUpCheck`).
+    /// click, without posting anything; and the check a key's up arms (`KeyUpCheck`). A scroll event
+    /// says its point deltas and phase ("Test input: scroll dy 12 dx 0, gesture changed (none)"), so a
+    /// test reads which way a device's scroll went (positive dy moves the content down).
     var testLog = false
     /// The flags of the last keyboard event posted (a dry run's: that would have been), which the HID
     /// state table holds by KeyStrokes' inference: the check after a key's up reads the table against
@@ -64,6 +66,10 @@ final class InputInjector {
     private var lastKeyFlags: UInt64 = 0
     /// Where the last pointer event went: a synthetic host's pointer, which it never reads.
     private var lastPointerLocation: CGPoint = .zero
+    /// The streamed source's display's own pixel scale (StreamCoordinator sets it as each pipeline
+    /// starts; nil for the test pattern): a position lands at most on that display's last pixel row
+    /// and column (InputLanding).
+    var displayScale: CGFloat?
 
     // MARK: Entry point
 
@@ -99,11 +105,12 @@ final class InputInjector {
         }
     }
 
-    /// Where a device's position lands on the Mac: its fraction of `rect`; with no source to place it
-    /// on (`.null`), where the pointer is now.
+    /// Where a device's position lands on the Mac: its fraction of `rect`, held to the rectangle's
+    /// last pixel row and column (InputLanding: a device's bottom edge, y = 1, is `rect.maxY`, the row
+    /// past the last); with no source to place it on (`.null`), where the pointer is now.
     private func point(_ x: Double, _ y: Double, in rect: CGRect) -> CGPoint {
         if rect.isNull { return pointerNow() }
-        return CGPoint(x: rect.minX + CGFloat(x) * rect.width, y: rect.minY + CGFloat(y) * rect.height)
+        return InputLanding.point(x: x, y: y, in: rect, displayScale: displayScale)
     }
 
     /// Where the Mac's pointer is: read (no permission) on a host that posts; on a synthetic host,
@@ -144,13 +151,35 @@ final class InputInjector {
         case .rightMouseDown: what = "right mouse down"
         case .rightMouseUp: what = "right mouse up"
         case .rightMouseDragged: what = "right mouse drag"
-        case .scrollWheel: what = "scroll"
+        case .scrollWheel: what = Self.scrollTestText(event)
         default: what = "event \(event.type.rawValue)"
         }
         // A button's event says where it goes: a button's up with no source goes where the pointer is.
         let button = event.type != .mouseMoved && event.type != .scrollWheel
         let at = button ? " at \(Int(event.location.x.rounded())),\(Int(event.location.y.rounded()))" : ""
         print("Test input: \(what) (\(KeyStrokes.names(lastKeyFlags)))\(at)")
+    }
+
+    /// TEST ONLY: a scroll event as the log gives it, "scroll dy 12 dx 0, gesture changed": its point
+    /// deltas, vertical first as the event's axes are (`postScroll`'s wheel1 and wheel2, the device's dy
+    /// and dx in points: positive moves the content down or right), and where it is in a gesture: its
+    /// scroll phase (began, changed, ended), its momentum phase (the coast's begin, continue, end), or
+    /// neither (a wheel's plain delta).
+    private static func scrollTestText(_ event: CGEvent) -> String {
+        let dy = event.getIntegerValueField(.scrollWheelEventPointDeltaAxis1)
+        let dx = event.getIntegerValueField(.scrollWheelEventPointDeltaAxis2)
+        let phase: String
+        switch (event.getIntegerValueField(.scrollWheelEventScrollPhase), event.getIntegerValueField(.scrollWheelEventMomentumPhase)) {
+        case (Int64(CGScrollPhase.began.rawValue), _): phase = "gesture began"
+        case (Int64(CGScrollPhase.changed.rawValue), _): phase = "gesture changed"
+        case (Int64(CGScrollPhase.ended.rawValue), _): phase = "gesture ended"
+        case (_, Int64(CGMomentumScrollPhase.begin.rawValue)): phase = "coast began"
+        case (_, Int64(CGMomentumScrollPhase.continuous.rawValue)): phase = "coast"
+        case (_, Int64(CGMomentumScrollPhase.end.rawValue)): phase = "coast ended"
+        case (0, 0): phase = "wheel"
+        case (let scroll, let momentum): phase = "phase \(scroll)/\(momentum)"
+        }
+        return "scroll dy \(dy) dx \(dx), \(phase)"
     }
 
     /// TEST ONLY: SILL_TEST_INPUT_LOG, read once at the coordinator's start. "1" on a synthetic host

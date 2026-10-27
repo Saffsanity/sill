@@ -194,5 +194,24 @@ M = [
     ("removalRevokes: a remote session never revokes", F, "        if remote { return true }\n", "        if remote { return false }\n"),
     ("removalRevokes: no saved key still revokes", F, "        guard let savedKey else { return false }\n        if remote",
      "        guard let savedKey else { return remote }\n        if remote"),
+    # A row keeps its TXT record while its result stays listed (the cable pulled, Noah's iPad, 2026-10-27);
+    # a browser made again starts afresh (the review of #232); each result of a name keeps its own.
+    ("rowRecords: a result without a record reads as none (the rule undone, as before the fix)", F,
+     "            next[item.key] = item.record ?? previous[item.key]", "            next[item.key] = item.record"),
+    ("rowRecords: a record kept after its result left the results", F,
+     "        var next: [RowRecordKey: RowRecord] = [:], seen = Set<RowRecordKey>()",
+     "        var next: [RowRecordKey: RowRecord] = previous, seen = Set<RowRecordKey>()"),
+    ("rowRecords: the kept record wins over one that comes", F,
+     "            next[item.key] = item.record ?? previous[item.key]", "            next[item.key] = previous[item.key] ?? item.record"),
+    ("rowRecords: a key listed twice read by its last entry", F,
+     "        for item in listed where seen.insert(item.key).inserted {", "        for item in listed {"),
+    ("rowRecords: another result's record kept for one without", F,
+     "            next[item.key] = item.record ?? previous[item.key]", "            next[item.key] = item.record ?? previous.values.first"),
+    ("rowRecords: a record kept across browsers (a browser made again no break, as #232 first had it)", F,
+     "            next[item.key] = item.record ?? previous[item.key]",
+     "            next[item.key] = item.record ?? previous.first(where: { $0.key.name == item.key.name && $0.key.domain == item.key.domain })?.value"),
+    ("rowRecords: a record kept across domains (by browser and name alone)", F,
+     "            next[item.key] = item.record ?? previous[item.key]",
+     "            next[item.key] = item.record ?? previous.first(where: { $0.key.browser == item.key.browser && $0.key.name == item.key.name })?.value"),
 ]
 sys.exit(0 if module.mutate("home-device", M, sys.argv[1]) else 1)
