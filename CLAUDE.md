@@ -133,7 +133,10 @@ sleep or shutting down". Additive: kind 22 gains the reasons "sleep", "shutdown"
   when the last device leaves runs as the Mac sleeps: capture stops, a window Sill sized goes back to
   its own frame, the virtual display is removed and its window sent home; close the lid for a few
   seconds with a window picked (Aa set, and once with Virtual Display on) and note what the Mac's window
-  does and what the device shows after (the Desktop, since nothing streams on the new session). Restart
+  does and what the device shows after (the Desktop, since nothing streams on the new session). That
+  is with this build's device, which closes its end on the goodbye; with 0.5.1 the Mac closes the
+  connection a second after it, by a timer whose clock stops while the Mac sleeps, so that work can
+  come at the wake instead (note which). Restart
   and Shut Down from the Apple menu with the iPad streaming: Sill.log "macOS says the Mac is about to
   log out, restart or shut down." and "Quit: macOS asked Sill to quit for a restart." (only "Shutting
   down…", with neither of those lines nor a "The Mac is …" one, means Sill went by a signal or a quit

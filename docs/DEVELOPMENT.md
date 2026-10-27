@@ -120,9 +120,13 @@ Sill wakes no display for it ("The Mac is going to sleep: refused a session
 from … with the same goodbye."); at the wake, "The Mac woke: devices can
 connect again.". Should macOS never say the Mac woke, devices connect again
 ten minutes (of the Mac's awake time) after the goodbye. Every sleep ends
-every session, so what Sill does when the last device leaves runs as the Mac
-sleeps: capture stops, a window Sill sized goes back, the virtual display goes
-and its window home.
+every session, so what Sill does when the last device leaves (capture stops,
+a window Sill sized goes back, the virtual display goes and its window home)
+runs as the Mac sleeps when each device closes its end on the goodbye, as this
+build's do. A device that waits for the Mac to close instead (Sill 0.5.1 from
+the App Store, and older) is closed a second after the goodbye, by a timer
+whose clock stops while the Mac sleeps: if the Mac is asleep within that
+second, the close, and that work with it, comes only once it wakes.
 
 A log out, a restart or a shut down is less certain (issue #105;
 `Sources/SillHost/HostGoodbye.swift` has the evidence). What was seen: a

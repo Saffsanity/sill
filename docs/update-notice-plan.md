@@ -813,9 +813,11 @@ the person's own Mac.
 - So it never drops silently. But against a Mac that refuses it, it loops (at home as fast as the
   connections go), and says the wrong thing.
 
-**The rule** is one pure function, `GoodbyePolicy.outcome(goodbye, mac:, device:, saved:) ->
-Outcome` (`text`, `reconnect`, `remoteAllowed`, `storeLink`, `isNotice`), for every route, whether or
-not a window list came:
+**The rule** is one pure function, `GoodbyePolicy.outcome(goodbye, mac:, device:, saved:, remote:) ->
+Outcome` (`text`, `reconnect`, `remoteAllowed`, `storeLink`, `isNotice`, `went`), for every route,
+whether or not a window list came. `remote` (PR #100) is whether the session came through the remote
+door, which the Mac's own going lets the reconnect dial only then; `went` (PR #100) is how the Mac said
+it went (quit, asleep, off), for the reconnect's waits (DiscoveryPolicy), nil for every other end:
 
 | Goodbye | Status line | Reconnects by itself | Remote dial in that reconnect | Link |
 |---|---|---|---|---|
