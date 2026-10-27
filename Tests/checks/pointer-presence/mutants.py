@@ -58,6 +58,10 @@ MUTANTS = [
     ("a stroke ignores the anchor", "        if let anchor { cursor = Self.clamped(anchor) }\n", ""),
     ("the pad's cursor unclamped", "cursor = Self.clamped(CGPoint(x: Double(cursor.x) + dx, y: Double(cursor.y) + dy))",
      "cursor = CGPoint(x: Double(cursor.x) + dx, y: Double(cursor.y) + dy)"),
+    # TouchMode (issue #178)
+    ("TouchMode defaults to trackpad", "raw.flatMap(TouchMode.init(rawValue:)) ?? .direct", "raw.flatMap(TouchMode.init(rawValue:)) ?? .trackpad"),
+    ("TouchMode.showsPointer ignores trackpad mode in landscape", "isPortrait || mode == .trackpad", "isPortrait"),
+    ("TouchMode.showsPointer ignores portrait in direct mode", "isPortrait || mode == .trackpad", "mode == .trackpad"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

@@ -503,5 +503,20 @@ do {
     check(pad3.cursor == pt(0.50, 0.40), "rest: another device driving on, the finger's move goes on from its latest position")
 }
 
+// MARK: TouchMode (issue #178: Direct Touch vs Trackpad mode on the stream)
+
+check(TouchMode.defaultsKey == "Sill.touchMode", "TouchMode defaults key")
+check(TouchMode.allCases == [.direct, .trackpad], "TouchMode cases")
+check(TouchMode.direct.title == "Direct Touch" && TouchMode.trackpad.title == "Trackpad", "TouchMode titles")
+check(TouchMode.stored(nil) == .direct && TouchMode.stored("unknown") == .direct
+      && TouchMode.stored("direct") == .direct && TouchMode.stored("trackpad") == .trackpad,
+      "TouchMode.stored parsing and fallback")
+check(TouchMode.showsPointer(isPortrait: true, mode: .direct) == true
+      && TouchMode.showsPointer(isPortrait: false, mode: .direct) == false
+      && TouchMode.showsPointer(isPortrait: false, mode: .trackpad) == true
+      && TouchMode.showsPointer(isPortrait: true, mode: .trackpad) == true,
+      "TouchMode.showsPointer shows sprite in portrait or when Trackpad mode is selected")
+check(!TouchMode.footnote.isEmpty, "TouchMode footnote")
+
 print("\(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

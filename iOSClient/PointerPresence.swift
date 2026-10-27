@@ -353,3 +353,29 @@ struct PadCursor: Equatable {
         CGPoint(x: min(max(p.x, 0), 1), y: min(max(p.y, 0), 1))
     }
 }
+
+/// Option to switch between Direct Touch and Trackpad (relative mouse) mode on the stream
+/// (issue #178). Pure (`Foundation` + `CoreGraphics`).
+enum TouchMode: String, CaseIterable, Equatable, Sendable {
+    case direct
+    case trackpad
+
+    static let defaultsKey = "Sill.touchMode"
+
+    var title: String {
+        switch self {
+        case .direct: "Direct Touch"
+        case .trackpad: "Trackpad"
+        }
+    }
+
+    static func stored(_ raw: String?) -> TouchMode {
+        raw.flatMap(TouchMode.init(rawValue:)) ?? .direct
+    }
+
+    static func showsPointer(isPortrait: Bool, mode: TouchMode) -> Bool {
+        isPortrait || mode == .trackpad
+    }
+
+    static let footnote = "Direct Touch clicks where you tap on the picture. Trackpad turns the picture itself into a trackpad: drag to move the pointer, tap to click, press and hold to drag, and use two fingers to scroll."
+}
