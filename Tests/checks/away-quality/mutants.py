@@ -21,9 +21,31 @@ MUTANTS = [
     ("AQ14 one device away is enough", H + "AwayPolicy.swift", "devicesAway.isEmpty ? current : devicesAway.allSatisfy { $0 }", "devicesAway.isEmpty ? current : devicesAway.contains { $0 }"),
     ("AQ15 the away line names the away pair as the home one", H + "AwayPolicy.swift", '+ "The home quality stays \\(title(c.bitrate, c.captureScale))."', '+ "The home quality stays \\(title(c.awayBitrate, c.awayCaptureScale))."'),
     ("AQ16 the home line streams the away pair", H + "AwayPolicy.swift", "streaming at \\(title(c.bitrate, c.captureScale)).\"", "streaming at \\(title(c.awayBitrate, c.awayCaptureScale)).\""),
-    ("AQ17 standard shares no clipboard", H + "HostConfig.swift", "requirePairing: true, shareClipboard: true)", "requirePairing: true, shareClipboard: false)"),
+    ("AQ17 standard shares no clipboard", H + "HostConfig.swift", "requirePairing: true, shareClipboard: true, sendAudio: false)", "requirePairing: true, shareClipboard: false, sendAudio: false)"),
     ("AQ18 the clipboard's change unnamed", H + "HostConfig.swift", '        if shareClipboard != new.shareClipboard { parts.append("share clipboard \\(onOff(shareClipboard)) → \\(onOff(new.shareClipboard))") }\n', ""),
     ("AQ19 the clipboard's switch never stored", H + "HostConfig.swift", "        self.shareClipboard = shareClipboard\n", "        self.shareClipboard = true\n"),
+    # Send Audio, a device's to set too (docs/audio-plan.md, Q8 as Noah revised it on 2026-10-27).
+    ("AQ20 a device's Send Audio dropped, as the beta's hosts did", H + "DeviceSettings.swift",
+     "var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed, sendAudio: c.sendAudio)",
+     "var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed)"),
+    ("AQ21 a device's Send Audio named as refused", H + "DeviceSettings.swift", "        var refused: [String] = []\n",
+     '        var refused: [String] = c.sendAudio != nil ? ["send audio (set on this Mac only)"] : []\n'),
+    ("AQ22 only a device's Send Audio on taken", H + "DeviceSettings.swift", "sendAudio: c.sendAudio)", "sendAudio: c.sendAudio == true ? true : nil)"),
+    ("AQ23 a device never sees Send Audio on", H + "DeviceSettings.swift", "directWireless: directWireless, sendAudio: sendAudio)",
+     "directWireless: directWireless, sendAudio: false)"),
+    ("AQ24 Send Audio's change unnamed", H + "HostConfig.swift", 'if sendAudio != new.sendAudio { parts.append(', 'if false { parts.append('),
+    ("AQ25 a device's Send Audio laid over nothing", H + "DeviceSettings.swift", "        if let v = change.sendAudio { c.sendAudio = v }\n", ""),
+    ("AQ26 a device's Send Audio dropped away from home", H + "DeviceSettings.swift", "        rest.captureScale = nil\n",
+     "        rest.captureScale = nil\n        rest.sendAudio = nil\n"),
+    # Sill.app's defaults: the CLI's with the virtual display on (Noah, 2026-10-27).
+    ("AQ27 Sill.app's virtual display off (the default before 2026-10-27)", H + "HostConfig.swift",
+     "        c.virtualDisplay = true\n", "        c.virtualDisplay = false\n"),
+    ("AQ28 the CLI's virtual display on by default", H + "HostConfig.swift",
+     "prioritizeSpeed: false, virtualDisplay: false, directWireless: false,", "prioritizeSpeed: false, virtualDisplay: true, directWireless: false,"),
+    ("AQ29 Sill.app's defaults another knob off the CLI's too", H + "HostConfig.swift",
+     "        c.virtualDisplay = true\n", "        c.virtualDisplay = true\n        c.directWireless = true\n"),
+    ("AQ30 Sill.app's Send Audio off (the default before 2026-10-27)", H + "HostConfig.swift",
+     "        c.sendAudio = true\n", "        c.sendAudio = false\n"),
 ]
 caught = 0
 for name, rel, old, new in MUTANTS:
