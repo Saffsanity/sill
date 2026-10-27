@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 import StreamProtocol
 
 /// The Settings panel: the Mac's streaming settings, changed from here the way the Sill menu on
@@ -61,6 +62,8 @@ struct HostSettingsPanel: View {
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
+    /// When Copy Connection Information was last tapped: its row reads "Copied" for 2 s.
+    @State private var copiedAt: Date?
 
     private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
     private static let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -394,8 +397,80 @@ struct HostSettingsPanel: View {
             // After everything of the Mac's, whatever state its settings are in: while they load, and
             // for a Mac without them too. Both are this device's own: its gestures, then the tour.
             thisDevice
+            connection
             tour
         }
+    }
+
+    // MARK: Connection Information
+
+    /// What this session runs on, refreshed with each second's link stats (Windows App's Connection
+    /// Information), and Copy for a bug report. Read from what the client already has; sends nothing.
+    @ViewBuilder private var connection: some View {
+        let rows = ConnectionInfo.rows(connectionFacts)
+        Text("Connection Information")
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(Palette.muted)
+            .padding(.horizontal, 14)
+            .padding(.top, 6)
+            .padding(.bottom, 6)
+            .accessibilityAddTraits(.isHeader)
+        Rows {
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                if index > 0 { RowDivider() }
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(row.label).foregroundStyle(Palette.muted)
+                    Spacer(minLength: 8)
+                    Text(row.value).foregroundStyle(Palette.text).multilineTextAlignment(.trailing)
+                }
+                .font(.footnote)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityElement(children: .combine)
+                .rowFrame()
+            }
+            RowDivider()
+            Button {
+                // Local only, and its change count marked handled, so Universal Clipboard does not carry
+                // it to the Mac and the Paste on ‹Mac› chip never offers Sill's own diagnostic text back.
+                let board = UIPasteboard.general
+                board.setItems([[UTType.utf8PlainText.identifier: ConnectionInfo.text(rows, at: Date())]],
+                               options: [.localOnly: true])
+                client.clipboardHandled = board.changeCount
+                copiedAt = Date()
+                AccessibilityNotification.Announcement("Copied").post()
+            } label: {
+                Text(copiedAt.map { Date().timeIntervalSince($0) < 2 } == true ? "Copied" : "Copy Connection Information")
+                    .foregroundStyle(Palette.accent)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .rowFrame()
+        }
+        .padding(.bottom, 8)
+        .task(id: copiedAt) {
+            guard copiedAt != nil else { return }
+            try? await Task.sleep(for: .seconds(2))
+            if !Task.isCancelled { copiedAt = nil }
+        }
+    }
+
+    private var connectionFacts: ConnectionInfo.Facts {
+        let s = client.settings.host?.stream
+        let link = client.linkStats
+        let info = Bundle.main.infoDictionary
+        return ConnectionInfo.Facts(
+            mac: client.macName,
+            route: client.remoteRoute?.phrase ?? client.route?.word,
+            stream: s.map { ConnectionInfo.Stream(width: $0.width, height: $0.height, fps: $0.fps, mbps: $0.mbps) },
+            received: link?.fps,
+            rtt: link?.rtt.map { ConnectionInfo.Sample(median: $0.median, max: $0.max) },
+            frameAge: link?.frameAge.map { ConnectionInfo.Sample(median: $0.median, max: $0.max) },
+            hostVersion: client.hostVersion, hostProtocol: client.hostProtocol,
+            appVersion: info?["CFBundleShortVersionString"] as? String ?? "?",
+            build: info?["CFBundleVersion"] as? String ?? "?",
+            system: "\(UIDevice.current.systemName) \(UIDevice.current.systemVersion)",
+            model: ClientStatsReporter.hardwareIdentifier)
     }
 
     /// The last group: this device's, not the Mac's, so after everything about the Mac, and there
