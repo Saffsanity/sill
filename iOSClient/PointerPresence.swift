@@ -353,3 +353,39 @@ struct PadCursor: Equatable {
         CGPoint(x: min(max(p.x, 0), 1), y: min(max(p.y, 0), 1))
     }
 }
+
+/// How far the pointer travels for one full swipe across the on-screen trackpad (#86): `Normal`
+/// is 1.25 frames per swipe (today's), with slower options (`Slowest` 0.625, `Slow` 0.9375) for
+/// fine cursor control and faster ones (`Fast` 1.75, `Fastest` 2.25) in Settings › This iPad /
+/// This iPhone (`Sill.trackpadSpeed`).
+enum TrackpadSpeed: String, CaseIterable, Equatable {
+    case slowest, slow, normal, fast, fastest
+
+    static let defaultsKey = "Sill.trackpadSpeed"
+
+    static func stored(_ raw: String?) -> TrackpadSpeed {
+        raw.flatMap(TrackpadSpeed.init(rawValue:)) ?? .normal
+    }
+
+    var travel: CGFloat {
+        switch self {
+        case .slowest: return 0.625
+        case .slow: return 0.9375
+        case .normal: return 1.25
+        case .fast: return 1.75
+        case .fastest: return 2.25
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .slowest: return "Slowest"
+        case .slow: return "Slow"
+        case .normal: return "Normal"
+        case .fast: return "Fast"
+        case .fastest: return "Fastest"
+        }
+    }
+
+    static let footnote = "How fast the pointer moves when you drag on the on-screen trackpad."
+}

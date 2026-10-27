@@ -58,6 +58,9 @@ MUTANTS = [
     ("a stroke ignores the anchor", "        if let anchor { cursor = Self.clamped(anchor) }\n", ""),
     ("the pad's cursor unclamped", "cursor = Self.clamped(CGPoint(x: Double(cursor.x) + dx, y: Double(cursor.y) + dy))",
      "cursor = CGPoint(x: Double(cursor.x) + dx, y: Double(cursor.y) + dy)"),
+    ("TrackpadSpeed.stored ignores saved value", "raw.flatMap(TrackpadSpeed.init(rawValue:)) ?? .normal", ".normal"),
+    ("TrackpadSpeed default is slow instead of normal", "raw.flatMap(TrackpadSpeed.init(rawValue:)) ?? .normal", "raw.flatMap(TrackpadSpeed.init(rawValue:)) ?? .slow"),
+    ("TrackpadSpeed.normal travel changed from 1.25", "case .normal: return 1.25", "case .normal: return 1.0"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
