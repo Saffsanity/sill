@@ -31,7 +31,10 @@ who has it, and the newest iPhone and iPad app.
 Known, and by design: with Require pairing off (Settings › Devices), any
 device on the Mac's own networks, one nearby while Direct Wireless Connection
 is on, and any app on the Mac itself connect without pairing, still
-encrypted. `SillHost`, the command-line host for development, keeps a plain
+encrypted. With Show the pairing window to screen sharing on (Settings ›
+Devices, off by default), Screen Sharing and other remote desktop apps show the
+pairing window, so anyone who can see the Mac's screen remotely can read its
+code. `SillHost`, the command-line host for development, keeps a plain
 home door, with no pairing and no encryption, unless it runs with
 `--pairing`. Sill for Mac 0.3.1 and earlier had no pairing and no encryption
 at home: update to the newest release.

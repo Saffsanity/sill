@@ -91,12 +91,18 @@ package final class StreamCoordinator {
     /// Why that check failed, if it did: the virtual display then stays off for the whole run.
     private var apiProblem: String?
     private var encoder: HEVCEncoder? { didSet { encoderBox.current = encoder } }
+    /// The display's own pixel scale under the running pipeline (CaptureScale): ScreenCaptureKit's for
+    /// its filter (`pointPixelScale`), Sill's virtual display's (2) for a staged window, nil for the
+    /// test pattern. Set with `active` as a pipeline starts (`startPipeline`); the injector lands
+    /// input on that display's last pixel row and column at most (InputLanding).
+    private var streamDisplayScale: CGFloat?
     /// Hardware HEVC normally. When a hardware session stops returning frames, or the launch probe
-    /// gets no answer, the stream runs on the software encoder at half the capture scale and up to
-    /// 60 fps, slow but alive (`enterSoftwareFallback`), until a re-check finds the hardware keeping
-    /// up with the stream again (`recheckLoop`, `hardwareIsBack`). The hardware has been stuck for
-    /// hours (2026-09-22) and busy for seconds (2026-09-24, when this used to last until the host
-    /// relaunched: 3 h at half resolution after a 1.8 s stall).
+    /// gets no answer, the stream runs on the software encoder at 1x (Standard: half the scale each
+    /// way on a Retina display, the hardware's own on a 1x one) and up to 60 fps, slow but alive
+    /// (`enterSoftwareFallback`), until a re-check finds the hardware keeping up with the stream
+    /// again (`recheckLoop`, `hardwareIsBack`). The hardware has been stuck for hours (2026-09-22)
+    /// and busy for seconds (2026-09-24, when this used to last until the host relaunched: 3 h at
+    /// half resolution, a Retina display's Standard, after a 1.8 s stall).
     private var useSoftwareEncoder = false
     private var softwareRestarts = 0
     private var lastSoftwareHangAt: CFAbsoluteTime = 0
@@ -162,6 +168,7 @@ package final class StreamCoordinator {
             cursorShapes.running = active != .none
             pointer.setGeometry(pointerGeometry(), fps: fps)   // also on a restart of the same source
             menuTargetChanged()                     // the menus' app follows the source (only for devices that asked)
+            audioFollow()                           // and the sound (the same app keeps its stream)
         }
     }
     private var rectCache: (id: CGWindowID, rect: CGRect, at: CFAbsoluteTime)?
@@ -187,6 +194,9 @@ package final class StreamCoordinator {
     /// frame covered a display), or when it was picked: off the list, it may be leaving full screen
     /// (`windowsChanged`, WindowRestore.keepsStreaming).
     private var listedFullScreen: CGWindowID?
+    /// The app of the window `select` last resolved, so the sound still finds it while a regular-mode
+    /// window streams on off the catalog's list (`windowsChanged`'s looks, issue #57; `audioKey`).
+    private var streamedPID: (window: CGWindowID, pid: pid_t)?
     /// Each connection's kind 17 changes of the last second (applied or refused), and when its
     /// "ignored" line was last printed: `settingsPerSecond` a second, one line a second at most.
     private var settingsArrivals: [ObjectIdentifier: [CFAbsoluteTime]] = [:]
@@ -283,6 +293,13 @@ package final class StreamCoordinator {
     /// subscribed, while Share clipboard with devices (`HostConfig.shareClipboard`) is on. Looks at
     /// nothing while nobody subscribes.
     let clipboard: HostClipboard
+    /// The Mac's sound (kind 43, AudioPipeline): the sound of what streams, to the devices that play
+    /// it, while Send Audio is on. It follows the source from `active`'s didSet, as the pointer and
+    /// the menus do, so the picture always starts first, and nothing of it waits on the picture or the
+    /// other way round.
+    let audio = AudioPipeline()
+    /// Connected devices that play the sound (the server's count, from their hellos).
+    private var audioListeners = 0
     /// TEST ONLY. `SILL_TEST_MENU_PID=<pid>` on a --synthetic host: the test pattern's menus are that
     /// process's (the gates' fixture, Scripts/menufixture.swift), read and pressed through the same
     /// code, never activated (the Desktop's rule). Nil otherwise; `testMenuLine` is what `start`
@@ -379,7 +396,20 @@ package final class StreamCoordinator {
         menus.prepare = { [weak self] in await self?.focusForMenus() ?? true }
         menus.currentTarget = { [weak self] in self?.menuTarget() }
         menus.onSubscribersChanged = { [weak self] any in self?.watchFrontmostApp(any) }
-        catalog.onPolled = { [weak self] in self?.menusPolled() }
+        catalog.onPolled = { [weak self] in self?.catalogPolled() }
+        // The sound's messages go straight from its queue to the network queue; its status to the Mac's.
+        let server = self.server
+        audio.onFormat = { data, epoch in server.broadcastAudio(format: data, epoch: epoch) }
+        audio.onPackets = { data, epoch in server.broadcastAudio(packets: data, epoch: epoch) }
+        audio.onStatus = { [weak self] _ in self?.showAudio() }
+        server.onAudioListenersChanged = { [weak self] count in
+            Task { @MainActor in
+                guard let self else { return }
+                self.audioListeners = count
+                self.audioFollow()
+                self.showAudio()
+            }
+        }
 
         server.onClientConnected = { [weak self] connection, route, link in
             Task { @MainActor in
@@ -630,6 +660,7 @@ package final class StreamCoordinator {
             print("Direct wireless connection on: also advertised over peer-to-peer Wi-Fi (AWDL), which takes this Mac's Wi-Fi off its channel for up to ~100 ms twice a second.")
         }
         if let testMenuLine { print(testMenuLine) }   // TEST ONLY, and only with SILL_TEST_MENU_PID set
+        if config.sendAudio { audio.prepare() }       // the codec, loaded before the first chunk needs it
         server.start()
         remote?.apply(config)        // the remote door, when Remote Access is on (or a pairing window opens later)
         if promptForPermissions || CGPreflightScreenCaptureAccess() { await catalog.refreshWindows() }
@@ -759,7 +790,10 @@ package final class StreamCoordinator {
     /// quality (`away`): its rate (the devices' highest under the new limit, 60 at most on the
     /// software encoder), capture scale and bitrate (the pair `away` picks), encoder speed, or, for a
     /// window, the virtual display. The Desktop never uses the display. Direct Wireless is
-    /// deliberately absent: it is the listener's (`adopt` hands it over).
+    /// deliberately absent: it is the listener's (`adopt` hands it over). The capture scale is the
+    /// knob's: on a 1x display Retina and Standard are one capture (CaptureScale), and a change between
+    /// them still restarts once, to the same size, so the devices' links are judged afresh at a new
+    /// setting as everywhere else (`judgeLinks`).
     ///
     /// A new bitrate needs a new encoder session. VideoToolbox accepts AverageBitRate on a live
     /// session and reads it back, but the hardware HEVC encoder's rate control does not follow it
@@ -803,6 +837,11 @@ package final class StreamCoordinator {
         if !old.virtualDisplay && next.virtualDisplay { enableVirtualDisplay() }
         status.update { $0.virtualDisplayOn = next.virtualDisplay }
         print("Settings: " + old.changes(to: next))
+        // The sound's own stream's, not the pipeline's: at once when nothing is switching; inside a
+        // select, `active`'s didSet follows once the picture has started. Turned on, the codec loads
+        // in the background, before the first chunk needs it.
+        if !old.sendAudio, next.sendAudio { audio.prepare() }
+        if old.sendAudio != next.sendAudio, !switching { audioFollow() }
     }
 
     /// Settings › Virtual Display › Try Again: clear a run-level disable, and stage the streamed
@@ -882,7 +921,8 @@ package final class StreamCoordinator {
         case .behind, .stalled:
             let behind = v.state == .behind
             let fps = status.snapshot.stream?.fps ?? self.fps
-            let suggestion = LinkJudge.suggestion(carriedKbps: v.carriedKbps, bitrate: bitrate, fps: fps, captureScale: Double(captureScale))
+            // Against what the capture runs at: on a 1x display Standard would change nothing.
+            let suggestion = LinkJudge.suggestion(carriedKbps: v.carriedKbps, bitrate: bitrate, fps: fps, captureScale: Double(streamPixelScale))
             let report = LinkReport(state: behind ? LinkReport.behind : LinkReport.stalled, withheldPerSecond: v.withheld,
                                     bitrate: bitrate, carriedKbps: v.carriedKbps,
                                     suggestedBitrate: suggestion?.bitrate, suggestedCaptureScale: suggestion?.captureScale)
@@ -1404,6 +1444,9 @@ package final class StreamCoordinator {
         var filter: SCContentFilter?     // nil only for the synthetic test pattern
         var sourceRect: CGRect? = nil    // set only when the window streams from the virtual display
         var picked: SCWindow?            // the resolved window, for the fallback after a failed start
+        // The source's display's own pixel scale (CaptureScale): its filter's, the virtual display's
+        // for a staged window, none for the test pattern. The capture runs at the knob held to it.
+        var displayScale: CGFloat? = nil
         let width: Int, height: Int
         var describe = ""
         var title = ""                   // for the app's menu: "Safari — Apple Developer", "Whole Desktop"
@@ -1424,6 +1467,7 @@ package final class StreamCoordinator {
             print("Selecting window \(w.windowID) \(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "") frame \(w.frame) onScreen \(w.isOnScreen) active \(w.isActive)")
             picked = w
             listedFullScreen = WindowRestore.coversDisplay(w.frame, WindowSizer.displayFrames()) ? id : nil
+            streamedPID = w.owningApplication.map { (window: id, pid: $0.processID) }
             title = Self.menuTitle(for: w)
             var size = w.frame.size
             if virtualDisplay, stage.disabledReason == nil {
@@ -1432,12 +1476,15 @@ package final class StreamCoordinator {
                 // streamed): the stage keeps the frame it would have gone back to as its way home.
                 let home = stageHome(for: id)
                 do {
-                    let prepared = try await stage.prepare(window: w, wanted: want.size, envelope: want.envelope, captureScale: captureScale,
+                    // Sill's own display is 2x: the knob, as before (CaptureScale.virtualDisplay).
+                    let stageScale = CaptureScale.effective(knob: captureScale, displayScale: CaptureScale.virtualDisplay)
+                    let prepared = try await stage.prepare(window: w, wanted: want.size, envelope: want.envelope, captureScale: stageScale,
                                                            refreshHz: fps, home: home)
                     _ = fits.take(id)     // the stage puts it back from now on; a staging that failed keeps the record
                     guard !shuttingDown else { stage.release(); active = .none; broadcastList(); return }
                     filter = prepared.filter
                     sourceRect = prepared.sourceRect
+                    displayScale = CaptureScale.virtualDisplay
                     size = prepared.outputSize ?? prepared.sourceRect.size
                     describe = prepared.describe + (useSoftwareEncoder ? " (software encoder)" : "")
                     status.update { $0.lastStageFailure = nil }
@@ -1455,8 +1502,11 @@ package final class StreamCoordinator {
                 }
             }
             if sourceRect == nil {
-                // Today's path: capture the window where it is.
-                filter = SCContentFilter(desktopIndependentWindow: w)
+                // Today's path: capture the window where it is, at most at its display's own scale
+                // (a window on a 1x display drawn at 1x into a 2x buffer filled its top-left quarter).
+                let windowFilter = SCContentFilter(desktopIndependentWindow: w)
+                filter = windowFilter
+                displayScale = Self.displayScale(of: windowFilter)
                 // Regular mode raises the picked window (2026-09-23, Noah: the Mac must show the
                 // picked window). A covered window stops repainting, so it would stream frozen, and
                 // keys go to the active app's key window. Done before capture starts, so the first
@@ -1468,7 +1518,16 @@ package final class StreamCoordinator {
                 if let resized = fitToViewport(w) { size = Self.liveBounds(of: id)?.size ?? resized }
                 describe = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")\(useSoftwareEncoder ? " (software encoder)" : "")"
             }
-            width = evenPixels(size.width * captureScale); height = evenPixels(size.height * captureScale)
+            if sourceRect == nil {
+                // The window as it is, drawn 1:1 at its display's scale: an odd side rounds up, one black
+                // column or row past the window, never its pixels shrunk into one fewer (CaptureScale.windowPixels).
+                let pixels = CaptureScale.windowSize(size, knob: captureScale, displayScale: displayScale)
+                width = pixels.width; height = pixels.height
+            } else {
+                // A crop of Sill's virtual display, which ScreenCaptureKit scales to the buffer, as a display.
+                let pixelScale = CaptureScale.effective(knob: captureScale, displayScale: displayScale)
+                width = evenPixels(size.width * pixelScale); height = evenPixels(size.height * pixelScale)
+            }
             // Staged on the virtual display, nothing is activated or raised on select: the window
             // cannot be covered there, and the AX moves that put it there touch no focus.
         case .desktop:
@@ -1491,20 +1550,22 @@ package final class StreamCoordinator {
                     own = await catalog.resolveOwnApplication()
                     guard !shuttingDown else { active = .none; broadcastList(); return }
                 }
-                if let own {
-                    filter = SCContentFilter(display: d, excludingApplications: [own], exceptingWindows: [])
-                } else {
-                    filter = SCContentFilter(display: d, excludingWindows: [])
-                }
-                width = evenPixels(CGFloat(d.width) * captureScale); height = evenPixels(CGFloat(d.height) * captureScale)
+                let displayFilter = own.map { SCContentFilter(display: d, excludingApplications: [$0], exceptingWindows: []) }
+                    ?? SCContentFilter(display: d, excludingWindows: [])
+                filter = displayFilter
+                // At most the display's own scale: ScreenCaptureKit scales a display up to fill a larger
+                // buffer (5120×2880 for a 1x 2560×1440 display: four times the pixels to encode).
+                displayScale = Self.displayScale(of: displayFilter)
+                let pixelScale = CaptureScale.effective(knob: captureScale, displayScale: displayScale)
+                width = evenPixels(CGFloat(d.width) * pixelScale); height = evenPixels(CGFloat(d.height) * pixelScale)
                 describe = "the whole desktop\(useSoftwareEncoder ? " (software encoder)" : "")"
                 title = "Whole Desktop"; kind = .desktop
             }
         }
 
         do {
-            try await startPipeline(source: source, filter: filter, sourceRect: sourceRect, width: width, height: height, describe: describe,
-                                    title: title, kind: kind)
+            try await startPipeline(source: source, filter: filter, sourceRect: sourceRect, displayScale: displayScale,
+                                    width: width, height: height, describe: describe, title: title, kind: kind)
         } catch {
             // `picked`, not a catalog lookup: a staged window may have left the on-screen list.
             if virtualDisplay, stage.isStaged, let w = picked {
@@ -1514,9 +1575,12 @@ package final class StreamCoordinator {
                 stage.release()
                 if comeForward, !shuttingDown { activateAndRaise(window: w) }   // regular mode now: a pick comes forward
                 let fallback = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")\(useSoftwareEncoder ? " (software encoder)" : "")"
+                let windowFilter = SCContentFilter(desktopIndependentWindow: w)
+                let windowScale = Self.displayScale(of: windowFilter)
+                let pixels = CaptureScale.windowSize(w.frame.size, knob: captureScale, displayScale: windowScale)
                 do {
-                    try await startPipeline(source: source, filter: SCContentFilter(desktopIndependentWindow: w), sourceRect: nil,
-                                            width: evenPixels(w.frame.width * captureScale), height: evenPixels(w.frame.height * captureScale),
+                    try await startPipeline(source: source, filter: windowFilter, sourceRect: nil, displayScale: windowScale,
+                                            width: pixels.width, height: pixels.height,
                                             describe: fallback, title: title, kind: kind)
                 } catch {
                     print("Could not start streaming \(fallback): \(error)")
@@ -1534,8 +1598,11 @@ package final class StreamCoordinator {
 
     /// Encoder, then capture (ScreenCaptureKit for a filter, the test pattern without one), then
     /// `active`. Throws with `active` untouched if either refuses; the caller decides what to do.
-    /// `title` and `kind` describe the stream in the app's menu.
-    private func startPipeline(source: StreamSource, filter: SCContentFilter?, sourceRect: CGRect?, width: Int, height: Int, describe: String,
+    /// `title` and `kind` describe the stream in the app's menu. `displayScale`: the source's display's
+    /// own pixel scale (nil for the test pattern), which `width` and `height` were held to
+    /// (CaptureScale) and the injector lands input by (InputLanding).
+    private func startPipeline(source: StreamSource, filter: SCContentFilter?, sourceRect: CGRect?, displayScale: CGFloat?,
+                               width: Int, height: Int, describe: String,
                                title: String, kind: HostStatusSnapshot.Stream.Kind) async throws {
         let enc = try HEVCEncoder(width: width, height: height, fps: fps, bitrate: streamBitrate, prioritizeSpeed: prioritizeSpeed,
                                   software: useSoftwareEncoder)
@@ -1559,13 +1626,16 @@ package final class StreamCoordinator {
         }
         if let filter {
             capture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
-            try await capture.start(filter: filter, width: width, height: height, fps: fps, showsCursor: false, sourceRect: sourceRect)
+            try await capture.start(filter: filter, width: width, height: height, fps: fps, showsCursor: false, sourceRect: sourceRect,
+                                    scaleWords: CaptureScale.words(knob: captureScale, displayScale: displayScale))
         } else {
             syntheticCapture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
             syntheticCapture.start(width: width, height: height, fps: fps)
         }
         encoder = enc
         active = source
+        streamDisplayScale = displayScale
+        injector.displayScale = displayScale
         print("Streaming \(describe) at \(width)×\(height), \(fps) fps, \(streamBitrate / 1_000_000) Mbps")
         status.update {
             $0.stream = HostStatusSnapshot.Stream(kind: kind, title: title, width: width, height: height, fps: fps,
@@ -1763,7 +1833,7 @@ package final class StreamCoordinator {
         let now = CFAbsoluteTimeGetCurrent()
         guard now - lastClickLog > 1 else { return }
         lastClickLog = now
-        let p = CGPoint(x: rect.minX + rect.width * x, y: rect.minY + rect.height * y)
+        let p = InputLanding.point(x: x, y: y, in: rect, displayScale: streamDisplayScale)
         let top = Self.topmostWindow(at: p)
         let verdict = top?.id == id ? "the streamed window" : "window \(top.map { String($0.id) } ?? "none"), not the streamed \(id)"
         print("Click at (\(Int(p.x)),\(Int(p.y))) in (\(Int(rect.minX)),\(Int(rect.minY)),\(Int(rect.width))×\(Int(rect.height))) → \(verdict)")
@@ -1774,7 +1844,7 @@ package final class StreamCoordinator {
         guard let rect = currentSourceRect() else { return nil }
         switch event {
         case .pointer(_, let x, let y), .scroll(let x, let y, _, _), .scrollGesture(_, let x, let y):
-            return CGPoint(x: rect.minX + rect.width * x, y: rect.minY + rect.height * y)
+            return InputLanding.point(x: x, y: y, in: rect, displayScale: streamDisplayScale)
         default: return nil
         }
     }
@@ -1804,8 +1874,29 @@ package final class StreamCoordinator {
         return topmostWindow(at: nil)?.pid
     }
 
-    /// Retina normally; points when the software encoder is carrying the stream.
+    /// The Resolution knob of the pair that runs: Retina normally; points when the software encoder is
+    /// carrying the stream. A capture runs at it held to its display's own scale (CaptureScale).
     private var captureScale: CGFloat { useSoftwareEncoder ? min(scale, 1.0) : scale }
+
+    /// The pixels a point the running pipeline captures at: the knob held to its display's own scale.
+    private var streamPixelScale: CGFloat { CaptureScale.effective(knob: captureScale, displayScale: streamDisplayScale) }
+
+    /// A filter's display scale as ScreenCaptureKit gives it (`pointPixelScale`: the scale it draws that
+    /// content at), nil when it gives none.
+    private static func displayScale(of filter: SCContentFilter) -> CGFloat? {
+        CaptureScale.displayScale(pointPixelScale: filter.pointPixelScale)
+    }
+
+    /// The display scale ScreenCaptureKit has for `w` as it is, in regular mode: its filter's, made afresh.
+    private static func displayScale(of w: SCWindow) -> CGFloat? {
+        displayScale(of: SCContentFilter(desktopIndependentWindow: w))
+    }
+
+    /// The pixels a point a capture of `w` would run at now, in regular mode: the knob held to the
+    /// scale ScreenCaptureKit has for the window as it is.
+    private func capturePixelScale(of w: SCWindow) -> CGFloat {
+        CaptureScale.effective(knob: captureScale, displayScale: Self.displayScale(of: w))
+    }
 
     /// "Safari — Apple Developer" for the app's menu; just the app for an untitled window.
     private static func menuTitle(for w: SCWindow) -> String {
@@ -1857,6 +1948,22 @@ package final class StreamCoordinator {
     private func menuTargetChanged() {
         guard menus.hasSubscribers else { return }
         menus.setTarget(menuTarget())
+    }
+
+    /// Every catalog poll (2 s) while a device is connected: the menus, and a window streaming in
+    /// regular mode that moved onto a display of another scale. That keeps its size in points, so the
+    /// list does not change and `windowsChanged` never hears of it, and its capture would go on at the
+    /// old display's scale (from a 2x display onto a 1x one at Retina: the window in the top-left
+    /// quarter of the picture). Only the scale is compared here, never the size, which a list read
+    /// before a fit landed can still give at its old value; a resize is `windowsChanged`'s.
+    private func catalogPolled() {
+        menusPolled()
+        guard !switching, !shuttingDown, case .window(let id) = active, !(virtualDisplay && stage.isStaged),
+              let w = catalog.window(id: id), capturePixelScale(of: w) != streamPixelScale else { return }
+        Task { @MainActor in
+            guard !self.switching, self.active == .window(id) else { return }
+            await self.select(.window(id))
+        }
     }
 
     /// Every catalog poll (2 s) while a device is connected.
@@ -1964,6 +2071,101 @@ package final class StreamCoordinator {
         return (pid, "Test menus: the test pattern's menus are pid \(pid)'s (\(name)); read and pressed without activating it.")
     }
 
+    // MARK: The Mac's sound (AudioPipeline; docs/audio-plan.md §4.7)
+    //
+    // One function decides what the sound is of, from Send Audio, the devices that play it, the
+    // source and whether Sill is quitting, and hands it to the pipeline, which keeps the same app's
+    // stream through the picture's restarts and starts another for another source. It runs in
+    // `active`'s didSet (set on every path of `select`, once the picture has started, or to none),
+    // when the count of devices that play it changes, in `adopt` when Send Audio changed outside a
+    // select, and at quit. The sound adds no device → host kind and no per-connection state here: the
+    // server keeps each device's codec and epoch.
+
+    /// What the sound should be of now, and why none when none: the log's reason.
+    private func audioKey() -> (AudioKey, String) {
+        if shuttingDown { return (.none, "Sill is quitting") }
+        guard config.sendAudio else { return (.none, "Send Audio is off") }
+        guard audioListeners > 0 else { return (.none, "no connected device plays sound") }
+        switch active {
+        case .none:
+            return (.none, "nothing streams")
+        case .desktop:
+            // A filter of the same kind as the picture's; a synthetic host's Desktop is the test pattern,
+            // and its sound the test tone.
+            return (synthetic ? .test : .desktop, "")
+        case .window(let id):
+            // A synthetic host never captures a real app's sound: its tests hear only the tone.
+            if synthetic { return (.none, "a test host sends only its test tone") }
+            let pid: pid_t
+            if virtualDisplay, let p = stage.placement, p.windowID == id {
+                pid = p.pid
+            } else if let app = catalog.window(id: id)?.owningApplication {
+                pid = app.processID
+            } else if let s = streamedPID, s.window == id {
+                pid = s.pid    // off the list for a few looks (`windowsChanged`), still streaming
+            } else {
+                return (.none, "the streamed window's app is not known")
+            }
+            // Sill's own sound never goes out (and the capture leaves this process out anyway).
+            guard pid != WindowCatalog.ownPID else { return (.none, "Sill's own window streams") }
+            let name = NSRunningApplication(processIdentifier: pid)?.localizedName
+                ?? catalog.window(id: id)?.owningApplication?.applicationName ?? "pid \(pid)"
+            return (.app(pid: pid, name: SafeText.label(name)), "")
+        }
+    }
+
+    /// Hands the pipeline what the sound should be of now.
+    private func audioFollow() {
+        let (key, reason) = audioKey()
+        audio.follow(key, reason: reason) { [weak self] key in
+            await self?.makeAudioSource(key) ?? .failed("the host is shutting down")
+        }
+    }
+
+    /// The source for `key`: ScreenCaptureKit's sound of one app, or of every app but Sill's, on the
+    /// main display (sound does not depend on the display: an app on the virtual display is heard
+    /// the same); or a synthetic host's test tone.
+    private func makeAudioSource(_ key: AudioKey) async -> AudioPipeline.Made {
+        switch key {
+        case .none:
+            return .failed("nothing to capture")
+        case .test:
+            return .source(SyntheticAudio(queue: audio.queue), line: "Audio: a test tone (440 Hz at -30 dBFS, a click at each second).")
+        case .desktop:
+            guard let display = catalog.display else { return .failed("no display to capture from") }
+            let filter: SCContentFilter
+            if let own = catalog.ownApplication {
+                filter = SCContentFilter(display: display, excludingApplications: [own], exceptingWindows: [])
+            } else {
+                filter = SCContentFilter(display: display, excludingWindows: [])   // the CLI: no Sill app to leave out
+            }
+            return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing the whole Mac's sound (every app but Sill).")
+        case .app(let pid, let name):
+            guard let display = catalog.display else { return .failed("no display to capture from") }
+            guard let app = await runningApplication(pid) else { return .failed("\(name) is not among the apps ScreenCaptureKit lists") }
+            let filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
+            return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing \(name)'s sound (every window of it).")
+        }
+    }
+
+    /// The app with this pid as ScreenCaptureKit lists it: from the catalog's last look, else from one
+    /// bounded look at every window and app (a window staged on the virtual display, or a minimized
+    /// app's, can be off the on-screen list).
+    private func runningApplication(_ pid: pid_t) async -> SCRunningApplication? {
+        if let app = catalog.windows.first(where: { $0.owningApplication?.processID == pid })?.owningApplication { return app }
+        guard let all = await WindowCatalog.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 2) else { return nil }
+        return all.applications.first { $0.processID == pid }
+    }
+
+    /// The Mac's status of the sound, from the pipeline's and the devices' count.
+    private func showAudio() {
+        let s = audio.status
+        status.update {
+            $0.audio = s.map { HostStatusSnapshot.Audio(source: $0.source, devices: $0.capturing && $0.problem == nil ? audioListeners : 0,
+                                                        problem: $0.problem) }
+        }
+    }
+
     // MARK: Virtual display lifecycle
 
     /// The window server removed the virtual display (sleep/wake, display arbitration). The stage
@@ -1991,6 +2193,7 @@ package final class StreamCoordinator {
         injector.releaseAll()
         server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
         shuttingDown = true
+        audio.shutdown()   // "Audio stopped: Sill is quitting."
         restoreFits(keeping: nil)
         stage.release()
     }
@@ -2066,8 +2269,9 @@ package final class StreamCoordinator {
 
     // MARK: The software fallback and the way back
 
-    /// From here the software encoder carries every stream, at half the capture scale and up to 60
-    /// fps: a hardware session stopped returning frames (`afterHang`), or the launch probe got no
+    /// From here the software encoder carries every stream, at 1x (its knob is 1 at most: half the
+    /// scale each way on a Retina display, the hardware's own on a 1x one) and up to 60 fps: a
+    /// hardware session stopped returning frames (`afterHang`), or the launch probe got no
     /// answer. Busy or stuck cannot be told apart yet (a busy engine's frame comes back seconds
     /// later, and the encoder's deinit says so), so both start the re-check. A hang soon after a
     /// return means the busy spell is still on: the next check waits longer.
@@ -2087,10 +2291,13 @@ package final class StreamCoordinator {
         lastRecheck = now
         recheckDue = now + recheckInterval
         let next = Int(recheckInterval)
+        // The scale the software encoder captures at, in the capture line's words ("capturing at 1x"):
+        // `captureScale` is its knob from here, held to the stream's display (nothing streams yet at launch).
+        let at = CaptureScale.words(knob: captureScale, displayScale: streamDisplayScale)
         if afterHang {
-            print("Hardware HEVC encoder is not returning frames (busy or stuck); switching to the software encoder at half scale until the hardware keeps up again (next check in \(next) s).")
+            print("Hardware HEVC encoder is not returning frames (busy or stuck); switching to the software encoder, \(at), until the hardware keeps up again (next check in \(next) s).")
         } else {
-            print("The Mac's hardware video encoder is not answering; streaming with the software encoder at half scale until a check finds it keeping up (every \(next) s while a device is connected).")
+            print("The Mac's hardware video encoder is not answering; streaming with the software encoder, \(at), until a check finds it keeping up (every \(next) s while a device is connected).")
         }
         startRecheck()
     }
@@ -2202,15 +2409,23 @@ package final class StreamCoordinator {
     }
 
     /// The size a hardware stream would have now: the running one's at the full capture scale, or
-    /// the Desktop's while nothing streams (a device asks for the Desktop first).
+    /// the Desktop's while nothing streams (a device asks for the Desktop first); either held to its
+    /// display's own scale (CaptureScale), as the stream would be.
     private var hardwareProbeSize: (width: Int, height: Int) {
         if let size = Self.testProbeSize { return size }
         if active != .none, let enc = encoder {
-            let factor = enc.software ? scale / min(scale, 1.0) : 1   // the software encoder runs at points
+            // The software encoder runs at points: the hardware's stream would run at the knob, both
+            // held to the display's own scale (on a 1x display the two are one size).
+            let hardware = CaptureScale.effective(knob: scale, displayScale: streamDisplayScale)
+            let software = CaptureScale.effective(knob: min(scale, 1.0), displayScale: streamDisplayScale)
+            let factor = enc.software ? hardware / software : 1
             return (evenPixels(CGFloat(enc.width) * factor), evenPixels(CGFloat(enc.height) * factor))
         }
         if synthetic { return (evenPixels(1512 * scale), evenPixels(949 * scale)) }
-        if let d = catalog.display { return (evenPixels(CGFloat(d.width) * scale), evenPixels(CGFloat(d.height) * scale)) }
+        if let d = catalog.display {
+            let s = CaptureScale.effective(knob: scale, displayScale: Self.displayScale(of: SCContentFilter(display: d, excludingWindows: [])))
+            return (evenPixels(CGFloat(d.width) * s), evenPixels(CGFloat(d.height) * s))
+        }
         return (evenPixels(1920 * scale), evenPixels(1080 * scale))
     }
 
@@ -2317,12 +2532,18 @@ package final class StreamCoordinator {
                 broadcastList()
                 return
             }
-            // The encoder is fixed to one size, so a resized window means a fresh pipeline.
-            if let scw = catalog.window(id: id),
-               evenPixels(scw.frame.width * captureScale) != encoderWidth || evenPixels(scw.frame.height * captureScale) != encoderHeight {
-                _ = w
-                await select(active)
-                return
+            // The encoder is fixed to one size, so a resized window means a fresh pipeline: when the
+            // size `select` would ask for it now, at the scale its capture would run at and by the same
+            // rounding, is not the encoder's (CaptureScale.windowNeedsRestart: a window whose odd side
+            // was rounded up never restarts at every poll; a move to a display of another scale alone
+            // is `catalogPolled`'s).
+            if let scw = catalog.window(id: id) {
+                if CaptureScale.windowNeedsRestart(encoder: (encoderWidth, encoderHeight), points: scw.frame.size,
+                                                   knob: captureScale, displayScale: Self.displayScale(of: scw)) {
+                    _ = w
+                    await select(active)
+                    return
+                }
             }
         }
         broadcastList()
@@ -2488,7 +2709,8 @@ package final class StreamCoordinator {
                                  stream: s.stream?.wire,
                                  answering: answering,
                                  away: away,
-                                 link: link)
+                                 link: link,
+                                 audioNote: t.sendAudio ? s.audio?.note : nil)
     }
 
     /// The Mac's Virtual Display pane in its order (SettingsPanes.swift, `statusText`), without the
