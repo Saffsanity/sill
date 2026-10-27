@@ -7,9 +7,13 @@ struct ContentView: View {
     /// Tells the host what this device sees, once a second while connected. Also covers the DEBUG
     /// harness's `-SillLive 1` session, which runs on this same client.
     @StateObject private var statsReporter = ClientStatsReporter()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         root.onAppear { statsReporter.attach(to: client) }
+            // This window's sound: a scene in the background is not heard, though another keeps the app
+            // active (inactive is still on screen: Control Center over it, a headless simulator).
+            .onChange(of: scenePhase, initial: true) { _, phase in client.sound.setSceneForeground(phase != .background) }
     }
 
     @ViewBuilder private var root: some View {
@@ -189,8 +193,9 @@ struct ContentView: View {
 /// * `-SillSettingsEnd 1` — with `-SillSettings 1`: the panel's rows start scrolled to their end,
 ///   so a photo of a short screen shows the last groups (Direct Wireless, Away from home, This
 ///   iPad, Take the Tour). `-SillSettingsScroll gestures` starts them at the This iPad group
-///   instead (its switch and rows, which the footnotes under them push out of the end's view on a
-///   short screen).
+///   instead (its switches and rows, which the footnotes under them push out of the end's view on a
+///   short screen), `-SillSettingsScroll sound` at the Send Audio row, and `-SillSettingsScroll
+///   reverse` at its Reverse Scrolling switch.
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
@@ -287,10 +292,11 @@ struct ContentView: View {
 ///   `-SillLive 1`, whose session shows the real thing.
 /// * `-SillInputScript '<t> <step>; …'` — with `-SillLive 1` only: input for the simulator gates,
 ///   which have no finger (`InputScript`): `t` is seconds since the session's first window list, and
-///   a step is `down`, `pad DX,DY`, `lift` or `click` on the portrait pad, `tap X,Y` on the stream
-///   (a frame fraction), `key USAGE` (a hardware key) or `row USAGE` (a key of the portrait key
-///   row), `esc [MODS]`, `scroll DX,DY`, `wheel DX,DY`, `keyboard attach|detach` or `orient
-///   landscape|portrait` (InputScript has them all). The console says "input script: …" at each.
+///   a step is `down`, `pad DX,DY`, `lift`, `click` or `padscroll DX,DY` on the portrait pad, `tap
+///   X,Y` (a frame fraction) or `drag DX,DY` on the stream, `key USAGE` (a hardware key) or `row
+///   USAGE` (a key of the portrait key row), `esc [MODS]`, `scroll DX,DY`, `wheel DX,DY`, `keyboard
+///   attach|detach` or `orient landscape|portrait` (InputScript has them all). The console says
+///   "input script: …" at each.
 ///   It runs only when the session was dialled by `-SillConnect` to a loopback address and the
 ///   host's first window list has no version
 ///   (Sill.app's always has, and would post the input to this Mac): else "input script: refused:
@@ -339,6 +345,22 @@ struct ContentView: View {
 ///   never makes an app's connection defunct. The console says what happened ("browser: …"; the return
 ///   from the background makes the network browser again too, and the nearby one if it runs, "browser:
 ///   rebuilt … (back from the background)"), and the automatic reconnect its dials ("reconnect: …").
+/// * `-SillLayerFail <s>[,<s>…]` — in the normal app and under `-SillLive 1`: at each of these seconds
+///   after the launch's first picture, a frame that cannot decode goes onto the display layer, so the
+///   picture's recovery runs for real (issue #101): the layer's own notification, the flush, the one
+///   ask for a keyframe (kind 44, KeyframeRecovery; a repeat within 10 s waits 4, 8, 16, then 32 s
+///   from the last ask, "the ask waits N s for the spacing") and the Mac's keyframe. The console says what happened
+///   ("display: the picture was interrupted …", "keyframe: … asked the Mac for a keyframe", "display:
+///   the picture is back, N ms after it was interrupted"), and the host "Keyframe for ‹device›: its
+///   picture was interrupted." A synthetic host with `SILL_TEST_STILL_AFTER=<s>` stands in for a
+///   still window, whose picture comes back only through that ask; with `SILL_TEST_KEYFRAME_IGNORE=<n>`
+///   it ignores the first n asks, as a Mac from before kind 44 ignores every one, and the device asks
+///   again once its keyframe is overdue ("keyframe: no keyframe 4.0 s after the last ask; asked
+///   again").
+/// * `-SillKeyframeLost <n>` — with `-SillLayerFail`: the first n keyframes that end a wait after an
+///   interruption are thrown away by the layer's flush, as though the layer still read failed when they
+///   came (as it can while another app holds the decoder): the console's "flushed with the keyframe it
+///   waited for", the picture counted back and lost again, and the next ask a repeat's 4 s later.
 /// * Pairing at home, in the normal app and under `-SillLive 1` (§7.9): `-SillServiceType
 ///   _silltest._tcp` (the browsers look for that type: a test host registered with
 ///   SILL_TEST_SERVICE_TYPE is a real row, and no real Mac is; the Debug build's Info.plist
@@ -389,6 +411,20 @@ struct ContentView: View {
 /// * `-SillOrientation landscape|portrait` — the normal app only: asks the window scene for that
 ///   orientation at launch (a phone simulator sideways, with its real safe areas). The Duo's inner
 ///   display refuses it (UISceneErrorDomain 101): fold and turn its simulator with Tests/duorig.
+/// * The Mac's sound (docs/audio-plan.md §7.8). In the mock: `-SillSound on|muted` makes the mock Mac
+///   send its sound and this device play it or have it muted (the Sound button and switch in that
+///   state; the mock plays nothing), and `-SillSettingsCase sound|soundoff|soundnote` the Send Audio
+///   row on, off, or on with the Mac's note (why no sound comes). In the normal app and under
+///   `-SillLive 1`: `-SillSoundSink manual|device` (the engine renders offline and opens no output
+///   device, the simulator's default in every build, or it plays to the output; `device` in the
+///   simulator plays through the Mac's speakers: never in a gate), `-SillSoundVolume 0` (the player's
+///   volume, a second guard), `-SillSoundToggle <s>[,<s>…]` (the Sound button used at those seconds
+///   after the stream screen shows, as a tap would) and `-SillSoundSwitchAt <s>` (the panel's switch
+///   off, then on a second later). The console's "audio: …" lines say what happened: the format, the
+///   engine and its latencies, a line a second while sound plays (how far it trails the picture, the
+///   need, late packets, the error, frames added and dropped, jumps, duplicates), and in manual
+///   rendering where each click of a synthetic host's test tone was heard, against where it was placed
+///   and when it was due.
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
@@ -632,7 +668,12 @@ struct LayoutHarness: View {
 /// * `pad DX,DY` — that finger moves DX, DY points (a stroke starts first if none is down);
 /// * `lift` — it comes up;
 /// * `click` — a tap on the pad: a click where its cursor is;
+/// * `padscroll DX,DY` — two fingers on the pad: a scroll of DX, DY points in five steps, lifted at
+///   600 pt/s (so it coasts), through the pad's own scroll path (Reverse Scrolling turns it around);
 /// * `tap X,Y` — a finger's tap on the stream at that fraction of the frame;
+/// * `drag DX,DY` — a finger dragged over the stream: a scroll of DX, DY points in five steps at the
+///   picture's middle, lifted at 600 pt/s (so it coasts), through the finger pan's scroll path
+///   (Reverse Scrolling turns it around);
 /// * `key USAGE` — a hardware key (a HID usage), down and up: this device's pointer hides;
 /// * `row USAGE` — a key of the portrait key row: what the sprite shows stays;
 /// * `gesture NAME[,FINGERS]` — a three-finger (or four-finger) gesture a surface decided, through
@@ -643,8 +684,10 @@ struct LayoutHarness: View {
 ///   (`shift+command` and the like), only while the input view takes Esc (it holds the keyboard and no
 ///   EscapeKey is on screen in its window); the console says whether it went;
 /// * `scroll DX,DY` — the iPad's trackpad: a two-finger scroll of DX, DY points in five steps, lifted at
-///   600 pt/s (so it coasts), through the scroll path its recognizer takes;
-/// * `wheel DX,DY` — a mouse's wheel: the same steps as plain deltas, no gesture, no coast;
+///   600 pt/s (so it coasts), through the scroll path its recognizer takes (iPadOS's own Natural
+///   Scrolling has set its direction: Reverse Scrolling leaves it);
+/// * `wheel DX,DY` — a mouse's wheel: the same steps as plain deltas, no gesture, no coast (and, as a
+///   trackpad's, never turned around);
 /// * `keyboard attach|detach` — a hardware keyboard attaching or going, as GameController says it;
 /// * `orient landscape|portrait` — the scene asked for that orientation (an iPhone's).
 /// The pad and the overlay register themselves as they join a window, and each step calls their
@@ -659,7 +702,8 @@ struct LayoutHarness: View {
 /// `--synthetic` would post the input, so never point a script at one.
 enum InputScript {
     enum Step: Equatable, CustomStringConvertible {
-        case down, pad(dx: Double, dy: Double), lift, click, tap(x: Double, y: Double), key(UInt16), row(UInt16)
+        case down, pad(dx: Double, dy: Double), lift, click, padScroll(dx: Double, dy: Double)
+        case tap(x: Double, y: Double), drag(dx: Double, dy: Double), key(UInt16), row(UInt16)
         case gesture(TrackpadGestures.Gesture, fingers: Int)
         case esc(modifiers: String), scroll(dx: Double, dy: Double), wheel(dx: Double, dy: Double)
         case keyboard(attached: Bool), orient(String)
@@ -670,7 +714,9 @@ enum InputScript {
             case .pad(let dx, let dy): return "pad \(dx),\(dy)"
             case .lift: return "lift"
             case .click: return "click"
+            case .padScroll(let dx, let dy): return "padscroll \(dx),\(dy)"
             case .tap(let x, let y): return "tap \(x),\(y)"
+            case .drag(let dx, let dy): return "drag \(dx),\(dy)"
             case .key(let usage): return "key \(usage)"
             case .row(let usage): return "row \(usage)"
             case .gesture(let g, let fingers): return "gesture \(g.rawValue)" + (fingers == 3 ? "" : ",\(fingers)")
@@ -717,7 +763,9 @@ enum InputScript {
             case ("lift", 2): step = .lift
             case ("click", 2): step = .click
             case ("pad", 3) where pair.count == 2: step = .pad(dx: pair[0], dy: pair[1])
+            case ("padscroll", 3) where pair.count == 2: step = .padScroll(dx: pair[0], dy: pair[1])
             case ("tap", 3) where pair.count == 2: step = .tap(x: pair[0], y: pair[1])
+            case ("drag", 3) where pair.count == 2: step = .drag(dx: pair[0], dy: pair[1])
             case ("key", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .key(usage)
             case ("row", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .row(usage)
             case ("gesture", 3):
@@ -795,7 +843,9 @@ enum InputScript {
         case .pad(let dx, let dy): if let pad { pad.scriptMove(dx: dx, dy: dy) } else { done = false }
         case .lift: if let pad { pad.scriptLift() } else { done = false }
         case .click: if let pad { pad.scriptClick() } else { done = false }
+        case .padScroll(let dx, let dy): if let pad { pad.scriptScroll(dx: dx, dy: dy) } else { done = false }
         case .tap(let x, let y): if let overlay { overlay.scriptTap(x: x, y: y) } else { done = false }
+        case .drag(let dx, let dy): if let overlay { overlay.scriptScroll(dx: dx, dy: dy, from: .finger) } else { done = false }
         case .key(let usage): if let overlay { overlay.scriptKey(usage) } else { done = false }
         case .row(let usage):
             client.sendFromKeyRow(.key(hidUsage: usage, down: true, modifiers: 0))

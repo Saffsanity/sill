@@ -31,7 +31,9 @@ import SillHostCore
 ///
 /// `updateCheck` (automatic update checks) is here too, outside HostConfig: it moves no listener and
 /// no pipeline. What the checks found is UpdateChecker's own (updateLastCheck, updateETag,
-/// updateLatestTag, updateLatestURL, in the same defaults).
+/// updateLatestTag, updateLatestURL, in the same defaults). So is `showPairingWindowToScreenSharing`
+/// (Settings › Devices, issue #108): only the pairing window reads it, never the host, and it lives
+/// here rather than beside Require pairing because it lets no device in (PairingWindowSharing).
 @MainActor @Observable
 final class HostSettings {
     enum Key {
@@ -45,6 +47,8 @@ final class HostSettings {
         static let logShowsStats = "logShowsStats"
         static let updateCheck = "updateCheck"
         static let shareClipboard = "shareClipboard"
+        static let sendAudio = "sendAudio"
+        static let showPairingWindowToScreenSharing = "showPairingWindowToScreenSharing"
     }
 
     var config: HostConfig {
@@ -90,6 +94,21 @@ final class HostSettings {
     }
     @ObservationIgnored var onUpdateCheckChange: (@MainActor () -> Void)?
 
+    /// "Show the pairing window to screen sharing" (Settings › Devices; issue #108): Screen Sharing,
+    /// Apple Remote Desktop and VNC apps show the pairing window, its QR code and its code, so a Mac
+    /// used through them can pair (PairingWindowSharing). Off by default; a window already open
+    /// follows a change at once (the app delegate's hook). `-showPairingWindowToScreenSharing 1`
+    /// turns it on for one run without saving.
+    var showPairingWindowToScreenSharing: Bool {
+        didSet {
+            guard showPairingWindowToScreenSharing != oldValue else { return }
+            defaults.set(showPairingWindowToScreenSharing, forKey: Key.showPairingWindowToScreenSharing)
+            print(PairingWindowSharing.line(on: showPairingWindowToScreenSharing))
+            onPairingWindowSharingChange?()
+        }
+    }
+    @ObservationIgnored var onPairingWindowSharingChange: (@MainActor () -> Void)?
+
     @ObservationIgnored private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -113,6 +132,10 @@ final class HostSettings {
             Key.updateCheck: true,
             // On, like the CLI: each device has its own switch, and a password manager's copies never go.
             Key.shareClipboard: standard.shareClipboard,
+            // Off, like the CLI: the Mac keeps playing its own sound (docs/audio-plan.md, Q1).
+            Key.sendAudio: standard.sendAudio,
+            // Off: whoever can see this Mac's screen remotely could read a code (PairingWindowSharing).
+            Key.showPairingWindowToScreenSharing: false,
         ])
         config = HostConfig(maxFPS: defaults.integer(forKey: Key.maxFPS),
                             captureScale: CGFloat(defaults.double(forKey: Key.captureScale)),
@@ -129,9 +152,11 @@ final class HostSettings {
                             // (the identity store), from which AppModel reads it at launch, before
                             // the host starts, and to which the Devices pane saves it.
                             requirePairing: HostConfig.standard.requirePairing,
-                            shareClipboard: defaults.bool(forKey: Key.shareClipboard)).validated()
+                            shareClipboard: defaults.bool(forKey: Key.shareClipboard),
+                            sendAudio: defaults.bool(forKey: Key.sendAudio)).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         updateCheck = defaults.bool(forKey: Key.updateCheck)
+        showPairingWindowToScreenSharing = defaults.bool(forKey: Key.showPairingWindowToScreenSharing)
         settingsTab = defaults.string(forKey: Key.settingsTab).flatMap(SettingsTab.init(rawValue:)) ?? .general
         permissionsOnboardingDismissed = defaults.bool(forKey: Key.permissionsOnboardingDismissed)
         askedScreenRecording = defaults.bool(forKey: Key.askedScreenRecording)
@@ -154,6 +179,7 @@ final class HostSettings {
         if config.remotePort != old.remotePort { defaults.set(config.remotePort, forKey: Key.remotePort) }
         if config.internetAccess != old.internetAccess { defaults.set(config.internetAccess, forKey: Key.internetAccess) }
         if config.shareClipboard != old.shareClipboard { defaults.set(config.shareClipboard, forKey: Key.shareClipboard) }
+        if config.sendAudio != old.sendAudio { defaults.set(config.sendAudio, forKey: Key.sendAudio) }
     }
 
     // MARK: Remote devices seen (display only)

@@ -328,6 +328,14 @@ final class StreamClient: ObservableObject {
     /// Where the sprite's tip goes, a fraction of the video frame, or nil to hide it: the display
     /// view's `setPointer`, set by `StreamView.wirePointer`. Up to 120 times a second. Main thread.
     var onPointerChange: ((CGPoint?) -> Void)?
+    /// Something that may move the Mac's caret is about to go to the Mac: a click or a key going down
+    /// (TextInputRules.movesCaret), whichever view sent it, a pick, a launch, a window's button, a menu
+    /// item or a gesture. Called before it is queued, so what the stream screen's input view sends of a
+    /// composition still in progress goes out first, where the caret still is; the view then forgets what
+    /// it remembers of what was typed (InputOverlayProxy.caretMayHaveMoved, #138). Typed text never calls
+    /// it, a Return or a Tab among it neither: the input view keeps what was typed, and what came before
+    /// the Return final (TextComposition.fence). Set by StreamScreen. Main thread.
+    var onCaretMayMove: (() -> Void)?
     /// Q1's flip only (`PointerPresence.trackpadLinger`): the one timer that re-renders when the
     /// trackpad's pointer is due to go. Idle while the linger is nil, as it is by default.
     private var lingerRender: DispatchWorkItem?
@@ -386,6 +394,20 @@ final class StreamClient: ObservableObject {
     /// re-measuring; nil once the session ends (`forgetViewport`). Main thread.
     var lastViewport: Viewport?
 
+    // The Mac's sound (kind 43; docs/audio-plan.md §7.5, StreamClient+Audio.swift, AudioOutput).
+    /// This device's mute, the Sound button's and switch's: local, remembered (`Sill.soundMuted`; the
+    /// controls save it through `setSoundMuted`), never sent to the Mac. Main thread.
+    @Published var soundMuted = UserDefaults.standard.bool(forKey: StreamClient.soundMutedKey) {
+        didSet { if soundMuted != oldValue { sound.setMuted(soundMuted) } }
+    }
+    /// Whether the Mac sent its sound when a move handed the session over: the Sound button and switch
+    /// stay until the new connection's first kind 16 says (the same Mac). Nil outside a move. Main.
+    var soundAcrossMove: Bool?
+    /// The sound's output: its queue, the playout, the decoder and the engine. The panel's refresh is
+    /// this device's screen's, as the viewport reads it (`screenMaximumFPS`: the scene's screen, not
+    /// `UIScreen.main`), once, as the client is made on the main thread.
+    let sound = AudioOutput(refresh: 1 / Double(StreamClient.screenMaximumFPS()))
+
     /// The Mac's current cursor image (hotspot and size in points), for the pointer sprite, whichever
     /// pointer it shows. Not @Published for the same reason as `presence`. Main thread.
     struct CursorShape { let image: UIImage; let hotspot: CGPoint; let size: CGSize }
@@ -414,6 +436,11 @@ final class StreamClient: ObservableObject {
         var frameAge: MedianMax?
         /// Ping round trips, over the pongs that came back during the second. nil: none did.
         var rtt: MedianMax?
+        /// The Mac's sound: how far it trailed the picture over the last second the sound closed (ms,
+        /// -1 for one with none played), and the packets too late to play since the last report; both
+        /// nil before any sound played this session (ClientStats' `audioBehindMs`, `audioLate`).
+        var soundBehindMs: Int? = nil
+        var soundLate: Int? = nil
     }
 
     /// The typical and the worst of one second's samples, in whole milliseconds.
@@ -432,12 +459,37 @@ final class StreamClient: ObservableObject {
         }
     }
 
+    /// When the device asks the Mac for a keyframe after its picture was interrupted (issue #101).
+    /// Main thread.
+    private var keyframeRecovery = KeyframeRecovery()
+    /// The next look at the recovery: an ask the spacing holds back, when it is due, or an ask that is
+    /// out, when its keyframe is overdue. Main thread.
+    private var keyframeAskWork: DispatchWorkItem?
+
     /// The one display view for the whole session. Landscape and portrait both host it, so a
     /// rotation reparents the same layer (and its last decoded image) instead of creating a fresh
     /// view that would sit black until the next keyframe, up to 4 s later. Main thread.
     private(set) lazy var displayView: HEVCDisplayView = {
         let view = HEVCDisplayView(frame: .zero)
+        view.renderQueue = queue
         view.onVideoSize = { [weak self] size in self?.videoSize = size }
+        // The picture interrupted, then back (HEVCDisplayView.checkLayer): KeyframeRecovery decides
+        // when to ask the Mac for a keyframe, which a still window never sends by itself.
+        view.onNeedsKeyframe = { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.keyframeRecovery.interrupted(now: ProcessInfo.processInfo.systemUptime)
+                self.considerKeyframeAsk()
+            }
+        }
+        view.onPictureBack = { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                // A keyframe that comes while the window is away is the background's (KeyframeRecovery).
+                self.keyframeRecovery.pictureBack(now: ProcessInfo.processInfo.systemUptime, active: self.pictureActive)
+                self.keyframeAskWork?.cancel(); self.keyframeAskWork = nil
+            }
+        }
         onParameterSets = { ps in view.apply(ps) }
         onFrame = { data, isKey in view.enqueue(data, isKeyframe: isKey) }
         return view
@@ -919,6 +971,91 @@ final class StreamClient: ObservableObject {
         }
         // The clipboard's chip looks when Sill becomes active (StreamClient+Clipboard).
         observeClipboardActivation()
+        sound.setMuted(soundMuted)
+        sound.onRouteMuted = { [weak self] in self?.headphonesOut() }
+        // The picture's window going away and coming back (KeyframeRecovery).
+        observePictureActivation()
+    }
+
+    // MARK: - The picture's recovery
+
+    /// Sill (or the picture's own window: each Sill window has its own client) going away and coming
+    /// back. From init.
+    private func observePictureActivation() {
+        let center = NotificationCenter.default
+        // A scene's notification counts only for this session's window (any, before it has one).
+        let ours: (Notification) -> Bool = { [weak self] note in
+            guard let scene = note.object as? UIScene, let own = self?.displayView.window?.windowScene else { return true }
+            return scene === own
+        }
+        for name in [UIApplication.didBecomeActiveNotification, UIScene.didActivateNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                guard let self, ours(note) else { return }
+                // A layer iOS stopped meanwhile is flushed now: a still window sends no frame that
+                // would show it. And an ask held back while away goes out.
+                let view = self.displayView
+                self.queue.async { view.checkLayer("as its window became active") }
+                self.considerKeyframeAsk()
+            }
+        }
+        for name in [UIApplication.willResignActiveNotification, UIScene.willDeactivateNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                guard let self, ours(note) else { return }
+                self.keyframeRecovery.leftForeground()
+                self.keyframeAskWork?.cancel(); self.keyframeAskWork = nil
+            }
+        }
+    }
+
+    /// Whether the picture can be shown now: its window's scene is in the foreground and active, or,
+    /// while it is in no window, Sill is active. Main thread.
+    private var pictureActive: Bool {
+        if let scene = displayView.window?.windowScene { return scene.activationState == .foregroundActive }
+        return UIApplication.shared.applicationState == .active
+    }
+
+    /// Asks the Mac for one keyframe (kind 44) when KeyframeRecovery says one is owed and due, and looks
+    /// again when an ask the spacing holds back is due, or when the keyframe of an ask that is out is
+    /// overdue (`answerWait`: 4 s, or four of the worst round trips), so it can ask again. Never a pick
+    /// of the source again, which would restart every device's stream and, in regular mode, raise the
+    /// window on the Mac. A Mac from before kind 44 skips every ask, and the picture waits for the
+    /// stream's next keyframe, as it did. Main thread.
+    private func considerKeyframeAsk() {
+        keyframeAskWork?.cancel(); keyframeAskWork = nil
+        let now = ProcessInfo.processInfo.systemUptime
+        let wait = KeyframeRecovery.answerWait(worstRttMs: lastRttMaxMs)
+        let wasOut = keyframeRecovery.asked
+        let decision = keyframeRecovery.consider(now: now, active: pictureActive, streaming: active != .none, wait: wait)
+        #if DEBUG
+        // An ask that was out and is owed again (it goes now, or waits for the spacing): no keyframe came.
+        var unanswered = false
+        if wasOut { switch decision { case .askNow, .askAt: unanswered = true; case .nothing, .keyframeDue: break } }
+        let why = unanswered ? "no keyframe \(String(format: "%.1f", wait)) s after the last ask" : "the picture was interrupted"
+        #endif
+        switch decision {
+        case .nothing:
+            break
+        case .askNow:
+            send(.keyframeRequest, payload: Data())
+            lookAtKeyframeRecovery(at: now + wait, from: now)
+            #if DEBUG
+            print("keyframe: \(why); asked the Mac for a keyframe (spacing \(Int(keyframeRecovery.spacingNow)) s)")
+            #endif
+        case .askAt(let at):
+            lookAtKeyframeRecovery(at: at, from: now)
+            #if DEBUG
+            print("keyframe: \(why); the ask waits \(String(format: "%.1f", at - now)) s for the spacing")
+            #endif
+        case .keyframeDue(let at):
+            lookAtKeyframeRecovery(at: at, from: now)
+        }
+    }
+
+    /// `considerKeyframeAsk` again at `at` (uptime seconds). Main thread.
+    private func lookAtKeyframeRecovery(at: TimeInterval, from now: TimeInterval) {
+        let work = DispatchWorkItem { [weak self] in self?.considerKeyframeAsk() }
+        keyframeAskWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, at - now), execute: work)
     }
 
     /// Starts the network browser, once; from then on it is only made again (`rebuildBrowser`). The
@@ -1516,6 +1653,7 @@ final class StreamClient: ObservableObject {
         refusedListing = nil
         resetHomeMove()       // …and what a remote session knew of its move home
         resetPointerFeed()    // …and the Mac has the pointer until this device's first input (Q6)
+        sound.sessionStarted(away: false)   // …and its sound starts afresh (a move's hand-over keeps it)
         hostName = name
         var bonjourName: String?
         if case .service(let service, _, _, _) = endpoint { bonjourName = service }
@@ -1745,7 +1883,9 @@ final class StreamClient: ObservableObject {
         if let v = UserDefaults.standard.string(forKey: "SillHelloVersion"), !v.isEmpty { version = v }
         #endif
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-        return Wire.encode(Hello(appVersion: version, build: build, protocol: SillProtocol.current, device: ClientStatsReporter.deviceName))
+        // The codecs of the Mac's sound it plays: a Mac sends kind 43 only to a device that lists one.
+        return Wire.encode(Hello(appVersion: version, build: build, protocol: SillProtocol.current, device: ClientStatsReporter.deviceName,
+                                 audio: AudioCodec.devicePlays))
     }()
 
     /// The hello, the first thing on every session connection, written straight to `c` before
@@ -2330,6 +2470,7 @@ final class StreamClient: ObservableObject {
                 persistSavedMacs()
             }
             remoteRoute = nil
+            sound.setAway(false)   // the jitter cover takes home's bounds, and nothing else resets (rules 2 and 7)
             homeInfo = DiscoveryPolicy.HomeMoveInfo()
             failedHomeMoves = nil
             homeMoveTrust = nil
@@ -2342,6 +2483,7 @@ final class StreamClient: ObservableObject {
         lastPongAt = ProcessInfo.processInfo.systemUptime
         setRoute(from: c.currentPath, fresh: true)   // the new connection's, which carries the session now
         status = "Connected to \(hostName)"
+        soundAcrossMove = soundAvailable
         settings.reset()
         settingsProblem = nil
         settingsExpiry?.cancel()
@@ -3004,6 +3146,9 @@ final class StreamClient: ObservableObject {
         refusedListing = nil
         resetHomeMove()
         resetPointerFeed()   // the Mac has the pointer until this device's first input (Q6)
+        // Away from home through a VPN or the internet: away's cover, its start and bounds (rule 2). By
+        // address (a LAN address through the remote door) is home, as the Mac's AwayPolicy counts it.
+        sound.sessionStarted(away: s.route != .remote(.address))
         session = s
         goodbye = nil
         // Its way in is its route line's (`remoteRoute`, at its first window list), never a link word.
@@ -3156,8 +3301,13 @@ final class StreamClient: ObservableObject {
         apps = []
         videoSize = .zero
         displayView.clear()
+        // Nor an interruption of its picture: the next session's starts afresh.
+        keyframeRecovery = KeyframeRecovery()
+        keyframeAskWork?.cancel()
+        keyframeAskWork = nil
         // Nothing of a Mac's settings outlives its connection: the next one sends them afresh.
         settings.reset()
+        soundAcrossMove = nil
         settingsProblem = nil
         connectedAt = nil
         settingsExpiry?.cancel()
@@ -3166,6 +3316,8 @@ final class StreamClient: ObservableObject {
         // Nor its menus: an open one says "Not connected.", the button goes, and the iPad's bar
         // loses the Mac's menus at its next rebuild.
         resetMenus()
+        // Nor its sound: the engine stops, and the next session's floor and cover start afresh.
+        sound.sessionEnded()
         // Nor the clipboard's subscription, its chip or its note.
         resetClipboard()
     }
@@ -3184,7 +3336,8 @@ final class StreamClient: ObservableObject {
     /// is not the person's doing.
     private func request(_ source: StreamSource) {
         choicesSent += 1
-        send(.selectSource, Wire.encode(source))
+        onCaretMayMove?()   // the Mac raises what it picks: its caret is in another window
+        sendAfterInput(.selectSource, Wire.encode(source))
         #if DEBUG
         // Layout harness (mock, no connection): show the pick locally so taps can be checked.
         if connection == nil { DispatchQueue.main.async { self.active = source } }
@@ -3194,7 +3347,8 @@ final class StreamClient: ObservableObject {
     /// The bar's long-press menu: close, minimize or full-screen a window on the Mac.
     func command(_ action: WindowCommand.Action, window id: UInt32) {
         noteAction()
-        send(.windowCommand, Wire.encode(WindowCommand(id: id, action: action)))
+        onCaretMayMove?()
+        sendAfterInput(.windowCommand, Wire.encode(WindowCommand(id: id, action: action)))
     }
 
     // MARK: Bar order
@@ -3238,7 +3392,8 @@ final class StreamClient: ObservableObject {
     func launch(bundleID: String) {
         noteAction()
         choicesSent += 1   // the host picks the launched app's window: a choice, like a pick
-        send(.launchApp, Wire.encode(LaunchApp(bundleID: bundleID)))
+        onCaretMayMove?()
+        sendAfterInput(.launchApp, Wire.encode(LaunchApp(bundleID: bundleID)))
     }
 
     /// Send one input event to the Mac. Safe to call from the main thread; the work hops to the
@@ -3260,6 +3415,8 @@ final class StreamClient: ObservableObject {
         // Every input passes here, a hover and a flick's coast included: the tour's rule counts it
         // as something happening (StreamScreen.considerTour).
         lastInputAt = ProcessInfo.processInfo.systemUptime
+        // A click or a key from any view: what the input view remembers of what was typed goes (#138).
+        if TextInputRules.movesCaret(event) { onCaretMayMove?() }
         #if DEBUG
         // The tour takes every touch and the keyboard while it shows, and holds back the pointer's
         // move to a new frame's middle, so nothing should get here then; the one case expected is a
@@ -3306,6 +3463,14 @@ final class StreamClient: ObservableObject {
         return defaults.object(forKey: gesturesKey) == nil || defaults.bool(forKey: gesturesKey)
     }
 
+    /// This device's switch for Reverse Scrolling (the Settings panel's This iPad group; issue #143): off
+    /// unless turned on. While on, a finger dragged over the picture and two fingers on the on-screen
+    /// trackpad scroll the content the other way, their coast too; a connected trackpad or mouse keeps
+    /// iPadOS's own Natural Scrolling (`ScrollDirection`). The device's own preference, never sent to
+    /// the Mac; read as each scroll begins (`InputOverlayView`, `TrackpadSurface`).
+    static let reverseScrollKey = "Sill.reverseScroll"
+    static var reverseScrollOn: Bool { UserDefaults.standard.bool(forKey: reverseScrollKey) }
+
     /// This device's switch for Larger Picture (the Settings panel's This iPhone group; issue #58,
     /// docs/larger-picture-plan.md): off unless turned on. The device's own preference, never sent to
     /// the Mac; the stream screen reads it with what streams (`active`): it acts only while a window
@@ -3327,6 +3492,7 @@ final class StreamClient: ObservableObject {
                                             generation: TrackpadGesture.generation, windowStreams: windowStreams)
         guard plan.send else { return false }
         if plan.desktopFirst { select(.desktop) }
+        onCaretMayMove?()
         let payload = Wire.encode(TrackpadGesture(gesture: gesture.rawValue, fingers: fingers))
         queue.async { [weak self] in
             guard let self else { return }
@@ -3348,6 +3514,14 @@ final class StreamClient: ObservableObject {
         let message = StreamMessage(kind: kind, timestamp: Date().timeIntervalSince1970,
                                     isKeyframe: false, payload: payload)
         link.send(message.serialized())
+    }
+
+    /// A pick, a launch, a window's button or a menu item, behind the input already on its way
+    /// (`sendInput` hops to `queue`, which is serial): what an input method was still composing, sent
+    /// just before as `onCaretMayMove` let go of it, and anything typed a moment earlier reach the Mac
+    /// before it moves the caret, where the caret was. Sent straight away, it could overtake them.
+    private func sendAfterInput(_ kind: StreamMessageKind, _ payload: Data) {
+        queue.async { [weak self] in self?.send(kind, payload) }
     }
 
     // MARK: - The pointer (docs/pointer-visibility-plan.md §7.3)
@@ -3613,6 +3787,7 @@ final class StreamClient: ObservableObject {
             let age = (Date().timeIntervalSince1970 - header.timestamp) * 1000
             if age.isFinite { frameAgeSamples.append(min(max(age, 0), Self.sampleCeilingMs)) }
             frameCounter += 1
+            frameForSound(header)
             onFrame?(data, header.isKeyframe)
         case .windowList:
             guard let list = Wire.decode(WindowList.self, from: data) else { return }
@@ -3731,6 +3906,9 @@ final class StreamClient: ObservableObject {
             DispatchQueue.main.async { self.cursorShape = CursorShape(image: image, hotspot: hotspot, size: size) }
         case .macPointer:
             receivePointer(data)
+        case .audio:
+            // The Mac's sound: a format, or packets (StreamClient+Audio, AudioOutput).
+            receiveAudio(header, data)
         case .hostSettings:
             guard let state = Wire.decode(HostSettingsState.self, from: data) else { return }
             let from = connection
@@ -3847,11 +4025,14 @@ final class StreamClient: ObservableObject {
         windowOpenedAt = now
         // Per second of the window's real length, which is a second unless the app was suspended.
         let fps = elapsed > 0 ? Int((Double(frameCounter) / elapsed).rounded()) : frameCounter
-        let stats = LinkStats(fps: fps, frameAge: MedianMax(frameAgeSamples), rtt: MedianMax(rttSamples))
+        let audio = sound.takeSecond()
+        let stats = LinkStats(fps: fps, frameAge: MedianMax(frameAgeSamples), rtt: MedianMax(rttSamples),
+                              soundBehindMs: audio.map { $0.behindMs ?? -1 }, soundLate: audio?.late)
         frameCounter = 0
         frameAgeSamples.removeAll(keepingCapacity: true)
         rttSamples.removeAll(keepingCapacity: true)
         if let rtt = stats.rtt { worstRecentRttMs = Double(rtt.max) }
+        sound.rtt(median: stats.rtt?.median)
         DispatchQueue.main.async {
             guard self.connection === c else { return }   // torn down meanwhile: stay nil
             self.linkStats = stats
@@ -3950,6 +4131,7 @@ extension StreamClient {
         let linkBefore = settings.host?.link
         #endif
         let refused = settings.receive(state)
+        if let fps = state.stream?.fps { sound.setStreamFPS(fps) }
         if state.answering != nil { settingsProblem = nil }
         if !refused.isEmpty { settingsRefusals += 1 }
         scheduleSettingsExpiry()
@@ -4200,7 +4382,8 @@ extension StreamClient {
         switch menus.press(row, token: menuToken) {
         case .send(let request)?:
             menuToken += 1
-            send(.pressMenuItem, payload: Wire.encode(request))
+            onCaretMayMove?()
+            sendAfterInput(.pressMenuItem, Wire.encode(request))
             #if DEBUG
             print("menus: chose \(row.title) (\(request.id ?? ""))")
             if connection == nil { mockAnswer(request) }

@@ -85,7 +85,12 @@ no drops; approved on the App Store.
 In: single-window capture + HEVC; touch/keyboard/Pencil input; live-preview
 bar; full-desktop button; Duo inner + outer layouts; iCloud pairing + add by
 address.
-Out: hole punching, multi-window, layout customization, audio, AV1.
+Out: hole punching, multi-window, layout customization, AV1. Audio moved in on
+2026-09-27 (Noah: "Audio: the plan is done and parked as a v2 feature by your
+earlier decision", first in what he wanted worked on): the sound of what
+streams, off by default (Send Audio), per docs/audio-plan.md. In, as a beta,
+since 2026-10-20 (Noah, about PR #94: "merge as beta support"): Send Audio is the
+Mac's alone and says beta until the plan's device tests pass.
 
 Milestones (solo, ~10 hrs/week; halve at 20):
 1. Latency spike, capture→encode→decode — done 2026-09-22 (streams to iPad Mini; latency number still to record)

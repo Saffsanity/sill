@@ -42,8 +42,8 @@ own code (#66's host sends password managers' copies and gives the Mac's owner n
   message over 1 MiB (`StreamMessage.maxClientPayload`), and a device a host's over 4 MiB
   (`maxOtherHostPayload`), so the smaller cap serves both directions. Swift's JSON escapes a control
   character as six bytes, so 256 KB of text can exceed 1 MiB as JSON; such text is not sent.
-- Kinds 29, 30 and 31 stay free: 29 is the audio plan's (docs/audio-plan.md on the `audio-plan`
-  branch), 30 and 31 #66's side streams.
+- Kinds 29, 30 and 31 stay free, #66's side streams (29 was the audio plan's until 2026-10-14; the
+  sound is 43: docs/audio-plan.md, "Kind 43").
 - **What a subscription takes.** `{}` is text alone: a host sends `image` only to a connection whose
   subscription carries a later field saying it takes images (`"accepts":2`, the generation, say),
   never to one that subscribed with `{}`, which drops it (the review's finding: #66's host sends an

@@ -31,7 +31,7 @@
 
 <main>
   <h1>Privacy Policy</h1>
-  <p class="muted">Last updated October 14, 2026</p>
+  <p class="muted">Last updated October 20, 2026</p>
 
   <p class="lede">Sill collects nothing. There is no account and no server: your screen, what you type and what you copy travel only between your own devices, and Sill never sends anything about you to the developer.</p>
 
@@ -67,6 +67,9 @@
     <!-- Clipboard: for the release that ships it (PR #78); a republish before that release takes this item out. -->
     <li>While Share Clipboard is on, what you copy on your Mac (text), so you can paste it on your iPhone or iPad; copies a password manager marks as concealed are never sent.</li>
     <!-- /Clipboard -->
+    <!-- Sound: for the release that ships it (PR #94); a republish before that release takes this item out. -->
+    <li>While Send Audio is on (a beta, off unless you turn it on in Sill on your Mac), the sound of what you’re looking at: the window’s app, or every app for your desktop. Your iPhone or iPad plays it as it arrives and never records or saves it.</li>
+    <!-- /Sound -->
     <li>Sill’s streaming settings, and whether the connection keeps up with them.</li>
     <li>Which version of Sill for Mac it runs.</li>
   </ul>
@@ -81,7 +84,13 @@
     <!-- Clipboard: for the release that ships it (PR #78); a republish before that release takes this item out. -->
     <li>When you tap Paste in Sill to paste on your Mac, the text on your device’s clipboard, which becomes your Mac’s. Sill never reads your device’s clipboard by itself.</li>
     <!-- /Clipboard -->
+    <!-- Keyframe: for the release that ships it (PR #93); a republish before that release takes this item out. -->
+    <li>When the picture on your device was interrupted, for example while Sill was in the background, a request to send the picture again. It carries nothing else.</li>
+    <!-- /Keyframe -->
     <li>While it’s connected, once a second, a short report: the frame rate, how long frames and replies took, and the device’s name and model, such as “iPad (iPad14,1)”. iOS gives apps a generic name like “iPad”, not the name you gave your device.</li>
+    <!-- Sound: for the release that ships it (PR #94); a republish before that release takes this item out. -->
+    <li>While it plays sound from your Mac, that report also says how far the sound trails the picture and how many sound packets came too late to play.</li>
+    <!-- /Sound -->
     <li>When it connects, which version of Sill it runs, so your Mac can say when the app needs an update to keep working with it.</li>
   </ul>
 
@@ -112,9 +121,15 @@
     <li>The names of Mac computers it has seen with Direct Wireless Connection on, so it knows to look for them nearby.</li>
     <li>Which parts of the tour of Sill’s controls you have seen, and whether you skipped it, so it shows you only what you haven’t seen.</li>
     <li>Whether three-finger gestures are on, and whether Larger Picture is.</li>
+    <!-- Sound: for the release that ships it (PR #94); a republish before that release takes this item out. -->
+    <li>Whether you muted the sound from your Mac on that device.</li>
+    <!-- /Sound -->
     <!-- Clipboard: for the release that ships it (PR #78); a republish before that release takes this item out. -->
     <li>Whether Share Clipboard is on, and a count that tells Sill whether you copied something new since it last sent or received text, never what you copied. Text your Mac sends stays on the device’s clipboard for 10 minutes, and Universal Clipboard does not pass it to your other devices.</li>
     <!-- /Clipboard -->
+    <!-- Reverse Scrolling: for the release that ships it (PR #159); a republish before that release takes this item out. -->
+    <li>Whether Reverse Scrolling is on.</li>
+    <!-- /Reverse Scrolling -->
     <li>The Mac computers you paired: each one’s name, key and addresses, and when it last connected.</li>
     <li>This device’s pairing key, in its keychain. It isn’t synced, and it works only on this device: a backup can put it back on this same iPhone or iPad, never on another.</li>
   </ul>
@@ -128,7 +143,11 @@
   <h2>Permissions</h2>
   <h3>On your Mac</h3>
   <ul>
-    <li><strong>Screen Recording</strong>, to show the windows you pick on your iPhone or iPad. Nothing is recorded or saved.</li>
+    <li><strong>Screen Recording</strong>, to show the windows you pick on your iPhone or iPad. Nothing is recorded or saved.
+    <!-- Sound: for the release that ships it (PR #94); a republish before that release takes this sentence out. -->
+    While Send Audio is on, it also lets Sill send their sound to your iPhone or iPad.
+    <!-- /Sound -->
+    </li>
     <li><strong>Accessibility</strong>, so your iPhone or iPad can click, scroll and type on your Mac and choose from its menus, and so Sill can move and size the window it shows.</li>
     <li><strong>Local Network</strong>, so your iPhone and iPad can find your Mac.</li>
   </ul>
