@@ -1382,6 +1382,15 @@ final class KeyboardFrameMonitor: ObservableObject {
             if let own, own.height > 0, own.width > 0 { ownHeights[own.width] = own.height }
         }
         let now: CGRect? = hiding ? nil : end.flatMap { $0.height > 0 && !$0.isNull ? $0 : nil }
+        #if DEBUG
+        // `-SillKeyboardProbe 1`: every notification as UIKit sends it (how the laptop pose's numbers
+        // were measured, DuoPosture.visibleKeyboardTop).
+        if UserDefaults.standard.bool(forKey: "SillKeyboardProbe") {
+            print("keyboard probe: \(note.name.rawValue): begin \(Self.describe(begin)), end \(Self.describe(end)); "
+                  + "own heights " + ownHeights.sorted { $0.key < $1.key }.map { "\(Self.points($0.value)) at \(Self.points($0.key)) wide" }
+                    .joined(separator: ", "))
+        }
+        #endif
         guard now != frame else { return }
         let duration = (info[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0
         #if DEBUG
@@ -1397,6 +1406,11 @@ final class KeyboardFrameMonitor: ObservableObject {
     #if DEBUG
     private static func points(_ value: CGFloat) -> String {
         abs(value - value.rounded()) < 0.01 ? "\(Int(value.rounded()))" : String(format: "%.1f", value)
+    }
+
+    private static func describe(_ rect: CGRect?) -> String {
+        guard let rect else { return "none" }
+        return "\(points(rect.minX)),\(points(rect.minY)) \(points(rect.width))×\(points(rect.height))"
     }
     #endif
 }
