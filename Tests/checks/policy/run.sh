@@ -9,11 +9,12 @@
 # pairing at home's session rules (home.swift: the pin, the trust a dial starts, how a session at
 # home ends, the ask's answer, the words); and issue #69's (sleep.swift: the browsers made again after
 # the background and after a failure, what one made again shows while it settles, the reconnect's dials
-# of a row that stays listed and their words, the Desktop asked for again after a stop, with models).
+# of a row that stays listed and their words, the Desktop asked for again after a stop, with models); and
+# a row's TXT record kept while its name stays listed (records.swift: the cable pulled, 2026-10-27).
 #   Tests/checks/policy/run.sh             compile and run the check
 #   Tests/checks/policy/run.sh --mutants   one-line mutants of DiscoveryPolicy.swift; each must fail it
 here="$(cd "$(dirname "$0")" && pwd)"
 source "$here/../common.sh"
 if [ "${1:-}" = "--mutants" ]; then run_mutants python3 "$here/mutants.py"; exit; fi
-swiftc -O iOSClient/DiscoveryPolicy.swift "$here/main.swift" "$here/home.swift" "$here/sleep.swift" -o "$out/check"
+swiftc -O iOSClient/DiscoveryPolicy.swift "$here/main.swift" "$here/home.swift" "$here/sleep.swift" "$here/records.swift" -o "$out/check"
 "$out/check"
