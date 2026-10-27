@@ -159,6 +159,13 @@ final class StreamClient: ObservableObject {
     // Remote access (StreamClient+Remote.swift). Published on main; the DEBUG harness seeds them.
     /// The Macs this device paired with (SavedMacs), persisted in `SavedMacs.defaultsKey`.
     @Published var savedMacs: [SavedMac] = []
+    /// Custom group names assigned to saved Macs (ConnectionList), persisted in `ConnectionList.groupsKey`.
+    @Published var macGroups: [String: String] = [:]
+    /// Last-stream preview pictures for saved Macs (ConnectionList), stored in Caches/SillPreviews: those
+    /// shown, which is none while the list shows (the files stay: `syncPreviews`).
+    @Published var macPreviews: [String: UIImage] = [:]
+    /// The style the shown pictures follow (`syncPreviews`); nil before the first look at launch.
+    var previewStyle: ConnectionList.Style?
     /// This connection's latest kind 18: who the Mac is and how to reach it from afar. Verified
     /// against the pin when the Mac is a saved one; otherwise decoded unverified, shown in the
     /// panel's Away from home group and never saved.
@@ -888,6 +895,14 @@ final class StreamClient: ObservableObject {
     private let link = SessionLink()
     let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
     private var lastParameterSets: ParameterSets?
+    /// The session's last keyframe with the parameter sets it came with (the Mac sends them before
+    /// every keyframe): a saved Mac's tile picture, decoded when the session ends (KeyframePicture),
+    /// since no snapshot of the screen can take the display layer's video on a device. One frame,
+    /// replaced at each keyframe, dropped with the session (`tearDown`). On `queue`.
+    private var lastKeyframe: (frame: Data, parameterSets: ParameterSets)?
+    /// Disconnect waits for a keyframe (`freshPictureWait`'s token): the next to come is told to the
+    /// main thread. On `queue`.
+    private var keyframeWanted: Int?
 
     // Liveness, on `queue` (docs/remote-access-plan.md §7.6). The host answers every ping, so a
     // live connection never goes quiet for long; a dead path used to keep a frozen picture.
@@ -932,6 +947,8 @@ final class StreamClient: ObservableObject {
 
     /// DEBUG: saved Macs seeded for this run by `-Sill.savedMacs '<JSON>'`; nothing is written back.
     private(set) var savedMacsSeeded = false
+    /// DEBUG: Mac groups seeded for this run by `-Sill.macGroups '<JSON>'`; nothing is written back.
+    private(set) var macGroupsSeeded = false
 
     init() {
         // The hello is built here, on the main thread: it reads UIDevice (the device's name), which
@@ -947,6 +964,12 @@ final class StreamClient: ObservableObject {
         } else {
             savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
         }
+        if let i = arguments.firstIndex(of: "-" + ConnectionList.groupsKey), i + 1 < arguments.count {
+            macGroups = ConnectionList.decodeGroups(arguments[i + 1])
+            macGroupsSeeded = true
+        } else {
+            macGroups = ConnectionList.decodeGroups(UserDefaults.standard.string(forKey: ConnectionList.groupsKey))
+        }
         // A bracketed IPv6 address starts so too (`-SillConnect '[::1]:P'`): an address argument
         // the argument domain dropped goes into the registration domain (this run's memory, never
         // saved), where every reader of UserDefaults finds it. Its readers are this client's
@@ -958,7 +981,9 @@ final class StreamClient: ObservableObject {
         }
         #else
         savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
+        macGroups = ConnectionList.decodeGroups(UserDefaults.standard.string(forKey: ConnectionList.groupsKey))
         #endif
+        syncPreviews(to: connectionStyle)
         // Back from the background: the pings stopped while the app was suspended, which is no loss;
         // and the browsers, whose connection to mDNSResponder iOS may have made defunct meanwhile, are
         // made again (`cameForward`, issue #69).
@@ -3182,8 +3207,25 @@ final class StreamClient: ObservableObject {
         }
     }
 
-    /// The user chose to leave. No reconnect.
+    /// The user chose to leave. No reconnect. With tiles on, a saved Mac's picture is the last thing
+    /// on screen: the Mac is asked for a keyframe first, every Mac as the picture's recovery asks, and
+    /// the session ends when it comes or after 300 ms, whichever is first (ConnectionList.freshPicture);
+    /// meanwhile the stream screen stays, and a second tap does nothing. A Mac from before kind 44 skips
+    /// the ask: its picture is the keyframe kept, 300 ms later.
     func disconnect() {
+        guard freshPictureWait == nil else { return }
+        switch freshPictureOnLeaving() {
+        case .stored:
+            finishDisconnect()
+        case .ask:
+            waitForFreshKeyframe(asked: true)
+        case .awaitAsked:
+            waitForFreshKeyframe(asked: false)
+        }
+    }
+
+    private func finishDisconnect() {
+        freshPictureWait = nil
         reconnect = nil
         cancelRemoteDial()
         let c = connection
@@ -3191,6 +3233,117 @@ final class StreamClient: ObservableObject {
         c?.cancel()
         tearDown(status: Self.lookingOnNetwork)
         updateDiscovery()
+    }
+
+    /// Disconnect waiting for its keyframe (`waitForFreshKeyframe`): the wait's token. Main thread.
+    private var freshPictureWait: Int?
+    private var freshPictureToken = 0
+    /// When the wait began (uptime), for the DEBUG line.
+    private var freshPictureAskedAt: TimeInterval = 0
+
+    /// What Disconnect does first for the tile's picture (ConnectionList.freshPicture). Main thread.
+    private func freshPictureOnLeaving() -> ConnectionList.FreshPicture {
+        guard connected, videoSize != .zero, let macID = session?.macID else { return .stored }
+        let inFront = displayView.window?.windowScene?.activationState == .foregroundActive
+        let takes = ConnectionList.takesPreview(style: connectionStyle, sceneActive: inFront, saved: savedMac(macID) != nil)
+        let now = ProcessInfo.processInfo.systemUptime
+        let decision = ConnectionList.freshPicture(takesPreview: takes, streaming: active != .none,
+                                                   sinceLastAsk: keyframeRecovery.lastAsk.map { now - $0 },
+                                                   askOut: keyframeRecovery.asked)
+        #if DEBUG
+        if takes, decision == .stored {
+            let why = active == .none ? "nothing streams" : "the picture's recovery asked for one under 2 s ago, and it came"
+            print("tiles: no keyframe asked for the picture of \(macID): \(why)")
+        }
+        #endif
+        return decision
+    }
+
+    /// Asks the Mac for a keyframe (`asked`; else one the picture's recovery asked for is due) and
+    /// ends the session when it comes or after `ConnectionList.freshKeyframeWait`. The wait is told of
+    /// the keyframe on `queue` (`keyframeWanted`), set there before the ask goes out, so its answer
+    /// cannot slip past it. Main thread.
+    private func waitForFreshKeyframe(asked: Bool) {
+        freshPictureToken += 1
+        let token = freshPictureToken
+        freshPictureWait = token
+        freshPictureAskedAt = ProcessInfo.processInfo.systemUptime
+        queue.async { self.keyframeWanted = token }
+        if asked {
+            send(.keyframeRequest, payload: Data())
+            // The picture's recovery asks nothing more: the session ends within the wait, and its own
+            // ask, due meanwhile while an interruption's keyframe is overdue, would come within the
+            // Mac's second of this one and be refused (KeyframeRecovery keeps asks 2 s apart for that).
+            keyframeAskWork?.cancel(); keyframeAskWork = nil
+        }
+        #if DEBUG
+        print("tiles: \(asked ? "asked the Mac for a keyframe" : "waiting for the keyframe the picture's recovery asked for") "
+              + "before the session ends, for the picture of \(session?.macID ?? "?"); at most \(Int(ConnectionList.freshKeyframeWait * 1000)) ms")
+        #endif
+        DispatchQueue.main.asyncAfter(deadline: .now() + ConnectionList.freshKeyframeWait) { [weak self] in
+            self?.freshKeyframeCame(token, timedOut: true)
+        }
+    }
+
+    /// The keyframe Disconnect waited for came (it is kept already: `lastKeyframe`), or the wait ran
+    /// out: the session ends now. Nothing when that wait is over (the session ended another way, or
+    /// the other of the two came first). Main thread.
+    private func freshKeyframeCame(_ token: Int, timedOut: Bool) {
+        guard freshPictureWait == token else { return }
+        queue.async { if self.keyframeWanted == token { self.keyframeWanted = nil } }
+        #if DEBUG
+        let ms = Int(((ProcessInfo.processInfo.systemUptime - freshPictureAskedAt) * 1000).rounded())
+        print(timedOut ? "tiles: no keyframe in \(ms) ms; the picture from the one kept"
+                       : "tiles: the keyframe came \(ms) ms after the ask; the picture from it")
+        #endif
+        finishDisconnect()
+    }
+
+    /// The tile's picture of `macID`: the keyframe kept (`lastKeyframe`), decoded off the main thread
+    /// within ConnectionList.decodeBound (KeyframePicture), and kept when it lands while tiles are still
+    /// on and the Mac still saved (ConnectionList.keepsDecodedPicture): `savePreview` puts it on the tile
+    /// at once (the connect screen may be showing by then) and writes its JPEG. Nothing, and the old
+    /// file stays, when no keyframe came, the decode fails or gives no answer in time, or the picture is
+    /// black. From `tearDown`, whose next block on `queue` drops the keyframe. Main thread.
+    private func takePreview(of macID: String) {
+        queue.async { [weak self] in
+            guard let kept = self?.lastKeyframe else {
+                #if DEBUG
+                print("tiles: no picture of \(macID) kept: no keyframe came in this session")
+                #endif
+                return
+            }
+            #if DEBUG
+            let started = CACurrentMediaTime()
+            #endif
+            KeyframePicture.make(frame: kept.frame, parameterSets: kept.parameterSets, bound: ConnectionList.decodeBound) { result in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    #if DEBUG
+                    let ms = Int(((CACurrentMediaTime() - started) * 1000).rounded())
+                    #endif
+                    switch result {
+                    case .success(let picture):
+                        guard ConnectionList.keepsDecodedPicture(style: self.connectionStyle, saved: self.savedMac(macID) != nil) else {
+                            #if DEBUG
+                            print("tiles: no picture of \(macID) kept: decoded in \(ms) ms, but the list is on or the Mac is no longer saved")
+                            #endif
+                            return
+                        }
+                        #if DEBUG
+                        print("tiles: decoded the picture of \(macID) from its \(kept.frame.count / 1024) KB keyframe in \(ms) ms, \(picture.width)×\(picture.height)")
+                        #endif
+                        self.savePreview(UIImage(cgImage: picture, scale: ConnectionList.previewScale, orientation: .up), for: macID)
+                    case .failure(let why):
+                        #if DEBUG
+                        print("tiles: no picture of \(macID) kept: \(why) (\(ms) ms); the old one stays")
+                        #else
+                        _ = why
+                        #endif
+                    }
+                }
+            }
+        }
     }
 
     /// The connection ended: the Mac went away (host quit, Wi-Fi dropped, connection reset, a
@@ -3205,6 +3358,8 @@ final class StreamClient: ObservableObject {
         if let released = link.release(c) { fenceEnded(c, released, why: "the direct connection closed") }
         DispatchQueue.main.async {
             guard self.connection === c else { return }   // stale callback from a connection we already replaced
+            // A Disconnect waiting for its keyframe: the person's leave stands, with no reconnect.
+            if self.freshPictureWait != nil { self.finishDisconnect(); return }
             // A move carries the session on (`rescue`), not when this device closed the connection
             // itself (`end`: a message no Sill sends): that one ends with the words it deserves.
             if self.sessionDead || (end == nil && self.rescue(from: c)) { return }
@@ -3218,6 +3373,7 @@ final class StreamClient: ObservableObject {
     /// that was to carry a session whose connection had gone on did not (`moveEnded`,
     /// `followBestPath`). Main thread.
     private func endSession(error: NWError? = nil, end: RemoteDialPolicy.End? = nil) {
+        if freshPictureWait != nil { finishDisconnect(); return }    // a Disconnect waiting for its keyframe stands
         connection = nil
         #if DEBUG
         if connected { print("session: over; back to the connect screen") }
@@ -3255,7 +3411,29 @@ final class StreamClient: ObservableObject {
         sessionHost = nil
         refusedListing = nil
         resetHomeMove()
-        queue.async { self.lastParameterSets = nil; self.pendingMove = nil; self.stopMeasuring() }
+        // A saved Mac's tile shows its screen as the last session ended, kept only while tiles are on and
+        // only from this session's own window in front (ConnectionList.takesPreview): the window's
+        // scene, not the app, since one of two Sill windows can be behind while the app is active. The
+        // picture is the session's last keyframe, decoded (KeyframePicture): never a snapshot of the
+        // screen, where a device draws the video black. A Disconnect asked for a fresh one first; a
+        // session lost or ended by the Mac gives the one kept.
+        freshPictureWait = nil
+        if connected, videoSize != .zero, let macID = session?.macID {
+            let inFront = displayView.window?.windowScene?.activationState == .foregroundActive
+            if ConnectionList.takesPreview(style: connectionStyle, sceneActive: inFront, saved: savedMac(macID) != nil) {
+                takePreview(of: macID)
+            } else {
+                #if DEBUG
+                print("tiles: no picture of \(macID) kept: \(connectionStyle), window in front \(inFront), saved \(savedMac(macID) != nil)")
+                #endif
+            }
+        }
+        // After the picture's keyframe was taken (the block above queued first): nothing of this
+        // session's stream outlives it.
+        queue.async {
+            self.lastParameterSets = nil; self.lastKeyframe = nil; self.keyframeWanted = nil
+            self.pendingMove = nil; self.stopMeasuring()
+        }
         firstListDeadline?.cancel()
         firstListDeadline = nil
         session = nil
@@ -3787,6 +3965,13 @@ final class StreamClient: ObservableObject {
             let age = (Date().timeIntervalSince1970 - header.timestamp) * 1000
             if age.isFinite { frameAgeSamples.append(min(max(age, 0), Self.sampleCeilingMs)) }
             frameCounter += 1
+            if header.isKeyframe, let ps = lastParameterSets {
+                lastKeyframe = (data, ps)       // the tile's picture (ConnectionList); its payload, not a copy
+                if let token = keyframeWanted {
+                    keyframeWanted = nil
+                    DispatchQueue.main.async { self.freshKeyframeCame(token, timedOut: false) }
+                }
+            }
             frameForSound(header)
             onFrame?(data, header.isKeyframe)
         case .windowList:

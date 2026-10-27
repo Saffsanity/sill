@@ -535,6 +535,7 @@ enum MockCatalog {
         case homeolder       // a tap on an Update Sill row: "Mac mini runs an older Sill…"
         case pairingrequired // Require pairing turned on while this device was connected without pairing
         case asleep          // the automatic reconnect's dials of a listed row not answered: "Mac mini isn’t answering. It may be asleep…" (issue #69)
+        case tiles           // tiles with stored preview pictures and Home / Work / Other groups
     }
 
     /// How the connect screen starts in a case: the card unfolded, on the typed path, and the
@@ -694,6 +695,35 @@ enum MockCatalog {
             // dials have not connected: the line after DiscoveryPolicy.reconnectQuietAfter of them.
             client.macs = [home("Mac mini", .wifi, saved: true, homeTLS: true), studio]
             client.status = DiscoveryPolicy.reconnectLine(mac: "Mac mini", failed: DiscoveryPolicy.reconnectQuietAfter, direct: false)
+        case .tiles:
+            // The Mac mini twice, as on Noah's iPad (2026-10-27): its Wired row, taken for it by its Bonjour
+            // name (no tag of a saved Mac's, so its Remote row stays listed), and that Remote row. Both show
+            // its one picture (ConnectionList.tileMac); the Office iMac (not saved) and the Mac mini (2) (no
+            // picture kept) show the placeholder.
+            let wiredWord = DiscoveryPolicy.rowWord(door: .pairingRequired, saved: true, revoked: false, homeTLS: true,
+                                                    debug: StreamClient.debugBuild, method: .wired, cable: true)
+            let mini = FoundMac(name: "Mac mini", endpoint: .service(name: "Mac mini", type: "_sill._tcp", domain: "local.", interface: nil),
+                                route: .network, savedByName: "HOMEPAIRING8", method: .wired, door: .pairingRequired, homeWord: wiredWord)
+            let miniRemote = remote("Mac mini", "HOMEPAIRING8")
+            let pro = remote("Noah Saffer’s MacBook Pro in the Studio", "A3C5HR4RBV67YR21")
+            let second = remote("Mac mini (2)", "0123456789ABCDEF")
+            client.macs = [mini, studio, home("Office iMac", .wired, saved: false), miniRemote, pro, second]
+            if client.macGroups.isEmpty {
+                client.macGroups = ["HOMEPAIRING8": "Home", "HOMEPAIRING6": "Home", "A3C5HR4RBV67YR21": "Work"]
+            }
+            // `-SillVideoSize WxH`: the pictures at that shape (a 16:9 Desktop, a 2.39:1 ultrawide one), each
+            // 320 pt wide as a session's end keeps it, so a photo shows a tile keeping to its cell.
+            var size = CGSize(width: 208, height: 132)
+            if let raw = UserDefaults.standard.string(forKey: "SillVideoSize") {
+                let parts = raw.lowercased().split(separator: "x").compactMap { Double($0) }
+                if parts.count == 2, parts[0] > 0, parts[1] > 0 {
+                    size = CGSize(width: 320, height: (320 * parts[1] / parts[0]).rounded())
+                } else {
+                    print("-SillVideoSize \(raw): not WxH")
+                }
+            }
+            client.macPreviews = ["HOMEPAIRING8": thumbnail(seed: 0, size: size), "HOMEPAIRING6": thumbnail(seed: 1, size: size),
+                                  "A3C5HR4RBV67YR21": thumbnail(seed: 2, size: size)]
         }
         return client
     }
@@ -751,11 +781,10 @@ enum MockCatalog {
         }
     }
 
-    /// 208×132 window portrait: a dark body under a 9 pt title strip, with a few grey bars so it
-    /// reads as a tiny window rather than a blank rectangle.
-    private static func thumbnail(seed: Int) -> UIImage {
-        let size = CGSize(width: 208, height: 132)
-        return UIGraphicsImageRenderer(size: size).image { _ in
+    /// 208×132 window portrait (or `size`): a dark body under a 9 pt title strip, with a few grey bars
+    /// so it reads as a tiny window rather than a blank rectangle.
+    private static func thumbnail(seed: Int, size: CGSize = CGSize(width: 208, height: 132)) -> UIImage {
+        UIGraphicsImageRenderer(size: size).image { _ in
             colour(0x26282D).setFill()
             UIBezierPath(rect: CGRect(origin: .zero, size: size)).fill()
 

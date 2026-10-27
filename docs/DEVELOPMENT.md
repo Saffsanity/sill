@@ -236,6 +236,51 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
    the cable. A session from away (Remote access, below) keeps its way in until
    it ends.
 
+The connect screen lists the Macs as rows, or, with the button beside "Connect
+to a Mac" (or Show as Tiles in a saved Mac's menu: touch and hold), as tiles:
+two columns from 340 pt wide, one on a narrower screen or at the accessibility
+text sizes. The rows are the default. With tiles on, a saved Mac's tile shows
+its screen as the last session with it ended, a 320 pt JPEG in
+Library/Caches/SillPreviews (never in a backup, unreadable while the device is
+locked), taken only for a session that ended in a window in front while tiles
+show. Switching to the list hides the pictures and keeps their files, so
+switching back to tiles shows them again at once; only Remove Preview Picture,
+Forget and the Mac's record going delete one (a launch and a change of style
+also delete the files of Macs no longer saved), and a session that ends while
+the list shows leaves the kept picture as it was: the list is the default, and
+a Mac's screen is kept on the device only by someone who chose tiles
+(`ConnectionList.takesPreview`, `previewPlan`). The picture is never a
+snapshot of the screen: on a device the video is composited outside the app's
+own drawing, so a snapshot of the stream drew black where it was (the
+simulator composites it in software, so its photos looked right). The device
+keeps the session's last keyframe with the parameter sets it came with (one
+frame, replaced at each keyframe, dropped with the session) and decodes it as
+the session ends, with a VideoToolbox session of its own, off the main thread,
+given up after a second (`iOSClient/KeyframePicture.swift`); the tile shows it
+once it lands. The Mac's cursor is never in the video and the device's pointer
+is a layer of its own, so the picture has neither (nor the `-SillHUD`
+readout). Disconnect first asks the Mac for a keyframe (kind 44, every Mac, as
+the picture's recovery does) and ends the session when it comes or after 300
+ms, so the picture is the last thing on screen, another window brought forward
+on the Mac included: a Mac from main on answers within a frame, and one that
+skips the request (Sill for Mac 0.5.1) costs that 300 ms pause before the
+connect screen, its picture the keyframe kept. A session lost or ended by the
+Mac gives the keyframe kept. A decode that fails, or a picture black
+throughout, writes nothing, and the old picture stays. Every tile of one Mac
+shows its one picture, whichever way the tile reaches it: a network or Direct
+row whose tag names the saved Mac, one with no tag taken for it by its Bonjour
+name (as a tap dials it), and its Remote row, which stays listed beside a row
+taken by name; another Mac's tiles show its own, and a row of no saved Mac the
+placeholder (`ConnectionList.tileMac`, which also lists each row under its
+Mac's group).
+
+A saved Mac's menu also puts it in a group, Home, Work, Personal or a name of
+your own (New Group…): grouped Macs are listed under their group's name, the
+three first, then the others alphabetically, then Other for the rest; with no
+group set the screen is the plain list it always was.
+`iOSClient/ConnectionList.swift` has the rules, checked in
+`Tests/checks/connection-list`.
+
 When a session ends by itself, the device reconnects: the Mac's row at once,
 then, while that row stays listed and nothing answers (a sleeping Mac whose
 record an Apple TV or HomePod keeps up as a Bonjour Sleep Proxy, or a Mac whose
@@ -1347,7 +1392,25 @@ simulator:
 - `-SillDrawer 1`, `-SillSettings 1` (with `-SillSettingsCase …` for the
   settings of the mock Mac) and `-SillConnectCase …`: the drawer, the Settings
   panel or the connect screen in a given state.
+- `-SillConnectCase tiles`: the connect screen's tiles (six, in Home, Work and
+  Other: the Mac mini twice, its Wired row taken for it by its name and its
+  Remote row, with its one picture; two more saved Macs with a picture each;
+  the Office iMac, not saved, and the Mac mini (2), no picture kept, with the
+  placeholder); `-SillVideoSize 1920x1080` gives the pictures that shape. `-Sill.connectionStyle tiles` (or `list`) and
+  `-Sill.macGroups '{"HOMEPAIRING6":"Home"}'` set the arrangement and the
+  saved Macs' groups, by Mac ID, for one run, in the mock and in the normal
+  app; the groups are never written back. A launch argument outranks the
+  switch beside the title, so to try the switch write the default instead:
+  `xcrun simctl spawn <udid> defaults write me.saffer.sill
+  Sill.connectionStyle tiles`.
 - `-SillHUD 1`: fps, frame age, round trip and frame size over the stream.
+- With tiles on, the console's `tiles:` lines say whether Disconnect asked the
+  Mac for a keyframe, when it came, and how the picture was decoded or why
+  none was kept. In a live session to a synthetic host on this Mac's
+  loopback, `-SillSettingsScript '8 disconnect'` takes the panel's Disconnect
+  8 s after the first window list; `SILL_TEST_KEYFRAME_IGNORE=1` on the host
+  stands in for a Mac that skips the request (the picture is the keyframe
+  kept, 300 ms later).
 - `-SillLayerFail <s>[,<s>…]` (the normal app and `-SillLive 1`): at each of
   these seconds after the launch's first picture a frame that cannot decode
   goes onto the display layer, so the picture's recovery runs for real (the

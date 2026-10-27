@@ -6324,7 +6324,34 @@ good.
   `Sill.tourSkipped`, `TouchWatcher`, a recognizer on the window that counts
   every touch and takes none, and DEBUG `TourDebug`); StreamScreen runs it
   (targets, the rule's inputs, the layer above the layouts and under the
-  pairing overlay, Take the Tour from the Settings panel's last row).
+  pairing overlay, Take the Tour from the Settings panel's last row). The
+  connect screen's tiles and groups (issue #116, PR #117): `ConnectionList`
+  (rows or tiles, `Sill.connectionStyle`, the rows by default; when a session's
+  end keeps a picture, `takesPreview`: only with tiles, from the session's own
+  window in front, for a saved Mac; the saved Mac a row stands for, `tileMac`:
+  its tag's or record's, else the one it is taken for by name, so every row
+  of one Mac (Wired, Wi-Fi, Direct, Remote) shows its one picture and is listed
+  under its group; what a launch or a change of style does,
+  `previewPlan`: the list hides the pictures and keeps their files, tiles show
+  them again, only the files of Macs no longer saved go; the picture's size,
+  `previewPixels`, 640 pixels wide at most, and `looksBlack`;
+  `keepsDecodedPicture`; whether Disconnect asks the Mac for a keyframe
+  first, `freshPicture`, every Mac whatever version it says; group names,
+  `Sill.macGroups`, and the sections' order; a superseded record's group; the
+  pictures' file names; pure, with KeyframeRecovery's spacing,
+  `Tests/checks/connection-list`; pbxproj AF01/FF01). ConnectScreen draws them
+  (the switch beside the title, the tiles, a saved Mac's Group menu and New
+  Group…), StreamClient+Remote keeps them (`savePreview` with complete file
+  protection in Library/Caches/SillPreviews, `syncPreviews` at launch and at a
+  change of style; only Remove Preview Picture and Forget delete a Mac's),
+  and StreamClient takes the picture: the session's last keyframe with its
+  parameter sets (`lastKeyframe`, on the network queue, one frame, dropped at
+  `tearDown`), decoded at the session's end by `KeyframePicture` (a
+  VTDecompressionSession of its own, off the main thread, 1 s at most;
+  pbxproj AF02/FF02), never a snapshot of the screen, which a device draws
+  black where the video is; Disconnect waits up to 300 ms for a fresh keyframe
+  first (kind 44, every Mac; one that skips it, Sill for Mac 0.5.1, costs that
+  pause, its picture the keyframe kept).
   `AudioDecoder` (AAC-ELD to a buffer per channel, one packet at a time;
   AudioToolbox only), `AudioPlayout` (the sound's timing; pure,
   `Tests/checks/audio-playout`), `AudioOutput` (its queue, the decoder and the
@@ -6407,7 +6434,7 @@ good.
   `audio-packetizer`, `audio-playout` (iOSClient's AudioPlayout on a simulated
   clock), `away-copy`, `away-quality`, `away-wire`, `cable-link`, `capture-scale`, `clientlink`,
   `clipboard`, `compatibility`,
-  `device-gate`, `display-wake`, `dmg-layout` (Scripts/dmg-layout's `.DS_Store` and alias
+  `connection-list`, `device-gate`, `display-wake`, `dmg-layout` (Scripts/dmg-layout's `.DS_Store` and alias
   writer, against Finder's own layout of the file, make-dmg.sh's layout
   arguments and the SVG's size and edge), `door-policy`, `duo` (DuoPosture;
   `tour` and `phone-portrait` take the Duo's real sizes too), `encoder-mailbox`,
@@ -6742,9 +6769,9 @@ plays through the Mac's speakers, never in a gate) with `-SillSoundVolume 0`,
 console's "audio: …" lines say what happened (the format, the engine and its
 latencies, a line a second, each jump with its size and cause, and in manual
 rendering where each click of a synthetic host's test tone was heard),
-`-SillSettingsScript '<t> set K=V[,K=V] | suggestion; …'` (a live session to a
-synthetic host on loopback: the panel's controls and the link callout's button,
-t seconds after the first window list), `-SillMoveHomeTest to:HOST:PORT|refused|
+`-SillSettingsScript '<t> set K=V[,K=V] | suggestion | disconnect; …'` (a live
+session to a synthetic host on loopback: the panel's controls, the link
+callout's button and Disconnect, t seconds after the first window list), `-SillMoveHomeTest to:HOST:PORT|refused|
 other:PORT` (with `-SillDialSaved 1`: the saved Mac listed as a network row a
 second into the remote session at a door that speaks TLS, so the move home
 runs against a synthetic `--remote --pairing` host with SILL_TEST_REMOTE_ORIGIN
