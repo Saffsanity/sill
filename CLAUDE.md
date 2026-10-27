@@ -132,8 +132,10 @@ sleep or shutting down". Additive: kind 22 gains the reasons "sleep", "shutdown"
   all 54 passed (51 before #157's and #233's checks came in); the mutants ran on display-wake's
   697e6c0, goodbye's aed225a and policy's 66d7121, and nothing those checks compile has changed since;
   each check's mutants by
-  its own `run.sh --mutants`, one run at a time; the CLI against main's, `--synthetic` on loopback, idle
-  30 s and with a Desktop client 15 s, identical masked and sorted. The bare app on loopback (`--synthetic`, the software
+  its own `run.sh --mutants`, one run at a time; the CLI against main's at b4caa91 (`--synthetic` on
+  loopback, masked and sorted): idle 30 s identical, and with a Desktop client 15 s identical in three
+  alternating runs but for `cursor.shape`, which follows this Mac's own cursor and came in both builds'
+  runs (main's in 0, 2 and 3 seconds, the head's in 7, 5 and 2). The bare app on loopback (`--synthetic`, the software
   encoder, no router, no screen) with two TLS sillclients paired through its pairing window
   (`-SillPairAfter`, `--pair-ask --then-code` from `SILL_TEST_REMOTE_DIR`): `-SillSleepAfter 6
   -SillWakeAfter 12`, both streaming the Desktop with sound, each told "sleep" and nothing more; a client
