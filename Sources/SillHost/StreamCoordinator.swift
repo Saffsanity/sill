@@ -97,11 +97,12 @@ package final class StreamCoordinator {
     /// input on that display's last pixel row and column at most (InputLanding).
     private var streamDisplayScale: CGFloat?
     /// Hardware HEVC normally. When a hardware session stops returning frames, or the launch probe
-    /// gets no answer, the stream runs on the software encoder at half the capture scale and up to
-    /// 60 fps, slow but alive (`enterSoftwareFallback`), until a re-check finds the hardware keeping
-    /// up with the stream again (`recheckLoop`, `hardwareIsBack`). The hardware has been stuck for
-    /// hours (2026-09-22) and busy for seconds (2026-09-24, when this used to last until the host
-    /// relaunched: 3 h at half resolution after a 1.8 s stall).
+    /// gets no answer, the stream runs on the software encoder at 1x (Standard: half the scale each
+    /// way on a Retina display, the hardware's own on a 1x one) and up to 60 fps, slow but alive
+    /// (`enterSoftwareFallback`), until a re-check finds the hardware keeping up with the stream
+    /// again (`recheckLoop`, `hardwareIsBack`). The hardware has been stuck for hours (2026-09-22)
+    /// and busy for seconds (2026-09-24, when this used to last until the host relaunched: 3 h at
+    /// half resolution, a Retina display's Standard, after a 1.8 s stall).
     private var useSoftwareEncoder = false
     private var softwareRestarts = 0
     private var lastSoftwareHangAt: CFAbsoluteTime = 0
@@ -1517,8 +1518,16 @@ package final class StreamCoordinator {
                 if let resized = fitToViewport(w) { size = Self.liveBounds(of: id)?.size ?? resized }
                 describe = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")\(useSoftwareEncoder ? " (software encoder)" : "")"
             }
-            let pixelScale = CaptureScale.effective(knob: captureScale, displayScale: displayScale)
-            width = evenPixels(size.width * pixelScale); height = evenPixels(size.height * pixelScale)
+            if sourceRect == nil {
+                // The window as it is, drawn 1:1 at its display's scale: an odd side rounds up, one black
+                // column or row past the window, never its pixels shrunk into one fewer (CaptureScale.windowPixels).
+                let pixels = CaptureScale.windowSize(size, knob: captureScale, displayScale: displayScale)
+                width = pixels.width; height = pixels.height
+            } else {
+                // A crop of Sill's virtual display, which ScreenCaptureKit scales to the buffer, as a display.
+                let pixelScale = CaptureScale.effective(knob: captureScale, displayScale: displayScale)
+                width = evenPixels(size.width * pixelScale); height = evenPixels(size.height * pixelScale)
+            }
             // Staged on the virtual display, nothing is activated or raised on select: the window
             // cannot be covered there, and the AX moves that put it there touch no focus.
         case .desktop:
@@ -1568,10 +1577,10 @@ package final class StreamCoordinator {
                 let fallback = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")\(useSoftwareEncoder ? " (software encoder)" : "")"
                 let windowFilter = SCContentFilter(desktopIndependentWindow: w)
                 let windowScale = Self.displayScale(of: windowFilter)
-                let pixelScale = CaptureScale.effective(knob: captureScale, displayScale: windowScale)
+                let pixels = CaptureScale.windowSize(w.frame.size, knob: captureScale, displayScale: windowScale)
                 do {
                     try await startPipeline(source: source, filter: windowFilter, sourceRect: nil, displayScale: windowScale,
-                                            width: evenPixels(w.frame.width * pixelScale), height: evenPixels(w.frame.height * pixelScale),
+                                            width: pixels.width, height: pixels.height,
                                             describe: fallback, title: title, kind: kind)
                 } catch {
                     print("Could not start streaming \(fallback): \(error)")
@@ -1878,10 +1887,15 @@ package final class StreamCoordinator {
         CaptureScale.displayScale(pointPixelScale: filter.pointPixelScale)
     }
 
+    /// The display scale ScreenCaptureKit has for `w` as it is, in regular mode: its filter's, made afresh.
+    private static func displayScale(of w: SCWindow) -> CGFloat? {
+        displayScale(of: SCContentFilter(desktopIndependentWindow: w))
+    }
+
     /// The pixels a point a capture of `w` would run at now, in regular mode: the knob held to the
-    /// scale ScreenCaptureKit has for the window as it is (its filter's, made afresh).
+    /// scale ScreenCaptureKit has for the window as it is.
     private func capturePixelScale(of w: SCWindow) -> CGFloat {
-        CaptureScale.effective(knob: captureScale, displayScale: Self.displayScale(of: SCContentFilter(desktopIndependentWindow: w)))
+        CaptureScale.effective(knob: captureScale, displayScale: Self.displayScale(of: w))
     }
 
     /// "Safari — Apple Developer" for the app's menu; just the app for an untitled window.
@@ -2255,8 +2269,9 @@ package final class StreamCoordinator {
 
     // MARK: The software fallback and the way back
 
-    /// From here the software encoder carries every stream, at half the capture scale and up to 60
-    /// fps: a hardware session stopped returning frames (`afterHang`), or the launch probe got no
+    /// From here the software encoder carries every stream, at 1x (its knob is 1 at most: half the
+    /// scale each way on a Retina display, the hardware's own on a 1x one) and up to 60 fps: a
+    /// hardware session stopped returning frames (`afterHang`), or the launch probe got no
     /// answer. Busy or stuck cannot be told apart yet (a busy engine's frame comes back seconds
     /// later, and the encoder's deinit says so), so both start the re-check. A hang soon after a
     /// return means the busy spell is still on: the next check waits longer.
@@ -2276,10 +2291,13 @@ package final class StreamCoordinator {
         lastRecheck = now
         recheckDue = now + recheckInterval
         let next = Int(recheckInterval)
+        // The scale the software encoder captures at, in the capture line's words ("capturing at 1x"):
+        // `captureScale` is its knob from here, held to the stream's display (nothing streams yet at launch).
+        let at = CaptureScale.words(knob: captureScale, displayScale: streamDisplayScale)
         if afterHang {
-            print("Hardware HEVC encoder is not returning frames (busy or stuck); switching to the software encoder at half scale until the hardware keeps up again (next check in \(next) s).")
+            print("Hardware HEVC encoder is not returning frames (busy or stuck); switching to the software encoder, \(at), until the hardware keeps up again (next check in \(next) s).")
         } else {
-            print("The Mac's hardware video encoder is not answering; streaming with the software encoder at half scale until a check finds it keeping up (every \(next) s while a device is connected).")
+            print("The Mac's hardware video encoder is not answering; streaming with the software encoder, \(at), until a check finds it keeping up (every \(next) s while a device is connected).")
         }
         startRecheck()
     }
@@ -2514,12 +2532,14 @@ package final class StreamCoordinator {
                 broadcastList()
                 return
             }
-            // The encoder is fixed to one size, so a resized window means a fresh pipeline: its size
-            // at the scale its capture would run at now (CaptureScale; a move to a display of another
-            // scale alone is `catalogPolled`'s).
+            // The encoder is fixed to one size, so a resized window means a fresh pipeline: when the
+            // size `select` would ask for it now, at the scale its capture would run at and by the same
+            // rounding, is not the encoder's (CaptureScale.windowNeedsRestart: a window whose odd side
+            // was rounded up never restarts at every poll; a move to a display of another scale alone
+            // is `catalogPolled`'s).
             if let scw = catalog.window(id: id) {
-                let s = capturePixelScale(of: scw)
-                if evenPixels(scw.frame.width * s) != encoderWidth || evenPixels(scw.frame.height * s) != encoderHeight {
+                if CaptureScale.windowNeedsRestart(encoder: (encoderWidth, encoderHeight), points: scw.frame.size,
+                                                   knob: captureScale, displayScale: Self.displayScale(of: scw)) {
                     _ = w
                     await select(active)
                     return

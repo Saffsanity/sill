@@ -206,6 +206,10 @@ at the defaults, change one at a time. captureScale (Resolution: 2 Retina, 1
 Standard) is pixels per point at most: a capture runs at the lesser of it and
 its display's own scale, so on a 1x display both are 1x (a window captured
 there at 2x showed in the top-left quarter of the picture before 2026-10-27).
+A window drawn at its display's own scale asks one pixel more on an odd side
+("Capture started: 1118×610 … filter (1117.0, 610.0)"): ScreenCaptureKit
+draws it 1:1 with one black column or row past it, where a pixel fewer had it
+shrink the window by one (CaptureScale.windowPixels).
 The stream rate is the device's own: each client reports its panel's ceiling
 (120 on ProMotion iPads and iPhones, 60 on the iPad mini) and 60 while Low
 Power Mode is on; the host runs capture, encoder and the virtual display at
@@ -1653,7 +1657,8 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
   asleep and is on again.
 - The Mac has one hardware video encoder, shared by every app. When it keeps
   a frame for 1.5 s the log says "switching to the software encoder" and the
-  stream restarts at half resolution on the CPU, up to 60 fps (a launch probe
+  stream restarts on the CPU at 1x (Standard: half the resolution each way on
+  a Retina display, the same on a 1x one), up to 60 fps (a launch probe
   with no answer, "Hardware encoder probe: no answer", starts there). Almost
   always the encoder is busy, not broken: the iOS Simulator's screen recorder
   (`xcrun simctl io … recordVideo`) runs at a higher priority in the encoder

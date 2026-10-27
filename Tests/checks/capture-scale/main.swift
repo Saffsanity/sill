@@ -1,12 +1,15 @@
 // CaptureScale and InputLanding (Sources/SillHost/CaptureScale.swift): the pixel scale a capture runs
 // at, the Resolution knob held to the display's own (2026-10-27: on an external 2560×1440 display at
 // 1x, a window picked at Retina filled the top-left quarter of the picture, and the Desktop was
-// captured at 5120×2880), and where a device's position lands on the Mac: at most on the source's
-// last pixel row and column (the picture's bottom edge was posted at the row past the display's last).
+// captured at 5120×2880); a window's capture size, an odd side rounded up to even where it is drawn
+// 1:1 (a 1117-point window on a 1x display was asked 1116 pixels and shrunk into them), and the
+// restart rule that compares the same size (no restart at every poll); and where a device's position
+// lands on the Mac: at most on the source's last pixel row and column (the picture's bottom edge was
+// posted at the row past the display's last).
 // Compiled with Sources/SillHost/CaptureScale.swift alone (run.sh):
 //   swiftc -O Sources/SillHost/CaptureScale.swift Tests/checks/capture-scale/main.swift
-// The rule case by case (Sill.log's own sizes among them), then random knobs, displays, rectangles
-// and fractions against its properties.
+// The rule case by case (Sill.log's own sizes among them), then random knobs, displays, windows,
+// rectangles and fractions against its properties.
 import CoreGraphics
 import Foundation
 
@@ -18,13 +21,17 @@ func check(_ ok: Bool, _ what: @autoclosure () -> String) {
 typealias C = CaptureScale
 typealias L = InputLanding
 
-/// WindowCapture.swift's, which needs ScreenCaptureKit and so is not compiled here: HEVC wants even
-/// dimensions.
-func evenPixels(_ v: CGFloat) -> Int { Int(v.rounded(.down)) & ~1 }
-/// What `select` asks ScreenCaptureKit for: the content's points at the capture's pixel scale.
+/// What `select` asks ScreenCaptureKit for a display, a staged window's crop of Sill's virtual display
+/// or the test pattern: the content's points at the capture's pixel scale, down to even (`evenPixels`,
+/// CaptureScale.swift's since the window rule; ScreenCaptureKit scales a display to fill any buffer).
 func size(_ w: CGFloat, _ h: CGFloat, knob: CGFloat, display: CGFloat?) -> String {
     let s = C.effective(knob: knob, displayScale: display)
     return "\(evenPixels(w * s))×\(evenPixels(h * s))"
+}
+/// What `select` asks for a window in regular mode (CaptureScale.windowSize).
+func window(_ w: CGFloat, _ h: CGFloat, knob: CGFloat, display: CGFloat?) -> String {
+    let s = C.windowSize(CGSize(width: w, height: h), knob: knob, displayScale: display)
+    return "\(s.width)×\(s.height)"
 }
 /// The part of each side of the buffer a window fills: ScreenCaptureKit draws it at its display's own
 /// scale and never scales it up (the bug: a 2x buffer of a window on a 1x display, a half each way).
@@ -64,14 +71,96 @@ for bad: Float in [0, -2, .nan, .infinity, -.infinity] {
 // Sill.log's own captures, 2026-10-27 and before: what was asked, and what is asked now.
 check(size(2560, 1440, knob: 2, display: 1) == "2560×1440",
       "the 1x Desktop: 2560×1440 (Sill.log: 5120×2880, four times the pixels, upscaled)")
-check(size(1117, 610, knob: 2, display: 1) == "1116×610",
-      "the window on the 1x display: 1116×610 (Sill.log: 2234×1220, the window in its top-left quarter)")
-check(size(2234, 1220, knob: 2, display: 1) == "2234×1220", "a 2234×1220-point window on the 1x display (Sill.log: 4468×2440)")
+check(window(1117, 610, knob: 2, display: 1) == "1118×610",
+      "the window on the 1x display: 1118×610, drawn whole (Sill.log: 2234×1220, the window in its top-left quarter; #233: 1116×610, shrunk)")
+check(window(2234, 1220, knob: 2, display: 1) == "2234×1220", "a 2234×1220-point window on the 1x display (Sill.log: 4468×2440)")
 check(size(1512, 982, knob: 2, display: 2) == "3024×1964" && size(1512, 982, knob: 1, display: 2) == "1512×982",
       "the Retina Desktop as before: 3024×1964 at Retina, 1512×982 at Standard")
-check(size(1091, 753, knob: 2, display: 2) == "2182×1506", "a window on the Retina display as before (Sill.log: 2182×1506)")
+check(window(1091, 753, knob: 2, display: 2) == "2182×1506", "a window on the Retina display as before (Sill.log: 2182×1506)")
 check(size(2234, 1220, knob: 2, display: C.virtualDisplay) == "4468×2440" && size(1117, 610, knob: 2, display: C.virtualDisplay) == "2234×1220",
       "staged windows as before (Sill.log: 4468×2440 and 2234×1220 of the virtual display)")
+
+// MARK: - A window's capture size: an odd side rounds up where the window is drawn 1:1
+
+// ScreenCaptureKit draws a window at its display's own scale into the top-left of the buffer and only
+// scales it down (`scalesToFit` false). A buffer a pixel short shrinks the window's pixels into one
+// fewer; a pixel more leaves one black column (or row) past it and the window 1:1.
+/// How a window `pixels` wide (at its display's scale) is drawn into a buffer `buffer` wide: its scale
+/// (1: 1:1; below 1: shrunk) and the black past it.
+func drawn(_ pixels: CGFloat, into buffer: Int) -> (scale: CGFloat, black: CGFloat) {
+    let s = min(1, CGFloat(buffer) / pixels)
+    return (s, CGFloat(buffer) - pixels * s)
+}
+/// Before this rule: every side down to even (`evenPixels` at the capture's scale).
+func before(_ points: CGFloat, knob: CGFloat, display: CGFloat?) -> Int {
+    evenPixels(points * C.effective(knob: knob, displayScale: display))
+}
+
+// Sill.log's odd windows at Aa 1x on the 1x display (2026-10-27), each now drawn whole.
+for (w, h, now, then) in [(CGFloat(1117), CGFloat(610), "1118×610", "1116×610"), (818, 565, "818×566", "818×564"),
+                          (728, 535, "728×536", "728×534"), (377, 235, "378×236", "376×234")] {
+    check(window(w, h, knob: 2, display: 1) == now && "\(before(w, knob: 2, display: 1))×\(before(h, knob: 2, display: 1))" == then,
+          "a \(Int(w))×\(Int(h))-point window on a 1x display asks \(now) (it was \(then))")
+    let s = C.windowSize(CGSize(width: w, height: h), knob: 2, displayScale: 1)
+    let across = drawn(w, into: s.width), down = drawn(h, into: s.height)
+    check(across.scale == 1 && down.scale == 1 && across.black <= 1 && down.black <= 1,
+          "\(Int(w))×\(Int(h)) drawn 1:1, at most one black column and row past it (\(across.black), \(down.black))")
+}
+check(drawn(1117, into: 1116).scale < 1 && drawn(1117, into: 1118) == (1, 1),
+      "the blur, as ScreenCaptureKit draws it: 1117 columns shrunk into 1116 (#233); into 1118, 1:1 and one black column")
+check(C.windowPixels(1117, knob: 1, displayScale: 1) == 1118 && C.windowPixels(611, knob: 1, displayScale: 1) == 612,
+      "Standard on a 1x display: the same as Retina there, an odd side up")
+check(C.windowPixels(1116, knob: 2, displayScale: 1) == 1116 && C.windowPixels(2560, knob: 2, displayScale: 1) == 2560,
+      "an even side on a 1x display as it is: no black column for nothing")
+// The software encoder (knob 1) on either display: 1x, so 1:1 on a 1x display, scaled down on a 2x one.
+check(window(1117, 611, knob: 1, display: 1) == "1118×612", "the software encoder on a 1x display: drawn whole")
+// A 2x display: whole points are always even; a half point rounds up the same way.
+check(window(1117, 610, knob: 2, display: 2) == "2234×1220", "a 2x display at Retina as before: 2234×1220")
+check(C.windowPixels(1117.5, knob: 2, displayScale: 2) == 2236 && before(1117.5, knob: 2, display: 2) == 2234,
+      "a window at a half point on a 2x display: 2236, drawn whole (it was 2234, shrunk)")
+check(C.windowPixels(610.5, knob: 2, displayScale: 2) == 1222, "a half point's height on a 2x display: 1222")
+// Held below its display's scale, the window is scaled down whatever the buffer: down to even, as before.
+check(window(1117, 611, knob: 1, display: 2) == "1116×610", "Standard on a 2x display as before: 1116×610 (scaled down anyway)")
+check(C.windowPixels(1117.5, knob: 2, displayScale: 3) == 2234, "a 3x display at Retina: held below it, down to even (2234)")
+// A display between the two at its own scale: 1:1, up.
+check(C.windowPixels(1117, knob: 2, displayScale: 1.5) == 1676 && C.windowPixels(744.3, knob: 2, displayScale: 1.5) == 1118,
+      "a 1.5x display at its own scale: 1675.5 pixels ask 1676, 1116.45 ask 1118 (never fewer than the window's)")
+// No display scale (none, or one that is none): the knob, down to even, as before.
+for bad: CGFloat? in [nil, 0, -1, .nan, .infinity] {
+    check(C.windowPixels(1117, knob: 1, displayScale: bad) == 1116 && C.windowPixels(1117, knob: 2, displayScale: bad) == 2234,
+          "a window with display scale \(bad.map { "\($0)" } ?? "none"): the knob, down to even, as before")
+}
+// A product's rounding is no reason for a black column.
+check(C.windowPixels(1116.0000001, knob: 1, displayScale: 1) == 1116, "1116.0000001 pixels: 1116, no black column for a rounding")
+check(C.windowPixels(1117.0000001, knob: 1, displayScale: 1) == 1118, "1117.0000001 pixels: 1118")
+check(C.windowPixels(1116.9999999, knob: 1, displayScale: 1) == 1118, "1116.9999999 pixels count as 1117: 1118")
+check(C.windowPixels(0, knob: 2, displayScale: 1) == 0, "a window of no width: 0")
+check(C.windowSize(CGSize(width: 1117, height: 610), knob: 2, displayScale: 1) == (1118, 610)
+      && C.windowSize(CGSize(width: 610, height: 1117), knob: 2, displayScale: 1) == (610, 1118), "width and height each their own side")
+
+// The restart rule (`windowsChanged`, each catalog poll): the size `select` would ask for now, by the
+// same rule, against the encoder's.
+let oddWindow = CGSize(width: 1117, height: 610)
+let started = C.windowSize(oddWindow, knob: 2, displayScale: 1)
+check(!C.windowNeedsRestart(encoder: started, points: oddWindow, knob: 2, displayScale: 1),
+      "a window whose odd side was rounded up: no restart at the next poll (1118×610 for 1117×610)")
+check(before(1117, knob: 2, display: 1) != started.width,
+      "the comparison before the rule (down to even) against that encoder: 1116 against 1118, a restart at every poll")
+check(!C.windowNeedsRestart(encoder: started, points: CGSize(width: 1118, height: 610), knob: 2, displayScale: 1),
+      "1117 to 1118 points: within the rounding, no restart (the buffer holds it whole)")
+check(C.windowNeedsRestart(encoder: started, points: CGSize(width: 1119, height: 610), knob: 2, displayScale: 1),
+      "1117 to 1119 points: a restart, at 1120")
+check(C.windowNeedsRestart(encoder: started, points: CGSize(width: 1117, height: 611), knob: 2, displayScale: 1),
+      "610 to 611 points high: a restart, at 612")
+check(C.windowNeedsRestart(encoder: started, points: oddWindow, knob: 2, displayScale: 2),
+      "the window on a 2x display now: a restart, at 2234×1220")
+// Aa asked 1116 and the app kept 1117 (its own size steps): the encoder was started at what the window
+// is, and the polls agree with it.
+check(!C.windowNeedsRestart(encoder: C.windowSize(oddWindow, knob: 2, displayScale: 1), points: oddWindow, knob: 2, displayScale: 1),
+      "a window that keeps an odd size it was not asked for: no restart at any poll")
+let standard2x = C.windowSize(CGSize(width: 1117, height: 611), knob: 1, displayScale: 2)
+check(standard2x == (1116, 610) && !C.windowNeedsRestart(encoder: standard2x, points: CGSize(width: 1116, height: 610), knob: 1, displayScale: 2),
+      "Standard on a 2x display as before: 1116×610 for 1117×611 and for 1116×610, no restart between them")
 
 // What the picture shows: before, a window drawn at 1x into a 2x buffer filled a half each way.
 check(fill(capture: 2, display: 1) == 0.5, "the bug as ScreenCaptureKit draws it: a quarter of the picture (a half each way)")
@@ -212,6 +301,55 @@ check(outside == 0, "every landing is inside the rectangle and by PointerControl
 check(changedInside == 0, "away from the far edges a position lands where it did before (\(changedInside) moved)")
 check(notMonotonic == 0, "a larger fraction never lands nearer the origin (\(notMonotonic))")
 check(edgeNotLast == 0, "the far edges land on the last pixel row and column (\(edgeNotLast) not)")
+
+// Random windows: whole, half and odd fractions of points, on displays of each scale, at each knob.
+var notEven = 0, cut = 0, tooMuchBlack = 0, notAsBefore = 0, loopsAtOnce = 0, shrinks = 0, pollLoops = 0, restartsMissed = 0
+for _ in 0..<20_000 {
+    let knob = pick([CGFloat(1), 2])
+    let display: CGFloat? = pick([nil, 1, 2, 3, 1.5, 0, .nan])
+    let points = CGFloat(Int(next() % 4_000)) + pick([CGFloat(0), 0.5, 0.25, CGFloat(next() % 1_000) / 1_000])
+    let p = C.windowPixels(points, knob: knob, displayScale: display)
+    let e = C.effective(knob: knob, displayScale: display)
+    let valid = display.map { $0.isFinite && $0 > 0 } ?? false
+    if p < 0 || p % 2 != 0 { notEven += 1 }
+    if valid, e == display! {
+        // Drawn 1:1: the buffer holds the whole window, with at most one black column past its last.
+        if CGFloat(p) < points * e - 0.001 { cut += 1 }
+        if CGFloat(p) - points * e >= 2 { tooMuchBlack += 1 }
+    } else if p != evenPixels(points * e) { notAsBefore += 1 }
+    // A window a little larger never asks for fewer pixels.
+    if C.windowPixels(points + 0.5, knob: knob, displayScale: display) < p { shrinks += 1 }
+    // Right after a restart at a size, the same size never restarts again.
+    let size = CGSize(width: points, height: CGFloat(Int(next() % 3_000)) + pick([CGFloat(0), 0.5]))
+    if C.windowNeedsRestart(encoder: C.windowSize(size, knob: knob, displayScale: display), points: size, knob: knob, displayScale: display) {
+        loopsAtOnce += 1
+    }
+}
+// A model of `windowsChanged`: a window resized now and then by a few points, polled every 2 s; the
+// encoder restarts only when the rule says so, at the size `select` asks for.
+for _ in 0..<2_000 {
+    let knob = pick([CGFloat(1), 2]), display: CGFloat? = pick([1, 2, 1.5])
+    var size = CGSize(width: CGFloat(200 + Int(next() % 3_000)), height: CGFloat(200 + Int(next() % 2_000)))
+    var encoder = C.windowSize(size, knob: knob, displayScale: display)
+    for _ in 0..<20 {
+        if next() % 3 == 0 {
+            size.width += CGFloat(Int(next() % 5) - 2)
+            size.height += CGFloat(Int(next() % 5) - 2)
+        }
+        let want = C.windowSize(size, knob: knob, displayScale: display)
+        if C.windowNeedsRestart(encoder: encoder, points: size, knob: knob, displayScale: display) {
+            encoder = want
+            if C.windowNeedsRestart(encoder: encoder, points: size, knob: knob, displayScale: display) { pollLoops += 1 }
+        } else if want != encoder { restartsMissed += 1 }
+    }
+}
+check(notEven == 0, "20,000 random windows: every side even (\(notEven) not)")
+check(cut == 0, "a window drawn 1:1 is never cut or shrunk: the buffer holds all its pixels (\(cut) not)")
+check(tooMuchBlack == 0, "a window drawn 1:1 has at most one black column or row past it (\(tooMuchBlack) more)")
+check(notAsBefore == 0, "a window not drawn 1:1 (held below its display, no display scale) asks what it asked before (\(notAsBefore) not)")
+check(shrinks == 0, "a larger window never asks for fewer pixels (\(shrinks))")
+check(loopsAtOnce == 0, "right after a restart, the same size never needs another (\(loopsAtOnce) would loop)")
+check(pollLoops == 0 && restartsMissed == 0, "2,000 windows resized and polled 20 times: no restart loop, no change of size missed (\(pollLoops), \(restartsMissed))")
 
 print("\(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

@@ -24,8 +24,10 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     ///
     /// `width` and `height` are the caller's: the content's points at the knob held to the display's
     /// own pixel scale (CaptureScale), since ScreenCaptureKit draws a window at its display's scale
-    /// and never scales it up. `scaleWords` end the line ("capturing at 1x, the display's own (2x
-    /// asked)").
+    /// and never scales it up (`scalesToFit` is left false: a window is only ever scaled down). So a
+    /// window asked a pixel larger than it is, an odd side rounded up to even, is drawn 1:1 at the
+    /// buffer's top-left with one black column or row past it (`CaptureScale.windowPixels`).
+    /// `scaleWords` end the line ("capturing at 1x, the display's own (2x asked)").
     func start(filter: SCContentFilter, width: Int, height: Int, fps: Int, showsCursor: Bool, sourceRect: CGRect? = nil,
                scaleWords: String? = nil) async throws {
         let config = SCStreamConfiguration()
@@ -96,6 +98,3 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         onStopped?(error)
     }
 }
-
-/// HEVC wants even dimensions.
-func evenPixels(_ v: CGFloat) -> Int { Int(v.rounded(.down)) & ~1 }

@@ -49,6 +49,53 @@ enum CaptureScale {
         usable(CGFloat(pointPixelScale))
     }
 
+    /// One side of a window's capture in pixels, even (HEVC wants even sides): the window's `points`
+    /// on that side at the capture's scale (`effective`). What `select` asks ScreenCaptureKit for a
+    /// window in regular mode, and so what `windowsChanged` compares the running encoder with
+    /// (`windowNeedsRestart`).
+    ///
+    /// ScreenCaptureKit draws a window at its display's own scale into the top-left of the buffer and
+    /// only ever scales it down to fit (`SCStreamConfiguration.scalesToFit` left false: "When false,
+    /// the output only scales down", SCStream.h). A window captured at its display's own scale is
+    /// therefore drawn 1:1, and an odd side rounds up: a 1117×610-point window on a 1x display asks
+    /// 1118×610 and is drawn whole, one black column past its right edge, where 1116×610 (`evenPixels`,
+    /// every capture's rule until 2026-10-27) had ScreenCaptureKit shrink its 1117 columns into 1116,
+    /// up to half a pixel of blur mid-picture, where a text stem is one pixel wide. Odd sides are
+    /// routine at Aa 1x (Sill.log: 1117×610, 818×565, 728×535, 377×235) and in any window sized by
+    /// hand. A whole number of points at 2x is always even; a window at a half point rounds up the
+    /// same way. A device draws the frame aspect-fit on black: the column joins a letterbox beside it,
+    /// or is a black hairline at the picture's edge where the frame fills the panel. A device's
+    /// position lands as the same fraction of the window (InputLanding), so at most a pixel nearer
+    /// the window's origin than the frame shows it, at the far side. Held below its display's scale
+    /// (Standard on a 2x display) a window is scaled down whatever the buffer, so it rounds down as
+    /// before; so does one with no display scale. A display (scaled to fill any buffer), a staged
+    /// window's crop of Sill's virtual display and the test pattern keep `evenPixels`.
+    static func windowPixels(_ points: CGFloat, knob: CGFloat, displayScale: CGFloat?) -> Int {
+        let e = effective(knob: knob, displayScale: displayScale)
+        guard let d = usable(displayScale), e == d else { return evenPixels(points * e) }
+        // Within a thousandth of a pixel of a whole number is that number: no black column for a
+        // product's rounding.
+        let whole = Int((points * e - 0.001).rounded(.up))
+        return whole + (whole & 1)
+    }
+
+    /// `windowPixels` for both sides of a window `points` big.
+    static func windowSize(_ points: CGSize, knob: CGFloat, displayScale: CGFloat?) -> (width: Int, height: Int) {
+        (windowPixels(points.width, knob: knob, displayScale: displayScale),
+         windowPixels(points.height, knob: knob, displayScale: displayScale))
+    }
+
+    /// Whether a window whose capture runs at `encoder` pixels needs a new pipeline now that it is
+    /// `points` big (`windowsChanged`, at each catalog poll): only when the size `select` would ask
+    /// for it now differs, by the same rule. So a window whose odd side was rounded up (1117 points,
+    /// asked 1118) never restarts at every poll, and a change within the rounding (1117 to 1118
+    /// points) needs none: the buffer already holds the window whole.
+    static func windowNeedsRestart(encoder: (width: Int, height: Int), points: CGSize, knob: CGFloat,
+                                   displayScale: CGFloat?) -> Bool {
+        let want = windowSize(points, knob: knob, displayScale: displayScale)
+        return want.width != encoder.width || want.height != encoder.height
+    }
+
     /// One pixel of a display of scale `displayScale`, in points: half a point at 2x, a point at 1x,
     /// and a point when there is no scale (InputLanding's last row and column).
     static func pixel(displayScale: CGFloat?) -> CGFloat {
@@ -74,6 +121,12 @@ enum CaptureScale {
         s.isFinite && s == s.rounded() && abs(s) < 1_000 ? "\(Int(s))x" : "\(Double(s))x"
     }
 }
+
+/// HEVC wants even sides: a capture's size in pixels rounded down to even. Every capture's rule until
+/// 2026-10-27, and still a display's, a staged window's crop's and the test pattern's; a window that
+/// ScreenCaptureKit draws 1:1 rounds up instead (`CaptureScale.windowPixels`). Here rather than in
+/// WindowCapture.swift, which needs ScreenCaptureKit, so the check compiles it.
+func evenPixels(_ v: CGFloat) -> Int { Int(v.rounded(.down)) & ~1 }
 
 /// Where a device's position lands on the Mac: its fraction of the streamed source's rectangle, at
 /// most on the rectangle's last row and column of pixels.

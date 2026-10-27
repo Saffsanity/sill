@@ -15,6 +15,14 @@ LAND = ("        return CGPoint(x: max(rect.minX, min(px, rect.maxX - pixel)),\n
         "                       y: max(rect.minY, min(py, rect.maxY - pixel)))\n")
 UNIT = "        v.isNaN ? 0 : min(max(v, 0), 1)\n"
 WORDS = "        return e < knob ? base + \", the display's own (\\(times(knob)) asked)\" : base\n"
+GUARD = "        guard let d = usable(displayScale), e == d else { return evenPixels(points * e) }\n"
+UP = "        let whole = Int((points * e - 0.001).rounded(.up))\n"
+EVENUP = "        return whole + (whole & 1)\n"
+WANT = "        let want = windowSize(points, knob: knob, displayScale: displayScale)\n"
+CMP = "        return want.width != encoder.width || want.height != encoder.height\n"
+SIDES = ("        (windowPixels(points.width, knob: knob, displayScale: displayScale),\n"
+         "         windowPixels(points.height, knob: knob, displayScale: displayScale))\n")
+EVEN = "func evenPixels(_ v: CGFloat) -> Int { Int(v.rounded(.down)) & ~1 }\n"
 MUTANTS = [
     # The capture's pixel scale.
     ("C1 the knob never held to the display (the bug: a window on a 1x display in the top-left quarter)", HOLD,
@@ -31,6 +39,26 @@ MUTANTS = [
      "        return e <= knob ? base + \", the display's own (\\(times(knob)) asked)\" : base\n"),
     ("C9 a scale of 1.5 written as a whole number", "        s.isFinite && s == s.rounded() && abs(s) < 1_000 ? ",
      "        s.isFinite && abs(s) < 1_000 ? "),
+    # A window's capture size: an odd side up to even where it is drawn 1:1, and the restart rule.
+    ("W1 a window's odd side down to even (the blur: 1117 columns shrunk into 1116)", EVENUP,
+     "        return evenPixels(points * e)\n"),
+    ("W2 an even side up by two (a black column for nothing)", EVENUP, "        return whole + 2 - (whole & 1)\n"),
+    ("W3 up to even whatever the scale (Standard on a 2x display too)", GUARD,
+     "        guard let d = usable(displayScale), e <= d else { return evenPixels(points * e) }\n"),
+    ("W4 no display scale taken for 1:1", GUARD,
+     "        guard e == (usable(displayScale) ?? knob) else { return evenPixels(points * e) }\n"),
+    ("W5 no tolerance (a black column for a product's rounding)", UP, "        let whole = Int((points * e).rounded(.up))\n"),
+    ("W6 to the nearest pixel, not up (a window cut)", UP, "        let whole = Int((points * e).rounded())\n"),
+    ("W7 the restart rule rounds as before (a restart at every poll)", WANT,
+     "        let want = (width: evenPixels(points.width * effective(knob: knob, displayScale: displayScale)),\n"
+     "                    height: evenPixels(points.height * effective(knob: knob, displayScale: displayScale)))\n"),
+    ("W8 the restart rule never restarts", CMP, "        return false\n"),
+    ("W9 the restart rule looks only at the width", CMP, "        return want.width != encoder.width\n"),
+    ("W10 a window's sides swapped", SIDES,
+     "        (windowPixels(points.height, knob: knob, displayScale: displayScale),\n"
+     "         windowPixels(points.width, knob: knob, displayScale: displayScale))\n"),
+    ("E1 evenPixels not even (the test pattern 1512×949 at Standard)", EVEN,
+     "func evenPixels(_ v: CGFloat) -> Int { Int(v.rounded(.down)) }\n"),
     # One pixel, and where a position lands.
     ("L1 a pixel is always a point (a 2x display's last row a point up)", PIXEL, "        CGFloat(1)\n"),
     ("L2 no scale: half a point", PIXEL, "        1 / (usable(displayScale) ?? 2)\n"),
