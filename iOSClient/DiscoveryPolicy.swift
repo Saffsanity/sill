@@ -6,10 +6,11 @@ import Foundation
 /// on, when a reconnect may take a Direct row, when a session over AWDL moves to the network,
 /// when a live session at home moves to the cable that came or off the one that went (`pathPlan`),
 /// and, for the Macs this device paired with, when they show as Remote rows and when a lost one is
-/// dialed away from home; at home, what a row of a Mac whose door speaks TLS says and what a tap
-/// on it does, whether a connection runs over the USB cable as this device sees it, the key each
-/// connection of a session at home is pinned to and what its end means, what the Mac's answer to
-/// an ask means, where a pairing link goes, and the words for all of it.
+/// dialed away from home; at home, the TXT record a row is read with, what a row of a Mac whose
+/// door speaks TLS says and what a tap on it does, whether a connection runs over the USB cable as
+/// this device sees it, the key each connection of a session at home is pinned to and what its end
+/// means, what the Mac's answer to an ask means, where a pairing link goes, and the words for all
+/// of it.
 /// AWDL takes the radio off its Wi-Fi channel (CLAUDE.md, trackpad stutter), so the device asks for
 /// it only when a Mac it has seen with Direct Wireless Connection on is missing from the network,
 /// or when the user taps Search Nearby, never while connected, and leaves it once the network lists
@@ -851,6 +852,66 @@ enum DiscoveryPolicy {
     /// "0" a TLS door open to any device, anything else a TLS door for paired devices only.
     enum HomeDoor: Hashable { case plain, pairingRequired, open }
 
+    /// A Bonjour result's TXT record as its row reads it (§7.3): the recognition tag (`r`, nil for
+    /// none) and the home door (`p`). StreamClient.record(of:) reads it from the result's metadata,
+    /// and a result whose metadata is not `.bonjour`, or whose record holds no entry, carries none
+    /// (nil). A Sill with an identity always advertises `r` (HostIdentity.txtRecord), so its own
+    /// record is never empty; a plain door without one (an older Sill.app, the CLI) registers none.
+    struct RowRecord: Hashable {
+        var tag: String?
+        var door: HomeDoor
+    }
+
+    /// What a kept record belongs to (`rowRecords`): one browser's result for one service.
+    /// `browser` is the browser that delivered it: StreamClient numbers each browser it makes, so one
+    /// made again after the background or a failure (issue #69) is another browser, and the DEBUG
+    /// harness's test rows, which no browser lists, take 0. `name` and `domain` are the service's
+    /// Bonjour name and domain: a browser that lists a name in two domains has two results, and each
+    /// row is read with the record of the result it is built from.
+    struct RowRecordKey: Hashable {
+        var browser: Int
+        var name: String
+        var domain: String
+    }
+
+    /// The record each result shown is read with: its own, else the last record that result
+    /// (`RowRecordKey`: this browser, this name and domain) carried while its browser has listed it
+    /// without a break, forgotten once it leaves the browser's results (`previous`: the records
+    /// after the last look; `listed`: each result shown now, with its key and its own record).
+    /// Noah's iPad, 2026-10-27, on the connect screen with the USB cable in: the Mac was listed on
+    /// anpi0, en2 and en0 with its record (p=1); with the cable pulled the same result came back on
+    /// en2 and en0, then on en0 alone, with no record at all, so its row was taken by its name
+    /// alone and read as a plain door, "Update Sill" by the no-downgrade rule (`rowWord`), and a
+    /// tap dialed nothing, and it stayed so. A record that comes replaces the kept one, whatever it
+    /// says: it is the Mac's own word (a new tag, Require pairing turned off, `p` gone). A browser
+    /// made again is a break: its own results are read with what it delivers itself, which a fresh
+    /// browse resolves again (on the simulator a browser listed a new name only once its TXT record
+    /// answered), and the results of the browser it replaced, shown beside them while it settles
+    /// (`browserResults`), keep theirs only while they are shown. The replaced browser reported
+    /// nothing once it was suspended (iOS may have made its connection defunct without a word), so
+    /// a Mac whose registration went meanwhile, its name taken by another service with no record
+    /// (an older Sill, the CLI), would otherwise have been read as that Mac by its old tag (the
+    /// review of #232). So a row never gains a door that no record gave it: what is kept is a
+    /// record this very browser delivered for that result, and a tap dials as that record says
+    /// (`homeDial`: pinned to the saved Mac's key over TLS, never plain). A Mac that really went
+    /// back to a plain door reads "Update Sill" again once its name is listed afresh: the browser's
+    /// removal of the name (about a second after its Sill's goodbye) is the break, with no timer,
+    /// and another Sill's registration comes after it. While one browser keeps listing a result
+    /// without a break, though, a removal it never reported (a lost goodbye, a removal and a
+    /// registration in one report) leaves whatever service now answers under that name read with
+    /// the old record: as the Mac its tag names, whose Remote row is then hidden and whose
+    /// automatic remote dial is held back while it is listed, dialed pinned, and marked newKey by a
+    /// TLS answer with another key when no other row of that Mac is listed (`afterPinRefused`, as
+    /// for a refused tag-named row). A result never listed with a record reads as a plain door, as
+    /// before (`rowWord`, `homeDial`). A key listed twice is read by its first entry.
+    static func rowRecords(_ previous: [RowRecordKey: RowRecord], listed: [(key: RowRecordKey, record: RowRecord?)]) -> [RowRecordKey: RowRecord] {
+        var next: [RowRecordKey: RowRecord] = [:], seen = Set<RowRecordKey>()
+        for item in listed where seen.insert(item.key).inserted {
+            next[item.key] = item.record ?? previous[item.key]
+        }
+        return next
+    }
+
     /// The saved Mac a network or Direct row is (§7.3): the one its TXT tag names (`tagged`, the
     /// tag this device resolved), else, for a row that carries no tag at all (`carriesTag` false),
     /// the saved Mac last reached under the row's Bonjour name (`saved`: each saved Mac's ID and that
@@ -863,6 +924,9 @@ enum DiscoveryPolicy {
     /// stranger's until its key says otherwise: its pin then fails (-9808), and nothing of this
     /// device reaches it. The price: another Mac of the same name, reached only while the saved one
     /// is not listed, cannot be tapped until the saved one is forgotten.
+    ///
+    /// The tag and whether there is one come from the record the row is read with (`rowRecords`):
+    /// its result's own, else the last one that result carried while its browser listed it.
     ///
     /// A row whose tag names no saved Mac is not one, by its name or otherwise (Noah, 2026-09-27:
     /// Sill for Mac 0.4.0 made the Mac a new key and a new recognition key, its row read the saved
