@@ -215,9 +215,9 @@ extension StreamClient {
         }
     }
 
-    /// The connect screen's arrangement as stored (`Sill.connectionStyle`, which ConnectScreen's switch
-    /// and a saved Mac's menu set): pictures are taken only with tiles (ConnectionList.takesPreview), and
-    /// shown only with tiles (`syncPreviews`).
+    /// The connect screen's arrangement (`Sill.connectionStyle`, which ConnectScreen's switch and a saved
+    /// Mac's menu set; tiles while nothing is stored, ConnectionList.defaultStyle): pictures are taken
+    /// only with tiles (ConnectionList.takesPreview), and shown only with tiles (`syncPreviews`).
     var connectionStyle: ConnectionList.Style {
         ConnectionList.storedStyle(UserDefaults.standard.string(forKey: ConnectionList.styleKey))
     }

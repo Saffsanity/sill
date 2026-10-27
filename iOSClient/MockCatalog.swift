@@ -291,7 +291,7 @@ enum MockCatalog {
     /// `-SillSettingsCase`: the states the Settings panel has to look right in. The mock streams
     /// 2880×1800 · 60 fps · 15 Mbps over Wi-Fi unless a case says otherwise.
     enum SettingsCase: String {
-        case `default`   // Sill.app: saved, the virtual display available and off
+        case `default`   // Sill.app: saved, the virtual display available and off, Send Audio off (Mute under it shows)
         case cli         // SillHost without --virtual-display: kept until it quits, the switch off and disabled
         case software    // the hardware encoder is down: the callout, a 1440×900 stream under Retina / 120 fps targets
         case custom      // a bitrate set by hand on the Mac: "Custom — 12 Mbps"
@@ -302,7 +302,7 @@ enum MockCatalog {
         case timeout     // the Mac did not answer a pick: the inline problem
         case direct      // Direct Wireless Connection on (every other case has it off, so its row shows)
         case directlink  // on, and this device connected over it: "Direct" in the readout and the footer's warning
-        case nodirect    // a host without the setting (the ipad-host-settings build): no row
+        case nodirect    // a host without the setting (the ipad-host-settings build): no row, and no sound
         case wired       // the session runs over the USB cable (or Ethernet): "Wired" in the readout
         case noroute     // a path that names no link (loopback, a VPN): the readout ends in the bitrate
         case remote          // connected through Tailscale, 48 ms, a saved Mac: the route line, Paired
@@ -323,10 +323,11 @@ enum MockCatalog {
         case linkmixed       // behind while a device at home keeps Pro: the callout without a button
         case linklow         // behind at Low · Standard: "even at Low", no button
         case linkstalled     // stalled: the Mac's alone, so no callout
-        // The Mac's sound (docs/audio-plan.md §7.8):
-        case sound           // the Mac sends its sound: the Send Audio row on, the Sound button and switch
-        case soundoff        // a Mac with sound, Send Audio off: the row off, no button
+        // The Mac's sound (docs/audio-plan.md §7.8; Send Audio and Mute, the panel's two switches):
+        case sound           // the Mac sends its sound: the Send Audio row on, and Mute under it
+        case soundoff        // a Mac with sound, Send Audio off: the row off (as `default`), and Mute
         case soundnote       // on, and the Mac could not capture it: the note under the row
+        case nosound         // a Mac without sound (Sill for Mac 0.5.1): the row off and disabled, "Update Sill…", no Mute
     }
 
     /// The away and link cases: the Mac's two qualities (home Pro · Retina, away Low · Standard unless
@@ -407,10 +408,10 @@ enum MockCatalog {
         client.hostClipboard = c == .legacy ? nil : ClipboardPolicy.generation
         guard c != .legacy else { return }
         var state = HostSettingsState(
-            // A Mac without sound (every one before it, Sill for Mac 0.3.1 among them), but in the sound's
-            // cases and under `-SillSound`, so every other photo is as it was.
+            // A Mac with sound, Send Audio off, as Sill for Mac has it since the sound came: the panel's
+            // Send Audio switch and Mute under it show. `nosound` and `nodirect` are older Macs.
             settings: StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
-                                     directWireless: false, sendAudio: nil),
+                                     directWireless: false, sendAudio: false),
             persistent: true, virtualDisplayAvailable: true, softwareEncoder: false,
             stream: RunningStream(width: 2880, height: 1800, fps: 60, mbps: 15, onVirtualDisplay: false))
         switch c {
@@ -438,6 +439,7 @@ enum MockCatalog {
             client.connectedDirectly = true
         case .nodirect:
             state.settings.directWireless = nil
+            state.settings.sendAudio = nil
         case .remote, .remoteslow:
             client.remoteRoute = .vpn("Tailscale")
             client.macInfo = macInfo()
@@ -470,11 +472,13 @@ enum MockCatalog {
             state.settings.sendAudio = true
             // The host's words (HostStatusSnapshot.Audio.note) for a start that ran out of time.
             state.audioNote = "Couldn’t capture the sound of Safari: the stream did not start within 2 s."
+        case .nosound:
+            state.settings.sendAudio = nil
         case .default, .legacy, .pending, .timeout, .wired, .noroute, .noremote:
             break
         }
-        // `-SillSound on|muted`: the Mac sends its sound, and this device plays it or has it muted (the
-        // button and the switch in that state; the mock plays nothing). Never saved.
+        // `-SillSound on|muted`: the Mac sends its sound (Send Audio on), and this device plays it or has it
+        // muted (Mute off or on; the mock plays nothing). Never saved.
         switch UserDefaults.standard.string(forKey: "SillSound") {
         case "on"?: state.settings.sendAudio = true; client.soundMuted = false
         case "muted"?: state.settings.sendAudio = true; client.soundMuted = true

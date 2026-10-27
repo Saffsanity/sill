@@ -1,5 +1,6 @@
-"""Mutants of CaptureScale.swift (Sources/SillHost): each changes it in one place, is compiled with the
-check (main.swift) and must make it fail. A mutant that does not compile is not counted as caught.
+"""Mutants of CaptureScale.swift (Sources/SillHost; CaptureScale, VirtualDisplaySize, InputLanding): each
+changes it in one place, is compiled with the check (main.swift) and must make it fail. A mutant that
+does not compile is not counted as caught.
 usage: mutants.py"""
 import os, subprocess, sys
 SP = os.path.dirname(os.path.abspath(__file__))
@@ -81,6 +82,25 @@ MUTANTS = [
     ("L9 NaN lands at the far edge", UNIT, "        v.isNaN ? 1 : min(max(v, 0), 1)\n"),
     ("L10 the fraction of the wrong side", "        let py = rect.minY + CGFloat(unit(y)) * rect.height\n",
      "        let py = rect.minY + CGFloat(unit(y)) * rect.width\n"),
+    # Sill's virtual display: no side under 800 points (an iPhone's 754×784 display came up at 1x).
+    ("V1 the old floor, 320 (an iPhone upright's 754×784 display at 1x)", "    static let minSide: CGFloat = 800\n",
+     "    static let minSide: CGFloat = 320\n"),
+    ("V2 only the width held to the floor", "height: min(max(s.height, minSide), maxSide))",
+     "height: min(s.height, maxSide))"),
+    ("V3 only the height held to the floor", "CGSize(width: min(max(s.width, minSide), maxSide), ",
+     "CGSize(width: min(s.width, maxSide), "),
+    ("V4 the envelope from the panel's shorter edge", "        let side = ceil(max(panel.width, panel.height) / 0.5)\n",
+     "        let side = ceil(min(panel.width, panel.height) / 0.5)\n"),
+    ("V5 the envelope without Aa's smallest step", "        let side = ceil(max(panel.width, panel.height) / 0.5)\n",
+     "        let side = ceil(max(panel.width, panel.height))\n"),
+    ("V6 a fraction of a point not rounded up", "        let side = ceil(max(panel.width, panel.height) / 0.5)\n",
+     "        let side = max(panel.width, panel.height) / 0.5\n"),
+    ("V7 no panel: the window's own size not held", "panel.height > 0 else { return clamp(windowSize) }",
+     "panel.height > 0 else { return windowSize }"),
+    ("V8 a panel with no width counted", "        guard let panel, panel.width > 0, panel.height > 0 else",
+     "        guard let panel, panel.height > 0 else"),
+    ("V9 the ceiling raised past VirtualDisplay's 8192 pixels at 2x", "    static let maxSide: CGFloat = 4096\n",
+     "    static let maxSide: CGFloat = 8192\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

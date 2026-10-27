@@ -13,10 +13,13 @@ import SillHostCore
 /// between two main-actor turns. No sliders anywhere: one change is one apply and at most one
 /// restart.
 ///
-/// Defaults are registered from `HostConfig.standard`, so a fresh install streams exactly like the
-/// CLI, and launch arguments override for one run without being saved (`-maxFPS 60`), because a
-/// save writes only the keys a change touched. Launch at login is not stored here: SMAppService
-/// is its source of truth (LoginItem.swift).
+/// Defaults are registered from `HostConfig.app`: the CLI's (`HostConfig.standard`) with the virtual
+/// display and Send Audio on (Noah, 2026-10-27), so a fresh install streams like the CLI with
+/// `--virtual-display --audio`.
+/// Registered, never written: a key a change saved always wins over them (`virtualDisplay` 0 stays
+/// off whatever the default), and launch arguments override for one run without being saved
+/// (`-maxFPS 60`, `-virtualDisplay 0`), because a save writes only the keys a change touched. Launch
+/// at login is not stored here: SMAppService is its source of truth (LoginItem.swift).
 ///
 /// Remote Access, its port and the internet switch are the Mac's alone: they come from here (the
 /// menu, the Remote Access pane, -SillSetAfter), never from a device. The trust list, the keys and
@@ -113,27 +116,30 @@ final class HostSettings {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        let standard = HostConfig.standard
+        let base = HostConfig.app
         defaults.register(defaults: [
-            Key.maxFPS: standard.maxFPS,
-            Key.captureScale: Double(standard.captureScale),
-            Key.bitrate: standard.bitrate,
-            Key.awayBitrate: standard.awayBitrate,
-            Key.awayCaptureScale: Double(standard.awayCaptureScale),
-            Key.prioritizeSpeed: standard.prioritizeSpeed,
-            Key.virtualDisplay: standard.virtualDisplay,
+            Key.maxFPS: base.maxFPS,
+            Key.captureScale: Double(base.captureScale),
+            Key.bitrate: base.bitrate,
+            Key.awayBitrate: base.awayBitrate,
+            Key.awayCaptureScale: Double(base.awayCaptureScale),
+            Key.prioritizeSpeed: base.prioritizeSpeed,
+            // On, unlike the CLI (Noah, 2026-10-27): an install that never set the key streams a picked
+            // window from the virtual display; one whose user or device turned it off keeps it off.
+            Key.virtualDisplay: base.virtualDisplay,
             // Off, like the CLI: an existing install has no key, so it stops asking for AWDL.
-            Key.directWireless: standard.directWireless,
+            Key.directWireless: base.directWireless,
             // Off, and the internet switch too: only the Mac's own user widens exposure.
-            Key.remoteAccess: standard.remoteAccess,
-            Key.remotePort: standard.remotePort,
-            Key.internetAccess: standard.internetAccess,
+            Key.remoteAccess: base.remoteAccess,
+            Key.remotePort: base.remotePort,
+            Key.internetAccess: base.internetAccess,
             Key.remoteAddressName: "",
             Key.updateCheck: true,
             // On, like the CLI: each device has its own switch, and a password manager's copies never go.
-            Key.shareClipboard: standard.shareClipboard,
-            // Off, like the CLI: the Mac keeps playing its own sound (docs/audio-plan.md, Q1).
-            Key.sendAudio: standard.sendAudio,
+            Key.shareClipboard: base.shareClipboard,
+            // On, unlike the CLI (Noah, 2026-10-27: "Send Audio should be on by default"); a saved key
+            // wins. The Mac keeps playing its own sound too.
+            Key.sendAudio: base.sendAudio,
             // Off: whoever can see this Mac's screen remotely could read a code (PairingWindowSharing).
             Key.showPairingWindowToScreenSharing: false,
         ])
@@ -151,7 +157,7 @@ final class HostSettings {
                             // Never a default or a launch argument: it lives with the trust list
                             // (the identity store), from which AppModel reads it at launch, before
                             // the host starts, and to which the Devices pane saves it.
-                            requirePairing: HostConfig.standard.requirePairing,
+                            requirePairing: base.requirePairing,
                             shareClipboard: defaults.bool(forKey: Key.shareClipboard),
                             sendAudio: defaults.bool(forKey: Key.sendAudio)).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""

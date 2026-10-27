@@ -25,7 +25,9 @@ struct FoundMac: Identifiable, Hashable {
     /// stranger's until its key says otherwise.
     let savedByName: String?
     /// The row's TXT record carries a recognition tag (any, a saved Mac's or not). A row whose tag
-    /// names no saved Mac is never one (DiscoveryPolicy.rowMac, `reconnectMatches`).
+    /// names no saved Mac is never one (DiscoveryPolicy.rowMac, `reconnectMatches`). The record is
+    /// the result's own, else the last one that result carried while its browser listed it
+    /// (DiscoveryPolicy.rowRecords; a browser made again starts afresh), and so is `door`'s.
     let carriesTag: Bool
     /// How the Mac is reachable, the word at the end of a network or Direct row ("Wired", "Wi-Fi",
     /// "Direct"), or nil when the interfaces it was seen on do not say (DiscoveryPolicy.method), and
@@ -402,13 +404,13 @@ final class StreamClient: ObservableObject {
     var lastViewport: Viewport?
 
     // The Mac's sound (kind 43; docs/audio-plan.md §7.5, StreamClient+Audio.swift, AudioOutput).
-    /// This device's mute, the Sound button's and switch's: local, remembered (`Sill.soundMuted`; the
-    /// controls save it through `setSoundMuted`), never sent to the Mac. Main thread.
+    /// This device's mute, the Settings panel's Mute switch (right under Send Audio; off by default): local, remembered
+    /// (`Sill.soundMuted`; the switch saves it through `setSoundMuted`), never sent to the Mac. Main thread.
     @Published var soundMuted = UserDefaults.standard.bool(forKey: StreamClient.soundMutedKey) {
         didSet { if soundMuted != oldValue { sound.setMuted(soundMuted) } }
     }
-    /// Whether the Mac sent its sound when a move handed the session over: the Sound button and switch
-    /// stay until the new connection's first kind 16 says (the same Mac). Nil outside a move. Main.
+    /// Whether the Mac had sound (`macHasSound`) when a move handed the session over: the panel's Mute
+    /// switch stays until the new connection's first kind 16 says (the same Mac). Nil outside a move. Main.
     var soundAcrossMove: Bool?
     /// The sound's output: its queue, the playout, the decoder and the engine. The panel's refresh is
     /// this device's screen's, as the viewport reads it (`screenMaximumFPS`: the scene's screen, not
@@ -530,10 +532,24 @@ final class StreamClient: ObservableObject {
     }
     private var networkBrowser: NWBrowser?
     private var nearbyBrowser: NWBrowser?
+    /// A browse result and the browser that delivered it, by its number (`browsersMade`).
+    private struct Listing {
+        let result: NWBrowser.Result
+        let browser: Int
+    }
     /// What the rows are read from (DiscoveryPolicy.browserResults): each browser's own results, and
     /// while a browser made again settles, those of the one it replaced beside them.
-    private var networkResults: [NWBrowser.Result] = []
-    private var nearbyResults: [NWBrowser.Result] = []
+    private var networkResults: [Listing] = []
+    private var nearbyResults: [Listing] = []
+    /// The TXT record each result those show is read with (DiscoveryPolicy.rowRecords): its own, else
+    /// the last one it carried while its browser listed it. Keyed by the browser that delivered it as
+    /// well as the service, so a browser made again reads its own results with what it delivers
+    /// itself, and the records of the one it replaced serve only that one's results while they are
+    /// shown beside them: the replaced browser may have been suspended, its connection defunct, and
+    /// reported no removal.
+    private var rowRecordMemory: [DiscoveryPolicy.RowRecordKey: DiscoveryPolicy.RowRecord] = [:]
+    /// Browsers made so far, of either kind; each browser's results carry its number.
+    private var browsersMade = 0
     /// The two browsers across their rebuilds (issue #69): iOS makes a suspended app's connection to
     /// mDNSResponder defunct, so each is made again on the return from the background and after it
     /// fails (DiscoveryPolicy.rebuildBrowser).
@@ -546,8 +562,8 @@ final class StreamClient: ObservableObject {
         var failures = 0
         var failedAt: Double?
         /// Its own results, and those of the browser it replaced, shown beside them until `settleEnds`.
-        var fresh: [NWBrowser.Result] = []
-        var kept: [NWBrowser.Result] = []
+        var fresh: [Listing] = []
+        var kept: [Listing] = []
         var settleEnds: Double?
         /// The rebuild a failure waits for, and the settle's end.
         var rebuildWork: DispatchWorkItem?
@@ -1106,10 +1122,12 @@ final class StreamClient: ObservableObject {
         if kind == .nearby { params.includePeerToPeer = true }
         let browser = NWBrowser(for: .bonjourWithTXTRecord(type: Self.serviceType, domain: nil), using: params)
         let key = browserKey(kind)
+        browsersMade += 1
+        let number = browsersMade
         browser.browseResultsChangedHandler = { [weak self, weak browser] results, _ in
             DispatchQueue.main.async {
                 guard let self, let browser, self[keyPath: key] === browser else { return }
-                self[keyPath: self.lifeKey(kind)].fresh = Array(results)
+                self[keyPath: self.lifeKey(kind)].fresh = results.map { Listing(result: $0, browser: number) }
                 self.showResults(kind)
             }
         }
@@ -1140,7 +1158,7 @@ final class StreamClient: ObservableObject {
     private func lifeKey(_ kind: BrowserKind) -> ReferenceWritableKeyPath<StreamClient, BrowserLife> {
         kind == .network ? \.networkLife : \.nearbyLife
     }
-    private func resultsKey(_ kind: BrowserKind) -> ReferenceWritableKeyPath<StreamClient, [NWBrowser.Result]> {
+    private func resultsKey(_ kind: BrowserKind) -> ReferenceWritableKeyPath<StreamClient, [Listing]> {
         kind == .network ? \.networkResults : \.nearbyResults
     }
 
@@ -1151,13 +1169,13 @@ final class StreamClient: ObservableObject {
         let key = lifeKey(kind)
         let now = ProcessInfo.processInfo.systemUptime
         let life = self[keyPath: key]
-        self[keyPath: resultsKey(kind)] = DiscoveryPolicy.browserResults(kept: life.kept, fresh: life.fresh, name: Self.serviceName(of:),
+        self[keyPath: resultsKey(kind)] = DiscoveryPolicy.browserResults(kept: life.kept, fresh: life.fresh, name: { Self.serviceName(of: $0.result) },
                                                                          settleEnds: life.settleEnds, now: now)
         if let ends = life.settleEnds, now >= ends {
             self[keyPath: key].kept = []
             self[keyPath: key].settleEnds = nil
             #if DEBUG
-            print("browser: the new \(kind.rawValue) browser has settled: \(life.fresh.map(Self.serviceName(of:)).sorted())")
+            print("browser: the new \(kind.rawValue) browser has settled: \(life.fresh.map { Self.serviceName(of: $0.result) }.sorted())")
             #endif
         }
         discoveryChanged()
@@ -1282,7 +1300,7 @@ final class StreamClient: ObservableObject {
         makeBrowser(kind)
         DispatchQueue.main.asyncAfter(deadline: .now() + DiscoveryPolicy.rebuildSettle, execute: settle)
         #if DEBUG
-        print("browser: rebuilt the \(kind.rawValue) browser (\(why)); \(life.kept.map(Self.serviceName(of:)).sorted()) kept beside it for "
+        print("browser: rebuilt the \(kind.rawValue) browser (\(why)); \(life.kept.map { Self.serviceName(of: $0.result) }.sorted()) kept beside it for "
               + "\(Int(DiscoveryPolicy.rebuildSettle)) s")
         #endif
     }
@@ -1317,7 +1335,11 @@ final class StreamClient: ObservableObject {
     /// session's Mac is on (DiscoveryPolicy.pathSightings), which `followBestPath` follows. A row
     /// whose TXT tag this device resolves is that saved Mac, whatever its Bonjour name; a result
     /// without a tag is no saved Mac (an older host, or briefly during a re-registration: the
-    /// reconnect still finds it by the Bonjour name last used with it). Then a Remote row for each
+    /// reconnect still finds it by the Bonjour name last used with it). A result without a TXT
+    /// record at all is read with the last one it carried while its browser has listed it
+    /// (DiscoveryPolicy.rowRecords): with the USB cable pulled, iPadOS listed the Mac on its other
+    /// interfaces with none, and its row read "Update Sill" (2026-10-27). A browser made again starts
+    /// afresh: a name it lists is read with what it delivers itself. Then a Remote row for each
     /// saved Mac neither browser lists, once the network has had its 3 s. Each row also carries its
     /// home door, from its TXT record's `p`, and the word that follows from it and from what this
     /// device knows of that Mac (DiscoveryPolicy.rowWord: "Not paired", "Update Sill"…); a saved Mac
@@ -1328,38 +1350,53 @@ final class StreamClient: ObservableObject {
         if mockDiscovery { return }
         #endif
         // Each result's interfaces twice, as NWInterface, to dial on, and as the policy spells them,
-        // its TXT tag, which names a saved Mac, and its home door (`p`). `stands` is the DEBUG test
-        // rows' saved Mac (they carry no tag): the one a `-SillConnect` address counts as, and the
-        // remote session's for `-SillMoveHomeTest`'s row.
+        // its key (the browser that delivered it, its name and domain: DiscoveryPolicy.RowRecordKey)
+        // and its TXT record (its tag, which names a saved Mac, and its home door, `p`), nil when it
+        // carries none. The DEBUG test rows, which no browser lists (browser 0), carry a record of their
+        // own making, no tag and the door they stand for, so a kept record never changes them; `stands`
+        // is their saved Mac: the one a `-SillConnect` address counts as, and the remote session's for
+        // `-SillMoveHomeTest`'s row.
         typealias Seen = (name: String, endpoint: NWEndpoint, interfaces: [NWInterface], policy: [DiscoveryPolicy.Interface],
-                          tag: String?, door: DiscoveryPolicy.HomeDoor, stands: String?)
-        var network: [Seen] = networkResults.map {
-            (Self.serviceName(of: $0), $0.endpoint, Array($0.interfaces), $0.interfaces.map(Self.policyInterface), Self.tag(of: $0),
-             Self.door(of: $0), nil)
+                          key: DiscoveryPolicy.RowRecordKey, record: DiscoveryPolicy.RowRecord?, stands: String?)
+        func seen(_ listing: Listing) -> Seen {
+            let r = listing.result, name = Self.serviceName(of: r)
+            return (name, r.endpoint, Array(r.interfaces), r.interfaces.map(Self.policyInterface),
+                    DiscoveryPolicy.RowRecordKey(browser: listing.browser, name: name, domain: Self.serviceDomain(of: r)), Self.record(of: r), nil)
         }
+        var network: [Seen] = networkResults.map(seen)
         #if DEBUG
         // The move and path tests' rows are the -SillConnect address's Mac: with `-SillHomeDoor`, the
         // one saved Mac when exactly one is saved (docs/home-pairing-plan.md §7.9).
         let stands = Self.testHomeDoor != .plain && savedMacs.count == 1 ? savedMacs[0].macID : nil
-        network += testNetworkRows.map { ($0.name, $0.endpoint, [], [], nil, Self.testHomeDoor, stands) }
+        let testKey = { (name: String) in DiscoveryPolicy.RowRecordKey(browser: 0, name: name, domain: "local.") }
+        network += testNetworkRows.map {
+            ($0.name, $0.endpoint, [], [], testKey($0.name), DiscoveryPolicy.RowRecord(tag: nil, door: Self.testHomeDoor), stands)
+        }
         // The move home test's row is the remote session's saved Mac at a home door that speaks TLS
         // (`-SillMoveHomeTest`: its host runs --pairing, as Sill.app's home door does).
-        network += testHomeRows.map { ($0.name, $0.endpoint, [], [], nil, .pairingRequired, $0.macID) }
-        if let row = pathTest?.row { network.append((row.name, row.endpoint, [], row.interfaces, nil, Self.testHomeDoor, stands)) }
-        #endif
-        let nearby: [Seen] = nearbyResults.map {
-            (Self.serviceName(of: $0), $0.endpoint, Array($0.interfaces), $0.interfaces.map(Self.policyInterface), Self.tag(of: $0),
-             Self.door(of: $0), nil)
+        network += testHomeRows.map {
+            ($0.name, $0.endpoint, [], [], testKey($0.name), DiscoveryPolicy.RowRecord(tag: nil, door: .pairingRequired), $0.macID)
         }
+        if let row = pathTest?.row {
+            network.append((row.name, row.endpoint, [], row.interfaces, testKey(row.name), DiscoveryPolicy.RowRecord(tag: nil, door: Self.testHomeDoor),
+                            stands))
+        }
+        #endif
+        let nearby: [Seen] = nearbyResults.map(seen)
         let rows = DiscoveryPolicy.rows(network: network.map(\.name), nearby: nearby.map { ($0.name, $0.policy.map(\.name)) })
         let now = ProcessInfo.processInfo.systemUptime
         directSince = DiscoveryPolicy.directSince(directSince, rows: rows, now: now)
         sightings = DiscoveryPolicy.sightings(sightings, listed: Set(network.map(\.name)), now: now)
         paths = DiscoveryPolicy.pathSightings(paths, network: network.map { ($0.name, $0.policy) }, now: now)
+        // The record each result is read with: its own, else the last one it carried while its browser
+        // listed it (DiscoveryPolicy.rowRecords; by browser, so one made again starts afresh). A row is
+        // read with the record of the result it is built from, its name's first.
+        rowRecordMemory = DiscoveryPolicy.rowRecords(rowRecordMemory, listed: (network + nearby).map { ($0.key, $0.record) })
+        let records = rowRecordMemory
+        let record = { (row: (name: String, direct: Bool)) in (row.direct ? nearby : network).first { $0.name == row.name }.flatMap { records[$0.key] } }
         // A saved Mac seen with `p` has a door that speaks TLS: remembered first, so a row of it
         // without `p` (a replayed tag, or an older Sill.app put back) reads "Update Sill" at once.
-        let listed = rows.compactMap { row in (row.direct ? nearby : network).first { $0.name == row.name } }
-        let seenTLS = Set(listed.filter { $0.door != .plain }.compactMap { SavedMacs.recognize(tag: $0.tag, in: savedMacs) })
+        let seenTLS = Set(rows.compactMap(record).filter { $0.door != .plain }.compactMap { SavedMacs.recognize(tag: $0.tag, in: savedMacs) })
         if let marked = SavedMacs.seenOverTLS(seenTLS, in: savedMacs) {
             savedMacs = marked
             storeSavedMacs()
@@ -1378,14 +1415,15 @@ final class StreamClient: ObservableObject {
             guard let seen = (row.direct ? nearby : network).first(where: { $0.name == row.name }) else { return nil }
             let wired = DiscoveryPolicy.dialInterface(direct: row.direct, interfaces: seen.policy)
             let wifi = DiscoveryPolicy.wifiInterface(direct: row.direct, interfaces: seen.policy)
-            let macID = SavedMacs.recognize(tag: seen.tag, in: savedMacs) ?? seen.stands
-            let carriesTag = !(seen.tag ?? "").isEmpty
+            let read = records[seen.key]
+            let macID = SavedMacs.recognize(tag: read?.tag, in: savedMacs) ?? seen.stands
+            let carriesTag = !(read?.tag ?? "").isEmpty
             let named = DiscoveryPolicy.rowMac(tagged: macID, carriesTag: carriesTag, name: row.name, saved: byName)
             let savedByName = named?.tagNamed == false ? named?.macID : nil
             let saved = named.flatMap { n in savedMacs.first { $0.macID == n.macID } }
             // A tag that names no saved Mac under a saved Mac's name: a Mac set up again (a new key),
             // or a look-alike; either way a tap asks, whatever its `p` (DiscoveryPolicy.rowDoor).
-            let door = DiscoveryPolicy.rowDoor(seen.door, otherTagUnderSavedName: DiscoveryPolicy.otherTagUnderSavedName(
+            let door = DiscoveryPolicy.rowDoor(read?.door ?? .plain, otherTagUnderSavedName: DiscoveryPolicy.otherTagUnderSavedName(
                 tagged: macID, carriesTag: carriesTag, name: row.name, saved: byName))
             let method = DiscoveryPolicy.method(direct: row.direct, interfaces: seen.policy)
             let word = DiscoveryPolicy.rowWord(door: door, saved: saved != nil, revoked: saved?.revoked == true,
@@ -1410,13 +1448,18 @@ final class StreamClient: ObservableObject {
         next += remote.map { FoundMac(name: $0.name, endpoint: nil, route: .remote, macID: $0.macID) }
         guard next != macs else { return }
         #if DEBUG
-        // What each row's word was read from, to check it on a device (the cable in and out).
+        // What each row's word was read from, to check it on a device (the cable in and out): its
+        // interfaces, its door and, when its result carries no TXT record, whether the row keeps the
+        // last one that result carried (DiscoveryPolicy.rowRecords).
         for mac in next where mac.route != .remote {
             let seen = (mac.direct ? nearby : network).first { $0.name == mac.name }
             let named = seen.map { s in s.interfaces.isEmpty ? s.policy.map { "\($0.name) (\($0.type))" } : s.interfaces.map { "\($0.name) (\($0.type))" } } ?? []
-            let door = mac.door == .plain ? "" : " (p=\(mac.door == .open ? "0" : "1")\(mac.homeWord == .method(mac.method) ? "" : ", \(mac.homeWord.word ?? "no word")"))"
+            let word = mac.homeWord == .method(mac.method) ? "" : ", \(mac.homeWord.word ?? "no word")"
+            let door = mac.door == .plain ? (word.isEmpty ? "" : " (no p\(word))") : " (p=\(mac.door == .open ? "0" : "1")\(word))"
             let byName = mac.savedByName.map { " (saved Mac \($0) by its name alone)" } ?? ""
-            print("discovery: \(mac.name): \(mac.method?.word ?? "no word"), seen on \(named.joined(separator: ", "))\(byName)\(door)")
+            let kept = seen == nil || seen?.record != nil ? ""
+                : seen.flatMap({ records[$0.key] }) == nil ? " (no TXT record)" : " (TXT record kept: this result carries none)"
+            print("discovery: \(mac.name): \(mac.method?.word ?? "no word"), seen on \(named.joined(separator: ", "))\(byName)\(door)\(kept)")
         }
         #endif
         macs = next
@@ -1427,12 +1470,6 @@ final class StreamClient: ObservableObject {
             DispatchQueue.main.async { self.connect(to: mac) }
         }
         #endif
-    }
-
-    /// A result's recognition tag (TXT `r`), if it carries one.
-    static func tag(of result: NWBrowser.Result) -> String? {
-        if case .bonjour(let txt) = result.metadata { return txt[RecognitionTag.txtKey] }
-        return nil
     }
 
     /// An interface as DiscoveryPolicy spells it, case for case.
@@ -1457,7 +1494,7 @@ final class StreamClient: ObservableObject {
         #endif
         let now = ProcessInfo.processInfo.systemUptime
         let out = DiscoveryPolicy.decide(DiscoveryPolicy.Input(
-            now: now, connected: connected, onNetwork: Set(networkResults.map(Self.serviceName(of:))),
+            now: now, connected: connected, onNetwork: Set(networkResults.map { Self.serviceName(of: $0.result) }),
             remembered: Set(directWirelessMacs), searchingSince: searchingSince, askedNearby: askedNearby,
             nearbyRunning: nearbyBrowser != nil, listed: macs.count, localNetworkDenied: localNetworkDenied))
         if out.browseNearby, nearbyBrowser == nil {
@@ -1513,6 +1550,12 @@ final class StreamClient: ObservableObject {
     static func serviceName(of result: NWBrowser.Result) -> String {
         if case .service(let name, _, _, _) = result.endpoint { return name }
         return "\(result.endpoint)"
+    }
+
+    /// A result's Bonjour domain ("local."), or "" when its endpoint is not a service.
+    static func serviceDomain(of result: NWBrowser.Result) -> String {
+        if case .service(_, _, let domain, _) = result.endpoint { return domain }
+        return ""
     }
 
     /// A row of the connect screen. Only a Direct row is connected with peer-to-peer allowed; a row
@@ -2508,7 +2551,7 @@ final class StreamClient: ObservableObject {
         lastPongAt = ProcessInfo.processInfo.systemUptime
         setRoute(from: c.currentPath, fresh: true)   // the new connection's, which carries the session now
         status = "Connected to \(hostName)"
-        soundAcrossMove = soundAvailable
+        soundAcrossMove = macHasSound
         settings.reset()
         settingsProblem = nil
         settingsExpiry?.cancel()

@@ -25,15 +25,17 @@ import Foundation
 /// rule of Sill's own can disagree with that pick (one that did would ask for a size the capture
 /// never fills, or restart the stream at every poll). It is what the capture line has always
 /// printed ("scale 1.0" above). Sill's own virtual display is made at 2x (VirtualStage's
-/// `VirtualDisplay(…, scale: 2)`), so a window staged there captures at the knob, as before.
+/// `VirtualDisplay(…, scale: 2)`, at a size macOS keeps at 2x: VirtualDisplaySize), so a window staged
+/// there captures at the knob, as before.
 ///
 /// Pure: Foundation and CoreGraphics, checked on its own with swiftc (Tests/checks/capture-scale).
 enum CaptureScale {
     /// The scale of Sill's own virtual display, which VirtualStage makes at 2x (HiDPI): what a staged
-    /// window's capture is held to, decided before the display exists. VirtualStage keeps a display
-    /// that came up at another mode ("online but not at … @2×": five times in Sill.log, each an
-    /// 800×832-point display at 1x), and a window staged on it still captures at the knob, scaled up,
-    /// as it always has.
+    /// window's capture is held to, decided before the display exists. macOS kept it at 2x for every
+    /// size but one with both sides under 800 points, five times in Sill.log an 800×832-point display at
+    /// 1x, where a staged window was captured at the knob, scaled up; VirtualDisplaySize keeps every
+    /// side at 800 or more since 2026-10-27. VirtualStage still keeps a display that comes up at
+    /// another mode ("online but not at … @2×"), and a window staged there still captures at the knob.
     static let virtualDisplay: CGFloat = 2
 
     /// The pixels a point that a capture of a source on a display of scale `displayScale` runs at:
@@ -119,6 +121,48 @@ enum CaptureScale {
     /// 1 → "1x", 2 → "2x", 1.5 → "1.5x".
     static func times(_ s: CGFloat) -> String {
         s.isFinite && s == s.rounded() && abs(s) < 1_000 ? "\(Int(s))x" : "\(Double(s))x"
+    }
+}
+
+/// The size of Sill's virtual display in points, as VirtualStage asks VirtualDisplay for it: no side
+/// under 800 points, the least macOS keeps at 2x, the scale a staged window's capture counts on
+/// (`CaptureScale.virtualDisplay`).
+///
+/// Found in Sill.log (2026-09-26 to 2026-10-15): of every display Sill made, five came up at 1x, each
+/// asked with both sides under 800 points, 754×784 (four times) or 762×792: the envelope of an iPhone
+/// held upright, its picture 377 or 381 points wide, doubled for Aa's smallest step, with the menu bar.
+/// Each came up at 800×832 points at 1x. macOS listed the mode asked for ("754×784 pt @ 1508×1568 px"),
+/// VirtualDisplay.waitUntilOnline asked for it every half second, and the display stayed at 1x until
+/// the stage's 3 s wait ran out ("Virtual display is online but not at 754×784 @2×: backing 800×832
+/// px", "online 3312 ms"): the pick waited 3 s more, and a window staged there was captured at the knob
+/// from a 1x display, scaled up ("Capture started: 1480×768 … filter (800.0, 832.0) scale 1.0").
+/// Every display with a side of 800 points or more came up at 2x within about half a second, one
+/// side under 800 or not (754×979, 838×792, 1000×784, 900×800, 848×878). The main display's scale
+/// played no part: those five were made beside the Mac's own Retina display, and on 2026-10-27,
+/// beside an external 2560×1440 display at 1x, every one came up at 2x ("filter (2560.0, 2264.0)
+/// scale 2.0"). So every side is held to 800 points or more, which macOS kept at 2x whatever the
+/// other side: the smallest display Sill makes is 800×830 (800 and a 30-point menu bar).
+///
+/// Pure, with CaptureScale (Tests/checks/capture-scale).
+enum VirtualDisplaySize {
+    /// The least side, in points.
+    static let minSide: CGFloat = 800
+    /// 4096 keeps the 2x backing store at or under 8192 pixels, VirtualDisplay's ceiling.
+    static let maxSide: CGFloat = 4096
+
+    /// Each side held to `minSide`…`maxSide`.
+    static func clamp(_ s: CGSize) -> CGSize {
+        CGSize(width: min(max(s.width, minSide), maxSide), height: min(max(s.height, minSide), maxSide))
+    }
+
+    /// The display's size below its menu bar that fits a device's panel of `panel` points at every Aa
+    /// scale and in both orientations: a square of the panel's longer edge ÷ 0.5 (the slider's smallest
+    /// step). No panel (no viewport yet), or one with no area: the window's own size. Held by `clamp`
+    /// either way (VirtualStage.envelope).
+    static func envelope(panel: CGSize?, windowSize: CGSize) -> CGSize {
+        guard let panel, panel.width > 0, panel.height > 0 else { return clamp(windowSize) }
+        let side = ceil(max(panel.width, panel.height) / 0.5)
+        return clamp(CGSize(width: side, height: side))
     }
 }
 

@@ -4,9 +4,18 @@ import os, subprocess, sys, tempfile
 WT = sys.argv[1]; HERE = os.path.dirname(os.path.abspath(__file__))
 F = os.path.join(WT, "iOSClient/ConnectionList.swift")
 MUTANTS = [
-    ("default style is tiles", "raw == Style.tiles.rawValue ? .tiles : .list", ".tiles"),
+    # The style: tiles by default (Noah, 2026-10-27), a stored choice always wins.
+    ("the list by default again (main before 2026-10-27)", "static let defaultStyle: Style = .tiles",
+     "static let defaultStyle: Style = .list"),
+    ("the old rule: tiles only when stored", "raw.flatMap(Style.init(rawValue:)) ?? defaultStyle",
+     "raw == Style.tiles.rawValue ? .tiles : .list"),
+    ("a stored choice ignored", "raw.flatMap(Style.init(rawValue:)) ?? defaultStyle", "defaultStyle"),
+    ("nothing stored read as the list", "raw.flatMap(Style.init(rawValue:)) ?? defaultStyle",
+     "raw.flatMap(Style.init(rawValue:)) ?? (raw == nil ? .list : defaultStyle)"),
+    ("a value no build writes read as the list", "raw.flatMap(Style.init(rawValue:)) ?? defaultStyle",
+     "raw.flatMap(Style.init(rawValue:)) ?? (raw == nil ? defaultStyle : .list)"),
     ("toggled stays the same", "self == .list ? .tiles : .list", "self"),
-    # When a session's end keeps a picture (Noah on #116: tiles are a choice; the list keeps none).
+    # When a session's end keeps a picture (only with tiles, the default since 2026-10-27; the list keeps none).
     ("a picture with the list too", "style == .tiles && sceneActive && saved", "sceneActive && saved"),
     ("a picture from a window behind", "style == .tiles && sceneActive && saved", "style == .tiles && saved"),
     ("a picture of a Mac not saved", "style == .tiles && sceneActive && saved", "style == .tiles && sceneActive"),

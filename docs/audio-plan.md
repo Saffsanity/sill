@@ -48,8 +48,8 @@ a v2 feature by your earlier decision."
   permission, and the CLI prints nothing new unless asked.
 - **Now, not after v1.** BRIEF.md keeps audio out of v1 ("Out: … audio"), and this plan was written
   for after it. Noah's word on 2026-09-27 brings it forward (Q13): it is built now, and step 8
-  records the decision in BRIEF.md and CLAUDE.md. Send Audio stays off by default (Q1), so a
-  release that carries it changes nothing for anyone who leaves it off.
+  records the decision in BRIEF.md and CLAUDE.md. Send Audio stayed off by default (Q1) until
+  2026-10-27, when Noah set it on in Sill.app (PR #236; the CLI's `--audio` still opts in).
 
 **A beta (2026-10-20).** Noah, about PR #94: "Check the sound branch and see if it is polished, if
 so then merge as beta support." So Send Audio ships as a beta, off by default: the Mac's status
@@ -61,11 +61,22 @@ open questions by default, each one place to change (the last section, "The beta
 changes and their checks): Q8, Send Audio is the Mac's alone, as Share Clipboard is; Q10, no
 seventh button in Larger Picture's row 1; Q4 and Q5 as below (it plays with the silent switch on,
 and devices start unmuted); Q16 and H12, codec quality Medium at +3.9 to +4.4 points of a core in
-the harness (+4.0 on 2026-10-20), accepted while it is off by default. **What ends the beta:** P1–P16 pass on Noah's
+the harness (+4.0 on 2026-10-20), accepted while it was off by default (on in Sill.app since
+2026-10-27, so P13 now measures the default). **What ends the beta:** P1–P16 pass on Noah's
 devices (§11); H12 is met or Noah accepts the cost, with P13 (Sill.app's CPU in Activity Monitor,
 sound on and off) measured; P5 is answered (Virtual Display and a minimized app: whether
 ScreenCaptureKit still hears an app whose window moved off the main display); and P6 (the sync,
-filmed) is measured. Then the labels come off and Send Audio's default is Noah's call (Q1).
+filmed) is measured. Then the labels come off; Send Audio's default was Noah's call (Q1), taken on 2026-10-27, before
+these criteria were met: on in Sill.app.
+
+**Two switches in the device's Settings panel (2026-10-27).** Noah: "I've decided the audio setting
+should not be in the main button tray but instead in settings. Sound should be a toggle in the
+settings menu." Q8 and Q10 as the beta took them are revised: a device's Settings panel sets Send
+Audio for every device again (Q8's default: the host accepts a device's `sendAudio` from either door
+and Sill.app saves it as a menu click), and no bar has a Sound button (Q10): the device's own mute
+is the **Mute** switch right under Send Audio (off by default). The last section, "Two switches in the device's
+Settings panel", has the changes and their checks; the sections above keep the design as it was,
+each marked where it changed.
 
 ---
 
@@ -279,7 +290,8 @@ the device's own delays.
 
 ### Controls
 
-- **Send Audio: a host setting, off by default in the first release with sound.**
+- **Send Audio: a host setting, off by default in the first release with sound; on by default in
+  Sill.app since 2026-10-27 (Noah, PR #236), the CLI's `--audio` opting in.**
   - The Mac keeps playing its own sound (ScreenCaptureKit does not silence the source). A device
     beside the Mac, the common case, would double every sound 60–155 ms late until someone mutes
     one of them.
@@ -291,7 +303,9 @@ the device's own delays.
     saves it (Q8). **Since the beta (2026-10-20), the Mac's alone** (Q8's alternative, taken as
     the beta's default): only Sill.app's menu and Settings, and the CLI's `--audio`, set it; the
     Mac refuses a device's change of it, on or off, from either door, naming it in the log, and
-    the device's panel shows the Mac's value, read-only (§4.1, §7.7).
+    the device's panel shows the Mac's value, read-only (§4.1, §7.7). **Since 2026-10-27 (Noah),
+    a device's again**: its Settings panel's Send Audio switch, saved on the Mac like Quality, for
+    every device (the last section).
 - **Sound: a button in the device's bars,** only while the Mac sends sound: in every bar that holds
   it, and on a phone held upright at the end of the thumbnails' row, row 1's approved five kept
   (§7.6; with Larger Picture, which has no thumbnails' row, row 1 before Settings from 384 pt:
@@ -301,7 +315,9 @@ the device's own delays.
   0.1 s, while the device's audio engine starts). The device remembers it. **Since the beta
   (2026-10-20):** no Sound button in Larger Picture's row 1, which stays main's (Apps, Menus while
   the Mac sent its menus, Aa, Keyboard, Desktop, Settings); there, as in a Slide Over, the panel's
-  switch is the only Sound control (Q10, as the beta took it; §7.6).
+  switch is the only Sound control (Q10, as the beta took it; §7.6). **Since 2026-10-27 (Noah): no
+  Sound button in any bar.** The device's own control is the **Mute** switch right under Send Audio in the
+  Settings panel (on mutes; off by default), for every Mac with sound, Send Audio on or off (the last section).
 
 ### Not in this step
 
@@ -487,7 +503,7 @@ public enum AudioMessage: Hashable, Sendable {
 | Device | Host | Result |
 |---|---|---|
 | Older (any build since b67f87d) | This host, Send Audio on | Its hello has no `audio`, so it is sent no kind 43 (it would skip one). It ignores `sendAudio` and `audioNote` in kind 16. Nothing changes for it |
-| This device | Older host (Sill for Mac 0.3.1, the public release; any CLI before this) | No kind 43; `sendAudio` nil: no row, no Sound button or switch |
+| This device | Older host (Sill for Mac 0.3.1, the public release; any CLI before this) | No kind 43; `sendAudio` nil: no row, no Sound button or switch. Since 2026-10-27: the Send Audio row off and disabled, its footnote "Beta. Update Sill on ‹Mac› to hear its sound on this ‹device›.", no Mute |
 | This device | This host, Send Audio off | The row shows off; no button; no kind 43 |
 | This device | This host, Send Audio on | This plan |
 | The base's `sillclient.py` | This host | No hello, or one without `audio`: no kind 43. Kind 16 carries two more keys |
@@ -534,7 +550,9 @@ per-connection `away` and `link`, `LinkJudge` in StreamServer's sweep, a second 
   **Since the beta (2026-10-20), refused instead** (Q8's alternative, taken as the beta's default):
   a device's `sendAudio`, on or off, from either door, is named in the log ("send audio (set on
   this Mac only)") and the rest of its change applies; only the Mac's menu and Settings, and the
-  CLI's `--audio`, set it. The field stays in kinds 16 and 17.
+  CLI's `--audio`, set it. The field stays in kinds 16 and 17. **Since 2026-10-27 (Noah), accepted
+  again**, on or off, from either door, as at first: `ok.sendAudio = c.sendAudio`, through
+  `applying` or `applyingAway` like any shared field (the last section).
 - **Not in `restartNeeded`** (StreamCoordinator.swift:555-564): the sound has its own stream;
   `adopt` hands it over (§4.7).
 - **Every other place** HostSettings.swift's header lists for a new setting (Sill.app's
@@ -786,7 +804,7 @@ PR #37 the loopback one is among TestHooks' door hooks too, which a test host al
 - **`--synthetic --audio`:** the test tone (§4.2).
 - **A device's change** lasts until SillHost quits, as every setting does. **Since the beta
   (2026-10-20):** there is none to keep; the host refuses it (Q8, §4.1), so only `--audio` turns
-  it on.
+  it on. **Since 2026-10-27:** a device's change again, kept until SillHost quits.
 - **Whichever door** (the plain home door by default; PR #37's `--pairing` puts it behind TLS; the
   remote door with `--remote`): the sound goes to every device whose hello plays it.
 - **Without `--audio`: stdout byte for byte** (H2), idle and streaming, whatever the devices'
@@ -805,7 +823,9 @@ PR #37 the loopback one is among TestHooks' door hooks too, which a test host al
   "Prioritize encoding speed" (and after PR #39's Away from home once it is in):
   `Toggle("Send audio", …)` with the footer **"Devices play the sound of what you stream: all of
   the streamed window's app, or every app for the Desktop. The Mac keeps playing it too, and each
-  device can mute it with its Sound button. Nothing is recorded."** While
+  device can mute it with its Sound button. Nothing is recorded."** (Since 2026-10-27, after
+  "Beta.": "… The Mac keeps playing it too. A connected iPhone or iPad can also turn this on or off
+  from Sill’s settings there, and mute it for itself alone. Nothing is recorded.") While
   `snapshot.audio?.problem` is set, under it, the orange label: **"Sill couldn't capture the sound
   of Safari: <reason>. The picture is unaffected."**
 - **Settings › Permissions** (SettingsPanes.swift:318-321): Screen Recording's explanation becomes
@@ -1039,9 +1059,21 @@ and dropped, jumps.
   epoch, the dedupe drops what both connections carry, and a faster or slower path is a floor
   change (rule 13), one jump at most.
 - **State.** `soundMuted` (published; `UserDefaults` `Sill.soundMuted`, default false), and
-  `soundAvailable` (the host's `settings.displayed?.sendAudio == true`).
+  `soundAvailable` (the host's `settings.displayed?.sendAudio == true`). Since 2026-10-27
+  `macHasSound` (the host's `settings.displayed?.sendAudio != nil`: the Mac has sound, on or off),
+  which shows the Settings panel's Mute; `soundAvailable` went with the bars' Sound button.
 
 #### 7.6 The Sound button (every layout) and the Sound switch
+
+**Gone since 2026-10-27** (Noah: "I've decided the audio setting should not be in the main button
+tray but instead in settings."): no bar has the Sound button, and `PhonePortraitLayout`'s `sound`,
+`menusBesideSound` and `stripBesideBoth` went with it (every bar is main's before the sound). The
+switch is **Mute** (on mutes: `soundMuted`, remembered, never sent), right under Send Audio (Noah, 2026-10-27: "right below the Send Audio setting"; first in This iPad until then),
+for every Mac with sound whether Send Audio is on or off (`macHasSound`: its kind 16 carries
+`sendAudio`), so a device keeps itself silent before any device turns the sound on; VoiceOver's
+label "Mute sound from ‹Mac›"; the footnote "Silences ‹Mac›’s sound on this ‹device› alone; ‹Mac›
+keeps sending it and playing it." Headphones taken out still mute, and the switch shows it. What
+follows is the design as it was built.
 
 Only while `soundAvailable`; at each layout's button size, one button's width taken from the
 thumbnail strip, as the Menus button (#36) takes its own.
@@ -1099,12 +1131,21 @@ thumbnail strip, as the Menus button (#36) takes its own.
   the others. **Since the beta (2026-10-20):** the Mac's value, read-only (a disabled switch, as
   Direct Wireless's from afar; the Mac refuses a device's change, Q8), its title followed by a
   small **"Beta"** tag, VoiceOver's label "Send Audio, beta" and its hint "Set in Sill on ‹Mac›."
+  **Since 2026-10-27 (Noah):** a switch again, as at first, through the ledger, its pending mark
+  after the tag (an older Mac that refuses it sends it back: the warning haptic, "‹Mac› kept its
+  setting"); for a Mac without sound (nil) the row shows off and disabled, its hint "Update Sill on
+  ‹Mac› to use this.", rather than no row.
 - **Footer, off:** **"‹Mac› plays the sound of what streams on every connected device, and keeps
   playing it too."** **On:** **"Every device hears what streams; ‹Mac› keeps playing it too. Sound
   mutes it on this ‹device› alone."** Since the beta: off, **"Beta. Turn on Send Audio in Sill on
   ‹Mac› to hear what streams on every connected device; ‹Mac› keeps playing it too."**; on,
   **"Beta. Every connected device hears what streams; ‹Mac› keeps playing it too. Sound mutes it
-  on this ‹device› alone. Turn Send Audio off in Sill on ‹Mac›."**
+  on this ‹device› alone. Turn Send Audio off in Sill on ‹Mac›."** Since 2026-10-27: on, **"Beta.
+  Every connected device hears what streams, and ‹Mac› keeps playing it too. Mute silences it on
+  this ‹device› alone; ‹Mac› keeps sending and playing it."**; off, **"Beta. Turn this on to hear what
+  streams on every connected device; ‹Mac› keeps playing it too."** with the same Mute sentence;
+  either, while this device is muted, ending **"This ‹device› is muted."**; a Mac without sound, **"Beta.
+  Update Sill on ‹Mac› to hear its sound on this ‹device›."**
 - **`audioNote`:** under the row, as a warning footnote.
 - **The ledger:** `SettingsField.sendAudio`, `only`, `adding`, `fields`, and rule 9
   (HostSettingsLedger.swift:69, :99) for it: never sent to a host that did not report it.
@@ -1117,7 +1158,12 @@ thumbnail strip, as the Menus button (#36) takes its own.
   `-SillMacMenu` the mock shows the Menus button too, so a photo has both at the end of the phone's
   row 2; `-SillIdiom pad` draws an iPad window's compact halves on an iPhone simulator. The mock
   answers `sendAudio` as it answers the others. No `-SillSound…` argument exists yet (checked
-  2026-09-27).
+  2026-09-27). **Since 2026-10-27:** `-SillSound on|muted` sets Mute off or on (no
+  button), `-SillSettingsCase nosound` draws a Mac without sound (the Send Audio row off and
+  disabled, "Update Sill…", no Mute; `default` is now a Mac with sound, Send Audio off),
+  `-SillSettingsScroll mute` scrolls to the Mute switch, `-SillSoundToggle` and
+  `-SillSoundSwitchAt` flip Mute, and `-SillSettingsScript`'s `set sendAudio=1|0` is the device's
+  Send Audio switch.
 - **DEBUG console lines:**
   - `audio: format aac-eld 48000 Hz 2 ch, 480 frames (priming 240), epoch 3, Safari`
   - `audio: engine on, Speaker, output 11 ms, IO 5 ms, delay 68 ms (need 68: jitter 40, packet 10,
@@ -1234,7 +1280,7 @@ thumbnail strip, as the Menus button (#36) takes its own.
 | H4 | **`audio-codec`** (a new check): Sources/SillHost/AudioEncoder.swift and iOSClient/AudioDecoder.swift in memory; the test tone through the encoder at F 480 and 512, each packet decoded at once | F and P as §3.2; with the first P frames dropped, each click lands at its stamp's sample ±2 frames; 5 s of the busy signal at 120–140 kbps; nothing but AudioToolbox linked |
 | H5 | **The harness at home** (`Scripts/audio/`, step 4: the real StreamServer and sound files with the test tone and fake frames; no VideoToolbox, ScreenCaptureKit or CoreMedia). 60 s of Balanced-sized fake frames at 60 fps; `Scripts/audiocheck.swift` on the home door (a hello with "aac-eld"; it decodes and finds the clicks); the same run with Send Audio off | 100 ± 1 packets a second (93.75 with `SILL_TEST_AUDIO_CHUNK=1024`); no gap in seq; 60 clicks at whole seconds of their stamps ±1 ms; `net.dropped`, `net.sent` and the frames' age the same with and without sound, within run-to-run noise |
 | H6 | **The harness away:** Scripts/pacing's `bottleneck.py` (on main since #34) at 8 and 4 Mbps with 1.5 MB keyframes, and a 12 s dip to 0.5 Mbps; the remote door's slow link through `Scripts/sillrelay.py` at 2 Mbit/s and +150 ms; and the pacing harness's own gate cases (kf25m32, real24, restartkf, stillend) with sound, against the same without | `aud.drop` 0 at 8 and 4 Mbps while `net.dropped` > 0 in the keyframe case; every packet's age at most the frames' age + 20 ms; in the dip, sound and frames arrive late together, and 2 s after it ends the packets' age is back; the pacing cases' fps and drops within their run-to-run noise with sound on (the keyframe asked for while at most 16 KB waits is not held back) |
-| H7 | **Send Audio over the wire.** `sillclient.py --audio --set=sendAudio=1@3 --set=sendAudio=0@8 --expect=sendAudio=0` against a synthetic host started without `--audio` | The answers carry it; the first packet within 300 ms of the first answer, the last within 100 ms of the second; "Settings from sillclient: send audio off → on" and "… on → off"; no "Streaming …" line (the picture never restarted). **Since the beta (Q8):** both changes refused ("Settings from sillclient refused: send audio (set on this Mac only)"), each answer still `sendAudio` false, no packet; and `SillHost --synthetic --audio` with `sillclient.py --audio`: the format, then packets with no seq gap, and "Audio stopped: nothing streams." when the client picks nothing (the bare app's `-SillSetAfter '<s> sendAudio=0'`: "Audio stopped: Send Audio is off.") |
+| H7 | **Send Audio over the wire.** `sillclient.py --audio --set=sendAudio=1@3 --set=sendAudio=0@8 --expect=sendAudio=0` against a synthetic host started without `--audio` | The answers carry it; the first packet within 300 ms of the first answer, the last within 100 ms of the second; "Settings from sillclient: send audio off → on" and "… on → off"; no "Streaming …" line (the picture never restarted). **Since the beta (Q8):** both changes refused ("Settings from sillclient refused: send audio (set on this Mac only)"), each answer still `sendAudio` false, no packet; and `SillHost --synthetic --audio` with `sillclient.py --audio`: the format, then packets with no seq gap, and "Audio stopped: nothing streams." when the client picks nothing (the bare app's `-SillSetAfter '<s> sendAudio=0'`: "Audio stopped: Send Audio is off.") **Since 2026-10-27 (Noah), as at first:** both changes applied and named ("Settings from sillclient: send audio off → on", "… on → off"), packets between them with no seq gap, "Audio stopped: Send Audio is off." after the second, and a second client's kind 16 saying so each time |
 | H8 | **Epochs and segments** in the harness: the tone paused for 50 ms, then for 500 ms (`SILL_TEST_AUDIO_PAUSE=0.05@3,0.5@6`), and a source change | Each pause: nothing sent for the gap, a segment start at the resumed chunk placed at its stamp ±1 ms, no packet sent more than 40 ms after its stamp, and audiocheck's model keeps its jitter cover; the source change: a new epoch, its format before its first packet on every client |
 | H9 | **Compatibility.** The base's `sillclient.py` against an `--audio` host; the base's StreamProtocol (swiftc) against a kind 43 header and the new kind 16; the new device decoder against the base host's messages | No kind 43 to the old client; `.unknown`; the old kind 16 decode ignores the keys; nothing new decoded |
 | H10 | **Previews.** The bare app's `-SillRenderPreviews` before and after | Only the Streaming and Permissions panes, menu.txt's Send Audio and the new `sound` card sample differ |
@@ -1258,7 +1304,7 @@ model without a player: its floor, need and late decisions on real arrivals), a 
 | # | Check |
 |---|---|
 | S1 | **Photos**, on a private simulator ("Sill audio"). `-SillSound on` and `muted`, with and without `-SillMacMenu`: at 1000x710, 710x1000 and 710x500; the phone's arrangement at 440x956, 402x874, 375x667 and 320x548 and at the Duo's 500x710; the compact halves (`-SillIdiom pad`) at 500x710 and a 320x700 Slide Over (no button: the panel's switch); at the default size and xxLarge text. `-SillSettingsCase sound` and `soundnote` at the same sizes, the panel scrolled to its end (`-SillSettingsEnd 1`) for the switch. The button in every bar that holds it, the strip one button narrower, Menus beside it on the phone, the row after the closing footnote, the switch first in the device's group; against the base build, every other photo pixel for pixel. Send Noah the sheet |
-| S2 | **Live.** `-SillLive 1 -SillConnect 127.0.0.1:P` against the harness's home door, with `-SillSoundSink manual -SillSoundVolume 0`: the console's format and engine lines; within 3 s "late 0" and a steady "behind the picture"; each rendered click within 2 ms of its stamp plus the delay. A headless tap on Sound: "engine off"; again: on, one jump. The panel's switch the same. `sillclient.py --set=sendAudio=0@…` as a second client: the button and the switch go, and "idle, engine off" 10 s later (since the beta the Mac refuses it, Q8: nothing goes; the host's own end of the sound, its client picking nothing or the bare app's `-SillSetAfter '<s> sendAudio=0'`, stands in) |
+| S2 | **Live.** `-SillLive 1 -SillConnect 127.0.0.1:P` against the harness's home door, with `-SillSoundSink manual -SillSoundVolume 0`: the console's format and engine lines; within 3 s "late 0" and a steady "behind the picture"; each rendered click within 2 ms of its stamp plus the delay. A headless tap on Sound: "engine off"; again: on, one jump. The panel's switch the same. `sillclient.py --set=sendAudio=0@…` as a second client: the button and the switch go, and "idle, engine off" 10 s later (since the beta the Mac refuses it, Q8: nothing goes; the host's own end of the sound, its client picking nothing or the bare app's `-SillSetAfter '<s> sendAudio=0'`, stands in). **Since 2026-10-27:** no button: `-SillSoundToggle` flips This iPad's Mute ("engine off (muted)", then "unmuted"), and the device's own Send Audio switch (`-SillSettingsScript '<t> set sendAudio=1'`) turns the Mac's sound on and off: the host's "Settings from ‹device›: send audio off → on", the format, the engine on |
 | S3 | **A move.** `-SillMoveTest 1` with sound, against the harness, with `-SillSoundSink manual -SillSoundVolume 0`: no double packets (the console's dedupe count), nothing reset, at most one jump at the hand-over |
 
 **Noah's devices (P), handed over at the end:** the iPad mini, the Mac, headphones, an iPhone for
@@ -1392,7 +1438,8 @@ rewritten for the layouts main has since #30 and #36, and Q12 says where the kin
    Kept for the beta (2026-10-20); the support page says it plays on silent.
 5. **Mute.** Default: **per device, local, remembered.** The alternative: per Mac. Kept for the
    beta, so a device starts unmuted; with Q8 the Mac's alone, only the Mac's owner turns the sound
-   on for the devices.
+   on for the devices. **Since 2026-10-27** any device turns it on for every device (Q8), so This
+   iPad's Mute shows for every Mac with sound, on or off, and a device can stay silent beforehand.
 6. **The Mac keeps playing.** Default: **say so** (the menu's subtitle, the footers), and a device
    beside the Mac is muted by its user. The alternative is §14's tap, with a permission of its own.
 7. **Bluetooth headphones and AirPlay.** Default: **the sound trails by the route's latency**
@@ -1405,7 +1452,10 @@ rewritten for the layouts main has since #30 and #36, and Q12 says where the kin
    app's sound (calls among it) on every connected device, unmuted (Q5) and on silent (Q4); Share
    Clipboard is the Mac's alone for a like reason, and PR #66's author proposed the same for its
    mute-host. `DeviceSettings.accepted` refuses it, the device's row shows it read-only, and
-   kind 17's field stays for a later decision (#66's Mac viewer asked to set it).
+   kind 17's field stays for a later decision (#66's Mac viewer asked to set it). **Revised by Noah
+   on 2026-10-27: the default again.** "Sound should be a toggle in the settings menu": the
+   device's Send Audio switch turns the Mac's Send Audio on and off, saved on the Mac like Quality,
+   for every device; each device's Mute stays its own.
 9. **"· sound" on the Mac's card.** Default: **shown** in the source row while a device gets sound.
    The alternative: the menu's check mark only.
 10. **Where the Sound button goes.** Default (§7.6): **after Desktop in every bar that holds it
@@ -1420,7 +1470,10 @@ rewritten for the layouts main has since #30 and #36, and Q12 says where the kin
     iPadOS 26, a phone does not); the switch only where no bar holds the button; with Larger
     Picture, Sound never in row 1 (the panel's switch alone). **Taken for the beta (2026-10-20):
     with Larger Picture, Sound never in row 1**, which §13's hard rule asks (row 1 as Noah approved
-    it); the rest of the default stands.
+    it); the rest of the default stands. **Revised by Noah on 2026-10-27: no Sound button in any
+    bar.** "I've decided the audio setting should not be in the main button tray but instead in
+    settings." The Settings panel's two switches instead: the Mac's group's Send Audio (Q8) and
+    Mute right under it, the device's own.
 11. **Headphones unplugged.** Default: **mute and say so**, iOS's pause for a live feed. The
     alternative: keep playing on the speaker.
 12. **The kind number.** Default: **29**. 24, 25 and 27 are the Mac's menus and 26 its pointer, on
@@ -1765,7 +1818,8 @@ device; test hosts on 127.0.0.1 and the software encoder, `no-device.sh` before 
 16. **The encoder's CPU.** Default: **codec quality Medium** (AudioToolbox's default), about 1 point
     of a core on a tonal signal. The alternative is Low: 0.6 points less, 3–9 dB less SNR on tonal
     sound. **Kept for the beta (2026-10-20)**, H12 unmet (+3.9 to +4.4 points of a core in the
-    harness, the gate 1.5) and accepted while Send Audio is off by default; Sill.app's real cost
+    harness, the gate 1.5) and accepted while Send Audio was off by default (on in Sill.app since 2026-10-27, so P13 measures the
+    default); Sill.app's real cost
     (P13) is one of the beta's exit criteria. Two levers if Noah wants them: Low, and two packets a
     message (about half the per-message cost, for 10.7 ms more; the wire already carries 1 to 255).
 
@@ -2106,6 +2160,9 @@ commit each on the contributor's branch, never a rebase:
   set ("Turn on Send Audio in Sill on ‹Mac› to hear what streams on every connected device; ‹Mac›
   keeps playing it too."). Kind 17's field stays on the wire, never reused: a later decision may let
   a device set it again (#66's Mac viewer asked to). `away-quality`: 12 cases, mutants AQ20–AQ24.
+  **Revised on 2026-10-27** (Noah: "Sound should be a toggle in the settings menu"; the last
+  section): the device's Settings panel sets it for every device again, the host accepts it, and
+  the cases and mutants turn to acceptance.
 - **The labels** (e42f1a3). The status menu's "Send Audio (Beta)" (in the title, so VoiceOver and
   menu.txt have it), Settings › Streaming's "Send audio (beta)" and a footnote starting "Beta.", the
   CLI's "Audio on for this run (beta): …" (only with `--audio`, so H2 holds), and the device's row a
@@ -2117,7 +2174,10 @@ commit each on the contributor's branch, never a rebase:
   is the Settings panel's switch alone there; the standard arrangement keeps Sound at row 2's end.
   `row1Beside` goes. `phone-portrait`: the Sound-in-row-1 cases give way to "no Sound button" on
   every phone and across the Larger Picture grid (495 checks), A1–A4 to three mutants of the new
-  lines (80 in all); `tour`: its row-1 Sound case goes (111,191).
+  lines (80 in all); `tour`: its row-1 Sound case goes (111,191). **Revised on 2026-10-27** (Noah:
+  "the audio setting should not be in the main button tray but instead in settings"; the last
+  section): no Sound button in any bar, This iPad's Mute in the Settings panel instead, and
+  `phone-portrait` and `tour` main's before the sound again (484 and 73, 111,189 and 84).
 - **The pre-review's small defects.** b813164: `AudioCapture`'s running stream under a lock, taken
   by exactly one of the stop, a failed start and ScreenCaptureKit's end of it. 2e65f06 and 9104023:
   a session hands the sound's queue no video frame until its first format (every user without sound
@@ -2152,7 +2212,8 @@ commit each on the contributor's branch, never a rebase:
 **The beta's defaults**, each one place to change: Q8 and Q10 as above; Q4 (it plays on silent, the
 support page says so) and Q5 (a device starts unmuted) kept; Q16, codec quality Medium, with H12
 unmet (+4.0 points of a core in the harness on 2026-10-20, against the gate's 1.5) and accepted
-while Send Audio is off by default, P13 (Sill.app's CPU in Activity Monitor, sound on and off) to be
+while Send Audio was off by default (on in Sill.app since 2026-10-27), P13 (Sill.app's CPU in
+Activity Monitor, sound on and off, now the default) to be
 measured before the beta ends. Left as the review left it: packets that come while muted or in the
 background still count for the cover (§7.5), so a short trip to the background can hold it at its
 bound (150 ms at home, 600 ms away) for 10 s before the sound jumps back; #152 (the stream kept
@@ -2237,3 +2298,129 @@ along, a load average of 300 to 900):
   nothing, and a second client's off refused while the first kept its sound. The iOS app's sources
   and StreamProtocol are 9104023's, and the sound harness compiles none of the files the merge
   changed, so the iOS builds, S1–S3 and the harness's numbers above stand.
+
+## Two switches in the device's Settings panel (2026-10-27)
+
+Noah, a week into the beta: "I've decided the audio setting should not be in the main button tray but
+instead in settings. Sound should be a toggle in the settings menu." He had asked, too, why the iPad's
+Send Audio row was greyed out (it was read-only: Q8 as the beta took it), and settled the shape as two
+switches in the device's Settings panel: **Send Audio**, the Mac's, which a device turns on and off
+for every device as it does Quality, and **Mute**, this device's own playback, in place of the bars'
+Sound button. Branch `sound-toggle` from main at b4caa91, PR #235, one commit per theme; Q8 and Q10 above are
+revised, and each section above marks what changed.
+
+- **The host.** `DeviceSettings.accepted` takes a device's `sendAudio`, on or off, from either door,
+  as Prioritize Speed (a switch: nothing to check), and `sendAudioRefusal` goes. Sill.app's hook lays
+  it over its settings and saves it as a menu click: `applying`, or `applyingAway` for a device away,
+  which passes it on to the one shared value. It is not in `restartNeeded`, so, as with the Mac's own
+  switch, a device's change starts or stops the sound's stream and never restarts the picture. The
+  log says "Settings from ‹device›: send audio off → on", and kind 16 tells every device, as before.
+  Sill.app's menu ("Send Audio (Beta)") and the CLI's `--audio` are as they were; Settings ›
+  Streaming's footnote no longer says "each device can mute it with its Sound button. Only this Mac
+  turns it on.": "… The Mac keeps playing it too. A connected iPhone or iPad can also turn this on or
+  off from Sill’s settings there, and mute it for itself alone. Nothing is recorded."
+- **The Mac's group on the device.** Send Audio is a switch again (`binding(send) {
+  HostSettingsChange(sendAudio: $0) }` through the ledger, as at first), its pending mark after the
+  "Beta" tag, "Send Audio, beta" to VoiceOver ("Send Audio" for Voice Control). Its footnotes: on,
+  "Beta. Every connected device hears what streams, and ‹Mac› keeps playing it too. To silence only
+  this ‹device›, turn on Mute below." (while this device is muted, "This ‹device› is muted (Mute,
+  below)." in place of the advice); off, "Beta. Turn this on to hear what streams on every connected
+  device; ‹Mac› keeps playing it too." (the muted sentence after it while muted). A Mac without
+  sound (kind 16 without `sendAudio`: Sill for Mac 0.5.1, the public release, and older) shows the
+  row off and disabled, "Beta. Update Sill on ‹Mac› to hear its sound on this ‹device›." under it
+  and as its hint, where it had no row; the ledger's rule 9 never sends it there. A Mac from the beta (main
+  from 2026-10-20 to 27) refuses the change, and the switch goes back to the Mac's value with the
+  warning haptic (none on an iPad) and "‹Mac› kept its setting" to VoiceOver, as for any refusal.
+- **This iPad's Mute.** First in the group: on mutes (`soundMuted`, kept as `Sill.soundMuted`, never
+  sent), its footnote "Silences ‹Mac›’s sound on this ‹device› alone; ‹Mac› keeps sending it and
+  playing it.", VoiceOver's label "Mute sound from ‹Mac›". It shows for every Mac with sound, Send
+  Audio on or off (`macHasSound`: the Mac's kind 16 carries `sendAudio`; across a move's hand-over,
+  what the last connection said), the default taken here: now that any device turns the sound on for
+  every device, a device can keep itself silent beforehand, and the row never comes and goes with
+  that switch. None for a Mac without sound: nothing to mute, and its Send Audio row says to update
+  it. Headphones taken out still mute, and the switch shows it.
+- **No Sound button in any bar.** The landscape bar (`TopBar`: `soundFits` and `SoundButton` gone),
+  the iPad's portrait window bar, a phone's rows and the Duo's bars are main's before the sound
+  again: PortraitStreamScreen.swift, PhonePortraitLayout.swift (`sound`, `menusBesideSound` and
+  `stripBesideBoth` gone) and MacMenuButton.swift are byte for byte c215514's (main before #94), and
+  StreamScreen.swift's bar is, but for a comment.
+- **The harness.** `-SillSound on|muted`: Send Audio on, Mute off or on. The mock's `default` is a
+  Mac with sound, Send Audio off, so every panel photo now has the Send Audio row and Mute (it was a
+  Mac without sound); `nosound` is one without, and `nodirect`, an older Mac, has none either.
+  `-SillSettingsScroll mute`; `-SillSoundToggle` and `-SillSoundSwitchAt` flip Mute;
+  `-SillSettingsScript`'s `set sendAudio=1|0` is the device's Send Audio switch.
+- **The words.** README, site/support.html and privacy.html inside their `<!-- Sound` markers (a
+  device's settings panel turns it on, Mute silences one device; nothing new collected: the device's
+  change is among "changes you make in Sill’s settings panel", and its mute was kept already;
+  privacy.html's date October 27, 2026), docs/app-store-metadata.md (the bullet, What's New and the
+  counts; the review notes as they were: their WHAT TO TRY line names the Sill menu, which still
+  turns it on), BRIEF.md, DEVELOPMENT.md and CLAUDE.md.
+
+**Checks.** `away-quality`: its Send Audio cases turn to acceptance (applied on or off, at home and
+away, with the rest of the change and nothing refused; landing on the shared value, never a quality
+pair, from both routes; the log's words both ways), 89 checks; AQ20–AQ24 become mutants of that
+(dropped as the beta did, named as refused, only on taken, never seen on, unnamed) with AQ25 and AQ26
+(`applying` and `applyingAway` dropping it), 26 of 26 caught. `ledger`: its model gains a host from
+the beta, which refuses a device's Send Audio while its own menu sets it (559 of the 5,000 runs, 727
+refusals, every run converged), 100 checks, 12 of 12 mutants. `phone-portrait` and `tour` are
+c215514's again: 484 checks and 73 of 73 mutants, 111,189 and 84 of 84.
+
+Verified (2026-10-27, on a6576808; this Mac shared with other work, the load average from 7 to 352, and
+every heavy step paused while it was over 20):
+- **Builds.** `swift build -c release`, only the CaptureProbe warning. The iOS app with Xcode 27.1
+  (27A9275): Debug for the generic simulator as CI builds it, Release for the generic simulator and
+  Debug for a generic device, only the known `StreamClient` capture warning (StreamClient.swift:3882),
+  and the state of 7f9db775 (no button, the panel as the beta had it) Debug for the simulator.
+- **Checks.** `Tests/checks/run-all.sh`, all 54: 53 in the run, and `message-reader` (which
+  compiles nothing this branch changed) again on its own, its first run having failed its timed slow
+  case only because the load rule paused it for 35 s; the mutants above, every one caught.
+- **H2**, main's CLI (b4caa91) against this one, both `--synthetic` on loopback and the software
+  encoder: idle for 2.7 minutes, identical masked and sorted (13 lines each); with `sillclient.py PORT
+  8 desktop`, identical but for one second's `cursor.shape` in main's run (the Mac's cursor changed);
+  with `--hello=0.6 --audio` too, identical but for two seconds' `cursor.shape` in this one's, and no
+  sound from either (Send Audio off: `AUDIO 0 packets`).
+- **H7**, this host without `--audio`: `sillclient.py PORT 12 desktop --audio --set=sendAudio=1@3
+  --set=sendAudio=0@8 --expect=sendAudio=0`, with a second client joined without a pick. "Settings
+  from sillclient: send audio off → on", the answer at 3.001 s with `sendAudio` true, the format and
+  the first packet 12 ms later, 500 packets with no seq gap, "Settings from sillclient: send audio on
+  → off" and "Audio stopped: Send Audio is off." with the last packet; no "Streaming …" line after
+  the start (the picture never restarted); EXPECT ok. The second client's kind 16 said `sendAudio`
+  true, then false, and it got the same 500 packets with no gap.
+- **H10**, the bare SillMenuBar's previews of main and of this branch from one path: 146 files each,
+  only `pane-streaming-light.png` and `-dark.png` differ (the footnote); menu.txt is main's.
+- **S1**, harness photos on a private iPad Pro 13-inch (M5) simulator on iOS 27.0, deleted after,
+  Debug builds of main and of this branch. Every bar with the Mac sending its sound (`-SillSound on`)
+  pixel for pixel main's with it off: the landscape bar at 1000×710, the iPad's portrait window bar at
+  710×1000, a phone upright at 393×793 and 375×647 (`-SillIdiom phone`), the Duo's at 951×669 flat and
+  half (the book pose), 669×951 half (the laptop pose), 466×678 and 678×466 closed. The panel at
+  1000×710 and 710×1000, default text and accessibility-extra-large (the panel's xxLarge cap):
+  against main's, only the bar (no Sound button), the Send Audio row (a switch, its footnote) and
+  This iPad's first row (Mute and its footnote, for "Sound from ‹Mac›") differ; the cases `soundoff`,
+  `nosound` (the row disabled, "Update Sill…", no Mute), `soundnote` and `-SillSound muted` (Mute on,
+  "This iPad is muted (Mute, below).") photographed too, and a phone's panel at 393×793. The photos
+  (the mock's, nothing of this Mac's) are in `~/Downloads/sill-handoff/sound-toggle/` (INDEX.md).
+- **S2**, live on that simulator against this `SillHost --synthetic` (no `--audio`), the engine
+  rendering offline at volume 0, the panel open: the device's Send Audio switch on 3 s after the
+  first window list (`-SillSettingsScript`): the host's "Settings from Sill sound-toggle iPad
+  (iPad17,4 simulator): send audio off → on", the console's "audio: format aac-eld 48000 Hz 2 ch, 480
+  frames (priming 240), epoch 1, a test tone" and "engine on, manual rendering"; Mute on 7 s after
+  the stream showed (`-SillSoundToggle`): "engine off (muted)", the panel's Mute on and its Send Audio
+  footnote "This iPad is muted (Mute, below)."; Mute off at 11 s: "unmuted", the engine on again, one
+  join and no jump; every click heard within 0.1 ms of its place (14 packets late as the engine first
+  started); the switch off at 16 s: "send audio on → off", "Audio stopped: Send Audio is off.", the
+  device's "idle, engine off" 10 s later, Mute still shown. A second client watching the whole run:
+  kind 16 `sendAudio` true, 1,299 packets with no seq gap (the device's Mute changed nothing it was
+  sent), then false. Against main's CLI (a host from the beta), the same switch: "Settings from Sill
+  sound-toggle iPad (iPad17,4 simulator) refused: send audio (set on this Mac only)", and the switch
+  back off by the next photo (0.2 s).
+
+### Mute right under Send Audio (2026-10-27, after the review)
+
+Noah, with the two switches on his iPad: "Mute setting should be right below the Send Audio setting",
+"And should be set to off by default." So the Mute row is the second row of Send Audio's card (a
+`RowDivider` between them, `muteID` on the row), shown while the Mac has sound (`macHasSound`), and
+This iPad's group lost it; the one footnote under the card says, Send Audio on or off, "Mute silences
+it on this ‹device› alone; ‹Mac› keeps sending and playing it." and, while muted, "This ‹device› is
+muted."; `muteFooter` is gone. Mute was off by default already (`soundMuted` reads `Sill.soundMuted`,
+false when unset); an iPad that ran the beta's bar button may carry a saved true, which the row shows.
+The results above photographed Mute first in This iPad; the panel's photos change by that row's place.

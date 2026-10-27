@@ -200,8 +200,8 @@ struct ContentView: View {
 ///   so a photo of a short screen shows the last groups (Direct Wireless, Away from home, This
 ///   iPad, Take the Tour). `-SillSettingsScroll gestures` starts them at the This iPad group
 ///   instead (its switches and rows, which the footnotes under them push out of the end's view on a
-///   short screen), `-SillSettingsScroll sound` at the Send Audio row, and `-SillSettingsScroll
-///   reverse` at its Reverse Scrolling switch.
+///   short screen), `-SillSettingsScroll sound` at the Send Audio row, `-SillSettingsScroll mute` at
+///   the Mute row under Send Audio, and `-SillSettingsScroll reverse` at its Reverse Scrolling switch.
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
@@ -404,11 +404,18 @@ struct ContentView: View {
 ///   run learns is still saved.
 /// * `-Sill.connectionStyle tiles|list` and `-Sill.macGroups '{"HOMEPAIRING6":"Home"}'` — not harness
 ///   arguments either: the connect screen's arrangement and the saved Macs' groups (ConnectionList),
-///   by Mac ID, for one run, in the mock, under `-SillLive 1` and in the normal app. `-Sill.macGroups`
-///   writes nothing back (`'{}'` empties). A launch argument outranks what the app saves, so under
-///   `-Sill.connectionStyle` the switch beside the title changes nothing until the next run: to try
-///   the switch, write the default instead (`xcrun simctl spawn <udid> defaults write me.saffer.sill
-///   Sill.connectionStyle tiles`). With tiles, a saved Mac's session that ends keeps its picture in
+///   by Mac ID, for one run, in the mock, under `-SillLive 1` and in the normal app. Without either, and
+///   with nothing stored, the arrangement is tiles, the default since 2026-10-27
+///   (ConnectionList.defaultStyle); `-Sill.connectionStyle list` shows the list as main did by default.
+///   `-Sill.macGroups` writes nothing back (`'{}'` empties). A launch argument outranks what the app
+///   saves, so under `-Sill.connectionStyle` the switch beside the title changes nothing until the next
+///   run: to try the switch, write the default instead (with Sill not running, `plutil -replace
+///   Sill.connectionStyle -string list "$(xcrun simctl get_app_container <udid> me.saffer.sill
+///   data)/Library/Preferences/me.saffer.sill.plist"`; a `simctl spawn … defaults write` never reaches
+///   the app), or let `-SillStyleToggleAt <s>[,<s>…]` toggle it at
+///   those seconds after the connect screen shows, as the switch does (it stores the choice; the
+///   console says "connect: tiles → list at 4.0 s, …", and "connect: tiles (Sill.connectionStyle unset)"
+///   as each connect screen shows). With tiles, a saved Mac's session that ends keeps its picture in
 ///   Library/Caches/SillPreviews (none is taken while the list shows, which hides the kept ones and keeps
 ///   their files until tiles come back: ConnectionList.previewPlan, StreamClient.syncPreviews): the session's
 ///   last keyframe, decoded (KeyframePicture), never a snapshot of the screen, and Disconnect asks the
@@ -436,20 +443,22 @@ struct ContentView: View {
 /// * `-SillOrientation landscape|portrait` — the normal app only: asks the window scene for that
 ///   orientation at launch (a phone simulator sideways, with its real safe areas). The Duo's inner
 ///   display refuses it (UISceneErrorDomain 101): fold and turn its simulator with Tests/duorig.
-/// * The Mac's sound (docs/audio-plan.md §7.8). In the mock: `-SillSound on|muted` makes the mock Mac
-///   send its sound and this device play it or have it muted (the Sound button and switch in that
-///   state; the mock plays nothing), and `-SillSettingsCase sound|soundoff|soundnote` the Send Audio
-///   row on, off, or on with the Mac's note (why no sound comes). In the normal app and under
-///   `-SillLive 1`: `-SillSoundSink manual|device` (the engine renders offline and opens no output
-///   device, the simulator's default in every build, or it plays to the output; `device` in the
-///   simulator plays through the Mac's speakers: never in a gate), `-SillSoundVolume 0` (the player's
-///   volume, a second guard), `-SillSoundToggle <s>[,<s>…]` (the Sound button used at those seconds
-///   after the stream screen shows, as a tap would) and `-SillSoundSwitchAt <s>` (the panel's switch
-///   off, then on a second later). The console's "audio: …" lines say what happened: the format, the
-///   engine and its latencies, a line a second while sound plays (how far it trails the picture, the
-///   need, late packets, the error, frames added and dropped, jumps, duplicates), and in manual
-///   rendering where each click of a synthetic host's test tone was heard, against where it was placed
-///   and when it was due.
+/// * The Mac's sound (docs/audio-plan.md §7.8): the Settings panel's two switches, Send Audio (the
+///   Mac's, for every device) and Mute right under it (this device's own). In the mock: `-SillSound
+///   on|muted` makes the mock Mac send its sound and this device play it or have it muted (Mute off or
+///   on; the mock plays nothing), and `-SillSettingsCase sound|soundoff|soundnote|nosound` the Send
+///   Audio row on, off, on with the Mac's note (why no sound comes), or a Mac without sound (the row
+///   disabled, "Update Sill…", no Mute). In the normal app and under `-SillLive 1`: `-SillSoundSink
+///   manual|device` (the engine renders offline and opens no output device, the simulator's default
+///   in every build, or it plays to the output; `device` in the simulator plays through the Mac's
+///   speakers: never in a gate), `-SillSoundVolume 0` (the player's volume, a second guard),
+///   `-SillSoundToggle <s>[,<s>…]` (Mute flipped at those seconds after the stream screen shows, as
+///   a tap on the switch would) and `-SillSoundSwitchAt <s>` (Mute on, then off a second later);
+///   `-SillSettingsScript`'s `set sendAudio=1` is the Send Audio switch. The console's "audio: …"
+///   lines say what happened: the format, the engine and its latencies, a line a second while sound
+///   plays (how far it trails the picture, the need, late packets, the error, frames added and
+///   dropped, jumps, duplicates), and in manual rendering where each click of a synthetic host's test
+///   tone was heard, against where it was placed and when it was due.
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
@@ -905,8 +914,8 @@ enum InputScript {
 
 /// `-SillSettingsScript '<t> <step>; …'`: the Settings panel's controls for the simulator gates, which
 /// have no finger (docs/remote-bundle-plan.md S3): `t` is seconds since the session's first window
-/// list; a step is `set K=V[,K=V]` (maxFPS, bitrate, captureScale, prioritizeSpeed, virtualDisplay:
-/// a control's change, through `changeSettings` as the panel sends it), `suggestion` (the link
+/// list; a step is `set K=V[,K=V]` (maxFPS, bitrate, captureScale, prioritizeSpeed, virtualDisplay,
+/// sendAudio: a control's change, through `changeSettings` as the panel sends it), `suggestion` (the link
 /// callout's button: the Mac's suggestion as the panel offers it, or nothing when it offers none),
 /// `paste TEXT` (the clipboard's Paste, as the system's Paste control hands TEXT over, through
 /// `sendClipboard`, the receipt and its note included: docs/clipboard-plan.md) or `disconnect` (the
@@ -968,6 +977,7 @@ enum SettingsScript {
                 case "captureScale": change.captureScale = Double(kv[1])
                 case "prioritizeSpeed": change.prioritizeSpeed = on
                 case "virtualDisplay": change.virtualDisplay = on
+                case "sendAudio": change.sendAudio = on
                 default: print(when + "no setting \(kv[0])")
                 }
             }
@@ -1009,8 +1019,10 @@ struct ConnectScreen: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     /// The Duo's hinge (iOS 27.1): with the fold, where the column goes (ConnectLayout).
     @Environment(\.duoEnvironment) private var duoEnvironment
-    /// Rows or tiles on the connect screen (ConnectionList).
-    @AppStorage(ConnectionList.styleKey) private var styleRaw = ConnectionList.Style.list.rawValue
+    /// Rows or tiles on the connect screen (ConnectionList): what the switch beside the title or a saved
+    /// Mac's menu stored, nil while nothing is, which `ConnectionList.storedStyle` reads as the default
+    /// (tiles). Written only by `toggleStyle`.
+    @AppStorage(ConnectionList.styleKey) private var styleRaw: String?
     /// The saved Mac whose New Group… alert is up, and the name typed there.
     @State private var newGroupFor: String?
     @State private var newGroupName = ""
@@ -1154,6 +1166,10 @@ struct ConnectScreen: View {
             announce(client.status)
             // The style changed in another Sill window while this one streamed: its pictures follow it.
             client.syncPreviews(to: ConnectionList.storedStyle(styleRaw))
+            #if DEBUG
+            print("connect: \(style.rawValue) (Sill.connectionStyle \(styleRaw ?? "unset"))")
+            scheduleStyleToggles()
+            #endif
         }
         .onChange(of: client.status) { _, line in announce(line) }
     }
@@ -1163,6 +1179,32 @@ struct ConnectScreen: View {
         guard !line.isEmpty, line != StreamClient.lookingOnNetwork, line != StreamClient.lookingNearby else { return }
         AccessibilityNotification.Announcement(line).post()
     }
+
+    /// The switch beside the title, and Show as List/Tiles in a saved Mac's menu: stores the other style,
+    /// the person's choice from then on (ConnectionList.storedStyle), in every Sill window.
+    private func toggleStyle() {
+        styleRaw = style.toggled.rawValue
+    }
+
+    #if DEBUG
+    /// `-SillStyleToggleAt <s>[,<s>…]`: at each of these seconds after the connect screen shows, the
+    /// style is toggled as the switch beside the title toggles it (`toggleStyle`), so the gates, which
+    /// have no finger, store a choice and see it across a relaunch. Once per run.
+    private static var styleTogglesScheduled = false
+
+    private func scheduleStyleToggles() {
+        guard !Self.styleTogglesScheduled, let spec = UserDefaults.standard.string(forKey: "SillStyleToggleAt") else { return }
+        Self.styleTogglesScheduled = true
+        let times = spec.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        for at in times {
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [self] in
+                let from = style
+                toggleStyle()
+                print("connect: \(from.rawValue) → \(from.toggled.rawValue) at \(at) s, as the switch beside the title does (Sill.connectionStyle \(UserDefaults.standard.string(forKey: ConnectionList.styleKey) ?? "unset"))")
+            }
+        }
+    }
+    #endif
 
     private func column(_ layout: ConnectLayout) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1179,11 +1221,16 @@ struct ConnectScreen: View {
                 .accessibilityFocused($titleFocused)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 // The switch between rows and tiles: a 44 pt target over the title's line, which it
-                // overhangs above and below (an overlay, so the column is laid out as before it).
+                // overhangs above and below (an overlay, so the column is laid out as before it). Always
+                // (Noah, 2026-10-27: "The list/tiles switch should always show"), whichever style is on
+                // and whether or not a Mac is listed; only the card, which takes the title's place, and a
+                // link's confirmation leave it out. #117 showed it for tiles alone while the list was the
+                // default, which with tiles the default left someone with no Mac who chose the list no way
+                // back.
                 .overlay(alignment: .trailing) {
-                    if !carded, client.pendingLink == nil, style == .tiles || client.macs.contains(where: { $0.macID != nil }) {
+                    if !carded, client.pendingLink == nil {
                         Button {
-                            styleRaw = style.toggled.rawValue
+                            toggleStyle()
                         } label: {
                             Image(systemName: style == .tiles ? "list.bullet" : "square.grid.2x2")
                                 .font(.system(size: 15, weight: .medium))
@@ -1356,7 +1403,7 @@ struct ConnectScreen: View {
                 Label(currentGroup.map { "Group: \($0)" } ?? "Group", systemImage: "folder")
             }
             Button {
-                styleRaw = style.toggled.rawValue
+                toggleStyle()
             } label: {
                 Label(style == .tiles ? "Show as List" : "Show as Tiles",
                       systemImage: style == .tiles ? "list.bullet" : "square.grid.2x2")

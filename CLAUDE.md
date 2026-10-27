@@ -48,6 +48,195 @@ no wire change; every Duo build and photo on the iOS 27.1 runtime.
   console lines, esc and ⌘C on the Mac, the cap, the emoji and Chinese keyboards, a hardware keyboard,
   open flat, VoiceOver).
 
+**Tiles, Virtual Display and Send Audio on by default (2026-10-27, branch `defaults-tiles-vd` from main at
+3c257485, fast-forwarded to 3b546374 (#234) before its first commit; PR #236).** Noah, 2026-10-27:
+"make tiles not list the default behavior of the app. Also have Virtual Desktop on by default. Of
+course, if a user changes a setting remember their choice for future sessions as you do now. Make
+this a separate PR after #117 merges." Later that morning, testing #235: "Send Audio should be on
+by default, and mute should be off by default." No wire change.
+- Sill.app's Send Audio is on by default too (`HostConfig.app.sendAudio`; the CLI's `--audio` still
+  opts in; a saved `sendAudio` wins, so a Mac whose user turned it off stays off): the menu's
+  checkmark and Settings › Streaming's switch start on; README's Good to know, support.html's Sound
+  section and privacy.html say so. Mute on the device was off by default already (#235).
+- The device: the connect screen shows tiles unless its person chose the list
+  (`ConnectionList.defaultStyle`, `storedStyle`: a stored `Sill.connectionStyle`, "list" or "tiles",
+  always wins; nothing stored, or a value no build writes, reads as tiles). ConnectScreen keeps the
+  key optional (`@AppStorage … String?`), so the rule alone decides, as StreamClient's
+  `connectionStyle` already did. So a picture of each saved Mac's screen is kept by default
+  (`takesPreview`, unchanged: only with tiles), and Disconnect asks for its fresh keyframe by default
+  (300 ms at most before the connect screen with Sill for Mac 0.5.1, which skips kind 44). The switch
+  beside the title always shows, whichever style is on and whether or not a Mac is listed (Noah,
+  2026-10-27: "The list/tiles switch should always show"; #117 showed it for tiles alone, which with
+  tiles the default took it away under the finger of someone with no saved Mac who chose the list).
+  DEBUG: `-SillStyleToggleAt <s>[,<s>…]` toggles the style as
+  the switch does (`toggleStyle`); the console's `connect:` lines.
+- The Mac: Sill.app registers `HostConfig.app` (HostSettings), the CLI's `standard` with the virtual
+  display on. Registered, never written: a `virtualDisplay` key set from the menu, Settings ›
+  Virtual Display or a device always wins (a Mac that turned it off stays off; this Mac's own keys read 1 for
+  both on 2026-10-27, set by hand, so nothing changes here), and `-virtualDisplay 0` turns it off for one run. The CLI keeps `standard`: `--virtual-display`
+  opt-in, its stdout byte for byte. The menu's checkmark and the pane's switch follow `config`; no
+  pane names the default.
+- The virtual display at 1x, the caveat of that decision: not in the session of 2026-10-26/27.
+  Beside the 2560×1440 display at 1x every staged capture that night read "scale 2.0" (`filter
+  (1456.0, 1486.0)`, `(2560.0, 1486.0)`, `(2560.0, 2264.0)`); its "scale 1.0" captures were real
+  windows and the Desktop on that display (#233's case). Sill.log's 1x displays were five earlier
+  ones (2026-09-26, 09-28, 10-08 twice, 10-15), each asked with both sides under 800 points, 754×784
+  or 762×792: an iPhone held upright (its 377- or 381-point picture doubled for Aa's smallest step)
+  and the menu bar, beside the Mac's own Retina display too, so the main display's scale played no
+  part. macOS listed the 2x mode asked for, `selectRequestedMode` asked for it every half second,
+  and the display stayed at 800×832 points at 1x until the stage's 3 s wait ran out ("online 3312
+  ms"): the pick waited 3 s more, and the staged window was captured at 2x from a 1x display (eleven
+  captures `filter (800.0, 832.0) scale 1.0`). Every display with a side of 800 points or more came
+  up at 2x (754×979, 838×792, 900×800, 1000×784, 848×878 and larger). The fix, `VirtualDisplaySize`
+  (pure, in CaptureScale.swift, checked by `Tests/checks/capture-scale`): every side 800 to 4096
+  points, so an iPhone upright gets 800×830; VirtualStage's `envelope` and `ensureDisplay` use it.
+  The creation line prints the mode the display came up at (`VirtualDisplay.currentScale`; it said
+  "@2×" whatever came up), and `--virtual-display-selftest [Hz] [WxH]` makes another size.
+- Words: README (How it works: the connect screen's tiles, On iPhone, Text size and the virtual
+  display with it on by default; Good to know), site/support.html (a section, "A window left your
+  Mac’s screen", whose sentence on the default is marked `<!-- Virtual Display` for its release; "It
+  says Not paired"), site/privacy.html (the tiles' items: kept unless the list is chosen; "touch and
+  hold it"; dated October 27, 2026; the virtual display needs no word there, Accessibility "so Sill
+  can move and size the window it shows" says it already), docs/release-checklist.md (the marker,
+  its perl line and grep), docs/app-store-metadata.md (the description's "Your Mac shows up.", 3,032
+  characters; the next What's New's tiles paragraph, 232, the draft 1,805), docs/DEVELOPMENT.md, the
+  checks README.
+- Verified: `swift build -c release`, only the CaptureProbe warning; `Tests/checks/run-all.sh`, all
+  55 (562 s); mutants: connection-list 162 checks and 76 of 76, capture-scale 148 and 39 of 39,
+  away-quality 96 and 30 of 30 (after #235's merge: its acceptance mutants and the app defaults'), virtual-display-api (VirtualDisplay.swift changed) 17 of 17; H2
+  against main at 3b546374 from `git archive`, `--synthetic` on loopback (software encoder, no
+  router, no screen): idle 35 s identical masked and sorted (8 lines), with `sillclient.py PORT 8
+  desktop` identical (23 lines; a first pair differed only in which counters three stats lines
+  listed, `cursor.shape` among them); the bare SillMenuBar `--synthetic` (domain deleted before and
+  after): no key, "Virtual display: private CGVirtualDisplay API present…" and "✓ Virtual Display";
+  `-SillSetAfter '2 virtualDisplay=0'`, one "Settings: virtual display on → off" and the key 0; a
+  relaunch, off; `-virtualDisplay 1`, on for the run, the key still 0; main's binary with no key,
+  off; previews from both bare binaries at one path, 146 files each, only `menu.txt` (the
+  update-available sample's ✓ Virtual Display and ✓ Send Audio (Beta)), `pane-virtualDisplay-light.png`,
+  `-dark.png`, `pane-streaming-light.png` and `-dark.png` differ, each pane only in its switch; the iOS app
+  with Xcode 27.1 (27A9275), Debug for the generic simulator as CI builds it, Release for the
+  simulator, Debug for a device, only the known StreamClient capture warning
+  (StreamClient.swift:4110); on a private iPhone Duo simulator on iOS 27.1 (its cover display), the
+  29 connect cases at 466×678 and 951×669 against main's Debug build: this build with nothing stored
+  and main's with tiles stored, 57 of 58 pixel for pixel (the 58th the pairing case's spinner, which
+  differs from itself); this build with the list stored and main's with nothing stored, 44 of 58, the
+  rest the switch beside the title, which this build always shows (the verifier's photos of 04c9f226;
+  the author's, before 70423d1a, had the switch only with a saved Mac listed); the normal app, a fresh install against a synthetic host
+  registered as `_silltest._tcp`: tiles, toggled to the list (stored "list"), a relaunch the list,
+  toggled back (stored "tiles"), a relaunch tiles, the key read from the app's container plist
+  (`simctl spawn … defaults read <container>/Library/Preferences/me.saffer.sill.plist`; the domain by
+  name reads elsewhere); `SillHost --virtual-display-selftest 60 800x830` once, at 05:05 with this
+  Mac idle 601 s and no device connected: online at the requested mode in 446 ms, 1600×1660 px @2×,
+  a 30-point menu bar, gone 158 ms after (its HID move reset the idle time). Not run: Sill.app,
+  anything with a device, a staged window on 800×830.
+- **Untested, for Noah:** on the iPad with this build, a fresh install (Sill deleted first) shows
+  tiles; once a Mac is paired the switch beside the title shows; to the list, quit Sill from the app
+  switcher and reopen: the list; back to tiles, reopen: tiles; an install that chose the list keeps it.
+  On a Mac whose `virtualDisplay` was never set (another Mac or user account, or, with Sill quit,
+  `defaults delete me.saffer.sill.mac virtualDisplay sendAudio`; this Mac's read 1, set by hand, so it
+  is on here already): the menu shows ✓ Virtual Display and ✓ Send Audio (Beta), a device hears the
+  Mac's sound at once (beside the Mac it doubles every sound a moment late until Mute), a window
+  picked moves onto the virtual display (Sill.log "Virtual
+  display … @2× id …: created", "Moved …", "Capturing … of virtual display") and comes back at
+  Disconnect; the switch turned off stays off after a relaunch. With the iPhone 15 Pro upright and
+  the virtual display on, a pick's display is "Virtual display 800×830 pt @2×" with no "online but not
+  at" line, and the window's text crisp.
+**Send Audio and Mute in the device's Settings panel (2026-10-27, branch `sound-toggle` from main at
+b4caa91, main at 3b54637 (#117, #234) merged in, not rebased; PR #235; the bullet "Two switches" in the
+sound's entry below and docs/audio-plan.md's last section have the details).** Noah: "I've decided the
+audio setting should not be in the main button tray but instead in settings. Sound should be a toggle in
+the settings menu." Two switches in the device's Settings panel: **Send Audio** (the Mac's group, its
+"Beta" tag), which a device turns on and off for every device as it does Quality (the host accepts kind
+17's `sendAudio` again and Sill.app saves it, no picture restart; a Mac from the beta refuses it and the
+switch goes back; for a Mac without sound the row is off and disabled, "Update Sill on ‹Mac›…"), and
+**Mute** right under it (`soundMuted`, the device's own, off by default; Noah, 2026-10-27: "right below
+the Send Audio setting"), shown for every Mac with sound, Send Audio on or off. No Sound button in any bar.
+- Merged with main at 3b54637 (2026-10-27: #117, the connect screen's tiles, and #234, the capture scale
+  follow-ups; one merge commit). Only iOSClient/ContentView.swift conflicted, in SettingsScript's doc
+  comment: both kept (this branch's `set … sendAudio` and #117's `disconnect` step). CLAUDE.md,
+  Tests/checks/README.md (both sides' rows: #117's `connection-list` 154 and 72, #234's `capture-scale`,
+  this branch's `away-quality`, `ledger`, `phone-portrait` and `tour`), DEVELOPMENT.md, MockCatalog.swift
+  (#117's `tiles` connect case beside this branch's settings cases), StreamClient.swift and
+  site/privacy.html (#117's Tiles items beside the Sound item, the date October 27, 2026) merged by
+  themselves. Verified on the merge: `swift build -c release`; the iOS app, Debug for the generic
+  simulator as CI builds it, only the known `StreamClient` capture warning (StreamClient.swift:4067);
+  `run-all.sh ledger away-quality phone-portrait tour connection-list capture-scale`, all passed (100,
+  89, 484, 111,189, 154 and 122 checks).
+- **Untested, for Noah:** the bullet "Two switches"' list (Send Audio from the iPad's panel heard on
+  the iPhone too, Mute on one device, Mute before the sound is turned on elsewhere, VoiceOver on both
+  switches, this iPad against a Sill.app from the beta and against 0.5.1).
+**A Mac's row keeps its TXT record when the cable goes (2026-10-27, branch `cable-unplug-row` from main
+at 74d099c, PR #232).** Noah, on the iPad mini's connect screen with the iPad on the Mac's USB cable: the
+row read "Wired", and from the moment the cable came out "Update Sill", for good. The console (Debug):
+`discovery: Noah’s MacBook Pro: Wired, seen on anpi0 (wiredEthernet), en2 (wiredEthernet), en0 (wifi)
+(p=1)`, then `…: Wired, seen on en2 (wiredEthernet), en0 (wifi) (saved Mac H6WQ… by its name
+alone)`, then `…: Wi‑Fi, seen on en0 (wifi) (saved Mac … by its name alone)`: iPadOS listed the same
+result on the interfaces left with no TXT record at all, so `rowMac` took the row by its name alone,
+`HomeDoorTXT.door` read a plain door and `rowWord`'s no-downgrade rule said "Update Sill" for a Mac seen
+over TLS (a tap dialed nothing; by the same rules the saved Mac's Remote row came beside it). Device
+only, no wire change.
+- The rule (`DiscoveryPolicy.rowRecords`, pure, `RowRecord`, `RowRecordKey`): a row is read with its
+  result's own record (`r`, `p`), else the last one that result carried while the same browser has
+  listed it without a break; a record that comes replaces it, whatever it says; a result that leaves the
+  browser's results is forgotten (the browser's removal is the break, no timer). Kept records are keyed
+  by the browser that delivered the result and the service's name and domain, so a browser made again
+  (back from the background, after a failure: issue #69) starts afresh: its results are read with what
+  it delivers itself, and the old one's records serve only the old one's results while they are shown
+  beside it. A row never gains a door no record gave it; a tap and the reconnect dial by `homeDial` as
+  before (pinned over TLS, never plain for a Mac seen over TLS); a Mac really back on a plain door, or
+  another service under its name, reads "Update Sill" once listed afresh; a result never listed with a
+  record reads as a plain door, as before. Known: within one browser's listing, a removal it never
+  reports (a lost goodbye, a removal and a registration in one report) leaves any recordless service
+  that then answers under the name read with the old record: as the Mac its tag names, whose Remote row
+  is hidden and automatic remote dial held back while it is listed, dialed pinned (never plain), and
+  marked `newKey` by a TLS answer with another key when no other row of that Mac is listed
+  (`afterPinRefused`, as for a refused tag-named row).
+- Glue: `StreamClient.record(of:)` (nil for metadata other than `.bonjour` and for an empty record) in
+  place of `tag(of:)` and `door(of:)`; each browse result carries the number of the browser that
+  delivered it (`Listing`, `browsersMade`), `recomputeMacs` keeps one `rowRecordMemory` by
+  `RowRecordKey` and reads every row (by the result it is built from) and the `homeTLS` marking through
+  it; the DEBUG test rows (browser 0) carry a record of their own. The `discovery:` line adds "(TXT
+  record kept: this result carries none)" or "(no TXT record)", and a plain door's word, "(no p, Update
+  Sill)".
+- The review of #232 (2026-10-27, after 6eb6602; main at b4caa91 merged in by then): a kept record
+  survived a browser made again (the old results kept beside the new one's, the records keyed by name
+  alone), so a service that took M's name with no record while Sill was in the background read as M by
+  its old tag (M's Remote row hidden, its remote dial held back, a refusal of the pinned dial marking M
+  `newKey`) where main reads "Update Sill"; now keyed by browser as above. A name in two domains was one
+  record for two results; now each result has its own. The checks' two comments naming `door(of:)`.
+  Left as main has it (read from the code, not run): back from the background the automatic reconnect
+  dials at once from the old browser's last results, trusting their own records (issue #69's settle), so
+  a TLS service with another key that took M's name meanwhile can still mark M `newKey` in that moment.
+- Verified (after the review's fix; main at 3c25748 (#117) and 3b54637 (#234) then merged in, which changed
+  none of the files the four checks of DiscoveryPolicy.swift compile): `home-device` 209 checks and 131 of
+  131 mutants, `home-model` 76 and 25 of 25, `policy` 464 (`records.swift`) and 165 of 165,
+  `remote-rules` 144 and 76 of 76, one mutant run at a time; on the merged head `run-all.sh`, all 55,
+  `swift build -c release` (only the CaptureProbe warning) and the three iOS builds on Xcode 27.1 (Debug
+  for the generic simulator as CI builds it, Release for the simulator, Debug for a generic device), only
+  the known `StreamClient` capture warning. Live on private iPad mini simulators
+  (iOS 27.0, deleted after) against `SillHost --synthetic --pairing` under `_silltest._tcp` on loopback,
+  paired at the home door. The cable's shape: `dns-sd -R` of the host's name was renamed "(2)", so a bare
+  PTR record of it (a scratch `DNSServiceRegisterRecord` tool, lo0, no SRV or TXT) kept the name listed
+  once the host was killed, without a record (the simulator's browser lists a new name only once its TXT
+  record answers, and keeps a listed one whose record went): origin/main's build `(saved Mac … by its
+  name alone)`, "Update Sill", "… runs an older Sill…", the Remote row beside it, nothing dialed; this
+  branch `(p=1) (TXT record kept: this result carries none)`, the row as before, no Remote row, the
+  reconnect dialing over TLS, pinned (failing there, never plain), and once the name went and a plain
+  registration of it came (`dns-sd -i lo0 -R` to a plain host), "Update Sill", nothing dialed, before
+  and after the review's fix. The review's case: `-SillBrowserFail 1` (the network browser reported
+  failed, cancelled, made again a second later), and meanwhile the TLS host killed and its name
+  registered with no TXT record for a plain host: 5c69075e's build read it as M (`(p=1)` kept, no word,
+  no Remote row); this one `(… by its name alone) (no p, Update Sill) (no TXT record)`, "Update Sill",
+  M's Remote row, nothing dialed. Not live: a tap then (no UI input here; the checks have it).
+- **Untested, for Noah:** a Debug build on the iPad mini, Sill.app on the Mac, the connect screen with the
+  cable in, then unplugged: the `discovery:` lines keep `(p=1)` with "(TXT record kept: this result carries
+  none)", the row reads "Wi‑Fi" (no "Update Sill", no Remote row) and a tap connects; plugged in again,
+  "Wired"; the same while streaming over the cable. And a plain CLI host under the saved Mac's name: quit
+  Sill.app and run `swift run -c release SillHost` (no `--pairing`) on that Mac: the row reads "Update
+  Sill" and a tap dials nothing; the same with the switch made while Sill is in the background on the
+  iPad (the console's "browser: rebuilt the network browser (back from the background)"): back, the row
+  reads "Update Sill" with the Mac's Remote row beside it.
+
 **Capture scale follow-ups (2026-10-27, branch `capture-scale-followups` from main at b4caa910; PR #234).**
 The post-merge verification of #233 (sill-handoff's
 `triage/2026-10-20-reports/verdicts-2026-10-26/pr233-verdict.md`) left small follow-ups, all taken here.
@@ -420,6 +609,7 @@ fixed (5126215 to 8bbbe52, below) and verified in the simulator
 - Host: Send Audio (`HostConfig.sendAudio`) is off in `standard` and, since
   the beta, the Mac's alone (its menu and Settings, the CLI's `--audio`): a
   device's kind 17 `sendAudio` is refused from either door (the plan's Q8).
+  Since 2026-10-27 a device's again (the bullet "Two switches").
   It is not in `restartNeeded`, so the picture never restarts for it.
   - `AudioPipeline` follows the source from `active`'s didSet, where the
     pointer and the menus follow it. The same app keeps its stream through
@@ -456,7 +646,8 @@ fixed (5126215 to 8bbbe52, below) and verified in the simulator
   card's source row, `-SillSetAfter sendAudio=1`, and the `sound` preview.
 - The device: AudioDecoder, AudioPlayout (pure, `Tests/checks/audio-playout`),
   AudioOutput and StreamClient+Audio, in the Xcode project as AA01–AA04; the
-  Sound button in every bar and the panel's rows (5f7b1ac). AudioDecoder also
+  Sound button in every bar and the panel's rows (5f7b1ac; the button gone since
+  2026-10-27, the bullet "Two switches"). AudioDecoder also
   serves the `audio-codec` check and the harness's device.
   - The playout (§7.2): the floor, the need (the jitter cover from 40 ms at home
     and 150 ms away, a packet, the IO buffer, the output latency), the picture's
@@ -472,9 +663,10 @@ fixed (5126215 to 8bbbe52, below) and verified in the simulator
     refused during a call, each packet still counting for the floor and the
     cover. Headphones out mute it and say so. The simulator renders offline
     (manual rendering) in every build: nothing opens an output.
-  - The Sound button counts Menus whether or not it shows: where only one fits
-    (an iPhone SE sideways, iPad windows under 532 pt upright) Menus keeps its
-    place and Sound is the panel's switch alone, as in the iPhone Duo's book
+  - Until 2026-10-27 (the bullet "Two switches"), the Sound button counted
+    Menus whether or not it showed: where only one fits (an iPhone SE
+    sideways, iPad windows under 532 pt upright) Menus kept its place and
+    Sound was the panel's switch alone, as in the iPhone Duo's book
     pose and, since the beta, with Larger Picture on every phone (row 1 as
     Noah approved it: the plan's Q10). A remote session by address takes
     home's cover, as the Mac counts it.
@@ -628,11 +820,46 @@ fixed (5126215 to 8bbbe52, below) and verified in the simulator
   against main's CLI at 7b4c313, the host's output identical masked and sorted in all three modes;
   H7 as above (979 packets, no seq gap); the iOS app's sources and StreamProtocol 9104023's, and
   none of the files the merge changed in the sound harness.
+- **Two switches in the device's Settings panel (2026-10-27, branch `sound-toggle` from main at
+  b4caa91, PR #235; docs/audio-plan.md, "Two switches in the device's Settings panel", and Q8 and Q10
+  revised).** Noah: "I've decided the audio setting should not be in the main button tray but instead
+  in settings. Sound should be a toggle in the settings menu." (He had asked why the iPad's row was
+  greyed out: read-only since the beta.) The host takes a device's kind 17 `sendAudio` again, on or
+  off, from either door (`DeviceSettings.accepted`; `sendAudioRefusal` gone), Sill.app saves it as a
+  menu click (`applying`, `applyingAway`), never a restart ("Settings from ‹device›: send audio off →
+  on"), and Settings › Streaming's footnote says a device can turn it on and mute itself (the Mac's
+  menu, Settings switch and `--audio` as they were). On the device, the Mac's group's **Send Audio**
+  is a switch through the ledger (the "Beta" tag kept; off and disabled with "Update Sill on ‹Mac›…"
+  for a Mac without sound; a Mac from the beta refuses it: the switch goes back with the warning
+  haptic), and **Mute**, right under it (`soundMuted`, kept, off by default), shows for every Mac with sound, on or off
+  (`macHasSound`), so a device can stay silent before any device turns the sound on. No Sound button
+  in any bar: PortraitStreamScreen.swift, PhonePortraitLayout.swift and MacMenuButton.swift, and the
+  checks `phone-portrait` and `tour`, are c215514's again. The mock's `default` is a Mac with sound,
+  Send Audio off; `nosound` is one without. Verified (on a6576808, this Mac's load 7 to 352, heavy
+  steps paused over 20): `swift build -c release` and the iOS app with Xcode 27.1 (Debug and Release
+  for the generic simulator, Debug for a generic device; and the second commit's state), only the
+  known warnings; `run-all.sh`, all 54 (`message-reader` on its own after a pause broke its timed
+  case; `away-quality` 89 and 26 of 26 mutants, `ledger` 100 and 12 of 12, `phone-portrait` 484 and 73
+  of 73, `tour` 111,189 and 84 of 84); H2 against main's CLI, idle identical masked and sorted, a
+  Desktop client and one whose hello plays sound but for a second or two of `cursor.shape`; H7, a
+  device's Send Audio on and off ("Settings from sillclient: send audio off → on", 500 packets with no
+  seq gap, "Audio stopped: Send Audio is off.", a second client's kind 16 and packets the same, no
+  restart); the bare app's previews, only Settings › Streaming's footnote; harness photos on a private
+  iPad simulator (deleted after), every bar with the Mac sending sound pixel for pixel main's with it
+  off (landscape, the iPad's portrait bar, a phone at 393 and 375 pt, the Duo's five poses), the panel
+  at 1000×710 and 710×1000 at both text sizes; live against `SillHost --synthetic`, the device's
+  switch turning the sound on and off on the host, Mute's "engine off (muted)" and "unmuted", every
+  click within 0.1 ms, and main's CLI (a beta host) refusing it, the switch back off. **Untested, for
+  Noah:** on the iPad and iPhone with this Sill.app, Send Audio from the iPad's panel (the iPhone
+  hears it too, Sill.app's menu and Settings show it, `defaults read me.saffer.sill.mac sendAudio` is
+  1), Mute on one device while the other plays, Mute before Send Audio is turned on elsewhere,
+  VoiceOver on both switches, and this iPad against a Sill.app from the beta (the switch goes back)
+  and against 0.5.1 (the row disabled, "Update Sill…").
 - **Untested, for Noah:** everything on the devices, the plan's P1–P16, which end the beta with H12
   met or accepted (P13, Sill.app's CPU with sound on and off), P5 answered (Virtual Display, a
   minimized app) and P6 measured (the sync, filmed). Sill.app's menu and Settings rows can be looked
-  at (previews), and `defaults read me.saffer.sill.mac sendAudio` is absent (off) until it is first
-  set.
+  at (previews), and `defaults read me.saffer.sill.mac sendAudio` is absent until it is first
+  set, which reads as on in Sill.app since 2026-10-27 (#236).
 
 **The Close timeout and the interrupted picture (2026-10-19 and 20, PR #93 from addhumal, finished on
 its branch `audit-fixes`, which has main at 4d990e9 in it; issue #101).** The triage of 2026-10-16 and
@@ -5343,7 +5570,9 @@ and apply live: `StreamCoordinator.setTarget` hands a new `HostConfig` to the ne
 `select`, which takes it between pipelines; a change restarts the stream once,
 or not at all when nothing running depends on it (the virtual display toggle
 restarts only a window stream, and sends a staged window home first). Virtual
-display off by default in both the CLI and the app.
+display off by default in the CLI; in the app off until 2026-10-27 and on since
+(`HostConfig.app`, registered, so a saved key still wins; Current step, "Tiles and
+Virtual Display on by default").
 - Rules. Host code is the `SillHostCore` library (folder `Sources/SillHost`),
   reached with `package` access; make it `public` only if an Xcode target ever
   needs it (M5 CloudKit). Never `MainActor.assumeIsolated` in core code: under
@@ -5420,7 +5649,8 @@ Milestone 3, scaling and the virtual display. Two paths exist; adopt the second.
   (`WindowRestore`; Current step, "A window Sill sized goes back"). Harness:
   `-SillScaleOpen 1` photographs the unfolded state.
 - **Virtual display (implemented 2026-09-22 behind `--virtual-display`, off by
-  default; Noah flips the default after trying it).** With the flag, SillHost
+  default; on by default in Sill.app since 2026-10-27, Noah's call, the CLI's
+  flag still opt-in).** With the flag, SillHost
   runs `NSApplication.run()` (activation policy `.prohibited`: no Dock icon,
   never activatable) instead of `dispatchMain()`, because only under the AppKit
   loop does the creating process see the display's modes. `select(.window)`
@@ -5815,8 +6045,8 @@ good.
   `HostConfig` (the knobs: maxFPS, captureScale, bitrate per 60 fps, the
   away pair awayBitrate and awayCaptureScale, prioritizeSpeed, virtualDisplay,
   directWireless, remoteAccess, remotePort, internetAccess, requirePairing,
-  sendAudio, shareClipboard; `standard` is the CLI's values and the app's defaults;
-  `effective(away:)`), `HostClipboard` (the clipboard's host side: who
+  sendAudio, shareClipboard; `standard` is the CLI's values, `app` Sill.app's
+  defaults, the same with the virtual display and Send Audio on (2026-10-27); `effective(away:)`), `HostClipboard` (the clipboard's host side: who
   subscribed, the look at the pasteboard's change count four times a second
   while one has and macOS allows every read, a device's text written
   `.currentHostOnly` with this launch's marker and passed to the others, one
@@ -5844,7 +6074,9 @@ good.
   the display's own, ScreenCaptureKit's `pointPixelScale` for the filter, so a
   window on a 1x display fills its picture and nothing is upscaled; and
   `InputLanding`, where a device's position lands on the Mac: at most the
-  source's last pixel row and column at its display's scale; pure,
+  source's last pixel row and column at its display's scale; and
+  `VirtualDisplaySize`, the size of Sill's virtual display, no side under 800
+  points, which macOS kept at 2x (an iPhone's 754×784 came up at 1x); pure,
   `Tests/checks/capture-scale`), `SyntheticCapture` (test pattern for
   `--synthetic`; SILL_TEST_PATTERN=noise adds a square of noise,
   SILL_TEST_PATTERN=picture:<path> shows a still picture instead,
@@ -6263,7 +6495,10 @@ good.
   (`autoDesktop`; issue #69); pairing at home's rows and words, a tap's dial, the device's
   cable check and how a session at home ends: `rowWord`, `homeDial`,
   `onCable`, `rowMac`, `reconnectEnd`, `macInfoNamesSession`,
-  `removalRevokes`; pure, checked with swiftc), `StreamScreen`
+  `removalRevokes`; the TXT record each row is read with, its result's own or else the last one that
+  result carried while the same browser lists it, forgotten once it leaves and when a browser is made
+  again (`rowRecords`, `RowRecordKey`: the cable pulled, 2026-10-27); pure, checked with swiftc),
+  `StreamScreen`
   (landscape: top bar, thumbnails, drawer, Aa, Keyboard, Desktop; layout
   selection by size incl. Duo outer display, and `DuoLayout.phoneArrangement`,
   the idiom: which arrangement `.outerPortrait` draws; `DuoLayout.isPortrait`,
@@ -6277,16 +6512,14 @@ good.
   pane, row 1's five buttons in their band, the strip, six caps, the trackpad
   and its vertical span, the Aa ruler, the drawer and the Settings panel across
   row 1, and the dim, and the Menus button ending the strip's row (`menus`,
-  `stripBesideMenus`) and the Sound button with it (`sound`, `menusBesideSound`,
-  `stripBesideBoth`); with Larger Picture's keyboard (`keyboard`, from
+  `stripBesideMenus`; no Sound button anywhere since 2026-10-27); with Larger
+  Picture's keyboard (`keyboard`, from
   `keyboardHeight(for:)`, only while a window streams: `largerPicture(switchOn:
   streaming:)` and `Streaming`, and only where it is larger: `largerPictureGains`,
   `offersLargerPicture(screen:)`) no strip, the room over the keyboard, Menus in
-  row 1 (`buttonsBesideMenus`) and no Sound button (the Settings panel's switch
-  alone, docs/audio-plan.md's Q10: `sound` and `stripBesideBoth` are the strip's
-  empty place, `menusBesideSound` is `menus`), the drawer above row 1, the pane
-  at the picture's shape (`pane(video:)`) and its span (`trackpadSpan(video:)`);
-  pure, `Tests/checks/phone-portrait`), `DuoPosture`
+  row 1 (`buttonsBesideMenus`), the drawer above row 1, the pane at the
+  picture's shape (`pane(video:)`) and its span (`trackpadSpan(video:)`); pure,
+  `Tests/checks/phone-portrait`), `DuoPosture`
   (the iPhone Duo's posture and the rules that follow from it, docs/iphone-duo-plan.md:
   `FoldInfo`, inferred before iOS 27.1 or the fold's band; the laptop pose's
   split at the real fold and open flat's at the picture's shape, the book
@@ -6431,7 +6664,8 @@ good.
   (targets, the rule's inputs, the layer above the layouts and under the
   pairing overlay, Take the Tour from the Settings panel's last row). The
   connect screen's tiles and groups (issue #116, PR #117): `ConnectionList`
-  (rows or tiles, `Sill.connectionStyle`, the rows by default; when a session's
+  (rows or tiles, `Sill.connectionStyle`, tiles by default since 2026-10-27
+  (`defaultStyle`; a stored choice always wins); when a session's
   end keeps a picture, `takesPreview`: only with tiles, from the session's own
   window in front, for a saved Mac; the saved Mac a row stands for, `tileMac`:
   its tag's or record's, else the one it is taken for by name, so every row
@@ -6461,8 +6695,11 @@ good.
   AudioToolbox only), `AudioPlayout` (the sound's timing; pure,
   `Tests/checks/audio-playout`), `AudioOutput` (its queue, the decoder and the
   engine; no video frame handed to its queue before the session's first format, the last 32 kept
-  for the guard) and `StreamClient+Audio`: pbxproj AA01–AA04; the host's
-  `audio-codec` check and the sound harness's device compile AudioDecoder too.
+  for the guard) and `StreamClient+Audio` (this device's mute, `soundMuted`, the Settings panel's
+  Mute; `macHasSound`, whether it shows): pbxproj AA01–AA04; the host's `audio-codec` check and
+  the sound harness's device compile AudioDecoder too. The Settings panel (`HostSettingsPanel`)
+  holds the sound's two switches: the Mac's group's Send Audio (for every device, with a "Beta"
+  tag) and Mute right under it; no bar has a Sound button (Noah, 2026-10-27).
   `Info-Debug.plist` is the Debug configuration's Info.plist: Info.plist's
   keys, with `_silltest._tcp` beside `_sill._tcp` for the harness's
   `-SillServiceType` (Release declares `_sill._tcp` alone).
@@ -6602,10 +6839,10 @@ swift run -c release SillHost              # nothing streams until the iOS app p
 swift run -c release SillHost Safari       # optional: preselect a matching window
 swift run -c release SillHost --synthetic  # Desktop streams a test pattern; no Screen Recording needed
 swift run -c release SillHost --encoder-selftest   # is the hardware encoder alive? 5 s, exits
-swift run -c release SillHost --virtual-display   # picked windows stream from their own HiDPI display (off by default)
-swift run -c release SillHost --virtual-display-selftest   # create/destroy one display, report what sees it
+swift run -c release SillHost --virtual-display   # picked windows stream from their own HiDPI display (off by default in the CLI; on in Sill.app)
+swift run -c release SillHost --virtual-display-selftest   # create/destroy one display, report what sees it ([Hz] [WxH] after it: `60 800x830`)
 swift run -c release SillHost --direct-wireless   # also over peer-to-peer Wi-Fi (AWDL): devices without a shared network (off by default)
-swift run -c release SillHost --audio       # Send Audio (a beta) for this run: the streamed app's sound to devices that play it (with --synthetic, a test tone; off by default; a device cannot change it)
+swift run -c release SillHost --audio       # Send Audio (a beta) for this run: the streamed app's sound to devices that play it (with --synthetic, a test tone; off by default; a device's Settings panel turns it on or off too)
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 .build/release/SillHost --synthetic --audio   # the test tone on loopback; sillclient.py PORT 8 desktop --hello=0.6 --audio counts it
 Scripts/audio/run.sh                        # the encoder-free sound harness and its gates (~7 min; no encoder, capture, speaker or device)
 swift run -c release SillHost --remote      # the remote door for this run on any free port (--remote=PORT), a throwaway identity; the code and link print here
@@ -6862,15 +7099,18 @@ where the route line says how), away from home's and the link's settings cases
 `away|awaymixed|awayhome|linkbehind|linkmixed|linklow|linkstalled` (the header's
 away line, the footnote, the callout; `linkstalled` shows none) and
 `-SillLinkLine behind` (the mock reports the link behind: the stream's line),
-the Mac's sound's `-SillSound on|muted` (the mock Mac sends it: the Sound
-button and switch in that state; the mock plays nothing) and settings cases
-`sound|soundoff|soundnote` (the Send Audio row on, off, or on with the Mac's
-note), `-SillSettingsScroll sound` (the panel at the Send Audio row), and in
+the Mac's sound's `-SillSound on|muted` (the mock Mac sends it, Send Audio on:
+Mute off or on; the mock plays nothing) and settings cases
+`sound|soundoff|soundnote|nosound` (the Send Audio switch on, off, on with the
+Mac's note, or a Mac without sound: the switch off and disabled, "Update
+Sill…", no Mute; `default` is Send Audio off with Mute), `-SillSettingsScroll
+sound|mute` (the panel at the Send Audio row, or at the Mute row under it), and in
 the normal app and under `-SillLive 1` `-SillSoundSink manual|device` (manual
 rendering, no output device: the simulator's default in every build; `device`
 plays through the Mac's speakers, never in a gate) with `-SillSoundVolume 0`,
-`-SillSoundToggle <s>[,<s>…]` (the Sound button used at those seconds) and
-`-SillSoundSwitchAt <s>` (the panel's switch off, then on a second later); the
+`-SillSoundToggle <s>[,<s>…]` (Mute flipped at those seconds),
+`-SillSoundSwitchAt <s>` (Mute on, then off a second later) and
+`-SillSettingsScript`'s `set sendAudio=1|0` (the device's Send Audio switch); the
 console's "audio: …" lines say what happened (the format, the engine and its
 latencies, a line a second, each jump with its size and cause, and in manual
 rendering where each click of a synthetic host's test tone was heard),
@@ -7183,4 +7423,7 @@ device keeps working with Macs from the first public build on, or each says why
 - v1 out of scope: hole punching, multi-window, layout customization. Audio is in scope since
   2026-09-27 (Noah: "Audio: the plan is done and parked as a v2 feature by your earlier decision",
   first in what he wanted worked on; docs/audio-plan.md, docs/BRIEF.md), and in, as a beta, since
-  2026-10-20 (Noah, about PR #94: "merge as beta support"): Send Audio, off by default, the Mac's alone.
+  2026-10-20 (Noah, about PR #94: "merge as beta support"): Send Audio, off by default. Since
+  2026-10-27 (Noah: "Sound should be a toggle in the settings menu") the Mac's menu and Settings and
+  a device's Settings panel set it for every device, and each device's Mute is its own; no Sound
+  button in the bar.

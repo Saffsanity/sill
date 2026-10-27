@@ -13,10 +13,26 @@ func check(_ ok: Bool, _ what: String) {
 }
 typealias C = ConnectionList
 
-// Style: default is list so existing connect screens are unchanged; only "tiles" switches to tiles.
-check(C.storedStyle(nil) == .list && C.storedStyle("") == .list && C.storedStyle("grid") == .list, "default style is list")
-check(C.storedStyle("list") == .list && C.storedStyle("tiles") == .tiles, "stored style round-trips")
+// Style: tiles by default (Noah, 2026-10-27: "make tiles not list the default behavior of the app"), so
+// an install that never chose shows tiles; a stored choice always wins, the list included, so a person
+// who chose the list keeps it. A value no build writes reads as the default.
+check(C.defaultStyle == .tiles, "the default style is tiles")
+check(C.storedStyle(nil) == .tiles, "nothing stored: tiles, the default")
+check(C.storedStyle("") == .tiles && C.storedStyle("grid") == .tiles && C.storedStyle("List") == .tiles
+      && C.storedStyle(" list") == .tiles, "a value no build writes: the default, tiles")
+check(C.storedStyle("list") == .list, "a stored list stays the list")
+check(C.storedStyle("tiles") == .tiles, "stored tiles stay tiles")
 check(C.Style.list.toggled == .tiles && C.Style.tiles.toggled == .list, "toggling flips between list and tiles")
+// What the switch stores (the other style's raw value, ConnectScreen.toggleStyle) reads back as that
+// style, from either side and from nothing stored: a choice survives a relaunch, back and forth.
+var shown = C.storedStyle(nil)
+for step in 1...4 {
+    let stored = shown.toggled.rawValue
+    let next = C.storedStyle(stored)
+    check(next == shown.toggled, "toggle \(step) from \(shown): stores \(stored), reads back \(next)")
+    shown = next
+}
+check(shown == C.defaultStyle, "four toggles from the default come back to it")
 
 // A picture at a session's end: only with tiles, from a window in front, for a saved Mac. Every
 // combination, so dropping any one condition (or joining them with "or") fails.

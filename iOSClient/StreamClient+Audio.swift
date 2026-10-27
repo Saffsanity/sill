@@ -9,24 +9,27 @@ extension StreamClient {
     /// Where this device's mute is kept: local, per device, remembered across launches.
     static let soundMutedKey = "Sill.soundMuted"
 
-    /// The Mac sends its sound (Send Audio on, as its settings on this connection say): the Sound
-    /// button shows, and the panel's Sound switch. Nil from a Mac without sound reads as no. Across a
-    /// move's hand-over, what the last connection said until the new one says (`soundAcrossMove`).
-    var soundAvailable: Bool { (settings.displayed.map { $0.sendAudio } ?? soundAcrossMove) == true }
+    /// The Mac has sound: its settings on this connection carry Send Audio, on or off (Sill for Mac with
+    /// sound, and SillHost), so the Settings panel's Mute switch shows (Noah, 2026-10-27: Send Audio and
+    /// Mute as the panel's switches). Nil from a Mac without sound, and no settings yet, read as no.
+    /// Across a move's hand-over, what the last connection said until the new one says
+    /// (`soundAcrossMove`), so the switch never blinks out.
+    var macHasSound: Bool {
+        if let shown = settings.displayed { return shown.sendAudio != nil }
+        return soundAcrossMove ?? false
+    }
 
-    /// The Sound button and switch: mute or unmute this device alone, at once, without asking the Mac
-    /// (it keeps sending), and remember it. Main thread.
+    /// The Settings panel's Mute (This iPad's group), and headphones taken out: mute or unmute this
+    /// device alone, at once, without asking the Mac (it keeps sending), and remember it. Main thread.
     func setSoundMuted(_ on: Bool) {
         noteAction()
         guard soundMuted != on else { return }
         soundMuted = on
         UserDefaults.standard.set(on, forKey: Self.soundMutedKey)
         #if DEBUG
-        print("audio: the Sound control \(on ? "mutes" : "unmutes") this device")
+        print("audio: Mute \(on ? "on: mutes" : "off: unmutes") this device")
         #endif
     }
-
-    func toggleSound() { setSoundMuted(!soundMuted) }
 
     /// Headphones taken out while the sound played (AudioOutput): muted, as a video app pauses, and
     /// said. Main thread.
@@ -53,9 +56,9 @@ extension StreamClient {
     }
 
     #if DEBUG
-    /// `-SillSoundToggle <s>[,<s>…]`: at each of these seconds after the stream screen shows, the Sound
-    /// control is used as a tap would use it (the harness cannot tap); `-SillSoundSwitchAt <s>` the
-    /// panel's switch, off then on, a second apart. Once per launch.
+    /// `-SillSoundToggle <s>[,<s>…]`: at each of these seconds after the stream screen shows, the panel's
+    /// Mute switch is flipped as a tap would flip it (the harness cannot tap); `-SillSoundSwitchAt <s>`
+    /// turns it on, then off a second later. Once per launch.
     func runSoundArguments() {
         guard !Self.soundArgumentsRan else { return }
         Self.soundArgumentsRan = true
@@ -65,16 +68,16 @@ extension StreamClient {
         for t in times {
             DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self] in
                 guard let self else { return }
-                print("audio: harness: the Sound button tapped at \(t) s")
-                self.toggleSound()
+                print("audio: harness: Mute flipped at \(t) s")
+                self.setSoundMuted(!self.soundMuted)
             }
         }
         let at = defaults.double(forKey: "SillSoundSwitchAt")
         if at > 0 {
-            for (dt, on) in [(0.0, false), (1.0, true)] {
+            for (dt, mute) in [(0.0, true), (1.0, false)] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + at + dt) { [weak self] in
-                    print("audio: harness: the Sound switch turned \(on ? "on" : "off")")
-                    self?.setSoundMuted(!on)
+                    print("audio: harness: Mute turned \(mute ? "on" : "off")")
+                    self?.setSoundMuted(mute)
                 }
             }
         }

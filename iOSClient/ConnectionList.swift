@@ -20,18 +20,24 @@ enum ConnectionList {
     static let maxGroupLength = 32
     static let twoColumnMinWidth: CGFloat = 340
 
-    /// The stored style; `.list` for nil or any unknown value, so existing installs keep rows (tiles are
-    /// a choice, never the default: Noah on issue #116).
+    /// The arrangement of an install whose person never chose one: tiles (Noah, 2026-10-27: "make tiles
+    /// not list the default behavior of the app"; until then the list, Noah on issue #116). A choice
+    /// made with the switch beside the title or a saved Mac's menu is stored under `styleKey` and always
+    /// wins (`storedStyle`), so only an install that never toggled changed with the default.
+    static let defaultStyle: Style = .tiles
+
+    /// The style to show: the stored choice, "list" or "tiles", else the default (nil, nothing stored,
+    /// or a value no build writes).
     static func storedStyle(_ raw: String?) -> Style {
-        raw == Style.tiles.rawValue ? .tiles : .list
+        raw.flatMap(Style.init(rawValue:)) ?? defaultStyle
     }
 
     /// Whether a session's end keeps a picture of the Mac's screen for its tile. Only while tiles are
-    /// on: the list is the default, and a Mac's screen is kept on the device only by someone who chose
-    /// tiles; a session that ends while the list shows leaves the kept picture as it was (the list hides
-    /// the pictures and keeps their files: `previewPlan`). Only from the session's window in front: the
-    /// other of two Sill windows, or one in the background, is not where the person was looking. Only
-    /// for a saved Mac: only its tile shows a picture.
+    /// on, the default (`defaultStyle`): a Mac's screen is kept on the device unless the person chose
+    /// the list, and a session that ends while the list shows leaves the kept picture as it was (the list
+    /// hides the pictures and keeps their files: `previewPlan`). Only from the session's window in front:
+    /// the other of two Sill windows, or one in the background, is not where the person was looking.
+    /// Only for a saved Mac: only its tile shows a picture.
     static func takesPreview(style: Style, sceneActive: Bool, saved: Bool) -> Bool {
         style == .tiles && sceneActive && saved
     }
