@@ -66,14 +66,8 @@ check(Set(S.resample(fine, to: 32, filter: .nearest)).count == 1, "nearest halvi
 
 // When the hardware decoder must be made again (iOS invalidates a VTDecompressionSession in the
 // background: kVTInvalidSessionErr -12903, kVTVideoDecoderMalfunctionErr -12911) and ask for a
-// keyframe, at most once per 2 s, as opposed to a bad delta (-12909) where the session is still live.
+// keyframe via KeyframeRecovery, as opposed to a bad delta (-12909) where the session is still live.
 check(S.sessionBroken(-12903) && S.sessionBroken(-12911), "invalidated (-12903) and malfunction (-12911) recreate the decoder")
 check(!S.sessionBroken(0) && !S.sessionBroken(-12909) && !S.sessionBroken(-12910), "ok and a bad frame (-12909) keep the decoder")
-var rec = S.DecoderRecovery()
-check(!rec.shouldAskKeyframe(now: 10, active: false), "in the background: never asks for a keyframe")
-check(rec.shouldAskKeyframe(now: 10, active: true), "active, first recovery: asks for a keyframe")
-check(!rec.shouldAskKeyframe(now: 11.9, active: true), "within 2 s: does not ask again")
-check(rec.shouldAskKeyframe(now: 12.0, active: true), "at 2 s: asks again")
-check(rec.shouldAskKeyframe(now: 5.0, active: true), "clock went back: asks")
 print("\(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)
