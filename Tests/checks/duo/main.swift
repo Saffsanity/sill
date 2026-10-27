@@ -356,7 +356,9 @@ for (hinge, s, info) in [(DuoPosture.Hinge.partiallyOpen, book, FoldInfo.known(b
 // What UIKit reported on the iOS 27.1 simulator's Duo in the laptop pose, the dark keyboard with no
 // predictive bar (the reporter's): shown, the whole lower page from the fold's top edge (0, 455.5,
 // 669×495.5); going, its own frame (0, 555, 669×396), whose top is the glass's edge in a screenshot (the
-// reporter's too: the glass at 555, the keys from 568).
+// reporter's too: the glass at 555, the keys from 568). The Chinese (Pinyin) keyboard: shown, the same
+// page; going, (0, 506, 669×445), its glass at 506 in a screenshot, a band for its candidates over the
+// same keys.
 let deckTop: CGFloat = 455.5, glassTop: CGFloat = 555
 func visible(_ reported: CGFloat?, own: CGFloat? = nil, height: CGFloat = 951, controls: CGFloat = 496) -> CGFloat? {
     DuoPosture.visibleKeyboardTop(reported: reported, screenHeight: height, controlsTop: controls, ownHeight: own)
@@ -364,8 +366,13 @@ func visible(_ reported: CGFloat?, own: CGFloat? = nil, height: CGFloat = 951, c
 check(DuoPosture.laptopKeyboardHeight == 396, "the Duo's keyboard upright: 396 pt, the glass from 555")
 check(visible(deckTop) == glassTop, "the lower page reported: the glass 396 above the foot, 555")
 check(visible(deckTop, own: 396) == glassTop, "the same with the height the keyboard showed going")
-check(visible(deckTop, own: 420) == 531, "a taller keyboard's own height, once it has shown it: its glass")
-check(visible(deckTop, own: 495.5) == deckTop && visible(deckTop, own: 600) == deckTop, "never above the report")
+check(visible(deckTop, own: 420) == 531, "a taller keyboard's own height, once it has gone: its glass")
+check(visible(deckTop, own: 445) == 506, "the Chinese keyboard, once it has gone: its glass at 506")
+check(visible(deckTop, own: 454) == 497 && visible(deckTop, own: 455) == glassTop && visible(deckTop, own: 495.5) == glassTop
+      && visible(deckTop, own: 600) == glassTop && visible(deckTop, own: 0) == glassTop && visible(deckTop, own: -10) == glassTop,
+      "a height that would put the glass at or above the fold's edge is none: the measured 396")
+check(visible(500, height: 600, controls: 550) == 500 && visible(400, own: 445) == 506,
+      "never above the report (a screen too short for the measured keyboard)")
 check(visible(496) == glassTop && visible(495.9) == glassTop, "a report at the fold's lower edge is the page too")
 check(visible(570) == 570 && visible(496.5) == 496.5 && visible(700, own: 100) == 700, "a report under the fold's edge: the keyboard as itself")
 check(visible(nil) == nil && visible(951) == nil && visible(960) == nil, "none up, or one gone below the foot: none")
@@ -393,6 +400,8 @@ check(keyRow(glassTop, fold: .inferred) == nil && keyRow(glassTop, fold: .known(
 check(keyRow(473, controls: 414, size: size(669, 869)) == rect(14, 418, 641, 51), "the status bar shown: 4 + 51 + 4 from 414")
 // The whole chain, as the device reports it.
 check(keyRow(visible(deckTop)) == rect(14, 500, 641, 51), "the lower page reported: the row 500–551 over the glass at 555")
+check(keyRow(visible(deckTop, own: 445)) == rect(14, 496, 641, 20),
+      "the Chinese keyboard: 10 pt, the least caps from the fold's edge, 496–506 above its glass")
 // Twelve caps (the Desktop: Spotlight's too) and eleven across the row.
 check(abs(DuoPosture.keyboardRowCap(count: 12, width: 641) - 47.917) < 0.001, "twelve caps ≈ 48 pt wide")
 check(abs(DuoPosture.keyboardRowCap(count: 11, width: 641) - 52.818) < 0.001 && DuoPosture.keyboardRowCap(count: 0, width: 641) == 0,

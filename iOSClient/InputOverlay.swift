@@ -1340,18 +1340,19 @@ final class HardwareKeyboardMonitor: ObservableObject {
 
 /// Where the software keyboard is, as UIKit reports it: the end frame of its notifications, in the
 /// screen's coordinates (the stream screen's window fills its screen), nil while none is up; and the
-/// keyboard's own height at a width, from the frames that show it as itself. The laptop pose's key row
-/// follows its top (#215, DuoPosture.visibleKeyboardTop): there iOS 27.1 reports a keyboard from the
-/// fold's top edge down, the whole lower page (0, 455.5, 669×495.5 on the Duo), while it draws it at the
-/// foot, 396 pt tall (its glass from 555); it reports the keyboard's own frame (0, 555, 669×396) only as
-/// it goes, as a hide's begin frame and the end frame below the screen it slides to. Every notification
+/// keyboard's own height at a width, from the frame it leaves as it goes. The laptop pose's key row
+/// follows its glass (#215, DuoPosture.visibleKeyboardTop): there iOS 27.1 reports a keyboard from the
+/// fold's top edge down, the whole lower page (0, 455.5, 669×495.5 on the Duo), whatever it draws at the
+/// foot: the English keyboard 396 pt tall (its glass from 555), the Chinese (Pinyin) one 445 (from 506,
+/// its candidates' band over the same keys). Only a hide's begin frame is the glass, (0, 555, 669×396)
+/// and (0, 506, 669×445); the frame it slides to below the screen says 396 and 395. Every notification
 /// counts, the will and the did: on fresh simulators a will-change went unheard now and then. A change
 /// is published inside the keyboard's own animation, so what follows its top moves with it. Started by
 /// the first stream screen (`StreamScreen`), so it outlives a rotation. Main thread.
 final class KeyboardFrameMonitor: ObservableObject {
     static let shared = KeyboardFrameMonitor()
     @Published private(set) var frame: CGRect? = nil
-    /// The keyboard's own height by its width, from the frames that showed it as itself.
+    /// The keyboard's own height by its width, from the frame it left as it last went.
     private(set) var ownHeights: [CGFloat: CGFloat] = [:]
 
     private static let hides: Set<Notification.Name> = [UIResponder.keyboardWillHideNotification, UIResponder.keyboardDidHideNotification]
@@ -1365,7 +1366,7 @@ final class KeyboardFrameMonitor: ObservableObject {
         }
     }
 
-    /// The keyboard's own height at `width` (a screen's), if a frame has shown it.
+    /// The keyboard's own height at `width` (a screen's), once it has gone at that width.
     func ownHeight(width: CGFloat) -> CGFloat? { ownHeights[width] }
 
     private func changed(_ note: Notification) {
@@ -1375,11 +1376,11 @@ final class KeyboardFrameMonitor: ObservableObject {
         let hiding = Self.hides.contains(note.name)
         let begin = info[UIResponder.keyboardFrameBeginUserInfoKey] as? CGRect
         let end = info[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
-        // The keyboard as itself: going, the frame it leaves (a hide's begin), and the one below the
-        // screen's foot it slides to.
-        let foot = (note.object as? UIScreen)?.bounds.maxY
-        for own in [hiding ? begin : nil, end.flatMap { frame in foot.flatMap { frame.minY >= $0 ? frame : nil } }] {
-            if let own, own.height > 0, own.width > 0 { ownHeights[own.width] = own.height }
+        // The keyboard as itself: the frame it leaves as it goes (a hide's begin), across the screen and
+        // down to its foot (a fold's change reports frames of neither).
+        if hiding, let own = begin, own.height > 0, let screen = (note.object as? UIScreen)?.bounds,
+           own.width == screen.width, abs(own.maxY - screen.maxY) < 0.5 {
+            ownHeights[own.width] = own.height
         }
         let now: CGRect? = hiding ? nil : end.flatMap { $0.height > 0 && !$0.isNull ? $0 : nil }
         #if DEBUG
