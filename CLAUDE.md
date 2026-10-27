@@ -86,36 +86,38 @@ the Mac's words and `"reconnect":true`.
   of its own (`git cherry-pick 8aee786`, read with #152). The contributor's 9b59e0d and 34872a5,
   pushed meanwhile (that observer's guard; a quit's 3 s and a Reconnecting note for sleep and
   shutdown, and willPowerOff's flag against the quit), are merged in (8754a4f) with this design kept.
-- Verified (after the review's fixes, main at 9a8e30c merged in): `swift build -c release` from a clean
-  `git archive` of the head (only the CaptureProbe warning), and each of the four fix commits' own tree
-  where it changes the host; the iOS app as CI builds it from clean derived data, and each fix commit's
-  where it changes the app (only the StreamClient capture warning, now StreamClient.swift:3784);
-  `goodbye` 141 checks and 89 of 89 mutants; `policy` 507 and 201 of 201 (both six at a time with the
-  scripts' own replacements, compile lines and verdicts, the Mac's load average at 400 to 900);
-  `run-all.sh`, 44 of 45 at the first run (`message-reader`'s timing case, a 0.59 s gap at a load
-  average near 900; that file is main's) and `message-reader` alone twice after, passing; every other
-  check's mutant pattern that matched a changed file once on main still does (388; duo's generic
-  `} else {` aims at another file). The bare app on loopback (`--synthetic`, software encoder, no
-  router, a scratch identity) with two TLS sillclients: a sleep then a shut-down quit in the same
-  moment, one goodbye each ("sleep"); `-SillQuitAfter '<s> restart'` with the reason as an attribute
-  and as a parameter, "restart" (willPowerOff's line only for the attribute, as the probe found);
-  `-SillPowerOffAfter` then SIGTERM, exit 143, "shutdown" in the words "… is shutting down or
-  restarting." and its line in Sill.log; willPowerOff then the menu's Quit, "quit"; a log out and a
-  SIGTERM alone, "quit"; willPowerOff then a restart quit, "restart"; a shut down, "shutdown"; a sleep
-  goodbye while both clients sent a pointer move every 50 ms, the goodbye then the end a second later,
-  no reset. On a private iPad simulator (iOS 27.0, deleted after) against the bare app under the test
-  service type: a sleep goodbye mid-session, the words at once, the Mac's "Client left" 2 ms after its
-  goodbye, the dial 20.3 s later and the session back; "restart" at the device gate
-  (SILL_TEST_MIN_DEVICE_VERSION, SILL_TEST_GOODBYE) with the row never leaving: held ("looked at again
-  in 600 s"), then Settings in front and Sill again 10 s later: the browser made again, the row dialled
-  at once, the Mac's "restart" on that dial held again. A scratch driver of DiscoveryPolicy (a restart
-  goodbye at 100 s, the row's sighting kept through a rebuild at 400 s): held at 400 and 699.9 s, taken
-  at 700 s; taken at once when listed by the browser made at a return, never through the old browser's
-  kept results, and when listed afresh; a sleep goodbye read 0.02 s after a return dialled at once (at
-  420 s without the return's renewal); a restart on the dial made at the return held again. The probe
-  of willPowerOff (an accessory app sending itself quit Apple events) again: posted for 'rest', 'shut',
-  'rlgo', 'quia' and 'abcd' as attributes, before applicationShouldTerminate, never for a parameter or
-  no reason.
+- Verified on the head with main at 36e7212 merged in (2026-10-26): `swift build -c release` from a
+  clean `git archive` of the head (only the CaptureProbe warning); the iOS app as CI builds it, from
+  fresh derived data (only the StreamClient capture warning, now StreamClient.swift:3896); `goodbye`
+  141 checks and 89 of 89 mutants and `policy` 507 and 201 of 201, each by its own `run.sh --mutants`,
+  one run at a time, as CI's matrix runs them; `run-all.sh`, all 48 passed; every other check's mutant
+  pattern that matched a changed file exactly once on main still does (179 of 181; the two are duo's
+  generic `} else {`, which aims at DuoPosture.swift). The bare app on loopback (`--synthetic`, the
+  software encoder, no router, no screen, a scratch identity) with two TLS sillclients, ten runs: a
+  sleep then a shut-down quit 20 ms later, one goodbye each ("sleep") and the quit's lines with no
+  second; `-SillQuitAfter '8 restart'`, "restart" with willPowerOff's line, and with `parameter`,
+  "restart" without it (as the probe found); `-SillPowerOffAfter 6` then SIGTERM, exit 143,
+  "shutdown" in the words "… is shutting down or restarting." and "The Mac is shutting down or
+  restarting: 2 devices told."; SIGTERM alone, exit 143, "quit"; willPowerOff then the menu's Quit,
+  "quit"; willPowerOff then a restart quit, "restart"; a shut-down quit, "shutdown" ("… is shutting
+  down."); a log-out quit, "quit" ("Quit: macOS asked Sill to quit for a log out."); a sleep goodbye
+  while both clients sent a pointer move every 50 ms, the end 1.0 s after the goodbye and "Client
+  left" for both then, no reset. The scratch driver of DiscoveryPolicy again (a restart goodbye at
+  100 s, the row's sighting kept from before): held at 100.5, 400 and 699.9 s (looked at again at
+  700), taken at 700 s; taken at once when listed afresh and when listed by the browser made at a
+  return, never through the old browser's kept results; the words until the first dial; a sleep
+  goodbye read 0.02 s after a return dialled at once (at 420.02 s without the renewal); a restart on
+  the dial made at the return held again.
+- Earlier, after the review's fixes (main at 9a8e30c merged in): each of the four fix commits' own
+  tree built where it changes the host or the app, with the known warnings only. On a private iPad
+  simulator (iOS 27.0, deleted after) against the bare app under the test service type: a sleep
+  goodbye mid-session, the words at once, the Mac's "Client left" 2 ms after its goodbye, the dial
+  20.3 s later and the session back; "restart" at the device gate (SILL_TEST_MIN_DEVICE_VERSION,
+  SILL_TEST_GOODBYE) with the row never leaving: held ("looked at again in 600 s"), then Settings in
+  front and Sill again 10 s later: the browser made again, the row dialled at once, the Mac's
+  "restart" on that dial held again. The probe of willPowerOff (an accessory app sending itself quit
+  Apple events): posted for 'rest', 'shut', 'rlgo', 'quia' and 'abcd' as attributes, before
+  applicationShouldTerminate, never for a parameter or no reason.
 - **Untested, for Noah** (Sill.app from this branch, the iPad on this branch's build; a real Sleep,
   Restart and Shut Down are the merge gate): sleep the Mac (Apple menu › Sleep, and the lid) while it
   streams: "‹Mac› went to sleep…" at once, Sill.log's "The Mac is going to sleep: 1 device told.", and
