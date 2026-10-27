@@ -258,28 +258,36 @@ feed_warning() {
 }
 
 # What notarization requires of the signature, read back from the built app. make-app.sh has
-# already refused anything but Developer ID; this also catches a signing change there.
+# already refused anything but Developer ID; this also catches a signing change there. codesign
+# verifies every slice of a universal app (SILL_UNIVERSAL=1, #62) but shows only this Mac's, so each
+# slice's signature is read on its own.
 check_signature() {
-    local app="$1" details entitlements
+    local app="$1" details entitlements arch archs
     codesign --verify --strict --deep "$app" || fail "codesign can't verify $app"
-    details="$(codesign -dvvv "$app" 2>&1)"
-    grep -q '^Authority=Developer ID Application: ' <<<"$details" || fail "$app is not signed with Developer ID"
-    grep -q '^CodeDirectory .*flags=.*runtime' <<<"$details" || fail "$app is not signed with the hardened runtime"
-    grep -q '^Timestamp=' <<<"$details" || fail "$app has no secure timestamp"
-    if codesign -d --entitlements - --xml "$app" 2>/dev/null | grep -q 'get-task-allow'; then
-        fail "$app carries the get-task-allow entitlement, which notarization refuses"
-    fi
-    # The identity keychain (docs/keychain-plan.md): an embedded provisioning profile means the
-    # data-protection keychain, and then the app must carry the access group and its application
-    # identifier under the macOS key, or macOS would kill it at launch; no profile means the login
-    # keychain, the safe fallback, worth naming in a release's log so it is never a silent surprise.
-    # make-app.sh has already refused a profile that doesn't grant what the app is signed with.
+    archs="$(lipo -archs "$app/Contents/MacOS/Sill")" || fail "lipo can't read $app/Contents/MacOS/Sill"
+    for arch in $archs; do
+        details="$(codesign -dvvv --architecture "$arch" "$app" 2>&1)"
+        grep -q '^Authority=Developer ID Application: ' <<<"$details" || fail "$app ($arch) is not signed with Developer ID"
+        grep -q '^CodeDirectory .*flags=.*runtime' <<<"$details" || fail "$app ($arch) is not signed with the hardened runtime"
+        grep -q '^Timestamp=' <<<"$details" || fail "$app ($arch) has no secure timestamp"
+        entitlements="$(codesign -d --architecture "$arch" --entitlements - --xml "$app" 2>/dev/null)" || entitlements=""
+        if grep -q 'get-task-allow' <<<"$entitlements"; then
+            fail "$app ($arch) carries the get-task-allow entitlement, which notarization refuses"
+        fi
+        # The identity keychain (docs/keychain-plan.md): an embedded provisioning profile means the
+        # data-protection keychain, and then the app must carry the access group and its application
+        # identifier under the macOS key, or macOS would kill it at launch. make-app.sh has already
+        # refused a profile that doesn't grant what the app is signed with.
+        if [ -f "$app/Contents/embedded.provisionprofile" ]; then
+            grep -q '<key>keychain-access-groups</key>' <<<"$entitlements" \
+                || fail "$app ($arch) embeds a provisioning profile but does not carry keychain-access-groups; it would be killed at launch"
+            grep -q '<key>com.apple.application-identifier</key>' <<<"$entitlements" \
+                || fail "$app ($arch) embeds a provisioning profile but does not carry com.apple.application-identifier (a Mac profile grants no other application identifier); it would be killed at launch"
+        fi
+    done
+    # No profile means the login keychain, the safe fallback, worth naming in a release's log so it
+    # is never a silent surprise.
     if [ -f "$app/Contents/embedded.provisionprofile" ]; then
-        entitlements="$(codesign -d --entitlements - --xml "$app" 2>/dev/null)" || entitlements=""
-        grep -q '<key>keychain-access-groups</key>' <<<"$entitlements" \
-            || fail "$app embeds a provisioning profile but does not carry keychain-access-groups; it would be killed at launch"
-        grep -q '<key>com.apple.application-identifier</key>' <<<"$entitlements" \
-            || fail "$app embeds a provisioning profile but does not carry com.apple.application-identifier (a Mac profile grants no other application identifier); it would be killed at launch"
         say "Identity keychain: data-protection (embedded provisioning profile, keychain-access-groups present)"
     else
         say "Identity keychain: login keychain (no embedded provisioning profile; docs/keychain-plan.md — safe, but the hardened data-protection keychain needs the profile)"
