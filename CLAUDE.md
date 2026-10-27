@@ -9,7 +9,7 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **The Mac says when it goes to sleep, shuts down or restarts (2026-10-19, PR #100 by addhumal, branch
-`goodbye-sleep` on addhumal/sill with main at 4d990e9 merged in; issue #105; finished on the branch from
+`goodbye-sleep` on addhumal/sill with main at 36e7212 merged in; issue #105; finished on the branch from
 the triage of 2026-10-16 and 2026-10-19, `~/Downloads/sill-handoff/triage/`, and fixed after the
 verifier's review of 2026-10-20).** Noah: "Work on finishing ... The Mac telling devices it is going to
 sleep or shutting down". Additive: kind 22 gains the reasons "sleep", "shutdown" and "restart", each with
@@ -120,16 +120,19 @@ the Mac's words and `"reconnect":true`.
   Restart and Shut Down are the merge gate): sleep the Mac (Apple menu › Sleep, and the lid) while it
   streams: "‹Mac› went to sleep…" at once, Sill.log's "The Mac is going to sleep: 1 device told.", and
   after waking it the session back by itself (at once without a sleep proxy, within 30 s behind an
-  Apple TV or HomePod). Every sleep now ends every session, so what Sill does when the last device
-  leaves runs as the Mac sleeps: capture stops, a window Sill sized goes back to its own frame, the
-  virtual display is removed and its window sent home; close the lid for a few seconds with a window
-  picked (Aa set, and once with Virtual Display on) and note what the Mac's window does and what the
-  device shows after (the Desktop, since nothing streams on the new session). Restart and Shut Down
-  from the Apple menu with the iPad streaming: Sill.log "macOS says the Mac is about to log out,
-  restart or shut down." and "Quit: macOS asked Sill to quit for a restart." (only "Shutting down…",
-  with neither of those lines nor a "The Mac is …" one, means Sill went by a signal or a quit without
-  a reason, with no willPowerOff before it, and the inference is wrong: send the lines), the device's
-  words, the session back once the Mac is up and Sill open on it (Launch at Login); a restart
+  Apple TV or HomePod). Behind one, with the Mac left asleep: whether the device's dials (the first 20 s
+  after the goodbye, then every 30 s) wake it, and whether Sill.log then says "Woke the display for …,
+  which connected." (#151 declares user activity at every connect, which would light the display of a
+  Mac someone put to sleep, with nobody at it). Every sleep now ends every session, so what Sill does
+  when the last device leaves runs as the Mac sleeps: capture stops, a window Sill sized goes back to
+  its own frame, the virtual display is removed and its window sent home; close the lid for a few
+  seconds with a window picked (Aa set, and once with Virtual Display on) and note what the Mac's window
+  does and what the device shows after (the Desktop, since nothing streams on the new session). Restart
+  and Shut Down from the Apple menu with the iPad streaming: Sill.log "macOS says the Mac is about to
+  log out, restart or shut down." and "Quit: macOS asked Sill to quit for a restart." (only "Shutting
+  down…", with neither of those lines nor a "The Mac is …" one, means Sill went by a signal or a quit
+  without a reason, with no willPowerOff before it, and the inference is wrong: send the lines), the
+  device's words, the session back once the Mac is up and Sill open on it (Launch at Login); a restart
   begun from another account ("quit", as observed); Log Out ("quit"); the iPad locked or Sill in the
   background through a sleep and through a restart, back a minute later: the Mac dialled as soon as it
   is listed, not after 10 minutes, the words until then; an older build (0.5.1 from the App Store)
