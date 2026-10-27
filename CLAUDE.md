@@ -143,6 +143,252 @@ the Mac's words and `"reconnect":true`.
   remote dials from 20 s on. As each passes, its words waiting in docs/update-notice-plan.md §7.3
   ("Words that wait for a device") go into the support page and the next What's New.
 
+**The Mac's sound on the device: the wire, the host and Sill.app (2026-09-27,
+branch `audio` from main at 643af6b with the plan merged in from `audio-plan`
+(1fb9b71, 6e852ef) and refreshed (51520dd), main at da43f6b (PR #38) merged in
+at 2b114e1, then main at 985a733 (PRs #37, #39 to #56: pairing at home, away
+from home, the iPhone Duo with the iOS 27.1 SDK, the 0.5.1 release) merged in on
+2026-10-13, then main at 5c323e6 (PRs #74, #75, #77, #78, #79, #80, #85, #98)
+merged in on 2026-10-18, never rebased; the plan, its critique, the refresh and the results
+are in `docs/audio-plan.md`; PR #94 by Code-Tomato, who finished it from 9288aa6; in, as a beta,
+since 2026-10-20: the bullet "A beta").** Noah (2026-09-27), first in what he wants
+worked on: "Audio: the plan is done and parked as a v2 feature by your earlier
+decision". So the sound is in scope now (docs/BRIEF.md, the decisions below),
+and every open question takes its default (Send Audio off by default, AAC-ELD
+at 128 kbps, per device mute, and so on). Built here: the plan's steps 1 to 7,
+the device's playout model (6878c11), its output (aefe477) and the Sound button
+and the panel's rows (5f7b1ac) after the host's. The workflow stopped there
+(9288aa6, WIP); on 2026-10-13 the device's steps were reviewed against the plan,
+fixed (5126215 to 8bbbe52, below) and verified in the simulator
+(docs/audio-plan.md, "Results: the device").
+- Wire (additive; `Audio.swift`): kind 43, host → device (29 until 2026-10-14,
+  when PR #66's 29–42 were found: docs/audio-plan.md, "Kind 43"). Type 1 is a
+  JSON `AudioFormat`: codec "aac-eld", 48 kHz stereo, 480 or 512 frames a packet,
+  the priming, the bitrate, the epoch, the cookie and what the sound is of.
+  Type 2 is `AudioPackets`: epoch, seq, the segment flag and 1–255
+  length-prefixed packets, with the header's stamp on the wall clock of the
+  first decoded sample. A host sends it only to a device whose hello lists a
+  codec it makes (`Hello.audio`; `AudioCodec.choose` takes the first of the
+  device's list). Kinds 16 and 17 gain `sendAudio` (nil from a host without
+  sound), the state gains `audioNote`, and ClientStats gains `audioBehindMs`
+  and `audioLate`. `SillProtocol` stays 1.
+- Host: Send Audio (`HostConfig.sendAudio`) is off in `standard` and, since
+  the beta, the Mac's alone (its menu and Settings, the CLI's `--audio`): a
+  device's kind 17 `sendAudio` is refused from either door (the plan's Q8).
+  It is not in `restartNeeded`, so the picture never restarts for it.
+  - `AudioPipeline` follows the source from `active`'s didSet, where the
+    pointer and the menus follow it. The same app keeps its stream through
+    every restart of the picture. Another app, the Desktop or the test tone is
+    a new stream and epoch. One that ended or failed is tried again at most
+    every 10 s. A failure prints one line and sets the note; the picture never
+    notices.
+  - `AudioCapture` is a second, audio-only SCStream per app (the Desktop: every
+    app but Sill's) at 48 kHz stereo with `excludesCurrentProcessAudio`. Its 2×2
+    picture is thrown away, start and stop are bounded to 2 s, and each
+    buffer's layout is read, never assumed. No test runs it.
+  - `SyntheticAudio` (`--synthetic`) plays the test tone: 440 Hz at −30 dBFS
+    with a 4 ms 2 kHz click at each whole second of the stamps' clock. A
+    synthetic host never captures a real window's sound.
+  - The packetizer makes blocks stamped at input frame n·F − P from each
+    chunk's anchor. A gap ends a segment, with nothing flushed or filled.
+  - The encoder is AAC-ELD at 128 kbps, AudioToolbox only.
+  - StreamServer keeps each device's codec from its hello and sends the
+    epoch's format before the epoch's first packet. The sound has a send path
+    of its own: never `inflight`, the drain eviction or the keyframes'
+    bookkeeping. Its bytes count in `pendingBytes` and, once taken, in
+    `takenThisSecond`, as every message's do since away from home (#39), so
+    each device's link judge sees them; `paceRemote` still drops only frames. It sets `lastSentAt`, so remote ticks
+    pause while it flows. A packet is skipped only past 1 s untaken at home,
+    or 15 s away (the drain backstop). The plan's 3 s skipped a fifth of the
+    sound at 4 Mbit/s with 1.5 MB keyframes, where remote pacing already held
+    the picture 5–7 s behind.
+  - Log lines and the `aud.*` stats appear only while Send Audio is on (the
+    plan's §4.10).
+- The CLI's `--audio` adds one startup line; without it the output is main's.
+- Sill.app: Send Audio in the status menu after Resolution ("The Mac keeps
+  playing it too") and in Settings › Streaming, with its footer and an orange
+  line while it fails. Also the Permissions pane's words, " · sound" on the
+  card's source row, `-SillSetAfter sendAudio=1`, and the `sound` preview.
+- The device: AudioDecoder, AudioPlayout (pure, `Tests/checks/audio-playout`),
+  AudioOutput and StreamClient+Audio, in the Xcode project as AA01–AA04; the
+  Sound button in every bar and the panel's rows (5f7b1ac). AudioDecoder also
+  serves the `audio-codec` check and the harness's device.
+  - The playout (§7.2): the floor, the need (the jitter cover from 40 ms at home
+    and 150 ms away, a packet, the IO buffer, the output latency), the picture's
+    lag as a guard, placement by time then packet after packet, each packet's
+    last 5 ms held for a fade, drift closed a frame a packet, jumps over 40 ms,
+    clock steps; a move's hand-over resets nothing, and its copies are dropped.
+  - AudioOutput: AVAudioEngine with a player node (no render block of Sill's),
+    `.playback` mixing with others, active only while the engine runs; the
+    engine stops on mute, in the background and at a session's end after the
+    mixer's 25 ms ramp to volume 0 (measured), and after 10 s without a packet;
+    a configuration change (an output at another rate) stops it and the next
+    packet builds one; nothing is decoded while muted, in the background or
+    refused during a call, each packet still counting for the floor and the
+    cover. Headphones out mute it and say so. The simulator renders offline
+    (manual rendering) in every build: nothing opens an output.
+  - The Sound button counts Menus whether or not it shows: where only one fits
+    (an iPhone SE sideways, iPad windows under 532 pt upright) Menus keeps its
+    place and Sound is the panel's switch alone, as in the iPhone Duo's book
+    pose and, since the beta, with Larger Picture on every phone (row 1 as
+    Noah approved it: the plan's Q10). A remote session by address takes
+    home's cover, as the Mac counts it.
+  - The review's fixes (2026-10-13): 5126215 (the configuration change, nothing
+    decoded while silent, a start's reset, unmute retrying a refused session, a
+    DEBUG leak), fca4c80 (the fades), 46cc7e4 (the console's "audio: jump -870
+    ms (off by over 40 ms)"), 8a7dc30 (by address), dd9e6fc (Sound and Menus),
+    25767ef and 720d21e (checks and harness), 8bbbe52 (the DEBUG click finder).
+- Checks:
+  - `audio-packetizer`: 89 checks, 27 of 27 mutants.
+  - `audio-codec`: 21 checks, 9 of 9 mutants. Each click lands at its whole
+    second, 0 frames off, at 480 and 512 frames a packet and across gaps. A
+    busy signal runs at 130.2 kbps.
+  - `compatibility`: 130 checks, 31 of 31 mutants. `protocol`: 218 + 8, 30 of
+    30 (on 2b114e1; on 985a733 131 and 220 + 8, 31 of 31 and 33 of 33).
+  - The kind checks say 28 gesture, 32 the clipboard (#78, since the merge with
+    main at 5c323e6), 43 audio, and 29 to 31, 33 to 42 and 44 unknown. The
+    mutants this branch added that renumber a kind use 250–254; the
+    clipboard's use 30, 31 and 33.
+  - H0 again on this Mac: ELD 480 and 512 have 240 and 256 frames of priming,
+    the same after a reset. They take 15.0 and 25.3 ms end to end. A late
+    join's fourth packet decodes exactly.
+- The harness (`Scripts/audio/run.sh`) on 2b114e1 (main at da43f6b) passed
+  every gate but H12 (what follows ran there, not on 985a733):
+  - At home: 100.02 packets a second, no seq gap, and 60 of 60 clicks within
+    1 ms of their second. The picture's net.sent, net.dropped and frame age
+    were as without sound. With 1024-frame chunks: 93.84 a second.
+  - Pauses and a source change on two devices: segments at their stamps, each
+    epoch's format first, nothing over 40 ms late.
+  - Away through 8 and 4 Mbit/s with 1.5 MB keyframes: no packet skipped while
+    frames were, and packets never later than the frames + 20 ms. In a dip to
+    0.5 Mbit/s they were late with the picture and back in the same second.
+  - Through the relay at 2 Mbit/s and +150 ms: no eviction.
+  - The pacing harness's own gate cases with sound (`Scripts/pacing/run.sh
+    --sound`) passed, with fps and drops as without. In stillend, a stream far
+    past its link, the median of each second's slowest pong was 102–700 ms
+    against 75–86 without.
+  - H7: a device turned Send Audio on and off. The first packet came 23 ms
+    after the answer, the last before the second answer, and the picture
+    never restarted.
+  - H9: main's client and StreamProtocol read or skip everything new, and
+    this branch's client gets no sound from main's host.
+  - H10: only the Streaming and Permissions panes, menu.txt and the new card
+    differ from main's previews.
+  - The iOS app builds (on 2b114e1: Debug and Release for the simulator, Debug
+    for a device) with only the known warning.
+  - H2: the CLI's stdout (digits masked) against main's, idle, picking the
+    Desktop, and with a hello that lists the codec, with and without
+    `--direct-wireless`, twice each: every run printed the same lines. 4 of the
+    12 differed only in how many once-a-second stats lines came before the host
+    was stopped. There was no `Audio` line, no `aud.` key and no kind 29 (the
+    sound's number then; 43 since 2026-10-14).
+  - H12 was not met. The harness host used +2.1 to +3.1 points of a core with
+    sound, against the plan's 1.5. AAC-ELD itself takes about 1 point on the
+    test tone (82–101 µs a packet; 53 on a busy signal), and each packet's
+    own send on loopback about 1. Codec quality Low would save 0.6 points but
+    lose 3–9 dB of SNR on tonal sound, so it was not taken; the plan's Results
+    leave it to Noah.
+- On 985a733 (2026-10-13): `swift build -c release`; `Tests/checks/run-all.sh`,
+  all 43 (`compatibility` 131, `protocol` 220 + 8); the iOS app (Debug for the
+  generic simulator) only from a scratch copy with the iOS 27.1 SDK's names
+  stubbed (Xcode 27.0 here: `DuoPostureReader` alone fails), only the known
+  warning, so a build with Xcode 27.1 (CI's) is owed, and Debug for a device;
+  the sound and pacing harnesses build, not run: the pacing harness's
+  `--sound` cases and link verdicts are owed, the sound now counting in
+  `pendingBytes` and `takenThisSecond` at home too. No mutants, H2 or
+  previews.
+- On the merge and the review's fixes (2026-10-13 and 14; docs/audio-plan.md,
+  "Results: the device"): `swift build -c release` from `git archive`; the iOS
+  app from a scratch copy with the 27.1 names stubbed, Debug and Release for the
+  simulator and Debug for a device, only the known warning (Xcode 27.1's build,
+  CI's, owed); `audio-playout` 214, `phone-portrait` 169, `tour`, `ledger`,
+  `duo`; the mutants of the 31 checks whose compiled files differ from main's,
+  925, every one caught (`audio-playout` 36, `phone-portrait` 35, `tour` 72,
+  `ledger` 12, new: it had none), then `run-all.sh`, all 43; the sound harness, every gate but H12 (now +3.9 to +4.4
+  points of a core: open question 16); the pacing harness with sound (every
+  gate but over8's "≥ its base fps", 4.8 against 4.9: the sound is 1.9 % of
+  that overfilled 8 Mbit/s link) and without it against main (every gate);
+  H2 (4 of 6 identical, the rest the stop's timing); H10 (only the sound's
+  panes, menu.txt and its two cards); S2 and S3 against `SillHost --synthetic
+  --audio` on loopback and the software encoder, the engine rendering offline
+  at volume 0 (every click within 0.2 ms of its place; mute, the switch, the
+  background, Send Audio off from a second client, a move with its duplicate
+  dropped); S1's photos of every bar against main's build.
+- The review (2026-10-14; docs/audio-plan.md, "The review"): seven verified
+  findings fixed, one commit each (e6bc0a0 to 3760b01: the hand's deadline
+  before a late packet, the engine's own wait out of the cover, the host's
+  source callbacks and AAC-ELD's failure, one session for every window's
+  engine, headphones out without an engine, a window in the background);
+  `audio-playout` 218 and 38 of 38 mutants, S2 again, `run-all.sh`, all 43.
+- Merged with main at 5c323e6 (2026-10-18; one merge commit, not a rebase;
+  docs/audio-plan.md, "Merged with main at 5c323e6"): PRs #74, #75, #77 to #80,
+  #85 and #98. Where they meet: kind 32 (#78's clipboard) beside 43, 29–31 and
+  33–42 free (#66's); `sendAudio` beside `shareClipboard` in HostConfig and the
+  CLI; with Larger Picture (#79) the Sound button joined row 1 before Settings
+  (Apps, Menus, Aa, Keyboard, Desktop, Sound, Settings) only from 384 pt
+  (`PhonePortraitLayout.row1Beside`), narrower the panel's switch alone, a
+  question for Noah (the plan's Q10; the beta took it out again: the panel's
+  switch alone there); and #75's regular-mode window that streams
+  on through three looks off the catalog's list keeps its sound (`select` keeps
+  its app, `streamedPID`, which `audioKey` falls back to; before, a follow then
+  stopped it). Verified: `swift build -c release`; the iOS app from a scratch
+  copy with the 27.1 names stubbed, Debug and Release for the generic
+  simulator, only the known `StreamClient` capture warning (Xcode 27.1's build,
+  CI's, owed); CI's CLI step; `run-all.sh`, all 47 (`compatibility` 140,
+  `pointer-control` 158, `phone-portrait` 501, `tour` 111,192, `clipboard`
+  259); the mutants of the 25 checks that compile a file both sides changed
+  (StreamProtocol's StreamMessage and Compatibility, HostConfig,
+  PhonePortraitLayout), 936, every one caught (`compatibility` 34,
+  `protocol` 34, `pointer-control` 33, `phone-portrait` 81, `tour` 84,
+  `clipboard` 72). No harness, H2 or previews.
+- **A beta (2026-10-20; Noah, about PR #94: "merge as beta support"; docs/audio-plan.md, "The
+  beta").** On the contributor's branch, one commit each, never a rebase: Send Audio the Mac's alone
+  (Q8, fdf78ff: `DeviceSettings.accepted` refuses a device's `sendAudio` from either door and names
+  it, "Settings from ‹device› refused: send audio (set on this Mac only)"; the device's row
+  read-only; `away-quality` 83 and AQ20–AQ24); the labels (e42f1a3: "Send Audio (Beta)" in the menu,
+  "Send audio (beta)" and a footnote starting "Beta." in Settings › Streaming, the CLI's "(beta)", a
+  "Beta" tag on the device's row, "Send Audio, beta" to VoiceOver; none on the Sound button or This
+  iPad's switch); no Sound button in Larger Picture's row 1 (Q10, 6effec7: row 1 as Noah approved
+  it, the panel's switch alone there; `phone-portrait` 495 and A1–A3, `tour` 111,191); the
+  pre-review's small defects (b813164 `AudioCapture`'s stream under a lock; 2e65f06 and 9104023 no
+  frame handed to the sound's queue before the session's first format, the last 32 kept for the
+  guard; 86de992 the refresh from `screenMaximumFPS`, not `UIScreen.main`; e8ab324 AudioOutput's
+  observers removed; f448c46 a freed engine gives the app's session back; 6503bc5 AAC-ELD loaded in
+  the background when Send Audio turns on); the public words (README; site/privacy.html and
+  support.html inside `<!-- Sound` markers, with their perl line in docs/release-checklist.md;
+  docs/app-store-metadata.md's next version, "beta" on the feature, never the app; the compatibility
+  floor's reader caps below). Q4 (plays on silent) and Q5 (starts unmuted) kept; Q16, codec quality
+  Medium, with H12 unmet (+4.0 points of a core in the harness, against 1.5), accepted while it is
+  off by default; packets while muted or in the background still feed the cover (§7.5, Noah's).
+  Merged with main at d1fa97e, 9a8e30c, 4d990e9 and 7b4c313 (#153, #142, #136, #110, #87, #88,
+  #151: `display-wake` counts kind 43 among the kinds that never declare, 193 checks and M61).
+  Verified (2026-10-20, this Mac at a load average of 300 to 900 from other work all along):
+  `swift build -c release` from `git archive`, only the CaptureProbe warning; the iOS app with Xcode
+  27.1, Debug and Release for the generic simulator and Debug for a generic device, only the known
+  `StreamClient` warning; `run-all.sh`, all 49; the mutants of `away-quality` (24), `audio-codec`
+  (9), `audio-packetizer` (27), `ledger` (12), `away-wire` (9), `audio-playout` (38) and `tour`
+  (84), every one caught (the last two finished on 2026-10-26, after a pause had stopped them at
+  21 and 14, none missed); H2, main's CLI and this one identical masked and sorted (idle, a Desktop
+  client, one whose hello plays sound) but for the stop's timing; H7 (a device's Send Audio refused;
+  the CLI's `--audio` tone with no seq gap and its stop; a second client's off refused while the
+  first kept its sound); the sound harness's home, home-off, home1024, segments and relay2, every
+  gate but H12 once home and segments ran again (the first round stalled by the load), H12 +4.0
+  points; H10, only the sound's panes, menu.txt and its two cards; S1 to S3 on a private iPad
+  simulator on iOS 27.0 (the 27.1 runtime here runs only the iPhone Duo): the mock's photos pixel
+  for pixel main's without sound and with Larger Picture, the Sound button where it goes, the
+  read-only Beta row; live, 35 clicks within 0.1 ms of their places, the Sound button off and on, a
+  second client's off refused while the sound played on; a move with its copies dropped, no reset or
+  jump. Again on the merge with 7b4c313 (2026-10-26): `swift build -c release` from `git archive`,
+  only the CaptureProbe warning; `run-all.sh`, all 50; `display-wake`'s mutants, 61 of 61; H2
+  against main's CLI at 7b4c313, the host's output identical masked and sorted in all three modes;
+  H7 as above (979 packets, no seq gap); the iOS app's sources and StreamProtocol 9104023's, and
+  none of the files the merge changed in the sound harness.
+- **Untested, for Noah:** everything on the devices, the plan's P1–P16, which end the beta with H12
+  met or accepted (P13, Sill.app's CPU with sound on and off), P5 answered (Virtual Display, a
+  minimized app) and P6 measured (the sync, filmed). Sill.app's menu and Settings rows can be looked
+  at (previews), and `defaults read me.saffer.sill.mac sendAudio` is absent (off) until it is first
+  set.
+
 **The Close timeout and the interrupted picture (2026-10-19 and 20, PR #93 from addhumal, finished on
 its branch `audit-fixes`, which has main at 4d990e9 in it; issue #101).** The triage of 2026-10-16 and
 2026-10-19 (sill-handoff/triage): the close half ready; the re-pick, the broken harness and the
@@ -374,7 +620,7 @@ first. Wire, host and device; additive.
   Int as it rebases (a Bool does not decode). A device sends kind 32 only to a host that says 1 or
   more; any kind 32 subscribes, and `{}` is text alone: a host sends `image` only to a subscription
   that says it takes images (the floor; #66's host sends one to every subscriber). Text at most
-  256 KB of UTF-8, the JSON at most 1 MiB either way. Kinds 29–31 stay free (audio, #66's).
+  256 KB of UTF-8, the JSON at most 1 MiB either way. Kinds 29–31 stay free (#66's; the sound, once planned at 29, is 43).
 - Rules, pure, both ends: `ClipboardPolicy` (StreamProtocol). Never sent: an item a password manager
   or another app marks `org.nspasteboard.ConcealedType` or `org.nspasteboard.TransientType` (and
   three older markers), one from another device through Universal Clipboard
@@ -5288,14 +5534,21 @@ good.
   which change of the Mac's pasteboard the host sends and to whom, and only
   while macOS allows every read (`MacAccess`); the device's subscription,
   which text from the Mac it writes, a Paste's receipt, the chip and its time,
-  every word; pure, `Tests/checks/clipboard`). `ScrollDirection.swift` — which
-  way a scroll on the device moves the Mac's content: the device's Reverse
-  Scrolling (issue #143, `Sill.reverseScroll`, never sent) turns a finger's drag
-  over the picture and two fingers on the on-screen trackpad around, their coast
-  too, never a connected trackpad's or mouse's scroll events (iPadOS's own
-  Natural Scrolling set those); pure, `Tests/checks/protocol`. Kind 44,
-  `keyframeRequest` (device → host, no payload: this device's picture was
-  interrupted and waits for a keyframe; issue #101), has no type of its own.
+  every word; pure, `Tests/checks/clipboard`). `Audio.swift` — the Mac's sound
+  (kind 43, host → device; 29 to 31 and 33 to 42 are PR #66's):
+  `AudioMessage`, type 1 a JSON `AudioFormat` (codec, rate, channels, packet
+  size, priming, bitrate, epoch, cookie, what it is of), type 2 binary
+  `AudioPackets` (epoch, seq, the segment flag, 1–255 packets); `AudioCodec`
+  ("aac-eld", and `choose`: the first of a device's `Hello.audio` the host
+  makes); only to a device whose hello lists one. `ScrollDirection.swift` —
+  which way a scroll on the device moves the Mac's content: the device's
+  Reverse Scrolling (issue #143, `Sill.reverseScroll`, never sent) turns a
+  finger's drag over the picture and two fingers on the on-screen trackpad
+  around, their coast too, never a connected trackpad's or mouse's scroll
+  events (iPadOS's own Natural Scrolling set those); pure,
+  `Tests/checks/protocol`. Kind 44, `keyframeRequest` (device → host, no
+  payload: this device's picture was interrupted and waits for a keyframe;
+  issue #101), has no type of its own.
 - `Sources/SillHost/` — the `SillHostCore` library. `StreamCoordinator` (main
   actor; owns the pipeline, switches sources on client request, raises the
   picked window in regular mode (never on the virtual display), applies
@@ -5318,7 +5571,7 @@ good.
   `HostConfig` (the knobs: maxFPS, captureScale, bitrate per 60 fps, the
   away pair awayBitrate and awayCaptureScale, prioritizeSpeed, virtualDisplay,
   directWireless, remoteAccess, remotePort, internetAccess, requirePairing,
-  shareClipboard; `standard` is the CLI's values and the app's defaults;
+  sendAudio, shareClipboard; `standard` is the CLI's values and the app's defaults;
   `effective(away:)`), `HostClipboard` (the clipboard's host side: who
   subscribed, the look at the pasteboard's change count four times a second
   while one has and macOS allows every read, a device's text written
@@ -5489,6 +5742,23 @@ good.
   `InputInjector.chord` posts it (`in.gesture`), its key up with the HID
   state table's flags from before it (`KeyStrokes.chord`;
   `in.gestureModifiersLeft` if some stay).
+  The Mac's sound (docs/audio-plan.md; a beta since 2026-10-20): `AudioPipeline` (the source it follows
+  from `active`'s didSet, one transition at a time; on `sill.audio` the
+  packetizer, the encoder, the epochs and the stamps; the status and kind 16's
+  note; `prepare`, AAC-ELD's codec loaded once off `sill.audio` when Send Audio
+  is on), `AudioCapture` (ScreenCaptureKit's audio-only stream of one app, or of
+  every app but Sill's, bounded start and stop, the running stream under a
+  lock; never run by a test),
+  `SyntheticAudio` (a synthetic host's test tone; the TEST ONLY
+  `SILL_TEST_AUDIO_CHUNK` and `SILL_TEST_AUDIO_PAUSE`), `TestTone` (440 Hz and a
+  click at each whole second of the stamps' clock; pure), `AudioPacketizer`
+  (blocks, stamps and segments, `AudioSourceRule`, `PCMLayout`,
+  `AudioBufferTally`; pure, `Tests/checks/audio-packetizer`) and `AudioEncoder`
+  (AAC-ELD, AudioToolbox only; `Tests/checks/audio-codec`). StreamServer sends
+  kind 43 to the devices that play it on a send path of its own
+  (`broadcastAudio`: never `inflight`; its bytes in every client's `pendingBytes`
+  and `takenThisSecond`, so each device's LinkJudge sees them; `paceRemote`
+  drops only frames).
   A sleeping display (issue #134): `DisplayWake` (which of a device's messages
   are a person at it, so the host declares user activity on the Mac for it, as
   a key press would: a session's connect every time, kinds 7, 8, 15, 25 and 28
@@ -5643,6 +5913,15 @@ good.
   streams; it needs Accessibility for whatever runs it, and an unlocked screen),
   and its `close` step WindowSizer's Close (with WindowRestore.swift, which
   WindowSizer needs since #75) against Slow Close: back within 1 s, as no answer.
+  `Scripts/audio/` is the
+  encoder-free sound harness (docs/audio-plan.md H5, H6, H8): `build.sh` makes
+  `.build/audio/host` (the working tree's StreamServer and the sound's host
+  files with `main.swift`: fake frames, the test tone, both doors on
+  127.0.0.1) and `.build/audio/audiocheck` (`Scripts/audiocheck.swift`, the
+  harness's device: every kind 43 decoded with iOSClient/AudioDecoder.swift and
+  each click found at its stamp), refusing a binary that links a media
+  framework but AudioToolbox; `run.sh [--cases a,b]` runs the gate cases and
+  `summarize.py` judges them.
   `Scripts/restore-probe/run.sh` (TEST ONLY; issue #57) drives the real
   `WindowSizer.resize` and a fitted window's way back (WindowRestore's `fit`
   and `stop` through `WindowSizer.AXWindows`) against a window of its own
@@ -5758,13 +6037,16 @@ good.
   pane, row 1's five buttons in their band, the strip, six caps, the trackpad
   and its vertical span, the Aa ruler, the drawer and the Settings panel across
   row 1, and the dim, and the Menus button ending the strip's row (`menus`,
-  `stripBesideMenus`); with Larger Picture's keyboard (`keyboard`, from
+  `stripBesideMenus`) and the Sound button with it (`sound`, `menusBesideSound`,
+  `stripBesideBoth`); with Larger Picture's keyboard (`keyboard`, from
   `keyboardHeight(for:)`, only while a window streams: `largerPicture(switchOn:
   streaming:)` and `Streaming`, and only where it is larger: `largerPictureGains`,
   `offersLargerPicture(screen:)`) no strip, the room over the keyboard, Menus in
-  row 1 (`buttonsBesideMenus`), the drawer above row 1, the pane at the
-  picture's shape (`pane(video:)`) and its span (`trackpadSpan(video:)`); pure,
-  `Tests/checks/phone-portrait`), `DuoPosture`
+  row 1 (`buttonsBesideMenus`) and no Sound button (the Settings panel's switch
+  alone, docs/audio-plan.md's Q10: `sound` and `stripBesideBoth` are the strip's
+  empty place, `menusBesideSound` is `menus`), the drawer above row 1, the pane
+  at the picture's shape (`pane(video:)`) and its span (`trackpadSpan(video:)`);
+  pure, `Tests/checks/phone-portrait`), `DuoPosture`
   (the iPhone Duo's posture and the rules that follow from it, docs/iphone-duo-plan.md:
   `FoldInfo`, inferred before iOS 27.1 or the fold's band; the laptop pose's
   split at the real fold and open flat's at the picture's shape, the book
@@ -5894,6 +6176,12 @@ good.
   every touch and takes none, and DEBUG `TourDebug`); StreamScreen runs it
   (targets, the rule's inputs, the layer above the layouts and under the
   pairing overlay, Take the Tour from the Settings panel's last row).
+  `AudioDecoder` (AAC-ELD to a buffer per channel, one packet at a time;
+  AudioToolbox only), `AudioPlayout` (the sound's timing; pure,
+  `Tests/checks/audio-playout`), `AudioOutput` (its queue, the decoder and the
+  engine; no video frame handed to its queue before the session's first format, the last 32 kept
+  for the guard) and `StreamClient+Audio`: pbxproj AA01–AA04; the host's
+  `audio-codec` check and the sound harness's device compile AudioDecoder too.
   `Info-Debug.plist` is the Debug configuration's Info.plist: Info.plist's
   keys, with `_silltest._tcp` beside `_sill._tcp` for the harness's
   `-SillServiceType` (Release declares `_sill._tcp` alone).
@@ -5965,7 +6253,11 @@ good.
   caught), and `build.sh` where a check compiles a module (StreamProtocol's
   sources with `import StreamProtocol` stripped), or a `module.txt` naming the
   files `module.py` compiles as one module (pairing at home's checks):
-  `addresses`, `ask-limits`, `cable-link`, `clientlink`, `clipboard`, `compatibility`,
+  `addresses`, `ask-limits`, `audio-codec` (the host's AAC-ELD encoder,
+  packetizer and tone with the device's decoder, in memory; AudioToolbox only),
+  `audio-packetizer`, `audio-playout` (iOSClient's AudioPlayout on a simulated
+  clock), `away-copy`, `away-quality`, `away-wire`, `cable-link`, `clientlink`,
+  `clipboard`, `compatibility`,
   `device-gate`, `display-wake`, `dmg-layout` (Scripts/dmg-layout's `.DS_Store` and alias
   writer, against Finder's own layout of the file, make-dmg.sh's layout
   arguments and the SVG's size and edge), `door-policy`, `duo` (DuoPosture;
@@ -5975,8 +6267,8 @@ good.
   `home-device`, `home-model`, `home-records`, `home-txt`, `installed-apps`
   (InstalledApps on a fake applications folder), `key-strokes` (the
   host's KeyStrokes and the device's KeyChords, against a model of the Mac's
-  HID state table and of a Mac from before), `keyframe-recovery` (iOSClient's
-  KeyframeRecovery, against a model of the event history), `ledger`,
+  HID state table and of a Mac from before), `keychain`, `keyframe-recovery` (iOSClient's
+  KeyframeRecovery, against a model of the event history), `ledger`, `link-judge`,
   `menu-state` (iOSClient's MacMenuState), `menus` (the host's MenuFormat and
   MenuPolicy, and MacMenu.swift's JSON), `message-reader`, `origin`,
   `pairing-address`, `phone-portrait`, `pointer-control`, `pointer-presence`,
@@ -6030,6 +6322,9 @@ swift run -c release SillHost --encoder-selftest   # is the hardware encoder ali
 swift run -c release SillHost --virtual-display   # picked windows stream from their own HiDPI display (off by default)
 swift run -c release SillHost --virtual-display-selftest   # create/destroy one display, report what sees it
 swift run -c release SillHost --direct-wireless   # also over peer-to-peer Wi-Fi (AWDL): devices without a shared network (off by default)
+swift run -c release SillHost --audio       # Send Audio (a beta) for this run: the streamed app's sound to devices that play it (with --synthetic, a test tone; off by default; a device cannot change it)
+SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 .build/release/SillHost --synthetic --audio   # the test tone on loopback; sillclient.py PORT 8 desktop --hello=0.6 --audio counts it
+Scripts/audio/run.sh                        # the encoder-free sound harness and its gates (~7 min; no encoder, capture, speaker or device)
 swift run -c release SillHost --remote      # the remote door for this run on any free port (--remote=PORT), a throwaway identity; the code and link print here
 swift run -c release SillHost --remote --internet   # also admit paired devices from outside this Mac's networks and VPNs
 swift run -c release SillHost --print-reachability  # the addresses a device would get away from home, then exit
@@ -6079,7 +6374,7 @@ whatever launched it), Sill.app's to Sill itself.
 Sill.app: the log is `~/Library/Logs/Sill/Sill.log` (`tail -F`, not `-f`: at
 10 MB it moves to Sill.1.log; Show Log… in the menu); settings are `defaults
 read me.saffer.sill.mac` (maxFPS, captureScale, bitrate, prioritizeSpeed,
-virtualDisplay, directWireless, shareClipboard, updateCheck; the update check keeps
+virtualDisplay, directWireless, sendAudio, shareClipboard, updateCheck; the update check keeps
 updateLastCheck, updateETag, updateLatestTag and updateLatestURL), and a launch
 argument such as `-maxFPS 60` or `-updateCheck 0` overrides one for one run. A device's change from its Settings panel is saved there too, like a
 menu click; the CLI keeps a device's change until SillHost quits. Test arguments for the bare binary (`.build/release/SillMenuBar`,
@@ -6289,6 +6584,18 @@ where the route line says how), away from home's and the link's settings cases
 `away|awaymixed|awayhome|linkbehind|linkmixed|linklow|linkstalled` (the header's
 away line, the footnote, the callout; `linkstalled` shows none) and
 `-SillLinkLine behind` (the mock reports the link behind: the stream's line),
+the Mac's sound's `-SillSound on|muted` (the mock Mac sends it: the Sound
+button and switch in that state; the mock plays nothing) and settings cases
+`sound|soundoff|soundnote` (the Send Audio row on, off, or on with the Mac's
+note), `-SillSettingsScroll sound` (the panel at the Send Audio row), and in
+the normal app and under `-SillLive 1` `-SillSoundSink manual|device` (manual
+rendering, no output device: the simulator's default in every build; `device`
+plays through the Mac's speakers, never in a gate) with `-SillSoundVolume 0`,
+`-SillSoundToggle <s>[,<s>…]` (the Sound button used at those seconds) and
+`-SillSoundSwitchAt <s>` (the panel's switch off, then on a second later); the
+console's "audio: …" lines say what happened (the format, the engine and its
+latencies, a line a second, each jump with its size and cause, and in manual
+rendering where each click of a synthetic host's test tone was heard),
 `-SillSettingsScript '<t> set K=V[,K=V] | suggestion; …'` (a live session to a
 synthetic host on loopback: the panel's controls and the link callout's button,
 t seconds after the first window list), `-SillMoveHomeTest to:HOST:PORT|refused|
@@ -6489,8 +6796,9 @@ device keeps working with Macs from the first public build on, or each says why
   header; kinds 0–28, 32 and 44 and their payloads (HEVC with ParameterSets; the JSON of Switcher,
   Input, Viewport, HostSettings, Remote, Compatibility, Pointer, MacMenu, Gesture and Clipboard;
   44, a device's keyframe request after its picture was interrupted, empty, which a host from
-  before skips; 29 to 31 stay free, 29 the audio plan's, 30 and 31 pull request #66's), inside `sill/1` at
-  both doors (19 and 20 on their own `sill-pair/1` connection, the next bullet); the ping echo; a
+  before skips; 29 to 31 and 33 to 42 stay free, pull request #66's, and 43 is the Mac's sound's,
+  below), inside `sill/1` at both doors (19 and 20 on their own `sill-pair/1` connection, the
+  next bullet); the ping echo; a
   kind 16 within 2 s of the first window list, one per connection since Sill for Mac 0.5.1 (away
   from home, docs/remote-bundle-plan.md §4): its `settings` the pair that connection's controls
   set (the away quality for a device away), and its optional `away` (AwayQuality, from a host with
@@ -6517,7 +6825,13 @@ device keeps working with Macs from the first public build on, or each says why
   the receiver's clipboard, `image` is reserved for that later generation; a subscription says what
   the device takes, `{}` being text alone, so a host sends `image` only to a connection whose
   subscription carries a later field saying it takes images (`"accepts":2`, say), never to one that
-  sent `{}`.
+  sent `{}`; the Mac's sound (kind 43, Audio.swift), once a public build ships it, a beta or not:
+  its two types (a JSON AudioFormat, then packets whose layout never changes: a new layout is a new
+  type), AudioFormat's fields, the hello's `audio`, `sendAudio` and `audioNote`, kind 43 only to a
+  device whose hello lists a codec the host makes, and the reader's caps, which a later host keeps
+  within (a device drops a message past them whole): a format at most 4 KB, a packets message at
+  most 16 KB (`AudioMessage.parse`), so a host that batches packets never puts more than 16 KB in
+  one message.
 - Pairing as 1.0 does it (docs/home-pairing-plan.md §3): the Bonjour TXT keys `r` (the recognition
   tag) and `p` ("1" pairing required, "0" open, no `p` a plain door, any other value read as "1");
   a `sill-pair/1` connection is exactly one kind 19, with no hello (the device gate judges sessions
@@ -6588,4 +6902,7 @@ device keeps working with Macs from the first public build on, or each says why
 - Native feel is the bar: Flighty-level polish, iOS conventions, Duo layouts.
 - License: Apache-2.0, LICENSE since PR #15, kept when the repository went
   public on 2026-09-26 (paid plan is gone, so no GPL/CLA needed).
-- v1 out of scope: hole punching, multi-window, layout customization, audio.
+- v1 out of scope: hole punching, multi-window, layout customization. Audio is in scope since
+  2026-09-27 (Noah: "Audio: the plan is done and parked as a v2 feature by your earlier decision",
+  first in what he wanted worked on; docs/audio-plan.md, docs/BRIEF.md), and in, as a beta, since
+  2026-10-20 (Noah, about PR #94: "merge as beta support"): Send Audio, off by default, the Mac's alone.

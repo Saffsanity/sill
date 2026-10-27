@@ -323,6 +323,10 @@ enum MockCatalog {
         case linkmixed       // behind while a device at home keeps Pro: the callout without a button
         case linklow         // behind at Low · Standard: "even at Low", no button
         case linkstalled     // stalled: the Mac's alone, so no callout
+        // The Mac's sound (docs/audio-plan.md §7.8):
+        case sound           // the Mac sends its sound: the Send Audio row on, the Sound button and switch
+        case soundoff        // a Mac with sound, Send Audio off: the row off, no button
+        case soundnote       // on, and the Mac could not capture it: the note under the row
     }
 
     /// The away and link cases: the Mac's two qualities (home Pro · Retina, away Low · Standard unless
@@ -403,8 +407,10 @@ enum MockCatalog {
         client.hostClipboard = c == .legacy ? nil : ClipboardPolicy.generation
         guard c != .legacy else { return }
         var state = HostSettingsState(
+            // A Mac without sound (every one before it, Sill for Mac 0.3.1 among them), but in the sound's
+            // cases and under `-SillSound`, so every other photo is as it was.
             settings: StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
-                                     directWireless: false),
+                                     directWireless: false, sendAudio: nil),
             persistent: true, virtualDisplayAvailable: true, softwareEncoder: false,
             stream: RunningStream(width: 2880, height: 1800, fps: 60, mbps: 15, onVirtualDisplay: false))
         switch c {
@@ -456,8 +462,23 @@ enum MockCatalog {
             client.mockHomeTLS = true
         case .away, .awaymixed, .awayhome, .linkbehind, .linkmixed, .linklow, .linkstalled:
             seedAway(client, &state, c)
+        case .sound:
+            state.settings.sendAudio = true
+        case .soundoff:
+            state.settings.sendAudio = false
+        case .soundnote:
+            state.settings.sendAudio = true
+            // The host's words (HostStatusSnapshot.Audio.note) for a start that ran out of time.
+            state.audioNote = "Couldn’t capture the sound of Safari: the stream did not start within 2 s."
         case .default, .legacy, .pending, .timeout, .wired, .noroute, .noremote:
             break
+        }
+        // `-SillSound on|muted`: the Mac sends its sound, and this device plays it or has it muted (the
+        // button and the switch in that state; the mock plays nothing). Never saved.
+        switch UserDefaults.standard.string(forKey: "SillSound") {
+        case "on"?: state.settings.sendAudio = true; client.soundMuted = false
+        case "muted"?: state.settings.sendAudio = true; client.soundMuted = true
+        default: break
         }
         // `-SillLinkLine behind`: the Mac reports the link behind on this connection, whatever the
         // case, so the stream screen shows its line (with the panel closed). Its suggestion is the

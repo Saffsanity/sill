@@ -91,7 +91,7 @@ do {
     check(!off.validated().shareClipboard && standard.validated().shareClipboard, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: false)
+                          requirePairing: true, shareClipboard: false, sendAudio: false)
     check(!made.shareClipboard, "a HostConfig made with it off has it off (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
@@ -158,6 +158,30 @@ do {
     eq(refused.count, 3, "accepted: three refusals named")
     let (fine, none) = DeviceSettings.accepted(HostSettingsChange(bitrate: 150_000_000, captureScale: 1), virtualDisplayAvailable: false, fromRemote: true)
     check(fine.bitrate == 150_000_000 && fine.captureScale == 1 && none.isEmpty, "accepted: every preset and both scales from afar")
+}
+
+do {
+    // Send Audio is the Mac's alone (docs/audio-plan.md, Q8, the beta's default), as Share Clipboard is:
+    // a device's change of it is refused on or off, at home and away, and named for the log, while the
+    // rest of the same change applies; a device still sees it, whichever pair its connection controls.
+    for remote in [false, true] {
+        for on in [false, true] {
+            let change = HostSettingsChange(token: 4, maxFPS: 60, prioritizeSpeed: true, sendAudio: on)
+            let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: true, fromRemote: remote)
+            check(ok.sendAudio == nil && ok.maxFPS == 60 && ok.prioritizeSpeed == true,
+                  "accepted: Send Audio \(on ? "on" : "off") from \(remote ? "afar" : "home") refused, the rest of the change applied")
+            eq(refused, ["send audio (set on this Mac only)"], "accepted: …and named once")
+        }
+    }
+    let (alone, _) = DeviceSettings.accepted(HostSettingsChange(token: 5, sendAudio: true), virtualDisplayAvailable: true)
+    check(alone.isEmpty, "accepted: a change of Send Audio alone applies nothing")
+    var on = standard
+    on.sendAudio = true
+    check(!standard.sendAudio, "standard: Send Audio off")
+    eq(standard.changes(to: on), "send audio off → on", "changes: Send Audio's switch, the Mac's own")
+    check(on.streamSettings(away: true).sendAudio == true && on.streamSettings(away: false).sendAudio == true
+          && standard.streamSettings(away: true).sendAudio == false && standard.streamSettings(away: false).sendAudio == false,
+          "a device sees the Mac's Send Audio, at home and away")
 }
 
 // MARK: AwayPolicy

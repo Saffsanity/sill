@@ -128,21 +128,22 @@ serves the root or `/docs`, never `/site`. So:
       Pages on (main, / root) and the custom domain set. Republish when `site/` changes, right
       after the release whose builds the change describes (part 2, the last item):
 - Words on main for a release not out yet are marked: the clipboard's (PR #78) between
-  `<!-- Clipboard` and `<!-- /Clipboard -->`, privacy.html's item on the device's request for
-  the picture again after it was interrupted (PR #93, kind 44) between `<!-- Keyframe` and
+  `<!-- Clipboard` and `<!-- /Clipboard -->`, privacy.html's item on the device's request for the
+  picture again after it was interrupted (PR #93, kind 44) between `<!-- Keyframe` and
   `<!-- /Keyframe -->`, the display wake's (PR #151, support.html's paragraph on Sill waking a
-  sleeping display) between `<!-- Display wake` and `<!-- /Display wake -->`, and Reverse
-  Scrolling's (PR #159: privacy.html's item and support.html's section) between
-  `<!-- Reverse Scrolling` and `<!-- /Reverse Scrolling -->`. A republish before the release that
-  ships them (for words that hold for the builds already out, such as support.html's on a Mac
-  asleep or restarted, or on a black picture) deletes those blocks in the sill-site copy after the
-  rsync below (the perl lines, one per marker) and puts privacy.html's date back to the one last
-  published; then `grep -n -i clipboard ../sill-site/*.html` prints only privacy.html's log line
-  ("which devices share the clipboard", true of the builds out too, as "what you copy" in its lede
-  and "never what you copy" in both log lines are), and `grep -n -i keyframe ../sill-site/*.html`,
-  `grep -n "wakes your Mac’s display" ../sill-site/*.html` and `grep -n -i 'reverse scrolling'
-  ../sill-site/*.html` print nothing. The release that ships each deletes its markers in `site/`
-  and keeps the words.
+  sleeping display) between `<!-- Display wake` and `<!-- /Display wake -->`, the sound's (PR #94,
+  Send Audio, a beta) between `<!-- Sound` and `<!-- /Sound -->`, and Reverse Scrolling's (PR #159:
+  privacy.html's item and support.html's section) between `<!-- Reverse Scrolling` and
+  `<!-- /Reverse Scrolling -->`. A republish before those releases (for words that hold for the
+  builds already out, such as support.html's on a Mac asleep or restarted, or on a black picture)
+  deletes the blocks of each release not out yet in the sill-site copy after the rsync below (the
+  perl lines, one per marker) and puts privacy.html's date back to the one last published; then
+  `grep -n -i clipboard ../sill-site/*.html` prints only privacy.html's log line ("which devices
+  share the clipboard", true of the builds out too, as "what you copy" in its lede and "never what
+  you copy" in both log lines are), and `grep -n -i keyframe ../sill-site/*.html`, `grep -n "wakes
+  your Mac’s display" ../sill-site/*.html`, `grep -n -i -E 'sound|send audio' ../sill-site/*.html`
+  and `grep -n -i 'reverse scrolling' ../sill-site/*.html` print nothing. The release that ships
+  each deletes its markers in `site/` and keeps the words.
 - Once sill is public, it can serve the site itself: `git subtree push --prefix site origin gh-pages`,
   then Settings › Pages › gh-pages, / (root). Retire sill-site then.
 
@@ -152,6 +153,7 @@ rsync -a --delete --exclude .git --exclude .github --exclude .nojekyll site/ ../
 perl -0pi -e 's/[ \t]*<!-- Clipboard:.*?<!-- \/Clipboard -->\n//gs' ../sill-site/*.html   # only before the clipboard's release
 perl -0pi -e 's/[ \t]*<!-- Keyframe:.*?<!-- \/Keyframe -->\n//gs' ../sill-site/*.html   # only before the keyframe request's release (PR #93)
 perl -0pi -e 's/[ \t]*<!-- Display wake:.*?<!-- \/Display wake -->\n//gs' ../sill-site/*.html   # only before the display wake's release
+perl -0pi -e 's/[ \t]*<!-- Sound:.*?<!-- \/Sound -->\n//gs' ../sill-site/*.html   # only before the sound's release
 perl -0pi -e 's/[ \t]*<!-- Reverse Scrolling:.*?<!-- \/Reverse Scrolling -->\n//gs' ../sill-site/*.html   # only before Reverse Scrolling's release
 git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" && git -C ../sill-site push
 ```

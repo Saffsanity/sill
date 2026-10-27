@@ -41,6 +41,17 @@ MUTANTS = [
     ("the clipboard numbered 30", "StreamMessage.swift", "case clipboard = 32", "case clipboard = 30"),
     ("the server offers sill/1 alone, whatever serverALPNs says", "RemoteTLS.swift",
      "for alpn in serverALPNs { sec_protocol_options_add_tls_application_protocol(sp, alpn) }", "sec_protocol_options_add_tls_application_protocol(sp, sessionALPN)"),
+    # Kind 43, the Mac's sound (Audio.swift, docs/audio-plan.md §3.2)
+    ("kind 43 as 254", "StreamMessage.swift", "    case audio = 43 ", "    case audio = 254 "),
+    ("kind 43: bytes left over accepted", "Audio.swift", "            guard offset == d.count else { return nil }\n", ""),
+    ("kind 43: a count of 0 accepted", "Audio.swift", "            guard count >= 1 else { return nil }\n", ""),
+    ("kind 43: the packets' cap lifted", "Audio.swift", "public static let maxPacketsPayload = 16384", "public static let maxPacketsPayload = 65536"),
+    ("kind 43: the format's cap lifted", "Audio.swift", "public static let maxFormatPayload = 4096", "public static let maxFormatPayload = 8192"),
+    ("kind 43: any flag a segment start", "Audio.swift", "segmentStart: flags & 1 == 1", "segmentStart: flags != 0"),
+    ("kind 43: the epoch read a byte late", "Audio.swift", "let epoch = Int(d.readBigEndian(UInt16.self, at: 1))", "let epoch = Int(d.readBigEndian(UInt16.self, at: 2))"),
+    ("kind 43: the epoch clamped, not wrapped", "Audio.swift", "d.appendBigEndian(UInt16(truncatingIfNeeded: epoch))", "d.appendBigEndian(UInt16(clamping: epoch))"),
+    ("kind 43: an unknown type read as packets", "Audio.swift", "        case typePackets:\n            guard payload.count", "        case typePackets, 3:\n            guard payload.count"),
+    ("kind 43: only the first packet read", "Audio.swift", "            for _ in 0..<count {", "            for _ in 0..<1 {"),
 ]
 results = []
 for name, file, old, new in MUTANTS:

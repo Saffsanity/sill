@@ -386,6 +386,20 @@ final class StreamClient: ObservableObject {
     /// re-measuring; nil once the session ends (`forgetViewport`). Main thread.
     var lastViewport: Viewport?
 
+    // The Mac's sound (kind 43; docs/audio-plan.md §7.5, StreamClient+Audio.swift, AudioOutput).
+    /// This device's mute, the Sound button's and switch's: local, remembered (`Sill.soundMuted`; the
+    /// controls save it through `setSoundMuted`), never sent to the Mac. Main thread.
+    @Published var soundMuted = UserDefaults.standard.bool(forKey: StreamClient.soundMutedKey) {
+        didSet { if soundMuted != oldValue { sound.setMuted(soundMuted) } }
+    }
+    /// Whether the Mac sent its sound when a move handed the session over: the Sound button and switch
+    /// stay until the new connection's first kind 16 says (the same Mac). Nil outside a move. Main.
+    var soundAcrossMove: Bool?
+    /// The sound's output: its queue, the playout, the decoder and the engine. The panel's refresh is
+    /// this device's screen's, as the viewport reads it (`screenMaximumFPS`: the scene's screen, not
+    /// `UIScreen.main`), once, as the client is made on the main thread.
+    let sound = AudioOutput(refresh: 1 / Double(StreamClient.screenMaximumFPS()))
+
     /// The Mac's current cursor image (hotspot and size in points), for the pointer sprite, whichever
     /// pointer it shows. Not @Published for the same reason as `presence`. Main thread.
     struct CursorShape { let image: UIImage; let hotspot: CGPoint; let size: CGSize }
@@ -414,6 +428,11 @@ final class StreamClient: ObservableObject {
         var frameAge: MedianMax?
         /// Ping round trips, over the pongs that came back during the second. nil: none did.
         var rtt: MedianMax?
+        /// The Mac's sound: how far it trailed the picture over the last second the sound closed (ms,
+        /// -1 for one with none played), and the packets too late to play since the last report; both
+        /// nil before any sound played this session (ClientStats' `audioBehindMs`, `audioLate`).
+        var soundBehindMs: Int? = nil
+        var soundLate: Int? = nil
     }
 
     /// The typical and the worst of one second's samples, in whole milliseconds.
@@ -994,6 +1013,8 @@ final class StreamClient: ObservableObject {
         }
         // The clipboard's chip looks when Sill becomes active (StreamClient+Clipboard).
         observeClipboardActivation()
+        sound.setMuted(soundMuted)
+        sound.onRouteMuted = { [weak self] in self?.headphonesOut() }
         // The picture's window going away and coming back (KeyframeRecovery).
         observePictureActivation()
     }
@@ -1698,6 +1719,7 @@ final class StreamClient: ObservableObject {
         refusedListing = nil
         resetHomeMove()       // …and what a remote session knew of its move home
         resetPointerFeed()    // …and the Mac has the pointer until this device's first input (Q6)
+        sound.sessionStarted(away: false)   // …and its sound starts afresh (a move's hand-over keeps it)
         hostName = name
         var bonjourName: String?
         if case .service(let service, _, _, _) = endpoint { bonjourName = service }
@@ -1927,7 +1949,9 @@ final class StreamClient: ObservableObject {
         if let v = UserDefaults.standard.string(forKey: "SillHelloVersion"), !v.isEmpty { version = v }
         #endif
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-        return Wire.encode(Hello(appVersion: version, build: build, protocol: SillProtocol.current, device: ClientStatsReporter.deviceName))
+        // The codecs of the Mac's sound it plays: a Mac sends kind 43 only to a device that lists one.
+        return Wire.encode(Hello(appVersion: version, build: build, protocol: SillProtocol.current, device: ClientStatsReporter.deviceName,
+                                 audio: AudioCodec.devicePlays))
     }()
 
     /// The hello, the first thing on every session connection, written straight to `c` before
@@ -2515,6 +2539,7 @@ final class StreamClient: ObservableObject {
                 persistSavedMacs()
             }
             remoteRoute = nil
+            sound.setAway(false)   // the jitter cover takes home's bounds, and nothing else resets (rules 2 and 7)
             homeInfo = DiscoveryPolicy.HomeMoveInfo()
             failedHomeMoves = nil
             homeMoveTrust = nil
@@ -2527,6 +2552,7 @@ final class StreamClient: ObservableObject {
         lastPongAt = ProcessInfo.processInfo.systemUptime
         setRoute(from: c.currentPath, fresh: true)   // the new connection's, which carries the session now
         status = "Connected to \(hostName)"
+        soundAcrossMove = soundAvailable
         settings.reset()
         settingsProblem = nil
         settingsExpiry?.cancel()
@@ -3189,6 +3215,9 @@ final class StreamClient: ObservableObject {
         refusedListing = nil
         resetHomeMove()
         resetPointerFeed()   // the Mac has the pointer until this device's first input (Q6)
+        // Away from home through a VPN or the internet: away's cover, its start and bounds (rule 2). By
+        // address (a LAN address through the remote door) is home, as the Mac's AwayPolicy counts it.
+        sound.sessionStarted(away: s.route != .remote(.address))
         session = s
         forgetGoodbye()
         // Its way in is its route line's (`remoteRoute`, at its first window list), never a link word.
@@ -3347,6 +3376,7 @@ final class StreamClient: ObservableObject {
         keyframeAskWork = nil
         // Nothing of a Mac's settings outlives its connection: the next one sends them afresh.
         settings.reset()
+        soundAcrossMove = nil
         settingsProblem = nil
         connectedAt = nil
         settingsExpiry?.cancel()
@@ -3355,6 +3385,8 @@ final class StreamClient: ObservableObject {
         // Nor its menus: an open one says "Not connected.", the button goes, and the iPad's bar
         // loses the Mac's menus at its next rebuild.
         resetMenus()
+        // Nor its sound: the engine stops, and the next session's floor and cover start afresh.
+        sound.sessionEnded()
         // Nor the clipboard's subscription, its chip or its note.
         resetClipboard()
     }
@@ -3810,6 +3842,7 @@ final class StreamClient: ObservableObject {
             let age = (Date().timeIntervalSince1970 - header.timestamp) * 1000
             if age.isFinite { frameAgeSamples.append(min(max(age, 0), Self.sampleCeilingMs)) }
             frameCounter += 1
+            frameForSound(header)
             onFrame?(data, header.isKeyframe)
         case .windowList:
             guard let list = Wire.decode(WindowList.self, from: data) else { return }
@@ -3928,6 +3961,9 @@ final class StreamClient: ObservableObject {
             DispatchQueue.main.async { self.cursorShape = CursorShape(image: image, hotspot: hotspot, size: size) }
         case .macPointer:
             receivePointer(data)
+        case .audio:
+            // The Mac's sound: a format, or packets (StreamClient+Audio, AudioOutput).
+            receiveAudio(header, data)
         case .hostSettings:
             guard let state = Wire.decode(HostSettingsState.self, from: data) else { return }
             let from = connection
@@ -4050,11 +4086,14 @@ final class StreamClient: ObservableObject {
         windowOpenedAt = now
         // Per second of the window's real length, which is a second unless the app was suspended.
         let fps = elapsed > 0 ? Int((Double(frameCounter) / elapsed).rounded()) : frameCounter
-        let stats = LinkStats(fps: fps, frameAge: MedianMax(frameAgeSamples), rtt: MedianMax(rttSamples))
+        let audio = sound.takeSecond()
+        let stats = LinkStats(fps: fps, frameAge: MedianMax(frameAgeSamples), rtt: MedianMax(rttSamples),
+                              soundBehindMs: audio.map { $0.behindMs ?? -1 }, soundLate: audio?.late)
         frameCounter = 0
         frameAgeSamples.removeAll(keepingCapacity: true)
         rttSamples.removeAll(keepingCapacity: true)
         if let rtt = stats.rtt { worstRecentRttMs = Double(rtt.max) }
+        sound.rtt(median: stats.rtt?.median)
         DispatchQueue.main.async {
             guard self.connection === c else { return }   // torn down meanwhile: stay nil
             self.linkStats = stats
@@ -4153,6 +4192,7 @@ extension StreamClient {
         let linkBefore = settings.host?.link
         #endif
         let refused = settings.receive(state)
+        if let fps = state.stream?.fps { sound.setStreamFPS(fps) }
         if state.answering != nil { settingsProblem = nil }
         if !refused.isEmpty { settingsRefusals += 1 }
         scheduleSettingsExpiry()
