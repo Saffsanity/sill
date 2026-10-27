@@ -16,10 +16,11 @@ import Foundation
 /// The wire's generation. 1: the 14-byte header, kinds 0–23, and any later kind an older peer can
 /// skip (24, 25 and 27, the Mac's menus: MacMenu.swift; 26, the Mac's pointer: Pointer.swift; 28,
 /// the trackpad gesture: Gesture.swift; 32, the clipboard: Clipboard.swift, sent only to a peer that
-/// said it takes it), and the JSON rules of HostSettings.swift, inside TLS 1.3
-/// with both keys pinned at both doors, whose session protocol is the ALPN `sill/1`
-/// (RemoteTLS.sessionALPN): the home door pairs as the remote door does, as the first public builds
-/// ship it (docs/home-pairing-plan.md; the plain home door is development builds' and the CLI's).
+/// said it takes it; 43, the Mac's sound: Audio.swift, sent only to a device whose hello lists a
+/// codec), and the JSON rules of HostSettings.swift, inside TLS 1.3 with both keys pinned at both
+/// doors, whose session protocol is the ALPN `sill/1` (RemoteTLS.sessionALPN): the home door pairs
+/// as the remote door does, as the first public builds ship it (docs/home-pairing-plan.md; the plain
+/// home door is development builds' and the CLI's).
 /// Raised only by a change an older peer cannot skip (a new transport, a kind or rule it cannot
 /// skip); an additive change never raises it. When it rises, a later session ALPN (`sill/2`) goes
 /// beside `sill/1` and `sill-pair/1`, which every host offers for good (RemoteTLS.serverALPNs), and
@@ -98,8 +99,8 @@ public struct SillVersion: Comparable, Hashable, Sendable, CustomStringConvertib
 /// Kind 23: the first message of every session connection a device makes (home door, remote door,
 /// a move's network connection), written straight to that connection before anything else, so a
 /// host can judge the device before it sends it anything (DeviceGate). Never on a pairing
-/// connection, whose one message is kind 19. All four fields are optional: `{}` decodes, so a host
-/// never fails on a thin hello.
+/// connection, whose one message is kind 19. Every field is optional: `{}` decodes, so a host never
+/// fails on a thin hello.
 public struct Hello: Codable, Sendable, Equatable {
     /// CFBundleShortVersionString: "1.0" (the iOS project's MARKETING_VERSION). What a host's floor
     /// compares (DeviceGate).
@@ -110,8 +111,14 @@ public struct Hello: Codable, Sendable, Equatable {
     public var `protocol`: Int?
     /// "iPad (iPad14,1)", as ClientStats.device. The host cleans it (SafeText.label).
     public var device: String?
+    /// The codecs of the Mac's sound this device plays, best first (`AudioCodec.devicePlays`:
+    /// ["aac-eld"]). Nil from a device that plays none, every device before 2026-09-27: a host sends
+    /// it no kind 43 (Audio.swift).
+    public var audio: [String]?
 
-    public init(appVersion: String? = nil, build: String? = nil, protocol: Int? = nil, device: String? = nil) {
+    public init(appVersion: String? = nil, build: String? = nil, protocol: Int? = nil, device: String? = nil,
+                audio: [String]? = nil) {
         self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device
+        self.audio = audio
     }
 }
