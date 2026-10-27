@@ -311,7 +311,7 @@ struct PortraitStreamScreen: View {
                                                   ownHeight: keyboardFrame.ownHeight(width: size.width))
         return "keyboard row: the caps \(n(row.minY))–\(n(row.maxY)) (\(n(row.height)) pt) between the fold's edge at "
             + "\(n(split.controls)) and the keyboard's glass at \(glass.map(n) ?? "?") (reported from \(reported.map(n) ?? "?"); "
-            + "the keyboard \(keyboardFrame.ownHeight(width: size.width).map { n($0) + " pt, as UIKit last showed it" } ?? "396 pt, as measured"))"
+            + "the keyboard \(keyboardFrame.ownHeight(width: size.width).map { n($0) + " pt, as it last went" } ?? "396 pt, as measured"))"
     }
     #endif
 
