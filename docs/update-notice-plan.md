@@ -854,7 +854,18 @@ not a window list came:
   dial, which comes at once while the Mac's row is still listed). This build words them itself
   (above; "shutdown" as "shutting down or restarting", since a Mac sends it for willPowerOff) and
   treats them as notices, so a remote dial's goodbye before its first window list never reads as
-  "isn’t accepting remote connections". The holds are bounded (the review of 2026-10-20): a device
+  "isn’t accepting remote connections". From willSleep until didWake no door admits a session (the
+  review of 2026-10-26; HostGoodbye's `SleepWindow`, StreamServer's `gate`, for both TLS doors and
+  the plain one): until the Mac actually sleeps the host still runs, every session's start declares
+  user activity (DisplayWake, #151), and 0.5.1 dials the still-listed row as soon as its session ends
+  (the Mac's cancel, a second after the goodbye), so a session that comes then gets the sleep goodbye
+  again, closed as the gate's refusals close and never registered, and DisplayWake declares nothing
+  while the window runs. This build reads that refusal as the sleep's (the Mac counted as asleep from
+  it, its first dial 20 s later), at either door, a remote dial's before its first window list too;
+  0.5.1 shows its words and dials again (a source refused five times in a minute hears the next 2 s
+  late, as at the device gate). The window ends at didWake, opens again at a willSleep, and lapses ten
+  minutes of the Mac's awake time after willSleep (systemUptime stops while it sleeps), so a didWake
+  that never comes shuts no door for good; whether a dark wake posts didWake is not known here. The holds are bounded (the review of 2026-10-20): a device
   that missed the old registration's removal (suspended within the second it outlives the goodbye,
   the goodbye read only on the return from the background, an mDNS goodbye lost) keeps the row's
   old sighting, so after "shutdown" or "restart" the return from the background releases the hold

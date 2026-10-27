@@ -235,5 +235,80 @@ check(HostGoodbye.quitLine(reason: UInt32(kAERestart)) == "Quit: macOS asked Sil
       && HostGoodbye.quitLine(reason: UInt32(kAEReallyLogOut)) == "Quit: macOS asked Sill to quit for a log out.", "the quit's reason in the log")
 check(HostGoodbye.quitLine(reason: 0x7175_6961) == "Quit: macOS asked Sill to quit (reason 'quia')."
       && HostGoodbye.quitLine(reason: 7) == "Quit: macOS asked Sill to quit (reason 7).", "another reason: its four characters, or its number")
+// The Mac between its sleep goodbye and its wake (SleepWindow, the verifier's review of 2026-10-26): from
+// willSleep until didWake no door admits a session, and one that comes gets the sleep's own goodbye, which
+// this build reads as the sleep's (its words and its hold, before a remote dial's failure rules) and an
+// older one shows by its words with a reconnect. The window ends at didWake, opens again at a willSleep,
+// and lapses ten minutes of awake time after willSleep, so no door stays shut for good.
+var sw = SleepWindow()
+check(!sw.asleep(at: 0) && !sw.asleep(at: 1e6) && sw.refusal(at: 5, mac: mini) == nil && !sw.lapsed(at: 5) && sw.since == nil,
+      "no willSleep: every session admitted")
+sw.willSleep(at: 100)
+check(sw.since == 100 && sw.asleep(at: 100) && sw.asleep(at: 100.3) && sw.asleep(at: 699.99), "from willSleep: asleep")
+check(sw.refusal(at: 100.3, mac: mini) == Goodbye.asleep(mac: mini) && sw.refusal(at: 100.3, mac: mini) == HostGoodbye.goodbye(.sleep, mac: mini),
+      "a session 0.3 s after the goodbye gets the sleep goodbye, the one every device heard")
+check(Wire.decode(Goodbye.self, from: Wire.encode(sw.refusal(at: 100.3, mac: mini)!))
+      == Goodbye(reason: "sleep", message: "Mac mini is going to sleep.", reconnect: true), "the refusal on the wire: the sleep's reason, words and reconnect")
+let swHome = out(sw.refusal(at: 100.3, mac: mini), saved: true), swAway = out(sw.refusal(at: 100.3, mac: mini), saved: true, remote: true)
+check(swHome == O(text: "Mac mini went to sleep. This iPad reconnects when it wakes.", reconnect: true, remoteAllowed: false, isNotice: true, went: .asleep),
+      "this build reads the refusal at home as the sleep: its words, a reconnect, the Mac counted as asleep")
+check(swAway.isNotice && swAway.went == .asleep && swAway.remoteAllowed,
+      "and on a remote dial before its first window list: a notice (said before the dial's failure rules), the hold, the remote door")
+check(GoodbyePolicy.closesAtOnce(sw.refusal(at: 100.3, mac: mini)!), "the device closes its end at once on the refusal")
+check(!sw.asleep(at: 700) && sw.lapsed(at: 700) && sw.refusal(at: 700, mac: mini) == nil && sw.lapsed(at: 1e6),
+      "ten minutes of awake time without a didWake: lapsed, admitted (no door shut for good)")
+check(SleepWindow.limit == 600, "the limit: ten minutes of the Mac's awake time")
+check(!sw.asleep(at: 99.9) && sw.lapsed(at: 99.9) && sw.refusal(at: 99.9, mac: mini) == nil, "a clock before willSleep: ended, never a door stuck shut")
+var swWoke = sw
+swWoke.didWake()
+check(swWoke.since == nil && !swWoke.asleep(at: 100.5) && !swWoke.lapsed(at: 100.5) && swWoke.refusal(at: 100.5, mac: mini) == nil,
+      "didWake: admitted at once")
+var swAgain = sw
+swAgain.willSleep(at: 650)
+check(swAgain.since == 650 && swAgain.asleep(at: 700) && swAgain.asleep(at: 1249.9) && !swAgain.asleep(at: 1250) && swAgain.lapsed(at: 1250),
+      "a willSleep again: the window counts from it")
+var swAfterWake = swWoke
+swAfterWake.willSleep(at: 2000)
+check(swAfterWake.asleep(at: 2000.1) && !swAfterWake.asleep(at: 1999), "a willSleep after a wake: open again")
+var swTwice = SleepWindow()
+swTwice.didWake()
+check(swTwice.since == nil && !swTwice.asleep(at: 5), "a didWake with no willSleep: nothing")
+check(SleepWindow.refusedLine(endpoint: "127.0.0.1:50123") == "The Mac is going to sleep: refused a session from 127.0.0.1:50123 with the same goodbye.",
+      "the refusal's line")
+check(SleepWindow.refusedCountLine(1, source: "10.0.0.5") == "The Mac is going to sleep: refused 1 more session from 10.0.0.5 in the last minute."
+      && SleepWindow.refusedCountLine(4, source: "10.0.0.5") == "The Mac is going to sleep: refused 4 more sessions from 10.0.0.5 in the last minute.",
+      "the minute's count of the rest")
+check(SleepWindow.wokeLine(refused: 0) == "The Mac woke: devices can connect again."
+      && SleepWindow.wokeLine(refused: 1) == "The Mac woke: devices can connect again (1 session refused while it slept)."
+      && SleepWindow.wokeLine(refused: 3) == "The Mac woke: devices can connect again (3 sessions refused while it slept).", "the wake's line")
+check(SleepWindow.lapsedLine == "The Mac said it was going to sleep 10 minutes ago and has not said it woke: devices can connect again.",
+      "the lapsed window's line")
+// 20,000 random sequences of willSleep, didWake and time passing (backwards now and then), against the rule
+// stated here on its own: asleep exactly when the last of willSleep and didWake was a willSleep at t0, and
+// 0 <= now - t0 < 600; the refusal exactly then, the sleep's goodbye; lapsed exactly when a willSleep is
+// the last and it is not asleep.
+var swSeed: UInt64 = 0x51EE_9105
+func swNext() -> UInt64 { swSeed &+= 0x9E37_79B9_7F4A_7C15; var z = swSeed; z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9; z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB; return z ^ (z >> 31) }
+func swUnit() -> Double { Double(swNext() >> 11) / Double(1 << 53) }
+var swDiffer = 0, swSteps = 0, swAsleep = 0, swLapsed = 0
+for _ in 0..<20_000 {
+    var swRule = SleepWindow(), swT0: Double? = nil, now = swUnit() * 1e6
+    for _ in 0..<(2 + Int(swNext() % 30)) {
+        let r = swNext() % 100
+        if r < 25 { swRule.willSleep(at: now); swT0 = now }
+        else if r < 40 { swRule.didWake(); swT0 = nil }
+        else if r < 45 { now -= swUnit() * 900 }
+        else { now += [swUnit() * 2, swUnit() * 120, swUnit() * 900][Int(swNext() % 3)] }
+        let asleep = swT0.map { now >= $0 && now - $0 < 600 } ?? false
+        let lapsed = swT0 != nil && !asleep
+        swSteps += 1; swAsleep += asleep ? 1 : 0; swLapsed += lapsed ? 1 : 0
+        if swRule.asleep(at: now) != asleep || swRule.lapsed(at: now) != lapsed
+            || swRule.refusal(at: now, mac: mini) != (asleep ? Goodbye.asleep(mac: mini) : nil) || swRule.since != swT0 {
+            swDiffer += 1
+        }
+    }
+}
+check(swDiffer == 0 && swAsleep > 1000 && swLapsed > 1000,
+      "20,000 random sequences against the rule stated on its own (\(swSteps) steps, \(swAsleep) asleep, \(swLapsed) lapsed, \(swDiffer) differ)")
 print("\(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

@@ -39,7 +39,12 @@ import StreamProtocol
 ///                                              older-device and "Devices Can’t Connect" items)
 ///     -SillSleepAfter <s>                      as if the Mac were about to sleep s seconds after
 ///                                              launch: every device hears the goodbye it sends
-///                                              then, and its connection closes
+///                                              then, and its connection closes; until a wake (or
+///                                              the window's ten minutes) every door refuses a
+///                                              session with that goodbye
+///     -SillWakeAfter <s>                       as if the Mac had woken s seconds after launch:
+///                                              what NSWorkspace's didWake does, the doors admitting
+///                                              devices again (nothing is posted)
 ///     -SillPowerOffAfter <s>                   as if macOS said the Mac is about to log out,
 ///                                              restart or shut down, s seconds after launch:
 ///                                              NSWorkspace's willPowerOff posted to this app
@@ -124,7 +129,7 @@ enum DebugHooks {
     /// The timed hooks, which Sill.app itself ignores.
     static let timedHooks = ["SillSetAfter", "SillPairAfter", "SillCancelPairingAfter", "SillUnpairAfter",
                              "SillCableNoticeAfter", "SillMenuAfter", "SillPrintMenuAfter", "SillSettingsAfter", "SillSleepAfter",
-                             "SillPowerOffAfter", "SillQuitAfter"]
+                             "SillWakeAfter", "SillPowerOffAfter", "SillQuitAfter"]
     /// The Settings window's test arguments (issue #59), which Sill.app itself ignores too.
     static let windowHooks = ["SillTestScreenHeight", "SillSettingsShot"]
 
@@ -218,6 +223,13 @@ enum DebugHooks {
             after(sleepAfter) {
                 print("SillSleepAfter \(sleepAfter) s: as if the Mac were about to sleep")
                 model.coordinator?.goodbyeBeforeSleep()
+            }
+        }
+        let wakeAfter = defaults.double(forKey: "SillWakeAfter")
+        if wakeAfter > 0 {
+            after(wakeAfter) {
+                print("SillWakeAfter \(wakeAfter) s: as if the Mac had woken")
+                model.coordinator?.wokeForTest()
             }
         }
         let powerOffAfter = defaults.double(forKey: "SillPowerOffAfter")

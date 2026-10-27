@@ -5666,9 +5666,13 @@ good.
   minutes of willPowerOff (`powerOffStands`), a signal's or a reasonless quit
   event's "shutdown", "… is shutting down or restarting.", never Sill's own
   Quit's; else "quit"; the Mac about to sleep, "sleep"; the log's lines; what
-  is observed and what inferred of how macOS ends Sill; pure,
-  `Tests/checks/goodbye`; StreamServer's `told`: one goodbye per connection,
-  the first, and nothing after it),
+  is observed and what inferred of how macOS ends Sill; `SleepWindow`, the Mac
+  between its sleep goodbye and its wake: from willSleep until didWake, ten
+  minutes of awake time at most, no door admits a session, one that comes gets
+  the sleep goodbye (StreamServer's `gate`, `refuseAsleep`), and DisplayWake
+  declares nothing (`decide`'s `macAsleep`); pure, `Tests/checks/goodbye`;
+  StreamServer's `told`: one goodbye per connection, the first, and nothing
+  after it, the sound neither),
   `VirtualDisplaySelfTest`
   (`--virtual-display-selftest`), `Stats` (1 s lines while active, 30 s
   heartbeat when idle). Remote access: `OriginPolicy` + `InterfaceSnapshot`
@@ -6385,7 +6389,9 @@ off Bonjour; the port is in the "Status: Test Pattern Mode" line),
 itself with that reason as an attribute, `'<s> restart parameter'` as a
 parameter, as macOS sends at a restart, a shut down or a log out),
 `-SillSleepAfter <s>` (as if the Mac were about to sleep: the goodbye every
-device hears, its connection closed), `-SillPowerOffAfter <s>` (NSWorkspace's
+device hears, its connection closed, and every door refusing a session with it
+until `-SillWakeAfter <s>`, as if the Mac had woken, or ten minutes),
+`-SillPowerOffAfter <s>` (NSWorkspace's
 willPowerOff posted to the app alone: a SIGTERM or a reasonless quit event
 after it says "shutdown"), `-SillRenderPreviews <dir>` (panes, cards, glyphs,
 menu.txt; no permission needed), and for the Settings window's height

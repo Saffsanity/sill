@@ -113,7 +113,13 @@ Settings: `defaults read me.saffer.sill.mac`.
 When the Mac is about to sleep, Sill tells every connected device so before it
 does (a goodbye, kind 22, "sleep", with the Mac's words, "Noah’s MacBook Pro is
 going to sleep.") and closes its connection, so the device says why at once;
-the log says "The Mac is going to sleep: 1 device told.". Every sleep ends
+the log says "The Mac is going to sleep: 1 device told.". From then until the
+Mac wakes no device connects: one that dials meanwhile (Sill 0.5.1 redials at
+once, while the Mac is still on its way to sleep) gets the same goodbye, and
+Sill wakes no display for it ("The Mac is going to sleep: refused a session
+from … with the same goodbye."); at the wake, "The Mac woke: devices can
+connect again.". Should macOS never say the Mac woke, devices connect again
+ten minutes (of the Mac's awake time) after the goodbye. Every sleep ends
 every session, so what Sill does when the last device leaves runs as the Mac
 sleeps: capture stops, a window Sill sized goes back, the virtual display goes
 and its window home.
@@ -551,7 +557,8 @@ from away), and so does its own pointer move to a new frame's middle when it
 reaches the Mac more than 2 s after the new stream's first parameter sets left
 (a slow link): either can wake a sleeping display once with nobody at the
 device. It wakes a display, never a Mac that is asleep, and cannot light a
-closed laptop's display.
+closed laptop's display. Between the Mac's sleep goodbye and its wake it
+declares nothing, and no device connects then (above).
 
 The log says "Woke the display for iPad (iPad14,1), which connected." (or
 "…, which opened an app.", "…, which sent input.", "…, which pressed a window’s
@@ -1146,7 +1153,10 @@ settings in the defaults domain `SillMenuBar` (delete it after), and takes:
   carrying it as the event's attribute (with `parameter` after the reason, as
   its parameter), as macOS sends an app at a restart, a shut down or a log out,
   read where Sill.app reads it. `-SillSleepAfter <s>`: as if the Mac were about
-  to sleep (the goodbye every device hears then, and the closed connections).
+  to sleep (the goodbye every device hears then, and the closed connections),
+  and from then every door refuses a session with that goodbye until
+  `-SillWakeAfter <s>` (as if the Mac had woken: what NSWorkspace's didWake
+  does, nothing posted) or ten minutes.
   `-SillPowerOffAfter <s>`: as if macOS said the Mac is about to log out,
   restart or shut down (NSWorkspace's willPowerOff, posted to the app's own
   workspace notification center: nothing outside the process hears it), so a

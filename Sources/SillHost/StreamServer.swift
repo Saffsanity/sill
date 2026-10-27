@@ -1151,8 +1151,18 @@ final class StreamServer {
     /// is read ahead. Above it: reads `c`'s first message, within `DeviceGate.firstMessageDeadline`
     /// of now (`.ready`, or a TLS door's admission): a hello the floor admits calls `admit` with it;
     /// a lower version, a hello that does not decode, any other kind first, the end of the
-    /// connection or nothing in time is refused (`refuse`), and `admit` is never called. On `queue`.
+    /// connection or nothing in time is refused (`refuse`), and `admit` is never called. Either way,
+    /// while the Mac is between its sleep goodbye and its wake (SleepWindow: `macGoingToSleep`,
+    /// `macWoke`) a session the gate would admit gets that goodbye instead (`refuseAsleep`), and
+    /// `admit` is never called: every door's session passes here before it is registered, so the
+    /// check and the registration are one turn of `queue`, and the sleep's own goodbyes, sent on
+    /// `queue` after the window opened, reach every session registered before it. On `queue`.
     func gate(_ c: NWConnection, admit: @escaping (Hello?) -> Void) {
+        let admit = { [weak self] (hello: Hello?) in
+            guard let self else { c.cancel(); return }
+            if let goodbye = self.sleepRefusal() { self.refuseAsleep(c, goodbye); return }
+            admit(hello)
+        }
         guard deviceFloor != .zero else { admit(nil); return }
         var decided = false          // on `queue`, like every closure here
         let refuse = { [weak self] (hello: Hello?) in
@@ -1200,14 +1210,8 @@ final class StreamServer {
     /// source refused `DeviceGate.loopRefusals` times within the window hears it
     /// `DeviceGate.loopDelay` later. On `queue`.
     private func refuse(_ c: NWConnection, hello: Hello?) {
-        let source: String
-        if case .hostPort(let host, _) = c.endpoint { source = Self.addressText(host).text } else { source = "\(c.endpoint)" }
-        let now = CFAbsoluteTimeGetCurrent()
-        if gateRefusals.count > 256 { gateRefusals = gateRefusals.filter { $0.value.contains { now - $0 < DeviceGate.loopWindow } } }
-        var times = (gateRefusals[source] ?? []).filter { now - $0 < DeviceGate.loopWindow }
-        let slowed = DeviceGate.slows(refusedInWindow: times.count)
-        times.append(now)
-        gateRefusals[source] = times
+        let source = gateSource(c)
+        let slowed = countGateRefusal(source)
         logRefusal(DeviceGate.refusedLine(hello, endpoint: "\(c.endpoint)", floor: deviceFloor), source: source)
         let payload = testGoodbye ?? Wire.encode(DeviceGate.refusal(hello, floor: deviceFloor, macName: macName))
         let queue = queue
@@ -1215,6 +1219,123 @@ final class StreamServer {
             queue.asyncAfter(deadline: .now() + DeviceGate.loopDelay) { Self.closeWithGoodbye(payload, on: c, queue: queue) }
         } else {
             Self.closeWithGoodbye(payload, on: c, queue: queue)
+        }
+    }
+
+    /// A refused connection's source, as the gate counts it: its address without the port.
+    private func gateSource(_ c: NWConnection) -> String {
+        if case .hostPort(let host, _) = c.endpoint { return Self.addressText(host).text }
+        return "\(c.endpoint)"
+    }
+
+    /// One more refusal at the gate from `source` (the update goodbye's or the sleep's), and whether
+    /// this one waits `DeviceGate.loopDelay` (`DeviceGate.slows`: a device that redials at once after
+    /// each, as 0.5.1 does after a reason it does not know with a reconnect). On `queue`.
+    private func countGateRefusal(_ source: String) -> Bool {
+        let now = CFAbsoluteTimeGetCurrent()
+        if gateRefusals.count > 256 { gateRefusals = gateRefusals.filter { $0.value.contains { now - $0 < DeviceGate.loopWindow } } }
+        var times = (gateRefusals[source] ?? []).filter { now - $0 < DeviceGate.loopWindow }
+        let slowed = DeviceGate.slows(refusedInWindow: times.count)
+        times.append(now)
+        gateRefusals[source] = times
+        return slowed
+    }
+
+    // MARK: The Mac asleep (SleepWindow)
+    //
+    // From NSWorkspace's willSleep, when every device hears the sleep goodbye, until its didWake, no
+    // session is admitted at any door (`gate`): one that comes gets the same goodbye and is closed as
+    // the gate closes a refused one, never registered, so it never declares user activity on a Mac
+    // being put to sleep, nor starts a capture or an encoder. HostGoodbye's SleepWindow has the rule.
+
+    /// The window, its lock, and the sessions refused while it runs: written on the main thread
+    /// (StreamCoordinator's NSWorkspace observers, and the bare app's TEST ONLY hooks), read on `queue`
+    /// at every admission and on the main actor by DisplayWake's caller.
+    private let sleepLock = NSLock()
+    private var sleepWindow = SleepWindow()
+    private var sleepRefused = 0
+    /// Sources whose refused-while-asleep line was printed within the last minute, with how many more
+    /// came since. On `queue`.
+    private var asleepLog: [String: Int] = [:]
+
+    /// The Mac is about to sleep (willSleep): from now no session is admitted until `macWoke`, or until
+    /// the window lapses (`SleepWindow.limit` of the Mac's awake time). Before the sleep's goodbyes are
+    /// sent, so a session admitted after them is refused and one admitted before is told. Any thread.
+    func macGoingToSleep() {
+        sleepLock.lock()
+        sleepWindow.willSleep(at: ProcessInfo.processInfo.systemUptime)
+        sleepRefused = 0
+        sleepLock.unlock()
+    }
+
+    /// The Mac woke (didWake): sessions are admitted again; one line when a window was open. Any thread.
+    func macWoke() {
+        sleepLock.lock()
+        let wasOpen = sleepWindow.since != nil
+        let refused = sleepRefused
+        sleepWindow.didWake()
+        sleepRefused = 0
+        sleepLock.unlock()
+        if wasOpen { print(SleepWindow.wokeLine(refused: refused)) }
+    }
+
+    /// Whether the Mac counts as asleep now (DisplayWake declares nothing then). A window that lapsed
+    /// ends here, with its line, the first time anything asks. Any thread.
+    func macAsleep() -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        sleepLock.lock()
+        let lapsed = sleepWindow.lapsed(at: now)
+        if lapsed { sleepWindow.didWake(); sleepRefused = 0 }
+        let asleep = sleepWindow.asleep(at: now)
+        sleepLock.unlock()
+        if lapsed { print(SleepWindow.lapsedLine) }
+        return asleep
+    }
+
+    /// The goodbye a session that comes now gets while the Mac is asleep, counted; nil: admit it. On
+    /// `queue`.
+    private func sleepRefusal() -> Goodbye? {
+        guard macAsleep() else { return nil }
+        let now = ProcessInfo.processInfo.systemUptime
+        sleepLock.lock()
+        let goodbye = sleepWindow.refusal(at: now, mac: macName)
+        if goodbye != nil { sleepRefused += 1 }
+        sleepLock.unlock()
+        return goodbye
+    }
+
+    /// A session that came while the Mac is asleep: the sleep goodbye, then the close
+    /// (`closeWithGoodbye`), never registered; one line per source a minute, the rest counted. A source
+    /// refused `DeviceGate.loopRefusals` times within the window (the gate's refusals and these
+    /// together) hears it `DeviceGate.loopDelay` later, and still the sleep's: a device that dialled
+    /// while the Mac was asleep is not admitted by a wake that comes while it waits, it dials again.
+    /// On `queue`.
+    private func refuseAsleep(_ c: NWConnection, _ goodbye: Goodbye) {
+        let source = gateSource(c)
+        let slowed = countGateRefusal(source)
+        if let n = asleepLog[source] {
+            asleepLog[source] = n + 1
+        } else {
+            print(SleepWindow.refusedLine(endpoint: "\(c.endpoint)"))
+            asleepLog[source] = 0
+            armAsleepLog(source)
+        }
+        let payload = Wire.encode(goodbye)
+        let queue = queue
+        if slowed {
+            queue.asyncAfter(deadline: .now() + DeviceGate.loopDelay) { Self.closeWithGoodbye(payload, on: c, queue: queue) }
+        } else {
+            Self.closeWithGoodbye(payload, on: c, queue: queue)
+        }
+    }
+
+    private func armAsleepLog(_ source: String) {
+        queue.asyncAfter(deadline: .now() + RefusalSummary.interval) { [weak self] in
+            guard let self, let n = self.asleepLog[source] else { return }
+            guard n > 0 else { self.asleepLog[source] = nil; return }
+            print(SleepWindow.refusedCountLine(n, source: source))
+            self.asleepLog[source] = 0
+            self.armAsleepLog(source)
         }
     }
 

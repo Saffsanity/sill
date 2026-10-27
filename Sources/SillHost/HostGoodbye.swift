@@ -154,3 +154,81 @@ package enum HostGoodbye {
         }
     }
 }
+
+/// The Mac between its sleep goodbye and its wake (the verifier's review of PR #100, 2026-10-26): from
+/// NSWorkspace's willSleep, when every connected device hears "sleep", until its didWake, no door admits
+/// a session. Until the Mac actually sleeps the host still runs, and a session's start declares user
+/// activity (DisplayWake, #151), which could light the display of a Mac someone has just put to sleep,
+/// or keep it awake; and 0.5.1, the App Store build, reads "sleep" as a reason it does not know, with
+/// `"reconnect":true`, and dials the Mac's still-listed row as soon as its session ends, which over TLS
+/// is the Mac's cancel a second after the goodbye (DeviceGate.closeWait), inside the sleep's transition.
+/// So a session that comes then gets the same goodbye (`refusal`), closed as the device gate closes a
+/// refused one, and is never registered: this build's device reads it as the sleep's (GoodbyePolicy,
+/// DiscoveryPolicy: the Mac counted as asleep again, its first dial 20 s later), 0.5.1 shows its words
+/// and dials again (StreamServer slows a source refused five times in a minute, as the gate does), and
+/// DisplayWake declares nothing while the window runs.
+///
+/// How it ends: at didWake; a willSleep opens it again from that moment; and it lapses `limit` after
+/// willSleep in the Mac's awake time (ProcessInfo's systemUptime, which stops while the Mac sleeps), so
+/// a didWake that never comes leaves no door shut for good. Whether a dark wake (a Bonjour Sleep Proxy
+/// waking the Mac for a device's dial, Power Nap) posts didWake is not known here: if it does, the
+/// window ends at it and a session admitted then is #151's case (the support page's sleeping Mac, Noah's
+/// sleep-proxy item); if it does not, the window runs through it, and its awake time counts toward the
+/// limit. Ten minutes covers the transition (macOS waits up to 30 s for apps before it sleeps), the dark
+/// wakes the device's own dials can bring (nine, the first 20 s after the goodbye, then every 30 s), and
+/// the wake itself; a Mac that never slept is refused at most that long. Pure, checked in
+/// Tests/checks/goodbye; StreamServer keeps one under a lock (the doors read it on the network queue,
+/// NSWorkspace's observers write it on the main thread).
+package struct SleepWindow: Equatable, Sendable {
+    /// How long the window lasts without a didWake, in the Mac's awake time.
+    package static let limit: Double = 600
+
+    /// When willSleep came (systemUptime); nil: no window.
+    package private(set) var since: Double?
+
+    package init() {}
+
+    /// NSWorkspace's willSleep at `now`: the window opens, or opens again from now.
+    package mutating func willSleep(at now: Double) { since = now }
+
+    /// NSWorkspace's didWake, or a window that lapsed and was noticed: the window ends.
+    package mutating func didWake() { since = nil }
+
+    /// Whether the Mac counts as asleep at `now`: from willSleep until didWake, `limit` at most. A clock
+    /// that reads before its willSleep counts as ended (never a door stuck shut).
+    package func asleep(at now: Double) -> Bool {
+        guard let since else { return false }
+        return now >= since && now - since < Self.limit
+    }
+
+    /// A window still open that no longer counts at `now` (it ran its `limit` without a didWake).
+    package func lapsed(at now: Double) -> Bool { since != nil && !asleep(at: now) }
+
+    /// What a door says to a session that comes at `now`: while the Mac is asleep, the goodbye every
+    /// connected device heard at willSleep (`HostGoodbye.goodbye(.sleep, mac:)`); else nil, admit it.
+    package func refusal(at now: Double, mac: String) -> Goodbye? {
+        asleep(at: now) ? HostGoodbye.goodbye(.sleep, mac: mac) : nil
+    }
+
+    /// The log's line for a session refused while the Mac is asleep, the first from its source in a
+    /// minute (StreamServer counts the rest).
+    package static func refusedLine(endpoint: String) -> String {
+        "The Mac is going to sleep: refused a session from \(endpoint) with the same goodbye."
+    }
+
+    /// The minute's count of the rest from one source.
+    package static func refusedCountLine(_ n: Int, source: String) -> String {
+        "The Mac is going to sleep: refused \(n) more session\(n == 1 ? "" : "s") from \(source) in the last minute."
+    }
+
+    /// didWake ended an open window: one line, with the sessions refused while it ran.
+    package static func wokeLine(refused: Int) -> String {
+        "The Mac woke: devices can connect again"
+            + (refused > 0 ? " (\(refused) session\(refused == 1 ? "" : "s") refused while it slept)." : ".")
+    }
+
+    /// The window lapsed without a didWake, noticed when a door or DisplayWake next asked.
+    package static var lapsedLine: String {
+        "The Mac said it was going to sleep \(Int(limit / 60)) minutes ago and has not said it woke: devices can connect again."
+    }
+}

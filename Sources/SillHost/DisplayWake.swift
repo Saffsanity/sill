@@ -24,6 +24,12 @@ import StreamProtocol
 /// - A test host (`--synthetic`: it does not advertise, as `InputInjector.dryRun`) declares nothing:
 ///   it counts what it would declare (`dryKey` in the stats line), and the Mac's display is never
 ///   touched.
+/// - Nothing, declared or counted, while the Mac is between its sleep goodbye and its wake
+///   (`macAsleep`: StreamServer's SleepWindow, from NSWorkspace's willSleep to its didWake, issue #105):
+///   a declaration then could light the display of a Mac someone has just put to sleep, or keep it
+///   awake. The doors admit no session then either; this covers a session registered just before
+///   willSleep, whose connect reaches the rule after it. The interval is left as it was, so the first
+///   activity after the wake declares as it would have.
 ///
 /// One rule for every device: there is one display. The clock is the caller's; one that goes back
 /// counts as time passed, so a clock set back never holds a declaration off, and ends the window
@@ -123,9 +129,10 @@ struct DisplayWake {
         }
     }
 
-    /// What `event` at `now` does. A declaration (or count) restarts the interval; nothing does not.
-    mutating func decide(_ event: Event, at now: TimeInterval) -> Decision {
-        guard let activity = activity(event, at: now) else { return .nothing }
+    /// What `event` at `now` does, `macAsleep` whether the Mac is between its sleep goodbye and its
+    /// wake. A declaration (or count) restarts the interval; nothing does not.
+    mutating func decide(_ event: Event, at now: TimeInterval, macAsleep: Bool = false) -> Decision {
+        guard !macAsleep, let activity = activity(event, at: now) else { return .nothing }
         if activity != .connect, let last = lastDeclared, now >= last, now - last < Self.interval {
             return .nothing
         }

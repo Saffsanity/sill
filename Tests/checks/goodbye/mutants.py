@@ -76,7 +76,7 @@ MUTANTS = [
     ("willPowerOff counts at its ten minutes too", "HostGoodbye.swift", "return now >= since && now - since < powerOffStands", "return now >= since && now - since <= powerOffStands"),
     ("a time before willPowerOff counts", "HostGoodbye.swift", "return now >= since && now - since < powerOffStands", "return now - since < powerOffStands"),
     ("willPowerOff counts one minute", "HostGoodbye.swift", "package static let powerOffStands: Double = 600", "package static let powerOffStands: Double = 60"),
-    ("no willPowerOff counts as one", "HostGoodbye.swift", "        guard let since else { return false }\n", "        guard let since else { return true }\n"),
+    ("no willPowerOff counts as one", "HostGoodbye.swift", "        guard let since else { return false }\n        return now >= since && now - since < powerOffStands", "        guard let since else { return true }\n        return now >= since && now - since < powerOffStands"),
     ("the quit's goodbye with words", "HostGoodbye.swift", "case .quit: return Goodbye(reason: Goodbye.quit)", "case .quit: return Goodbye(reason: Goodbye.quit, message: \"\\(mac) quit Sill.\")"),
     ("the sleep's goodbye as a shut down", "HostGoodbye.swift", "case .sleep: return Goodbye.asleep(mac: mac)", "case .sleep: return Goodbye.shuttingDown(mac: mac)"),
     ("a shut down's goodbye as a restart", "HostGoodbye.swift", "case .shutDown: return Goodbye.shuttingDown(mac: mac)", "case .shutDown: return Goodbye.restarting(mac: mac)"),
@@ -97,6 +97,24 @@ MUTANTS = [
     ("the quit's reason never logged", "HostGoodbye.swift", "        guard let reason else { return nil }\n        if restartReasons", "        guard let reason, reason == 0 else { return nil }\n        if restartReasons"),
     ("a log out logged as a shut down", "HostGoodbye.swift", "if logOutReasons.contains(reason) { return \"Quit: macOS asked Sill to quit for a log out.\" }", "if logOutReasons.contains(reason) { return \"Quit: macOS asked Sill to quit for a shut down.\" }"),
     ("an unprintable code printed as characters", "HostGoodbye.swift", "(0x20...0x7E).contains($0)", "(0x00...0xFF).contains($0)"),
+    # The Mac between its sleep goodbye and its wake (SleepWindow, the review of PR #100 of 2026-10-26).
+    ("the sleep window never opens", "HostGoodbye.swift", "package mutating func willSleep(at now: Double) { since = now }", "package mutating func willSleep(at now: Double) { }"),
+    ("a willSleep again keeps the first window", "HostGoodbye.swift", "package mutating func willSleep(at now: Double) { since = now }", "package mutating func willSleep(at now: Double) { since = since ?? now }"),
+    ("didWake leaves the doors shut", "HostGoodbye.swift", "package mutating func didWake() { since = nil }", "package mutating func didWake() { }"),
+    ("no limit: a lost didWake shuts the doors for good", "HostGoodbye.swift", "return now >= since && now - since < Self.limit", "return now >= since"),
+    ("a clock before willSleep counts as asleep", "HostGoodbye.swift", "return now >= since && now - since < Self.limit", "return now - since < Self.limit"),
+    ("asleep at exactly the limit", "HostGoodbye.swift", "return now >= since && now - since < Self.limit", "return now >= since && now - since <= Self.limit"),
+    ("the limit one minute", "HostGoodbye.swift", "package static let limit: Double = 600", "package static let limit: Double = 60"),
+    ("lapsed while still asleep", "HostGoodbye.swift", "package func lapsed(at now: Double) -> Bool { since != nil && !asleep(at: now) }", "package func lapsed(at now: Double) -> Bool { since != nil }"),
+    ("never lapsed", "HostGoodbye.swift", "package func lapsed(at now: Double) -> Bool { since != nil && !asleep(at: now) }", "package func lapsed(at now: Double) -> Bool { false }"),
+    ("the refusal a quit goodbye", "HostGoodbye.swift", "asleep(at: now) ? HostGoodbye.goodbye(.sleep, mac: mac) : nil", "asleep(at: now) ? HostGoodbye.goodbye(.quit, mac: mac) : nil"),
+    ("the refusal a shut down's (the device would hold 10 minutes)", "HostGoodbye.swift", "asleep(at: now) ? HostGoodbye.goodbye(.sleep, mac: mac) : nil", "asleep(at: now) ? HostGoodbye.goodbye(.restart, mac: mac) : nil"),
+    ("every session refused", "HostGoodbye.swift", "asleep(at: now) ? HostGoodbye.goodbye(.sleep, mac: mac) : nil", "HostGoodbye.goodbye(.sleep, mac: mac)"),
+    ("no session refused", "HostGoodbye.swift", "asleep(at: now) ? HostGoodbye.goodbye(.sleep, mac: mac) : nil", "nil"),
+    ("the wake's line without the count", "HostGoodbye.swift", "(refused > 0 ? \" (\\(refused) session\\(refused == 1 ? \"\" : \"s\") refused while it slept).\" : \".\")", "\".\""),
+    ("the refused count's plural backwards", "HostGoodbye.swift", "session\\(n == 1 ? \"\" : \"s\") from", "session\\(n != 1 ? \"\" : \"s\") from"),
+    ("the lapsed line in seconds", "HostGoodbye.swift", "\\(Int(limit / 60)) minutes ago", "\\(Int(limit)) minutes ago"),
+    ("the refusal's line names no endpoint", "HostGoodbye.swift", "refused a session from \\(endpoint) with the same goodbye.", "refused a session with the same goodbye."),
 ]
 caught = 0
 for name, file, old, new in MUTANTS:

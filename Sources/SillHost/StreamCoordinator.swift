@@ -1137,9 +1137,11 @@ package final class StreamCoordinator {
     /// the Mac from it, as a key press on it would say (issue #134), and whether this one declares it;
     /// DisplayActivity makes the call on its own queue and says "Woke the display for …" only when the
     /// display read asleep before and on half a second later. A test host counts `disp.wakeDry` and
-    /// touches nothing.
+    /// touches nothing. Nothing at all between the Mac's sleep goodbye and its wake (`macAsleep`): a
+    /// session registered just before willSleep has its connect heard here after the observer
+    /// returned, on a Mac being put to sleep.
     private func deviceActive(_ event: DisplayWake.Event, _ connection: NWConnection) {
-        switch displayWake.decide(event, at: CFAbsoluteTimeGetCurrent()) {
+        switch displayWake.decide(event, at: CFAbsoluteTimeGetCurrent(), macAsleep: server.macAsleep()) {
         case .nothing: break
         case .count: Stats.shared.bump(DisplayWake.dryKey)
         case .declare(let activity): displayActivity.declare(for: deviceName(connection), activity)
@@ -2133,19 +2135,24 @@ package final class StreamCoordinator {
 
     /// The Mac about to sleep, while the AppKit loop runs (Sill.app, and the CLI with
     /// --virtual-display): NSWorkspace's willSleep, which it posts on the main thread and lets the Mac
-    /// sleep only once its observers return, so the goodbye goes out first (`goodbyeBeforeSleep`).
+    /// sleep only once its observers return, so the goodbye goes out first (`goodbyeBeforeSleep`), and
+    /// from then until its didWake no door admits a session (StreamServer's SleepWindow, HostGoodbye):
+    /// one that comes gets the same goodbye, and DisplayWake declares nothing (`deviceActive`).
     /// Without the AppKit loop (the CLI's dispatchMain) NSWorkspace says nothing, and a process that
     /// registers for the Mac's sleep there without answering holds it up to 30 s: nothing is
     /// registered, and its devices notice by liveness, as before. Once, from `start`.
     private func observeSleep() {
         guard appKitLoop, sleepObserver == nil else { return }
         let sleep = SleepGoodbye(server: server, mac: macName)
-        // The block runs on the posting thread (queue nil), the main thread, synchronously: it reads
-        // no main-actor state, only what it captured, so no hop is needed.
+        // The blocks run on the posting thread (queue nil), the main thread, synchronously: they read
+        // no main-actor state, only what they captured, so no hop is needed.
         sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification,
                                                                           object: nil, queue: nil) { _ in sleep.send() }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification,
+                                                                         object: nil, queue: nil) { _ in sleep.woke() }
     }
     private var sleepObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
 
     /// macOS said the Mac is about to log out, restart or shut down, while the AppKit loop runs:
     /// NSWorkspace's willPowerOff (issue #105; HostGoodbye has what is known of when it comes). For
@@ -2180,25 +2187,36 @@ package final class StreamCoordinator {
     }
 
     /// The same, now: the bare binary's `-SillSleepAfter` (TEST ONLY, DebugHooks), as if the Mac were
-    /// about to sleep.
+    /// about to sleep: the window opened, then the goodbyes.
     package func goodbyeBeforeSleep() {
         SleepGoodbye(server: server, mac: macName).send()
     }
 
-    /// The Mac is about to sleep: every connected device hears why (kind 22 "sleep", the Mac's words
-    /// and a reconnect), and its connection closes after it (this side's end at once, the device's
-    /// remains read until it closes too, 1 s at most: `goodbyeAll`'s `close`), the goodbye handed to
-    /// the network within 0.1 s, so its status line says so at once rather than when its liveness
-    /// gives up on a Mac gone silent, and its reconnect counts the Mac as asleep (GoodbyePolicy,
-    /// DiscoveryPolicy). One line, only when a device was connected. From any thread but the network
-    /// queue: the server hops onto it (`goodbyeAll`), and the Mac's name is a copy.
+    /// The bare binary's `-SillWakeAfter` (TEST ONLY, DebugHooks), as if the Mac had woken: what
+    /// didWake's observer does, the window ended and the doors admitting devices again.
+    package func wokeForTest() {
+        server.macWoke()
+    }
+
+    /// The Mac is about to sleep: first the doors stop admitting sessions (`macGoingToSleep`: until
+    /// didWake, a session that comes gets this goodbye too), then every connected device hears why
+    /// (kind 22 "sleep", the Mac's words and a reconnect), and its connection closes after it (this
+    /// side's end at once, the device's remains read until it closes too, 1 s at most: `goodbyeAll`'s
+    /// `close`, a timer whose clock stops while the Mac sleeps), the goodbye handed to the network
+    /// within 0.1 s, so its status line says so at once rather than when its liveness gives up on a
+    /// Mac gone silent, and its reconnect counts the Mac as asleep (GoodbyePolicy, DiscoveryPolicy).
+    /// One line, only when a device was connected. From any thread but the network queue: the server
+    /// hops onto it (`goodbyeAll`), and the Mac's name is a copy.
     private struct SleepGoodbye: @unchecked Sendable {
         let server: StreamServer
         let mac: String
         func send() {
+            server.macGoingToSleep()
             let told = server.goodbyeAll(HostGoodbye.goodbye(.sleep, mac: mac), within: 0.1, close: true)
             if let line = HostGoodbye.line(.sleep, devices: told) { print(line) }
         }
+        /// The Mac woke (didWake): the doors admit sessions again (`macWoke`).
+        func woke() { server.macWoke() }
     }
 
     /// The CLI's default path at a signal (HostShutdown.installKeyRelease), just before it dies of it:
