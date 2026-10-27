@@ -134,8 +134,8 @@ final class StreamServer {
         /// It was told why its connection is about to close (kind 22): the first goodbye says why,
         /// and no second one follows it (a Quit right after the Mac's sleep goodbye, or after the
         /// device was removed, never replaces what the device was told). Nothing else is sent to it
-        /// after its goodbye (a frame, a tick, a pong, a pointer report or a state would follow this
-        /// side's end), and what it still sends is read and dropped until it closes
+        /// after its goodbye (a frame, a tick, a pong, a pointer report, a sound packet or a state would
+        /// follow this side's end), and what it still sends is read and dropped until it closes
         /// (`receiveLoop`). On `queue`.
         var told = false
         /// The codec of the Mac's sound it gets, from its hello (`AudioCodec.choose`); nil for a device
@@ -1605,12 +1605,13 @@ final class StreamServer {
         queue.async { [self] in audioFormat = (epoch, format) }
     }
 
-    /// One packets message (a whole kind 43) of `epoch`, to every ready device that plays the sound:
-    /// the epoch's format first to a device that has not had it, then the packet, unless the device
-    /// has `audioCap` messages untaken. Thread-safe.
+    /// One packets message (a whole kind 43) of `epoch`, to every ready device that plays the sound
+    /// and was not told why its connection closes (`told`: nothing follows a goodbye, the sound
+    /// neither): the epoch's format first to a device that has not had it, then the packet, unless the
+    /// device has `audioCap` messages untaken. Thread-safe.
     func broadcastAudio(packets: Data, epoch: Int) {
         queue.async { [self] in
-            for client in clients.values where client.audioCodec == AudioCodec.aacELD && client.connection.state == .ready {
+            for client in clients.values where client.audioCodec == AudioCodec.aacELD && client.connection.state == .ready && !client.told {
                 if client.audioEpochSent != epoch {
                     guard let format = audioFormat, format.epoch == epoch else { continue }
                     sendAudio(format.data, to: client)
@@ -1625,8 +1626,10 @@ final class StreamServer {
         }
     }
 
-    /// On `queue`: one sound message to one device, counted as the section above says.
+    /// On `queue`: one sound message to one device, counted as the section above says. None after its
+    /// goodbye (`told`), as `send` sends none (after the sleep's, this side's end has gone with it).
     private func sendAudio(_ data: Data, to client: Client) {
+        guard !client.told else { return }
         client.audioUnsent += 1
         client.lastSentAt = Date().timeIntervalSince1970
         client.pendingBytes += data.count
