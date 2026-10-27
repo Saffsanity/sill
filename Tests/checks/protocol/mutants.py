@@ -41,6 +41,8 @@ MUTANTS = [
     ("the clipboard numbered 30", "StreamMessage.swift", "case clipboard = 32", "case clipboard = 30"),
     ("the server offers sill/1 alone, whatever serverALPNs says", "RemoteTLS.swift",
      "for alpn in serverALPNs { sec_protocol_options_add_tls_application_protocol(sp, alpn) }", "sec_protocol_options_add_tls_application_protocol(sp, sessionALPN)"),
+    ("Transport.stored ignores quic", "RemoteTLS.swift", "raw == Transport.quic.rawValue ? .quic : .tcp", ".tcp"),
+    ("securityMetadata ignores QUIC metadata", "RemoteTLS.swift", "if let m = connection.metadata(definition: NWProtocolQUIC.definition) as? NWProtocolQUIC.Metadata {\n            return m.securityProtocolMetadata\n        }", ""),
     # Kind 43, the Mac's sound (Audio.swift, docs/audio-plan.md §3.2)
     ("kind 43 as 254", "StreamMessage.swift", "    case audio = 43 ", "    case audio = 254 "),
     ("kind 43: bytes left over accepted", "Audio.swift", "            guard offset == d.count else { return nil }\n", ""),

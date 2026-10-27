@@ -39,6 +39,7 @@ HALF = float(opt("--delay-ms", "70")) / 2000.0
 QUEUE = int(opt("--queue-bytes", "262144"))
 SCHEDULE = [(float(t), float(r)) for t, r in (p.split(":") for p in opt("--rate-at", "").split(",") if p)]
 BLACKHOLE = float(opt("--blackhole-at", "-1"))
+UDP = "--udp" in sys.argv
 T0 = time.monotonic()
 
 def blackholed():
@@ -180,7 +181,102 @@ async def announce_rates():
             print(f"{stamp()} relay: blackhole both ways", flush=True); dark = True
         await asyncio.sleep(0.2)
 
+async def run_udp():
+    loop = asyncio.get_running_loop()
+    dev_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    for opt_name in (socket.SO_RCVBUF, socket.SO_SNDBUF):
+        try: dev_sock.setsockopt(socket.SOL_SOCKET, opt_name, 4 * 1024 * 1024)
+        except OSError: pass
+    dev_sock.bind(("127.0.0.1", LISTEN))
+    dev_sock.setblocking(False)
+    port = dev_sock.getsockname()[1]
+    print(f"{stamp()} bottleneck (UDP) listening on 127.0.0.1:{port} → {HOST}:{PORT}, {RATE:g} Mbit/s, +{HALF*2000:g} ms RTT, queue {QUEUE} B", flush=True)
+    asyncio.ensure_future(announce_rates())
+    sessions = {}   # dev_addr -> host_sock
+    queue, queued = deque(), [0]
+    space, data_ready = asyncio.Event(), asyncio.Event()
+    space.set()
+    line, line_ready = deque(), asyncio.Event()
+    up, up_ready = deque(), asyncio.Event()
+
+    async def recv_host(dev_addr, host_sock):
+        while True:
+            try:
+                while queued[0] >= QUEUE:
+                    space.clear(); await space.wait()
+                while blackholed(): await asyncio.sleep(0.1)
+                pkt = await loop.sock_recv(host_sock, 65536)
+                if not pkt: break
+                queue.append((dev_addr, pkt)); queued[0] += len(pkt); data_ready.set()
+            except OSError:
+                break
+
+    async def recv_dev():
+        while True:
+            pkt, addr = await loop.sock_recvfrom(dev_sock, 65536)
+            hs = sessions.get(addr)
+            if hs is None:
+                hs = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                for opt_name in (socket.SO_RCVBUF, socket.SO_SNDBUF):
+                    try: hs.setsockopt(socket.SOL_SOCKET, opt_name, 4 * 1024 * 1024)
+                    except OSError: pass
+                hs.connect((HOST, PORT))
+                hs.setblocking(False)
+                sessions[addr] = hs
+                print(f"{stamp()} relay #{len(sessions)}: open (UDP {addr[0]}:{addr[1]})", flush=True)
+                asyncio.ensure_future(recv_host(addr, hs))
+            if not blackholed():
+                up.append((time.monotonic() + HALF, hs, pkt)); up_ready.set()
+
+    async def serialize():
+        free = time.monotonic()
+        while True:
+            if not queue:
+                while not queue:
+                    data_ready.clear(); await data_ready.wait()
+                free = max(free, time.monotonic())
+            dev_addr, pkt = queue[0]
+            if blackholed():
+                await asyncio.sleep(0.1); free = time.monotonic(); continue
+            r = rate_now()
+            if r <= 0:
+                await asyncio.sleep(0.05); free = time.monotonic(); continue
+            free += len(pkt) * 8 / (r * 1e6)
+            wait = free - time.monotonic()
+            if wait > 0.001: await asyncio.sleep(wait)
+            queue.popleft(); queued[0] -= len(pkt); space.set()
+            line.append((free + HALF, dev_addr, pkt)); line_ready.set()
+
+    async def deliver_down():
+        while True:
+            while not line:
+                line_ready.clear(); await line_ready.wait()
+            due, dev_addr, pkt = line[0]
+            w = due - time.monotonic()
+            if w > 0: await asyncio.sleep(w)
+            line.popleft()
+            if not blackholed():
+                try: await loop.sock_sendto(dev_sock, pkt, dev_addr)
+                except OSError: pass
+
+    async def deliver_up():
+        while True:
+            while not up:
+                up_ready.clear(); await up_ready.wait()
+            due, hs, pkt = up[0]
+            w = due - time.monotonic()
+            if w > 0: await asyncio.sleep(w)
+            up.popleft()
+            if not blackholed():
+                try: await loop.sock_sendall(hs, pkt)
+                except OSError: pass
+
+    await asyncio.gather(recv_dev(), serialize(), deliver_down(), deliver_up())
+
 async def main():
+    if UDP:
+        await run_udp()
+        return
     server = await asyncio.start_server(handle, "127.0.0.1", LISTEN)
     port = server.sockets[0].getsockname()[1]
     print(f"{stamp()} bottleneck listening on 127.0.0.1:{port} → {HOST}:{PORT}, {RATE:g} Mbit/s, +{HALF*2000:g} ms RTT, queue {QUEUE} B", flush=True)

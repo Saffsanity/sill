@@ -136,6 +136,13 @@ final class Door {
         }
     }
 
+    /// The same server options for QUIC over UDP on this door's port.
+    func quicOptions() -> NWProtocolQUIC.Options {
+        RemoteTLS.quicOptions(identity: identity.remote.tls, role: .server, queue: queue) { [weak self] fp, alpn in
+            self?.verify(fp, alpn) ?? false
+        }
+    }
+
     // MARK: Admission
 
     /// What DoorPolicy knows about a key, from the snapshot as it is now.

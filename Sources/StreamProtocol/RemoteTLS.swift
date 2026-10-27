@@ -38,6 +38,25 @@ public enum RemoteTLS {
     public static let serverName = "sill"
     /// A device's TCP connect timeout for one attempt, seconds.
     public static let dialTimeout = 10
+    /// QUIC idle timeout in milliseconds, matching `tcpOptions`'s 15 s `connectionDropTime`.
+    public static let quicIdleTimeoutMs = 15_000
+
+    /// Which transport carries a Sill session or pairing exchange: TCP (the default) or QUIC over
+    /// UDP on the same port.
+    public enum Transport: String, CaseIterable, Sendable, Equatable {
+        case tcp, quic
+        public static let defaultsKey = "Sill.transport"
+        public static func stored(_ raw: String?) -> Transport {
+            raw == Transport.quic.rawValue ? .quic : .tcp
+        }
+        public var title: String {
+            switch self {
+            case .tcp: return "TCP"
+            case .quic: return "UDP (QUIC)"
+            }
+        }
+        public static let footnote = "How this device connects to a Mac: TCP (the default) or QUIC over UDP on the same port. Takes effect the next time you connect."
+    }
 
     public enum Role: Sendable {
         /// The host: offers `serverALPNs` and requires a client certificate.
@@ -53,7 +72,44 @@ public enum RemoteTLS {
     public static func options(identity: sec_identity_t, role: Role, queue: DispatchQueue,
                                verify: @escaping (_ peerFingerprint: Data?, _ alpn: String?) -> Bool) -> NWProtocolTLS.Options {
         let options = NWProtocolTLS.Options()
-        let sp = options.securityProtocolOptions
+        configureSecurity(options.securityProtocolOptions, identity: identity, role: role, queue: queue, verify: verify)
+        return options
+    }
+
+    /// The same, for a side that pins by key alone (a device dialing a saved Mac, a test client).
+    public static func options(identity: sec_identity_t, role: Role, verify: @escaping (Data?) -> Bool,
+                               queue: DispatchQueue) -> NWProtocolTLS.Options {
+        options(identity: identity, role: role, queue: queue) { fp, _ in verify(fp) }
+    }
+
+    /// QUIC options for `role` over UDP: the same TLS 1.3 security options, certificate pinning and
+    /// ALPNs as `options`, with one bidirectional stream per tunnel and a 15 s idle timeout.
+    public static func quicOptions(identity: sec_identity_t, role: Role, queue: DispatchQueue,
+                                   verify: @escaping (_ peerFingerprint: Data?, _ alpn: String?) -> Bool) -> NWProtocolQUIC.Options {
+        let alpn: [String] = {
+            switch role {
+            case .server: return serverALPNs
+            case .client(let a): return [a]
+            }
+        }()
+        let options = NWProtocolQUIC.Options(alpn: alpn)
+        options.direction = .bidirectional
+        options.idleTimeout = quicIdleTimeoutMs
+        options.initialMaxStreamsBidirectional = 1
+        options.initialMaxStreamsUnidirectional = 0
+        configureSecurity(options.securityProtocolOptions, identity: identity, role: role, queue: queue, verify: verify)
+        return options
+    }
+
+    /// The same, for a side that pins by key alone.
+    public static func quicOptions(identity: sec_identity_t, role: Role, verify: @escaping (Data?) -> Bool,
+                                   queue: DispatchQueue) -> NWProtocolQUIC.Options {
+        quicOptions(identity: identity, role: role, queue: queue) { fp, _ in verify(fp) }
+    }
+
+    private static func configureSecurity(_ sp: sec_protocol_options_t, identity: sec_identity_t, role: Role,
+                                          queue: DispatchQueue,
+                                          verify: @escaping (_ peerFingerprint: Data?, _ alpn: String?) -> Bool) {
         sec_protocol_options_set_min_tls_protocol_version(sp, .TLSv13)
         sec_protocol_options_set_max_tls_protocol_version(sp, .TLSv13)
         sec_protocol_options_set_local_identity(sp, identity)
@@ -77,13 +133,6 @@ public enum RemoteTLS {
             // matches.
             complete(verify(peerLeaf(metadata).flatMap { SPKI.fingerprint(of: $0) }, negotiatedALPN(metadata)))
         }, queue)
-        return options
-    }
-
-    /// The same, for a side that pins by key alone (a device dialing a saved Mac, a test client).
-    public static func options(identity: sec_identity_t, role: Role, verify: @escaping (Data?) -> Bool,
-                               queue: DispatchQueue) -> NWProtocolTLS.Options {
-        options(identity: identity, role: role, queue: queue) { fp, _ in verify(fp) }
     }
 
     /// TCP for the remote door: no Nagle; keepalive after 5 s idle, every 2 s, 3 probes, so a peer
@@ -121,17 +170,60 @@ public enum RemoteTLS {
         return p
     }
 
-    /// The application protocol a ready connection negotiated; nil for none (or not TLS).
+    /// Parameters for a QUIC listener or connection: the video service class, and peer-to-peer
+    /// (AWDL) only when the caller asks for it at the home door.
+    public static func quicParameters(quic: NWProtocolQUIC.Options, peerToPeer: Bool = false) -> NWParameters {
+        let p = NWParameters(quic: quic)
+        p.serviceClass = .interactiveVideo
+        p.includePeerToPeer = peerToPeer
+        return p
+    }
+
+    /// Wires a QUIC `NWListener` so each incoming tunnel (`NWConnectionGroup`) accepts at most one
+    /// client-initiated bidirectional stream (`streamIdentifier == 0`) and hands that stream to
+    /// `onConnection`, without creating a dummy server-initiated stream (`streamIdentifier == 1`).
+    public static func attachQUICGroups(_ listener: NWListener, queue: DispatchQueue,
+                                        onConnection: @escaping (NWConnection) -> Void) {
+        listener.newConnectionGroupHandler = { group in
+            var accepted = false
+            group.newConnectionHandler = { c in
+                guard !accepted else { c.cancel(); return }
+                accepted = true
+                onConnection(c)
+            }
+            group.stateUpdateHandler = { state in
+                if case .failed = state { group.cancel() }
+            }
+            group.start(queue: queue)
+        }
+    }
+
+    /// True when `connection` runs over QUIC rather than TCP.
+    public static func isQUIC(_ connection: NWConnection) -> Bool {
+        connection.metadata(definition: NWProtocolQUIC.definition) is NWProtocolQUIC.Metadata
+    }
+
+    private static func securityMetadata(_ connection: NWConnection) -> sec_protocol_metadata_t? {
+        if let m = connection.metadata(definition: NWProtocolTLS.definition) as? NWProtocolTLS.Metadata {
+            return m.securityProtocolMetadata
+        }
+        if let m = connection.metadata(definition: NWProtocolQUIC.definition) as? NWProtocolQUIC.Metadata {
+            return m.securityProtocolMetadata
+        }
+        return nil
+    }
+
+    /// The application protocol a ready connection negotiated; nil for none (or not TLS/QUIC).
     public static func negotiatedALPN(_ connection: NWConnection) -> String? {
-        guard let m = connection.metadata(definition: NWProtocolTLS.definition) as? NWProtocolTLS.Metadata else { return nil }
-        return negotiatedALPN(m.securityProtocolMetadata)
+        guard let sec = securityMetadata(connection) else { return nil }
+        return negotiatedALPN(sec)
     }
 
     /// The fingerprint of a ready connection's peer certificate (its leaf); nil when there is none
     /// or its key is not P-256.
     public static func peerFingerprint(_ connection: NWConnection) -> Data? {
-        guard let m = connection.metadata(definition: NWProtocolTLS.definition) as? NWProtocolTLS.Metadata else { return nil }
-        return peerLeaf(m.securityProtocolMetadata).flatMap { SPKI.fingerprint(of: $0) }
+        guard let sec = securityMetadata(connection) else { return nil }
+        return peerLeaf(sec).flatMap { SPKI.fingerprint(of: $0) }
     }
 
     /// The first certificate the peer sent (its own), exactly as the handshake carried it. Never

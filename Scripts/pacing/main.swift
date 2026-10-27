@@ -67,6 +67,8 @@ let seconds = Double(value("--seconds", "60"))!
 let logPath = value("--log", "")
 let home = args.contains("--home")
 let plain = home || args.contains("--plain")
+let quic = args.contains("--quic")
+let devicePort = UInt16(value("--device", "0"))!
 /// "T:kf:delta,T:kf:delta": at T seconds, the sizes change (a settings change: Pro → Low).
 let schedule: [(t: Double, kf: Int, delta: Int)] = value("--sizes-at", "").split(separator: ",").compactMap {
     let p = $0.split(separator: ":"); guard p.count == 3 else { return nil }
@@ -85,6 +87,187 @@ let linkBitrate = Int(value("--bitrate", "40000000"))!
 let withAudio = args.contains("--audio")
 
 if !logPath.isEmpty { HostLog.shared.configure(keepLines: 0, fileURL: URL(fileURLWithPath: logPath)) }
+
+if devicePort != 0 {
+    // Device mode (`--device PORT`): the same reader, 0.25 s ping, 1 s stats window and liveness
+    // rule as `device.py`, over Network.framework's QUIC (`--quic`) or TLS/TCP, so `summarize.py`
+    // reads the exact same lines.
+    let reconnect = args.contains("--reconnect")
+    let bytesLiveness = args.contains("--liveness-bytes")
+    let tag = value("--tag", "dev")
+    let devQueue = DispatchQueue(label: "harness.device")
+    let key = RemoteKey.generate()!
+    let identity = RemoteIdentity(privateKey: key)!
+    let deadline = ProcessInfo.processInfo.systemUptime + seconds
+    var newest = 0.0
+
+    func stamp() -> String {
+        let t = Date().timeIntervalSince1970
+        let sec = Int(t)
+        let ms = Int((t - Double(sec)) * 1000)
+        var tm = tm()
+        var s = time_t(sec)
+        localtime_r(&s, &tm)
+        return String(format: "%02d:%02d:%02d.%03d", tm.tm_hour, tm.tm_min, tm.tm_sec, ms)
+    }
+    func say(_ s: String) { print("\(stamp()) \(tag): \(s)") }
+    func medmax(_ xs: [Double]) -> (Int, Int)? {
+        guard !xs.isEmpty else { return nil }
+        let s = xs.sorted()
+        return (Int(s[s.count / 2].rounded()), Int(s[s.count - 1].rounded()))
+    }
+
+    func startSession() {
+        guard ProcessInfo.processInfo.systemUptime < deadline else { exit(0) }
+        let params: NWParameters
+        if plain {
+            params = NWParameters(tls: nil, tcp: RemoteTLS.tcpOptions(dialing: true))
+            params.serviceClass = .interactiveVideo
+        } else {
+            #if QUIC_TRANSPORT
+            if quic {
+                let qo = RemoteTLS.quicOptions(identity: identity.tls, role: .client(alpn: RemoteTLS.sessionALPN), verify: { _ in true }, queue: devQueue)
+                params = RemoteTLS.quicParameters(quic: qo)
+            } else {
+                let tls = RemoteTLS.options(identity: identity.tls, role: .client(alpn: RemoteTLS.sessionALPN), verify: { _ in true }, queue: devQueue)
+                params = RemoteTLS.parameters(tls: tls, dialing: true)
+            }
+            #else
+            let tls = RemoteTLS.options(identity: identity.tls, role: .client(alpn: RemoteTLS.sessionALPN), verify: { _ in true }, queue: devQueue)
+            params = RemoteTLS.parameters(tls: tls, dialing: true)
+            #endif
+        }
+        let c = NWConnection(to: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: devicePort)!), using: params)
+        var last = ProcessInfo.processInfo.systemUptime
+        var worst: Int?
+        var frames = 0, bytes = 0, keys = 0
+        var ages: [Double] = [], rtts: [Double] = []
+        var open = true
+        var why: String?
+        var pingTimer: DispatchSourceTimer?
+        var winTimer: DispatchSourceTimer?
+
+        func closeSession(_ reason: String) {
+            guard open else { return }
+            open = false
+            why = why ?? reason
+            pingTimer?.cancel(); winTimer?.cancel()
+            say("closed (\(why!))")
+            if why == "done" || !reconnect {
+                c.cancel(); exit(0)
+            }
+            c.cancel()
+            devQueue.asyncAfter(deadline: .now() + 3) { startSession() }
+        }
+
+        var buf = Data()
+        var need: StreamHeader?
+        func readLoop() {
+            c.receive(minimumIncompleteLength: 1, maximumLength: 262144) { data, _, isComplete, err in
+                guard open else {
+                    if data != nil, !isComplete, err == nil { readLoop() }
+                    return
+                }
+                guard let data, !data.isEmpty else {
+                    if isComplete || err != nil { closeSession("host closed") }
+                    return
+                }
+                bytes += data.count
+                if bytesLiveness { last = ProcessInfo.processInfo.systemUptime }
+                buf.append(data)
+                while true {
+                    if need == nil {
+                        guard buf.count >= StreamMessage.headerLength else { break }
+                        let hdrBytes = buf.prefix(StreamMessage.headerLength)
+                        buf.removeFirst(StreamMessage.headerLength)
+                        need = StreamMessage.parseHeader(Data(hdrBytes))
+                        last = ProcessInfo.processInfo.systemUptime
+                    }
+                    guard let h = need else { break }
+                    let n = Int(h.payloadLength)
+                    guard buf.count >= n else { break }
+                    let payload = Data(buf.prefix(n))
+                    buf.removeFirst(n)
+                    need = nil
+                    if n > 0 { last = ProcessInfo.processInfo.systemUptime }
+                    if h.kind == .frame {
+                        frames += 1
+                        newest = max(newest, h.timestamp)
+                        ages.append(max(0.0, (Date().timeIntervalSince1970 - h.timestamp) * 1000))
+                        if h.isKeyframe { keys += 1 }
+                    } else if h.kind == .pong, payload.count >= 8 {
+                        let sent = Double(bitPattern: payload.withUnsafeBytes { $0.load(as: UInt64.self).bigEndian })
+                        rtts.append(max(0.0, (ProcessInfo.processInfo.systemUptime - sent) * 1000))
+                    }
+                }
+                readLoop()
+            }
+        }
+
+        c.stateUpdateHandler = { st in
+            switch st {
+            case .ready:
+                say("connected")
+                last = ProcessInfo.processInfo.systemUptime
+                // Send Hello (kind 23) so a QUIC client-initiated stream (stream 0) opens at once.
+                let hello = Wire.encode(Hello(appVersion: "0.5.1", build: "4", protocol: SillProtocol.current, device: "harness"))
+                let msg = StreamMessage(kind: .hello, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: hello)
+                c.send(content: msg.serialized(), completion: .contentProcessed { _ in })
+                readLoop()
+                let pt = DispatchSource.makeTimerSource(queue: devQueue)
+                pt.schedule(deadline: .now() + 0.25, repeating: 0.25)
+                pt.setEventHandler {
+                    guard open else { return }
+                    let now = ProcessInfo.processInfo.systemUptime
+                    let limit = max(6.0, 4.0 * Double(worst ?? 0) / 1000.0)
+                    if now - last > limit {
+                        say("connection silent for \(Int(now - last)) s: lost")
+                        closeSession("liveness")
+                        return
+                    }
+                    var p = Data(capacity: 8)
+                    var v = now.bitPattern.bigEndian
+                    withUnsafeBytes(of: &v) { p.append(contentsOf: $0) }
+                    let pingMsg = StreamMessage(kind: .ping, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: p)
+                    c.send(content: pingMsg.serialized(), completion: .contentProcessed { _ in })
+                }
+                pingTimer = pt
+                pt.resume()
+
+                var opened = ProcessInfo.processInfo.systemUptime
+                let wt = DispatchSource.makeTimerSource(queue: devQueue)
+                wt.schedule(deadline: .now() + 1.0, repeating: 1.0)
+                wt.setEventHandler {
+                    guard open else { return }
+                    let now = ProcessInfo.processInfo.systemUptime
+                    let f = Int((Double(frames) / max(0.001, now - opened)).rounded())
+                    opened = now
+                    let age = medmax(ages), rtt = medmax(rtts)
+                    if let rtt { worst = rtt.1 }
+                    let stats = ClientStats(fps: f, frameAgeMs: age?.0 ?? -1, rttMs: rtt?.0 ?? -1,
+                                            device: "harness", frameAgeMaxMs: age?.1 ?? -1, rttMaxMs: rtt?.1 ?? -1)
+                    let statsMsg = StreamMessage(kind: .clientStats, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: Wire.encode(stats))
+                    c.send(content: statsMsg.serialized(), completion: .contentProcessed { _ in })
+                    let aStr = age.map { "\($0.0)/\($0.1)" } ?? "–"
+                    let rStr = rtt.map { "\($0.0)/\($0.1)" } ?? "–"
+                    say(String(format: "%3d fps  age %11@  rtt %11@  in %5d kB  keys %d  newest %.3f",
+                               f, aStr as NSString, rStr as NSString, bytes / 1000, keys, newest))
+                    frames = 0; ages.removeAll(); rtts.removeAll(); bytes = 0; keys = 0
+                    if now > deadline { closeSession("done") }
+                }
+                winTimer = wt
+                wt.resume()
+            case .failed(let e):
+                say("error: \(e)")
+                closeSession("error")
+            default: break
+            }
+        }
+        c.start(queue: devQueue)
+    }
+    devQueue.async { startSession() }
+    dispatchMain()
+}
 
 final class FakeEncoder {
     private let lock = NSLock()
@@ -185,17 +368,27 @@ if plain {
     params.serviceClass = .interactiveVideo
 } else {
     guard let key = RemoteKey.generate(), let identity = RemoteIdentity(privateKey: key) else { fatalError("no identity") }
+    #if QUIC_TRANSPORT
+    if quic {
+        let qo = RemoteTLS.quicOptions(identity: identity.tls, role: .server, queue: server.queue) { _, _ in true }
+        params = RemoteTLS.quicParameters(quic: qo)
+    } else {
+        let tls = RemoteTLS.options(identity: identity.tls, role: .server, queue: server.queue) { _, _ in true }
+        params = RemoteTLS.parameters(tls: tls, dialing: false)
+    }
+    #else
     let tls = RemoteTLS.options(identity: identity.tls, role: .server, queue: server.queue) { _, _ in true }
     params = RemoteTLS.parameters(tls: tls, dialing: false)
+    #endif
 }
 params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: port == 0 ? .any : NWEndpoint.Port(rawValue: port)!)
 let doorName = home ? "Home" : "Remote"
 let door = try NWListener(using: params)
 door.stateUpdateHandler = { state in
-    if case .ready = state { print("\(doorName) door listening on port \(door.port!.rawValue) (\(plain ? "TCP" : "TLS 1.3"), loopback)") }
+    if case .ready = state { print("\(doorName) door listening on port \(door.port!.rawValue) (\(plain ? "TCP" : (quic ? "QUIC" : "TLS 1.3")), loopback)") }
     if case .failed(let e) = state { print("\(doorName) door failed: \(e)"); exit(1) }
 }
-door.newConnectionHandler = { c in
+let acceptConnection: (NWConnection) -> Void = { c in
     c.stateUpdateHandler = { state in
         switch state {
         case .ready:
@@ -225,6 +418,15 @@ door.newConnectionHandler = { c in
     }
     c.start(queue: server.queue)
 }
+#if QUIC_TRANSPORT
+if quic {
+    RemoteTLS.attachQUICGroups(door, queue: server.queue, onConnection: acceptConnection)
+} else {
+    door.newConnectionHandler = acceptConnection
+}
+#else
+door.newConnectionHandler = acceptConnection
+#endif
 door.start(queue: server.queue)
 server.setStreaming(true)
 

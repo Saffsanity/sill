@@ -477,32 +477,52 @@ let mac = RemoteIdentity(privateKey: RemoteKey.generate()!)!
 let dev = RemoteIdentity(privateKey: RemoteKey.generate()!)!
 let stranger = RemoteIdentity(privateKey: RemoteKey.generate()!)!
 final class Box: @unchecked Sendable { var lines: [String] = []; var serverALPNSeen: [String?] = [] }
-func handshake(_ client: RemoteIdentity, alpn: String, pin: Data, paired: Set<Data>, pairingOpen: Bool) -> (clientReady: Bool, echo: Bool, serverALPN: String?, serverPeer: Data?, clientPeer: Data?, box: Box) {
+func handshake(_ client: RemoteIdentity, alpn: String, pin: Data, paired: Set<Data>, pairingOpen: Bool,
+               transport: RemoteTLS.Transport = .tcp) -> (clientReady: Bool, echo: Bool, serverALPN: String?, serverPeer: Data?, clientPeer: Data?, isQUIC: Bool, box: Box) {
     let box = Box()
-    let server = RemoteTLS.options(identity: mac.tls, role: .server, queue: q) { fp, a in
+    let verify: (Data?, String?) -> Bool = { fp, a in
         box.serverALPNSeen.append(a)
         guard let fp else { return false }
         return a == RemoteTLS.sessionALPN ? paired.contains(fp) : (a == RemoteTLS.pairingALPN && pairingOpen)
     }
-    let params = RemoteTLS.parameters(tls: server, dialing: false)
+    let params: NWParameters
+    if transport == .quic {
+        let server = RemoteTLS.quicOptions(identity: mac.tls, role: .server, queue: q, verify: verify)
+        params = RemoteTLS.quicParameters(quic: server)
+    } else {
+        let server = RemoteTLS.options(identity: mac.tls, role: .server, queue: q, verify: verify)
+        params = RemoteTLS.parameters(tls: server, dialing: false)
+    }
     params.requiredInterfaceType = .loopback
     let l = try! NWListener(using: params)
-    var serverALPN: String?, serverPeer: Data?, clientPeer: Data?, ready = false, echo = false
+    var serverALPN: String?, serverPeer: Data?, clientPeer: Data?, ready = false, echo = false, serverQUIC = false
     var accepted: [NWConnection] = []
     let done = DispatchSemaphore(value: 0)
-    l.newConnectionHandler = { c in
+    let accept: (NWConnection) -> Void = { c in
         accepted.append(c)
         c.stateUpdateHandler = { st in
             if case .ready = st {
+                serverQUIC = RemoteTLS.isQUIC(c)
                 serverALPN = RemoteTLS.negotiatedALPN(c); serverPeer = RemoteTLS.peerFingerprint(c)
                 c.receive(minimumIncompleteLength: 4, maximumLength: 4) { d, _, _, _ in if let d { c.send(content: d, completion: .contentProcessed { _ in }) } }
             }
         }
         c.start(queue: q)
     }
+    if transport == .quic {
+        RemoteTLS.attachQUICGroups(l, queue: q, onConnection: accept)
+    } else {
+        l.newConnectionHandler = accept
+    }
     l.stateUpdateHandler = { st in
         guard case .ready = st, let port = l.port else { return }
-        let cp = RemoteTLS.parameters(tls: RemoteTLS.options(identity: client.tls, role: .client(alpn: alpn), verify: { $0 == pin }, queue: q), dialing: true)
+        let cp: NWParameters
+        if transport == .quic {
+            let co = RemoteTLS.quicOptions(identity: client.tls, role: .client(alpn: alpn), verify: { $0 == pin }, queue: q)
+            cp = RemoteTLS.quicParameters(quic: co)
+        } else {
+            cp = RemoteTLS.parameters(tls: RemoteTLS.options(identity: client.tls, role: .client(alpn: alpn), verify: { $0 == pin }, queue: q), dialing: true)
+        }
         let c = NWConnection(to: .hostPort(host: "127.0.0.1", port: port), using: cp)
         var finished = false
         func finish() { if !finished { finished = true; c.cancel(); done.signal() } }
@@ -527,7 +547,7 @@ func handshake(_ client: RemoteIdentity, alpn: String, pin: Data, paired: Set<Da
     l.start(queue: q)
     _ = done.wait(timeout: .now() + 5)
     q.sync { accepted.forEach { $0.cancel() }; l.cancel() }
-    return (ready, echo, serverALPN, serverPeer, clientPeer, box)
+    return (ready, echo, serverALPN, serverPeer, clientPeer, serverQUIC, box)
 }
 var r = handshake(dev, alpn: RemoteTLS.sessionALPN, pin: mac.fingerprint, paired: [dev.fingerprint], pairingOpen: false)
 check("TLS: a paired key on sill/1 — ready, echo, both ALPNs sill/1, both peers pinned",
@@ -552,6 +572,22 @@ check("TLS: an ALPN the host does not offer — refused (\(r.box.lines.joined(se
 check("floor: every host offers sill/1 and sill-pair/1 (\(RemoteTLS.serverALPNs))",
       RemoteTLS.serverALPNs.contains("sill/1") && RemoteTLS.serverALPNs.contains("sill-pair/1"))
 check("floor: the two names never change", RemoteTLS.sessionALPN == "sill/1" && RemoteTLS.pairingALPN == "sill-pair/1")
+check("transport: stored reads tcp by default and quic when set",
+      RemoteTLS.Transport.stored(nil) == .tcp && RemoteTLS.Transport.stored("") == .tcp
+      && RemoteTLS.Transport.stored("quic") == .quic && RemoteTLS.Transport.stored("tcp") == .tcp
+      && RemoteTLS.Transport.tcp.title == "TCP" && RemoteTLS.Transport.quic.title == "UDP (QUIC)")
+var qres = handshake(dev, alpn: RemoteTLS.sessionALPN, pin: mac.fingerprint, paired: [dev.fingerprint], pairingOpen: false, transport: .quic)
+check("QUIC: a paired key on sill/1 — ready, echo, both ALPNs sill/1, both peers pinned, isQUIC true",
+      qres.clientReady && qres.echo && qres.isQUIC && !r.isQUIC && qres.serverALPN == "sill/1"
+      && qres.serverPeer == dev.fingerprint && qres.clientPeer == mac.fingerprint)
+qres = handshake(stranger, alpn: RemoteTLS.sessionALPN, pin: mac.fingerprint, paired: [dev.fingerprint], pairingOpen: true, transport: .quic)
+check("QUIC: an unpaired key on sill/1 — refused in the handshake", !qres.echo)
+qres = handshake(stranger, alpn: RemoteTLS.pairingALPN, pin: mac.fingerprint, paired: [dev.fingerprint], pairingOpen: true, transport: .quic)
+check("QUIC: an unpaired key on sill-pair/1 while pairing is open — admitted", qres.echo && qres.serverALPN == "sill-pair/1")
+qres = handshake(dev, alpn: RemoteTLS.sessionALPN, pin: stranger.fingerprint, paired: [dev.fingerprint], pairingOpen: false, transport: .quic)
+check("QUIC: the client's pin does not match — refused, never echoes", !qres.echo)
+qres = handshake(dev, alpn: "sill/2", pin: mac.fingerprint, paired: [dev.fingerprint], pairingOpen: false, transport: .quic)
+check("QUIC: an ALPN the host does not offer — refused", !qres.clientReady && !qres.echo)
 
 // MARK: - Reverse Scrolling (issue #143): fingers on the glass turn around; a connected trackpad's
 // or mouse's scroll events never do (iPadOS's own Natural Scrolling has set them)
