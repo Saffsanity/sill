@@ -5287,9 +5287,14 @@ good.
   which change of the Mac's pasteboard the host sends and to whom, and only
   while macOS allows every read (`MacAccess`); the device's subscription,
   which text from the Mac it writes, a Paste's receipt, the chip and its time,
-  every word; pure, `Tests/checks/clipboard`). Kind 44, `keyframeRequest`
-  (device → host, no payload: this device's picture was interrupted and waits
-  for a keyframe; issue #101), has no type of its own.
+  every word; pure, `Tests/checks/clipboard`). `ScrollDirection.swift` — which
+  way a scroll on the device moves the Mac's content: the device's Reverse
+  Scrolling (issue #143, `Sill.reverseScroll`, never sent) turns a finger's drag
+  over the picture and two fingers on the on-screen trackpad around, their coast
+  too, never a connected trackpad's or mouse's scroll events (iPadOS's own
+  Natural Scrolling set those); pure, `Tests/checks/protocol`. Kind 44,
+  `keyframeRequest` (device → host, no payload: this device's picture was
+  interrupted and waits for a keyframe; issue #101), has no type of its own.
 - `Sources/SillHost/` — the `SillHostCore` library. `StreamCoordinator` (main
   actor; owns the pipeline, switches sources on client request, raises the
   picked window in regular mode (never on the virtual display), applies
@@ -5776,7 +5781,8 @@ good.
   says what drew this device's pointer; hardware keys through `ForwardedKeys`,
   let go when the overlay stops taking keys; Esc's key commands; the iPad's
   trackpad's and a wheel's scroll pans beside the finger pan, one scroll path
-  (`scroll(_:at:translation:velocity:from:)`); `InputOverlayProxy`, who holds
+  (`scroll(_:at:translation:velocity:from:)`, a finger's drag in Reverse
+  Scrolling's direction, `ScrollDirection`); `InputOverlayProxy`, who holds
   the keyboard, carrying out `HardwareKeyboardPolicy`; `HardwareKeyboardMonitor`,
   GameController's keyboard), `HardwareKeyboardPolicy` (when the stream's input
   view holds the keyboard for a hardware keyboard and when it is the person's
@@ -5788,7 +5794,8 @@ good.
   pressesBegan; pure, `Tests/checks/key-strokes` with the
   host's KeyStrokes), `TrackpadView` (the relative pad: its
   cursor a `PadCursor`, from the anchor; a recognizer that only counts fingers;
-  `verticalSpan`, a phone's width ÷ 1.6, and the DEBUG input test),
+  `verticalSpan`, a phone's width ÷ 1.6; its two-finger scroll and coast in
+  Reverse Scrolling's direction, `ScrollDirection`; and the DEBUG input test),
   `HEVCDisplayView` (shared display view, the one pointer sprite + DEBUG HUD;
   the picture's interruptions on the network queue: `checkLayer` flushes a layer
   that failed, could not decode a frame or needs a flush to decode again, at each
@@ -6168,7 +6175,10 @@ no-device check); `SILL_TEST_INPUT_LOG=1` prints each event the dry run would
 post, "Test input: key 49 down (command)" with the flags it was made with, and
 a pointer or scroll event with those the last keyboard event would have left
 in the HID state table, a button's with where it goes ("Test input: left mouse
-down (none) at 756,474"), and each check a key's up arms ("Test input: key 55
+down (none) at 756,474"), a scroll's with its point deltas and phase ("Test
+input: scroll dy -12 dx 0, gesture changed (none)": positive dy moves the
+content down, so the sign shows which way a device's scroll went), and each
+check a key's up arms ("Test input: key 55
 up: the table read again in 0.25 s for command"): what a device's keys and
 buttons leave for its next click (KeyStrokes), without posting anything.
 A sleeping display, headless: a test host declares no user activity and counts
@@ -6296,9 +6306,11 @@ vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|remove
 remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
 remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (the panel
 scrolled to its end), `-SillSettingsScroll gestures` (the panel scrolled to its
-This iPad group; the mock Mac takes gestures in every case but `legacy`),
+This iPad group; the mock Mac takes gestures in every case but `legacy`; `reverse`
+to its Reverse Scrolling switch),
 `-Sill.trackpadGestures 0` (the device's Three-Finger Gestures off for one run,
-in the normal app too), `-Sill.largerPicture 1` (its Larger Picture on for one run,
+in the normal app too), `-Sill.reverseScroll 1` (its Reverse Scrolling on for one
+run, in the normal app too), `-Sill.largerPicture 1` (its Larger Picture on for one run,
 in effect while a window streams, as the mock does but with `-SillActive desktop|none`;
 the console's `larger picture: …` line says what the rule made of it;
 `-SillVideoSize WxH` the mock's frame, `-SillLargerPictureToggle <s>[,<s>…]` the
@@ -6379,12 +6391,14 @@ cable and Wi-Fi come and go on cue, so the session follows the best path for
 real; the spec is ContentView's contract, the console's "path: …" lines say
 what happened), `-SillInputScript '<t> <step>; …'` (with `-SillLive 1`: input
 with no finger, t seconds after the session's first window list: `down`, `pad
-DX,DY`, `lift` and `click` on the portrait pad, `tap X,Y` on the stream at a
-frame fraction, `key USAGE` a hardware key, `row USAGE` a key of the portrait
+DX,DY`, `lift` and `click` on the portrait pad, `padscroll DX,DY` two fingers
+scrolling it with their coast, `tap X,Y` on the stream at a frame fraction,
+`drag DX,DY` a finger dragged over it (a scroll, with its coast), `key USAGE` a
+hardware key, `row USAGE` a key of the portrait
 key row, `gesture NAME[,FINGERS]` a three-finger gesture through
 `StreamClient.sendGesture`, `esc [MODS]` Esc through the stream's key command
-(only while the input view takes Esc), `scroll DX,DY` a trackpad's two-finger
-scroll with its coast, `wheel DX,DY` a wheel's plain deltas, `keyboard
+(only while the input view takes Esc), `scroll DX,DY` a connected trackpad's
+two-finger scroll with its coast, `wheel DX,DY` a wheel's plain deltas, `keyboard
 attach|detach` a hardware keyboard coming or going, `orient landscape|portrait`
 the scene turned (an iPhone's); the console's "input script: …" and "pointer: …" lines say what
 happened; it runs only when the session was dialled by `-SillConnect` to a

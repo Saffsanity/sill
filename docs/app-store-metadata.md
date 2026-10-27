@@ -418,6 +418,8 @@ Larger Picture, in Settings on iPhone: held upright, a window’s picture takes 
 
 With a keyboard attached to your iPhone or iPad, what you type goes to your Mac as soon as its picture shows, Esc included, without the Keyboard button. Two fingers on a trackpad, or a mouse’s scroll wheel, now scroll the window under the pointer.
 
+Reverse Scrolling, in Settings: a finger dragged over the picture, or two fingers on the trackpad below it, scroll the other way. A trackpad or mouse connected to your iPad keeps following its Natural Scrolling setting.
+
 Fixed: after Sill sat in the background for hours, it could stop finding your Mac until you closed and reopened it. Sill now looks again when you come back, keeps trying for a few minutes while your Mac doesn’t answer (when it’s asleep, say), and connects when it does.
 ```
 
@@ -760,6 +762,8 @@ Safe:
 - With those words in (2026-10-15, after Noah's Universal Control test), the
   description block as it stands here, Larger Picture's sentence included:
   3,044 characters; its keyboard paragraph of the next What's New 247.
+- With Reverse Scrolling (PR #159, 2026-10-20), a paragraph of 219 characters
+  in the next What's New: the draft 1,017 characters; the rest unchanged.
 - The encryption key, now in `iOSClient/Info.plist`: Release builds of this
   branch for the simulator and for a device each have
   `"ITSAppUsesNonExemptEncryption" => false` in the built Sill.app's

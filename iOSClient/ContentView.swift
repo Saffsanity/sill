@@ -190,7 +190,7 @@ struct ContentView: View {
 ///   so a photo of a short screen shows the last groups (Direct Wireless, Away from home, This
 ///   iPad, Take the Tour). `-SillSettingsScroll gestures` starts them at the This iPad group
 ///   instead (its switch and rows, which the footnotes under them push out of the end's view on a
-///   short screen).
+///   short screen), and `-SillSettingsScroll reverse` at its Reverse Scrolling switch.
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
@@ -287,10 +287,11 @@ struct ContentView: View {
 ///   `-SillLive 1`, whose session shows the real thing.
 /// * `-SillInputScript '<t> <step>; …'` — with `-SillLive 1` only: input for the simulator gates,
 ///   which have no finger (`InputScript`): `t` is seconds since the session's first window list, and
-///   a step is `down`, `pad DX,DY`, `lift` or `click` on the portrait pad, `tap X,Y` on the stream
-///   (a frame fraction), `key USAGE` (a hardware key) or `row USAGE` (a key of the portrait key
-///   row), `esc [MODS]`, `scroll DX,DY`, `wheel DX,DY`, `keyboard attach|detach` or `orient
-///   landscape|portrait` (InputScript has them all). The console says "input script: …" at each.
+///   a step is `down`, `pad DX,DY`, `lift`, `click` or `padscroll DX,DY` on the portrait pad, `tap
+///   X,Y` (a frame fraction) or `drag DX,DY` on the stream, `key USAGE` (a hardware key) or `row
+///   USAGE` (a key of the portrait key row), `esc [MODS]`, `scroll DX,DY`, `wheel DX,DY`, `keyboard
+///   attach|detach` or `orient landscape|portrait` (InputScript has them all). The console says
+///   "input script: …" at each.
 ///   It runs only when the session was dialled by `-SillConnect` to a loopback address and the
 ///   host's first window list has no version
 ///   (Sill.app's always has, and would post the input to this Mac): else "input script: refused:
@@ -648,7 +649,12 @@ struct LayoutHarness: View {
 /// * `pad DX,DY` — that finger moves DX, DY points (a stroke starts first if none is down);
 /// * `lift` — it comes up;
 /// * `click` — a tap on the pad: a click where its cursor is;
+/// * `padscroll DX,DY` — two fingers on the pad: a scroll of DX, DY points in five steps, lifted at
+///   600 pt/s (so it coasts), through the pad's own scroll path (Reverse Scrolling turns it around);
 /// * `tap X,Y` — a finger's tap on the stream at that fraction of the frame;
+/// * `drag DX,DY` — a finger dragged over the stream: a scroll of DX, DY points in five steps at the
+///   picture's middle, lifted at 600 pt/s (so it coasts), through the finger pan's scroll path
+///   (Reverse Scrolling turns it around);
 /// * `key USAGE` — a hardware key (a HID usage), down and up: this device's pointer hides;
 /// * `row USAGE` — a key of the portrait key row: what the sprite shows stays;
 /// * `gesture NAME[,FINGERS]` — a three-finger (or four-finger) gesture a surface decided, through
@@ -659,8 +665,10 @@ struct LayoutHarness: View {
 ///   (`shift+command` and the like), only while the input view takes Esc (it holds the keyboard and no
 ///   EscapeKey is on screen in its window); the console says whether it went;
 /// * `scroll DX,DY` — the iPad's trackpad: a two-finger scroll of DX, DY points in five steps, lifted at
-///   600 pt/s (so it coasts), through the scroll path its recognizer takes;
-/// * `wheel DX,DY` — a mouse's wheel: the same steps as plain deltas, no gesture, no coast;
+///   600 pt/s (so it coasts), through the scroll path its recognizer takes (iPadOS's own Natural
+///   Scrolling has set its direction: Reverse Scrolling leaves it);
+/// * `wheel DX,DY` — a mouse's wheel: the same steps as plain deltas, no gesture, no coast (and, as a
+///   trackpad's, never turned around);
 /// * `keyboard attach|detach` — a hardware keyboard attaching or going, as GameController says it;
 /// * `orient landscape|portrait` — the scene asked for that orientation (an iPhone's).
 /// The pad and the overlay register themselves as they join a window, and each step calls their
@@ -675,7 +683,8 @@ struct LayoutHarness: View {
 /// `--synthetic` would post the input, so never point a script at one.
 enum InputScript {
     enum Step: Equatable, CustomStringConvertible {
-        case down, pad(dx: Double, dy: Double), lift, click, tap(x: Double, y: Double), key(UInt16), row(UInt16)
+        case down, pad(dx: Double, dy: Double), lift, click, padScroll(dx: Double, dy: Double)
+        case tap(x: Double, y: Double), drag(dx: Double, dy: Double), key(UInt16), row(UInt16)
         case gesture(TrackpadGestures.Gesture, fingers: Int)
         case esc(modifiers: String), scroll(dx: Double, dy: Double), wheel(dx: Double, dy: Double)
         case keyboard(attached: Bool), orient(String)
@@ -686,7 +695,9 @@ enum InputScript {
             case .pad(let dx, let dy): return "pad \(dx),\(dy)"
             case .lift: return "lift"
             case .click: return "click"
+            case .padScroll(let dx, let dy): return "padscroll \(dx),\(dy)"
             case .tap(let x, let y): return "tap \(x),\(y)"
+            case .drag(let dx, let dy): return "drag \(dx),\(dy)"
             case .key(let usage): return "key \(usage)"
             case .row(let usage): return "row \(usage)"
             case .gesture(let g, let fingers): return "gesture \(g.rawValue)" + (fingers == 3 ? "" : ",\(fingers)")
@@ -733,7 +744,9 @@ enum InputScript {
             case ("lift", 2): step = .lift
             case ("click", 2): step = .click
             case ("pad", 3) where pair.count == 2: step = .pad(dx: pair[0], dy: pair[1])
+            case ("padscroll", 3) where pair.count == 2: step = .padScroll(dx: pair[0], dy: pair[1])
             case ("tap", 3) where pair.count == 2: step = .tap(x: pair[0], y: pair[1])
+            case ("drag", 3) where pair.count == 2: step = .drag(dx: pair[0], dy: pair[1])
             case ("key", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .key(usage)
             case ("row", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .row(usage)
             case ("gesture", 3):
@@ -811,7 +824,9 @@ enum InputScript {
         case .pad(let dx, let dy): if let pad { pad.scriptMove(dx: dx, dy: dy) } else { done = false }
         case .lift: if let pad { pad.scriptLift() } else { done = false }
         case .click: if let pad { pad.scriptClick() } else { done = false }
+        case .padScroll(let dx, let dy): if let pad { pad.scriptScroll(dx: dx, dy: dy) } else { done = false }
         case .tap(let x, let y): if let overlay { overlay.scriptTap(x: x, y: y) } else { done = false }
+        case .drag(let dx, let dy): if let overlay { overlay.scriptScroll(dx: dx, dy: dy, from: .finger) } else { done = false }
         case .key(let usage): if let overlay { overlay.scriptKey(usage) } else { done = false }
         case .row(let usage):
             client.sendFromKeyRow(.key(hidUsage: usage, down: true, modifiers: 0))

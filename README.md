@@ -66,9 +66,11 @@ Sill has layouts of its own.
   the pointer. Sill for Mac turns it into mouse and keyboard events, which
   needs Accessibility. A keyboard attached to your device types on your Mac as
   soon as the picture shows, Esc included, and a trackpad or a mouse scrolls
-  the window under its pointer. Three fingers swipe and pinch as on a Mac's
-  trackpad: Mission Control, App Exposé, the Spaces, Apps and Show Desktop,
-  through the keyboard shortcuts your Mac has for them.
+  the window under its pointer. Reverse Scrolling, in the settings panel,
+  turns a finger's scroll and the on-screen trackpad's the other way. Three
+  fingers swipe and pinch as on a Mac's trackpad: Mission Control, App
+  Exposé, the Spaces, Apps and Show Desktop, through the keyboard shortcuts
+  your Mac has for them.
 - **On iPhone**, held upright, the picture is on top with buttons, keys and a
   trackpad below. Larger Picture, in the settings panel, gives a window's
   picture the room of the window thumbnails, down to where the keyboard comes

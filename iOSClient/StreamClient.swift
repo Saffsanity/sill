@@ -3495,6 +3495,14 @@ final class StreamClient: ObservableObject {
         return defaults.object(forKey: gesturesKey) == nil || defaults.bool(forKey: gesturesKey)
     }
 
+    /// This device's switch for Reverse Scrolling (the Settings panel's This iPad group; issue #143): off
+    /// unless turned on. While on, a finger dragged over the picture and two fingers on the on-screen
+    /// trackpad scroll the content the other way, their coast too; a connected trackpad or mouse keeps
+    /// iPadOS's own Natural Scrolling (`ScrollDirection`). The device's own preference, never sent to
+    /// the Mac; read as each scroll begins (`InputOverlayView`, `TrackpadSurface`).
+    static let reverseScrollKey = "Sill.reverseScroll"
+    static var reverseScrollOn: Bool { UserDefaults.standard.bool(forKey: reverseScrollKey) }
+
     /// This device's switch for Larger Picture (the Settings panel's This iPhone group; issue #58,
     /// docs/larger-picture-plan.md): off unless turned on. The device's own preference, never sent to
     /// the Mac; the stream screen reads it with what streams (`active`): it acts only while a window

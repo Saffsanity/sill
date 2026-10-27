@@ -4,6 +4,18 @@ import os, shutil, subprocess, sys, tempfile
 WT = sys.argv[1]
 HERE = os.path.dirname(os.path.abspath(__file__))
 MUTANTS = [
+    ("reverse scrolling never reverses", "ScrollDirection.swift", "reversed && reversible(source) ? -1 : 1", "false && reversible(source) ? -1 : 1"),
+    ("reverse scrolling turns every source around", "ScrollDirection.swift", "reversed && reversible(source) ? -1 : 1", "reversed ? -1 : 1"),
+    ("reverse scrolling on for fingers with the switch off", "ScrollDirection.swift", "reversed && reversible(source) ? -1 : 1", "reversible(source) ? -1 : 1"),
+    ("reverse scrolling halves instead of turning around", "ScrollDirection.swift", "reversed && reversible(source) ? -1 : 1", "reversed && reversible(source) ? -0.5 : 1"),
+    ("reverse scrolling leaves the finger's drag", "ScrollDirection.swift",
+     "case .finger, .pad: return true\n        case .trackpad, .wheel: return false", "case .pad: return true\n        case .finger, .trackpad, .wheel: return false"),
+    ("reverse scrolling leaves the on-screen pad", "ScrollDirection.swift",
+     "case .finger, .pad: return true\n        case .trackpad, .wheel: return false", "case .finger: return true\n        case .pad, .trackpad, .wheel: return false"),
+    ("reverse scrolling turns a connected trackpad around", "ScrollDirection.swift",
+     "case .finger, .pad: return true\n        case .trackpad, .wheel: return false", "case .finger, .pad, .trackpad: return true\n        case .wheel: return false"),
+    ("reverse scrolling turns a wheel around", "ScrollDirection.swift",
+     "case .finger, .pad: return true\n        case .trackpad, .wheel: return false", "case .finger, .pad, .wheel: return true\n        case .trackpad: return false"),
     ("Damm table entry swapped", "Pairing.swift", "[7, 0, 9, 2, 1, 5, 4, 8, 6, 3]", "[7, 0, 9, 2, 1, 5, 4, 8, 3, 6]"),
     ("typed-code check digit ignored", "Pairing.swift", "guard checkDigit(kept.compactMap { $0.wholeNumberValue }) == 0", "guard checkDigit(kept.compactMap { $0.wholeNumberValue }) >= 0"),
     ("proof_D label changed", "Pairing.swift", 'Data("\\(label) device".utf8)', 'Data("\\(label) devices".utf8)'),

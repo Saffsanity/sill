@@ -296,9 +296,9 @@ docs/reconnect-after-sleep-plan.md has the rules;
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom. After the Mac's settings
 come the device's own: This iPad (or iPhone), with Larger Picture on an iPhone
-(below; off unless turned on) and Three-Finger Gestures (below, Trackpad
-gestures; on unless turned off), neither ever sent to the Mac, and last Take
-the Tour.
+(below; off unless turned on), Reverse Scrolling (below; off unless turned on)
+and Three-Finger Gestures (below, Trackpad gestures; on unless turned off),
+none of them ever sent to the Mac, and last Take the Tour.
 
 On the iPhone Duo (docs/iphone-duo-plan.md) the layout follows the hinge,
 which iOS 27.1 reports with the fold's place. Open, Sill is on the inner
@@ -582,6 +582,23 @@ logs the shortcut it would post with "(not posted: a test host)", so
 `python3 Scripts/sillclient.py PORT 8 none --gesture=swipeUp@3` tests the wire
 without touching the Mac, and `SILL_TEST_HOTKEYS=108=off` (or `defaults`) gives
 such a host a table of its own instead of this Mac's shortcuts.
+
+## Reverse Scrolling
+
+A finger dragged over the picture scrolls the Mac's content the way it moves,
+as on the iPad itself, and so do two fingers on the portrait trackpad, as a
+Mac's trackpad does with Natural Scrolling on. Reverse Scrolling, in the
+Settings panel's This iPad group (This iPhone on a phone; issue #143), turns
+both around, the coast after a flick too: a drag down then moves the content
+up. It is off unless turned on (`Sill.reverseScroll`), the device's own, never
+sent to the Mac, so it works with every Sill for Mac. A trackpad or mouse
+connected to the iPad (below) is left alone: its scroll events come already
+turned the way iPadOS's own Natural Scrolling setting says (with the
+trackpad's and the mouse's settings, under Settings › General), and turning
+them again would undo it; the switch's footnote says so on an iPad. Each
+scroll reads the switch as it begins and keeps that direction to the end of
+its coast. `Sources/StreamProtocol/ScrollDirection.swift` is the rule, checked
+in `Tests/checks/protocol`.
 
 ## A hardware keyboard and trackpad on the device
 
@@ -981,7 +998,9 @@ how to reach them; `lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>` finds the port.
 Input (`--move`, `--tap`, `--key`, `--input`) goes only to a `--synthetic` host
 on this Mac, which posts nothing. With `SILL_TEST_INPUT_LOG=1` such a host
 prints each event it would have posted, a key with its flags and a click with
-the modifiers the last key would have left for it and where it goes, and the
+the modifiers the last key would have left for it and where it goes, a scroll
+with its point deltas and phase (`Test input: scroll dy -12 dx 0, gesture
+changed (none)`; positive dy moves the content down), and the
 check each key's up arms (`KeyUpCheck`, read on a real host a quarter of a
 second later), so what a device's keys and buttons leave behind (the Spotlight
 key's ⌘, a modifier held when a device leaves or the host stops, a button
@@ -1238,6 +1257,17 @@ simulator:
   one run, `-SillSettingsScroll gestures` opens the Settings panel at that
   group, and `-SillVoiceOver 1` shows it as with VoiceOver on. Under `-SillLive 1`, `-SillInputScript '3 gesture swipeUp'` sends a
   gesture through the app's own path, only to a test host on this Mac.
+- `-Sill.reverseScroll 1` turns the device's Reverse Scrolling on for one run
+  (in the normal app too), and `-SillSettingsScroll reverse` opens the Settings
+  panel at its switch. Under `-SillLive 1`, in a layout with the portrait
+  trackpad (`-SillLayout 710x1000`), `-SillInputScript '3 drag 0,60; 6
+  padscroll 0,40; 9 scroll 0,40; 12 wheel 0,-30'` drags a finger over the
+  picture, scrolls two fingers on the pad (both with their coast), and scrolls
+  a connected trackpad and a mouse's wheel, each through the app's own path and
+  only to a test host on this Mac. A synthetic host with `SILL_TEST_INPUT_LOG=1`
+  and `SILL_TEST_POINTER_PATH` prints each scroll's deltas, so the switch shows
+  in their sign: the drag's and the pad's turn around, the trackpad's and the
+  wheel's never.
 - `-SillMacMenu code|blender|long|stale|noaccess|none|slow|timeout|refuse`: the
   mock Mac's menus. `-SillMenusOpen 1` opens the Menus pull-down after launch,
   `-SillMenusOpen 'File/Open Recent'` opens it on that menu, and
@@ -1285,9 +1315,11 @@ surfaces as they are at REV, and `Tests/touchrig/compare.py BASE.log NEW.log
 [OFF.log]` checks that one- and two-finger strokes send what they sent before
 (and the same right after a gesture as made fresh) and that each stroke of three
 or more fingers, placed slowly, beside a resting thumb or with a brief extra
-contact too, sends its one gesture, or nothing, and nothing else. It runs on
-a simulator of its own (`SILL_TOUCHRIG_SIM`, made and deleted when missing),
-never XCUITest or a recording.
+contact too, sends its one gesture, or nothing, and nothing else. Reverse
+Scrolling is off there (`Stubs.swift`), so every scroll goes the natural way,
+as at a revision from before the switch. It runs on a simulator of its own
+(`SILL_TOUCHRIG_SIM`, made and deleted when missing), never XCUITest or a
+recording.
 
 ### The key rig
 

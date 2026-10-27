@@ -463,5 +463,30 @@ check("floor: every host offers sill/1 and sill-pair/1 (\(RemoteTLS.serverALPNs)
       RemoteTLS.serverALPNs.contains("sill/1") && RemoteTLS.serverALPNs.contains("sill-pair/1"))
 check("floor: the two names never change", RemoteTLS.sessionALPN == "sill/1" && RemoteTLS.pairingALPN == "sill-pair/1")
 
+// MARK: - Reverse Scrolling (issue #143): fingers on the glass turn around; a connected trackpad's
+// or mouse's scroll events never do (iPadOS's own Natural Scrolling has set them)
+check("scroll direction: four sources, the finger, the on-screen pad, a trackpad and a wheel",
+      ScrollDirection.Source.allCases == [.finger, .pad, .trackpad, .wheel])
+for source in ScrollDirection.Source.allCases {
+    check("scroll direction: off, \(source) keeps the natural direction", ScrollDirection.factor(source, reversed: false) == 1)
+}
+check("scroll direction: on, a finger's drag over the picture is turned around", ScrollDirection.factor(.finger, reversed: true) == -1)
+check("scroll direction: on, two fingers on the on-screen trackpad are turned around", ScrollDirection.factor(.pad, reversed: true) == -1)
+check("scroll direction: on, a connected trackpad keeps the direction iPadOS gave it", ScrollDirection.factor(.trackpad, reversed: true) == 1)
+check("scroll direction: on, a mouse's wheel keeps the direction iPadOS gave it", ScrollDirection.factor(.wheel, reversed: true) == 1)
+check("scroll direction: the switch reaches exactly the finger and the pad",
+      ScrollDirection.Source.allCases.filter(ScrollDirection.reversible) == [.finger, .pad])
+do {
+    // A finger dragged down a quarter of the picture: the content goes down a quarter (natural), or
+    // up a quarter with the switch on; a coast's velocity the same way; nothing but the sign changes.
+    let down = 0.25, coast = 600.0
+    check("scroll direction: a drag down moves the content down while off, up while on",
+          down * ScrollDirection.factor(.finger, reversed: false) == 0.25 && down * ScrollDirection.factor(.finger, reversed: true) == -0.25)
+    check("scroll direction: the pad's coast goes the way its scroll went",
+          coast * ScrollDirection.factor(.pad, reversed: true) == -600 && coast * ScrollDirection.factor(.pad, reversed: false) == 600)
+    check("scroll direction: only the sign changes (the factor is 1 or -1 everywhere)",
+          ScrollDirection.Source.allCases.allSatisfy { s in [false, true].allSatisfy { abs(ScrollDirection.factor(s, reversed: $0)) == 1 } })
+}
+
 print(fails == 0 ? "ALL PASS (\(passes) checks)" : "\(fails) FAILED of \(passes + fails)")
 exit(Int32(min(fails, 100)))

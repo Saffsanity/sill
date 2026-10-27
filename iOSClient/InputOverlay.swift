@@ -53,6 +53,10 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// True between the `.scrollGesture(.began)` this view sent and its `.ended`, so an end is
     /// never sent for a pan that could not begin (no video yet).
     private var scrollGestureOpen = false
+    /// -1 while Reverse Scrolling turns the scroll in progress around (a finger's drag; a connected
+    /// trackpad's or wheel's never), else 1 (`ScrollDirection`): read as each scroll begins, so its
+    /// deltas and the coast after its lift keep the direction it began with.
+    private var scrollFactor = 1.0
     /// The coast after a flick.
     private let momentum = ScrollMomentum()
     /// True once the hover in progress has shown itself to be a Pencil. Sticky for the session so a
@@ -204,7 +208,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// rubber-bands at the edges and coasts after a flick:
     /// `.began` → one `.scroll` per callback → `.ended`, then maybe momentum (`startMomentum`).
     /// Deltas are fractions of the video rect, natural sign (finger down = content down =
-    /// positive dy).
+    /// positive dy), turned around while this device's Reverse Scrolling is on (`ScrollDirection`).
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         guard !strokes.silent else { return }
         scroll(gesture, .finger)
@@ -226,6 +230,16 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         /// A gesture with phases around its deltas (the Mac rubber-bands and springs back), and a
         /// lift that coasts: a finger and a trackpad. A wheel's deltas are plain.
         var phased: Bool { self != .wheel }
+        /// The same source for Reverse Scrolling's rule, which turns only a finger's around: a
+        /// trackpad's and a wheel's scroll events come already turned the way iPadOS's own Natural
+        /// Scrolling says.
+        var direction: ScrollDirection.Source {
+            switch self {
+            case .finger: return .finger
+            case .trackpad: return .trackpad
+            case .wheel: return .wheel
+            }
+        }
     }
 
     private func scroll(_ gesture: UIPanGestureRecognizer, _ source: ScrollSource) {
@@ -244,6 +258,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
             // A new pan while the last flick is still coasting ends the coast first, so the Mac
             // sees momentumEnded before this gesture's began. (touchesBegan has usually done it.)
             momentum.stop()
+            scrollFactor = ScrollDirection.factor(source.direction, reversed: StreamClient.reverseScrollOn)
             guard let p = normalized(location, clamped: true) else { return }
             if source.phased {
                 send(.scrollGesture(.began, x: p.x, y: p.y))
@@ -282,7 +297,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         let dy = (translation.y - lastPanTranslation.y) / rect.height
         lastPanTranslation = translation
         guard dx != 0 || dy != 0, let p = normalized(location, clamped: true) else { return }
-        send(.scroll(x: p.x, y: p.y, dx: Double(dx), dy: Double(dy)))
+        send(.scroll(x: p.x, y: p.y, dx: Double(dx) * scrollFactor, dy: Double(dy) * scrollFactor))
     }
 
     // MARK: Which recognizer may scroll
@@ -325,13 +340,13 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
 
     /// The coast after a flick, at the point the finger lifted. Steps are converted to fractions
     /// of the video rect exactly as live pan deltas are, so the coast continues at the speed the
-    /// content was moving under the finger.
+    /// content was moving under the finger, and in its direction (`scrollFactor`).
     private func startMomentum(velocity: CGPoint, at p: (x: Double, y: Double)) {
         // Begin and end capture the send closure rather than self, so the end still goes out if
         // this view is torn down mid-coast.
         let send = self.send
         momentum.start(
-            velocity: velocity,
+            velocity: CGPoint(x: velocity.x * scrollFactor, y: velocity.y * scrollFactor),
             onBegin: { send(.scrollGesture(.momentumBegan, x: p.x, y: p.y)) },
             onStep: { [weak self] step in
                 guard let self else { return }
@@ -384,9 +399,9 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         return true
     }
 
-    /// `scroll DX,DY` and `wheel DX,DY`: the iPad's trackpad (a gesture of five steps to DX, DY points
-    /// at the picture's middle, lifted at 600 pt/s along it, so it coasts) or a wheel (plain deltas),
-    /// through the scroll path the recognizers take.
+    /// `drag DX,DY`, `scroll DX,DY` and `wheel DX,DY`: a finger dragged over the picture or the iPad's
+    /// trackpad (a gesture of five steps to DX, DY points at the picture's middle, lifted at 600 pt/s
+    /// along it, so it coasts) or a wheel (plain deltas), through the scroll path the recognizers take.
     func scriptScroll(dx: Double, dy: Double, from source: ScrollSource) {
         let rect = videoRect
         guard rect.width > 0, rect.height > 0 else { return }

@@ -20,9 +20,10 @@ import StreamProtocol
 /// This iPad (or iPhone), whose switches are preferences here and send nothing to the Mac (Larger
 /// Picture, `StreamClient.largerPictureKey`, on an iPhone without a hinge whose picture it makes
 /// larger, `largerPictureOffered`; Share Clipboard, `StreamClient.clipboardKey`, while the Mac shares
-/// its clipboard, with the system's Paste for this device's text; Three-Finger Gestures,
-/// `StreamClient.gesturesKey`), and whose gesture rows, as accessibility actions, do their gestures
-/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour.
+/// its clipboard, with the system's Paste for this device's text; Reverse Scrolling,
+/// `StreamClient.reverseScrollKey`; Three-Finger Gestures, `StreamClient.gesturesKey`), and whose
+/// gesture rows, as accessibility actions, do their gestures (`client.sendGesture`), since VoiceOver
+/// keeps three fingers for itself; then Take the Tour.
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
@@ -41,6 +42,10 @@ struct HostSettingsPanel: View {
     /// This device's switch for three-finger gestures (docs/trackpad-gestures-plan.md §8): on unless
     /// turned off, read by `StreamClient.sendGesture` at each gesture, never sent.
     @AppStorage(StreamClient.gesturesKey) private var gesturesOn = true
+    /// This device's switch for Reverse Scrolling (issue #143): off unless turned on, read by the
+    /// picture's input view and the on-screen trackpad as each scroll begins (`ScrollDirection`), never
+    /// sent.
+    @AppStorage(StreamClient.reverseScrollKey) private var reverseScroll = false
     /// This device's switch for Larger Picture (docs/larger-picture-plan.md): off unless turned on,
     /// read by the stream screen, never sent.
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
@@ -76,6 +81,17 @@ struct HostSettingsPanel: View {
         #endif
     }
     private static let gesturesGroupID = "thisDevice"
+    /// DEBUG `-SillSettingsScroll reverse`: the rows start scrolled to Reverse Scrolling's switch, so
+    /// a photo of the panel in the lower half shows it and its footnote, which the clipboard's rows
+    /// above it push out of `gestures`' view there.
+    private static var startsAtReverseScroll: Bool {
+        #if DEBUG
+        return UserDefaults.standard.string(forKey: "SillSettingsScroll") == "reverse"
+        #else
+        return false
+        #endif
+    }
+    private static let reverseScrollRowID = "reverseScroll"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
     static var voiceOverRunning: Bool {
@@ -96,7 +112,10 @@ struct HostSettingsPanel: View {
                         .scrollIndicatorsFlash(onAppear: true)
                         .scrollBounceBehavior(.basedOnSize)
                         .defaultScrollAnchor(Self.startsAtEnd ? .bottom : .top)
-                        .onAppear { if Self.startsAtGestures { reader.scrollTo(Self.gesturesGroupID, anchor: .top) } }
+                        .onAppear {
+                            if Self.startsAtGestures { reader.scrollTo(Self.gesturesGroupID, anchor: .top) }
+                            if Self.startsAtReverseScroll { reader.scrollTo(Self.reverseScrollRowID, anchor: .top) }
+                        }
                 }
             }
             foot
@@ -461,7 +480,8 @@ struct HostSettingsPanel: View {
 
     /// This device's own group, after the Mac's: on an iPhone its switch for Larger Picture, then Share
     /// Clipboard while the Mac shares its clipboard, with Paste on ‹Mac› (the system's Paste control)
-    /// under it while on, then its switch for three-finger gestures, and what each does when the Mac
+    /// under it while on, then Reverse Scrolling (for every Mac: it only turns this device's own
+    /// deltas around), then its switch for three-finger gestures, and what each does when the Mac
     /// takes them (Take the Tour follows it). After the Mac's rows because it is the least changed, and
     /// the compact halves' 259 pt show the Mac's rows first. The switches reach nothing on the Mac but
     /// the clipboard's, which subscribes or stops; a gesture row, activated by VoiceOver, Voice Control
@@ -506,6 +526,14 @@ struct HostSettingsPanel: View {
             Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, mac: mac, device: device))
         }
         Rows {
+            Toggle(isOn: $reverseScroll) {
+                Text("Reverse Scrolling").foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        .id(Self.reverseScrollRowID)
+        Footnote(text: Self.reverseScrollFooter(device: device))
+        Rows {
             Toggle(isOn: $gesturesOn) {
                 Text("Three-Finger Gestures").foregroundStyle(Palette.text)
             }
@@ -520,6 +548,16 @@ struct HostSettingsPanel: View {
             }
         }
         Footnote(text: gesturesFooter)
+    }
+
+    /// Under Reverse Scrolling's switch: what it turns around, a finger's drag over the picture and two
+    /// fingers on the on-screen trackpad, their coast too (`ScrollDirection`); and, on an iPad, that a
+    /// trackpad or mouse connected to it keeps the direction iPadOS's own Natural Scrolling gives it
+    /// (with the trackpad's and the mouse's settings, under Settings › General), which the switch
+    /// leaves alone.
+    static func reverseScrollFooter(device: String) -> String {
+        "Turns a finger’s drag and the trackpad’s two-finger scroll around."
+            + (device == "iPad" ? " A trackpad or mouse connected to the iPad follows its own Natural Scrolling setting." : "")
     }
 
     /// The Mac's window list said it takes the gestures (`WindowList.gestures`).

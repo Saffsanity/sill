@@ -42,11 +42,13 @@ fetch() {
 }
 for f in iOSClient/TrackpadView.swift iOSClient/InputOverlay.swift iOSClient/PointerPresence.swift \
          iOSClient/TrackpadGestures.swift iOSClient/KeyChords.swift iOSClient/PortraitStreamScreen.swift \
-         iOSClient/HardwareKeyboardPolicy.swift Sources/StreamProtocol/Input.swift; do
+         iOSClient/HardwareKeyboardPolicy.swift Sources/StreamProtocol/Input.swift \
+         Sources/StreamProtocol/ScrollDirection.swift; do
     fetch "$f"
 done
 cd "$work/src"
-# One module: StreamProtocol's Input.swift is compiled in, so its import goes.
+# One module: StreamProtocol's Input.swift (and ScrollDirection.swift, Reverse Scrolling's rule, where the
+# sources have it) is compiled in, so its import goes.
 sed -i '' '/^import StreamProtocol$/d' TrackpadView.swift InputOverlay.swift $(ls KeyChords.swift 2>/dev/null)
 # HIDKey, the app's own, cut from PortraitStreamScreen.swift, with KeyModifiers where the sources keep
 # it there (before KeyChords.swift, which the surfaces' shortcuts and hardware keys go through).
@@ -60,7 +62,7 @@ cp "$here/Stubs.swift" "$here/main.swift" "$here/TouchSynth.h" "$here/TouchSynth
 target=arm64-apple-ios17.0-simulator
 xcrun -sdk iphonesimulator clang -target $target -fobjc-arc -Wall -c TouchSynth.m -o TouchSynth.o
 xcrun -sdk iphonesimulator swiftc -target $target -swift-version 5 -module-name TouchRig -Onone ${flags[@]+"${flags[@]}"} \
-    -import-objc-header Bridging.h Stubs.swift Keys.swift Input.swift $(ls PointerPresence.swift TrackpadGestures.swift KeyChords.swift HardwareKeyboardPolicy.swift 2>/dev/null) \
+    -import-objc-header Bridging.h Stubs.swift Keys.swift Input.swift $(ls PointerPresence.swift TrackpadGestures.swift KeyChords.swift HardwareKeyboardPolicy.swift ScrollDirection.swift 2>/dev/null) \
     TrackpadView.swift InputOverlay.swift main.swift TouchSynth.o -o "$work/TouchRig.app/TouchRig"
 cat > "$work/TouchRig.app/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
