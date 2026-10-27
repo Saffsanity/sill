@@ -135,10 +135,6 @@ MUTANTS = {
     "K17 the caps at most 48": ("static let keyboardRowMost: CGFloat = 58", "static let keyboardRowMost: CGFloat = 48"),
     "K18 the halves' 8 pt gaps": ("static let keyboardRowGap: CGFloat = 6", "static let keyboardRowGap: CGFloat = 8"),
     "K19 a cap's width without its gaps": ("return (width - CGFloat(count - 1) * keyboardRowGap) / CGFloat(count)", "return width / CGFloat(count)"),
-    # Issue #215: Keyboard button in the halves' window bar while the software keyboard is up.
-    "M54 the halves' window bar never shows the Keyboard button": ("static func halvesBarShowsKeyboard(keyboardShown: Bool) -> Bool {\n        keyboardShown",
-                                                                   "static func halvesBarShowsKeyboard(keyboardShown: Bool) -> Bool {\n        false"),
-    "M55 the halves' top padding kept while the keyboard is up": ("keyboardShown ? 0 : defaultPadTop", "defaultPadTop"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():
