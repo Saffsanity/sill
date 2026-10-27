@@ -45,7 +45,7 @@ package enum HostShutdown {
     /// applicationShouldTerminate), nil for a quit from the menu; a restart's or a shut down's tells
     /// every device so (HostGoodbye.forQuit). `byMenu`: Sill's own Quit with no Apple event (its menu,
     /// ⌘Q), which is "quit" whatever came before. A signal's goodbye (`begin`) has no reason: "quit",
-    /// or "shutdown" within ten minutes of NSWorkspace's willPowerOff (StreamCoordinator.observePowerOff).
+    /// or "poweroff" within ten minutes of NSWorkspace's willPowerOff (StreamCoordinator.observePowerOff).
     @MainActor
     package static func releaseForQuit(coordinator: StreamCoordinator?, quitReason: UInt32? = nil, byMenu: Bool = false) {
         guard !began else { return }

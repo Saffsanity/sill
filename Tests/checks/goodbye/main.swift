@@ -96,11 +96,16 @@ check(out(Goodbye.asleep(mac: mini), saved: true, remote: true) == O(text: "Mac 
 check(!out(Goodbye.asleep(mac: mini), remote: true).remoteAllowed, "sleep: an unsaved Mac is never dialled remotely")
 check(out(Goodbye.asleep(mac: "x"), mac: "Studio", device: "iPhone").text == "Studio went to sleep. This iPhone reconnects when it wakes.",
       "sleep: this device's name for the Mac, and its own word")
-check(out(Goodbye.shuttingDown(mac: mini), saved: true) == O(text: "Mac mini is shutting down or restarting. This iPad reconnects when it’s back.",
+check(out(Goodbye.shuttingDown(mac: mini), saved: true) == O(text: "Mac mini is shutting down. This iPad reconnects when it’s back.",
                                                              reconnect: true, remoteAllowed: false, isNotice: true, went: .off),
-      "shutdown, a saved Mac at home: worded shutting down or restarting (a Mac sends it for willPowerOff, which says neither)")
-check(out(Goodbye.shuttingDownOrRestarting(mac: mini), saved: true) == out(Goodbye.shuttingDown(mac: mini), saved: true),
-      "shutdown: the same whichever words the Mac sent with it")
+      "shutdown, a saved Mac at home: a shut down the Mac knows (the review of 2026-10-26: one meaning)")
+check(out(Goodbye.shuttingDownOrRestarting(mac: mini), saved: true) == O(text: "Mac mini is shutting down or restarting. This iPad reconnects when it’s back.",
+                                                                         reconnect: true, remoteAllowed: false, isNotice: true, went: .off),
+      "poweroff, a saved Mac at home: worded shutting down or restarting (willPowerOff says neither), the same wait")
+check(out(Goodbye.shuttingDown(mac: mini), saved: true).text != out(Goodbye.shuttingDownOrRestarting(mac: mini), saved: true).text,
+      "shutdown and poweroff: words of their own")
+check(out(Goodbye.shuttingDownOrRestarting(mac: mini), saved: true, remote: true).remoteAllowed
+      && !out(Goodbye.shuttingDownOrRestarting(mac: mini), remote: true).remoteAllowed, "poweroff: the remote door for a saved Mac's remote session only")
 check(out(Goodbye.shuttingDown(mac: mini), saved: true, remote: true).remoteAllowed && !out(Goodbye.shuttingDown(mac: mini), remote: true).remoteAllowed,
       "shutdown: the remote door for a saved Mac's remote session only")
 check(out(Goodbye.restarting(mac: mini), saved: true) == O(text: "Mac mini is restarting. This iPad reconnects when it’s back.", reconnect: true,
@@ -109,19 +114,21 @@ check(out(Goodbye.restarting(mac: mini), saved: true, remote: true).remoteAllowe
       "restart: the remote door for a saved Mac's remote session only")
 check(out(Goodbye.restarting(mac: "x"), mac: "Studio", device: "iPhone").text == "Studio is restarting. This iPhone reconnects when it’s back."
       && out(Goodbye.shuttingDown(mac: "x"), mac: "Studio", device: "iPhone").text
+          == "Studio is shutting down. This iPhone reconnects when it’s back."
+      && out(Goodbye.shuttingDownOrRestarting(mac: "x"), mac: "Studio", device: "iPhone").text
           == "Studio is shutting down or restarting. This iPhone reconnects when it’s back.",
-      "shutdown and restart: this device's name for the Mac, and its own word")
-check(["sleep", "shutdown", "restart"].allSatisfy { GoodbyePolicy.closesAtOnce(g($0)) }, "the Mac's own going: this device closes the connection at once")
-check(!["quit", "removed", "remoteOff", "internetOff", "busy", "pairingRequired", "update", "", "later", "Sleep"].contains { GoodbyePolicy.closesAtOnce(g($0)) },
+      "shutdown, restart and poweroff: this device's name for the Mac, and its own word")
+check(["sleep", "shutdown", "restart", "poweroff"].allSatisfy { GoodbyePolicy.closesAtOnce(g($0)) }, "the Mac's own going: this device closes the connection at once")
+check(!["quit", "removed", "remoteOff", "internetOff", "busy", "pairingRequired", "update", "", "later", "Sleep", "powerOff"].contains { GoodbyePolicy.closesAtOnce(g($0)) },
       "every other goodbye: the Mac closes the connection")
-for r in ["sleep", "shutdown", "restart"] {
+for r in ["sleep", "shutdown", "restart", "poweroff"] {
     check(GoodbyePolicy.isNotice(g(r)), "\(r) is a notice")
     check(out(g(r, "x", reconnect: false)).reconnect && out(g(r, "x", reconnect: false), saved: true).isNotice, "\(r): this build's reconnect, whatever the Mac adds")
     check(!out(g(r, "Some other words.")).text.contains("Some other words"), "\(r): this build's words, not the Mac's")
     check(!out(g(r)).storeLink, "\(r): no App Store link")
 }
 
-// What the Mac sends (Goodbye.asleep, .shuttingDown, .restarting): the reason, a reconnect, and words
+// What the Mac sends (Goodbye.asleep, .shuttingDown, .restarting, .shuttingDownOrRestarting): the reason, a reconnect, and words
 // that say what happened in plain words, which a device from before these reasons shows: it reads a
 // reason it does not know by its message and follows its reconnect (an older GoodbyePolicy's
 // `default`, the same as this build's for a reason it does not know).
@@ -130,9 +137,10 @@ let asleep = Goodbye.asleep(mac: "Noah’s MacBook Pro"), down = Goodbye.shuttin
 check(asleep == Goodbye(reason: "sleep", message: "Noah’s MacBook Pro is going to sleep.", reconnect: true), "the sleep goodbye")
 check(down == Goodbye(reason: "shutdown", message: "Noah’s MacBook Pro is shutting down.", reconnect: true), "the shutdown goodbye")
 check(again == Goodbye(reason: "restart", message: "Noah’s MacBook Pro is restarting.", reconnect: true), "the restart goodbye")
-check(either == Goodbye(reason: "shutdown", message: "Noah’s MacBook Pro is shutting down or restarting.", reconnect: true),
-      "willPowerOff's goodbye: shutdown, in the words that say it may be either")
-check(Goodbye.sleep == "sleep" && Goodbye.shutdown == "shutdown" && Goodbye.restart == "restart", "the reasons on the wire")
+check(either == Goodbye(reason: "poweroff", message: "Noah’s MacBook Pro is shutting down or restarting.", reconnect: true),
+      "willPowerOff's goodbye: a reason of its own, poweroff, in the words that say it may be either")
+check(Goodbye.sleep == "sleep" && Goodbye.shutdown == "shutdown" && Goodbye.restart == "restart" && Goodbye.poweroff == "poweroff",
+      "the reasons on the wire")
 for host in [asleep, down, again, either] {
     // An older build: the reason unknown to it, so its default branch: the message, and the reconnect asked for.
     let older = out(Goodbye(reason: "some reason \(host.reason)", message: host.message, reconnect: host.reconnect), saved: true)
@@ -181,6 +189,9 @@ check(!HostGoodbye.poweringOff(since: 100, now: 99), "a time before it: not powe
 check(HostGoodbye.goodbye(.quit, mac: mini) == quit && HostGoodbye.goodbye(.sleep, mac: mini) == Goodbye.asleep(mac: mini)
       && HostGoodbye.goodbye(.shutDown, mac: mini) == Goodbye.shuttingDown(mac: mini) && HostGoodbye.goodbye(.restart, mac: mini) == Goodbye.restarting(mac: mini)
       && HostGoodbye.goodbye(.powerOff, mac: mini) == Goodbye.shuttingDownOrRestarting(mac: mini), "each choice's goodbye")
+check(HostGoodbye.goodbye(.shutDown, mac: mini).reason == "shutdown" && HostGoodbye.goodbye(.powerOff, mac: mini).reason == "poweroff"
+      && HostGoodbye.goodbye(.restart, mac: mini).reason == "restart" && HostGoodbye.goodbye(.sleep, mac: mini).reason == "sleep",
+      "each choice's reason on the wire")
 check(String(decoding: Wire.encode(HostGoodbye.goodbye(.quit, mac: mini)), as: UTF8.self) == #"{"reason":"quit"}"#,
       "the quit goodbye's JSON as Macs have sent it since remote access")
 // What this build then says for each, and the wait it takes.
@@ -191,6 +202,23 @@ check(endToEnd(nil, off: true).text == "Mac mini is shutting down or restarting.
       "willPowerOff then a SIGTERM, end to end: shutting down or restarting, and the wait")
 check(endToEnd(UInt32(kAEShutDown), off: false).went == .off && endToEnd(nil, off: false).went == .quit
       && endToEnd(UInt32(kAELogOut), off: true).went == .quit, "shut down, quit and log out, end to end")
+check(endToEnd(UInt32(kAEShutDown), off: true).text == "Mac mini is shutting down. This iPad reconnects when it’s back.",
+      "a shut down's quit after willPowerOff, end to end: is shutting down")
+// "shutdown" keeps one meaning (the review of 2026-10-26): on every path to Sill's end, the goodbye says
+// "shutdown" exactly when a quit's reason said a shut down, and "poweroff" exactly when willPowerOff stands
+// and nothing said which (not Sill's own Quit).
+var meanings = 0, meaningsWrong = 0
+for reason in [nil, 0, UInt32(kAERestart), UInt32(kAEShowRestartDialog), UInt32(kAEShutDown), UInt32(kAEShowShutdownDialog),
+               UInt32(kAEReallyLogOut), UInt32(kAELogOut), UInt32(kAEQuitApplication), 0x6162_6364] as [UInt32?] {
+    for off in [false, true] { for menu in [false, true] {
+        let r = HostGoodbye.goodbye(HostGoodbye.forQuit(reason: reason, byMenu: menu, poweringOff: off), mac: mini).reason
+        let shut = reason.map { HostGoodbye.shutdownReasons.contains($0) } ?? false
+        let said = reason.map { HostGoodbye.restartReasons.contains($0) || HostGoodbye.shutdownReasons.contains($0) || HostGoodbye.logOutReasons.contains($0) } ?? false
+        meanings += 1
+        if (r == "shutdown") != shut || (r == "poweroff") != (off && !menu && !said) { meaningsWrong += 1 }
+    } }
+}
+check(meaningsWrong == 0, "shutdown only for a shut down, poweroff only for willPowerOff alone, over \(meanings) paths (\(meaningsWrong) wrong)")
 // A quit Apple event's reason (HostGoodbye.quitReason): its parameter (AERegistry.h's word) or its attribute,
 // either descriptor type, only in a quit Apple event.
 func quitEvent(_ eventID: UInt32 = UInt32(kAEQuitApplication)) -> NSAppleEventDescriptor {

@@ -1086,7 +1086,7 @@ final class StreamServer {
 
     /// Every admitted client, home and remote, that was not told why already (`told`) gets
     /// `goodbye`: the app's Quit and the signal path, "quit", or what HostGoodbye.forQuit makes of the
-    /// reason macOS gave the Quit and of willPowerOff, "restart" or "shutdown"; the Mac about to
+    /// reason macOS gave the Quit and of willPowerOff, "restart", "shutdown" or "poweroff"; the Mac about to
     /// sleep, "sleep". With `close` (the sleep's) its connection then closes as `closeWithGoodbye`
     /// closes one: the goodbye, then this side's end (FIN; over TLS its close_notify first), then
     /// what the device still sends read and dropped by its own receive loop (`told`) until it

@@ -24,8 +24,9 @@ import StreamProtocol
 ///
 /// So the choice, `Going`: NSWorkspace's willPowerOff, when it comes (StreamCoordinator's
 /// `observePowerOff`), is the first signal, and for `powerOffStands` after it the goodbye is
-/// `powerOff`, "shutdown" in the words "‹Mac› is shutting down or restarting." (willPowerOff says
-/// neither which of a log out, a restart and a shut down nor whether someone cancels it). Nothing is
+/// `powerOff`, "poweroff" in the words "‹Mac› is shutting down or restarting." (willPowerOff says
+/// neither which of a log out, a restart and a shut down nor whether someone cancels it; a reason of
+/// its own, so "shutdown" keeps one meaning, a shut down Sill knows). Nothing is
 /// sent then: it goes out when Sill goes, by the SIGTERM that ends it (one that comes while Sill's
 /// Quit still waits on a full-screen window, say) or a quit Apple event, never by Sill's own Quit
 /// from its menu. A quit Apple event's reason, read as a parameter or an attribute (`quitReason`),
@@ -52,7 +53,7 @@ package enum HostGoodbye {
         /// A quit Apple event's reason said a restart: "restart", "‹Mac› is restarting."
         case restart
         /// macOS said the Mac is about to log out, restart or shut down (willPowerOff), and no quit
-        /// reason said which: "shutdown", "‹Mac› is shutting down or restarting."
+        /// reason said which: "poweroff", "‹Mac› is shutting down or restarting."
         case powerOff
     }
 

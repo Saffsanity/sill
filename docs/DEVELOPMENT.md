@@ -139,10 +139,11 @@ the Mac is about to log out, restart or shut down." and "Quit: macOS asked Sill
 to quit for a restart.", and every device hears "restart" ("Noah’s MacBook Pro
 is restarting.") or "shutdown" ("… is shutting down."); a log out is "quit".
 Within ten minutes of willPowerOff, a quit event with no reason Sill can read,
-and a SIGTERM, send "shutdown" in the words "… is shutting down or
+and a SIGTERM, send "poweroff" in the words "… is shutting down or
 restarting." (willPowerOff says neither which nor whether someone cancels it,
 so nothing is sent until Sill goes, and a Quit from Sill's own menu stays
-"quit"). Without either (Quit from the menu, a signal, a restart begun
+"quit"; a reason of its own, so "shutdown" is only ever a shut down Sill
+knows). Without either (Quit from the menu, a signal, a restart begun
 from another account as above), "quit" as before. One goodbye per connection,
 the first: a Quit right after the sleep's tells a device nothing more. Words for
 a device from before these reasons are the Mac's own, which it shows as they
@@ -285,7 +286,8 @@ again. When the Mac said why it went (Sill.app above), the device says so too:
 Mac as asleep from the start, so a row listed then (a sleep proxy's) is first
 dialled 20 s later, then every 30 s, with the lines above from that dial on,
 and a row listed afresh (the Mac awake) at once; "Mac mini is restarting." (or
-"is shutting down or restarting.") "This iPad reconnects when it’s back.", and
+"is shutting down.", or "is shutting down or restarting." when the Mac could
+not tell which) "This iPad reconnects when it’s back.", and
 a row listed then (the registration on its way out) is left alone until the
 Mac is listed afresh, Sill comes back from the background, or 10 minutes have
 passed; the words stay until the first dial. A goodbye can wait in the

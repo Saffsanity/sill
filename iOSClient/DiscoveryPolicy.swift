@@ -50,7 +50,7 @@ enum DiscoveryPolicy {
     /// counts as usual: a Sill relaunched within that second renews the record, so its row never
     /// leaves, and a goodbye packet can be lost.
     static let quitWait = 3.0
-    /// After the Mac said it is shutting down or restarting (goodbye `shutdown` or `restart`), a row
+    /// After the Mac said it is shutting down or restarting (goodbye `shutdown`, `restart` or `poweroff`), a row
     /// listed since before the goodbye is left alone at most this long (`reconnectRow`'s `offAt`):
     /// ten minutes, longer than a Mac takes to restart and open Sill again. A Mac back sooner is
     /// dialled as soon as its row is listed afresh, the usual way back; this bounds the wait of a
@@ -791,7 +791,7 @@ enum DiscoveryPolicy {
     // proxy may wake a Mac someone put to sleep. So that listing starts where the dials would have
     // got to: asleep, its first dial `asleepWait` after the goodbye, then every 30 s, `reconnectDials`
     // in all, with the words those dials have. A row listed afresh since is the Mac awake again, and
-    // is dialled at once. (After "shutdown" or "restart" a row listed before is left alone instead,
+    // is dialled at once. (After "shutdown", "restart" or "poweroff" a row listed before is left alone instead,
     // for `offHold` at most: `reconnectRow`'s `offAt`.)
     //
     // The app's return from the background (issue #105's review, 2026-10-20). A goodbye can wait in
@@ -799,7 +799,7 @@ enum DiscoveryPolicy {
     // read, is the return's, and the Mac may have said it long before: what the browser made again at
     // that return lists is the network as it is now. So a row that browser lists counts as listed
     // afresh (`returnRenews`, `renewed`): after "sleep" for the return the goodbye was read on (on a
-    // session from before it), after "shutdown" or "restart" for any return since the goodbye. A row
+    // session from before it), after "shutdown", "restart" or "poweroff" for any return since the goodbye. A row
     // only the old browser's results list, kept beside the new one while it settles, does not.
 
     /// How long after the Mac said it is going to sleep its row as listed then is first dialled
@@ -825,7 +825,7 @@ enum DiscoveryPolicy {
     /// `reconnectLine`'s for the dials so far; nil, which keeps the status line as it is (the words
     /// the session's end left: "‹Mac› went to sleep. This ‹iPad› reconnects when it wakes.", "‹Mac›
     /// is restarting…"), while no dial of the row has gone out since the Mac said it went (`wentAt`,
-    /// the moment the session ended after a goodbye "sleep", "shutdown" or "restart": `lastDialAt`
+    /// the moment the session ended after a goodbye "sleep", "shutdown", "restart" or "poweroff": `lastDialAt`
     /// nil, or at or before it, as a listing counted asleep starts with its last dial at the goodbye,
     /// `listingStart`).
     static func waitingLine(mac: String, failed: Int, lastDialAt: Double?, direct: Bool, wentAt: Double?) -> String? {
@@ -836,7 +836,7 @@ enum DiscoveryPolicy {
     /// Whether the app's return from the background at `returnedAt` makes what the browser made again
     /// then lists count as listed afresh for the goodbye that ended the session at `wentAt`
     /// (`reconnectRow`'s `networkRenewed` and `directRenewed`, `listingStart`'s `renewed`). After
-    /// "shutdown" or "restart" (`off`), any return since the goodbye: the person is back, and that
+    /// "shutdown", "restart" or "poweroff" (`off`), any return since the goodbye: the person is back, and that
     /// browser lists the network as it is now, not the registration on its way out. After "sleep",
     /// only the return the goodbye was read on: read in the background (`inBackground`) with the
     /// return within `rebuildSettle` after it, as when it waited in the connection while the app was

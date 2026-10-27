@@ -2115,7 +2115,7 @@ package final class StreamCoordinator {
     /// (kind 22, at most 0.1 s: HostGoodbye.forQuit, from the reason macOS gave the app's Quit,
     /// `quitReason`, whether Sill's own Quit with no Apple event ended it, `byMenu`, and whether macOS
     /// said the Mac is about to log out, restart or shut down, `observePowerOff`: "restart",
-    /// "shutdown", or "quit" as before; so a signal after willPowerOff says "shutdown" too; one line
+    /// "shutdown", "poweroff", or "quit" as before; so a signal after willPowerOff says "poweroff"; one line
     /// then; a device already told why, by the Mac's sleep goodbye, hears nothing more), then a window
     /// Sill sized goes back to its own frame (`restoreFits`), the staged window home, display gone.
     /// Capture and encoder need no stop; the process is about to end. The CLI without
@@ -2156,7 +2156,7 @@ package final class StreamCoordinator {
 
     /// macOS said the Mac is about to log out, restart or shut down, while the AppKit loop runs:
     /// NSWorkspace's willPowerOff (issue #105; HostGoodbye has what is known of when it comes). For
-    /// the next ten minutes (`HostGoodbye.powerOffStands`) the goodbye Sill's end sends is "shutdown"
+    /// the next ten minutes (`HostGoodbye.powerOffStands`) the goodbye Sill's end sends is "poweroff"
     /// in the words "‹Mac› is shutting down or restarting." (`shutdownForExit`: HostGoodbye.forQuit's
     /// `powerOff`), unless a quit Apple event's reason says which: the SIGTERM that may end Sill
     /// without a Quit sends it, where it sent "quit", and so does a quit Apple event without a

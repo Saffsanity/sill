@@ -211,9 +211,9 @@ public struct PairResult: Codable, Sendable {
 public struct Goodbye: Codable, Sendable, Equatable {
     /// "removed", "remoteOff", "internetOff", "quit", "busy", "pairingRequired" (Require pairing was
     /// turned on while this unpaired device was connected at home), "update", or the Mac's own going:
-    /// "sleep", "shutdown" or "restart". Always sent: a device from before 2026-09-25 decodes nothing
-    /// without it. A device from then on treats a reason it does not know by `message` and
-    /// `reconnect`, so a later host can tell it anything (GoodbyePolicy).
+    /// "sleep", "shutdown", "restart" or "poweroff". Always sent: a device from before 2026-09-25
+    /// decodes nothing without it. A device from then on treats a reason it does not know by `message`
+    /// and `reconnect`, so a later host can tell it anything (GoodbyePolicy).
     public var reason: String
     /// Shown word for word as the connect screen's status line (after SafeText.label, at most 300
     /// characters). "update" always carries one, and a new reason should. Nil: the device's own words.
@@ -234,16 +234,18 @@ public struct Goodbye: Codable, Sendable, Equatable {
     /// The host no longer serves this device's version: update it (DeviceGate).
     public static let update = "update"
     /// The Mac is going to sleep ("sleep": NSWorkspace says so under the AppKit loop, in Sill.app and
-    /// the CLI with --virtual-display), shutting down ("shutdown") or restarting ("restart"). Which of
-    /// the last two Sill.app says comes from macOS (HostGoodbye): a quit Apple event's reason says
-    /// which, and NSWorkspace's willPowerOff, which comes for a log out, a restart or a shut down
-    /// alike, makes it "shutdown" in the words "‹Mac› is shutting down or restarting."; a log out
-    /// that says so is a "quit", the Mac staying up. Each with the Mac's words, which say what
-    /// happened in plain words for a device from before these reasons (it shows a reason it does not
-    /// know by its `message`), and a reconnect, which such a device follows as after any end. This
-    /// build's words and its waits: GoodbyePolicy and DiscoveryPolicy (docs/update-notice-plan.md
-    /// §7.3). Additive: three reason strings.
-    public static let sleep = "sleep", shutdown = "shutdown", restart = "restart"
+    /// the CLI with --virtual-display), shutting down ("shutdown"), restarting ("restart"), or about to
+    /// log out, restart or shut down without saying which ("poweroff"). Which Sill.app says comes from
+    /// macOS (HostGoodbye): a quit Apple event's reason says "restart" or "shutdown", a log out that
+    /// says so is a "quit" (the Mac stays up), and NSWorkspace's willPowerOff, which comes for a log
+    /// out, a restart or a shut down alike, makes it "poweroff" when nothing says which, so "shutdown"
+    /// keeps one meaning, a shut down Sill knows (the review of PR #100 of 2026-10-26; before it,
+    /// willPowerOff's goodbye was a "shutdown" in the words "‹Mac› is shutting down or restarting.").
+    /// Each with the Mac's words, which say what happened in plain words for a device from before
+    /// these reasons (it shows a reason it does not know by its `message`), and a reconnect, which
+    /// such a device follows as after any end. This build's words and its waits: GoodbyePolicy and
+    /// DiscoveryPolicy (docs/update-notice-plan.md §7.3). Additive: four reason strings.
+    public static let sleep = "sleep", shutdown = "shutdown", restart = "restart", poweroff = "poweroff"
 
     /// "‹Mac› is going to sleep."
     public static func asleep(mac: String) -> Goodbye {
@@ -261,8 +263,8 @@ public struct Goodbye: Codable, Sendable, Equatable {
     }
 
     /// "‹Mac› is shutting down or restarting.": macOS said the Mac is about to log out, restart or
-    /// shut down (willPowerOff) and nothing said which.
+    /// shut down (willPowerOff) and nothing said which, reason "poweroff".
     public static func shuttingDownOrRestarting(mac: String) -> Goodbye {
-        Goodbye(reason: shutdown, message: "\(mac) is shutting down or restarting.", reconnect: true)
+        Goodbye(reason: poweroff, message: "\(mac) is shutting down or restarting.", reconnect: true)
     }
 }

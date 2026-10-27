@@ -15,16 +15,17 @@ import StreamProtocol
 /// rule a reason the device did not know showed "‹Mac› disconnected…" and reconnected at once, so a
 /// Mac that refused the device was dialled again and again.
 ///
-/// The Mac's own going (issue #105): "sleep", "shutdown" and "restart" are notices too (said whatever
-/// the session's state, a remote dial's before its first window list included), in this build's
-/// words and always with a reconnect, which waits as `went` says (DiscoveryPolicy: the Mac counted as
-/// asleep, or a Mac going down left alone until it is listed afresh, the app's return from the
-/// background, or ten minutes), and through the remote door only for a session that came that way: at
-/// home such a dial would only replace the words while the Mac is away, and the Mac's row brings it
-/// back. "shutdown" is worded "is shutting down or restarting": a Mac sends it when macOS said it is
-/// about to log out, restart or shut down without saying which (willPowerOff, HostGoodbye), as well as
-/// for a shut down it knows. A device from before them shows the Mac's `message` ("‹Mac› is going to
-/// sleep.", "‹Mac› is shutting down or restarting.") and follows its `reconnect`.
+/// The Mac's own going (issue #105): "sleep", "shutdown", "restart" and "poweroff" are notices too
+/// (said whatever the session's state, a remote dial's before its first window list included), in
+/// this build's words and always with a reconnect, which waits as `went` says (DiscoveryPolicy: the Mac
+/// counted as asleep, or a Mac going down left alone until it is listed afresh, the app's return from
+/// the background, or ten minutes), and through the remote door only for a session that came that way:
+/// at home such a dial would only replace the words while the Mac is away, and the Mac's row brings it
+/// back. "shutdown" is a shut down the Mac knows ("is shutting down"), "restart" a restart, and
+/// "poweroff" what a Mac sends when macOS said it is about to log out, restart or shut down without
+/// saying which (willPowerOff, HostGoodbye): "is shutting down or restarting". A device from before
+/// them shows the Mac's `message` ("‹Mac› is going to sleep.", "‹Mac› is shutting down or
+/// restarting.") and follows its `reconnect`.
 enum GoodbyePolicy {
     struct Outcome: Equatable {
         /// The connect screen's status line.
@@ -59,12 +60,12 @@ enum GoodbyePolicy {
                                             Goodbye.pairingRequired]
 
     /// Whether this device closes the connection as soon as the goodbye comes rather than waiting
-    /// for the Mac to close it: the Mac's own going, "sleep", "shutdown" or "restart". Its Mac closes
-    /// the connection after the goodbye (reading what the device still sends until then), but over
-    /// TLS its end goes only at its cancel, a second later, and a Mac that has gone to sleep sends
-    /// it only once it wakes, so the device would otherwise wait for its liveness to give up.
+    /// for the Mac to close it: the Mac's own going, "sleep", "shutdown", "restart" or "poweroff". Its
+    /// Mac closes the connection after the goodbye (reading what the device still sends until then),
+    /// but over TLS its end goes only at its cancel, a second later, and a Mac that has gone to sleep
+    /// sends it only once it wakes, so the device would otherwise wait for its liveness to give up.
     static func closesAtOnce(_ goodbye: Goodbye) -> Bool {
-        [Goodbye.sleep, Goodbye.shutdown, Goodbye.restart].contains(goodbye.reason)
+        [Goodbye.sleep, Goodbye.shutdown, Goodbye.restart, Goodbye.poweroff].contains(goodbye.reason)
     }
 
     /// A goodbye this build shows by the Mac's words: "update", or a reason it does not know (a
@@ -93,10 +94,14 @@ enum GoodbyePolicy {
             return Outcome(text: "\(mac) went to sleep. This \(device) reconnects when it wakes.",
                            reconnect: true, remoteAllowed: saved && remote, isNotice: true, went: .asleep)
         case Goodbye.shutdown:
-            return Outcome(text: "\(mac) is shutting down or restarting. This \(device) reconnects when it’s back.",
+            return Outcome(text: "\(mac) is shutting down. This \(device) reconnects when it’s back.",
                            reconnect: true, remoteAllowed: saved && remote, isNotice: true, went: .off)
         case Goodbye.restart:
             return Outcome(text: "\(mac) is restarting. This \(device) reconnects when it’s back.",
+                           reconnect: true, remoteAllowed: saved && remote, isNotice: true, went: .off)
+        case Goodbye.poweroff:
+            // willPowerOff with nothing to say which: either, and the same wait.
+            return Outcome(text: "\(mac) is shutting down or restarting. This \(device) reconnects when it’s back.",
                            reconnect: true, remoteAllowed: saved && remote, isNotice: true, went: .off)
         case Goodbye.removed:
             return Outcome(text: "\(mac) removed this \(device). To use it again, pair it again.",

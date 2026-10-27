@@ -12,10 +12,13 @@ Formerly winstream; the folder still carries the old name.
 `goodbye-sleep` on addhumal/sill with main at c215514 merged in; issue #105; finished on the branch from
 the triage of 2026-10-16 and 2026-10-19, `~/Downloads/sill-handoff/triage/`, and fixed after the
 verifier's review of 2026-10-20).** Noah: "Work on finishing ... The Mac telling devices it is going to
-sleep or shutting down". Additive: kind 22 gains the reasons "sleep", "shutdown" and "restart", each with
-the Mac's words and `"reconnect":true`.
+sleep or shutting down". Additive: kind 22 gains the reasons "sleep", "shutdown", "restart" and
+"poweroff", each with the Mac's words and `"reconnect":true`.
 - Wire (Remote.swift): `Goodbye.asleep`, `.shuttingDown`, `.restarting` and `.shuttingDownOrRestarting`
-  (reason "shutdown"), whose words say what happened in plain words for a device from before them,
+  (reason "poweroff", the review of 2026-10-26: "shutdown" keeps one meaning, a shut down Sill knows;
+  willPowerOff alone, which says neither which nor whether someone cancels it, has a reason of its own,
+  the maintainer's default, for Noah to reverse before the merge if he wants "shutdown" for both),
+  whose words say what happened in plain words for a device from before them,
   which shows a reason it does not know by its message ("Noah’s MacBook Pro is going to sleep.", "… is
   shutting down.", "… is restarting.", "… is shutting down or restarting."): 0.5.1 shows them until its
   reconnect's first dial, which comes at once while the Mac's row is still listed.
@@ -29,7 +32,7 @@ the Mac's words and `"reconnect":true`.
   cancel), the goodbye handed over within 0.1 s, one line ("The Mac is going to sleep: 2 devices
   told."). Not under the CLI's dispatchMain: NSWorkspace says nothing there, and a power client that
   nobody answers holds the Mac's sleep up to 30 s. A log out, restart or shut down (`HostGoodbye`,
-  pure, has the evidence): NSWorkspace's willPowerOff (`observePowerOff`) stages "shutdown" in the words
+  pure, has the evidence): NSWorkspace's willPowerOff (`observePowerOff`) stages "poweroff" in the words
   "… is shutting down or restarting." for ten minutes (`powerOffStands`), sent when Sill goes, by a
   SIGTERM (HostShutdown's signal path, where it sent "quit") or a quit Apple event without a reason,
   never by Sill's own Quit from its menu (`byMenu`); a quit Apple event's `kAEQuitReason`, read as a
@@ -45,16 +48,16 @@ the Mac's words and `"reconnect":true`.
   sudden termination off). TEST ONLY on the bare binary: `-SillSleepAfter <s>`,
   `-SillPowerOffAfter <s>` (willPowerOff posted to the app alone), `-SillQuitAfter '<s> restart|shutdown|
   logout[ parameter]'` (a quit Apple event to itself with that reason).
-- Device: GoodbyePolicy's three notices in this build's words ("‹Mac› went to sleep. This ‹iPad›
-  reconnects when it wakes.", "‹Mac› is shutting down or restarting." or "is restarting." "This ‹iPad›
-  reconnects when it’s back."), always a reconnect, `went` (quit, asleep, off) for its waits, the remote
+- Device: GoodbyePolicy's four notices in this build's words ("‹Mac› went to sleep. This ‹iPad›
+  reconnects when it wakes.", "‹Mac› is shutting down.", "is restarting." or, for "poweroff", "is
+  shutting down or restarting." "This ‹iPad› reconnects when it’s back."), always a reconnect, `went` (quit, asleep, off) for its waits, the remote
   door only after a session that came through it (`remote`), and the connection closed by the device as
   soon as one comes (`closesAtOnce`), so the session ends at once whatever the Mac's end does.
   DiscoveryPolicy: after "sleep" a row listed at the goodbye counts as asleep (`listingStart`: three
   dials that did not connect, the last at the goodbye, so the first comes 20 s later, `asleepWait`,
   then every 30 s, nine in all, with #69's lines from that dial on), a row listed afresh is dialled at
-  once, and the return from the background starts the count there again; after "shutdown" or
-  "restart" a row listed at the goodbye is left alone until it is listed afresh, Sill comes back from
+  once, and the return from the background starts the count there again; after "shutdown", "restart"
+  or "poweroff" a row listed at the goodbye is left alone until it is listed afresh, Sill comes back from
   the background (what the browser made then lists), or 10 minutes have passed (`reconnectRow`'s
   `offAt`, `offHold`); a goodbye read only as the app came back (in the background just before the
   return, or within 3 s after it on a session up before it: `Session.startedAt`, `sessionSince`)
@@ -5664,7 +5667,7 @@ good.
   event's `kAEQuitReason`, read as a parameter or an attribute (`quitReason`),
   "restart" or "shutdown" with the Mac's words, a log out "quit"; within ten
   minutes of willPowerOff (`powerOffStands`), a signal's or a reasonless quit
-  event's "shutdown", "… is shutting down or restarting.", never Sill's own
+  event's "poweroff", "… is shutting down or restarting.", never Sill's own
   Quit's; else "quit"; the Mac about to sleep, "sleep"; the log's lines; what
   is observed and what inferred of how macOS ends Sill; `SleepWindow`, the Mac
   between its sleep goodbye and its wake: from willSleep until didWake, ten
@@ -6135,7 +6138,7 @@ good.
   home card for a row), `CodeScanner` (VisionKit),
   `PairingOverlay` (Pair This iPad…), `GoodbyePolicy` (the words and the
   reconnect after a session ends, a Mac's notice included, and the Mac's own
-  going, "sleep", "shutdown" and "restart", with how it went for the
+  going, "sleep", "shutdown", "restart" and "poweroff", with how it went for the
   reconnect's waits, and the connection the device closes at once on one
   (`closesAtOnce`); pure, `Tests/checks/goodbye`; StreamClient keeps a
   goodbye only for the connection it came on). The Mac's menus (docs/menu-bar-plan.md §7): `MacMenuState` (one
@@ -6395,7 +6398,7 @@ device hears, its connection closed, and every door refusing a session with it
 until `-SillWakeAfter <s>`, as if the Mac had woken, or ten minutes),
 `-SillPowerOffAfter <s>` (NSWorkspace's
 willPowerOff posted to the app alone: a SIGTERM or a reasonless quit event
-after it says "shutdown"), `-SillRenderPreviews <dir>` (panes, cards, glyphs,
+after it says "poweroff"), `-SillRenderPreviews <dir>` (panes, cards, glyphs,
 menu.txt; no permission needed), and for the Settings window's height
 `-SillSettingsAfter '<s> <tab>|close|report|end|height=<points>[; …]'` (opens it,
 then prints its frame, the pane's whole height and how much shows),
@@ -6813,7 +6816,11 @@ device keeps working with Macs from the first public build on, or each says why
   an identity: Sill.app, SillHost --remote or --pairing) and `link` (LinkReport, only while a link
   does not keep up; its `state` a string,
   which a device reads as keeping up when it does not know it); kind 22's `reason`, `message` and
-  `reconnect`; the
+  `reconnect`, and its reasons with their meanings (`quit`, `removed`, `remoteOff`, `internetOff`,
+  `busy`, `pairingRequired`, `update`, and the Mac's own going since PR #100: `sleep`, `shutdown` a
+  shut down the Mac knows, `restart`, and `poweroff` a log out, restart or shut down macOS did not
+  say which of; a later reason comes with its `message`, which a device from 2026-09-25 on shows as
+  it is, and its `reconnect`); the
   Mac's menus as MacMenu.swift has them (docs/menu-bar-plan.md §3):
   a kind 27 without an id is the device's subscription, and only a subscriber is served (another
   connection's fetches and choices are answered "The menus changed…", nothing read or pressed); an

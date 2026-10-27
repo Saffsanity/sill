@@ -827,11 +827,11 @@ not a window list came:
 | busy | "‹Mac› is already serving 8 devices." | yes | a saved Mac | — |
 | update | `message`. Without one: "Update Sill on this ‹iPad› to keep using ‹Mac›.", plus " It needs version ‹minimumVersion› or later." when that parses | only with `"reconnect":true` | a saved Mac | the App Store |
 | sleep (issue #105, PR #100) | "‹Mac› went to sleep. This ‹iPad› reconnects when it wakes." | yes, the Mac counted as asleep: a row listed at the goodbye is first dialled 20 s later, then every 30 s, nine dials (#69's twelve, three of them counted), with #69's lines from that first dial on; a row listed afresh at once, and so a row the browser made at the return from the background lists when the goodbye was read only on that return | a saved Mac, only after a session through the remote door, not before 20 s | — |
-| shutdown, restart (issue #105, PR #100) | "‹Mac› is shutting down or restarting. This ‹iPad› reconnects when it’s back." / "‹Mac› is restarting. This ‹iPad› reconnects when it’s back." | yes; a row listed at the goodbye is left alone until it is listed afresh (the Mac back, Sill open again), the browser made at a return from the background lists it, or 10 minutes have passed, then dialled at once; the words stay until that dial | a saved Mac, only after a session through the remote door, not before 20 s | — |
+| shutdown, restart, poweroff (issue #105, PR #100) | "‹Mac› is shutting down. This ‹iPad› reconnects when it’s back." / "‹Mac› is restarting. This ‹iPad› reconnects when it’s back." / "‹Mac› is shutting down or restarting. This ‹iPad› reconnects when it’s back." | yes; a row listed at the goodbye is left alone until it is listed afresh (the Mac back, Sill open again), the browser made at a return from the background lists it, or 10 minutes have passed, then dialled at once; the words stay until that dial | a saved Mac, only after a session through the remote door, not before 20 s | — |
 | Any other reason, and a kind 22 that does not decode (reason "") | `message`. Without one: "‹Mac› closed the connection. Tap it to try again.", or with `"reconnect":true` "‹Mac› closed the connection. Sill will reconnect when it can." | only with `"reconnect":true` | a saved Mac | — |
 
 - The first six rows are today's words and behaviour, moved, not changed.
-- sleep, shutdown and restart (added with PR #100, issue #105): the Mac's own going. Sill.app (and
+- sleep, shutdown, restart and poweroff (added with PR #100, issue #105): the Mac's own going. Sill.app (and
   the CLI under the AppKit loop, `--virtual-display`) sends "sleep" from NSWorkspace's willSleep,
   then closes each connection (its goodbye, this side's end, then what the device still sends read
   and dropped until it closes, as the gate's refusals close), so the device's session ends at once,
@@ -845,15 +845,18 @@ not a window list came:
   or shut down begun in Sill's own session sends Sill.app such a quit event (it turns sudden
   termination off). Its reason (read as a parameter or an attribute) says "restart" or "shutdown", a
   log out "quit"; after willPowerOff without a reason read, and for a SIGTERM within ten minutes of
-  willPowerOff, the goodbye is "shutdown" in the words "… is shutting down or restarting."
+  willPowerOff, the goodbye is "poweroff" in the words "… is shutting down or restarting."
   (willPowerOff says neither which nor whether someone cancels it, so nothing goes out before Sill
-  does, and a Quit from Sill's own menu stays "quit"). Without either, "quit", as before. Each carries the Mac's words, in plain words ("Noah’s MacBook Pro is going to
+  does, and a Quit from Sill's own menu stays "quit"). "poweroff" is that case's own reason (the
+  review of 2026-10-26, the maintainer's default for a wire decision Noah may reverse before the
+  merge): it was "shutdown" in those words, so "shutdown" meant a shut down Sill knew and one it
+  could not tell from a restart, and this build worded even a known shut down "is shutting down or
+  restarting"; now "shutdown" keeps one meaning, a shut down Sill knows, and each is worded right. Without either, "quit", as before. Each carries the Mac's words, in plain words ("Noah’s MacBook Pro is going to
   sleep.", "… is shutting down or restarting.", "… is shutting down.", "… is restarting.") and
   `"reconnect":true`, so a device from before them, which reads them as reasons it does not know,
   shows those words and reconnects as after any end (0.5.1 shows them until its reconnect's first
   dial, which comes at once while the Mac's row is still listed). This build words them itself
-  (above; "shutdown" as "shutting down or restarting", since a Mac sends it for willPowerOff) and
-  treats them as notices, so a remote dial's goodbye before its first window list never reads as
+  (above: "shutdown" a shut down, "poweroff" a shut down or a restart) and treats them as notices, so a remote dial's goodbye before its first window list never reads as
   "isn’t accepting remote connections". From willSleep until didWake no door admits a session (the
   review of 2026-10-26; HostGoodbye's `SleepWindow`, StreamServer's `gate`, for both TLS doors and
   the plain one): until the Mac actually sleeps the host still runs, every session's start declares
@@ -1218,7 +1221,10 @@ Commit messages end with the session's attribution lines.
 >   are that old, so no plaintext path or sniffer answers them.
 
 (Since the merge of main into `home-pairing`, 2026-09-27: the last bullet says what that merge
-settled, the gate in `Door` and protocol 1 with ALPN `sill/1`.)
+settled, the gate in `Door` and protocol 1 with ALPN `sill/1`. Since PR #100, issue #105: CLAUDE.md's
+first bullet also keeps kind 22's reasons with their meanings, the Mac's own going among them, "sleep",
+"shutdown" (a shut down the Mac knows), "restart" and "poweroff" (a log out, restart or shut down macOS
+did not say which of), §7.3.)
 
 **CLAUDE.md, elsewhere:**
 - the current step: both features, the defaults taken, what was verified;
