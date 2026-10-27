@@ -3,7 +3,7 @@ import Network
 import StreamProtocol
 
 struct ContentView: View {
-    @StateObject private var client = StreamClient()
+    @StateObject private var client = StreamClient(lane: StreamClient.mintLane())
     /// Tells the host what this device sees, once a second while connected. Also covers the DEBUG
     /// harness's `-SillLive 1` session, which runs on this same client.
     @StateObject private var statsReporter = ClientStatsReporter()

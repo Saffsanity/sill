@@ -26,6 +26,7 @@ import StreamProtocol
 /// keeps three fingers for itself; then Take the Tour.
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
+    @Environment(\.openWindow) private var openWindow
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
     let close: () -> Void
     /// Pair This iPad…: the stream screen puts the panel away and covers the stream with the
@@ -504,6 +505,17 @@ struct HostSettingsPanel: View {
                 .rowFrame()
             }
             Footnote(text: Self.largerPictureFooter)
+        }
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            Rows {
+                Button(action: { openWindow(id: "main") }) {
+                    Text("New Window")
+                        .foregroundStyle(Palette.accent)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .padding(.horizontal, 4)
+                }
+            }
+            Footnote(text: "Opens another Sill window. Pick a different Mac app in it. With Virtual Display on, a covered window keeps its picture.")
         }
         // The clipboard (docs/clipboard-plan.md): only while the Mac says it shares it.
         if ClipboardPolicy.hostTakes(client.hostClipboard) {

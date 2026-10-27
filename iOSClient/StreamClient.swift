@@ -906,10 +906,16 @@ final class StreamClient: ObservableObject {
     /// DEBUG: saved Macs seeded for this run by `-Sill.savedMacs '<JSON>'`; nothing is written back.
     private(set) var savedMacsSeeded = false
 
-    init() {
+    /// Nil on the first window of this process (the shared stream). Each window opened after that
+    /// asks the Mac for its own. A mock client passes nil and stays on the shared stream.
+    private let lane: String?
+    private let helloData: Data
+
+    init(lane: String? = nil) {
+        self.lane = lane
         // The hello is built here, on the main thread: it reads UIDevice (the device's name), which
         // the network queue, where connections become ready and send it, must not be first to touch.
-        _ = Self.helloPayload
+        helloData = Self.makeHello(lane: lane)
         #if DEBUG
         // Read from the command line itself: the argument domain drops a value that starts like a
         // property list but is not one, and JSON's "[" is such a start.
@@ -1845,16 +1851,25 @@ final class StreamClient: ObservableObject {
         return DeviceTLS.refusing(peerToPeer: false, queue: queue)
     }
 
-    /// This device's hello (kind 23): its version, build, protocol and name, built once. DEBUG:
-    /// `-SillHelloVersion <v>` replaces the version, for a host's device floor under test.
-    private static let helloPayload: Data = {
+    /// The first window of this process keeps the shared stream. Each one opened after it asks
+    /// for its own (`Hello.lane`). Called from `ContentView`, once per window.
+    static func mintLane() -> String? {
+        struct Counter { static var n = 0 }
+        Counter.n += 1
+        return Counter.n == 1 ? nil : UUID().uuidString
+    }
+
+    /// This device's hello (kind 23): its version, build, protocol, name and, for a later window,
+    /// the lane. DEBUG: `-SillHelloVersion <v>` replaces the version, for a host's device floor.
+    private static func makeHello(lane: String?) -> Data {
         var version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
         #if DEBUG
         if let v = UserDefaults.standard.string(forKey: "SillHelloVersion"), !v.isEmpty { version = v }
         #endif
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-        return Wire.encode(Hello(appVersion: version, build: build, protocol: SillProtocol.current, device: ClientStatsReporter.deviceName))
-    }()
+        return Wire.encode(Hello(appVersion: version, build: build, protocol: SillProtocol.current,
+                                 device: ClientStatsReporter.deviceName, lane: lane))
+    }
 
     /// The hello, the first thing on every session connection, written straight to `c` before
     /// anything else can go out on it: a Mac with a device floor judges the device by its first
@@ -1866,11 +1881,12 @@ final class StreamClient: ObservableObject {
     /// winner before it becomes the session's (`adopt`). Never on a pairing connection, whose one
     /// message is kind 19. Older Macs skip it. Any thread.
     private func sendHello(on c: NWConnection) {
-        let message = StreamMessage(kind: .hello, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: Self.helloPayload)
+        let message = StreamMessage(kind: .hello, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: helloData)
         c.send(content: message.serialized(), completion: .contentProcessed { _ in })
         #if DEBUG
-        if let hello = Wire.decode(Hello.self, from: Self.helloPayload) {
-            print("hello: sent Sill \(hello.appVersion ?? "?") (\(hello.build ?? "?")), protocol \(hello.protocol ?? 0)")
+        if let hello = Wire.decode(Hello.self, from: helloData) {
+            let own = hello.lane == nil ? "" : ", own stream"
+            print("hello: sent Sill \(hello.appVersion ?? "?") (\(hello.build ?? "?")), protocol \(hello.protocol ?? 0)\(own)")
         }
         #endif
     }
@@ -3800,7 +3816,9 @@ final class StreamClient: ObservableObject {
                 // (its capture stopped: issue #69), and when the window being watched has closed. Not
                 // when a pick failed (the host still lists the window): that is the user's to retry. At
                 // most once every 10 s, so a host that cannot start the Desktop does not loop.
-                if list.active == .none, !Self.noAutoDesktop {
+                // A later window asked for its own stream. It waits on the picker: asking for the
+                // Desktop here would start a second full-screen encode.
+                if list.active == .none, self.lane == nil, !Self.noAutoDesktop {
                     let watched: DiscoveryPolicy.Watched
                     switch previous {
                     case .none: watched = .nothing

@@ -270,14 +270,16 @@ final class StreamServer {
     /// (PointerWatch.samplerInterval). Returns the devices sent one.
     @discardableResult
     private func samplePointer(now: TimeInterval) -> Set<ObjectIdentifier> {
-        let ready = clients.compactMap { $0.value.connection.state == .ready ? $0.key : nil }
+        let ready = clients.compactMap { id, client in
+            client.connection.state == .ready && !ownStreams.contains(id) ? id : nil
+        }
         guard let watch = pointerWatch, let reading = watch.sample(devices: ready) else {
             setPointerSampler(interval: nil)
             return []
         }
         var sent = Set<ObjectIdentifier>()
         var watched = false
-        for (id, client) in clients where client.connection.state == .ready {
+        for (id, client) in clients where client.connection.state == .ready && !ownStreams.contains(id) {
             guard let report = reading.report(for: id, seen: client.inputsRead) else {
                 client.lastPointer = nil
                 continue
@@ -1309,7 +1311,7 @@ final class StreamServer {
     func resetForNewStream() {
         queue.async { [self] in
             lastParameterSets = nil
-            for client in clients.values {
+            for client in clients.values where !ownStreams.contains(ObjectIdentifier(client.connection)) {
                 client.needsKeyframe = true
                 client.awaitingFirstKeyframe = true
             }
@@ -1344,15 +1346,28 @@ final class StreamServer {
         }
     }
 
-    /// One message to one client (catalog on connect). Thread-safe.
-    func send(_ message: StreamMessage, to connection: NWConnection) {
+    /// One message to one client (catalog on connect, or one window's own frames). `isFrame` counts
+    /// toward the drain timeout, as a broadcast frame does. Thread-safe.
+    func send(_ message: StreamMessage, to connection: NWConnection, isFrame: Bool = false) {
         let data = message.serialized()
+        let key = message.isKeyframe
         queue.async { [self] in
             guard let client = clients[ObjectIdentifier(connection)] else {
                 print("send: no client for \(connection.endpoint) (\(clients.count) known)")
                 return
             }
-            send(data, to: client)
+            send(data, to: client, isFrame: isFrame, isKeyframe: key)
+        }
+    }
+
+    /// Connections that asked for their own stream (Hello.lane). Their frames never go through
+    /// `broadcast`, and a shared restart does not make them wait for the shared keyframe. On `queue`.
+    private var ownStreams: Set<ObjectIdentifier> = []
+
+    /// Thread-safe. `on` from the moment the hello is known until the connection leaves.
+    func setOwnStream(_ id: ObjectIdentifier, _ on: Bool) {
+        queue.async { [self] in
+            if on { ownStreams.insert(id) } else { ownStreams.remove(id) }
         }
     }
 
@@ -1458,6 +1473,8 @@ final class StreamServer {
             var wantKeyframe = false
             defer { if wantKeyframe { onKeyframeNeeded?() } }
             for client in clients.values where client.connection.state == .ready {
+                if (message.kind == .frame || message.kind == .parameterSets),
+                   ownStreams.contains(ObjectIdentifier(client.connection)) { continue }
                 if message.kind == .frame, client.route.isRemote {
                     if paceRemote(client, message: message, data: data) { wantKeyframe = true }
                     continue

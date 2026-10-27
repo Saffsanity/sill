@@ -11,6 +11,11 @@
 	     library of Sill's own (docs/app-store-metadata.md section 6). -->
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Finds your Mac on the local network.</string>
 	<!-- DEBUG ONLY: Info.plist (the Release configuration's) plus `_silltest._tcp`, which the Debug
