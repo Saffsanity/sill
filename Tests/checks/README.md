@@ -11,15 +11,15 @@ a device's keys leave set on the Mac, when the device takes the keyboard for a h
 when it asks the Mac for a keyframe after its picture was interrupted, what the Mac sends of its
 menus and what the device makes of it, how the Mac's sound becomes packets and back and when and
 where the device plays them, when the first-run tour shows and where its card goes, how tall the
-Mac's Settings window may be on a screen, pairing at home: who each door admits, what counts as the
-USB cable, the device's home rows and dials, where the layouts meet the iPhone Duo's fold, when a
-window Sill sized goes back, which type encodings the virtual display's private API may report, and
-when the Mac's display is woken for a device) are plain Swift files that compile on their own. Each
-folder here compiles one or a few of those files, exactly as they are in `Sources/`, `iOSClient/`
-and `Scripts/`, together with its own `main.swift`, and runs the result. Nothing here needs a
-device, Screen Recording, Accessibility, the video encoder or any network but loopback, so the
-checks run anywhere Xcode does, and in CI (`.github/workflows/ci.yml`) on pull requests and pushes
-to `main`.
+Mac's Settings window may be on a screen, whether screen sharing shows the pairing window, pairing
+at home: who each door admits, what counts as the USB cable, the device's home rows and dials,
+where the layouts meet the iPhone Duo's fold, when a window Sill sized goes back, which type
+encodings the virtual display's private API may report, and when the Mac's display is woken for a
+device) are plain Swift files that compile on their own. Each folder here compiles one or a few of
+those files, exactly as they are in `Sources/`, `iOSClient/` and `Scripts/`, together with its own
+`main.swift`, and runs the result. Nothing here needs a device, Screen Recording, Accessibility,
+the video encoder or any network but loopback, so the checks run anywhere Xcode does, and in CI
+(`.github/workflows/ci.yml`) on pull requests and pushes to `main`.
 
 ```
 Tests/checks/run-all.sh                   # every check, about five minutes on an M-series Mac
@@ -75,6 +75,7 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 | `message-reader` | `iOSClient/MessageReader.swift`, `Sources/StreamProtocol/StreamMessage.swift` | the session's reader against a stand-in Mac on loopback: 2,000 random messages in random chunks delivered byte for byte and in order, payloads read in pieces of at most 256 KB with every piece reported (liveness counts bytes), the end mid-message and with the last bytes, the caps, and a stop between messages, mid-payload and at a message the end came with | 46 | 17 |
 | `origin` | `Sources/SillHost/OriginPolicy.swift`, `InterfaceSnapshot.swift` | which door a connection may use, by source address and interface; the last cases read this Mac's own interfaces (read-only) | 66 | 10 |
 | `pairing-address` | `Sources/SillMenuBar/PairingWindowAddress.swift` with `AddressList`, `OriginPolicy` and `Sources/StreamProtocol` (`build.sh`) | the address the pairing window gives to type, with 5,000 random runs | 80 | 35 |
+| `pairing-sharing` | `Sources/SillMenuBar/PairingWindowSharing.swift` (`build.sh`; AppKit imported for `NSWindow.SharingType` alone, no window) | whether screen sharing shows the pairing window (issue #108): Settings › Devices' switch alone decides it, hidden while off and shown while on, whoever opened the window (the Mac's user or a device's ask), through one window's session; what the window server is told for each (`.none` hidden, `.readOnly`, AppKit's default, shown); the Log's two lines, which carry no digit | 18 | 11 |
 | `phone-portrait` | `iOSClient/PhonePortraitLayout.swift` | where everything goes on a phone held upright: the picture's 16:10 pane, row 1's five buttons in their band, the strip, the six caps, the trackpad and its span, the Aa ruler, the drawer and the Settings panel across row 1, and the dim, and the Menus button ending the strip's row, the Sound button under Settings with Menus beside it (docs/audio-plan.md §7.6), and none in Larger Picture's row 1 (Q10: the Settings panel's switch alone); the plan's tables phone by phone (the keyboard's too, the Duo's outer display's, and the iPhone Duo's real cover, 382×678 beside its camera's strip), the approved mockup's numbers, and every width from 300 to 599 pt at every height to 1,400; and Larger Picture (docs/larger-picture-plan.md): the keyboard's estimate phone by phone, the switch and the hinge, only where it makes the picture larger (not at Display Zoom's 320 pt; the switch judged upright, whichever way the phone is held), the room above the keyboard, row 1 with the Menus button, the key row 10 pt above the keyboard, the trackpad its footprint, the drawer above row 1, the picture's frame at its own shape and the trackpad's span, phone by phone and over the same grid with the four keyboards measured; only while a window streams (`largerPicture(switchOn:streaming:)`: the Desktop and nothing streaming with the switch on are the switch off's arrangement, every rect, the viewport, the frames and the spans, phone by phone and over the grid; Noah's finding of 2026-10-15 in numbers) | 495 | 80 |
 | `pointer-control` | `Sources/SillHost/PointerControl.swift` with `Sources/StreamProtocol` (`build.sh`) | who moves the Mac's pointer: the settle after Sill's own input, posts and warps, a real move from the last position that counted (jitter never, a slow drift yes), keys, one controller of two devices, a read after a gap, when it counts as moving (the frame-rate sampling), the fraction kind 26 carries (the far edges outside); kind 26 itself (MacPointer's JSON, the kind table, 43 the Mac's sound's and 44 the keyframe request's since), with 5,000 random runs | 159 | 33 |
 | `pointer-presence` | `iOSClient/PointerPresence.swift` | what the device's pointer sprite shows, row by row of the plan's table (the Mac's, the portrait trackpad's, the Pencil's, both flips), the portrait key row keeping what shows, a new frame re-centring only this device's own pointer while it shows, a report's freshness, the network queue's feed (the anchor, its re-seeds, a hand-over's carry-over and restatements), the portrait pad's cursor and its re-seed mid-stroke or under a resting finger | 165 | 43 |
@@ -103,26 +104,26 @@ is the `hardware-keyboard` branch's (#67, #68: Esc's key command; the `spotlight
 before it), `hardware-keyboard` came with that branch, `home-device`, `home-model` and
 `remote-rules` grew with #44 and #46, `policy` with #69 (`sleep.swift`), `installed-apps` came
 with #136 (#76), its depth #135's, `virtual-display-api` with #87 (#62), `display-wake` with #151
-(issue #134), and `protocol`'s Reverse Scrolling cases and mutants with #159 (issue #143). At the
-`audio` branch's merge with main at 7b4c313 `display-wake` decides kind 43 too (the Mac's sound,
-never a person's: 193 checks, and M61, 61 mutants). The `audio` branch brought
-`audio-packetizer`, `audio-codec` and `audio-playout`, and added the sound's cases to
-`compatibility` (130 with the gestures'), `protocol` (218) and the kind tables (`pointer-control`
-157); at its merge with main at 985a733, `compatibility`'s 131 and 31 and `protocol`'s 220 + 8 and
-33 are both sides' cases and mutants together. After its device's review (2026-10-14) the mutants of
-the 31 checks whose compiled files differ from main's ran there, 925 in all, every one caught: the
-three audio checks, `ledger` (its 12 new), `phone-portrait`, `tour`, and every check that compiles
-one of StreamProtocol's changed files. At its merge with main at 5c323e6 the counts of
-`compatibility`, `protocol`, `pointer-control`, `phone-portrait` and `tour` are the merged tree's:
-both sides' cases and mutants, with `phone-portrait`'s 13 cases and four mutants (A1–A4) and
-`tour`'s one case for the Sound button in Larger Picture's row 1 (`row1Beside`), and
+(issue #134), `protocol`'s Reverse Scrolling cases and mutants with #159 (issue #143), and
+`pairing-sharing` with #157 (#108). At the `audio` branch's merge with main at 7b4c313
+`display-wake` decides kind 43 too (the Mac's sound, never a person's: 193 checks, and M61, 61
+mutants). The `audio` branch brought `audio-packetizer`, `audio-codec` and `audio-playout`, and
+added the sound's cases to `compatibility` (130 with the gestures'), `protocol` (218) and the kind
+tables (`pointer-control` 157); at its merge with main at 985a733, `compatibility`'s 131 and 31 and
+`protocol`'s 220 + 8 and 33 are both sides' cases and mutants together. After its device's review
+(2026-10-14) the mutants of the 31 checks whose compiled files differ from main's ran there, 925 in
+all, every one caught: the three audio checks, `ledger` (its 12 new), `phone-portrait`, `tour`, and
+every check that compiles one of StreamProtocol's changed files. At its merge with main at 5c323e6
+the counts of `compatibility`, `protocol`, `pointer-control`, `phone-portrait` and `tour` are the
+merged tree's: both sides' cases and mutants, with `phone-portrait`'s 13 cases and four mutants
+(A1–A4) and `tour`'s one case for the Sound button in Larger Picture's row 1 (`row1Beside`), and
 `pointer-control`'s two kinds (32 and 43) in its table. As a beta (2026-10-20; docs/audio-plan.md,
 "The beta"), Larger Picture's row 1 has no Sound button (the plan's Q10): those give way to
 `phone-portrait`'s cases that it has none (495 checks) and three mutants of its own (A1–A3, 80 in
 all), and `tour`'s case goes (111,191); and Send Audio is the Mac's alone (Q8): `away-quality` gains
 its 12 cases and five mutants (AQ20–AQ24: 83 and 24). At its merge with main at c215514 (#159),
-`protocol`'s 234 + 8 and 42 are both sides' cases and mutants together (the sound's 221 + 8 and
-34, Reverse Scrolling's 13 and 8).
+`protocol`'s 234 + 8 and 42 are both sides' cases and mutants together (the sound's 221 + 8 and 34,
+Reverse Scrolling's 13 and 8).
 
 A mutant changes the checked file in one place and must make the check fail: `run.sh --mutants`
 (or `run-all.sh --mutants`) passes only when the script's last line counts every mutant as caught.

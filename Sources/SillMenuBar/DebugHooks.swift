@@ -17,9 +17,10 @@ import StreamProtocol
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
 ///                                              sendAudio, remoteAccess, remotePort, internetAccess,
 ///                                              shareClipboard, remoteAddressName=host[:port],
-///                                              updateCheck, requirePairing=0|1). Saved like any
-///                                              change (requirePairing in the identity store:
-///                                              memory, or SILL_TEST_REMOTE_DIR)
+///                                              updateCheck, showPairingWindowToScreenSharing=0|1,
+///                                              requirePairing=0|1). Saved like any change
+///                                              (requirePairing in the identity store: memory, or
+///                                              SILL_TEST_REMOTE_DIR)
 ///     -requirePairing YES|NO                   Require pairing at launch, saved in the identity
 ///                                              store as the Devices pane saves it
 ///     -SillPairAfter <s>                       open a pairing window (Pair iPhone or iPad…) s
@@ -192,13 +193,16 @@ enum DebugHooks {
                     var addressName: String?
                     var requirePairing: Bool?
                     var updateCheck: Bool?
+                    var pairingSharing: Bool?
                     for change in changes {
-                        apply(change, to: &config, addressName: &addressName, requirePairing: &requirePairing, updateCheck: &updateCheck)
+                        apply(change, to: &config, addressName: &addressName, requirePairing: &requirePairing, updateCheck: &updateCheck,
+                              pairingSharing: &pairingSharing)
                     }
                     print("SillSetAfter \(parts[0]) s: \(changes.joined(separator: ", "))")
                     model.settings.config = config    // one assignment: several keys, one apply
                     if let addressName { model.settings.remoteAddressName = addressName }
                     if let updateCheck { model.settings.updateCheck = updateCheck }
+                    if let pairingSharing { model.settings.showPairingWindowToScreenSharing = pairingSharing }
                     // Through the identity store first, as the Devices pane's switch goes.
                     if let requirePairing { model.setRequirePairing(requirePairing) }
                 }
@@ -411,7 +415,7 @@ enum DebugHooks {
     }
 
     private static func apply(_ change: String, to config: inout HostConfig, addressName: inout String?, requirePairing: inout Bool?,
-                              updateCheck: inout Bool?) {
+                              updateCheck: inout Bool?, pairingSharing: inout Bool?) {
         let kv = change.split(separator: "=", maxSplits: 1).map(String.init)
         guard kv.count == 2 else { print("SillSetAfter: can’t read “\(change)”"); return }
         let (key, value) = (kv[0], kv[1])
@@ -433,6 +437,7 @@ enum DebugHooks {
         case "remoteAddressName": addressName = value
         case "requirePairing": requirePairing = flag
         case "updateCheck": updateCheck = flag
+        case "showPairingWindowToScreenSharing": pairingSharing = flag
         default: print("SillSetAfter: no setting called \(key)")
         }
     }
@@ -460,6 +465,7 @@ enum DebugHooks {
         }
         for sample in devicesPaneSamples() {
             let pane = DevicesPane(status: sample.status, requirePairing: .constant(sample.requirePairing),
+                                   showPairingWindowToScreenSharing: .constant(sample.showPairingWindowToScreenSharing),
                                    requirePairingProblem: nil, actions: DevicesPane.Actions(), now: previewNow)
                 .formStyle(.grouped)
                 .frame(width: 520)
@@ -867,12 +873,14 @@ extension DebugHooks {
         var name: String
         var status: RemoteStatus
         var requirePairing = true
+        var showPairingWindowToScreenSharing = false
     }
 
-    /// pane-devices-{required,off,empty,unavailable}: three devices, one paired over the USB cable
-    /// and seen over Wi-Fi at home, one by QR code and seen through Tailscale yesterday, one by
-    /// code and never connected; Require pairing off (its warning); nothing paired yet; the
-    /// keychain unusable (no home door).
+    /// pane-devices-{required,off,empty,screensharing,unavailable}: three devices, one paired over
+    /// the USB cable and seen over Wi-Fi at home, one by QR code and seen through Tailscale
+    /// yesterday, one by code and never connected; Require pairing off (its warning); nothing paired
+    /// yet; nothing paired yet with the pairing window shown to screen sharing (a Mac used through
+    /// Screen Sharing, issue #108); the keychain unusable (no home door).
     static func devicesPaneSamples() -> [DevicesPaneSample] {
         let now = previewNow
         let ipad = PairedDeviceSummary(id: "ipad", keyPrefix: "5KD2Q7", name: "iPad (iPad14,1)", model: "iPad14,1",
@@ -887,6 +895,8 @@ extension DebugHooks {
             DevicesPaneSample(name: "required", status: RemoteStatus(paired: [ipad, iphone, pro], homeDoor: .pairingRequired)),
             DevicesPaneSample(name: "off", status: RemoteStatus(paired: [ipad, iphone], homeDoor: .open), requirePairing: false),
             DevicesPaneSample(name: "empty", status: RemoteStatus(homeDoor: .pairingRequired)),
+            DevicesPaneSample(name: "screensharing", status: RemoteStatus(homeDoor: .pairingRequired),
+                              showPairingWindowToScreenSharing: true),
             DevicesPaneSample(name: "unavailable",
                               status: RemoteStatus(identityProblem: keychainProblem,
                                                    homeDoor: .unavailable("Sill couldn’t use its key in the keychain (\(keychainProblem))"))),
