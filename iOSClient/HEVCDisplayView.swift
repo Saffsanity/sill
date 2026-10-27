@@ -14,6 +14,11 @@ final class HEVCDisplayView: UIView {
     private var formatDescription: CMVideoFormatDescription?
     private var waitingForKeyframe = true
     private var lastParameterSets: Data?
+    /// Picture Smoothing's renderer while a level other than Automatic is chosen (PictureSmoothing):
+    /// the frames go to it instead of the system layer. On the stream's queue (`useRenderer`).
+    private var ownRenderer: MetalStreamRenderer?
+    /// The same renderer, whose layer is shown over the system layer's and laid out here. Main thread.
+    private var shownRenderer: MetalStreamRenderer?
 
     /// The streamed frame's pixel size, reported on main whenever new parameter sets arrive.
     /// Input needs it: touches are normalized against the video, not against this view.
@@ -116,13 +121,17 @@ final class HEVCDisplayView: UIView {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        // A standalone layer renders at 1× unless told otherwise; the arrow should be crisp.
+        // A standalone layer renders at 1× unless told otherwise; the arrow and Metal layer should be crisp.
         if let scale = window?.screen.scale { cursorLayer.contentsScale = scale }
+        setNeedsLayout()
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         placeCursor()   // rotation and letterbox changes move the video rect under it
+        if let shownRenderer, let renderQueue {
+            shownRenderer.layout(bounds: bounds, scale: window?.screen.scale ?? 2, videoSize: pointerVideoSize, on: renderQueue)
+        }
         #if DEBUG
         if let debugFrame {
             CATransaction.begin()
@@ -291,6 +300,7 @@ final class HEVCDisplayView: UIView {
         guard status == noErr, let desc else { print("format description failed: \(status)"); return }
         formatDescription = desc
         waitingForKeyframe = true
+        ownRenderer?.setFormat(desc)
         let dimensions = CMVideoFormatDescriptionGetDimensions(desc)
         let size = CGSize(width: CGFloat(dimensions.width), height: CGFloat(dimensions.height))
         DispatchQueue.main.async { [weak self] in
@@ -299,9 +309,32 @@ final class HEVCDisplayView: UIView {
             self.onVideoSize?(size)
             self.placeCursor()
             self.onVideoSizeForPointer?(size)
+            self.setNeedsLayout()      // Sill's renderer fits the new size
         }
         // Remove the last frame too: switching sources should show black until the new keyframe,
         // not the previous window frozen in place.
+        displayLayer.flushAndRemoveImage()
+    }
+
+    /// Picture Smoothing: who draws the picture (nil: the system layer). On main; the stream's queue
+    /// then hands the frames over (`useRenderer`). The renderer's layer sits under the pointer sprite.
+    func showRenderer(_ renderer: MetalStreamRenderer?) {
+        guard shownRenderer !== renderer else { return }
+        shownRenderer?.layer.removeFromSuperlayer()
+        shownRenderer = renderer
+        if let renderer { layer.insertSublayer(renderer.layer, below: cursorLayer) }
+        setNeedsLayout()
+    }
+
+    /// The stream's side of `showRenderer`, on its queue: from the next keyframe the frames go to the
+    /// renderer, or back to the system layer, and the other one shows nothing.
+    func useRenderer(_ renderer: MetalStreamRenderer?) {
+        guard ownRenderer !== renderer else { return }
+        ownRenderer?.clear()
+        ownRenderer = renderer
+        renderer?.onNeedsKeyframe = { [weak self] in self?.onNeedsKeyframe?() }
+        if let renderer, let desc = formatDescription { renderer.setFormat(desc) }
+        waitingForKeyframe = true
         displayLayer.flushAndRemoveImage()
     }
 
@@ -314,6 +347,7 @@ final class HEVCDisplayView: UIView {
         interruptedAt = nil
         #endif
         displayLayer.flushAndRemoveImage()
+        ownRenderer?.clear()
         // The pointer's copy of the size is main-thread state; the client zeroes its own alongside.
         DispatchQueue.main.async { [weak self] in
             self?.pointerVideoSize = .zero
@@ -354,6 +388,11 @@ final class HEVCDisplayView: UIView {
             first[kCMSampleAttachmentKey_DisplayImmediately as String] = true
         }
 
+        if let ownRenderer {
+            ownRenderer.decode(sample)
+            if resuming { onPictureBack?() }
+            return
+        }
         var lost: Error?
         #if DEBUG
         if resuming, interruptedAt != nil, keyframesToLose > 0 {     // -SillKeyframeLost

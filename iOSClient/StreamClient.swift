@@ -468,6 +468,33 @@ final class StreamClient: ObservableObject {
         }
     }
 
+    /// Picture Smoothing's renderer while a level other than Automatic is chosen. Main thread.
+    private var smoothingRenderer: MetalStreamRenderer?
+
+    /// Picture Smoothing (PictureSmoothing; This iPad in the Settings panel): Automatic draws with the
+    /// system's video layer, every other level with Sill's own renderer and that level's filter. A
+    /// change of who draws asks for a keyframe (kind 44), since that path starts at one; a change of
+    /// filter only draws the last frame again. Main thread.
+    func setSmoothing(_ smoothing: PictureSmoothing) {
+        var renderer: MetalStreamRenderer?
+        if let filter = smoothing.filter {
+            if let existing = smoothingRenderer {
+                renderer = existing
+                existing.setFilter(filter, on: queue)
+            } else if let made = MetalStreamRenderer(filter: filter) {
+                renderer = made
+            } else {
+                print("smoothing: \(smoothing.title) needs Metal; the system's layer draws instead")
+            }
+        }
+        let newPath = renderer !== smoothingRenderer
+        smoothingRenderer = renderer
+        let view = displayView
+        view.showRenderer(renderer)
+        queue.async { view.useRenderer(renderer) }
+        if newPath, active != .none { send(.keyframeRequest, payload: Data()) }
+    }
+
     /// When the device asks the Mac for a keyframe after its picture was interrupted (issue #101).
     /// Main thread.
     private var keyframeRecovery = KeyframeRecovery()
@@ -999,6 +1026,8 @@ final class StreamClient: ObservableObject {
         savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
         macGroups = ConnectionList.decodeGroups(UserDefaults.standard.string(forKey: ConnectionList.groupsKey))
         #endif
+        let smoothing = PictureSmoothing.stored(UserDefaults.standard.string(forKey: PictureSmoothing.defaultsKey))
+        if smoothing.usesOwnRenderer { setSmoothing(smoothing) }
         syncPreviews(to: connectionStyle)
         // Back from the background: the pings stopped while the app was suspended, which is no loss;
         // and the browsers, whose connection to mDNSResponder iOS may have made defunct meanwhile, are
