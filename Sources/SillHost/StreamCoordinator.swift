@@ -2743,7 +2743,8 @@ package final class StreamCoordinator {
         for (wid, pipe) in secondaryPipelines {
             let resized: Bool
             if let w = catalog.window(id: wid) {
-                resized = evenPixels(w.frame.width * scale) != pipe.width || evenPixels(w.frame.height * scale) != pipe.height
+                resized = CaptureScale.windowNeedsRestart(encoder: (pipe.width, pipe.height), points: w.frame.size,
+                                                          knob: captureScale, displayScale: Self.displayScale(of: w))
             } else {
                 resized = true
             }
@@ -2770,8 +2771,11 @@ package final class StreamCoordinator {
         }
         for wid in wantedIDs where secondaryPipelines[wid] == nil {
             guard let w = catalog.window(id: wid) else { continue }
-            let width = evenPixels(w.frame.width * scale)
-            let height = evenPixels(w.frame.height * scale)
+            let windowFilter = SCContentFilter(desktopIndependentWindow: w)
+            let windowScale = Self.displayScale(of: windowFilter)
+            let pixels = CaptureScale.windowSize(w.frame.size, knob: captureScale, displayScale: windowScale)
+            let width = pixels.width
+            let height = pixels.height
             guard let enc = try? HEVCEncoder(width: width, height: height, fps: fps, bitrate: streamBitrate,
                                              prioritizeSpeed: prioritizeSpeed, software: useSoftwareEncoder) else { continue }
             let pipe = SecondaryPipeline(windowID: wid, width: width, height: height, encoder: enc)
@@ -2792,7 +2796,7 @@ package final class StreamCoordinator {
             }
             pipe.capture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
             do {
-                try await pipe.capture.start(filter: SCContentFilter(desktopIndependentWindow: w),
+                try await pipe.capture.start(filter: windowFilter,
                                              width: width, height: height, fps: fps, showsCursor: false, sourceRect: nil)
                 secondaryPipelines[wid] = pipe
                 for id in byWindow[wid] ?? [] { server.resetForNewStream(client: id) }
