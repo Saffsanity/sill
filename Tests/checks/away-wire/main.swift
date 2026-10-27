@@ -37,7 +37,7 @@ struct BaseState: Codable, Hashable, Sendable {
 }
 
 let settings = StreamSettings(maxFPS: 120, bitrate: 4_000_000, captureScale: 1, prioritizeSpeed: false, virtualDisplay: false,
-                              directWireless: false)
+                              directWireless: false, sendAudio: nil)
 let stream = RunningStream(width: 1512, height: 982, fps: 60, mbps: 4, onVirtualDisplay: false)
 let away = AwayQuality(homeBitrate: 40_000_000, homeCaptureScale: 2, awayBitrate: 4_000_000, awayCaptureScale: 1,
                        thisConnectionAway: true, awayRunning: true)

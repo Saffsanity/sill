@@ -16,7 +16,7 @@ func homeRemote() {
           && PairResult.busy == "busy" && PairResult.cable == "cable")
     check("askAnswer: closed, expired, stopped and code after an ask are refusals (the Mac's menu)", [PairResult.closed, PairResult.expired, PairResult.stopped, PairResult.code]
           .allSatisfy { P.askAnswer(ok: false, method: nil, hasProof: false, reason: $0, retryAfter: nil, askedCable: true, macIDMatches: true, recognitionKeyBytes: 32) == .refused })
-    // The TXT record's door, as StreamClient.door(of:) maps it case for case.
+    // The TXT record's door, as StreamClient.record(of:) maps it case for case.
     func mapped(_ d: HomeDoorTXT.Door) -> P.HomeDoor { switch d { case .plain: return .plain; case .pairingRequired: return .pairingRequired; case .open: return .open } }
     check("the door: no p plain, p=1 and any other value pairing required, p=0 open", mapped(HomeDoorTXT.door([:])) == .plain
           && mapped(HomeDoorTXT.door(["p": "1"])) == .pairingRequired && mapped(HomeDoorTXT.door(["p": "0"])) == .open

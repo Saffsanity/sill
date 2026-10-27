@@ -5,7 +5,8 @@ import Foundation
 /// (DoorPolicy.isTestHost: one that does not advertise and is not a .app's executable): any process
 /// of this user can start Sill.app's own executable with an environment, and it then runs with
 /// Sill's Screen Recording and Accessibility grants. Anywhere else each one set is ignored with one
-/// line, here. The encoder's variables let nobody in and are not among them;
+/// line, here. The encoder's variables and the test tone's (SyntheticAudio: only a synthetic host
+/// has the tone) let nobody in and are not among them;
 /// SILL_TEST_REMOTE_DIR is read, and refused, where the identity store is chosen (the CLI and the
 /// app).
 enum TestHooks {
