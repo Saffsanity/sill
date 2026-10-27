@@ -53,6 +53,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return true
         }
         model.showCableNotice = { [weak self] notice in self?.showCableNotice(notice) }
+        // Settings › Devices' "Show the pairing window to screen sharing": a pairing window already
+        // made follows a change at once, on screen or not (one made later reads it as it is made).
+        model.settings.onPairingWindowSharingChange = { [weak self] in self?.pairingWindow?.applySharing() }
         // Always, not only with the virtual display on: Settings can turn it on at any time, and a
         // kill must then still put the streamed window back.
         HostShutdown.install { [model] in model.coordinator }

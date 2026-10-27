@@ -1,8 +1,9 @@
 import Foundation
 
 // The Mac's settings as a device sees and changes them (kinds 16 and 17, see StreamMessage.swift):
-// five for the stream, and one (Direct Wireless) for how devices reach the Mac. Rules for every
-// later change, because older builds of either side must keep decoding what newer ones send:
+// five for the stream, one (Direct Wireless) for how devices reach the Mac, and one (Send Audio) for
+// what they hear of it. Rules for every later change, because older builds of either side must keep
+// decoding what newer ones send:
 //
 // • A device knows the host supports settings when a `.hostSettings` arrives on this connection,
 //   never by a version: `WindowList.hostVersion` is nil from SillHost, and it and `protocol`
@@ -27,9 +28,9 @@ import Foundation
 // refusal. The places:
 // • here: `StreamSettings` (optional), `HostSettingsChange` with `isEmpty` and `applied(to:)`, and
 //   `SettingsChoices` when the setting takes a fixed set of values;
-// • the host: `HostConfig` (`validated()`, `changes(to:)`), `streamSettings`, `applying` and
-//   `DeviceSettings.accepted` in DeviceSettings.swift, and `StreamCoordinator.restartNeeded` when
-//   the running pipeline depends on it;
+// • the host: `HostConfig` (`validated()`, `changes(to:)`), `streamSettings(away:)`, `applying`
+//   and `DeviceSettings.accepted` in DeviceSettings.swift, and `StreamCoordinator.restartNeeded`
+//   when the running pipeline depends on it;
 // • Sill.app: `HostSettings` (its key, registered default, load and `save(changedFrom:)`),
 //   `DebugHooks.apply` (`-SillSetAfter`), and the status menu and Settings panes when the Mac
 //   shows it;
@@ -53,8 +54,8 @@ import Foundation
 // HostSettings (UserDefaults) or a launch argument, since any process of this user can write those.
 
 /// The settings a device sees and changes, as the Mac's menu and Settings show them: five for the
-/// stream, and one (Direct Wireless) for how devices reach the Mac. Plain values, never enums: an
-/// unknown case would fail an older reader's whole decode.
+/// stream, one (Direct Wireless) for how devices reach the Mac, and one (Send Audio) for what they
+/// hear of it. Plain values, never enums: an unknown case would fail an older reader's whole decode.
 public struct StreamSettings: Codable, Hashable, Sendable {
     /// Frame rate limit: a ceiling; each device still gets its own panel's rate below it.
     public var maxFPS: Int
@@ -69,13 +70,23 @@ public struct StreamSettings: Codable, Hashable, Sendable {
     /// Optional because it came sixth: nil is a host without the setting (the device shows no row
     /// and never sends it).
     public var directWireless: Bool?
+    /// Send Audio: every connected device whose hello lists a codec it plays gets the sound of what
+    /// streams (kind 43, Audio.swift): the streamed window's app, or every app for the Desktop. The Mac
+    /// keeps playing it too. Off by default, a beta. A device shows it as its Settings panel's Send
+    /// Audio switch and sets it for every device (`HostSettingsChange.sendAudio`), as the Mac's menu
+    /// does; each device's Mute is its own and never sent. Optional because it came seventh: nil is a
+    /// host without sound (the device's switch shows off and disabled, says to update the Mac, and
+    /// never sends it).
+    public var sendAudio: Bool?
 
-    /// `directWireless` has no default: every host must say, so the compiler finds one that forgets.
+    /// `directWireless` and `sendAudio` have no default: every host must say, so the compiler finds
+    /// one that forgets.
     public init(maxFPS: Int, bitrate: Int, captureScale: Double, prioritizeSpeed: Bool, virtualDisplay: Bool,
-                directWireless: Bool?) {
+                directWireless: Bool?, sendAudio: Bool?) {
         self.maxFPS = maxFPS; self.bitrate = bitrate; self.captureScale = captureScale
         self.prioritizeSpeed = prioritizeSpeed; self.virtualDisplay = virtualDisplay
         self.directWireless = directWireless
+        self.sendAudio = sendAudio
     }
 }
 
@@ -193,14 +204,19 @@ public struct HostSettingsState: Codable, Hashable, Sendable {
     public var away: AwayQuality?
     /// This connection's link while it cannot keep up; nil while it does, and from older hosts.
     public var link: LinkReport?
+    /// Why no sound comes although Send Audio is on ("Couldn’t capture the sound of Safari: …"); nil
+    /// while all is well, while Send Audio is off, and from hosts without sound. The Mac's, the same
+    /// for every connection.
+    public var audioNote: String?
 
     public init(settings: StreamSettings, persistent: Bool, virtualDisplayAvailable: Bool,
                 virtualDisplayNote: String? = nil, softwareEncoder: Bool, stream: RunningStream? = nil,
-                answering: Int? = nil, away: AwayQuality? = nil, link: LinkReport? = nil) {
+                answering: Int? = nil, away: AwayQuality? = nil, link: LinkReport? = nil, audioNote: String? = nil) {
         self.settings = settings; self.persistent = persistent
         self.virtualDisplayAvailable = virtualDisplayAvailable; self.virtualDisplayNote = virtualDisplayNote
         self.softwareEncoder = softwareEncoder; self.stream = stream; self.answering = answering
         self.away = away; self.link = link
+        self.audioNote = audioNote
     }
 }
 
@@ -218,18 +234,25 @@ public struct HostSettingsChange: Codable, Hashable, Sendable {
     public var prioritizeSpeed: Bool?
     public var virtualDisplay: Bool?
     public var directWireless: Bool?
+    /// Send Audio from a device's Settings panel: a host applies it for every device, on or off, from
+    /// either door, and Sill.app saves it as a menu click (Noah, 2026-10-27: docs/audio-plan.md's Q8 as
+    /// revised). The beta's hosts (2026-10-20 to 27) refused it, on or off, and named it in their log
+    /// ("send audio (set on this Mac only)"), so a device's switch went back to the Mac's value.
+    public var sendAudio: Bool?
 
     public init(token: Int? = nil, maxFPS: Int? = nil, bitrate: Int? = nil, captureScale: Double? = nil,
-                prioritizeSpeed: Bool? = nil, virtualDisplay: Bool? = nil, directWireless: Bool? = nil) {
+                prioritizeSpeed: Bool? = nil, virtualDisplay: Bool? = nil, directWireless: Bool? = nil,
+                sendAudio: Bool? = nil) {
         self.token = token; self.maxFPS = maxFPS; self.bitrate = bitrate; self.captureScale = captureScale
         self.prioritizeSpeed = prioritizeSpeed; self.virtualDisplay = virtualDisplay
         self.directWireless = directWireless
+        self.sendAudio = sendAudio
     }
 
     /// All setting fields nil (the token does not count).
     public var isEmpty: Bool {
         maxFPS == nil && bitrate == nil && captureScale == nil && prioritizeSpeed == nil && virtualDisplay == nil
-            && directWireless == nil
+            && directWireless == nil && sendAudio == nil
     }
 
     /// `s` with this change laid over it: the device's merge (its ledger, and the DEBUG mock's
@@ -244,6 +267,7 @@ public struct HostSettingsChange: Codable, Hashable, Sendable {
         if let v = prioritizeSpeed { r.prioritizeSpeed = v }
         if let v = virtualDisplay { r.virtualDisplay = v }
         if let v = directWireless { r.directWireless = v }
+        if let v = sendAudio { r.sendAudio = v }
         return r
     }
 }
