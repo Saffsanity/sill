@@ -20,7 +20,7 @@
 // grid also spans refused listings and failed moves up, and its rule for reconnectNow is the new one).
 import Foundation
 //   swiftc -O iOSClient/DiscoveryPolicy.swift Tests/checks/policy/main.swift Tests/checks/policy/home.swift \
-//     Tests/checks/policy/sleep.swift -o .build/checks/policy/check && .build/checks/policy/check
+//     Tests/checks/policy/sleep.swift Tests/checks/policy/records.swift -o .build/checks/policy/check && .build/checks/policy/check
 typealias P = DiscoveryPolicy
 var fails = 0, passes = 0
 func check(_ name: String, _ ok: Bool) { if !ok { fails += 1; print("FAIL", name) } else { passes += 1; print("ok  ", name) } }
@@ -1278,6 +1278,9 @@ afterSleepPolicy()
 
 // Pairing at home (docs/home-pairing-plan.md): sessions and pairing at home over TLS, in home.swift.
 homePolicy()
+
+// A row keeps its TXT record while its name stays listed (the cable pulled, 2026-10-27), in records.swift.
+rowRecordsPolicy()
 
 print(fails == 0 ? "ALL PASS (\(passes))" : "\(fails) FAIL, \(passes) pass")
 if fails > 0 { exit(1) }

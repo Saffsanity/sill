@@ -2,13 +2,14 @@ import Foundation
 import StreamProtocol
 
 // The keys this device sends for a shortcut: the Spotlight key's ⌘Space, the portrait key row's keys
-// with whatever is latched, a latched ⌘, ⌃ or ⌥ on the software keyboard, the modifiers the portrait
-// trackpad holds down around a click or a drag, and a hardware keyboard's keys (Esc also through a
-// key command, sent once whichever channel iPadOS uses). One place, so each
-// goes out the way a keyboard sends it: a shortcut's modifiers pressed with their own keys around it,
-// and every key's up after its down (2026-09-27, the stuck command after Spotlight). A shortcut sent
-// as one key down and up carrying its modifiers left them set on every Mac from before that fix,
-// which posted the up as it came, and the next click there was a ⌘-click.
+// with whatever is latched, a latched ⌘, ⌃ or ⌥ on the software keyboard (a latched shift with its
+// return or tab too), the modifiers the portrait trackpad holds down around a click or a drag, and a
+// hardware keyboard's keys (Esc also through a key command, sent once whichever channel iPadOS
+// uses). One place, so each goes out the way a keyboard sends it: a shortcut's modifiers pressed
+// with their own keys around it, and every key's up after its down (2026-09-27, the stuck command
+// after Spotlight). A shortcut sent as one key down and up carrying its modifiers left them set on
+// every Mac from before that fix, which posted the up as it came, and the next click there was a
+// ⌘-click.
 //
 // Pure: Foundation and StreamProtocol only, checked with swiftc beside the host's KeyStrokes
 // (Tests/checks/key-strokes), which is what the Mac makes of these events.
@@ -120,12 +121,19 @@ struct ForwardedKeys {
         0xE0, 0xE2, 0xE3, 0xE4, 0xE6, 0xE7,                                       // control, option, command, left and right
     ]
 
+    /// Return and tab: with shift held they go as keys too. The text system hands them over as
+    /// "\n" and "\t" with the shift gone, and the Mac then typed a plain Return (sending a chat
+    /// message where ⇧Return means a new line) and a plain Tab (moving focus forward, not back).
+    static let shiftedKeyUsages: Set<UInt16> = [0x28, 0x2B]
+
     /// Whether a key pressed with these modifiers goes to the Mac as a key rather than to the text
-    /// system: one of `keyUsages`, or any key while ⌘, ⌃ or ⌥ is held, as those make shortcuts (⌘S,
-    /// ⌃A, ⌥←) and never reach the text system. Shift alone makes characters, which the text system
-    /// composes (shifted, dead-keyed, from an IME) and sends as text.
+    /// system: one of `keyUsages`, return or tab with shift held (`shiftedKeyUsages`), or any key
+    /// while ⌘, ⌃ or ⌥ is held, as those make shortcuts (⌘S, ⌃A, ⌥←) and never reach the text
+    /// system. Shift alone otherwise makes characters, which the text system composes (shifted,
+    /// dead-keyed, from an IME) and sends as text.
     static func goesAsKey(_ usage: UInt16, modifiers: UInt64) -> Bool {
         keyUsages.contains(usage) || modifiers & KeyModifiers.shortcutMakers.rawValue != 0
+            || (shiftedKeyUsages.contains(usage) && modifiers & KeyModifiers.shift.rawValue != 0)
     }
 
     /// A key pressed, with the modifier flags UIKit gives it: its down, when it goes to the Mac as a
