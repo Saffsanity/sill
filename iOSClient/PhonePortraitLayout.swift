@@ -2,8 +2,7 @@ import CoreGraphics
 
 /// Where everything goes on a phone held upright (Noah, 2026-09-27; docs/iphone-portrait-plan.md):
 /// the picture in a fixed 16:10 pane at the top, then row 1 (Apps, Aa, Keyboard, Desktop,
-/// Settings, widened to the row), row 2 (the window thumbnails, and at its end the Menus and Sound
-/// buttons while the Mac sends its menus and its sound), row 3 (esc, tab, ctrl, opt, cmd,
+/// Settings, widened to the row), row 2 (the window thumbnails), row 3 (esc, tab, ctrl, opt, cmd,
 /// shift), and the trackpad in everything left. Every rectangle is a function of the stream
 /// screen's size alone, the screen less its top safe-area inset down to its bottom edge (the stream
 /// screen ignores the bottom inset and the keyboard), so nothing moves when the streamed window
@@ -15,16 +14,14 @@ import CoreGraphics
 /// streaming keep the standard arrangement) and the software keyboard's height known (`keyboard`),
 /// the thumbnails' row goes and the picture gets every point that keeps the key row
 /// `keyboardClearance` above the keyboard (on an 18 Pro Max 424×422 against 424×265); the trackpad
-/// is the keyboard's footprint, so nothing moves when it comes up, the Menus button joins row 1 (the
-/// Mac's sound is the Settings panel's switch alone there: docs/audio-plan.md, Q10), and the Apps
-/// drawer opens above row 1, where no keyboard reaches (`drawer`).
-/// The picture's frame then takes the picture's own shape inside that room (`pane(video:)`, so a
-/// 16:10 window keeps its shape and a taller one gains), and the viewport is the whole room, which
-/// the Mac fits a window to once Aa sets its text size (or on the virtual display). It applies
-/// only where it makes the picture larger (`largerPictureGains`: not where Display Zoom makes the
-/// screen 320 pt wide). Every rectangle is still a function of the screen's size, the keyboard's
-/// height and the switch (with what streams) alone; the frame and the trackpad's span also of the
-/// picture's shape.
+/// is the keyboard's footprint, so nothing moves when it comes up, and the Apps drawer opens above
+/// row 1, where no keyboard reaches (`drawer`). The picture's frame then takes the picture's own
+/// shape inside that room (`pane(video:)`, so a 16:10 window keeps its shape and a taller one
+/// gains), and the viewport is the whole room, which the Mac fits a window to once Aa sets its text
+/// size (or on the virtual display). It applies only where it makes the picture larger
+/// (`largerPictureGains`: not where Display Zoom makes the screen 320 pt wide). Every rectangle is
+/// still a function of the screen's size, the keyboard's height and the switch (with what streams)
+/// alone; the frame and the trackpad's span also of the picture's shape.
 ///
 /// `DuoLayout.outerPortrait` on an iPhone draws this (`DuoLayout.phoneArrangement`): every iPhone
 /// upright, and the Duo's outer display upright; an iPad window that narrow keeps the compact halves.
@@ -131,17 +128,6 @@ struct PhonePortraitLayout: Equatable {
     /// row 1, the second of six (`buttonsBesideMenus`), as the landscape bar has it after Apps.
     let menus: CGRect
     let stripBesideMenus: CGRect
-    /// Row 2 while the Mac sends its sound (docs/audio-plan.md §7.6): the Sound button ends the row,
-    /// under Settings, where Menus goes without it, and the strip ends `gap` before it
-    /// (`stripBesideMenus`: one button at the row's end, whichever). With the Mac's menus too, Menus
-    /// moves one place left, under Desktop, and the strip ends `gap` before that. Row 1 keeps its five.
-    /// With Larger Picture there is no row 2, and row 1 takes no Sound button (Noah's approved row,
-    /// docs/audio-plan.md, Q10): the Mac's sound is the Settings panel's switch alone, `sound` and
-    /// `stripBesideBoth` are the strip's empty place under row 1, and `menusBesideSound` is Menus' own
-    /// place in row 1 (`menus`).
-    let sound: CGRect
-    let menusBesideSound: CGRect
-    let stripBesideBoth: CGRect
     /// Row 3.
     let keys: CGRect
     let caps: [CGRect]
@@ -211,24 +197,16 @@ struct PhonePortraitLayout: Equatable {
         let settingsButton = buttons[Button.settings.rawValue]
         if footprint == nil {
             // Row 2: the strip, under row 1's band, wider than the rows by its own padding. With the
-            // Mac's menus, the Menus button under Settings, and the strip up to `gap` before it. With
-            // the Mac's sound, the Sound button there instead, Menus under Desktop beside it, and the
-            // strip up to `gap` before the first of them.
+            // Mac's menus, the Menus button under Settings, and the strip up to `gap` before it.
             strip = CGRect(x: Self.side - Self.stripInset, y: row1.maxY + Self.band + Self.rowGap,
                            width: max(0, width - 2 * (Self.side - Self.stripInset)), height: Self.stripHeight)
             menus = CGRect(x: settingsButton.minX, y: strip.minY + (Self.stripHeight - Self.buttonHeight) / 2,
                            width: settingsButton.width, height: Self.buttonHeight)
             stripBesideMenus = CGRect(x: strip.minX, y: strip.minY, width: max(0, menus.minX - Self.gap - strip.minX), height: strip.height)
             buttonsBesideMenus = buttons
-            sound = menus
-            let desktopButton = buttons[Button.desktop.rawValue]
-            menusBesideSound = CGRect(x: desktopButton.minX, y: menus.minY, width: desktopButton.width, height: Self.buttonHeight)
-            stripBesideBoth = CGRect(x: strip.minX, y: strip.minY, width: max(0, menusBesideSound.minX - Self.gap - strip.minX),
-                                     height: strip.height)
         } else {
             // Larger Picture: no strip, so the key row comes straight under row 1's band; the Menus
-            // button joins row 1 after Apps, six sharing the row. No Sound button: the Settings
-            // panel's switch alone (Q10).
+            // button joins row 1 after Apps, six sharing the row.
             let six = Self.split(row1, count: Button.allCases.count + 1, gap: Self.gap)
             let gone = CGRect(origin: CGPoint(x: Self.side - Self.stripInset, y: row1.maxY + Self.band),
                               size: CGSize(width: max(0, width - 2 * (Self.side - Self.stripInset)), height: 0))
@@ -236,9 +214,6 @@ struct PhonePortraitLayout: Equatable {
             stripBesideMenus = gone
             menus = six[1]
             buttonsBesideMenus = [six[0]] + six.dropFirst(2)
-            sound = gone
-            menusBesideSound = menus
-            stripBesideBoth = gone
         }
 
         // Row 3: six equal caps, `gap` apart.

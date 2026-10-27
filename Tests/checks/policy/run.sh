@@ -13,11 +13,12 @@
 # Mac's own goodbye (issue #105), its row counted asleep or left alone until listed afresh, the return
 # from the background or 10 minutes, and a goodbye read only on the return, with models; and the
 # session's liveness after the app ran again, a tick far after the last judging nothing, with a model
-# of the session's queue across a suspension).
+# of the session's queue across a suspension); and a row's TXT record kept while its name stays listed
+# (records.swift: the cable pulled, 2026-10-27).
 #   Tests/checks/policy/run.sh             compile and run the check
 #   Tests/checks/policy/run.sh --mutants   one-line mutants of DiscoveryPolicy.swift; each must fail it
 here="$(cd "$(dirname "$0")" && pwd)"
 source "$here/../common.sh"
 if [ "${1:-}" = "--mutants" ]; then run_mutants python3 "$here/mutants.py"; exit; fi
-swiftc -O iOSClient/DiscoveryPolicy.swift "$here/main.swift" "$here/home.swift" "$here/sleep.swift" -o "$out/check"
+swiftc -O iOSClient/DiscoveryPolicy.swift "$here/main.swift" "$here/home.swift" "$here/sleep.swift" "$here/records.swift" -o "$out/check"
 "$out/check"

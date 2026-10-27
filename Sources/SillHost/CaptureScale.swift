@@ -25,15 +25,17 @@ import Foundation
 /// rule of Sill's own can disagree with that pick (one that did would ask for a size the capture
 /// never fills, or restart the stream at every poll). It is what the capture line has always
 /// printed ("scale 1.0" above). Sill's own virtual display is made at 2x (VirtualStage's
-/// `VirtualDisplay(…, scale: 2)`), so a window staged there captures at the knob, as before.
+/// `VirtualDisplay(…, scale: 2)`, at a size macOS keeps at 2x: VirtualDisplaySize), so a window staged
+/// there captures at the knob, as before.
 ///
 /// Pure: Foundation and CoreGraphics, checked on its own with swiftc (Tests/checks/capture-scale).
 enum CaptureScale {
     /// The scale of Sill's own virtual display, which VirtualStage makes at 2x (HiDPI): what a staged
-    /// window's capture is held to, decided before the display exists. VirtualStage keeps a display
-    /// that came up at another mode ("online but not at … @2×": five times in Sill.log, each an
-    /// 800×832-point display at 1x), and a window staged on it still captures at the knob, scaled up,
-    /// as it always has.
+    /// window's capture is held to, decided before the display exists. macOS kept it at 2x for every
+    /// size but one with both sides under 800 points, five times in Sill.log an 800×832-point display at
+    /// 1x, where a staged window was captured at the knob, scaled up; VirtualDisplaySize keeps every
+    /// side at 800 or more since 2026-10-27. VirtualStage still keeps a display that comes up at
+    /// another mode ("online but not at … @2×"), and a window staged there still captures at the knob.
     static let virtualDisplay: CGFloat = 2
 
     /// The pixels a point that a capture of a source on a display of scale `displayScale` runs at:
@@ -47,6 +49,53 @@ enum CaptureScale {
     /// A filter's `pointPixelScale` (a Float) as a display scale: nil when it is none.
     static func displayScale(pointPixelScale: Float) -> CGFloat? {
         usable(CGFloat(pointPixelScale))
+    }
+
+    /// One side of a window's capture in pixels, even (HEVC wants even sides): the window's `points`
+    /// on that side at the capture's scale (`effective`). What `select` asks ScreenCaptureKit for a
+    /// window in regular mode, and so what `windowsChanged` compares the running encoder with
+    /// (`windowNeedsRestart`).
+    ///
+    /// ScreenCaptureKit draws a window at its display's own scale into the top-left of the buffer and
+    /// only ever scales it down to fit (`SCStreamConfiguration.scalesToFit` left false: "When false,
+    /// the output only scales down", SCStream.h). A window captured at its display's own scale is
+    /// therefore drawn 1:1, and an odd side rounds up: a 1117×610-point window on a 1x display asks
+    /// 1118×610 and is drawn whole, one black column past its right edge, where 1116×610 (`evenPixels`,
+    /// every capture's rule until 2026-10-27) had ScreenCaptureKit shrink its 1117 columns into 1116,
+    /// up to half a pixel of blur mid-picture, where a text stem is one pixel wide. Odd sides are
+    /// routine at Aa 1x (Sill.log: 1117×610, 818×565, 728×535, 377×235) and in any window sized by
+    /// hand. A whole number of points at 2x is always even; a window at a half point rounds up the
+    /// same way. A device draws the frame aspect-fit on black: the column joins a letterbox beside it,
+    /// or is a black hairline at the picture's edge where the frame fills the panel. A device's
+    /// position lands as the same fraction of the window (InputLanding), so at most a pixel nearer
+    /// the window's origin than the frame shows it, at the far side. Held below its display's scale
+    /// (Standard on a 2x display) a window is scaled down whatever the buffer, so it rounds down as
+    /// before; so does one with no display scale. A display (scaled to fill any buffer), a staged
+    /// window's crop of Sill's virtual display and the test pattern keep `evenPixels`.
+    static func windowPixels(_ points: CGFloat, knob: CGFloat, displayScale: CGFloat?) -> Int {
+        let e = effective(knob: knob, displayScale: displayScale)
+        guard let d = usable(displayScale), e == d else { return evenPixels(points * e) }
+        // Within a thousandth of a pixel of a whole number is that number: no black column for a
+        // product's rounding.
+        let whole = Int((points * e - 0.001).rounded(.up))
+        return whole + (whole & 1)
+    }
+
+    /// `windowPixels` for both sides of a window `points` big.
+    static func windowSize(_ points: CGSize, knob: CGFloat, displayScale: CGFloat?) -> (width: Int, height: Int) {
+        (windowPixels(points.width, knob: knob, displayScale: displayScale),
+         windowPixels(points.height, knob: knob, displayScale: displayScale))
+    }
+
+    /// Whether a window whose capture runs at `encoder` pixels needs a new pipeline now that it is
+    /// `points` big (`windowsChanged`, at each catalog poll): only when the size `select` would ask
+    /// for it now differs, by the same rule. So a window whose odd side was rounded up (1117 points,
+    /// asked 1118) never restarts at every poll, and a change within the rounding (1117 to 1118
+    /// points) needs none: the buffer already holds the window whole.
+    static func windowNeedsRestart(encoder: (width: Int, height: Int), points: CGSize, knob: CGFloat,
+                                   displayScale: CGFloat?) -> Bool {
+        let want = windowSize(points, knob: knob, displayScale: displayScale)
+        return want.width != encoder.width || want.height != encoder.height
     }
 
     /// One pixel of a display of scale `displayScale`, in points: half a point at 2x, a point at 1x,
@@ -74,6 +123,54 @@ enum CaptureScale {
         s.isFinite && s == s.rounded() && abs(s) < 1_000 ? "\(Int(s))x" : "\(Double(s))x"
     }
 }
+
+/// The size of Sill's virtual display in points, as VirtualStage asks VirtualDisplay for it: no side
+/// under 800 points, the least macOS keeps at 2x, the scale a staged window's capture counts on
+/// (`CaptureScale.virtualDisplay`).
+///
+/// Found in Sill.log (2026-09-26 to 2026-10-15): of every display Sill made, five came up at 1x, each
+/// asked with both sides under 800 points, 754×784 (four times) or 762×792: the envelope of an iPhone
+/// held upright, its picture 377 or 381 points wide, doubled for Aa's smallest step, with the menu bar.
+/// Each came up at 800×832 points at 1x. macOS listed the mode asked for ("754×784 pt @ 1508×1568 px"),
+/// VirtualDisplay.waitUntilOnline asked for it every half second, and the display stayed at 1x until
+/// the stage's 3 s wait ran out ("Virtual display is online but not at 754×784 @2×: backing 800×832
+/// px", "online 3312 ms"): the pick waited 3 s more, and a window staged there was captured at the knob
+/// from a 1x display, scaled up ("Capture started: 1480×768 … filter (800.0, 832.0) scale 1.0").
+/// Every display with a side of 800 points or more came up at 2x within about half a second, one
+/// side under 800 or not (754×979, 838×792, 1000×784, 900×800, 848×878). The main display's scale
+/// played no part: those five were made beside the Mac's own Retina display, and on 2026-10-27,
+/// beside an external 2560×1440 display at 1x, every one came up at 2x ("filter (2560.0, 2264.0)
+/// scale 2.0"). So every side is held to 800 points or more, which macOS kept at 2x whatever the
+/// other side: the smallest display Sill makes is 800×830 (800 and a 30-point menu bar).
+///
+/// Pure, with CaptureScale (Tests/checks/capture-scale).
+enum VirtualDisplaySize {
+    /// The least side, in points.
+    static let minSide: CGFloat = 800
+    /// 4096 keeps the 2x backing store at or under 8192 pixels, VirtualDisplay's ceiling.
+    static let maxSide: CGFloat = 4096
+
+    /// Each side held to `minSide`…`maxSide`.
+    static func clamp(_ s: CGSize) -> CGSize {
+        CGSize(width: min(max(s.width, minSide), maxSide), height: min(max(s.height, minSide), maxSide))
+    }
+
+    /// The display's size below its menu bar that fits a device's panel of `panel` points at every Aa
+    /// scale and in both orientations: a square of the panel's longer edge ÷ 0.5 (the slider's smallest
+    /// step). No panel (no viewport yet), or one with no area: the window's own size. Held by `clamp`
+    /// either way (VirtualStage.envelope).
+    static func envelope(panel: CGSize?, windowSize: CGSize) -> CGSize {
+        guard let panel, panel.width > 0, panel.height > 0 else { return clamp(windowSize) }
+        let side = ceil(max(panel.width, panel.height) / 0.5)
+        return clamp(CGSize(width: side, height: side))
+    }
+}
+
+/// HEVC wants even sides: a capture's size in pixels rounded down to even. Every capture's rule until
+/// 2026-10-27, and still a display's, a staged window's crop's and the test pattern's; a window that
+/// ScreenCaptureKit draws 1:1 rounds up instead (`CaptureScale.windowPixels`). Here rather than in
+/// WindowCapture.swift, which needs ScreenCaptureKit, so the check compiles it.
+func evenPixels(_ v: CGFloat) -> Int { Int(v.rounded(.down)) & ~1 }
 
 /// Where a device's position lands on the Mac: its fraction of the streamed source's rectangle, at
 /// most on the rectangle's last row and column of pixels.

@@ -100,9 +100,11 @@ enum MenuBuilder {
             ? "Away from home now: \(QualityPreset.shortTitle(bitrate: config.awayBitrate, captureScale: Double(config.awayCaptureScale)))"
             : "Per 60 fps; a 120 fps stream gets twice as much"
         menu.append(MenuEntry(kind: .item, title: "Quality", subtitle: qualityNote, children: quality))
+        // Standard is one pixel a point: a quarter of a Retina display's pixels, and on a 1x display
+        // the same capture as Retina (CaptureScale holds the knob to the display's own scale).
         menu.append(MenuEntry(kind: .item, title: "Resolution", children: [
             MenuEntry(kind: .item, title: "Retina", checked: config.captureScale >= 1.5, action: .setCaptureScale(2)),
-            MenuEntry(kind: .item, title: "Standard", subtitle: "A quarter of the pixels; much lighter to encode",
+            MenuEntry(kind: .item, title: "Standard", subtitle: "On a Retina display, a quarter of the pixels to encode",
                       checked: config.captureScale < 1.5, action: .setCaptureScale(1)),
         ]))
         // The last of what streams: the sound of it (docs/audio-plan.md §6), a beta, which its title

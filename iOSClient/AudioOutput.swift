@@ -179,7 +179,7 @@ final class AudioOutput {
         }
     }
 
-    /// This device's mute (the Sound button and switch): at once, locally; the Mac keeps sending, and
+    /// This device's mute (the Settings panel's Mute switch): at once, locally; the Mac keeps sending, and
     /// each packet still counts for the floor and the cover, so unmuting is quick. Any thread.
     func setMuted(_ on: Bool) {
         queue.async { [self] in

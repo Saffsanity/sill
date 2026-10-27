@@ -46,31 +46,30 @@ extension HostConfig {
 }
 
 /// What a device may change on this host. There is no generic "write a default": a device moves
-/// these six knobs, to exactly the Mac menu's values, and nothing else. From a connection the Mac
+/// these seven knobs, to exactly the Mac menu's values, and nothing else. From a connection the Mac
 /// counts as away, its bitrate and capture scale land on the away pair (`applyingAway`): the same
 /// whitelist decides both routes. Remote access, its port and
 /// internet access can never enter this whitelist: they widen who reaches the Mac, and only the
-/// Mac's own user may do that. Send Audio is the Mac's alone too, as Share Clipboard is
-/// (docs/audio-plan.md, Q8, the beta's default): it decides whether the sound of the Mac's apps
-/// leaves the Mac at all (a call among it) and what every connected device plays, unmuted until each
-/// one mutes it, so a device's change of it is refused from either door, and the device's row only
-/// shows it. It stays in kinds 16 and 17 (a later decision may let devices set it again, and #66's
-/// Mac viewer asked to); only the Mac's menu and Settings, and the CLI's `--audio`, set it.
+/// Mac's own user may do that. Send Audio is a device's to set, on or off, from either door, as
+/// Quality is (Noah, 2026-10-27: "Sound should be a toggle in the settings menu"; docs/audio-plan.md,
+/// Q8 as revised): it changes what the devices hear of the Mac, not who can reach it, and Sill.app
+/// saves it like a menu click, so it applies to every device; each device keeps its own mute, which
+/// is never sent. The beta's hosts (2026-10-20 to 27) refused it, and a device's switch went back.
+/// Share Clipboard stays the Mac's alone.
 enum DeviceSettings {
     /// The fields of `c` a device may set: exactly the Mac menu's choices (`SettingsChoices`), and
     /// the virtual display on only where this host can run it (off is always allowed), and Direct
     /// Wireless either way on every host (on the synthetic one it changes only which interfaces the
     /// listener accepts on, since that host registers nothing a device browses), except from a
     /// remote connection (`fromRemote`): a device away from home cannot change how devices near the
-    /// Mac reach it. Send Audio never, on or off, from anywhere (`sendAudioRefusal`). Refusal is per
-    /// field: the rest of the same change still applies. The refused fields are named for the log;
-    /// the token is not carried (the handler answers with the request's own). Each field is copied by
-    /// name, so one added to `HostSettingsChange` but not here is dropped without a refusal or a log
-    /// line (StreamProtocol's HostSettings.swift lists every place a new setting goes).
+    /// Mac reach it. Send Audio either way from anywhere, as Prioritize Speed: a switch, nothing to
+    /// check. Refusal is per field: the rest of the same change still applies. The refused fields are
+    /// named for the log; the token is not carried (the handler answers with the request's own). Each
+    /// field is copied by name, so one added to `HostSettingsChange` but not here is dropped without a
+    /// refusal or a log line (StreamProtocol's HostSettings.swift lists every place a new setting goes).
     static func accepted(_ c: HostSettingsChange, virtualDisplayAvailable: Bool, fromRemote: Bool = false) -> (HostSettingsChange, refused: [String]) {
-        var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed)
+        var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed, sendAudio: c.sendAudio)
         var refused: [String] = []
-        if c.sendAudio != nil { refused.append(sendAudioRefusal) }
         if let v = c.directWireless {
             if fromRemote { refused.append("direct wireless (not from a remote connection)") } else { ok.directWireless = v }
         }
@@ -88,8 +87,4 @@ enum DeviceSettings {
         }
         return (ok, refused)
     }
-
-    /// The log's words for a device's Send Audio ("Settings from iPad (iPad14,1) refused: send audio
-    /// (set on this Mac only)"): only the Mac's own menu and Settings, or the CLI's `--audio`, set it.
-    static let sendAudioRefusal = "send audio (set on this Mac only)"
 }

@@ -308,15 +308,16 @@ private struct StreamingPane: View {
             } footer: {
                 Footnote("Lower latency when the Mac is busy, at a softer picture.")
             }
-            // The Mac's sound (docs/audio-plan.md §6), a beta: its switch and its footnote say so, and
-            // only this Mac turns it on (Q8).
+            // The Mac's sound (docs/audio-plan.md §6), a beta: its switch and its footnote say so. A device's
+            // Settings panel turns it on and off too, for every device, and mutes it for that device alone
+            // (Q8 as Noah revised it on 2026-10-27).
             Section {
                 Toggle("Send audio (beta)", isOn: $settings.config.sendAudio)
                 if settings.config.sendAudio, let problem = model.coordinator?.status.snapshot.audio?.problem {
                     Warning("Sill \(problem). The picture is unaffected.")
                 }
             } footer: {
-                Footnote("Beta. Devices play the sound of what you stream: all of the streamed window’s app, or every app for the Desktop. The Mac keeps playing it too, and each device can mute it with its Sound button. Only this Mac turns it on. Nothing is recorded.")
+                Footnote("Beta. Devices play the sound of what you stream: all of the streamed window’s app, or every app for the Desktop. The Mac keeps playing it too. A connected iPhone or iPad can also turn this on or off from Sill’s settings there, and mute it for itself alone. Nothing is recorded.")
             }
             if let snapshot = model.coordinator?.status.snapshot, snapshot.softwareEncoder {
                 Section {
