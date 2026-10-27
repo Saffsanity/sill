@@ -15,8 +15,9 @@ import StreamProtocol
 ///                                              a control would (maxFPS, captureScale, bitrate,
 ///                                              awayBitrate, awayCaptureScale,
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
-///                                              remoteAccess, remotePort, internetAccess,
-///                                              remoteAddressName=host[:port], updateCheck,
+///                                              sendAudio, remoteAccess, remotePort, internetAccess,
+///                                              shareClipboard, remoteAddressName=host[:port],
+///                                              updateCheck, showPairingWindowToScreenSharing=0|1,
 ///                                              requirePairing=0|1). Saved like any change
 ///                                              (requirePairing in the identity store: memory, or
 ///                                              SILL_TEST_REMOTE_DIR)
@@ -170,13 +171,16 @@ enum DebugHooks {
                     var addressName: String?
                     var requirePairing: Bool?
                     var updateCheck: Bool?
+                    var pairingSharing: Bool?
                     for change in changes {
-                        apply(change, to: &config, addressName: &addressName, requirePairing: &requirePairing, updateCheck: &updateCheck)
+                        apply(change, to: &config, addressName: &addressName, requirePairing: &requirePairing, updateCheck: &updateCheck,
+                              pairingSharing: &pairingSharing)
                     }
                     print("SillSetAfter \(parts[0]) s: \(changes.joined(separator: ", "))")
                     model.settings.config = config    // one assignment: several keys, one apply
                     if let addressName { model.settings.remoteAddressName = addressName }
                     if let updateCheck { model.settings.updateCheck = updateCheck }
+                    if let pairingSharing { model.settings.showPairingWindowToScreenSharing = pairingSharing }
                     // Through the identity store first, as the Devices pane's switch goes.
                     if let requirePairing { model.setRequirePairing(requirePairing) }
                 }
@@ -330,7 +334,7 @@ enum DebugHooks {
     }
 
     private static func apply(_ change: String, to config: inout HostConfig, addressName: inout String?, requirePairing: inout Bool?,
-                              updateCheck: inout Bool?) {
+                              updateCheck: inout Bool?, pairingSharing: inout Bool?) {
         let kv = change.split(separator: "=", maxSplits: 1).map(String.init)
         guard kv.count == 2 else { print("SillSetAfter: can’t read “\(change)”"); return }
         let (key, value) = (kv[0], kv[1])
@@ -344,6 +348,7 @@ enum DebugHooks {
         case "prioritizeSpeed": config.prioritizeSpeed = flag
         case "virtualDisplay": config.virtualDisplay = flag
         case "directWireless": config.directWireless = flag
+        case "sendAudio": config.sendAudio = flag
         case "remoteAccess": config.remoteAccess = flag
         case "remotePort": if let v = Int(value) { config.remotePort = v }
         case "internetAccess": config.internetAccess = flag
@@ -351,6 +356,7 @@ enum DebugHooks {
         case "remoteAddressName": addressName = value
         case "requirePairing": requirePairing = flag
         case "updateCheck": updateCheck = flag
+        case "showPairingWindowToScreenSharing": pairingSharing = flag
         default: print("SillSetAfter: no setting called \(key)")
         }
     }
@@ -378,6 +384,7 @@ enum DebugHooks {
         }
         for sample in devicesPaneSamples() {
             let pane = DevicesPane(status: sample.status, requirePairing: .constant(sample.requirePairing),
+                                   showPairingWindowToScreenSharing: .constant(sample.showPairingWindowToScreenSharing),
                                    requirePairingProblem: nil, actions: DevicesPane.Actions(), now: previewNow)
                 .formStyle(.grouped)
                 .frame(width: 520)
@@ -448,7 +455,8 @@ enum DebugHooks {
                        appearance: appearance, to: out.appendingPathComponent("card-\(sample.name)-\(name).png"))
             }
             var config = model.settings.config
-            config.virtualDisplay = sample.snapshot.virtualDisplayOn     // the checkmark matches the sample
+            config.virtualDisplay = sample.snapshot.virtualDisplayOn     // the checkmarks match the sample
+            config.sendAudio = sample.snapshot.audio != nil
             let entries = MenuBuilder.entries(presentation: p, config: config, login: login, permissions: sample.permissions)
             menuText += "=== \(sample.name) (glyph: \(p.glyph), tooltip: \(p.tooltip))\n"
             menuText += MenuBuilder.dump(entries, card: p) + "\n"
@@ -564,6 +572,11 @@ enum DebugHooks {
         // The same device while the away quality runs (docs/remote-bundle-plan.md §5.7): the menu's
         // Quality subtitle says so, and the stream runs at Low · Standard.
         list.append(Sample(name: "remote-away", snapshot: remoteAway()))
+        // The same device with the Mac's sound: the widest source row there is with it, ending in
+        // "through Tailscale · virtual display · sound".
+        var remoteSound = remote
+        remoteSound.audio = HostStatusSnapshot.Audio(source: "Safari", devices: 1)
+        list.append(Sample(name: "remote-sound", snapshot: remoteSound))
         // Pairing at home (docs/home-pairing-plan.md §6.4): a device's ask while its window shows
         // the code, while the limits kept one from opening, and while this Mac was locked; an older
         // device refused at the home door; the keychain unusable, so no home door at all.
@@ -660,6 +673,10 @@ enum DebugHooks {
         streaming.virtualDisplayOn = true
         var two = streaming
         two.devices = [ipad, iphone]
+        // The Mac's sound going to the one device (Send Audio on), on the virtual display over Wi-Fi,
+        // ending in "sound" (`remote-sound` is the same from away).
+        var sound = streaming
+        sound.audio = HostStatusSnapshot.Audio(source: "Safari", devices: 1)
         // A still window on the Mac's own screen (virtual display off) to one device, at the most the
         // menu offers (Maximum at 120 fps: 80 Mbps) over the widest word: the source row stays on one
         // line, as it does while the picture changes, so the open menu keeps its height. The device
@@ -700,6 +717,7 @@ enum DebugHooks {
             Sample(name: "streaming", snapshot: streaming),
             Sample(name: "still-window", snapshot: still),
             Sample(name: "two-devices", snapshot: two),
+            Sample(name: "sound", snapshot: sound),
             Sample(name: "software-encoder", snapshot: software),
             Sample(name: "software-encoder-stuck", snapshot: stuck),
             Sample(name: "virtual-display-fallback", snapshot: fallback),
@@ -774,12 +792,14 @@ extension DebugHooks {
         var name: String
         var status: RemoteStatus
         var requirePairing = true
+        var showPairingWindowToScreenSharing = false
     }
 
-    /// pane-devices-{required,off,empty,unavailable}: three devices, one paired over the USB cable
-    /// and seen over Wi-Fi at home, one by QR code and seen through Tailscale yesterday, one by
-    /// code and never connected; Require pairing off (its warning); nothing paired yet; the
-    /// keychain unusable (no home door).
+    /// pane-devices-{required,off,empty,screensharing,unavailable}: three devices, one paired over
+    /// the USB cable and seen over Wi-Fi at home, one by QR code and seen through Tailscale
+    /// yesterday, one by code and never connected; Require pairing off (its warning); nothing paired
+    /// yet; nothing paired yet with the pairing window shown to screen sharing (a Mac used through
+    /// Screen Sharing, issue #108); the keychain unusable (no home door).
     static func devicesPaneSamples() -> [DevicesPaneSample] {
         let now = previewNow
         let ipad = PairedDeviceSummary(id: "ipad", keyPrefix: "5KD2Q7", name: "iPad (iPad14,1)", model: "iPad14,1",
@@ -794,6 +814,8 @@ extension DebugHooks {
             DevicesPaneSample(name: "required", status: RemoteStatus(paired: [ipad, iphone, pro], homeDoor: .pairingRequired)),
             DevicesPaneSample(name: "off", status: RemoteStatus(paired: [ipad, iphone], homeDoor: .open), requirePairing: false),
             DevicesPaneSample(name: "empty", status: RemoteStatus(homeDoor: .pairingRequired)),
+            DevicesPaneSample(name: "screensharing", status: RemoteStatus(homeDoor: .pairingRequired),
+                              showPairingWindowToScreenSharing: true),
             DevicesPaneSample(name: "unavailable",
                               status: RemoteStatus(identityProblem: keychainProblem,
                                                    homeDoor: .unavailable("Sill couldn’t use its key in the keychain (\(keychainProblem))"))),

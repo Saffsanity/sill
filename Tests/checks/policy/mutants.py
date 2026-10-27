@@ -1,4 +1,4 @@
-"""(integrate-12: follow-best-path's 61 mutants, unchanged, and R1-R9 of the merge's remote rule, against the merged file and policy-merge/main.swift.) Each mutant of DiscoveryPolicy's session route (P: route, S: sessionRoute/describesFlow), of the wired dial (D: dialInterface, W: wiredWait), of following the best path (F: pathPlan, pathGone, PathSightings, freshWifi, wifiInterface, rank) and of its review fixes (G: the reconnect over the cable, the refused listing, upWait) must fail the policy check. usage: mutants.py"""
+"""(integrate-12: follow-best-path's 61 mutants, unchanged, and R1-R9 of the merge's remote rule, against the merged file and policy-merge/main.swift.) Each mutant of DiscoveryPolicy's session route (P: route, S: sessionRoute/describesFlow), of the wired dial (D: dialInterface, W: wiredWait), of following the best path (F: pathPlan, pathGone, PathSightings, freshWifi, wifiInterface, rank) and of its review fixes (G: the reconnect over the cable, the refused listing, upWait), and of a row's kept TXT record (T: rowRecords, records.swift: the cable pulled; a browser made again starts afresh) must fail the policy check. usage: mutants.py"""
 import os, subprocess, sys
 SP = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(SP, "..", "..", ".."))   # the repository
@@ -244,13 +244,32 @@ MUTANTS = {
     "S4 copy: over the cable dropped": ("            cable ? \"Pairing with \\(mac) over the cable\\u{2026}\" : \"Pairing with \\(mac)\\u{2026}\"", "            \"Pairing with \\(mac)\\u{2026}\""),
     "S4 copy: removed says the old remote words": ("        static func removed(mac: String, device: String) -> String { \"\\(mac) removed this \\(device). Tap it to pair again.\" }", "        static func removed(mac: String, device: String) -> String { \"\\(mac) removed this \\(device). To use it again, pair it again.\" }"),
     "S4 copy: openOnMac names no menu": ("\"\\(mac) didn\\u{2019}t show a code. On the Mac, choose Pair iPhone or iPad\\u{2026} in the Sill menu, then tap \\(mac) again.\"", "\"\\(mac) didn\\u{2019}t show a code.\""),
+    # A row keeps its TXT record while its result stays listed (records.swift: the cable pulled, 2026-10-27);
+    # a browser made again starts afresh (the review of #232); each result of a name keeps its own.
+    "T1 rowRecords: a result without a record reads as none (the rule undone, as before the fix)": (
+        "            next[item.key] = item.record ?? previous[item.key]", "            next[item.key] = item.record"),
+    "T2 rowRecords: a record kept after its result left the results": (
+        "        var next: [RowRecordKey: RowRecord] = [:], seen = Set<RowRecordKey>()",
+        "        var next: [RowRecordKey: RowRecord] = previous, seen = Set<RowRecordKey>()"),
+    "T3 rowRecords: the kept record wins over one that comes": (
+        "            next[item.key] = item.record ?? previous[item.key]", "            next[item.key] = previous[item.key] ?? item.record"),
+    "T4 rowRecords: a key listed twice read by its last entry": (
+        "        for item in listed where seen.insert(item.key).inserted {", "        for item in listed {"),
+    "T5 rowRecords: another result's record kept for one without": (
+        "            next[item.key] = item.record ?? previous[item.key]", "            next[item.key] = item.record ?? previous.values.first"),
+    "T6 rowRecords: a record kept across browsers (a browser made again no break, as #232 first had it)": (
+        "            next[item.key] = item.record ?? previous[item.key]",
+        "            next[item.key] = item.record ?? previous.first(where: { $0.key.name == item.key.name && $0.key.domain == item.key.domain })?.value"),
+    "T7 rowRecords: a record kept across domains (by browser and name alone)": (
+        "            next[item.key] = item.record ?? previous[item.key]",
+        "            next[item.key] = item.record ?? previous.first(where: { $0.key.browser == item.key.browser && $0.key.name == item.key.name })?.value"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():
     assert orig.count(old) == 1, f"{name}: pattern found {orig.count(old)} times"
     path = os.path.join(OUT, "mutant.swift")
     open(path, "w").write(orig.replace(old, new))
-    b = subprocess.run(["swiftc", "-O", path, os.path.join(SP, "main.swift"), os.path.join(SP, "home.swift"), os.path.join(SP, "sleep.swift"), "-o", os.path.join(OUT, "mutant")],
+    b = subprocess.run(["swiftc", "-O", path, os.path.join(SP, "main.swift"), os.path.join(SP, "home.swift"), os.path.join(SP, "sleep.swift"), os.path.join(SP, "records.swift"), "-o", os.path.join(OUT, "mutant")],
                        capture_output=True, text=True)
     if b.returncode != 0:
         print(f"{name}: DOES NOT COMPILE\n{b.stderr[:800]}"); continue

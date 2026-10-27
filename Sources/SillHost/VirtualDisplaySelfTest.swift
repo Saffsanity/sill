@@ -3,11 +3,13 @@ import AppKit
 import CoreGraphics
 import ScreenCaptureKit
 
-/// `SillHost --virtual-display-selftest`: creates one 1000×700 pt @2× virtual display from a
-/// process that runs the AppKit event loop exactly as `--virtual-display` does, reports what this
-/// process, CoreGraphics, AppKit and ScreenCaptureKit see of it, destroys it and exits. The
-/// display part needs no permission; SCShareableContent needs Screen Recording and the report
-/// says so when it is missing. Exit code 0 when the display came up and went away cleanly.
+/// `SillHost --virtual-display-selftest [Hz] [WxH]`: creates one 1000×700 pt @2× virtual display (or
+/// W×H points: `800x830` is the smallest VirtualStage makes, VirtualDisplaySize; `754x784` one that
+/// macOS ran at 1x) from a process that runs the AppKit event loop exactly as `--virtual-display`
+/// does, reports what this process, CoreGraphics, AppKit and ScreenCaptureKit see of it, destroys it
+/// and exits. The display part needs no permission; SCShareableContent needs Screen Recording and the
+/// report says so when it is missing. It moves the pointer onto the display and back (the input
+/// check below). Exit code 0 when the display came up and went away cleanly.
 package enum VirtualDisplaySelfTest {
     package static func run() -> Never {
         let app = NSApplication.shared
@@ -18,6 +20,13 @@ package enum VirtualDisplaySelfTest {
         }
         app.run()
         exit(0)   // app.run() does not return
+    }
+
+    /// "800x830" → 800×830 points; nil for anything else (a refresh rate, another flag).
+    private static func points(_ text: String) -> (width: Int, height: Int)? {
+        let parts = text.lowercased().split(separator: "x")
+        guard parts.count == 2, let w = Int(parts[0]), let h = Int(parts[1]), w > 0, h > 0 else { return nil }
+        return (w, h)
     }
 
     private static func onlineDisplays() -> [CGDirectDisplayID] {
@@ -44,12 +53,15 @@ package enum VirtualDisplaySelfTest {
         let t0 = Date()
         let d: VirtualDisplay
         do {
-            // `--virtual-display-selftest 120` asks for a 120 Hz display (what a ProMotion device gets).
+            // `--virtual-display-selftest 120` asks for a 120 Hz display (what a ProMotion device gets),
+            // and `800x830` (either order) for that size in points.
             let args = CommandLine.arguments
-            let hz = args.firstIndex(of: "--virtual-display-selftest").flatMap { i in args.count > i + 1 ? Double(args[i + 1]) : nil } ?? 60
-            d = try VirtualDisplay(name: "Sill", widthPt: 1000, heightPt: 700, scale: 2, refreshHz: hz,
+            let after = args.firstIndex(of: "--virtual-display-selftest").map { Array(args[($0 + 1)...]) } ?? []
+            let hz = after.lazy.compactMap { Double($0) }.first ?? 60
+            let size = after.lazy.compactMap(points).first ?? (width: 1000, height: 700)
+            d = try VirtualDisplay(name: "Sill", widthPt: size.width, heightPt: size.height, scale: 2, refreshHz: hz,
                                    vendorID: VirtualStage.vendorID, productID: VirtualStage.productID, serialNum: VirtualStage.serialNum)
-            print("  requested refresh: \(Int(hz)) Hz")
+            print("  requested: \(size.width)×\(size.height) pt @2×, \(Int(hz)) Hz")
         } catch {
             print("  FAIL create: \(error)")
             return 2
@@ -59,7 +71,7 @@ package enum VirtualDisplaySelfTest {
         let onlineMs = Int(Date().timeIntervalSince(t0) * 1000)
         let px = d.pixelSize
         print("  created id \(d.displayID) in \(createdMs) ms; online at requested mode: \(online) after \(onlineMs) ms")
-        print("  bounds \(d.bounds), backing \(px.width)×\(px.height) px")
+        print("  bounds \(d.bounds), backing \(px.width)×\(px.height) px, @\(d.currentScale)×")
         if let mode = CGDisplayCopyDisplayMode(d.displayID) { print("  current mode refresh: \(Int(mode.refreshRate)) Hz") }
         // Input reachability: the host maps device touches to global coordinates on this display
         // and posts HID mouse events there. If the window server keeps the cursor off virtual

@@ -254,7 +254,10 @@ this branch (the console's `hwkey:` and `keyboard:` lines) against Sill.app buil
 10. **VoiceOver** with the keyboard attached: nothing reads differently (the input view is not an element).
 11. **An input method** (Japanese or Chinese on the Magic Keyboard, if used): during the hold the input view
     is empty, so iPadOS's candidate bar may not show; the Keyboard button then gives iPadOS's own keyboard
-    views back. Note whether typing in one works either way.
+    views back. Note whether typing in one works either way. (Answered by #147, issue #138: the input view
+    was a key input only, so no input method or dictation reached the Mac at all. It is a text input since:
+    the composition shows over the picture, a hardware keyboard's candidates beside it; docs/DEVELOPMENT.md,
+    "Other languages and dictation".)
 12. **Two Sill windows** side by side (Split View, or Stage Manager), each streaming: open Settings in one,
     then press Esc in the other. Esc reaches the Mac (`hwkey: … to the Mac`), and Settings stays open in
     the first window. Then open Settings in both and press Esc in one: only that window's panel closes (the
