@@ -223,6 +223,8 @@ frameworks only, no third-party dependencies, nothing that needs a server, and
 latency before picture quality. Open an issue before starting anything large.
 Before a pull request, `Tests/checks/run-all.sh` runs the same pure checks as
 CI, in about five minutes and with no device.
+For translations, [docs/localization.md](docs/localization.md) explains the
+app-owned String Catalogs and the command that extracts and synchronizes source strings.
 Contributions are accepted under the project's license. Please report a
 security problem privately, as [SECURITY.md](SECURITY.md) says, not in a
 public issue.
