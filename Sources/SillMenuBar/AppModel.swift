@@ -126,6 +126,8 @@ final class AppModel {
                 await c.start(preselect: nil, promptForPermissions: false)
                 Stats.shared.startPrinting()
                 print("Sill \(Self.version) (\(Self.build)) running from \(Bundle.main.bundlePath); log file \(HostLog.shared.fileURL?.path ?? "none")")
+                // Off by default, and worth seeing in a log someone sends (issue #108).
+                if settings.showPairingWindowToScreenSharing { print(PairingWindowSharing.line(on: true)) }
                 onboardIfNeeded()
             } catch {
                 startupError = "\(error)"
