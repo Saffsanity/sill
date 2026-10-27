@@ -465,7 +465,7 @@ private enum Runtime {
 /// Pure sizing rule for fitting the Desktop stream to the device via Virtual Display when Aa is set
 /// (issues #212 and #213), checked in `Tests/checks/virtual-display-api`.
 enum DesktopVirtualDisplay {
-    static let minSide = 320
+    static let minSide = 800
     static let maxSide = 4096
 
     static func targetSize(viewportWidth: Double, viewportHeight: Double, scale: Double?,

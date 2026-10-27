@@ -181,10 +181,10 @@ for raw in Array(arm64macOS27.values) + Array(x86RosettaMacOS27.values) {
 // DesktopVirtualDisplay (#212, #213): fitting the Desktop stream to the device via Virtual Display when Aa is set.
 let fit1x = DesktopVirtualDisplay.targetSize(viewportWidth: 1366, viewportHeight: 1024, scale: 1.0, virtualDisplayOn: true)
 check(fit1x?.width == 1366 && fit1x?.height == 1024, "DesktopVirtualDisplay: 1366×1024 at 1.0× with Virtual Display on is 1366×1024 (#212)")
-let fit15x = DesktopVirtualDisplay.targetSize(viewportWidth: 1366, viewportHeight: 1024, scale: 1.5, virtualDisplayOn: true)
-check(fit15x?.width == 911 && fit15x?.height == 683, "DesktopVirtualDisplay: 1366×1024 at 1.5× rounds to 911×683 (#212)")
+let fit12x = DesktopVirtualDisplay.targetSize(viewportWidth: 1366, viewportHeight: 1024, scale: 1.2, virtualDisplayOn: true)
+check(fit12x?.width == 1138 && fit12x?.height == 853, "DesktopVirtualDisplay: 1366×1024 at 1.2× rounds to 1138×853 (#212)")
 let clamped = DesktopVirtualDisplay.targetSize(viewportWidth: 200, viewportHeight: 5000, scale: 1.0, virtualDisplayOn: true)
-check(clamped?.width == 320 && clamped?.height == 4096, "DesktopVirtualDisplay: clamps to 320...4096 (#212)")
+check(clamped?.width == 800 && clamped?.height == 4096, "DesktopVirtualDisplay: clamps to 800...4096 so macOS keeps 2x HiDPI (#212, #236)")
 check(DesktopVirtualDisplay.targetSize(viewportWidth: 1366, viewportHeight: 1024, scale: nil, virtualDisplayOn: true) == nil,
       "DesktopVirtualDisplay: nil scale (Aa Off) keeps the Mac's real main display (#212)")
 check(DesktopVirtualDisplay.targetSize(viewportWidth: 1366, viewportHeight: 1024, scale: 1.0, virtualDisplayOn: false) == nil,
