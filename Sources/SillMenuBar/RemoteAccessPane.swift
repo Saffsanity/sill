@@ -60,10 +60,10 @@ struct RemoteAccessPane: View {
                 if let problem = status.identityProblem {
                     // The system's messages end with a full stop of their own.
                     let reason = problem.hasSuffix(".") ? String(problem.dropLast()) : problem
-                    Warning("Remote access isn’t available: Sill couldn’t use the keychain (\(reason)).")
+                    Warning(String(localized: "Remote access isn’t available: Sill couldn’t use the keychain (\(reason))."))
                 }
             } footer: {
-                Footnote("Lets the iPhone and iPad you pair connect to this Mac from other networks: through a VPN such as Tailscale, or through a port you forward on your router. Sill turns away every device you haven’t paired, and encrypts everything the paired ones send and receive.")
+                Footnote(String(localized: "Lets the iPhone and iPad you pair connect to this Mac from other networks: through a VPN such as Tailscale, or through a port you forward on your router. Sill turns away every device you haven’t paired, and encrypts everything the paired ones send and receive."))
             }
             if on { addresses }
             pairedDevices
@@ -89,10 +89,10 @@ struct RemoteAccessPane: View {
                 LabeledContent {
                     Button("Change…") { startEditingPort() }
                 } label: {
-                    Warning("Port \(p) is in use by another app, so devices can’t reach this Mac remotely. Sill tries again every 30 seconds.")
+                    Warning(String(localized: "Port \(String(p)) is in use by another app, so devices can’t reach this Mac remotely. Sill tries again every 30 seconds."))
                 }
             case .failed(let error):
-                Warning("Remote access couldn’t start (\(error)). Sill tries again every 30 seconds.")
+                Warning(String(localized: "Remote access couldn’t start (\(String(describing: error))). Sill tries again every 30 seconds."))
             case .off, .listening:
                 EmptyView()
             }
@@ -108,7 +108,7 @@ struct RemoteAccessPane: View {
                                     .textSelection(.enabled)
                             }
                         }
-                        CopyButton(text: row.primary, spoken: "Copy the \(row.label) address")
+                        CopyButton(text: row.primary, spoken: String(localized: "Copy the \(row.label) address"))
                     }
                 } label: {
                     Text(row.label)
@@ -130,9 +130,9 @@ struct RemoteAccessPane: View {
         } footer: {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(status.vpnDown, id: \.self) { name in
-                    Footnote("Your devices can’t reach this Mac through \(name) until it connects.")
+                    Footnote(String(localized: "Your devices can’t reach this Mac through \(name) until it connects."))
                 }
-                Footnote("Your devices learn these when they pair and keep them current whenever they connect.")
+                Footnote(String(localized: "Your devices learn these when they pair and keep them current whenever they connect."))
             }
         }
     }
@@ -192,10 +192,10 @@ struct RemoteAccessPane: View {
     static func portProblem(_ text: String) -> (message: String, blocks: Bool)? {
         let t = text.trimmingCharacters(in: .whitespaces)
         guard !t.isEmpty, t.allSatisfy({ $0.isASCII && $0.isNumber }), t.count <= 5, let p = Int(t), (1024...65535).contains(p) else {
-            return ("Choose a port from 1024 to 65535.", true)
+            return (String(localized: "Choose a port from 1024 to 65535."), true)
         }
-        if p == 5000 || p == 7000 { return ("Port \(p) belongs to AirPlay Receiver. Choose another.", true) }
-        if p >= 49152 { return ("Ports from 49152 up can be taken by any app at any moment.", false) }
+        if p == 5000 || p == 7000 { return (String(localized: "Port \(String(p)) belongs to AirPlay Receiver. Choose another."), true) }
+        if p >= 49152 { return (String(localized: "Ports from 49152 up can be taken by any app at any moment."), false) }
         return nil
     }
 
@@ -212,7 +212,7 @@ struct RemoteAccessPane: View {
                 }
             }
         } footer: {
-            Footnote("The devices you pair in Devices can connect from afar while Remote Access is on.")
+            Footnote(String(localized: "The devices you pair in Devices can connect from afar while Remote Access is on."))
         }
     }
 
@@ -224,7 +224,7 @@ struct RemoteAccessPane: View {
             if internetAccess {
                 if let lan = status.lanAddress {
                     LabeledContent {
-                        CopyButton(text: lan, spoken: "Copy this Mac’s address")
+                        CopyButton(text: lan, spoken: String(localized: "Copy this Mac’s address"))
                     } label: {
                         Text("Forward TCP port \(String(port)) on your router to this Mac (\(lan)), and reserve that address for this Mac in the router’s settings.")
                     }
@@ -235,7 +235,7 @@ struct RemoteAccessPane: View {
                     LabeledContent {
                         HStack(spacing: 8) {
                             Text(v6.host).textSelection(.enabled)
-                            CopyButton(text: v6.host, spoken: "Copy the IPv6 address")
+                            CopyButton(text: v6.host, spoken: String(localized: "Copy the IPv6 address"))
                         }
                     } label: {
                         Text("IPv6")
@@ -247,9 +247,9 @@ struct RemoteAccessPane: View {
             Text("Internet")
         } footer: {
             if internetAccess {
-                Footnote("Anyone on the internet can now reach port \(String(port)) and try to connect. Sill turns away every device you haven’t paired. Turning this off doesn’t close the port on your router: remove the forward there too.")
+                Footnote(String(localized: "Anyone on the internet can now reach port \(String(port)) and try to connect. Sill turns away every device you haven’t paired. Turning this off doesn’t close the port on your router: remove the forward there too."))
             } else {
-                Footnote("Only needed for a port forward on your router. A VPN is simpler and keeps this Mac off the open internet.")
+                Footnote(String(localized: "Only needed for a port forward on your router. A VPN is simpler and keeps this Mac off the open internet."))
             }
         }
     }
@@ -264,16 +264,16 @@ struct RemoteAccessPane: View {
             LabeledContent("Router’s internet address") {
                 HStack(spacing: 8) {
                     Text(a).textSelection(.enabled)
-                    CopyButton(text: a, spoken: "Copy the router’s internet address")
+                    CopyButton(text: a, spoken: String(localized: "Copy the router’s internet address"))
                 }
             }
         case .carrierNAT(let a):
             LabeledContent("Router’s internet address") {
-                Warning("Your internet provider shares this address among many homes (\(Self.masked(a))), so a port forward can’t reach this Mac. Use a VPN such as Tailscale instead.")
+                Warning(String(localized: "Your internet provider shares this address among many homes (\(Self.masked(a))), so a port forward can’t reach this Mac. Use a VPN such as Tailscale instead."))
             }
         case .doubleNAT:
             LabeledContent("Router’s internet address") {
-                Warning("Your router sits behind another router. Forward the port on both, or use a VPN.")
+                Warning(String(localized: "Your router sits behind another router. Forward the port on both, or use a VPN."))
             }
         case .noAnswer:
             LabeledContent("Router’s internet address") {
@@ -304,9 +304,9 @@ struct RemoteAccessPane: View {
             nameProblem = nil
             actions.setAddressName(text)
         case .failure(.zone):
-            nameProblem = "Remove the part after %: it only works on this network."
+            nameProblem = String(localized: "Remove the part after %: it only works on this network.")
         case .failure:
-            nameProblem = "That doesn’t look like an address. Try home.example.net, or home.example.net:17455."
+            nameProblem = String(localized: "That doesn’t look like an address. Try home.example.net, or home.example.net:17455.")
         }
     }
 
@@ -376,6 +376,6 @@ private struct CopyButton: View {
                 copied = false
             }
         }
-        .accessibilityLabel(copied ? "Copied" : spoken)
+        .accessibilityLabel(copied ? String(localized: "Copied") : spoken)
     }
 }

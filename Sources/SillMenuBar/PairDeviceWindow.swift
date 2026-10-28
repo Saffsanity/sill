@@ -157,7 +157,7 @@ struct PairDeviceView: View {
             // A device-opened window is the home door's: the remote door's state is not its own.
             if offer.byDevice { return .waiting(triesLeft: triesLeft, wrongFrom: wrongFrom) }
             switch status.listener {
-            case .portInUse(let p): return .doorDown(String(localized: "Can’t pair while port \(p) is in use."))
+            case .portInUse(let p): return .doorDown(String(localized: "Can’t pair while port \(String(p)) is in use."))
             case .failed: return .doorDown(String(localized: "Can’t pair: remote access couldn’t start. Sill tries again every 30 seconds."))
             case .off, .listening: return .waiting(triesLeft: triesLeft, wrongFrom: wrongFrom)
             }

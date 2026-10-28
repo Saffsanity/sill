@@ -91,7 +91,7 @@ enum StatusText {
         }
         let remotePortTaken = remotePortInUse(s.remote)
         if let port = remotePortTaken {
-            attention.append(.init(title: String(localized: "Remote Access Can’t Start"), subtitle: String(localized: "Port \(port) is in use by another app."),
+            attention.append(.init(title: String(localized: "Remote Access Can’t Start"), subtitle: String(localized: "Port \(String(port)) is in use by another app."),
                                    action: .showRemoteAccess))
         }
         // Pairing at home (docs/home-pairing-plan.md §6.4).
@@ -178,7 +178,7 @@ enum StatusText {
         if r.identityProblem != nil { return String(localized: "Unavailable: the keychain couldn’t be used") }
         guard r.remoteAccess else { return String(localized: "Off") }
         switch r.listener {
-        case .portInUse(let port): return String(localized: "Port \(port) is in use")
+        case .portInUse(let port): return String(localized: "Port \(String(port)) is in use")
         case .failed: return String(localized: "Couldn’t start; trying again")
         case .off, .listening: break
         }
@@ -211,7 +211,7 @@ enum StatusText {
             return (String(localized: "Waiting for the Network"),
                     String(localized: "Sill appears on your iPhone and iPad once this Mac is on Wi-Fi or Ethernet and Local Network access is allowed."))
         case .notAdvertised(let port):
-            return (String(localized: "Test Pattern Mode"), String(localized: "Not advertised; test clients connect to port \(port)."))
+            return (String(localized: "Test Pattern Mode"), String(localized: "Not advertised; test clients connect to port \(String(port))."))
         case .registering, .advertising:
             break
         }
@@ -264,8 +264,8 @@ enum StatusText {
         let title: String, symbol: String
         switch stream.kind {
         case .window: title = middleTruncated(stream.title, to: 44); symbol = "macwindow"
-        case .desktop: title = "Whole Desktop"; symbol = "menubar.dock.rectangle"
-        case .testPattern: title = "Test Pattern"; symbol = "checkerboard.rectangle"
+        case .desktop: title = String(localized: "Whole Desktop"); symbol = "menubar.dock.rectangle"
+        case .testPattern: title = String(localized: "Test Pattern"); symbol = "checkerboard.rectangle"
         }
         // The encoder only produces a frame when the picture changed (ScreenCaptureKit delivers
         // frames on repaint), so 0 means a still window, not a stalled stream. "120 fps, still" is
@@ -273,17 +273,18 @@ enum StatusText {
         // changing, unless the count's own digits tip it: the open menu resizes the card on every
         // change, and "nothing changing" with the route word made it jump a line each time a
         // window stopped or started changing.
-        let rate = s.encodedFPS > 0 ? "\(min(s.encodedFPS, stream.fps)) of \(stream.fps) fps" : "\(stream.fps) fps, still"
+        let rate = s.encodedFPS > 0 ? String(localized: "\(min(s.encodedFPS, stream.fps)) of \(stream.fps) fps") : String(localized: "\(stream.fps) fps, still")
         var detail = "\(stream.width)×\(stream.height) · \(rate) · \(stream.mbps) Mbps"
         if s.devices.count == 1, let route = routeWord(s.devices[0]) { detail += " · \(route)" }
         if stream.onVirtualDisplay {
-            detail += " · virtual display"
+            detail += " · " + String(localized: "virtual display")
         } else if s.virtualDisplayOn, stream.kind == .window {
-            detail += " · real window (virtual display: \(s.lastStageFailure ?? s.virtualDisplayProblem ?? "unavailable"))"
+            let reason = s.lastStageFailure ?? s.virtualDisplayProblem ?? String(localized: "unavailable")
+            detail += " · " + String(localized: "real window (virtual display: \(reason))")
         }
-        if stream.softwareEncoder { detail += " · software encoder" }
+        if stream.softwareEncoder { detail += " · " + String(localized: "software encoder") }
         // The Mac's sound goes out too, while a device gets it (docs/audio-plan.md, Q9).
-        if s.audio?.devices ?? 0 > 0 { detail += " · sound" }
+        if s.audio?.devices ?? 0 > 0 { detail += " · " + String(localized: "sound") }
         return StatusPresentation.Row(id: "source", symbol: symbol, title: title, detail: detail)
     }
 
@@ -302,7 +303,7 @@ enum StatusText {
         if let link = d.link {
             parts.append(linkWords(link, fps: d.fps, rttMs: d.rttMs))
         } else if let fps = d.fps, let age = d.frameAgeMs, let rtt = d.rttMs {
-            parts.append("\(fps) fps · frame age \(ms(age)) · RTT \(ms(rtt))")
+            parts.append(String(localized: "\(fps) fps · frame age \(ms(age)) · RTT \(ms(rtt))"))
         }
         if let route = routeWord(d) { parts.append(route) }
         return StatusPresentation.Row(id: String(describing: d.id), symbol: symbol, title: name,
@@ -315,12 +316,13 @@ enum StatusText {
     static func linkWords(_ link: HostStatusSnapshot.LinkStatus, fps: Int?, rttMs: Int?) -> String {
         switch link.state {
         case .stalled:
-            return "Nothing is getting through"
+            return String(localized: "Nothing is getting through")
         case .behind:
-            let quality = QualityPreset.name(forBitrate: link.bitrate).replacingOccurrences(of: " ", with: "\u{00A0}")
-            var words = (fps.map { "\($0) fps, " } ?? "") + "the link can’t carry \(quality)"
+            let quality = QualityPreset.localizedName(forBitrate: link.bitrate).replacingOccurrences(of: " ", with: "\u{00A0}")
+            var words = fps.map { String(localized: "\($0) fps, the link can’t carry \(quality)") }
+                ?? String(localized: "The link can’t carry \(quality)")
             if let rtt = rttMs { words += " · RTT \(ms(rtt))" }
-            return fps == nil ? words.prefix(1).uppercased() + words.dropFirst() : words
+            return words
         }
     }
 
@@ -333,7 +335,7 @@ enum StatusText {
     /// known kind). Either is kept whole when a detail wraps: a remote label's spaces are no-break
     /// ones (the source row wrapped "through" and "Tailscale" onto two lines), as Wi-Fi's hyphen is.
     private static func routeWord(_ d: HostStatusSnapshot.Device) -> String? {
-        if let remote = d.remoteRoute { return remote.replacingOccurrences(of: " ", with: "\u{00A0}") }
+        if let remote = d.remoteRoute { return remoteWords(remote).replacingOccurrences(of: " ", with: "\u{00A0}") }
         return d.route.map(word)
     }
 
@@ -341,9 +343,24 @@ enum StatusText {
     /// detail never splits it.
     private static func word(_ route: ClientLink.Route) -> String {
         switch route {
-        case .wired: return "Wired"
+        case .wired: return String(localized: "Wired")
         case .wifi: return "Wi\u{2011}Fi"
-        case .direct: return "Direct"
+        case .direct: return String(localized: "Direct")
+        }
+    }
+
+    /// A remote session's route as the host words it (OriginPolicy.label: "through Tailscale",
+    /// "through your VPN", "over the internet", "by address"), in Sill.app's language. A label this
+    /// build does not know stays as the host wrote it.
+    static func remoteWords(_ route: String) -> String {
+        switch route {
+        case "through your VPN": return String(localized: "through your VPN")
+        case "over the internet": return String(localized: "over the internet")
+        case "by address": return String(localized: "by address")
+        default:
+            guard route.hasPrefix("through ") else { return route }
+            let service = String(route.dropFirst("through ".count))
+            return String(localized: "through \(service)")
         }
     }
 
@@ -352,9 +369,9 @@ enum StatusText {
     private static func ms(_ v: Int) -> String { v < 0 ? "–" : "\(v) ms" }
 
     private static func virtualDisplayNote(_ s: HostStatusSnapshot) -> String {
-        if let problem = s.virtualDisplayProblem { return "Unavailable: \(problem)" }
-        if s.virtualDisplayOn, s.stream?.onVirtualDisplay == true { return "The streamed window is on the virtual display" }
-        return "Picked windows leave this screen while they stream"
+        if let problem = s.virtualDisplayProblem { return String(localized: "Unavailable: \(problem)") }
+        if s.virtualDisplayOn, s.stream?.onVirtualDisplay == true { return String(localized: "The streamed window is on the virtual display") }
+        return String(localized: "Picked windows leave this screen while they stream")
     }
 
     /// "Safari — A very long window title that goes on" → "Safari — A very long…that goes on".

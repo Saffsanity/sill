@@ -103,7 +103,7 @@ private struct GeneralPane: View {
                 Toggle("Launch at login", isOn: Binding(get: { model.loginItem.isOn }, set: { model.loginItem.set($0) }))
                     .disabled(!model.loginItem.available)
                 if !model.loginItem.available {
-                    Footnote("Available when Sill runs from its app bundle.")
+                    Footnote(String(localized: "Available when Sill runs from its app bundle."))
                 } else if model.loginItem.needsApproval {
                     LabeledContent("Waiting for your approval") {
                         Button("Approve in System Settings…") { model.loginItem.openSystemSettings() }
@@ -154,7 +154,7 @@ private struct GeneralPane: View {
             Section {
                 Toggle("Direct wireless connection", isOn: $settings.config.directWireless)
             } footer: {
-                Footnote("Lets your iPhone and iPad connect when they’re near this Mac, even without a shared Wi\u{2011}Fi network, the way AirDrop does. While it’s on, this Mac’s Wi\u{2011}Fi keeps stepping away from your network, so streaming over Wi\u{2011}Fi can stutter. Anyone nearby with Sill can find this Mac; only devices you paired can connect, unless Require pairing is off.")
+                Footnote(String(localized: "Lets your iPhone and iPad connect when they’re near this Mac, even without a shared Wi\u{2011}Fi network, the way AirDrop does. While it’s on, this Mac’s Wi\u{2011}Fi keeps stepping away from your network, so streaming over Wi\u{2011}Fi can stutter. Anyone nearby with Sill can find this Mac; only devices you paired can connect, unless Require pairing is off."))
             }
             // The clipboard both ways (HostClipboard): at once, no restart. Each device has its own
             // switch too. macOS's answer is read with the permissions (once a second while this pane
@@ -189,7 +189,7 @@ private struct GeneralPane: View {
                 // A way out when the status item is hidden (a crowded menu bar, the notch).
                 Button("Quit Sill") { NSApp.terminate(nil) }
             } footer: {
-                Footnote("Sill \(AppModel.version) (\(AppModel.build)). Free and open source.")
+                Footnote(String(localized: "Sill \(AppModel.version) (\(AppModel.build)). Free and open source."))
             }
         }
     }
@@ -197,11 +197,11 @@ private struct GeneralPane: View {
     private var networkName: String {
         let snapshot = model.coordinator?.status.snapshot ?? HostStatusSnapshot()
         switch snapshot.network {
-        case .advertising(let name): return "“\(name)”"
-        case .notAdvertised: return "Not advertised (test pattern mode)"
-        case .failed: return "Not visible (the listener failed)"
-        case .waiting: return "Not yet (waiting for the network)"
-        case .starting, .registering: return "Registering…"
+        case .advertising(let name): return String(localized: "“\(name)”")
+        case .notAdvertised: return String(localized: "Not advertised (test pattern mode)")
+        case .failed: return String(localized: "Not visible (the listener failed)")
+        case .waiting: return String(localized: "Not yet (waiting for the network)")
+        case .starting, .registering: return String(localized: "Registering…")
         }
     }
 }
@@ -448,9 +448,9 @@ private struct StreamingPane: View {
                 }
                 .pickerStyle(.segmented)
                 Picker("Quality", selection: $settings.config.bitrate) {
-                    ForEach(QualityPreset.allCases) { Text($0.title).tag($0.rawValue) }
+                    ForEach(QualityPreset.allCases) { Text($0.localizedTitle).tag($0.rawValue) }
                     if QualityPreset(rawValue: settings.config.bitrate) == nil {
-                        Text(QualityPreset.title(forBitrate: settings.config.bitrate)).tag(settings.config.bitrate)
+                        Text(QualityPreset.localizedTitle(forBitrate: settings.config.bitrate)).tag(settings.config.bitrate)
                     }
                 }
                 Picker("Resolution", selection: $settings.config.captureScale) {
@@ -458,15 +458,15 @@ private struct StreamingPane: View {
                     Text("Standard").tag(CGFloat(1))
                 }
             } footer: {
-                Footnote("Each device asks for its own screen’s rate, up to this limit. Quality is per 60 fps; a 120 fps stream gets twice as much. \(QualityPreset.fastLinkNote) Changes apply at once: the current stream restarts for a moment.")
+                Footnote(String(localized: "Each device asks for its own screen’s rate, up to this limit. Quality is per 60 fps; a 120 fps stream gets twice as much. \(QualityPreset.localizedFastLinkNote) Changes apply at once: the current stream restarts for a moment."))
             }
             // Away from home (docs/remote-bundle-plan.md §5): its own quality, which a device away
             // sets too; the menu's Quality and Resolution stay the home ones.
             Section {
                 Picker("Quality", selection: $settings.config.awayBitrate) {
-                    ForEach(QualityPreset.allCases) { Text($0.title).tag($0.rawValue) }
+                    ForEach(QualityPreset.allCases) { Text($0.localizedTitle).tag($0.rawValue) }
                     if QualityPreset(rawValue: settings.config.awayBitrate) == nil {
-                        Text(QualityPreset.title(forBitrate: settings.config.awayBitrate)).tag(settings.config.awayBitrate)
+                        Text(QualityPreset.localizedTitle(forBitrate: settings.config.awayBitrate)).tag(settings.config.awayBitrate)
                     }
                 }
                 Picker("Resolution", selection: $settings.config.awayCaptureScale) {
@@ -476,13 +476,14 @@ private struct StreamingPane: View {
             } header: {
                 Text("Away from home")
             } footer: {
-                Footnote("Sill streams at these while every connected device is away from home, through a VPN or over the internet, so a slow connection never starts at your home quality. A device away from home changes these, and never your Quality and Resolution above."
-                         + (model.coordinator?.status.snapshot.away == true ? " Streaming at these now." : ""))
+                Footnote(model.coordinator?.status.snapshot.away == true
+                         ? String(localized: "Sill streams at these while every connected device is away from home, through a VPN or over the internet, so a slow connection never starts at your home quality. A device away from home changes these, and never your Quality and Resolution above. Streaming at these now.")
+                         : String(localized: "Sill streams at these while every connected device is away from home, through a VPN or over the internet, so a slow connection never starts at your home quality. A device away from home changes these, and never your Quality and Resolution above."))
             }
             Section {
                 Toggle("Prioritize encoding speed", isOn: $settings.config.prioritizeSpeed)
             } footer: {
-                Footnote("Lower latency when the Mac is busy, at a softer picture.")
+                Footnote(String(localized: "Lower latency when the Mac is busy, at a softer picture."))
             }
             // The Mac's sound (docs/audio-plan.md §6), a beta: its switch and its footnote say so. A device's
             // Settings panel turns it on and off too, for every device, and mutes it for that device alone
@@ -490,10 +491,10 @@ private struct StreamingPane: View {
             Section {
                 Toggle("Send audio (beta)", isOn: $settings.config.sendAudio)
                 if settings.config.sendAudio, let problem = model.coordinator?.status.snapshot.audio?.problem {
-                    Warning("Sill \(problem). The picture is unaffected.")
+                    Warning(String(localized: "Sill \(problem). The picture is unaffected."))
                 }
             } footer: {
-                Footnote("Beta. Devices play the sound of what you stream: all of the streamed window’s app, or every app for the Desktop. The Mac keeps playing it too. A connected iPhone or iPad can also turn this on or off from Sill’s settings there, and mute it for itself alone. Nothing is recorded.")
+                Footnote(String(localized: "Beta. Devices play the sound of what you stream: all of the streamed window’s app, or every app for the Desktop. The Mac keeps playing it too. A connected iPhone or iPad can also turn this on or off from Sill’s settings there, and mute it for itself alone. Nothing is recorded."))
             }
             if let snapshot = model.coordinator?.status.snapshot, snapshot.softwareEncoder {
                 Section {
@@ -521,7 +522,7 @@ private struct VirtualDisplayPane: View {
             Section {
                 Toggle("Stream from a virtual display", isOn: $settings.config.virtualDisplay)
             } footer: {
-                Footnote("Sill moves the window you pick onto an invisible display made for your device, so it keeps updating when other windows cover it and text is drawn at your device’s scale. The window leaves this screen while it streams and comes back when you stop streaming or quit Sill.")
+                Footnote(String(localized: "Sill moves the window you pick onto an invisible display made for your device, so it keeps updating when other windows cover it and text is drawn at your device’s scale. The window leaves this screen while it streams and comes back when you stop streaming or quit Sill."))
             }
             Section {
                 LabeledContent("Status") {
@@ -546,7 +547,7 @@ private struct VirtualDisplayPane: View {
                     }
                 }
             } footer: {
-                Footnote("Uses a private macOS interface (CGVirtualDisplay). If a macOS update breaks it, Sill streams the window where it is.")
+                Footnote(String(localized: "Uses a private macOS interface (CGVirtualDisplay). If a macOS update breaks it, Sill streams the window where it is."))
             }
         }
     }
@@ -554,13 +555,13 @@ private struct VirtualDisplayPane: View {
     private func statusText(_ s: HostStatusSnapshot) -> String {
         let sr = model.permissions.screenRecording, ax = model.permissions.accessibility
         if s.virtualDisplayAPIMissing, let problem = s.virtualDisplayProblem {
-            return "Not available on this version of macOS: \(problem)"
+            return String(localized: "Not available on this version of macOS: \(problem)")
         }
-        if !sr && !ax { return "Needs Screen Recording and Accessibility" }
-        if !ax { return "Needs Accessibility" }
-        if !sr { return "Needs Screen Recording" }
-        if let problem = s.virtualDisplayProblem { return "Off for this session: \(problem)" }
-        return "Available"
+        if !sr && !ax { return String(localized: "Needs Screen Recording and Accessibility") }
+        if !ax { return String(localized: "Needs Accessibility") }
+        if !sr { return String(localized: "Needs Screen Recording") }
+        if let problem = s.virtualDisplayProblem { return String(localized: "Off for this session: \(problem)") }
+        return String(localized: "Available")
     }
 
     /// A run-level disable (the system removed the display too often) can be retried; a missing

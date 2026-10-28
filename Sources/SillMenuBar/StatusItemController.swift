@@ -110,15 +110,15 @@ enum MenuBuilder {
             MenuEntry(kind: .item, title: String(localized: "Up to \(fps) fps"), checked: config.maxFPS == fps, action: .setMaxFPS(fps))
         }))
         var quality = QualityPreset.allCases.map { preset in
-            MenuEntry(kind: .item, title: preset.title, checked: config.bitrate == preset.rawValue, action: .setBitrate(preset.rawValue))
+            MenuEntry(kind: .item, title: preset.localizedTitle, checked: config.bitrate == preset.rawValue, action: .setBitrate(preset.rawValue))
         }
         if QualityPreset(rawValue: config.bitrate) == nil {
-            quality.append(MenuEntry(kind: .item, title: QualityPreset.title(forBitrate: config.bitrate), checked: true, enabled: false))
+            quality.append(MenuEntry(kind: .item, title: QualityPreset.localizedTitle(forBitrate: config.bitrate), checked: true, enabled: false))
         }
         // The home quality, as ever; while every connected device is away, the subtitle says which
         // quality runs instead (the away one is set in Settings › Streaming, never here).
         let qualityNote = p.away
-            ? String(localized: "Away from home now: \(QualityPreset.shortTitle(bitrate: config.awayBitrate, captureScale: Double(config.awayCaptureScale)))")
+            ? String(localized: "Away from home now: \(QualityPreset.localizedShortTitle(bitrate: config.awayBitrate, captureScale: Double(config.awayCaptureScale)))")
             : String(localized: "Per 60 fps; a 120 fps stream gets twice as much")
         menu.append(MenuEntry(kind: .item, title: String(localized: "Quality"), subtitle: qualityNote, children: quality))
         // Standard is one pixel a point: a quarter of a Retina display's pixels, and on a 1x display
