@@ -333,7 +333,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@。請結束並重新開啟 Sill 後再試一次。"
+            "value": "%@。請結束並重新打開 Sill 後再試一次。"
           }
         }
       }
@@ -1227,7 +1227,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "按一下「在系統設定中允許」：macOS 會先詢問一次，接著開啟「隱私權與安全性」，請在「從其他App貼上」中將 Sill 設為「允許」。裝置用「貼上」傳來的文字仍會送達。"
+            "value": "按一下「在系統設定中允許」：macOS 會先詢問一次，接著打開「隱私權與安全性」，請在「從其他App貼上」中將 Sill 設為「允許」。裝置用「貼上」傳來的文字仍會送達。"
           }
         }
       }
@@ -1631,7 +1631,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "裝置無法連線：Sill 無法使用鑰匙圈中的金鑰（%@）。請結束並重新開啟 Sill；若鑰匙圈詢問，請選擇「永遠允許」。"
+            "value": "裝置無法連線：Sill 無法使用鑰匙圈中的金鑰（%@）。請結束並重新打開 Sill；若鑰匙圈詢問，請選擇「永遠允許」。"
           }
         }
       }
@@ -2070,7 +2070,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "在 iPhone 或 iPad 上開啟 Sill，點一下這部 Mac；在外時點一下「加入 Mac⋯」，再將相機對準此 QR 碼。"
+            "value": "在 iPhone 或 iPad 上打開 Sill，點一下這部 Mac；在外時點一下「加入 Mac⋯」，再將相機對準此 QR 碼。"
           }
         }
       }
@@ -2709,7 +2709,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sill 每天會向 GitHub 查詢一次是否有新版本。GitHub 會看到這部 Mac 的 IP 位址和 Sill 的版本，不會傳送其他資料。Sill 不會自行下載或安裝任何東西：有新版本時會開啟 GitHub 上的頁面，由你自己下載。"
+            "value": "Sill 每天會向 GitHub 查詢一次是否有新版本。GitHub 會看到這部 Mac 的 IP 位址和 Sill 的版本，不會傳送其他資料。Sill 不會自行下載或安裝任何東西：有新版本時會打開 GitHub 上的頁面，由你自己下載。"
           }
         }
       }
@@ -2729,7 +2729,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "開啟能源設定⋯"
+            "value": "打開能源設定⋯"
           }
         }
       }
@@ -2751,7 +2751,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "開啟區域網路設定⋯"
+            "value": "打開「區域網路」設定⋯"
           }
         }
       }
@@ -2773,7 +2773,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "開啟隱私權與安全性⋯"
+            "value": "打開「隱私權與安全性」⋯"
           }
         }
       }
@@ -2783,7 +2783,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "開啟發行頁面⋯"
+            "value": "打開發行頁面⋯"
           }
         }
       }
@@ -2805,7 +2805,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "請在 iPhone 或 iPad 上開啟 Sill。這部 Mac 顯示為「%@」。"
+            "value": "請在 iPhone 或 iPad 上打開 Sill。這部 Mac 顯示為「%@」。"
           }
         }
       }
@@ -2827,7 +2827,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "開啟系統設定⋯"
+            "value": "打開「系統設定」⋯"
           }
         }
       }
@@ -3477,7 +3477,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "重新開啟 Sill"
+            "value": "重新打開 Sill"
           }
         }
       }
@@ -3821,7 +3821,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "重新開啟 Sill 後，螢幕錄影權限才會生效。"
+            "value": "重新打開 Sill 後，螢幕錄影權限才會生效。"
           }
         }
       }
@@ -4169,7 +4169,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sill 無法使用鑰匙圈中的金鑰。請結束並重新開啟 Sill；若鑰匙圈詢問，請選擇「永遠允許」。"
+            "value": "Sill 無法使用鑰匙圈中的金鑰。請結束並重新打開 Sill；若鑰匙圈詢問，請選擇「永遠允許」。"
           }
         }
       }
@@ -4763,7 +4763,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "如果你透過「螢幕共享」或其他遠端桌面 App 使用這部 Mac（例如沒有接螢幕的 Mac），打開這個選項才能配對。開啟期間，任何能從遠端看到這部 Mac 螢幕的人都看得到配對碼。正在串流這部 Mac 的裝置一律看不到這個視窗。"
+            "value": "如果你透過「螢幕共享」或其他遠端桌面 App 使用這部 Mac（例如沒有接螢幕的 Mac），開啟這個選項才能配對。開啟期間，任何能從遠端看到這部 Mac 螢幕的人都看得到配對碼。正在串流這部 Mac 的裝置一律看不到這個視窗。"
           }
         }
       }
@@ -5052,7 +5052,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "目前版本 %@；會開啟下載頁面"
+            "value": "目前版本 %@；會打開下載頁面"
           }
         }
       }
@@ -5146,7 +5146,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "已準備就緒。請在 iPhone 或 iPad 上開啟 Sill。"
+            "value": "已準備就緒。請在 iPhone 或 iPad 上打開 Sill。"
           }
         }
       }
