@@ -363,7 +363,7 @@ let known: [(StreamMessageKind, UInt8)] = [
     (.launchApp, 7), (.input, 8), (.viewport, 9), (.ping, 10), (.pong, 11), (.clientStats, 12), (.tick, 13), (.cursorShape, 14),
     (.windowCommand, 15), (.hostSettings, 16), (.changeSettings, 17), (.macInfo, 18), (.pairRequest, 19), (.pairResult, 20),
     (.pairingWanted, 21), (.goodbye, 22), (.hello, 23), (.macMenu, 24), (.pressMenuItem, 25), (.macPointer, 26),
-    (.fetchMenu, 27), (.gesture, 28), (.clipboard, 32), (.audio, 43), (.keyframeRequest, 44), (.unknown, 255),
+    (.fetchMenu, 27), (.gesture, 28), (.clipboard, 32), (.audio, 43), (.keyframeRequest, 44), (.camera, 46), (.unknown, 255),
 ]
 for (kind, raw) in known {
     check(kind.rawValue == raw && StreamMessageKind(rawValue: raw) == kind, "kind \(raw) is \(kind)")

@@ -91,6 +91,8 @@ public enum StreamMessageKind: UInt8 {
                              // From the device once per interruption while its keyframe is due, again when it
                              // has not come in 4 s (or four round trips), 2 s apart at least (KeyframeRecovery);
                              // at most one a second per connection on the host
+    case camera = 46         // device → host: CameraMessage (type 1 JSON CameraFormat, type 2 binary CameraFrame) —
+                             // the device's camera video, only to a host whose window list says `camera` 1 or more
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

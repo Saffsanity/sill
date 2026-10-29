@@ -362,3 +362,89 @@ package enum MacClipboard {
         }
     }
 }
+
+/// Receives and displays the connected device's camera frames (kind 46, `CameraMessage`, Roadmap
+/// Item 10). Feeds frames into a floating camera preview window (`sharingType = .none` so it is
+/// excluded from Desktop capture) and is ready to feed Sill's Core Media I/O camera extension once
+/// Apple grants the system-extension entitlement.
+@MainActor
+final class HostCamera {
+    private var activeOwner: ObjectIdentifier?
+    private var currentEpoch: Int?
+    private var panel: NSPanel?
+    private var imageView: NSImageView?
+
+    func received(_ payload: Data, from connection: NWConnection, who: String) {
+        guard let msg = CameraMessage.parse(payload) else { return }
+        let owner = ObjectIdentifier(connection)
+        switch msg {
+        case .format(let fmt):
+            if fmt.stop == true {
+                if activeOwner == owner {
+                    stop()
+                    print("Camera: \(who) stopped sharing its camera.")
+                }
+                return
+            }
+            let w = fmt.width ?? 640
+            let h = fmt.height ?? 480
+            guard (1...4096).contains(w), (1...4096).contains(h) else { return }
+            activeOwner = owner
+            currentEpoch = fmt.epoch
+            ensurePanel(title: "\(who) Camera", width: w, height: h)
+            print("Camera: \(who) shares its \(fmt.position ?? CameraCodec.positionFront) camera (\(w)×\(h)).")
+        case .frame(let frame):
+            guard activeOwner == owner else { return }
+            if let currentEpoch, frame.epoch != currentEpoch { return }
+            guard let image = NSImage(data: frame.data) else { return }
+            if panel == nil {
+                ensurePanel(title: "\(who) Camera", width: frame.width, height: frame.height)
+            }
+            imageView?.image = image
+            Stats.shared.bump("cam.recv")
+        }
+    }
+
+    func clientLeft(_ connection: NWConnection) {
+        if activeOwner == ObjectIdentifier(connection) {
+            stop()
+        }
+    }
+
+    private func ensurePanel(title: String, width: Int, height: Int) {
+        let aspect = width > 0 && height > 0 ? CGFloat(width) / CGFloat(height) : 4.0 / 3.0
+        let targetH: CGFloat = 240
+        let targetW = (targetH * aspect).rounded()
+        if let panel {
+            panel.title = title
+            panel.setContentSize(NSSize(width: targetW, height: targetH))
+            return
+        }
+        let p = NSPanel(
+            contentRect: NSRect(x: 40, y: 80, width: targetW, height: targetH),
+            styleMask: [.titled, .closable, .utilityWindow, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        p.title = title
+        p.isFloatingPanel = true
+        p.hidesOnDeactivate = false
+        p.sharingType = .none
+        let iv = NSImageView(frame: NSRect(x: 0, y: 0, width: targetW, height: targetH))
+        iv.imageScaling = .scaleProportionallyUpOrDown
+        iv.autoresizingMask = [.width, .height]
+        p.contentView = iv
+        p.orderFrontRegardless()
+        panel = p
+        imageView = iv
+    }
+
+    private func stop() {
+        panel?.orderOut(nil)
+        panel?.close()
+        panel = nil
+        imageView = nil
+        activeOwner = nil
+        currentEpoch = nil
+    }
+}

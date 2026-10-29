@@ -276,6 +276,29 @@ let clipboardMessage = StreamMessage(kind: .clipboard, timestamp: 1, isKeyframe:
 check(StreamMessage.parseHeader(clipboardMessage)?.kind == .clipboard && clipboardMessage.count == StreamMessage.headerLength + Wire.encode(clip).count,
       "the clipboard's header parses, then the JSON")
 
+// Kind 46, the device's camera (Roadmap Item 10: CameraMessage, CameraFormat, CameraFrame), and the
+// window list's `camera`: additive both ways.
+check(StreamMessageKind.camera.rawValue == 46 && StreamMessageKind(rawValue: 46) == .camera, "kind 46 is camera")
+check(CameraCodec.jpeg == "jpeg" && CameraCodec.hevc == "hevc" && CameraCodec.generation == 1, "CameraCodec names and generation")
+check(CameraCodec.positionFront == "front" && CameraCodec.positionBack == "back", "CameraCodec positions")
+let camFmt = CameraFormat(codec: CameraCodec.jpeg, width: 1280, height: 720, fps: 30, position: CameraCodec.positionFront, epoch: 5)
+let camFmtPayload = CameraMessage.format(camFmt).serialized()
+check(camFmtPayload.first == CameraMessage.typeFormat && CameraMessage.parse(camFmtPayload) == .format(camFmt), "CameraMessage.format round-trips")
+let camStop = CameraFormat(stop: true)
+check(CameraMessage.parse(CameraMessage.format(camStop).serialized()) == .format(camStop), "CameraMessage stop round-trips")
+let camFrame = CameraFrame(epoch: 5, seq: 19, width: 1280, height: 720, keyframe: true, data: Data([0xFF, 0xD8, 0xFF, 0xD9]))
+let camFramePayload = CameraMessage.frame(camFrame).serialized()
+check(camFramePayload.first == CameraMessage.typeFrame && CameraMessage.parse(camFramePayload) == .frame(camFrame), "CameraMessage.frame round-trips")
+check(CameraMessage.parse(Data()) == nil && CameraMessage.parse(Data([99, 1, 2])) == nil, "unknown or empty CameraMessage returns nil")
+check(CameraMessage.parse(Data([CameraMessage.typeFrame, 0, 1, 0, 0, 0, 1, 0, 0, 2, 208, 1, 0xFF])) == nil, "zero-width CameraFrame rejected")
+check(CameraMessage.parse(Data([CameraMessage.typeFrame, 0, 1, 0, 0, 0, 1, 5, 0, 0, 0, 1, 0xFF])) == nil, "zero-height CameraFrame rejected")
+check(CameraMessage.parse(Data([CameraMessage.typeFrame, 0, 1, 0, 0, 0, 1, 5, 0, 2, 208, 1])) == nil, "empty-data CameraFrame rejected")
+var withCam = shares
+withCam.camera = 1
+check(json(withCam).contains(#""camera":1"#), "WindowList with camera encodes camera:1")
+check(!json(shares).contains("camera"), "WindowList without camera omits the key")
+check(Wire.decode(WindowList.self, from: Wire.encode(withCam))?.camera == 1, "WindowList.camera round-trips")
+
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil
 if let out {
