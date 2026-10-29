@@ -58,6 +58,8 @@ struct HostSettingsPanel: View {
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
+    /// How long holding a window thumbnail takes to open its controls (`ThumbnailHold`), never sent.
+    @AppStorage(ThumbnailHold.defaultsKey) private var thumbnailHoldRaw = ThumbnailHold.halfSecond.rawValue
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -593,6 +595,17 @@ struct HostSettingsPanel: View {
             }
         }
         Footnote(text: gesturesFooter)
+        Rows {
+            AdaptiveRow(title: "Thumbnail Hold", since: nil) {
+                Picker("Thumbnail Hold", selection: Binding(get: { ThumbnailHold.stored(thumbnailHoldRaw) },
+                                                            set: { thumbnailHoldRaw = $0.rawValue })) {
+                    ForEach(ThumbnailHold.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+        }
+        Footnote(text: ThumbnailHold.footnote)
     }
 
     /// Under Send Audio's switch and the Mute row below it (docs/audio-plan.md §7.7): on, that every

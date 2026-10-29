@@ -1630,11 +1630,11 @@ struct WindowStrip: View {
     /// the submenu outside this clipped strip.
     @Binding var menuFor: UInt32?
 
-    /// Press and hold a thumbnail for 1.5 s: it starts to wiggle and its traffic lights (close,
-    /// minimize, full screen) appear in a submenu beside it, the way a held Home Screen icon
-    /// offers its menu. Keep holding and move: the submenu goes, the thumbnail lifts and drags
-    /// into a new slot. The arrangement is the device's own, persisted per Mac. A tap selects.
-    static let holdToOpen: TimeInterval = 1.5
+    /// Press and hold a thumbnail (`ThumbnailHold`, 0.5 s by default): it starts to wiggle and its
+    /// traffic lights (close, minimize, full screen) appear in a submenu beside it, the way a held
+    /// Home Screen icon offers its menu. Keep holding and move: the submenu goes, the thumbnail lifts
+    /// and drags into a new slot. The arrangement is the device's own, persisted per Mac. A tap selects.
+    @AppStorage(ThumbnailHold.defaultsKey) private var holdRaw = ThumbnailHold.halfSecond.rawValue
     /// What the tour lights of the strip: its thumbnails' band (the strip is as tall as its bar),
     /// with the active halo's 5 pt above and the app badge's 6 pt below.
     static func tourBand(pad: CGFloat) -> EdgeInsets {
@@ -1664,7 +1664,7 @@ struct WindowStrip: View {
                                         client.persistWindowOrder()
                                     })
                         .overlay {
-                            HoldDragOverlay(minimumHold: Self.holdToOpen,
+                            HoldDragOverlay(minimumHold: ThumbnailHold.stored(holdRaw).seconds,
                                             onTap: { if menuFor != nil { closeMenu() } else { client.select(.window(window.id)) } },
                                             onHold: { openMenu(for: window.id) },
                                             onMove: { t in holdMoved(window: window, index: index, count: windows.count, slot: slot, translation: t) },
@@ -1761,16 +1761,23 @@ struct HoldDragOverlay: UIViewRepresentable {
         let hold = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.held(_:)))
         hold.minimumPressDuration = minimumHold
         hold.allowableMovement = 12        // more than this before the hold fires is a scroll, not a hold
+        context.coordinator.hold = hold
         view.addGestureRecognizer(tap)
         view.addGestureRecognizer(hold)
         return view
     }
 
-    func updateUIView(_ view: UIView, context: Context) { context.coordinator.parent = self }
+    func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.parent = self
+        if let hold = context.coordinator.hold, hold.minimumPressDuration != minimumHold {
+            hold.minimumPressDuration = minimumHold
+        }
+    }
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     final class Coordinator: NSObject {
         var parent: HoldDragOverlay
+        weak var hold: UILongPressGestureRecognizer?
         private var start = CGPoint.zero
         init(_ parent: HoldDragOverlay) { self.parent = parent }
 
