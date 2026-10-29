@@ -30,10 +30,14 @@ This copy differs from the recovered v3.1 in three places:
 
 On 2026-10-29 every clip and still the reel reads was reconstituted from the delivered v3.1 film itself (the
 originals are gone) and the whole reel rendered again by `Scripts/pipeline.sh`, unchanged, with the software
-encoder: 1,729 of its 4,992 frames decode identically to the delivered film's (every drawn shot), the poster and the
-score are the delivered ones byte for byte and sample for sample, and the footage, solved back out of the delivered
-H.264, comes to 44.7 dB, for 50.8 dB mean PSNR over the whole reel (36.4 dB at the worst frame). The method, every
-shot's numbers, side-by-side sheets and the reproduced films are on Noah's Mac in
+encoder: 1,729 of its 4,992 frames decode identically to the delivered film's (every frame of S01–S05, S20 and
+S29–S35, and S21's first; the drawn frames of S22 and S28, coded after footage, differ by at most 11 and 3 levels),
+the poster and the score are the delivered ones byte for byte and sample for sample, and the footage, solved back out
+of the delivered H.264, comes to 44.7 dB, for 50.8 dB mean PSNR over the 3,263 frames that are not identical (49.8 dB
+pooled over all 4,992; 36.4 dB at the worst frame). A second check the same day, with tools of its own, recomputed
+every frame's numbers and the score and rendered two shots again from this branch: S02 bit for bit, and S10, from its
+input rebuilt bit for bit, within 1 dB of the reproduced film on every frame. The method, every shot's numbers, the
+check, side-by-side sheets and the reproduced films are on Noah's Mac in
 `~/Downloads/sill-handoff/reel/reproduction/REPRODUCTION.md`, kept there like the delivered reel, which shows his own
 windows.
 
