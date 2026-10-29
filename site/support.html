@@ -178,6 +178,19 @@
     <li>On iPhone Duo, Larger Picture isn’t there: the cover display keeps its layout. With Display Zoom on, some iPhones have no room for a larger picture, and it isn’t there either.</li>
   </ul>
 
+  <!-- Windows: take this section out for a release without Sill for Windows. -->
+  <h2 id="windows">Sill for Windows</h2>
+  <p>Sill for Windows shows your Mac on a Windows PC, as the Sill app does on an iPhone or iPad. <a href="download.html#windows">Download it here</a>.</p>
+  <ul>
+    <li><strong>What it needs.</strong> Windows 10, version 1809 or later, or Windows 11, on an x64 PC (most PCs) or an Arm one (Sill-windows-arm64.zip). And HEVC Video Extensions, which decodes your Mac’s picture: if Sill says it can’t, get HEVC Video Extensions from the Microsoft Store, then open Sill again. Your Mac needs Sill for Mac running, as for an iPhone or iPad.</li>
+    <li><strong>Windows protected your PC.</strong> Sill for Windows isn’t signed yet, so SmartScreen warns the first time you open it. Click More info, then Run anyway. It doesn’t ask again for the same file.</li>
+    <li><strong>Installing.</strong> Opened from the Downloads folder, Sill offers to install itself to <code>%LOCALAPPDATA%\Programs\Sill</code> and adds Sill to the Start menu, for your account only. It needs no administrator and changes nothing else on your PC. If it says the installed Sill is open, close that one first.</li>
+    <li><strong>Pairing.</strong> Your PC pairs with your Mac once, like an iPhone or iPad: your Mac opens a window with a code, and you type its 12 digits in Sill on your PC. Your Mac pairs a device only while it’s unlocked. It lists your PC in Sill’s Settings › Devices, where you can remove it.</li>
+    <li><strong>Updates.</strong> Once a day Sill asks GitHub whether a new version is out, and says so with a link to the release page. It never downloads anything by itself: download the new zip and open the new Sill.exe, which replaces the installed one.</li>
+    <li><strong>Uninstalling.</strong> Delete the Sill folder in <code>%LOCALAPPDATA%\Programs</code> and Sill in the Start menu. Your PC’s key, the Macs it paired with and its settings are in <code>%LOCALAPPDATA%\Sill</code>: delete that folder too to start over, and remove your PC in Sill’s Settings › Devices on your Mac.</li>
+  </ul>
+  <!-- /Windows -->
+
   <h2 id="log">Sending a log</h2>
   <p>A log helps with problems that aren’t listed here. On your Mac, choose Show Log… in the Sill menu, or open the Sill folder in Library/Logs in your home folder. The log lists your window names, device names and network addresses, never what you copy, so read it before you send it.</p>
 </main>

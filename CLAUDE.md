@@ -7404,3 +7404,17 @@ device keeps working with Macs from the first public build on, or each says why
   2026-10-27 (Noah: "Sound should be a toggle in the settings menu") the Mac's menu and Settings and
   a device's Settings panel set it for every device, and each device's Mute is its own; no Sound
   button in the bar.
+
+## Agent skills
+
+### Issue tracker
+
+Local markdown under `.scratch/`, one directory per feature. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Windows client spike
+
+C# in `Windows/`; its decisions, tickets and status are in `Windows/PROGRESS.md`. Read it first.

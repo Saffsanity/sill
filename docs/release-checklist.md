@@ -359,7 +359,9 @@ comes later, when the cask qualifies (below).
       GitHub to line up with the app version, I want all versions to be 0.5.1"), set together
       in the release's pull request: Sill for Mac's `CFBundleShortVersionString` in
       `Packaging/Info.plist`, and the iOS app's MARKETING_VERSION in both configurations of
-      `iOSClient/Sill.xcodeproj` (target Sill › General). The tag is `v` + that number, and the
+      `iOSClient/Sill.xcodeproj` (target Sill › General), and Sill for Windows' `Version` in
+      `Windows/Directory.Build.props` (the release workflow's windows job refuses a tag that
+      differs from it). The tag is `v` + that number, and the
       GitHub Release, its assets (`.build/Sill-<version>.dmg`), TestFlight's version and the App
       Store's all say it. The build numbers stay each app's own: Sill for Mac's is the commit
       count, which make-app.sh stamps in; the iOS app's, CURRENT_PROJECT_VERSION in both
@@ -1015,3 +1017,68 @@ is not a beta. When GitHub replaces the
 preview with a regular macOS 27 image, change `runs-on` in the three files. The image's `bash` is
 3.2, macOS's own, and runs every `run:` step: write steps it can parse (it ends a `$(` at the `)`
 of a `case` pattern inside it) and try them with `/bin/bash`, not zsh.
+
+### Sill for Windows
+
+The release workflow's `windows` job (on `windows-latest`, PowerShell steps, so the bash 3.2 rule
+above is the macOS jobs' only) builds Sill for Windows from the same tag, after the Mac's job:
+
+- [ ] `Windows/Directory.Build.props`' `Version` is the release's version (part 2's first item);
+      the job stops with an error otherwise, before building anything.
+- It runs the Windows solution's build and tests, then `dotnet publish src/Sill.Viewer` for
+  `win-x64` and `win-arm64`, self-contained and single-file, with `-p:SillExeName=Sill` (the app
+  is `Sill.exe`; without that property the project still makes the spike's `Sill.Viewer.exe`) and
+  `-p:Version=<version>`, and `-p:SillBuild=<the commit count at the tag>` (the checkout has the
+  whole history for it): the hello's build number, as Sill.app's CFBundleVersion. It checks that each `Sill.exe` carries that version in its version
+  resource (Sill.exe compares it to decide whether an installed copy is older), and zips each
+  exe four ways: `Sill-<version>-windows-x64.zip`, `Sill-<version>-windows-arm64.zip`, and the
+  version-free `Sill-windows-x64.zip` and `Sill-windows-arm64.zip` that the site's download page
+  links through `/releases/latest/download/` (as `Sill.dmg` is the Mac's), each with a `.sha256`
+  file in shasum's format. About 50 MB each zipped: the .NET runtime is inside, so the PC needs
+  nothing installed.
+- Without `SILL_SIGN_IN_CI`: the eight files are the run's artifact `windows-v<version>` for 14
+  days, and nothing is published. With it: the same artifact, then `gh release upload` adds them to
+  the release `release.sh --publish` has just created (`SILL_RELEASE_REPO` and `SILL_RELEASE_TOKEN`
+  as for the Mac). A Mac publish that failed stops the job, so a release never has Windows files
+  without the Mac's. The release's notes, written by `release.sh` and edited by hand after
+  (`fill-notes.sh`), should name both platforms; the Windows hashes are in the job's summary.
+- A run re-started after the upload half-failed: delete the Windows assets already on the release
+  (`gh release delete-asset v<version> Sill-windows-x64.zip …`) and re-run the job, or upload the
+  artifact's files by hand with `gh release upload --clobber`. An immutable release takes no new
+  assets once published, so with immutable releases on, the Windows files have to be attached
+  while the release is a draft: change `release.sh` to create it as one and publish it after this
+  job.
+- Try the zips on a PC that never had Sill (the downloads, not the artifact): Sill.exe opens with
+  SmartScreen's warning, offers to install itself to `%LOCALAPPDATA%\Programs\Sill` with Sill in
+  the Start menu, and a newer release is offered from the app.
+
+Signing. Sill.exe ships unsigned for now (Jericho, 2026-10-21: zero running cost; no paid
+certificate). Windows then says "Windows protected your PC" on first run until the file gains
+reputation with Microsoft's SmartScreen: More info, then Run anyway. The download and support pages
+say so. The free way to a signature is [SignPath Foundation](https://signpath.org), which signs
+open-source projects without charge with a certificate in its own name:
+
+- [ ] A person applies (the repository's owner, Noah): signpath.org's application for open-source
+      projects. Check its terms first: an OSI licence (Sill's Apache-2.0 is one), a public
+      repository whose releases are built on GitHub Actions from that repository, a code signing
+      policy published on the project's site (a page at getsill.app, or a section of support.html,
+      that says who may release and that releases are signed), and the team's accounts with
+      multi-factor sign-in. The publisher Windows shows is SignPath Foundation, not Sill or Noah.
+- When it is granted, the workflow changes in the windows job only: between `dotnet publish` and
+  zipping, the two unsigned `Sill.exe` go up as an artifact (actions/upload-artifact, its id an
+  output), SignPath's own action (`signpath/github-action-submit-signing-request`, pinned by commit
+  as every action here, and added to the repository's Actions allow-list) submits that artifact
+  with the organization id, project and signing-policy slugs SignPath gives, waits for the signed
+  files (`wait-for-completion`) and writes them to a folder, and the zips are made from those.
+  One secret, `SIGNPATH_API_TOKEN`; a check that `Get-AuthenticodeSignature` says Valid before
+  zipping. A signature alone does not end SmartScreen's warning at once (reputation then builds per
+  certificate rather than per file), but it ends "Unknown publisher".
+
+### Sill for Windows' updates
+
+Sill for Windows checks the same feed as Sill.app (`UpdatePolicy.Feed` in
+`Windows/src/Sill.Protocol`), so a release is offered to both at once: the tag is the version both
+compare. Its words say "Download the Windows zip there", from the release page; nothing downloads
+by itself. The release must carry the Windows zips before PCs are told about it, which the job's
+order (Windows files right after the Mac's publish, within minutes) keeps close enough: a PC checks
+at most once a day.
