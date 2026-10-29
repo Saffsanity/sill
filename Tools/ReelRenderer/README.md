@@ -32,8 +32,8 @@ This copy differs from the recovered v3.1 in three places:
 cd Tools/ReelRenderer
 swift build -c release                     # about 30 s; one deprecation warning (CIColorKernel)
 swift Scripts/placeholders.swift work      # stand-in inputs, so any shot renders (below)
-.build/release/ReelRenderer stills /tmp/reel 1.0 75.2 80.5     # PNG frames at reel times
-.build/release/ReelRenderer render --from 78.4 --to 82.0 --out /tmp/reel/duo.mp4
+taskpolicy -c utility .build/release/ReelRenderer stills /tmp/reel 1.0 75.2 80.5     # PNG frames at reel times
+taskpolicy -c utility .build/release/ReelRenderer render --from 78.4 --to 82.0 --out /tmp/reel/duo.mp4
 swift Scripts/check.swift info /tmp/reel/duo.mp4                 # duration, size, rate, frames
 ```
 
