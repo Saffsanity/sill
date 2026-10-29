@@ -75,6 +75,10 @@ public enum StreamMessageKind: UInt8 {
                              // on), its text becomes the Mac's clipboard, and `stop` ends the subscription; only
                              // to a host whose window list says `clipboard` 1 or more. Host → device: text copied
                              // on the Mac (or sent by another device), only to a connection that subscribed
+    case fileChunk = 34      // either way: FileChunk — part of a file dropped on one of the host's windows here, or
+                             // (host → device) of a file the device asked for (#66)
+    case fileDrop = 35       // device → host: JSON FileDrop — those files, all sent, dropped at a point of the picture;
+                             // both only to a host whose list says `fileDrop`
     // The Mac's sound (Audio.swift), after the menus' 24, 25 and 27, the pointer's 26 and the trackpad gesture's 28,
     // and after 29–42, which PR #66 (Sill Viewer, with #72 and #73) and #78 (the clipboard's 32) take. Older readers
     // map it to `.unknown` and skip it.

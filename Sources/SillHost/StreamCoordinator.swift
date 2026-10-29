@@ -293,6 +293,7 @@ package final class StreamCoordinator {
     /// subscribed, while Share clipboard with devices (`HostConfig.shareClipboard`) is on. Looks at
     /// nothing while nobody subscribes.
     let clipboard: HostClipboard
+    private lazy var fileDrops = FileDrops()
     /// The Mac's sound (kind 43, AudioPipeline): the sound of what streams, to the devices that play
     /// it, while Send Audio is on. It follows the source from `active`'s didSet, as the pointer and
     /// the menus do, so the picture always starts first, and nothing of it waits on the picture or the
@@ -465,6 +466,7 @@ package final class StreamCoordinator {
                 if self.flipWait == id { self.flipWait = nil }
                 self.menus.clientLeft(connection)
                 self.clipboard.clientLeft(connection)
+                self.fileDrops.clientLeft(connection)
                 self.releaseKeys(of: id)
                 self.status.update { $0.devices.removeAll { $0.id == id } }
                 // The last device at home left devices away behind: the away quality, at once.
@@ -1130,6 +1132,14 @@ package final class StreamCoordinator {
             // The clipboard (HostClipboard): a subscription, a device's text, or its stop. No `await`:
             // it reads and writes the pasteboard at once, and says nothing per copy.
             clipboard.received(message.payload, from: connection, who: deviceName(connection))
+        case .fileChunk:
+            guard !synthetic else { return }
+            fileDrops.chunk(message.payload, device: deviceName(connection), from: connection)
+        case .fileDrop:
+            guard !synthetic, let d = Wire.decode(FileDrop.self, from: message.payload) else { return }
+            let x = min(max(d.x, 0), 1), y = min(max(d.y, 0), 1)
+            let point = currentSourceRect().map { CGPoint(x: $0.minX + x * $0.width, y: $0.minY + y * $0.height) }
+            fileDrops.drop(d, at: point, device: deviceName(connection), from: connection)
         case .pressMenuItem:
             guard let r = Wire.decode(PressMenuItem.self, from: message.payload) else { return }
             // One of the Mac's menu items chosen from a device acts as a click on it would, and may
@@ -2639,10 +2649,12 @@ package final class StreamCoordinator {
     // MARK: Catalog to clients
 
     private func listMessage() -> StreamMessage {
-        StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
-                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
-                                                      hostVersion: hostVersion, protocol: SillProtocol.current,
-                                                      gestures: TrackpadGesture.generation, clipboard: clipboard.advertised)))
+        var list = WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
+                              hostVersion: hostVersion, protocol: SillProtocol.current,
+                              gestures: TrackpadGesture.generation, clipboard: clipboard.advertised)
+        list.fileDrop = synthetic ? nil : true
+        return StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
+                             payload: Wire.encode(list))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }
