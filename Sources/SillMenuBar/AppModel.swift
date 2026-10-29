@@ -60,6 +60,7 @@ final class AppModel {
     @ObservationIgnored private var loggedStatus: String?
     @ObservationIgnored private var napActivity: NSObjectProtocol?
     @ObservationIgnored private var napHold = NapHold.none
+    @ObservationIgnored private var awaitingHeadlessOffer = false
     /// Recomputes the presentation when a menu item that lasts a while runs out with nothing else
     /// changing then (the older-device item's 10 minutes).
     @ObservationIgnored private var presentationExpiry: Task<Void, Never>?
@@ -124,6 +125,7 @@ final class AppModel {
                 remote.setAddressName(settings.remoteAddressName)
                 settings.onAddressNameChange = { [settings, weak remote] in remote?.setAddressName(settings.remoteAddressName) }
                 await c.start(preselect: nil, promptForPermissions: false)
+                HeadlessPairing.startHostListener(model: self)
                 Stats.shared.startPrinting()
                 print("Sill \(Self.version) (\(Self.build)) running from \(Bundle.main.bundlePath); log file \(HostLog.shared.fileURL?.path ?? "none")")
                 // Off by default, and worth seeing in a log someone sends (issue #108).
@@ -310,7 +312,25 @@ final class AppModel {
             try? FileIdentityStore.writePrivate(Data(offer.url.utf8), to: dir.appendingPathComponent("pairing.url"))
             try? FileIdentityStore.writePrivate(Data(offer.code.utf8), to: dir.appendingPathComponent("pairing.code"))
         }
+        if awaitingHeadlessOffer {
+            awaitingHeadlessOffer = false
+            HeadlessPairing.writeOffer(offer)
+        }
         showPairing?(offer)
+    }
+
+    /// `--pair-code` CLI request from an interactive terminal of this user (issue #180).
+    func handleHeadlessPairRequest() {
+        guard let remote else {
+            HeadlessPairing.writeError(startupError ?? "Sill is still starting.")
+            return
+        }
+        if let problem = remote.identityProblem {
+            HeadlessPairing.writeError("Remote access unavailable: \(problem)")
+            return
+        }
+        awaitingHeadlessOffer = true
+        pairDevice()
     }
 
     // MARK: Status
