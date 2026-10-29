@@ -1612,7 +1612,8 @@ simulator:
 - Away from home and the link: `-SillSettingsCase away`, `awaymixed`,
   `awayhome`, `linkbehind`, `linkmixed`, `linklow` or `linkstalled` (the
   Settings panel's header, callout and footnote in each case), and
-  `-SillLinkLine behind` (the line over the stream). In a live session,
+  `-SillLinkLine behind` (the line over the stream; `console`: the Mac's
+  session off the console, issue #211, the console's line and callout). In a live session,
   `-SillSettingsScript '3 set bitrate=15000000; 20 suggestion'` changes a
   setting, or takes the link callout's button, at those seconds after the
   first window list, only against a synthetic host on this Mac's loopback;
@@ -1794,6 +1795,26 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
 - `swift run -c release CaptureProbe <window> [seconds] [--encode] [--software]
   [--synthetic]` isolates capture from encode from the network.
 
+### If taps and keys do nothing
+
+- Fast user switching (issue #211): while another user's session, or the login
+  window, has the Mac's screen, macOS drops every event Sill posts from this
+  user's session, so taps, clicks, scrolls, keys and gestures go nowhere while
+  the session and the stream stay up. They work again by themselves once the
+  Mac switches back, with no reconnect. The host says so in the log ("Console:
+  another user's session, or the login window, has this Mac's screen; …", then
+  "Console: this user's session has the screen again; …"), the `[1s]` lines
+  count what a device sent meanwhile (`in.offConsole`), and a device from
+  issue #211 on shows "‹Mac› switched users. Taps and keys work again once
+  it’s back." over the stream and a callout in its Settings panel (kind 16's
+  `sessionOnConsole`, false only then; an older device shows nothing). The
+  host reads the session dictionary's `kCGSSessionOnConsoleKey`
+  (`ConsoleSession`): at start, at macOS's session notifications (Sill.app,
+  and SillHost with `--virtual-display`), as a device connects, and every
+  second while one is connected (the CLI's default path has no other way).
+  TEST ONLY, a synthetic host: `SILL_TEST_CONSOLE_FILE=<file>` stands in for
+  the switch ("off" in the file: another session has the screen).
+
 ## Releasing
 
 Distribution: a release is a commit tagged `v` + the version both apps carry,
@@ -1905,6 +1926,9 @@ record field by field.
   untested; from away they cannot (Remote access, above).
 - Bonjour at home, your VPN or a port forward away (Remote access above).
   iCloud auto-pairing comes with milestone 5.
+- Input reaches the Mac only while Sill's user session has its screen: under
+  fast user switching, taps and keys go nowhere until the Mac switches back
+  (If taps and keys do nothing, above).
 
 ## Layout
 
