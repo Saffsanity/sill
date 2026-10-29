@@ -26,6 +26,17 @@ This copy differs from the recovered v3.1 in three places:
 - `Timeline.swift`: one comment no longer lists the names of the files a privacy blur covered in a clip.
 - `Package.swift`: its comment says where the package lives now.
 
+## Proof of reproduction
+
+On 2026-10-29 every clip and still the reel reads was reconstituted from the delivered v3.1 film itself (the
+originals are gone) and the whole reel rendered again by `Scripts/pipeline.sh`, unchanged, with the software
+encoder: 1,729 of its 4,992 frames decode identically to the delivered film's (every drawn shot), the poster and the
+score are the delivered ones byte for byte and sample for sample, and the footage, solved back out of the delivered
+H.264, comes to 44.7 dB, for 50.8 dB mean PSNR over the whole reel (36.4 dB at the worst frame). The method, every
+shot's numbers, side-by-side sheets and the reproduced films are on Noah's Mac in
+`~/Downloads/sill-handoff/reel/reproduction/REPRODUCTION.md`, kept there like the delivered reel, which shows his own
+windows.
+
 ## Build and run
 
 ```
