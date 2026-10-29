@@ -43,13 +43,24 @@ final class ClientStatsReporter: ObservableObject {
         client.send(.clientStats, payload: Wire.encode(stats))
     }
 
-    /// "iPad (iPad14,1)": the user-visible name is generic on iOS 16+ without an entitlement, so the
-    /// hardware identifier is what tells an iPad Mini from a simulator in the Mac's log.
-    static let deviceName: String = {
-        let name = UIDevice.current.name
-        let id = hardwareIdentifier
-        return id.isEmpty ? name : "\(name) (\(id))"
-    }()
+    /// The user-configured custom name (`Sill.customDeviceName`), or `UIDevice.current.name` when none
+    /// is set (issue #118).
+    static var plainDeviceName: String {
+        CustomDeviceName.resolvedName(
+            custom: UserDefaults.standard.string(forKey: CustomDeviceName.key),
+            fallback: UIDevice.current.name
+        )
+    }
+
+    /// "Work iPad (iPad14,1)" or "iPad (iPad14,1)": the user-visible name is generic on iOS 16+
+    /// without an entitlement, so `Sill.customDeviceName` and the hardware identifier tell devices apart.
+    static var deviceName: String {
+        CustomDeviceName.displayWithModel(
+            custom: UserDefaults.standard.string(forKey: CustomDeviceName.key),
+            fallback: UIDevice.current.name,
+            model: hardwareIdentifier
+        )
+    }
 
     /// "iPad14,1", or "iPad16,6 simulator": also what a pairing request gives as the model.
     static var hardwareIdentifier: String {

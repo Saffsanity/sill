@@ -194,6 +194,12 @@ M = [
     ("removalRevokes: a remote session never revokes", F, "        if remote { return true }\n", "        if remote { return false }\n"),
     ("removalRevokes: no saved key still revokes", F, "        guard let savedKey else { return false }\n        if remote",
      "        guard let savedKey else { return remote }\n        if remote"),
+    # Custom device name (issue #118).
+    ("CustomDeviceName.resolvedName keeps blank custom name", F,
+     "guard let raw = custom else { return fallback }\n        let cleaned = String(raw.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64))\n        return cleaned.isEmpty ? fallback : cleaned",
+     "guard let raw = custom else { return fallback }\n        return raw"),
+    ("CustomDeviceName.displayWithModel drops model", F, "return model.isEmpty ? base : \"\\(base) (\\(model))\"",
+     "return base"),
     # A row keeps its TXT record while its result stays listed (the cable pulled, Noah's iPad, 2026-10-27);
     # a browser made again starts afresh (the review of #232); each result of a name keeps its own.
     ("rowRecords: a result without a record reads as none (the rule undone, as before the fix)", F,

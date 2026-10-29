@@ -58,6 +58,8 @@ struct HostSettingsPanel: View {
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
+    /// Custom name for this device in Paired Devices and the Mac's menu bar (issue #118).
+    @AppStorage(CustomDeviceName.key) private var customDeviceName = ""
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -541,6 +543,19 @@ struct HostSettingsPanel: View {
             .padding(.bottom, 6)
             .accessibilityAddTraits(.isHeader)
             .id(Self.gesturesGroupID)
+        Rows {
+            HStack(spacing: 12) {
+                Text(CustomDeviceName.Copy.rowTitle)
+                    .foregroundStyle(Palette.text)
+                Spacer(minLength: 8)
+                TextField(device, text: $customDeviceName)
+                    .multilineTextAlignment(.trailing)
+                    .foregroundStyle(Palette.text)
+                    .submitLabel(.done)
+            }
+            .rowFrame()
+        }
+        Footnote(text: CustomDeviceName.Copy.footnote(mac: mac, device: device))
         if offersLargerPicture {
             Rows {
                 Toggle(isOn: $largerPicture) {
