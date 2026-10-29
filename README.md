@@ -74,6 +74,9 @@ Sill has layouts of its own.
   Three fingers swipe and pinch as on a Mac's trackpad: Mission Control, App
   Exposé, the Spaces, Apps and Show Desktop, through the keyboard shortcuts
   your Mac has for them.
+  Pinch the picture to zoom it, up to 5×, around the point between your
+  fingers; two fingers move a zoomed picture, and a pinch all the way out
+  shows the whole picture again.
 - **On iPhone**, held upright, the picture is on top with buttons, keys and a
   trackpad below. Larger Picture, in the settings panel, gives a window's
   picture the room of the window thumbnails, down to where the keyboard comes

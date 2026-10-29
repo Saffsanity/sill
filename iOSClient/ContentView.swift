@@ -290,6 +290,11 @@ struct ContentView: View {
 ///   `hidden` (the Mac has it, off the stream: none) or `pencil@0.50,0.50` (this device's Pencil:
 ///   none, unless `-SillPencilPointer 1`, Q2's flip, draws it in every layout). Ignored with
 ///   `-SillLive 1`, whose session shows the real thing.
+/// * `-SillZoom 'S@X,Y[; T S@X,Y …]'` — the picture's pinch zoom (StreamZoom, issue #65), in the mock
+///   and live, and in the normal app: at T seconds (1 without one) one pinch step of factor S about that
+///   fraction of the picture's pane (its middle without one), then the lift's settle: `2.5@0.3,0.4; 3
+///   0.1` zooms in, then pinches all the way out. The console's "harness: -SillZoom …" line gives the
+///   zoom.
 /// * `-SillInputScript '<t> <step>; …'` — with `-SillLive 1` only: input for the simulator gates,
 ///   which have no finger (`InputScript`): `t` is seconds since the session's first window list, and
 ///   a step is `down`, `pad DX,DY`, `lift`, `click` or `padscroll DX,DY` on the portrait pad, `tap
@@ -698,7 +703,13 @@ struct LayoutHarness: View {
 /// * `click` — a tap on the pad: a click where its cursor is;
 /// * `padscroll DX,DY` — two fingers on the pad: a scroll of DX, DY points in five steps, lifted at
 ///   600 pt/s (so it coasts), through the pad's own scroll path (Reverse Scrolling turns it around);
-/// * `tap X,Y` — a finger's tap on the stream at that fraction of the frame;
+/// * `tap X,Y` — a finger's tap on the stream at that fraction of the frame (where the picture's zoom
+///   shows it);
+/// * `touch X,Y` — a finger's tap at that fraction of the picture's pane on screen, whatever the zoom
+///   shows there; the console says where in the frame it went out (StreamZoom);
+/// * `pinch FACTOR[@X,Y]` — two fingers 60 pt apart about that fraction of the pane (its middle without
+///   one) moving to FACTOR times that apart, then lifted, through the stroke rule's own path (who owns
+///   the stroke, the pinch, the settle at the lift: StreamZoom.Stroke); the console gives the zoom after;
 /// * `drag DX,DY` — a finger dragged over the stream: a scroll of DX, DY points in five steps at the
 ///   picture's middle, lifted at 600 pt/s (so it coasts), through the finger pan's scroll path
 ///   (Reverse Scrolling turns it around);
@@ -732,6 +743,7 @@ enum InputScript {
     enum Step: Equatable, CustomStringConvertible {
         case down, pad(dx: Double, dy: Double), lift, click, padScroll(dx: Double, dy: Double)
         case tap(x: Double, y: Double), drag(dx: Double, dy: Double), key(UInt16), row(UInt16)
+        case touch(x: Double, y: Double), pinch(factor: Double, x: Double, y: Double)
         case gesture(TrackpadGestures.Gesture, fingers: Int)
         case esc(modifiers: String), scroll(dx: Double, dy: Double), wheel(dx: Double, dy: Double)
         case keyboard(attached: Bool), orient(String)
@@ -744,6 +756,8 @@ enum InputScript {
             case .click: return "click"
             case .padScroll(let dx, let dy): return "padscroll \(dx),\(dy)"
             case .tap(let x, let y): return "tap \(x),\(y)"
+            case .touch(let x, let y): return "touch \(x),\(y)"
+            case .pinch(let factor, let x, let y): return "pinch \(factor)@\(x),\(y)"
             case .drag(let dx, let dy): return "drag \(dx),\(dy)"
             case .key(let usage): return "key \(usage)"
             case .row(let usage): return "row \(usage)"
@@ -793,6 +807,13 @@ enum InputScript {
             case ("pad", 3) where pair.count == 2: step = .pad(dx: pair[0], dy: pair[1])
             case ("padscroll", 3) where pair.count == 2: step = .padScroll(dx: pair[0], dy: pair[1])
             case ("tap", 3) where pair.count == 2: step = .tap(x: pair[0], y: pair[1])
+            case ("touch", 3) where pair.count == 2: step = .touch(x: pair[0], y: pair[1])
+            case ("pinch", 3):
+                let parts = words[2].split(separator: "@")
+                guard parts.count <= 2, let factor = Double(parts[0]), factor > 0 else { return nil }
+                let xy = parts.count == 2 ? parts[1].split(separator: ",").compactMap { Double($0) } : [0.5, 0.5]
+                guard xy.count == 2 else { return nil }
+                step = .pinch(factor: factor, x: xy[0], y: xy[1])
             case ("drag", 3) where pair.count == 2: step = .drag(dx: pair[0], dy: pair[1])
             case ("key", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .key(usage)
             case ("row", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .row(usage)
@@ -873,6 +894,18 @@ enum InputScript {
         case .click: if let pad { pad.scriptClick() } else { done = false }
         case .padScroll(let dx, let dy): if let pad { pad.scriptScroll(dx: dx, dy: dy) } else { done = false }
         case .tap(let x, let y): if let overlay { overlay.scriptTap(x: x, y: y) } else { done = false }
+        case .touch(let x, let y):
+            guard let overlay else { done = false; break }
+            let went = overlay.scriptTouch(x: x, y: y)
+            print(String(format: "input script: t=%.2f ", at) + "\(step): "
+                  + (went.map { String(format: "went out at (%.4f, %.4f) of the frame", $0.x, $0.y) } ?? "the letterbox, or no picture: nothing sent")
+                  + ", the zoom " + StreamScreen.zoomLine(overlay.zoom))
+            return
+        case .pinch(let factor, let x, let y):
+            guard let overlay else { done = false; break }
+            let zoom = overlay.scriptPinch(factor: factor, x: x, y: y)
+            print(String(format: "input script: t=%.2f ", at) + "\(step): the zoom " + StreamScreen.zoomLine(zoom))
+            return
         case .drag(let dx, let dy): if let overlay { overlay.scriptScroll(dx: dx, dy: dy, from: .finger) } else { done = false }
         case .key(let usage): if let overlay { overlay.scriptKey(usage) } else { done = false }
         case .row(let usage):

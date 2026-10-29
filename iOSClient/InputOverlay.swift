@@ -104,6 +104,22 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     private weak var wheelScroll: UIPanGestureRecognizer?
     /// The Pencil's hover and the iPad's pointer, which the pointer's scrolls recognize alongside.
     private weak var hover: UIHoverGestureRecognizer?
+    /// The picture's zoom (StreamZoom, issue #65), whoever keeps it: the stream screen's, through these
+    /// (InputOverlay), or this view alone (the touch rig). Read for every touch; written while two
+    /// fingers pinch or move the picture.
+    var readZoom: (() -> StreamZoom)?
+    var writeZoom: ((StreamZoom) -> Void)?
+    private var ownZoom = StreamZoom()
+    var zoom: StreamZoom {
+        get { readZoom?() ?? ownZoom }
+        set { if let writeZoom { writeZoom(newValue) } else { ownZoom = newValue } }
+    }
+    /// Who the stroke on the picture belongs to, the Mac or the picture (StreamZoom.Stroke), from every
+    /// direct touch the stroke observer sees.
+    private var zoomStroke = StreamZoom.Stroke()
+    /// The finger pan opened the Mac's scroll (its stroke was the Mac's when it began): its steps and its
+    /// end go out. A pan whose stroke the picture took sends nothing at all.
+    private var fingerScroll = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -164,10 +180,13 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
 
         // Three fingers or more: a gesture for the Mac, never a click, a right click or a scroll
         // (StrokeObserver, TrackpadGestures). It only watches: it takes no touch from the
-        // recognizers above and delays none.
+        // recognizers above and delays none. Two fingers that pinch, and any two on a zoomed picture,
+        // are the picture's (StreamZoom.Stroke, from the same touches): no recognizer of their own, so
+        // nothing of theirs can begin, end or scroll the Mac behind the rule's back.
         scrollPan = pan
         strokes.onSilenced = { [weak self] in self?.strokeSilenced() }
         strokes.onGesture = { [weak self] gesture, fingers in _ = self?.sendGesture(gesture, fingers) }
+        strokes.onTouch = { [weak self] touch in self?.zoomTouch(touch) }
         addGestureRecognizer(strokes)
 
         // iPadOS shows no input source switch while the hardware keyboard's hold draws nothing: the
@@ -209,8 +228,9 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     private func normalized(_ point: CGPoint, clamped: Bool) -> (x: Double, y: Double)? {
         let rect = videoRect
         guard rect.width > 0, rect.height > 0 else { return nil }
-        let x = (point.x - rect.minX) / rect.width
-        let y = (point.y - rect.minY) / rect.height
+        let u = zoom.unzoomedPoint(point, in: bounds.size)
+        let x = (u.x - rect.minX) / rect.width
+        let y = (u.y - rect.minY) / rect.height
         if x < 0 || x > 1 || y < 0 || y > 1 {
             guard clamped else { return nil }
             return (Double(min(max(x, 0), 1)), Double(min(max(y, 0), 1)))
@@ -266,9 +286,41 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// `.began` → one `.scroll` per callback → `.ended`, then maybe momentum (`startMomentum`).
     /// Deltas are fractions of the video rect, natural sign (finger down = content down =
     /// positive dy), turned around while this device's Reverse Scrolling is on (`ScrollDirection`).
+    ///
+    /// Only a stroke that is the Mac's when the pan begins scrolls it: two fingers that pinch, and any
+    /// two on a zoomed picture, are the picture's (StreamZoom.Stroke), and their pan sends nothing,
+    /// to its end, even after one of them lifts.
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         guard !strokes.silent else { return }
+        if gesture.state == .began {
+            zoomStroke.panBegan()
+            fingerScroll = zoomStroke.scrollsMac
+        }
+        guard fingerScroll else { return }
+        if gesture.state == .ended || gesture.state == .cancelled { fingerScroll = false }
         scroll(gesture, .finger)
+    }
+
+    /// Every direct touch on the picture, from the stroke observer: who the stroke belongs to, and while
+    /// it is the picture's, its pinch, in this view's points (StreamZoom.Stroke). Before there is a
+    /// picture the stroke is judged as ever but nothing zooms.
+    private func zoomTouch(_ touch: StrokeObserver.Touch) {
+        var z = zoom
+        var changed = false
+        switch touch {
+        case .down(let id, let point):
+            zoomStroke.down(id, at: point, zoom: z)
+        case .moved(let moves):
+            if videoRect.isEmpty {
+                var scratch = z
+                zoomStroke.moved(moves, zoom: &scratch, in: bounds.size)
+            } else {
+                changed = zoomStroke.moved(moves, zoom: &z, in: bounds.size)
+            }
+        case .up(let id), .cancelled(let id):
+            changed = zoomStroke.up(id, zoom: &z)
+        }
+        if changed { zoom = z }
     }
 
     /// The iPad's trackpad (two fingers) or a Magic Mouse over the picture: the finger pan's path, at
@@ -350,8 +402,10 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     private func scrolled(to translation: CGPoint, at location: CGPoint) {
         let rect = videoRect
         guard rect.width > 0, rect.height > 0 else { return }
-        let dx = (translation.x - lastPanTranslation.x) / rect.width
-        let dy = (translation.y - lastPanTranslation.y) / rect.height
+        let rawDelta = CGPoint(x: translation.x - lastPanTranslation.x, y: translation.y - lastPanTranslation.y)
+        let scaled = zoom.unzoomedDelta(rawDelta)
+        let dx = scaled.x / rect.width
+        let dy = scaled.y / rect.height
         lastPanTranslation = translation
         guard dx != 0 || dy != 0, let p = normalized(location, clamped: true) else { return }
         send(.scroll(x: p.x, y: p.y, dx: Double(dx) * scrollFactor, dy: Double(dy) * scrollFactor))
@@ -386,9 +440,13 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
 
     /// A stroke just went silent (TrackpadGestures: three fingers down): a scroll it had begun (a first
     /// finger that slid before the others landed) ends here, with no coast; the Mac got deltas of less
-    /// than `chordTravel`. Nothing else of the stroke goes out but its gesture.
+    /// than `chordTravel`. Nothing else of the stroke goes out but its gesture, and a picture its first
+    /// two fingers had pinched goes back to how the stroke found it (StreamZoom.Stroke).
     private func strokeSilenced() {
         lastPanTranslation = .zero
+        fingerScroll = false
+        var z = zoom
+        if zoomStroke.silenced(zoom: &z) { zoom = z }
         guard scrollGestureOpen else { return }
         scrollGestureOpen = false
         let p = scrollPan.flatMap { normalized($0.location(in: self), clamped: true) } ?? (x: 0.5, y: 0.5)
@@ -409,8 +467,9 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
                 guard let self else { return }
                 let rect = self.videoRect
                 guard rect.width > 0, rect.height > 0 else { return }
+                let scaled = self.zoom.unzoomedDelta(step)
                 self.send(.scroll(x: p.x, y: p.y,
-                                  dx: Double(step.x / rect.width), dy: Double(step.y / rect.height)))
+                                  dx: Double(scaled.x / rect.width), dy: Double(scaled.y / rect.height)))
             },
             onEnd: { send(.scrollGesture(.momentumEnded, x: p.x, y: p.y)) })
     }
@@ -434,10 +493,42 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     #if DEBUG
     /// `-SillInputScript`'s `tap X,Y` (ContentView): a finger's tap at that fraction of the video
     /// frame, through the tap's own path.
+    /// The frame's point is where the picture's zoom shows it, so the tap lands on it whatever the zoom
+    /// (a frame point zoomed off the pane is tapped where it would be, which is outside the view).
     func scriptTap(x: Double, y: Double) {
         let rect = videoRect
         guard rect.width > 0, rect.height > 0 else { return }
-        tap(at: CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height))
+        tap(at: zoom.zoomedPoint(CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height), in: bounds.size))
+    }
+
+    /// `touch X,Y`: a finger's tap at that fraction of the picture's pane on screen, through the tap's
+    /// own path, whatever the zoom shows there; returns the fraction of the frame it went out at (nil:
+    /// the letterbox, or no picture).
+    func scriptTouch(x: Double, y: Double) -> CGPoint? {
+        let point = CGPoint(x: x * bounds.width, y: y * bounds.height)
+        let at = normalized(point, clamped: false)
+        tap(at: point)
+        return at.map { CGPoint(x: $0.x, y: $0.y) }
+    }
+
+    /// `pinch FACTOR[@X,Y]`: two fingers landing 60 pt apart about that fraction of the pane (its middle
+    /// without one), their spacing times FACTOR in eight steps, then lifted, through the stroke rule's
+    /// own path (who owns the stroke, the pinch's steps, the settle at the lift) as the stroke observer
+    /// feeds it; no pan begins, as none would for fingers moving apart about a still midpoint. Returns
+    /// the zoom after.
+    func scriptPinch(factor: Double, x: Double, y: Double) -> StreamZoom {
+        let c = CGPoint(x: x * bounds.width, y: y * bounds.height)
+        let ids = [1_000_000, 1_000_001]   // numbers no observer hands out
+        func fingers(_ spacing: Double) -> [CGPoint] {
+            [CGPoint(x: c.x - spacing / 2, y: c.y), CGPoint(x: c.x + spacing / 2, y: c.y)]
+        }
+        let start = fingers(60)
+        for (id, p) in zip(ids, start) { zoomTouch(.down(id, p)) }
+        for step in 1...8 {
+            zoomTouch(.moved(Dictionary(uniqueKeysWithValues: zip(ids, fingers(60 * pow(max(factor, 0.01), Double(step) / 8))))))
+        }
+        for id in ids { zoomTouch(.up(id)) }
+        return zoom
     }
 
     /// `key USAGE`: a hardware key, down and up with no modifier, as `pressesBegan` and
@@ -1350,6 +1441,11 @@ struct InputOverlay: UIViewRepresentable {
     var onModifiersConsumed: () -> Void = {}
     /// `StreamClient.sendGesture`; see `InputOverlayView.sendGesture`.
     var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
+    /// The picture's zoom, kept by the stream screen (its StreamZoomModel, which ZoomedStreamView draws):
+    /// read for every touch, written while two fingers pinch or move the picture. Nil keeps it in the
+    /// view.
+    var readZoom: (() -> StreamZoom)? = nil
+    var writeZoom: ((StreamZoom) -> Void)? = nil
 
     func makeUIView(context: Context) -> InputOverlayView {
         let view = InputOverlayView(frame: .zero)
@@ -1364,6 +1460,8 @@ struct InputOverlay: UIViewRepresentable {
         uiView.setOwnPointer = setOwnPointer
         uiView.latchedModifiers = latchedModifiers
         uiView.sendGesture = sendGesture
+        uiView.readZoom = readZoom
+        uiView.writeZoom = writeZoom
         // Called straight from a UIKit text-input callback, never from inside a SwiftUI update,
         // so writing the binding here needs no hop.
         uiView.onModifiersConsumed = onModifiersConsumed
@@ -1381,7 +1479,8 @@ struct InputOverlay: UIViewRepresentable {
 /// Feeds a surface's `TrackpadGestures` with every direct touch, so a stroke that has three fingers
 /// down before any has moved sends the Mac nothing but its gesture, if it makes one
 /// (docs/trackpad-gestures-plan.md §6.2). One on each glass surface: the portrait trackpad and the
-/// stream.
+/// stream. The stream's also hands each touch on (`onTouch`), for who two fingers belong to: the Mac's
+/// scroll or the picture's zoom (StreamZoom.Stroke).
 ///
 /// An observer, not the view's own touch callbacks: the pans, taps and long presses cancel the
 /// view's touches as they recognize, after which the view hears no more of the stroke. This one sees
@@ -1403,6 +1502,14 @@ final class StrokeObserver: UIGestureRecognizer, UIGestureRecognizerDelegate {
     /// The decision, at the first lift of a finger that armed the stroke: the gesture and its
     /// fingers, 3 or 4.
     var onGesture: (TrackpadGestures.Gesture, Int) -> Void = { _, _ in }
+    /// A direct touch of the stroke, by its number, in the view's points: after the gestures' own look
+    /// at it (and after `onSilenced`, for the finger that silences the stroke). The picture's zoom
+    /// decides who a stroke belongs to from these (InputOverlayView, StreamZoom.Stroke).
+    enum Touch {
+        /// A touch event's moves together, each touch's number to where it is now.
+        case down(Int, CGPoint), moved([Int: CGPoint]), up(Int), cancelled(Int)
+    }
+    var onTouch: (Touch) -> Void = { _ in }
     /// Each touch of the stroke, numbered as it lands.
     private var ids: [ObjectIdentifier: Int] = [:]
     private var nextID = 0
@@ -1435,15 +1542,21 @@ final class StrokeObserver: UIGestureRecognizer, UIGestureRecognizerDelegate {
             let id = nextID
             nextID += 1
             ids[ObjectIdentifier(touch)] = id
-            if strokes.down(id, at: touch.location(in: view), time: touch.timestamp, holding: holding()) == .silenced { onSilenced() }
+            let point = touch.location(in: view)
+            if strokes.down(id, at: point, time: touch.timestamp, holding: holding()) == .silenced { onSilenced() }
+            onTouch(.down(id, point))
         }
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        var moves: [Int: CGPoint] = [:]
         for touch in ordered(touches) {
             guard let id = ids[ObjectIdentifier(touch)] else { continue }
-            strokes.moved(id, to: touch.location(in: view), time: touch.timestamp)
+            let point = touch.location(in: view)
+            strokes.moved(id, to: point, time: touch.timestamp)
+            moves[id] = point
         }
+        if !moves.isEmpty { onTouch(.moved(moves)) }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
@@ -1452,6 +1565,7 @@ final class StrokeObserver: UIGestureRecognizer, UIGestureRecognizerDelegate {
             if case .gesture(let gesture, let fingers) = strokes.up(id, at: touch.location(in: view), time: touch.timestamp) {
                 onGesture(gesture, fingers)
             }
+            onTouch(.up(id))
         }
     }
 
@@ -1459,6 +1573,7 @@ final class StrokeObserver: UIGestureRecognizer, UIGestureRecognizerDelegate {
         for touch in ordered(touches) {
             guard let id = ids.removeValue(forKey: ObjectIdentifier(touch)) else { continue }
             strokes.cancelled(id)
+            onTouch(.cancelled(id))
         }
     }
 
@@ -1467,7 +1582,10 @@ final class StrokeObserver: UIGestureRecognizer, UIGestureRecognizerDelegate {
     /// clean and this one decides nothing more.
     override func reset() {
         super.reset()
-        for id in ids.values.sorted() { strokes.cancelled(id) }
+        for id in ids.values.sorted() {
+            strokes.cancelled(id)
+            onTouch(.cancelled(id))
+        }
         ids.removeAll()
     }
 }

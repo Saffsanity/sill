@@ -429,6 +429,8 @@ changed since the build before.
 Made for iPhone Duo. Open it flat and your Mac fills the inner display. Half open, it’s a laptop: the picture above the fold, a trackpad and keys below. Closed, Sill runs on the cover display. Nothing you touch sits on the fold.
 
 Away from home, Sill now starts at a quality a slower connection can carry, tells you when the connection can’t keep up and offers a quality it can, and moves your session back to your home network by itself when you get home. Also fixed: if your Mac showed twice away from home after Sill for Mac 0.4.0 gave it a new key, the row that didn’t work now connects, and the other goes. For the away quality and the notice, update Sill for Mac to 0.5.1 from getsill.app: from this release on, both apps share one version number.
+
+Pinch to zoom: two fingers zoom the picture up to 5× around the point between them, and move it while it’s zoomed. Taps, clicks and scrolls land on what you see under your finger. Pinch all the way out to see everything again.
 ```
 
 Local-only build (0.5.1's other changes are all away from home's):

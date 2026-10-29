@@ -672,6 +672,26 @@ scroll reads the switch as it begins and keeps that direction to the end of
 its coast. `Sources/StreamProtocol/ScrollDirection.swift` is the rule, checked
 in `Tests/checks/protocol`.
 
+## Pinch zoom
+
+Two fingers on the picture zoom it as a photo zooms in Photos (issue #65): spread
+them and the picture grows about the point between them, up to 5×, and moves
+with them, the point under the fingers staying under them. On a zoomed picture
+any two fingers move it and pinch it, and one finger is still the Mac's (a tap
+clicks, a hold right-clicks, a drag scrolls), landing on what shows under it, as
+the Pencil, a hover and the iPad's own pointer do. On the whole picture two
+fingers scroll the Mac as before, unless they pinch first (their spacing changes
+12 pt, and more than the point between them moves). A slight pinch out leaves
+the picture zoomed; only a pinch all the way out gives back the whole picture (a
+lift within 2 % of it counts). Three fingers are the Mac's gestures (above), and
+a zoom they interrupt is undone. The zoom is the device's alone: nothing is sent,
+the Mac's window and the viewport stay as they are, and the Mac's pointer is not
+involved (no zoom about it, no view following it). The pointer the device draws,
+the Mac's or the portrait trackpad's, keeps its size at the zoomed place. A turn,
+the other layout, Split View or a fold keeps the zoom on the same point of the
+picture; another window or the Desktop gives the whole picture again.
+`iOSClient/StreamZoom.swift` is the rule, checked in `Tests/checks/stream-zoom`.
+
 ## A hardware keyboard and trackpad on the device
 
 With a keyboard attached to the iPhone or iPad (a Magic Keyboard, a Smart
@@ -1234,8 +1254,8 @@ pairing at home (the doors, the cable, the device's rows), whether screen
 sharing shows the pairing window, which keychain Sill.app keeps its identity
 in, the away quality and the link's judgement, the iPhone Duo's layouts, what
 of the clipboard goes between the Mac and a device, which type encodings the
-virtual display's private API may report, and when the Mac's display is woken
-for a device) on their own with a check each, and
+virtual display's private API may report, when the Mac's display is woken for a
+device, and the picture's pinch zoom with who two fingers belong to) on their own with a check each, and
 runs them: about five minutes, no device, permission or encoder. `--mutants`
 also checks that each check fails when its file is changed in one place (well
 over an hour).
@@ -1547,6 +1567,15 @@ simulator:
   one run, `-SillSettingsScroll gestures` opens the Settings panel at that
   group, and `-SillVoiceOver 1` shows it as with VoiceOver on. Under `-SillLive 1`, `-SillInputScript '3 gesture swipeUp'` sends a
   gesture through the app's own path, only to a test host on this Mac.
+- `-SillZoom '2.5@0.3,0.4; 3 0.1'` zooms the picture (in the mock, live and in
+  the normal app): at 1 s by 2.5 about that fraction of its pane, at 3 s by 0.1,
+  a pinch all the way out, each as a pinch's step and the lift's settle. Under
+  `-SillLive 1`, `-SillInputScript '2 pinch 2.5@0.3,0.4; 4 touch 0.5,0.5; 5 tap
+  0.25,0.25'` pinches through the stroke rule's own path, taps at a fraction of
+  the pane on screen (the console says where in the frame it went out) and at a
+  fraction of the frame (where the zoom shows it), only to a test host on this
+  Mac. `-SillHitTest '6 500,40; 500,300'` prints what UIKit's hit test finds at
+  those window points at 6 s (the zoomed picture is never a touch's target).
 - `-Sill.reverseScroll 1` turns the device's Reverse Scrolling on for one run
   (in the normal app too), and `-SillSettingsScroll reverse` opens the Settings
   panel at its switch. Under `-SillLive 1`, in a layout with the portrait
@@ -1605,7 +1634,12 @@ surfaces as they are at REV, and `Tests/touchrig/compare.py BASE.log NEW.log
 [OFF.log]` checks that one- and two-finger strokes send what they sent before
 (and the same right after a gesture as made fresh) and that each stroke of three
 or more fingers, placed slowly, beside a resting thumb or with a brief extra
-contact too, sends its one gesture, or nothing, and nothing else. Reverse
+contact too, sends its one gesture, or nothing, and nothing else. Where the
+sources have the picture's zoom it also runs the overlay's zoom strokes (a
+spread, two fingers on a zoomed picture, a pinch all the way out, a drifting
+two-finger scroll, a pinch led by one finger, a spread that one finger lifts
+from, three fingers on a zoomed picture, a scroll that a second finger joins),
+each ending with a `zoom:` line. Reverse
 Scrolling is off there (`Stubs.swift`), so every scroll goes the natural way,
 as at a revision from before the switch. It runs on a simulator of its own
 (`SILL_TOUCHRIG_SIM`, made and deleted when missing), never XCUITest or a

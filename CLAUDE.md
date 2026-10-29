@@ -8,6 +8,19 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Pinch to zoom (2026-10-28/29, addhumal's PR #196 with maintainer edits; issue #65).** Noah's decisions of
+2026-10-19/20: pinch to zoom, not a slider; Photos-like, centred on the point between the fingers, the Mac's cursor
+not involved; a slight pinch out stays zoomed and only a pinch all the way out (or a lift within 2 % of it) gives the
+whole picture back; cap 5×. `StreamZoom` (pure, `Tests/checks/stream-zoom`, 105 checks and 30 mutants) owns the zoom
+and the two-finger stroke; InputOverlay maps every touch and scroll through it so taps, clicks, the Pencil, hover and
+scrolls land on what shows under the finger; `ZoomedStreamView` scales the picture; three fingers stay the Mac's
+gestures and undo a zoom they interrupt; a turn or another layout keeps the zoom, another source resets it; nothing
+is sent. Harness: `-SillZoom`, `-SillHitTest`, the input script's `pinch` and `touch`; the touch rig's zoom strokes
+(`RIG_ONLY=zoom`). Verified (the verdict in the handoff): the check and mutants, run-all 56, the touch rig 72 of 72
+against main, photos at 1×, 2.5×, 5× and after a full pinch out. Untested, for Noah: on the iPad and iPhone, the pinch
+following the fingers, a two-finger scroll at 1×, moving a zoomed picture, taps and the Pencil landing under the
+finger, three-finger gestures over a zoomed picture, a turn, Larger Picture, ProMotion smoothness, VoiceOver.
+
 **Tiles, Virtual Display and Send Audio on by default (2026-10-27, branch `defaults-tiles-vd` from main at
 3c257485, fast-forwarded to 3b546374 (#234) before its first commit; PR #236).** Noah, 2026-10-27:
 "make tiles not list the default behavior of the app. Also have Virtual Desktop on by default. Of
@@ -6528,7 +6541,11 @@ good.
   host's KeyStrokes), `TrackpadView` (the relative pad: its
   cursor a `PadCursor`, from the anchor; a recognizer that only counts fingers;
   `verticalSpan`, a phone's width ÷ 1.6; its two-finger scroll and coast in
-  Reverse Scrolling's direction, `ScrollDirection`; and the DEBUG input test),
+  Reverse Scrolling's direction, `ScrollDirection`; and the DEBUG input test), `StreamZoom` (pinch to zoom on
+  the picture, 1× to 5× around the point between the fingers, Photos-like, and `StreamZoom.Stroke`, which two
+  fingers belong to; pure, `Tests/checks/stream-zoom`; `StreamZoomModel` and `ZoomedStreamView` in
+  HEVCDisplayView.swift scale the picture inside the pane's clip; StrokeObserver's `onTouch` feeds it; every
+  touch and scroll lands through it: PR #196, issue #65),
   `HEVCDisplayView` (shared display view, the one pointer sprite + DEBUG HUD;
   the picture's interruptions on the network queue: `checkLayer` flushes a layer
   that failed, could not decode a frame or needs a flush to decode again, at each
@@ -6753,7 +6770,7 @@ good.
   `phone-portrait`, `pointer-control`, `pointer-presence`,
   `pointer-watch`, `policy` (with its `home.swift`), `protocol`,
   `remote-rules` (with its `home.swift`), `settings-window` (Sill.app's
-  `SettingsWindowFit`), `text-composition` (iOSClient's TextComposition with
+  `SettingsWindowFit`), `stream-zoom` (iOSClient's StreamZoom), `text-composition` (iOSClient's TextComposition with
   StreamProtocol's Input.swift), `tour`, `update-policy`, `virtual-display-api`
   (VirtualDisplay.swift whole, as VirtualDisplayProbe compiles it: its surface,
   TypeEncoding and Runtime.method's decision, on classes made at run time, against
