@@ -174,6 +174,8 @@ package final class StreamCoordinator {
     private var rectCache: (id: CGWindowID, rect: CGRect, at: CFAbsoluteTime)?
     private var pendingLaunch: String?
     private var switching = false
+    /// Fallback virtual display created for Desktop mode on a headless Mac or closed-lid MacBook (#61).
+    private var headlessDisplay: VirtualDisplay?
     /// A restart of the active source is in flight (a settings change, a resize, a rate change,
     /// the encoder fallback, a lost display): the source being restarted. Nil during a switch to
     /// another source.
@@ -484,7 +486,14 @@ package final class StreamCoordinator {
                 let wasEmpty = self.catalog.clientCount == 0
                 self.catalog.clientCount = count          // the catalog idles itself at 0
                 // Nobody is watching: stop capturing and encoding. The next client picks afresh.
-                if count == 0 { self.viewport = nil; self.clientFPS = [:] }   // the next device starts from scratch
+                if count == 0 {
+                    self.viewport = nil
+                    self.clientFPS = [:]
+                    if self.headlessDisplay != nil {
+                        self.headlessDisplay = nil
+                        print("Headless display: removed virtual Desktop display.")
+                    }
+                }   // the next device starts from scratch
                 if count == 0 { self.gestureChords.forget() }                 // and did not open a view it could close
                 // On the software encoder, the hardware is checked only while someone watches.
                 if count == 0 { self.stopRecheck() } else { self.devicesPresent(firstArrived: wasEmpty) }
@@ -887,6 +896,49 @@ package final class StreamCoordinator {
     /// Whether `id` is a Sill virtual display, which the app keeps its own windows off.
     package static func isSillVirtualDisplay(_ id: CGDirectDisplayID) -> Bool {
         CGDisplayVendorNumber(id) == VirtualStage.vendorID
+    }
+
+    /// Creates a fallback virtual display when Desktop mode is requested on a headless Mac or a
+    /// MacBook with its lid closed and no physical monitor attached (issue #61).
+    private func ensureHeadlessDisplayIfNeeded() async {
+        let apiOK = VirtualDisplay.checkPrivateAPI().isEmpty
+        guard HeadlessDesktopPolicy.needsVirtualDesktop(
+            hasDisplay: catalog.display != nil,
+            clientCount: catalog.clientCount,
+            appKitLoop: appKitLoop,
+            synthetic: synthetic,
+            apiAvailable: apiOK
+        ) else { return }
+        if headlessDisplay == nil {
+            let dims = HeadlessDesktopPolicy.desktopDimensions(
+                viewportWidth: viewport?.width,
+                viewportHeight: viewport?.height
+            )
+            do {
+                let d = try VirtualDisplay(
+                    name: "Sill Desktop",
+                    widthPt: dims.widthPt,
+                    heightPt: dims.heightPt,
+                    scale: dims.scale,
+                    refreshHz: Double(effectiveFPS),
+                    vendorID: VirtualStage.vendorID,
+                    productID: VirtualStage.productID + 1,
+                    serialNum: VirtualStage.serialNum + 1
+                )
+                headlessDisplay = d
+                _ = await d.waitUntilOnline(timeout: 3)
+                print("Headless display: created \(dims.widthPt)×\(dims.heightPt) pt @\(dims.scale)× virtual display (id \(d.displayID)) for Desktop mode.")
+            } catch {
+                print("Headless display: could not create virtual display (\(error)).")
+                return
+            }
+        }
+        let deadline = Date().addingTimeInterval(3)
+        while catalog.display == nil, Date() < deadline {
+            await catalog.refreshWindows()
+            if catalog.display != nil { break }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
     }
 
     // MARK: Each device's link (docs/remote-bundle-plan.md §6)
@@ -1538,6 +1590,9 @@ package final class StreamCoordinator {
                 describe = "a synthetic test pattern\(useSoftwareEncoder ? " (software encoder)" : "")"
                 title = "Test Pattern"; kind = .testPattern
             } else {
+                if catalog.display == nil {
+                    await ensureHeadlessDisplayIfNeeded()
+                }
                 guard let d = catalog.display else { active = .none; broadcastList(); return }
                 // Sill's own windows (Settings, Log, the pairing window with its code) never go out
                 // in a Desktop stream. Fixed here at pipeline start: a running SCStream is never
@@ -2196,6 +2251,7 @@ package final class StreamCoordinator {
         audio.shutdown()   // "Audio stopped: Sill is quitting."
         restoreFits(keeping: nil)
         stage.release()
+        headlessDisplay = nil
     }
 
     /// The CLI's default path at a signal (HostShutdown.installKeyRelease), just before it dies of it:

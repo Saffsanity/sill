@@ -252,9 +252,11 @@ final class WindowCatalog {
         guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
         appliedSeq = seq
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
+        let physical = content.displays.filter { !StreamCoordinator.isSillVirtualDisplay($0.displayID) }
+        let pool = physical.isEmpty ? content.displays : physical
         display = preferMainDisplay
-            ? (content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first)
-            : content.displays.first
+            ? (pool.first { $0.displayID == CGMainDisplayID() } ?? pool.first)
+            : pool.first
         var visible = content.windows.filter { w in
             guard let app = w.owningApplication, !app.applicationName.isEmpty else { return false }
             return w.windowLayer == 0                                  // drops widgets, wallpaper, backstop

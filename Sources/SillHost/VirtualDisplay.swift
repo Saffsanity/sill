@@ -461,3 +461,47 @@ private enum Runtime {
         return fn(target, sel)
     }
 }
+
+/// Headless Mac / closed-lid MacBook fallback display for Desktop mode (issue #61).
+/// Pure: compiled and checked by `Tests/checks/virtual-display-api`.
+enum HeadlessDesktopPolicy {
+    static let defaultWidthPt = 1920
+    static let defaultHeightPt = 1080
+    static let minWidthPt = 1024
+    static let maxWidthPt = 3840
+    static let minHeightPt = 640
+    static let maxHeightPt = 2400
+
+    struct Dimensions: Equatable, Sendable {
+        var widthPt: Int
+        var heightPt: Int
+        var scale: Int
+
+        init(widthPt: Int, heightPt: Int, scale: Int) {
+            self.widthPt = widthPt
+            self.heightPt = heightPt
+            self.scale = scale
+        }
+    }
+
+    static func needsVirtualDesktop(
+        hasDisplay: Bool,
+        clientCount: Int,
+        appKitLoop: Bool,
+        synthetic: Bool,
+        apiAvailable: Bool
+    ) -> Bool {
+        !hasDisplay && clientCount > 0 && appKitLoop && !synthetic && apiAvailable
+    }
+
+    static func desktopDimensions(viewportWidth: Double?, viewportHeight: Double?) -> Dimensions {
+        guard let w = viewportWidth, let h = viewportHeight, w > 0, h > 0 else {
+            return Dimensions(widthPt: defaultWidthPt, heightPt: defaultHeightPt, scale: 2)
+        }
+        let clampedW = min(maxWidthPt, max(minWidthPt, Int(w.rounded())))
+        let clampedH = min(maxHeightPt, max(minHeightPt, Int(h.rounded())))
+        let evenW = clampedW & ~1
+        let evenH = clampedH & ~1
+        return Dimensions(widthPt: evenW, heightPt: evenH, scale: 2)
+    }
+}
