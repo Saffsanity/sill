@@ -77,6 +77,9 @@ portrait one's at x 322, y 376, 1420×2000. A clip may only be read inside the s
 `Scripts/placeholders.swift <dir> [--clips all|none|r01,n3,…] [--fps 4]` writes a stand-in for every input:
 test-pattern stills and clips of the same sizes, with the clip and clip time burned in, covering each clip's
 approved segments. With them every shot renders, so a new cut's timing can be watched before any footage exists.
+It also writes S18's finger path, `v3tools/pointer-path.txt`, which is no stand-in: the stroke the capture played
+while clip 13 was recorded (its own script wrote it), byte for byte the file v3.1 read. S18 does not render
+without it.
 
 The Mac's previews (S26's pairing window) come from the bare `SillMenuBar` binary, never from a built `Sill.app` or
 the executable inside it: macOS registers such a copy in place of the installed app, and its permissions and login

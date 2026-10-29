@@ -8,8 +8,9 @@
 //   real-captures/*.mov, capture/final-*.mov               2064×2752 test-pattern clips covering each clip's approved
 //                                                          segment, with the clip's name and clip time burned in
 //   v31/s18/{arrow-56x80.png, plate-band.png, recorded-arrow-subpx.csv}   S18's assets (the arrow is AppKit's own)
-// Every file says PLACEHOLDER on it. Clips are H.264 from Apple's software encoder (never the hardware encoder, which
-// Sill.app shares). Apple frameworks only.
+//   v3tools/pointer-path.txt                               S18's finger path: no stand-in but the stroke v3.1 used
+// Every picture and clip says PLACEHOLDER on it. Clips are H.264 from Apple's software encoder (never the hardware
+// encoder, which Sill.app shares). Apple frameworks only.
 import AppKit
 import AVFoundation
 import CoreGraphics
@@ -159,6 +160,47 @@ do {
     while t <= 5.40 + 1e-9 { csv += String(format: "%.4f,490,%.3f\n", t, 400 + 100 * t); t += 1 / fps }
     try csv.write(to: dir.appendingPathComponent("recorded-arrow-subpx.csv"), atomically: true, encoding: .utf8)
     print("s18 assets in \(dir.path)")
+}
+
+// MARK: - S18's finger path, as the capture played it
+//
+// S18's finger dot follows v3tools/pointer-path.txt, and S18 does not render without it (ShotsII.swift: `Pointer.path`,
+// "pointer path missing"). It is no recording: the capture's own script wrote it (2026-09-25) and the touch injector
+// played it while clip 13 was recorded. 516 → 352 pt (a sine ease out, 1.3 s), → 679 (a cosine ease in and out,
+// 2.3 s), → 597 (0.9 s), then a 79 × 53 pt ellipse (3.0 s), sampled every 17.5 ms, at y 1006: 428 lines, byte for
+// byte the file v3.1 read (Tools/ReelRenderer/README.md). V31.swift's `strokeX` is the same stroke, analytic.
+
+do {
+    let dt = 0.0175, y = 1006.0
+    var samples: [(t: Double, x: Double, y: Double)] = [(0, 516, y)]
+    var t = 0.0
+    func line(_ x0: Double, _ x1: Double, _ dur: Double, easeOut: Bool) {
+        let n = max(1, Int((dur / dt).rounded()))
+        for k in 1...n {
+            let u = Double(k) / Double(n)
+            let s = easeOut ? sin(u * Double.pi / 2) : (1 - cos(Double.pi * u)) / 2
+            samples.append((t + Double(k) * dur / Double(n), x0 + (x1 - x0) * s, y))
+        }
+        t += dur
+    }
+    func ellipse(cx: Double, rx: Double, ry: Double, _ dur: Double) {
+        let n = max(1, Int((dur / dt).rounded()))
+        for k in 1...n {
+            let u = Double(k) / Double(n)
+            let a = 2 * Double.pi * ((1 - cos(Double.pi * u)) / 2)
+            samples.append((t + Double(k) * dur / Double(n), cx + rx * cos(a), y + ry * sin(a)))
+        }
+        t += dur
+    }
+    line(516, 352, 1.3, easeOut: true)
+    line(352, 679, 2.3, easeOut: false)
+    line(679, 597, 0.9, easeOut: false)
+    ellipse(cx: 518, rx: 79, ry: 53, 3.0)
+    let url = root.appendingPathComponent("v3tools/pointer-path.txt")
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try samples.map { String(format: "%.4f %.2f %.2f\n", $0.t, $0.x, $0.y) }.joined()
+        .write(to: url, atomically: true, encoding: .utf8)
+    print("s18 finger path \(url.path): \(samples.count) samples")
 }
 
 // MARK: - Clips
