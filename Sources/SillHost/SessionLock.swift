@@ -1,5 +1,4 @@
 import Foundation
-import AppKit
 import CoreGraphics
 
 /// Whether this Mac's user is at an unlocked console (docs/home-pairing-plan.md §4.3): the ask
@@ -21,9 +20,6 @@ package final class SessionLock {
 
     /// The last notification said locked (Sill.app only).
     private var notifiedLocked = false
-    /// Whether this user's session is currently on the console (macOS Fast User Switching, #211).
-    package private(set) var isOnConsole = true
-    package var onConsoleChanged: ((Bool) -> Void)?
     private var observers: [NSObjectProtocol] = []
 
     private init() {}
@@ -40,33 +36,12 @@ package final class SessionLock {
     /// actor under the AppKit loop.
     package func watchNotifications() {
         guard observers.isEmpty else { return }
-        let d = CGSessionCopyCurrentDictionary() as? [String: Any]
-        if let on = d?["kCGSSessionOnConsoleKey"] as? NSNumber {
-            isOnConsole = on.boolValue
-        }
         let center = DistributedNotificationCenter.default()
         observers.append(center.addObserver(forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: .main) { _ in
             Task { @MainActor in SessionLock.shared.notifiedLocked = true }
         })
         observers.append(center.addObserver(forName: Notification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main) { _ in
             Task { @MainActor in SessionLock.shared.notifiedLocked = false }
-        })
-        let ws = NSWorkspace.shared.notificationCenter
-        observers.append(ws.addObserver(forName: NSWorkspace.sessionDidResignActiveNotification, object: nil, queue: .main) { _ in
-            Task { @MainActor in
-                guard SessionLock.shared.isOnConsole else { return }
-                SessionLock.shared.isOnConsole = false
-                print("Console session: switched away from this user's session (Fast User Switching); input is paused until this session returns.")
-                SessionLock.shared.onConsoleChanged?(false)
-            }
-        })
-        observers.append(ws.addObserver(forName: NSWorkspace.sessionDidBecomeActiveNotification, object: nil, queue: .main) { _ in
-            Task { @MainActor in
-                guard !SessionLock.shared.isOnConsole else { return }
-                SessionLock.shared.isOnConsole = true
-                print("Console session: this user's session is back on the console.")
-                SessionLock.shared.onConsoleChanged?(true)
-            }
         })
     }
 

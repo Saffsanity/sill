@@ -132,7 +132,10 @@ package struct HostStatusSnapshot: Equatable {
     /// connected device is away, so the away quality is the target. The menu's Quality subtitle
     /// and the Streaming pane say so.
     package var away = false
-    /// Whether this Mac's user session owns the console (macOS Fast User Switching, issue #211).
+    /// Whether this Mac's user session has the console (issue #211, ConsoleSession): false while
+    /// another user's session or the login window has the screen under fast user switching, and the
+    /// input devices send goes nowhere. Every device's kind 16 says so; Sill.app shows nothing, since
+    /// nobody sees its menu then.
     package var sessionOnConsole = true
     /// The Mac's sound while it is wanted (Send Audio on, something streams, a device plays it); nil
     /// otherwise.
