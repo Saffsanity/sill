@@ -66,20 +66,35 @@ Sill has layouts of its own.
   the pointer. Sill for Mac turns it into mouse and keyboard events, which
   needs Accessibility. A keyboard attached to your device types on your Mac as
   soon as the picture shows, Esc included, and a trackpad or a mouse scrolls
-  the window under its pointer. Three fingers swipe and pinch as on a Mac's
-  trackpad: Mission Control, App Exposé, the Spaces, Apps and Show Desktop,
-  through the keyboard shortcuts your Mac has for them.
+  the window under its pointer. Chinese, Japanese, Korean and other languages
+  whose input methods compose text are typed with the keyboards you set up on
+  your device: you compose and choose there, and what you choose is typed on
+  your Mac. Dictation types on your Mac too. Reverse Scrolling, in the settings
+  panel, turns a finger's scroll and the on-screen trackpad's the other way.
+  Three fingers swipe and pinch as on a Mac's trackpad: Mission Control, App
+  Exposé, the Spaces, Apps and Show Desktop, through the keyboard shortcuts
+  your Mac has for them.
+  Pinch the picture to zoom it, up to 5×, around the point between your
+  fingers; two fingers move a zoomed picture, and a pinch all the way out
+  shows the whole picture again.
 - **On iPhone**, held upright, the picture is on top with buttons, keys and a
   trackpad below. Larger Picture, in the settings panel, gives a window's
   picture the room of the window thumbnails, down to where the keyboard comes
-  up; the Desktop keeps the usual layout. A window keeps its own shape until
-  you set its text size with Aa, or turn on the virtual display; then your Mac
-  makes it fill the taller picture.
+  up; the Desktop keeps the usual layout. With the virtual display (on unless
+  you turn it off in Sill for Mac), your Mac makes a window fill the taller
+  picture; with it off, once you set the window's text size with Aa.
 - **The clipboard** goes both ways while Share Clipboard is on, in both apps:
   text you copy on your Mac is ready to paste on your device, and Paste in
   Sill sends what you copied on your device to your Mac's clipboard, where you
   press ⌘V. Sill never reads your device's clipboard by itself, and copies a
   password manager marks as concealed stay on your Mac.
+- **Sound from your Mac** is a beta, on by default; Send Audio (Beta) in the
+  Sill menu or Sill's Settings on your Mac, or in the settings panel of Sill on
+  your iPhone or iPad, turns it off and on. Sill for Mac captures the sound of
+  the window's app, or of every app for the Desktop, and every connected device
+  plays it a moment behind the picture, never ahead of it. Your Mac keeps
+  playing it too, and Mute in a device's settings panel silences it on that
+  device alone.
 - **On iPhone Duo**, Sill follows the hinge: open it flat and your Mac fills
   the inner display; half open, the picture is above the fold with a trackpad
   and keys below; closed, Sill runs on the cover display. Nothing you touch
@@ -89,6 +104,10 @@ Sill has layouts of its own.
   Sill for Mac reads each menu from the app as you open it and chooses the
   item you pick, through Accessibility. When someone moves the mouse at your
   Mac, your device shows the pointer where it is.
+- **The connect screen** on your device shows each Mac as a tile, a paired Mac
+  with its screen as your last session with it ended. The picture stays on
+  your device until you remove it or forget the Mac. The button beside
+  "Connect to a Mac" lists them instead, and Sill remembers which you chose.
 - **Nearby**, your device finds your Mac with Bonjour on your local network.
   Over a USB cable, your Mac shows as Wired and the connection uses the cable.
   With no shared network, Direct Wireless Connection (off by default) connects
@@ -98,7 +117,11 @@ Sill has layouts of its own.
   a USB cable the device pairs by itself. From then on each end knows the
   other's key, and every connection, nearby or away, is pinned to those keys.
   In Sill's Settings on your Mac, Devices lists the devices you paired, and
-  you can remove any of them there.
+  you can remove any of them there. If you use your Mac through Screen Sharing
+  or another remote desktop app, as you would a Mac without a display, Sill's
+  pairing window doesn't show there until you turn on Show the pairing window
+  to screen sharing in the same place. It is off by default: while it is on,
+  anyone who can see your Mac's screen remotely can read the code.
 - **Away from home**, Remote Access (off by default) lets the devices you
   paired reach your Mac through your own VPN or a port you forward on your
   router; a device learns how the next time it connects at home with Remote
@@ -110,32 +133,39 @@ Sill has layouts of its own.
 - **When the link can't keep up**, Sill for Mac notices that it is holding
   frames back and tells your device, which says so over the picture and, in
   its Settings, offers a quality the link can carry.
-- **Text size**: Aa on your device resizes the window you stream on your Mac,
-  through Accessibility, so its text shows at the size you pick, and keeps it
-  at that size while it streams. The window goes back to its own size and
-  place when Sill stops showing it: you pick another window or the Desktop,
-  your last device disconnects, or you quit Sill. If you moved it on your Mac
-  meanwhile, it keeps its new place.
-- **The virtual display** (off by default) moves a window you stream onto a
-  display of its own on your Mac, so it keeps updating when other windows
-  cover it. It uses a private macOS API, which is one reason Sill for Mac comes
-  from the website and not from the Mac App Store.
+- **Text size**: Aa on your device resizes the window you stream, through
+  Accessibility, so its text shows at the size you pick, and keeps it at that
+  size while it streams, on the virtual display or, with that off, on your
+  Mac's screen. The window goes back to its own size and place when Sill stops
+  showing it: you pick another window or the Desktop, your last device
+  disconnects, or you quit Sill. With the virtual display off, a window you
+  moved on your Mac meanwhile keeps its new place.
+- **The virtual display**, on unless you turn it off in the Sill menu or in
+  Sill's Settings on your Mac, or in the settings panel of Sill on your iPhone
+  or iPad, moves the window you stream onto a display of
+  its own on your Mac, sized for your device, so it keeps updating when other
+  windows cover it. The window leaves your Mac's screen while it streams and
+  comes back where it was. The display uses a private macOS API, which is one
+  reason Sill for Mac comes from the website and not from the Mac App Store; if
+  a macOS update breaks it, Sill streams the window where it is.
 
 Good to know: Sill shows one window, or the whole desktop, at a time, and it
-does not play sound from your Mac. The clipboard carries text only, up to 256
-KB at a time, and only between apps that both have it. Your Mac needs to be
-awake, with Sill open. Sill may not be able to wake it. After a restart Sill
-opens only once someone logs in, with Launch at Login on. Only the iPhones and
-iPads you paired can connect, unless you turn off Require pairing in Settings
-› Devices; then any device on your network can, still encrypted. Pairing at
-home came with Sill for Mac 0.4.0 and Sill for iPhone and iPad 0.5 (2), and
-each needs the other: the iPhone and iPad app shows an older Sill for Mac as
-"Update Sill", and an older iPhone and iPad app can't connect to Sill for Mac
-0.4.0 or later at home. Since 0.5.1 the two apps share one version number for
-each release. With Sill for Mac 0.3.1 or earlier, connections on your local
-network, over the cable and over Direct Wireless Connection are not encrypted,
-and anything that reaches your Mac there can connect without pairing: update
-it.
+plays your Mac's sound on your device as a beta, on by default. While the
+virtual display is on, the window your device shows isn't on your Mac's screen
+until you stop. The clipboard carries text only, up to 256 KB at a time, and
+only between apps that both have it. Your Mac needs to be awake, with Sill
+open. Sill may not be able to wake it. After a restart Sill opens only once
+someone logs in, with Launch at Login on.
+Only the iPhones and iPads you paired can connect, unless you turn off Require
+pairing in Settings › Devices; then any device on your network can, still
+encrypted. Pairing at home came with Sill for Mac 0.4.0 and Sill for iPhone and
+iPad 0.5 (2), and each needs the other: the iPhone and iPad app shows an older
+Sill for Mac as "Update Sill", and an older iPhone and iPad app can't connect
+to Sill for Mac 0.4.0 or later at home. Since 0.5.1 the two apps share one
+version number for each release. With Sill for Mac 0.3.1 or earlier,
+connections on your local network, over the cable and over Direct Wireless
+Connection are not encrypted, and anything that reaches your Mac there can
+connect without pairing: update it.
 
 ## Tips
 

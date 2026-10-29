@@ -140,6 +140,11 @@ struct StreamScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The stream panel's size in points, reported by whichever layout is showing.
     @State private var panelSize: CGSize = .zero
+    /// The picture's pinch zoom (StreamZoom, issue #65): one per stream screen, so a turn keeps it and
+    /// the next session starts at 1×. Held, not watched (`@State`, as `overlay` is; a `@StateObject`
+    /// would redraw this whole screen at every step of a pinch): only the picture's own view watches it
+    /// (ZoomedStreamView).
+    @State private var zoom = StreamZoomModel()
     /// The viewport send waiting out its debounce, if any.
     @State private var pendingViewport: Task<Void, Never>? = nil
     /// The line over the stream while the link cannot carry the quality (docs/remote-bundle-plan.md
@@ -346,6 +351,11 @@ struct StreamScreen: View {
         .onChange(of: windowMenu) { _, menu in if menu != nil { setSettings(false) } }
         .ignoresSafeArea(edges: .bottom)
         .onAppear {
+            // A click, a key, a pick, a menu item or a gesture from anywhere on this screen, before it
+            // goes out: the input view sends what is still composed, then forgets what was typed, which
+            // dictation and an input method may revise (#138).
+            let proxy = overlay
+            client.onCaretMayMove = { [weak proxy] in proxy?.caretMayHaveMoved() }
             // A fresh connection starts on the Desktop (the client asks for it as soon as the host
             // reports nothing streaming), so the drawer stays closed until the user opens it.
             sendViewport()
@@ -356,7 +366,13 @@ struct StreamScreen: View {
             #endif
         }
         .onChange(of: client.active) { _, source in
+            // Another source, whoever picked it: the whole picture again (a new frame size of the same
+            // source keeps the zoom where it is on the pane).
+            zoom.reset()
             if source != .none { withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false } }
+            // Another source, whoever picked it: the Mac's caret is in another window (#138). A pick or a
+            // launch from this device has let go of what was typed already, before it went out.
+            overlay.caretMayHaveMoved()
             // The host sizes a window as it selects it, from the last viewport it has; this repeat
             // is for a host that restarted, or a window that was picked from the Mac's side.
             sendViewport()
@@ -564,7 +580,42 @@ struct StreamScreen: View {
                       + (largerPictureHeld != nil ? "; the Settings panel is open, so it applies when the panel closes" : ""))
             }
         }
+        // `-SillZoom 'S@X,Y[; T S@X,Y …]'`: the picture's zoom for photos (StreamZoom): at T seconds (1
+        // without one), one pinch step of factor S about that fraction of the picture's pane (its middle
+        // without one), then the lift's settle, as two fingers would leave it: `2.5@0.3,0.4`, then
+        // `3 0.1` for a pinch all the way out. In the mock too.
+        for (time, factor, point) in Self.zoomSteps(defaults.string(forKey: "SillZoom") ?? "") {
+            after(time) {
+                var z = zoom.zoom
+                let size = z.pane
+                guard size.width > 0, size.height > 0 else { print("harness: -SillZoom: no picture pane yet"); return }
+                let at = CGPoint(x: point.x * size.width, y: point.y * size.height)
+                z.pinch(factor: factor, from: at, to: at, in: size)
+                z.settle()
+                zoom.set(z)
+                print("harness: -SillZoom \(factor)@\(point.x),\(point.y): " + Self.zoomLine(z))
+            }
+        }
+        // `-SillHitTest 'S x,y[; x,y …]'`: at S seconds, what UIKit's hit test finds at each point of the
+        // window (its points), for the zoom's gate: a zoomed picture never under the bar's or the keys'
+        // touches (StreamZoom; HEVCDisplayView takes none).
+        let probe = (defaults.string(forKey: "SillHitTest") ?? "").split(separator: ";").map { $0.split(separator: " ").map(String.init) }
+        if let first = probe.first, first.count == 2, let time = Double(first[0]) {
+            let points = ([first[1]] + probe.dropFirst().compactMap { $0.first }).compactMap { item -> CGPoint? in
+                let xy = item.split(separator: ",").compactMap { Double($0) }
+                return xy.count == 2 ? CGPoint(x: xy[0], y: xy[1]) : nil
+            }
+            after(time) {
+                guard let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return }
+                for point in points {
+                    let hit = window.hitTest(point, with: nil)
+                    print("harness: hit test at (\(Self.points(point.x)), \(Self.points(point.y))): "
+                          + (hit.map { String(describing: type(of: $0)) } ?? "nothing") + ", the zoom " + Self.zoomLine(zoom.zoom))
+                }
+            }
+        }
         guard live else { return }
+        client.runSoundArguments()
         if defaults.bool(forKey: "SillDrawer") {
             after(1.5) { print("harness: the drawer opened"); withAnimation(.easeOut(duration: 0.18)) { drawerOpen = true } }
         }
@@ -585,6 +636,26 @@ struct StreamScreen: View {
         }
     }
     private static var launchArgumentsRan = false
+
+    /// `-SillZoom`'s steps: (seconds, factor, the fraction of the pane); none for what does not read.
+    static func zoomSteps(_ text: String) -> [(Double, CGFloat, CGPoint)] {
+        text.split(separator: ";").compactMap { item in
+            let words = item.split(separator: " ", omittingEmptySubsequences: true)
+            guard words.count == 1 || words.count == 2 else { return nil }
+            let time = words.count == 2 ? Double(words[0]) : 1
+            let parts = words[words.count - 1].split(separator: "@")
+            guard let time, time >= 0, let factor = Double(parts[0]), factor > 0, parts.count <= 2 else { return nil }
+            let xy = parts.count == 2 ? parts[1].split(separator: ",").compactMap { Double($0) } : [0.5, 0.5]
+            guard xy.count == 2 else { return nil }
+            return (time, CGFloat(factor), CGPoint(x: xy[0], y: xy[1]))
+        }
+    }
+
+    /// "2.50×, offset (125.0, 60.0) in a 1000×650 pt pane", for the console.
+    static func zoomLine(_ z: StreamZoom) -> String {
+        String(format: "%.2f×, offset (%.1f, %.1f) in a %@×%@ pt pane", z.scale, z.offset.width, z.offset.height,
+               points(z.pane.width), points(z.pane.height))
+    }
 
     /// `-SillAXDump`: walks the key window as an assistive technology does (an element, else its
     /// `accessibilityElements`, else its element count, else its subviews) and prints one line per
@@ -1032,7 +1103,8 @@ struct StreamScreen: View {
                    keyboardShown: $keyboardShown,
                    textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
                    settingsOpen: settingsOpen,
-                   // Apps, Menus, Aa, Keyboard, Desktop, Settings, and the strip.
+                   // Apps, Menus, Aa, Keyboard, Desktop, Settings, and the strip. The Mac's sound has no
+                   // button: Send Audio and Mute are the Settings panel's switches (Noah, 2026-10-27).
                    menusFit: MacMenuButton.fits(width: width - 2 * bar.padding, buttons: 6, buttonWidth: bar.buttonWidth,
                                                 gap: bar.gap, thumbWidth: bar.thumbWidth),
                    toggleKeyboard: { overlay.toggleKeyboard() },
@@ -1056,7 +1128,8 @@ struct StreamScreen: View {
                              pairThisDevice: openPairingOverlay,
                              linkLine: shownLinkLine,
                              takeTour: takeTour,
-                             largerKeyboard: largerKeyboard)
+                             largerKeyboard: largerKeyboard,
+                             zoom: zoom)
     }
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
@@ -1066,8 +1139,10 @@ struct StreamScreen: View {
             Color.black
 
             ZStack {
-                StreamView(client: client)
-                // Same frame as the video, so a touch maps straight onto the streamed frame.
+                // Scaled and moved by the picture's zoom, inside the clip below.
+                ZoomedStreamView(client: client, zoom: zoom)
+                // Same frame as the video, so a touch maps straight onto the streamed frame (through the
+                // zoom, StreamZoom.unzoomedPoint).
                 InputOverlay(videoSize: client.videoSize,
                              send: { client.sendInput($0) },
                              setOwnPointer: { client.setOwnPointer($0, from: $1) },
@@ -1075,7 +1150,9 @@ struct StreamScreen: View {
                              isKeyboardShown: $keyboardShown,
                              latchedModifiers: latched,
                              onModifiersConsumed: { latched = [] },
-                             sendGesture: { client.sendGesture($0, fingers: $1) })
+                             sendGesture: { client.sendGesture($0, fingers: $1) },
+                             readZoom: { [zoom] in zoom.zoom },
+                             writeZoom: { [zoom] in zoom.set($0) })
             }
             .background(Palette.panel)
             .overlay(alignment: .top) { LinkLineView(text: shownLinkLine) }

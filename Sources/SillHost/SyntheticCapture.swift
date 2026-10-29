@@ -19,8 +19,15 @@ import ImageIO
 /// filling the frame and cropped to its shape, in place of the grey ground and its bar: a Desktop
 /// that looks like one, for photographs of the device (docs/iphone-duo-plan.md). A picture that does
 /// not load gives the pattern, with one line.
+///
+/// TEST ONLY: `SILL_TEST_STILL_AFTER=<s>` delivers no frame from s seconds after a capture starts, as
+/// a window that stopped changing (ScreenCaptureKit sends a frame only when it repaints): what a
+/// device got last is all it gets until a keyframe is asked for, which the encoder makes from the
+/// last frame (HEVCEncoder.requestKeyframe). For the picture's recovery (issue #101, kind 44).
 final class SyntheticCapture: @unchecked Sendable {   // state is confined to `queue` (see above)
     static let noise: Bool = ProcessInfo.processInfo.environment["SILL_TEST_PATTERN"] == "noise"
+    /// `SILL_TEST_STILL_AFTER`'s seconds.
+    static let stillAfter: Double? = ProcessInfo.processInfo.environment["SILL_TEST_STILL_AFTER"].flatMap(Double.init).flatMap { $0 >= 0 ? $0 : nil }
     /// `SILL_TEST_PATTERN=picture:<path>`'s path.
     static let picturePath: String? = {
         guard let raw = ProcessInfo.processInfo.environment["SILL_TEST_PATTERN"], raw.hasPrefix("picture:") else { return nil }
@@ -32,6 +39,7 @@ final class SyntheticCapture: @unchecked Sendable {   // state is confined to `q
     private var pool: CVPixelBufferPool?
     private var frameIndex = 0
     private var fps = 60
+    private var startedAt: TimeInterval = 0
     /// The picture's planes at the frame's size (`SILL_TEST_PATTERN=picture:`), nil for the pattern.
     private var picture: SyntheticPicture?
 
@@ -44,14 +52,18 @@ final class SyntheticCapture: @unchecked Sendable {   // state is confined to `q
         CVPixelBufferPoolCreate(nil, nil, attrs as CFDictionary, &pool)
         let picture = Self.picturePath.flatMap { SyntheticPicture(path: $0, width: width, height: height) }
         if let path = Self.picturePath, picture == nil { print("Synthetic capture: \(path) did not load; the pattern instead (SILL_TEST_PATTERN)") }
-        queue.async { [weak self] in self?.pool = pool; self?.frameIndex = 0; self?.fps = fps; self?.picture = picture }   // ordered before the timer's first tick
+        queue.async { [weak self] in
+            self?.pool = pool; self?.frameIndex = 0; self?.fps = fps; self?.picture = picture
+            self?.startedAt = ProcessInfo.processInfo.systemUptime
+        }   // ordered before the timer's first tick
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now(), repeating: 1.0 / Double(fps), leeway: .milliseconds(1))
         timer.setEventHandler { [weak self] in self?.tick() }
         timer.resume()
         self.timer = timer
         print("Synthetic capture: \(width)×\(height) @\(fps) fps" + (Self.noise ? ", a square of noise (SILL_TEST_PATTERN)" : "")
-              + (picture != nil ? ", a picture (SILL_TEST_PATTERN)" : ""))
+              + (picture != nil ? ", a picture (SILL_TEST_PATTERN)" : "")
+              + (Self.stillAfter.map { ", still from \($0) s on (SILL_TEST_STILL_AFTER)" } ?? ""))
     }
 
     /// Returns once no tick is running any more, so no late frame reaches the next encoder.
@@ -64,6 +76,7 @@ final class SyntheticCapture: @unchecked Sendable {   // state is confined to `q
 
     private func tick() {
         guard let pool else { return }
+        if let still = Self.stillAfter, ProcessInfo.processInfo.systemUptime - startedAt >= still { return }
         var pb: CVPixelBuffer?
         CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pb)
         guard let pb else { Stats.shared.bump("syn.noBuffer"); return }
