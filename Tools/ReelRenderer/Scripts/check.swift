@@ -114,7 +114,7 @@ case "psnr":
     if a.count > 3 { let f = a[3].split(separator: ",").map { Double($0)! }; rect = CGRect(x: f[0], y: f[1], width: f[2], height: f[3]) }
     var se = 0.0, sa = 0.0, n = 0.0, worst = 0, over8 = 0
     for y in Int(rect.minY)..<Int(rect.maxY) {
-        let row = h - 1 - y   // CG buffers run bottom-up
+        let row = y           // a bitmap context's first row in memory is the image's top row
         for x in Int(rect.minX)..<Int(rect.maxX) {
             let i = (row * w + x) * 4
             var px = 0
