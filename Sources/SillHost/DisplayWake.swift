@@ -21,6 +21,10 @@ import StreamProtocol
 /// - Never a bare pointer move within `recentre` after the host's own stream restart or new frame
 ///   size (`streamChanged`): the device moves its own pointer to the new frame's middle by itself
 ///   (StreamClient.pointerFrameChanged), with nobody at it.
+/// - A left or right press on a display that reads asleep is held back (`pass`, PR #228), and so is
+///   its release: the pointer moves there instead, and the press declares at once whatever the
+///   interval (`Event.wakingPress`). A tap on a black picture then clicks nothing out of sight; it
+///   only wakes the display, as the PR has a click on a sleeping display at the Mac do.
 /// - A test host (`--synthetic`: it does not advertise, as `InputInjector.dryRun`) declares nothing:
 ///   it counts what it would declare (`dryKey` in the stats line), and the Mac's display is never
 ///   touched.
@@ -38,6 +42,9 @@ struct DisplayWake {
         /// A message from a device's session, every one that reaches the coordinator, with its input
         /// event when it is kind 8 and decodes (nil otherwise).
         case message(StreamMessageKind, InputEvent?)
+        /// A device's left or right press that `pass` held back because the display it lands on read
+        /// asleep: it declares at once, as a connect does, whatever the interval.
+        case wakingPress
     }
 
     /// A person's activity at the device, which a declaration is made for (and its line says).
@@ -53,6 +60,8 @@ struct DisplayWake {
         case menuItem
         /// Kind 28: a three- or four-finger trackpad gesture.
         case gesture
+        /// A press held back on a display that read asleep (`pass`): it only wakes the display.
+        case wakingPress
     }
 
     enum Decision: Equatable {
@@ -80,10 +89,11 @@ struct DisplayWake {
     /// characters).
     static let assertionName = "Sill: a device is using this Mac"
 
-    /// The stats line's keys, each only in a second it happened: a declaration made, and a test host's
-    /// that was not.
+    /// The stats line's keys, each only in a second it happened: a declaration made, a test host's
+    /// that was not, and a press held back on a display that read asleep (`pass`, on any host).
     static let declaredKey = "disp.wake"
     static let dryKey = "disp.wakeDry"
+    static let heldKey = "disp.heldPress"
 
     /// `--synthetic`: count, never declare.
     let testHost: Bool
@@ -91,36 +101,8 @@ struct DisplayWake {
     private(set) var lastDeclared: TimeInterval?
     /// When the host last restarted its stream or sent a new frame size (`streamChanged`); nil before.
     private(set) var streamChangedAt: TimeInterval?
-    /// Whether the current left or right button press arrived while the display was asleep and was
-    /// turned into a pointer move, so its matching release is swallowed too.
-    private(set) var swallowedLeft = false
-    private(set) var swallowedRight = false
 
     init(testHost: Bool) { self.testHost = testHost }
-
-    /// Filters a device's `InputEvent` against whether the display being clicked is currently asleep:
-    /// a button press on a sleeping display moves the pointer to the tap spot without clicking an
-    /// unseen control, and its matching button release is swallowed even if the display wakes first.
-    mutating func filterWakeInput(_ event: InputEvent, displayAsleep: Bool) -> InputEvent? {
-        switch event {
-        case .pointer(.leftDown, let x, let y):
-            if displayAsleep { swallowedLeft = true; return .pointer(.move, x: x, y: y) }
-            swallowedLeft = false
-            return event
-        case .pointer(.leftUp, _, _):
-            if swallowedLeft { swallowedLeft = false; return nil }
-            return event
-        case .pointer(.rightDown, let x, let y):
-            if displayAsleep { swallowedRight = true; return .pointer(.move, x: x, y: y) }
-            swallowedRight = false
-            return event
-        case .pointer(.rightUp, _, _):
-            if swallowedRight { swallowedRight = false; return nil }
-            return event
-        default:
-            return event
-        }
-    }
 
     /// The host restarted its stream or sent a new frame size: the coordinator calls it when a new
     /// stream's first parameter sets go out, and when parameter sets that differ from the last ones
@@ -133,6 +115,8 @@ struct DisplayWake {
         switch event {
         case .connect:
             return .connect
+        case .wakingPress:
+            return .wakingPress
         case .message(let kind, let input):
             switch kind {
             case .launchApp: return .launch
@@ -154,11 +138,80 @@ struct DisplayWake {
     /// What `event` at `now` does. A declaration (or count) restarts the interval; nothing does not.
     mutating func decide(_ event: Event, at now: TimeInterval) -> Decision {
         guard let activity = activity(event, at: now) else { return .nothing }
-        if activity != .connect, let last = lastDeclared, now >= last, now - last < Self.interval {
+        if activity != .connect, activity != .wakingPress, let last = lastDeclared, now >= last, now - last < Self.interval {
             return .nothing
         }
         lastDeclared = now
         return testHost ? .count : .declare(activity)
+    }
+
+    // MARK: - The waking click (PR #228)
+
+    /// How long presses on a display that keeps reading asleep are held back, from the first of them:
+    /// past it the display is taken for one a press does not wake, or one whose picture is live while
+    /// macOS reads it asleep, and its presses go on to the Mac as they did before. A gap this long
+    /// between presses starts afresh (the display may have woken and slept again since).
+    static let wakeGrace: TimeInterval = 5
+
+    /// A device's mouse button.
+    enum Button: Hashable { case left, right }
+
+    /// What `pass` makes of an input event.
+    struct Passed: Equatable {
+        /// What goes on to the Mac: the event as it came, a held-back press's pointer move, or nil.
+        let event: InputEvent?
+        /// A press held back on a display that read asleep: it wakes the display (`Event.wakingPress`).
+        let waking: Bool
+    }
+
+    /// Each device's presses held back whose releases have not come (the coordinator's device key).
+    private(set) var heldBack: [ObjectIdentifier: Set<Button>] = [:]
+    /// The presses on a display that kept reading asleep, the first and the latest (held back, or
+    /// past `wakeGrace` gone on); nil once a press read it awake.
+    private(set) var asleepPresses: (first: TimeInterval, last: TimeInterval)?
+
+    /// A device's input event on its way to the Mac. A left or right press on a display that reads
+    /// asleep (`asleep`, asked only for a press: the display the press lands on) is held back: the
+    /// pointer moves there instead and the press wakes the display (`waking`), so nothing is clicked
+    /// where nobody can see. Its release is held
+    /// back too, whenever it comes and whatever the display reads by then, and the moves between them
+    /// are plain moves (the Mac has no button down). A press on a display that reads awake goes on,
+    /// and so does a release whose press went on. Each device's own, so another device's release is
+    /// never taken for this one's. While the display keeps reading asleep, presses are held back for
+    /// `wakeGrace` from the first, and then go on; a press `wakeGrace` or more after the last press
+    /// on it starts afresh, and so does a clock set back. Keys, text, scrolls and moves go on as
+    /// they are, and `asleep` is not asked for them.
+    mutating func pass(_ event: InputEvent, from device: ObjectIdentifier, at now: TimeInterval,
+                       asleep: () -> Bool) -> Passed {
+        guard case .pointer(let action, let x, let y) = event, action != .move else { return Passed(event: event, waking: false) }
+        let button: Button = action == .leftDown || action == .leftUp ? .left : .right
+        if action == .leftUp || action == .rightUp {
+            guard heldBack[device]?.contains(button) == true else { return Passed(event: event, waking: false) }
+            letGo(button, of: device)
+            return Passed(event: nil, waking: false)
+        }
+        if asleep() {
+            var run = asleepPresses ?? (now, now)
+            if now < run.last || now - run.last >= Self.wakeGrace { run = (now, now) }    // afresh
+            run.last = now
+            asleepPresses = run
+            if now - run.first < Self.wakeGrace {
+                heldBack[device, default: []].insert(button)
+                return Passed(event: .pointer(.move, x: x, y: y), waking: true)
+            }
+        } else {
+            asleepPresses = nil
+        }
+        letGo(button, of: device)            // this press goes on: one of that button held back before is over
+        return Passed(event: event, waking: false)
+    }
+
+    /// A device left: its presses held back are forgotten.
+    mutating func forget(_ device: ObjectIdentifier) { heldBack[device] = nil }
+
+    private mutating func letGo(_ button: Button, of device: ObjectIdentifier) {
+        heldBack[device]?.remove(button)
+        if heldBack[device]?.isEmpty == true { heldBack[device] = nil }
     }
 
     // MARK: - What DisplayActivity says
@@ -178,6 +231,7 @@ struct DisplayWake {
         case .windowButton: return "pressed a window’s button"
         case .menuItem: return "chose a menu item"
         case .gesture: return "made a trackpad gesture"
+        case .wakingPress: return "clicked while the display was asleep; the click was held back"
         }
     }
 
@@ -249,6 +303,21 @@ struct DisplayWake {
             lastLineAt = now
             return DisplayWake.declaredLine(device: look.device, activity: look.activity, asleepNow: asleepNow)
         }
+    }
+
+    // MARK: - TEST ONLY: a test host's display asleep
+
+    /// TEST ONLY: a test host's display (the test pattern's, which never sleeps) reads asleep while
+    /// the file this variable names exists, so a test client's press shows what `pass` does: in the
+    /// dry run's input log (SILL_TEST_INPUT_LOG=1) a pointer move where the press was and no release,
+    /// and a `disp.wakeDry` at the press. Honoured only by a test host; a real host reads its displays.
+    static let displayAsleepVariable = "SILL_TEST_DISPLAY_ASLEEP"
+
+    /// The file the variable names, and the one line it prints at start (nil when it is not set).
+    static func testDisplayAsleep(environment: [String: String], testHost: Bool) -> (path: String?, line: String?) {
+        guard let value = environment[displayAsleepVariable], !value.isEmpty else { return (nil, nil) }
+        guard testHost else { return (nil, "\(displayAsleepVariable) ignored: only a --synthetic host takes it.") }
+        return (value, "Test display: the test pattern's display reads asleep while the file \(displayAsleepVariable) names exists.")
     }
 
     // MARK: - TEST ONLY: the user's location

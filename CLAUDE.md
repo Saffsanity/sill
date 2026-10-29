@@ -1025,6 +1025,37 @@ test is Noah's.
   more than 2 s after the new stream's first parameter sets left (a slow remote link): either can wake
   a sleeping display once with nobody at the device (docs/DEVELOPMENT.md, A sleeping display). Telling
   them apart would need the device to say so, a wire change.
+- The waking click (2026-10-29, PR #228 from addhumal's `swallow-wake-click`, finished with maintainer
+  edits): a left or right press whose spot is on a display that reads asleep is held back
+  (`DisplayWake.pass`; the coordinator's `pressLandsAsleep`: `CGDisplayIsAsleep` of the display under
+  the press in the source, the virtual display for a window staged there, the main display when
+  nothing streams): the pointer moves there instead, the press declares at once whatever the 5 s
+  (`Event.wakingPress`; "Woke the display for iPad (iPad14,1), which clicked while the display was
+  asleep; the click was held back."), and its release is held back too, whenever it comes; each
+  device's and each button's own; a display that keeps reading asleep has its presses held back for
+  5 s from the first (`wakeGrace`), then they go on (a display a press does not wake, or one whose
+  picture is live while macOS reads it asleep), and a gap of 5 s or a clock set back starts afresh; a
+  device that leaves is forgotten; `disp.heldPress` in the stats line; TEST ONLY
+  `SILL_TEST_DISPLAY_ASLEEP=<file>` (a --synthetic host's display reads asleep while the file
+  exists). Keys, text and scrolls go on as before. `Tests/checks/display-wake`: 265 checks (P1–P6 for
+  the click, I7 for its declaration) and 80 of 80 mutants. Changed from the PR as opened: it kept one
+  flag for every device, so another device's release could be held back for this one's press and its
+  button stay down on the Mac (every later move a drag); it read the main display on the main actor
+  for every input event; it never held back a press on a window staged on the virtual display, on by
+  default since #236, where it now judges that display; a press within 5 s of the last declaration
+  was held back and woke nothing; a display that kept reading asleep lost every click for good; a
+  test host could not show it. Verified: `swift build -c release`, only the CaptureProbe warning;
+  `run-all.sh`, all 55; H2 against main at 6c5b5d24 (idle and with a test client, masked and sorted:
+  identical); live on a loopback synthetic host with the dry run's input log and a scripted pointer:
+  under the TEST ONLY file a press became "pointer move" with `disp.heldPress 1` and `disp.wakeDry 1`
+  2 s after the connect's, its release 3 s later (the file gone at 4.5 s) printed nothing, and a tap
+  after posted "left mouse down/up"; main's host and this one without the file posted the press and
+  its release. **Untested, for Noah:** a Calculator window streaming, `pmset displaysleepnow` on the
+  Mac, then a tap on the black picture where its 7 is: the picture comes back and the display reads 0
+  (main's build types 7), Sill.log's "Woke the display for …, which clicked while the display was
+  asleep; the click was held back."; the same with Virtual Display on (whether a staged window's
+  picture is black while the panel sleeps, and whether that tap was held back: `disp.heldPress` in
+  the log's `[1s]` lines); a long press (right click) and the trackpad's tap the same.
 - **Untested, for Noah,** with Sill.app from this branch (release-signed with the embedded profile):
   `pmset displaysleepnow`, then connect the iPad at home and through Tailscale: the picture, not black
   windows, and Sill.log's "Woke the display for …, which connected."; `pmset -g assertions` lists

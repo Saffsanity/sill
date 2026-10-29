@@ -566,13 +566,23 @@ again once it is on, as when someone wakes it at the Mac. Nothing is held: the
 display sleeps again by the Mac's own setting (System Settings › Lock Screen),
 counted from the last declaration, which can be up to 5 s before the device's
 last input. So a device left connected and untouched lets the display sleep,
-the picture goes black, and the device's next input wakes it again. A tap on a
-black picture is a click, posted at once at a spot nobody can see; a pointer
-move on the trackpad, or ⌘, ⌥ or ⌃ pressed alone on a keyboard attached to the
-device, wakes the display without clicking. Shift alone does not: the device's
-text system takes it, and it reaches the Mac only in what it shifts
-(`ForwardedKeys.goesAsKey`); nor do the key row's modifiers, which only latch,
-sending nothing by themselves.
+the picture goes black, and the device's next input wakes it again.
+
+A tap on a black picture wakes the display without clicking (PR #228): a left
+or right press whose spot is on a display that reads asleep (`CGDisplayIsAsleep`
+of the display under it: the source's, the virtual display for a window staged
+there) is held back, the pointer moves there instead, and the press declares
+user activity at once, whatever the 5 s; its release is held back too, whenever
+it comes, and the moves between them are plain moves, so nothing is clicked or
+dragged where nobody can see. Each device's presses are its own. While the display keeps
+reading asleep, presses are held back for 5 s from the first and then go on
+(a display a press does not wake, or one whose picture is live while macOS
+reads it asleep); a gap of 5 s between presses starts afresh. Keys, text and
+scrolls go on as they are: ⌘, ⌥ or ⌃ pressed alone on a keyboard attached to
+the device, a scroll, or a pointer move on the trackpad wakes the display too.
+Shift alone does not: the device's text system takes it, and it reaches the Mac
+only in what it shifts (`ForwardedKeys.goesAsKey`); nor do the key row's
+modifiers, which only latch, sending nothing by themselves.
 Every session the host admits counts: a paired device, any device at home with
 Require pairing off, and with the CLI's plain home door (no `--pairing`) any
 device on this Mac's networks or over Direct Wireless; a request to pair does
@@ -586,19 +596,26 @@ closed laptop's display.
 
 The log says "Woke the display for iPad (iPad14,1), which connected." (or
 "…, which opened an app.", "…, which sent input.", "…, which pressed a window’s
-button.", "…, which chose a menu item.", "…, which made a trackpad gesture.")
+button.", "…, which chose a menu item.", "…, which made a trackpad gesture.",
+"…, which clicked while the display was asleep; the click was held back.")
 when the main display read asleep just before a declaration and on 0.5 s after
 it, once for one wake (two devices connecting together share it). Any other
 declaration says "Declared activity for iPad (iPad14,1), which sent input." at
 most once a minute, a woke line counting as that minute's, with ", but the
 display read asleep 0.5 s later." when it did (a closed lid, a display slow to
-wake). The stats line counts each declaration as `disp.wake`, and `pmset -g
+wake). The stats line counts each declaration as `disp.wake` and each press
+held back as `disp.heldPress`, and `pmset -g
 assertions` lists it as `UserIsActive named: "Sill: a device is using this
 Mac"` (its "Timeout will fire in" should count down from the display-sleep
 setting, as WindowServer's does after a key press). A test host
 (`--synthetic`, in the CLI and in the app alike) declares nothing and touches
 no display: it counts `disp.wakeDry` instead, so a test client's connect and
-input show what a real host would declare.
+input show what a real host would declare. TEST ONLY:
+`SILL_TEST_DISPLAY_ASLEEP=<file>` makes a test host's display read asleep while
+that file exists (only a `--synthetic` host takes it), so a test client's tap
+shows the waking click: with `SILL_TEST_INPUT_LOG=1` and a scripted pointer
+(`SILL_TEST_POINTER_PATH`, so input lands on the test pattern) the log has a
+"pointer move" where the press was and no "left mouse up" for it.
 
 TEST ONLY: `SILL_TEST_USER_ACTIVE=remote` declares the user as connected over
 the network (`kIOPMUserActiveRemote`) instead of in front of the Mac. Every
@@ -1698,11 +1715,11 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
   the encoder, not the capture. `cap` at zero means the window is not
   repainting (covered on the Mac, or the app is idle).
 - Black windows, thumbnails too: the Mac's display is probably asleep. A
-  device's connect or input wakes it (A sleeping display, above): move the
-  pointer on the trackpad or press ⌘ on a keyboard attached to the device (not
-  Shift, which sends nothing by itself), since a tap on the black picture clicks
-  at a spot nobody can see. The log's "Woke the display for …" says it was
-  asleep and is on again.
+  device's connect or input wakes it (A sleeping display, above): tap the
+  picture, which only wakes it and moves the pointer there, or move the
+  pointer on the trackpad, or press ⌘ on a keyboard attached to the device (not
+  Shift, which sends nothing by itself). The log's "Woke the display for …"
+  says it was asleep and is on again.
 - The Mac has one hardware video encoder, shared by every app. When it keeps
   a frame for 1.5 s the log says "switching to the software encoder" and the
   stream restarts on the CPU at 1x (Standard: half the resolution each way on

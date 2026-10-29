@@ -220,6 +220,10 @@ package final class StreamCoordinator {
     /// it takes are ignored, with a line each, as a Mac from before kind 44 skips every one, so a
     /// device's ask again after its wait runs for real (`keyframeIgnoreHook`). Zero otherwise.
     private var keyframeRequestsToIgnore: Int
+    /// TEST ONLY. `SILL_TEST_DISPLAY_ASLEEP=<file>` on a --synthetic host: its display reads asleep
+    /// while the file exists, so a test client's press shows DisplayWake.pass at work
+    /// (`pressLandsAsleep`). Nil otherwise: a test host's display never reads asleep.
+    private let testDisplayAsleepFile: String?
     static let keyframeRequestSpacing: CFTimeInterval = 1
     private lazy var keyframeRequestDrops = RefusalSummary(queue: .main, categories: ["keyframes"]) { counts in
         "Keyframe requests ignored: \(counts["keyframes"] ?? 0) in a minute, from devices asking more than once a second."
@@ -342,7 +346,10 @@ package final class StreamCoordinator {
         let userActive = DisplayWake.userActive(environment: env, testHost: synthetic)
         displayActivity = DisplayActivity(remote: userActive.remote)
         keyframeRequestsToIgnore = keyframeIgnore.count
-        testHookLines = [path.line, software.line, inputLog.line, userActive.line, keyframeIgnore.line, noScreen.line].compactMap { $0 }
+        let displayAsleep = DisplayWake.testDisplayAsleep(environment: env, testHost: synthetic)
+        testDisplayAsleepFile = displayAsleep.path
+        testHookLines = [path.line, software.line, inputLog.line, userActive.line, keyframeIgnore.line, noScreen.line,
+                         displayAsleep.line].compactMap { $0 }
         status = HostStatus()
         var home = StreamServer.HomeDoorMode.plain
         if homePairing, let remote {
@@ -465,6 +472,7 @@ package final class StreamCoordinator {
                 if self.flipWait == id { self.flipWait = nil }
                 self.menus.clientLeft(connection)
                 self.clipboard.clientLeft(connection)
+                self.displayWake.forget(id)
                 self.releaseKeys(of: id)
                 self.status.update { $0.devices.removeAll { $0.id == id } }
                 // The last device at home left devices away behind: the away quality, at once.
@@ -951,9 +959,17 @@ package final class StreamCoordinator {
     private func handle(_ message: StreamMessage, from connection: NWConnection) async {
         // Input decoded once, for the display's rule and for its case below.
         let input = message.kind == .input ? Wire.decode(InputEvent.self, from: message.payload) : nil
+        // A press on a display that reads asleep wakes it and goes no further, nor does its release
+        // (DisplayWake.pass, PR #228): a tap on a black picture clicks nothing out of sight.
+        let passed = input.map { event in
+            displayWake.pass(event, from: ObjectIdentifier(connection), at: CFAbsoluteTimeGetCurrent(),
+                             asleep: { pressLandsAsleep(event) })
+        }
+        if passed?.waking == true { Stats.shared.bump(DisplayWake.heldKey) }
         // Every message goes to DisplayWake, which alone says which of them is a person at the device
-        // (a pick never is: the device asks for the Desktop by itself), issue #134.
-        deviceActive(.message(message.kind, input), connection)
+        // (a pick never is: the device asks for the Desktop by itself), issue #134; a press held back
+        // declares at once.
+        deviceActive(passed?.waking == true ? .wakingPress : .message(message.kind, input), connection)
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
@@ -993,9 +1009,7 @@ package final class StreamCoordinator {
                 if let error { print("Launch failed: \(error.localizedDescription)") }
             }
         case .input:
-            guard let rawEvent = input else { return }
-            let sleepingPhysical = !synthetic && !(virtualDisplay && stage.isStaged) && CGDisplayIsAsleep(CGMainDisplayID()) != 0
-            guard let event = displayWake.filterWakeInput(rawEvent, displayAsleep: sleepingPhysical) else { return }
+            guard let event = passed?.event else { return }     // it does not decode, or a release held back
             let device = ObjectIdentifier(connection)
             guard let rect = currentSourceRect() else {
                 // Nothing streams (between sources, or the stream stopped: the window closed under a
@@ -1154,6 +1168,25 @@ package final class StreamCoordinator {
         case .count: Stats.shared.bump(DisplayWake.dryKey)
         case .declare(let activity): displayActivity.declare(for: deviceName(connection), activity)
         }
+    }
+
+    /// Whether the display a device's press lands on reads asleep (DisplayWake.pass asks only for a
+    /// press): the display under the press in the streamed source, the virtual display when a window
+    /// is staged there, as CoreGraphics reads it; the main display when nothing streams or the press
+    /// lands on no display. A test host never reads a display: its test pattern never sleeps, but
+    /// under SILL_TEST_DISPLAY_ASLEEP while that file exists.
+    private func pressLandsAsleep(_ event: InputEvent) -> Bool {
+        if synthetic { return testDisplayAsleepFile.map { FileManager.default.fileExists(atPath: $0) } ?? false }
+        guard case .pointer(_, let x, let y) = event, let rect = currentSourceRect(), !rect.isNull else {
+            return CGDisplayIsAsleep(CGMainDisplayID()) != 0
+        }
+        var display = CGDirectDisplayID(0)
+        var count: UInt32 = 0
+        let point = InputLanding.point(x: x, y: y, in: rect, displayScale: nil)
+        guard CGGetDisplaysWithPoint(point, 1, &display, &count) == .success, count == 1 else {
+            return CGDisplayIsAsleep(CGMainDisplayID()) != 0
+        }
+        return CGDisplayIsAsleep(display) != 0
     }
 
     /// Parameter sets went out at `time` (the encoder's callback, hopped here). A stream's first, and
