@@ -78,6 +78,18 @@ portrait one's at x 322, y 376, 1420×2000. A clip may only be read inside the s
 test-pattern stills and clips of the same sizes, with the clip and clip time burned in, covering each clip's
 approved segments. With them every shot renders, so a new cut's timing can be watched before any footage exists.
 
+The Mac's previews (S26's pairing window) come from the bare `SillMenuBar` binary, never from a built `Sill.app` or
+the executable inside it: macOS registers such a copy in place of the installed app, and its permissions and login
+item go with it. The bare binary records the deployment target as its SDK, so it draws the look of macOS before 26;
+v3's previews came from a copy with the current SDK recorded:
+
+```
+swift build -c release                                        # at the repository's root
+xcrun vtool -set-build-version macos 14.0 "$(xcrun --sdk macosx --show-sdk-version)" \
+    -output /tmp/SillMenuBar .build/release/SillMenuBar && codesign -s - -f /tmp/SillMenuBar
+/tmp/SillMenuBar -SillRenderPreviews /tmp/previews            # no permission needed; defaults domain SillMenuBar
+```
+
 ## How the v3.1 reel was made
 
 The shot list came first: `design/reel/SHOTLIST.md` (v1), `v2/SHOTLIST-v2.md` (Noah's notes applied) and
@@ -143,8 +155,8 @@ A shot list (`design/reel/v3/SHOTLIST-v3.md` is the model) has:
 
 1. **Write it in the shot list.** Where it goes on the grid (a beat is 0.4 s, a bar 1.6 s; cuts on beats, acts
    on bar lines), what is on screen, its source, its copy and what backs the copy.
-2. **Get its pictures.** A still (a harness screenshot of the client, or a Mac preview from
-   `SillMenuBar -SillRenderPreviews`) or a clip (a recording of the client). Put it under `work/`, and name it:
+2. **Get its pictures.** A still (a harness screenshot of the client, or a Mac preview, made as in Inputs) or a
+   clip (a recording of the client). Put it under `work/`, and name it:
    a case of `ClipID` with its file and approved segments (`Clip.swift`), or a still beside `V3Still` and
    `MacPreview` (`V3.swift`), loaded in `makeEnv` (`main.swift`). Add it to `Scripts/placeholders.swift`.
 3. **Write its builder:** `@MainActor func sNN(_ t: Double, _ e: Env) throws -> FrameLayers`, from
