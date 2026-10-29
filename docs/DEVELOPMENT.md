@@ -27,6 +27,8 @@ Pipeline: `SCStream (420f) → VTCompressionSession (HEVC, real time, no B-frame
   `Scripts/`: `make-app.sh`, and the test tools below. `design/`: the icon, the
   disk image's background and the App Store screenshots (see its README).
   `docs/`: the brief and the plans.
+- `Tools/ReelRenderer/`: the sizzle reel's renderer, a Swift package of its
+  own that neither the app's build nor CI builds (The sizzle reel, below).
 
 `CLAUDE.md`, Layout, goes through the code file by file.
 
@@ -1794,6 +1796,24 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
 - `swift run -c release CaptureProbe <window> [seconds] [--encode] [--software]
   [--synthetic]` isolates capture from encode from the network.
 
+## The sizzle reel
+
+`Tools/ReelRenderer/` renders Sill's sizzle reel (its last render, v3.1, is
+`design/reel/v3/Sill-sizzle-v3.1.mp4`, which git ignores with the rest of
+`design/reel/`; neither the site nor the README shows a reel yet). It draws
+the devices, the type and the app icon in code
+around clips and stills of the real app, synthesises its own score and writes
+the film with Apple's software H.264 encoder: SwiftUI, Core Graphics, Core
+Image and AVFoundation, nothing else. It is a package of its own, which the
+root `Package.swift` does not name, so `swift build` here and CI leave it
+alone. Its README has how the v3.1 reel was made from
+`design/reel/v3/SHOTLIST-v3.md`, the shot list's format, the rules every cut
+keeps (plain device bezels, a drawn pointer, the software encoder while Sill
+streams, no downloaded music), how to add a beat for a new feature, and what
+a new cut needs from a person: real clips of the app, which go in its `work/`
+folder and never in git. `Scripts/placeholders.swift` there stands in for every
+clip and still, so a cut's timing can be watched before any footage exists.
+
 ## Releasing
 
 Distribution: a release is a commit tagged `v` + the version both apps carry,
@@ -1939,3 +1959,5 @@ record field by field.
   release).
 - `design/`: the app icon, the disk image's background, and the iPad App
   Store screenshots the README shows (`screenshots/`).
+- `Tools/ReelRenderer/`: the sizzle reel's renderer and its scripts (The
+  sizzle reel, above).
