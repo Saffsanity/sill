@@ -57,3 +57,52 @@ enum InstalledApps {
         return found
     }
 }
+
+/// RAIL-style child/dialog window following: when a streamed app opens a new window in response
+/// to recent user activity on the device, automatically switch the stream to that new window and
+/// push the parent window onto a return stack; when the child window closes, return to the most
+/// recent still-open parent window instead of dropping to `.none`.
+struct WindowFollowPolicy: Equatable {
+    static let activityWindow: TimeInterval = 5
+
+    private(set) var parentStack: [UInt32] = []
+    private(set) var knownWindowIDs: Set<UInt32> = []
+    private(set) var seeded = false
+
+    mutating func reset() {
+        parentStack.removeAll()
+    }
+
+    mutating func poll(windows: [(id: UInt32, bundleID: String)],
+                       activeWindowID: UInt32?,
+                       now: TimeInterval,
+                       lastActivityAt: TimeInterval?,
+                       keepMissingActive: Bool = false) -> UInt32? {
+        let currentIDs = Set(windows.map(\.id))
+        let previousIDs = knownWindowIDs
+        let wasSeeded = seeded
+        knownWindowIDs = currentIDs
+        seeded = true
+        parentStack = parentStack.filter { currentIDs.contains($0) }
+
+        guard let activeID = activeWindowID else {
+            parentStack.removeAll()
+            return nil
+        }
+
+        if let activeEntry = windows.first(where: { $0.id == activeID }) {
+            guard wasSeeded, !activeEntry.bundleID.isEmpty,
+                  let last = lastActivityAt, now >= last, now - last <= Self.activityWindow else {
+                return nil
+            }
+            if let child = windows.last(where: { $0.id != activeID && $0.bundleID == activeEntry.bundleID && !previousIDs.contains($0.id) }) {
+                if parentStack.last != activeID { parentStack.append(activeID) }
+                return child.id
+            }
+            return nil
+        }
+
+        if keepMissingActive { return nil }
+        return parentStack.popLast()
+    }
+}
