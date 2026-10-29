@@ -8,9 +8,12 @@ import IOKit.pwr_mgt
 /// display sleep is postponed "up to the user's display sleep Energy Saver settings" (IOPMLib.h), so
 /// the display sleeps again by the Mac's own setting once no device uses it: nothing is held.
 /// (WindowServer's UserIsActive assertion for a key press shows that setting as its timeout in
-/// `pmset -g assertions`.) The same ID goes back with each call, as the header asks; it is never
-/// released early, and the process's assertions go with it when it quits. TEST ONLY
-/// `SILL_TEST_USER_ACTIVE=remote` declares kIOPMUserActiveRemote instead (DisplayWake.userActive).
+/// `pmset -g assertions`.) The same ID goes back with each call of its type, as the header asks: one
+/// ID for local declarations and one for remote ones, since whether powerd keeps an assertion's type
+/// when its ID comes back with the other is not documented. None is released early, and the process's
+/// assertions go with it when it quits. TEST ONLY `SILL_TEST_USER_ACTIVE=remote` declares
+/// kIOPMUserActiveRemote instead, and `auto` by PR #229's rule (DisplayWake.userType); the caller
+/// gives each declaration its type.
 ///
 /// DisplayWake decides when (the coordinator, on the main actor); a test host never gets here. The
 /// call is an IPC to powerd and may block, so it runs on a queue of its own: the main display's sleep
@@ -18,28 +21,25 @@ import IOKit.pwr_mgt
 /// DisplayWake.Report allows (a wake once, else a line a minute at most).
 final class DisplayActivity: @unchecked Sendable {
     private let queue = DispatchQueue(label: "sill.display-wake", qos: .userInitiated)
-    private let userType: IOPMUserActiveType
     // On `queue`.
-    private var assertionID = IOPMAssertionID(kIOPMNullAssertionID)
+    private var assertionIDs: [DisplayWake.UserType: IOPMAssertionID] = [:]
     private var report = DisplayWake.Report()
 
-    /// `remote`: TEST ONLY, the user declared as connected over the network.
-    init(remote: Bool = false) { userType = remote ? kIOPMUserActiveRemote : kIOPMUserActiveLocal }
-
-    /// Declares user activity for `device` (its name for the line) because of `activity`.
-    /// When `remote` is true (away from home or staged on Sill's virtual display), or when
-    /// `SILL_TEST_USER_ACTIVE=remote` is set, declares `kIOPMUserActiveRemote`.
-    func declare(for device: String, _ activity: DisplayWake.Activity, remote: Bool = false) {
+    /// Declares user activity for `device` (its name for the line) because of `activity`, as a user
+    /// of `type`: local, as a key press on the Mac does, unless TEST ONLY SILL_TEST_USER_ACTIVE says
+    /// otherwise (DisplayWake.userType).
+    func declare(for device: String, _ activity: DisplayWake.Activity, as type: DisplayWake.UserType) {
         queue.async { [self] in
             let wasAsleep = Self.mainDisplayAsleep()
-            var id = assertionID
-            let type = remote ? kIOPMUserActiveRemote : userType
-            let result = IOPMAssertionDeclareUserActivity(DisplayWake.assertionName as CFString, type, &id)
+            var id = assertionIDs[type] ?? IOPMAssertionID(kIOPMNullAssertionID)
+            let userType = type == .remote ? kIOPMUserActiveRemote : kIOPMUserActiveLocal
+            let result = IOPMAssertionDeclareUserActivity(DisplayWake.assertionName as CFString, userType, &id)
             if result == kIOReturnSuccess {
-                assertionID = id
+                assertionIDs[type] = id
                 Stats.shared.bump(DisplayWake.declaredKey)
             }
-            let said = report.declared(device: device, activity: activity, wasAsleep: wasAsleep, result: result)
+            let said = report.declared(device: device, activity: activity, wasAsleep: wasAsleep, result: result,
+                                       remote: type == .remote)
             if let line = said.line { print(line) }
             guard let look = said.look else { return }
             // Whether it woke the display shows once the panel is on: a wake only when it reads on.

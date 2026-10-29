@@ -601,14 +601,21 @@ no display: it counts `disp.wakeDry` instead, so a test client's connect and
 input show what a real host would declare.
 
 TEST ONLY: `SILL_TEST_USER_ACTIVE=remote` declares the user as connected over
-the network (`kIOPMUserActiveRemote`) instead of in front of the Mac. Every
-real host takes it, Sill.app included, and says so in a "TEST:" line at start
-(a test host ignores it with a line; `local` is the default). IOPMLib.h says
+the network (`kIOPMUserActiveRemote`) instead of in front of the Mac, and
+`SILL_TEST_USER_ACTIVE=auto` does so by PR #229's rule: remote while every
+connected device is away from home (the remote door, from a VPN or the
+internet) or a window is staged on Sill's virtual display, local otherwise.
+Every real host takes it, Sill.app included, and says so in a "TEST:" line at
+start (a test host ignores it with a line; `local` is the default), and the
+lines of a remote declaration say "(declared as a remote user)". IOPMLib.h says
 parts of the system are kept at different power levels by where the user is,
 and sends network clients that need the framebuffer to it, so it may keep the
-picture live with the panel dark (issue #133), or wake nothing: untried. To
-try it, quit Sill, then `open --env SILL_TEST_USER_ACTIVE=remote
-/Applications/Sill.app`; the next plain launch declares local again.
+picture live with the panel dark (issue #133), or wake nothing: untried, which
+is why `auto` is not the default (were remote to leave the picture black, a
+device away from home would get issue #134's black windows back). Each type
+keeps an assertion ID of its own. To try it, quit Sill, then `open --env
+SILL_TEST_USER_ACTIVE=auto /Applications/Sill.app` (or `=remote`); the next
+plain launch declares local again.
 `Sources/SillHost/DisplayWake.swift` is the rule (`Tests/checks/display-wake`),
 `DisplayActivity.swift` the call.
 

@@ -1,4 +1,4 @@
-"""Each mutant changes DisplayWake.swift (issue #134, PR #151) in one place, is compiled with the check by
+"""Each mutant changes DisplayWake.swift (issue #134, PRs #151 and #229) in one place, is compiled with the check by
 build.sh and must make it fail (main.swift). usage: mutants.py WORKTREE"""
 import os, subprocess, sys
 WT = sys.argv[1]; HERE = os.path.dirname(os.path.abspath(__file__))
@@ -55,7 +55,7 @@ MUTANTS = {
     "M33 a stream change forgotten": ("mutating func streamChanged(at now: TimeInterval) { streamChangedAt = now }",
                                       "mutating func streamChanged(at now: TimeInterval) { }"),
     # The lines
-    "M34 the woke line without the device": ('"Woke the display for \\(device), which \\(why(activity))."', '"Woke the display, which \\(why(activity))."'),
+    "M34 the woke line without the device": ('"Woke the display for \\(device), which \\(why(activity))\\(remote ? remoteNote : "")."', '"Woke the display, which \\(why(activity))\\(remote ? remoteNote : "")."'),
     "M35 a connect said as input": ('case .connect: return "connected"', 'case .connect: return "sent input"'),
     "M36 an app opened said as a connect": ('case .launch: return "opened an app"', 'case .launch: return "connected"'),
     "M37 the declaration's line without the asleep note": ('(asleepNow ? ", but the display read asleep \\(secondLook) s later." : ".")', '"."'),
@@ -65,7 +65,7 @@ MUTANTS = {
     "M40 a woke line for a display that was on": (WOKE, "if !asleepNow, look.wakesBefore == wakesSaid {"),
     "M41 two woke lines for one wake": (WOKE, "if look.wasAsleep, !asleepNow {"),
     "M42 a woke line not counted": ("                wakesSaid += 1\n", ""),
-    "M43 a declaration's wakes taken at its look": ("wakesBefore: wakesSaid))", "wakesBefore: 0))"),
+    "M43 a declaration's wakes taken at its look": ("wakesBefore: wakesSaid, remote: remote))", "wakesBefore: 0, remote: remote))"),
     "M44 a woke line not this minute's": ("                wakesSaid += 1\n                lastLineAt = now\n", "                wakesSaid += 1\n"),
     "M45 a declaration's line every time": (MINUTE + "\n", ""),
     "M46 the minute 30 s": ("static let declaredLineInterval: TimeInterval = 60", "static let declaredLineInterval: TimeInterval = 30"),
@@ -82,14 +82,24 @@ MUTANTS = {
     "M55 the test host's stats key": ('static let dryKey = "disp.wakeDry"', 'static let dryKey = "disp.wake"'),
     "M56 success is not 0": ("static let success: Int32 = 0", "static let success: Int32 = 1"),
     # The TEST ONLY user type
-    "M57 remote ignored": ('        case "remote":\n            return (true,', '        case "remote":\n            return (false,'),
+    "M57 remote ignored": ('        case "remote":\n            return (.remote,', '        case "remote":\n            return (.local,'),
     "M58 a test host takes remote": ("        guard !testHost else {", "        guard testHost || !testHost else {"),
-    "M59 another value echoed": ('return (false, "\\(userActiveVariable) ignored: it takes local or remote; user activity is declared as local.")',
-                                 'return (false, "\\(userActiveVariable)=\\(value) ignored: it takes local or remote; user activity is declared as local.")'),
+    "M59 another value echoed": ('return (.local, "\\(userActiveVariable) ignored: it takes local, remote or auto; user activity is declared as local.")',
+                                 'return (.local, "\\(userActiveVariable)=\\(value) ignored: it takes local, remote or auto; user activity is declared as local.")'),
     "M60 the variable's name": ('static let userActiveVariable = "SILL_TEST_USER_ACTIVE"', 'static let userActiveVariable = "SILL_TEST_USERACTIVE"'),
-    "M61 awayRunning does not declare remote": ("awayRunning || stagedOnVirtualDisplay", "stagedOnVirtualDisplay"),
-    "M62 stagedOnVirtualDisplay does not declare remote": ("awayRunning || stagedOnVirtualDisplay", "awayRunning"),
-    "M63 always declares remote even at home on physical display": ("awayRunning || stagedOnVirtualDisplay", "true"),
+    # The TEST ONLY user type's auto (PR #229)
+    "M81 auto never remote": ("case .auto: return everyDeviceAway || stagedOnVirtualDisplay ? .remote : .local", "case .auto: return .local"),
+    "M82 auto ignores the virtual display": ("case .auto: return everyDeviceAway || stagedOnVirtualDisplay ? .remote : .local", "case .auto: return everyDeviceAway ? .remote : .local"),
+    "M83 auto ignores away from home": ("case .auto: return everyDeviceAway || stagedOnVirtualDisplay ? .remote : .local", "case .auto: return stagedOnVirtualDisplay ? .remote : .local"),
+    "M84 auto always remote": ("case .auto: return everyDeviceAway || stagedOnVirtualDisplay ? .remote : .local", "case .auto: return .remote"),
+    "M85 remote declares local": ("        case .remote: return .remote\n", "        case .remote: return .local\n"),
+    "M86 local (the default) declares remote": ("        case .local: return .local\n", "        case .local: return .remote\n"),
+    "M87 unset is auto": ("!value.isEmpty else { return (.local, nil) }", "!value.isEmpty else { return (.auto, nil) }"),
+    "M88 auto not taken": ('        case "auto":\n', '        case "automatic":\n'),
+    "M89 a remote declaration's line as a local one": ('static let remoteNote = " (declared as a remote user)"', 'static let remoteNote = ""'),
+    "M90 a look forgets it was remote": ("wakesBefore: wakesSaid, remote: remote))", "wakesBefore: wakesSaid, remote: false))"),
+    "M91 a local line says remote": ('"Woke the display for \\(device), which \\(why(activity))\\(remote ? remoteNote : "")."',
+                                    '"Woke the display for \\(device), which \\(why(activity))\\(remoteNote)."'),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

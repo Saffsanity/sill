@@ -988,6 +988,29 @@ test is Noah's.
   with a "TEST:" line) declares `kIOPMUserActiveRemote` instead. docs/DEVELOPMENT.md, "A sleeping
   display"; site/support.html, "The picture is black" (its Sill paragraph inside `<!-- Display wake`
   markers, cut by docs/release-checklist.md part 1 §3's perl line for a republish before the release).
+- A remote user when every device is away (2026-10-29, PR #229 from addhumal's `smart-display-wake`,
+  finished with maintainer edits): its rule, `kIOPMUserActiveRemote` while every connected device is
+  away from home or a window is staged on the virtual display, else local (`DisplayWake.userType`), is
+  TEST ONLY `SILL_TEST_USER_ACTIVE=auto`, not the default: IOPMLib.h sends remote clients that need
+  the framebuffer to a remote declaration but promises nothing about the panel or the picture, nobody
+  has seen what one does to a sleeping display, and were it to leave the picture black, a device away
+  from home, issue #134's own case, would get its black windows back. Local (`caffeinate -u`'s, which
+  users saw bring the picture back) stays the default until Noah's Mac shows remote keeps the picture
+  live; then the default is one line. Each type keeps an assertion ID of its own
+  (`DisplayActivity.assertionIDs`: whether powerd keeps an assertion's type when its ID comes back
+  with the other is not documented), and a remote declaration's lines say "(declared as a remote
+  user)". `Tests/checks/display-wake`: 218 checks and 73 of 73 mutants (M81–M91 the rule's).
+  Changed from the PR as opened: the rule was the default for every away session; one assertion ID
+  went back with either type; its "without lighting the physical panel" was taken from no source.
+  Verified: `swift build -c release`, only the CaptureProbe warning; `run-all.sh`, all 55; H2 against
+  main at 6c5b5d24 (masked and sorted: idle identical, with a test client identical but the stats
+  line's `cursor.shape`, which follows this Mac's own cursor and differed between main's two runs too). **Untested, for Noah:** quit Sill, `open --env
+  SILL_TEST_USER_ACTIVE=auto /Applications/Sill.app` (Sill.log's "TEST: … (SILL_TEST_USER_ACTIVE=auto)"),
+  the iPad away through Tailscale, `pmset displaysleepnow`, connect: whether the picture comes back
+  (the device), whether the panel lit (Sill.log: "Woke the display for …, which connected (declared as
+  a remote user)." or "Declared activity …, but the display read asleep 0.5 s later."), and `pmset -g
+  assertions` (which assertion powerd lists for it); then at home (local, as without the variable);
+  then Virtual Display on with a window staged at home (remote); then quit and open Sill plainly.
 - Changed from the PR as opened: its PreventUserIdleDisplaySleep assertion, held for every session
   (the panel lit all session long, against #133's privacy mode, and at home the Mac kept from idle
   sleep), and its single `kIOPMUserActiveRemote` declaration at the first device are gone; nothing
