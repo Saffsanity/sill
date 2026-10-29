@@ -130,8 +130,9 @@ A shot list (`design/reel/v3/SHOTLIST-v3.md` is the model) has:
 - **The software encoder while Sill streams.** Sill.app shares the Mac's one hardware video encoder, and a
   render or a simulator recording on it costs Sill frames, or stalls it. The renderer uses Apple's software
   H.264 encoder unless `SILL_HW_ENCODER` is set, to any value, `0` and an empty one included (`pipeline.sh`
-  refuses it), renders run at utility priority, and nothing records the simulator (`simctl io recordVideo`)
-  while Sill.app is streaming.
+  refuses it), renders run at utility priority, and nothing encodes the simulator's screen while Sill.app is
+  streaming: no `simctl io recordVideo`, no UI test run (Xcode records its screen) and no live view of the
+  simulator left attached. A screenshot (`simctl io screenshot`) encodes no video.
 - **No downloaded music.** The score is synthesised in code; no samples, no stock tracks.
 - **Every claim is backed** by the README or the code, in the shot list's copy deck. Real footage shows the real
   app; mock data appears only in harness stills, which the shot list says.
