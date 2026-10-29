@@ -311,3 +311,41 @@ package enum DroppedInput {
         }
     }
 }
+
+/// Hardware volume buttons from a device (issue #127): USB HID usages `0x80` (`volumeUp`) and
+/// `0x81` (`volumeDown`) mapped to macOS `NSSystemDefined` (`subtype: 8`) media key events
+/// (`NX_KEYTYPE_SOUND_UP` = 0, `NX_KEYTYPE_SOUND_DOWN` = 1).
+package enum VolumeButtonPolicy {
+    package static let hidVolumeUp: UInt16 = 0x80
+    package static let hidVolumeDown: UInt16 = 0x81
+    package static let nxSoundUp: Int = 0
+    package static let nxSoundDown: Int = 1
+    package static let systemDefinedSubtype: Int16 = 8
+
+    package struct SystemMediaEvent: Equatable, Sendable {
+        package var keyType: Int
+        package var down: Bool
+        package var flags: UInt
+        package var data1: Int
+
+        package init(keyType: Int, down: Bool, flags: UInt, data1: Int) {
+            self.keyType = keyType
+            self.down = down
+            self.flags = flags
+            self.data1 = data1
+        }
+    }
+
+    package static func mediaEvent(for usage: UInt16, down: Bool) -> SystemMediaEvent? {
+        let keyType: Int
+        switch usage {
+        case hidVolumeUp: keyType = nxSoundUp
+        case hidVolumeDown: keyType = nxSoundDown
+        default: return nil
+        }
+        let code = down ? 0xa : 0xb
+        let flags = UInt(code << 8)
+        let data1 = (keyType << 16) | (code << 8)
+        return SystemMediaEvent(keyType: keyType, down: down, flags: flags, data1: data1)
+    }
+}

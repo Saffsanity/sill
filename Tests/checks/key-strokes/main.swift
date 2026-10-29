@@ -1451,5 +1451,31 @@ do {
     print("device: \(sessions) sessions; checks reported in \(reported[.modifierUps] ?? 0) of 500 on a Mac ignoring modifier keys' ups and \(reported[.keyUps] ?? 0) of 500 ignoring other keys' ups")
 }
 
+// MARK: Volume buttons (issue #127)
+
+do {
+    check(VolumeButtonPolicy.hidVolumeUp == 0x80 && VolumeButtonPolicy.hidVolumeDown == 0x81, "HID volume usages")
+    let upDown = VolumeButtonPolicy.mediaEvent(for: 0x80, down: true)
+    let upUp = VolumeButtonPolicy.mediaEvent(for: 0x80, down: false)
+    let downDown = VolumeButtonPolicy.mediaEvent(for: 0x81, down: true)
+    check(upDown == VolumeButtonPolicy.SystemMediaEvent(keyType: 0, down: true, flags: 0xa00, data1: 0x0a00), "volume up down media event")
+    check(upUp == VolumeButtonPolicy.SystemMediaEvent(keyType: 0, down: false, flags: 0xb00, data1: 0x0b00), "volume up release media event")
+    check(downDown == VolumeButtonPolicy.SystemMediaEvent(keyType: 1, down: true, flags: 0xa00, data1: 0x10a00), "volume down down media event")
+    check(VolumeButtonPolicy.mediaEvent(for: 0x29, down: true) == nil, "non-volume usage returns nil")
+
+    check(VolumeButtonChord.key == "Sill.volumeButtonsControlMac", "VolumeButtonChord defaults key")
+    check(VolumeButtonChord.events(switchOn: false, previousVolume: 0.5, newVolume: 0.6) == [], "switch off sends no volume events")
+    check(VolumeButtonChord.events(switchOn: true, previousVolume: 0.5, newVolume: 0.5005) == [], "tiny volume jitter below minDelta ignored")
+    check(VolumeButtonChord.events(switchOn: true, previousVolume: 0.5, newVolume: 0.5625) == [
+        .key(hidUsage: 0x80, down: true, modifiers: 0),
+        .key(hidUsage: 0x80, down: false, modifiers: 0),
+    ], "volume increase sends HID 0x80 down and up")
+    check(VolumeButtonChord.events(switchOn: true, previousVolume: 0.5, newVolume: 0.4375) == [
+        .key(hidUsage: 0x81, down: true, modifiers: 0),
+        .key(hidUsage: 0x81, down: false, modifiers: 0),
+    ], "volume decrease sends HID 0x81 down and up")
+    check(!VolumeButtonChord.Copy.toggleTitle.isEmpty && VolumeButtonChord.Copy.footnote(mac: "Mac mini", device: "iPhone").contains("Mac mini"), "VolumeButtonChord copy")
+}
+
 print(failures == 0 ? "ok: \(checks) checks" : "FAILED: \(failures) of \(checks) checks")
 exit(failures == 0 ? 0 : 1)
