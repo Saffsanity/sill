@@ -100,34 +100,103 @@ enum DuoLayout {
 
 // MARK: - Screen
 
-/// Coordinates `UIApplication.shared.isIdleTimerDisabled` across all open Sill windows using
-/// `DeviceIdlePolicy` (`HardwareKeyboardPolicy.swift`). Main thread.
-enum DeviceIdleTimer {
-    private static var policy = DeviceIdlePolicy<ObjectIdentifier>()
+/// Sill's hold on the device's own auto-lock (UIApplication.isIdleTimerDisabled) across its windows
+/// (DeviceIdlePolicy, PR #230). Each window's WindowSessionObserver says which session it shows and
+/// in which UIWindow, both weak as MacMenuHub's are, so a window that closed leaves nothing, whether
+/// or not its stream screen ran its onDisappear; every look lists them afresh: whether a window's
+/// scene is foreground active now, whether its session is connected and streaming, and when the
+/// person last used it (input to the Mac, one of the stream screen's controls, the moment it began
+/// streaming or came to the front). It looks again when a scene comes, goes or changes its
+/// activation, when a session connects, disconnects or changes its source, when the person uses a
+/// session while nothing holds, and when the hold would end. Main thread.
+final class DeviceIdleTimer {
+    static let shared = DeviceIdleTimer()
 
-    static func update(client: ObjectIdentifier, active: Bool, streaming: Bool) {
-        policy.update(scene: client, active: active, streaming: streaming)
-        apply()
+    private struct Entry {
+        weak var client: StreamClient?
+        weak var window: UIWindow?
+        /// When its session began streaming (systemUptime); nil while it does not stream.
+        var streamingSince: Double?
+        /// When its window's scene last came to the front (systemUptime); nil while it is not there.
+        var frontSince: Double?
     }
+    private var entries: [Entry] = []
+    private var observers: [NSObjectProtocol] = []
+    private var recheck: Timer?
+    /// Whether auto-lock is held off now.
+    private(set) var holding = false
 
-    static func remove(client: ObjectIdentifier) {
-        policy.remove(scene: client)
-        apply()
-    }
-
-    private static func apply() {
-        let activeSceneCount = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .filter { $0.activationState == .foregroundActive }
-            .count
-        if activeSceneCount == 0 {
-            policy.prune(keeping: [])
+    private init() {
+        for name in [UIScene.willConnectNotification, UIScene.didDisconnectNotification, UIScene.didActivateNotification,
+                     UIScene.willDeactivateNotification, UIScene.didEnterBackgroundNotification,
+                     UIScene.willEnterForegroundNotification] {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                // A scene's activation state reads its new value once its notification has gone out.
+                DispatchQueue.main.async { self?.update() }
+            })
         }
-        let wanted = policy.disablesIdleTimer
-        if UIApplication.shared.isIdleTimerDisabled != wanted {
-            UIApplication.shared.isIdleTimerDisabled = wanted
-        }
     }
+
+    /// A session's screen moved into `window` (nil: out of every window).
+    func session(_ client: StreamClient, window: UIWindow?) {
+        let kept = entries.first { $0.client === client }
+        entries.removeAll { $0.client == nil || $0.client === client }
+        if let window {
+            entries.append(Entry(client: client, window: window, streamingSince: kept?.streamingSince,
+                                 frontSince: kept?.window === window ? kept?.frontSince : nil))
+        }
+        update()
+    }
+
+    /// The person used a session (input to the Mac, one of the stream screen's controls). While
+    /// auto-lock is held off its timer looks again when the hold would end; while it is not, now.
+    func used() { if !holding { update() } }
+
+    /// Lists the windows afresh and applies DeviceIdlePolicy.
+    func update() {
+        let now = ProcessInfo.processInfo.systemUptime
+        entries.removeAll { $0.client == nil || $0.window == nil }
+        var windows: [DeviceIdlePolicy.Window] = []
+        for i in entries.indices {
+            guard let client = entries[i].client, let window = entries[i].window else { continue }
+            let streaming = client.connected && client.active != .none
+            let front = window.windowScene?.activationState == .foregroundActive
+            if !streaming { entries[i].streamingSince = nil } else if entries[i].streamingSince == nil { entries[i].streamingSince = now }
+            if !front { entries[i].frontSince = nil } else if entries[i].frontSince == nil { entries[i].frontSince = now }
+            let used = [client.lastInputAt, client.lastActionAt, entries[i].streamingSince, entries[i].frontSince].compactMap { $0 }.max()
+            windows.append(DeviceIdlePolicy.Window(foregroundActive: front, streaming: streaming, lastUsedAt: used))
+        }
+        let ends = DeviceIdlePolicy.holdEnds(windows, now: now, limit: Self.limit)
+        recheck?.invalidate()
+        recheck = nil
+        if let ends {
+            let timer = Timer(timeInterval: max(ends - now, 0.5), repeats: false) { [weak self] _ in self?.update() }
+            RunLoop.main.add(timer, forMode: .common)
+            recheck = timer
+        }
+        let hold = ends != nil
+        guard hold != holding || UIApplication.shared.isIdleTimerDisabled != hold else { return }
+        holding = hold
+        UIApplication.shared.isIdleTimerDisabled = hold
+        #if DEBUG
+        if let ends {
+            print("idle: auto-lock held off while a window streams, \(Int((ends - now).rounded())) s more without use")
+        } else {
+            print("idle: auto-lock is the device's own again")
+        }
+        #endif
+    }
+
+    /// DEBUG `-SillIdleLimit <s>`: the hold's limit for one run, to see it end without waiting ten
+    /// minutes; DeviceIdlePolicy.idleLimit otherwise, and always in a Release build.
+    #if DEBUG
+    private static let limit: Double = {
+        let s = UserDefaults.standard.double(forKey: "SillIdleLimit")
+        return s > 0 ? s : DeviceIdlePolicy.idleLimit
+    }()
+    #else
+    private static let limit = DeviceIdlePolicy.idleLimit
+    #endif
 }
 
 struct StreamScreen: View {
@@ -369,9 +438,6 @@ struct StreamScreen: View {
         .onChange(of: scenePhase) { _, phase in
             // A gesture cut short by a scene change never ends: put the transient UI away.
             if phase != .active { scaleOpen = false; windowMenu = nil }
-            DeviceIdleTimer.update(client: ObjectIdentifier(client),
-                                   active: phase == .active,
-                                   streaming: client.connected && client.active != .none)
         }
         // One thing open at a time: the Aa ruler and a thumbnail's traffic lights put the Settings
         // panel away. (Opening the panel closes them, the drawer and the keyboard.)
@@ -387,9 +453,6 @@ struct StreamScreen: View {
             // A fresh connection starts on the Desktop (the client asks for it as soon as the host
             // reports nothing streaming), so the drawer stays closed until the user opens it.
             sendViewport()
-            DeviceIdleTimer.update(client: ObjectIdentifier(client),
-                                   active: scenePhase == .active,
-                                   streaming: client.connected && client.active != .none)
             // A link that came in before this connection did waits here now.
             if client.pendingLink != nil { openLinkOverlay() }
             #if DEBUG
@@ -398,9 +461,6 @@ struct StreamScreen: View {
         }
         .onChange(of: client.active) { _, source in
             if source != .none { withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false } }
-            DeviceIdleTimer.update(client: ObjectIdentifier(client),
-                                   active: scenePhase == .active,
-                                   streaming: client.connected && source != .none)
             // Another source, whoever picked it: the Mac's caret is in another window (#138). A pick or a
             // launch from this device has let go of what was typed already, before it went out.
             overlay.caretMayHaveMoved()
@@ -409,9 +469,6 @@ struct StreamScreen: View {
             sendViewport()
         }
         .onChange(of: client.connected) { _, up in
-            DeviceIdleTimer.update(client: ObjectIdentifier(client),
-                                   active: scenePhase == .active,
-                                   streaming: up && client.active != .none)
             if up { sendViewport() }
         }
         // A hardware keyboard (docs/hardware-keyboard-plan.md §2): the input view takes the keyboard by
@@ -454,7 +511,6 @@ struct StreamScreen: View {
         .onDisappear {
             tourWait?.cancel()
             tourWait = nil
-            DeviceIdleTimer.remove(client: ObjectIdentifier(client))
         }
     }
 

@@ -179,30 +179,3 @@ struct HardwareKeyboardPolicy: Equatable {
         hold = .none
     }
 }
-
-/// Multi-window-safe iOS Auto-Lock policy: disables the device's idle timer only while at least
-/// one foreground-active Sill scene is connected and actively streaming (`active != .none`), and
-/// re-enables auto-lock when all scenes stop streaming, leave the foreground, or close.
-struct DeviceIdlePolicy<Scene: Hashable>: Equatable {
-    struct State: Equatable {
-        var active: Bool
-        var streaming: Bool
-    }
-    private(set) var scenes: [Scene: State] = [:]
-
-    var disablesIdleTimer: Bool {
-        scenes.values.contains { $0.active && $0.streaming }
-    }
-
-    mutating func update(scene: Scene, active: Bool, streaming: Bool) {
-        scenes[scene] = State(active: active, streaming: streaming)
-    }
-
-    mutating func remove(scene: Scene) {
-        scenes.removeValue(forKey: scene)
-    }
-
-    mutating func prune(keeping openScenes: Set<Scene>) {
-        scenes = scenes.filter { openScenes.contains($0.key) }
-    }
-}

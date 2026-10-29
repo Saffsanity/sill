@@ -451,25 +451,5 @@ for (what, count) in violations.sorted(by: { $0.key < $1.key }) {
 check("20,000 random sessions, \(events) events (\(automaticHolds) after-states with the keyboard's hold, \(ownHolds) with the person's): every invariant",
       violations.isEmpty && automaticHolds > 10_000 && ownHolds > 10_000)
 
-// MARK: - DeviceIdlePolicy: multi-window-safe iOS Auto-Lock policy
-
-do {
-    var idle = DeviceIdlePolicy<String>()
-    check("idle timer: enabled (not disabled) when no scene is streaming", !idle.disablesIdleTimer)
-    idle.update(scene: "W1", active: true, streaming: true)
-    check("idle timer: disabled while a foreground-active scene is streaming", idle.disablesIdleTimer)
-    idle.update(scene: "W2", active: true, streaming: true)
-    idle.remove(scene: "W1")
-    check("idle timer: stays disabled when one window leaves while a second window still streams", idle.disablesIdleTimer)
-    idle.update(scene: "W2", active: true, streaming: false)
-    check("idle timer: re-enabled when the Mac stops streaming (e.g. display sleeps)", !idle.disablesIdleTimer)
-    idle.update(scene: "W2", active: true, streaming: true)
-    idle.update(scene: "W2", active: false, streaming: true)
-    check("idle timer: re-enabled when the scene leaves foreground active", !idle.disablesIdleTimer)
-    idle.update(scene: "W2", active: true, streaming: true)
-    idle.prune(keeping: [])
-    check("idle timer: re-enabled when a window closed mid-session without onDisappear is pruned", !idle.disablesIdleTimer)
-}
-
 print(fails == 0 ? "ok: \(passes) checks" : "FAILED: \(fails) of \(passes + fails) checks")
 exit(fails == 0 ? 0 : 1)
