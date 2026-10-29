@@ -129,8 +129,9 @@ A shot list (`design/reel/v3/SHOTLIST-v3.md` is the model) has:
   60 fps: no repeated or skipped positions.
 - **The software encoder while Sill streams.** Sill.app shares the Mac's one hardware video encoder, and a
   render or a simulator recording on it costs Sill frames, or stalls it. The renderer uses Apple's software
-  H.264 encoder unless `SILL_HW_ENCODER=1` (`pipeline.sh` refuses it), renders run at utility priority, and
-  nothing records the simulator (`simctl io recordVideo`) while Sill.app is streaming.
+  H.264 encoder unless `SILL_HW_ENCODER` is set, to any value, `0` and an empty one included (`pipeline.sh`
+  refuses it), renders run at utility priority, and nothing records the simulator (`simctl io recordVideo`)
+  while Sill.app is streaming.
 - **No downloaded music.** The score is synthesised in code; no samples, no stock tracks.
 - **Every claim is backed** by the README or the code, in the shot list's copy deck. Real footage shows the real
   app; mock data appears only in harness stills, which the shot list says.

@@ -10,7 +10,8 @@ HERE=$(cd "$(dirname "$0")/.." && pwd)
 export REEL_DIR=${REEL_DIR:-$HERE/work}
 OUT=$REEL_DIR/v31/out
 RR=$HERE/.build/release/ReelRenderer
-[ -z "${SILL_HW_ENCODER:-}" ] || { echo "SILL_HW_ENCODER is set: refusing (the software encoder only)"; exit 1; }
+# The renderer takes the hardware encoder whenever SILL_HW_ENCODER is set, to any value (Render.swift), empty included.
+[ -z "${SILL_HW_ENCODER+set}" ] || { echo "SILL_HW_ENCODER is set: refusing (the software encoder only)"; exit 1; }
 [ -z "${REEL_V31_NO_ARROW:-}${REEL_V31_FLAT:-}${REEL_V31_NO_GRAIN:-}" ] || { echo "a REEL_V31_ test switch is set: refusing"; exit 1; }
 (cd "$HERE" && taskpolicy -c utility swift build -c release)
 mkdir -p "$OUT"
