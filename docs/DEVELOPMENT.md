@@ -1798,9 +1798,10 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
 
 ## The sizzle reel
 
-`Tools/ReelRenderer/` renders the reel the site shows (its last render, v3.1,
-is `design/reel/v3/Sill-sizzle-v3.1.mp4`, which git ignores with the rest of
-`design/reel/`). It draws the devices, the type and the app icon in code
+`Tools/ReelRenderer/` renders Sill's sizzle reel (its last render, v3.1, is
+`design/reel/v3/Sill-sizzle-v3.1.mp4`, which git ignores with the rest of
+`design/reel/`; neither the site nor the README shows a reel yet). It draws
+the devices, the type and the app icon in code
 around clips and stills of the real app, synthesises its own score and writes
 the film with Apple's software H.264 encoder: SwiftUI, Core Graphics, Core
 Image and AVFoundation, nothing else. It is a package of its own, which the
