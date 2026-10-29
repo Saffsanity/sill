@@ -1,0 +1,7 @@
+# The reel's inputs and renders: real footage, harness stills and films never go in the repository.
+work/
+out/
+*.mp4
+*.mov
+*.m4a
+*.wav
