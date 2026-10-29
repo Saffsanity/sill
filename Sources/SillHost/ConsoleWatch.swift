@@ -17,6 +17,8 @@ final class ConsoleWatch {
     /// After a change's line.
     var onChange: ((Bool) -> Void)?
     private let read: () -> Bool?
+    /// False for a synthetic host without the test file: it never looks at all.
+    private let looks: Bool
     private let notifications: Bool
     private var observers: [NSObjectProtocol] = []
     private var looking: Task<Void, Never>?
@@ -29,12 +31,14 @@ final class ConsoleWatch {
         } else {
             read = { ConsoleSession.onConsole(dictionary: CGSessionCopyCurrentDictionary() as? [String: Any]) }
         }
+        looks = !synthetic || testFile != nil
         notifications = !synthetic
     }
 
     /// A look now, and from here on one at each session notification. The notifications only say
     /// when to look: the dictionary says what is so.
     func start() {
+        guard looks else { return }
         look()
         guard notifications, observers.isEmpty else { return }
         let center = NSWorkspace.shared.notificationCenter
@@ -47,7 +51,7 @@ final class ConsoleWatch {
 
     /// While `on` (a device is connected): a look now, then one every ConsoleSession.lookInterval.
     func watch(_ on: Bool) {
-        guard on else {
+        guard looks, on else {
             looking?.cancel()
             looking = nil
             return
@@ -63,7 +67,7 @@ final class ConsoleWatch {
 
     /// One look: a change prints its line and calls `onChange`.
     func look() {
-        guard let change = ConsoleSession.next(current: onConsole, read: read()) else { return }
+        guard looks, let change = ConsoleSession.next(current: onConsole, read: read()) else { return }
         onConsole = change.onConsole
         print(change.line)
         onChange?(change.onConsole)
