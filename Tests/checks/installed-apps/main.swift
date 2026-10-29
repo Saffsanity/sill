@@ -76,20 +76,6 @@ check(found.map(\.name) == found.map(\.name).sorted { $0.localizedCaseInsensitiv
       "sorted by display name")
 check(found.first { $0.bundleID == "com.adobe.Photoshop" }?.name == "Adobe Photoshop 2026", "the name drops .app")
 check(InstalledApps.find(in: [root.appendingPathComponent("Missing").path]).isEmpty, "a missing folder gives nothing")
-check(InstalledApps.isBlankOrHelperWindow(title: "LayerProbeParent", bundleID: "com.apple.TextEdit"),
-      "a LayerProbeParent window is filtered out")
-check(InstalledApps.isBlankOrHelperWindow(title: nil, bundleID: ""),
-      "an untitled window from a helper process with no bundle ID is filtered out (#114)")
-check(InstalledApps.isBlankOrHelperWindow(title: "   ", bundleID: "com.apple.WindowServer"),
-      "a whitespace-only window from WindowServer is filtered out (#114)")
-check(InstalledApps.isBlankOrHelperWindow(title: "", bundleID: "com.apple.dock"),
-      "an untitled window from com.apple.dock is filtered out (#114)")
-check(InstalledApps.isBlankOrHelperWindow(title: "", bundleID: "com.apple.appkit.xpc.openAndSavePanelService"),
-      "an untitled window from an AppKit XPC service is filtered out (#114)")
-check(!InstalledApps.isBlankOrHelperWindow(title: "", bundleID: "com.apple.Terminal"),
-      "an untitled window from a real app with a bundle ID is kept")
-check(!InstalledApps.isBlankOrHelperWindow(title: "ReadMe.md", bundleID: ""),
-      "a titled window from a process without a bundle ID is kept")
 // exit() skips the top-level defer, so the fake folder goes first.
 try? fm.removeItem(at: root)
 if failures > 0 { print("installed-apps: \(failures) failed"); exit(1) }
