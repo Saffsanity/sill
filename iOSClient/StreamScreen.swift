@@ -425,12 +425,13 @@ struct StreamScreen: View {
 
     // MARK: The link's line
 
-    /// What the Mac's report says for the line now: nil while the link keeps up.
-    private var linkReportLine: String? {
+    /// What the Mac's report says for the line now, and what about: the console's line while another
+    /// user's session has the Mac's screen (issue #211), else the link's; nil while all is well.
+    private var linkReportLine: AwayCopy.StreamLine? {
         let host = client.settings.host
-        return AwayCopy.streamLine(link: host?.link, away: host?.away,
-                                   mac: client.macName.isEmpty ? "the Mac" : client.macName,
-                                   sessionOnConsole: host?.sessionOnConsole)
+        return AwayCopy.line(link: host?.link, away: host?.away,
+                             mac: client.macName.isEmpty ? "the Mac" : client.macName,
+                             sessionOnConsole: host?.sessionOnConsole)
     }
 
     /// Nothing open over the stream: the Settings panel (which has the callout), the drawer, the
@@ -449,7 +450,9 @@ struct StreamScreen: View {
     /// Runs LinkLine on the report and what is open, says the line once a spell, and looks again at
     /// the linger's end.
     private func updateLinkLine() {
-        if let words = linkLine.update(report: linkReportLine, allowed: linkLineAllowed, now: ProcessInfo.processInfo.systemUptime) {
+        let report = linkReportLine
+        if let words = linkLine.update(report: report?.text, topic: report?.topic ?? .link, allowed: linkLineAllowed,
+                                       now: ProcessInfo.processInfo.systemUptime) {
             AccessibilityNotification.Announcement(words).post()
             #if DEBUG
             print("link: the stream's line “\(words)” (announced)")
@@ -1209,7 +1212,8 @@ struct StreamScreen: View {
 
 // MARK: - The link's line
 
-/// The line over the stream while the link cannot carry the quality (docs/remote-bundle-plan.md §6.7):
+/// The line over the stream while the link cannot carry the quality (docs/remote-bundle-plan.md §6.7),
+/// or while another user's session has the Mac's screen (issue #211):
 /// a capsule at the top centre of the stream panel, 8 pt inside its top edge and at most the panel's
 /// width less 32 pt, footnote text on the bar's colour; two lines at most, the text no larger than
 /// xxLarge. It never takes a touch meant for the Mac, and comes and goes with a fade (with Reduce

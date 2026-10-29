@@ -11,6 +11,8 @@
 // an older host's does; an older device's decoder (`BaseState`: HostSettingsState as main had it at
 // 2b38179, verbatim but for its name) reads the new state, fields and all, and skips the two new
 // ones; `isBehind` is "behind" alone; `name(forBitrate:)` and `shortTitle(bitrate:captureScale:)`.
+// And `sessionOnConsole` (issue #211): sent only when false, so a state on the console has an older
+// host's keys exactly (the check above), round-trips, and an older device reads past it.
 import Foundation
 
 var failures = 0
@@ -133,6 +135,7 @@ do {
                                        softwareEncoder: false, sessionOnConsole: false)
     let offJSON = encode(offConsole)
     check(keys(offJSON).contains("sessionOnConsole"), "sessionOnConsole is sent when set")
+    check(object(offJSON)["sessionOnConsole"] as? Bool == false, "…as false")
     check(decode(HostSettingsState.self, offJSON)?.sessionOnConsole == false, "sessionOnConsole round-trips")
     check(decode(BaseState.self, offJSON) != nil, "an older device decodes a state carrying sessionOnConsole")
 }
