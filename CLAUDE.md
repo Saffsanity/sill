@@ -29,10 +29,10 @@ TEST ONLY `SILL_TEST_CONSOLE_FILE` (a synthetic host: "off" in the file), sillcl
 `--expect=console=on|off`, the harness's `-SillLinkLine console`. Verified: run-all 57, the three iOS builds and
 `swift build -c release` with the known warnings, H2 against main (idle identical; with a client every line but the
 `[1s]` lines), live on loopback (the flip seen within a second both ways, `in.offConsole` counted, the device's line
-announced 25 ms after the host's look, gone on return), photos on a private iPad mini. **Untested, for Noah** (a second
-account on his Mac; the report in sill-handoff's triage folder has the steps): the lines and the device's words around
-a real switch, whether the picture freezes or the capture stops (and comes back), taps after the switch back, the
-login window's case, Sill.app launched in the background account.
+announced 3 ms after the host's look, 25 ms after the file changed, gone on return), photos on a private iPad mini.
+**Untested, for Noah** (a second account on his Mac; the report in sill-handoff's triage folder has the steps): the
+lines and the device's words around a real switch, whether the picture freezes or the capture stops (and comes
+back), taps after the switch back, the login window's case, Sill.app launched in the background account.
 
 **Pinch to zoom (2026-10-28/29, addhumal's PR #196 with maintainer edits; issue #65).** Noah's decisions of
 2026-10-19/20: pinch to zoom, not a slider; Photos-like, centred on the point between the fingers, the Mac's cursor
