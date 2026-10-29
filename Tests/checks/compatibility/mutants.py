@@ -40,6 +40,19 @@ MUTANTS = [
     ("the audio note never kept", "HostSettings.swift", "self.audioNote = audioNote", "self.audioNote = nil"),
     ("the late count never kept", "Viewport.swift", "self.audioBehindMs = audioBehindMs; self.audioLate = audioLate", "self.audioBehindMs = audioBehindMs; self.audioLate = nil"),
     ("kind 43 as 253", "StreamMessage.swift", "    case audio = 43 ", "    case audio = 253 "),
+    ("PerClientStreamRouting.effectiveSource ignores client pick (#210)", "Switcher.swift",
+     "        if let picked = clientSources[client], picked != .none { return picked }\n", ""),
+    ("PerClientStreamRouting.isSecondaryWindow treats primary window as secondary (#210)", "Switcher.swift",
+     "        return picked != primaryActive", "        return true"),
+    ("PerClientStreamRouting.secondaryWindowIDs includes primary window (#210)", "Switcher.swift",
+     "            if case .window(let id) = source, source != primaryActive { ids.insert(id) }",
+     "            if case .window(let id) = source { ids.insert(id) }"),
+    ("PerClientStreamRouting.primaryRecipients sends primary frames to secondary-window clients (#210)", "Switcher.swift",
+     "        allClients.filter { !isSecondaryWindow(for: $0, clientSources: clientSources, primaryActive: primaryActive) }",
+     "        allClients"),
+    ("PerClientStreamRouting.pruningClosedWindows keeps closed windows (#210)", "Switcher.swift",
+     "            if case .window(let id) = source, !openWindowIDs.contains(id) { continue }",
+     ""),
 ]
 caught = 0
 for name, file, old, new in MUTANTS:

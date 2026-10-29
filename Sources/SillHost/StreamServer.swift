@@ -1481,15 +1481,17 @@ final class StreamServer {
         return "\(median)/\(max(worst, median)) ms"
     }
 
-    /// Thread-safe: hops onto the network queue.
-    func broadcast(_ message: StreamMessage) {
+    /// Thread-safe: hops onto the network queue. `excluding`: client IDs watching an independent
+    /// secondary window stream (#210), which receive their own stream's parameter sets and frames.
+    func broadcast(_ message: StreamMessage, excluding excluded: Set<ObjectIdentifier> = []) {
         let data = message.serialized()
         queue.async { [self] in
             if message.kind == .parameterSets { lastParameterSets = data }
             if message.kind == .frame, message.isKeyframe { lastKeyframeAt = Date().timeIntervalSince1970 }
             var wantKeyframe = false
             defer { if wantKeyframe { onKeyframeNeeded?() } }
-            for client in clients.values where client.connection.state == .ready {
+            for (id, client) in clients where client.connection.state == .ready {
+                if (message.kind == .frame || message.kind == .parameterSets), excluded.contains(id) { continue }
                 if message.kind == .frame, client.route.isRemote {
                     if paceRemote(client, message: message, data: data) { wantKeyframe = true }
                     continue
@@ -1519,6 +1521,47 @@ final class StreamServer {
                 }
                 send(data, to: client, isFrame: message.kind == .frame)
             }
+        }
+    }
+
+    /// Sends a secondary window stream's parameter sets or frame to `recipients` (`#210`).
+    func broadcast(_ message: StreamMessage, to recipients: Set<ObjectIdentifier>, lastParameterSets psData: Data?,
+                   onKeyframeNeeded: (() -> Void)? = nil) {
+        guard !recipients.isEmpty else { return }
+        let data = message.serialized()
+        queue.async { [self] in
+            var wantKeyframe = false
+            defer { if wantKeyframe { onKeyframeNeeded?() } }
+            for id in recipients {
+                guard let client = clients[id], client.connection.state == .ready else { continue }
+                if message.kind == .frame {
+                    if client.needsKeyframe {
+                        guard message.isKeyframe, let ps = psData else {
+                            if !client.awaitingFirstKeyframe { client.withheldThisSecond += 1 }
+                            continue
+                        }
+                        send(ps, to: client)
+                        client.needsKeyframe = false
+                        client.awaitingFirstKeyframe = false
+                    } else if client.inflight > 2 && !message.isKeyframe {
+                        client.withheldThisSecond += 1
+                        client.needsKeyframe = true
+                        wantKeyframe = true
+                        continue
+                    }
+                    client.sentThisSecond += 1
+                }
+                send(data, to: client, isFrame: message.kind == .frame)
+            }
+        }
+    }
+
+    /// Resets `needsKeyframe` and `awaitingFirstKeyframe` for a single client switching streams (#210).
+    func resetForNewStream(client id: ObjectIdentifier) {
+        queue.async { [self] in
+            guard let client = clients[id] else { return }
+            client.needsKeyframe = true
+            client.awaitingFirstKeyframe = true
         }
     }
 
