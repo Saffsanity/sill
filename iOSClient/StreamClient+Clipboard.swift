@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import UIKit
 import UniformTypeIdentifiers
 import StreamProtocol
@@ -334,5 +335,117 @@ extension StreamClient {
         let work = DispatchWorkItem { [weak self] in self?.clipboardNote = nil }
         clipboardNoteExpiry = work
         DispatchQueue.main.asyncAfter(deadline: .now() + ClipboardPolicy.noteLifetime, execute: work)
+    }
+
+    // MARK: The microphone (kind 45, Roadmap Item 9)
+
+    static let microphoneKey = "Sill.shareMicrophone"
+    static var microphoneOn: Bool {
+        UserDefaults.standard.bool(forKey: microphoneKey)
+    }
+
+    func updateMicrophoneCapture() {
+        let supported = (hostMicrophone ?? 0) >= MicrophoneCodec.generation
+        if connected && supported && Self.microphoneOn {
+            startMicrophoneCapture()
+        } else {
+            stopMicrophoneCapture(sendStop: connected && supported)
+        }
+    }
+
+    func startMicrophoneCapture() {
+        if let existing = microphoneSender as? DeviceMicrophoneCapture, existing.isRunning { return }
+        let cap = DeviceMicrophoneCapture { [weak self] message in
+            DispatchQueue.main.async {
+                guard let self, self.connected else { return }
+                self.send(.microphone, payload: message.serialized())
+            }
+        }
+        microphoneSender = cap
+        cap.start()
+    }
+
+    func stopMicrophoneCapture(sendStop: Bool) {
+        if let existing = microphoneSender as? DeviceMicrophoneCapture {
+            existing.stop()
+            microphoneSender = nil
+            if sendStop {
+                let stopMsg = MicrophoneMessage.format(MicrophoneFormat(stop: true))
+                send(.microphone, payload: stopMsg.serialized())
+            }
+        }
+    }
+}
+
+final class DeviceMicrophoneCapture {
+    private let onMessage: (MicrophoneMessage) -> Void
+    private var engine: AVAudioEngine?
+    private var converter: AVAudioConverter?
+    private var epoch: Int = Int.random(in: 1...65_000)
+    private var seq: UInt32 = 0
+    private(set) var isRunning = false
+
+    init(onMessage: @escaping (MicrophoneMessage) -> Void) {
+        self.onMessage = onMessage
+    }
+
+    func start() {
+        guard !isRunning else { return }
+        AVAudioApplication.requestRecordPermission { [weak self] granted in
+            DispatchQueue.main.async {
+                guard granted, let self else { return }
+                self.beginEngine()
+            }
+        }
+    }
+
+    private func beginEngine() {
+        guard !isRunning else { return }
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
+            try session.setActive(true)
+            let eng = AVAudioEngine()
+            let input = eng.inputNode
+            let inFmt = input.inputFormat(forBus: 0)
+            guard inFmt.sampleRate > 0, inFmt.channelCount > 0,
+                  let outFmt = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 48_000, channels: 1, interleaved: true),
+                  let conv = AVAudioConverter(from: inFmt, to: outFmt) else { return }
+            converter = conv
+            epoch = (epoch + 1) & 0xFFFF
+            seq = 0
+            onMessage(.format(MicrophoneFormat(codec: MicrophoneCodec.pcm16, sampleRate: 48_000, channels: 1, framesPerPacket: 480, epoch: epoch)))
+            let currentEpoch = epoch
+            input.installTap(onBus: 0, bufferSize: 1024, format: inFmt) { [weak self] buffer, _ in
+                guard let self, let outBuf = AVAudioPCMBuffer(pcmFormat: outFmt, frameCapacity: 1024) else { return }
+                var error: NSError?
+                var supplied = false
+                conv.convert(to: outBuf, error: &error) { _, status in
+                    if supplied { status.pointee = .noDataNow; return nil }
+                    supplied = true
+                    status.pointee = .haveData
+                    return buffer
+                }
+                let frames = Int(outBuf.frameLength)
+                guard error == nil, frames > 0, let ptr = outBuf.int16ChannelData?[0] else { return }
+                let bytes = Data(bytes: ptr, count: frames * 2)
+                let s = self.seq
+                self.seq &+= 1
+                self.onMessage(.packets(MicrophonePackets(epoch: currentEpoch, seq: s, segmentStart: s == 0, packets: [bytes])))
+            }
+            try eng.start()
+            engine = eng
+            isRunning = true
+        } catch {}
+    }
+
+    func stop() {
+        guard isRunning else { return }
+        engine?.inputNode.removeTap(onBus: 0)
+        engine?.stop()
+        engine = nil
+        converter = nil
+        isRunning = false
+        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
     }
 }

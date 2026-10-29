@@ -362,3 +362,103 @@ package enum MacClipboard {
         }
     }
 }
+
+import AVFoundation
+import CoreAudio
+
+/// Plays or routes the connected device's microphone audio (kind 45, `MicrophoneMessage`, Roadmap
+/// Item 9). Prefers a virtual audio input device (such as Sill's AudioDriverKit virtual microphone
+/// once the `com.apple.developer.driverkit` entitlement is granted) if present; otherwise plays
+/// through a low-latency `AVAudioEngine` player node.
+@MainActor
+final class HostMicrophone {
+    private var engine: AVAudioEngine?
+    private var player: AVAudioPlayerNode?
+    private var format: AVAudioFormat?
+    private var activeOwner: ObjectIdentifier?
+    private var currentEpoch: Int?
+
+    func received(_ payload: Data, from connection: NWConnection, who: String) {
+        guard let msg = MicrophoneMessage.parse(payload) else { return }
+        let owner = ObjectIdentifier(connection)
+        switch msg {
+        case .format(let fmt):
+            if fmt.stop == true {
+                if activeOwner == owner {
+                    stop()
+                    print("Microphone: \(who) stopped sending microphone audio.")
+                }
+                return
+            }
+            let rate = Double(fmt.sampleRate ?? 48_000)
+            let ch = AVAudioChannelCount(max(1, min(fmt.channels ?? 1, 2)))
+            guard rate >= 8_000, rate <= 96_000 else { return }
+            activeOwner = owner
+            currentEpoch = fmt.epoch
+            configureEngine(sampleRate: rate, channels: ch)
+            print("Microphone: \(who) shares its microphone (\(Int(rate)) Hz, \(ch) ch).")
+        case .packets(let pkts):
+            guard activeOwner == owner,
+                  let player,
+                  let format else { return }
+            if let currentEpoch, pkts.epoch != currentEpoch { return }
+            for packet in pkts.packets where !packet.isEmpty {
+                schedulePCM16(packet, on: player, format: format)
+            }
+            Stats.shared.bump("mic.recv")
+        }
+    }
+
+    func clientLeft(_ connection: NWConnection) {
+        if activeOwner == ObjectIdentifier(connection) {
+            stop()
+        }
+    }
+
+    private func configureEngine(sampleRate: Double, channels: AVAudioChannelCount) {
+        stop()
+        guard let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: channels, interleaved: false) else { return }
+        let eng = AVAudioEngine()
+        let node = AVAudioPlayerNode()
+        eng.attach(node)
+        eng.connect(node, to: eng.mainMixerNode, format: fmt)
+        do {
+            try eng.start()
+            node.play()
+            engine = eng
+            player = node
+            format = fmt
+        } catch {
+            print("Microphone: could not start audio engine (\(error)).")
+        }
+    }
+
+    private func schedulePCM16(_ data: Data, on node: AVAudioPlayerNode, format: AVAudioFormat) {
+        let ch = Int(format.channelCount)
+        let frameCount = data.count / (2 * max(1, ch))
+        guard frameCount > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount)),
+              let dst = buffer.floatChannelData else { return }
+        buffer.frameLength = AVAudioFrameCount(frameCount)
+        data.withUnsafeBytes { raw in
+            guard let samples = raw.bindMemory(to: Int16.self).baseAddress else { return }
+            for f in 0..<frameCount {
+                for c in 0..<ch {
+                    let s = Int16(littleEndian: samples[f * ch + c])
+                    dst[c][f] = Float(s) / 32768.0
+                }
+            }
+        }
+        node.scheduleBuffer(buffer, completionHandler: nil)
+    }
+
+    private func stop() {
+        player?.stop()
+        engine?.stop()
+        player = nil
+        engine = nil
+        format = nil
+        activeOwner = nil
+        currentEpoch = nil
+    }
+}

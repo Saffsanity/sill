@@ -276,6 +276,30 @@ let clipboardMessage = StreamMessage(kind: .clipboard, timestamp: 1, isKeyframe:
 check(StreamMessage.parseHeader(clipboardMessage)?.kind == .clipboard && clipboardMessage.count == StreamMessage.headerLength + Wire.encode(clip).count,
       "the clipboard's header parses, then the JSON")
 
+// Kind 45, the device's microphone (Roadmap Item 9: MicrophoneMessage, MicrophoneFormat,
+// MicrophonePackets), and the window list's `microphone`: additive both ways.
+check(StreamMessageKind.microphone.rawValue == 45 && StreamMessageKind(rawValue: 45) == .microphone, "kind 45 is microphone")
+check(MicrophoneCodec.pcm16 == "pcm16" && MicrophoneCodec.aacELD == "aac-eld", "MicrophoneCodec names")
+check(MicrophoneCodec.choose(offered: ["aac-eld", "pcm16"]) == "aac-eld", "MicrophoneCodec.choose picks first supported")
+check(MicrophoneCodec.choose(offered: ["opus"]) == nil && MicrophoneCodec.choose(offered: nil) == nil, "MicrophoneCodec.choose returns nil when unsupported")
+let micFmt = MicrophoneFormat(codec: MicrophoneCodec.pcm16, sampleRate: 48_000, channels: 1, framesPerPacket: 480, epoch: 3)
+let fmtPayload = MicrophoneMessage.format(micFmt).serialized()
+check(fmtPayload.first == MicrophoneMessage.typeFormat && MicrophoneMessage.parse(fmtPayload) == .format(micFmt), "MicrophoneMessage.format round-trips")
+let stopFmt = MicrophoneFormat(stop: true)
+check(MicrophoneMessage.parse(MicrophoneMessage.format(stopFmt).serialized()) == .format(stopFmt), "MicrophoneMessage stop round-trips")
+let micPkts = MicrophonePackets(epoch: 3, seq: 42, segmentStart: true, packets: [Data([1, 2, 3, 4]), Data([5, 6])])
+let pktsPayload = MicrophoneMessage.packets(micPkts).serialized()
+check(pktsPayload.first == MicrophoneMessage.typePackets && MicrophoneMessage.parse(pktsPayload) == .packets(micPkts), "MicrophoneMessage.packets round-trips")
+check(MicrophoneMessage.parse(Data()) == nil && MicrophoneMessage.parse(Data([99, 1, 2])) == nil, "unknown or empty MicrophoneMessage returns nil")
+check(MicrophoneMessage.parse(Data([MicrophoneMessage.typePackets, 0, 1, 0, 0, 0, 1, 0, 0])) == nil, "0-packet MicrophonePackets rejected")
+check(MicrophoneMessage.parse(Data([MicrophoneMessage.typePackets, 0, 1, 0, 0, 0, 1, 0, 1, 0, 5, 1, 2])) == nil, "truncated MicrophonePackets rejected")
+check(MicrophoneMessage.parse(Data([MicrophoneMessage.typePackets, 0, 1, 0, 0, 0, 1, 0, 1, 0, 2, 1, 2, 99])) == nil, "trailing bytes in MicrophonePackets rejected")
+var withMic = shares
+withMic.microphone = 1
+check(json(withMic).contains(#""microphone":1"#), "WindowList with microphone encodes microphone:1")
+check(!json(shares).contains("microphone"), "WindowList without microphone omits the key")
+check(Wire.decode(WindowList.self, from: Wire.encode(withMic))?.microphone == 1, "WindowList.microphone round-trips")
+
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil
 if let out {

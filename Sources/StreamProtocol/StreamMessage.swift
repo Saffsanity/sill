@@ -91,6 +91,9 @@ public enum StreamMessageKind: UInt8 {
                              // From the device once per interruption while its keyframe is due, again when it
                              // has not come in 4 s (or four round trips), 2 s apart at least (KeyframeRecovery);
                              // at most one a second per connection on the host
+    case microphone = 45     // device → host: MicrophoneMessage (type 1 JSON MicrophoneFormat, type 2 binary
+                             // MicrophonePackets) — the device's microphone audio, only to a host whose window
+                             // list says `microphone` 1 or more
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

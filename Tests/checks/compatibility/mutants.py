@@ -40,6 +40,10 @@ MUTANTS = [
     ("the audio note never kept", "HostSettings.swift", "self.audioNote = audioNote", "self.audioNote = nil"),
     ("the late count never kept", "Viewport.swift", "self.audioBehindMs = audioBehindMs; self.audioLate = audioLate", "self.audioBehindMs = audioBehindMs; self.audioLate = nil"),
     ("kind 43 as 253", "StreamMessage.swift", "    case audio = 43 ", "    case audio = 253 "),
+    ("kind 45 as 46", "StreamMessage.swift", "case microphone = 45", "case microphone = 46"),
+    ("MicrophonePackets segmentStart bit ignored", "Clipboard.swift", "segmentStart: flags & 1 == 1", "segmentStart: false"),
+    ("MicrophonePackets trailing bytes allowed", "Clipboard.swift", "guard offset == d.count else { return nil }", "guard offset <= d.count else { return nil }"),
+    ("MicrophoneCodec.choose ignores order", "Clipboard.swift", "offered.first { accepts.contains($0) }", "offered.last { accepts.contains($0) }"),
 ]
 caught = 0
 for name, file, old, new in MUTANTS:
