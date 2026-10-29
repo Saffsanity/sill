@@ -90,6 +90,9 @@ final class VirtualStage {
     private(set) var display: VirtualDisplay?
     private(set) var scDisplay: SCDisplay?
     private(set) var placement: WindowSizer.Placement?
+    /// True when the virtual display is currently hosting a full Desktop stream sized to the device
+    /// (`prepareDesktop`, issues #212 and #213).
+    private(set) var desktopStaged = false
     /// The size the window actually took on the display, and the size that was asked for.
     private(set) var placedSize: CGSize?
     private var askedSize: CGSize?
@@ -154,7 +157,7 @@ final class VirtualStage {
         self.catalog = catalog
     }
 
-    var isStaged: Bool { display != nil && placement != nil }
+    var isStaged: Bool { display != nil && (placement != nil || desktopStaged) }
 
     /// True when `windowID` is the staged window and `size` is what was last asked for it (±2 pt),
     /// so a repeated viewport needs no restart. Compared against the asked size, not the size the
@@ -162,6 +165,13 @@ final class VirtualStage {
     func matches(windowID: CGWindowID, size: CGSize) -> Bool {
         guard let p = placement, p.windowID == windowID, let d = display, d.isAlive, let asked = askedSize else { return false }
         return abs(asked.width - size.width) <= 2 && abs(asked.height - size.height) <= 2
+    }
+
+    /// True when the virtual display is already staged for a Desktop stream at `size` (±2 pt).
+    func matchesDesktop(width: Int, height: Int) -> Bool {
+        guard desktopStaged, let d = display, d.isAlive else { return false }
+        return DesktopVirtualDisplay.matches(currentWidth: d.widthPt, currentHeight: d.heightPt,
+                                             wantedWidth: width, wantedHeight: height)
     }
 
     /// The captured rectangle in global screen coordinates: what the device's touch fractions map
@@ -490,6 +500,70 @@ final class VirtualStage {
         return Prepared(filter: filter, sourceRect: crop, describe: describe)
     }
 
+    /// Creates or reuses a virtual display at the exact `width × height` (in points) for a Desktop
+    /// stream fitted to the device when Virtual Display is on and Aa is set (issues #212 and #213).
+    func prepareDesktop(width: Int, height: Int, refreshHz: Int = 60,
+                        excluding own: SCRunningApplication?) async throws -> Prepared {
+        self.refreshHz = refreshHz
+        if let why = disabledReason { throw Failure.disabled(why) }
+        guard CGPreflightScreenCaptureAccess() else { throw Failure.screenRecordingOff }
+        if placement != nil { releaseWindow() }
+        if let d = display, (!d.isAlive || scDisplay == nil || Int(d.refreshHz) != refreshHz
+                             || !DesktopVirtualDisplay.matches(currentWidth: d.widthPt, currentHeight: d.heightPt,
+                                                               wantedWidth: width, wantedHeight: height)) {
+            destroyDisplay()
+        }
+        if display == nil {
+            let t0 = Date()
+            let d: VirtualDisplay
+            do {
+                d = try VirtualDisplay(name: "Sill", widthPt: width, heightPt: height, scale: 2,
+                                       refreshHz: Double(refreshHz), vendorID: Self.vendorID,
+                                       productID: Self.productID, serialNum: Self.serialNum)
+            } catch {
+                creationFailures += 1
+                if creationFailures >= 2 { disabledReason = "creating the display failed \(creationFailures) times (\(error))" }
+                throw Failure.displayCreate(error)
+            }
+            creationFailures = 0
+            generation += 1
+            let gen = generation
+            display = d
+            let created = Self.ms(since: t0)
+            d.onTerminated = { [weak self] in Task { @MainActor [weak self] in self?.lost(generation: gen) } }
+            let online = await d.waitUntilOnline(timeout: 3)
+            if !online, d.bounds.width == 0 {
+                destroyDisplay()
+                throw Failure.neverOnline
+            }
+            let t1 = Date()
+            var listed: SCDisplay?
+            while Date().timeIntervalSince(t1) < 3 {
+                let remaining = max(0.2, 3 - Date().timeIntervalSince(t1))
+                if let c = await WindowCatalog.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: true, timeout: remaining),
+                   let found = c.displays.first(where: { $0.displayID == d.displayID }) { listed = found; break }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            guard let listed, display === d else {
+                destroyDisplay()
+                throw Failure.notListedBySCK
+            }
+            scDisplay = listed
+            Stats.shared.bump("vd.created")
+            print("Virtual display \(d.widthPt)×\(d.heightPt) pt @2× id \(d.displayID) for Desktop: created \(created) ms")
+        }
+        guard let scDisplay, let d = display, d.isAlive else { throw Failure.notListedBySCK }
+        desktopStaged = true
+        let rect = CGRect(x: 0, y: 0, width: CGFloat(d.widthPt), height: CGFloat(d.heightPt))
+        captureRect = rect
+        askedSize = rect.size
+        placedSize = rect.size
+        let filter = own.map { SCContentFilter(display: scDisplay, excludingApplications: [$0], exceptingWindows: []) }
+            ?? SCContentFilter(display: scDisplay, excludingWindows: [])
+        return Prepared(filter: filter, sourceRect: rect,
+                        describe: "the virtual desktop on display \(d.displayID) (\(d.widthPt)×\(d.heightPt) pt @\(d.scale)×)")
+    }
+
     /// The refresh rate the next display is made at; see `prepare`.
     private var refreshHz = 60
 
@@ -662,6 +736,7 @@ final class VirtualStage {
         }
         cursorBefore = nil
         fullScreen = false
+        desktopStaged = false
         placement = nil
         placedSize = nil
         askedSize = nil

@@ -178,5 +178,21 @@ for raw in Array(arm64macOS27.values) + Array(x86RosettaMacOS27.values) {
     check(Encoding.normalized(Encoding.normalized(raw)) == Encoding.normalized(raw), "\(raw): normalized twice is normalized once")
 }
 
+// DesktopVirtualDisplay (#212, #213): fitting the Desktop stream to the device via Virtual Display when Aa is set.
+let fit1x = DesktopVirtualDisplay.targetSize(viewportWidth: 1366, viewportHeight: 1024, scale: 1.0, virtualDisplayOn: true)
+check(fit1x?.width == 1366 && fit1x?.height == 1024, "DesktopVirtualDisplay: 1366×1024 at 1.0× with Virtual Display on is 1366×1024 (#212)")
+let fit12x = DesktopVirtualDisplay.targetSize(viewportWidth: 1366, viewportHeight: 1024, scale: 1.2, virtualDisplayOn: true)
+check(fit12x?.width == 1138 && fit12x?.height == 853, "DesktopVirtualDisplay: 1366×1024 at 1.2× rounds to 1138×853 (#212)")
+let clamped = DesktopVirtualDisplay.targetSize(viewportWidth: 200, viewportHeight: 5000, scale: 1.0, virtualDisplayOn: true)
+check(clamped?.width == 800 && clamped?.height == 4096, "DesktopVirtualDisplay: clamps to 800...4096 so macOS keeps 2x HiDPI (#212, #236)")
+check(DesktopVirtualDisplay.targetSize(viewportWidth: 1366, viewportHeight: 1024, scale: nil, virtualDisplayOn: true) == nil,
+      "DesktopVirtualDisplay: nil scale (Aa Off) keeps the Mac's real main display (#212)")
+check(DesktopVirtualDisplay.targetSize(viewportWidth: 1366, viewportHeight: 1024, scale: 1.0, virtualDisplayOn: false) == nil,
+      "DesktopVirtualDisplay: Virtual Display off keeps the Mac's real main display (#212)")
+check(DesktopVirtualDisplay.matches(currentWidth: 1366, currentHeight: 1024, wantedWidth: 1365, wantedHeight: 1026)
+      && !DesktopVirtualDisplay.matches(currentWidth: 1366, currentHeight: 1024, wantedWidth: 1366, wantedHeight: 1366)
+      && !DesktopVirtualDisplay.matches(currentWidth: 1366, currentHeight: 1024, wantedWidth: 1024, wantedHeight: 1024),
+      "DesktopVirtualDisplay.matches: within 2 pt matches, different width or height does not (#212)")
+
 print("virtual-display-api: \(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)
