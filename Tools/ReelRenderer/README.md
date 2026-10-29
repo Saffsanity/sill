@@ -61,7 +61,7 @@ starts, and each clip when a shot first reads it:
 
 | Path under `reelDir` | What it is | Shots |
 |---|---|---|
-| `real-captures/01-connect-desktop.mov`, `02-drawer-launch.mov`, `04-pick-vscode.mov`, `05-pick-blender.mov`, `08-settings-panel.mov` | R01, R02, R04, R05, R08: the client streaming real Mac apps | S06–S14, S21, S23 |
+| `real-captures/01-connect-desktop.mov`, `02-drawer-launch.mov`, `04-pick-vscode.mov`, `05-pick-blender.mov`, `08-settings-panel.mov` | R01, R02, R04, R05, R08: the client streaming real Mac apps | S06–S12, S14, S21, S23 |
 | `real-captures/11-window-to-desktop.mov`, `12-aa-resize-weather.mov`, `13-trackpad-pointer.mov` | N1, N2, N3 | S13, S16, S18 |
 | `capture/final-aa.mov`, `capture/final-lights.mov` | HT-B, HT-D: the layout harness with mock data | S15, S19 |
 | `capture/final-portrait.png` | HT-C, the portrait layout | S17 |
