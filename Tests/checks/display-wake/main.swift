@@ -16,7 +16,9 @@
 // exactly where a real one declares; the lines; what DisplayActivity says after its second look
 // (Report: a wake only when the display read asleep before and on after, once for one wake, any other
 // declaration's line at most once a minute, a woke line counting as that minute's, a refusal once,
-// again after a success); the TEST ONLY user type (SILL_TEST_USER_ACTIVE); then 20,000 random
+// again after a success); the TEST ONLY user type (SILL_TEST_USER_ACTIVE: local, remote, or auto by
+// PR #229's rule, remote while every device is away or a window is staged on the virtual display) and
+// a remote declaration's lines; then 20,000 random
 // sessions against the rule's invariants and 20,000 against Report's:
 //   I1 every connect declares (a test host: counts);
 //   I2 two declarations by anything but a connect are never under 5 s apart, unless the clock went back;
@@ -353,23 +355,60 @@ do {
 
 // MARK: - The TEST ONLY user type
 
-func userActive(_ value: String?, testHost: Bool = false) -> (remote: Bool, line: String?) {
+func userActive(_ value: String?, testHost: Bool = false) -> (setting: W.UserActive, line: String?) {
     W.userActive(environment: value.map { [W.userActiveVariable: $0] } ?? [:], testHost: testHost)
 }
-check(userActive(nil) == (false, nil), "unset: local, no line")
-check(userActive("") == (false, nil), "empty: as unset")
-check(userActive("remote") == (true, "TEST: user activity is declared as remote (kIOPMUserActiveRemote), not local (SILL_TEST_USER_ACTIVE=remote)."),
+check(userActive(nil) == (.local, nil), "unset: local, no line")
+check(userActive("") == (.local, nil), "empty: as unset")
+check(userActive("remote") == (.remote, "TEST: user activity is declared as remote (kIOPMUserActiveRemote), not local (SILL_TEST_USER_ACTIVE=remote)."),
       "remote on a real host (Sill.app too): remote, and a TEST line")
-check(userActive("local") == (false, "TEST: user activity is declared as local (kIOPMUserActiveLocal), as without SILL_TEST_USER_ACTIVE."),
+check(userActive("local") == (.local, "TEST: user activity is declared as local (kIOPMUserActiveLocal), as without SILL_TEST_USER_ACTIVE."),
       "local: local, and a TEST line")
+check(userActive("auto") == (.auto, "TEST: user activity is declared as remote (kIOPMUserActiveRemote) while every connected device is away "
+                             + "from home or a window is staged on the virtual display, else as local (SILL_TEST_USER_ACTIVE=auto)."),
+      "auto on a real host: PR #229's rule, and a TEST line")
 do {
     let odd = userActive("Remote\nWoke the display for nobody.")
-    check(!odd.remote, "another value: local")
-    check(odd.line == "SILL_TEST_USER_ACTIVE ignored: it takes local or remote; user activity is declared as local.",
+    check(odd.setting == .local, "another value: local")
+    check(odd.line == "SILL_TEST_USER_ACTIVE ignored: it takes local, remote or auto; user activity is declared as local.",
           "another value: ignored with one line that does not echo it")
-    check(userActive("remote", testHost: true) == (false, "SILL_TEST_USER_ACTIVE ignored: a test host declares no user activity (it counts disp.wakeDry)."),
+    check(userActive("Auto").setting == .local, "auto in another case: local")
+    check(userActive("remote", testHost: true) == (.local, "SILL_TEST_USER_ACTIVE ignored: a test host declares no user activity (it counts disp.wakeDry)."),
           "remote on a test host: ignored, with one line")
-    check(W.userActive(environment: ["SILL_TEST_USERACTIVE": "remote"], testHost: false) == (false, nil), "another variable: nothing")
+    check(userActive("auto", testHost: true).setting == .local, "auto on a test host: ignored")
+    check(W.userActive(environment: ["SILL_TEST_USERACTIVE": "remote"], testHost: false) == (.local, nil), "another variable: nothing")
+}
+
+// The type of each declaration (PR #229's rule only under auto).
+for away in [false, true] {
+    for staged in [false, true] {
+        eq(W.userType(.local, everyDeviceAway: away, stagedOnVirtualDisplay: staged), .local,
+           "local (the default): local, away \(away), staged \(staged)")
+        eq(W.userType(.remote, everyDeviceAway: away, stagedOnVirtualDisplay: staged), .remote,
+           "remote: remote, away \(away), staged \(staged)")
+        eq(W.userType(.auto, everyDeviceAway: away, stagedOnVirtualDisplay: staged), away || staged ? .remote : .local,
+           "auto: " + (away || staged ? "remote" : "local") + ", away \(away), staged \(staged)")
+    }
+}
+
+// A remote declaration's lines say so; a local one's are as before.
+eq(W.wokeLine(device: "iPad (iPad14,1)", activity: .connect, remote: true),
+   "Woke the display for iPad (iPad14,1), which connected (declared as a remote user).", "the woke line of a remote declaration")
+eq(W.declaredLine(device: "iPad (iPad14,1)", activity: .input, asleepNow: true, remote: true),
+   "Declared activity for iPad (iPad14,1), which sent input (declared as a remote user), but the display read asleep 0.5 s later.",
+   "the declaration's line of a remote declaration, the display still asleep")
+eq(W.wokeLine(device: "iPad", activity: .connect), W.wokeLine(device: "iPad", activity: .connect, remote: false),
+   "a local declaration's line as before")
+do {
+    var r = W.Report()
+    let remote = r.declared(device: "iPad", activity: .connect, wasAsleep: true, result: 0, remote: true)
+    eq(remote.look?.remote, true, "a remote declaration's look keeps its type")
+    eq(r.looked(remote.look!, asleepNow: true, at: 0.5),
+       "Declared activity for iPad, which connected (declared as a remote user), but the display read asleep 0.5 s later.",
+       "its second look, the panel still asleep: the line says remote and asleep")
+    let local = r.declared(device: "iPad", activity: .input, wasAsleep: true, result: 0)
+    eq(local.look?.remote, false, "a local declaration's look: local")
+    eq(r.looked(local.look!, asleepNow: false, at: 70), "Woke the display for iPad, which sent input.", "its woke line as before")
 }
 
 // MARK: - 20,000 random sessions: the rule

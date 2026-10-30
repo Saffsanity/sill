@@ -47,7 +47,11 @@ package final class StreamCoordinator {
     /// display sleeps again by the Mac's own setting once no device uses it. A test host
     /// (`--synthetic`, as `injector.dryRun`) only counts `disp.wakeDry`.
     private var displayWake: DisplayWake
-    private let displayActivity: DisplayActivity
+    private let displayActivity = DisplayActivity()
+    /// Where each declaration says the user is: local, as a key press on the Mac does, unless TEST
+    /// ONLY SILL_TEST_USER_ACTIVE says remote, or auto (PR #229: remote while every device is away or
+    /// a window is staged on the virtual display; DisplayWake.userType).
+    private let userActive: DisplayWake.UserActive
     /// The parameter sets that last went out, forgotten as each stream starts (`select`): a stream's
     /// first, and any that differ, are a new frame size for the devices (`parameterSetsSent`).
     private var lastParameterSets: Data?
@@ -365,7 +369,7 @@ package final class StreamCoordinator {
         pointer = PointerWatch(synthetic: synthetic, path: path.path)
         softwareOnly = software.on
         let userActive = DisplayWake.userActive(environment: env, testHost: synthetic)
-        displayActivity = DisplayActivity(remote: userActive.remote)
+        self.userActive = userActive.setting
         keyframeRequestsToIgnore = keyframeIgnore.count
         // The firewall's TEST ONLY answers, for a test host alone (StreamServer's own rule).
         let firewallTest = FirewallCheck.TestHook.read(testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
@@ -1285,7 +1289,10 @@ package final class StreamCoordinator {
         switch displayWake.decide(event, at: CFAbsoluteTimeGetCurrent()) {
         case .nothing: break
         case .count: Stats.shared.bump(DisplayWake.dryKey)
-        case .declare(let activity): displayActivity.declare(for: deviceName(connection), activity)
+        case .declare(let activity):
+            let type = DisplayWake.userType(userActive, everyDeviceAway: awayWanted && !routes.isEmpty,
+                                            stagedOnVirtualDisplay: virtualDisplay && stage.isStaged)
+            displayActivity.declare(for: deviceName(connection), activity, as: type)
         }
     }
 
