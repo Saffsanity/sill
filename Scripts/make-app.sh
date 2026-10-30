@@ -65,12 +65,19 @@ if [ "$release" = 1 ]; then
     fi
 fi
 
+# The app owns its String Catalogs: SwiftUI literals and String(localized:) in the package
+# both look in Bundle.main. Compile them explicitly; a CLT-only build without xcstringstool
+# must fail here rather than quietly ship an English-only app.
+if ! xcrun --find xcstringstool >/dev/null 2>&1; then
+    echo "error: building Sill.app requires Xcode with xcstringstool to compile Packaging/*.xcstrings; select Xcode with xcode-select." >&2
+    exit 2
+fi
+
 bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' Packaging/Info.plist)"
 
 # SILL_UNIVERSAL=1: one Sill.app for Apple silicon and Intel Macs (#62), one build per architecture
-# joined with lipo. Not one `swift build --arch arm64 --arch x86_64`: that needs Xcode's XCBuild, and
-# the Command Line Tools alone must still build this. Each architecture has its own scratch path: in
-# one shared .build, every switch of triple costs a relink (16 s measured), so no rebuild stays at
+# joined with lipo. Each architecture has its own scratch path: in one shared .build, every
+# switch of triple costs a relink (16 s measured), so no rebuild stays at
 # ~2 s. Off by default: it doubles every build (50 to 97 s cold, 21 to 42 s after a one-line change,
 # measured 2026-10-20), the x86_64 slice had not streamed on an Intel Mac by then, and releases stay
 # arm64 until #62 decides (release.sh names the architectures it built). Unset, the build is for this
@@ -102,6 +109,12 @@ cp Packaging/Info.plist "$stage/Contents/Info.plist"
 build_number="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" "$stage/Contents/Info.plist"
 printf 'APPL????' > "$stage/Contents/PkgInfo"
+
+# Build into the fresh staging bundle before signing. No generated resources are kept in the
+# source tree, and no stale .lproj from an earlier language list survives a rebuild.
+for catalog in Packaging/Localizable.xcstrings Packaging/InfoPlist.xcstrings; do
+    xcrun xcstringstool compile "$catalog" --output-directory "$stage/Contents/Resources"
+done
 
 # The icon. design/AppIcon.svg is the iOS art, a full-bleed square. macOS 26+ masks and lights a
 # full-bleed icon itself when it comes from an asset catalog, but shows a legacy .icns shrunk

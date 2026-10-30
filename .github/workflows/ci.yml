@@ -90,6 +90,17 @@ jobs:
       - name: Pure checks (Tests/checks/run-all.sh)
         run: Tests/checks/run-all.sh
 
+      # SwiftPM alone does not assemble the application's resources. Exercise the shipped bundle
+      # path too, with an ad-hoc identity so this check needs no signing secrets.
+      - name: Build the Mac app and check its Chinese resources
+        run: |
+          SILL_SIGN_IDENTITY=- Scripts/make-app.sh
+          for language in zh-Hans zh-Hant; do
+            resources=".build/Sill.app/Contents/Resources/$language.lproj"
+            test -s "$resources/Localizable.strings"
+            test -s "$resources/InfoPlist.strings"
+          done
+
       # The iOS app needs the iOS 27.1 SDK (the iPhone Duo's hinge and fold, docs/iphone-duo-plan.md):
       # the newest Xcode 27.1 that is not a beta, else its newest beta (the image had only
       # Xcode_27.1_beta.app, 27A9269, in October 2026); without either, a warning and the newest Xcode

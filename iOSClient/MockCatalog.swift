@@ -99,7 +99,9 @@ enum MockCatalog {
         if let line = UserDefaults.standard.string(forKey: "SillOverlayLine") {
             let device = StreamClient.deviceWord
             switch line {
-            case "asking": client.overlayAskLine = DiscoveryPolicy.HomeCopy.overlayAsking(mac: "Mac mini")
+            case "asking":
+                client.overlayAskLine = DiscoveryPolicy.HomeCopy.overlayAsking(mac: "Mac mini")
+                client.overlayAskIsPending = true
             case "shown": client.overlayAskLine = DiscoveryPolicy.overlayLine(.shown, mac: "Mac mini", device: device)
             case "openonmac": client.overlayAskLine = DiscoveryPolicy.overlayLine(.openOnMac, mac: "Mac mini", device: device)
             case "locked": client.overlayAskLine = DiscoveryPolicy.overlayLine(.locked, mac: "Mac mini", device: device)
@@ -571,7 +573,7 @@ enum MockCatalog {
     static func connectClient(_ c: ConnectCase) -> StreamClient {
         let client = StreamClient()
         client.mockDiscovery = true
-        client.status = StreamClient.lookingOnNetwork
+        client.setStatus(StreamClient.lookingOnNetwork, kind: .searchingNetwork)
         /// A row as `recomputeMacs` makes it: Direct only for a Direct row. No wired interface: the
         /// mock never dials.
         func mac(_ name: String, _ method: DiscoveryPolicy.Method?) -> FoundMac {
@@ -610,7 +612,7 @@ enum MockCatalog {
             client.showsNearbyHint = true
         case .nearby:
             client.searchingNearby = true
-            client.status = StreamClient.lookingNearby
+            client.setStatus(StreamClient.lookingNearby, kind: .searchingNearby)
             // The long name checks that "Direct" never truncates: the title does.
             client.macs = [mac("Studio", .wifi), mac("Mac mini", .direct),
                            mac("Noah Saffer’s MacBook Pro in the Studio (2)", .direct)]
@@ -620,13 +622,13 @@ enum MockCatalog {
             // word). The long names check that the word never truncates or wraps, the title does:
             // "Wi-Fi" is spelled with a non-breaking hyphen.
             client.searchingNearby = true
-            client.status = StreamClient.lookingNearby
+            client.setStatus(StreamClient.lookingNearby, kind: .searchingNearby)
             client.macs = [mac("Mac Studio", .wired), mac("Mac mini", .wifi), mac("Office iMac", nil),
                            mac("Noah Saffer’s MacBook Pro in the Studio (2)", .wired),
                            mac("Noah Saffer’s iMac on the Desk by the Window", .wifi),
                            mac("MacBook Air", .direct)]
         case .denied:
-            client.status = StreamClient.allowLocalNetwork
+            client.setStatus(StreamClient.allowLocalNetwork, kind: .localNetworkPermission)
         case .update, .notice:
             // As a session ends with it (StreamClient.endWithNotice): the words as the status line,
             // the notice beside them. The message is the host's (DeviceGate's), for this device.
@@ -640,7 +642,7 @@ enum MockCatalog {
                           reconnect: false)
             let outcome = GoodbyePolicy.outcome(goodbye, mac: "Mac mini", device: StreamClient.deviceWord, saved: false)
             client.status = outcome.text
-            client.notice = StreamClient.Notice(text: outcome.text, storeLink: outcome.storeLink)
+            client.notice = StreamClient.Notice(storeLink: outcome.storeLink)
         case .remote:
             // The long name checks that "Remote" never truncates: the title does.
             client.macs = remoteRows
@@ -673,12 +675,12 @@ enum MockCatalog {
             let mini = home("Mac mini", .wifi)
             client.macs = [mini, studio]
             client.homeAsk = ask(mini, shown: false)
-            client.status = Copy.pairing(mac: mini.name, cable: false)
+            client.setStatus(Copy.pairing(mac: mini.name, cable: false), kind: .homeAsk)
         case .homecard, .homecode, .homecodeerror:
             let mini = home("Mac mini", .wifi)
             client.macs = [mini, studio]
             client.homeAsk = ask(mini, shown: true)
-            client.status = Copy.showing(mac: mini.name, device: device)
+            client.setStatus(Copy.showing(mac: mini.name, device: device), kind: .homeAsk)
             if c == .homecodeerror { client.pairing = .failed(.wrongCode(triesLeft: 4)) }
         case .homelocked:
             client.macs = [home("Mac mini", .wired, cable: true), studio]

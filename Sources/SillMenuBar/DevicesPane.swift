@@ -63,16 +63,16 @@ struct DevicesPane: View {
                 Toggle("Require pairing", isOn: $requirePairing)
                     .disabled(unavailable != nil)
                 if let problem = unavailable {
-                    Warning("Devices can’t connect: Sill couldn’t use its key in your keychain (\(withoutFullStop(problem))). Quit Sill and open it again, and choose Always Allow if the keychain asks.")
+                    Warning(String(localized: "Devices can’t connect: Sill couldn’t use its key in your keychain (\(withoutFullStop(problem))). Quit Sill and open it again, and choose Always Allow if the keychain asks."))
                 } else if let p = requirePairingProblem {
                     let reason = withoutFullStop(p.reason)
                     Warning(p.wanted
-                            ? "Pairing is required until Sill quits: Sill couldn’t update the keychain (\(reason)). Try again."
-                            : "Pairing is still required: Sill couldn’t update the keychain (\(reason)). Try again.")
+                            ? String(localized: "Pairing is required until Sill quits: Sill couldn’t update the keychain (\(reason)). Try again.")
+                            : String(localized: "Pairing is still required: Sill couldn’t update the keychain (\(reason)). Try again."))
                 }
             } footer: {
                 if requirePairing {
-                    Footnote("Each iPhone or iPad pairs once: over the USB cable by itself, or on Wi\u{2011}Fi with a code this Mac shows when the device asks. Everything devices send and receive is encrypted.")
+                    Footnote(String(localized: "Each iPhone or iPad pairs once: over the USB cable by itself, or on Wi\u{2011}Fi with a code this Mac shows when the device asks. Everything devices send and receive is encrypted."))
                 } else {
                     Label("Any device on your network (or nearby, with Direct Wireless Connection on) and any app on this Mac can see and control it without pairing. Connections are still encrypted.",
                           systemImage: "exclamationmark.triangle.fill")
@@ -85,7 +85,7 @@ struct DevicesPane: View {
             Section {
                 Toggle("Show the pairing window to screen sharing", isOn: $showPairingWindowToScreenSharing)
             } footer: {
-                Footnote("Turn this on to pair while you use this Mac through Screen Sharing or another remote desktop app, as you would a Mac without a display. While it’s on, anyone who can see this Mac’s screen remotely can read the code. Devices streaming this Mac never show the window.")
+                Footnote(String(localized: "Turn this on to pair while you use this Mac through Screen Sharing or another remote desktop app, as you would a Mac without a display. While it’s on, anyone who can see this Mac’s screen remotely can read the code. Devices streaming this Mac never show the window."))
             }
             pairedDevices
         }
@@ -97,7 +97,7 @@ struct DevicesPane: View {
                 Text("\(removedName) can no longer connect. To use it again, pair it again.")
             }
             if let removeProblem {
-                Warning("\(removeProblem.name) is still paired: Sill couldn’t update the keychain (\(withoutFullStop(removeProblem.reason))). Try again.")
+                Warning(String(localized: "\(removeProblem.name) is still paired: Sill couldn’t update the keychain (\(withoutFullStop(removeProblem.reason))). Try again."))
             }
             if unavailable != nil {
                 // The trust list lives with the key: unread, not empty.
@@ -125,7 +125,7 @@ struct DevicesPane: View {
         } header: {
             Text("Paired Devices")
         } footer: {
-            Footnote("A paired device can see and control this Mac on your network, nearby, and from afar while Remote Access is on. If one is lost, remove it here.")
+            Footnote(String(localized: "A paired device can see and control this Mac on your network, nearby, and from afar while Remote Access is on. If one is lost, remove it here."))
         }
     }
 }
@@ -173,21 +173,45 @@ struct PairedDeviceRow: View {
     /// "Paired Sep 25 over the USB cable · last connected 2 minutes ago over Wi‑Fi", "Paired Sep 24
     /// with the QR code · last connected yesterday through Tailscale".
     static func detail(_ device: PairedDeviceSummary, now: Date) -> String {
-        var out = "Paired \(day(device.pairedAt, now: now))"
-        if let method = device.displayMethod { out += " \(method)" }
-        if let seen = device.lastSeen {
-            let formatter = RelativeDateTimeFormatter()
-            formatter.unitsStyle = .full
-            formatter.dateTimeStyle = .named
-            let when = now.timeIntervalSince(seen) < 60 ? "just now" : formatter.localizedString(for: seen, relativeTo: now)
-            out += " · last connected \(when)"
-            if let route = device.lastRoute { out += " \(route)" }
+        let date = day(device.pairedAt, now: now)
+        let paired: String
+        // Use the stored method identifier, never the host's already rendered displayMethod.
+        // Unknown future methods still show the pairing date without inventing a description.
+        switch device.method {
+        case PairRequest.qr: paired = String(localized: "Paired \(date) with the QR code")
+        case PairRequest.code: paired = String(localized: "Paired \(date) with a code")
+        case PairResult.cable: paired = String(localized: "Paired \(date) over the USB cable")
+        default: paired = String(localized: "Paired \(date)")
         }
-        return out
+        guard let seen = device.lastSeen else { return paired }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = Locale(identifier: Bundle.main.preferredLocalizations.first ?? "en")
+        formatter.unitsStyle = .full
+        formatter.dateTimeStyle = .named
+        let when = now.timeIntervalSince(seen) < 60
+            ? String(localized: "just now") : formatter.localizedString(for: seen, relativeTo: now)
+        let connected: String
+        // lastRoute is persisted host copy. Keep its finite known labels here at the display
+        // boundary; an unfamiliar label remains visible instead of being silently discarded.
+        switch device.lastRoute {
+        case "over the USB cable": connected = String(localized: "last connected \(when) over the USB cable")
+        case "on this Mac": connected = String(localized: "last connected \(when) on this Mac")
+        case "directly": connected = String(localized: "last connected \(when) directly")
+        case "over Wi\u{2011}Fi": connected = String(localized: "last connected \(when) over Wi‑Fi")
+        case "over Ethernet": connected = String(localized: "last connected \(when) over Ethernet")
+        case "at home": connected = String(localized: "last connected \(when) at home")
+        case "over the internet": connected = String(localized: "last connected \(when) over the internet")
+        case "through Tailscale": connected = String(localized: "last connected \(when) through Tailscale")
+        case .some(let route): connected = String(localized: "last connected \(when) (\(route))")
+        case nil: connected = String(localized: "last connected \(when)")
+        }
+        return "\(paired) · \(connected)"
     }
 
     static func day(_ date: Date, now: Date) -> String {
         let sameYear = Calendar.current.component(.year, from: date) == Calendar.current.component(.year, from: now)
-        return sameYear ? date.formatted(.dateTime.month(.abbreviated).day()) : date.formatted(.dateTime.month(.abbreviated).day().year())
+        let locale = Locale(identifier: Bundle.main.preferredLocalizations.first ?? "en")
+        return sameYear ? date.formatted(.dateTime.month(.abbreviated).day().locale(locale))
+            : date.formatted(.dateTime.month(.abbreviated).day().year().locale(locale))
     }
 }

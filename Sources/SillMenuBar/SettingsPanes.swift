@@ -404,24 +404,24 @@ private struct PermissionsPane: View {
         let network = model.coordinator?.status.snapshot.network
         Form {
             Section {
-                PermissionRow(title: "Screen Recording", allowed: permissions.screenRecording,
+                PermissionRow(title: String(localized: "Screen Recording"), allowed: permissions.screenRecording,
                               // Not "on this network": a device connected over Direct Wireless shares none.
-                              explanation: "Lets Sill capture the windows you pick on your iPhone or iPad, and their sound when Send Audio is on. Nothing is recorded or saved; frames and sound go straight to your devices.",
-                              button: model.settings.askedScreenRecording ? "Open System Settings…" : "Allow…") {
+                              explanation: String(localized: "Lets Sill capture the windows you pick on your iPhone or iPad, and their sound when Send Audio is on. Nothing is recorded or saved; frames and sound go straight to your devices."),
+                              button: model.settings.askedScreenRecording ? String(localized: "Open System Settings…") : String(localized: "Allow…")) {
                     permissions.requestScreenRecording()
                 }
-                PermissionRow(title: "Accessibility", allowed: permissions.accessibility,
-                              explanation: "Lets your iPhone or iPad click, scroll and type on this Mac, and lets Sill move and size the window it streams.",
-                              button: model.settings.askedAccessibility ? "Open System Settings…" : "Allow…") {
+                PermissionRow(title: String(localized: "Accessibility"), allowed: permissions.accessibility,
+                              explanation: String(localized: "Lets your iPhone or iPad click, scroll and type on this Mac, and lets Sill move and size the window it streams."),
+                              button: model.settings.askedAccessibility ? String(localized: "Open System Settings…") : String(localized: "Allow…")) {
                     permissions.requestAccessibility()
                 }
             } footer: {
-                Footnote("Access belongs to Sill itself. Access you gave Terminal for the SillHost command-line tool doesn’t carry over.")
+                Footnote(String(localized: "Access belongs to Sill itself. Access you gave Terminal for the SillHost command-line tool doesn’t carry over."))
             }
             if permissions.relaunchSuggested, !permissions.screenRecording {
                 Section {
                     LabeledContent("Screen Recording starts working once Sill opens again.") {
-                        Button(permissions.canRelaunch ? "Relaunch Sill" : "Quit Sill") { permissions.relaunch() }
+                        Button(permissions.canRelaunch ? String(localized: "Relaunch Sill") : String(localized: "Quit Sill")) { permissions.relaunch() }
                     }
                 }
             }

@@ -140,9 +140,9 @@ enum DiscoveryPolicy {
 
         var word: String {
             switch self {
-            case .wired: return "Wired"
-            case .wifi: return "Wi\u{2011}Fi"   // a non-breaking hyphen: never "Wi-" and "Fi" on two lines
-            case .direct: return "Direct"
+            case .wired: return String(localized: "Wired")
+            case .wifi: return String(localized: "Wi\u{2011}Fi")   // a non-breaking hyphen: never "Wi-" and "Fi" on two lines
+            case .direct: return String(localized: "Direct")
             }
         }
 
@@ -751,11 +751,11 @@ enum DiscoveryPolicy {
     /// hears it once), and after `reconnectDials` that the dials stopped, in the words the remote
     /// path's end uses.
     static func reconnectLine(mac: String, failed: Int, direct: Bool) -> String {
-        if failed >= reconnectDials { return "Stopped trying to reach \(mac). Tap it to try again." }
+        if failed >= reconnectDials { return String(localized: "Stopped trying to reach \(mac). Tap it to try again.") }
         if failed >= reconnectQuietAfter {
-            return "\(mac) isn\u{2019}t answering. It may be asleep. Sill keeps trying, or tap it to try now."
+            return String(localized: "\(mac) isn\u{2019}t answering. It may be asleep. Sill keeps trying, or tap it to try now.")
         }
-        return direct ? "Reconnecting to \(mac) directly\u{2026}" : "Reconnecting to \(mac)\u{2026}"
+        return direct ? String(localized: "Reconnecting to \(mac) directly\u{2026}") : String(localized: "Reconnecting to \(mac)\u{2026}")
     }
 
     /// What this device watched when a window list says nothing streams (`autoDesktop`).
@@ -1011,27 +1011,27 @@ enum DiscoveryPolicy {
         var word: String? {
             switch self {
             case .method(let m): return m?.word
-            case .notPaired, .openDoor: return "Not paired"
+            case .notPaired, .openDoor: return String(localized: "Not paired")
             case .pairsOverCable: return Method.wired.word
-            case .updateSill: return "Update Sill"
+            case .updateSill: return String(localized: "Update Sill")
             }
         }
 
         /// VoiceOver's label: "Mac mini, Wired", "Mac mini, not paired"; the name alone without a word.
         func label(name: String) -> String {
-            if self == .notPaired || self == .openDoor { return "\(name), not paired" }
-            return word.map { "\(name), \($0)" } ?? name
+            if self == .notPaired || self == .openDoor { return String(localized: "\(name), not paired") }
+            return word.map { String(localized: "\(name), \($0)") } ?? name
         }
 
         /// VoiceOver's hint; `device` is this device's kind ("iPad"). A row that says how its Mac
         /// is reachable keeps the hint it had ("" but for a Direct row).
         func hint(name: String, device: String, direct: Bool) -> String {
             switch self {
-            case .method: return direct ? "Connects without a shared Wi\u{2011}Fi network" : ""
-            case .notPaired: return "Pairs with a code \(name) shows, then connects."
-            case .openDoor: return "Connects without pairing: \(name) lets any device in."
-            case .pairsOverCable: return "Pairs over the USB cable, then connects."
-            case .updateSill: return "\(name)\u{2019}s Sill is too old for this \(device)."
+            case .method: return direct ? String(localized: "Connects without a shared Wi\u{2011}Fi network") : ""
+            case .notPaired: return String(localized: "Pairs with a code \(name) shows, then connects.")
+            case .openDoor: return String(localized: "Connects without pairing: \(name) lets any device in.")
+            case .pairsOverCable: return String(localized: "Pairs over the USB cable, then connects.")
+            case .updateSill: return String(localized: "\(name)\u{2019}s Sill is too old for this \(device).")
             }
         }
     }
@@ -1115,7 +1115,7 @@ enum DiscoveryPolicy {
 
     /// The status line after a tap that dialed nothing because the Mac's Sill is too old.
     static func updateSillStatus(mac: String) -> String {
-        "\(mac) runs an older Sill. Update Sill on the Mac to connect."
+        String(localized: "\(mac) runs an older Sill. Update Sill on the Mac to connect.")
     }
 
     /// Whether this device's connection runs over the USB cable to the Mac, as this device sees it
@@ -1482,67 +1482,67 @@ enum DiscoveryPolicy {
     /// calls the Mac; `device` this device's kind ("iPad").
     enum HomeCopy {
         static func pairing(mac: String, cable: Bool) -> String {
-            cable ? "Pairing with \(mac) over the cable\u{2026}" : "Pairing with \(mac)\u{2026}"
+            cable ? String(localized: "Pairing with \(mac) over the cable\u{2026}") : String(localized: "Pairing with \(mac)\u{2026}")
         }
-        static func pairedOverCable(mac: String) -> String { "Paired with \(mac) over the cable." }
+        static func pairedOverCable(mac: String) -> String { String(localized: "Paired with \(mac) over the cable.") }
         /// The status line while the home card is up, and the card's scan line.
-        static func showing(mac: String, device: String) -> String { "\(mac) is showing a code. Point this \(device) at it." }
+        static func showing(mac: String, device: String) -> String { String(localized: "\(mac) is showing a code. Point this \(device) at it.") }
         /// The home card (§7.7): its title, a heading; its typed path's line, which is also the
         /// line it collapses to while the code has the keyboard; the viewfinder's caption, and
         /// what VoiceOver says for the viewfinder.
-        static func cardTitle(mac: String) -> String { "Pair with \(mac)" }
-        static func typeCode(mac: String) -> String { "Type the code \(mac) shows." }
-        static func viewfinderCaption(mac: String) -> String { "Point at the code on \(mac)" }
-        static func viewfinderLabel(mac: String) -> String { "Camera. Point it at the code on \(mac)." }
+        static func cardTitle(mac: String) -> String { String(localized: "Pair with \(mac)") }
+        static func typeCode(mac: String) -> String { String(localized: "Type the code \(mac) shows.") }
+        static func viewfinderCaption(mac: String) -> String { String(localized: "Point at the code on \(mac)") }
+        static func viewfinderLabel(mac: String) -> String { String(localized: "Camera. Point it at the code on \(mac).") }
         /// Pair This iPad… over a session at home that needs no pairing (the Settings panel's
         /// footnote, `AwayFromHome.pairThisDevice(atHome: true)`).
         static func pairThisDeviceAtHome(mac: String, device: String) -> String {
-            "\(mac) lets devices connect without pairing. Pair this \(device) once to keep connecting if that changes, and to reach \(mac) away from home while Remote Access is on. \(mac) shows a code; scan it with this \(device)."
+            String(localized: "\(mac) lets devices connect without pairing. Pair this \(device) once to keep connecting if that changes, and to reach \(mac) away from home while Remote Access is on. \(mac) shows a code; scan it with this \(device).")
         }
         /// Pair This iPad…'s errors over a stream at home, where no row can be tapped: the Mac
         /// could not prove it knows the code; nothing answered the pairing connection. (A refused
         /// code says what the remote path's does: choose Pair iPhone or iPad… on the Mac.)
         static func proofFailedOverStream(mac: String) -> String {
-            "Pairing didn\u{2019}t finish: \(mac) couldn\u{2019}t show it knows the code."
+            String(localized: "Pairing didn\u{2019}t finish: \(mac) couldn\u{2019}t show it knows the code.")
         }
-        static func noAnswerOverStream(mac: String) -> String { "\(mac) didn\u{2019}t answer. Try again." }
+        static func noAnswerOverStream(mac: String) -> String { String(localized: "\(mac) didn\u{2019}t answer. Try again.") }
         /// Pair This iPad…'s line under its title over a session at home that speaks TLS, from the
         /// Mac's answer to its ask (`overlayLine`): asking; a code showing; none shown by itself;
         /// the Mac locked. Never "Tap": over a stream there is no row.
-        static func overlayAsking(mac: String) -> String { "Asking \(mac) for a code\u{2026}" }
-        static func overlayShowing(mac: String) -> String { "\(mac) is showing a code now." }
+        static func overlayAsking(mac: String) -> String { String(localized: "Asking \(mac) for a code\u{2026}") }
+        static func overlayShowing(mac: String) -> String { String(localized: "\(mac) is showing a code now.") }
         static func overlayOpenOnMac(mac: String) -> String {
-            "\(mac) didn\u{2019}t show a code by itself. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu."
+            String(localized: "\(mac) didn\u{2019}t show a code by itself. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu.")
         }
         static func overlayLocked(mac: String, device: String) -> String {
-            "Unlock \(mac), then choose Pair This \(device)\u{2026} again."
+            String(localized: "Unlock \(mac), then choose Pair This \(device)\u{2026} again.")
         }
         static func openOnMac(mac: String) -> String {
-            "\(mac) didn\u{2019}t show a code. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap \(mac) again."
+            String(localized: "\(mac) didn\u{2019}t show a code. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap \(mac) again.")
         }
-        static func locked(mac: String) -> String { "Unlock \(mac), then tap it again." }
-        static func removed(mac: String, device: String) -> String { "\(mac) removed this \(device). Tap it to pair again." }
+        static func locked(mac: String) -> String { String(localized: "Unlock \(mac), then tap it again.") }
+        static func removed(mac: String, device: String) -> String { String(localized: "\(mac) removed this \(device). Tap it to pair again.") }
         /// Another key answered as the saved Mac and no other row of it was left (`afterPinRefused`).
         static func newKey(mac: String, device: String) -> String {
-            "\(mac) has a new key since this \(device) paired. Tap it to pair again."
+            String(localized: "\(mac) has a new key since this \(device) paired. Tap it to pair again.")
         }
         static func pairingRequired(mac: String, device: String) -> String {
-            "\(mac) now asks devices to pair. Tap it to pair this \(device)."
+            String(localized: "\(mac) now asks devices to pair. Tap it to pair this \(device).")
         }
         /// The home card's errors, under its field or in its place (`homeRefusal`). After a stop
         /// or a closed code the Mac keeps this device quiet (a cancel on the Mac, a stop), so the
         /// words send the person to its menu first; after an expiry a tap is enough.
         static func stopped(mac: String) -> String {
-            "\(mac) stopped pairing after too many wrong codes. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap \(mac) again."
+            String(localized: "\(mac) stopped pairing after too many wrong codes. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap \(mac) again.")
         }
-        static func expired(mac: String) -> String { "That code expired. Tap \(mac) for a new one." }
+        static func expired(mac: String) -> String { String(localized: "That code expired. Tap \(mac) for a new one.") }
         static func closed(mac: String) -> String {
-            "That code no longer works. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap \(mac) again."
+            String(localized: "That code no longer works. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap \(mac) again.")
         }
         static func proofFailed(mac: String) -> String {
-            "Pairing didn\u{2019}t finish: \(mac) couldn\u{2019}t show it knows the code. Tap it to try again."
+            String(localized: "Pairing didn\u{2019}t finish: \(mac) couldn\u{2019}t show it knows the code. Tap it to try again.")
         }
         /// Nothing answered the ask or a proof at the row (it went, or Sill quit meanwhile).
-        static func noAnswer(mac: String) -> String { "\(mac) didn\u{2019}t answer. Check that Sill is open on it, then tap it again." }
+        static func noAnswer(mac: String) -> String { String(localized: "\(mac) didn\u{2019}t answer. Check that Sill is open on it, then tap it again.") }
     }
 }

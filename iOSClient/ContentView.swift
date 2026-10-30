@@ -1100,9 +1100,9 @@ struct ConnectScreen: View {
     /// "Pair with Mac mini" over the home card; "Add a Mac" over Add a Mac and an outside link's
     /// confirmation.
     private var title: String {
-        if client.pendingLink != nil || adding { return "Add a Mac" }
+        if client.pendingLink != nil || adding { return String(localized: "Add a Mac") }
         if let mac = homeCard { return DiscoveryPolicy.HomeCopy.cardTitle(mac: mac) }
-        return "Connect to a Mac"
+        return String(localized: "Connect to a Mac")
     }
 
     private var device: String { StreamClient.deviceWord }
@@ -1228,7 +1228,7 @@ struct ConnectScreen: View {
 
     /// Not the idle "Looking for Macs…" lines, which change as the search does.
     private func announce(_ line: String) {
-        guard !line.isEmpty, line != StreamClient.lookingOnNetwork, line != StreamClient.lookingNearby else { return }
+        guard !line.isEmpty, !client.statusKind.isQuietSearch else { return }
         AccessibilityNotification.Announcement(line).post()
     }
 
@@ -1291,7 +1291,7 @@ struct ConnectScreen: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel(style == .tiles ? "Show as list" : "Show as tiles")
+                        .accessibilityLabel(style == .tiles ? String(localized: "Show as list") : String(localized: "Show as tiles"))
                     }
                 }
 
@@ -1334,7 +1334,7 @@ struct ConnectScreen: View {
         // A Mac that no longer serves this version said so (GoodbyePolicy's "update", its words the
         // status line above): where to get the new one, while the status line still says why. Not
         // before Sill's App Store address is known (SillLinks): the words say what to do anyway.
-        if let notice = client.notice, notice.storeLink, notice.text == client.status, let url = SillLinks.appStore {
+        if let notice = client.notice, notice.storeLink, let url = SillLinks.appStore {
             Link(destination: url) {
                 Text("Update Sill in the App Store")
                     .font(.system(size: 15, weight: .semibold))
@@ -1399,7 +1399,7 @@ struct ConnectScreen: View {
                 Button(action: {
                     client.searchNearby()
                     // The button leaves from under VoiceOver's cursor: say what it started.
-                    AccessibilityNotification.Announcement("Also looking nearby").post()
+                    AccessibilityNotification.Announcement(String(localized: "Also looking nearby")).post()
                 }) {
                     Text("Search Nearby")
                         .font(.system(size: 15, weight: .semibold))
@@ -1452,12 +1452,12 @@ struct ConnectScreen: View {
                     Label("New Group…", systemImage: "folder.badge.plus")
                 }
             } label: {
-                Label(currentGroup.map { "Group: \($0)" } ?? "Group", systemImage: "folder")
+                Label(currentGroup.map { String(localized: "Group: \($0)") } ?? String(localized: "Group"), systemImage: "folder")
             }
             Button {
                 toggleStyle()
             } label: {
-                Label(style == .tiles ? "Show as List" : "Show as Tiles",
+                Label(style == .tiles ? String(localized: "Show as List") : String(localized: "Show as Tiles"),
                       systemImage: style == .tiles ? "list.bullet" : "square.grid.2x2")
             }
             if style == .tiles, client.macPreviews[id] != nil {
@@ -1499,11 +1499,11 @@ struct ConnectScreen: View {
     }
 
     private func rowLabel(_ mac: FoundMac) -> String {
-        mac.route == .remote ? "\(mac.name), Remote" : mac.homeWord.label(name: mac.name)
+        mac.route == .remote ? String(localized: "\(mac.name), Remote") : mac.homeWord.label(name: mac.name)
     }
 
     private func rowHint(_ mac: FoundMac) -> String {
-        mac.route == .remote ? "Connects through your VPN or the internet."
+        mac.route == .remote ? String(localized: "Connects through your VPN or the internet.")
             : mac.homeWord.hint(name: mac.name, device: device, direct: mac.direct)
     }
 
