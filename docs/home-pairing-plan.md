@@ -1227,6 +1227,12 @@ New attention items (first group, orange):
 
 - **An outside link** (`onOpenURL`, after its confirmation) goes the same way: to the row whose
   asked key it names, else the home rows pinned to its key, then its addresses, as today.
+- **The record** a code scanned or a link confirmed pairs at the home door (`savePairedAtHome`)
+  keeps that link's addresses and port until the session's first verified kind 18 replaces them
+  (`SavedMacs.applyingLink`, #224, 2026-10-28): before, it had none and the default port until
+  then, so a person who left before it came had a Remote row with nothing to dial. A window a
+  device's ask opened lists no addresses, so that record gets the port alone. The link's own
+  addresses are dialed only by the rows' path above, when no row answers, as before.
 - **Pair This ‹iPad›…** (the panel's overlay; now only in an unpaired session while Require
   pairing is off): the ask on a `sill-pair/1` connection of its own to the session's endpoint,
   pinned to the key the session saw, never claiming the cable (`askOverStream`), and the line under

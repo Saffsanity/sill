@@ -774,6 +774,11 @@ enum DiscoveryPolicy {
         /// Asks for it once the closed window's wait has passed (two seconds and the worst recent round
         /// trip), unless the person picked or launched something meanwhile (StreamClient).
         case askAfterWait
+        /// Asks for it again in this many seconds, when the spacing since the last automatic request
+        /// ends: that request brought no stream that lasted (the Mac could not start the Desktop, the
+        /// black screen of 2026-10-28, or stopped it within the spacing) and the person chose nothing
+        /// since. One re-check, which StreamClient keeps and `autoDesktopRecheck` judges when it comes due.
+        case askIn(Double)
         /// Nothing.
         case leave
     }
@@ -789,13 +794,30 @@ enum DiscoveryPolicy {
     /// send); after the closed window's wait when a window it watched has left the list (a window can
     /// leave it for a second or two: a Space change, full screen); never when that window is still
     /// listed, a pick that failed, which is the person's to retry. Never within `autoDesktopSpacing` of
-    /// the last automatic request (`sinceLastAuto`).
-    static func autoDesktop(watched: Watched, sinceLastAuto: Double) -> AutoDesktop {
-        guard sinceLastAuto > autoDesktopSpacing else { return .leave }
+    /// the last automatic request (`sinceLastAuto`): within it, watching nothing or the Desktop, the
+    /// device asks again once the spacing ends (`askIn`), when the person chose nothing since that
+    /// request (`choseSinceLastAuto`: a pick, a launch, or a pick made again after a move). On
+    /// 2026-10-28 the Mac could not start the Desktop the device asked for on its first list, its
+    /// next lists came within the spacing, and nothing asked again: the panel stayed black until the
+    /// person left. A clock set back waits the spacing, never longer.
+    static func autoDesktop(watched: Watched, sinceLastAuto: Double, choseSinceLastAuto: Bool) -> AutoDesktop {
+        let spaced = sinceLastAuto > autoDesktopSpacing
         switch watched {
-        case .nothing, .desktop: return .ask
-        case .window(let listed): return listed ? .leave : .askAfterWait
+        case .nothing, .desktop:
+            if spaced { return .ask }
+            return choseSinceLastAuto ? .leave : .askIn(min(autoDesktopSpacing, autoDesktopSpacing - sinceLastAuto))
+        case .window(let listed):
+            guard spaced else { return .leave }
+            return listed ? .leave : .askAfterWait
         }
+    }
+
+    /// The re-check `askIn` set, come due: the Desktop again only while nothing streams still, the
+    /// person chose nothing since it was set, and no other automatic request went out (each starts its
+    /// own spacing, and its own re-check). So a Desktop that failed is asked for once more 10 s after,
+    /// and a Mac that keeps failing every 10 s, never faster.
+    static func autoDesktopRecheck(nothingStreams: Bool, choseSince: Bool, askedSince: Bool) -> Bool {
+        nothingStreams && !choseSince && !askedSince
     }
 
     /// The memory after a state from `mac`: true moves it to the front, false removes it, nil (an

@@ -96,8 +96,8 @@ package struct HostConfig: Equatable, Sendable {
     /// exposure. 7455 is unassigned at IANA and below the ephemeral range. Away from home, Low ·
     /// Standard (Noah, 2026-09-25): a slow connection never starts at the home quality. Require
     /// pairing on: a home door that speaks TLS admits only paired devices until the Mac's user says
-    /// otherwise. Share clipboard with devices on (2026-10-14): each device has its own switch too, and
-    /// a password manager's copies never go. Send Audio off here; Sill.app's is on since 2026-10-27
+    /// otherwise. Share clipboard with devices on (2026-10-14): each device has its own switch too.
+    /// Send Audio off here; Sill.app's is on since 2026-10-27
     /// (`app`).
     package static let standard = HostConfig(maxFPS: 120, captureScale: 2, bitrate: 15_000_000,
                                              awayBitrate: 4_000_000, awayCaptureScale: 1,

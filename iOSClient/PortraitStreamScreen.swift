@@ -279,7 +279,8 @@ struct PortraitStreamScreen: View {
 
             TextScaleControl(scale: $textScale, open: $scaleOpen,
                              width: metrics.buttonWidth, height: metrics.buttonHeight,
-                             radius: metrics.buttonRadius, pointsPerStep: 36)
+                             radius: metrics.buttonRadius, pointsPerStep: 36,
+                             offered: client.textScaleOffersOff, available: client.textScaleSelectable)
                 .tourTarget(.textSize)
 
             desktopButton()
@@ -402,7 +403,8 @@ struct PortraitStreamScreen: View {
             TextScaleControl(scale: $textScale, open: $scaleOpen,
                              width: width, height: layout.row1.height,
                              radius: metrics.buttonRadius, pointsPerStep: menus ? layout.rulerStepBesideMenus : layout.rulerStep,
-                             iconBox: PortraitMetrics.phoneIconBox, iconSpacing: metrics.buttonSpacing)
+                             iconBox: PortraitMetrics.phoneIconBox, iconSpacing: metrics.buttonSpacing,
+                             offered: client.textScaleOffersOff, available: client.textScaleSelectable)
                 .tourTarget(.textSize)
 
             barButton(open: keyboardShown, symbol: "keyboard", label: "Keyboard", width: width,
@@ -468,6 +470,7 @@ struct PortraitStreamScreen: View {
                          latchedModifiers: latched,
                          onModifiersConsumed: { latched = [] },
                          sendGesture: { client.sendGesture($0, fingers: $1) },
+                         macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
                          readZoom: { [zoom] in zoom.zoom },
                          writeZoom: { [zoom] in zoom.set($0) },
                          magnifyAvailable: { client.hostMagnify != nil })
@@ -702,6 +705,20 @@ private extension View {
 
 // MARK: - Key row
 
+/// A key row cap that is held (HeldCap): dimmed while a finger is on it, and its press told as it
+/// begins and ends (the Button's own pressed state), so its key is down on the Mac from the touch to
+/// the release. The Button's action (which also ends a press whose end was not told), the Large Content
+/// Viewer and the accessibility activation are the Button's, as for every other cap.
+private struct HeldCapStyle: ButtonStyle {
+    let pressed: (Bool) -> Void
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.5 : 1)
+            .onChange(of: configuration.isPressed) { _, isPressed in pressed(isPressed) }
+    }
+}
+
 /// One cap in the key row, as data, so each layout can pick its own set and fold it.
 private enum Key {
     /// A key that types itself: the cap's text, its HID usage, its accessibility label.
@@ -732,7 +749,9 @@ private enum Key {
 /// 44 pt caps do not fit across 472 pt, six and then six, 72 pt wide at 500 pt. On a phone
 /// (`.phone`): escape, tab and the four modifiers, six caps across the row; the Keyboard button is
 /// in row 1, and Spotlight is cmd then space on the keyboard (a latched ⌘ turns a typed space into
-/// ⌘Space). Arrows there come from a hardware keyboard.
+/// ⌘Space). Arrows there come from a hardware keyboard. Escape, tab and the arrows are down on the
+/// Mac while a finger holds them, so the Mac repeats them (HeldCap, #162), but for the phone's at the
+/// accessibility text sizes, whose long press shows the cap large (`capsHold`).
 private struct KeyRow: View {
     enum Keys { case full, phone }
 
@@ -745,6 +764,13 @@ private struct KeyRow: View {
     /// Spotlight's panel is its own Mac window, so it only shows up in the stream while the whole
     /// desktop is the source. Anywhere else the key would be a cap that does something invisible.
     let showSpotlight: Bool
+    /// Escape, tab or an arrow held down (HeldCap): its key is down on the Mac until the finger leaves.
+    @State private var heldCap = HeldCap()
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// Whether escape, tab and the arrows are held from the touch to the release: everywhere but where a
+    /// long press shows a cap large (the phone's caps at the accessibility text sizes), so that long press
+    /// stays a look, a tap at its release as before, and never a key held down and repeating on the Mac.
+    private var capsHold: Bool { !(keys == .phone && dynamicTypeSize.isAccessibilitySize) }
 
     private static let all: [Key] = [
         .press("esc", HIDKey.escape, "Escape"),
@@ -791,6 +817,9 @@ private struct KeyRow: View {
             }
         }
         .frame(height: metrics.keyBlockHeight)
+        // Gone from the screen (a turn, the stream's end) with a cap held: no release comes, so it
+        // comes up here.
+        .onDisappear { heldCap.releaseAll().forEach(send) }
         #if DEBUG
         .onAppear(perform: runInputTest)
         #endif
@@ -798,10 +827,11 @@ private struct KeyRow: View {
 
     @ViewBuilder private func key(_ key: Key) -> some View {
         switch key {
-        case .press(let title, _, let label):
-            cap(open: false, label: label, largeContent: title, action: { tap(key) }) { text(title) }
-        case .arrow(let symbol, _, let label):
-            cap(open: false, label: label, action: { tap(key) }) {
+        case .press(let title, let usage, let label):
+            cap(open: false, label: label, largeContent: title, held: capsHold ? { touch(usage, down: $0) } : nil,
+                action: { activate(usage) }) { text(title) }
+        case .arrow(let symbol, let usage, let label):
+            cap(open: false, label: label, held: capsHold ? { touch(usage, down: $0) } : nil, action: { activate(usage) }) {
                 Image(systemName: symbol)
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Palette.text)
@@ -825,7 +855,27 @@ private struct KeyRow: View {
         }
     }
 
-    /// What a tap on each cap does.
+    /// A finger landed on escape, tab or an arrow, or left it (HeldCap): its key down with what is
+    /// latched, which is spent, or its key up.
+    private func touch(_ usage: UInt16, down: Bool) {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard down else { heldCap.touchUp(usage, at: now).forEach(send); return }
+        let events = heldCap.touchDown(usage, latched: latched, at: now)
+        events.forEach(send)
+        if HeldCap.spendsLatch(events) { latched = [] }
+    }
+
+    /// Escape's, tab's or an arrow's action: nothing after a finger's touch (its key went down and up
+    /// with it; or its up, if the press's end was not told yet); from VoiceOver, Switch Control, Voice
+    /// Control or a keyboard, or where the caps do not hold (`capsHold`), the whole press, as `tap`.
+    private func activate(_ usage: UInt16) {
+        let events = heldCap.activated(usage, latched: latched, at: ProcessInfo.processInfo.systemUptime)
+        events.forEach(send)
+        if HeldCap.spendsLatch(events) { latched = [] }
+    }
+
+    /// What a tap on each cap does (escape, tab and the arrows: a whole press at once, as an assistive
+    /// technology's activation sends it).
     private func tap(_ key: Key) {
         switch key {
         case .press(_, let usage, _), .arrow(_, let usage, _):
@@ -844,19 +894,27 @@ private struct KeyRow: View {
     // MARK: Caps
 
     /// `largeContent`: the cap's text, which the phone's caps (fixed in size, as the row is) show
-    /// large on a long press at the accessibility text sizes.
+    /// large on a long press at the accessibility text sizes. `held`: told when a finger's press on the
+    /// cap begins and ends (escape, tab and the arrows: HeldCap); the other caps act on their tap alone.
     @ViewBuilder
     private func cap<Content: View>(open: Bool, label: String, largeContent: String? = nil,
+                                    held: ((Bool) -> Void)? = nil,
                                     action: @escaping () -> Void,
                                     @ViewBuilder content: () -> Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: 11, style: .continuous)
-        let button = Button(action: action) {
+        let base = Button(action: action) {
             content()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(shape.fill(open ? Palette.controlOpen : Palette.control))
                 .contentShape(shape)
         }
-        .buttonStyle(.plain)
+        let button = Group {
+            if let held {
+                base.buttonStyle(HeldCapStyle(pressed: held))
+            } else {
+                base.buttonStyle(.plain)
+            }
+        }
         .accessibilityLabel(label)
         if keys == .phone, let largeContent {
             button.accessibilityShowsLargeContentViewer { Text(largeContent) }

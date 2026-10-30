@@ -36,6 +36,7 @@
 		A1000001000000000000AC64 /* StreamClient+Clipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FC64 /* StreamClient+Clipboard.swift */; };
 		A1000001000000000000AD64 /* ClipboardChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FD64 /* ClipboardChip.swift */; };
 		A1000001000000000000AE65 /* StreamZoom.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FE65 /* StreamZoom.swift */; };
+		A1000001000000000000A113 /* ThumbnailHold.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F113 /* ThumbnailHold.swift */; };
 		A1000001000000000000A014 /* DiscoveryPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F014 /* DiscoveryPolicy.swift */; };
 		A1000001000000000000A015 /* SessionLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F015 /* SessionLink.swift */; };
 		A1000001000000000000A020 /* MessageReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F020 /* MessageReader.swift */; };
@@ -98,6 +99,7 @@
 		A1000001000000000000FC64 /* StreamClient+Clipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StreamClient+Clipboard.swift"; sourceTree = "<group>"; };
 		A1000001000000000000FD64 /* ClipboardChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardChip.swift; sourceTree = "<group>"; };
 		A1000001000000000000FE65 /* StreamZoom.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamZoom.swift; sourceTree = "<group>"; };
+		A1000001000000000000F113 /* ThumbnailHold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailHold.swift; sourceTree = "<group>"; };
 		A1000001000000000000F014 /* DiscoveryPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryPolicy.swift; sourceTree = "<group>"; };
 		A1000001000000000000F015 /* SessionLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionLink.swift; sourceTree = "<group>"; };
 		A1000001000000000000F020 /* MessageReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageReader.swift; sourceTree = "<group>"; };
@@ -159,6 +161,7 @@
 				A1000001000000000000FC64 /* StreamClient+Clipboard.swift */,
 				A1000001000000000000FD64 /* ClipboardChip.swift */,
 				A1000001000000000000FE65 /* StreamZoom.swift */,
+				A1000001000000000000F113 /* ThumbnailHold.swift */,
 				A1000001000000000000F402 /* TourOverlay.swift */,
 				A1000001000000000000F401 /* TourPolicy.swift */,
 				A1000001000000000000FB01 /* DuoPosture.swift */,
@@ -313,6 +316,7 @@
 				A1000001000000000000AC64 /* StreamClient+Clipboard.swift in Sources */,
 				A1000001000000000000AD64 /* ClipboardChip.swift in Sources */,
 				A1000001000000000000AE65 /* StreamZoom.swift in Sources */,
+				A1000001000000000000A113 /* ThumbnailHold.swift in Sources */,
 				A1000001000000000000A402 /* TourOverlay.swift in Sources */,
 				A1000001000000000000A401 /* TourPolicy.swift in Sources */,
 				A1000001000000000000AB01 /* DuoPosture.swift in Sources */,
@@ -502,7 +506,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.5.1;
+				MARKETING_VERSION = 0.5.5;
 				PRODUCT_BUNDLE_IDENTIFIER = me.saffer.sill;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -534,7 +538,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.5.1;
+				MARKETING_VERSION = 0.5.5;
 				PRODUCT_BUNDLE_IDENTIFIER = me.saffer.sill;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

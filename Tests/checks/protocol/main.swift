@@ -596,5 +596,75 @@ check("magnify: a window list without it says nil (a host before it)", magnifyLi
 magnifyList.magnify = Magnify.generation
 check("magnify: a window list carries the generation", Wire.decode(WindowList.self, from: Wire.encode(magnifyList))?.magnify == 1)
 
+// MARK: - Aa's detents (issue #179): Off is a detent of its own, and leaving it for a scale or back is a fit
+check("text scale: with Off offered the ruler is Off, 0.5, 0.75, 1, 1.25, 1.5", TextScale.detents(offered: true) == [0.25, 0.5, 0.75, 1.0, 1.25, 1.5])
+check("text scale: without Off (the virtual display) it is the five scales", TextScale.detents(offered: false) == [0.5, 0.75, 1.0, 1.25, 1.5])
+check("text scale: an untouched Aa (no scale) sits on Off, so it no longer reads 1×", TextScale.position(of: nil, offered: true) == TextScale.off)
+check("text scale: an untouched Aa without Off sits on 1×", TextScale.position(of: nil, offered: false) == 1.0)
+check("text scale: a scale sits on its own detent", TextScale.position(of: 1.25, offered: true) == 1.25)
+check("text scale: Off stands for no scale; a scale for itself", TextScale.scale(at: TextScale.off) == nil && TextScale.scale(at: 1.0) == 1.0 && TextScale.scale(at: 0.5) == 0.5)
+check("text scale: 1× and Off are told apart in the title", TextScale.title(at: 1.0) == "1×" && TextScale.title(at: TextScale.off) == "Off")
+check("text scale: titles drop trailing zeros", TextScale.title(at: 0.75) == "0.75×" && TextScale.title(at: 1.5) == "1.5×" && TextScale.title(at: 0.5) == "0.5×")
+check("text scale: VoiceOver says Off, or the scale in times", TextScale.spoken(at: TextScale.off) == "Off" && TextScale.spoken(at: 1.25) == "1.25 times")
+check("text scale: a drag below 0.5 snaps to Off when offered", TextScale.snap(0.3, offered: true) == TextScale.off && TextScale.snap(0.4, offered: true) == 0.5)
+check("text scale: a drag below 0.5 stays at 0.5 without Off", TextScale.snap(0.1, offered: false) == 0.5)
+check("text scale: a drag past 1.5 stops at 1.5", TextScale.snap(9, offered: true) == 1.5)
+check("text scale: a drag snaps to the nearest detent", TextScale.snap(1.1, offered: true) == 1.0 && TextScale.snap(1.2, offered: true) == 1.25)
+check("text scale: decrement from 0.5 reaches Off, and stops there", TextScale.step(from: 0.5, up: false, offered: true) == TextScale.off && TextScale.step(from: TextScale.off, up: false, offered: true) == TextScale.off)
+check("text scale: decrement from 0.5 stops at 0.5 without Off", TextScale.step(from: 0.5, up: false, offered: false) == 0.5)
+check("text scale: increment from Off reaches 0.5, and stops at 1.5", TextScale.step(from: TextScale.off, up: true, offered: true) == 0.5 && TextScale.step(from: 1.5, up: true, offered: true) == 1.5)
+check("text scale: a scale then none ends the fit", TextScale.endsFit(from: 1.0, to: nil))
+check("text scale: none then none, a scale then a scale, and none then a scale do not", !TextScale.endsFit(from: nil, to: nil) && !TextScale.endsFit(from: 1.0, to: 0.5) && !TextScale.endsFit(from: nil, to: 1.0))
+// Every detent stands for one thing and comes back to its place; only Off stands for no scale, so no
+// scale of 0.25 (Off's place) ever reaches the Mac.
+for offered in [true, false] {
+    let detents = TextScale.detents(offered: offered)
+    check("text scale (Off \(offered ? "offered" : "not offered")): every detent comes back to its place",
+          detents.allSatisfy { TextScale.position(of: TextScale.scale(at: $0), offered: offered) == $0 })
+    check("text scale (Off \(offered ? "offered" : "not offered")): only Off is no scale, and every scale is 0.5 to 1.5",
+          detents.filter { TextScale.scale(at: $0) == nil } == (offered ? [TextScale.off] : [])
+            && detents.compactMap { TextScale.scale(at: $0) }.allSatisfy { $0 >= 0.5 && $0 <= 1.5 })
+    check("text scale (Off \(offered ? "offered" : "not offered")): each detent snaps to itself, and a step up then down comes back",
+          detents.allSatisfy { TextScale.snap($0, offered: offered) == $0 }
+            && detents.dropLast().allSatisfy { TextScale.step(from: TextScale.step(from: $0, up: true, offered: offered), up: false, offered: offered) == $0 })
+}
+check("text scale: the ruler's titles left to right", TextScale.detents(offered: true).map(TextScale.title(at:)) == ["Off", "0.5×", "0.75×", "1×", "1.25×", "1.5×"])
+// Off only where no scale leaves the window alone: not with the Mac's virtual display on, where no
+// scale is 1× (an untouched Aa there reads 1×).
+check("text scale: Off offered with the virtual display off", TextScale.offersOff(virtualDisplay: false))
+check("text scale: Off offered before the Mac said (an older Mac, the state not in yet)", TextScale.offersOff(virtualDisplay: nil))
+check("text scale: no Off with the virtual display on", !TextScale.offersOff(virtualDisplay: true)
+      && TextScale.position(of: nil, offered: TextScale.offersOff(virtualDisplay: true)) == 1.0)
+// While a window streams, where it streams decides (the review, 2026-10-29): Virtual Display on with the
+// window streaming in place (the virtual display not available on that macOS, off for the session, or a
+// staging that failed) leaves it alone with no scale, so Off is offered and an untouched Aa reads Off;
+// a window still on the virtual display after the setting went off reads 1× until it restarts.
+let aWindow = StreamSource.window(102)
+check("text scale: Off with Virtual Display on when the window streams in place", TextScale.offersOff(virtualDisplay: true, streaming: aWindow, onVirtualDisplay: false)
+      && TextScale.position(of: nil, offered: TextScale.offersOff(virtualDisplay: true, streaming: aWindow, onVirtualDisplay: false)) == TextScale.off)
+check("text scale: no Off while the window streams on the virtual display", !TextScale.offersOff(virtualDisplay: true, streaming: aWindow, onVirtualDisplay: true)
+      && !TextScale.offersOff(virtualDisplay: false, streaming: aWindow, onVirtualDisplay: true) && !TextScale.offersOff(virtualDisplay: nil, streaming: aWindow, onVirtualDisplay: true))
+check("text scale: Off while the window streams in place, whatever the setting says", TextScale.offersOff(virtualDisplay: false, streaming: aWindow, onVirtualDisplay: false)
+      && TextScale.offersOff(virtualDisplay: nil, streaming: aWindow, onVirtualDisplay: false))
+check("text scale: a window the Mac has not reported yet goes by the setting", TextScale.offersOff(virtualDisplay: false, streaming: aWindow, onVirtualDisplay: nil)
+      && !TextScale.offersOff(virtualDisplay: true, streaming: aWindow, onVirtualDisplay: nil) && TextScale.offersOff(virtualDisplay: nil, streaming: aWindow, onVirtualDisplay: nil))
+// The Desktop's running stream, or nothing's, says nothing of where a window goes (the review, 2026-10-29):
+// the setting decides there, so a dimmed Aa over the Desktop keeps the reading the next window will have:
+// 1× with Virtual Display on, though the Desktop's stream is never on the virtual display.
+check("text scale: over the Desktop or nothing the setting decides, whatever their stream says",
+      [StreamSource.desktop, .none].allSatisfy { s in
+          [Bool?.none, false, true].allSatisfy { on in
+              !TextScale.offersOff(virtualDisplay: true, streaming: s, onVirtualDisplay: on)
+                  && TextScale.offersOff(virtualDisplay: false, streaming: s, onVirtualDisplay: on)
+                  && TextScale.offersOff(virtualDisplay: nil, streaming: s, onVirtualDisplay: on) } })
+check("text scale: the Desktop with Virtual Display on reads 1× untouched, as the next window will",
+      TextScale.position(of: nil, offered: TextScale.offersOff(virtualDisplay: true, streaming: .desktop, onVirtualDisplay: false)) == 1.0)
+// Aa only while a window streams (Noah, 2026-10-29: "it should not be selectable while you are in
+// desktop mode, misleading"): the Mac sizes a window, never the Desktop.
+check("text scale: Aa can be used while a window streams", TextScale.selectable(streaming: .window(102)) && TextScale.selectable(streaming: .window(0)))
+check("text scale: not while the Desktop streams", !TextScale.selectable(streaming: .desktop))
+check("text scale: not while nothing streams", !TextScale.selectable(streaming: .none))
+check("text scale: VoiceOver hears a dimmed Aa is for a window", TextScale.unavailableHint == "Available for a window.")
+
 print(fails == 0 ? "ALL PASS (\(passes) checks)" : "\(fails) FAILED of \(passes + fails)")
 exit(Int32(min(fails, 100)))

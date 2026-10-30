@@ -208,14 +208,131 @@ func afterSleepPolicy() {
     // MARK: The Desktop after a stop
 
     typealias W = DiscoveryPolicy.Watched
-    check("autoDesktop: nothing watched (a connection's first list): the Desktop at once", P.autoDesktop(watched: .nothing, sinceLastAuto: 1e9) == .ask)
-    check("autoDesktop: the Desktop the Mac stopped: asked for again at once", P.autoDesktop(watched: .desktop, sinceLastAuto: 30) == .ask)
-    check("autoDesktop: a window that left the list: after the closed window's wait",
-          P.autoDesktop(watched: .window(listed: false), sinceLastAuto: 30) == .askAfterWait)
-    check("autoDesktop: a window still listed (a pick that failed): left to the person",
-          P.autoDesktop(watched: .window(listed: true), sinceLastAuto: 30) == .leave)
-    check("autoDesktop: never within 10 s of the last automatic request",
-          [W.nothing, .desktop, .window(listed: false), .window(listed: true)].allSatisfy {
-              P.autoDesktop(watched: $0, sinceLastAuto: 10) == .leave && P.autoDesktop(watched: $0, sinceLastAuto: 0) == .leave })
-    check("autoDesktop: just past 10 s it asks", P.autoDesktop(watched: .desktop, sinceLastAuto: 10.001) == .ask)
+    let allWatched: [W] = [.nothing, .desktop, .window(listed: false), .window(listed: true)]
+    func auto(_ w: W, _ since: Double, chose: Bool = false) -> P.AutoDesktop { P.autoDesktop(watched: w, sinceLastAuto: since, choseSinceLastAuto: chose) }
+    check("autoDesktop: nothing watched (a connection's first list): the Desktop at once", auto(.nothing, 1e9) == .ask)
+    check("autoDesktop: the Desktop the Mac stopped: asked for again at once", auto(.desktop, 30) == .ask)
+    check("autoDesktop: past the spacing, the person's choices since change nothing",
+          auto(.nothing, 30, chose: true) == .ask && auto(.desktop, 30, chose: true) == .ask
+          && auto(.window(listed: false), 30, chose: true) == .askAfterWait && auto(.window(listed: true), 30, chose: true) == .leave)
+    check("autoDesktop: a window that left the list: after the closed window's wait", auto(.window(listed: false), 30) == .askAfterWait)
+    check("autoDesktop: a window still listed (a pick that failed): left to the person", auto(.window(listed: true), 30) == .leave)
+    check("autoDesktop: never asks at once within 10 s of the last automatic request",
+          allWatched.allSatisfy { w in [0.0, 5, 10].allSatisfy { since in [false, true].allSatisfy { chose in
+              let a = auto(w, since, chose: chose); return a != .ask && a != .askAfterWait } } })
+    check("autoDesktop: a window within the spacing is left as before (no re-check)",
+          [true, false].allSatisfy { listed in [0.0, 5, 10].allSatisfy { auto(.window(listed: listed), $0) == .leave && auto(.window(listed: listed), $0, chose: true) == .leave } })
+    check("autoDesktop: just past 10 s it asks", auto(.desktop, 10.001) == .ask && auto(.nothing, 10.001) == .ask)
+
+    // MARK: The Desktop that did not start (2026-10-28)
+
+    // Sill.app could not start the Desktop the iPad asked for on its first list (a display gone while no
+    // device was connected), and its next lists, 0.18 and 0.25 s after the request, came within the
+    // spacing: nothing asked again, and the panel stayed black for the 7.4 s until Noah left. Now each
+    // sets one re-check when the spacing ends, unless the person chose something since the request.
+    func close(_ a: P.AutoDesktop, _ wait: Double) -> Bool { if case .askIn(let w) = a { return abs(w - wait) < 1e-9 }; return false }
+    check("autoDesktop (2026-10-28): the list 0.18 s after the device's request, nothing streaming: again in 9.82 s", close(auto(.nothing, 0.18), 9.82))
+    check("autoDesktop (2026-10-28): the fresh look's list at 0.25 s: again in 9.75 s", close(auto(.nothing, 0.25), 9.75))
+    check("autoDesktop: the Desktop the Mac stopped within the spacing (issue #69's, 3 s after the request): again in 7 s", close(auto(.desktop, 3), 7))
+    check("autoDesktop: the re-check waits out the spacing to the dot", close(auto(.nothing, 0), 10) && close(auto(.nothing, 10), 0)
+          && close(auto(.desktop, 9.99), 0.01))
+    check("autoDesktop: a clock set back waits the spacing, never longer", close(auto(.nothing, -5), 10) && close(auto(.desktop, -1e9), 10))
+    check("autoDesktop: no re-check once the person chose since the request (a pick, a launch, a pick made again after a move)",
+          [W.nothing, .desktop].allSatisfy { w in [0.0, 0.18, 5, 10].allSatisfy { auto(w, $0, chose: true) == .leave } })
+    check("autoDesktopRecheck: asks only while nothing streams, nobody chose and no other automatic request went out",
+          P.autoDesktopRecheck(nothingStreams: true, choseSince: false, askedSince: false)
+          && [(true, true, false), (true, false, true), (false, false, false), (false, true, true), (true, true, true),
+              (false, true, false), (false, false, true)].allSatisfy { !P.autoDesktopRecheck(nothingStreams: $0.0, choseSince: $0.1, askedSince: $0.2) })
+
+    // A model of the glue (StreamClient's window-list handler, `askForDesktopByItself`, `recheckDesktop`):
+    // the session's lists, the Mac's answer to each Desktop request `answer` s later (a list that streams
+    // the Desktop, or says nothing streams again), the person's picks, a Desktop the Mac stops, the end.
+    // Returns the times the device asked for the Desktop by itself and when the Desktop came.
+    enum Src: Equatable { case none, desktop, window }
+    struct DesktopRun { var asks: [Double] = []; var streamedAt: Double? }
+    func desktopModel(until end: Double, fails: (Int) -> Bool, answer: Double = 0.2, alsoListAt extra: [Double] = [],
+                      picks: [(at: Double, streams: Bool)] = [], stopsAt: [Double] = [], recheck: Bool = true) -> DesktopRun {
+        enum E { case list(Src), pick(Bool), fire(choices: Int, last: Double), stop }
+        var queue: [(at: Double, seq: Int, e: E)] = [], seq = 0
+        func add(_ at: Double, _ e: E) { seq += 1; queue.append((at, seq, e)); queue.sort { ($0.at, $0.seq) < ($1.at, $1.seq) } }
+        var active = Src.none, lastAuto = -Double.infinity, choices = 0, choicesAtLastAuto = 0, asks = 0
+        var pending = false
+        var run = DesktopRun()
+        func askByItself(_ now: Double) {
+            pending = false                       // a re-check of the spacing before is over
+            lastAuto = now; choices += 1; choicesAtLastAuto = choices
+            run.asks.append(now)
+            let failed = fails(asks); asks += 1
+            add(now + answer, .list(failed ? .none : .desktop))
+        }
+        add(0, .list(.none))                      // the connection's first list
+        for t in extra { add(t, .list(.none)) }   // a list nothing asked for (the fresh look's 3 → 4 windows)
+        for p in picks { add(p.at, .pick(p.streams)) }
+        for t in stopsAt { add(t, .stop) }
+        while let next = queue.first, next.at <= end {
+            queue.removeFirst()
+            let now = next.at
+            switch next.e {
+            case .list(let src):
+                let previous = active; active = src
+                if src == .desktop, run.streamedAt == nil { run.streamedAt = now }
+                guard src == .none else { break }
+                let watched: W = previous == .none ? .nothing : (previous == .desktop ? .desktop : .window(listed: true))
+                switch P.autoDesktop(watched: watched, sinceLastAuto: now - lastAuto, choseSinceLastAuto: choices != choicesAtLastAuto) {
+                case .ask: askByItself(now)
+                case .askIn(let wait):
+                    if recheck, !pending { pending = true; add(now + wait, .fire(choices: choices, last: lastAuto)) }
+                case .askAfterWait, .leave: break
+                }
+            case .pick(let streams):
+                choices += 1
+                add(now + answer, .list(streams ? .window : .none))
+            case .fire(let c, let last):
+                guard pending, last == lastAuto else { break }    // cancelled: a newer request's spacing
+                pending = false
+                if P.autoDesktopRecheck(nothingStreams: active == .none, choseSince: choices != c, askedSince: lastAuto != last) { askByItself(now) }
+            case .stop:
+                if active == .desktop { add(now, .list(.none)) }   // ScreenCaptureKit stopped it: the host selects nothing
+            }
+        }
+        return run
+    }
+    // 2026-10-28, the Mac's first start failing (before its own fix; any later one streams), its lists at
+    // 0.2 and 0.25 s: the device asks again 10 s after its first request, and the Desktop comes.
+    func at(_ a: [Double], _ b: [Double]) -> Bool { a.count == b.count && zip(a, b).allSatisfy { abs($0 - $1) < 1e-6 } }
+    func at(_ a: Double?, _ b: Double) -> Bool { a.map { abs($0 - b) < 1e-6 } ?? false }
+    let blackScreen = desktopModel(until: 60, fails: { $0 == 0 }, alsoListAt: [0.25])
+    check("Desktop model (2026-10-28): asked at 0 s, and once more at 10 s", at(blackScreen.asks, [0, 10]))
+    check("Desktop model (2026-10-28): the Desktop streams 0.2 s after the second ask", at(blackScreen.streamedAt, 10.2))
+    let before = desktopModel(until: 600, fails: { $0 == 0 }, alsoListAt: [0.25], recheck: false)
+    check("Desktop model, the rule before the re-check: one ask, and nothing streams for good (the black screen)",
+          at(before.asks, [0]) && before.streamedAt == nil)
+    // The Mac's own fix (it looks again and tries once more): the first request streams; nothing more asked.
+    let fixedMac = desktopModel(until: 60, fails: { _ in false }, alsoListAt: [0.1])
+    check("Desktop model: a Mac that starts it: one ask, no re-check fires", at(fixedMac.asks, [0]) && at(fixedMac.streamedAt, 0.2))
+    // A Mac that cannot start the Desktop at all: asked every 10 s, never faster.
+    let neverStarts = desktopModel(until: 95, fails: { _ in true }, alsoListAt: [0.25])
+    check("Desktop model: a Mac that keeps failing is asked every 10 s", at(neverStarts.asks, stride(from: 0.0, through: 90, by: 10).map { $0 }))
+    check("Desktop model: never two automatic requests closer than 10 s",
+          zip(neverStarts.asks, neverStarts.asks.dropFirst()).allSatisfy { $1 - $0 >= 10 - 1e-9 })
+    // The person's pick meanwhile, even one that fails, stands the re-check down; one that streams too.
+    let pickedFailing = desktopModel(until: 60, fails: { _ in true }, picks: [(5, false)])
+    check("Desktop model: a person's pick at 5 s (failing too): no ask at 10 s", at(pickedFailing.asks, [0]))
+    let pickedWindow = desktopModel(until: 60, fails: { _ in true }, picks: [(5, true)])
+    check("Desktop model: a person's pick at 5 s that streams a window: no ask after", at(pickedWindow.asks, [0]))
+    // A list that says nothing streams before the Mac has handled the request (a window change in between),
+    // then the Desktop: no ask at 10 s.
+    let slowAnswer = desktopModel(until: 60, fails: { _ in false }, answer: 3, alsoListAt: [0.1])
+    check("Desktop model: a request answered late (a list in between said nothing streams): no second ask",
+          at(slowAnswer.asks, [0]) && at(slowAnswer.streamedAt, 3))
+    // The Desktop the device asked for streams, and the Mac stops it 4 s later (issue #69, within the
+    // spacing): asked for again 10 s after the request, where the rule before left it stopped.
+    let stoppedSoon = desktopModel(until: 60, fails: { _ in false }, stopsAt: [4])
+    check("Desktop model: a Desktop the Mac stopped 4 s after the request: asked for again at 10 s", at(stoppedSoon.asks, [0, 10]))
+    check("Desktop model: the rule before left a Desktop stopped within the spacing stopped",
+          at(desktopModel(until: 60, fails: { _ in false }, stopsAt: [4], recheck: false).asks, [0]))
+    let stoppedLate = desktopModel(until: 60, fails: { _ in false }, stopsAt: [30])
+    check("Desktop model: one stopped past the spacing is asked for at once, as before", at(stoppedLate.asks, [0, 30]))
+    // The session ends at 5 s: nothing after (the tear-down cancels the re-check).
+    check("Desktop model: the session's end at 5 s: no ask after", at(desktopModel(until: 5, fails: { _ in true }).asks, [0]))
 }

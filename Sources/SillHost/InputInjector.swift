@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import QuartzCore
 import CoreGraphics
 import ApplicationServices
@@ -17,7 +18,8 @@ import StreamProtocol
 ///
 /// Every post of a pointer or scroll event is noted in the PointerWatch just before it happens
 /// (`watch`), so the pointer moving under it reads as Sill's own motion, not the Mac's. A synthetic
-/// host posts nothing (`dryRun`).
+/// host posts nothing (`dryRun`). A device's key held down repeats here, as the Mac's own keyboard
+/// repeats a key (KeyRepeat: posted events never repeat by themselves).
 @MainActor
 final class InputInjector {
     /// Two downs of the same button within this time and distance are a double (then triple) click.
@@ -57,8 +59,10 @@ final class InputInjector {
     /// have left in the HID state table, which it would start from ("Test input: left mouse down
     /// (none) at 756,474", a button's with where it goes): what a device's keys leave for its next
     /// click, without posting anything; and the check a key's up arms (`KeyUpCheck`). A scroll event
-    /// says its point deltas and phase ("Test input: scroll dy 12 dx 0, gesture changed (none)"), so a
-    /// test reads which way a device's scroll went (positive dy moves the content down).
+    /// says its point deltas, phase and place ("Test input: scroll dy 12 dx 0, gesture changed (none)
+    /// at 756,474"), so a test reads which way a device's scroll went (positive dy moves the content
+    /// down) and where it lands. A held key's repeat says so ("Test input: key 123 repeat (option)"),
+    /// and its start says when the repeats come ("Test input: key 123 repeats after 0.50 s, every 0.033 s").
     var testLog = false
     /// The flags of the last keyboard event posted (a dry run's: that would have been), which the HID
     /// state table holds by KeyStrokes' inference: the check after a key's up reads the table against
@@ -143,7 +147,8 @@ final class InputInjector {
         switch event.type {
         case .keyDown, .keyUp, .flagsChanged:
             let key = event.getIntegerValueField(.keyboardEventKeycode)
-            what = "key \(key) " + (event.type == .keyDown ? "down" : event.type == .keyUp ? "up" : "flags changed")
+            let repeated = event.type == .keyDown && event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+            what = "key \(key) " + (repeated ? "repeat" : event.type == .keyDown ? "down" : event.type == .keyUp ? "up" : "flags changed")
             print("Test input: \(what) (\(KeyStrokes.names(lastKeyFlags)))")
             return
         case .mouseMoved: what = "pointer move"
@@ -161,8 +166,10 @@ final class InputInjector {
         default: what = "event \(event.type.rawValue)"
         }
         // A button's event says where it goes: a button's up with no source goes where the pointer is.
-        let button = event.type != .mouseMoved && event.type != .scrollWheel
-        let at = button ? " at \(Int(event.location.x.rounded())),\(Int(event.location.y.rounded()))" : ""
+        // So does a scroll event: the window under its location is the one it scrolls, every event of
+        // a gesture (`postScroll`).
+        let placed = event.type != .mouseMoved
+        let at = placed ? " at \(Int(event.location.x.rounded())),\(Int(event.location.y.rounded()))" : ""
         print("Test input: \(what) (\(KeyStrokes.names(lastKeyFlags)))\(at)")
     }
 
@@ -519,8 +526,10 @@ final class InputInjector {
 
     private func type(_ string: String, from device: KeyStrokes.Device) {
         // A device types text with none of its modifier keys down: any it still holds goes up first
-        // (KeyStrokes.text), as the characters carry no flags either.
+        // (KeyStrokes.text), as the characters carry no flags either. Its characters are keys pressed
+        // after the held one, which stops repeating (KeyRepeat).
         post(keys.text(from: device))
+        stopRepeating()
         for character in string {
             switch character {
             case "\n": tap(virtualKey: 36)          // Return
@@ -566,14 +575,19 @@ final class InputInjector {
             Stats.shared.bump("in.unknownKey")
             return
         }
-        post(strokes)
+        post(strokes, by: device)
     }
 
     /// Posts KeyStrokes' events in order, each made from `source` with exactly its flags (a modifier's
     /// own keycode makes a flags-changed event), and has each up checked a quarter of a second later
-    /// (KeyUpCheck: the table read just before each down, a read that needs no permission).
-    private func post(_ strokes: [KeyStroke], letGo: Bool = false) {
+    /// (KeyUpCheck: the table read just before each down, a read that needs no permission). Each is
+    /// told to the repeat (KeyRepeat.posted), `device`'s key down with the Mac's settings now: the
+    /// held key repeats, and stops at its up.
+    private func post(_ strokes: [KeyStroke], letGo: Bool = false, by device: KeyStrokes.Device? = nil) {
+        defer { if !strokes.isEmpty { repeatChanged() } }
         for stroke in strokes {
+            repeating.posted(virtualKey: stroke.virtualKey, down: stroke.down, flags: stroke.flags, by: device,
+                             at: Self.clock(), timing: stroke.down ? Self.macTiming() : nil)
             guard let event = CGEvent(keyboardEventSource: source, virtualKey: stroke.virtualKey, keyDown: stroke.down) else { continue }
             event.flags = CGEventFlags(rawValue: stroke.flags)
             // A dry run reads no table: what it would hold is the last event's flags, none of them the Mac's own.
@@ -600,6 +614,7 @@ final class InputInjector {
     func releaseAll() {
         if magnifyOpen { magnifyOpen = false; postMagnify(.ended, at: magnifyAt, amount: 0) }
         post(keys.releaseAll(), letGo: true)
+        stopRepeating()
         if left.isDown { pointer(.leftUp, at: pointerNow()) }
         if right.isDown { pointer(.rightUp, at: pointerNow()) }
     }
@@ -636,6 +651,92 @@ final class InputInjector {
         }
     }
 
+    // MARK: Key repeat
+
+    /// The held key that repeats (KeyRepeat, pure): the last key a device pressed, after the Mac's
+    /// Delay Until Repeat and at its Key Repeat Rate, until it comes up, another key goes down, its
+    /// device goes quiet or leaves, or input has nowhere to land.
+    private var repeating = KeyRepeat()
+    /// Steps the repeat at the times it names while a key is held (`repeatChanged`): one at a time.
+    private var repeatTask: Task<Void, Never>?
+    /// The press the task steps for (its key and when it went down): another starts the task afresh.
+    private var repeatScheduled: (key: UInt16, pressedAt: Double)?
+    /// When a device was last heard from (StreamServer.lastHeard, set by the coordinator; the same
+    /// clock as `clock`): a held key repeats only while its device is (KeyRepeat.silence). Unset, as
+    /// in the checks' glue, every device counts as heard now.
+    var heardFrom: ((KeyStrokes.Device) -> Double?)?
+    /// Where a repeat would land now (the coordinator's, KeyRepeat.Landing). Unset: on the source.
+    var repeatLanding: (() -> KeyRepeat.Landing)?
+
+    /// The repeat's clock: seconds of system uptime (StreamServer.lastHeard's).
+    static func clock() -> Double { ProcessInfo.processInfo.systemUptime }
+
+    /// The Mac's own Delay Until Repeat and Key Repeat Rate (System Settings › Keyboard), as NSEvent
+    /// reads them now (0.5 s and 1/30 s on the Mac this was built on), or nil when they say no repeat.
+    private static func macTiming() -> KeyRepeat.Timing? {
+        KeyRepeat.timing(delay: NSEvent.keyRepeatDelay, interval: NSEvent.keyRepeatInterval)
+    }
+
+    /// No key repeats any more (text, a gesture's shortcut, the host's end; and the coordinator's:
+    /// input with nowhere to land, a switch dropping what was held). The key stays down on the Mac
+    /// until its up comes.
+    func stopRepeating() {
+        repeating.stop()
+        repeatChanged()
+    }
+
+    /// The held key may have changed (pressed, up, replaced, stopped): the task steps for a new press,
+    /// or ends. A modifier's change to the same press needs nothing: each step reads what it carries.
+    private func repeatChanged() {
+        let now = repeating.held.map { (key: $0.virtualKey, pressedAt: $0.pressedAt) }
+        if let now, let was = repeatScheduled, was.key == now.key, was.pressedAt == now.pressedAt { return }
+        repeatScheduled = now
+        repeatTask?.cancel()
+        repeatTask = nil
+        guard now != nil else { return }
+        if testLog, let held = repeating.held {
+            print("Test input: key \(held.virtualKey) repeats after \(String(format: "%.2f", held.timing.delay)) s, every "
+                  + "\(String(format: "%.3f", held.timing.interval)) s")
+        }
+        // Main actor, inherited from this method, as the scroll watchdog's.
+        repeatTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let wait = self?.repeatStep() else { return }
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            }
+        }
+    }
+
+    /// One step of the held key's repeat now (KeyRepeat.step): a repeat posted or not, and how long
+    /// until the next; nil when nothing repeats any more.
+    private func repeatStep() -> Double? {
+        let now = Self.clock()
+        var heard: Double? = now
+        if let held = repeating.held, let heardFrom { heard = heardFrom(held.device) }
+        switch repeating.step(at: now, heard: heard, landing: repeatLanding?() ?? .lands, holding: keys.heldFlags) {
+        case .idle:
+            repeatScheduled = nil
+            repeatTask = nil
+            return nil
+        case .wait(let until):
+            return max(0.001, until - now)
+        case .post(let virtualKey, let flags, let next):
+            postRepeat(virtualKey: virtualKey, flags: flags)
+            return max(0.001, next - Self.clock())
+        }
+    }
+
+    /// The held key's down again with the autorepeat flag (kCGKeyboardEventAutorepeat: NSEvent's
+    /// isARepeat), as the Mac's keyboard repeats a key, carrying the flags KeyRepeat gives. Not a new
+    /// down: KeyStrokes and the check after its up keep the down they have. `in.keyRepeat`, or in a dry
+    /// run `in.dry` and, TEST ONLY, its line.
+    private func postRepeat(virtualKey: UInt16, flags: UInt64) {
+        guard let event = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: true) else { return }
+        event.flags = CGEventFlags(rawValue: flags)
+        event.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
+        if post(event) { Stats.shared.bump("in.keyRepeat") }
+    }
+
     // MARK: Gestures
 
     /// A trackpad gesture's shortcut (kind 28, docs/trackpad-gestures-plan.md §7.3): the key down
@@ -664,6 +765,7 @@ final class InputInjector {
         for (event, stroke) in zip(events, strokes) { event.flags = CGEventFlags(rawValue: stroke.flags) }
         let posted = post(events[0])
         _ = post(events[1])
+        stopRepeating()                 // the chord is a key pressed after the held one
         guard posted else { return }
         Stats.shared.bump("in.gesture")
         checkModifiersLeft(chord: flags, before: before)

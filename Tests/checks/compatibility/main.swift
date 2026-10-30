@@ -276,6 +276,22 @@ let clipboardMessage = StreamMessage(kind: .clipboard, timestamp: 1, isKeyframe:
 check(StreamMessage.parseHeader(clipboardMessage)?.kind == .clipboard && clipboardMessage.count == StreamMessage.headerLength + Wire.encode(clip).count,
       "the clipboard's header parses, then the JSON")
 
+// The window list's `keyRepeat` (#162's letters): a host that repeats a device's held key says 1 (set after
+// the initializer, whose parameters stay as they were), and a device sends it a hardware keyboard's
+// characters as keys only then. Additive: an older host's list decodes with it nil, and an older device's
+// reader skips the key.
+var repeats = shares
+repeats.keyRepeat = 1
+check(json(repeats).contains(#""keyRepeat":1"#), "a list from a host that repeats held keys says keyRepeat 1: \(json(repeats))")
+check(!json(shares).contains("keyRepeat") && !json(list).contains("keyRepeat") && shares.keyRepeat == nil,
+      "a list without it (the initializer's) leaves the key out")
+check(decodedOld != nil && decodedOld?.keyRepeat == nil, "an older host's list decodes, keyRepeat nil")
+check(Wire.decode(WindowList.self, from: Wire.encode(repeats)).map { $0.keyRepeat == 1 && $0.clipboard == 1 && $0.gestures == 1 } == true,
+      "keyRepeat round-trips beside clipboard and gestures")
+struct ReaderBefore: Decodable { var macName: String; var gestures: Int?; var clipboard: Int? }
+check(Wire.decode(ReaderBefore.self, from: Wire.encode(repeats)).map { $0.macName == "Mac mini" && $0.clipboard == 1 } == true,
+      "a reader from before it skips keyRepeat")
+
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil
 if let out {
@@ -287,6 +303,7 @@ if let out {
         "gestureMessage": gestureMessage.base64EncodedString(),
         "windowListGestures": String(decoding: Wire.encode(takes), as: UTF8.self),
         "windowListClipboard": String(decoding: Wire.encode(shares), as: UTF8.self),
+        "windowListKeyRepeat": String(decoding: Wire.encode(repeats), as: UTF8.self),
         "clipboardMessage": clipboardMessage.base64EncodedString(),
     ]
     try! JSONSerialization.data(withJSONObject: payloads, options: [.sortedKeys, .prettyPrinted]).write(to: URL(fileURLWithPath: out))

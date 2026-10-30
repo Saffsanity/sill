@@ -28,6 +28,8 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
                      bytes (and none of them); the host should close the connection
   --flood=N          before the session, open N connections to the same door and reset each one
                      (SO_LINGER 0) before sending a byte
+  --ping=S           a ping (kind 10) every S seconds (0.05 to 10; 1 when left out): 0.25 pings as a
+                     device does, which a host's key repeat needs to hear a held key's device (KeyRepeat)
   --stop-ping@T      from T seconds in, send no more pings and no stats: a silent client
   --stop-read@T      from T seconds in, read nothing more (pings go on): a client that stopped draining
   --pairing-wanted@T send kind 21 ("show your pairing code") T seconds in
@@ -74,6 +76,9 @@ The Mac's pointer (kind 26; docs/pointer-visibility-plan.md):
   --move=X,Y@T       a pointer move (kind 8) to the frame fractions X, Y, T seconds in
   --tap=X,Y@T        a move there, a left down and a left up: three kind 8 messages
   --key=USAGE@T      a key down and up (a USB HID usage, no modifiers): two kind 8 messages
+  --key=USAGE,HOLD@T the down T seconds in and the up HOLD seconds later (a held key, which the Mac
+                     repeats: KeyRepeat); meanwhile pings go four a second, as a device sends them (a
+                     host repeats a key only while its device is heard from)
   --input=JSON@T     this literal kind 8 payload T seconds in (split on the last @), as written: an
                      input the flags above do not make, such as a scroll or a scroll gesture's phase
                      ({"scrollGesture":{"_0":"began","x":0.5,"y":0.5}}); one kind 8 message
@@ -156,7 +161,7 @@ INPUT = ("move", "tap", "key", "input")
 # What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
 GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
 VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "hello-delay", "then-code",
-          "pair-hold", "expect-pair", "pair-v", "expect-menus")
+          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping")
 PAIR_RESULTS = ("ok", "cable", "shown", "openOnMac", "locked", "closed", "code", "busy", "expired", "stopped")
 # Sends that read or press the host's menus: only against a host started with the fixture's pid.
 MENU_SENDS = ("fetch", "press", "raw25", "raw27")
@@ -216,6 +221,14 @@ def usage(text):
     u = number(text, "--key")
     if not 0 <= u <= 65535: raise ValueError(f"--key: a HID usage from 0 to 65535, got {u}")
     return u
+
+def held_key(text):
+    """--key's USAGE[,HOLD]: the usage, and how long it is held (None: down and up at once)."""
+    u, comma, hold = text.partition(",")
+    if not comma: return usage(u), None
+    h = number(hold, "--key's HOLD", float)
+    if not (h == h and 0 < h < 3600): raise ValueError(f"--key: HOLD is seconds, more than 0, got {hold!r}")
+    return usage(u), h
 
 def synthetic_listener(port):
     """Whether every process listening on this Mac's TCP `port` is a --synthetic host (lsof, ps): the only
@@ -457,6 +470,7 @@ flags = [a for a in args if a.startswith("--")]
 # order given. Every body is parsed here, before connecting, so a bad one fails at once instead of
 # after the stream has started.
 events = []
+holds = []     # (from, to) seconds in: a key held (--key=USAGE,HOLD@T), while pings go four a second
 try:
     if not pos: raise ValueError("no PORT (usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...])")
     port = number(pos[0], "PORT"); dur = number(pos[1], "seconds", float) if len(pos) > 1 else 12
@@ -487,8 +501,15 @@ try:
                           else gesture(text) if name == "gesture"
                           else unescape(text) if name == "copy"
                           else "x" * number(text, "--copy-bytes") if name == "copy-bytes"
-                          else usage(text) if name == "key" else text)
-            events.append((number(t, f"--{name}'s @T", float), i, name, text, parsed))
+                          else held_key(text) if name == "key" else text)
+            at_t = number(t, f"--{name}'s @T", float)
+            if name == "key" and parsed[1] is not None:
+                # A held key: its down now and its up HOLD seconds later, pinging as a device meanwhile.
+                events.append((at_t, i, name, text, (parsed[0], "down")))
+                events.append((at_t + parsed[1], i, name, text, (parsed[0], "up")))
+                holds.append((at_t, at_t + parsed[1]))
+            else:
+                events.append((at_t, i, name, text, (parsed[0], None) if name == "key" else parsed))
         elif name in VALUED:
             if not body: raise ValueError(f"--{name} needs a value")
             if name in ("big-payload", "flood") and number(body, f"--{name}") < 1: raise ValueError(f"--{name} must be at least 1")
@@ -538,6 +559,8 @@ try:
         if not hv: raise ValueError("--hello: VERSION[,PROTOCOL] or none")
         if hp: number(hp, "--hello's protocol")
     hello_delay = number(valued("hello-delay"), "--hello-delay", float) if valued("hello-delay") else 0
+    ping_every = number(valued("ping"), "--ping", float) if valued("ping") else 1
+    if not (ping_every == ping_every and 0.05 <= ping_every <= 10): raise ValueError("--ping=S: seconds from 0.05 to 10")
     if hello_delay and hello_arg is None and "--audio" not in flags: raise ValueError("--hello-delay needs --hello or --audio")
     if hello_delay < 0: raise ValueError("--hello-delay must be 0 or more")
     # Input reaches only a host that never posts it: a --synthetic host on this Mac (every one is a
@@ -751,7 +774,13 @@ def fire(e, now):
         s.sendall(pointer_input("move", *parsed) + pointer_input("leftDown", *parsed) + pointer_input("leftUp", *parsed))
         print(f"  sent tap {text} (move, down, up) at {at}")
     elif name == "key":
-        s.sendall(key_input(parsed, True) + key_input(parsed, False)); print(f"  sent key {parsed} (down, up) at {at}")
+        u, part = parsed
+        if part is None:
+            s.sendall(key_input(u, True) + key_input(u, False)); print(f"  sent key {u} (down, up) at {at}")
+        else:
+            s.sendall(key_input(u, part == "down")); print(f"  sent key {u} {part} at {at}")
+            if part == "down":
+                global nextping; nextping = min(nextping, now + 0.25)   # a device's next ping is at most 0.25 s off
     elif name == "input":
         s.sendall(msg(8, text.encode())); print(f"  sent input {text} at {at}")
     elif name == "gesture":
@@ -769,7 +798,9 @@ while time.time() - t0 < dur:
         fire(events.pop(0), now)
     try:
         if pinging and now >= nextping:
-            s.sendall(msg(10, struct.pack(">d", now))); nextping = now + 1
+            # Four a second while a key is held, as a device pings (StreamClient.pingInterval), else one.
+            s.sendall(msg(10, struct.pack(">d", now)))
+            nextping = now + (min(0.25, ping_every) if any(a <= now - t0 < b for a, b in holds) else ping_every)
         if pinging and stats and now >= nextstats:
             s.sendall(msg(12, json.dumps({"fps": 0, "frameAgeMs": 0, "rttMs": 0, "device": device}).encode())); nextstats = now + 1
     except OSError as e:
@@ -781,6 +812,7 @@ while time.time() - t0 < dur:
         continue
     # Wake in time for the next timed send (a few ms matter for the race checks).
     wait = 0.25 if not events else min(0.25, max(0.001, t0 + events[0][0] - now))
+    if (holds or ping_every < 1) and pinging: wait = min(wait, max(0.001, nextping - now))    # pings on time
     s.settimeout(wait)
     try:
         chunk = s.recv(1 << 20)

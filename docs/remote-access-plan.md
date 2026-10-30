@@ -1356,6 +1356,15 @@ An `NSWindowController` hosting a SwiftUI `PairDeviceView`.
   `127.0.0.1` for the simulator tests.
 - **At launch,** if saved Macs exist but the device key does not (a restore from backup, since the
   key is `ThisDeviceOnly`), the saved Macs are cleared.
+- **The key's life** (#140, 2026-10-28; `DeviceKeyPolicy`, SavedMacs.swift, pure): a key is made
+  only when the Keychain says there is none (errSecItemNotFound); any other failed read fails that
+  pairing or dial, so a read that failed for a moment never puts a second key under the tag. A key
+  made now is used only once the Keychain gives back this very key under the tag, as the next
+  launch looks for it; else it is added once by itself; still not given back, the pairing fails
+  with the Keychain's status ("couldn’t make its key (the Keychain didn’t keep it: ‹status›)") and
+  the key is deleted again. Before, a key the next launch could not find paired for one launch: the
+  launch then cleared the saved Mac as above, the person scanned the code again, and the Mac
+  trusted one more key of the device at every launch (#140's report).
 - **Forget** removes the record only. The Mac lists the device until it is removed there, and the
   copy says so.
 

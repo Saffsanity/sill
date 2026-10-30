@@ -99,11 +99,16 @@ struct ContentView: View {
 ///   on the Duo's simulator too, and every layout is what the size alone gives, as before.
 /// * `-SillDrawer 1` — start with the app drawer open. This, `-SillScaleOpen 1` and `-SillSettings 1`
 ///   also work in a live session (the normal app with `-SillConnect`, and `-SillLive 1`), where each
-///   opens 1.5 s after the stream screen shows, once the Desktop has started (StreamScreen).
+///   opens 1.5 s after the stream screen shows, once the Desktop has started (StreamScreen); the Aa
+///   ruler only while a window streams, so never over a synthetic host's Desktop.
 ///   `-SillDrawerSearch <text>`: the open drawer searches for that text with the keyboard up for its
 ///   field (in a live session the real keyboard), so a photo shows what the keyboard leaves in view.
-/// * `-SillScaleOpen 1` — start with the Aa slider unfolded (as while a finger holds it);
-///   `-SillScale 1.5` sets the scale it opens at.
+/// * `-SillScaleOpen 1` — start with the Aa slider unfolded (as while a finger holds it), where Aa
+///   can be used: while a window streams (`-SillActive desktop` or `none`: Aa dimmed, no ruler;
+///   TextScale.selectable); `-SillScale 1.5` sets the scale it opens at (none, or 0.25, Off's place: Off).
+///   `-SillScaleScript '<s> <scale|off>[; …]'`, in a live session, sets Aa's value s seconds in as the
+///   ruler's release does, whatever streams (a synthetic host streams only its Desktop): the console's
+///   `viewport: …` lines, and the host's `win.fitOff` in its `[1s]` lines for a scale then Off (issue #179).
 /// * `-SillWindowMenu 1` — open the first thumbnail's traffic lights and keep them open.
 /// * `-SillKeyboard 1` — start with the software keyboard shown: in the mock only the Keyboard
 ///   button lights (a real keyboard upsets the fake screen); under `-SillLive 1` and in the normal
@@ -195,7 +200,10 @@ struct ContentView: View {
 ///   iPad, Take the Tour). `-SillSettingsScroll gestures` starts them at the This iPad group
 ///   instead (its switches and rows, which the footnotes under them push out of the end's view on a
 ///   short screen), `-SillSettingsScroll sound` at the Send Audio row, `-SillSettingsScroll mute` at
-///   the Mute row under Send Audio, and `-SillSettingsScroll reverse` at its Reverse Scrolling switch.
+///   the Mute row under Send Audio, `-SillSettingsScroll reverse` at its Reverse Scrolling switch, and
+///   `-SillSettingsScroll hold` at its Hold to Show Window Controls stepper.
+///   `-SillSettingsScroll clipboard` at the clipboard's Paste row (it and the group's footnote, which
+///   a short screen's `gestures` leaves under the two switches above them).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
@@ -220,12 +228,25 @@ struct ContentView: View {
 ///   three-finger gestures (the Settings panel's last group, This iPad) off for one run, in the
 ///   normal app too. The mock Mac takes gestures (`WindowList.gestures` 1) in every settings case
 ///   but `legacy`, whose group then says to update Sill on the Mac.
+/// * `-Sill.thumbnailHold 0.3` — not a harness argument either: how long a window's thumbnail is held
+///   before its lights show and it can be dragged (ThumbnailHold, issue #113; the Settings panel's This
+///   iPad group, 0.2 to 3 s, 0.5 s unless changed) held at 0.3 s for one run, in the normal app too (the
+///   stepper's changes are saved for the next run; this one keeps 0.3). The console says
+///   "thumbnails: hold 0.3 s" when a bar's thumbnails first read it and at each change.
 /// * `-Sill.shareClipboard 0` — not a harness argument either: this device's Share Clipboard (the
 ///   Settings panel's This iPad group) off for one run, in the normal app too. The mock Mac shares its
 ///   clipboard (`WindowList.clipboard` 1) in every settings case but `legacy`, whose group then has no
 ///   clipboard rows. `-SillClipboardChip 1` offers the clipboard's chip over the mock's stream (as
-///   after a copy on this device; it stays), and `-SillClipboardNote sent|long|notsent` shows a Paste's
-///   note in its place and under the group's Paste (docs/clipboard-plan.md).
+///   after a copy on this device; it stays), and `-SillClipboardNote sent|long|notsent|pasted` shows a
+///   Paste's note in its place and under the group's Paste (`pasted`: "Pasted on ‹Mac›.", the note
+///   after ⌘V; docs/clipboard-plan.md).
+/// * `-Sill.pasteRightAway 0` — not a harness argument either: this device's Paste on ‹Mac› Right Away
+///   (the This iPad group, under Share Clipboard) off for one run, in the normal app too: a Paste's
+///   receipt then presses no ⌘V on the Mac, and the chip, the note and the group's footnote say what
+///   they said before paste right away ("Then press ⌘V there."). `-SillPasteDelay <s>` (DEBUG) sends
+///   that ⌘V s seconds after the receipt instead of ClipboardPolicy.pasteDelay (0: right behind it),
+///   for the race between it and the Mac's write of the text (docs/clipboard-plan.md, "Paste right
+///   away").
 /// * `-Sill.largerPicture 1` — not a harness argument either: this device's Larger Picture switch
 ///   (the Settings panel's This iPhone group; docs/larger-picture-plan.md) on for one run, in the
 ///   normal app too. A phone held upright then has, while a window streams, no thumbnails, the
@@ -298,8 +319,9 @@ struct ContentView: View {
 /// * `-SillInputScript '<t> <step>; …'` — with `-SillLive 1` only: input for the simulator gates,
 ///   which have no finger (`InputScript`): `t` is seconds since the session's first window list, and
 ///   a step is `down`, `pad DX,DY`, `lift`, `click` or `padscroll DX,DY` on the portrait pad, `tap
-///   X,Y` (a frame fraction) or `drag DX,DY` on the stream, `key USAGE` (a hardware key) or `row
-///   USAGE` (a key of the portrait key row), `esc [MODS]`, `scroll DX,DY`, `wheel DX,DY`, `keyboard
+///   X,Y` (a frame fraction) or `drag DX,DY` on the stream, `key USAGE` (a hardware key), `type TEXT`
+///   (the on-screen keyboard's typing) or `row USAGE` (a key of the portrait key row), `esc [MODS]`,
+///   `scroll DX,DY`, `wheel DX,DY`, `keyboard
 ///   attach|detach` or `orient landscape|portrait` (InputScript has them all). The console says
 ///   "input script: …" at each.
 ///   It runs only when the session was dialled by `-SillConnect` to a loopback address and the
@@ -309,9 +331,10 @@ struct ContentView: View {
 /// * `-SillSettingsScript '<t> <step>; …'` — the Settings panel's controls for the simulator gates,
 ///   in the normal app too: `set K=V[,K=V]` (a control's change), `suggestion` (the link
 ///   callout's button), `paste TEXT` (the clipboard's Paste with TEXT, as the system's Paste control
-///   hands it over) or `disconnect` (the panel's Disconnect: with tiles on, the fresh keyframe first),
-///   `t` seconds after the session's first window list, under `-SillInputScript`'s
-///   guard (a session dialled to a loopback address whose host sends no version: never Sill.app).
+///   hands it over, and with Paste on ‹Mac› Right Away on the ⌘V after its receipt) or `disconnect`
+///   (the panel's Disconnect: with tiles on, the fresh keyframe first), `t` seconds after the
+///   session's first window list, under `-SillInputScript`'s guard (a session dialled to a loopback
+///   address whose host sends no version: never Sill.app).
 ///   The console says "settings script: …" (`SettingsScript`).
 /// * `-SillMoveHomeTest to:HOST:PORT|refused|other:PORT` — with `-SillDialSaved 1`: a second after the
 ///   remote session's first window list, its saved Mac is listed as a network row with its Mac ID
@@ -471,7 +494,7 @@ struct ContentView: View {
 /// larger simulator, or in the normal app.
 ///
 /// Console lines for the gates, in the harness and the normal app alike: `viewport: 386×241 pt,
-/// scale none, 60 fps` for each viewport the stream screen sends the Mac (StreamScreen); on a phone
+/// scale off, 60 fps` for each viewport the stream screen sends the Mac (StreamScreen); on a phone
 /// held upright `trackpad: 412×389 pt, vertical span 257.5 pt` whenever the pad or its span changes,
 /// and `keyboard: up, 320 pt tall, its top at 574 pt in the stream screen; the key row ends 10 pt
 /// above it, …` each time the software keyboard moves (PortraitStreamScreen).
@@ -530,7 +553,7 @@ struct LayoutHarness: View {
                         drawerOpen: defaults.bool(forKey: "SillDrawer"),
                         keyboardShown: defaults.bool(forKey: "SillKeyboard"),
                         scaleOpen: defaults.bool(forKey: "SillScaleOpen"),
-                        textScale: defaults.double(forKey: "SillScale") > 0 ? defaults.double(forKey: "SillScale") : nil,
+                        textScale: defaults.double(forKey: "SillScale") > 0 ? TextScale.scale(at: defaults.double(forKey: "SillScale")) : nil,
                         live: defaults.bool(forKey: "SillLive"),
                         mockActive: mockActive(defaults.string(forKey: "SillActive")),
                         settingsOpen: defaults.bool(forKey: "SillSettings"),
@@ -714,6 +737,8 @@ struct LayoutHarness: View {
 ///   picture's middle, lifted at 600 pt/s (so it coasts), through the finger pan's scroll path
 ///   (Reverse Scrolling turns it around);
 /// * `key USAGE` — a hardware key (a HID usage), down and up: this device's pointer hides;
+/// * `type TEXT` — the on-screen keyboard's typing: TEXT (one word) handed to the input view as the
+///   keyboard hands it its keys (`insertText`), typed text for the Mac;
 /// * `row USAGE` — a key of the portrait key row: what the sprite shows stays;
 /// * `gesture NAME[,FINGERS]` — a three-finger (or four-finger) gesture a surface decided, through
 ///   `StreamClient.sendGesture` as a surface's decision goes (the switch, the Mac's `gestures`, the
@@ -742,7 +767,7 @@ struct LayoutHarness: View {
 enum InputScript {
     enum Step: Equatable, CustomStringConvertible {
         case down, pad(dx: Double, dy: Double), lift, click, padScroll(dx: Double, dy: Double)
-        case tap(x: Double, y: Double), drag(dx: Double, dy: Double), key(UInt16), row(UInt16)
+        case tap(x: Double, y: Double), drag(dx: Double, dy: Double), key(UInt16), type(String), row(UInt16)
         case touch(x: Double, y: Double), pinch(factor: Double, x: Double, y: Double)
         case gesture(TrackpadGestures.Gesture, fingers: Int)
         case esc(modifiers: String), scroll(dx: Double, dy: Double), wheel(dx: Double, dy: Double)
@@ -760,6 +785,7 @@ enum InputScript {
             case .pinch(let factor, let x, let y): return "pinch \(factor)@\(x),\(y)"
             case .drag(let dx, let dy): return "drag \(dx),\(dy)"
             case .key(let usage): return "key \(usage)"
+            case .type(let text): return "type \(text)"
             case .row(let usage): return "row \(usage)"
             case .gesture(let g, let fingers): return "gesture \(g.rawValue)" + (fingers == 3 ? "" : ",\(fingers)")
             case .esc(let modifiers): return "esc" + (modifiers.isEmpty ? "" : " \(modifiers)")
@@ -816,6 +842,7 @@ enum InputScript {
                 step = .pinch(factor: factor, x: xy[0], y: xy[1])
             case ("drag", 3) where pair.count == 2: step = .drag(dx: pair[0], dy: pair[1])
             case ("key", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .key(usage)
+            case ("type", 3): step = .type(words[2])
             case ("row", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .row(usage)
             case ("gesture", 3):
                 let parts = words[2].split(separator: ",").map(String.init)
@@ -908,6 +935,7 @@ enum InputScript {
             return
         case .drag(let dx, let dy): if let overlay { overlay.scriptScroll(dx: dx, dy: dy, from: .finger) } else { done = false }
         case .key(let usage): if let overlay { overlay.scriptKey(usage) } else { done = false }
+        case .type(let text): if let overlay { overlay.scriptType(text) } else { done = false }
         case .row(let usage):
             client.sendFromKeyRow(.key(hidUsage: usage, down: true, modifiers: 0))
             client.sendFromKeyRow(.key(hidUsage: usage, down: false, modifiers: 0))
@@ -941,9 +969,10 @@ enum InputScript {
 /// sendAudio: a control's change, through `changeSettings` as the panel sends it), `suggestion` (the link
 /// callout's button: the Mac's suggestion as the panel offers it, or nothing when it offers none),
 /// `paste TEXT` (the clipboard's Paste, as the system's Paste control hands TEXT over, through
-/// `sendClipboard`, the receipt and its note included: docs/clipboard-plan.md) or `disconnect` (the
-/// panel's Disconnect, through `disconnect`: with tiles on, the tile's fresh keyframe first). The
-/// console says "settings script: …" at each. It runs in the normal app too, under InputScript's
+/// `sendClipboard`, the receipt, the ⌘V after it while Paste on ‹Mac› Right Away is on, and the note
+/// included: docs/clipboard-plan.md) or `disconnect` (the panel's Disconnect, through `disconnect`:
+/// with tiles on, the tile's fresh keyframe first). The console says "settings script: …" at each.
+/// It runs in the normal app too, under InputScript's
 /// guard: only a session dialled to a loopback address (a remote dial's winner through a relay
 /// counts) whose host's first window list has no version, so never Sill.app's settings.
 enum SettingsScript {

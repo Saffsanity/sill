@@ -987,6 +987,7 @@ final class StreamServer {
     private func register(_ client: Client) {
         client.connectedAt = Date().timeIntervalSince1970
         client.lastHeardAt = client.connectedAt
+        heard(ObjectIdentifier(client.connection))
         clients[ObjectIdentifier(client.connection)] = client
         onClientCountChanged?(clients.count)
         updateTicking()
@@ -1313,10 +1314,30 @@ final class StreamServer {
         }
     }
 
+    /// When each registered client was last heard from (the header of any message, a ping included),
+    /// by the repeat's clock (InputInjector.clock, seconds of system uptime): a held key repeats only
+    /// while its device is heard (KeyRepeat.silence). Written on `queue`, read from the main actor.
+    private let heardLock = NSLock()
+    private var heardAt: [ObjectIdentifier: Double] = [:]
+
+    /// On `queue`: `id` was heard from now.
+    private func heard(_ id: ObjectIdentifier) {
+        let now = ProcessInfo.processInfo.systemUptime
+        heardLock.lock(); heardAt[id] = now; heardLock.unlock()
+    }
+
+    /// When the registered client `id` was last heard from, by the repeat's clock; nil for one that
+    /// is not registered (it left, or is not admitted yet). From any thread.
+    func lastHeard(from id: ObjectIdentifier) -> Double? {
+        heardLock.lock(); defer { heardLock.unlock() }
+        return heardAt[id]
+    }
+
     /// On `queue`: forgets a registered client, once ("Client left" and the callbacks). A
     /// connection that was never registered (refused, or failed before it was ready) leaves no line.
     private func unregister(_ id: ObjectIdentifier) {
         guard let client = clients.removeValue(forKey: id) else { return }
+        heardLock.lock(); heardAt[id] = nil; heardLock.unlock()
         pointerWatch?.clientLeft(id)
         print("Client left: \(client.connection.endpoint)")
         onClientDisconnected?(client.connection)
@@ -1391,6 +1412,7 @@ final class StreamServer {
                 return
             }
             client.lastHeardAt = Date().timeIntervalSince1970
+            if self.clients[ObjectIdentifier(c)] === client { self.heard(ObjectIdentifier(c)) }
             // A header can announce up to 4 GiB and the read below would wait for all of it. No
             // client message comes near a megabyte, so a bigger one is a broken or hostile peer.
             if header.payloadLength > StreamMessage.maxClientPayload {

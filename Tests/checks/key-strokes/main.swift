@@ -56,6 +56,8 @@ final class Conn {}
 // HID usages the device sends, and the Mac's keycodes for them.
 let uSpace: UInt16 = 0x2C, uEsc: UInt16 = 0x29, uS: UInt16 = 0x16, uC: UInt16 = 0x06
 let uLeft: UInt16 = 0x50, uRight: UInt16 = 0x4F, uReturn: UInt16 = 0x28
+let uA: UInt16 = 0x04, uE: UInt16 = 0x08, uP: UInt16 = 0x13, uZ: UInt16 = 0x1D, u1: UInt16 = 0x1E, u0: UInt16 = 0x27
+let uDelete: UInt16 = 0x2A, uTab: UInt16 = 0x2B, uMinus: UInt16 = 0x2D, uSlash: UInt16 = 0x38, uCapsLock: UInt16 = 0x39
 let uLCtrl: UInt16 = 0xE0, uLShift: UInt16 = 0xE1, uLOpt: UInt16 = 0xE2, uLCmd: UInt16 = 0xE3
 let uRCtrl: UInt16 = 0xE4, uRShift: UInt16 = 0xE5, uROpt: UInt16 = 0xE6, uRCmd: UInt16 = 0xE7
 let kSpace: UInt16 = 49, kEsc: UInt16 = 53, kS: UInt16 = 1, kC: UInt16 = 8, kLeft: UInt16 = 123, kRight: UInt16 = 124
@@ -608,6 +610,8 @@ func tripwire(_ events: [InputEvent], _ want: [String], ignoring ups: Mac.Ignore
 
 // This device's Spotlight key: ⌘'s key up is checked for command (Space's up keeps it: ⌘ is down).
 tripwire(KeyChord.spotlight, ["55: command"], ignoring: .modifierUps, "this device's Spotlight key")
+// The clipboard's ⌘V (paste right away): the same, V's up keeping command while ⌘ is down.
+tripwire(KeyChord.paste, ["55: command"], ignoring: .modifierUps, "Paste right away's ⌘V")
 // The key row's ⌘esc, a latched ⌘S on the software keyboard, and ⌃⇧→: each modifier key's up.
 tripwire(KeyChord.press(uEsc, with: .command), ["55: command"], ignoring: .modifierUps, "the key row's ⌘esc")
 tripwire(KeyChord.press(uS, with: .command), ["55: command"], ignoring: .modifierUps, "a latched ⌘S")
@@ -1050,6 +1054,24 @@ check(ksCommand == command && ksShift == shift && ksControl == control && ksOpti
 // The Spotlight key: ⌘'s own key down, Space down and up with command, ⌘ up with nothing.
 check(KeyChord.spotlight == [key(uLCmd, true, command), key(uSpace, true, command), key(uSpace, false, command), key(uLCmd, false, 0)],
       "the Spotlight key sends \(KeyChord.spotlight)")
+// The clipboard's ⌘V after a Paste's receipt (paste right away, docs/clipboard-plan.md): the same shape,
+// V for Space; on this Mac command for V alone and nothing held after, nor on a Mac from before
+// 2026-09-27 (which posts each key's flags as they come), and ⌘'s up is the one up checked.
+do {
+    let uV: UInt16 = 0x19, kV: UInt16 = 9
+    check(ClipboardPolicy.pasteKey == uV && KeyStrokes.virtualKeys[uV] == kV, "⌘V's key is V, the Mac's virtual key 9")
+    check(KeyChord.paste == [key(uLCmd, true, command), key(uV, true, command), key(uV, false, command), key(uLCmd, false, 0)],
+          "Paste right away sends \(KeyChord.paste)")
+    var mac = Mac(); let a = Conn()
+    mac.send(KeyChord.paste + tap, from: a)
+    check(Array(mac.log.prefix(4)) == [.key(kCmd, true, command), .key(kV, true, command), .key(kV, false, command), .key(kCmd, false, 0)]
+          && mac.log.dropFirst(4).allSatisfy { $0 == .pointer(0) } && mac.table == 0 && mac.down.isEmpty && mac.broken.isEmpty,
+          "⌘V on this Mac, then a tap that is no ⌘-click: \(mac.log)")
+    var old = OldMac()
+    old.send(KeyChord.paste + tap)
+    check(old.log.contains(.key(kV, true, command)) && old.table == 0 && old.down.isEmpty && old.log.last == .pointer(0),
+          "⌘V on a Mac from before 2026-09-27 leaves nothing: \(old.log)")
+}
 // A key with nothing latched: the key alone, as before.
 check(KeyChord.press(uEsc, with: []) == bare(uEsc, 0), "escape with nothing latched: \(KeyChord.press(uEsc, with: []))")
 // Two latched: each modifier's key down in the trackpad's order with the flags so far, the key, the
@@ -1104,6 +1126,203 @@ do {
     check(fixed.table == 0 && fixed.log.last == .pointer(0), "this device's Spotlight key leaves nothing on an older Mac: \(fixed.log)")
 }
 
+// MARK: The key row's caps held (HeldCap, #162)
+//
+// Escape, tab and the arrows of the key row go down when a finger lands on them and up when it leaves
+// (HeldCap), so the Mac repeats a cap held down (KeyRepeat, Tests/checks/key-repeat); what is latched
+// goes down with the key, its modifiers' own keys first, and is spent at the touch; one cap at a time;
+// the Button's own action after a touch sends nothing, and an assistive technology's activation (no
+// touch) the whole press, as before.
+
+let uUp: UInt16 = 0x52, uDown: UInt16 = 0x51
+
+// A key going down and up with what is latched: `press` is exactly `down` then `up`.
+check(KeyChord.down(uLeft, with: [.option]) == [key(uLOpt, true, option), key(uLeft, true, option)]
+      && KeyChord.up(uLeft, with: [.option]) == [key(uLeft, false, option), key(uLOpt, false, 0)],
+      "⌥←'s down and up: \(KeyChord.down(uLeft, with: [.option])) then \(KeyChord.up(uLeft, with: [.option]))")
+check(KeyChord.down(uEsc, with: []) == [key(uEsc, true, 0)] && KeyChord.up(uEsc, with: []) == [key(uEsc, false, 0)],
+      "escape with nothing latched: its down, its up")
+do {
+    var all = true
+    for bits in 0..<16 {
+        var latched: KeyModifiers = []
+        if bits & 1 != 0 { latched.insert(.control) }
+        if bits & 2 != 0 { latched.insert(.shift) }
+        if bits & 4 != 0 { latched.insert(.option) }
+        if bits & 8 != 0 { latched.insert(.command) }
+        for u in [uEsc, uTab, uLeft, uRight, uUp, uDown] where KeyChord.press(u, with: latched) != KeyChord.down(u, with: latched) + KeyChord.up(u, with: latched) {
+            all = false
+        }
+    }
+    check(all, "a press is its down then its up, for every latch")
+}
+
+// A finger on escape, then off: its down at the touch, its up at the release; the Button's action as
+// the finger lifts sends nothing more, before the press ends or after it.
+do {
+    var h = HeldCap()
+    check(h.touchDown(uEsc, latched: [], at: 1.0) == [key(uEsc, true, 0)] && h.down?.usage == uEsc, "escape's touch: its down")
+    check(h.touchUp(uEsc, at: 1.8) == [key(uEsc, false, 0)] && h.down == nil, "the release: its up")
+    check(h.activated(uEsc, latched: [], at: 1.81).isEmpty, "the action just after: nothing")
+    check(h.activated(uEsc, latched: [], at: 1.85) == KeyChord.press(uEsc, with: []), "a second activation after it is a press of its own")
+    var g = HeldCap()
+    _ = g.touchDown(uTab, latched: [.option], at: 1.0)
+    check(g.activated(uTab, latched: [.shift], at: 1.5) == [key(uTab, false, option), key(uLOpt, false, 0)] && g.down == nil,
+          "the action before the press's end is told: it is the release, the key and its ⌥ up")
+    check(g.touchUp(uTab, at: 1.51).isEmpty, "then the press's end: nothing more")
+    check(g.activated(uTab, latched: [], at: 3.0) == KeyChord.press(uTab, with: []), "a later activation: the whole press")
+    // The latch is spent when a key goes down with it: a touch's down, a whole press; never by an up.
+    check(HeldCap.spendsLatch(KeyChord.down(uEsc, with: [])) && HeldCap.spendsLatch(KeyChord.press(uTab, with: [.shift]))
+          && !HeldCap.spendsLatch(KeyChord.up(uLeft, with: [.option])) && !HeldCap.spendsLatch([]),
+          "the latch: spent by a down or a press, not by an up or nothing")
+}
+// With ⌥ latched: ⌥'s own key and ← go down at the touch, ← and then ⌥ come up at the release; a
+// modifier latched meanwhile is not the held cap's (touchUp takes no latch).
+do {
+    var h = HeldCap()
+    check(h.touchDown(uLeft, latched: [.option], at: 1.0) == [key(uLOpt, true, option), key(uLeft, true, option)], "⌥ latched: ⌥ and ← down")
+    check(h.down?.modifiers == [.option], "the cap holds what it went down with")
+    check(h.touchUp(uLeft, at: 2.0) == [key(uLeft, false, option), key(uLOpt, false, 0)], "the release: ← up, then ⌥ up")
+}
+// VoiceOver, Switch Control or a keyboard activates a cap with no touch: the whole press with what is
+// latched, as before; also long after a touch that slid off the cap (no action came for it).
+do {
+    var h = HeldCap()
+    check(h.activated(uTab, latched: [.shift], at: 5.0) == KeyChord.press(uTab, with: [.shift]), "an activation with no touch: ⇧Tab pressed")
+    _ = h.touchDown(uEsc, latched: [], at: 6.0)
+    _ = h.touchUp(uEsc, at: 6.2)
+    check(h.activated(uEsc, latched: [], at: 7.0) == KeyChord.press(uEsc, with: []), "0.8 s after a slid-off touch: the whole press")
+    _ = h.touchDown(uEsc, latched: [], at: 8.0)
+    check(h.activated(uEsc, latched: [], at: 8.4) == [key(uEsc, false, 0)], "the action with the finger still on it, as told: its up")
+    check(h.activated(uEsc, latched: [], at: 8.45) == KeyChord.press(uEsc, with: []), "a second activation: its own press")
+    check(h.touchUp(uEsc, at: 8.5).isEmpty, "the press's end after: nothing more")
+}
+// A finger on a second cap: the first comes up first (one key at a time), then the second goes down;
+// the first's own release and action later send nothing.
+do {
+    var h = HeldCap()
+    check(h.touchDown(uLeft, latched: [.command], at: 1.0) == [key(uLCmd, true, command), key(uLeft, true, command)], "⌘←'s touch")
+    check(h.touchDown(uRight, latched: [], at: 1.5) == [key(uLeft, false, command), key(uLCmd, false, 0), key(uRight, true, 0)],
+          "a finger on →: ← and ⌘ up, then → down")
+    check(h.touchUp(uLeft, at: 1.7).isEmpty && h.activated(uLeft, latched: [], at: 1.7).isEmpty, "←'s release and action: nothing")
+    check(h.down?.usage == uRight, "→ is the cap down")
+    check(h.touchUp(uRight, at: 2.0) == [key(uRight, false, 0)] && h.activated(uRight, latched: [], at: 2.0).isEmpty, "→'s release, its action")
+}
+// The same cap's press told twice (no release between): one down. Off the cap and back: up, then down.
+do {
+    var h = HeldCap()
+    check(h.touchDown(uUp, latched: [], at: 1.0) == [key(uUp, true, 0)] && h.touchDown(uUp, latched: [.shift], at: 1.1).isEmpty,
+          "a second press of the cap down: nothing, and the latch stays (nothing came back)")
+    check(h.touchUp(uUp, at: 1.2) == [key(uUp, false, 0)] && h.touchDown(uUp, latched: [], at: 1.3) == [key(uUp, true, 0)]
+          && h.touchUp(uUp, at: 1.4) == [key(uUp, false, 0)] && h.activated(uUp, latched: [], at: 1.4).isEmpty,
+          "slid off and back on: up, down again, up, and its action nothing")
+}
+// The key row leaves the screen with a cap held: it comes up, with its modifiers; its release after
+// sends nothing.
+do {
+    var h = HeldCap()
+    check(h.releaseAll().isEmpty, "nothing held: nothing to let go")
+    _ = h.touchDown(uDown, latched: [.shift, .control], at: 1.0)
+    check(h.releaseAll() == [key(uDown, false, shift | control), key(uLShift, false, control), key(uLCtrl, false, 0)] && h.down == nil,
+          "⌃⇧↓ held as the row goes: ↓, ⇧ and ⌃ up")
+    check(h.touchUp(uDown, at: 1.5).isEmpty, "the release after: nothing")
+}
+// Held on this Mac and on one from before 2026-09-27 (which posts each key's flags as they come): the
+// key is down on the Mac from the touch to the release, carrying what was latched, and nothing is left
+// held after; for every latch and every held cap.
+do {
+    var combos = 0, ok = true
+    for bits in 0..<16 {
+        var latched: KeyModifiers = []
+        if bits & 1 != 0 { latched.insert(.control) }
+        if bits & 2 != 0 { latched.insert(.shift) }
+        if bits & 4 != 0 { latched.insert(.option) }
+        if bits & 8 != 0 { latched.insert(.command) }
+        for u in [uEsc, uTab, uLeft, uRight, uUp, uDown] {
+            var mac = Mac(), old = OldMac(); let a = Conn()
+            var h = HeldCap()
+            let downs = h.touchDown(u, latched: latched, at: 1.0)
+            mac.send(downs, from: a); old.send(downs)
+            let k = KeyStrokes.virtualKeys[u]!
+            let heldNow = mac.down[k] == latched.rawValue && old.down[k] == latched.rawValue
+            let ups = h.touchUp(u, at: 2.0) + tap
+            mac.send(ups, from: a); old.send(ups)
+            if !(heldNow && mac.down.isEmpty && mac.table == 0 && mac.broken.isEmpty && old.down.isEmpty && old.table == 0) {
+                ok = false; print("FAIL: \(u) held with \(names(latched.rawValue)): this Mac \(mac.log), older \(old.log)")
+            }
+            combos += 1
+        }
+    }
+    check(ok && combos == 96, "96 held caps on this Mac and an older one: down while held, nothing left after")
+}
+// Random key row sessions: fingers landing on and leaving the six caps (two at once), their actions in
+// the window or not, activations with no touch, latches made and spent as the key row spends them, and
+// the row leaving the screen. Whenever no cap is down, nothing is held on this Mac or an older one;
+// while one is down its key is the one down on the Mac, with what it went down with.
+do {
+    var rng = Rng(state: 0xCA95_4E1D)
+    var broken = 0, sessions = 0, holds = 0, presses = 0
+    let caps: [UInt16] = [uEsc, uTab, uLeft, uRight, uUp, uDown]
+    for run in 0..<2000 {
+        var mac = Mac(), old = OldMac(); let a = Conn()
+        var h = HeldCap()
+        var latched: KeyModifiers = []
+        var t = 1.0
+        var fingers: [UInt16] = []
+        var problem: String?
+        func send(_ events: [InputEvent]) { mac.send(events, from: a); old.send(events) }
+        for step in 0..<(10 + rng.below(40)) {
+            t += Double(rng.below(400)) / 1000
+            switch rng.below(9) {
+            case 0, 1, 2:
+                let u = rng.pick(caps)
+                let events = h.touchDown(u, latched: latched, at: t)
+                send(events)
+                if HeldCap.spendsLatch(events) { latched = []; holds += 1 }
+                if !fingers.contains(u) { fingers.append(u) }
+            case 3, 4:
+                if let u = fingers.isEmpty ? nil : fingers[rng.below(fingers.count)] {
+                    // The release: the press's end and the Button's action, in either order, or the end alone
+                    // (the finger slid off the cap).
+                    let action = rng.chance(70), first = rng.chance(50)
+                    if action && first { send(h.activated(u, latched: latched, at: t)) }
+                    send(h.touchUp(u, at: t))
+                    fingers.removeAll { $0 == u }
+                    if action && !first { t += Double(rng.below(30)) / 1000; send(h.activated(u, latched: latched, at: t)) }
+                }
+            case 5:
+                let u = rng.pick(caps)
+                if !fingers.contains(u) {
+                    let events = h.activated(u, latched: latched, at: t + 1)
+                    t += 1
+                    send(events)
+                    if HeldCap.spendsLatch(events) { latched = []; presses += 1 }
+                }
+            case 6, 7:
+                latched.formSymmetricDifference(rng.pick([KeyModifiers.control, .shift, .option, .command]))
+            default:
+                if rng.chance(30) { send(h.releaseAll()); fingers = [] }
+            }
+            let modifierKeysDown = mac.down.keys.filter { macModifiers[$0] != nil }
+            if let held = h.down {
+                let k = KeyStrokes.virtualKeys[held.usage]!
+                let others = mac.down.keys.filter { macModifiers[$0] == nil && $0 != k }
+                if mac.down[k] != held.modifiers.rawValue || !others.isEmpty || old.down[k] != held.modifiers.rawValue {
+                    problem = "step \(step): cap \(held.usage) down with \(names(held.modifiers.rawValue)), the Mac has \(mac.down)"
+                }
+            } else if !mac.down.isEmpty || mac.table & modifierBits != 0 || !old.down.isEmpty || old.table & modifierBits != 0 || !modifierKeysDown.isEmpty {
+                problem = "step \(step): no cap down, yet this Mac has \(mac.down) (\(names(mac.table))), an older one \(old.down)"
+            }
+            if !mac.broken.isEmpty { problem = "step \(step): " + mac.broken[0] }
+            if problem != nil { break }
+        }
+        if let problem { broken += 1; if broken <= 3 { print("FAIL: key row run \(run): \(problem)") } }
+        sessions += 1
+    }
+    check(broken == 0, "key row sessions: \(broken) of \(sessions) left something held or the wrong key down")
+    check(holds > 10_000 && presses > 1_000, "the sessions hold caps and press them: \(holds) holds, \(presses) presses")
+}
+
 // MARK: The device's hardware keyboard (ForwardedKeys)
 
 /// A hardware keyboard on this device and what UIKit tells InputOverlayView: the modifiers held after
@@ -1113,28 +1332,37 @@ struct Keyboard {
     var physical: [UInt16] = []
     var before = false
     var forwarded = ForwardedKeys()
+    /// Who types the characters as each key goes down (KeyTyping: the overlay asks it at each press):
+    /// iPadOS's text system, as before, unless a test says the Mac.
+    var typing = KeyTyping.text
+    /// Caps Lock on: the iPad's own state, which its key toggles (that key is the text system's whoever
+    /// types, and types nothing), carried in UIKit's flags as alphaShift.
+    var capsLockOn = false
     /// The clock UIPress timestamps and the key commands' firing share (systemUptime).
     var time: Double = 1000
-    var flags: UInt64 { physical.reduce(0) { $0 | (KeyModifiers.flag(forKey: $1)?.rawValue ?? 0) } }
+    var flags: UInt64 {
+        physical.reduce(capsLockOn ? capsLock : 0) { $0 | (KeyModifiers.flag(forKey: $1)?.rawValue ?? 0) }
+    }
     /// What the overlay does with an answer of `pressed` or `released`: to the Mac, to the text system
-    /// (a character typed; a modifier alone or a key's up types nothing), or nowhere.
+    /// (a character typed; a modifier alone, Caps Lock or a key's up types nothing), or nowhere.
     func outcome(_ p: ForwardedKeys.Press, _ u: UInt16, down: Bool) -> [InputEvent] {
         switch p {
         case .send(let e): return [e]
-        case .text: return down && KeyModifiers.flag(forKey: u) == nil ? [.text("x")] : []
+        case .text: return down && KeyModifiers.flag(forKey: u) == nil && u != uCapsLock ? [.text("x")] : []
         case .swallow: return []
         }
     }
     /// A key pressed, as pressesBegan has it (`pressed`): its down if it goes to the Mac as a key, else
-    /// a character typed. Unseen (the overlay not taking keys), nothing.
+    /// a character typed. Unseen (the overlay not taking keys), nothing. Caps Lock's press toggles it.
     mutating func press(_ u: UInt16, seen: Bool = true) -> [InputEvent] {
         guard !physical.contains(u) else { return [] }
         let was = flags
         physical.append(u)
         time += 0.2
         if u == uEsc { escSeen = seen }
+        if u == uCapsLock { capsLockOn.toggle() }
         guard seen else { return [] }
-        return outcome(forwarded.pressed(u, modifiers: before ? was : flags, at: time), u, down: true)
+        return outcome(forwarded.pressed(u, modifiers: before ? was : flags, at: time, typing: typing), u, down: true)
     }
     mutating func release(_ u: UInt16, seen: Bool = true) -> [InputEvent] {
         guard let i = physical.firstIndex(of: u) else { return [] }
@@ -1172,12 +1400,12 @@ struct Keyboard {
             return forwarded.commanded(uEsc, modifiers: held, at: firedAt)
         case .pressFirst:
             escSeen = true
-            return outcome(forwarded.pressed(uEsc, modifiers: held, at: pressedAt), uEsc, down: true)
+            return outcome(forwarded.pressed(uEsc, modifiers: held, at: pressedAt, typing: typing), uEsc, down: true)
                 + forwarded.commanded(uEsc, modifiers: held, at: firedAt)
         case .commandFirst:
             escSeen = true
             return forwarded.commanded(uEsc, modifiers: held, at: firedAt)
-                + outcome(forwarded.pressed(uEsc, modifiers: held, at: pressedAt), uEsc, down: true)
+                + outcome(forwarded.pressed(uEsc, modifiers: held, at: pressedAt, typing: typing), uEsc, down: true)
         }
     }
     /// Whether pressesBegan saw the last Esc, so pressesEnded sees its release too.
@@ -1190,13 +1418,14 @@ struct Keyboard {
 // any key while ⌘, ⌃ or ⌥ is held, and return and tab with shift (their "\n" and "\t" carry none);
 // shift alone otherwise makes characters.
 check([uLeft, uRight, 0x51, 0x52, uEsc, 0x4C, 0x4A, 0x4D, 0x4B, 0x4E, 0x3A, 0x45, uLCmd, uRCmd, uLCtrl, uRCtrl, uLOpt, uROpt]
-        .allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: 0) },
+        .allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: 0, typing: .text) },
       "arrows, escape, forward delete, home, end, page up and down, F1 and F12, ⌘, ⌃, ⌥: as keys")
-check(![uS, uSpace, 0x2A, uLShift, uRShift, 0x39].contains { ForwardedKeys.goesAsKey($0, modifiers: shift | capsLock) },
+check(![uS, uSpace, 0x2A, uLShift, uRShift, 0x39].contains { ForwardedKeys.goesAsKey($0, modifiers: shift | capsLock, typing: .text) },
       "letters, space, delete, shift and caps lock with shift: to the text system")
-check([uReturn, 0x2B].allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: shift) && ForwardedKeys.goesAsKey($0, modifiers: shift | capsLock) },
+check([uReturn, 0x2B].allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: shift, typing: .text)
+                                   && ForwardedKeys.goesAsKey($0, modifiers: shift | capsLock, typing: .text) },
       "return and tab with shift: as keys (the text system's \\n and \\t carry no shift)")
-check(![uReturn, 0x2B].contains { ForwardedKeys.goesAsKey($0, modifiers: 0) || ForwardedKeys.goesAsKey($0, modifiers: capsLock) },
+check(![uReturn, 0x2B].contains { ForwardedKeys.goesAsKey($0, modifiers: 0, typing: .text) || ForwardedKeys.goesAsKey($0, modifiers: capsLock, typing: .text) },
       "return and tab alone, or with caps lock: to the text system (an IME's return confirms its text)")
 // ⇧Return and ⇧Tab: the key's down carries shift (the text system's, so no shift key went), its up
 // the keys down: none; either Mac is left nothing.
@@ -1208,8 +1437,9 @@ for (u, name) in [(uReturn, "⇧Return"), (UInt16(0x2B), "⇧Tab")] {
     mac.send(events + tap, from: a); old.send(events + tap)
     check(mac.table == 0 && mac.broken.isEmpty && old.table == 0 && old.log.last == .pointer(0), "\(name) leaves nothing on either Mac")
 }
-check([uS, uSpace, uReturn, uLShift].allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: command) && ForwardedKeys.goesAsKey($0, modifiers: option)
-                                                  && ForwardedKeys.goesAsKey($0, modifiers: control) },
+check([uS, uSpace, uReturn, uLShift].allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: command, typing: .text)
+                                                  && ForwardedKeys.goesAsKey($0, modifiers: option, typing: .text)
+                                                  && ForwardedKeys.goesAsKey($0, modifiers: control, typing: .text) },
       "any key while ⌘, ⌃ or ⌥ is held: as a key")
 
 // ⌘C, ⌘ let go last: the ⌘ key's up goes to the Mac although UIKit no longer says command.
@@ -1329,7 +1559,7 @@ do {
     var f = ForwardedKeys()
     let first = f.commanded(uEsc, modifiers: 0, at: 5.0)
     let repeated = f.commanded(uEsc, modifiers: 0, at: 5.5)
-    let press = f.pressed(uEsc, modifiers: 0, at: 4.999)
+    let press = f.pressed(uEsc, modifiers: 0, at: 4.999, typing: .text)
     let up = f.released(uEsc)
     check(first == [key(uEsc, true, 0), key(uEsc, false, 0)] && repeated == first && press == .swallow && up == .swallow,
           "a repeating command and its one press: \(first) \(repeated) \(press) \(up)")
@@ -1338,7 +1568,7 @@ do {
 // Esc down through pressesBegan (held): the command sends nothing while it is down.
 do {
     var f = ForwardedKeys()
-    let down = f.pressed(uEsc, modifiers: 0, at: 1.0)
+    let down = f.pressed(uEsc, modifiers: 0, at: 1.0, typing: .text)
     let command = f.commanded(uEsc, modifiers: 0, at: 1.1)
     let up = f.released(uEsc)
     check(down == .send(key(uEsc, true, 0)) && command.isEmpty && up == .send(key(uEsc, false, 0)),
@@ -1348,34 +1578,316 @@ do {
 do {
     var f = ForwardedKeys()
     _ = f.commanded(uEsc, modifiers: 0, at: 2.0)
-    _ = f.pressed(uEsc, modifiers: 0, at: 1.99)
+    _ = f.pressed(uEsc, modifiers: 0, at: 1.99, typing: .text)
     check(f.swallowed == [uEsc], "a swallowed press is remembered")
     check(f.releaseAll().isEmpty && f.swallowed.isEmpty, "releaseAll forgets it")
 }
 // `pressed` and `released` are `began` and `ended` for every other key.
 do {
     var f = ForwardedKeys()
-    check(f.pressed(uS, modifiers: 0, at: 1) == .text && f.pressed(uLeft, modifiers: 0, at: 1) == .send(key(uLeft, true, 0))
+    check(f.pressed(uS, modifiers: 0, at: 1, typing: .text) == .text && f.pressed(uLeft, modifiers: 0, at: 1, typing: .text) == .send(key(uLeft, true, 0))
           && f.released(uLeft) == .send(key(uLeft, false, 0)) && f.released(uS) == .text,
           "pressed and released for S and ←")
     check(f.commanded(uS, modifiers: 0, at: 2).isEmpty, "a key the text system takes: no command sends it")
 }
 
+// MARK: Who types a hardware keyboard's characters (KeyTyping, #162's letters)
+
+// While the Mac types them (`.keys`: a keyboard in the Latin alphabet selected on the iPad, nothing
+// composed, nothing latched), every key that types a character goes to the Mac as a key, so the Mac
+// repeats a held one and its own layout and dead keys apply; otherwise (`.text`) they go to iPadOS's text
+// system, as before, and while an input method composes (`.composing`) the overlay hands every key to it
+// before ForwardedKeys is asked (here, as the text system's).
+let characterKeys = Set(0x04...0x1D).union(0x1E...0x27).union([uReturn, uDelete, uTab, uSpace]).union(0x2D...0x31)
+    .union(0x33...0x38).union([uLShift, uRShift])
+check(ForwardedKeys.characterUsages == characterKeys,
+      "the character keys: the letters, the digits, Return, Delete, Tab, Space, - = [ ] \\ ; ' ` , . / and Shift's two: "
+        + "\(ForwardedKeys.characterUsages.sorted().map { String($0, radix: 16) })")
+check(characterKeys.allSatisfy { KeyStrokes.virtualKeys[$0] != nil },
+      "every character key is a key every Sill for Mac answers to (none is dropped by a Mac from before)")
+check(characterKeys.allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: 0, typing: .keys)
+                                 && ForwardedKeys.goesAsKey($0, modifiers: shift | capsLock, typing: .keys) },
+      "while the Mac types: every character key as a key, with shift or caps lock too")
+check(!characterKeys.subtracting(ForwardedKeys.keyUsages).contains { u in
+          [KeyTyping.text, .composing].contains { ForwardedKeys.goesAsKey(u, modifiers: 0, typing: $0)
+                                                  || (u != uReturn && u != uTab && ForwardedKeys.goesAsKey(u, modifiers: shift | capsLock, typing: $0)) } },
+      "while iPadOS types: the character keys to the text system, as before (⇧Return and ⇧Tab aside)")
+check(ForwardedKeys.keyUsages.allSatisfy { u in [KeyTyping.keys, .text, .composing].allSatisfy { ForwardedKeys.goesAsKey(u, modifiers: 0, typing: $0) } },
+      "the keys the text system never delivers: as keys whoever types")
+check(characterKeys.allSatisfy { u in [KeyTyping.keys, .text].allSatisfy { ForwardedKeys.goesAsKey(u, modifiers: command, typing: $0)
+                                                                         && ForwardedKeys.goesAsKey(u, modifiers: option, typing: $0) } },
+      "a character key with ⌘ or ⌥: a shortcut, as a key whoever types")
+// Caps Lock, the keypad, the ISO keyboards' Non-US # and \ and the international keys: no Sill for Mac
+// before has a key for the last three (KeyStrokes.virtualKeys), and Caps Lock is the iPad's own state.
+let textAlways: [UInt16] = [uCapsLock, 0x32, 0x64, 0x53, 0x54, 0x58, 0x59, 0x62, 0x63, 0x67, 0x85, 0x87, 0x89]
+check(!textAlways.contains { ForwardedKeys.goesAsKey($0, modifiers: 0, typing: .keys) || ForwardedKeys.goesAsKey($0, modifiers: shift, typing: .keys) },
+      "Caps Lock, the keypad, Non-US # and \\, the international keys: the text system's whoever types")
+check(textAlways.filter { $0 != uCapsLock }.allSatisfy { KeyStrokes.virtualKeys[$0] == nil },
+      "the keys left to the text system are ones a Mac from before has no key for (but Caps Lock)")
+
+/// A key's events on this Mac and on one from before (each left nothing held, the tap after plain): what
+/// the Mac posted.
+func onBothMacs(_ events: [InputEvent], _ what: String, line: Int = #line) -> [Mac.Event] {
+    var mac = Mac(), old = OldMac(); let a = Conn()
+    mac.send(events, from: a); old.send(events)
+    let posted = mac.log
+    mac.send(tap, from: a); old.send(tap)
+    check(mac.table == 0 && mac.broken.isEmpty && mac.down.isEmpty && old.table == 0 && old.down.isEmpty && old.log.last == .pointer(0),
+          "\(what) leaves nothing on either Mac: \(mac.log) / \(old.log)", line: line)
+    return posted
+}
+
+// A held P, the reported key (Noah, 2026-10-29: "hold p didnt work"): its down goes at the press and its
+// up at the release, so the Mac repeats it between them (KeyRepeat); the text system never sees it.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let events = kb.press(uP) + kb.release(uP)
+    check(events == [key(uP, true, 0), key(uP, false, 0)], "P held while the Mac types: \(events)")
+    expect(onBothMacs(events, "P held"), [.key(35, true, 0), .key(35, false, 0)], "P held: the Mac's P (kVK_ANSI_P)")
+    var text = Keyboard()
+    check(text.press(uP) + text.release(uP) == [.text("x")], "P while iPadOS types: the text system's, as before")
+}
+// E, which iPadOS's press and hold gave its accent popover: a key, the text system never sees it.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let events = kb.press(uE) + kb.release(uE)
+    check(events == [key(uE, true, 0), key(uE, false, 0)], "E held while the Mac types: \(events)")
+}
+// Every character key alone: down and up as a key, nothing left down on the device.
+do {
+    var bad: [UInt16] = []
+    for u in characterKeys.sorted() {
+        var kb = Keyboard(); kb.typing = .keys
+        let events = kb.press(u) + kb.release(u)
+        let isShift = KeyModifiers.flag(forKey: u) == .shift
+        let want = isShift ? [key(u, true, shift), key(u, false, 0)] : [key(u, true, 0), key(u, false, 0)]
+        if events != want || !kb.forwarded.down.isEmpty { bad.append(u) }
+    }
+    check(bad.isEmpty, "each character key alone while the Mac types: \(bad.map { String($0, radix: 16) })")
+}
+// ⇧A: Shift's own key goes first (so the Mac knows it is held: the repeats of a held A follow it), then
+// A with shift, A's up with shift still held, Shift's up with nothing.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let events = kb.press(uLShift) + kb.press(uA) + kb.release(uA) + kb.release(uLShift)
+    check(events == [key(uLShift, true, shift), key(uA, true, shift), key(uA, false, shift), key(uLShift, false, 0)], "⇧A: \(events)")
+    expect(onBothMacs(events, "⇧A"), [.key(56, true, shift), .key(0, true, shift), .key(0, false, shift), .key(56, false, 0)],
+           "⇧A on the Mac: Shift's flags-changed, A with shift, Shift let go")
+}
+// Shift let go before A: Shift's up first (the Mac's repeats of A go on without it), then A's up.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let events = kb.press(uLShift) + kb.press(uA) + kb.release(uLShift) + kb.release(uA)
+    check(events == [key(uLShift, true, shift), key(uA, true, shift), key(uLShift, false, 0), key(uA, false, 0)], "⇧A, ⇧ let go first: \(events)")
+    _ = onBothMacs(events, "⇧A with ⇧ let go first")
+}
+// The right Shift, and both: the left's up keeps shift while the right is down.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let events = kb.press(uLShift) + kb.press(uRShift) + kb.press(uZ) + kb.release(uLShift) + kb.release(uZ) + kb.release(uRShift)
+    check(events == [key(uLShift, true, shift), key(uRShift, true, shift), key(uZ, true, shift), key(uLShift, false, shift),
+                     key(uZ, false, shift), key(uRShift, false, 0)], "both Shifts around Z: \(events)")
+    _ = onBothMacs(events, "both Shifts around Z")
+}
+// Caps Lock on (the iPad's): a letter goes down with shift too, so the Mac types a capital whatever it
+// makes of a posted caps lock flag; its up with nothing held. Caps Lock's own key types nothing.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let toggle = kb.press(uCapsLock) + kb.release(uCapsLock)
+    check(toggle.isEmpty && kb.capsLockOn, "Caps Lock's key: the text system's, nothing typed: \(toggle)")
+    let events = kb.press(uA) + kb.release(uA)
+    check(events == [key(uA, true, capsLock | shift), key(uA, false, 0)], "A with Caps Lock on: \(events)")
+    expect(onBothMacs(events, "A with Caps Lock on"), [.key(0, true, capsLock | shift), .key(0, false, 0)], "A with Caps Lock on, on the Mac")
+    // A digit and a punctuation key: Caps Lock changes neither on a Mac, so no shift.
+    let digit = kb.press(u1) + kb.release(u1) + kb.press(uSlash) + kb.release(uSlash)
+    check(digit == [key(u1, true, capsLock), key(u1, false, 0), key(uSlash, true, capsLock), key(uSlash, false, 0)],
+          "1 and / with Caps Lock on: no shift: \(digit)")
+    // ⇧A with Caps Lock on: shift once.
+    let shifted = kb.press(uLShift) + kb.press(uA) + kb.release(uA) + kb.release(uLShift)
+    check(shifted == [key(uLShift, true, shift), key(uA, true, capsLock | shift), key(uA, false, shift), key(uLShift, false, 0)],
+          "⇧A with Caps Lock on: \(shifted)")
+    // ⌘A, ⌥E and ⌃A with Caps Lock on: the shortcut as it is, never ⌘⇧A.
+    let chords = kb.press(uLCmd) + kb.press(uA) + kb.release(uA) + kb.release(uLCmd)
+        + kb.press(uLOpt) + kb.press(uE) + kb.release(uE) + kb.release(uLOpt)
+        + kb.press(uLCtrl) + kb.press(uA) + kb.release(uA) + kb.release(uLCtrl)
+    check(chords == [key(uLCmd, true, command), key(uA, true, capsLock | command), key(uA, false, command), key(uLCmd, false, 0),
+                     key(uLOpt, true, option), key(uE, true, capsLock | option), key(uE, false, option), key(uLOpt, false, 0),
+                     key(uLCtrl, true, control), key(uA, true, capsLock | control), key(uA, false, control), key(uLCtrl, false, 0)],
+          "⌘A, ⌥E and ⌃A with Caps Lock on: no shift added: \(chords)")
+    _ = onBothMacs(events + digit + shifted + chords, "Caps Lock's keys")
+    // Off again: plain letters.
+    _ = kb.press(uCapsLock) + kb.release(uCapsLock)
+    check(!kb.capsLockOn && kb.press(uA) + kb.release(uA) == [key(uA, true, 0), key(uA, false, 0)], "Caps Lock off again: a plain A")
+    // While iPadOS types, Caps Lock's letters are the text system's as before.
+    var text = Keyboard(); text.capsLockOn = true
+    check(text.press(uA) + text.release(uA) == [.text("x")], "A with Caps Lock on while iPadOS types: the text system's")
+}
+check(ForwardedKeys.carried(uA, modifiers: capsLock) == capsLock | shift && ForwardedKeys.carried(uA, modifiers: 0) == 0
+      && ForwardedKeys.carried(uZ, modifiers: capsLock) == capsLock | shift && ForwardedKeys.carried(0x1E, modifiers: capsLock) == capsLock
+      && ForwardedKeys.carried(uA, modifiers: capsLock | command) == capsLock | command
+      && ForwardedKeys.carried(uLeft, modifiers: capsLock) == capsLock,
+      "carried: shift for a letter A to Z with Caps Lock on and no shortcut, nothing else")
+check(KeyModifiers.capsLock.rawValue == capsLock, "the device's caps lock bit is the Mac's")
+// ⌥E, then E: both keys, so the Mac's dead key makes é (as a keyboard plugged into it does); before,
+// ⌥E went as a key and E as typed text.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let events = kb.press(uLOpt) + kb.press(uE) + kb.release(uE) + kb.release(uLOpt) + kb.press(uE) + kb.release(uE)
+    check(events == [key(uLOpt, true, option), key(uE, true, option), key(uE, false, option), key(uLOpt, false, 0),
+                     key(uE, true, 0), key(uE, false, 0)], "⌥E, then E while the Mac types: \(events)")
+    expect(onBothMacs(events, "⌥E, E"), [.key(58, true, option), .key(14, true, option), .key(14, false, option), .key(58, false, 0),
+                                       .key(14, true, 0), .key(14, false, 0)], "⌥E, then E on the Mac")
+    var text = Keyboard()
+    check(text.press(uLOpt) + text.press(uE) + text.release(uE) + text.release(uLOpt) + text.press(uE) + text.release(uE)
+          == [key(uLOpt, true, option), key(uE, true, option), key(uE, false, option), key(uLOpt, false, 0), .text("x")],
+          "⌥E, then E while iPadOS types: as before, E typed as text")
+}
+// Return, Delete, Tab and Space as keys; ⇧Return and ⇧Tab with Shift's own key around them.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let events = [uReturn, uDelete, uTab, uSpace].flatMap { kb.press($0) + kb.release($0) }
+    check(events == [uReturn, uDelete, uTab, uSpace].flatMap { [key($0, true, 0), key($0, false, 0)] }, "Return, Delete, Tab, Space: \(events)")
+    expect(onBothMacs(events, "Return, Delete, Tab, Space"), [36, 51, 48, 49].flatMap { [Mac.Event.key($0, true, 0), .key($0, false, 0)] },
+           "Return, Delete, Tab, Space on the Mac")
+    let shifted = kb.press(uLShift) + kb.press(uReturn) + kb.release(uReturn) + kb.press(uTab) + kb.release(uTab) + kb.release(uLShift)
+    check(shifted == [key(uLShift, true, shift), key(uReturn, true, shift), key(uReturn, false, shift), key(uTab, true, shift),
+                      key(uTab, false, shift), key(uLShift, false, 0)], "⇧Return, ⇧Tab while the Mac types: \(shifted)")
+    _ = onBothMacs(shifted, "⇧Return, ⇧Tab")
+}
+// ⌘S, Esc and ← are as they were.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let events = kb.press(uLCmd) + kb.press(uS) + kb.release(uS) + kb.release(uLCmd) + kb.press(uLeft) + kb.release(uLeft)
+        + kb.esc(.commandFirst) + kb.releaseEsc() + kb.press(uEsc) + kb.release(uEsc)
+    var was = Keyboard()
+    let before = was.press(uLCmd) + was.press(uS) + was.release(uS) + was.release(uLCmd) + was.press(uLeft) + was.release(uLeft)
+        + was.esc(.commandFirst) + was.releaseEsc() + was.press(uEsc) + was.release(uEsc)
+    check(events == before, "⌘S, ←, Esc by both channels and by its press: the same whoever types: \(events)")
+}
+// A key's way is decided at its down: A down while the Mac types, the keyboard switched to one iPadOS
+// types (by the Globe key, say: ⌃Space lets the keys held come up at its Space, below), A's up still to the
+// Mac; and the other way, nothing to the Mac.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    var events = kb.press(uA)
+    kb.typing = .text
+    events += kb.release(uA)
+    check(events == [key(uA, true, 0), key(uA, false, 0)], "A down while the Mac types, up after a switch: \(events)")
+    var other = Keyboard(); other.typing = .text
+    var typed = other.press(uA)
+    other.typing = .keys
+    typed += other.release(uA)
+    check(typed == [.text("x")] && other.forwarded.down.isEmpty, "A down while iPadOS types, up after a switch: no stray up: \(typed)")
+    // Shift held across a switch: its up follows its down to the Mac; a letter in between is the text system's.
+    var held = Keyboard(); held.typing = .keys
+    var around = held.press(uLShift)
+    held.typing = .text
+    around += held.press(uA) + held.release(uA) + held.release(uLShift)
+    check(around == [key(uLShift, true, shift), .text("x"), key(uLShift, false, 0)], "Shift held across a switch: \(around)")
+    _ = onBothMacs(events + around, "keys across a switch")
+}
+// ⌃Space as iPadOS's own switch between keyboards (two languages set up: TextInputRules.isKeyboardSwitch, judged
+// in the overlay before `pressed`): the Space goes to iPadOS, so the Mac never hears a key go down, which on a Mac
+// stops the key repeating before it (KeyRepeat). Every key down on the Mac but the modifiers' own comes up at the
+// Space (ForwardedKeys.keyboardSwitch), the last pressed first, ⌃ (and ⇧) at their own releases; the keys' own
+// releases later are the text system's. Before, a letter held across the switch went on repeating on the Mac, with
+// control while ⌃ was down (⌃P, a line up), then plain until it came up.
+extension Keyboard {
+    /// The Space of ⌃Space taken by iPadOS (InputOverlayView.forward's switch): a key down the Mac never hears,
+    /// and the ups the switch sends.
+    mutating func iPadOSSwitch() -> [InputEvent] {
+        guard !physical.contains(uSpace) else { return [] }
+        physical.append(uSpace)
+        time += 0.2
+        return forwarded.keyboardSwitch()
+    }
+}
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    var events = kb.press(uP) + kb.press(uLCtrl) + kb.iPadOSSwitch()
+    kb.typing = .text                                      // now Zhuyin, say
+    events += kb.release(uSpace) + kb.release(uLCtrl) + kb.release(uP)
+    check(events == [key(uP, true, 0), key(uLCtrl, true, control), key(uP, false, control), key(uLCtrl, false, 0)],
+          "P held across iPadOS's ⌃Space: P up at the Space, ⌃ at its own release, P's release nothing: \(events)")
+    check(kb.forwarded.down.isEmpty, "P held across iPadOS's ⌃Space: nothing left down")
+    expect(onBothMacs(events, "P held across iPadOS's ⌃Space"),
+           [.key(35, true, 0), .key(59, true, control), .key(35, false, control), .key(59, false, 0)],
+           "P held across iPadOS's ⌃Space on the Mac: P's up while ⌃ is down, before any other key")
+    // ⇧, P and ← held: both keys up, the last pressed first, with what the modifier keys hold; ⇧ stays down for
+    // its own release.
+    var two = Keyboard(); two.typing = .keys
+    var held = two.press(uLShift) + two.press(uP) + two.press(uLeft) + two.press(uLCtrl) + two.iPadOSSwitch()
+    held += two.release(uSpace) + two.release(uLCtrl) + two.release(uLeft) + two.release(uP) + two.release(uLShift)
+    check(held == [key(uLShift, true, shift), key(uP, true, shift), key(uLeft, true, shift), key(uLCtrl, true, shift | control),
+                   key(uLeft, false, shift | control), key(uP, false, shift | control), key(uLCtrl, false, shift), key(uLShift, false, 0)],
+          "⇧, P and ← held across iPadOS's ⌃Space: \(held)")
+    _ = onBothMacs(held, "⇧, P and ← held across iPadOS's ⌃Space")
+    // An arrow held while iPadOS types the characters (it repeats on every Mac with key repeat): the same.
+    var arrow = Keyboard()
+    let a = arrow.press(uRight) + arrow.press(uLCtrl) + arrow.iPadOSSwitch() + arrow.release(uSpace) + arrow.release(uLCtrl)
+        + arrow.release(uRight)
+    check(a == [key(uRight, true, 0), key(uLCtrl, true, control), key(uRight, false, control), key(uLCtrl, false, 0)],
+          "→ held across iPadOS's ⌃Space: \(a)")
+    // Nothing held but ⌃: ⌃'s own keys alone, as before.
+    var bare = Keyboard(); bare.typing = .keys
+    let b = bare.press(uLCtrl) + bare.iPadOSSwitch() + bare.release(uSpace) + bare.release(uLCtrl)
+    check(b == [key(uLCtrl, true, control), key(uLCtrl, false, 0)], "⌃Space with nothing held: \(b)")
+    // A key pressed again after the switch goes down and up as any key does.
+    var again = Keyboard(); again.typing = .keys
+    _ = again.press(uP) + again.press(uLCtrl) + again.iPadOSSwitch() + again.release(uSpace) + again.release(uLCtrl) + again.release(uP)
+    let next = again.press(uP) + again.release(uP)
+    check(next == [key(uP, true, 0), key(uP, false, 0)], "P again after the switch: \(next)")
+}
+// Two letters held, one let go: each down and up once, the Mac repeating the last pressed (KeyRepeat).
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    let events = kb.press(uP) + kb.press(uE) + kb.release(uP) + kb.release(uE)
+    check(events == [key(uP, true, 0), key(uE, true, 0), key(uP, false, 0), key(uE, false, 0)], "P and E held: \(events)")
+}
+// The overlay letting go (Settings, the tour) with Shift and P down: both come up, the last pressed first.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    _ = kb.press(uLShift) + kb.press(uP)
+    let ups = kb.forwarded.releaseAll()
+    check(ups == [key(uP, false, shift), key(uLShift, false, 0)], "releaseAll with ⇧P down: \(ups)")
+    check(kb.release(uP).isEmpty && kb.release(uLShift).isEmpty, "the releases after it: nothing")
+    // Cancelled presses (the app going to the background): the same ups.
+    var c = Keyboard(); c.typing = .keys
+    let cancelled = c.press(uLShift) + c.press(uP) + c.cancel(uP) + c.cancel(uLShift)
+    check(cancelled == [key(uLShift, true, shift), key(uP, true, shift), key(uP, false, shift), key(uLShift, false, 0)], "⇧P cancelled: \(cancelled)")
+}
+// A key no Sill for Mac has (the keypad's 1) stays the text system's while the Mac types.
+do {
+    var kb = Keyboard(); kb.typing = .keys
+    check(kb.press(0x59) + kb.release(0x59) == [.text("x")], "the keypad's 1 while the Mac types: the text system's")
+}
+// UIKit's flags from before each change (a modifier's press not yet in its own flags): Shift's down still
+// carries shift, as every modifier key's own down carries what the keys down hold.
+do {
+    var kb = Keyboard(); kb.typing = .keys; kb.before = true
+    let events = kb.press(uLShift) + kb.press(uA) + kb.release(uA) + kb.release(uLShift)
+    check(events == [key(uLShift, true, shift), key(uA, true, shift), key(uA, false, shift), key(uLShift, false, 0)],
+          "⇧A with UIKit's flags from before each change: \(events)")
+}
+
 // Random sessions on this device alone: its shortcuts (latched or Spotlight), the trackpad's modified
 // clicks and drags, a hardware keyboard (with presses cancelled and the overlay letting go, Return
-// and Tab among its keys (⇧Return and ⇧Tab go as keys), and Esc through its key command in each
-// order), text and taps. This Mac keeps the invariant after every event; a Mac from before this fix
-// holds no modifier whenever nothing is pressed on the device, and at the end.
+// and Tab among its keys (⇧Return and ⇧Tab go as keys), Esc through its key command in each
+// order, letters, digits, Delete, Shift and Caps Lock, typed by the Mac or by iPadOS's text system and
+// the keyboard switched between the two mid-session), text and taps. This Mac keeps the invariant after
+// every event; a Mac from before this fix holds no modifier whenever nothing is pressed on the device,
+// and at the end; and once every key is let go nothing is down on the Mac.
 do {
     var rng = Rng(state: 0xDE71_CE5E)
-    var sessions = 0, oldBroken = 0, newBroken = 0, missed = 0, falseReports = 0
+    var sessions = 0, oldBroken = 0, newBroken = 0, missed = 0, falseReports = 0, leftDown = 0, macTyped = 0, switched = 0, ctrlSpaceSwitches = 0, switchLeftDown = 0
     var reported: [Mac.Ignore: Int] = [:]
     for (ignore, count) in [(Mac.Ignore.nothing, 2000), (.modifierUps, 500), (.keyUps, 500)] {
     for run in 0..<count {
         var mac = Mac(), old = OldMac(); let a = Conn()
         mac.ignore = ignore
         var tripwire = Tripwire()
-        var kb = Keyboard(); kb.before = rng.chance(40)
+        var kb = Keyboard(); kb.before = rng.chance(40); kb.typing = rng.chance(50) ? .keys : .text
+        if kb.typing == .keys { macTyped += 1 }
         var drag: KeyModifiers? = nil
         var overlay = true
         var oldHeld: String? = nil
@@ -1383,7 +1895,7 @@ do {
         func send(_ events: [InputEvent]) { mac.send(events, from: a); old.send(events) }
         for step in 0..<(20 + rng.below(60)) {
             defer { tripwire.step(&mac, "step \(step)") }
-            switch rng.below(12) {
+            switch rng.below(13) {
             case 0: send(KeyChord.press(rng.pick([uSpace, uEsc, uS, uLeft, uRight, uReturn]), with: latched()))
             case 1: send(KeyChord.spotlight)
             case 2:
@@ -1393,7 +1905,8 @@ do {
                 if let m = drag { send([.pointer(.leftUp, x: 0.2, y: 0.2)] + KeyChord.modifiersUp(m)); drag = nil }
                 else { let m = latched(); send(KeyChord.modifiersDown(m) + [.pointer(.leftDown, x: 0.2, y: 0.2)]); drag = m }
             case 4, 5, 6:
-                let u = rng.pick([uLCmd, uRCmd, uLCtrl, uLOpt, uLShift, uC, uS, uLeft, uEsc, uSpace, uReturn, 0x2B])
+                let u = rng.pick([uLCmd, uRCmd, uLCtrl, uLOpt, uLShift, uRShift, uC, uS, uP, uA, u1, uDelete, uCapsLock, uLeft,
+                                  uEsc, uSpace, uReturn, 0x2B])
                 // Esc, half the time through its key command, in one of the three orders.
                 if u == uEsc, overlay, rng.chance(50) {
                     send(kb.esc(rng.pick([.commandOnly, .pressFirst, .commandFirst])))
@@ -1414,6 +1927,25 @@ do {
                 // The overlay stops taking keys, or takes them again.
                 if overlay { send(kb.forwarded.releaseAll()) }
                 overlay.toggle()
+            case 11:
+                // The keyboard switched between one the Mac types and one iPadOS's text system types: by the
+                // Globe key, keys down stay the way they went; by ⌃Space, iPadOS's switch (while the overlay
+                // takes keys), whose Space the Mac never hears, every key down on the Mac but a modifier's own
+                // comes up (ForwardedKeys.keyboardSwitch).
+                if overlay, rng.chance(50), !kb.physical.contains(uSpace) {
+                    let ctrl = !kb.physical.contains(uLCtrl)
+                    if ctrl { send(kb.press(uLCtrl)) }
+                    send(kb.iPadOSSwitch())
+                    if kb.forwarded.down.contains(where: { KeyModifiers.flag(forKey: $0) == nil }) {
+                        switchLeftDown += 1
+                        if switchLeftDown <= 3 { print("FAIL: device run \(run): after iPadOS's ⌃Space \(kb.forwarded.down) still down") }
+                    }
+                    send(kb.release(uSpace))
+                    if ctrl { send(kb.release(uLCtrl)) }
+                    ctrlSpaceSwitches += 1
+                }
+                kb.typing = kb.typing == .keys ? .text : .keys
+                switched += 1
             default: send([.text("y")] + tap)
             }
             if kb.physical.isEmpty, drag == nil, old.table & modifierBits != 0 {
@@ -1423,6 +1955,10 @@ do {
         }
         if let m = drag { send([.pointer(.leftUp, x: 0.2, y: 0.2)] + KeyChord.modifiersUp(m)) }
         for u in kb.physical { send(kb.release(u, seen: overlay && (u != uEsc || kb.escSeen))) }
+        if !mac.down.isEmpty || !kb.forwarded.down.isEmpty {
+            leftDown += 1
+            if leftDown <= 3 { print("FAIL: device run \(run): with every key let go, keys \(mac.down.keys.sorted()) are down on the Mac, \(kb.forwarded.down) forwarded") }
+        }
         if oldHeld == nil, old.table & modifierBits != 0 || !old.down.filter({ macModifiers[$0.key] != nil }).isEmpty {
             oldHeld = "at the end an older Mac holds \(names(old.table & modifierBits)), down \(old.down.keys.sorted())"
         }
@@ -1443,12 +1979,16 @@ do {
         sessions += 1
     }
     }
+    check(leftDown == 0, "device sessions: \(leftDown) of \(sessions) left a key down on the Mac once every key was let go")
+    check(macTyped > 1000 && switched > 1000, "the Mac typed in \(macTyped) sessions, and keyboards switched \(switched) times")
+    check(switchLeftDown == 0 && ctrlSpaceSwitches > 500,
+          "iPadOS's ⌃Space: \(switchLeftDown) of \(ctrlSpaceSwitches) left a key but a modifier down on the Mac")
     check(newBroken == 0, "device sessions on this Mac: \(newBroken) of 2000 broke the invariant")
     check(oldBroken == 0, "device sessions on a Mac from before this fix: \(oldBroken) of 2000 left a modifier held")
     check(missed == 0, "device sessions on a Mac keeping its table through some ups: \(missed) of 1000 left a modifier set that no check reported")
     check(falseReports == 0 && reported[.nothing] == nil, "device sessions on a Mac as the model says: \(falseReports) reported a modifier")
     check((reported[.modifierUps] ?? 0) > 250, "this device's modifier keys' ups are checked: \(reported)")
-    print("device: \(sessions) sessions; checks reported in \(reported[.modifierUps] ?? 0) of 500 on a Mac ignoring modifier keys' ups and \(reported[.keyUps] ?? 0) of 500 ignoring other keys' ups")
+    print("device: \(sessions) sessions (the Mac typing in \(macTyped), \(switched) keyboard switches); checks reported in \(reported[.modifierUps] ?? 0) of 500 on a Mac ignoring modifier keys' ups and \(reported[.keyUps] ?? 0) of 500 ignoring other keys' ups")
 }
 
 print(failures == 0 ? "ok: \(checks) checks" : "FAILED: \(failures) of \(checks) checks")
