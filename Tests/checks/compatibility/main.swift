@@ -311,6 +311,29 @@ struct ReaderBefore: Decodable { var macName: String; var gestures: Int?; var cl
 check(Wire.decode(ReaderBefore.self, from: Wire.encode(repeats)).map { $0.macName == "Mac mini" && $0.clipboard == 1 } == true,
       "a reader from before it skips keyRepeat")
 
+// The window list's `desktopDisplays` and `desktopDisplay` (#91's tapping method), and kind 47: a host with
+// two displays or more says how many and which the Desktop streams, and a device sends kind 47 (empty) for
+// the next only then. Additive: an older host's list decodes with both nil, an older reader skips the keys,
+// and an older host skips the kind.
+var displays = repeats
+displays.desktopDisplays = 2
+displays.desktopDisplay = 1
+check(json(displays).contains(#""desktopDisplays":2"#) && json(displays).contains(#""desktopDisplay":1"#),
+      "a list from a host with two displays says desktopDisplays 2 and desktopDisplay 1: \(json(displays))")
+check(!json(repeats).contains("desktopDisplay") && repeats.desktopDisplays == nil && repeats.desktopDisplay == nil,
+      "a list without them (the initializer's) leaves the keys out")
+check(decodedOld != nil && decodedOld?.desktopDisplays == nil && decodedOld?.desktopDisplay == nil, "an older host's list decodes, both nil")
+check(Wire.decode(WindowList.self, from: Wire.encode(displays)).map { $0.desktopDisplays == 2 && $0.desktopDisplay == 1 && $0.keyRepeat == 1 } == true,
+      "desktopDisplays and desktopDisplay round-trip beside keyRepeat")
+check(Wire.decode(ReaderBefore.self, from: Wire.encode(displays)).map { $0.macName == "Mac mini" && $0.clipboard == 1 } == true,
+      "a reader from before them skips desktopDisplays and desktopDisplay")
+check(StreamMessageKind.nextDisplay.rawValue == 47 && StreamMessageKind(rawValue: 47) == .nextDisplay, "kind 47 is the next display")
+check(StreamMessageKind(rawValue: 45) == nil && StreamMessageKind(rawValue: 46) == nil,
+      "45 and 46 not this build's (open pull requests' microphone, pen and camera)")
+let nextMessage = StreamMessage(kind: .nextDisplay, timestamp: 1, isKeyframe: false, payload: Data()).serialized()
+check(StreamMessage.parseHeader(nextMessage).map { $0.kind == .nextDisplay && $0.payloadLength == 0 } == true
+      && nextMessage[nextMessage.startIndex] == 47, "kind 47's header parses, its payload empty")
+
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil
 if let out {

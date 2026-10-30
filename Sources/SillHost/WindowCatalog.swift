@@ -92,6 +92,18 @@ final class WindowCatalog {
     /// exists, so pick by ID. Off by default: the default path keeps `displays.first`.
     var preferMainDisplay = false
 
+    /// The Desktop's display a device stepped to (kind 47, DesktopDisplays), by its UUID: kept while
+    /// Sill runs and across sleeps, where its ID can change. Nil until a device steps; while it is
+    /// unplugged the Desktop is on the display it would be on without it.
+    private var desktopDisplayUUID: String?
+    /// The displays the Desktop can stream, from the last look, in DesktopDisplays' order (never Sill's
+    /// virtual display): the window list's `desktopDisplays` and `desktopDisplay`.
+    private(set) var desktopCandidates: [DesktopDisplays.Display] = []
+    private var lookedDisplays: [SCDisplay] = []
+    /// How many displays the Desktop can stream, or which it streams, changed: the list goes out again,
+    /// and a Desktop streaming another display restarts.
+    var onDesktopDisplaysChanged: (() -> Void)?
+
     /// `--virtual-display`: the window the coordinator has moved onto the virtual display. Set right
     /// after a successful placement, cleared on release. If ScreenCaptureKit stops treating it as
     /// on-screen there (unverified), it is fetched from the full window list so its tile stays in
@@ -273,9 +285,8 @@ final class WindowCatalog {
         appliedSeq = seq
         lookedAt = .now
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
-        display = preferMainDisplay
-            ? (content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first)
-            : content.displays.first
+        lookedDisplays = content.displays
+        resolveDesktopDisplay()
         var visible = content.windows.filter { w in
             guard let app = w.owningApplication, !app.applicationName.isEmpty else { return false }
             return w.windowLayer == 0                                  // drops widgets, wallpaper, backstop
@@ -303,6 +314,47 @@ final class WindowCatalog {
             infos = newInfos
             onWindowsChanged?(newInfos)
         }
+    }
+
+    /// Steps the Desktop to the display after the one it streams (kind 47), from the last look: kept by
+    /// its UUID, and `display` at once. Nil with fewer than two displays.
+    func chooseNextDesktopDisplay() -> DesktopDisplays.Display? {
+        guard let next = DesktopDisplays.next(after: display?.displayID, in: desktopCandidates) else { return nil }
+        chooseDesktopDisplay(next.uuid)
+        return next
+    }
+
+    /// The Desktop's display by UUID (nil: none chosen), and `display` from the last look at once.
+    func chooseDesktopDisplay(_ uuid: String?) {
+        desktopDisplayUUID = uuid
+        resolveDesktopDisplay()
+    }
+
+    /// The UUID of the display the Desktop is on now, if it is a candidate.
+    var desktopDisplayChoice: String? { desktopCandidates.first { $0.id == display?.displayID }?.uuid }
+
+    /// `display` from the last look: the display a device stepped to while it is connected, else the one
+    /// it was while it is still there (macOS's order of displays may change between looks), else as
+    /// before (with the virtual display on the main display, else macOS's first); never Sill's virtual
+    /// display while there is another.
+    private func resolveDesktopDisplay() {
+        let before = (desktopCandidates.count, display?.displayID, DesktopDisplays.number(of: display?.displayID, in: desktopCandidates))
+        let todays = preferMainDisplay
+            ? (lookedDisplays.first { $0.displayID == CGMainDisplayID() } ?? lookedDisplays.first)
+            : lookedDisplays.first
+        desktopCandidates = DesktopDisplays.candidates(lookedDisplays.map(Self.described))
+        let kept = DesktopDisplays.number(of: display?.displayID, in: desktopCandidates) != nil ? display?.displayID : nil
+        let id = DesktopDisplays.resolve(chosen: desktopDisplayUUID, among: desktopCandidates, fallback: kept ?? todays?.displayID)?.id
+        display = lookedDisplays.first { $0.displayID == id } ?? todays
+        if (desktopCandidates.count, display?.displayID, DesktopDisplays.number(of: display?.displayID, in: desktopCandidates)) != before {
+            onDesktopDisplaysChanged?()
+        }
+    }
+
+    private static func described(_ d: SCDisplay) -> DesktopDisplays.Display {
+        let uuid = CGDisplayCreateUUIDFromDisplayID(d.displayID).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String }
+        return DesktopDisplays.Display(id: d.displayID, uuid: uuid ?? "display \(d.displayID)", frame: d.frame,
+                                       isSills: StreamCoordinator.isSillVirtualDisplay(d.displayID))
     }
 
     /// Thumbnail cadence, per window: every pass (2 s) if its `WindowInfo` changed since its last

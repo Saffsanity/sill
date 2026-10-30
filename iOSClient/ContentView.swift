@@ -146,6 +146,8 @@ struct ContentView: View {
 ///   only at a synthetic host, or put a relay that drops kind 8 (input) in front of the host.
 /// * `-SillActive none` — start with nothing streaming (also `desktop`, or a window ID like `104`).
 ///   The mock otherwise starts on Code's window, as the boards draw it.
+/// * `-SillDesktopDisplays 3,2` — the mock's Mac has three displays, the Desktop on the second: the
+///   Desktop button reads "Desktop 2" (DesktopDisplays, issue #91). `2` alone is the first.
 /// * `-SillIdiom pad` — draw a screen taller than wide and narrower than 600 pt as an iPad draws
 ///   such a window (the compact halves), not as a phone does (`DuoLayout.phoneArrangement`), so an
 ///   iPhone simulator can photograph it; `phone` the other way round. Also in the normal app.
@@ -602,10 +604,21 @@ struct LayoutHarness: View {
     init(spec: Spec, live: StreamClient) {
         self.spec = spec
         self.live = live
-        _mock = StateObject(wrappedValue: spec.connectCase.map(MockCatalog.connectClient)
+        _mock = StateObject(wrappedValue: Self.withDisplays(spec.connectCase.map(MockCatalog.connectClient)
                                 ?? MockCatalog.client(active: spec.mockActive, settings: spec.settingsCase,
                                                       menus: spec.live ? nil : spec.macMenu,
-                                                      pointer: spec.pointer, pencilPointer: spec.pencilPointer))
+                                                      pointer: spec.pointer, pencilPointer: spec.pencilPointer)))
+    }
+
+    /// `-SillDesktopDisplays 3,2`: the mock's Mac has three displays and the Desktop is on the second
+    /// (DesktopDisplays: the Desktop button reads "Desktop 2"); `2` alone, the first.
+    private static func withDisplays(_ client: StreamClient) -> StreamClient {
+        let parts = (UserDefaults.standard.string(forKey: "SillDesktopDisplays") ?? "").split(separator: ",").compactMap { Int($0) }
+        if let count = parts.first {
+            client.hostDesktopDisplays = count
+            client.hostDesktopDisplay = parts.count > 1 ? parts[1] : 1
+        }
+        return client
     }
 
     var body: some View {
