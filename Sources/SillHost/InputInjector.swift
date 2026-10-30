@@ -448,24 +448,39 @@ final class InputInjector {
             case "\t": tap(virtualKey: 48)          // Tab
             case "\u{8}": tap(virtualKey: 51)       // Delete (backspace)
             default:
-                // Virtual key 0 with a Unicode string: the character arrives whatever the Mac's
-                // keyboard layout is, which is what a software keyboard on the phone means.
+                // The key that types the character on the Mac's layout, when there is one, with the
+                // Unicode string beside it: an app that reads the keycode (the iOS Simulator, a VM, a
+                // game) gets the right key, and AppKit gets the string. Without such a key, virtual
+                // key 0 and the string alone, which arrives whatever the layout is.
+                let press = layoutKeys.press(for: character)
                 let units = Array(character.utf16)
-                guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
-                      let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else { continue }
+                guard let down = CGEvent(keyboardEventSource: source, virtualKey: press?.virtualKey ?? 0, keyDown: true),
+                      let up = CGEvent(keyboardEventSource: source, virtualKey: press?.virtualKey ?? 0, keyDown: false) else { continue }
                 down.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
                 up.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
-                // No modifiers, explicitly: the character carries its own case, and an event made
-                // from this source after a ⌘Space (the Spotlight key) could otherwise inherit ⌘,
-                // which Spotlight's field ignores (typing into Spotlight did nothing, 2026-09-23).
-                down.flags = []
-                up.flags = []
+                // Shift only where the key needs it, as the Shift key itself pressed around the
+                // character (flags-changed, as KeyStrokes posts a modifier's own key): an app that
+                // reads keycodes (the iOS Simulator) takes its Shift from that key and ignores the
+                // flag, so `@` came out as `2`. No other modifier, explicitly: an event made from
+                // this source after a ⌘Space (the Spotlight key) could otherwise inherit ⌘, which
+                // Spotlight's field ignores (typing into Spotlight did nothing, 2026-09-23). Shift's
+                // up leaves the HID state table with no flags, for the next click (KeyStrokes' rule).
+                let shift = press?.shift == true
+                let flags: CGEventFlags = shift ? .maskShift : []
+                if shift { post([KeyStroke(virtualKey: Self.shiftKey, down: true, flags: KeyStrokes.shift)]) }
+                down.flags = flags
+                up.flags = flags
                 _ = post(down)
                 _ = post(up)
+                if shift { post([KeyStroke(virtualKey: Self.shiftKey, down: false, flags: 0)]) }
             }
             if !dryRun { Stats.shared.bump("in.text") }
         }
     }
+
+    private var layoutKeys = LayoutKeys()
+    /// kVK_Shift, the left Shift key.
+    private static let shiftKey: UInt16 = 56
 
     private func tap(virtualKey: CGKeyCode) {
         for down in [true, false] {
