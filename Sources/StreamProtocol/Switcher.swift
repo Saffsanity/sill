@@ -53,6 +53,9 @@ public struct WindowList: Codable {
     /// 2026-09-27, to which a device sends no kind 28. A later generation of gestures says 2 and
     /// goes only to a host that says so.
     public var gestures: Int?
+    /// Whether this host takes a two-finger pinch as `InputEvent.magnify` (`Magnify.generation`, 1).
+    /// Nil from every host before it: a device sends it none, and zooms nothing on that Mac.
+    public var magnify: Int?
     /// What this host takes and sends of the clipboard (kind 32, Clipboard.swift): 1 is text
     /// (`ClipboardPolicy.generation`). Nil from every host before 2026-10-14, and from one whose Share
     /// clipboard with devices is off: a device sends no kind 32 to either. A later generation

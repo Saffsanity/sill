@@ -339,7 +339,7 @@ enum TextInputRules {
         switch event {
         case .pointer(let action, _, _): return action == .leftDown || action == .rightDown
         case .key(_, let down, _): return down
-        case .text, .scroll, .scrollGesture: return false
+        case .text, .scroll, .scrollGesture, .magnify: return false
         }
     }
 

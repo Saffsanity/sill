@@ -858,6 +858,9 @@ final class StreamClient: ObservableObject {
     /// six, nil from a Mac before 2026-09-27, which is sent none (`sendGesture`). Cleared with the
     /// session.
     @Published var hostGestures: Int?
+    /// Whether this session's Mac takes a two-finger pinch (`WindowList.magnify`, `InputEvent.magnify`);
+    /// nil from a Mac before it, which is sent none. Cleared with the session.
+    @Published var hostMagnify: Int?
     /// The clipboard (kind 32, StreamClient+Clipboard, docs/clipboard-plan.md): what this session's
     /// Mac takes and sends (`WindowList.clipboard`, 1 for text), nil from a Mac before it or with Share
     /// clipboard with devices off. Cleared with the session.
@@ -3485,6 +3488,7 @@ final class StreamClient: ObservableObject {
         hostVersion = nil
         hostProtocol = nil
         hostGestures = nil
+        hostMagnify = nil
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -3859,7 +3863,8 @@ final class StreamClient: ObservableObject {
         let sent: PointerFeedState.Sent
         switch event {
         case .pointer(_, let x, let y): sent = .pointer(CGPoint(x: x, y: y))
-        case .scroll(let x, let y, _, _), .scrollGesture(_, let x, let y): sent = .scroll(CGPoint(x: x, y: y))
+        case .scroll(let x, let y, _, _), .scrollGesture(_, let x, let y), .magnify(_, let x, let y, _):
+            sent = .scroll(CGPoint(x: x, y: y))
         case .text, .key: sent = .other
         }
         guard pointerFeed.sent(sent, now: CACurrentMediaTime()) else { return }
@@ -4034,6 +4039,7 @@ final class StreamClient: ObservableObject {
                 if self.hostVersion != list.hostVersion { self.hostVersion = list.hostVersion }
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
+                if self.hostMagnify != list.magnify { self.hostMagnify = list.magnify }
                 // The clipboard: subscribe (or stop) as the Mac's word and this device's switch say.
                 self.hostClipboardChanged(list.clipboard)
                 if !self.sessionListed {

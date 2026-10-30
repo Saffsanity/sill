@@ -469,7 +469,8 @@ struct PortraitStreamScreen: View {
                          onModifiersConsumed: { latched = [] },
                          sendGesture: { client.sendGesture($0, fingers: $1) },
                          readZoom: { [zoom] in zoom.zoom },
-                         writeZoom: { [zoom] in zoom.set($0) })
+                         writeZoom: { [zoom] in zoom.set($0) },
+                         magnifyAvailable: { client.hostMagnify != nil })
         }
         .background(Palette.panel)
         .overlay(alignment: .top) { LinkLineView(text: linkLine) }

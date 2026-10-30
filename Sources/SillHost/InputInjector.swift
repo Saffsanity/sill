@@ -102,6 +102,8 @@ final class InputInjector {
             scrollGesture(phase, at: point(x, y, in: rect))
         case .key(let hidUsage, let down, let modifiers):
             key(hidUsage: hidUsage, down: down, modifiers: modifiers, from: device)
+        case .magnify(let phase, let x, let y, let amount):
+            magnify(phase, at: point(x, y, in: rect), amount: amount)
         }
     }
 
@@ -152,6 +154,10 @@ final class InputInjector {
         case .rightMouseUp: what = "right mouse up"
         case .rightMouseDragged: what = "right mouse drag"
         case .scrollWheel: what = Self.scrollTestText(event)
+        case Self.gestureEventType:
+            what = "magnify \(event.getDoubleValueField(Self.magnificationField))"
+            print("Test input: \(what) (phase \(event.getIntegerValueField(Self.gesturePhaseField)))")
+            return
         default: what = "event \(event.type.rawValue)"
         }
         // A button's event says where it goes: a button's up with no source goes where the pointer is.
@@ -190,6 +196,79 @@ final class InputInjector {
         guard synthetic else { return (false, "SILL_TEST_INPUT_LOG ignored: only a --synthetic host takes it.") }
         guard value == "1" else { return (false, "SILL_TEST_INPUT_LOG=\(value) ignored: 1 turns it on.") }
         return (true, "Test input log: each event this host would post is printed; a --synthetic host posts none.")
+    }
+
+    // MARK: Magnify (a two-finger pinch)
+
+    /// The trackpad's magnify gesture has no public CGEvent constructor. It is the window server's
+    /// gesture event (NSEventTypeGesture, 29) with the subtype field set to magnify (8), the amount in
+    /// the magnification field and a phase around it, the fields AppKit reads for
+    /// `NSEvent.magnification` (private numbers, as `SymbolicHotKeys` and the virtual display are
+    /// private API; stable since OS X 10.7, but unverified here on macOS 27 with a real app).
+    private static let gestureEventType = CGEventType(rawValue: 29)!
+    private static let gestureSubtypeField = CGEventField(rawValue: 110)!
+    private static let magnificationField = CGEventField(rawValue: 113)!
+    private static let gesturePhaseField = CGEventField(rawValue: 132)!
+    private static let magnifySubtype: Int64 = 8
+    /// The gesture phases NSEvent reports: began, changed, ended.
+    private static func phaseValue(_ phase: MagnifyPhase) -> Int64 {
+        switch phase { case .began: return 1; case .changed: return 2; case .ended: return 4 }
+    }
+    /// A pinch whose closing message never comes (the device dropped off mid-pinch) would leave the
+    /// Mac's content held in a zoom gesture: it ends after this long without an event.
+    private static let magnifyIdleTimeout: Double = 1
+    private var magnifyOpen = false
+    private var magnifyAt = CGPoint.zero
+    private var magnifyWatchdog: Task<Void, Never>?
+    /// Bounds a single event: a device's amount is a fraction of the size, not more than a doubling.
+    private static let maxMagnification = 1.0
+
+    private func magnify(_ phase: MagnifyPhase, at location: CGPoint, amount rawAmount: Double) {
+        Stats.shared.bump("in.magnifyPhase")
+        guard rawAmount.isFinite else { return }
+        let amount = min(max(rawAmount, -Self.maxMagnification), Self.maxMagnification)
+        switch phase {
+        case .began:
+            if magnifyOpen { postMagnify(.ended, at: magnifyAt, amount: 0) }
+            // The pointer under the fingers first, as a hand on a trackpad has it: apps zoom about the
+            // cursor, and a finger sends no move before its pinch.
+            if hypot(pointerNow().x - location.x, pointerNow().y - location.y) > 1 { pointer(.move, at: location) }
+            magnifyOpen = true
+            postMagnify(.began, at: location, amount: amount)
+        case .changed:
+            guard magnifyOpen else { return }   // the begin was lost or the watchdog closed it
+            postMagnify(.changed, at: location, amount: amount)
+        case .ended:
+            guard magnifyOpen else { return }
+            magnifyOpen = false
+            postMagnify(.ended, at: location, amount: amount)
+        }
+        magnifyAt = location
+        rearmMagnifyWatchdog()
+    }
+
+    private func postMagnify(_ phase: MagnifyPhase, at location: CGPoint, amount: Double) {
+        guard let event = CGEvent(source: source) else { return }
+        event.type = Self.gestureEventType
+        event.location = location
+        event.setIntegerValueField(Self.gestureSubtypeField, value: Self.magnifySubtype)
+        event.setIntegerValueField(Self.gesturePhaseField, value: Self.phaseValue(phase))
+        event.setDoubleValueField(Self.magnificationField, value: amount)
+        watch?.sillMoved(to: location)   // before the post, as every pointer and scroll event (`watch`)
+        lastPointerLocation = location
+        if post(event) { Stats.shared.bump("in.magnify") }
+    }
+
+    private func rearmMagnifyWatchdog() {
+        magnifyWatchdog?.cancel()
+        guard magnifyOpen else { magnifyWatchdog = nil; return }
+        magnifyWatchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.magnifyIdleTimeout * 1_000_000_000))
+            guard !Task.isCancelled, let self, self.magnifyOpen else { return }
+            self.magnifyOpen = false
+            self.postMagnify(.ended, at: self.magnifyAt, amount: 0)
+            Stats.shared.bump("in.magnifyTimeout")
+        }
     }
 
     // MARK: Pointer
@@ -519,6 +598,7 @@ final class InputInjector {
     /// The host is going: every key any device holds down goes up (KeyStrokes.releaseAll), then a
     /// button still down, where the pointer is, so nothing a device pressed outlives Sill on the Mac.
     func releaseAll() {
+        if magnifyOpen { magnifyOpen = false; postMagnify(.ended, at: magnifyAt, amount: 0) }
         post(keys.releaseAll(), letGo: true)
         if left.isDown { pointer(.leftUp, at: pointerNow()) }
         if right.isDown { pointer(.rightUp, at: pointerNow()) }
