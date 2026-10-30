@@ -18,14 +18,23 @@ MUTANTS = {
     "AC8 the line offers Settings whenever there is a suggestion": [("        if c.button != nil { return", "        if link.suggestedBitrate != nil { return")],
     "AC9 no linger": [("    static let linger = 2.0", "    static let linger = 0.0")],
     "AC10 announced on every update": [("guard visible, !announced, let t = text else { return nil }", "guard visible, let t = text else { return nil }")],
-    "AC11 a flip back does not restart the linger": [("            text = report\n            clearedAt = nil\n", "            text = report\n")],
+    "AC11 a flip back does not restart the linger": [("            text = report\n            topic = newTopic\n            clearedAt = nil\n", "            text = report\n            topic = newTopic\n")],
     "AC12 shown and announced while something is open": [("visible = text != nil && allowed", "visible = text != nil")],
     "AC13 the reason left out of the spoken home line": [(", because a device at home is connected\")", "\")")],
     "AC14 the running footnote names the away quality as home": [("let home = whole(title(a.homeBitrate, a.homeCaptureScale))", "let home = whole(title(a.awayBitrate, a.awayCaptureScale))")],
     "AC16 the footnote's qualities that may wrap": [("let home = whole(title(a.homeBitrate, a.homeCaptureScale))", "let home = title(a.homeBitrate, a.homeCaptureScale)")],
     "AC15 titles that may wrap": [('text.replacingOccurrences(of: " ", with: "\\u{00A0}")', "text")],
     # The review of 2026-09-27: the linger is for a line on screen only.
-    "AC17 a line off screen lingers (Done after the callout's button brings the cleared line up)": [("if now >= since + Self.linger || !allowed {", "if now >= since + Self.linger {")],
+    "AC17 a line off screen lingers (Done after the callout's button brings the cleared line up)": [("if now >= since + Self.linger || !allowed || topic == .console {", "if now >= since + Self.linger || topic == .console {")],
+    # Issue #211: the Mac's console.
+    "AC18 the callout while the session has the console": [("        guard sessionOnConsole == false else { return nil }\n        return \"\\(mac) switched to another user,", "        guard sessionOnConsole != nil else { return nil }\n        return \"\\(mac) switched to another user,")],
+    "AC19 the stream's line whatever the console says": [("        guard sessionOnConsole == false else { return nil }\n        return \"\\(mac) switched users.", "        return \"\\(mac) switched users.")],
+    "AC20 the link's line before the console's": [("        if let text = consoleLine(sessionOnConsole: sessionOnConsole, mac: mac) { return StreamLine(text: text, topic: .console) }\n        return streamLine(link: link, away: away, mac: mac).map { StreamLine(text: $0, topic: .link) }",
+        "        if let text = streamLine(link: link, away: away, mac: mac) { return StreamLine(text: text, topic: .link) }\n        return consoleLine(sessionOnConsole: sessionOnConsole, mac: mac).map { StreamLine(text: $0, topic: .console) }")],
+    "AC21 the console's line under the link's topic": [("return StreamLine(text: text, topic: .console) }", "return StreamLine(text: text, topic: .link) }")],
+    "AC22 a change of topic not heard": [("            if text != nil, newTopic != topic { announced = false }   // another topic: a spell of its own\n", "")],
+    "AC23 the console's line lingers": [("if now >= since + Self.linger || !allowed || topic == .console {", "if now >= since + Self.linger || !allowed {")],
+    "AC24 the topic never kept": [("            topic = newTopic\n", "")],
 }
 caught = 0
 for name, edits in MUTANTS.items():

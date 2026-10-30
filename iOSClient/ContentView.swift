@@ -224,6 +224,9 @@ struct ContentView: View {
 ///   under it says how instead).
 /// * `-SillLinkLine behind` — the mock Mac reports this connection's link behind, whatever the
 ///   settings case: the stream screen's line shows (the panel closed; with it open, the callout).
+///   `-SillLinkLine console`: the mock Mac's session is off the console (issue #211, another user's
+///   session has its screen): the console's line, before any link's (`linkbehind` too), and the
+///   panel's callout.
 /// * `-Sill.trackpadGestures 0` — not a harness argument either: this device's switch for
 ///   three-finger gestures (the Settings panel's last group, This iPad) off for one run, in the
 ///   normal app too. The mock Mac takes gestures (`WindowList.gestures` 1) in every settings case

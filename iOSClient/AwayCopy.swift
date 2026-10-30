@@ -5,11 +5,12 @@ import Foundation
 import StreamProtocol
 #endif
 
-/// Away from home and the link, on the device (docs/remote-bundle-plan.md §5.8, §6.7 and §8): every
-/// string the Settings panel and the stream screen show for them, which callout shows, and when the
-/// stream screen's line comes and goes (`LinkLine`). Values only ever from the Mac's own state on this
-/// connection (`away` and `link` in its kind 16), never a pending pick. Pure (Foundation and
-/// StreamProtocol's HostSettings.swift), checked with swiftc (Tests/checks/away-copy).
+/// Away from home and the link, on the device (docs/remote-bundle-plan.md §5.8, §6.7 and §8), and the
+/// Mac's console (issue #211): every string the Settings panel and the stream screen show for them,
+/// which callout shows, and when the stream screen's line comes and goes (`LinkLine`). Values only
+/// ever from the Mac's own state on this connection (`away`, `link` and `sessionOnConsole` in its
+/// kind 16), never a pending pick. Pure (Foundation and StreamProtocol's HostSettings.swift), checked
+/// with swiftc (Tests/checks/away-copy).
 enum AwayCopy {
     /// "Low · Standard", from the Mac's word.
     static func title(_ bitrate: Int, _ captureScale: Double) -> String {
@@ -118,6 +119,35 @@ enum AwayCopy {
         if c.button != nil { return "The link can’t keep up with \(QualityPreset.name(forBitrate: link.bitrate)). Lower it in Settings." }
         return "The link to \(mac) can’t keep up."
     }
+
+    // MARK: The Mac's console (issue #211)
+
+    /// The Settings panel's callout while the Mac's user session is off the console: under fast user
+    /// switching another user's session, or the login window, has the Mac's screen, macOS drops the
+    /// taps and keys this device sends, and they work again by themselves once the Mac switches back.
+    /// Nil while the session has the console, and from a Mac that never says (nil: an older one).
+    static func offConsoleCallout(sessionOnConsole: Bool?, mac: String) -> String? {
+        guard sessionOnConsole == false else { return nil }
+        return "\(mac) switched to another user, so your taps and keys don’t reach it, and its picture may stop. Both come back once it switches back; there’s no need to reconnect."
+    }
+
+    /// The stream screen's line for the same, short enough for two lines on a phone.
+    static func consoleLine(sessionOnConsole: Bool?, mac: String) -> String? {
+        guard sessionOnConsole == false else { return nil }
+        return "\(mac) switched users. Taps and keys work again once it’s back."
+    }
+
+    /// The stream screen's line and what it is about: the console's first (nothing reaches the Mac,
+    /// whatever the link does), then the link's.
+    struct StreamLine: Equatable {
+        let text: String
+        let topic: LinkLine.Topic
+    }
+
+    static func line(link: LinkReport?, away: AwayQuality?, mac: String, sessionOnConsole: Bool?) -> StreamLine? {
+        if let text = consoleLine(sessionOnConsole: sessionOnConsole, mac: mac) { return StreamLine(text: text, topic: .console) }
+        return streamLine(link: link, away: away, mac: mac).map { StreamLine(text: $0, topic: .link) }
+    }
 }
 
 /// The stream screen's line over time (docs/remote-bundle-plan.md §6.7): it shows as soon as a
@@ -127,9 +157,15 @@ enum AwayCopy {
 /// is for a line on screen only: a report that clears while something is open over the stream, or a
 /// lingering line that something covers, ends its spell at once, so closing the panel right after
 /// its callout's button never brings up, or speaks, a report that has gone (the review of
-/// 2026-09-27).
+/// 2026-09-27). The Mac's console (issue #211) is a topic of its own: a line that turns from the
+/// link to the console, or back, is a new spell and heard again, and the console's line goes as
+/// soon as the Mac says it has switched back, with no linger (a switch never flickers, and its
+/// words would no longer be true).
 struct LinkLine: Equatable {
     static let linger = 2.0
+    /// What the line is about.
+    enum Topic: Equatable { case link, console }
+    private(set) var topic: Topic = .link
     /// The line's text through its spell, the linger included; nil once it has gone.
     private(set) var text: String?
     /// On screen: a text, and nothing open over the stream.
@@ -138,18 +174,21 @@ struct LinkLine: Equatable {
     private var clearedAt: Double?
     private var announced = false
 
-    /// A report's line now (nil: none, or not behind), whether nothing is open over the stream, and the
-    /// time. Returns the text to announce, once a spell.
-    mutating func update(report: String?, allowed: Bool, now: Double) -> String? {
+    /// A report's line now (nil: none, or not behind) and its topic, whether nothing is open over the
+    /// stream, and the time. Returns the text to announce, once a spell.
+    mutating func update(report: String?, topic newTopic: Topic = .link, allowed: Bool, now: Double) -> String? {
         if let report {
+            if text != nil, newTopic != topic { announced = false }   // another topic: a spell of its own
             text = report
+            topic = newTopic
             clearedAt = nil
         } else if text != nil {
             let since = clearedAt ?? now
             clearedAt = since
             // Gone at the linger's end, or at once while nothing shows it: the linger keeps a line on
-            // screen from flickering, and a line off screen has nothing to keep.
-            if now >= since + Self.linger || !allowed {
+            // screen from flickering, and a line off screen has nothing to keep. The console's goes
+            // at once.
+            if now >= since + Self.linger || !allowed || topic == .console {
                 text = nil
                 clearedAt = nil
                 announced = false

@@ -7,9 +7,11 @@
 // What it checks: the panel header's away line and what VoiceOver adds; the footnote's three forms;
 // the link's callout, first match wins, its button's title, spoken label and change; that stalled
 // shows nothing; the old round-trip callout only for a Mac without `away`; the stream screen's line;
-// and LinkLine: shown on arrival, gone 2 s after the report clears, kept through a quick flip, hidden
+// LinkLine: shown on arrival, gone 2 s after the report clears, kept through a quick flip, hidden
 // while something is open over the stream, gone at once when its report clears (or it is covered) off
-// screen, announced once a spell.
+// screen, announced once a spell; and the Mac's console (issue #211): the panel's callout and the
+// stream's line while another user's session has the Mac's screen, before any link's line, a topic of
+// its own for LinkLine (announced as it takes over, gone at once as the Mac is back).
 import Foundation
 
 setvbuf(stdout, nil, _IOLBF, 0)
@@ -177,6 +179,59 @@ do {
     _ = covered.update(report: nil, allowed: false, now: 1.5)
     _ = covered.update(report: nil, allowed: true, now: 2)
     check(!covered.visible && covered.text == nil, "…and something opened over it ends the linger: closed again, no line")
+}
+
+// MARK: The Mac's console (issue #211)
+
+let calloutWords = "Mac mini switched to another user, so your taps and keys don’t reach it, and its picture may stop. Both come back once it switches back; there’s no need to reconnect."
+let consoleWords = "Mac mini switched users. Taps and keys work again once it’s back."
+eq(AwayCopy.offConsoleCallout(sessionOnConsole: false, mac: "Mac mini"), calloutWords, "off the console: the panel's callout")
+check(AwayCopy.offConsoleCallout(sessionOnConsole: true, mac: "Mac mini") == nil, "on the console: no callout")
+check(AwayCopy.offConsoleCallout(sessionOnConsole: nil, mac: "Mac mini") == nil, "nil (on the console, or an older Mac): no callout")
+eq(AwayCopy.consoleLine(sessionOnConsole: false, mac: "Mac mini"), consoleWords, "off the console: the stream's line")
+check(AwayCopy.consoleLine(sessionOnConsole: true, mac: "Mac mini") == nil, "on the console: no line")
+check(AwayCopy.consoleLine(sessionOnConsole: nil, mac: "Mac mini") == nil, "nil: no line")
+eq(AwayCopy.line(link: nil, away: away(), mac: "Mac mini", sessionOnConsole: false),
+   AwayCopy.StreamLine(text: consoleWords, topic: .console), "the stream screen's line off the console, and its topic")
+eq(AwayCopy.line(link: link(), away: away(), mac: "Mac mini", sessionOnConsole: false)?.topic, .console,
+   "…before a link that is behind: nothing reaches the Mac either way")
+eq(AwayCopy.line(link: link(), away: away(), mac: "Mac mini", sessionOnConsole: nil),
+   AwayCopy.StreamLine(text: "The link can’t keep up with Pro. Lower it in Settings.", topic: .link), "on the console (nil): the link's line, its topic")
+eq(AwayCopy.line(link: link(), away: away(run: false), mac: "Mac mini", sessionOnConsole: true),
+   AwayCopy.StreamLine(text: "The link to Mac mini can’t keep up.", topic: .link), "…and when the Mac says true")
+check(AwayCopy.line(link: nil, away: away(), mac: "Mac mini", sessionOnConsole: nil) == nil, "on the console, the link keeping up: no line")
+check(AwayCopy.line(link: link(LinkReport.stalled), away: away(), mac: "Mac mini", sessionOnConsole: true) == nil, "stalled, on the console: no line")
+
+do {
+    var l = LinkLine()
+    eq(l.update(report: "link", allowed: true, now: 0), "link", "a link's line: announced")
+    eq(l.update(report: "console", topic: .console, allowed: true, now: 1), "console",
+       "the console's line over it: a spell of its own, announced")
+    eq(l.topic, .console, "…its topic")
+    eq(l.update(report: "console", topic: .console, allowed: true, now: 2), nil, "…once")
+    eq(l.update(report: "link", allowed: true, now: 3), "link", "the Mac back with the link still behind: the link's line, announced again")
+    eq(l.update(report: "console", topic: .console, allowed: true, now: 4), "console", "switched away again: announced again")
+    eq(l.update(report: nil, allowed: true, now: 5), nil, "the Mac back, all well: nothing announced")
+    check(!l.visible && l.text == nil, "…and the console's line gone at once, no linger")
+    check(l.recheckAt == nil, "…nothing to look at again")
+    eq(l.update(report: "console", topic: .console, allowed: true, now: 6), "console", "switched away later: a new spell, announced")
+}
+do {
+    var l = LinkLine()
+    eq(l.update(report: "console", topic: .console, allowed: false, now: 0), nil,
+       "the console's line while the panel is open (it has the callout): not announced")
+    eq(l.update(report: "console", topic: .console, allowed: true, now: 1), "console", "…announced once the panel closes")
+    _ = l.update(report: nil, allowed: true, now: 2)
+    check(!l.visible && l.text == nil, "…gone as the Mac is back")
+    var m = LinkLine()
+    _ = m.update(report: "link", allowed: true, now: 0)
+    _ = m.update(report: nil, allowed: true, now: 1)
+    check(m.visible, "a link's line lingering after its report cleared")
+    eq(m.update(report: "console", topic: .console, allowed: true, now: 1.5), "console",
+       "…the console's line takes its place at once, announced")
+    check(m.recheckAt == nil, "…with no linger left to look at")
+    _ = m.update(report: nil, allowed: true, now: 1.6)
+    check(!m.visible && m.text == nil, "…and goes at once as the Mac is back")
 }
 
 print(failures == 0 ? "away-copy: all passed" : "away-copy: \(failures) FAILED")

@@ -72,6 +72,9 @@ package final class StreamCoordinator {
     /// The TEST ONLY hooks' lines (PointerTestHooks, InputInjector.testInputLog, `keyframeIgnoreHook`,
     /// FirewallCheck.TestHook), printed as `start` begins; empty without them.
     private let testHookLines: [String]
+    /// Whether this Mac's user session has the console (issue #211, ConsoleSession): its state goes
+    /// in the snapshot, and so in every device's kind 16.
+    private let console: ConsoleWatch
     /// The macOS firewall (FirewallRule, a user's report of 2026-10-29): the paths a rule may name
     /// for this process, the TEST ONLY answers a test host takes instead of asking, and one check at
     /// a time (`checkFirewall`), with one more after it when asked meanwhile.
@@ -361,6 +364,8 @@ package final class StreamCoordinator {
         let noScreen = PointerTestHooks.noScreen(synthetic: synthetic, environment: env)
         WindowCatalog.screenless = noScreen.on
         let keyframeIgnore = Self.keyframeIgnoreHook(synthetic: synthetic, environment: env)
+        let consoleHook = ConsoleSession.testHook(synthetic: synthetic, environment: env)
+        console = ConsoleWatch(synthetic: synthetic, testFile: consoleHook.path)
         let desktopFail = Self.desktopFailHook(synthetic: synthetic, environment: env)
         pointer = PointerWatch(synthetic: synthetic, path: path.path)
         softwareOnly = software.on
@@ -374,7 +379,7 @@ package final class StreamCoordinator {
         firewallPaths = FirewallRule.paths(executable: FirewallCheck.executablePath())
         desktopStartsToFail = desktopFail.count
         testHookLines = [path.line, software.line, inputLog.line, userActive.line, keyframeIgnore.line, desktopFail.line,
-                         noScreen.line, firewallTest.line].compactMap { $0 }
+                         noScreen.line, firewallTest.line, consoleHook.line].compactMap { $0 }
         status = HostStatus()
         var home = StreamServer.HomeDoorMode.plain
         if homePairing, let remote {
@@ -481,7 +486,9 @@ package final class StreamCoordinator {
                 self.routesChanged(joined: id, endpoint: "\(connection.endpoint)")
                 // A sleeping display gives black frames: the session's start wakes it, as a key would.
                 if !cut { self.deviceActive(.connect, connection) }
-                // Catalog first: the client's UI needs it even if the keyframe is slow to come.
+                // Catalog first: the client's UI needs it even if the keyframe is slow to come. Its
+                // first settings state, in the catalog, says where the console is now.
+                self.console.look()
                 self.catalog.thumbnailsWanted = true
                 self.sendCatalog(to: connection)
                 self.encoder?.requestKeyframe()
@@ -547,6 +554,7 @@ package final class StreamCoordinator {
                 guard let self else { return }
                 let wasEmpty = self.catalog.clientCount == 0
                 self.catalog.clientCount = count          // the catalog idles itself at 0
+                self.console.watch(count > 0)             // and so does the look at the console
                 // Nobody is watching: stop capturing and encoding. The next client picks afresh.
                 if count == 0 { self.viewport = nil; self.clientFPS = [:]; self.fitScales = [:] }   // the next device starts from scratch
                 if count == 0 { self.gestureChords.forget() }                 // and did not open a view it could close
@@ -748,6 +756,12 @@ package final class StreamCoordinator {
             if !hardwareResponds { enterSoftwareFallback(afterHang: false) }
         }
         if virtualDisplay { enableVirtualDisplay() }
+        // This user's session and the console (issue #211): a look now, then at each session
+        // notification, as a device connects and every second while one is (ConsoleWatch). Prints
+        // nothing while the session has the console, as it does whenever the host starts from a
+        // login or a terminal.
+        console.onChange = { [weak self] onConsole in self?.status.update { $0.sessionOnConsole = onConsole } }
+        console.start()
         catalog.start()
         // The only startup line Direct Wireless adds, and only when it is on: the default path
         // prints what it always printed.
@@ -1101,6 +1115,9 @@ package final class StreamCoordinator {
             }
         case .input:
             guard let event = input else { return }
+            // Off the console macOS drops what is posted (issue #211): counted, and posted as ever, so
+            // nothing is held back to land later, when the Mac may show something else.
+            if !console.onConsole { Stats.shared.bump(ConsoleSession.offConsoleInputKey) }
             let device = ObjectIdentifier(connection)
             guard let rect = currentSourceRect() else {
                 // Nothing streams (between sources, or the stream stopped: the window closed under a
@@ -3026,7 +3043,8 @@ package final class StreamCoordinator {
                                  away: away,
                                  link: link,
                                  audioNote: t.sendAudio ? s.audio?.note : nil,
-                                 sessionPaired: sessionPaired(id))
+                                 sessionPaired: sessionPaired(id),
+                                 sessionOnConsole: ConsoleSession.wire(onConsole: s.sessionOnConsole))
     }
 
     /// Whether connection `id`'s key is on this Mac's trust list now, as the status snapshot lists it

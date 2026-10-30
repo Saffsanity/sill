@@ -21,9 +21,10 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --expect=K=V[,...] at exit, compare the last kind 16's settings (and its top-level persistent,
                      virtualDisplayAvailable and sessionPaired; away from home, docs/remote-bundle-plan.md: its
                      away's homeBitrate, homeCaptureScale, awayBitrate, awayCaptureScale,
-                     thisConnectionAway and awayRunning, missing when the host sent no away; and
-                     linkState, its link's state, "fine" when it sent none): prints EXPECT ok or
-                     EXPECT FAIL, exits 1 on failure
+                     thisConnectionAway and awayRunning, missing when the host sent no away;
+                     linkState, its link's state, "fine" when it sent none; and console, off while
+                     the host says another user's session has the Mac's screen, else on, issue
+                     #211): prints EXPECT ok or EXPECT FAIL, exits 1 on failure
   --host=H           connect to H instead of 127.0.0.1 (an IPv4 or IPv6 address, or a name)
   --device=NAME      the name ClientStats reports (implies --stats); \n, \t, \xHH and \uXXXX escapes
                      are decoded, so control and bidi characters can be sent
@@ -143,7 +144,8 @@ its arrival time; dw= is Direct Wireless
 session's key is on the Mac's trust list, the one kind of session it takes Direct Wireless from (1, 0,
 or - from a host before 2026-10-29); away= (only when the host sent it) is
 h:HOME_BITRATE/SCALE,a:AWAY_BITRATE/SCALE,this=1|0,run=1|0, and link= (only while the host reports
-the link behind or stalled) STATE,withheld=N,bitrate=B,carried=KBPS|-,suggested=B/SCALE|-. Flags may come in any
+the link behind or stalled) STATE,withheld=N,bitrate=B,carried=KBPS|-,suggested=B/SCALE|-, and console=off (only
+while the host says another user's session has the Mac's screen, issue #211). Flags may come in any
 order after the positional arguments. Everything is checked before connecting: an unknown flag, a
 --set or --expect key that is not one of theirs, or a value that does not parse stops the script
 with status 2 (--raw17, --raw9 and --input go out as written). Find PORT with: lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>.
@@ -159,7 +161,7 @@ BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "sendAudio",
 SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless", "sendAudio"}
 # Away from home (docs/remote-bundle-plan.md): read from the state's `away`, and its `link`'s state.
 AWAY_KEYS = {"homeBitrate", "homeCaptureScale", "awayBitrate", "awayCaptureScale", "thisConnectionAway", "awayRunning"}
-EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "sessionPaired", "linkState", "clipboard"} | AWAY_KEYS
+EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "sessionPaired", "linkState", "clipboard", "console"} | AWAY_KEYS
 TIMED = ("set", "raw17", "raw9", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "keyframe", "fetch", "press", "raw25",
          "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32")
 INPUT = ("move", "tap", "key", "input")
@@ -190,6 +192,9 @@ def value(k, v):
         return BOOL[v.lower()]
     if k == "linkState":
         if v not in ("fine", "behind", "stalled"): raise ValueError(f"linkState: fine, behind or stalled, got {v!r}")
+        return v
+    if k == "console":
+        if v not in ("on", "off"): raise ValueError(f"console: on or off, got {v!r}")
         return v
     if k == "clipboard":
         return None if v == "none" else unescape(v)
@@ -713,7 +718,8 @@ def describe(d):
     return (f"maxFPS={st.get('maxFPS')} bitrate={st.get('bitrate')} scale={st.get('captureScale')} speed={b(st.get('prioritizeSpeed'))} "
             f"vd={b(st.get('virtualDisplay'))} dw={dw} paired={sp} audio={au} persistent={b(d.get('persistent'))} vdAvail={b(d.get('virtualDisplayAvailable'))} "
             f"sw={b(d.get('softwareEncoder'))} stream={running}" + (f" note={note!r}" if note else "")
-            + (f" audioNote={d['audioNote']!r}" if d.get("audioNote") else "") + extra)
+            + (f" audioNote={d['audioNote']!r}" if d.get("audioNote") else "") + extra
+            + (" console=off" if d.get("sessionOnConsole") is False else ""))
 
 buf = b""; t0 = time.time(); last = t0; nextping = t0; nextstats = t0
 per = {}; tot = {}; frames = 0; keys = 0; kb = 0; kb_sec = 0; rtt = None; first_frame = None; ps_seen = []
@@ -983,6 +989,7 @@ if expect is not None:
             if k in ("persistent", "virtualDisplayAvailable", "sessionPaired"): got = last_state.get(k)
             elif k in AWAY_KEYS: got = (last_state.get("away") or {}).get(k)
             elif k == "linkState": got = (last_state.get("link") or {}).get("state", "fine")
+            elif k == "console": got = "off" if last_state.get("sessionOnConsole") is False else "on"
             else: got = last_state.get("settings", {}).get(k)
             if isinstance(want, str): same = got == want
             else: same = (got == want) if isinstance(want, bool) else (got is not None and not isinstance(got, bool) and float(got) == float(want))

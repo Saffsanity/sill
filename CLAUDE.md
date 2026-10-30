@@ -8,6 +8,32 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**When another user has the Mac's screen (2026-10-29, addhumal's PR #221 with maintainer edits; issue #211,
+junkaiman's).** Under fast user switching, while another user's session or the login window has the screen, macOS
+drops every event Sill posts from this user's session: taps, keys and gestures go nowhere while the session stays up,
+and they work again by themselves once the Mac switches back (the reporter's retest of 2026-10-23: no reconnect, no
+relaunch). So the host only says so. Wire (additive): kind 16's `sessionOnConsole`, false only while off the console,
+nil otherwise (a state is then byte for byte what it was; `away-wire`). Host: `ConsoleSession` (pure,
+`Tests/checks/console-session`, 37 checks and 12 mutants: the session dictionary's `kCGSSessionOnConsoleKey`, nothing
+said without a dictionary or the key, the wire, the two `Console:` lines, `in.offConsole`) and `ConsoleWatch` (a look at
+start, at NSWorkspace's session notifications, which only say when to look, as a device connects and every second
+while one is: the CLI's default path gets no notification); the PR's notification-only state in `SessionLock` is gone
+(SessionLock is main's again, the lock witness Sill.app's alone). Input is posted as ever and counted
+(`in.offConsole`); nothing is held back to land later. Device: over the stream "‹Mac› switched users. Taps and keys work
+again once it’s back." (two lines on an SE at xxLarge with "Mac mini"), in the Settings panel "‹Mac› switched to another
+user, so your taps and keys don’t reach it, and its picture may stop. Both come back once it switches back; there’s no
+need to reconnect."; LinkLine gives the console a topic of its own (heard as it takes over from the link's line or gives
+way to it, gone at once when the Mac is back; `away-copy` 103 checks and 24 mutants). No goodbye (kind 22 would end a
+session that comes back by itself, and 0.5.1 devices would not reconnect); older devices show nothing, as before.
+TEST ONLY `SILL_TEST_CONSOLE_FILE` (a synthetic host: "off" in the file), sillclient's `console=off` and
+`--expect=console=on|off`, the harness's `-SillLinkLine console`. Verified: run-all 57, the three iOS builds and
+`swift build -c release` with the known warnings, H2 against main (idle identical; with a client every line but the
+`[1s]` lines), live on loopback (the flip seen within a second both ways, `in.offConsole` counted, the device's line
+announced 3 ms after the host's look, 25 ms after the file changed, gone on return), photos on a private iPad mini.
+**Untested, for Noah** (a second account on his Mac; the report in sill-handoff's triage folder has the steps): the
+lines and the device's words around a real switch, whether the picture freezes or the capture stops (and comes
+back), taps after the switch back, the login window's case, Sill.app launched in the background account.
+
 **The door's waiting places (2026-10-29, branch `sec-door-pending` from main at 150479b5, PR #252; finding 9 of the
 security scan of 2026-10-18, Low; Noah's go of 2026-10-29).** A TLS door (the remote one, and the home one of
 Sill.app and `SillHost --pairing`) held 8 connections waiting for admission, 2 per address, 10 s each, and backed an
@@ -7295,6 +7321,14 @@ good.
   only with the Mac's own signature). StreamServer's home door is plain (the
   CLI without --pairing), TLS (`Door(.home)`, `p` in its TXT record) or
   closed (no identity: fail closed), `HomeDoorMode`.
+  The Mac's console under fast user switching (issue #211): `ConsoleSession`
+  (whether this user's session has the screen, from the session dictionary's
+  `kCGSSessionOnConsoleKey`; kind 16's `sessionOnConsole`, false only while it
+  does not; the two log lines; `in.offConsole`; the TEST ONLY
+  SILL_TEST_CONSOLE_FILE; pure, `Tests/checks/console-session`) and
+  `ConsoleWatch` (main actor: a look at start, at NSWorkspace's session
+  notifications, as a device connects and every second while one is; a
+  synthetic host reads only the test file).
   `DeviceGate` (the device floor, "0" in every build so far, and a refusal's
   words and log lines; pure, checked with swiftc; the gate itself, which runs
   only above "0", is StreamServer's, with the TEST ONLY
@@ -7778,9 +7812,10 @@ good.
   (the Mac's settings with this device's unanswered picks; pure logic, checked
   with swiftc), `HostSettingsPanel` (the Settings panel; the route line, Away
   from home, the away line in the header, the link's callout and its button,
-  the footnote, the slow-link callout for older Macs), `AwayCopy` (every
-  string of away from home and the link on the device, which callout shows,
-  and `LinkLine`, the stream screen's line over time; pure,
+  the footnote, the slow-link callout for older Macs, the Mac's console's
+  callout), `AwayCopy` (every string of away from home, the link and the Mac's
+  console (issue #211) on the device, which callout shows, and `LinkLine`, the
+  stream screen's line over time, the console's a topic of its own; pure,
   `Tests/checks/away-copy`; pbxproj A801/F801). Remote access: `DeviceIdentity`
   (the device key in the Keychain, carrying out `DeviceKeyPolicy`),
   `SavedMacs` (pure; `homeTLS` and `revoked` for pairing at home; with
@@ -8082,6 +8117,7 @@ SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TES
 SILL_TEST_FIREWALL=executable SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: the macOS firewall's answers canned (executable|bundle|both|all|off|allowed|unreadable, or a file holding one, read at each check): "Firewall: the macOS firewall blocks Sill’s executable, …"
 /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate; …/socketfilterfw --listapps; …/socketfilterfw --getappblocked PATH   # the firewall, read-only as any user; never --unblockapp, --add, --remove or --set* (they change it, with sudo)
 python3 Scripts/sillclient.py PORT 6 none --clipboard --copy=hello@2 --expect=clipboard=none   # subscribe, send text as a device's Paste does; each kind 32 printed
+echo off > $T/console; SILL_TEST_CONSOLE_FILE=$T/console SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: another user's session "has the screen" while the file says off (issue #211): the Console lines, kind 16's sessionOnConsole false (sillclient's console=off, --expect=console=on|off), in.offConsole
 SILL_TOUCHRIG_SIM='Sill touchrig' Tests/touchrig/run.sh new && Tests/touchrig/run.sh --rev origin/main base && Tests/touchrig/compare.py .build/touchrig/base.log .build/touchrig/new.log   # the surfaces under synthesized touches
 Tests/checks/run-all.sh                 # every pure check, as CI runs them (~5 min; --mutants adds the mutants, well over an hour)
 Scripts/pacing/run.sh                   # remote pacing and the link's judge, this tree against origin/main, no encoder, all on loopback (~25 min; --full ~45; --list)
@@ -8198,6 +8234,10 @@ window list, no thumbnails, no display lookup), so a test host with a client con
 macOS for no screen recording: every ScreenCaptureKit call counts against the responsible app's
 grant (Claude's, for a host an agent runs), and macOS reminds the person once a month and after
 every rebuilt binary; set it on every headless host whose test needs no real window.
+`SILL_TEST_CONSOLE_FILE=<file>` stands in for fast user switching (issue #211): a synthetic host
+never reads this Mac's session, and with it reads the file instead, at start, as a device connects
+and every second while one is; "off" (whitespace ignored) is another user's session on the
+console, anything else or no file this one (ConsoleSession.testRead).
 `SILL_TEST_SOFTWARE_ENCODER=1` starts on the software encoder, with
 no launch probe and no re-check, so a test never touches the hardware encoder
 (60 fps at most: a 120 fps sampler test needs the hardware, and so the
@@ -8331,7 +8371,8 @@ Wired, `noroute` none, and `remote`, `remoteinternet` and `remoteslow` none,
 where the route line says how), away from home's and the link's settings cases
 `away|awaymixed|awayhome|linkbehind|linkmixed|linklow|linkstalled` (the header's
 away line, the footnote, the callout; `linkstalled` shows none) and
-`-SillLinkLine behind` (the mock reports the link behind: the stream's line),
+`-SillLinkLine behind` (the mock reports the link behind: the stream's line; `console`: the mock
+Mac's session off the console, issue #211: the console's line, before any link's, and the panel's callout),
 the Mac's sound's `-SillSound on|muted` (the mock Mac sends it, Send Audio on:
 Mute off or on; the mock plays nothing) and settings cases
 `sound|soundoff|soundnote|nosound` (the Send Audio switch on, off, on with the
@@ -8569,7 +8610,9 @@ device keeps working with Macs from the first public build on, or each says why
   set (the away quality for a device away), and its optional `away` (AwayQuality, from a host with
   an identity: Sill.app, SillHost --remote or --pairing) and `link` (LinkReport, only while a link
   does not keep up; its `state` a string,
-  which a device reads as keeping up when it does not know it); kind 22's `reason`, `message` and
+  which a device reads as keeping up when it does not know it) and `sessionOnConsole` (false only
+  while another user's session or the login window has the Mac's screen, issue #211; never sent
+  while this session has it, so a state is then what it always was); kind 22's `reason`, `message` and
   `reconnect`; the
   Mac's menus as MacMenu.swift has them (docs/menu-bar-plan.md §3):
   a kind 27 without an id is the device's subscription, and only a subscriber is served (another

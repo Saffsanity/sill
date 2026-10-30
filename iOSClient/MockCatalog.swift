@@ -509,6 +509,10 @@ enum MockCatalog {
             state.link = LinkReport(state: LinkReport.behind, withheldPerSecond: 52, bitrate: bitrate, carriedKbps: 2_100,
                                     suggestedBitrate: suggestion?.bitrate, suggestedCaptureScale: suggestion?.captureScale)
         }
+        // `-SillLinkLine console`: the Mac's session is off the console (issue #211): another user's
+        // session has its screen, so the stream screen's line says so (before any link's), and the
+        // Settings panel its callout. With a link case (`linkbehind`), both reports at once.
+        if UserDefaults.standard.string(forKey: "SillLinkLine") == "console" { state.sessionOnConsole = false }
         if client.macInfo != nil { client.macInfoAt = Date().addingTimeInterval(-59) }
         var ledger = SettingsLedger()
         _ = ledger.receive(state)
