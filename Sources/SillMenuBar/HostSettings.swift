@@ -135,7 +135,7 @@ final class HostSettings {
             Key.internetAccess: base.internetAccess,
             Key.remoteAddressName: "",
             Key.updateCheck: true,
-            // On, like the CLI: each device has its own switch, and a password manager's copies never go.
+            // On, like the CLI: each device has its own switch.
             Key.shareClipboard: base.shareClipboard,
             // On, unlike the CLI (Noah, 2026-10-27: "Send Audio should be on by default"); a saved key
             // wins. The Mac keeps playing its own sound too.

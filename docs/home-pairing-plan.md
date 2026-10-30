@@ -232,10 +232,23 @@ Each such pairing is logged, listed as "over the USB cable" and shown in a notic
   - with Require pairing off, the home door is as open as it is today, but encrypted: to devices on
     the network or nearby, and to any app on this Mac (loopback, or this Mac's own addresses);
   - a device that has never paired can be lured to a look-alike row that advertises `p=0`: it pins
-    and saves nothing, but a session there gets what it types. Over the cable an app on this Mac can
-    go further: listening on the Mac's end of the cable (which the device cannot tell from Sill) and
-    answering an ask with a proof-less ok, it is saved as a Mac and gets what that device types,
-    never the Mac itself. A saved Mac's rows are always dialed pinned, so a paired device never is;
+    and saves nothing, but a session there gets what it types. Only by a tap since the security
+    scan's finding 3 (2026-10-29): the automatic reconnect after such a session is lost dials an
+    open door's row pinned to the key the session saw, and another key under the lost Mac's name
+    ends it ("‹Mac› answered with another key, so this ‹iPad› didn’t reconnect. Tap it to
+    connect."), where it took any key with no tap, the device's clipboard included. Nor does that
+    reconnect dial a plain door (no `p`) under the name, as a DEBUG build's did (its tap still
+    does), with no key to check at all (the review of #255, 2026-10-29): it looks past one, as
+    Release does. A tap during the reconnect (its words invite one: "…Sill keeps trying, or tap it
+    to try now.") still takes any key, but if its dial ends before its handshake the reconnect that
+    follows it is pinned to the key the last session under that name saw (`openKeys`, the review of
+    #255), where it took any key from then on. Left as it was: a tap under a name no session has
+    seen a key under since Sill started (`openKeys` is kept in memory only), whose dial ended before
+    its handshake, leaves a reconnect that takes any key, as the tap would have. Over the cable an
+    app on this Mac can go further: listening on the Mac's end of the cable (which the device cannot
+    tell from Sill) and answering an ask with a proof-less ok, it is saved as a Mac and gets what
+    that device types, never the Mac itself. A saved Mac's rows are always dialed pinned, so a
+    paired device never is;
   - anyone who can reach the home door (this network, or radio range with Direct Wireless on) can
     connect and read the Mac's certificate: TLS 1.3 encrypts it on the wire, but a client that
     connects receives it, and its key is stable, so it names this Mac across networks, as the
@@ -243,9 +256,33 @@ Each such pairing is logged, listed as "over the USB cable" and shown in a notic
     telling;
   - a stranger on the network can hold up pairing and the door without getting in: three asks in
     10 minutes use up the device-opened windows (the real device is then sent to the Mac's menu,
-    whose "‹name› Wants to Pair" it can keep lit), five wrong codes stop any open window, and eight
-    half-open connections (10 s each, two per address, and IPv6 gives it any number of addresses)
-    fill the door's pending places, as they can at the remote door;
+    whose "‹name› Wants to Pair" it can keep lit), and five wrong codes stop any open window. Its
+    half-open connections no longer hold the door's pending places for good (the security scan of
+    2026-10-18, finding 9; branch `sec-door-pending`, `DoorPolicy.Places`): waiting costs (a tenth
+    of a failure for each connection that ends unadmitted, and for a pairing connection's kind 19,
+    a tenth for each second it waited at least, one more for every 2 s beyond the first 2, at least
+    one for a refusal; 5 within a minute back an address off for 5 minutes, as before), counted to
+    the place's deadline at most and, for an address that proved a paired key, as for one that did
+    not (the review of 2026-10-29: a kind 19 sent just before its deadline held a place for
+    nothing, the Mac's sleep counted as waiting, a paired device's stalled dials cost it more than a
+    stranger's, and, its second pass, a place held 2 s at a time cost a twentieth a second, under an
+    address's 5 a minute, so eight addresses held every shared place for good), the TLS handshake
+    has 4 s, an IPv6 address answers for its /64 too (12 failures in 5 minutes from its addresses
+    not known back the /64 off, each address counting 6 at most, so it takes two: paced under its
+    own backoff, one address backed off its whole link before the review's second pass), and 2
+    places beyond the 8 are kept for addresses that proved a paired key in the last day, at either
+    door. What stays: an address keeps about 4/5 of a place for good without being backed off (one
+    connection held 2 s in every 2.5 s), so ten IPv4 addresses on the network taking turns can keep
+    the shared places full for new devices (and with a /24's free ones, a new one as each is backed
+    off, without taking turns; IPv6 from the internet at the remote door, with Internet Access on,
+    gives a stranger with a routed /48 or /56 as many /64s), and a paired device whose address has
+    not proved its key that day waits as a new one does; a device not yet paired in its own IPv6 /64 is refused while
+    that /64 is backed off, and a stranger in the /64 (at home, link-local addresses share one per
+    interface) keeps it backed off with a dozen refused handshakes from new addresses each time the
+    5 minutes end; someone at a paired device's own address (its NAT, or its address while it is
+    away) takes the two kept places and is backed off with it within 30 s, since nothing tells them
+    apart before TLS; and an asker's quiet now covers its IPv6 /64, so for 10 minutes after the
+    Mac's Cancel another new device of that /64 opens the window on the Mac;
   - Remote Access's own switches (remote access, internet access, the port) and Direct Wireless
     stay in UserDefaults, where any process of this user can flip them: that widens who reaches a
     door, never lets an unpaired key in. Require pairing is the one switch that would, so it is
@@ -662,10 +699,45 @@ enum CableLink {
   (`SILL_TEST_ENCODER_HANG`, `SILL_TEST_PROBE_*`, `SILL_TEST_RECHECK_SECONDS`,
   `SILL_TEST_SOFTWARE_ENCODER`) let nobody in and stay as they are: Noah runs the first on Sill.app
   itself.
+- **As fixed (2026-10-29, the security scan of 2026-10-18, finding 1).** "Not a `.app`'s
+  executable" was `Bundle.main.bundleURL.pathExtension == "app"`, the folder's name, and the grants
+  are not the folder's: TCC keeps them with the bundle ID and the designated requirement. So Sill.app
+  copied to a folder named Sill.bin read as the bare binary and took every hook above, with Sill's
+  grants (the scan's premise; no grant was tried here), and so did Sill.app's own executable started
+  through a symlink or a hard link: Foundation then finds no bundle around it, and its bundle
+  identifier reads nil (measured on 2026-10-29: the check's own copies, and the bare binary in a
+  scratch bundle started through a symlink). `bundled` is now
+  `AppIdentity.isSillApp` (Sources/SillMenuBar/AppIdentity.swift) of four facts read once at launch:
+  Sill.app when its signing identifier is `me.saffer.sill.mac` (the kernel's copy,
+  SecTaskCopySigningIdentifier: every copy of the code that can satisfy Sill's designated requirement
+  carries it, whatever its folder, file name or link, and a file replaced on disk after the launch
+  does not change it), when it is signed with any certificate, when its signature cannot be read,
+  when its bundle's CFBundleIdentifier is Sill's (Foundation reads Contents/Info.plist whatever the
+  folder is called), or, as before, in a `.app`. Only the bare binary as `swift build` makes it (the
+  linker's ad hoc signature, or none on Intel, no Info.plist, a build folder) is a test host, so the
+  harness, the previews and every `--synthetic` recipe are as they were. Sill.app's code in a folder
+  that is not a `.app` says so in one line ("Running from …/Sill.bin, which is not a .app, as
+  Sill.app itself (signed me.saffer.sill.mac): it takes no test hook."), then each hook's "ignored"
+  line as before. `Tests/checks/test-host` checks the rule, the line and the reader, on copies of its
+  own binary signed and linked in each of those ways. Live (2026-10-29), the bare binary in a scratch
+  bundle with Sill's Info.plist in a folder named Sill.bin, started only under `sandbox-exec` (no
+  network, no LaunchServices database write, no TCC, no preference write, nothing written in the
+  home folder) with `--synthetic`, `SILL_TEST_REMOTE_DIR`, the doors' variables, `-requirePairing
+  NO` and `-SillSetAfter`: the line, every hook "ignored" and "Home door: TLS, pairing required (0
+  paired)."; the same signed ad hoc as a bundle, and through a symlink, the same with "signed
+  me.saffer.sill.mac"; origin/main's build in that bundle took every hook.
+  This holds for Sill.app built from this change on. A build from before it keeps the rule it was
+  built with: 0.4.0, 0.5.1 and the nightly 0.5.5 (987) of 2026-10-29 take every hook from a
+  renamed copy or a link to their executable (the review, 2026-10-29: the nightly's own Developer
+  ID build, its signature valid, in a folder named Sill.bin under the same sandbox: "Test listener:
+  loopback only", "Home door: TLS, pairing not required.", "Settings: require pairing off → on",
+  its identity written into `SILL_TEST_REMOTE_DIR`). What that leaves open, and the choices, are
+  Noah's (the review's report).
 
 #### 4.4 `Door.swift` (new, from RemoteServer.swift) and `RemoteServer.swift`
 
-- **`Door`** is RemoteServer's admission, moved: pending connections (8 in all, 2 a source), the
+- **`Door`** is RemoteServer's admission, moved: pending connections (8 in all, 2 a source; since
+  the security scan's finding 9, `DoorPolicy.Places` and §9's rows), the
   10 s admission deadline, the origin check before start, the verify block (now
   `DoorPolicy.trusts`), `.ready` (`DoorPolicy.atReady`), reading the one kind 19, the backoff (5 of
   its own refusals in 60 s → 300 s; a paired key clears its source), `doorRefusals`, and the
@@ -1115,7 +1187,12 @@ New attention items (first group, orange):
 - **The pin** is the saved Mac's fingerprint. For an unsaved Mac on an open door (`p=0`) the
   session's first connection takes any key, and every later connection of that session (a move,
   a PR #12 hop) pins the key the first one saw. `DeviceIdentity.loadOrCreate()` runs at the first
-  TLS dial (today: at the first pairing).
+  TLS dial (today: at the first pairing). Since the security scan's finding 3 (2026-10-29), so does
+  the automatic reconnect once the session is lost (`DiscoveryPolicy.reconnectTrust`, the lost
+  session's key carried as `Reconnect.openKey`): it finds an unsaved Mac by its Bonjour name alone,
+  and with any key it gave whatever advertised that name with `p=0` the session, with no tap.
+  Another key now ends the reconnect (`HomeEnd.otherKey`: "‹Mac› answered with another key, so this
+  ‹iPad› didn’t reconnect. Tap it to connect."); a tap takes any key, as before.
 - **A move's new connection** is read up to its first window list before it takes the session
   over (`probeMove`); over TLS that is also where the Mac's refusal of the key shows (a read error,
   -9825, right after `.ready`), and a refused move ends as a failed one does today. SessionLink's
@@ -1177,7 +1254,16 @@ New attention items (first group, orange):
 | no `p`, DEBUG, not `homeTLS` | plain, as today |
 | no `p`, otherwise | nothing dialed; status "Mac mini runs an older Sill. Update Sill on the Mac to connect." |
 
-- The automatic reconnect follows the same table, and never asks: an ask is a tap's.
+- The automatic reconnect follows the same table, and never asks: an ask is a tap's. Two rows
+  differ since the security scan's finding 3 (2026-10-29, `DiscoveryPolicy.reconnectTrust`): an
+  unsaved `p=0` row is dialed pinned to the key the lost session saw (`Reconnect.openKey`), not
+  with any key, since the reconnect finds an unsaved Mac by its Bonjour name alone (§7.6); and
+  after such a session a row without `p` is not dialed at all, where a DEBUG build dialed it plain
+  (the review of #255): the reconnect looks on, as Release's does past "Update Sill". A tap clears
+  the reconnect and dials any key; the reconnect after a tap whose dial ended before its handshake
+  pins the key the last session under that name saw (`DiscoveryPolicy.reconnectKey`'s `earlier`,
+  StreamClient's `openKeys`, in memory; the review of #255), and any key only when no session
+  under that name saw one.
 - A Wired row's dial goes over the cable first (`wiredDial`, :748; :832 at `cea195c`) with its
   fallback after `wiredWait`, for an ask as for a session.
 
@@ -1227,6 +1313,12 @@ New attention items (first group, orange):
 
 - **An outside link** (`onOpenURL`, after its confirmation) goes the same way: to the row whose
   asked key it names, else the home rows pinned to its key, then its addresses, as today.
+- **The record** a code scanned or a link confirmed pairs at the home door (`savePairedAtHome`)
+  keeps that link's addresses and port until the session's first verified kind 18 replaces them
+  (`SavedMacs.applyingLink`, #224, 2026-10-28): before, it had none and the default port until
+  then, so a person who left before it came had a Remote row with nothing to dial. A window a
+  device's ask opened lists no addresses, so that record gets the port alone. The link's own
+  addresses are dialed only by the rows' path above, when no row answers, as before.
 - **Pair This ‹iPad›…** (the panel's overlay; now only in an unpaired session while Require
   pairing is off): the ask on a `sill-pair/1` connection of its own to the session's endpoint,
   pinned to the key the session saw, never claiming the cable (`askOverStream`), and the line under
@@ -1259,6 +1351,14 @@ New attention items (first group, orange):
   the saved Mac's Bonjour name alone (§7.3) is skipped by the reconnect from then on
   (`pinRefusedRows`) without that copy; after a tap, which asked for that Mac, the copy follows the
   Mac's other rows as for a row its tag named.
+- **-9808 on the automatic reconnect of an unsaved `p=0` Mac** (`HomeEnd.otherKey`, the security
+  scan's finding 3, 2026-10-29): the reconnect's dial, pinned to the key the lost session saw, met
+  another key under the lost Mac's Bonjour name: another Mac that took the name, or the same Mac
+  with a new key, which the device cannot tell apart. Status "Mac mini answered with another key, so
+  this ‹iPad› didn’t reconnect. Tap it to connect."; no automatic reconnect; the row reads "Not
+  paired", and a tap connects with any key, as a tap on that row always has. Before, the reconnect
+  took any key there, so whatever advertised the name with `p=0` got the session with no tap: what
+  the device typed, and its clipboard.
 - **The reconnect at a row that waits for a tap** (`DiscoveryPolicy.reconnectEnd`, the security
   review, 2026-09-27): the automatic reconnect never asks, so an unsaved Mac whose door now requires
   pairing (Require pairing turned on while this device was away, or a session that ended without a
@@ -1295,7 +1395,7 @@ New attention items (first group, orange):
 | Where | Text |
 |---|---|
 | Row words | "Not paired", "Wired", "Update Sill" (§7.3) |
-| Status | "Pairing with Mac mini…" · "Pairing with Mac mini over the cable…" · "Paired with Mac mini over the cable." · "Mac mini runs an older Sill. Update Sill on the Mac to connect." · "Mac mini removed this ‹iPad›. Tap it to pair again." · "Mac mini now asks devices to pair. Tap it to pair this ‹iPad›." |
+| Status | "Pairing with Mac mini…" · "Pairing with Mac mini over the cable…" · "Paired with Mac mini over the cable." · "Mac mini runs an older Sill. Update Sill on the Mac to connect." · "Mac mini removed this ‹iPad›. Tap it to pair again." · "Mac mini now asks devices to pair. Tap it to pair this ‹iPad›." · "Mac mini answered with another key, so this ‹iPad› didn’t reconnect. Tap it to connect." (2026-10-29) |
 | After an ask | `openOnMac`: "Mac mini didn’t show a code. On the Mac, choose Pair iPhone or iPad… in the Sill menu, then tap Mac mini again." · `locked`: "Unlock Mac mini, then tap it again." · `shown` (as built, step 4, while the card is up): "Mac mini is showing a code. Point this ‹iPad› at it." · nothing answered the ask or a proof (step 4): "Mac mini didn’t answer. Check that Sill is open on it, then tap it again." |
 
 **The home card**
@@ -1412,8 +1512,8 @@ the code Mac mini shows." Esc, Cancel or the escape gesture fold it back to the 
 
 | What | Value |
 |---|---|
-| Home door: accept → admission (TLS, plus a pairing connection's one kind 19) | 10 s |
-| Home door: pending connections | 8 in all, 2 per source; 5 of the door's own refusals in 60 s → refused for 300 s (an older Sill's plain tries do not count, §4.4); a paired key clears its source |
+| Home door: accept → admission (TLS, plus a pairing connection's one kind 19) | 10 s; since the security scan's finding 9 (2026-10-29, `DoorPolicy.Places`, both TLS doors): 4 s to `.ready` (10 s from an address that proved a paired key within a day), then 4 s for the kind 19, 10 s at most |
+| Home door: pending connections | 8 in all, 2 per source; 5 of the door's own refusals in 60 s → refused for 300 s (an older Sill's plain tries do not count, §4.4); a paired key clears its source. Since finding 9: 8 places for anyone and 2 more for addresses that proved a paired key; 2 per address, and per IPv6 /64 for addresses not known; every connection that ends unadmitted, and a pairing connection's kind 19, costs its address (and its /64, unless known) a tenth of a failure, a tenth for each second it waited at least, one more for every 2 s it waited beyond the first 2 (counted to its deadline at most, and to an unknown address's for a known one), at least one when refused; 5 within 60 s → the address refused for 300 s, 12 within 300 s from a /64's unknown addresses (each counting 6 at most) → the /64 |
 | Device-opened pairing windows | one at a time; at most 3 in any 10 minutes; a device whose window was cancelled on the Mac or stopped opens none for 10 minutes (by key and by address); a window that ran out, or that its device withdrew, quiets nobody |
 | Pairing window | 300 s, 5 wrong proofs, spacing 1/2/4/8 s, 5 s per source, single use (as today) |
 | The ask: kind 20 on the device | within 15 s |
@@ -1658,8 +1758,8 @@ Commit messages end with the session's attribution lines.
 - **The modal-loop rule** in the app; errors inline; a device-opened window never activates Sill.
 - **Tests never touch** Noah's Sill.app, `/Applications`, `me.saffer.sill.mac`, his login keychain or
   his iPad; no XCUITest, `recordVideo` or Simulator-tool `attach`; TEST ONLY hooks that bear on the
-  doors or pairing are honoured only by test hosts: not advertising and not a `.app`'s executable
-  (§4.3).
+  doors or pairing are honoured only by test hosts: not advertising and not Sill.app's own code
+  (§4.3: known by its signature and bundle since 2026-10-29, by a `.app` folder before).
 - **Require pairing lives with the trust list** (the identity store), never in UserDefaults, and
   the bundle takes no argument or hook that changes it.
 - **New iOS files** need their four pbxproj entries by hand. Swift 5 language mode.

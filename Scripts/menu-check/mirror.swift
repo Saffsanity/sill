@@ -1,11 +1,13 @@
 // Scripts/menu-check/run.sh mirror: MenuMirror end to end against the fixture, with no host, network
 // or encoder: the real MenuMirror, MenuReader, MenuPolicy, MenuFormat and StreamProtocol, with stubs
 // for the server's send, a connection's state, Stats and print (all recorded). It drives the mirror
-// as the coordinator does (fetch, press, setTarget, catalogPolled, clientLeft, clientStats) and checks
-// each kind 24 and log line (docs/menu-bar-plan.md §4.4, §4.7; H4–H8's and H10's logic, and the
-// review's: only subscribers served, a request past its device's wait not read, one top-level read
-// a second, and the tree changed in place under a version). Presses go only to the fixture whose pid
-// is given; a /bin/sleep it starts stands for an app whose top level cannot be read. usage
+// as the coordinator does (fetch, press, setTarget, catalogPolled, clientLeft, clientRevoked,
+// clientStats) and checks each kind 24 and log line (docs/menu-bar-plan.md §4.4, §4.7; H4–H8's and
+// H10's logic, and the review's: only subscribers served, a request past its device's wait not read,
+// one top-level read a second, and the tree changed in place under a version; and a device the Mac
+// stops serving, whose waiting fetch and choice are neither read nor made: security scan finding 10).
+// Presses go only to the fixture whose pid is given; a /bin/sleep it starts stands for an app whose
+// top level cannot be read. usage
 // (fixture.py runs it): mirror PID FIXTURE_LOG FIXTURE_BIN
 import Foundation
 import ApplicationServices
@@ -292,6 +294,28 @@ func dynamic(_ m: MacMenu?) -> Int { Int(m?.items?.compactMap { $0.title }.first
     mirror.prepare = { true }
     B.state = .ready
     _ = await fetch(B, nil, nil)
+    // A device the Mac stops serving (security scan finding 10, the review of PR #254: Remove, Require
+    // pairing): D, a subscriber, is cut off while its fetch and its choice wait behind A's slow
+    // activation: neither is prepared, read or made, unlike B's choice above, and the host says why.
+    await sleep(1.1)
+    let D = FakeConnection("D")
+    _ = await fetch(D, nil, nil)
+    prepares = 0
+    let cbEditD = fixture().filter { $0.contains("menuNeedsUpdate 'Edit'") }.count
+    mirror.prepare = { prepares += 1; try? await Task.sleep(for: .seconds(0.6)); return true }
+    let tA3 = next(); mirror.fetch(FetchMenu(version: vF, id: "2", title: "File", token: tA3), from: A, who: "A")
+    mirror.fetch(FetchMenu(version: vF, id: "3", title: "Edit", token: next()), from: D, who: "D")
+    mirror.press(PressMenuItem(version: vF, id: "4.0", title: "Set Label A", token: next()), from: D, who: "D")
+    await sleep(0.05)
+    n = Lines.shared.all().count
+    mirror.clientRevoked(ObjectIdentifier(D))
+    _ = await answer(A, tA3)
+    await sleep(1.0)
+    check(prepares == 1 && label() == "B" && fixture().filter { $0.contains("menuNeedsUpdate 'Edit'") }.count == cbEditD
+          && lines(since: n).contains("Menu from D refused: 4.0: the Mac no longer serves it"),
+          "D cut off before its turn: its fetch neither prepared nor read, its choice not made (\(prepares) activations: A's; the label \(label()))")
+    D.state = .cancelled; mirror.clientLeft(D)
+    mirror.prepare = { true }
     // A request past its device's wait: a fetch queued behind a 4.2 s activation is not read, and a
     // choice behind it is refused as late.
     await sleep(1.1)
