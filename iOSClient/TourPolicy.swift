@@ -531,13 +531,14 @@ enum TourPolicy {
         case .bar:
             var rows: [TourRow]
             // Aa sizes a window, never the Desktop (the Mac ignores a viewport's scale for it), and
-            // the first picture is the Desktop: the rows say whose text it is.
+            // the first picture is the Desktop, over which Aa is dimmed and not adjustable
+            // (TextScale.selectable): both rows say when it can be used, a window's text.
             if voiceOver {
                 rows = [row("hand.point.up.left", [strong("Each window"), plain(" has actions: close, minimize, full screen, and move left or right. Swipe up or down to hear them.")]),
-                        row("textformat.size", [strong("Text size"), plain(" makes a window’s text on \(mac) larger or smaller. Swipe up or down on it.")])]
+                        row("textformat.size", [strong("Text size"), plain(" makes a window’s text on \(mac) larger or smaller. Swipe up or down on it while a window shows.")])]
             } else {
                 rows = [row("hand.point.up.left", [strong("Touch and hold"), plain(" a window to close, minimize or go full screen. Keep holding and drag to move it.")]),
-                        row("textformat.size", [strong("Aa"), plain(": touch it and slide to make a window’s text larger or smaller.")])]
+                        row("textformat.size", [strong("Aa"), plain(": while a window shows, touch it and slide to make its text larger or smaller.")])]
             }
             // A phone with Larger Picture has no thumbnails: windows come from Apps, which shows an
             // open app's next window when it is chosen again (AppDrawer).

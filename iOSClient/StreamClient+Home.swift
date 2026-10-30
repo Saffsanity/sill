@@ -380,12 +380,13 @@ extension StreamClient {
     }
 
     /// How a session at home over TLS ended (§7.6, DiscoveryPolicy.homeEnd): the Mac removed this
-    /// device, now asks devices to pair, or another key answered as the saved Mac. True when it
-    /// said the words and chose what follows (never the ordinary reconnect); false for every other
-    /// end, which `sessionEnded` words as before. A saved Mac whose pin failed has its other rows
-    /// dialed first, pinned: a stranger replaying its tag makes a row that looks like it, and the
-    /// words would tell the user to forget the real Mac. A row the reconnect took by its Bonjour
-    /// name alone is skipped from then on, without those words. Main thread.
+    /// device, now asks devices to pair, or another key answered as the saved Mac, or at the
+    /// reconnect of an unsaved one on an open door. True when it said the words and chose what
+    /// follows (never the ordinary reconnect); false for every other end, which `sessionEnded`
+    /// words as before. A saved Mac whose pin failed has its other rows dialed first, pinned: a
+    /// stranger replaying its tag makes a row that looks like it, and the words would tell the user
+    /// to forget the real Mac. A row the reconnect took by its Bonjour name alone is skipped from
+    /// then on, without those words. Main thread.
     func homeSessionEnded(_ s: Session?, error: NWError?, goodbye: String?) -> Bool {
         guard let s, !s.route.isRemote else { return false }
         let end = DiscoveryPolicy.homeEnd(trust: s.home, goodbye: goodbye, tls: error.flatMap { RemoteTLS.status(of: $0) })
@@ -408,6 +409,12 @@ extension StreamClient {
             endAtHome(DiscoveryPolicy.HomeCopy.removed(mac: name, device: Self.deviceWord))
         case .pairingRequired:
             endAtHome(DiscoveryPolicy.HomeCopy.pairingRequired(mac: name, device: Self.deviceWord))
+        case .otherKey:
+            // The reconnect of a Mac this device was connected to without pairing, pinned to the key
+            // that session saw (DiscoveryPolicy.reconnectTrust), met another: whatever now answers
+            // under its name is not dialed again by itself. The reconnect ends; its row reads Not
+            // paired, and a tap connects with any key, as a tap there always has.
+            endAtHome(DiscoveryPolicy.HomeCopy.otherKey(mac: name, device: Self.deviceWord))
         case .wrongKey:
             let tried = s.row.map { $0.tried + [$0.id] } ?? []
             guard let mac = saved, let pin = mac.fingerprintData else {
@@ -841,12 +848,12 @@ extension StreamClient {
         let qr: (Data) -> SymmetricKey? = { _ in PairingProof.qrKey(secret: link.secret) }
         if let ask = homeAsk, ask.phase == .shown, let key = ask.askedKey, key == link.fingerprint, let answered = ask.answered {
             homeProof(targets: [askedTarget(ask, answered)], pin: key, method: PairRequest.qr, key: qr,
-                      name: ask.name, overlay: false, link: nil, scannedSecret: secret)
+                      name: ask.name, overlay: false, link: nil, linkSaved: link, scannedSecret: secret)
             return
         }
         if overlay, let t = sessionPairingTarget, t.key == link.fingerprint {
             homeProof(targets: [t.target], pin: t.key, method: PairRequest.qr, key: qr,
-                      name: macName.isEmpty ? link.name : macName, overlay: true, link: nil, scannedSecret: secret)
+                      name: macName.isEmpty ? link.name : macName, overlay: true, link: nil, linkSaved: link, scannedSecret: secret)
             return
         }
         let asked = homeAsk.flatMap { a in a.askedKey.map { (key: $0, row: a.target.row) } }
@@ -863,16 +870,18 @@ extension StreamClient {
             return
         }
         homeProof(targets: targets, pin: link.fingerprint, method: PairRequest.qr, key: qr, name: link.name, overlay: overlay,
-                  link: link, scannedSecret: secret)
+                  link: link, linkSaved: link, scannedSecret: secret)
     }
 
     /// A proof at the home door: `sill-pair/1` to each target in turn, pinned to `pin`, kind 19
     /// `qr` or `code` with proof_D; kind 20 ok with proof_M checked and naming that key: saved
     /// (`homeTLS`, the Bonjour name), then a pinned session on the row, or over a stream the
     /// session goes on, now with a saved Mac. No target answering: a link's own addresses
-    /// (`link`), else the words. `busy`: one silent retry.
+    /// (`link`), else the words. `linkSaved`: the code's link, whose addresses and port the record
+    /// keeps until the session's first kind 18 (SavedMacs.applyingLink). `busy`: one silent retry.
     private func homeProof(targets: [HomeDialer.Target], pin: Data, method: String, key makeKey: @escaping (Data) -> SymmetricKey?,
-                           name: String, overlay: Bool, link: PairLink?, scannedSecret: Data?, busyRetried: Bool = false) {
+                           name: String, overlay: Bool, link: PairLink?, linkSaved: PairLink? = nil, scannedSecret: Data?,
+                           busyRetried: Bool = false) {
         guard let identity = deviceIdentity() else { return }
         lastScannedSecret = scannedSecret
         homeDialer?.cancel()
@@ -892,7 +901,7 @@ extension StreamClient {
             DispatchQueue.main.asyncAfter(deadline: .now() + after) {
                 guard let self, self.pairingAttempt == attempt else { return }   // cancelled, or another pairing began
                 self.homeProof(targets: targets, pin: pin, method: method, key: makeKey, name: name, overlay: overlay, link: link,
-                               scannedSecret: scannedSecret, busyRetried: true)
+                               linkSaved: linkSaved, scannedSecret: scannedSecret, busyRetried: true)
             }
         }
         dialer.onWinner = { [weak self, weak dialer] w in
@@ -902,7 +911,7 @@ extension StreamClient {
                     guard self.homeDialer === dialer, self.pairingAttempt == attempt else { return }
                     self.homeDialer = nil
                     self.proved(outcome, winner: w, identity: identity, method: method, name: name, overlay: overlay,
-                                busyRetried: busyRetried, retry: retry)
+                                linkSaved: linkSaved, busyRetried: busyRetried, retry: retry)
                 }
             }
         }
@@ -925,7 +934,7 @@ extension StreamClient {
 
     /// The Mac's answer to a proof at the home door. Main thread.
     private func proved(_ outcome: HomeExchange, winner w: HomeDialer.Winner, identity: RemoteIdentity, method: String, name: String,
-                        overlay: Bool, busyRetried: Bool, retry: (Double) -> Void) {
+                        overlay: Bool, linkSaved: PairLink?, busyRetried: Bool, retry: (Double) -> Void) {
         // Over a stream (Pair This iPad…) no row can be tapped: its words say what to do there.
         let proofFailed: PairingProblem = overlay ? .proofFailedOverStream(name) : .homeProofFailed(name)
         guard case .answer(let r, let key) = outcome else {
@@ -955,7 +964,7 @@ extension StreamClient {
         let info = sameMac ? macInfoVerified.flatMap { $0.fingerprint == w.fingerprint ? $0.info : nil } : nil
         guard let id = savePairedAtHome(r, fingerprint: w.fingerprint, method: method, name: name, replacing: homeAsk?.replaces,
                                         bonjourName: sameMac ? session?.bonjourName : Self.bonjourName(w.target.fallback ?? w.target.endpoint),
-                                        info: info) else { return }
+                                        info: info, link: linkSaved) else { return }
         pairing = .paired(displayName(id))
         #if DEBUG
         print("home: paired with \(displayName(id)) (\(id)) at the home door, proof_M checked, pin saved\(overlay ? (sameMac ? "; this session's Mac" : "; not this session's Mac") : "")")
@@ -991,9 +1000,12 @@ extension StreamClient {
     /// Kind 20 ok, checked: the Mac saved as the remote path saves it, plus what the home door
     /// teaches: `homeTLS` (its door speaks TLS: no plain dial of it ever again) and the Bonjour name
     /// (§7.5). The port and addresses come from the session's first kind 18, or from `info`, the
-    /// verified kind 18 of a session with this very Mac. Returns its Mac ID.
+    /// verified kind 18 of a session with this very Mac; until then from `link`, the code scanned or
+    /// confirmed, when it names the key that answered (SavedMacs.applyingLink, #140). Returns its
+    /// Mac ID.
     private func savePairedAtHome(_ r: PairResult, fingerprint: Data, method: String, name fallbackName: String,
-                                  replacing replaces: String? = nil, bonjourName: String?, info: MacInfo? = nil) -> String? {
+                                  replacing replaces: String? = nil, bonjourName: String?, info: MacInfo? = nil,
+                                  link: PairLink? = nil) -> String? {
         guard let macID = r.macID, let recognition = r.recognitionKey else { return nil }
         let label = SafeText.label(r.name ?? fallbackName)
         var mac = SavedMac(macID: macID, fingerprint: Base64URL.encode(fingerprint), name: label.isEmpty ? "Mac" : label,
@@ -1001,6 +1013,10 @@ extension StreamClient {
                            infoIssuedAt: 0, bonjourName: bonjourName, lastWorked: nil, pairedAt: Date(), method: method,
                            lastConnectedAt: nil, lastRoute: nil, homeTLS: true, revoked: nil)
         if let info { mac = SavedMacs.refreshed(mac, info: info, fingerprint: fingerprint, allowLoopback: Self.keepsLoopback) ?? mac }
+        if let link, link.fingerprint == fingerprint {
+            mac = SavedMacs.applyingLink(link.addresses.map(RemoteDialPolicy.address(for:)), port: link.port, to: mac,
+                                         allowLoopback: Self.keepsLoopback)
+        }
         savedMacs = SavedMacs.adding(mac, to: savedMacs)
         if let old = replaces {
             savedMacs = SavedMacs.replacingNewKey(old: old, new: macID, in: savedMacs)

@@ -164,6 +164,30 @@ enum VirtualDisplaySize {
         let side = ceil(max(panel.width, panel.height) / 0.5)
         return clamp(CGSize(width: side, height: side))
     }
+
+    /// The most a window is asked for on the virtual display, a side: the largest viewport a host takes,
+    /// 16384 points at a text scale of 0.25 (ViewportBounds), so the hold changes no size a host asked
+    /// for before. Not the display's `maxSide`: the placement fits the window to the display anyway
+    /// (VirtualStage.prepare's `dest`), and a full-screen window's crop takes the shape of this size,
+    /// which is the panel's only while no side is held. Held at 4096, a 2560×1400 panel at 0.5x (an iPad's
+    /// Stage Manager window on a large display) was asked 4096×2800, and a full-screen window's crop came
+    /// out 1.46:1 for a 1.83:1 panel, black bars on the device (the review of finding 4, 2026-10-29).
+    static let maxWindowSide: CGFloat = 65536
+
+    /// The size a window should have on the virtual display, in Mac points: a device's panel of `panel`
+    /// points divided by its text scale (none, or one that is not a positive number, counts as 1), each
+    /// side held to 1…`maxWindowSide` (VirtualStage.windowSize). Until 2026-10-29 nothing held it: a
+    /// viewport of 1e300 points, or a scale of 1e-300, gave a side no Int holds, and the "insists on …"
+    /// line's Int() trapped (security scan, finding 4; hosts now refuse such a viewport, ViewportBounds,
+    /// and the line prints through ViewportBounds.whole). Every viewport a host takes is asked for as
+    /// before, but for a side under half a point, now 1 rather than 0. No panel, or one whose sides are
+    /// not positive numbers: the window's own size, as before.
+    static func windowSize(panel: CGSize?, scale: CGFloat?, own: CGSize) -> CGSize {
+        guard let panel, panel.width.isFinite, panel.height.isFinite, panel.width > 0, panel.height > 0 else { return own }
+        let s = scale.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? 1
+        return CGSize(width: min(max((panel.width / s).rounded(), 1), maxWindowSide),
+                      height: min(max((panel.height / s).rounded(), 1), maxWindowSide))
+    }
 }
 
 /// HEVC wants even sides: a capture's size in pixels rounded down to even. Every capture's rule until

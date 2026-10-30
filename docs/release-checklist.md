@@ -140,9 +140,15 @@ serves the root or `/docs`, never `/site`. So:
   Reverse Scrolling's (PR #159: privacy.html's item and support.html's section) between
   `<!-- Reverse Scrolling` and `<!-- /Reverse Scrolling -->`, support.html's item on the
   pairing window and screen sharing (PR #157, Sill for Mac's Show the pairing window to screen
-  sharing) between `<!-- Pairing window` and `<!-- /Pairing window -->`, and support.html's
+  sharing) between `<!-- Pairing window` and `<!-- /Pairing window -->`, support.html's
   paragraph that Virtual Display is on unless you turn it off (PR #236, Sill for Mac's default
-  since 2026-10-27) between `<!-- Virtual Display` and `<!-- /Virtual Display -->`. A republish before those
+  since 2026-10-27) between `<!-- Virtual Display` and `<!-- /Virtual Display -->`, support.html's
+  paragraph on Aa's Off and Aa dimmed over the Desktop (PR #181, issue #179) between `<!-- Aa Off`
+  and `<!-- /Aa Off -->`, the thumbnail hold's (PR #248, issue #113: privacy.html's item and
+  support.html's section) between `<!-- Thumbnail hold` and `<!-- /Thumbnail hold -->`, and
+  support.html's sentence that Sill for Mac names a firewall that blocks it, in its menu and its
+  Settings (PR #250; the item's command before it holds for the builds out too), between
+  `<!-- Firewall` and `<!-- /Firewall -->`. A republish before those
   releases (for words that hold for the builds already out, such as support.html's on a Mac asleep
   or restarted, or on a black picture) deletes the blocks of each release not out yet in the
   sill-site copy after the rsync below (the perl lines, one per marker) and puts privacy.html's
@@ -155,8 +161,11 @@ serves the root or `/docs`, never `/site`. So:
   `grep -n -i -E 'sound|send audio' ../sill-site/*.html`,
   `grep -n -i -E 'tiles|group name' ../sill-site/*.html`,
   `grep -n -i 'reverse scrolling' ../sill-site/*.html`,
-  `grep -n -i 'screen sharing' ../sill-site/*.html` and
-  `grep -n 'Virtual Display is on unless' ../sill-site/*.html` print nothing. The release that ships each
+  `grep -n -i 'screen sharing' ../sill-site/*.html`,
+  `grep -n 'Virtual Display is on unless' ../sill-site/*.html`,
+  `grep -n 'Aa starts at Off' ../sill-site/*.html`,
+  `grep -n "hold a window’s thumbnail" ../sill-site/*.html` and
+  `grep -n 'Devices Can’t Connect' ../sill-site/*.html` print nothing. The release that ships each
   deletes its markers in `site/` and keeps the words.
 - Once sill is public, it can serve the site itself: `git subtree push --prefix site origin gh-pages`,
   then Settings › Pages › gh-pages, / (root). Retire sill-site then.
@@ -173,6 +182,9 @@ perl -0pi -e 's/[ \t]*<!-- Tiles:.*?<!-- \/Tiles -->\n//gs' ../sill-site/*.html 
 perl -0pi -e 's/[ \t]*<!-- Reverse Scrolling:.*?<!-- \/Reverse Scrolling -->\n//gs' ../sill-site/*.html   # only before Reverse Scrolling's release
 perl -0pi -e 's/[ \t]*<!-- Pairing window:.*?<!-- \/Pairing window -->\n//gs' ../sill-site/*.html   # only before the release with PR #157
 perl -0pi -e 's/[ \t]*<!-- Virtual Display:.*?<!-- \/Virtual Display -->\n//gs' ../sill-site/*.html   # only before the release that turns Virtual Display on by default
+perl -0pi -e 's/[ \t]*<!-- Aa Off:.*?<!-- \/Aa Off -->\n//gs' ../sill-site/*.html   # only before the release with PR #181 (Aa's Off)
+perl -0pi -e 's/[ \t]*<!-- Thumbnail hold:.*?<!-- \/Thumbnail hold -->\n//gs' ../sill-site/*.html   # only before the thumbnail hold's release (PR #248)
+perl -0pi -e 's/[ \t]*<!-- Firewall:.*?<!-- \/Firewall -->\n//gs' ../sill-site/*.html   # only before the release that names a firewall that blocks Sill
 git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" && git -C ../sill-site push
 ```
 
@@ -366,10 +378,19 @@ comes later, when the cask qualifies (below).
       configurations, keeps counting across versions (0.5 had builds 1 to 3, 0.5.1 starts at
       4), so a build number names one upload whatever its version. Put the device build's number
       in the same pull request as the version, so the tag below names the commit that both come
-      from; `release-ios.sh --upload` then needs no `--bump`. Before 0.5.1 the two counted
+      from; `release-ios.sh --upload` then needs no `--bump` (while the nightlies run, the device
+      build's number is the commit count instead, never committed: the iOS item below, and
+      Nightlies). Before 0.5.1 the two counted
       apart (Sill for Mac 0.3.0, 0.3.1 and 0.4.0 beside Sill for iPhone and iPad 0.5; there was
       never a Sill for Mac 0.4.1). A release that changes only one app is Noah's call: both at
       the new number, or the other left at its last (nothing in the code compares the two).
+      main carries the next release's number, both apps together, from soon after the last
+      release on: 0.5.5 since 2026-10-29 (PR #244), ahead of 0.5.1 on
+      the App Store and on GitHub. App Store Connect takes no new build of a version it has
+      released (its train is closed), so every build of main for TestFlight needs the next
+      number; and Sill.app's update check compares only release tags with the version it runs,
+      so a build of main saying 0.5.5 is offered nothing until a release newer than 0.5.5 exists.
+      The release's tag then names a commit of main that already says its number.
 - [ ] A Mac release and a device build that need each other (a change to the home door or the wire
       that older builds on the other side can't follow): the release notes say which versions go
       together, the device build is uploaded first (App Store Connect takes 5 to 30 minutes to
@@ -412,7 +433,8 @@ comes later, when the cask qualifies (below).
       the release workflow ("Releasing from GitHub Actions" below), creates the GitHub Release
       `v<version>` in Saffsanity/sill with the assets `Sill.dmg`, `Sill.dmg.sha256`, `Sill.zip` and
       `Sill.zip.sha256`; before it builds, `--publish` checks that origin has the tag and that it
-      names HEAD (the workflow's checkout is that tag). The site's Download button links
+      names HEAD (the workflow's checkout is the commit its run was started for, with every tag,
+      and it stops when the tag no longer names it). The site's Download button links
       `releases/latest/download/<name>`, which GitHub redirects to the newest release, so
       download.html is never edited per release (its one exception, the move to Sill.dmg, is done:
       below). Anonymous downloads and the update check need a public repository, which
@@ -422,7 +444,8 @@ comes later, when the cask qualifies (below).
       anywhere but Saffsanity/sill, so leave `SILL_RELEASE_REPO` unset (in `~/.sill-release` and as
       a repository variable). One way or the other for a version: pushing the tag, which a local
       `--publish` needs first, also starts the release workflow. With `SILL_SIGN_IN_CI` set to
-      `true` that run publishes the release, so don't also run `--publish` here (whichever comes
+      `true` that run publishes the release once Noah approves it (Releasing from GitHub Actions ›
+      What a tag does), so don't also run `--publish` here (whichever comes
       second stops at "already exists"); without it the run only verifies (macOS minutes either
       way). Neither the variable nor any secret is set on 2026-09-27, so a pushed tag only verifies.
 - [ ] Release notes: `--publish` gives the release a one-line body (the version, the build and
@@ -465,7 +488,11 @@ comes later, when the cask qualifies (below).
       `Scripts/release-ios.sh --upload` from the tagged commit. Or in Xcode: Any iOS Device, Product
       › Archive, then the Organizer's Validate App and Distribute App › App Store Connect › Upload.
       The privacy report: `Scripts/release-ios.sh --privacy-report`, and the Organizer's Generate
-      Privacy Report for the PDF; both should list the privacy manifest's API categories.
+      Privacy Report for the PDF; both should list the privacy manifest's API categories. While
+      the nightlies run (Nightlies, below), App Store Connect already has builds of the version
+      numbered by commit count, far above the committed number: submit the nightly build of the
+      tagged commit itself, or upload from the tag with `--build-number "$(git rev-list --count
+      HEAD)"`, not `--bump`.
 - [ ] TestFlight: internal testers get the build without review. An external group sends the
       first build through Beta App Review with the same notes and video: a cheap rehearsal
       (TestFlight §5 to §7 below). Every build has its own What to Test (TestFlight › the build ›
@@ -779,6 +806,8 @@ To send feedback, take a screenshot while you use Sill, or use Send Beta Feedbac
   Test internally first: that needs none of it.
 - Once approved: invite testers by email, or turn on a public link (Open to Anyone, with a tester
   limit if you like, up to 10,000).
+  The public beta group's link, on since 2026-10-29: https://testflight.apple.com/join/6v7nqyn3 (the README, the download
+  page and the nightly pre-release's notes carry it; a new link means changing all three).
 
 ### 8. Screenshots, for the App Store
 
@@ -801,38 +830,60 @@ screens of each set, the capture commands and what may appear in the picture. Th
 
 ### TestFlight from GitHub Actions
 
-`.github/workflows/testflight.yml` runs only by hand: Actions › TestFlight › Run workflow, on a
-branch or tag (GitHub lists it once it is on main). It never runs on a push or a pull request.
-It selects the newest Xcode 27 that is not a beta, and `release-ios.sh` refuses one before 27.1:
-until the `xcode-27` image has a 27.1 that is not a beta (in October 2026 it had only
-`Xcode_27.1_beta.app`, 27A9269), every run stops at that refusal. Upload from this Mac meanwhile.
+`.github/workflows/testflight.yml` runs only by hand, and only from main: Actions › TestFlight ›
+Run workflow (GitHub lists it once it is on main). It never runs on a push or a pull request. Its
+job runs in the environment `nightly` (Releasing from GitHub Actions › Secrets and variables,
+below), which only main may use, so GitHub refuses a run from any other branch or a tag before it
+starts, and the key below is that environment's. To send a branch to TestFlight, upload it from
+this Mac with `release-ios.sh --bump --upload`.
+It selects the newest Xcode 27 that is not a beta, and `release-ios.sh` refuses one before 27.1.
+The `xcode-27` image had only `Xcode_27.1_beta.app` (27A9269) until October 2026; on 2026-10-29 it
+had `Xcode_27.1.app` (27A9275), which the runs 40825231452 and 40843967209 took. The nightlies
+(below) upload through the same key every night.
 
-- Without the key below: `release-ios.sh --unsigned`. The Release archive is built without
-  signing and checked; `Sill-<version>-<build>-unsigned.ipa` is the artifact for 14 days, to look
-  inside only. No secret is read.
+- Without the key below (none in the environment `nightly`: a notice says so):
+  `release-ios.sh --unsigned`. The Release archive is built without signing and checked;
+  `Sill-<version>-<build>-unsigned.ipa` is the artifact for 14 days, to look inside only. No
+  secret is read.
 - With the key: `release-ios.sh --sign-at-export`. The runner has no development certificate, so
   the archive is built without signing, and the export signs it through the key with the same
   cloud-managed certificate as here and the App Store profile, which Xcode makes or fetches. No
-  certificate, private key or profile is kept in the repository's secrets: an archive made without
+  certificate, private key or profile is kept in the secrets: an archive made without
   signing exports with the same entitlements (tried here on 2026-09-26 with the Apple Account;
-  through a key, not yet). `Sill-<version>-<build>.ipa` is the artifact for 14 days. Nothing is
-  uploaded, unless:
-- the repository variable `SILL_TESTFLIGHT_IN_CI` is `true`: the run also uploads, as
-  `--upload` does here. It takes the committed build number, so bump it here (`--bump`), push,
-  then run the workflow.
+  through the key on 2026-10-29: run 40825231452, and 40843967209 with the build number given).
+  `Sill-<version>-<build>.ipa` is the artifact for 14 days. Nothing is uploaded, unless:
+- the repository variable `SILL_TESTFLIGHT_IN_CI` is `true` and the commit is on main's own line,
+  as a run from main always is: the run also uploads, as `--upload` does here. The mode step still
+  checks main's line before an upload, and exports with a notice otherwise (below), should the
+  environment ever let another ref in.
+
+The build number is the commit count (`git rev-list --count HEAD`), given with `--build-number`
+for the run only, as the nightlies' is: nothing to bump or commit first. Along main's first-parent
+line every commit's count is its own, but another branch's commit can have the count of a later
+commit of main (a branch four commits ahead of main has the count main gets by merging a pull
+request of three commits: the three and the merge), and the nightly of that commit would then find
+"its" build in App Store Connect and give the branch's to TestFlight's groups (reproduced with the
+workflows' own run blocks in the review of 2026-10-29). So uploads go only from main's line; to send a branch to TestFlight,
+upload it from this Mac with `release-ios.sh --bump --upload` (a committed number, far below the
+counts). Run 40843967209 (branch `nightly-builds` at e59499f9, whose project says 4, before the
+environment kept the workflow to main) exported 0.5.1 (987), App Store-signed.
 
 | Name | Kind | What it holds |
 |---|---|---|
-| `SILL_TESTFLIGHT_KEY_ID` | secret | The Key ID of an App Store Connect API key with the Admin role (Users and Access › Integrations › App Store Connect API › Team Keys › +). Cloud signing refuses any other role. |
-| `SILL_TESTFLIGHT_ISSUER_ID` | secret | The Issuer ID above the keys (the same for every key of the team). |
-| `SILL_TESTFLIGHT_KEY_P8` | secret | The key file `AuthKey_<Key ID>.p8`, in base64. Apple lets you download it once. |
-| `SILL_TESTFLIGHT_IN_CI` | variable | `true` also uploads. Absent or anything else: export only. |
+| `SILL_TESTFLIGHT_KEY_ID` | secret of the environment `nightly` | The Key ID of an App Store Connect API key with the Admin role (Users and Access › Integrations › App Store Connect API › Team Keys › +). Cloud signing refuses any other role. |
+| `SILL_TESTFLIGHT_ISSUER_ID` | secret of the environment `nightly` | The Issuer ID above the keys (the same for every key of the team). |
+| `SILL_TESTFLIGHT_KEY_P8` | secret of the environment `nightly` | The key file `AuthKey_<Key ID>.p8`, in base64. Apple lets you download it once. |
+| `SILL_TESTFLIGHT_IN_CI` | variable (the repository's) | `true` also uploads, here (a commit on main's own line only) and in the nightlies. Absent or anything else: export only. |
+
+The environment `nightly` first (Releasing from GitHub Actions › Secrets and variables, step 1); the
+three secrets are part of its step 2, and the repository keeps no copy (its step 3). The variable
+goes on after an export-only run has passed:
 
 ```
-gh secret set SILL_TESTFLIGHT_KEY_ID
-gh secret set SILL_TESTFLIGHT_ISSUER_ID
-base64 -i AuthKey_ABC123DEFG.p8 | gh secret set SILL_TESTFLIGHT_KEY_P8
-gh variable set SILL_TESTFLIGHT_IN_CI --body true     # after an export-only run has passed
+gh secret set SILL_TESTFLIGHT_KEY_ID --env nightly
+gh secret set SILL_TESTFLIGHT_ISSUER_ID --env nightly
+base64 -i <backup folder>/AuthKey_YYYYYYYYYY.p8 | gh secret set SILL_TESTFLIGHT_KEY_P8 --env nightly
+gh variable set SILL_TESTFLIGHT_IN_CI --body true
 ```
 
 An Admin key can do nearly all an Admin can in App Store Connect, managing users included, so it
@@ -841,6 +892,178 @@ repository only, and revoke it (Users and Access › Integrations) when TestFlig
 use; a revoked key stops at once. Uploading from this Mac with `release-ios.sh --upload` needs no
 key at all. A run takes about 5 minutes of macOS time (What it costs, below).
 
+## Nightlies
+
+`.github/workflows/nightly.yml` (2026-10-29; issue #134) builds main every night it moved, at 09:17
+UTC, and when run by hand: Actions › Nightly › Run workflow, or `gh workflow run nightly.yml`. GitHub
+lists a workflow, and runs it by hand or on a schedule, only once its file is on main.
+
+What a nightly is:
+
+- Sill for Mac: main's head built as a release is, by `Scripts/release.sh --nightly`:
+  `make-app.sh --release` (Developer ID, the hardened runtime, the Developer ID provisioning profile
+  embedded), but universal (`SILL_UNIVERSAL=1`: Apple silicon and Intel, #62 and #88), as the first
+  nightly was (by hand, 2026-10-29) and as Noah told #62 the next version's download will be, where
+  a release so far is Apple silicon only; notarized and stapled, checked as Gatekeeper will check it, in a zip and a disk image
+  named `Sill-nightly-<yyyymmdd>-<sha7>.dmg` and `.zip`, each with its `.sha256`, on the pre-release
+  [`nightly`](https://github.com/Saffsanity/sill/releases/tag/nightly). One pre-release for all
+  the nights: its tag `nightly` moves to each night's commit, its notes say what a nightly is, list the
+  newest files with their SHA-256, give Sill for iPhone and iPad's public beta link (release.sh's
+  `nightly_testflight_link`: every night's notes replace the last, so a new link is changed there
+  too, as in the README and the download page), list the pull requests merged since the last release
+  tag and the earlier nightlies, and end with the commit's sha in a comment. It keeps the seven
+  newest nightlies' files (`SILL_NIGHTLY_KEEP`) and deletes older ones. Never "latest", never a plain
+  release, no tag per night. A release with the tag `nightly` that isn't a pre-release is never
+  touched. The first nightly was published by hand on 2026-10-29 (0.5.5 (987), universal, the tag at
+  150479b5, notes without the sha comment): the workflow's first night takes that pre-release over,
+  keeps its four files among the seven, moves the tag and replaces its notes (checked with the stand-in
+  gh in the review of 2026-10-29).
+- Sill for iPhone and iPad: the same commit; `Scripts/asc.swift groups` lists the app's TestFlight
+  groups through the App Store Connect key (reads only, in a verify-only run too), then
+  `release-ios.sh --sign-at-export --upload --build-number <commit count>` through the key (cloud
+  signing, as TestFlight from GitHub Actions above), then `Scripts/asc.swift distribute`: it waits for App Store Connect to process
+  the build (a look a minute, 90 minutes at most), gives it What to Test, and gives it to TestFlight's
+  groups (below). A night run again by hand finds its build in App Store Connect and only gives it its
+  groups again.
+- Versions: what main says (0.5.5 since 2026-10-29, the pre-release number, part 2's first item; the store release will be 0.6.0), with the commit count as
+  the build number on both apps, as in "Sill 0.5.5 (990)". Never committed: make-app.sh has always
+  stamped the count into the Mac's bundle, and `--build-number` gives it to xcodebuild for the run.
+  Only commits on main's first-parent line are uploaded with their count (the nightlies, and
+  testflight.yml, which runs from main alone and checks its line before an upload), so a build
+  number of the version in App Store Connect names one commit of main, and a night run again finds
+  its own build there. From this Mac, give `--build-number` the count only for a commit of main's
+  line too.
+- The words: `Scripts/nightly-notes.sh` writes them once a night for both apps, from the pull
+  requests on main's first-parent line since the newest tag `v<version>` (merges and squashes), their
+  titles from GitHub: Markdown for the pre-release (no @mention, so nobody is notified every night),
+  plain text within App Store Connect's 4,000 characters for What to Test ("… and N more" with the
+  pre-release's address when the list is longer).
+- Built only when main moved: on a schedule, a night whose main is the commit in the pre-release's
+  sha comment builds nothing. By hand it always builds.
+
+The two kinds of TestFlight group:
+
+- Every internal group (App Store Connect users, no review) gets every nightly. A group with
+  automatic distribution gets it by itself, and asc.swift leaves it alone.
+- The public beta group, the external group with the public link on, gets nightlies only while the
+  repository variable `SILL_NIGHTLY_PUBLIC_BETA` is `true`. It is unset at first: Noah tries a nightly
+  in his Insiders group first (2026-10-29: "hold off on giving the testflight build to public beta
+  until I try it out in Insiders first tomorrow"). Without it no external group is ever touched and
+  nothing goes to Beta App Review; the job's log says which groups got the build and that the public
+  beta didn't. asc.swift takes `--public-beta` only with the variable's value in its environment too.
+  With it, the build goes to that group and to Beta App Review when TestFlight waits for a submission:
+  the first build of a version is reviewed in full (it needs §6's Test Information), a later build of
+  the version is submitted the same way and usually approved within minutes. While another build of
+  the version is still in review, the submission waits for the next nightly (a warning in the job).
+
+For a nightly tester:
+
+- Pairing: a nightly is signed by the same Developer ID team, with the same bundle ID and the same
+  provisioning profile as the release, so it reads the same data-protection keychain items (part 1
+  §5): the same Mac ID, key and paired devices. A device paired with the release stays paired with a
+  nightly, and back. The settings (`me.saffer.sill.mac`) and the Screen Recording and Accessibility
+  permissions (granted to the bundle ID and the designated requirement, which names the team) carry
+  over too. That is why a nightly refuses to build without the profile.
+- The update check never offers a nightly: it reads only
+  `https://api.github.com/repos/Saffsanity/sill/releases/latest`, which never lists a pre-release
+  (`UpdatePolicy.feed`), refuses an answer that says `prerelease` anyway (`UpdatePolicy.release`), and
+  "nightly" is no version. A nightly Sill.app says 0.5.5 with its build number, so the update check offers it the 0.6.0 release once that is published, like everyone else's.
+- Going back: on the Mac, quit Sill, download the release from https://getsill.app/download and
+  replace Sill in Applications; nothing to set up again. On a device, TestFlight › Sill › Previous
+  Builds installs an earlier build, and the App Store installs the release over a TestFlight build
+  (Apple doesn't promise an app's data across that switch: if Sill forgets the Mac, pair it again).
+  A TestFlight build stops opening after 90 days.
+
+The variables, repository variables (Settings › Secrets and variables › Actions › Variables; `gh
+variable set NAME --body true`, `gh variable delete NAME`), none set at first:
+
+| Name | `true` | Unset |
+|---|---|---|
+| `SILL_NIGHTLY` | the schedule builds | the schedule does nothing (by hand still builds) |
+| `SILL_SIGN_IN_CI` | Sill for Mac signed, notarized and published on the pre-release; also release.yml's publish job on a pushed tag (with the profile since the same pull request) | ad hoc artifacts only |
+| `SILL_TESTFLIGHT_IN_CI` | the iOS build uploaded and given to the internal groups; also testflight.yml's upload | signed through the key and exported, nothing uploaded |
+| `SILL_NIGHTLY_PUBLIC_BETA` | the public beta group too, through Beta App Review | internal groups only |
+
+A run by hand with "Verify only" ticked builds as if none were set; a run from any other branch
+builds nothing (decide says so: both builds run in the environment `nightly`, which only main may
+use). The secrets are the environment `nightly`'s nine (Releasing from GitHub Actions › Secrets and
+variables: only main may use it, with no reviewer, so a night runs unattended; none is a repository
+secret), among them `SILL_PROVISION_PROFILE`, the Developer ID profile of part 1 §5 in base64
+(`base64 -i Packaging/embedded.provisionprofile | gh secret set SILL_PROVISION_PROFILE --env
+nightly`): no secret inside, but a secret keeps it out of the tree; the workflow decodes it to
+`Packaging/embedded.provisionprofile` under another name than make-app.sh's `SILL_PROVISION_PROFILE`
+(a path there), and deletes it at the end. An environment without its secrets gives empty strings:
+with `SILL_SIGN_IN_CI` on, the Mac job stops before it builds and names the missing ones; with
+`SILL_TESTFLIGHT_IN_CI` on, so does the iOS job; otherwise the Mac job builds ad hoc and the iOS
+job unsigned, with a notice that the environment has no App Store Connect key.
+
+Stopping them: `gh variable delete SILL_NIGHTLY` stops the schedule, `gh workflow disable
+nightly.yml` stops the workflow; delete `SILL_TESTFLIGHT_IN_CI` to stop the uploads,
+`SILL_NIGHTLY_PUBLIC_BETA` to keep them to the internal groups, `SILL_SIGN_IN_CI` to stop the Mac's
+(and the release workflow's signing). A build already on TestFlight stays installable until it is
+expired (TestFlight › the build › Expire Build). The pre-release can be deleted on GitHub: the next
+nightly makes it again.
+
+A release after nightlies: the version is already on main (part 2's first item), so tag the commit.
+Sill for Mac: with `SILL_SIGN_IN_CI` on, as the nightlies need it, pushing the tag starts release.yml's
+publish job, which waits for Noah's approval in the environment `release` (GitHub notifies him; the
+run's page › Review deployments › release › Approve and deploy, once the run is his tag on the
+commit he tagged: What a tag does) and then builds, notarizes and publishes the
+release itself, the profile embedded; don't also
+run `release.sh --publish` from this Mac (it would find the release there and stop). The pre-release
+stays beside the release, never "latest". Sill for iPhone and iPad: App Store Connect already has
+builds of the version numbered by commit count (987 and up), and the committed
+CURRENT_PROJECT_VERSION (4) is far below them, so either submit the nightly build of the tagged
+commit itself (that commit, App Store-signed, processed and tested), or upload from the tag with
+`--build-number "$(git rev-list --count HEAD)"`, above every nightly before it. Then, before the
+next night, move main to the next version (part 2's first item, a pull request like PR #244): once
+the version is released, App Store Connect takes no new build of it (its train is closed), so until
+main says the next number every nightly's upload is refused and the iOS job fails, while Sill for
+Mac's nightlies keep the released number.
+
+The first run, for Noah:
+
+1. Done 2026-10-29 (PR #243, on main at 150479b5): the app's binary uses
+   `UITextInputMode.activeInputModes` (#147's Control-Space rule), which App Store Connect refuses
+   undeclared (ITMS-91053; `release-ios.sh` warned in runs 40825231452 and 40843967209), and
+   `iOSClient/PrivacyInfo.xcprivacy` now declares `NSPrivacyAccessedAPICategoryActiveKeyboards`
+   with 54BD.1. `release-ios.sh`'s check of run 40843967209's binary against main's manifest
+   declares every required-reason API it uses (ActiveKeyboards, SystemBootTime, UserDefaults).
+2. Merge "Version 0.5.5 for both apps": App Store Connect takes no new build of 0.5.1, which it has
+   released.
+3. Merge "Nightly builds".
+4. The environments, before anything runs with them and before any variable: Releasing from GitHub
+   Actions › Secrets and variables, steps 1 to 3. The environments `release` (`v*` tags, Noah's
+   approval) and `nightly` (main), with their rules, checked; the secrets set in each from the same
+   sources as the repository's (six in `release`, nine in `nightly`); then the nine repository
+   secrets deleted (`gh secret list` prints nothing). Until then the repository's secrets reach a run
+   on any branch or tag.
+5. `gh workflow run nightly.yml -f verify_only=true` (or Run workflow with "Verify only" ticked).
+   Check decide's summary (the notes and What to Test), the Mac job's artifacts
+   `Sill-nightly-<date>-<sha7>-adhoc.zip` and `.dmg`, the iOS job's `Sill-0.5.5-<count>.ipa`
+   ("Signed for App Store Connect and checked … Nothing was uploaded") and its summary's "TestFlight's
+   groups": `Scripts/asc.swift groups` reads them through the key (nothing else), so this run already
+   shows the key works with App Store Connect's API and which groups the nightlies will go to, and
+   that the key now comes from the environment `nightly` (the repository has none: with no key the job
+   would say "The environment nightly has no App Store Connect API key" and build unsigned).
+6. `gh variable set SILL_SIGN_IN_CI --body true` and `gh variable set SILL_TESTFLIGHT_IN_CI --body
+   true`. Not `SILL_NIGHTLY_PUBLIC_BETA`.
+7. `gh workflow run nightly.yml`. Check the pre-release (the night's four files beside the first
+   nightly's, the notes with the public beta link, "Pre-release"), the
+   Mac job's log ("Identity keychain: data-protection", twice "Notarized Developer ID"), the disk image
+   on a second Mac (downloaded, so quarantined: it opens, the drag, Sill opens, the iPad still
+   paired), the iOS job's last step ("Assigned build … to: Insiders", "Public beta: not given") and
+   TestFlight on the iPad (the build with its What to Test).
+8. `gh variable set SILL_NIGHTLY --body true`: every night from the next 09:17 UTC on.
+9. Once a nightly has worked in Insiders: `gh variable set SILL_NIGHTLY_PUBLIC_BETA --body true`
+   (§6's Test Information filled in first). The next nightly goes to the public beta group and to Beta
+   App Review; the first build of a version is reviewed in full.
+
+What it costs: nothing, in a public repository. A night is three jobs on `xcode-27`: about 2 minutes
+to decide, 25 to 45 for Sill for Mac (the checks, the build, two notarizations), and 10 for Sill for
+iPhone and iPad plus App Store Connect's processing, which the job waits out (usually 10 to 40
+minutes). Apple charges nothing for notarization or TestFlight.
+
 ## Releasing from GitHub Actions
 
 Two workflows run on GitHub's own Macs. `.github/workflows/ci.yml` checks every pull request and
@@ -848,8 +1071,11 @@ every push to `main` (not a change to documents, the site or the design files al
 the Mac side with `swift build -c release`, runs the pure checks (`Tests/checks/run-all.sh`),
 builds the iOS app for the simulator without signing, and runs the CLI where it needs no capture or
 encoder. `.github/workflows/release.yml` runs when a tag `v<version>` is pushed, or by hand (Actions
-› Release › Run workflow) with such a tag. Both use no secret until you turn signing on. A third,
-`.github/workflows/testflight.yml`, runs only by hand: TestFlight from GitHub Actions, above.
+› Release › Run workflow) with such a tag. Both use no secret until you turn signing on, and then
+only release.yml's publish job, in the environment `release` (Secrets and variables). A third,
+`.github/workflows/testflight.yml`, runs only by hand: TestFlight from GitHub Actions, above. A
+fourth, `.github/workflows/nightly.yml`, builds both apps from main every night it moved: Nightlies,
+above.
 
 ### Why the download link did not work before 2026-09-26
 
@@ -875,9 +1101,28 @@ encoder. `.github/workflows/release.yml` runs when a tag `v<version>` is pushed,
   too), and keeps `Sill-<version>-adhoc.zip` and `Sill-<version>-adhoc.dmg` as the run's two
   artifacts for 14 days. They are for trying out only (the image, to look at its window): not
   Developer ID, not notarized. Nothing is published.
-- With `SILL_SIGN_IN_CI` set to `true`: sign and publish. The same checks, then the Developer ID
+- With `SILL_SIGN_IN_CI` set to `true`: sign and publish, in the environment `release` (Secrets and
+  variables, below). The job waits for Noah's approval before it starts: GitHub notifies him, and
+  the run's page › Review deployments › release › Approve and deploy lets it go (Reject fails the
+  run). Approve only the tag you pushed, on the commit you tagged: the run's page names who pushed
+  it, the tag and its commit (`git rev-list -n 1 v<version>` here gives the one you tagged). The
+  job builds that commit, the run's own (`github.sha`), not whatever the tag names when it starts,
+  and stops before anything is built or signed if the tag has moved or gone since the run began:
+  a tag moved after your look would otherwise build and sign another commit, and your `git
+  rev-list` would not see it (`git fetch --tags` never moves a tag you already have). A move is a
+  push too, and usually starts a run of its own under the name of whoever moved the tag: reject
+  that one unless it was you. Any
+  `v*` tag pushed by anyone with write access waits there the same way, the workflow's own checks
+  are that tag's, and the approval is all that stands between it and a release that every
+  Sill.app's update check offers (What the environments don't do, below). By hand, start it from
+  the tag itself (Run workflow › Use workflow from › Tags › the tag, with the same tag as the
+  input): the environment refuses a run from a branch, and the job's
+  first step a run from another tag. That first step also stops the run, naming them, when the
+  environment lacks any of its six secrets. Then the same checks, then the Developer ID
   certificate goes into a temporary keychain with a random password, the notary key into a profile
-  in it (`notarytool store-credentials`, which validates the key with Apple first), and
+  in it (`notarytool store-credentials`, which validates the key with Apple first), the Developer ID
+  provisioning profile (`SILL_PROVISION_PROFILE`) into `Packaging/embedded.provisionprofile`, so the
+  release keeps its identity in the data-protection keychain as a release from this Mac does, and
   `Scripts/release.sh --publish` runs with `SILL_RELEASE_TAG` set: it builds, notarizes, staples,
   checks a copy unpacked from the zip the way Gatekeeper will, makes, notarizes, staples and checks
   the disk image, and creates the GitHub Release with `Sill.dmg`, `Sill.zip` and their `.sha256`
@@ -898,39 +1143,147 @@ encoder. `.github/workflows/release.yml` runs when a tag `v<version>` is pushed,
 
 ### Secrets and variables
 
-Settings › Secrets and variables › Actions, or `gh` from the repository's folder. Nothing here
-ever goes in the repository, a commit message or a shell profile.
+Settings › Environments and Settings › Secrets and variables › Actions, or `gh` from the
+repository's folder. Nothing here ever goes in the repository, a commit message or a shell profile.
 
-Until the environment below exists, sign on this Mac instead (`Scripts/release.sh --publish`, with
-`SILL_SIGN_IN_CI` unset), as v0.3.0 and v0.3.1 were. Repository secrets reach any workflow on any
-branch or tag pushed here (never a fork's pull request), and an environment, which can keep them to
-release runs alone, needs a public repository on GitHub Free, which Saffsanity/sill is since
-2026-09-26. Before `SILL_SIGN_IN_CI` goes on: an environment `release` that only tags `v*` may
-deploy to, with Noah as its required reviewer, holds the five secrets (`gh secret set NAME --env
-release`), and release.yml's publish job names it (`environment: release`).
+The secrets live in two environments, and none is a repository secret. A repository secret reaches
+every workflow run on any branch or tag pushed here (never a fork's pull request), and a workflow
+runs by hand from any ref with that ref's own scripts, so anyone who could push a branch could run
+a copy of a script with the Developer ID key or the Admin App Store Connect key on disk (the
+security scan of 2026-10-18, findings 5 and 6). An environment's secrets reach only the jobs that
+name it, from the refs it allows. Environments with rules need a public repository on GitHub Free,
+which Saffsanity/sill is since 2026-09-26.
+
+- `release`: release.yml's publish job. Only a tag `v*` may use it, and Noah is its required
+  reviewer: a release waits for his click (What a tag does, above). Six secrets: the five
+  `SILL_DEVELOPER_ID_*` and `SILL_NOTARY_*` ones, and `SILL_PROVISION_PROFILE`; and
+  `SILL_RELEASE_TOKEN` should it ever be used.
+- `nightly`: nightly.yml's Sill for Mac and Sill for iPhone and iPad jobs, and testflight.yml's job.
+  Only the branch `main` may use it, with no reviewer, so a night runs unattended. Nine secrets: the
+  same six and the App Store Connect key's three (TestFlight from GitHub Actions, above).
+
+GitHub refuses a job whose ref its environment doesn't allow, before the job starts: a release by
+hand runs from its tag, testflight.yml only from main, and nightly.yml's decide job builds nothing
+on any other ref (so the run ends quietly, not refused). An environment without its secrets gives
+the workflow empty strings, not an error, so each job checks first and names the environment and
+the missing secrets when the run needs them. A run that names an environment that does not exist
+makes it, with no rule and no secret: so the environments come first, with their rules, before any
+run uses them. A workflow file from before this change (an older tag or branch) names no
+environment and reads repository secrets: so the repository keeps none.
+
+Before `SILL_SIGN_IN_CI` goes on, and before the nightlies' first run (Nightlies › The first run,
+step 4), in this order:
+
+1. The two environments, with their rules, then a look at them. With `gh` (written from GitHub's
+   REST reference, "Create or update an environment" and "Create a deployment branch policy", on
+   2026-10-29; not run here, as no repository was at hand to try them on), from the repository's
+   folder; 19507835 is Saffsanity's user ID (`gh api users/Saffsanity --jq .id`), and
+   `prevent_self_review` stays false because Noah is the one who pushes the tag and the one who
+   approves:
+
+   ```
+   gh api -X PUT repos/Saffsanity/sill/environments/release --input - <<'EOF'
+   {"prevent_self_review": false, "reviewers": [{"type": "User", "id": 19507835}],
+    "deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
+   EOF
+   gh api -X POST repos/Saffsanity/sill/environments/release/deployment-branch-policies -f name='v*' -f type=tag
+   gh api -X PUT repos/Saffsanity/sill/environments/nightly --input - <<'EOF'
+   {"deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
+   EOF
+   gh api -X POST repos/Saffsanity/sill/environments/nightly/deployment-branch-policies -f name=main -f type=branch
+   ```
+
+   Or by hand: Settings › Environments › New environment `release`, Required reviewers: Noah,
+   Deployment branches and tags: Selected branches and tags › Add deployment branch or tag rule ›
+   Ref type Tag, `v*`; then `nightly`, no reviewer, Selected branches and tags › Ref type Branch,
+   `main`. Either way, look:
+
+   ```
+   gh api repos/Saffsanity/sill/environments --jq '.environments[] | {name, reviewers: [.protection_rules[] | select(.type == "required_reviewers") | .reviewers[].reviewer.login], refs: .deployment_branch_policy}'
+   gh api repos/Saffsanity/sill/environments/release/deployment-branch-policies --jq '.branch_policies[] | "\(.type) \(.name)"'
+   gh api repos/Saffsanity/sill/environments/nightly/deployment-branch-policies --jq '.branch_policies[] | "\(.type) \(.name)"'
+   ```
+
+   `release` with the reviewer `Saffsanity`, `nightly` with none, both with
+   `"custom_branch_policies": true`; then `tag v*` alone, and `branch main` alone. A `refs` of `null`
+   lets any branch or tag in: fix that before going on.
+   A POST answered 404 found its environment without `custom_branch_policies` (the PUT before it
+   didn't take); one answered 303 found the rule there already. The look's commands, which only
+   read, ran on 2026-10-29 against other public repositories' environments (a tag rule with a
+   required reviewer, a `main` branch rule), so their filters fit what GitHub answers; the PUTs
+   and POSTs above have run nowhere.
+2. The secrets in each environment, from the same sources as the repository's were (GitHub never
+   shows a secret again). `gh secret set` without a value asks for it, so the password lands in no
+   shell history; the two lists at the end print the names, six for `release` and nine for
+   `nightly`. These blocks hold no `#` comments: zsh, as it starts (no `interactivecomments`),
+   would hand a comment's words to `gh` as arguments.
+
+   ```
+   for env in release nightly; do
+     base64 -i <backup folder>/DeveloperID.p12 | gh secret set SILL_DEVELOPER_ID_P12 --env "$env"
+     gh secret set SILL_DEVELOPER_ID_P12_PASSWORD --env "$env"
+     gh secret set SILL_NOTARY_KEY_ID --env "$env"
+     gh secret set SILL_NOTARY_ISSUER_ID --env "$env"
+     base64 -i <backup folder>/AuthKey_ABC123DEFG.p8 | gh secret set SILL_NOTARY_KEY_P8 --env "$env"
+     base64 -i Packaging/embedded.provisionprofile | gh secret set SILL_PROVISION_PROFILE --env "$env"
+   done
+   gh secret set SILL_TESTFLIGHT_KEY_ID --env nightly
+   gh secret set SILL_TESTFLIGHT_ISSUER_ID --env nightly
+   base64 -i <backup folder>/AuthKey_YYYYYYYYYY.p8 | gh secret set SILL_TESTFLIGHT_KEY_P8 --env nightly
+   gh secret list --env release
+   gh secret list --env nightly
+   ```
+3. The repository's copies deleted. An environment's secret wins over a repository secret of the
+   same name inside its jobs, but the repository's would still reach every other run. The list at
+   the end prints nothing:
+
+   ```
+   for name in SILL_DEVELOPER_ID_P12 SILL_DEVELOPER_ID_P12_PASSWORD SILL_NOTARY_KEY_ID SILL_NOTARY_ISSUER_ID \
+       SILL_NOTARY_KEY_P8 SILL_PROVISION_PROFILE SILL_TESTFLIGHT_KEY_ID SILL_TESTFLIGHT_ISSUER_ID SILL_TESTFLIGHT_KEY_P8; do
+     gh secret delete "$name"
+   done
+   gh secret list
+   ```
+4. Then the variables, repository variables as before: `SILL_SIGN_IN_CI` (below) after a
+   verify-only run has passed, and the nightlies' (Nightlies › The first run).
+
+What the environments don't do: they don't protect main or the tags. A `v*` tag or a commit on main
+can still be pushed by anyone with write access to the repository: Noah alone today, and so any
+token of his (the `gh` signed in on this Mac has the `repo` and `workflow` scopes). A release waits
+for Noah's approval whoever pushed its tag. A nightly doesn't wait, and `nightly` holds the same
+Developer ID and notary keys as `release`, and the Admin App Store Connect key: a commit on main
+reaches all of them at the next run from main (the schedule, or nightly.yml or testflight.yml by
+hand), with no approval (the review of 2026-10-29 ran that route through the workflows' own steps),
+and with them the nightly Mac job's token, which can publish any release (`contents: write`), one
+the update check offers included. So the approval keeps a tag from publishing a release unseen, not
+a commit on main. A ruleset on main that requires a pull request stops a direct push but not a
+merged pull request, unless an approval is required too, and GitHub never lets a pull request's
+author approve it: with Noah alone it holds only against someone else's write access. A ruleset
+keeping `v*` tags to Noah keeps other people's tags from reaching his approval at all, and one
+that restricts updates and deletions of `v*` tags keeps any tag where it was pushed: a tag moved
+after its run began stops that run, but one moved while the job builds still gets the release,
+its files the approved commit's build and its tag and source archives the other commit's. An
+administrator can still bypass an environment's rules (GitHub's default), which is Noah.
 
 | Name | Kind | What it holds |
 |---|---|---|
-| `SILL_SIGN_IN_CI` | variable | `true` turns on signing and publishing. Absent or anything else: verify only. |
-| `SILL_DEVELOPER_ID_P12` | secret | The Developer ID Application certificate with its private key, exported as a .p12 (part 1 §1), in base64. |
-| `SILL_DEVELOPER_ID_P12_PASSWORD` | secret | The password given when exporting that .p12. |
-| `SILL_NOTARY_KEY_ID` | secret | The App Store Connect API key's Key ID (part 1 §2, the API key). |
-| `SILL_NOTARY_ISSUER_ID` | secret | The Issuer ID shown above the keys in App Store Connect. |
-| `SILL_NOTARY_KEY_P8` | secret | The key file `AuthKey_<Key ID>.p8`, in base64. |
+| `SILL_SIGN_IN_CI` | variable (the repository's) | `true` turns on signing and publishing. Absent or anything else: verify only. |
+| `SILL_DEVELOPER_ID_P12` | secret of `release` and `nightly` | The Developer ID Application certificate with its private key, exported as a .p12 (part 1 §1), in base64. |
+| `SILL_DEVELOPER_ID_P12_PASSWORD` | secret of `release` and `nightly` | The password given when exporting that .p12. |
+| `SILL_NOTARY_KEY_ID` | secret of `release` and `nightly` | The App Store Connect API key's Key ID (part 1 §2, the API key). |
+| `SILL_NOTARY_ISSUER_ID` | secret of `release` and `nightly` | The Issuer ID shown above the keys in App Store Connect. |
+| `SILL_NOTARY_KEY_P8` | secret of `release` and `nightly` | The key file `AuthKey_<Key ID>.p8`, in base64. |
+| `SILL_PROVISION_PROFILE` | secret of `release` and `nightly` | The Developer ID provisioning profile (part 1 §5), in base64: the release and the nightlies embed it. |
 | `SILL_RELEASE_REPO` | variable, optional | `owner/name` of another repository to publish in, such as `Saffsanity/sill-site`. Default: this one, with the run's own token. |
-| `SILL_RELEASE_TOKEN` | secret, optional | Only with `SILL_RELEASE_REPO`: a fine-grained personal access token for that one repository, with Contents read and write. |
+| `SILL_RELEASE_TOKEN` | secret of `release`, optional | Only with `SILL_RELEASE_REPO`: a fine-grained personal access token for that one repository, with Contents read and write. |
 
 The workflow takes only an App Store Connect API key, not the app-specific password that part 1 §2
 also allows. The keychain, its password, the profile name `sill-notary` and the token for this
-repository's own release are made by each run and gone at its end.
+repository's own release are made by each run and gone at its end. `SILL_SIGN_IN_CI` goes on last,
+after steps 1 to 3 and a verify-only run that passed:
 
 ```
-base64 -i <backup folder>/DeveloperID.p12 | gh secret set SILL_DEVELOPER_ID_P12
-gh secret set SILL_DEVELOPER_ID_P12_PASSWORD        # asks for the value; nothing lands in the shell history
-gh secret set SILL_NOTARY_KEY_ID
-gh secret set SILL_NOTARY_ISSUER_ID
-base64 -i <backup folder>/AuthKey_ABC123DEFG.p8 | gh secret set SILL_NOTARY_KEY_P8
-gh variable set SILL_SIGN_IN_CI --body true         # after a verify-only run has passed
+gh variable set SILL_SIGN_IN_CI --body true
 ```
 
 `<backup folder>` is where part 1 keeps the exported .p12 and .p8: outside the repository (these
@@ -940,16 +1293,23 @@ anyway.
 
 ### Rotating them
 
+Each secret lives in every environment that holds it (the table above), so set it again in each:
+`--env release` and `--env nightly` for the six, `--env nightly` for the App Store Connect key's
+three, never without `--env` (a repository secret would reach every run again).
+
 - The Developer ID certificate, before it expires or if its key may have leaked: make a new one
   (part 1 §1), export it with a new password, and set both `SILL_DEVELOPER_ID_P12` and
-  `SILL_DEVELOPER_ID_P12_PASSWORD` again. Sill's designated requirement names the team, not the
-  certificate, so users keep their permissions. Revoke the old certificate at developer.apple.com
-  only if the key leaked: revoking it can also stop copies already signed with it from opening.
+  `SILL_DEVELOPER_ID_P12_PASSWORD` again, in both environments. Sill's designated requirement names
+  the team, not the certificate, so users keep their permissions. Revoke the old certificate at
+  developer.apple.com only if the key leaked: revoking it can also stop copies already signed with it
+  from opening.
 - The notary key: in App Store Connect › Users and Access › Integrations › App Store Connect API,
-  make a new key, set the three `SILL_NOTARY_*` secrets, run a release (or `store-credentials`
-  locally) to see it validate, then revoke the old key there; a revoked key stops working at once.
+  make a new key, set the three `SILL_NOTARY_*` secrets in both environments, run a release (or
+  `store-credentials` locally) to see it validate, then revoke the old key there; a revoked key stops
+  working at once.
 - `SILL_RELEASE_TOKEN`: fine-grained tokens expire. Make a new one before that (github.com ›
-  Settings › Developer settings › Personal access tokens), set it, and delete the old one.
+  Settings › Developer settings › Personal access tokens), set it in `release`, and delete the old
+  one.
 - After a suspected leak of any of them: revoke first, then replace, then look at the repository's
   Actions runs and releases for anything you didn't start.
 - Turning signing off again: delete the variable `SILL_SIGN_IN_CI` (or set it to `false`). The
@@ -995,7 +1355,7 @@ GitHub's prices on 2026-09-25 ([runner pricing](https://docs.github.com/en/billi
 
 ### The runner image
 
-All three workflows run on `xcode-27`, the newest macOS image GitHub offers and the only one with
+All four workflows run on `xcode-27`, the newest macOS image GitHub offers and the only one with
 Xcode 27, which Sill is built with: macOS 27.0 with Xcode 27.0 (the default), 27.1 and a 27.2 beta
 in September 2026 (image 20261006.0244: `Xcode_27.app` 27.0 27A266a, `Xcode_27.1_beta.app` 27.1
 27A9269, `Xcode_27.2_beta_2.app` 27.2 27B5028f). GitHub calls it a public preview, so jobs can wait in a queue longer and

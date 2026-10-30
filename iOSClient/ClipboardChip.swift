@@ -1,12 +1,15 @@
 import SwiftUI
 import StreamProtocol
 
-/// The clipboard's chip over the stream (docs/clipboard-plan.md): "Paste on ‹Mac›", then press ⌘V
-/// there, with the system's Paste button and Dismiss; for a moment after a Paste, its note in the same
-/// place. Offered by StreamClient (`clipboardChip`, ClipboardPolicy.offersChip); placed and hidden by
-/// StreamScreen. Takes no touch outside itself.
+/// The clipboard's chip over the stream (docs/clipboard-plan.md): "Paste on ‹Mac›", where the text goes
+/// with Paste on ‹Mac› Right Away on ("Where the cursor is.": the Paste presses ⌘V there too),
+/// else "Then press ⌘V there.", with the system's Paste button and Dismiss; for a moment after a Paste,
+/// its note in the same place. Offered by StreamClient (`clipboardChip`, ClipboardPolicy.offersChip);
+/// placed and hidden by StreamScreen. Takes no touch outside itself.
 struct ClipboardChip: View {
     @ObservedObject var client: StreamClient
+    /// Paste on ‹Mac› Right Away (StreamClient.pasteRightAwayOn), for the words.
+    @AppStorage(StreamClient.pasteRightAwayKey) private var pasteRightAway = true
 
     private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
 
@@ -37,7 +40,7 @@ struct ClipboardChip: View {
                     .foregroundStyle(Palette.text)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(ClipboardPolicy.Copy.chipSubtitle)
+                Text(ClipboardPolicy.Copy.chipSubtitle(rightAway: pasteRightAway))
                     .font(.caption)
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)
@@ -45,7 +48,7 @@ struct ClipboardChip: View {
             .layoutPriority(-1)
             // One element for the words; the Paste button and Dismiss are their own.
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(ClipboardPolicy.Copy.chipSpoken(mac: mac, device: StreamClient.deviceWord))
+            .accessibilityLabel(ClipboardPolicy.Copy.chipSpoken(mac: mac, device: StreamClient.deviceWord, rightAway: pasteRightAway))
             .accessibilityAddTraits(.isStaticText)
             ClipboardPasteButton(client: client)
             Button(action: { client.dismissClipboardChip() }) {
@@ -90,10 +93,12 @@ struct ClipboardChip: View {
 }
 
 /// The system's Paste button (SwiftUI's PasteButton, UIPasteControl): the person's tap reads this
-/// device's clipboard without iOS asking, and what it read goes to the Mac (`sendClipboard`). Disabled
-/// by the system while the clipboard has no text. Its label is the system's ("Paste").
+/// device's clipboard without iOS asking, and what it read goes to the Mac (`sendClipboard`), pasted
+/// there once the Mac has it while Paste on ‹Mac› Right Away is on. Disabled by the system while the
+/// clipboard has no text. Its label is the system's ("Paste").
 struct ClipboardPasteButton: View {
     @ObservedObject var client: StreamClient
+    @AppStorage(StreamClient.pasteRightAwayKey) private var pasteRightAway = true
 
     var body: some View {
         PasteButton(payloadType: String.self) { strings in
@@ -104,6 +109,6 @@ struct ClipboardPasteButton: View {
         .labelStyle(.titleAndIcon)
         .tint(Palette.accent)
         .accessibilityHint(ClipboardPolicy.Copy.pasteHint(mac: client.macName.isEmpty ? "the Mac" : client.macName,
-                                                          device: StreamClient.deviceWord))
+                                                          device: StreamClient.deviceWord, rightAway: pasteRightAway))
     }
 }

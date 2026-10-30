@@ -234,6 +234,13 @@ final class StreamClient: ObservableObject {
     @Published private(set) var windowOrder: [UInt32] = []
     /// When the Desktop was last picked on the device's own initiative (see the window list).
     private var lastAutoDesktop: Date = .distantPast
+    /// `choicesSent` right after that request: a pick, a launch or a pick made again after a move moves
+    /// it on, and then the re-check stands down (DiscoveryPolicy.autoDesktop's `choseSinceLastAuto`).
+    private var choicesAtLastAuto = 0
+    /// The one re-check of the Desktop (DiscoveryPolicy's `askIn`) waiting for the spacing to end, set
+    /// when a list within the spacing still says nothing streams after this device's own request.
+    /// Cancelled by the next automatic request (its spacing is over) and at a session's end or move.
+    private var desktopRecheck: DispatchWorkItem?
     /// DEBUG `-SillNoAutoDesktop 1`: the device never picks the Desktop by itself, so a live gate's
     /// session streams nothing and no host encodes (a test host's software encoder included) while
     /// it runs. Always false in a Release build.
@@ -823,8 +830,23 @@ final class StreamClient: ObservableObject {
         var rowListing: Double?
         var rowDials = 0
         var lastRowDialAt: Double?
+        /// An unsaved Mac on an open door (`p=0`): the key its lost session saw, which every dial of
+        /// its row pins (DiscoveryPolicy.reconnectKey, reconnectTrust: the security scan's finding 3,
+        /// 2026-10-29); another key ends the reconnect, and a tap takes any key. A plain door under the
+        /// name is never dialed while it is set (a DEBUG build's; the review of #255). For a session
+        /// that never saw one (a tap's dial that ended before its handshake), the key the last session
+        /// under its name saw (`openKeys`; the review of #255). Nil for a saved Mac (pinned to its
+        /// saved key), a plain door, and a session that never saw one under a name none saw one.
+        var openKey: Data?
     }
     var reconnect: Reconnect?
+    /// The key the last session at home under each Bonjour name saw on an open door (`p=0`), in
+    /// memory: DiscoveryPolicy.reconnectKey's `earlier`. A tap clears the reconnect and dials any
+    /// key, so a tap whose dial ended before its handshake (one the reconnect's own words invite
+    /// while the Mac is away) left a reconnect that took any key under that name, the pin of the
+    /// session before it lost (the review of #255, 2026-10-29); that reconnect pins this key instead.
+    /// Set as a session's first connection is ready. Main thread.
+    var openKeys: [String: Data] = [:]
     /// The reconnect's retry timer chain now running (`scheduleReconnectRetry`).
     private var reconnectRetryChain = 0
     /// The dial in flight, remote or pairing: one at a time each.
@@ -858,6 +880,11 @@ final class StreamClient: ObservableObject {
     /// six, nil from a Mac before 2026-09-27, which is sent none (`sendGesture`). Cleared with the
     /// session.
     @Published var hostGestures: Int?
+    /// Whether this session's Mac repeats a key held down (`WindowList.keyRepeat`, KeyRepeat on the host):
+    /// 1 from a Mac with key repeat, nil from one before it. The stream's input view sends a hardware
+    /// keyboard's characters as keys only to a Mac that says so (KeyTyping); to one before it they go
+    /// through iPadOS's text system, as they always did. Cleared with the session.
+    var hostKeyRepeat: Int?
     /// The clipboard (kind 32, StreamClient+Clipboard, docs/clipboard-plan.md): what this session's
     /// Mac takes and sends (`WindowList.clipboard`, 1 for text), nil from a Mac before it or with Share
     /// clipboard with devices off. Cleared with the session.
@@ -888,6 +915,9 @@ final class StreamClient: ObservableObject {
     /// its timeout (`receiptWait`).
     var clipboardReceipt: ClipboardReceipt?
     var clipboardReceiptExpiry: DispatchWorkItem?
+    /// A receipt's ⌘V (paste right away: ClipboardPolicy.pastesOnReceipt) during its `pasteDelay`;
+    /// the session's end cancels it.
+    var clipboardPasteWork: DispatchWorkItem?
     /// This device's path (status, interfaces, cost), for "did it leave home since the loss".
     var pathSignature = ""
     var pathMonitor: NWPathMonitor?
@@ -1590,10 +1620,12 @@ final class StreamClient: ObservableObject {
     /// pinned to its key; an unsaved Mac's on an open door with any key; the ask (a tap's only) for
     /// a Mac that requires pairing or removed this device; a plain one to a plain door (a DEBUG
     /// build, a Mac never seen with `p`); nothing for a Mac whose Sill is too old for this build.
-    /// `macID`: the saved Mac it is (its tag's, or the reconnect's by Bonjour name). True when it
-    /// dialed something. Main thread.
+    /// `macID`: the saved Mac it is (its tag's, or the reconnect's by Bonjour name). `seen`: the
+    /// reconnect's, the key its lost session saw (Reconnect.openKey), which its dial of an unsaved
+    /// Mac on an open door pins (DiscoveryPolicy.reconnectTrust); a tap takes any key there. True
+    /// when it dialed something. Main thread.
     @discardableResult
-    func dial(_ mac: FoundMac, macID: String?, tap: Bool) -> Bool {
+    func dial(_ mac: FoundMac, macID: String?, tap: Bool, seen: Data? = nil) -> Bool {
         let saved = macID.flatMap { savedMac($0) }
         let decision = homeDecision(mac, macID: macID, tap: tap)
         switch decision {
@@ -1607,7 +1639,10 @@ final class StreamClient: ObservableObject {
                 replaces: saved?.newKey == true ? saved?.macID : nil)
             return true
         case .pinned, .anyKey, .plain:
-            guard let trust = DiscoveryPolicy.sessionTrust(decision, savedPin: saved?.fingerprintData) else { return false }
+            // A tap takes any key at an open door; the automatic reconnect pins the key its lost session saw.
+            let wanted = tap ? DiscoveryPolicy.sessionTrust(decision, savedPin: saved?.fingerprintData)
+                             : DiscoveryPolicy.reconnectTrust(decision, savedPin: saved?.fingerprintData, seen: seen)
+            guard let trust = wanted else { return false }
             return dialRow(mac, macID: saved?.macID, trust: trust, tagNamed: mac.macID != nil, tap: tap)
         }
     }
@@ -1757,8 +1792,12 @@ final class StreamClient: ObservableObject {
                     guard self.connection === c else { c.cancel(); return }   // replaced while connecting
                     self.connectedDirectly = direct
                     self.session?.route = direct ? .direct : .network
-                    // An open door's session keeps the key its first connection saw: every later one pins it.
+                    // An open door's session keeps the key its first connection saw: every later one pins it,
+                    // and so does a reconnect after a tap under its name that sees none (`openKeys`).
                     if let t = self.session?.home { self.session?.home = DiscoveryPolicy.trust(t, readyWith: seen) }
+                    if let name = self.session?.bonjourName, let key = DiscoveryPolicy.reconnectKey(lost: self.session?.home) {
+                        self.openKeys[name] = key
+                    }
                     self.setRoute(from: path, fresh: true)
                     self.pathSignals = PathSignals()
                     self.lastPongAt = ProcessInfo.processInfo.systemUptime
@@ -2559,6 +2598,8 @@ final class StreamClient: ObservableObject {
         lastRttMaxMs = nil
         connectedAt = Date()
         lastAutoDesktop = .distantPast
+        desktopRecheck?.cancel()           // the new connection's first list decides afresh
+        desktopRecheck = nil
         #if DEBUG
         switch kind {
         case .fromRemote: print(reconnected ? "remote: the session carried on over the move home (its remote connection went)" : "remote: the session moved home")
@@ -3485,6 +3526,7 @@ final class StreamClient: ObservableObject {
         hostVersion = nil
         hostProtocol = nil
         hostGestures = nil
+        hostKeyRepeat = nil
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -3513,6 +3555,8 @@ final class StreamClient: ObservableObject {
             askedNearby = false
         }
         lastAutoDesktop = .distantPast     // the next connection starts on the Desktop again
+        desktopRecheck?.cancel()           // and its re-check, if one waited, is this session's
+        desktopRecheck = nil
         self.status = status
         macName = ""
         windows = []
@@ -3563,6 +3607,43 @@ final class StreamClient: ObservableObject {
         // Layout harness (mock, no connection): show the pick locally so taps can be checked.
         if connection == nil { DispatchQueue.main.async { self.active = source } }
         #endif
+    }
+
+    /// The Desktop on this device's own initiative (DiscoveryPolicy.autoDesktop): a connection's first
+    /// list, a Desktop the Mac stopped, a closed window, a re-check. Its spacing starts here, and a
+    /// re-check of the spacing before is over.
+    private func askForDesktopByItself() {
+        desktopRecheck?.cancel()
+        desktopRecheck = nil
+        lastAutoDesktop = Date()
+        request(.desktop)
+        choicesAtLastAuto = choicesSent
+    }
+
+    /// One re-check when the spacing ends (DiscoveryPolicy's `askIn`): a list within it still said
+    /// nothing streams after this device's own Desktop request (on 2026-10-28 the Mac could not start
+    /// it, and nothing asked again). Due, it asks only while nothing streams still, the person chose
+    /// nothing and no other automatic request went out (`autoDesktopRecheck`); that request starts its
+    /// own spacing and, if it brings no stream either, its own re-check: every 10 s, never faster.
+    private func recheckDesktop(in wait: Double) {
+        guard desktopRecheck == nil else { return }   // one re-check a spacing
+        let choices = choicesSent, last = lastAutoDesktop
+        #if DEBUG
+        print("session: nothing streams after this device's Desktop request; asking again in \(String(format: "%.1f", wait)) s, when the 10 s spacing ends")
+        #endif
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.desktopRecheck = nil
+            guard self.connected,
+                  DiscoveryPolicy.autoDesktopRecheck(nothingStreams: self.active == .none, choseSince: self.choicesSent != choices,
+                                                     askedSince: self.lastAutoDesktop != last) else { return }
+            #if DEBUG
+            print("session: still nothing streams 10 s after this device's Desktop request; asking for it again")
+            #endif
+            self.askForDesktopByItself()
+        }
+        desktopRecheck = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: work)
     }
 
     /// The bar's long-press menu: close, minimize or full-screen a window on the Mac.
@@ -4034,6 +4115,7 @@ final class StreamClient: ObservableObject {
                 if self.hostVersion != list.hostVersion { self.hostVersion = list.hostVersion }
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
+                self.hostKeyRepeat = list.keyRepeat
                 // The clipboard: subscribe (or stop) as the Mac's word and this device's switch say.
                 self.hostClipboardChanged(list.clipboard)
                 if !self.sessionListed {
@@ -4082,7 +4164,9 @@ final class StreamClient: ObservableObject {
                 // on the first list of a connection, again when the Mac stopped the Desktop it streamed
                 // (its capture stopped: issue #69), and when the window being watched has closed. Not
                 // when a pick failed (the host still lists the window): that is the user's to retry. At
-                // most once every 10 s, so a host that cannot start the Desktop does not loop.
+                // most once every 10 s, so a host that cannot start the Desktop does not loop; and once
+                // more when those 10 s end if its own request brought nothing that lasted (`askIn`: on
+                // 2026-10-28 the Mac could not start it, and the panel stayed black).
                 if list.active == .none, !Self.noAutoDesktop {
                     let watched: DiscoveryPolicy.Watched
                     switch previous {
@@ -4090,13 +4174,15 @@ final class StreamClient: ObservableObject {
                     case .desktop: watched = .desktop
                     case .window(let id): watched = .window(listed: list.windows.contains { $0.id == id })
                     }
-                    switch DiscoveryPolicy.autoDesktop(watched: watched, sinceLastAuto: Date().timeIntervalSince(self.lastAutoDesktop)) {
+                    switch DiscoveryPolicy.autoDesktop(watched: watched, sinceLastAuto: Date().timeIntervalSince(self.lastAutoDesktop),
+                                                       choseSinceLastAuto: self.choicesSent != self.choicesAtLastAuto) {
                     case .ask:
                         #if DEBUG
                         if watched == .desktop { print("session: the Mac stopped the Desktop; asking for it again") }
                         #endif
-                        self.lastAutoDesktop = Date()
-                        self.request(.desktop)
+                        self.askForDesktopByItself()
+                    case .askIn(let wait):
+                        self.recheckDesktop(in: wait)
                     case .askAfterWait:
                         guard case .window(let id) = previous else { break }
                         // A window can drop off the list for a second or two (a Space change,
@@ -4110,8 +4196,7 @@ final class StreamClient: ObservableObject {
                         DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
                             guard let self, self.connected, self.active == .none, self.choicesSent == choices,
                                   !self.windows.contains(where: { $0.id == id }) else { return }
-                            self.lastAutoDesktop = Date()
-                            self.request(.desktop)
+                            self.askForDesktopByItself()
                         }
                     case .leave:
                         break
@@ -4435,14 +4520,16 @@ extension StreamClient {
 
     #if DEBUG
     /// The layout harness has no Mac: answer a pick after 0.35 s the way a host would, over the
-    /// mock's state at that moment, refusing the virtual display where the mock has none. The
-    /// readout follows as a restart would make it. Nothing under `mockFrozen`.
+    /// mock's state at that moment, refusing the virtual display where the mock has none, and Direct
+    /// Wireless on a session it says is not paired. The readout follows as a restart would make it.
+    /// Nothing under `mockFrozen`.
     private func mockAnswer(_ out: HostSettingsChange) {
         guard !mockFrozen else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
             guard let self, self.connection == nil, var state = self.settings.host else { return }
             var ok = out
             if ok.virtualDisplay == true, !state.virtualDisplayAvailable { ok.virtualDisplay = nil }
+            if !state.takesDirectWireless || self.remoteRoute != nil { ok.directWireless = nil }
             let before = state.settings
             state.settings = ok.applied(to: before)
             if var stream = state.stream {
