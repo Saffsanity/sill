@@ -249,6 +249,65 @@ do {
     eq(t.decide(person, at: 1), .nothing, "a test host's input 1 s later: nothing")
 }
 
+// MARK: - The Mac asleep (between its sleep goodbye and its wake, issue #105)
+
+do {
+    var w = W(testHost: false)
+    eq(w.decide(.connect, at: 0, macAsleep: true), .nothing, "a connect while the Mac is asleep: nothing")
+    eq(w.lastDeclared, nil, "nothing restarts the interval while it is asleep")
+    eq(w.decide(person, at: 0.5, macAsleep: true), .nothing, "a person's input while it is asleep: nothing")
+    eq(w.decide(msg(.gesture), at: 0.6, macAsleep: true), .nothing, "a gesture while it is asleep: nothing")
+    eq(w.decide(person, at: 0.7), .declare(.input), "awake again: the first input declares at once")
+    eq(w.decide(.connect, at: 0.8, macAsleep: true), .nothing, "a connect asleep again, 0.1 s later: nothing")
+    eq(w.decide(.connect, at: 0.9), .declare(.connect), "awake: a connect declares, every time")
+    var t = W(testHost: true)
+    eq(t.decide(.connect, at: 0, macAsleep: true), .nothing, "a test host counts nothing while the Mac is asleep")
+    eq(t.decide(.connect, at: 0.1), .count, "and counts again once it is awake")
+    var c = W(testHost: false)
+    eq(c.decide(person, at: 10), .declare(.input), "input at 10 s declares")
+    c.streamChanged(at: 11)
+    eq(c.decide(person, at: 13, macAsleep: true), .nothing, "input at 13 s, asleep: nothing")
+    eq(c.lastDeclared, 10, "the last declaration stays at 10 s")
+    eq(c.decide(person, at: 14), .nothing, "awake at 14 s: still within 5 s of the declaration at 10")
+    eq(c.decide(person, at: 15), .declare(.input), "at 15 s: declares, as without the asleep input")
+}
+// 5,000 random sessions with spans asleep: beside a rule that never sees the events heard while the Mac is
+// asleep, every decision outside them is the same (asleep, the rule takes nothing in, moves nothing), and
+// every one inside is nothing, neither declared nor counted.
+do {
+    var r = Rng(s: 0x5EE9_0105)
+    var differ = 0, inside = 0, outside = 0, notNothing = 0
+    for _ in 0..<5_000 {
+        let testHost = r.below(3) == 0
+        var withSleep = W(testHost: testHost), reference = W(testHost: testHost)
+        var now = r.unit() * 100_000, asleep = false
+        for _ in 0..<(5 + r.below(50)) {
+            now += r.below(10) == 0 ? -(r.unit() * 60) : r.unit() * 8
+            if r.below(8) == 0 { asleep.toggle() }
+            if r.below(15) == 0 { withSleep.streamChanged(at: now); reference.streamChanged(at: now); continue }
+            let event: W.Event
+            switch r.below(6) {
+            case 0: event = .connect
+            case 1: event = msg(.selectSource)
+            case 2: event = msg(.input, move)
+            case 3: event = msg(.input, recentred)
+            case 4: event = msg([Kind.launchApp, .windowCommand, .pressMenuItem, .gesture][r.below(4)])
+            default: event = person
+            }
+            let d = withSleep.decide(event, at: now, macAsleep: asleep)
+            if asleep {
+                inside += 1
+                if d != .nothing { notNothing += 1 }
+            } else {
+                outside += 1
+                if d != reference.decide(event, at: now) { differ += 1 }
+            }
+        }
+    }
+    check(notNothing == 0 && differ == 0 && inside > 10_000 && outside > 10_000,
+          "5,000 random sessions with spans asleep: nothing inside them (\(notNothing) not), the same decisions outside (\(differ) differ; \(inside) inside, \(outside) outside)")
+}
+
 // MARK: - The lines
 
 eq(W.why(.connect), "connected", "why: a connect")

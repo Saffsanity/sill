@@ -41,7 +41,28 @@ import StreamProtocol
 ///                                              the macOS firewall is asked again first, as the
 ///                                              menu does when it opens, its answer shown by the
 ///                                              next print
-///     -SillQuitAfter <s>                       Quit (NSApp.terminate) s seconds after launch
+///     -SillSleepAfter <s>                      as if the Mac were about to sleep s seconds after
+///                                              launch: every device hears the goodbye it sends
+///                                              then, and its connection closes; until a wake (or
+///                                              the window's ten minutes) every door refuses a
+///                                              session with that goodbye
+///     -SillWakeAfter <s>                       as if the Mac had woken s seconds after launch:
+///                                              what NSWorkspace's didWake does, the doors admitting
+///                                              devices again (nothing is posted)
+///     -SillPowerOffAfter <s>                   as if macOS said the Mac is about to log out,
+///                                              restart or shut down, s seconds after launch:
+///                                              NSWorkspace's willPowerOff posted to this app
+///                                              alone (its own workspace notification center;
+///                                              nothing leaves the process), so Sill's end then
+///                                              (a Quit without a reason, or a SIGTERM) sends
+///                                              that goodbye
+///     -SillQuitAfter '<s>[ restart|shutdown|logout[ parameter]]'
+///                                              Quit (NSApp.terminate) s seconds after launch; with
+///                                              a reason, a quit Apple event to Sill itself carrying
+///                                              it, as macOS sends every app at a restart, a shut
+///                                              down or a log out (the goodbye it sends then): the
+///                                              reason as the event's attribute, or with
+///                                              `parameter` as its parameter
 ///     -SillUpdateFeed <url>                    the update check asks this feed instead of GitHub:
 ///                                              a feed on this Mac only (http or https to
 ///                                              127.0.0.1, ::1 or localhost; anything else is
@@ -115,7 +136,8 @@ enum DebugHooks {
 
     /// The timed hooks, which Sill.app itself ignores.
     static let timedHooks = ["SillSetAfter", "SillPairAfter", "SillCancelPairingAfter", "SillUnpairAfter",
-                             "SillCableNoticeAfter", "SillMenuAfter", "SillPrintMenuAfter", "SillSettingsAfter", "SillQuitAfter"]
+                             "SillCableNoticeAfter", "SillMenuAfter", "SillPrintMenuAfter", "SillSettingsAfter", "SillSleepAfter",
+                             "SillWakeAfter", "SillPowerOffAfter", "SillQuitAfter"]
     /// The Settings window's test arguments (issue #59), which Sill.app itself ignores too.
     static let windowHooks = ["SillTestScreenHeight", "SillSettingsShot"]
 
@@ -207,6 +229,30 @@ enum DebugHooks {
                 print("SillCancelPairingAfter \(delay) s: \(wasShown ? "closed the pairing window" : "no pairing window on screen; cancelled")")
             }
         }
+        let sleepAfter = defaults.double(forKey: "SillSleepAfter")
+        if sleepAfter > 0 {
+            after(sleepAfter) {
+                print("SillSleepAfter \(sleepAfter) s: as if the Mac were about to sleep")
+                model.coordinator?.goodbyeBeforeSleep()
+            }
+        }
+        let wakeAfter = defaults.double(forKey: "SillWakeAfter")
+        if wakeAfter > 0 {
+            after(wakeAfter) {
+                print("SillWakeAfter \(wakeAfter) s: as if the Mac had woken")
+                model.coordinator?.wokeForTest()
+            }
+        }
+        let powerOffAfter = defaults.double(forKey: "SillPowerOffAfter")
+        if powerOffAfter > 0 {
+            after(powerOffAfter) {
+                print("SillPowerOffAfter \(powerOffAfter) s: as if macOS said the Mac is about to log out, restart or shut down "
+                      + "(willPowerOff, posted to this app alone)")
+                // This process's own workspace notification center: what the coordinator observes, and
+                // nothing outside the process hears it.
+                NSWorkspace.shared.notificationCenter.post(name: NSWorkspace.willPowerOffNotification, object: NSWorkspace.shared)
+            }
+        }
         let unpairAfter = defaults.double(forKey: "SillUnpairAfter")
         if unpairAfter > 0 {
             after(unpairAfter) {
@@ -287,12 +333,47 @@ enum DebugHooks {
                 }
             }
         }
-        let quitAfter = defaults.double(forKey: "SillQuitAfter")
-        if quitAfter > 0 {
-            after(quitAfter) {
-                print("SillQuitAfter \(quitAfter) s: quitting")
-                NSApp.terminate(nil)
+        if let spec = defaults.string(forKey: "SillQuitAfter") {
+            // "<s>", or "<s> restart|shutdown|logout", or that and "parameter": the reason macOS would
+            // give the quit, as the event's attribute or its parameter (HostGoodbye.quitReason reads both).
+            let parts = spec.split(separator: " ").map(String.init)
+            let reasons: [String: UInt32] = ["restart": UInt32(kAERestart), "shutdown": UInt32(kAEShutDown),
+                                             "logout": UInt32(kAEReallyLogOut)]
+            let readable = parts.count == 1 || (parts.count >= 2 && reasons[parts[1]] != nil && (parts.count == 2 || (parts.count == 3 && parts[2] == "parameter")))
+            if let at = parts.first.flatMap(Double.init), at > 0, readable {
+                let reason = parts.count >= 2 ? parts[1] : nil
+                let asParameter = parts.count == 3
+                after(at) {
+                    let how = asParameter ? "its parameter" : "its attribute"
+                    print("SillQuitAfter \(at) s: quitting\(reason.map { " (a quit Apple event, as at a \($0 == "logout" ? "log out" : $0 == "shutdown" ? "shut down" : $0), the reason \(how))" } ?? "")")
+                    if let reason, let code = reasons[reason] { quitAsMacOSWould(code, asParameter: asParameter) } else { NSApp.terminate(nil) }
+                }
+            } else {
+                print("SillQuitAfter: can’t read “\(spec)”; expected '<seconds>' or '<seconds> restart|shutdown|logout[ parameter]'")
             }
+        }
+    }
+
+    /// TEST ONLY (-SillQuitAfter '<s> restart'): a quit Apple event sent to Sill itself with this
+    /// reason (`kAEQuitReason`), as macOS sends an app at a restart, a shut down or a log out, so
+    /// the app's applicationShouldTerminate reads it there as it would then: as the event's attribute,
+    /// or (`asParameter`) its parameter, which AERegistry.h names. An event to the app's own process
+    /// asks no permission of anyone. Run from the run-loop Timer of `after` (the modal-loop rule: the
+    /// terminate it brings may answer .terminateLater).
+    private static func quitAsMacOSWould(_ reason: UInt32, asParameter: Bool) {
+        let event = NSAppleEventDescriptor.appleEvent(withEventClass: AEEventClass(kCoreEventClass), eventID: AEEventID(kAEQuitApplication),
+                                                      targetDescriptor: NSAppleEventDescriptor.currentProcess(),
+                                                      returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID))
+        if asParameter {
+            event.setParam(NSAppleEventDescriptor(enumCode: OSType(reason)), forKeyword: AEKeyword(kAEQuitReason))
+        } else {
+            event.setAttribute(NSAppleEventDescriptor(enumCode: OSType(reason)), forKeyword: AEKeyword(kAEQuitReason))
+        }
+        do {
+            _ = try event.sendEvent(options: [.noReply], timeout: 2)
+        } catch {
+            print("SillQuitAfter: the quit Apple event was not sent (\(error)); quitting without a reason")
+            NSApp.terminate(nil)
         }
     }
 

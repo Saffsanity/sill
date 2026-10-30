@@ -9,8 +9,12 @@
 # pairing at home's session rules (home.swift: the pin, the trust a dial starts, how a session at
 # home ends, the ask's answer, the words); and issue #69's (sleep.swift: the browsers made again after
 # the background and after a failure, what one made again shows while it settles, the reconnect's dials
-# of a row that stays listed and their words, the Desktop asked for again after a stop, with models); and
-# a row's TXT record kept while its name stays listed (records.swift: the cable pulled, 2026-10-27).
+# of a row that stays listed and their words, the Desktop asked for again after a stop, and, after the
+# Mac's own goodbye (issue #105), its row counted asleep or left alone until listed afresh, the return
+# from the background or 10 minutes, and a goodbye read only on the return, with models; and the
+# session's liveness after the app ran again, a tick far after the last judging nothing, with a model
+# of the session's queue across a suspension); and a row's TXT record kept while its name stays listed
+# (records.swift: the cable pulled, 2026-10-27).
 #   Tests/checks/policy/run.sh             compile and run the check
 #   Tests/checks/policy/run.sh --mutants   one-line mutants of DiscoveryPolicy.swift; each must fail it
 here="$(cd "$(dirname "$0")" && pwd)"

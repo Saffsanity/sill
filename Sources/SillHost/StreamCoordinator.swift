@@ -757,6 +757,8 @@ package final class StreamCoordinator {
         if let testMenuLine { print(testMenuLine) }   // TEST ONLY, and only with SILL_TEST_MENU_PID set
         if config.sendAudio { audio.prepare() }       // the codec, loaded before the first chunk needs it
         server.start()
+        observeSleep()               // under the AppKit loop: the Mac about to sleep tells every device why
+        observePowerOff()            // and the Mac about to log out, restart or shut down sets the goodbye Sill's end sends
         remote?.apply(config)        // the remote door, when Remote Access is on (or a pairing window opens later)
         if promptForPermissions || CGPreflightScreenCaptureAccess() { await catalog.refreshWindows() }
         if let match = preselect?.lowercased(),
@@ -1280,9 +1282,11 @@ package final class StreamCoordinator {
     /// the Mac from it, as a key press on it would say (issue #134), and whether this one declares it;
     /// DisplayActivity makes the call on its own queue and says "Woke the display for …" only when the
     /// display read asleep before and on half a second later. A test host counts `disp.wakeDry` and
-    /// touches nothing.
+    /// touches nothing. Nothing at all between the Mac's sleep goodbye and its wake (`macAsleep`): a
+    /// session registered just before willSleep has its connect heard here after the observer
+    /// returned, on a Mac being put to sleep.
     private func deviceActive(_ event: DisplayWake.Event, _ connection: NWConnection) {
-        switch displayWake.decide(event, at: CFAbsoluteTimeGetCurrent()) {
+        switch displayWake.decide(event, at: CFAbsoluteTimeGetCurrent(), macAsleep: server.macAsleep()) {
         case .nothing: break
         case .count: Stats.shared.bump(DisplayWake.dryKey)
         case .declare(let activity): displayActivity.declare(for: deviceName(connection), activity)
@@ -2485,18 +2489,111 @@ package final class StreamCoordinator {
     /// Called by HostShutdown on the main queue just before `exit` (or, for the app's Quit, just
     /// before AppKit exits): every key and button a device holds down on the Mac goes up (a modifier
     /// left down would outlive Sill: the Mac's next click a ⌘-click), every connected device hears why
-    /// (kind 22 "quit", at most 0.1 s), then a window Sill sized goes back to its own frame
-    /// (`restoreFits`), the staged window home, display gone. Capture and encoder need no stop; the
-    /// process is about to end. The CLI without --virtual-display lets go of the keys, puts a sized
-    /// window back and dies of the signal with no goodbye (`releaseKeysForExit`): its devices notice
-    /// by liveness.
-    package func shutdownForExit() {
+    /// (kind 22, at most 0.1 s: HostGoodbye.forQuit, from the reason macOS gave the app's Quit,
+    /// `quitReason`, whether Sill's own Quit with no Apple event ended it, `byMenu`, and whether macOS
+    /// said the Mac is about to log out, restart or shut down, `observePowerOff`: "restart",
+    /// "shutdown", "poweroff", or "quit" as before; so a signal after willPowerOff says "poweroff"; one line
+    /// then; a device already told why, by the Mac's sleep goodbye, hears nothing more), then a window
+    /// Sill sized goes back to its own frame (`restoreFits`), the staged window home, display gone.
+    /// Capture and encoder need no stop; the process is about to end. The CLI without
+    /// --virtual-display lets go of the keys, puts a sized window back and dies of the signal with no
+    /// goodbye (`releaseKeysForExit`): its devices notice by liveness.
+    package func shutdownForExit(quitReason: UInt32? = nil, byMenu: Bool = false) {
         injector.releaseAll()
-        server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
+        let poweringOff = HostGoodbye.poweringOff(since: powerOffAt.at, now: ProcessInfo.processInfo.systemUptime)
+        let going = HostGoodbye.forQuit(reason: quitReason, byMenu: byMenu, poweringOff: poweringOff)
+        let told = server.goodbyeAll(HostGoodbye.goodbye(going, mac: macName), within: 0.1)
+        if let line = HostGoodbye.line(going, devices: told) { print(line) }
         shuttingDown = true
         audio.shutdown()   // "Audio stopped: Sill is quitting."
         restoreFits(keeping: nil)
         stage.release()
+    }
+
+    /// The Mac about to sleep, while the AppKit loop runs (Sill.app, and the CLI with
+    /// --virtual-display): NSWorkspace's willSleep, which it posts on the main thread and lets the Mac
+    /// sleep only once its observers return, so the goodbye goes out first (`goodbyeBeforeSleep`), and
+    /// from then until its didWake no door admits a session (StreamServer's SleepWindow, HostGoodbye):
+    /// one that comes gets the same goodbye, and DisplayWake declares nothing (`deviceActive`).
+    /// Without the AppKit loop (the CLI's dispatchMain) NSWorkspace says nothing, and a process that
+    /// registers for the Mac's sleep there without answering holds it up to 30 s: nothing is
+    /// registered, and its devices notice by liveness, as before. Once, from `start`.
+    private func observeSleep() {
+        guard appKitLoop, sleepObserver == nil else { return }
+        let sleep = SleepGoodbye(server: server, mac: macName)
+        // The blocks run on the posting thread (queue nil), the main thread, synchronously: they read
+        // no main-actor state, only what they captured, so no hop is needed.
+        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification,
+                                                                          object: nil, queue: nil) { _ in sleep.send() }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification,
+                                                                         object: nil, queue: nil) { _ in sleep.woke() }
+    }
+    private var sleepObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
+
+    /// macOS said the Mac is about to log out, restart or shut down, while the AppKit loop runs:
+    /// NSWorkspace's willPowerOff (issue #105; HostGoodbye has what is known of when it comes). For
+    /// the next ten minutes (`HostGoodbye.powerOffStands`) the goodbye Sill's end sends is "poweroff"
+    /// in the words "‹Mac› is shutting down or restarting." (`shutdownForExit`: HostGoodbye.forQuit's
+    /// `powerOff`), unless a quit Apple event's reason says which: the SIGTERM that may end Sill
+    /// without a Quit sends it, where it sent "quit", and so does a quit Apple event without a
+    /// reason, but never Sill's own Quit from its menu. Nothing is sent now: willPowerOff comes for a
+    /// log out as well, and someone may still cancel any of the three while Sill runs on. One line
+    /// each time. Once, from `start`.
+    private func observePowerOff() {
+        guard appKitLoop, powerOffObserver == nil else { return }
+        let at = powerOffAt
+        // On the posting thread (queue nil), the main thread: it touches only the time, which locks.
+        powerOffObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willPowerOffNotification,
+                                                                             object: nil, queue: nil) { _ in
+            at.set(ProcessInfo.processInfo.systemUptime)
+            print(HostGoodbye.powerOffLine)
+        }
+    }
+    private var powerOffObserver: NSObjectProtocol?
+    /// When willPowerOff last came (`observePowerOff`), read at Sill's end (`shutdownForExit`).
+    private let powerOffAt = PowerOffTime()
+
+    /// Set by willPowerOff's observer and read at Sill's end, both on the main thread under the AppKit
+    /// loop; a lock all the same, as nothing here is main-actor state.
+    private final class PowerOffTime: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: Double?
+        func set(_ now: Double) { lock.lock(); value = now; lock.unlock() }
+        var at: Double? { lock.lock(); defer { lock.unlock() }; return value }
+    }
+
+    /// The same, now: the bare binary's `-SillSleepAfter` (TEST ONLY, DebugHooks), as if the Mac were
+    /// about to sleep: the window opened, then the goodbyes.
+    package func goodbyeBeforeSleep() {
+        SleepGoodbye(server: server, mac: macName).send()
+    }
+
+    /// The bare binary's `-SillWakeAfter` (TEST ONLY, DebugHooks), as if the Mac had woken: what
+    /// didWake's observer does, the window ended and the doors admitting devices again.
+    package func wokeForTest() {
+        server.macWoke()
+    }
+
+    /// The Mac is about to sleep: first the doors stop admitting sessions (`macGoingToSleep`: until
+    /// didWake, a session that comes gets this goodbye too), then every connected device hears why
+    /// (kind 22 "sleep", the Mac's words and a reconnect), and its connection closes after it (this
+    /// side's end at once, the device's remains read until it closes too, 1 s at most: `goodbyeAll`'s
+    /// `close`, a timer whose clock stops while the Mac sleeps), the goodbye handed to the network
+    /// within 0.1 s, so its status line says so at once rather than when its liveness gives up on a
+    /// Mac gone silent, and its reconnect counts the Mac as asleep (GoodbyePolicy, DiscoveryPolicy).
+    /// One line, only when a device was connected. From any thread but the network queue: the server
+    /// hops onto it (`goodbyeAll`), and the Mac's name is a copy.
+    private struct SleepGoodbye: @unchecked Sendable {
+        let server: StreamServer
+        let mac: String
+        func send() {
+            server.macGoingToSleep()
+            let told = server.goodbyeAll(HostGoodbye.goodbye(.sleep, mac: mac), within: 0.1, close: true)
+            if let line = HostGoodbye.line(.sleep, devices: told) { print(line) }
+        }
+        /// The Mac woke (didWake): the doors admit sessions again (`macWoke`).
+        func woke() { server.macWoke() }
     }
 
     /// The CLI's default path at a signal (HostShutdown.installKeyRelease), just before it dies of it:

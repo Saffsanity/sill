@@ -78,12 +78,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// full screen first, waiting up to 2 s on a run-loop timer; a 4 s watchdog exits regardless,
     /// and the atexit restore still runs then. No confirmation. Signals do not come through here:
     /// HostShutdown handles them synchronously, with exit code 128 + the signal.
+    /// When a quit Apple event brings the Quit, its reason (`kAEQuitReason`, as a parameter or an
+    /// attribute; readable only while it is handled, here) says whether macOS quits Sill for a
+    /// restart, a shut down or a log out: a restart's or a shut down's goodbye tells every device so,
+    /// and a log out's is "quit" (HostGoodbye, which has what is known of when macOS sends one:
+    /// loginwindow ends a UI-element app such as Sill with a signal, and sends it a quit event only
+    /// when that fails; the signal's goodbye follows NSWorkspace's willPowerOff,
+    /// StreamCoordinator.observePowerOff, and so does a quit event's without a reason, but never a
+    /// Quit from Sill's own menu, which comes with no Apple event). The log says which.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if terminating { return .terminateNow }
         terminating = true
+        let event = NSAppleEventManager.shared().currentAppleEvent
+        let quitReason = HostGoodbye.quitReason(in: event)
+        let byMenu = event == nil   // Sill's own Quit (its menu, ⌘Q): no Apple event
+        if let line = HostGoodbye.quitLine(reason: quitReason) { print(line) }
         let coordinator = model.coordinator
         guard let c = coordinator, c.stagedWindowIsFullScreen else {
-            HostShutdown.releaseForQuit(coordinator: coordinator)
+            HostShutdown.releaseForQuit(coordinator: coordinator, quitReason: quitReason, byMenu: byMenu)
             return .terminateNow
         }
         print("Quit: taking the streamed window out of full screen first.")
@@ -93,7 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated {
                 guard c.stagedWindowSettled || Date() >= deadline else { return }
                 timer.invalidate()
-                HostShutdown.releaseForQuit(coordinator: c)
+                HostShutdown.releaseForQuit(coordinator: c, quitReason: quitReason, byMenu: byMenu)
                 NSApp.reply(toApplicationShouldTerminate: true)
             }
         }

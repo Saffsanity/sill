@@ -137,6 +137,13 @@ final class StreamServer {
         /// The last kind 26 sent to it; nil also while it drives the pointer, so the next one goes out
         /// whatever it says.
         var lastPointer: MacPointer?
+        /// It was told why its connection is about to close (kind 22): the first goodbye says why,
+        /// and no second one follows it (a Quit right after the Mac's sleep goodbye, or after the
+        /// device was removed, never replaces what the device was told). Nothing else is sent to it
+        /// after its goodbye (a frame, a tick, a pong, a pointer report, a sound packet or a state would
+        /// follow this side's end), and what it still sends is read and dropped until it closes
+        /// (`receiveLoop`). On `queue`.
+        var told = false
         /// The codec of the Mac's sound it gets, from its hello (`AudioCodec.choose`); nil for a device
         /// that plays none (every device before 2026-09-27, a test client without --audio), which is
         /// sent no kind 43.
@@ -268,7 +275,7 @@ final class StreamServer {
         // The Mac's pointer, unless the frame-rate sampler has it while it moves.
         let reported = pointerSampler == nil ? samplePointer(now: now) : []
         let data = StreamMessage(kind: .tick, timestamp: now, isKeyframe: false, payload: Data()).serialized()
-        for (id, client) in clients where client.connection.state == .ready {
+        for (id, client) in clients where client.connection.state == .ready && !client.told {
             // A kind 26 just sent keeps its link awake this turn.
             if reported.contains(id) { continue }
             // Over TLS every record costs CPU (the remote plan's H20): skip a tick right after
@@ -299,14 +306,14 @@ final class StreamServer {
     /// (PointerWatch.samplerInterval). Returns the devices sent one.
     @discardableResult
     private func samplePointer(now: TimeInterval) -> Set<ObjectIdentifier> {
-        let ready = clients.compactMap { $0.value.connection.state == .ready ? $0.key : nil }
+        let ready = clients.compactMap { $0.value.connection.state == .ready && !$0.value.told ? $0.key : nil }
         guard let watch = pointerWatch, let reading = watch.sample(devices: ready) else {
             setPointerSampler(interval: nil)
             return []
         }
         var sent = Set<ObjectIdentifier>()
         var watched = false
-        for (id, client) in clients where client.connection.state == .ready {
+        for (id, client) in clients where client.connection.state == .ready && !client.told {
             guard let report = reading.report(for: id, seen: client.inputsRead) else {
                 client.lastPointer = nil
                 continue
@@ -1074,9 +1081,14 @@ final class StreamServer {
 
     /// Tells one admitted client why it is about to be closed, then closes it once the message is
     /// handed to the network or `within` has passed, whichever comes first: a registered client,
-    /// whose connection the stream and the catalog share. A connection that was never registered
-    /// closes with `closeWithGoodbye`. On `queue`.
+    /// whose connection the stream and the catalog share. One already told why (`told`) is closed
+    /// with nothing more said. A connection that was never registered closes with `closeWithGoodbye`.
+    /// On `queue`.
     func goodbye(_ goodbye: Goodbye, to connection: NWConnection, within: TimeInterval = 0.25) {
+        if let client = clients[ObjectIdentifier(connection)] {
+            guard !client.told else { connection.cancel(); return }
+            client.told = true
+        }
         Self.sayGoodbye(payload: Wire.encode(goodbye), on: connection, queue: queue, within: within)
     }
 
@@ -1088,22 +1100,51 @@ final class StreamServer {
         queue.asyncAfter(deadline: .now() + within) { connection.cancel() }
     }
 
-    /// Every admitted client, home and remote, gets `goodbye` (the app's Quit and the signal path:
-    /// "quit"); returns once each message was handed to the network or after `within`. Call from
-    /// any thread but the network queue.
-    func goodbyeAll(_ goodbye: Goodbye, within: TimeInterval) {
+    /// Every admitted client, home and remote, that was not told why already (`told`) gets
+    /// `goodbye`: the app's Quit and the signal path, "quit", or what HostGoodbye.forQuit makes of the
+    /// reason macOS gave the Quit and of willPowerOff, "restart", "shutdown" or "poweroff"; the Mac about to
+    /// sleep, "sleep". With `close` (the sleep's) its connection then closes as `closeWithGoodbye`
+    /// closes one: the goodbye, then this side's end (FIN; over TLS its close_notify first), then
+    /// what the device still sends read and dropped by its own receive loop (`told`) until it
+    /// closes too, which cancels the connection, at most `DeviceGate.closeWait` after: the device's
+    /// session ends at once, with those words, not when its liveness gives up on a Mac that went
+    /// silent. Cancelling at once instead, with the ticks, pings or input a streaming device keeps
+    /// sending still unread, makes TCP answer with a reset, which can reach the device before the
+    /// goodbye. Without `close` the process is about to end and its end closes them. Returns how
+    /// many were told, once each message was handed to the network or after `within` (those not
+    /// reached by then are not counted). Call from any thread but the network queue.
+    @discardableResult
+    func goodbyeAll(_ goodbye: Goodbye, within: TimeInterval, close: Bool = false) -> Int {
         let group = DispatchGroup()
+        let count = TellCount()
         group.enter()
         queue.async { [self] in
             let data = StreamMessage(kind: .goodbye, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                                      payload: Wire.encode(goodbye)).serialized()
-            for client in clients.values where client.connection.state == .ready {
+            for client in clients.values where client.connection.state == .ready && !client.told {
+                client.told = true
+                count.add()
                 group.enter()
-                client.connection.send(content: data, completion: .contentProcessed { _ in group.leave() })
+                let c = client.connection
+                if close {
+                    c.send(content: data, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in group.leave() })
+                    queue.asyncAfter(deadline: .now() + DeviceGate.closeWait) { c.cancel() }
+                } else {
+                    c.send(content: data, completion: .contentProcessed { _ in group.leave() })
+                }
             }
             group.leave()
         }
         _ = group.wait(timeout: .now() + within)
+        return count.value
+    }
+
+    /// How many `goodbyeAll` told, written on the network queue and read by its caller.
+    private final class TellCount: @unchecked Sendable {
+        private let lock = NSLock()
+        private var n = 0
+        func add() { lock.lock(); n += 1; lock.unlock() }
+        var value: Int { lock.lock(); defer { lock.unlock() }; return n }
     }
 
     // MARK: The device gate (DeviceGate)
@@ -1126,8 +1167,18 @@ final class StreamServer {
     /// is read ahead. Above it: reads `c`'s first message, within `DeviceGate.firstMessageDeadline`
     /// of now (`.ready`, or a TLS door's admission): a hello the floor admits calls `admit` with it;
     /// a lower version, a hello that does not decode, any other kind first, the end of the
-    /// connection or nothing in time is refused (`refuse`), and `admit` is never called. On `queue`.
+    /// connection or nothing in time is refused (`refuse`), and `admit` is never called. Either way,
+    /// while the Mac is between its sleep goodbye and its wake (SleepWindow: `macGoingToSleep`,
+    /// `macWoke`) a session the gate would admit gets that goodbye instead (`refuseAsleep`), and
+    /// `admit` is never called: every door's session passes here before it is registered, so the
+    /// check and the registration are one turn of `queue`, and the sleep's own goodbyes, sent on
+    /// `queue` after the window opened, reach every session registered before it. On `queue`.
     func gate(_ c: NWConnection, admit: @escaping (Hello?) -> Void) {
+        let admit = { [weak self] (hello: Hello?) in
+            guard let self else { c.cancel(); return }
+            if let goodbye = self.sleepRefusal() { self.refuseAsleep(c, goodbye); return }
+            admit(hello)
+        }
         guard deviceFloor != .zero else { admit(nil); return }
         var decided = false          // on `queue`, like every closure here
         let refuse = { [weak self] (hello: Hello?) in
@@ -1175,14 +1226,8 @@ final class StreamServer {
     /// source refused `DeviceGate.loopRefusals` times within the window hears it
     /// `DeviceGate.loopDelay` later. On `queue`.
     private func refuse(_ c: NWConnection, hello: Hello?) {
-        let source: String
-        if case .hostPort(let host, _) = c.endpoint { source = Self.addressText(host).text } else { source = "\(c.endpoint)" }
-        let now = CFAbsoluteTimeGetCurrent()
-        if gateRefusals.count > 256 { gateRefusals = gateRefusals.filter { $0.value.contains { now - $0 < DeviceGate.loopWindow } } }
-        var times = (gateRefusals[source] ?? []).filter { now - $0 < DeviceGate.loopWindow }
-        let slowed = DeviceGate.slows(refusedInWindow: times.count)
-        times.append(now)
-        gateRefusals[source] = times
+        let source = gateSource(c)
+        let slowed = countGateRefusal(source)
         logRefusal(DeviceGate.refusedLine(hello, endpoint: "\(c.endpoint)", floor: deviceFloor), source: source)
         let payload = testGoodbye ?? Wire.encode(DeviceGate.refusal(hello, floor: deviceFloor, macName: macName))
         let queue = queue
@@ -1190,6 +1235,123 @@ final class StreamServer {
             queue.asyncAfter(deadline: .now() + DeviceGate.loopDelay) { Self.closeWithGoodbye(payload, on: c, queue: queue) }
         } else {
             Self.closeWithGoodbye(payload, on: c, queue: queue)
+        }
+    }
+
+    /// A refused connection's source, as the gate counts it: its address without the port.
+    private func gateSource(_ c: NWConnection) -> String {
+        if case .hostPort(let host, _) = c.endpoint { return Self.addressText(host).text }
+        return "\(c.endpoint)"
+    }
+
+    /// One more refusal at the gate from `source` (the update goodbye's or the sleep's), and whether
+    /// this one waits `DeviceGate.loopDelay` (`DeviceGate.slows`: a device that redials at once after
+    /// each, as 0.5.1 does after a reason it does not know with a reconnect). On `queue`.
+    private func countGateRefusal(_ source: String) -> Bool {
+        let now = CFAbsoluteTimeGetCurrent()
+        if gateRefusals.count > 256 { gateRefusals = gateRefusals.filter { $0.value.contains { now - $0 < DeviceGate.loopWindow } } }
+        var times = (gateRefusals[source] ?? []).filter { now - $0 < DeviceGate.loopWindow }
+        let slowed = DeviceGate.slows(refusedInWindow: times.count)
+        times.append(now)
+        gateRefusals[source] = times
+        return slowed
+    }
+
+    // MARK: The Mac asleep (SleepWindow)
+    //
+    // From NSWorkspace's willSleep, when every device hears the sleep goodbye, until its didWake, no
+    // session is admitted at any door (`gate`): one that comes gets the same goodbye and is closed as
+    // the gate closes a refused one, never registered, so it never declares user activity on a Mac
+    // being put to sleep, nor starts a capture or an encoder. HostGoodbye's SleepWindow has the rule.
+
+    /// The window, its lock, and the sessions refused while it runs: written on the main thread
+    /// (StreamCoordinator's NSWorkspace observers, and the bare app's TEST ONLY hooks), read on `queue`
+    /// at every admission and on the main actor by DisplayWake's caller.
+    private let sleepLock = NSLock()
+    private var sleepWindow = SleepWindow()
+    private var sleepRefused = 0
+    /// Sources whose refused-while-asleep line was printed within the last minute, with how many more
+    /// came since. On `queue`.
+    private var asleepLog: [String: Int] = [:]
+
+    /// The Mac is about to sleep (willSleep): from now no session is admitted until `macWoke`, or until
+    /// the window lapses (`SleepWindow.limit` of the Mac's awake time). Before the sleep's goodbyes are
+    /// sent, so a session admitted after them is refused and one admitted before is told. Any thread.
+    func macGoingToSleep() {
+        sleepLock.lock()
+        sleepWindow.willSleep(at: ProcessInfo.processInfo.systemUptime)
+        sleepRefused = 0
+        sleepLock.unlock()
+    }
+
+    /// The Mac woke (didWake): sessions are admitted again; one line when a window was open. Any thread.
+    func macWoke() {
+        sleepLock.lock()
+        let wasOpen = sleepWindow.since != nil
+        let refused = sleepRefused
+        sleepWindow.didWake()
+        sleepRefused = 0
+        sleepLock.unlock()
+        if wasOpen { print(SleepWindow.wokeLine(refused: refused)) }
+    }
+
+    /// Whether the Mac counts as asleep now (DisplayWake declares nothing then). A window that lapsed
+    /// ends here, with its line, the first time anything asks. Any thread.
+    func macAsleep() -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        sleepLock.lock()
+        let lapsed = sleepWindow.lapsed(at: now)
+        if lapsed { sleepWindow.didWake(); sleepRefused = 0 }
+        let asleep = sleepWindow.asleep(at: now)
+        sleepLock.unlock()
+        if lapsed { print(SleepWindow.lapsedLine) }
+        return asleep
+    }
+
+    /// The goodbye a session that comes now gets while the Mac is asleep, counted; nil: admit it. On
+    /// `queue`.
+    private func sleepRefusal() -> Goodbye? {
+        guard macAsleep() else { return nil }
+        let now = ProcessInfo.processInfo.systemUptime
+        sleepLock.lock()
+        let goodbye = sleepWindow.refusal(at: now, mac: macName)
+        if goodbye != nil { sleepRefused += 1 }
+        sleepLock.unlock()
+        return goodbye
+    }
+
+    /// A session that came while the Mac is asleep: the sleep goodbye, then the close
+    /// (`closeWithGoodbye`), never registered; one line per source a minute, the rest counted. A source
+    /// refused `DeviceGate.loopRefusals` times within the window (the gate's refusals and these
+    /// together) hears it `DeviceGate.loopDelay` later, and still the sleep's: a device that dialled
+    /// while the Mac was asleep is not admitted by a wake that comes while it waits, it dials again.
+    /// On `queue`.
+    private func refuseAsleep(_ c: NWConnection, _ goodbye: Goodbye) {
+        let source = gateSource(c)
+        let slowed = countGateRefusal(source)
+        if let n = asleepLog[source] {
+            asleepLog[source] = n + 1
+        } else {
+            print(SleepWindow.refusedLine(endpoint: "\(c.endpoint)"))
+            asleepLog[source] = 0
+            armAsleepLog(source)
+        }
+        let payload = Wire.encode(goodbye)
+        let queue = queue
+        if slowed {
+            queue.asyncAfter(deadline: .now() + DeviceGate.loopDelay) { Self.closeWithGoodbye(payload, on: c, queue: queue) }
+        } else {
+            Self.closeWithGoodbye(payload, on: c, queue: queue)
+        }
+    }
+
+    private func armAsleepLog(_ source: String) {
+        queue.asyncAfter(deadline: .now() + RefusalSummary.interval) { [weak self] in
+            guard let self, let n = self.asleepLog[source] else { return }
+            guard n > 0 else { self.asleepLog[source] = nil; return }
+            print(SleepWindow.refusedCountLine(n, source: source))
+            self.asleepLog[source] = 0
+            self.armAsleepLog(source)
         }
     }
 
@@ -1449,6 +1611,9 @@ final class StreamServer {
                     self.receiveLoop(client)
                     return
                 }
+                // Told why its connection closes (`told`): what it still sends is read and dropped
+                // until it closes, so this side's end never meets unread data (a reset).
+                if client.told { self.receiveLoop(client); return }
                 if header.kind == .input {
                     self.lastInputAt = Date().timeIntervalSince1970
                     if self.tickTimer == nil { self.updateTicking() }
@@ -1541,7 +1706,7 @@ final class StreamServer {
             if message.kind == .frame, message.isKeyframe { lastKeyframeAt = Date().timeIntervalSince1970 }
             var wantKeyframe = false
             defer { if wantKeyframe { onKeyframeNeeded?() } }
-            for client in clients.values where client.connection.state == .ready {
+            for client in clients.values where client.connection.state == .ready && !client.told {
                 if message.kind == .frame, client.route.isRemote {
                     if paceRemote(client, message: message, data: data) { wantKeyframe = true }
                     continue
@@ -1613,12 +1778,13 @@ final class StreamServer {
         queue.async { [self] in audioFormat = (epoch, format) }
     }
 
-    /// One packets message (a whole kind 43) of `epoch`, to every ready device that plays the sound:
-    /// the epoch's format first to a device that has not had it, then the packet, unless the device
-    /// has `audioCap` messages untaken. Thread-safe.
+    /// One packets message (a whole kind 43) of `epoch`, to every ready device that plays the sound
+    /// and was not told why its connection closes (`told`: nothing follows a goodbye, the sound
+    /// neither): the epoch's format first to a device that has not had it, then the packet, unless the
+    /// device has `audioCap` messages untaken. Thread-safe.
     func broadcastAudio(packets: Data, epoch: Int) {
         queue.async { [self] in
-            for client in clients.values where client.audioCodec == AudioCodec.aacELD && client.connection.state == .ready {
+            for client in clients.values where client.audioCodec == AudioCodec.aacELD && client.connection.state == .ready && !client.told {
                 if client.audioEpochSent != epoch {
                     guard let format = audioFormat, format.epoch == epoch else { continue }
                     sendAudio(format.data, to: client)
@@ -1633,8 +1799,10 @@ final class StreamServer {
         }
     }
 
-    /// On `queue`: one sound message to one device, counted as the section above says.
+    /// On `queue`: one sound message to one device, counted as the section above says. None after its
+    /// goodbye (`told`), as `send` sends none (after the sleep's, this side's end has gone with it).
     private func sendAudio(_ data: Data, to client: Client) {
+        guard !client.told else { return }
         client.audioUnsent += 1
         client.lastSentAt = Date().timeIntervalSince1970
         client.pendingBytes += data.count
@@ -1763,6 +1931,7 @@ final class StreamServer {
     private static let graceAfterConnect: TimeInterval = 8.0
 
     private func send(_ data: Data, to client: Client, isFrame: Bool = false, isKeyframe: Bool = false) {
+        guard !client.told else { return }   // after its goodbye, nothing (`told`)
         let now = Date().timeIntervalSince1970
         let remote = client.route.isRemote
         if isFrame, let oldest = client.oldestUnackedFrameAt,

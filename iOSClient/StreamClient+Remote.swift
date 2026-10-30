@@ -618,7 +618,8 @@ extension StreamClient {
             reconnectIfListed()
             return
         }
-        let outcome = GoodbyePolicy.outcome(goodbye, mac: name, device: Self.deviceWord, saved: saved != nil)
+        let outcome = GoodbyePolicy.outcome(goodbye, mac: name, device: Self.deviceWord, saved: saved != nil,
+                                            remote: s?.route.isRemote == true)
         if goodbye?.reason == Goodbye.removed, let mac = saved,
            DiscoveryPolicy.removalRevokes(remote: s?.route.isRemote == true, trust: s?.home, savedKey: mac.fingerprintData),
            let next = SavedMacs.revoking(mac.macID, in: savedMacs) {
@@ -631,7 +632,7 @@ extension StreamClient {
         }
         tearDown(status: outcome.text)
         reconnect = outcome.reconnect ? lostReconnect(session: s, saved: saved, name: name, remoteAllowed: outcome.remoteAllowed,
-                                                      afterQuit: goodbye?.reason == Goodbye.quit) : nil
+                                                      went: outcome.went) : nil
         updateDiscovery()
         if outcome.reconnect {
             scheduleReconnectRetry()
@@ -647,7 +648,8 @@ extension StreamClient {
     /// dial's failure rules, which would say "isn’t accepting remote connections" and redial, are
     /// not asked.
     private func endWithNotice(_ goodbye: Goodbye, session s: Session?, saved: SavedMac?, name: String) {
-        let outcome = GoodbyePolicy.outcome(goodbye, mac: name, device: Self.deviceWord, saved: saved != nil)
+        let outcome = GoodbyePolicy.outcome(goodbye, mac: name, device: Self.deviceWord, saved: saved != nil,
+                                            remote: s?.route.isRemote == true)
         tearDown(status: outcome.text, restartSearch: connected)
         notice = Notice(text: outcome.text, storeLink: outcome.storeLink)
         if s?.why == .afterPairing {
@@ -655,7 +657,8 @@ extension StreamClient {
             afterPairingWatch = nil
             pairing = .idle
         }
-        reconnect = outcome.reconnect ? lostReconnect(session: s, saved: saved, name: name, remoteAllowed: outcome.remoteAllowed) : nil
+        reconnect = outcome.reconnect ? lostReconnect(session: s, saved: saved, name: name, remoteAllowed: outcome.remoteAllowed,
+                                                      went: outcome.went) : nil
         #if DEBUG
         print("session: the Mac said goodbye (\(goodbye.reason.isEmpty ? "unreadable" : goodbye.reason)): “\(outcome.text)”; \(outcome.reconnect ? "reconnecting" : "not reconnecting")")
         #endif
@@ -663,14 +666,22 @@ extension StreamClient {
         if outcome.reconnect { scheduleReconnectRetry() }
     }
 
-    /// The automatic reconnect after a session with this Mac ended on its own (§7.4). `afterQuit`:
-    /// the session ended with goodbye `quit`, so the Mac's row that is going is left alone for
-    /// DiscoveryPolicy.quitWait (`reconnectIfListed`); never for a notice. An open door's session
-    /// leaves the key it saw, which the reconnect's dials pin (DiscoveryPolicy.reconnectKey); one that
-    /// saw none (a tap's dial that ended before its handshake) the key the last session under its
-    /// name saw (`openKeys`, the review of #255).
+    /// The automatic reconnect after a session with this Mac ended on its own (§7.4). `went`: how
+    /// the Mac said it went (GoodbyePolicy.Went), so its row is left alone as DiscoveryPolicy says
+    /// (`reconnectIfListed`): after a quit for `quitWait`; after the Mac said it is going to sleep,
+    /// counted as asleep; after a shut down or a restart, until it is listed afresh, the app comes
+    /// back from the background, or `offHold` has passed. Nothing dials the Mac's addresses sooner
+    /// than `asleepWait` after it said it was going to sleep, shutting down or restarting
+    /// (`firstRemoteDial`). A session that ends in the background, or just after the return from it,
+    /// may have ended on a goodbye that waited in its connection while the app was suspended
+    /// (DiscoveryPolicy.returnRenews): ended just after the return, and up before it (its
+    /// `startedAt`), what the browsers made then list counts as listed afresh at once
+    /// (`renewedFrom`); ended in the background, the return decides. An open door's session leaves
+    /// the key it saw, which the reconnect's dials pin (DiscoveryPolicy.reconnectKey); one that saw
+    /// none (a tap's dial that ended before its handshake) the key the last session under its name
+    /// saw (`openKeys`, the review of #255).
     private func lostReconnect(session s: Session?, saved: SavedMac?, name: String, remoteAllowed: Bool,
-                               afterQuit: Bool = false) -> Reconnect {
+                               went: GoodbyePolicy.Went? = nil) -> Reconnect {
         let bonjour = s?.bonjourName ?? saved?.bonjourName
         let earlier = bonjour.flatMap { openKeys[$0] }
         let openKey = DiscoveryPolicy.reconnectKey(lost: s?.home, earlier: earlier)
@@ -679,11 +690,24 @@ extension StreamClient {
             print("reconnect: the dial of \(name) saw no key; the reconnect pins the key the last session under its name saw")
         }
         #endif
-        return Reconnect(macID: saved?.macID, bonjourName: bonjour, name: name,
-                         lostAt: ProcessInfo.processInfo.systemUptime, pathAtLoss: pathSignature,
-                         remoteAllowed: remoteAllowed,
-                         rememberedDirect: bonjour.map { directWirelessMacs.contains($0) } ?? false,
-                         afterQuit: afterQuit, openKey: openKey)
+        let lostAt = ProcessInfo.processInfo.systemUptime
+        var r = Reconnect(macID: saved?.macID, bonjourName: bonjour, name: name,
+                          lostAt: lostAt, pathAtLoss: pathSignature,
+                          remoteAllowed: remoteAllowed,
+                          rememberedDirect: bonjour.map { directWirelessMacs.contains($0) } ?? false,
+                          went: went, openKey: openKey)
+        r.nextRemoteAt = DiscoveryPolicy.firstRemoteDial(macWentAt: r.wentAt)
+        r.endedInBackground = !appInForeground
+        if let wentAt = r.wentAt, let back = returnedAt,
+           DiscoveryPolicy.returnRenews(off: went == .off, wentAt: wentAt, inBackground: r.endedInBackground, returnedAt: back,
+                                        sessionSince: s?.startedAt ?? .infinity) {
+            r.renewedFrom = back
+            #if DEBUG
+            print("reconnect: \(name)'s goodbye was read \(String(format: "%.2f", wentAt - back)) s after the return from the background: "
+                  + "what the browsers made then list counts as listed afresh")
+            #endif
+        }
+        return r
     }
 
     /// The automatic reconnect's look, at every browser change, path change and due time
@@ -702,7 +726,14 @@ extension StreamClient {
     /// since before the loss is the registration that is going (it outlives the goodbye by about a
     /// second): it is left alone for DiscoveryPolicy.quitWait, and the words "‹Mac› quit Sill…"
     /// stay meanwhile; the row listed again (Sill is back), or still listed after that, is taken as
-    /// above.
+    /// above. After the Mac said it is going to sleep, a row listed since before counts as asleep
+    /// (DiscoveryPolicy.listingStart: its first dial 20 s after, then every 30 s, with #69's lines
+    /// from that dial on, "‹Mac› went to sleep…" until it); after it said it is shutting down or
+    /// restarting, such a row is left alone until it is listed afresh, the app comes back from the
+    /// background, or 10 minutes have passed (`reconnectRow`'s `offAt`, `offHold`), and the words stay
+    /// until its first dial (`waitingLine`). Either way a row listed by a browser made at a return
+    /// that counts for the goodbye is the Mac as it is now (`returnRenews`, `renewedFrom`): dialled at
+    /// once.
     @discardableResult
     func reconnectIfListed() -> Bool {
         reconnectCheck?.cancel()
@@ -723,10 +754,26 @@ extension StreamClient {
         // The network's sightings are by the name it lists: the Direct row's, else the name last
         // used with the Mac.
         let listedName = direct?.name ?? r.bonjourName
+        // A row the browser made at a return that counts for the Mac's goodbye lists itself counts as
+        // listed afresh for its rules (DiscoveryPolicy.returnRenews, `renewed`; issue #105).
+        let networkRenewed = network.map { listedAfreshByBrowser($0, renewedFrom: r.renewedFrom) } ?? false
+        let directRenewed = direct.map { listedAfreshByBrowser($0, renewedFrom: r.renewedFrom) } ?? false
         let choice = DiscoveryPolicy.reconnectRow(network: network, networkSince: network.flatMap { sightings.since[$0.name] },
                                                   direct: direct, directSince: direct.flatMap { directSince[$0.name] },
                                                   networkLeftAt: listedName.flatMap { sightings.leftAt[$0] },
-                                                  quitAt: r.afterQuit ? r.lostAt : nil, now: now)
+                                                  quitAt: r.went == .quit ? r.lostAt : nil, offAt: r.went == .off ? r.lostAt : nil,
+                                                  networkRenewed: networkRenewed, directRenewed: directRenewed, now: now)
+        #if DEBUG
+        if r.went == .off, choice.take == nil, network != nil || direct != nil {
+            let note = "off \(r.lostAt)"
+            if lastRedialNote != note {
+                lastRedialNote = note
+                let next = choice.recheckAt.map { String(format: " (looked at again in %.0f s)", $0 - now) } ?? ""
+                print("reconnect: \(r.name) is listed since before it said it is shutting down or restarting: left alone until it is "
+                      + "listed afresh, Sill comes back from the background, or \(Int(DiscoveryPolicy.offHold / 60)) minutes after the goodbye\(next)")
+            }
+        }
+        #endif
         if let mac = choice.take, mac.endpoint != nil {
             // The row's door decides whether the reconnect dials it at all (DiscoveryPolicy.homeDial,
             // never an ask): a Mac that removed this device, or an unsaved one that requires
@@ -741,26 +788,39 @@ extension StreamClient {
                 // while its dials do not connect (a Mac a sleep proxy answers for, one stopped), 12 at
                 // most, in the foreground only (DiscoveryPolicy.redialRow). A listing seen afresh
                 // starts again: the Mac's record renewed is the best sign it is back.
+                // Where a listing's count starts: none, or, after the Mac said it is going to sleep while
+                // it was listed, the Mac counted as asleep (DiscoveryPolicy.listingStart).
+                // A listing renewed by a return (DiscoveryPolicy.returnRenews) starts again too: the Mac as
+                // it is now, never counted as asleep.
                 let listing = mac.direct ? directSince[mac.name] : sightings.since[mac.name]
-                if r.rowListing != listing {
+                let renewed = mac.direct ? directRenewed : networkRenewed
+                if r.rowListing != listing || r.rowRenewed != renewed {
                     r.rowListing = listing
-                    r.rowDials = 0
-                    r.lastRowDialAt = nil
+                    r.rowRenewed = renewed
+                    (r.rowDials, r.lastRowDialAt) = DiscoveryPolicy.listingStart(listedSince: listing, asleepAt: r.asleepAt, renewed: renewed)
                 }
                 let line = DiscoveryPolicy.reconnectLine(mac: r.name, failed: r.rowDials, direct: mac.direct)
                 let due = DiscoveryPolicy.redialRow(failed: r.rowDials, lastDialAt: r.lastRowDialAt, foreground: appInForeground, now: now)
                 guard due.dial else {
                     // Listed, and not dialled now: the line for the dials so far ("…may be asleep…",
-                    // "Stopped trying…"), and the next look. No remote dial while a row lists the Mac.
+                    // "Stopped trying…"), or the end's own while a Mac that said it went to sleep, is
+                    // shutting down or restarting has had no dial yet, and the next look. No remote dial
+                    // while a row lists the Mac.
                     reconnect = r
-                    if status != line { status = line }
+                    if let waiting = DiscoveryPolicy.waitingLine(mac: r.name, failed: r.rowDials, lastDialAt: r.lastRowDialAt,
+                                                                 direct: mac.direct, wentAt: r.wentAt),
+                       status != waiting { status = waiting }
                     #if DEBUG
                     let note = "\(r.rowDials) \(due.recheckAt ?? -1) \(appInForeground)"
                     if lastRedialNote != note {
                         lastRedialNote = note
                         let next = due.recheckAt.map { String(format: "the next in %.1f s", $0 - now) }
                             ?? (appInForeground ? "no more of this listing" : "the next once back in the foreground")
-                        print("reconnect: \(mac.name) is listed; \(r.rowDials) dial\(r.rowDials == 1 ? "" : "s") of it did not connect; \(next)")
+                        if r.asleepAt != nil, r.lastRowDialAt == r.asleepAt {
+                            print("reconnect: \(mac.name) is listed, and \(r.name) said it is going to sleep: counted as asleep; \(next)")
+                        } else {
+                            print("reconnect: \(mac.name) is listed; \(r.rowDials) dial\(r.rowDials == 1 ? "" : "s") of it did not connect; \(next)")
+                        }
                     }
                     #endif
                     if let at = due.recheckAt {

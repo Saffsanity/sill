@@ -11,6 +11,7 @@ WINDOW = "if case .pointer(.move, _, _) = input, let changed = streamChangedAt, 
 LAUNCH = "            case .launchApp: return .launch\n"
 WOKE = "if look.wasAsleep, !asleepNow, look.wakesBefore == wakesSaid {"
 MINUTE = "if let last = lastLineAt, now >= last, now - last < DisplayWake.declaredLineInterval { return nil }"
+ASLEEP = "guard !macAsleep, let activity = activity(event, at: now) else { return .nothing }"
 MUTANTS = {
     # The interval
     "M1 the connect held off like the rest": (HELD, "if let last = lastDeclared, now >= last, now - last < Self.interval {"),
@@ -18,10 +19,10 @@ MUTANTS = {
     "M3 the interval 2 s": ("static let interval: TimeInterval = 5", "static let interval: TimeInterval = 2"),
     "M4 nothing at exactly 5 s": (HELD, HELD.replace("now - last < Self.interval", "now - last <= Self.interval")),
     "M5 a declaration that does not restart the interval": ("        lastDeclared = now\n        return testHost", "        return testHost"),
-    "M6 what was held off restarts it too": ("        guard let activity = activity(event, at: now) else { return .nothing }\n",
-                                             "        guard let activity = activity(event, at: now) else { return .nothing }\n        defer { lastDeclared = now }\n"),
-    "M7 what is not a person's restarts it": ("        guard let activity = activity(event, at: now) else { return .nothing }\n",
-                                              "        guard let activity = activity(event, at: now) else { lastDeclared = now; return .nothing }\n"),
+    "M6 what was held off restarts it too": ("        guard !macAsleep, let activity = activity(event, at: now) else { return .nothing }\n",
+                                             "        guard !macAsleep, let activity = activity(event, at: now) else { return .nothing }\n        defer { lastDeclared = now }\n"),
+    "M7 what is not a person's restarts it": ("        guard !macAsleep, let activity = activity(event, at: now) else { return .nothing }\n",
+                                              "        guard !macAsleep, let activity = activity(event, at: now) else { lastDeclared = now; return .nothing }\n"),
     "M8 a clock set back holds declarations off": (HELD, HELD.replace("now >= last, ", "")),
     "M9 a test host declares": ("return testHost ? .count : .declare(activity)", "return .declare(activity)"),
     "M10 a real host only counts": ("return testHost ? .count : .declare(activity)", "return .count"),
@@ -87,6 +88,12 @@ MUTANTS = {
     "M59 another value echoed": ('return (false, "\\(userActiveVariable) ignored: it takes local or remote; user activity is declared as local.")',
                                  'return (false, "\\(userActiveVariable)=\\(value) ignored: it takes local or remote; user activity is declared as local.")'),
     "M60 the variable's name": ('static let userActiveVariable = "SILL_TEST_USER_ACTIVE"', 'static let userActiveVariable = "SILL_TEST_USERACTIVE"'),
+    # The Mac asleep (issue #105, the review of PR #100): nothing between its sleep goodbye and its wake
+    "M62 the Mac asleep ignored (a connect declares on a Mac being put to sleep)": (ASLEEP, "guard let activity = activity(event, at: now) else { return .nothing }"),
+    "M63 asleep, the interval restarted": (ASLEEP, "if macAsleep { lastDeclared = now; return .nothing }\n        guard let activity = activity(event, at: now) else { return .nothing }"),
+    "M64 asleep, a test host still counts": (ASLEEP, "if macAsleep, testHost, activity(event, at: now) != nil { return .count }\n        " + ASLEEP),
+    "M65 asleep, only a connect held back": (ASLEEP, "guard !(macAsleep && event == .connect), let activity = activity(event, at: now) else { return .nothing }"),
+    "M66 asleep, the stream change forgotten": (ASLEEP, "if macAsleep { streamChangedAt = nil }\n        " + ASLEEP),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

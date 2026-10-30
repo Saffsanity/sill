@@ -587,6 +587,10 @@ final class StreamClient: ObservableObject {
     /// The app is not in the background (UIApplication's notifications): the automatic reconnect dials
     /// a listed row, and a failed browser is made again, only then (issue #69). Main thread.
     private(set) var appInForeground = UIApplication.shared.applicationState != .background
+    /// The app's last return from the background (`cameForward`, systemUptime), when the browsers were
+    /// made again: a session that ends just after it may have ended on a goodbye that waited in its
+    /// connection while the app was suspended (DiscoveryPolicy.returnRenews). Main thread.
+    private(set) var returnedAt: Double?
     #if DEBUG
     /// `-SillBrowserFail N`: each of the first N network browsers is reported failed with
     /// kDNSServiceErr_DefunctConnection (-65569) half a second after it starts, as iOS reports a
@@ -788,6 +792,10 @@ final class StreamClient: ObservableObject {
         var row: HomeRow? = nil
         /// The endpoint dialed (the DEBUG move and path tests start from it).
         var endpoint: NWEndpoint? = nil
+        /// When it was dialled (systemUptime; a remote one's when its dial won): a goodbye on it read
+        /// just after a return from the background was read on that return only if the session was up
+        /// before it (DiscoveryPolicy.returnRenews' `sessionSince`). A move keeps it.
+        var startedAt = ProcessInfo.processInfo.systemUptime
     }
     var session: Session?
 
@@ -820,14 +828,33 @@ final class StreamClient: ObservableObject {
         var rememberedDirect: Bool
         var remoteFailures = 0
         var nextRemoteAt = 0.0
-        /// The session ended with goodbye `quit`: a row listed since before `lostAt` is the Mac's
-        /// registration that is going, left alone for DiscoveryPolicy.quitWait (`reconnectRow`).
-        var afterQuit = false
+        /// How the Mac said it went (GoodbyePolicy.Went), at `lostAt`: `quit`, a row listed since
+        /// before is the Mac's registration that is going, left alone for DiscoveryPolicy.quitWait
+        /// (`reconnectRow`); `asleep`, the Mac counted as asleep (`listingStart`, and no remote dial
+        /// before `asleepWait`); `off`, a row listed since before left alone until it is listed
+        /// afresh, the app comes back from the background or `offHold` has passed (`reconnectRow`'s
+        /// `offAt`). Nil for every other end.
+        var went: GoodbyePolicy.Went?
+        /// When the Mac said it is going to sleep: `lostAt` after a goodbye `sleep`, else nil.
+        var asleepAt: Double? { went == .asleep ? lostAt : nil }
+        /// When the Mac said it went: `lostAt` after a goodbye `sleep`, `shutdown` or `restart`, else
+        /// nil (DiscoveryPolicy.waitingLine: its words stay until the first dial).
+        var wentAt: Double? { went == .asleep || went == .off ? lostAt : nil }
+        /// The session ended while the app was in the background (`appInForeground` false): its
+        /// goodbye may have waited in the connection while the app was suspended
+        /// (DiscoveryPolicy.returnRenews).
+        var endedInBackground = false
+        /// The return from the background from which what a browser made then (or later) lists itself
+        /// counts as listed afresh for the goodbye's rules (DiscoveryPolicy.returnRenews, `renewed`):
+        /// set at the return (`cameForward`), or as the session ends just after one. Nil: no return
+        /// counts.
+        var renewedFrom: Double?
         /// The listing of the Mac's row the reconnect dials (its `sightings.since`, `directSince` for a
-        /// Direct row), the dials of it so far, none of which connected, and when the last started
-        /// (DiscoveryPolicy.redialRow, issue #69). A listing seen afresh, and the app's return from
-        /// the background, start again.
+        /// Direct row), whether it is renewed so (`rowRenewed`), the dials of it so far, none of which
+        /// connected, and when the last started (DiscoveryPolicy.redialRow, issue #69). A listing seen
+        /// afresh or renewed, and the app's return from the background, start again.
         var rowListing: Double?
+        var rowRenewed = false
         var rowDials = 0
         var lastRowDialAt: Double?
         /// An unsaved Mac on an open door (`p=0`): the key its lost session saw, which every dial of
@@ -857,11 +884,34 @@ final class StreamClient: ObservableObject {
     var reconnectCheck: DispatchWorkItem?
     /// A remote session's first window list must come within 10 s of `.ready`.
     var firstListDeadline: DispatchWorkItem?
-    /// A kind 22 on the current connection: why the Mac is about to close it, and what to do then
-    /// (GoodbyePolicy). One that does not decode reads as reason "", a reason this build does not know.
-    var goodbye: Goodbye?
-    /// The Mac's own words from the goodbye that ended the last session, when it was a notice
-    /// ("update", or a reason this build does not know): the connect screen's status line
+    /// A kind 22 and the connection it came on (`goodbyeOn`): why the Mac is about to close that
+    /// connection, and what to do then (GoodbyePolicy). It speaks for that connection's end only:
+    /// a move that carries the session on over another connection drops it (`finishMove`), a rescue
+    /// is refused only for the connection it came on, and a new session starts without one
+    /// (`connect`, `adopt`, `tearDown`), so a goodbye is never shown for a later connection's end.
+    /// One that does not decode reads as reason "", a reason this build does not know. Main thread.
+    private(set) var goodbye: Goodbye?
+    private var goodbyeOn: ObjectIdentifier?
+
+    /// The Mac said why it is about to close `c` (main thread).
+    private func heardGoodbye(_ goodbye: Goodbye, on c: NWConnection) {
+        self.goodbye = goodbye
+        goodbyeOn = ObjectIdentifier(c)
+    }
+
+    /// No goodbye stands: a new session, or the session carried on over another connection.
+    private func forgetGoodbye() {
+        goodbye = nil
+        goodbyeOn = nil
+    }
+
+    /// Whether the Mac said goodbye on `c`.
+    private func saidGoodbye(on c: NWConnection) -> Bool {
+        goodbye != nil && goodbyeOn == ObjectIdentifier(c)
+    }
+    /// The words of the goodbye that ended the last session, when it was a notice (the Mac's own for
+    /// "update" or a reason this build does not know; this build's for the Mac going to sleep,
+    /// shutting down or restarting): the connect screen's status line
     /// (GoodbyePolicy), and for "update" the App Store link under it, shown while the status line
     /// still says it: the next status (a tap, a dial, Forget) takes the link away. Cleared by the
     /// next session's tear-down.
@@ -959,6 +1009,9 @@ final class StreamClient: ObservableObject {
     private var worstRecentRttMs: Double?
     /// A remote connection's path stopped being viable at this time; nil while viable.
     private var unviableSince: Double?
+    /// The last ping tick's time on this connection (CACurrentMediaTime), nil before its first: a tick
+    /// far after it is the app running again (DiscoveryPolicy.liveness's `resumed`).
+    private var lastPingTickAt: Double?
     /// The current connection is a remote one (the viability rule applies).
     private var remoteOnQueue = false
     /// No byte for this long (or four times the worst recent round trip) is a lost connection.
@@ -1214,20 +1267,44 @@ final class StreamClient: ObservableObject {
     /// Back from the background (issue #69): the network browser is made again, and the nearby one if it runs
     /// (DiscoveryPolicy.rebuildBrowser: iOS may have made their connection to mDNSResponder defunct while the
     /// app was suspended, and said nothing yet), and the automatic reconnect's count of dials starts again:
-    /// the person is back, so a listed row is dialled at once. Only after the app was seen going to the
-    /// background. Main thread.
+    /// the person is back, so a listed row is dialled at once. After the Mac said it is shutting down or
+    /// restarting, and after a "sleep" goodbye read as the app ran again, what the browsers made now list
+    /// counts as listed afresh (DiscoveryPolicy.returnRenews: `renewedFrom`, issue #105). Only after the app
+    /// was seen going to the background. Main thread.
     private func cameForward() {
         let wasInBackground = !appInForeground
         appInForeground = true
         guard browsing, wasInBackground else { return }
+        let now = ProcessInfo.processInfo.systemUptime   // before the browsers are made: each was made at or after it
+        returnedAt = now
         rebuildIfDue(.network, cameForward: true)
         if nearbyBrowser != nil { rebuildIfDue(.nearby, cameForward: true) }
         if var r = reconnect {
-            r.rowDials = 0
-            r.lastRowDialAt = nil
+            // The session ended before this return (`sessionSince` matters only for a goodbye read after it).
+            if let wentAt = r.wentAt,
+               DiscoveryPolicy.returnRenews(off: r.went == .off, wentAt: wentAt, inBackground: r.endedInBackground, returnedAt: now,
+                                            sessionSince: -.infinity) {
+                r.renewedFrom = now
+                #if DEBUG
+                print("reconnect: back from the background since \(r.name) said it \(r.went == .off ? "is shutting down or restarting" : "is going to sleep"): "
+                      + "what the browsers made now list counts as listed afresh")
+                #endif
+            }
+            // Where a fresh look at its listing would start it: none, or, for a Mac that said it is
+            // going to sleep while it was listed, asleep (DiscoveryPolicy.listingStart).
+            (r.rowDials, r.lastRowDialAt) = DiscoveryPolicy.listingStart(listedSince: r.rowListing, asleepAt: r.asleepAt, renewed: r.rowRenewed)
             reconnect = r
         }
         discoveryChanged()
+    }
+
+    /// Whether `mac`'s row counts as renewed for the reconnect's goodbye (DiscoveryPolicy.renewed): the
+    /// browser now running lists it itself, not only through the results of the one it replaced, and
+    /// was made at or after `renewedFrom`. Main thread.
+    func listedAfreshByBrowser(_ mac: FoundMac, renewedFrom: Double?) -> Bool {
+        let life = mac.direct ? nearbyLife : networkLife
+        return DiscoveryPolicy.renewed(listedByBrowser: life.fresh.contains { Self.serviceName(of: $0.result) == mac.name },
+                                       browserMadeAt: life.startedAt, renewedFrom: renewedFrom)
     }
 
     /// A browser's state. A failed one, of either kind, is made again after DiscoveryPolicy's back-off
@@ -1762,7 +1839,7 @@ final class StreamClient: ObservableObject {
         if case .service(let service, _, _, _) = endpoint { bonjourName = service }
         session = Session(route: peerToPeer ? .direct : .network, macID: macID, bonjourName: bonjourName, home: trust, row: row,
                           endpoint: endpoint)
-        goodbye = nil
+        forgetGoodbye()
         status = peerToPeer ? "Connecting to \(name) directly…" : "Connecting to \(name)…"
         #if DEBUG
         if trust.tls { print("home: dialing \(name) over TLS, \(DiscoveryPolicy.pin(trust) == .anyKey ? "any key" : "pinned")") }
@@ -2493,7 +2570,7 @@ final class StreamClient: ObservableObject {
         let reason = goodbye.reason.isEmpty ? "unreadable" : goodbye.reason
         if sessionDead {
             print("path: the Mac said goodbye (\(reason)) on the new connection: the session ends with its words")
-            self.goodbye = goodbye
+            heardGoodbye(goodbye, on: c)   // its close ends the move, and the session with it (`moveEnded`)
             return
         }
         switch move.kind {
@@ -2549,6 +2626,9 @@ final class StreamClient: ObservableObject {
             print("path: no fence (the old connection\(reconnected ? " is gone" : "'s path is gone")): \(released?.held ?? 0) held messages went out on the new connection\(waiting)")
             #endif
         }
+        // A goodbye the Mac said on the connection moved from spoke for that one: the session goes on
+        // over `c`, whose end is its own.
+        forgetGoodbye()
         // The Mac takes the new connection for a new device and reports the pointer to it at once,
         // having read nothing on it: while this device had the pointer, that report is its own doing
         // and must not bring up the Mac's arrow (docs/pointer-visibility-plan.md §7.3). Its control
@@ -2870,7 +2950,7 @@ final class StreamClient: ObservableObject {
     /// goodbye on (kind 22: it closed it on purpose, "quit" at home, and the session ends with the
     /// words that goodbye deserves rather than after a dial to a Mac that is going). Main thread.
     private func rescue(from c: NWConnection) -> Bool {
-        guard connected, sessionListed, goodbye == nil else { return false }
+        guard connected, sessionListed, !saidGoodbye(on: c) else { return false }
         // The remote connection went while the move home is under way (the hotspot dropped as the
         // home Wi-Fi joined): the move carries the session, without a fence (nothing sent on a dead
         // connection comes back). What the device sends waits from this moment: unlike a move to
@@ -3259,7 +3339,7 @@ final class StreamClient: ObservableObject {
         // address (a LAN address through the remote door) is home, as the Mac's AwayPolicy counts it.
         sound.sessionStarted(away: s.route != .remote(.address))
         session = s
-        goodbye = nil
+        forgetGoodbye()
         // Its way in is its route line's (`remoteRoute`, at its first window list), never a link word.
         if route != nil { route = nil }
         c.stateUpdateHandler = { [weak self] state in
@@ -3521,7 +3601,7 @@ final class StreamClient: ObservableObject {
         firstListDeadline?.cancel()
         firstListDeadline = nil
         session = nil
-        goodbye = nil
+        forgetGoodbye()
         notice = nil
         hostVersion = nil
         hostProtocol = nil
@@ -4263,9 +4343,15 @@ final class StreamClient: ObservableObject {
             let goodbye = Wire.decode(Goodbye.self, from: data) ?? Goodbye(reason: "")
             let from = connection
             DispatchQueue.main.async {
-                guard self.connection === from else { return }
-                self.goodbye = goodbye
+                guard let from, self.connection === from else { return }
+                self.heardGoodbye(goodbye, on: from)
             }
+            // The Mac's own going (GoodbyePolicy.closesAtOnce): this device closes the connection now,
+            // so its session ends at once with these words. The Mac's end of it comes over TLS only at its
+            // cancel, a second later, and from a Mac that has gone to sleep not before it wakes. The
+            // cancel's `.cancelled` brings `connectionLost` after `heardGoodbye` (both on the main queue,
+            // in order), and the Mac, reading what was still sent until this end, closes cleanly.
+            if GoodbyePolicy.closesAtOnce(goodbye), let from { from.cancel() }
         case .clipboard:
             // Text copied on the Mac (StreamClient+Clipboard): written to this device's clipboard while
             // its switch is on. Only from the current connection.
@@ -4300,6 +4386,7 @@ final class StreamClient: ObservableObject {
         lastReceivedAt = windowOpenedAt
         worstRecentRttMs = nil
         unviableSince = nil
+        lastPingTickAt = nil
         remoteOnQueue = remote
         let window = DispatchSource.makeTimerSource(queue: queue)
         window.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(10))
@@ -4368,17 +4455,34 @@ final class StreamClient: ObservableObject {
 
     /// Liveness, on every route: nothing received for `livenessFloor` seconds, or four times the
     /// worst recent round trip on a slow link, and the connection is gone; a remote path that has
-    /// not been viable for `viabilityLimit` seconds too. Checked at each ping. On `queue`.
+    /// not been viable for `viabilityLimit` seconds too. Checked at each ping (DiscoveryPolicy.liveness).
+    /// The first tick after the app ran again (a second or more after the one before: it was
+    /// suspended) judges nothing and counts both afresh from now, as `resetLiveness` does at the
+    /// return, whose hop from the main thread can land after it: the time suspended is no silence,
+    /// and a goodbye that waited in the connection is read before any verdict. On `queue`.
     private func checkLiveness(_ c: NWConnection) -> Bool {
         let now = CACurrentMediaTime()
         let limit = max(Self.livenessFloor, 4 * (worstRecentRttMs ?? 0) / 1000)
-        let silent = now - lastReceivedAt > limit
-        let unviable = remoteOnQueue && unviableSince.map { now - $0 > Self.viabilityLimit } == true
-        guard silent || unviable else { return true }
-        print(silent ? "connection silent for \(Int(now - lastReceivedAt)) s: lost" : "connection not viable for 3 s: lost")
-        connectionLost(c)
-        c.cancel()
-        return false
+        let previous = lastPingTickAt
+        let verdict = DiscoveryPolicy.liveness(now: now, lastTickAt: previous, lastReceivedAt: lastReceivedAt, limit: limit,
+                                               unviableSince: remoteOnQueue ? unviableSince : nil, viabilityLimit: Self.viabilityLimit)
+        lastPingTickAt = now
+        switch verdict {
+        case .alive:
+            return true
+        case .resumed:
+            #if DEBUG
+            print("liveness: a ping tick \(String(format: "%.1f", now - (previous ?? now))) s after the last (the app ran again): no verdict, counted afresh")
+            #endif
+            lastReceivedAt = now
+            unviableSince = nil
+            return true
+        case .silent, .unviable:
+            print(verdict == .silent ? "connection silent for \(Int(now - lastReceivedAt)) s: lost" : "connection not viable for 3 s: lost")
+            connectionLost(c)
+            c.cancel()
+            return false
+        }
     }
 
     /// Returning to the foreground is never a loss by itself: the pings stopped while suspended, so

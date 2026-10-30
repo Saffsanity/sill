@@ -84,6 +84,17 @@ package final class HostLog: @unchecked Sendable {
         }
     }
 
+    /// Waits, at most `timeout`, for the lines recorded so far to reach the file: just before the
+    /// process ends by `exit` (HostShutdown: a signal's end, the app's Quit), which would otherwise
+    /// take the last of them with the file's queue (a restart's SIGTERM, whose goodbye line is the
+    /// one that says what the devices heard). Any thread but the file's queue; nothing without a file.
+    package func flush(timeout: TimeInterval = 0.5) {
+        lock.lock()
+        let sink = self.sink
+        lock.unlock()
+        sink?.flush(timeout: timeout)
+    }
+
     /// For code outside SillHostCore (the app shell): printed and recorded like the host's lines.
     package func line(_ text: String) {
         Swift.print(text)
@@ -142,6 +153,13 @@ private final class FileSink: @unchecked Sendable {
                 // A full disk or a deleted directory: the line still reached stdout and the ring.
             }
         }
+    }
+
+    /// Returns once every write enqueued before it is done, or after `timeout`. Not on `queue`.
+    func flush(timeout: TimeInterval) {
+        let done = DispatchSemaphore(value: 0)
+        queue.async { done.signal() }
+        _ = done.wait(timeout: .now() + timeout)
     }
 
     /// Queue only.
