@@ -348,6 +348,20 @@ start streaming the whole desktop: ‹error›. Looked at the displays again: tr
 once more on display 53."); a second failure is the old line, and nothing
 streams.
 
+On a Mac with two displays or more, the Desktop button reads "Desktop 1",
+"Desktop 2"… (numbered left to right, then top to bottom, as System Settings ›
+Displays arranges them; never Sill's virtual display), and a tap while the
+Desktop streams moves it to the next display, wrapping round (issue #91). The
+device sends kind 47 only to a Mac whose window list says `desktopDisplays` 2
+or more, so with one display or an older Mac the button is as before. The host
+works the next display out from its own newest look, keeps the choice by the
+display's UUID while Sill runs (a new ID after a sleep is still the same
+display; unplugged, the Desktop falls back and returns when it is back), moves
+the Mac's pointer to the new display's centre, and logs "Desktop: display 2 of
+3 (DELL U2723QE), asked by ‹device›." (`Sources/StreamProtocol/DesktopDisplays.swift`,
+checked in `Tests/checks/desktop-displays`). Every device watching the Desktop
+moves with it: the Mac streams one source.
+
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom. After the Mac's settings
 come the device's own: This iPad (or iPhone), with Larger Picture on an iPhone

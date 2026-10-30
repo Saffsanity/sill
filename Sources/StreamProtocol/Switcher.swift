@@ -4,7 +4,7 @@ import Foundation
 public enum StreamSource: Codable, Hashable {
     case none
     case window(UInt32)   // CGWindowID, stable for the life of the window
-    case desktop          // the Mac's main display
+    case desktop          // one of the Mac's displays: the main one unless a device stepped to another (kind 47)
 }
 
 /// One on-screen Mac window, as the client sees it. WindowList order is stable: first seen first.
@@ -68,6 +68,13 @@ public struct WindowList: Codable {
     /// sends them as keys only to a host that says so (the device's KeyTyping). Set after the initializer,
     /// whose parameters stay as they were: `list.keyRepeat = KeyRepeat.generation`.
     public var keyRepeat: Int?
+    /// How many displays the Desktop can stream (DesktopDisplays: never Sill's virtual display), and
+    /// which of them it streams or would, counting from 1 left to right (issue #91). A device's Desktop
+    /// button then reads "Desktop 2", and a tap while the Desktop streams sends kind 47 for the next.
+    /// Nil from every host before 2026-10-30, to which a device sends no kind 47, and from one with no
+    /// display. Set after the initializer, as `keyRepeat`.
+    public var desktopDisplays: Int?
+    public var desktopDisplay: Int?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
                 hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil) {

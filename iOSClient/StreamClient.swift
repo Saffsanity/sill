@@ -885,6 +885,11 @@ final class StreamClient: ObservableObject {
     /// keyboard's characters as keys only to a Mac that says so (KeyTyping); to one before it they go
     /// through iPadOS's text system, as they always did. Cleared with the session.
     var hostKeyRepeat: Int?
+    /// How many displays this session's Mac's Desktop can stream and which it streams, from 1
+    /// (`WindowList.desktopDisplays`, `desktopDisplay`; DesktopDisplays): the Desktop button's "Desktop 2"
+    /// and its tap's kind 47. Nil from a Mac before them. Cleared with the session.
+    @Published var hostDesktopDisplays: Int?
+    @Published var hostDesktopDisplay: Int?
     /// The clipboard (kind 32, StreamClient+Clipboard, docs/clipboard-plan.md): what this session's
     /// Mac takes and sends (`WindowList.clipboard`, 1 for text), nil from a Mac before it or with Share
     /// clipboard with devices off. Cleared with the session.
@@ -3527,6 +3532,8 @@ final class StreamClient: ObservableObject {
         hostProtocol = nil
         hostGestures = nil
         hostKeyRepeat = nil
+        hostDesktopDisplays = nil
+        hostDesktopDisplay = nil
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -3594,6 +3601,19 @@ final class StreamClient: ObservableObject {
     func select(_ source: StreamSource) {
         noteAction()
         request(source)
+    }
+
+    /// The Desktop button: while the Desktop streams on a Mac with two displays or more, the Mac's next
+    /// display (kind 47, DesktopDisplays); else the Desktop picked, as before. Only the button: this
+    /// device's own Desktop requests and a gesture's go through `select`, so nothing steps by itself.
+    func tapDesktop() {
+        guard DesktopDisplays.tapSendsNext(desktopStreams: active == .desktop, displays: hostDesktopDisplays) else {
+            select(.desktop)
+            return
+        }
+        noteAction()
+        choicesSent += 1
+        sendAfterInput(.nextDisplay, Data())
     }
 
     /// Asks the host to stream this source: the person's pick (`select`), or this device's own
@@ -4116,6 +4136,8 @@ final class StreamClient: ObservableObject {
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
                 self.hostKeyRepeat = list.keyRepeat
+                if self.hostDesktopDisplays != list.desktopDisplays { self.hostDesktopDisplays = list.desktopDisplays }
+                if self.hostDesktopDisplay != list.desktopDisplay { self.hostDesktopDisplay = list.desktopDisplay }
                 // The clipboard: subscribe (or stop) as the Mac's word and this device's switch say.
                 self.hostClipboardChanged(list.clipboard)
                 if !self.sessionListed {
