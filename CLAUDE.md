@@ -8,6 +8,2094 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**The door's waiting places (2026-10-29, branch `sec-door-pending` from main at 150479b5, PR #252; finding 9 of the
+security scan of 2026-10-18, Low; Noah's go of 2026-10-29).** A TLS door (the remote one, and the home one of
+Sill.app and `SillHost --pairing`) held 8 connections waiting for admission, 2 per address, 10 s each, and backed an
+address off only for its own refusals: four addresses closing each connection at 9.9 s kept every place full for good
+and a paired device got "limit". Host only, no wire change. `DoorPolicy.Places` (pure) owns the places, `Door` runs
+it on a monotonic clock: a connection that ends unadmitted, and a pairing connection's kind 19, costs its address a
+tenth of a failure, a tenth for each second it waited at least, one more for every 2 s beyond the first 2 (counted to
+its deadline at most), at least one when refused (5 in 60 s: 300 s, as before; a paired key at `.ready` clears its
+address); the TLS handshake has 4 s (Network.framework does not say when a ClientHello arrives, so the whole
+handshake rather than its first bytes; 10 s from a known address), a pairing connection's kind 19 4 s after `.ready`,
+10 s in all; an IPv6 address answers for its /64 too (a link-local one's on its interface): 2 waiting places per /64
+for addresses not known, and 12 failures in 300 s from those back the /64 off, an address counting 6 at most (so it
+takes two); 2 places beyond the 8 for addresses that proved a paired key within a day (known: never refused for nor
+charged to their /64, and they pay for what they hold as an address not known does, so someone at a paired device's
+address is backed off with it within 30 s: nothing tells them apart before TLS). One line a minute per door, "Home
+door backed off 10.128.0.34 for 300 s: its connections waited without being admitted, or were refused."
+`AskLimits.quietKey`: the quiet after the Mac's Cancel or a stop covers the asker's IPv6 /64. Checks: `door-policy`
+254 (the scan's attack modelled against the rule before and this one: before, every place held and the paired device
+refused at all 60 tries in 2 minutes; now the four backed off 12 s in, the paired device admitted at every try, one
+not yet known in at 13 s; closing at 1.9 s, 26.6 s; IPv6 churn in a /64, the /64 at 61 s, holding one place at 120 s)
+and 109 of 109 mutants; `ask-limits` 43 and 24 of 24. Live on loopback synthetic `--pairing` hosts (sources
+127.0.0.1, en0's 10.128.0.34, en13's 10.128.0.148 and en14's 169.254.219.184, whose connections to 127.0.0.1 stay on
+lo0; 127.0.0.2–5 cannot be bound without a root alias): main's build refused the paired client at all 30 tries in 90
+s ("… 27 over the limit."), backing nobody off; this one cut the four at 4.2 s and backed them off at 12.6 s ("Home
+door backed off 10.128.0.34 for 300 s: …", the client at 127.0.0.1 with them); a scratch build with 6 shared places
+(three addresses filling them as four fill 8) served a known client at all 20 tries and an unknown one from 13 s; one
+address cycling at 1.9 s held 2 places for good on main and was backed off at 47.9 s here. Plan's "What stays open"
+updated (an address keeps about 4/5 of a place, so ten IPv4 addresses taking turns fill the shared places; the
+co-located address; a device not yet paired in a backed-off /64, which a stranger in it keeps backed off with a dozen
+refused handshakes as each 5 minutes end; a routed IPv6 prefix from the internet at the remote door).
+- The review (2026-10-29; the report's "The review", f9-pending-slots-report.md in sill-handoff's
+  triage/2026-10-29-security): three findings, each reproduced live on 7929c539 first and fixed in a commit of its own.
+  A kind 19 left its place for nothing, and the home door's verify block takes `sill-pair/1` with any key: a holder
+  doing TLS on it 3 s in and a kind 19 (`v` 2, answered `closed`, nothing shown) 3.5 s later held all 8 places for
+  90 s from four addresses (112 kind 19s), nobody backed off, an unknown paired client refused at all 30 tries; now
+  `Places.End.request` pays as a connection that ended then (fd0a58c5): the same holder backed off at 13.07 s. The
+  wait counted from accept on CLOCK_MONOTONIC, which runs on through a sleep while the deadline's timer does not: one
+  connection waiting across a 20 s SIGSTOP of the host (a sleep's stand-in) backed 127.0.0.1 off at the continue and
+  the known client was refused at all 13 tries; now a wait counts to its place's deadline at most (0b457e48): no
+  backoff, 13 of 13 served. A known address was charged for all of its 10 s (a cut 4.1, its device's own let-go at
+  5 s 1.6, where main charged 1 and nothing): a known device's reconnect whose dials stalled was backed off at 40.06 s
+  and refused at all 6 tries after; now it pays as an address not known (1.1 at most for a handshake, 3.1 for a
+  pairing connection; 8e0148a0): no backoff, 6 of 6 served. Docs: the plans' limits tables, sillclient's `--pair-hold`
+  note, DEVELOPMENT.md, and the /64 trade-off (a check: the /64 open 1.8 s of 15 minutes).
+- The review's second pass (2026-10-29, resumed after the session's limit stopped the first before it pushed; the
+  report's "The review"): three more findings, each reproduced first and fixed in a commit of its own. A mutant's
+  pattern still named the line 0b457e48 replaced, so `run.sh --mutants` said "NOT APPLIED" and 103 of 104 (bda128ba).
+  An end within 2 s cost a tenth however long it held its place, so one connection at a time closed at 2 s cost an
+  address 3 a minute, under its 5: eight addresses held every shared place for good (the model, 600 s: nobody backed
+  off, a device not yet known refused at all 300 tries; live, one address 120 s: no "backed off" line; a scratch
+  build of 3 shared places: three addresses held them 120 s, a paired client not yet known refused at all 40 tries);
+  now each second held costs a tenth at least, `DoorPolicy.waitCost` (8b51058d): live, "[51.54] Home door backed off
+  10.128.0.34 for 300 s: …", and with 3 places the three backed off at 51.5 s (27 connections each) and the client,
+  refused at all 17 tries before, served at all 23 after; an address keeps about 4/5 of a place (ten taking turns
+  could fill the 8). The /64's 12 was said to need two addresses, true only for a burst: paced under its own 5, one
+  address backed its /64 off (an older Sill's plain try every 2 s on its link-local address backed off its whole link
+  at 238 s; a refusal every 16 s, at 176 s); now an address counts for 6 at most, `DoorPolicy.groupShare` (c0e70ab6;
+  the model only: the test listener is IPv4). door-policy 254 checks and 109 of 109 mutants, ask-limits 24 of 24,
+  home-model 25 of 25, addresses 16 of 16; `run-all.sh` all 56 (513 s); `swift build -c release` from a clean
+  `.build`, only the CaptureProbe warning; `Scripts/pacing/build.sh` builds both sides. The first pass's live runs
+  again on the final build: the kind 19 holder backed off at 13.18 s, the 20 s stop no backoff and 13 of 13 served,
+  the known device's stalled dials no backoff and 7 of 7, the scan's attack backed off by 12.63 s.
+**Untested, for Noah:** a week of ordinary use at home and away (Wi-Fi, cable, Tailscale, the hotspot) with no
+"backed off" line in Sill.log (note any, with what the device did); a new pairing over the hotspot through Tailscale
+(its handshake inside 4 s); an iPad back after a night asleep; from the review, the Mac's lid closed while the iPad
+reconnects, then opened: the iPad back at once, no "backed off" line; the iPad sent to the background mid-dial a few
+times, or walked out of Wi-Fi range while it redials: no "backed off" line for its address; from its second pass, a
+device whose dial tries the Mac's addresses 1 s apart (through Tailscale), away and back a few times: no "backed off"
+line (its losers now cost up to 0.2 each).
+**A device the Mac stops serving lands no more input (2026-10-29, branch `sec-revoked-input` from main at
+150479b5, PR #254; security scan finding 10, Low; Noah's go of 2026-10-29 for the security batch).** Remove,
+Require pairing turned on, and Remote Access or internet access turned off said goodbye and closed the device's
+connection once the goodbye was handed to the network, or 0.25 s later; meanwhile its input kept landing, and
+input held for it while an app came forward (up to 0.6 s) was replayed, also once it had left. Host only; no
+wire change, nothing on the device.
+- The coordinator marks the device as the Mac decides (`RemoteAccess.onCutOff`, on the main actor: every
+  connection whose route the change names, before any of its messages already waiting there; since the review),
+  and a session the door admitted while the Mac decided, whose registration waited behind the decision, as it
+  registers (`RemoteAccess.stillServes`, `DoorPolicy.stillServes`, pure: as `afterGate` judges a session the
+  gate held; since the resumed review), and `StreamServer.closeSessions` marks its session revoked as it says
+  goodbye (`Client.revoked`, on the network queue) and tells the coordinator in the same queue turn
+  (`onClientRevoked`): its receive loop then hands on only a key's or a button's up (`RevokedInput.mayLetGo`),
+  no pong, no stats, no pointer control, and counts the rest (`in.revoked`). The coordinator keeps the revoked
+  set until the device leaves and posts of it only the up of a key or a button that device pressed and the Mac
+  still has down (`RevokedInput.stillGoes`, KeyStrokes.swift, pure; `InputInjector.releasesWhatItHolds`, with
+  each button's owner), a button's where the pointer is; nothing else it sends acts (a pick, a window's buttons,
+  a launch, settings, menus, the clipboard), and a menu choice or fetch of it still waiting for its turn is
+  neither made nor read (`MenuMirror.clientRevoked`; a departed device's choice is still made, as a move counts
+  on it). The replay of held input, a switch's drop of it and gestures waiting for a switch judge a revoked
+  device, and one that left while it waited (`gone`), the same way, and drop their shortcuts. Its keys still
+  down when it leaves go up as before, and its buttons now too (`RevokedInput.buttonsLetGo`; an unremoved
+  device's stay down as before: its session may go on over a move's connection). TEST ONLY: with
+  `SILL_TEST_INPUT_LOG` a synthetic host prints where a revoked device's input stops landing;
+  `sillclient.py --key=USAGE,HOLD@T` holds a key. The pacing and sound harnesses compile KeyStrokes beside
+  StreamServer.
+- The review (2026-10-29, at cf230ed9; three findings, each reproduced on loopback first, then fixed in a
+  commit of its own). (1) A cut-off device's mouse button stayed down after it left (departures let go of
+  keys only): a paired client pressed the left button and was removed before its up; after "Client left"
+  another device's three moves were posted as "left mouse drag", the up only at Quit. Now
+  "left mouse up (none) at 529,332" as it leaves and the moves plain (8399498f). (2) The coordinator learned
+  of the cut only from the server's mark, which reached the main actor behind the device's messages already
+  waiting there (read while the Mac saved the change: the keychain's write, or a locked login keychain's
+  prompt): with the test store's save made to take 150 ms (a scratch build), 25 events (moves, key downs,
+  their ups) landed at +154 ms, after "Removed …", 2 runs of 2; with the decision's mark none, `in.revoked`
+  20 (9c518d13). (3) A menu choice or fetch made before the cut and waiting behind a slow menu read (up to
+  its device's 4 s wait) was still made or read, its app brought forward first; checked with a scratch
+  harness of the real MenuMirror on a stub reader (no Accessibility in that session): the branch's made B's
+  choice and read E's menu after their cut, this one neither, and a departed C's choice is still made
+  (6d7dfb89). Scripts/menu-check/mirror.swift gains the case against the fixture: it compiles, not run there.
+- The review, resumed (2026-10-29, at 14f09529; one finding, reproduced on loopback first, fixed in a commit
+  of its own). A session of the cut-off key that the door admitted while the Mac was deciding (saving the
+  change: a keychain write or its prompt; or the main actor held up, as by a hung app's Accessibility call)
+  registered on the main actor only behind the decision, so `onCutOff` could not name it, and everything it
+  sent until the server's own mark landed after the decision: with a scratch build whose test store's save
+  took 1 s, a second connection of the removed device admitted 0.29–0.33 s into the save landed 58 and 62
+  events (moves, key downs, their ups) at +1,016 to +1,029 ms, after "Removed …; closed 2 connections.", 2
+  runs of 2, and one that sent and left before the save ended still landed 41. Now the coordinator asks, as it
+  registers a session, whether the Mac still serves it (`RemoteAccess.stillServes`, `DoorPolicy.stillServes`:
+  `afterGate`'s judgement from what it was admitted as and the trust as it is now; a plain session never cut
+  off, the remote door's limit no cut), and marks it before any of its messages; such a session neither wakes
+  the display nor counts as the paired device's last connection. With the same save: 0 events after the
+  decision, 3 runs of 3 (`in.revoked` 56 to 76), and 0 for the one that left first.
+- Verified: `key-strokes` 395 checks (42 new on the branch: the rule, the buttons as a cut-off device leaves,
+  the glue modelled with what waits for the main actor, removals, holds, switches, gestures, departures and
+  busy spells, one ending with the decision: 3,000 random sessions; marked by the server alone 1,097 and as
+  it was before 2,789 of 3,000 landed input after the cut) and 98 of 98 mutants (15 new); `run-all.sh`, all
+  56; `swift build -c release`, only the CaptureProbe warning; the pacing and sound harnesses build; no iOS
+  file changed. Live on loopback (a `--synthetic` bare app with `SILL_TEST_INPUT_LOG`, a paired `sillclient`
+  pressing a key every 25 ms, each held 0.6 s, and moving, tapping, typing and pressing F-keys across the
+  cut, not reading, so its connection lasts the whole 0.25 s): between "Removed sec10-client (sillclient);
+  closed 1 connection." and "Client left" main's build posted 48 and 57 events (key downs, moves, clicks,
+  typed text, key ups) up to +253 ms, and 56 after Require pairing's line; the branch's builds only key ups
+  of keys down at the cut (10 to 11), then at "Client left" the keys it still held; on the final build the same
+  for Remove (11, Client left +260 ms, `in.revoked` 44), Require pairing (10, +255 ms, 37), Remote Access off
+  and internet access off through the remote door (16 ups in all each, +256 and +252 ms, 24 and 23), and a
+  device removed mid-drag lets go of the button as it leaves ("left mouse up (none) at 529,332"). After the
+  resumed review (8a29d178): `door-policy` 135 checks (7 new: `stillServes` against `afterGate`'s oracle over
+  5,120 combinations, and the four cuts by name) and 62 of 62 mutants (4 new); `key-strokes` 402 (7 new: the
+  model registers a session ahead of its messages; in 1,181 of 3,000 random sessions a second connection of
+  the removed key admitted while the Mac decides lands nothing after the decision, where without the check at
+  registration 391 of 1,187 landed it) and 98 of 98 mutants (KeyStrokes.swift unchanged); `run-all.sh`, all
+  56; `swift build -c release` from `git archive`, only the CaptureProbe warning; the pacing and sound
+  harnesses build. Live on its build:
+  Remove 10 key ups (`Client left` +262 ms, `in.revoked` 39), Require pairing 11 (+250 ms, 38), Remote Access
+  off and internet access off 16 each (+252 and +253 ms, 22 and 23), each an up of a key down at the cut; the
+  mid-drag removal's up as it leaves and plain moves after; the CLI's plain door, alone and beside `--remote`,
+  a test client's move, key and tap landing as before; the menu stub harness 5 of 5.
+- Not done: a pick already under way, or queued behind a restart, when the cut comes still brings its window
+  forward (not input); frames, the clipboard and pointer reports sent after the goodbye queue behind it and go
+  with the connection.
+- **Untested, for Noah:** with this Sill.app and the iPad's Magic Keyboard streaming TextEdit, type steadily
+  (or hold a key) and click Remove in Settings › Devices: nothing typed after the click lands, and no key
+  stays down on the Mac (Sill.log: "Removed …", then "Client left", the `[1s]` line's `in.revoked`); pair
+  again and it works. The same with Require pairing turned on while an unpaired iPad types. From the review:
+  drag a window with the iPad's trackpad and click Remove mid-drag: the drag ends, and another device's
+  pointer then moves without dragging; choose a menu item from the iPad's Menus in a slow app and click
+  Remove at once: the item is not chosen (Sill.log: "Menu from … refused: …: the Mac no longer serves it").
+**The macOS firewall that blocks Sill's executable (2026-10-29, branch `firewall-executable-block` from main
+at 150479b5; PR #250; the security batch, Noah's go of 2026-10-29).** A user's report: the firewall keeps a
+rule per path, and a Mac held `/Applications/Sill.app` allowed and `…/Contents/MacOS/Sill` blocked
+(`socketfilterfw --listapps`): nothing reached Sill from the network, System Settings showed it allowed, and
+`--getappblocked` on the bundle said "permitted"; `sudo socketfilterfw --unblockapp` on the executable fixed it.
+No wire change.
+- `FirewallCheck` asks `/usr/libexec/ApplicationFirewall/socketfilterfw` `--getglobalstate`, then only while it is
+  on (`asksRules`) `--getblockall`, `--getappblocked` for the running executable (`proc_pidpath`) and its bundle,
+  and `--listapps`: a process each with 2 s (then SIGTERM, SIGKILL a second later), read-only, no privileges
+  (macOS 27.0.1: 4–8 ms each, no prompt, no Full Disk Access needed; asked in one run the tool is killed, 137,
+  when `--getstealthmode` or `--getallowsigned` follows `--getappblocked`, or `--listapps` follows it with a
+  bundle's path; no `com.apple.alf.plist` there). At launch, when the listener comes up, when Sill.app's status
+  menu opens (the glyph at once, its item from the next opening), when its General opens or Sill becomes active
+  over it, and when a device gets in from the network while the verdict says none can (`asksAgain`); never on a
+  timer.
+- `FirewallRule` (pure, `Tests/checks/firewall`, 390 checks, 69 mutants): off, allows (only once `--listapps`
+  was read), `blocks(executable:bundle:)` (its own answer or its rule in the list, either enough), `blocksAll`,
+  unknown (with why, in the log).
+  While it blocks: General's line in the Permissions style with `sudo …/socketfilterfw --unblockapp <the running
+  executable's path>` (a line per option; Copy copies one line), for Block all where to turn it off; the menu's
+  "Devices Can’t Connect — The macOS firewall blocks Sill’s executable." (opens General); one log line per change
+  ("Firewall: …"; none for a first verdict that blocks nothing). Sill never runs the command. support.html's
+  "Your Mac isn’t listed" gains the case (Sill's own line marked `<!-- Firewall`). TEST ONLY
+  `SILL_TEST_FIREWALL=executable|bundle|both|all|off|allowed|unreadable` or a file holding one, test hosts only;
+  the previews are the rule's verdicts on those answers; `-SillPrintMenuAfter` prints General's line.
+- Verified: the check and mutants; `run-all.sh`, all 57; a clean release build (the CaptureProbe warning
+  only); main's CLI output identical masked and sorted, idle and with a client; previews main's but the 16 new
+  files, menu.txt's two samples and General's path; live on loopback, blocked → allowed → Block all →
+  unreadable, a VPN-origin client clearing a stale verdict, the bare app's menu and line, this Mac's real
+  firewall "none (allows)". Not built: an Unblock button with the admin password (`osascript` off the main
+  thread, or a privileged helper), Noah's call.
+- The review (2026-10-29, three lenses; each finding reproduced first, then fixed in a commit of its own;
+  sill-handoff's `triage/2026-10-29-security/firewall-line-report.md`, "The review"): a block that came after
+  launch (a Deny in the firewall's own prompt, Block all turned on) went unsaid until General opened or the
+  listener was replaced, as `asksAgain` can only clear one (on loopback, the canned answer blocked from 2 s: a
+  client at 3.6 s and the bare app's menu at 4 and 7 s said nothing): the status menu asks again as it opens
+  (bd18d96b); with `--listapps` unread the verdict took the executable's own "permitted" for allowed and dropped
+  why: unknown, with why, unless an answer blocks (3d10ea95); the check's usage stand-in had no "apps", so a
+  reading that took any mention of apps for a list passed (56d3f3a3); the docs had the tool die whenever
+  `--listapps` followed `--getappblocked` in one run (the docs commit, af3283d1; the second review measured which
+  options do, below). Re-run: the check 340 and 67 of 67 mutants (64 of 64 before; two extra mutants had
+  survived); `run-all.sh`, all 57; the release build, the CaptureProbe warning only; main's CLI masked and sorted,
+  idle (8 lines) and with a client (three passes, as main against main); previews 162 files; on loopback a device
+  in from a VPN re-asking without clearing a block that holds, and clearing a stale one.
+- The second review (2026-10-29, after af3283d1; the report's "The second review"): two findings, each reproduced
+  first and fixed in a commit of its own. The first review's correction of when the tool dies was wrong both ways
+  (read-only, as noah, 3 runs of 3 each): `--getstealthmode` or `--getallowsigned` after `--getappblocked` kill it
+  whatever the path, `--listapps` only after a bundle's, and `--getglobalstate`, `--getblockall` or another
+  `--getappblocked` after it answer (78685c9a, docs). A tool that never answered was asked all five questions, and
+  one that ignored SIGTERM was left running, a thread blocked on its pipe, after each (FirewallCheck's own code
+  against a stand-in: 10.04 s a check; 20.11 s and 5 processes left; the state on and the rest deaf, 16.16 s and
+  4), which the menu's re-asking at every opening would add up: nothing more is asked once the state decides
+  (`asksRules`: off, Block all, a state that doesn't read) and an unanswered question is killed a second after
+  SIGTERM (2.01, 3.01 and 12.06 s, none left; 6d836d1f). Re-run: the check 390 and 69 of 69 mutants; `run-all.sh`,
+  all 57; a release build from an empty `.build`, the CaptureProbe warning only; this Mac's firewall through the
+  fixed check, 19–22.5 ms for Sill.app's five questions, allows; previews 162 files; on loopback a Block all held
+  against a device in from a VPN, then blocked, cleared and unreadable as the canned answer changed.
+- **Untested, for Noah:** the report's state by hand (`sudo …/socketfilterfw --add …/Contents/MacOS/Sill`, then
+  `--blockapp`; `--remove` after): the device's tap failing, the menu item and log line, General's line and
+  Copy, the command in Terminal, then both gone without a relaunch; Block all on and off, also with Sill running
+  and its menu opened twice (the glyph turns at the first, Devices Can’t Connect at the second); VoiceOver;
+  macOS 14 or 15 (answers that don't read log "Firewall: couldn’t read …" once and show nothing).
+**A password manager's copies go to the devices (2026-10-29, branch `clipboard-concealed` from main at
+6c5b5d24).** Noah, with the clipboard on his iPad: "Copy paste works, including password apps. I think its
+fine to copy password apps. Remove the code that tries to make password copies never arrive." So
+`ClipboardPolicy` no longer skips an item marked `org.nspasteboard.ConcealedType`, `TransientType`,
+`AutoGeneratedType`, the older transient type or 1Password's own (`markerTypes` and `HostSkip.marked` are
+gone); Universal Clipboard's items (`com.apple.is-remote-clipboard`) and the host's own writes are still
+never sent, and the types are still judged before any data is read. Words: Settings › General's footnote
+(`ClipboardPolicy.Copy.macFootnote`), README's Good to know, support.html, privacy.html (dated October 29,
+2026), DEVELOPMENT.md, docs/clipboard-plan.md's last section; `Tests/checks/clipboard` (the marked items now
+sent, the footnote, the model). No wire change.
+**A Desktop after a spell with no device (2026-10-28, branch `idle-display-refresh` from main at 6c5b5d24,
+PR #239; the diagnosis is sill-handoff's `triage/2026-10-20-reports/verdicts-2026-10-27/glitch-wired-black-2026-10-28.md`,
+the report `verdicts-2026-10-28/idle-display-report.md`).** Noah, 2026-10-28 18:15 on the iPad mini over the cable
+with a fresh Debug build: connected, black, left after 7.4 s; the Wi‑Fi tap 25 s later "worked flawlessly". Sill.app
+had sat 36.5 hours with no device while the dock's two displays came back under new IDs through ~290 sleeps; the
+catalog looks only while a device is connected ("idle means idle"), so it still held display 21 (the displays were
+53 and 52). The first pick built the Desktop's filter on 21's SCDisplay, read before an await during which the
+poll's first look had already replaced it; ScreenCaptureKit refused it ("Start stream failed … The stream is nil",
+CoreGraphicsErrorDomain 1003); the host printed it, sent "nothing streams" and never tried again; the device had
+just asked, its next lists (0.18 and 0.25 s) came within the 10 s spacing, and no list came after: black until
+left. Any second pick would have streamed. Not a regression (the Desktop's cached display dates from 2026-09-22).
+No wire change.
+- The host (CatalogLook, pure, `Tests/checks/catalog-look`): before any window or Desktop capture (never the test
+  pattern) the catalog looks again (one ScreenCaptureKit call, about 50 ms) when its last look's display is not
+  among `CGGetActiveDisplayList`'s (gone, or asleep: harmless), it had none while macOS has one, there was no look,
+  or the look is older than two poll intervals (4 s) on the clock that counts sleep (`WindowCatalog.lookedAt`,
+  `lookAge`; an empty list of displays leaves it to the age). A look the poll keeps fresh needs none, so a pick
+  mid-session is as before. The Desktop reads its display after its last await (`desktopCapture`: Sill's own app
+  looked up, then the display and the app from the newest look), and says "Desktop: display 21 → 53 (the displays
+  changed since the last look, 36 h ago)." when the look changed it. A Desktop start that fails looks again and
+  tries once more with one line, "Could not start streaming the whole desktop: ‹error›. Looked at the displays
+  again: trying once more on display 53." (`startDesktopAgain`; the test pattern tries the same start again,
+  "… Trying once more."); a second failure is the old line, nothing streams.
+- The device (`DiscoveryPolicy.autoDesktop`, `autoDesktopRecheck`, StreamClient's `askForDesktopByItself` and
+  `recheckDesktop`): within the 10 s spacing after its own Desktop request, a list that says nothing streams
+  (watching nothing, or the Desktop the Mac stopped) and no choice of the person's since that request (a pick, a
+  launch, a pick made again after a move: `choicesAtLastAuto`) sets one re-check when the spacing ends (`askIn`;
+  a clock set back waits the spacing, never longer); due, it asks only while nothing streams still, nobody chose
+  and no other automatic request went out. So a Desktop that failed is asked for again 10 s after, a Mac that
+  keeps failing every 10 s, never faster, and a Desktop the Mac stopped within the spacing is asked for when it
+  ends (issue #69's re-ask was held back there). A window that closes within the spacing is left as before. The
+  re-check is cancelled by the next automatic request, at a session's end and at a move. DEBUG console:
+  `session: nothing streams after this device's Desktop request; asking again in 9.8 s, when the 10 s spacing
+  ends`, `session: still nothing streams 10 s after this device's Desktop request; asking for it again`. Against
+  Sill for Mac 0.5.1 (the stale display unfixed there) the second ask should stream too: the diagnosis found the
+  first session's own look had replaced the display 0.1 s in, so any second pick streamed (read, not run).
+- TEST ONLY `SILL_TEST_DESKTOP_FAIL=<n>`, honoured only by a `--synthetic` host ("Test Desktop: …" at start;
+  otherwise one "ignored" line): the first n Desktop starts fail where the capture would start, as on 2026-10-28.
+  With 1 the host's one more try streams; with 2 nothing streams and a device's second ask does.
+- Not done (the report's items 3, 4 and 6, for Noah): the first catalog sent only after the first fresh look (a
+  device shows a list up to a day old for about 50 ms); a display reconfiguration callback marking the look stale
+  while idle; dropping a client whose path goes unsatisfied before its 8 s grace (the dead cable connection the Mac
+  served for 7.6 s). Nor the pair dialog of the same evening (the diagnosis leaves it open: Add a Mac's card or an
+  iPadOS alert; the iPad's console or a screenshot would settle it).
+- Verified: `swift build -c release` (only the CaptureProbe warning); `catalog-look` 64 checks and 25 of 25
+  mutants (in CI's matrix); `policy` 486 (22 new) and 176 of 176 mutants (N24–N28 follow the new code, N29–N39
+  the re-check); the patterns of the other three checks that compile DiscoveryPolicy.swift (`home-device` 131,
+  `home-model` 14, `remote-rules` 17) each still found once, their mutants not run again (none calls `autoDesktop`);
+  `run-all.sh`, all 56; the three iOS builds on Xcode 27.1 (Debug for the generic simulator as CI builds it, Release
+  for the simulator, Debug for a generic device), only the known `StreamClient` capture warning (now line 4162);
+  H2: the CLI from `git archive` of 6c5b5d24 against this branch's, `--synthetic` test hosts on loopback with the
+  software encoder and no screen, idle 35 s identical masked and sorted, with a test client picking the Desktop for
+  12 s identical (twice; main's own second run differed from its first only in the stats line of the second the
+  client left). Live on a private iPad mini (A17 Pro) simulator (iOS 27.0, deleted after) dialling such a host with
+  `-SillConnect` (a plain door): with `SILL_TEST_DESKTOP_FAIL=2` the host's start and its one more try failed 0.23 s
+  after the connection, the device said it would ask again in 9.5 s and did 10.2 s after its first request, and the
+  stream came within 10 ms (29–57 fps after); with 1 the one more try streamed in the same pick and the device never asked
+  again; with 50 (a Mac that never starts it) the device asked at +0.85, 10.99, 21.24, 31.49 and 41.49 s, 10.0 to
+  10.25 s apart. Not run: the real Desktop path (`desktopCapture`, the look before it, the "display 21 → 53" line,
+  the one more try with a new look), since every test host here stays off ScreenCaptureKit (`SILL_TEST_NO_SCREEN`)
+  and never captures this Mac's displays; nor a device, nor main's iOS build beside this one (the model has the rule
+  before: one ask, then black).
+- **Untested, for Noah:** with Sill.app from this branch and the iPad on a Debug build: leave Sill.app
+  with no device while the dock's displays sleep and wake (or `pmset displaysleepnow`, a key, and a look with
+  `system_profiler SPDisplaysDataType` or a `CGGetActiveDisplayList` probe that their IDs changed), then connect: the
+  Desktop at once over any route, and Sill.log's "Desktop: display ‹old› → ‹new› (the displays changed since the last
+  look, … ago)."; picks while connected exactly as before (no such line, no delay); the Desktop with Virtual Display
+  on, and a window picked first after the spell. The device's part against Sill for Mac 0.5.1 (the host's fix not in
+  it), after the same spell: black for about 10 s, then the Desktop by itself (the console's `session: still nothing
+  streams 10 s after …; asking for it again`); a monitor unplugged while the Desktop streams (ScreenCaptureKit stops
+  the capture): the Desktop back within 10 s; VoiceOver unchanged (nothing new is drawn or said).
+**Held keys repeat, as on the Mac (2026-10-28, branch `key-repeat` from main at 6c5b5d2; issue #162; PR #240).**
+Noah, 2026-10-27: "#162 should expand to make holding down keys work on all keys when held, same as a
+regular keyboard, wait times and all, where non-command keys wait a second before starting their
+repeating. Same as desktop." An event posted from a CGEventSource never repeats (the HID system repeats
+only the keyboards it reads), so a held arrow, ⌥← or ⌘Z reached the Mac once. The host repeats it, so
+every device gets it from a Mac with this build (no wire change for that; the window lists' additive
+`keyRepeat` came with a hardware keyboard's letters, below). Supersedes addhumal's #163 (the device
+repeating at its own 0.4 s and 20 a second), which this branch leaves alone.
+- Host (`KeyRepeat`, pure; `Tests/checks/key-repeat`): InputInjector tells it each keyboard event it
+  posts and steps it at the times it names (a Task on the main actor); a key held down repeats after
+  the Mac's own Delay Until Repeat and at its Key Repeat Rate (NSEvent's keyRepeatDelay and
+  keyRepeatInterval, read at each key's down: 0.5 s and 1/30 s on this Mac), each repeat the key's
+  down again with the autorepeat flag (kCGKeyboardEventAutorepeat) and the flags in force (what the
+  down carried less a modifier let go since, and what the modifier keys down hold now: ⇧ pressed while
+  → repeats selects, ⌥ let go turns word jumps into steps). Every key but the modifiers, Caps Lock,
+  fn and the media keys; one key at a time, the last pressed (an earlier one still held never takes
+  over again). It stops at its up (any device's), another key's down, typed text, a gesture's chord,
+  its device leaving and the host's end (every key let go), and input with nowhere to land (the
+  coordinator's `keyRepeatLanding`, `currentSourceRect` nil, and select's drop point); it waits while
+  input is held for an activation (a repeat never overtakes it), and while its device has been quiet
+  half a second (`StreamServer.lastHeard`, every message's header; a device pings every 0.25 s), then
+  starts over after the delay: a stalled link can hold the key's up back for the 4 to 8 s before the
+  Mac drops the device. Its first repeat (after the press, and after a quiet spell) waits for a word
+  from its device heard after the press and no earlier than `KeyRepeat.firstWord` (0.3 s) before it is
+  due (the review of the held letters): the link keeps the device's messages in order, so a key only
+  tapped (a letter, a Delete) whose up a stall holds back never repeats, and a key held has its ping in
+  time. A late wake posts once, the next at least half an interval on. Off (a delay
+  or an interval of a minute or more) and nonsense repeat nothing; a delay under 0.1 s and an
+  interval under 15 ms count as those. `in.keyRepeat` on a host that posts; a `--synthetic` host
+  counts `in.dry`, and with SILL_TEST_INPUT_LOG=1 prints "Test input: key 123 repeats after 0.50 s,
+  every 0.033 s" at each press and "Test input: key 123 repeat (none)" for each repeat.
+- Device (`HeldCap` in KeyChords.swift, checked in `key-strokes`): the portrait key row's esc, tab and
+  arrows go down at a finger's touch and up at its release (a ButtonStyle's isPressed; `KeyChord.down`
+  and `up`, `press` = both), what is latched going down with the key and spent at the touch; one cap at
+  a time; the Button's own action after a touch sends nothing, or the up of a press whose end
+  isPressed had not told yet (the action comes with the release: a missed end never leaves a key down
+  repeating), an activation with no touch (VoiceOver, Switch Control, Voice Control, a keyboard) the
+  whole press as before; the latch is spent when a key goes down with it (`spendsLatch`); the row
+  leaving the screen lets a held cap up. A phone's esc and tab stay taps at the accessibility text sizes, where a long press
+  shows the cap large (`capsHold`). The latching modifiers, Keyboard and Spotlight are taps as before.
+  A hardware keyboard's characters: the next bullet (they were thought to keep iPadOS's own repeat).
+- Held letters (2026-10-29; Noah on the iPad mini with a Bluetooth keyboard and through Universal Control:
+  "hold p didnt work … When I held down e it showed the keyboard options for Spanish characters"). The text
+  system's keys never reached the Mac as held keys: in the iPad simulator with `Tests/keyrig` (`wait:S` holds
+  a key) against a loopback synthetic host, 4504a96c's build typed a held P once (one `pressesBegan` handed
+  to the text system, one `insertText "p"`, nothing more in 2.3 s), a held E once and then iPadOS's
+  press-and-hold accent popover (è é ê ë ě ẽ ē ė ę, still up after the release), and repeated Delete and
+  Space itself (the first after about 0.4 s, then every 0.105 s: 20 separate presses each in 2.3 s, iPadOS's
+  timing, not the Mac's). Now `KeyTyping` (TextComposition.swift, pure, checked in `text-composition`) says
+  at each key's down who types a hardware keyboard's characters: the Mac, as keys, while it says it repeats a
+  held key (`WindowList.keyRepeat` 1, additive, nil from every host before: `KeyRepeat.generation`, set in
+  every window list; the device's `StreamClient.hostKeyRepeat`), the keyboard selected on the iPad types the
+  Latin alphabet directly (its primary language's likely script is Latn, and its input method does not
+  compose: `composingLatin`, Vietnamese and Hawaiian, whose input managers say they compose text in the iOS
+  27.0 runtime's TextInput bundles), nothing is composed and nothing is latched on the key row (with no
+  keyboard selected, only if every keyboard set up would); else iPadOS's text system, as before (a Sill for
+  Mac from before key repeat, which would type each key once where iPadOS repeats Delete and Space itself; an
+  input method's keyboard, Chinese, Cantonese, Japanese, Korean, Vietnamese, Hawaiian or a transliteration
+  one; another script's, Russian, Greek, Arabic, Hindi…; a latch, whose shortcut `insertText` makes), and
+  while marked text is open every key is the input method's. While the Mac types,
+  `ForwardedKeys.characterUsages` (the letters, digits, Return, Delete, Tab, Space, the punctuation keys
+  `` - = [ ] \ ; ' ` , . / `` and Shift's two keys, each a key every Sill for Mac answers to) go down and up
+  as keys, so the host repeats them at the Mac's timing, the Mac's own layout and dead keys make the
+  characters (⌥E then E is é), Shift is a key the Mac hears (the repeats follow it; a click with it held is a
+  shift-click) and no accent popover comes; Caps Lock stays the iPad's (its key the text system's) and a
+  letter typed with it on and no ⌘, ⌃ or ⌥ carries Shift (`ForwardedKeys.carried`). The keypad and the ISO
+  keyboards' Non-US `\` and # stay the text system's (no Sill for Mac before has them as keys). Unchanged:
+  the ⌃Space rule (#138), the on-screen keyboard (`insertText`), dictation, Esc's key command, every key that
+  already went as a key, the host's repeat; the wire but for the additive `keyRepeat`. DEBUG: each hardware
+  key's down line ends in who types it, and so do textinput's first-responder and keyboard-switch lines:
+  `hwkey: usage 19 down via pressesBegan (none): to the Mac; the Mac types: en-US`,
+  `…: the text system's; iPadOS types: zh-Hant`,
+  `…; iPadOS types: the Mac repeats no key (a Sill for Mac before key repeat)`; `-SillInputScript`'s
+  `type TEXT` hands the input view text as the on-screen keyboard does. Defaults taken
+  (docs/hardware-keyboard-plan.md, open question 12): the Latin alphabet only, as a keyboard chosen in
+  another script says which characters are meant and, with two keyboards, ⌃Space is iPadOS's (alternative:
+  every keyboard that does not compose); Hawaiian left to iPadOS with Vietnamese (its input manager says it
+  composes; whether it marks text for a hardware keyboard is a device's to show); the Latin keyboards that
+  compose a letter with its accents (`UIKeyboardComposesText`: Czech, Slovak, Faroese, Navajo, Guarani…) the
+  Mac's, as a hardware keyboard's dead keys make those and the Mac's input source has its own. Known: the
+  iPad's hardware keyboard layout and Key Repeat settings no longer apply to the Mac's keys (the Mac's input
+  source does); letters typed through iPadOS still never repeat. Verified: `key-strokes` 440 checks (55 new)
+  and 115 of 115 mutants (16 new); `text-composition` 193 (15 new) and 102 of 102 (15 new); `key-repeat` 106
+  (6 new: P held, P then E, ⇧A with ⇧ let go, A with Caps Lock, `KeyRepeat.generation`) and 37 of 37 (1 new);
+  `compatibility` 145 (5 new: `keyRepeat` in the JSON, left out when nil, nil from an older host,
+  round-tripped, skipped by an older reader) and 34 of 34; `run-all.sh`, all 57 (one at a time on the final
+  code, each started under a load of 20; 2,720 s); `swift build -c release`, only the CaptureProbe warning;
+  the iOS sources typechecked with and without DEBUG, and Debug and Release for the simulator and Debug for a
+  device, only the StreamClient warning, the Release binary none of the DEBUG lines (the three builds on
+  4bb51fb2; the last two commits typechecked both ways and built by CI); CI's "Build and check" green on
+  4bb51fb2 and on f534be17; live on a private iPad mini simulator (iOS 27.0) against loopback synthetic hosts
+  with the input log, keys from the rig: P held 2.3 s (key 35 down, "key 35 repeats after 0.50 s, every 0.033
+  s", 55 repeats from 0.49 s at 30.6 a second, its up, no `insertText`), E held 3.3 s (85 repeats, no popover
+  in the photo), ⇧A with ⇧ let go mid-hold (40 repeats with shift, then 40 without), Delete and Space (55 and
+  56 repeats at the Mac's 0.5 s and 30 a second), A with Caps Lock on (25 repeats with caps lock and shift; 1
+  with caps lock alone), ⌥E then E, Return, Tab, ⇧Return and ⇧Tab (Shift's own key around them); ⌘S, ⌘Z, Esc
+  and ⌃Space with one keyboard the base build's events exactly; Zhuyin (ㄋㄧˇ, Return: 你 once) and Japanese
+  Romaji (に) composing on the iPad as before; ⌃Space with Zhuyin and English iPadOS's switch, then P
+  repeating on the Mac with English and composing ㄣ with Zhuyin; Russian's з typed once through iPadOS; the
+  on-screen keyboard's `insertText "pe"` as text; a held P let up on the Mac when Sill went to the background
+  (UIKit's `pressesEnded` at the switch) and when the keyboard went (the hold let go); and the gate: against
+  this branch's host P went as a key (54 repeats), against 4504a96c's (no `keyRepeat`) P was typed once
+  through iPadOS and Delete repeated by iPadOS, 20 separate presses, as before. The Mac's own press and hold
+  applies as to its own keyboard (the repeats carry the autorepeat flag): in TextEdit or Notes with macOS's
+  default a held E shows the Mac's accent menu and a held P types once; Terminal, iTerm2 and apps with
+  `ApplePressAndHoldEnabled` off repeat. **Untested, for Noah** (Sill for Mac from this branch, the iPad with
+  a Bluetooth keyboard and through Universal Control), in Terminal (or with the Mac's press and hold off):
+  hold P (ppp… after the Mac's delay, at its rate), hold E (eee…, no accents on the iPad), ⌥E then E (é), ⇧
+  held over a letter and let go (capitals, then small letters), Caps Lock, Space and Delete held; in
+  TextEdit, a held E shows the Mac's accent menu, as the Mac's own keyboard does; a Chinese keyboard on the
+  iPad (composes as before; ⌃Space switches); a keyboard layout on the iPad other than the Mac's (the Mac's
+  wins).
+- The review of the held letters (2026-10-29, after 79ace754; the report's "The review", sill-handoff's
+  `triage/2026-10-20-reports/verdicts-2026-10-29/key-repeat-letters-report.md`). A letter typed or a Delete
+  (a key held a tenth of a second) whose up a stalled link held back more than 0.4 s was typed again one to
+  three times when a ping had come during the press, the host repeating while the device was heard in the
+  last half second: on loopback against a synthetic host with a stand-in device (letters at nine phases of
+  the pings, the up and what followed it held back), 12 of 27 at 0.45, 0.6 and 1 s, the four phases with a
+  ping in the press. Now a key's first repeat waits for a word heard after the press and no earlier than
+  `KeyRepeat.firstWord` (0.3 s) before it is due (0288e6cb): none of 45, a key held still first repeated at
+  0.50 s; key-repeat 114 checks (8 new) and 42 of 42 mutants (5 new). Kept from an earlier attempt at the
+  review, stopped at the usage limit: iPadOS's ⌃Space switch (two languages) let the keys held on the Mac go
+  on repeating, as ⌃P, so they now come up at the Space (fbcf4b69, `ForwardedKeys.keyboardSwitch`; key-strokes
+  450 and 118 of 118), and the Mac's `keyRepeat` is read in one checked place (a66a7fbc, `KeyTyping.macRepeats`;
+  text-composition 194 and 105 of 105). The switch's DEBUG note is made only in Debug (f7374b10). For Noah: a
+  key held and let go during a stall repeats on for up to half a second (measured: 3, 6, 8 and 11 more for an
+  up held back 0.1, 0.2, 0.3 and 0.6 s), as the arrows always did, now Delete too; with two Latin keyboards
+  ⌃Space stays the iPad's though the Mac types; a hardware letter ends what dictation can revise. run-all.sh
+  57 of 57 (55 one at a time on 0288e6cb, key-strokes and text-composition with their mutants); CI green on
+  0288e6cb and f7374b10. No simulator this time (the free disk stayed under the rules' 25 GB, other sessions'
+  work): each of the first run's live runs replayed against the final host, its device events as its app logged
+  them put through the real `ForwardedKeys`, gave the first run's numbers (P held 55 repeats, E 85, ⇧A 40 and 40,
+  Delete 55, Space 56, Caps Lock's A 25 with caps lock and shift, ⌘Z 25, Esc 25, each first at 0.49 to 0.51 s).
+- sillclient.py: `--key=USAGE,HOLD@T` (a key held, pinging four a second meanwhile, as a device) and
+  `--ping=S`.
+- Defaults taken (docs/hardware-keyboard-plan.md, open question 12): modifiers mid-hold change the
+  repeats, never stop them; the silence pause; the floors; the accessibility-size taps. Known: while
+  iPadOS types the characters, ⇧ let go while a hardware ⇧→ is held keeps selecting until → comes up (the
+  text system keeps ⇧'s own key; while the Mac types them, ⇧ is a key it hears).
+- Verified: `key-repeat` 100 checks (2,400 random sessions, 600 held to the exact cadence) and 36 of 36
+  mutants (in CI's matrix); `key-strokes` 385 (32 new) and 99 of 99 (16 new, two retargeted to `press`'s
+  new body); `run-all.sh`, all 56; `swift build -c release`, only the CaptureProbe warning; the iOS app
+  Debug and Release for the simulator and Debug for a device, only the known StreamClient warning
+  (StreamClient.swift:4110); H2 against origin/main's CLI from `git archive`: idle identical masked and
+  sorted, with a client identical but for which seconds count the software encoder's
+  `enc.mailboxDrop`; live on loopback synthetic hosts with the input log, eleven runs: ← held 1.2 s
+  (the down, 21 repeats from 0.48 s at 29.7 a second, the up), a tap and a 0.3 s hold (none), ⌥←
+  with ⌥ let go mid-hold (option, then none), ⇧ pressed mid-hold (shift, then none), ⌘Z (command),
+  → over ← (← stops, → repeats), text (stops), pings stopped (repeats end half a second after the
+  last), the client leaving (its key up, nothing after), a pick of none (stops; the up still goes),
+  Esc. Not run: the key row's caps pressed on a screen. A scratch rig (the cap's SwiftUI Button and
+  HeldCapStyle with HeldCap, pressed by Tests/touchrig's TouchSynth on a private iOS 27.0 simulator,
+  deleted after) reached no SwiftUI control at all, through `sendEvent` or UIKit's HID entry point (iOS
+  27 has no `UITouch setGestureView:`), so the press's report is untested; if SwiftUI never reports it
+  the caps are taps as before, and a missed end is ended by the action.
+- **Untested, for Noah** (a Mac build of this branch and the iPad with a Magic Keyboard): hold ←, →,
+  ⌥←, ⌘→, Forward Delete and ⌘Z in TextEdit and a terminal: the first repeat after this Mac's delay
+  and then at its rate, as the Mac's own keyboard (System Settings › Keyboard changes both), and
+  nothing after the release; ⇧ pressed while → repeats selects; letters held repeat at iPadOS's own
+  rate as before; Esc held in vim. Upright on the iPad mini and iPhone, hold the key row's esc, tab
+  and arrows (repeats until the finger lifts; with ⌥ latched, word jumps), slide off a cap (it stops),
+  turn the device while holding one (it stops), VoiceOver's double tap (one press), an accessibility
+  text size's long press on esc (the large cap, one Esc). Wi-Fi off while holding a key: the repeats
+  stop within about half a second. Sill.log's `[1s]` lines count `in.keyRepeat`.
+**Nightly builds (2026-10-29, branch `nightly-builds` from main at 35a9c47c, PR #246; issue #134;
+the brief and its Progress are in ~/Downloads/sill-handoff/nightly-plan.md, the procedure in
+docs/release-checklist.md, "Nightlies").** Noah: "Setup the nightly build strategy" (the nine secrets set
+2026-10-29), then, before the build: "hold off on giving the testflight build to public beta until I try it
+out in Insiders first tomorrow". Merge "Version 0.5.5 for both apps" (PR #244, branch `version-0.6.0`) first.
+- `.github/workflows/nightly.yml`: 09:17 UTC while the repository variable `SILL_NIGHTLY` is `true`, and by
+  hand (`verify_only` forces the ad hoc, no-upload path); a scheduled night whose main is the sha at the end
+  of the pre-release's notes builds nothing; only main publishes. decide writes the night's words once
+  (`Scripts/nightly-notes.sh`: the pull requests merged since the newest `v<version>` tag) and fixes the
+  date and build number (the commit count). Sill for Mac: the pure checks, then with `SILL_SIGN_IN_CI`
+  release.yml's keychain and notary steps, the profile decoded from `SILL_PROVISION_PROFILE`, and
+  `release.sh --nightly --publish` (built and checked as a release, but universal: `SILL_UNIVERSAL=1`, as the
+  first nightly by hand and #62's word on the next version; no tag rule, the profile required) as
+  `Sill-nightly-<yyyymmdd>-<sha7>.dmg` and `.zip` with their `.sha256` on the rolling pre-release
+  `nightly` (never latest; its tag moved to the commit; the seven newest kept; the commit's sha last in its
+  notes); else ad hoc artifacts. Sill for iPhone and iPad: `release-ios.sh --build-number <commit count>`
+  (unsigned, export or upload as testflight.yml; with the key, `asc.swift groups` first, reads only, the
+  real group names in the summary; an upload App Store Connect has already is skipped), then
+  `Scripts/asc.swift distribute`: waits up to 90 minutes for processing, What to Test, every internal
+  TestFlight group, and the public beta group (the external group with the public link) only while
+  `SILL_NIGHTLY_PUBLIC_BETA` is `true`, with Beta App Review right after; asc.swift refuses `--public-beta`
+  unless its environment says that too. Unset at first, on Noah's word.
+- A nightly is 0.5.5 (N), N the commit count on both apps, never committed (the store release will be 0.6.0). The update check never offers
+  one (`UpdatePolicy.feed` is /releases/latest, which lists no pre-release; `UpdatePolicy.release` refuses
+  `prerelease: true`; "nightly" is no version), and offers a nightly nothing until a release newer than its
+  version exists. A nightly reads the release's data-protection keychain items (same team, bundle ID and
+  profile), so a device paired with one stays paired with the other.
+- Also: release.yml's publish job decodes `SILL_PROVISION_PROFILE` too (the nightly turns on
+  `SILL_SIGN_IN_CI`, which arms it; without the profile a CI release would have moved every Mac to the
+  login keychain); testflight.yml takes the commit count as its build number; `release-ios.sh
+  --whats-new FILE` (with `--upload`, `--api-key`) sets What to Test after an upload; make-app.sh's
+  `SILL_RELEASE_NIGHTLY=1`; README's Good to know and site/download.html one line each.
+- Verified (the plan's Progress has every number): asc.swift against a stand-in App Store Connect on
+  127.0.0.1 with a throwaway P-256 key (each token's ES256 signature checked with openssl; header, claims,
+  exp − iat 900 s), 114 of 114 checks over 21 scenarios and 23 of 23 mutants, the token in no output;
+  release.sh's nightly mode and nightly-notes.sh against a stand-in gh in a synthetic repository, 103 of
+  103 (the release path's 15 preflight cases and publish_release identical to origin/main's in words, exit
+  statuses and gh calls); release-ios.sh against a stand-in xcodebuild playing run 40843967209's real
+  .ipa, 48 of 48 (its App Store path identical to origin/main's); 30 of 30 mutants of the new shell paths caught (15 in release.sh's nightly mode and its release path, 7 in nightly-notes.sh, 8 in release-ios.sh's flags); the workflows: 5 files
+  parse (PyYAML), 46 run blocks under /bin/bash -n, 200 structural checks (actions pinned by the commits
+  already used, no expression in a run script, secrets only in env, the gates); nightly.yml's run blocks executed under /bin/bash 3.2 -eo pipefail with GitHub's output, env and summary files and the stand-ins, 44 of 44 (decide's skip rule on a schedule only, publishing only from main and not verify only, the notes through the outputs, the Mac's and the iOS mode matrices, `--public-beta` only for exactly `true`), and 8 of 8 mutants of its gates caught; a 12-minute real-time wait (the build listed after 11.5 min, a look a minute): 20 requests, every token valid, renewed once at 600 s; on GitHub
+  `gh workflow run testflight.yml --ref nightly-builds` with `SILL_TESTFLIGHT_IN_CI` unset (`gh variable
+  list` empty) → run 40843967209 passed: Xcode_27.1.app 27A9275, archived with CURRENT_PROJECT_VERSION=987,
+  exported through the key; the downloaded .ipa says 0.5.1 (987) while the project says 4, signed "Apple
+  Distribution: NOAH WILLIAM SAFFER (9B2KKVM937)", the App Store profile, get-task-allow false; nothing
+  uploaded. Tonight's real notes: 36 pull requests since v0.5.1, What to Test 3,179 bytes. nightly.yml
+  itself runs only once it is on main.
+- The review (2026-10-29, after ba85e191; the plan's "The review"): seven findings, each reproduced, then
+  fixed in a commit of its own. testflight.yml uploaded from any branch with the commit count, so a branch
+  four commits ahead of main had the count of a later nightly, which took the branch's build for its own
+  and gave it to TestFlight's groups (both workflows' run blocks in a synthetic repository): uploads only
+  from main's first-parent line now, other branches export (7c62d6c1; the mode step 12 of 12, 9 before).
+  The first nightly, published by hand that morning (0.5.5 (987), tag `nightly` at 150479b5), is universal
+  and its notes give the TestFlight public beta link: the workflow's Mac job builds with `SILL_UNIVERSAL=1`
+  (598d68be) and `nightly_testflight_link` keeps the link in every night's notes (0458239d; the hand-made
+  pre-release taken over with the stand-in gh, 8 of 8, 7 before). A malformed .p12 or notary key ended at
+  security's or notarytool's words with the file left until the cleanup: named errors in nightly.yml and
+  release.yml (2623acee; 16 of 16, 4 before). The distribute step's 100 minutes equalled asc.swift's 90 +
+  10 (measured: 300 s of processing, then 601 s for the review state): 110 (86e59547). Docs: the privacy
+  manifest's ActiveKeyboards is PR #243's, on main (e3dbf133); part 2 contradicted Nightlies on the iOS
+  build number, and a release must move main to the next version before the next night (df11fb07).
+  Re-run, all passing: asc.swift 114 and the review's 9, 23 of 23 mutants, a 13-minute token wait (20
+  requests, renewed at 600 s); release.sh and the notes 104 (a link check added); release-ios.sh 48; 31 of
+  31 shell mutants; the workflows 204 structural checks and 46 blocks under bash -n, 44 of 44 run blocks
+  executed; the signing run's artifact rechecked (0.5.1 (987), Apple Distribution, get-task-allow false).
+  Not changed here, for the session that talks to Noah: the version (the handoff records his 08:55 UTC
+  decision that pre-release builds say 0.5.5 and the release 0.6: #244 and these docs say 0.5.5 since the main session's fix-up of 2026-10-29) and the hour (09:17 UTC, applied the same way); PR #247's README and download-page words repeat this one's.
+- The environments (2026-10-29, the security batch's item for the scan's findings 5 and 6; Noah: "the
+  environments as a checklist step before SILL_SIGN_IN_CI goes on"): the nine secrets were repository
+  secrets, which reach a run on any branch or tag, and release.yml and testflight.yml run by hand from
+  any ref with that ref's scripts. release.yml's publish job now runs in the environment `release` (only
+  `v*` tags; Noah its required reviewer, so a release waits for his click), nightly.yml's Mac and iOS
+  jobs and testflight.yml's job in `nightly` (only main; no reviewer, so a night runs unattended). An
+  environment without its secrets gives empty strings, so each job names the environment and what is
+  missing when the run needs it: release.yml's first step, before the checkout (it also stops a run by
+  hand that didn't start from the tag it releases); the nightly mode steps as before, in the
+  environment's words, a notice when the iOS key is absent. decide builds nothing off main; testflight.yml
+  runs from main only (its first-parent check kept). docs/release-checklist.md, "Secrets and variables":
+  the step before the variables (the two environments with `gh api` PUT and their branch and tag
+  policies, written from GitHub's REST reference and not run: nothing may be created here; the check
+  with `gh api` GETs; the secrets with `--env`; the nine repository secrets deleted), and Nightlies'
+  first run gains it as step 4; DEVELOPMENT.md's three paragraphs. Verified: the workflows' structural
+  check 245 of 245 (its stale 03:17 rule moved to 09:17, 41 new for the environments; 25 problems on
+  984d7f0c), 46 run blocks under /bin/bash -n; nightly.yml's run blocks executed 52 of 52 (9 failing on
+  984d7f0c); the environments' run blocks 19 of 19 (16 failing on 984d7f0c); testflight.yml's mode 12
+  of 12; the keychain steps 16 of 16; 15 of 15 mutants of the environment rules caught; the look's jq
+  filters against the documented response shapes, on the live endpoint (read-only: no environment
+  exists yet) and, when the work resumed after a usage stop, on other public repositories' real
+  environments (a tag rule with a required reviewer, a `main` branch rule), the REST reference read
+  again (the PUT's fields; the POST's `name` and `type`, 404 without `custom_branch_policies`, 303 for a
+  rule already there); actionlint 1.7.12 with the `xcode-27` label declared: only the 17 shellcheck
+  notes 984d7f0c has too; CI's Build and check on 5d2bb590 (run 40865615093). The checklist's
+  TestFlight key line names the Admin key's own file, not the notary key's. The review (2026-10-29;
+  four findings, all in the docs, each fixed in commits of its own; the report's "The review"): "What
+  the environments don't do" understated the route through main: `nightly` holds the same Developer ID
+  and notary keys as `release`, and the Admin key, so a commit on main reaches them, and the nightly
+  Mac job's token that can publish any release, at the next run from main with no approval, and a
+  ruleset requiring pull requests closes that only with a required approval, and then only against
+  someone else's write access (78248187, 2596e910; a loopback run of the workflows' own steps on main,
+  GitHub's rule emulated with Ruby's File.fnmatch, handed an attacker's release.sh the signing
+  identity, the notary profile and the token, and release-ios.sh the key file); any `v*` tag waits on
+  the approval alone, so What a tag does says to approve only the tag you pushed, on the commit you
+  tagged (a7c6787e); testflight.yml no longer "exports other branches" (732c374f); steps 2 and 3 and
+  the two variable lines lost their inline comments, which zsh as it starts hands to `gh` as arguments
+  (39b9ecfd: pasted into `zsh -f -i`, 7 of 29 calls broken before, none after). The harness again on
+  the head's workflows, unchanged by the review: 245, 52, 19, 12 and 16 of the same, 15 of 15 mutants.
+  The second review (2026-10-29, on edda6b6e; the report's "The second review"): one finding, in the
+  workflow. The approval is the tag route's gate, but the publish job checked out the tag by name, and
+  given a ref actions/checkout v7.0.1 checks nothing against github.sha, so a tag force-moved after
+  the run began (or right after the approval) built and signed another commit while Noah's look still
+  matched (his local tag never moves). Reproduced on loopback (tag-move.py in nightly/tests: git
+  daemon on 127.0.0.1, checkout's git sequence from its source, the job's own steps with stand-ins):
+  the moved commit's release.sh got the identity, the notary profile and the token, a pushed tag, by
+  hand and annotated alike. Now the checkout is `${{ github.sha }}` and the tag check stops the run,
+  before the keychain and any build, when HEAD or the tag is not that commit (e6545f2b, with the
+  checklist's What a tag does, a tag ruleset's part, DEVELOPMENT.md and release.sh's comment): the
+  moved cases refused, the unmoved ones on. The harness on it: check.py 257 (12 new; 3 problems on
+  edda6b6e), run.py 52, env-steps.py 26 (7 new; 4 failing on edda6b6e), tf-mode.py 12, kc-steps.py 16,
+  rel-test 104, 21 of 21 mutants (6 new), zsh-paste 36 calls exact, actionlint's 17 notes as before.
+- **Untested, for Noah (docs/release-checklist.md, "Nightlies", "The first run"):** the privacy
+  manifest's ActiveKeyboards (#147's `UITextInputMode.activeInputModes`, ITMS-91053) is declared on main
+  since PR #243 (54BD.1; release-ios.sh's check of run 40843967209's binary against main's manifest: every
+  API declared). Merge #244, then this; the environments `release` and `nightly` with their rules, the
+  secrets in each, the nine repository secrets deleted ("Secrets and variables", steps 1 to 3: the `gh api`
+  calls were never run); `gh workflow run nightly.yml -f verify_only=true` and its artifacts (the iOS key
+  from `nightly`); the first release through the environment `release` (its tag check passes on the
+  run's own commit, which the run's page shows);
+  `SILL_SIGN_IN_CI` and `SILL_TESTFLIGHT_IN_CI` true; a run by hand: the pre-release, the notarized dmg on
+  a second Mac (quarantined: opens, drags, opens, the iPad still paired), TestFlight's groups (the real
+  names: the step lists them) and What to Test; `SILL_NIGHTLY` true; after his Insiders test,
+  `SILL_NIGHTLY_PUBLIC_BETA` true (Test Information filled in; the first build of a version reviewed in full).
+**A copy of Sill.app takes no test hook, from this build on (2026-10-29, branch `sec-test-host-identity` from main
+at 150479b5, PR #249; the security scan of 2026-10-18, finding 1, Medium; the security batch of 2026-10-29; the
+report in sill-handoff's `triage/2026-10-29-security/f1-test-host-report.md`).** `AppModel.bundled`, the one gate
+on every TEST ONLY hook that bears on who gets in (`SILL_TEST_REMOTE_DIR`'s trust list, `-requirePairing`, the
+`-Sill…After` hooks, the doors' `SILL_TEST_*`: docs/home-pairing-plan.md §4.3), was
+`Bundle.main.bundleURL.pathExtension == "app"`, the folder's name: Sill.app copied to a folder named Sill.bin, or
+its executable started through a symlink or a hard link (Foundation then finds no bundle), read as the bare binary
+and took them all, keeping Sill's grants (TCC keys them to the bundle ID and designated requirement; the scan's
+premise, not tried). Now `bundled` is `AppIdentity.isSillApp` (Sources/SillMenuBar/AppIdentity.swift, pure but for
+its reader) of four facts read once at launch: Sill.app when the running code's signing identifier is
+`me.saffer.sill.mac` (the kernel's, SecTaskCopySigningIdentifier: every copy that can hold Sill's grants carries
+it, and a file replaced after launch does not change it), when it is signed with any certificate or its signature
+can't be read (fail closed), when its bundle's CFBundleIdentifier is Sill's, or, as before, in a `.app`. The one
+test host is the bare binary as `swift build` makes it (identifier `SillMenuBar`, `adhoc,linker-signed`, no
+Info.plist). Sill.app's code outside a `.app` says why first: "Running from …, which is not a .app, as Sill.app
+itself (signed me.saffer.sill.mac): it takes no test hook." No wire change; the CLI unchanged. Builds from before
+keep the old rule: 0.4.0, 0.5.1 and the nightly 0.5.5 (987) take every hook from a renamed copy or a link
+(SECURITY.md names them; what that leaves open is the review's R1, for Noah, in the report).
+- Verified: `swift build -c release`, only the CaptureProbe warning; `Tests/checks/test-host` (new, in CI's
+  mutants matrix) 133 checks (1,344 combinations against an oracle; the reader for real on ad hoc copies of
+  its own binary under `sandbox-exec`: signed again as Sill, a Sill.bin bundle, a hard link, a symlink, a file
+  replaced after launch) and 22 of 22 mutants; `door-policy` 128, `keychain` and its 7 mutants; `run-all.sh`
+  all 57. Live: the bare binary on loopback took `-requirePairing NO` (an unpaired TLS client admitted),
+  `-SillSetAfter 'requirePairing=1'` (the next refused) and the `SILL_TEST_*`; the bare binary in a scratch
+  Sill.bin with Sill's Info.plist, run only under `sandbox-exec` (no network, no LaunchServices database
+  write, no TCC, no preference write, nothing written in the home folder), also signed ad hoc and through a
+  symlink: the line, every hook "ignored", "Home door: TLS, pairing required (0 paired)."; origin/main's build
+  in that bundle took every hook. Sill's real preferences byte for byte; LaunchServices' 43 records of Sill's
+  ID the same before and after.
+- The review (2026-10-29, after b0d9b03b; the report's "The review"), three lenses, four findings, each reproduced
+  first, the fixes in commits of their own: R1, the fix holds for Sill.app built from it on, and a build from
+  before keeps its rule: the nightly 0.5.5 (987)'s own Developer ID build, renamed Sill.bin under the same
+  sandbox, took every hook ("Home door: TLS, pairing not required.", "Settings: require pairing off → on"), so
+  SECURITY.md, the plan's §4.3 and this entry now say which builds (f562b4c3) and what that leaves open is Noah's,
+  in the report; R2, out of the finding's scope, for Noah, in the report; R3, the reader's two fail-closed answers
+  (a read that failed, an identifier with neither a certificate nor the ad hoc flag) were unchecked, three mutants
+  turning them into a test host surviving: `signature(read:)`, pure, 12 checks and 2 mutants (7ce5874c); R4, two
+  comments with the old rule, DebugHooks' header and the plan's §13 (b16d66c7). Tried and holding: this branch's
+  build signed as Sill in a Sill.bin, every hook "ignored", "pairing required (0 paired)"; `CFProcessPath` and
+  argv[0] do not move `Bundle.main` (a symlink does, and the kernel's identifier answers it). Verified after:
+  `test-host` 145 checks and 24 of 24 mutants; `run-all.sh` all 57 (9 min 58 s); `swift build -c release`, only
+  the CaptureProbe warning; the bare binary on loopback took `-requirePairing NO` (an unpaired TLS client
+  admitted), `-SillSetAfter 'requirePairing=1'` (the next refused: "certificate unknown") and the `SILL_TEST_*`;
+  previews 146; Sill's preferences, LaunchServices' 43 records and Sill.log untouched by the sandboxed runs. No
+  iOS file and no wire changed, so the three iOS builds were not run.
+- **Untested, for Noah:** a certificate-signed build reading itself (signing needs the keychain): with Sill.app
+  from this branch installed as usual, Sill.log has no "Running from …" line and Settings › Devices and Remote
+  Access work as before. Don't run a copy of Sill.app outside /Applications to see the refusal: a launched copy
+  can register with LaunchServices for Sill's ID and take the login item (2026-10-20). Seen, not changed:
+  LaunchServices lists 43 copies under Sill's ID (old worktrees' `.build/Sill.app`, `wt-mod157` among them, the
+  Trash, scratch folders).
+**An open door's reconnect pinned to the key it saw (2026-10-29, branch `sec-reconnect-pin` from main at
+150479b5, PR #255; the security scan's finding 3, Medium; Noah's go of 2026-10-29 for the batch).** The device's
+automatic reconnect to a Mac it was connected to without pairing (Require pairing off, `p=0`) found the row by its
+Bonjour name alone and took any key, so whatever advertised that name with `p=0` (another Mac renamed to it, a
+stranger after a crash) got the session with no tap: what the device typed, and its clipboard (kind 32, on by
+default). Device only, no wire change, nothing on the Mac.
+- The rule (DiscoveryPolicy, pure): `reconnectKey(lost:)` is the key an open session's first connection saw
+  (`trust(_:readyWith:)`), carried as `Reconnect.openKey` (`lostReconnect`); `reconnectTrust(_:savedPin:seen:)` is
+  `sessionTrust`'s but for an unsaved open door with a seen key, `.open(seen:)`, so `Pin.key` (`reconnectIfListed`,
+  `dial(_:macID:tap:seen:)`; a tap keeps `sessionTrust`). Another key answering (-9808, DeviceTLS's `onPinRefused`)
+  is `HomeEnd.otherKey`: `homeSessionEnded` ends the reconnect with "‹Mac› answered with another key, so this
+  ‹iPad› didn’t reconnect. Tap it to connect."; the row reads Not paired as before and a tap takes any key; a saved
+  Mac's reconnect is unchanged (its saved pin). The review of #255 added two: a plain door (no `p`) under the name
+  is not dialed after such a session (`reconnectTrust` gives nil for `.plain` with a seen key), where a DEBUG
+  build's reconnect dialed it plain with no key to check (the reconnect looks on, as Release's does past "Update
+  Sill"; a tap still dials it); and a tap during the reconnect (its words invite one) whose dial ends before its
+  handshake leaves the reconnect pinned to the key the last session under that name saw
+  (`reconnectKey(lost:earlier:)`, StreamClient's `openKeys` by Bonjour name, in memory, set at a session's first
+  `.ready`), where it took any key. Left as it was: a tap under a name no session has seen a key under since Sill
+  started (`openKeys` is memory only) whose dial ends before its handshake leaves a reconnect with any key, as the
+  tap would have. DEBUG console: "reconnect: dialing ‹Mac› (dial 1 of this listing), pinned to the key its last
+  session saw", "home: this device's pin refused the key that answered as ‹Mac› (-9808)", "home: the session ended:
+  otherKey (-9808: bad certificate format)", "reconnect: ‹Mac› is a plain door now, and its last session saw a key
+  over TLS: not dialed (a tap dials it)", "reconnect: the dial of ‹Mac› saw no key; the reconnect pins the key the
+  last session under its name saw".
+- Verified: `home-device` 225 checks (16 new) and 142 of 142 mutants (11 new), `home-model` 84 (8) and 28 of 28 (3),
+  `policy` 477 (13, with a model of the glue: 680 reconnects over every sequence of up to four rows under the name,
+  in Release and DEBUG, none to the other key, where main's rule gave it 197) and 171 of 171 (6, O1–O6); the four
+  checks that compile DiscoveryPolicy.swift keep every mutant pattern; `run-all.sh`, all 56; `swift build -c
+  release`, only the CaptureProbe warning; the three iOS builds, only the known `StreamClient` capture warning
+  (StreamClient.swift:4120). Live on a private iPad mini simulator (iOS 27.0, deleted after), two bare `SillMenuBar
+  --synthetic -requirePairing NO` hosts on 127.0.0.1 alone with identities of their own, each advertised as "Studio
+  f3" (`_silltest._tcp`, `p=0`, a tag) by `dns-sd -i lo0 -R` (a test host's own registration is "Sill test ‹pid›"),
+  the app with `-SillServiceType _silltest._tcp -SillTapRow "Studio f3" -SillNoAutoDesktop 1`: a tap connected to A
+  with any key and A's copy reached the device; A killed (-9) with its advertisement; B under the name. Main's build
+  (150479b5) reconnected to B by itself (B: "Client connected", "Client hello", "Clipboard: … shares the
+  clipboard.") and B's copy was written to the device's clipboard (`simctl pbpaste`); this build dialed it pinned,
+  refused B's key, ended with the words above (B logged nothing), the device's clipboard kept its sentinel, and a
+  tap then connected to B with any key; A back with its own key (same identity, new port) was reconnected by itself,
+  pinned, its copy arriving. Logs and photos in `~/Downloads/sill-handoff/triage/2026-10-29-security/f3-live/`.
+- The review (2026-10-29; the report's "The review"): two findings, each reproduced first and fixed in a commit of
+  its own. R1 (Low, DEBUG builds only), b8f0a7bb: after an open session that had seen a key, a DEBUG build's
+  reconnect dialed a plain door under the lost Mac's name with no key at all (live on a private simulator against
+  3e01e3c2's build: the CLI's plain door got the session, its hello and the device's clipboard; after the fix not
+  dialed, A back reconnected pinned, a tap still connects). R2 (Low), 625df1b2: a tap during the reconnect (its own
+  words invite one) whose dial waited for this device's own network and was let go before its handshake left a new
+  reconnect that took any key (the rules walked as StreamClient chains them: B's key taken with no tap); now pinned
+  to the key the last session under the name saw. Measured on loopback: a dial to a Bonjour row whose Mac does not
+  answer (a dead port, a vanished name, a TLS alert in place of a certificate) stays preparing, so a tap there ends
+  with "didn’t answer" and no reconnect at all; R2 needs the waiting case and was not run live. Seen in passing,
+  older and not fixed here: `homeEnd` reads -9825/-9829 as the Mac refusing this device's key even before `.ready`
+  (the plans: "right after `.ready`"), reachable only by an address dial at home (DEBUG's `-SillConnect`). Verified:
+  `home-device` 237 checks and 147 of 147 mutants, `home-model` 87 and 30 of 30, `policy` 482 (its model of the
+  glue: 1,560 reconnects with the person's tap among the looks, none to B; before the review B's plain door got the
+  session in 194 and B's key after such a tap in 94, main's rule B's key in 444) and 176 of 176 mutants, at b8f0a7bb
+  479 and 173 of 173; `remote-rules` 144, its 76 patterns each found once; `run-all.sh`, all 56 (512 s); `swift
+  build -c release` from a `git archive` of the head, only the CaptureProbe warning; the three iOS builds, only the
+  known `StreamClient` capture warning (StreamClient.swift:4134, main's 4110).
+- **Untested, for Noah:** two Macs with Require pairing off on one network (the scan's own steps): connect the iPad
+  to Mac A without pairing, quit Sill on A, give Mac B A's computer name (System Settings › General › Sharing) and
+  open Sill on B: the iPad shows "‹A› answered with another key, so this iPad didn’t reconnect. Tap it to connect.",
+  B's Sill.log has no "Client connected" for it and a copy on B never reaches the iPad; a tap connects to B. Sill
+  reopened on A instead: the iPad reconnects by itself. VoiceOver reads the line once. From the review: with a Debug
+  build from Xcode, the CLI's plain door (`SillHost`, no `--pairing`) or an older Sill.app given A's name after a
+  session with A is not reconnected (the console's "…is a plain door now…"; a tap connects to it); during the
+  reconnect to A ("…isn’t answering…"), a tap on its row while the iPad's own network changes (the tap's dial waits
+  and is let go), then B under the name: no connection to B ("answered with another key"). And a decision: another
+  key ends the reconnect for good, so a look-alike advertising the name for a moment while A is away turns the
+  automatic reconnect off until a tap (live: A back 3 s after it went was not reconnected), and the words ask for
+  the very tap that takes whatever key answers: keep it, skip that row and go on (as a saved Mac's row taken by its
+  name is skipped), or change the words.
+**A device's viewport held to what a host takes (2026-10-29, branch `sec-viewport-bounds` from main at
+150479b5, PR #251; the security scan's finding 4, Low; Noah's go of 2026-10-29 for the batch).** Kind 9 carried
+the panel and Aa's scale as Doubles with no bounds and the host took any number above 0: a viewport of 1e300 points
+(or a scale of 1e-300) from any device a Mac admitted reached the window's fit (`fitToViewport`), whose "Resized …"
+line made an Int of it, which traps, so Sill died with every device's session (the scan's chain with finding 3: its
+Bonjour name then free for an impostor); with the virtual display `VirtualStage.windowSize` was unheld and the
+"insists on …" line trapped the same way (a full-screen window's crop of an infinite panel was NaN, which
+`evenPixels` traps on). No wire change.
+- `ViewportBounds` (StreamProtocol's Viewport.swift, pure, `Tests/checks/viewport-bounds`): each side 1 to 16384
+  points, a text scale 0.25 to 4 or none. The host refuses any other viewport whole at kind 9, and one that does not
+  decode (JSON carries no NaN or infinity): the last viewport stands and nothing of the message is taken, its rate
+  neither; one line naming the device, at most one a second per connection ("Viewport from sillclient refused: width
+  1e+300 (1 to 16384 points), height 1e+300 (1 to 16384 points)"), `vp.refused` in the `[1s]` lines counting every
+  one. Every device build's viewport is within them (the compatibility floor's new line), and a device holds what it
+  sends to them (`held`, in `sendViewport`). The two lines print through `ViewportBounds.whole` (Int()'s number,
+  toward zero, without its trap); no other host line prints a device's number through Int() (a click's point is held
+  to the source by InputLanding, the rest are the Mac's own).
+- The window's size on the virtual display held to 1…65536 points a side, the most a host takes (16384 points at
+  0.25; `VirtualDisplaySize.windowSize`, `Tests/checks/capture-scale`): every viewport a host takes is asked as before
+  (a side under half a point 1, not 0), the placement fits it to the display, and a full-screen window's crop keeps
+  the panel's shape (the review's second finding: held at the display's 4096 it did not).
+- `sillclient.py --raw9=JSON@T` sends a literal viewport.
+- Verified: `viewport-bounds` 79 checks and 26 of 26 mutants (18,566 of its 200,000 random viewports main's guard
+  took and its line trapped on, none taken now), `capture-scale` 172 and 48 of 48; `run-all.sh`, all 57; `swift
+  build -c release` from `git archive`, only the CaptureProbe warning; the three iOS builds, only the known
+  `StreamClient` capture warning; live, a loopback synthetic host streaming the test pattern: 1e300, -1, NaN,
+  Infinity and a scale of 1e-300 each refused with its line (NaN and Infinity: "it does not decode as a viewport"),
+  three in 0.4 s one line and `vp.refused 3`, 16384 points at 0.25 taken, the stream going throughout (47–58 frames
+  a second). main's own lines (the handler, the fit's guard, target and line, the stage's window size and line, cut
+  from 150479b5 and compiled with its Viewport.swift) trap on the scan's payload and on a scale of 1e-300 (exit
+  133); the branch's refuse and go on. Not live on main's host: only a real window resized through Accessibility
+  reaches that line, which no test host lists.
+- The review (2026-10-29, after a02c1afe; the report's "The review"): two findings, each reproduced first and fixed in
+  a commit of its own. (1) f664a04d: a device's ClientStats `audioLate` was added to the stats line's count with a
+  plain `+` (StreamServer, from the audio work, after the scanned commit), so two reports of Int.max within the line's
+  1.5 s trapped: a loopback host built from a02c1afe died at the third report (exit 133), and lived with 1000; now
+  `ClientStats.lateSince` (Viewport.swift, pure: nothing for a missing or negative count, the sum stopping at
+  Int.max), and the rebuilt host took ten reports of Int.max and printed "9223372036854775807 late". (2) 972e2b87: the
+  window's size on the virtual display held at 4096 changed a full-screen window's crop for a panel past the display
+  (from the commits' own lines, a 2560×1400 panel at 0.5x: main 4096×2240, 1.829:1, the panel's shape; a02c1afe
+  4096×2800, 1.463:1, black bars on the device); now 65536, every row as main's. Re-verified: `viewport-bounds` 87
+  checks and 30 of 30 mutants, `capture-scale` 175 and 50 of 50; `run-all.sh`, all 57 (8 min 16 s); `swift build -c
+  release` from `git archive`, only the CaptureProbe warning; the three iOS builds, only the known `StreamClient`
+  capture warning; live on one loopback host, every kind 9 above refused again with its line, and the review's tries
+  (1.7976931348623157e308 refused, as -0 and 5e-324 were in a run on a02c1afe; 1e999 and a rate of 1e300 "does not
+  decode"; a duplicate key and a rate of Int.max taken, the rate held by `wantedFPS`; a rate of Int.min, on a02c1afe,
+  a restart at 24 fps), beside them a second client's ten stats reports of Int.max: the host alive throughout.
+- A second review (2026-10-29, after 37e47e68; scripts and logs in sill-handoff's
+  `triage/2026-10-29-security/f4-live/review2/`): one docs fix, e057acaf (DEVELOPMENT.md gave the refusal line's
+  limit per device; it is per connection: one device on two connections got two lines 0.11 s apart). No bypass: 92
+  hostile payloads of every kind a device sends but 19 and 32, on a loopback host with a scripted pointer, every ping
+  and kind 17 answered; 2,178 viewports a host takes in 15 s from two devices (236 restarts), the host streaming
+  after. Re-run: `viewport-bounds` 87 and 30 of 30 (five more mutants of the reviewer's caught), `capture-scale` 175
+  and 50 of 50, `compatibility`'s mutants 34 of 34 (one of Viewport.swift); `run-all.sh`, all 57 (8 min 28 s);
+  `swift build -c release`, only the CaptureProbe warning; the three iOS builds, only the known `StreamClient`
+  capture warning. Built, as the first review had not: the pacing harness from origin/main and this tree (`home`:
+  60.0 fps both, every gate), the audio harness and the restore probe's driver (not run).
+- **Untested, for Noah:** nothing should change on a device: Aa's steps and none, a rotation and the virtual display
+  as before on the iPad and iPhone, and Sill.log without a "Viewport from … refused" line; if an iPad with Stage
+  Manager on a large external display is at hand, a full-screen window (a video) on the virtual display at Aa 0.5x
+  fills the panel as on main.
+**Direct Wireless only from a paired device (2026-10-29, branch `sec-direct-wireless-paired` from main at
+150479b5, PR #253; the security scan's finding 8, Low; Noah's go of 2026-10-29 for the batch).** Any session at
+the home door could turn Direct Wireless Connection on or off from its Settings panel, an unpaired device at a door
+that lets any device in (Require pairing off) and any device at SillHost's plain door included, and Sill.app saved
+it: the door advertised and accepting over AWDL, radio range, on a stranger's word. Additive wire, host and device.
+- Host: `DeviceSettings.accepted(_:virtualDisplayAvailable:fromRemote:paired:)` (no default arguments now) takes
+  `directWireless`, on or off, only from a paired session at home; otherwise refused and named, "Settings from
+  ‹device› refused: direct wireless (only a paired device)" (away from home the old "(not from a remote
+  connection)" first), the rest of the change applied whoever sent it. Paired (`DeviceSettings.paired(key:trusted:)`,
+  the coordinator's `sessionPaired`): the session's key (`ClientRoute.fingerprint`, proved in its TLS handshake;
+  none at the plain door) on the Mac's trust list as the status snapshot lists it now (`remote.paired`, which
+  RemoteAccess publishes with every change of the list). The route already kept the admission (`peer.name`, nil
+  for an unpaired key); the live list adds a device paired during its session (Pair This iPad… at an open door)
+  and drops one removed before its session closes. Turning it off is refused too: an unpaired device would
+  disconnect the paired ones connected over it.
+- Wire: kind 16's `sessionPaired` (`HostSettingsState`, optional, the connection's own like `away` and `link`):
+  true for a key on the list (the remote door's too), false for an unpaired key at an open door and at a plain
+  door; nil from hosts before, which took it from any session at home; re-published when the list changes.
+- Device: the ledger's rule 10 (`HostSettingsState.takesDirectWireless`, `sessionPaired != false`) never sends
+  it on a session the Mac says is not paired; the panel disables the switch there, its footnote "Change this on
+  ‹Mac›, or from a device paired with it." (away from home as before, "…, or from a device near it."). The mock:
+  `default` paired, `cli` and `openpair` not, the older Macs' cases silent.
+- CLI: TEST ONLY `SILL_TEST_REQUIRE_PAIRING=0` (a `--synthetic` host; TestHooks' list) turns Require pairing off
+  at `--pairing`'s TLS door for the run ("Home door: TLS, pairing not required."); sillclient prints `paired=` and
+  `--expect` takes `sessionPaired`. Closes the Direct Wireless entry's "revisit it with pairing" (below) and
+  docs/direct-wireless-plan.md's; SECURITY.md's known list, DEVELOPMENT.md and support.html say who changes it.
+- Verified: `away-quality` 143 checks and 39 of 39 mutants (96 and 30 before), `compatibility` 146 and
+  36 of 36 (140, 34), `ledger` 116 and 16 of 16 (100, 12; 5,000 random runs: Direct Wireless taken from a paired
+  session 1,579 times, refused from an unpaired one 521, rule 10 holding back 943 picks, 1,209 devices paired
+  during a session, 899 runs against a host from before); `run-all.sh`, all 56 (621 s); a clean `swift build -c release`
+  from `git archive` of 52ad232c, only the CaptureProbe warning; the iOS app Debug and Release for the simulator
+  and Debug for a device, only the known `StreamClient` capture warning (StreamClient.swift:4110). Live on
+  loopback synthetic CLI hosts (software encoder, no router, no screen): at `--pairing`'s door a paired identity
+  turned it on and off (`dw=1 paired=1`, "Settings from paired-a: direct wireless off → on", "Direct wireless
+  on: listening on port … again."); at the open door (`SILL_TEST_REQUIRE_PAIRING=0`, "Home door: TLS, pairing
+  not required.") an unpaired identity's on and off refused (`dw=0 paired=0`, "Settings from unpaired-b
+  refused: direct wireless (only a paired device)") while a paired one beside it turned it on and off, and an
+  identity paired by a second connection during its session heard `paired=1` 5.0 s in and was then taken; the
+  plain door refused it (`paired=0`); the remote door refused it as before (`paired=1`, "(not from a remote
+  connection)"); no "Enabling AWDL" in the kernel log meanwhile. H2 against 150479b5 (`--synthetic` idle, then a
+  test client on the Desktop): identical masked and sorted (27 lines) but for the second the client left
+  (which counters it listed). Harness photos on a private iPad mini simulator (deleted after), 710×1000 and
+  1000×710: `openpair` and `cli` the switch dimmed with the new footnote, `default` as before (sill-handoff's
+  `triage/2026-10-29-security/f8-photos/`).
+- The review (2026-10-29, after 73f4892f; sill-handoff's `triage/2026-10-29-security/f8-direct-wireless-report.md`,
+  "The review"): the rule holds (the key from the TLS handshake at `.ready`, the list the status publishes with every
+  change of it before anything else runs, `accepted`'s `ok` the only way a device's change reaches the config). The
+  scan's own command took it at origin/main's plain door (`dw=1`, "Direct wireless on: listening on port … again.")
+  and is refused here (EXPECT FAIL). Every bypass tried on loopback was refused: at the open door a kind 17 forging
+  `sessionPaired`, an Int, duplicate keys, six at once and a paired device's name; a pairing window open after kind
+  21; the plain door; the remote door. What remains is by design or another finding's: a session that controls the
+  Mac's input can still turn it on in Sill's own menu or Settings (blind: Sill streams none of its windows), any
+  paired device can, and the cable's automatic pairing is finding 2. Two docs findings fixed: the plan's host rule
+  and the gates that change it at the plain door (91b83561), DEVELOPMENT.md's command-line host (881ac12f).
+  Re-run: `away-quality` 143 and 39 of 39 mutants, `compatibility` 146 and 36 of 36, `ledger` 116 and 16 of 16;
+  `run-all.sh`, all 56 (483 s); `swift build -c release`, only the CaptureProbe warning; the three iOS builds
+  (Xcode 27.1), only the known `StreamClient` capture warning; H2 against 150479b5, identical masked and sorted but
+  for one stats line as the client left.
+- A second pass (2026-10-29, after a66cd93a; the report's "The review, second pass"): no code to fix; one docs nit,
+  support.html's new sentence promised a paired device the switch through Remote Access too, which the Mac refuses
+  (`dw=0 paired=1`, "(not from a remote connection)"): now "but not while it's connected through Remote Access",
+  inside the Remote Access markers (e012ab81). It tried what the rule and all of pairing rest on, a paired device's
+  key used without its private key. Apple's APIs cannot make such a client (SecIdentityCreate refuses a certificate
+  with another key; `sec_identity_create_with_certificates` still sends the identity's own certificate first, which
+  the open door admits as unpaired and refuses Direct Wireless). A TLS 1.3 client of its own (CryptoKit;
+  sill-handoff's `triage/2026-10-29-security/f8-review2/tls13forge.swift`) sending paired a's certificate with a
+  CertificateVerify signed by another key got a `decrypt_error` alert before any Sill message, at `--pairing`'s door
+  and at the open door, and the host logged no "Client connected"; the same client signing with a's own key was
+  admitted as paired-a and turned it on. Re-run: `away-quality` 143 and 39 of 39 mutants, `ledger` 116 and 16 of 16,
+  `compatibility` 146 and 36 of 36; `swift build -c release`, only the CaptureProbe warning.
+- **Untested, for Noah:** with this branch's Sill.app (release-signed with the profile) and this iPad
+  build: a paired device's switch at home, on and off, Sill.app's menu and General pane following and
+  `defaults read me.saffer.sill.mac directWireless` saved; Require pairing off and a device the Mac has not
+  paired (one never paired, or one removed in Settings › Devices): its switch dimmed with "Change this on ‹Mac›,
+  or from a device paired with it.", then Pair This iPad… from that panel: the switch comes back without
+  reconnecting; away through Tailscale:
+  dimmed with "…, or from a device near it." as before; VoiceOver on the dimmed switch (read as dimmed, then the
+  footnote); mixed builds: this iPad against Sill for Mac 0.5.1 (no `sessionPaired`: the switch works, 0.5.1
+  takes it from any session at home), and the 0.5.1 (4) iPad, unpaired at an open door, against this Sill.app
+  (its switch goes back, "‹Mac› kept its setting").
+**Aa's Off, and Aa only for a window (2026-10-29, ArfiArfath21's PR #181 with maintainer edits, branch
+`aa-off`; issue #179, taschaub).** Noah's decisions of 2026-10-29: the Off detent ("off makes more sense
+than 1x"), and Aa not selectable while the Desktop streams ("misleading"). `TextScale` (pure,
+StreamProtocol; `Tests/checks/protocol`) holds Aa's detents: Off, one step left of 0.5×, is no scale (the
+Mac leaves the window alone) and an untouched Aa reads Off; no Off while the window streams on the Mac's virtual
+display (`offersOff`: no scale is 1× there, so an untouched Aa reads 1×), judged by the running stream's
+`onVirtualDisplay` while a window streams (the review: Virtual Display on with the window streaming in place has
+Off), else by the setting; Aa usable only while a window streams
+(`selectable`): over the Desktop or nothing every bar (sideways, the halves, a phone's row 1, the Duo's)
+dims it to 35 %, its ruler never opens, a ruler open when the window stops streaming folds without
+applying, VoiceOver hears "Text size, Off, dimmed, adjustable, Available for a window." and a swipe changes
+nothing (one view and one element whatever streams, as a disabled slider: the review); the value stays for
+the next window. The ruler's frame shows two detents each side of the thumb whatever the
+detents (`TextScaleControl.detentsEachSide`): every bar's ruler keeps main's width, a phone's row 1 its
+room (the contributor's grew a step and ran past the phone's row). Host: a device's viewport going from a
+scale to none (`TextScale.endsFit`, per connection, `fitScales`) puts the windows Sill sized back at once
+(`restoreFits`: whole, its own size where it was moved, left if resized on the Mac) and looks at the
+catalog again, so the stream restarts at the window's own size; `win.fitOff` in the `[1s]` lines. Sill for
+Mac 0.5.1 takes Off only as a stop to the fitting: it never puts a window back (#57 came after it). The tour's
+rows say when: "Aa: while a window shows, touch it and slide …" (the review) and VoiceOver's "Swipe up or
+down on it while a window shows." DEBUG: `-SillScaleScript '<s> <scale|off>[; …]'`, the AX dump's value,
+hint and traits. The review (2026-10-29; its report has each finding, how it was reproduced and the
+re-run): Off by where the window streams (`efcf9177`), 0.5.1 never puts a window back (`2cc12973`), the
+tour's sighted row (`00efae53`), the Desktop's stream never deciding, in `TextScale` and checked
+(`a9e4b458`), Aa one view and one VoiceOver element (`95e9e794`: a conditional adjustable action made a new
+one at every change of what streams), the docs (`26206e0d` and the next). Verified: protocol 272 + 8 checks
+and 61 of 61 mutants (19 TextScale's), window-restore 41,936 (the model's Off from one of two devices: each stop where the
+person expects it) and 95 of 95, tour 84 of 84, run-all 56; the
+three iOS builds (only the StreamClient capture warning) and `swift build -c release` (clean, only CaptureProbe's);
+harness photos in every bar (iPad and phone sizes on 27.0, the Duo's six poses on an iPhone Duo on 27.1, 17 cases
+each) at the default and accessibility-extra-large sizes against main's build: Aa closed at 1×, at 1.25× with its
+ruler, and on Sill's virtual display closed and with its ruler pixel for pixel main's, the ruler at 1× (and at
+1.25× on a 320 pt phone) main's but for the track's faint left end, the strip's fading end as noisy as main's
+against itself; live against a synthetic host: Aa dimmed over its Desktop, VoiceOver's words, viewports 1 → off
+→ 1.25 → off, `win.fitOff 1` at each Off. Untested, for Noah: on the iPad with Virtual Display off, Aa on a window to 1.25×, then Off: the window
+back to its own size at once (Sill.log's "Restored …"), and a later pick of it not resized; Aa dimmed over
+the Desktop, VoiceOver too (with its focus on Aa, the window closed on the Mac: the focus stays on Aa); the
+ruler's six detents in each bar; with Virtual Display on, no Off and 1× untouched (Off while a window streams
+in place, the Settings panel's note saying why); two devices (only the one whose scale it was ends the fit
+by Off); with Sill for Mac 0.5.1, Off only stops the resizing.
+**The hold before a thumbnail's lights (2026-10-29, branch `thumbnail-hold-stepper` from main at 35a9c47, PR #248; issue #113,
+promised on the issue as "lower the time … and have it be user adjustable").** Noah, 2026-10-29: "The hold time should
+be patched and editable with a slider in settings (one of those fancy ones with the +/- buttons that increment by 0.1
+seconds, ideally the timer can go from 0.2s to 3s or something like that." Device only: no wire change, never sent.
+- `ThumbnailHold` (pure, `Tests/checks/thumbnail-hold`, 82 checks and 32 mutants, in CI's matrix): 0.2 to 2 s in
+  tenths, 0.5 s unless changed (it was a fixed 1.5 s; iOS's own long press, which the reporter cites), counted in whole
+  tenths so no sum of steps drifts; `Sill.thumbnailHold` (a Double; `-Sill.thumbnailHold 0.3`'s string too); the words.
+- WindowStrip reads it at launch and on each change (every bar: sideways, an iPad's window bar, a phone's row 2), and
+  HoldDragOverlay gives the long press already on screen the new length; the drag to another slot starts from the
+  same hold. Its 12 pt (a scroll before the hold) and 8 pt (the lift after it), and the picture's 0.45 s right click,
+  are unchanged. DEBUG: the console's `thumbnails: hold 0.5 s` at the first read and each change.
+- Settings › This iPad (or iPhone), after Reverse Scrolling: Hold to Show Window Controls, its length ("0.5 s") and
+  the system's stepper (− dimmed at 0.2, + at 3), the title beside them while it has room for its three lines with
+  every word whole (`ThumbnailHold.titleLines`; ViewThatFits and a small Layout, `WrappingTitle`), else over them, and
+  the row never wider than the panel offers it; one adjustable VoiceOver element,
+  "Hold to show window controls, 0.5 seconds" (iOS 27's stepper alone is two buttons read with the whole label), its
+  footnote next. `-SillSettingsScroll hold`. Site words (support's section, privacy's item) marked `<!-- Thumbnail
+  hold`; the next What's New's paragraph. Not taken from the branch `thumbnail-hold` (2026-10-20, 1 to 5 s, never a
+  pull request): its pressed state from touch-down and its fix of the lights' VoiceOver labels; #164 (addhumal, a
+  picker of five lengths) predates Noah's stepper.
+- Verified: the three iOS builds and `swift build -c release`, only the known warnings; `run-all.sh`, all 57; on a
+  private iPhone Duo simulator (iOS 27.1, the cover display: the harness draws 1000x710 at 0.65, turned), with a driver
+  injected into the Debug app (the touch rig's synthesized touches; the scratchpad's, not committed): a press at the
+  default began the hold 0.505 s after touch-down and showed the lights, 0.35 s was a tap; at 0.2 s 0.205 and a 0.1 s
+  tap; at 3 s 3.008 and nothing at 2.75; main's build 1.510 and nothing at 1.3; a change while the strip showed (1.2
+  s) reached the thumbnails at once; drags to another slot at 0.5 and 0.2 s; a swipe across the strip still scrolls at
+  both; VoiceOver's swipe up and down a tenth each way, held at 0.2 and 3 s. Photos at 1000x710, 710x1000 and 500x710,
+  default and accessibility-extra-large: the bars and the panel's top main's to the pixel but one switch's knob edge
+  (9 px at Δ1), the panel above the new row within Δ1. Live against a loopback synthetic host (no screen, software
+  encoder): the row changed five times, nothing reached the host.
+- The review (2026-10-29; the report's "The review"; an earlier pass, cut off after its first two commits, then this
+  one): three findings, each reproduced on a private iPhone Duo simulator (iOS 27.1) against ae3d412's and main's
+  builds and fixed in a commit of its own. In a narrow panel the title squeezed beside the stepper (an iPad window as
+  narrow as Slide Over, 320x951, and a 320 pt iPhone, 320x693: four lines at the default size, seven at xxLarge with
+  "Win-dow" and "Con-trols"; the cover on its side at xxLarge: four); it stacks now (eb56ca7; the check's 82 and 32
+  with it). On the cover upright at xxLarge the row came to 298.333 pt in 298 (its lines rounded to the pixel at the
+  edge of fitting) and `rowFrame`'s frame, a maximum alone, passed that on: every row of the panel and its edge a
+  third of a point over, the panel's top 17,442 px from main's (accessibility frames 298.333 against 298); the row's
+  frame now takes what it is offered (3152061). A comment still said 1.5 s (661624a). Re-run on the final code: the
+  three iOS builds clean, only the known warning; `run-all.sh`, all 57 (493 s); the check 82 and 32 of 32 mutants;
+  `swift build -c release`, only the CaptureProbe warning; photos in the Duo's six poses against main's build (the
+  bars, the panel's top and the panel above the new row main's, but for Δ1–2 that retakes show as noise or as 148 px
+  at Δ1 on the halves' switch, as before), the narrow panels stacked, the row elsewhere ae3d412's to the pixel but for
+  the cover upright at xxLarge, its panel's edge main's again; the rig on every bar (sideways, the halves, a 320 pt
+  iPad window's sliver of a thumbnail, the laptop and book poses, the cover upright and on its side): the hold began
+  0.505–0.507 s into the press, 0.205 at 0.2 s, 3.009 at 3 s, main 1.505; VoiceOver's steps and ends, the stepper's
+  taps, a relaunch keeping 0.6 s, a Mac without kind 16; live through a recording relay, the row changed seven times
+  and the device sent only pings and its stats meanwhile.
+- **Untested, for Noah:** on the iPad and iPhone, a thumbnail's lights at half a second and the drag after them;
+  Settings › This iPad's stepper from 0.2 to 2 s and a hold at each end; a swipe across the strip at 0.2 s (no lights);
+  VoiceOver's reading and its swipes; the row at the largest text sizes (the panel stops at xxLarge: the title in three
+  lines beside the stepper, over it in a narrow panel, an iPad window in Slide Over or a phone with Display Zoom); Voice
+  Control, Switch Control and Full Keyboard Access on the row (one adjustable element: its − and + are no elements of
+  their own); a Magic Keyboard trackpad's or a mouse's click and hold on a thumbnail.
+
+**Pinch to zoom (2026-10-28/29, addhumal's PR #196 with maintainer edits; issue #65).** Noah's decisions of
+2026-10-19/20: pinch to zoom, not a slider; Photos-like, centred on the point between the fingers, the Mac's cursor
+not involved; a slight pinch out stays zoomed and only a pinch all the way out (or a lift within 2 % of it) gives the
+whole picture back; cap 5×. `StreamZoom` (pure, `Tests/checks/stream-zoom`, 105 checks and 30 mutants) owns the zoom
+and the two-finger stroke; InputOverlay maps every touch and scroll through it so taps, clicks, the Pencil, hover and
+scrolls land on what shows under the finger; `ZoomedStreamView` scales the picture; three fingers stay the Mac's
+gestures and undo a zoom they interrupt; a turn or another layout keeps the zoom, another source resets it; nothing
+is sent. Harness: `-SillZoom`, `-SillHitTest`, the input script's `pinch` and `touch`; the touch rig's zoom strokes
+(`RIG_ONLY=zoom`). Verified (the verdict in the handoff): the check and mutants, run-all 56, the touch rig 72 of 72
+against main, photos at 1×, 2.5×, 5× and after a full pinch out. Untested, for Noah: on the iPad and iPhone, the pinch
+following the fingers, a two-finger scroll at 1×, moving a zoomed picture, taps and the Pencil landing under the
+finger, three-finger gestures over a zoomed picture, a turn, Larger Picture, ProMotion smoothness, VoiceOver.
+**Trackpad and wheel scrolls stay under the pointer (2026-10-28, PR #217 from andrewgribben's
+`trackpad-scroll`, maintainer edits on it, main at 6c5b5d24 merged in; issue #130; the findings in
+docs/hardware-keyboard-plan.md, "#130 and PR #217").** #217 read each scroll pan's reading as that event's
+own movement on a Magic Keyboard, so that main's diff of a running total (#80) "sent almost nothing", and
+added three stats keys. Checked on a private iPad simulator (iOS 27.0) with keyrig, a probe app of pans
+side by side and Sill's own build against a loopback synthetic host with `SILL_TEST_INPUT_LOG=1`: the
+translation is a running total, as a finger's (a wheel's notches 3, 6, 9 pt), and main's build and #217's
+posted the same wheel scroll event for event. The issue's reports were of 0.5.1, whose finger pan had no
+scroll mask (a pan's default is 0, read there): no trackpad scroll reached it at all. Device only but for
+a TEST ONLY log line; no wire change.
+- What was wrong: UIKit moves a scroll pan's location on by its translation while the pointer stays put
+  (the pointer at y 308.8, the pan at 311.8, 314.8, 317.8), and InputOverlayView posted the scroll, its
+  end and its coast at that location: on the host ten notches walked from y 447 to 497 of the test
+  pattern's 949 and a phased scroll from 459 to 636, so the Mac scrolled the window under the pointer at
+  first, then whatever the point reached. `PointerScroll` (pure, in HardwareKeyboardPolicy.swift): every
+  event of a trackpad's or a wheel's scroll goes where the pointer was as it began, the pan's first
+  location less its first reading (on the host at y 442 throughout, the amounts unchanged). A finger's
+  pan is as it was.
+- Kept from #217: each reading taken and the pan's translation zeroed (the movement since the last event
+  whether UIKit adds them up or not); `PointerScroll.total` adds the readings up for the scroll path's
+  diff, so the shared path, the DEBUG input script and `scriptScroll` are main's. Gone:
+  `minimumNumberOfTouches = 0` (the trackpad's pan began without it through Universal Control on
+  2026-10-15), `in.scrollMiss` (could not count for a Sill device: both ends hold a scroll inside the
+  picture), `in.scroll0` (every coast's sub-point tail), `in.scrollY` (a sum among counts, for amounts that
+  were never lost) and `Stats.add`.
+- TEST ONLY: the input log's scroll line says where it lands ("Test input: scroll dy 6 dx 0, wheel (none)
+  at 833,442"). DEBUG: one `scroll:` console line a pointer scroll: how far, where, and how far UIKit's own
+  location for the pan had run from there ("scroll: wheel ended by 0.0,102.7 pt at 450.8,268.8; the pan's
+  own location ended 0.0,102.7 pt from it").
+- Verified: `hardware-keyboard` 62 checks (11 new) and 37 of 37 mutants (6 new); the touch rig 72 of 72
+  against main; `run-all.sh`, all 55; `swift build -c release`, only the CaptureProbe warning; the
+  iOS app Debug and Release for the simulator and Debug for a device, only the known `StreamClient`
+  capture warning. Not seen: a real trackpad's events in the continuous pan (none reached it in the
+  simulator: keyrig's mouse and its phased events go to the discrete pan, and a virtual touch pad's
+  digitizer frames came as touch events).
+- **Untested, for Noah** (the iPad with the Magic Keyboard, a Debug build from the branch): two fingers on
+  the trackpad scroll a window and the Desktop the whole way, under the pointer (a long scroll down and up
+  in Safari and in Finder's list); a flick coasts once (note a double coast: the content running on twice
+  as far, or a second stretch after the first ends); a mouse's wheel, one notch and a spin; the console's
+  `scroll:` lines say whether the pan's own location runs on there too.
+**A saved Mac gone after a force-quit (2026-10-28, PR #224 by addhumal, branch `saved-mac-persistence`,
+main at 6c5b5d24 in it; issue #140).** ZainnQureshii (iPhone 16 Pro Max, iOS 27.0.1, Sill 0.5.1 from
+the App Store, Tailscale at home and away): after pairing with the QR code and swiping Sill away, the
+Mac is absent at the next launch and the code must be scanned again each time; Sill for Mac logs a
+new `sill-pair/1` pairing at every relaunch. Device only, no wire change.
+- The cause, from the code and a model (remote-rules' `launch.swift`): the record is written at the
+  pairing (`storeSavedMacs`, before the session), and cfprefsd keeps it through a SIGKILL (a private
+  iOS 27.0 simulator against a loopback `--remote --pairing` host: kept on main, killed 0.1 s and
+  3 s after the pairing, the remote door's path and the home door's). The only launch path that
+  empties the list is `startRemote`'s clearing, run only when the Keychain says there is no device
+  key (`knownMissing`, meant for a restore from another device's backup). So on that iPhone the
+  device key, made at each pairing, was not found at the next launch (never kept, or kept and not
+  found by the tag query): each launch cleared the list, and the next pairing made a new key that
+  the Mac trusts as one more device. Not reproduced here; the Mac's log names each pairing's key
+  ("Paired ‹iPhone› (key XXXXXX…)"): a different one each time is this cause.
+- #224 as submitted: a Keychain mirror of the saved Macs and `CFPreferencesAppSynchronize` (for a
+  SIGKILL that loses the write: measured not to, it would lose the Mac once, never at every launch,
+  and the mirror cannot stop the clearing, which runs whatever the list came from; it could also
+  bring back a Mac forgotten while its write failed), `AfterFirstUnlockThisDeviceOnly` for the key
+  (a security change, not the cause), `knownMissing` reading the key first (the same query), a
+  read-back in `makeKey` (the one part aimed at the cause), and the scanned link's addresses on a
+  record paired at home. Kept, as maintainer edits: the read-back, as rules (`DeviceKeyPolicy`,
+  SavedMacs.swift, pure): a key made only when the Keychain says there is none (another failed read
+  fails that pairing or dial: before, it put a second key under the tag); a key made used only once
+  the Keychain gives back this very key under the tag (else one explicit add, else the pairing fails,
+  "This iPhone couldn’t make its key (the Keychain didn’t keep it: ‹status›).", and the key is
+  deleted again); the launch's clearing as before, through the same rules. And the link's addresses
+  and port on a record paired at the home door until a verified kind 18 (`SavedMacs.applyingLink`),
+  without #224's other change there: the ask's and the overlay's targets still never fall back to
+  the link's addresses. The mirror, the synchronize and the accessibility change are out.
+- Verified: `remote-rules` 172 (28 new: the rules case by case, a launch with each fault in turn,
+  4,000 random lives) and 88 of 88 mutants (12 new, two of them the rules before this change),
+  `home-records` 46 and 27 of 27, `home-model` 76 and 25 of 25; `run-all.sh`, all 55; iOS Debug for
+  the simulator (CI's command), Release for the simulator and Debug for a device, only the known
+  `StreamClient` capture warning; on the private simulator, this branch as main (kept after the
+  SIGKILLs; the console's "device key: made 5KVZV9…, given back by the Keychain" beside the Mac's
+  "Paired … (key 5KVZV9…)"), a home pairing killed at once keeping the link's five addresses and
+  port 47224 (main's: none, 7455), and an unsigned build's pairing ending "This iPhone couldn’t make
+  its key (the Keychain didn’t answer: -34018)." with nothing sent. The report, the drafts for the
+  reporter and addhumal and the evidence: `~/Downloads/sill-handoff/triage/2026-10-20-reports/
+  verdicts-2026-10-28/pr224-report.md`.
+- **Untested, for Noah:** on the iPad mini (iPadOS 27.0.1, the reporter's) with a Debug build of this
+  branch: once with `-SillForgetMacs 1` (the saved Macs and the device key gone; then remove it), Add a
+  Mac… and the code: the console's "device key: made XXXXXX…, given back by the Keychain" and Sill.log's
+  "Paired ‹iPad› (key XXXXXX…)" alike; swipe Sill away, open it: the Mac listed, its session without a
+  code (this is the making path, which no device here has run on 27.0.1: a key is made once). At home,
+  a tap on the row and the code, Sill swiped away at once: the Mac listed, and its Remote row dials
+  through Tailscale. With the reporter: the key names in Sill.log, and this build's word at pairing.
+
+**Tiles, Virtual Display and Send Audio on by default (2026-10-27, branch `defaults-tiles-vd` from main at
+3c257485, fast-forwarded to 3b546374 (#234) before its first commit; PR #236).** Noah, 2026-10-27:
+"make tiles not list the default behavior of the app. Also have Virtual Desktop on by default. Of
+course, if a user changes a setting remember their choice for future sessions as you do now. Make
+this a separate PR after #117 merges." Later that morning, testing #235: "Send Audio should be on
+by default, and mute should be off by default." No wire change.
+- Sill.app's Send Audio is on by default too (`HostConfig.app.sendAudio`; the CLI's `--audio` still
+  opts in; a saved `sendAudio` wins, so a Mac whose user turned it off stays off): the menu's
+  checkmark and Settings › Streaming's switch start on; README's Good to know, support.html's Sound
+  section and privacy.html say so. Mute on the device was off by default already (#235).
+- The device: the connect screen shows tiles unless its person chose the list
+  (`ConnectionList.defaultStyle`, `storedStyle`: a stored `Sill.connectionStyle`, "list" or "tiles",
+  always wins; nothing stored, or a value no build writes, reads as tiles). ConnectScreen keeps the
+  key optional (`@AppStorage … String?`), so the rule alone decides, as StreamClient's
+  `connectionStyle` already did. So a picture of each saved Mac's screen is kept by default
+  (`takesPreview`, unchanged: only with tiles), and Disconnect asks for its fresh keyframe by default
+  (300 ms at most before the connect screen with Sill for Mac 0.5.1, which skips kind 44). The switch
+  beside the title always shows, whichever style is on and whether or not a Mac is listed (Noah,
+  2026-10-27: "The list/tiles switch should always show"; #117 showed it for tiles alone, which with
+  tiles the default took it away under the finger of someone with no saved Mac who chose the list).
+  DEBUG: `-SillStyleToggleAt <s>[,<s>…]` toggles the style as
+  the switch does (`toggleStyle`); the console's `connect:` lines.
+- The Mac: Sill.app registers `HostConfig.app` (HostSettings), the CLI's `standard` with the virtual
+  display on. Registered, never written: a `virtualDisplay` key set from the menu, Settings ›
+  Virtual Display or a device always wins (a Mac that turned it off stays off; this Mac's own keys read 1 for
+  both on 2026-10-27, set by hand, so nothing changes here), and `-virtualDisplay 0` turns it off for one run. The CLI keeps `standard`: `--virtual-display`
+  opt-in, its stdout byte for byte. The menu's checkmark and the pane's switch follow `config`; no
+  pane names the default.
+- The virtual display at 1x, the caveat of that decision: not in the session of 2026-10-26/27.
+  Beside the 2560×1440 display at 1x every staged capture that night read "scale 2.0" (`filter
+  (1456.0, 1486.0)`, `(2560.0, 1486.0)`, `(2560.0, 2264.0)`); its "scale 1.0" captures were real
+  windows and the Desktop on that display (#233's case). Sill.log's 1x displays were five earlier
+  ones (2026-09-26, 09-28, 10-08 twice, 10-15), each asked with both sides under 800 points, 754×784
+  or 762×792: an iPhone held upright (its 377- or 381-point picture doubled for Aa's smallest step)
+  and the menu bar, beside the Mac's own Retina display too, so the main display's scale played no
+  part. macOS listed the 2x mode asked for, `selectRequestedMode` asked for it every half second,
+  and the display stayed at 800×832 points at 1x until the stage's 3 s wait ran out ("online 3312
+  ms"): the pick waited 3 s more, and the staged window was captured at 2x from a 1x display (eleven
+  captures `filter (800.0, 832.0) scale 1.0`). Every display with a side of 800 points or more came
+  up at 2x (754×979, 838×792, 900×800, 1000×784, 848×878 and larger). The fix, `VirtualDisplaySize`
+  (pure, in CaptureScale.swift, checked by `Tests/checks/capture-scale`): every side 800 to 4096
+  points, so an iPhone upright gets 800×830; VirtualStage's `envelope` and `ensureDisplay` use it.
+  The creation line prints the mode the display came up at (`VirtualDisplay.currentScale`; it said
+  "@2×" whatever came up), and `--virtual-display-selftest [Hz] [WxH]` makes another size.
+- Words: README (How it works: the connect screen's tiles, On iPhone, Text size and the virtual
+  display with it on by default; Good to know), site/support.html (a section, "A window left your
+  Mac’s screen", whose sentence on the default is marked `<!-- Virtual Display` for its release; "It
+  says Not paired"), site/privacy.html (the tiles' items: kept unless the list is chosen; "touch and
+  hold it"; dated October 27, 2026; the virtual display needs no word there, Accessibility "so Sill
+  can move and size the window it shows" says it already), docs/release-checklist.md (the marker,
+  its perl line and grep), docs/app-store-metadata.md (the description's "Your Mac shows up.", 3,032
+  characters; the next What's New's tiles paragraph, 232, the draft 1,805), docs/DEVELOPMENT.md, the
+  checks README.
+- Verified: `swift build -c release`, only the CaptureProbe warning; `Tests/checks/run-all.sh`, all
+  55 (562 s); mutants: connection-list 162 checks and 76 of 76, capture-scale 148 and 39 of 39,
+  away-quality 96 and 30 of 30 (after #235's merge: its acceptance mutants and the app defaults'), virtual-display-api (VirtualDisplay.swift changed) 17 of 17; H2
+  against main at 3b546374 from `git archive`, `--synthetic` on loopback (software encoder, no
+  router, no screen): idle 35 s identical masked and sorted (8 lines), with `sillclient.py PORT 8
+  desktop` identical (23 lines; a first pair differed only in which counters three stats lines
+  listed, `cursor.shape` among them); the bare SillMenuBar `--synthetic` (domain deleted before and
+  after): no key, "Virtual display: private CGVirtualDisplay API present…" and "✓ Virtual Display";
+  `-SillSetAfter '2 virtualDisplay=0'`, one "Settings: virtual display on → off" and the key 0; a
+  relaunch, off; `-virtualDisplay 1`, on for the run, the key still 0; main's binary with no key,
+  off; previews from both bare binaries at one path, 146 files each, only `menu.txt` (the
+  update-available sample's ✓ Virtual Display and ✓ Send Audio (Beta)), `pane-virtualDisplay-light.png`,
+  `-dark.png`, `pane-streaming-light.png` and `-dark.png` differ, each pane only in its switch; the iOS app
+  with Xcode 27.1 (27A9275), Debug for the generic simulator as CI builds it, Release for the
+  simulator, Debug for a device, only the known StreamClient capture warning
+  (StreamClient.swift:4110); on a private iPhone Duo simulator on iOS 27.1 (its cover display), the
+  29 connect cases at 466×678 and 951×669 against main's Debug build: this build with nothing stored
+  and main's with tiles stored, 57 of 58 pixel for pixel (the 58th the pairing case's spinner, which
+  differs from itself); this build with the list stored and main's with nothing stored, 44 of 58, the
+  rest the switch beside the title, which this build always shows (the verifier's photos of 04c9f226;
+  the author's, before 70423d1a, had the switch only with a saved Mac listed); the normal app, a fresh install against a synthetic host
+  registered as `_silltest._tcp`: tiles, toggled to the list (stored "list"), a relaunch the list,
+  toggled back (stored "tiles"), a relaunch tiles, the key read from the app's container plist
+  (`simctl spawn … defaults read <container>/Library/Preferences/me.saffer.sill.plist`; the domain by
+  name reads elsewhere); `SillHost --virtual-display-selftest 60 800x830` once, at 05:05 with this
+  Mac idle 601 s and no device connected: online at the requested mode in 446 ms, 1600×1660 px @2×,
+  a 30-point menu bar, gone 158 ms after (its HID move reset the idle time). Not run: Sill.app,
+  anything with a device, a staged window on 800×830.
+- **Untested, for Noah:** on the iPad with this build, a fresh install (Sill deleted first) shows
+  tiles; once a Mac is paired the switch beside the title shows; to the list, quit Sill from the app
+  switcher and reopen: the list; back to tiles, reopen: tiles; an install that chose the list keeps it.
+  On a Mac whose `virtualDisplay` was never set (another Mac or user account, or, with Sill quit,
+  `defaults delete me.saffer.sill.mac virtualDisplay sendAudio`; this Mac's read 1, set by hand, so it
+  is on here already): the menu shows ✓ Virtual Display and ✓ Send Audio (Beta), a device hears the
+  Mac's sound at once (beside the Mac it doubles every sound a moment late until Mute), a window
+  picked moves onto the virtual display (Sill.log "Virtual
+  display … @2× id …: created", "Moved …", "Capturing … of virtual display") and comes back at
+  Disconnect; the switch turned off stays off after a relaunch. With the iPhone 15 Pro upright and
+  the virtual display on, a pick's display is "Virtual display 800×830 pt @2×" with no "online but not
+  at" line, and the window's text crisp.
+**Send Audio and Mute in the device's Settings panel (2026-10-27, branch `sound-toggle` from main at
+b4caa91, main at 3b54637 (#117, #234) merged in, not rebased; PR #235; the bullet "Two switches" in the
+sound's entry below and docs/audio-plan.md's last section have the details).** Noah: "I've decided the
+audio setting should not be in the main button tray but instead in settings. Sound should be a toggle in
+the settings menu." Two switches in the device's Settings panel: **Send Audio** (the Mac's group, its
+"Beta" tag), which a device turns on and off for every device as it does Quality (the host accepts kind
+17's `sendAudio` again and Sill.app saves it, no picture restart; a Mac from the beta refuses it and the
+switch goes back; for a Mac without sound the row is off and disabled, "Update Sill on ‹Mac›…"), and
+**Mute** right under it (`soundMuted`, the device's own, off by default; Noah, 2026-10-27: "right below
+the Send Audio setting"), shown for every Mac with sound, Send Audio on or off. No Sound button in any bar.
+- Merged with main at 3b54637 (2026-10-27: #117, the connect screen's tiles, and #234, the capture scale
+  follow-ups; one merge commit). Only iOSClient/ContentView.swift conflicted, in SettingsScript's doc
+  comment: both kept (this branch's `set … sendAudio` and #117's `disconnect` step). CLAUDE.md,
+  Tests/checks/README.md (both sides' rows: #117's `connection-list` 154 and 72, #234's `capture-scale`,
+  this branch's `away-quality`, `ledger`, `phone-portrait` and `tour`), DEVELOPMENT.md, MockCatalog.swift
+  (#117's `tiles` connect case beside this branch's settings cases), StreamClient.swift and
+  site/privacy.html (#117's Tiles items beside the Sound item, the date October 27, 2026) merged by
+  themselves. Verified on the merge: `swift build -c release`; the iOS app, Debug for the generic
+  simulator as CI builds it, only the known `StreamClient` capture warning (StreamClient.swift:4067);
+  `run-all.sh ledger away-quality phone-portrait tour connection-list capture-scale`, all passed (100,
+  89, 484, 111,189, 154 and 122 checks).
+- **Untested, for Noah:** the bullet "Two switches"' list (Send Audio from the iPad's panel heard on
+  the iPhone too, Mute on one device, Mute before the sound is turned on elsewhere, VoiceOver on both
+  switches, this iPad against a Sill.app from the beta and against 0.5.1).
+**A Mac's row keeps its TXT record when the cable goes (2026-10-27, branch `cable-unplug-row` from main
+at 74d099c, PR #232).** Noah, on the iPad mini's connect screen with the iPad on the Mac's USB cable: the
+row read "Wired", and from the moment the cable came out "Update Sill", for good. The console (Debug):
+`discovery: Noah’s MacBook Pro: Wired, seen on anpi0 (wiredEthernet), en2 (wiredEthernet), en0 (wifi)
+(p=1)`, then `…: Wired, seen on en2 (wiredEthernet), en0 (wifi) (saved Mac H6WQ… by its name
+alone)`, then `…: Wi‑Fi, seen on en0 (wifi) (saved Mac … by its name alone)`: iPadOS listed the same
+result on the interfaces left with no TXT record at all, so `rowMac` took the row by its name alone,
+`HomeDoorTXT.door` read a plain door and `rowWord`'s no-downgrade rule said "Update Sill" for a Mac seen
+over TLS (a tap dialed nothing; by the same rules the saved Mac's Remote row came beside it). Device
+only, no wire change.
+- The rule (`DiscoveryPolicy.rowRecords`, pure, `RowRecord`, `RowRecordKey`): a row is read with its
+  result's own record (`r`, `p`), else the last one that result carried while the same browser has
+  listed it without a break; a record that comes replaces it, whatever it says; a result that leaves the
+  browser's results is forgotten (the browser's removal is the break, no timer). Kept records are keyed
+  by the browser that delivered the result and the service's name and domain, so a browser made again
+  (back from the background, after a failure: issue #69) starts afresh: its results are read with what
+  it delivers itself, and the old one's records serve only the old one's results while they are shown
+  beside it. A row never gains a door no record gave it; a tap and the reconnect dial by `homeDial` as
+  before (pinned over TLS, never plain for a Mac seen over TLS); a Mac really back on a plain door, or
+  another service under its name, reads "Update Sill" once listed afresh; a result never listed with a
+  record reads as a plain door, as before. Known: within one browser's listing, a removal it never
+  reports (a lost goodbye, a removal and a registration in one report) leaves any recordless service
+  that then answers under the name read with the old record: as the Mac its tag names, whose Remote row
+  is hidden and automatic remote dial held back while it is listed, dialed pinned (never plain), and
+  marked `newKey` by a TLS answer with another key when no other row of that Mac is listed
+  (`afterPinRefused`, as for a refused tag-named row).
+- Glue: `StreamClient.record(of:)` (nil for metadata other than `.bonjour` and for an empty record) in
+  place of `tag(of:)` and `door(of:)`; each browse result carries the number of the browser that
+  delivered it (`Listing`, `browsersMade`), `recomputeMacs` keeps one `rowRecordMemory` by
+  `RowRecordKey` and reads every row (by the result it is built from) and the `homeTLS` marking through
+  it; the DEBUG test rows (browser 0) carry a record of their own. The `discovery:` line adds "(TXT
+  record kept: this result carries none)" or "(no TXT record)", and a plain door's word, "(no p, Update
+  Sill)".
+- The review of #232 (2026-10-27, after 6eb6602; main at b4caa91 merged in by then): a kept record
+  survived a browser made again (the old results kept beside the new one's, the records keyed by name
+  alone), so a service that took M's name with no record while Sill was in the background read as M by
+  its old tag (M's Remote row hidden, its remote dial held back, a refusal of the pinned dial marking M
+  `newKey`) where main reads "Update Sill"; now keyed by browser as above. A name in two domains was one
+  record for two results; now each result has its own. The checks' two comments naming `door(of:)`.
+  Left as main has it (read from the code, not run): back from the background the automatic reconnect
+  dials at once from the old browser's last results, trusting their own records (issue #69's settle), so
+  a TLS service with another key that took M's name meanwhile can still mark M `newKey` in that moment.
+- Verified (after the review's fix; main at 3c25748 (#117) and 3b54637 (#234) then merged in, which changed
+  none of the files the four checks of DiscoveryPolicy.swift compile): `home-device` 209 checks and 131 of
+  131 mutants, `home-model` 76 and 25 of 25, `policy` 464 (`records.swift`) and 165 of 165,
+  `remote-rules` 144 and 76 of 76, one mutant run at a time; on the merged head `run-all.sh`, all 55,
+  `swift build -c release` (only the CaptureProbe warning) and the three iOS builds on Xcode 27.1 (Debug
+  for the generic simulator as CI builds it, Release for the simulator, Debug for a generic device), only
+  the known `StreamClient` capture warning. Live on private iPad mini simulators
+  (iOS 27.0, deleted after) against `SillHost --synthetic --pairing` under `_silltest._tcp` on loopback,
+  paired at the home door. The cable's shape: `dns-sd -R` of the host's name was renamed "(2)", so a bare
+  PTR record of it (a scratch `DNSServiceRegisterRecord` tool, lo0, no SRV or TXT) kept the name listed
+  once the host was killed, without a record (the simulator's browser lists a new name only once its TXT
+  record answers, and keeps a listed one whose record went): origin/main's build `(saved Mac … by its
+  name alone)`, "Update Sill", "… runs an older Sill…", the Remote row beside it, nothing dialed; this
+  branch `(p=1) (TXT record kept: this result carries none)`, the row as before, no Remote row, the
+  reconnect dialing over TLS, pinned (failing there, never plain), and once the name went and a plain
+  registration of it came (`dns-sd -i lo0 -R` to a plain host), "Update Sill", nothing dialed, before
+  and after the review's fix. The review's case: `-SillBrowserFail 1` (the network browser reported
+  failed, cancelled, made again a second later), and meanwhile the TLS host killed and its name
+  registered with no TXT record for a plain host: 5c69075e's build read it as M (`(p=1)` kept, no word,
+  no Remote row); this one `(… by its name alone) (no p, Update Sill) (no TXT record)`, "Update Sill",
+  M's Remote row, nothing dialed. Not live: a tap then (no UI input here; the checks have it).
+- **Untested, for Noah:** a Debug build on the iPad mini, Sill.app on the Mac, the connect screen with the
+  cable in, then unplugged: the `discovery:` lines keep `(p=1)` with "(TXT record kept: this result carries
+  none)", the row reads "Wi‑Fi" (no "Update Sill", no Remote row) and a tap connects; plugged in again,
+  "Wired"; the same while streaming over the cable. And a plain CLI host under the saved Mac's name: quit
+  Sill.app and run `swift run -c release SillHost` (no `--pairing`) on that Mac: the row reads "Update
+  Sill" and a tap dials nothing; the same with the switch made while Sill is in the background on the
+  iPad (the console's "browser: rebuilt the network browser (back from the background)"): back, the row
+  reads "Update Sill" with the Mac's Remote row beside it.
+
+**Capture scale follow-ups (2026-10-27, branch `capture-scale-followups` from main at b4caa910; PR #234).**
+The post-merge verification of #233 (sill-handoff's
+`triage/2026-10-20-reports/verdicts-2026-10-26/pr233-verdict.md`) left small follow-ups, all taken here.
+Host only: no wire change, no device file.
+- A window's odd side, drawn whole (`CaptureScale.windowPixels`, `windowSize`, `windowNeedsRestart`,
+  pure): on a 1x display a 1117×610-point window was asked 1116×610 (`evenPixels`, down to even), and
+  ScreenCaptureKit, which only scales a window down (`scalesToFit` left false), shrank its 1117 columns
+  into 1116: up to half a pixel of blur mid-picture, where a text stem is one pixel wide. A window
+  captured at its display's own scale is drawn 1:1 at the buffer's top-left, so an odd side now rounds
+  up to even: 1118×610, one black column past the window (Sill.log's 818×565, 728×535 and 377×235:
+  818×566, 728×536, 378×236); a half point on a 2x display the same; Standard on a 2x display (scaled
+  down anyway), the Desktop, a staged crop and the test pattern as before. Chosen over asking even
+  points in the Aa fit (`fitToViewport`), which would reach only windows Sill sizes and that take the
+  size, not one sized by hand, one with Aa unset or an app that keeps its own steps. The device draws
+  the frame aspect-fit on black (HEVCDisplayView): the column joins a letterbox beside it, or is a black
+  hairline (a frame's pixel) at the picture's right edge where the frame fills its panel; the viewport
+  it sends is the panel or the room, never the frame's shape, so nothing feeds back into a fit. A
+  device's position lands as the same fraction of the window (InputLanding), and the Mac's arrow is
+  drawn at its fraction of the frame: at most a pixel apart from the picture, at the far side, the far
+  edges still landing on the window's last pixel row and column. `select` (and the real window after a
+  failed stage) sizes a window with `windowSize`; `windowsChanged` asks `windowNeedsRestart`, the same
+  rule, so a rounded-up window never restarts at every poll (the old comparison would have: 1116 against
+  an encoder at 1118) and 1117 to 1118 points needs no restart; `catalogPolled` still compares only the
+  scale.
+- The words, true on a 1x display too (Retina and Standard capture the same there, and the software
+  encoder runs at the hardware's size): the status menu's Resolution › Standard, "On a Retina display, a
+  quarter of the pixels to encode" (it was "A quarter of the pixels; much lighter to encode"); the
+  fallback's two lines, "switching to the software encoder, capturing at 1x, until …" (CaptureScale.words
+  of the software knob; it was "at half scale"); the coordinator's comments and DEVELOPMENT.md's "restarts
+  at half resolution on the CPU".
+- Verified: `swift build -c release` from `git archive` of 70e3d171 (the code; the commits after it are
+  docs) and of main at b4caa910, only the CaptureProbe warning; `Tests/checks/capture-scale` 122 checks
+  and 30 of 30 mutants (eleven new: the window rule's ten, `evenPixels`' one; in CI's mutants matrix);
+  `Tests/checks/run-all.sh`, all 54 (473 s); H2 against main's CLI, both from `git archive`,
+  `--synthetic` on loopback (the software encoder, no router, no screen; Noah's iPad streamed from
+  Sill.app over the cable meanwhile, and nothing here touched the hardware encoder): idle 35 s identical
+  masked and sorted (8 lines), and with `sillclient.py PORT 8 desktop` every host line but the stats
+  lines, and every client line but the count of kinds received, identical masked and sorted (the test
+  pattern keeps `evenPixels`, 1512×948, and SILL_TEST_SOFTWARE_ENCODER prints no fallback line, so no
+  new words reach H2), the stats lines and the count of cursor shapes differing as main's from itself in
+  a second run (`cursor.shape` follows the Mac's own cursor; the second the client leaves in); the
+  previews from the two bare SillMenuBar binaries, run from one path: identical but menu.txt's Standard
+  line, in each of its 25 samples. Not run: any capture of this Mac's screen or windows, the hardware
+  encoder, input to this Mac, `--virtual-display-selftest`, Sill.app.
+- **Untested, for Noah** (Sill.app from this branch, release-signed with the embedded profile; the iPad,
+  the 2560×1440 display at 1x): a window with an odd width at Aa 1x (Sill.log: "Capture started: 1118×610
+  … filter (1117.0, 610.0) scale 1.0, capturing at 1x, the display's own (2x asked)") shows its text as
+  sharp as the Desktop's, with at most a black hairline at the picture's right edge; the window made a
+  point wider on the Mac (1117 to 1118): no second "Capture started"; Resolution › Standard's new line.
+
+**Capture at the display's own pixel scale (2026-10-27, branch `capture-scale` from main at
+74d099c2, main at 76bc100 (#157) and 48a4ef3 (#147) merged in; PR #233).** Noah, tonight, Sill.app from 74d099c2 on
+this Mac with its lid closed, an external 2560×1440 display at 1x as the main one and a 1920×1080 at
+1x to its left (CGDisplayBounds (-1920, 214); read, nothing captured): a window picked showed in the
+top-left quarter of the iPad's picture, black around it, Aa changing nothing, while the Desktop
+looked right; and a drag to the bottom of the Desktop's picture never brought up the auto-hidden
+Dock. Host only: no wire change, no device file, VirtualStage and VirtualDisplay untouched.
+- The cause (Sill.log): `Capture started: 5120×2880 … filter (2560.0, 1440.0) scale 1.0` for the
+  Desktop, `2234×1220 … filter (1117.0, 610.0) scale 1.0` for the window (and 4468×2440, 3024×1898,
+  2912×2140, 1960×1200 of others since 2026-10-26): the points times the Resolution knob
+  (`captureScale` 2), while ScreenCaptureKit draws a window at its display's own scale into the
+  top-left of a larger buffer, never scaling it up, and scales a display up to fill one (four times
+  the pixels: the encoder's 1–2 fps there).
+- The rule (`CaptureScale.effective(knob:displayScale:)`, pure, `Sources/SillHost/CaptureScale.swift`):
+  the lesser of the knob and the display's own scale, ScreenCaptureKit's for the filter being
+  captured (`pointPixelScale`, the capture line's "scale"; not CGDisplayMode's pixel width ÷ point
+  width: only the filter's is the scale it draws that content at, a window across two displays
+  held to the one it picks, so no rule of Sill's can disagree). On a 1x display Retina and Standard
+  both capture at 1x (2560×1440, that window 1116×610 at the merge, 1118×610 since its follow-ups (#234):
+  an odd side rounded up, drawn whole); a 2x display as before; the test pattern
+  1512×949 × the knob; a window staged on Sill's 2x virtual display at the knob. The same scale
+  sizes a window's restart on a resize, each catalog poll restarts a window that moved onto a
+  display of another scale (`catalogPolled`: the list never changes for it), the away pair goes
+  through it, and the link's suggestion and the re-check's test size follow it; `restartNeeded`
+  still compares the knob (a Resolution change on a 1x display restarts once, to the same size).
+  The line: "Capture started: 2560×1440 @60 fps, cursor out, filter (2560.0, 1440.0) scale 1.0,
+  capturing at 1x, the display's own (2x asked)".
+- The Dock (`InputLanding.point`, the same file): a device's bottom edge is y = 1 (PadCursor clamps
+  to 0…1 with 1 in; the iPad's pointer, a Pencil and a drag past the picture are held to it), which
+  InputInjector posted at `minY + 1 × height`: 1440.0 on a 1440-point display, not short of the last
+  row but the row past it (1439 is the last), off the display by CGRect's containment and by
+  PointerControl's own inside test. Where the window server puts that move, and whether the Dock's
+  trigger takes it, is not known here. Now a fraction is held to 0…1 and lands at most at
+  `maxX − 1/scale`, `maxY − 1/scale` (1439 at 1x, 981.5 at 2x, a point in for the test pattern), where
+  a pointer pinned at the edge is; elsewhere where it did. Not changed, the next suspect if the Dock
+  still does not come: Sill's moves carry no mouse deltas, and macOS moves the Dock to another
+  display only for a push against the edge (a Dock last shown on the 1920×1080 display).
+- Verified: `swift build -c release` from `git archive` of b2bb428 and of main at 76bc100, only the
+  CaptureProbe warning; `Tests/checks/capture-scale` 79 checks and 19 of 19 mutants (the first
+  commit alone 42 and 9 of 9), in CI's mutants matrix; `Tests/checks/run-all.sh`, all 53 at b2bb428
+  (454 s; 54 since the merge of 48a4ef3 brought `text-composition`: all 54 on the follow-ups' branch,
+  473 s);
+  H2 against main's CLI at 76bc100, both from `git archive`, `--synthetic` on loopback (the software
+  encoder, no router, no screen): idle 35 s identical masked and sorted (8 lines), and with
+  `sillclient.py PORT 8 desktop` identical masked and sorted but for the stats lines of the seconds
+  the client leaves in, the same kinds reaching the client (the test pattern has no capture line,
+  so no new words); a dry run of input there (SILL_TEST_INPUT_LOG, a scripted pointer, nothing
+  posted): a tap at the pattern's far corner went to 1512,949 on main, to 1511,948 here, its middle
+  (756,475) and origin as before. A second round was refused by no-device.sh (Noah's iPad connected
+  at 01:50). Not run: `--virtual-display-selftest`, which warps this Mac's cursor, posts a HID move
+  and makes a display (its sources, VirtualDisplay's and VirtualStage's are untouched); any capture
+  of this Mac's displays or windows; Sill.app.
+- **Untested, for Noah** (Sill.app from this branch, release-signed with the embedded profile; the
+  iPad): on the 2560×1440 display a window picked fills the picture (Sill.log: "…, capturing at 1x,
+  the display's own (2x asked)") and Aa still fits it; the Desktop captures at 2560×1440 and runs at
+  60 fps (`enc.out` near `cap.complete`); with the Dock auto-hidden and the Desktop streaming, a drag
+  to the picture's bottom edge (the portrait trackpad, the Magic Keyboard's trackpad) brings up the
+  Dock (if not, note which display it was last on); a window dragged between the two 1x displays
+  streams on with no restart; with Virtual Display on, a picked window still at 2x.
+- From the post-merge verification, for Noah (no code; the verdict, in the entry above): a drag-select
+  past a text window's bottom or right edge may no longer creep-scroll. A device's far edge now lands on
+  the window's last pixel row or column (InputLanding), where main's landed one pixel outside the
+  window, and AppKit autoscrolls a text view only while the pointer is outside the view: in a window
+  whose text reaches its edge, the last row is still inside it. A hypothesis, not tried: if a selection
+  dragged to the picture's edge stops scrolling the text, that is why, and a drag alone could land a
+  pixel outside again. And the Desktop reads its display's scale once, at `select` (its filter's
+  `pointPixelScale`); nothing reads it again while it streams (a window's is looked at each catalog
+  poll, `catalogPolled`), so a display misreported at the moment of a pick (the verification saw one, a
+  display going away as the lid closed) keeps that capture size until the next restart (a pick, a
+  settings change, the encoder's fallback).
+
+**Chinese input and dictation reach the Mac (2026-10-19 to 27, PR #147 from cinminori's `zhuyin-input`,
+finished on it, with main at 76bc100 in it; issue #138).** Noah: "Chinese input and dictation if polished
+then merge (detects user language set in iOS settings). Once testflight is enabled, ask users to test."
+Device only: no wire change, nothing on the Mac, no Sill setting: the keyboards and dictation languages
+set up in the device's Settings decide.
+- The PR (kept): the stream's input view (`InputOverlayView`) is a `UITextInput`, not only a
+  `UIKeyInput`, so an input method's composition (Zhuyin, Pinyin, Japanese…) stays on the device, drawn
+  at the top middle of the picture, and only what is chosen goes to the Mac as text; dictation's text and
+  its corrections go as backspaces back to the first difference, then the rest typed; while it composes
+  every key is the input method's (pressesBegan hands them all on; Esc's key commands stand down, and a
+  shortcut such as ⌘S goes to it too); spell checking and inline predictions off.
+- The triage's four changes (2026-10-19), in commits of their own: ⌃Space is iPadOS's switch only
+  with keyboards in two languages or more (`TextInputRules.isKeyboardSwitch`: Emoji and dictation aside, a
+  language counted once, judged at the press; ⌃⇧, ⌃⌥ and ⌃⌘Space always the Mac's), else the Mac's as on
+  main (the PR gave every ⌃Space to iPadOS); Scribble declined (a `UIScribbleInteraction` refusing every
+  start: the Pencil is the Mac's mouse); the dictation tail: what was typed kept whole while the text
+  system may revise it (the PR cut it to 200 characters inside every edit, unseen by the text system, so a
+  correction past 200 landed at the end and typed its words twice), trimmed past 4,000 to the last 1,000
+  between edits with the text system told, forgotten wherever the Mac's caret may move (a click or a key
+  from any view, a pick, a launch, a window's button, a menu item, a gesture:
+  `StreamClient.onCaretMayMove`, before it goes out, the pick and the rest now behind queued input,
+  `sendAfterInput`), a correction taken before a forget or a trim sending nothing (`generation`), and a
+  composition still in progress then, or when the input view resigns or leaves its window, sent first, as
+  it stands; and mutants for its check.
+- Also: Korean (2-Set selects the syllables it rebuilds and types them again: `TextComposition.selection`;
+  한글 reached a simulator Mac as 한한한글 before); VoiceOver (the input view stays no element); Writing
+  Tools, math results and grammar checking off; Debug `textinput:` lines; #110's latched-shift Return and
+  Tab behind `!composition.isComposing` (Noah's conflict comment). Docs: docs/DEVELOPMENT.md, "Other
+  languages and dictation"; README's How it works; site/support.html's paragraph inside `<!-- Other
+  languages` markers (docs/release-checklist.md part 1 §3's perl line); the next What's New
+  (docs/app-store-metadata.md); docs/hardware-keyboard-plan.md's item 11 answered.
+- The verification (2026-10-26, fix-first: sill-handoff's
+  `triage/2026-10-20-reports/verdicts-2026-10-26/pr147-verdict.md`), one commit per theme: a Return or a
+  Tab typed as text ("\n", "\r" or "\t", alone or anywhere in it: a hardware one without shift, the
+  on-screen return key, dictation's "new line") counted as the Mac's caret moving
+  (`TextInputRules.movesCaret`, `carriesReturnOrTab`): it went whole, then all of what was typed was
+  forgotten (`onCaretMayMove`, `forgetTyped`, the text system told), so a correction dictation made later
+  of the phrase before it, taken before it, sent nothing (it sent 15 backspaces and "Send the build.\n":
+  the message sent twice, the command run twice), a forget the second verification replaced with the
+  fence (below); a finger's tap or long press on the letterbox mid-composition sends nothing (its forget after the guard
+  that drops it, as touchesBegan's, where it sent the composition as it stood with no click);
+  and DEVELOPMENT.md says the keyboard's name shows over the picture at any switch while the input view
+  holds the keyboard, the on-screen keyboard's Globe key included (`inputModeChanged`), not only with a
+  hardware keyboard.
+- Verified (2026-10-26, on the tree merged with main at 36e7212): `Tests/checks/text-composition` 99
+  checks and 60 of 60 mutants (in CI's matrix; 119 and 65 of 65 since the verification's fix, above);
+  key-strokes 353; `swift build -c release`; the iOS app
+  Debug and Release for the simulator and Debug for a device, only the known StreamClient capture
+  warning; the touch rig, 72 scenarios; a private iPad simulator (iOS 27.0) against a loopback synthetic
+  host (software encoder, `SILL_TEST_INPUT_LOG`, a scripted pointer), keys from `Tests/keyrig`: Zhuyin
+  (ㄋㄧˇㄏㄠˇ, Return), Pinyin (nihao, Space), Japanese (nihonn, Return) and Korean (2-Set's g k s r m f)
+  each reached the host once (你好, 你好, 日本, 한글); a scripted tap mid-composition sent 好 first, then
+  the click; ⌃Space stayed on the device with keyboards in two languages and reached the host (key 49
+  with control) with one; letters as text, ⌘S and Esc as keys, ⌘S mid-composition nowhere;
+  `-SillInputTest 1` as before. The simulator takes a language's keyboards from `-AppleLanguages` and
+  `-AppleLocale`, not from its `AppleKeyboards` preference.
+- Verified after the verification's fixes (2026-10-26, on the tree merged with main at c215514, #159):
+  text-composition 119 checks and 65 of 65 mutants; key-strokes 353; `run-all.sh`, all 49; the iOS app
+  Debug and Release for the simulator and Debug for a device on Xcode 27.1, only the known StreamClient
+  capture warning; the touch rig 72 of 72 against main's; a private iPad simulator (iOS 27.0) against a
+  loopback synthetic host, keys from `Tests/keyrig`, the device's bytes recorded by `sillrelay.py`:
+  "send the build", Return, "ok", Backspace, ⌘S and Esc went as the 14 letters, "\n" (then "forgot the
+  15 characters typed"), "o", "k", one backspace, ⌘S's keys and Esc's; `-SillInputTest 1` as before;
+  mid-composition (Zhuyin's 你) a scripted tap on the letterbox sent nothing, one on the picture the
+  move, 你, then the click; with an uncommitted DEBUG step standing in for dictation (`insertText`,
+  then `replace` with the range it held), a correction after a hardware Return sent nothing (2dc6c75's
+  build with the same step: 15 backspaces and "Send the build.\n") and one with no Return went as before.
+- The second verification (2026-10-26, fix-first: `pr147-verdict-2.md` beside it): forgetting at a typed
+  Return was wrong for dictation's own "new line" said mid-utterance. The document empty after it, the
+  phrase's last pass through the range from where it began (offset 0, never past an empty document's
+  end, so not stale) was typed again at the caret, Return included (the Mac with the phrase twice, a
+  chat a second, garbled message), and in other models of how iPadOS sends the rest of an utterance the
+  words after the Return never arrived, or went three times (the verifier's harness, S1–S12). Now the
+  fence (`TextComposition.fence`): a Return or a Tab typed as text keeps the document and its
+  generation, goes whole, and makes what was sent up to just after its last Return or Tab final; a
+  correction whose first change falls before it sends nothing (`refusal`'s `.final`), wherever its
+  range starts, so an utterance sent again whole from its start that only adds words after the Return
+  goes; a selection wholly before it is not kept, so the next edit goes at the end ("send the bill⏎ok"
+  typed, "bill" selected, then "build": "okbuild" on the new line; select, backspace and "build", as
+  Korean rebuilds: "obuild", the backspace deleting the last character; acceptable, as no input method
+  has been seen selecting wholly before a Return: Korean's selections cross it, the person's backspace
+  selects one character); an edit's backspaces stop at it (the difference looked for after it, so a CR
+  and an LF typed later cost no backspace over the CR); the person's own backspace (text, from the
+  on-screen keyboard and from a hardware one without ⌘, ⌃ or ⌥) goes back across it and takes it back to
+  what is left, which stays final; a second Return moves it to just after itself; a forget puts it at 0
+  and a trim moves it with the text it keeps (to 0 when the cut passes it); a composition follows what
+  was sent, after it; the 4,000-character cap stays, reached across Returns now.
+  `TextInputRules.movesCaret` is false for all text again (`endOfReturnOrTab` says where the fence
+  goes); clicks, keys (⇧Return and ⇧Tab among them), picks, gestures and menu items keep the full
+  forget. Decided here: the fence goes just after the last Return or Tab, not at the end of the text
+  that brought it (the verifier's variant), as what follows the Return went where the caret went: the
+  verifier's own text with only "deploy it " corrected after is sent, and a hypothesis that revises a
+  word after the Return as it adds more keeps its new words (the harness's S13: the variant lost " it").
+  Known (the third verification, 2026-10-27: `pr147-verdict-3.md` beside it): a correction that changes
+  the line before a Return sends nothing, the words it adds after the Return with it, and dictation that
+  sends its whole utterance again with each update carries a word revised there into every later update,
+  each sending nothing too, so the rest of the utterance never reaches the Mac (the verifier's harness:
+  "send the bill", "send the bill⏎deploy", "send the build⏎deploy it", "send the build⏎deploy it now",
+  "Send the build.⏎Deploy it now." leave it "send the bill⏎deploy", " it now" never arriving, in an
+  editor too). Nothing is sent twice, and where new words come at the caret and each revision is a
+  replace of its own, every word arrives (the revision left out). The testers' "new line" step would
+  show which way iPadOS goes; a possible follow-up applies such an update's text after its k-th Return
+  or Tab (k: the Returns and Tabs in what is final) instead of refusing it whole. Docs: DEVELOPMENT.md's
+  "Other languages and dictation" (the fence, and plainly: after a click, a key or a pick a correction
+  through a range built again from offsets kept, starting where what was typed began, is typed again at
+  the caret, as before; after a Return or a Tab it sends nothing), the checks README. Found live and
+  fixed in a commit of its own: Korean's 2-Set rebuilds the character before its syllable together with
+  it, so right after a Return it selected "\nㅎ", deleted it and typed "\n" and "하" again, and with that
+  selection refused (the verifier's variant did the same: its harness's S18) the Mac got a second Return
+  at each of the first syllable's letters. A selection that reaches back across the fence from after it
+  is now kept: its deletion deletes only what follows the fence and leaves the rest in place as
+  `retype`, which the text typed next does not type again (in pieces too; text that starts otherwise
+  would change what is final, and sends nothing, so "\nㅎ" selected and deleted, then "하" typed alone,
+  loses the syllable: check J4, a nit of the third verification's, which Korean did not do live; a new
+  selection, or any other edit, ends it); text typed over it goes only while it keeps what is final; a
+  composition over it deletes only after the fence, nothing held back; one wholly before the fence is
+  still not kept (the text system selects the character a backspace deletes, so the person's backspace
+  right after a Return deletes that Return). Telling the text system at a Return (an experiment) did not
+  change what the input method selects.
+- Verified after the second verification's fix (2026-10-27, on 3187d56, the tree with main at c215514 in
+  it): text-composition 178 checks and 87 of 87 mutants (F1–F14 the fence's, J1–J8 the crossing
+  selection's; in CI's matrix); the verifier's harness, S1–S12, against its fence variant: the same output
+  in every scenario; five more (S13–S17) where the two differ only in S13 and S14 (the variant drops the
+  words a hypothesis adds as it revises one after the Return, and a correction of only the words after the
+  Return in the same text), and S18, Korean's rebuild across a Return, where the variant sends a second
+  Return at each letter and this rule none; key-strokes 353; `swift build -c release` from `git archive`
+  (only the CaptureProbe warning); the iOS app Debug and Release for the simulator and Debug for a device
+  on Xcode 27.1, only the known StreamClient capture warning; the touch rig 72 of 72 against main's
+  (74d099c); a private iPad simulator (iOS 27.0) against a loopback synthetic host (software encoder, no
+  router, no ScreenCaptureKit, `SILL_TEST_INPUT_LOG`, a scripted pointer), keys from `Tests/keyrig`, the
+  device's bytes recorded by `sillrelay.py`: with an uncommitted DEBUG step standing in for dictation
+  (`insertText`, then `replace` through the range from where the text began), "send the build", the
+  hardware Return's "\n", nothing for the phrase's correction after it, "send the build\ndeploy it "
+  whole, nothing for its whole-phrase pass, 10 backspaces and "Deploy it. " for the words after its
+  Return, "hello there" corrected as before; a b c Return d e f as letters and one "\n"; ⌘S and Esc as
+  keys; Korean 2-Set's 한글⏎한글⏎한 once (before the crossing fix 한글⏎⏎⏎한글⏎); Zhuyin's ㄋㄧˇ⏎⏎ㄋㄧˇ⏎⏎
+  as 你⏎你⏎ once; a Backspace right after a Return deleted that Return; `-SillInputTest 1` as before.
+- **Untested, for Noah and #138's testers (TestFlight):** Zhuyin and Pinyin on the on-screen keyboard and
+  on a Magic Keyboard (the candidates beside the composition), Japanese, Korean, dictation in Chinese and
+  in English with its corrections and punctuation (nothing typed twice), Return right after dictating in
+  Messages, Slack or Terminal (the line goes once), dictation with "new line" said in the middle of a
+  sentence, talking on, in TextEdit and in Messages or Slack, in English and in Chinese (every word
+  arrives once, nothing is sent twice), ⌃Space with one keyboard and
+  with two, the Globe key, Caps Lock's switch to and from ABC, a tap mid-composition, a shortcut
+  mid-composition, an Apple Pencil over the picture (no handwriting), VoiceOver.
+  If dictation corrects a word before the "new line" while you keep talking, the words after it may not
+  reach the Mac; nothing is sent twice either way. Say which words were missing and in which app.
+
+**The pairing window to screen sharing (2026-10-19, PR #157 by scripsweave, branch
+`fix/remote-desktop-qr-code` on their fork, from main at 5c323e6; issue #108, #137 closed as its
+duplicate).** The pairing window's `sharingType = .none` keeps it out of Screen Sharing, Apple
+Remote Desktop and VNC apps (Screens), so a Mac used only through them (a headless Mac mini) could
+pair a device over the USB cable alone. Noah (2026-10-19, answering the triage): the pairing code
+only, as a toggle, and no other hidden dialog shown. Sill.app only: no wire change, nothing on the
+device, the CLI untouched (`--pairing` prints its code on stdout).
+- Settings › Devices, after Require pairing: **Show the pairing window to screen sharing**
+  (`HostSettings.showPairingWindowToScreenSharing`, UserDefaults, off by default; a launch argument
+  for one run; `-SillSetAfter '<s> showPairingWindowToScreenSharing=1'` in the bare app). On, the
+  pairing window is `.readOnly` (AppKit's default) instead of `.none`, whoever opened it, the Mac's
+  user or a device's ask (`PairingWindowSharing`, pure, `Tests/checks/pairing-sharing`); applied as
+  the window is made, as each offer shows, and at once on a change to a window already made
+  (`PairDeviceWindowController.applySharing`, the app delegate's `onPairingWindowSharingChange`).
+  Footnote: "…While it’s on, anyone who can see this Mac’s screen remotely can read the code.
+  Devices streaming this Mac never show the window." Sill.log: "Pairing window: shown to screen
+  sharing (Settings › Devices); …" at each change and at launch while on, "… hidden …" when it goes
+  off. The cable notice and every other window keep AppKit's default, as on main; Sill's own streams
+  leave Sill's windows out whatever it says.
+- From the PR, kept: the switch, off by default, applied live. Changed: the name (was "Display QR
+  code on remote desktops", `displayQRCodeOnRemoteDesktops`); the rule a pure type with a check in
+  place of an XCTest target and a `swift test` CI step (both gone, with AppModel's `init(defaults:)`);
+  the footnote; the docs (README's Pairing, docs/DEVELOPMENT.md's Pairing at home, support.html's
+  "If it doesn’t work" item marked `<!-- Pairing window` for the release, the checklist's republish
+  cut, SECURITY.md's known-by-design paragraph, docs/home-pairing-plan.md's open risk).
+- Open for Noah: the 2026-10-19 triage suggested keeping a window a device's ask opened hidden; the
+  task as relayed covers both openers, since a device's tap is how a Mac seen over Screen Sharing
+  pairs. One line in `PairingWindowSharing.pairingWindow` and two of the check's cases change it.
+- Verified: `pairing-sharing` 16 checks and 8 of 8 mutants; `Tests/checks/run-all.sh`, all 45;
+  `swift build -c release` (only the CaptureProbe warning); `Scripts/make-app.sh` without `--install`;
+  the bare binary's previews against main's, both run from one path: only the Devices pane's eight
+  differ, two new (`screensharing`), `menu.txt` and the rest byte for byte; live on a test host
+  (`--synthetic`, loopback, the software encoder) with a scratch build whose pairing window was
+  transparent and click-through, opened by a test client's ask: the window server's
+  `kCGWindowSharingState`, sampled 2 s after each change, 0 with the switch off, 1 once
+  `-SillSetAfter` turned it on, 0 off, 1 on, the same open window throughout; 1 from the first look
+  with it saved on (the launch line logged) and with `-showPairingWindowToScreenSharing 1` (nothing
+  saved).
+- The verifier's findings (2026-10-20, after fa57c2f), each fixed in a commit of its own: the
+  window's `NSWindow.SharingType` for each answer (`.none` hidden, `.readOnly` shown), which no check
+  compiled, moved from PairDeviceWindowController into `PairingWindowSharing.swift` under
+  `#if canImport(AppKit)`, and the check (AppKit imported for that enum alone, no window) asserts
+  both: 18 checks, 11 of 11 mutants (new: the two cases swapped, hidden told `.readOnly`, shown told
+  `.none`); the footnote's and README's example is the Mac's ("…or another remote desktop app, as
+  you would a Mac without a display"; it read as an app without a display); docs/remote-access-plan.md
+  §6.2, the window's spec, names the switch; docs/DEVELOPMENT.md says what the switch changes, what
+  Screen Sharing, Apple Remote Desktop and VNC viewers see, and that a screen recording or a call's
+  shared screen may show the code either way (ScreenCaptureKit is reported to ignore `.none` from
+  macOS 15). Main merged in at d1fa97e (no conflict), at 4d990e9 (ci.yml's mutants matrix alone:
+  both sides kept, sorted) and at 74d099c (#94, #159, #227, #93, #151: six files, both sides kept in
+  each; #94's `sendAudio` beside this switch in HostSettings' keys and registered defaults, as Noah's
+  comment of 2026-10-19 asked of whichever landed second). Verified again on the last merge:
+  `swift build -c release` from a clean `git archive` (only the CaptureProbe warning); the iOS app
+  for the generic simulator as CI builds it (only the StreamClient capture warning);
+  `pairing-sharing` 18 checks and 11 of 11 mutants; `Tests/checks/run-all.sh`, all 52; the previews
+  against main's (74d099c), both run from one path: the Devices pane's eight differ, two new, the
+  other 136 byte for byte (`menu.txt` among them); the bare binary on loopback with
+  `-SillSetAfter '2 showPairingWindowToScreenSharing=1'`: one line for the change, the key saved;
+  live, on a trial merge of the same code, a test host as above (a scratch copy, its pairing window
+  alone transparent and click-through, opened by a test client's ask), `kCGWindowSharingState`
+  sampled every 0.1 s: 0 with the switch off, then 1, 0 and 1 within half a second of each
+  `-SillSetAfter` change, one window throughout, off screen after the Cancel; relaunched with it
+  saved on, 1 from the window's first look and the launch line once; with
+  `-showPairingWindowToScreenSharing 1`, 1 and nothing saved.
+- **Untested, for Noah:** with Sill.app from this branch, through Screen Sharing from another Mac
+  (or Screens, or Apple Remote Desktop) to a Mac: Pair iPhone or iPad… shows nothing remotely with
+  the switch off, the window and its code with it on, and flipping it with the window open shows or
+  hides it at once; a tap on the Mac's "Not paired" row on the iPad does the same; a device pairs
+  with the code read remotely. (#121's author saw `.readOnly` show the code through Screen Sharing on
+  a headless M4 Mac mini and paired with it.)
+
+**The Mac's sound on the device: the wire, the host and Sill.app (2026-09-27,
+branch `audio` from main at 643af6b with the plan merged in from `audio-plan`
+(1fb9b71, 6e852ef) and refreshed (51520dd), main at da43f6b (PR #38) merged in
+at 2b114e1, then main at 985a733 (PRs #37, #39 to #56: pairing at home, away
+from home, the iPhone Duo with the iOS 27.1 SDK, the 0.5.1 release) merged in on
+2026-10-13, then main at 5c323e6 (PRs #74, #75, #77, #78, #79, #80, #85, #98)
+merged in on 2026-10-18, never rebased; the plan, its critique, the refresh and the results
+are in `docs/audio-plan.md`; PR #94 by Code-Tomato, who finished it from 9288aa6; in, as a beta,
+since 2026-10-20: the bullet "A beta").** Noah (2026-09-27), first in what he wants
+worked on: "Audio: the plan is done and parked as a v2 feature by your earlier
+decision". So the sound is in scope now (docs/BRIEF.md, the decisions below),
+and every open question takes its default (Send Audio off by default, AAC-ELD
+at 128 kbps, per device mute, and so on). Built here: the plan's steps 1 to 7,
+the device's playout model (6878c11), its output (aefe477) and the Sound button
+and the panel's rows (5f7b1ac) after the host's. The workflow stopped there
+(9288aa6, WIP); on 2026-10-13 the device's steps were reviewed against the plan,
+fixed (5126215 to 8bbbe52, below) and verified in the simulator
+(docs/audio-plan.md, "Results: the device").
+- Wire (additive; `Audio.swift`): kind 43, host → device (29 until 2026-10-14,
+  when PR #66's 29–42 were found: docs/audio-plan.md, "Kind 43"). Type 1 is a
+  JSON `AudioFormat`: codec "aac-eld", 48 kHz stereo, 480 or 512 frames a packet,
+  the priming, the bitrate, the epoch, the cookie and what the sound is of.
+  Type 2 is `AudioPackets`: epoch, seq, the segment flag and 1–255
+  length-prefixed packets, with the header's stamp on the wall clock of the
+  first decoded sample. A host sends it only to a device whose hello lists a
+  codec it makes (`Hello.audio`; `AudioCodec.choose` takes the first of the
+  device's list). Kinds 16 and 17 gain `sendAudio` (nil from a host without
+  sound), the state gains `audioNote`, and ClientStats gains `audioBehindMs`
+  and `audioLate`. `SillProtocol` stays 1.
+- Host: Send Audio (`HostConfig.sendAudio`) is off in `standard` and, since
+  the beta, the Mac's alone (its menu and Settings, the CLI's `--audio`): a
+  device's kind 17 `sendAudio` is refused from either door (the plan's Q8).
+  Since 2026-10-27 a device's again (the bullet "Two switches").
+  It is not in `restartNeeded`, so the picture never restarts for it.
+  - `AudioPipeline` follows the source from `active`'s didSet, where the
+    pointer and the menus follow it. The same app keeps its stream through
+    every restart of the picture. Another app, the Desktop or the test tone is
+    a new stream and epoch. One that ended or failed is tried again at most
+    every 10 s. A failure prints one line and sets the note; the picture never
+    notices.
+  - `AudioCapture` is a second, audio-only SCStream per app (the Desktop: every
+    app but Sill's) at 48 kHz stereo with `excludesCurrentProcessAudio`. Its 2×2
+    picture is thrown away, start and stop are bounded to 2 s, and each
+    buffer's layout is read, never assumed. No test runs it.
+  - `SyntheticAudio` (`--synthetic`) plays the test tone: 440 Hz at −30 dBFS
+    with a 4 ms 2 kHz click at each whole second of the stamps' clock. A
+    synthetic host never captures a real window's sound.
+  - The packetizer makes blocks stamped at input frame n·F − P from each
+    chunk's anchor. A gap ends a segment, with nothing flushed or filled.
+  - The encoder is AAC-ELD at 128 kbps, AudioToolbox only.
+  - StreamServer keeps each device's codec from its hello and sends the
+    epoch's format before the epoch's first packet. The sound has a send path
+    of its own: never `inflight`, the drain eviction or the keyframes'
+    bookkeeping. Its bytes count in `pendingBytes` and, once taken, in
+    `takenThisSecond`, as every message's do since away from home (#39), so
+    each device's link judge sees them; `paceRemote` still drops only frames. It sets `lastSentAt`, so remote ticks
+    pause while it flows. A packet is skipped only past 1 s untaken at home,
+    or 15 s away (the drain backstop). The plan's 3 s skipped a fifth of the
+    sound at 4 Mbit/s with 1.5 MB keyframes, where remote pacing already held
+    the picture 5–7 s behind.
+  - Log lines and the `aud.*` stats appear only while Send Audio is on (the
+    plan's §4.10).
+- The CLI's `--audio` adds one startup line; without it the output is main's.
+- Sill.app: Send Audio in the status menu after Resolution ("The Mac keeps
+  playing it too") and in Settings › Streaming, with its footer and an orange
+  line while it fails. Also the Permissions pane's words, " · sound" on the
+  card's source row, `-SillSetAfter sendAudio=1`, and the `sound` preview.
+- The device: AudioDecoder, AudioPlayout (pure, `Tests/checks/audio-playout`),
+  AudioOutput and StreamClient+Audio, in the Xcode project as AA01–AA04; the
+  Sound button in every bar and the panel's rows (5f7b1ac; the button gone since
+  2026-10-27, the bullet "Two switches"). AudioDecoder also
+  serves the `audio-codec` check and the harness's device.
+  - The playout (§7.2): the floor, the need (the jitter cover from 40 ms at home
+    and 150 ms away, a packet, the IO buffer, the output latency), the picture's
+    lag as a guard, placement by time then packet after packet, each packet's
+    last 5 ms held for a fade, drift closed a frame a packet, jumps over 40 ms,
+    clock steps; a move's hand-over resets nothing, and its copies are dropped.
+  - AudioOutput: AVAudioEngine with a player node (no render block of Sill's),
+    `.playback` mixing with others, active only while the engine runs; the
+    engine stops on mute, in the background and at a session's end after the
+    mixer's 25 ms ramp to volume 0 (measured), and after 10 s without a packet;
+    a configuration change (an output at another rate) stops it and the next
+    packet builds one; nothing is decoded while muted, in the background or
+    refused during a call, each packet still counting for the floor and the
+    cover. Headphones out mute it and say so. The simulator renders offline
+    (manual rendering) in every build: nothing opens an output.
+  - Until 2026-10-27 (the bullet "Two switches"), the Sound button counted
+    Menus whether or not it showed: where only one fits (an iPhone SE
+    sideways, iPad windows under 532 pt upright) Menus kept its place and
+    Sound was the panel's switch alone, as in the iPhone Duo's book
+    pose and, since the beta, with Larger Picture on every phone (row 1 as
+    Noah approved it: the plan's Q10). A remote session by address takes
+    home's cover, as the Mac counts it.
+  - The review's fixes (2026-10-13): 5126215 (the configuration change, nothing
+    decoded while silent, a start's reset, unmute retrying a refused session, a
+    DEBUG leak), fca4c80 (the fades), 46cc7e4 (the console's "audio: jump -870
+    ms (off by over 40 ms)"), 8a7dc30 (by address), dd9e6fc (Sound and Menus),
+    25767ef and 720d21e (checks and harness), 8bbbe52 (the DEBUG click finder).
+- Checks:
+  - `audio-packetizer`: 89 checks, 27 of 27 mutants.
+  - `audio-codec`: 21 checks, 9 of 9 mutants. Each click lands at its whole
+    second, 0 frames off, at 480 and 512 frames a packet and across gaps. A
+    busy signal runs at 130.2 kbps.
+  - `compatibility`: 130 checks, 31 of 31 mutants. `protocol`: 218 + 8, 30 of
+    30 (on 2b114e1; on 985a733 131 and 220 + 8, 31 of 31 and 33 of 33).
+  - The kind checks say 28 gesture, 32 the clipboard (#78, since the merge with
+    main at 5c323e6), 43 audio, and 29 to 31, 33 to 42 and 44 unknown. The
+    mutants this branch added that renumber a kind use 250–254; the
+    clipboard's use 30, 31 and 33.
+  - H0 again on this Mac: ELD 480 and 512 have 240 and 256 frames of priming,
+    the same after a reset. They take 15.0 and 25.3 ms end to end. A late
+    join's fourth packet decodes exactly.
+- The harness (`Scripts/audio/run.sh`) on 2b114e1 (main at da43f6b) passed
+  every gate but H12 (what follows ran there, not on 985a733):
+  - At home: 100.02 packets a second, no seq gap, and 60 of 60 clicks within
+    1 ms of their second. The picture's net.sent, net.dropped and frame age
+    were as without sound. With 1024-frame chunks: 93.84 a second.
+  - Pauses and a source change on two devices: segments at their stamps, each
+    epoch's format first, nothing over 40 ms late.
+  - Away through 8 and 4 Mbit/s with 1.5 MB keyframes: no packet skipped while
+    frames were, and packets never later than the frames + 20 ms. In a dip to
+    0.5 Mbit/s they were late with the picture and back in the same second.
+  - Through the relay at 2 Mbit/s and +150 ms: no eviction.
+  - The pacing harness's own gate cases with sound (`Scripts/pacing/run.sh
+    --sound`) passed, with fps and drops as without. In stillend, a stream far
+    past its link, the median of each second's slowest pong was 102–700 ms
+    against 75–86 without.
+  - H7: a device turned Send Audio on and off. The first packet came 23 ms
+    after the answer, the last before the second answer, and the picture
+    never restarted.
+  - H9: main's client and StreamProtocol read or skip everything new, and
+    this branch's client gets no sound from main's host.
+  - H10: only the Streaming and Permissions panes, menu.txt and the new card
+    differ from main's previews.
+  - The iOS app builds (on 2b114e1: Debug and Release for the simulator, Debug
+    for a device) with only the known warning.
+  - H2: the CLI's stdout (digits masked) against main's, idle, picking the
+    Desktop, and with a hello that lists the codec, with and without
+    `--direct-wireless`, twice each: every run printed the same lines. 4 of the
+    12 differed only in how many once-a-second stats lines came before the host
+    was stopped. There was no `Audio` line, no `aud.` key and no kind 29 (the
+    sound's number then; 43 since 2026-10-14).
+  - H12 was not met. The harness host used +2.1 to +3.1 points of a core with
+    sound, against the plan's 1.5. AAC-ELD itself takes about 1 point on the
+    test tone (82–101 µs a packet; 53 on a busy signal), and each packet's
+    own send on loopback about 1. Codec quality Low would save 0.6 points but
+    lose 3–9 dB of SNR on tonal sound, so it was not taken; the plan's Results
+    leave it to Noah.
+- On 985a733 (2026-10-13): `swift build -c release`; `Tests/checks/run-all.sh`,
+  all 43 (`compatibility` 131, `protocol` 220 + 8); the iOS app (Debug for the
+  generic simulator) only from a scratch copy with the iOS 27.1 SDK's names
+  stubbed (Xcode 27.0 here: `DuoPostureReader` alone fails), only the known
+  warning, so a build with Xcode 27.1 (CI's) is owed, and Debug for a device;
+  the sound and pacing harnesses build, not run: the pacing harness's
+  `--sound` cases and link verdicts are owed, the sound now counting in
+  `pendingBytes` and `takenThisSecond` at home too. No mutants, H2 or
+  previews.
+- On the merge and the review's fixes (2026-10-13 and 14; docs/audio-plan.md,
+  "Results: the device"): `swift build -c release` from `git archive`; the iOS
+  app from a scratch copy with the 27.1 names stubbed, Debug and Release for the
+  simulator and Debug for a device, only the known warning (Xcode 27.1's build,
+  CI's, owed); `audio-playout` 214, `phone-portrait` 169, `tour`, `ledger`,
+  `duo`; the mutants of the 31 checks whose compiled files differ from main's,
+  925, every one caught (`audio-playout` 36, `phone-portrait` 35, `tour` 72,
+  `ledger` 12, new: it had none), then `run-all.sh`, all 43; the sound harness, every gate but H12 (now +3.9 to +4.4
+  points of a core: open question 16); the pacing harness with sound (every
+  gate but over8's "≥ its base fps", 4.8 against 4.9: the sound is 1.9 % of
+  that overfilled 8 Mbit/s link) and without it against main (every gate);
+  H2 (4 of 6 identical, the rest the stop's timing); H10 (only the sound's
+  panes, menu.txt and its two cards); S2 and S3 against `SillHost --synthetic
+  --audio` on loopback and the software encoder, the engine rendering offline
+  at volume 0 (every click within 0.2 ms of its place; mute, the switch, the
+  background, Send Audio off from a second client, a move with its duplicate
+  dropped); S1's photos of every bar against main's build.
+- The review (2026-10-14; docs/audio-plan.md, "The review"): seven verified
+  findings fixed, one commit each (e6bc0a0 to 3760b01: the hand's deadline
+  before a late packet, the engine's own wait out of the cover, the host's
+  source callbacks and AAC-ELD's failure, one session for every window's
+  engine, headphones out without an engine, a window in the background);
+  `audio-playout` 218 and 38 of 38 mutants, S2 again, `run-all.sh`, all 43.
+- Merged with main at 5c323e6 (2026-10-18; one merge commit, not a rebase;
+  docs/audio-plan.md, "Merged with main at 5c323e6"): PRs #74, #75, #77 to #80,
+  #85 and #98. Where they meet: kind 32 (#78's clipboard) beside 43, 29–31 and
+  33–42 free (#66's); `sendAudio` beside `shareClipboard` in HostConfig and the
+  CLI; with Larger Picture (#79) the Sound button joined row 1 before Settings
+  (Apps, Menus, Aa, Keyboard, Desktop, Sound, Settings) only from 384 pt
+  (`PhonePortraitLayout.row1Beside`), narrower the panel's switch alone, a
+  question for Noah (the plan's Q10; the beta took it out again: the panel's
+  switch alone there); and #75's regular-mode window that streams
+  on through three looks off the catalog's list keeps its sound (`select` keeps
+  its app, `streamedPID`, which `audioKey` falls back to; before, a follow then
+  stopped it). Verified: `swift build -c release`; the iOS app from a scratch
+  copy with the 27.1 names stubbed, Debug and Release for the generic
+  simulator, only the known `StreamClient` capture warning (Xcode 27.1's build,
+  CI's, owed); CI's CLI step; `run-all.sh`, all 47 (`compatibility` 140,
+  `pointer-control` 158, `phone-portrait` 501, `tour` 111,192, `clipboard`
+  259); the mutants of the 25 checks that compile a file both sides changed
+  (StreamProtocol's StreamMessage and Compatibility, HostConfig,
+  PhonePortraitLayout), 936, every one caught (`compatibility` 34,
+  `protocol` 34, `pointer-control` 33, `phone-portrait` 81, `tour` 84,
+  `clipboard` 72). No harness, H2 or previews.
+- **A beta (2026-10-20; Noah, about PR #94: "merge as beta support"; docs/audio-plan.md, "The
+  beta").** On the contributor's branch, one commit each, never a rebase: Send Audio the Mac's alone
+  (Q8, fdf78ff: `DeviceSettings.accepted` refuses a device's `sendAudio` from either door and names
+  it, "Settings from ‹device› refused: send audio (set on this Mac only)"; the device's row
+  read-only; `away-quality` 83 and AQ20–AQ24); the labels (e42f1a3: "Send Audio (Beta)" in the menu,
+  "Send audio (beta)" and a footnote starting "Beta." in Settings › Streaming, the CLI's "(beta)", a
+  "Beta" tag on the device's row, "Send Audio, beta" to VoiceOver; none on the Sound button or This
+  iPad's switch); no Sound button in Larger Picture's row 1 (Q10, 6effec7: row 1 as Noah approved
+  it, the panel's switch alone there; `phone-portrait` 495 and A1–A3, `tour` 111,191); the
+  pre-review's small defects (b813164 `AudioCapture`'s stream under a lock; 2e65f06 and 9104023 no
+  frame handed to the sound's queue before the session's first format, the last 32 kept for the
+  guard; 86de992 the refresh from `screenMaximumFPS`, not `UIScreen.main`; e8ab324 AudioOutput's
+  observers removed; f448c46 a freed engine gives the app's session back; 6503bc5 AAC-ELD loaded in
+  the background when Send Audio turns on); the public words (README; site/privacy.html and
+  support.html inside `<!-- Sound` markers, with their perl line in docs/release-checklist.md;
+  docs/app-store-metadata.md's next version, "beta" on the feature, never the app; the compatibility
+  floor's reader caps below). Q4 (plays on silent) and Q5 (starts unmuted) kept; Q16, codec quality
+  Medium, with H12 unmet (+4.0 points of a core in the harness, against 1.5), accepted while it is
+  off by default; packets while muted or in the background still feed the cover (§7.5, Noah's).
+  Merged with main at d1fa97e, 9a8e30c, 4d990e9 and 7b4c313 (#153, #142, #136, #110, #87, #88,
+  #151: `display-wake` counts kind 43 among the kinds that never declare, 193 checks and M61).
+  Verified (2026-10-20, this Mac at a load average of 300 to 900 from other work all along):
+  `swift build -c release` from `git archive`, only the CaptureProbe warning; the iOS app with Xcode
+  27.1, Debug and Release for the generic simulator and Debug for a generic device, only the known
+  `StreamClient` warning; `run-all.sh`, all 49; the mutants of `away-quality` (24), `audio-codec`
+  (9), `audio-packetizer` (27), `ledger` (12), `away-wire` (9), `audio-playout` (38) and `tour`
+  (84), every one caught (the last two finished on 2026-10-26, after a pause had stopped them at
+  21 and 14, none missed); H2, main's CLI and this one identical masked and sorted (idle, a Desktop
+  client, one whose hello plays sound) but for the stop's timing; H7 (a device's Send Audio refused;
+  the CLI's `--audio` tone with no seq gap and its stop; a second client's off refused while the
+  first kept its sound); the sound harness's home, home-off, home1024, segments and relay2, every
+  gate but H12 once home and segments ran again (the first round stalled by the load), H12 +4.0
+  points; H10, only the sound's panes, menu.txt and its two cards; S1 to S3 on a private iPad
+  simulator on iOS 27.0 (the 27.1 runtime here runs only the iPhone Duo): the mock's photos pixel
+  for pixel main's without sound and with Larger Picture, the Sound button where it goes, the
+  read-only Beta row; live, 35 clicks within 0.1 ms of their places, the Sound button off and on, a
+  second client's off refused while the sound played on; a move with its copies dropped, no reset or
+  jump. Again on the merge with 7b4c313 (2026-10-26): `swift build -c release` from `git archive`,
+  only the CaptureProbe warning; `run-all.sh`, all 50; `display-wake`'s mutants, 61 of 61; H2
+  against main's CLI at 7b4c313, the host's output identical masked and sorted in all three modes;
+  H7 as above (979 packets, no seq gap); the iOS app's sources and StreamProtocol 9104023's, and
+  none of the files the merge changed in the sound harness.
+- **Two switches in the device's Settings panel (2026-10-27, branch `sound-toggle` from main at
+  b4caa91, PR #235; docs/audio-plan.md, "Two switches in the device's Settings panel", and Q8 and Q10
+  revised).** Noah: "I've decided the audio setting should not be in the main button tray but instead
+  in settings. Sound should be a toggle in the settings menu." (He had asked why the iPad's row was
+  greyed out: read-only since the beta.) The host takes a device's kind 17 `sendAudio` again, on or
+  off, from either door (`DeviceSettings.accepted`; `sendAudioRefusal` gone), Sill.app saves it as a
+  menu click (`applying`, `applyingAway`), never a restart ("Settings from ‹device›: send audio off →
+  on"), and Settings › Streaming's footnote says a device can turn it on and mute itself (the Mac's
+  menu, Settings switch and `--audio` as they were). On the device, the Mac's group's **Send Audio**
+  is a switch through the ledger (the "Beta" tag kept; off and disabled with "Update Sill on ‹Mac›…"
+  for a Mac without sound; a Mac from the beta refuses it: the switch goes back with the warning
+  haptic), and **Mute**, right under it (`soundMuted`, kept, off by default), shows for every Mac with sound, on or off
+  (`macHasSound`), so a device can stay silent before any device turns the sound on. No Sound button
+  in any bar: PortraitStreamScreen.swift, PhonePortraitLayout.swift and MacMenuButton.swift, and the
+  checks `phone-portrait` and `tour`, are c215514's again. The mock's `default` is a Mac with sound,
+  Send Audio off; `nosound` is one without. Verified (on a6576808, this Mac's load 7 to 352, heavy
+  steps paused over 20): `swift build -c release` and the iOS app with Xcode 27.1 (Debug and Release
+  for the generic simulator, Debug for a generic device; and the second commit's state), only the
+  known warnings; `run-all.sh`, all 54 (`message-reader` on its own after a pause broke its timed
+  case; `away-quality` 89 and 26 of 26 mutants, `ledger` 100 and 12 of 12, `phone-portrait` 484 and 73
+  of 73, `tour` 111,189 and 84 of 84); H2 against main's CLI, idle identical masked and sorted, a
+  Desktop client and one whose hello plays sound but for a second or two of `cursor.shape`; H7, a
+  device's Send Audio on and off ("Settings from sillclient: send audio off → on", 500 packets with no
+  seq gap, "Audio stopped: Send Audio is off.", a second client's kind 16 and packets the same, no
+  restart); the bare app's previews, only Settings › Streaming's footnote; harness photos on a private
+  iPad simulator (deleted after), every bar with the Mac sending sound pixel for pixel main's with it
+  off (landscape, the iPad's portrait bar, a phone at 393 and 375 pt, the Duo's five poses), the panel
+  at 1000×710 and 710×1000 at both text sizes; live against `SillHost --synthetic`, the device's
+  switch turning the sound on and off on the host, Mute's "engine off (muted)" and "unmuted", every
+  click within 0.1 ms, and main's CLI (a beta host) refusing it, the switch back off. **Untested, for
+  Noah:** on the iPad and iPhone with this Sill.app, Send Audio from the iPad's panel (the iPhone
+  hears it too, Sill.app's menu and Settings show it, `defaults read me.saffer.sill.mac sendAudio` is
+  1), Mute on one device while the other plays, Mute before Send Audio is turned on elsewhere,
+  VoiceOver on both switches, and this iPad against a Sill.app from the beta (the switch goes back)
+  and against 0.5.1 (the row disabled, "Update Sill…").
+- **Untested, for Noah:** everything on the devices, the plan's P1–P16, which end the beta with H12
+  met or accepted (P13, Sill.app's CPU with sound on and off), P5 answered (Virtual Display, a
+  minimized app) and P6 measured (the sync, filmed). Sill.app's menu and Settings rows can be looked
+  at (previews), and `defaults read me.saffer.sill.mac sendAudio` is absent until it is first
+  set, which reads as on in Sill.app since 2026-10-27 (#236).
+
+**The Close timeout and the interrupted picture (2026-10-19 and 20, PR #93 from addhumal, finished on
+its branch `audit-fixes`, which has main at 4d990e9 in it; issue #101).** The triage of 2026-10-16 and
+2026-10-19 (sill-handoff/triage): the close half ready; the re-pick, the broken harness and the
+throttle to change. Host, device and one additive kind (44).
+- Close (the contributor's, kept): the button `kAXCloseButtonAttribute` gives is a new element on the
+  system's default timeout, pressed on the host's main actor, so an app whose close asks about unsaved
+  changes in an alert of its own, or a hung one, held input, picks and settings for every device that
+  long. It is type-checked (CFGetTypeID, then the cast, as MenuReader does) and given 1 s.
+  `WindowSizer.perform` says what came of a light (`CommandOutcome`, its words per action): "Window
+  104 close: no answer in time (the app is busy, or asking about unsaved changes); it may still act"
+  where it said "refused"; a minimize or full screen with no answer says only that the app is busy
+  and that the window may still minimize, or go in or out of full screen. The contributor's harness
+  (`Scripts/menu-check/run.sh close`, the fixture's Slow Close window) builds again (since #75
+  WindowSizer needs WindowRestore.swift), and checks the words of every action too.
+- The interrupted picture, replaced: the PR picked the source again (kind 6) every 2 s, which
+  restarted every device's stream and raised the window in regular mode, for ever if a layer kept
+  failing. Now the device asks for a keyframe: kind 44 `keyframeRequest`, device → host, empty. The
+  host answers with `HEVCEncoder.requestKeyframe` (a still window's last frame encoded again; every
+  device gets it, as when one joins), at most one a second per connection ("Keyframe for ‹device›:
+  its picture was interrupted."; the rest one line a minute), nothing while nothing streams, never a
+  restart or a raise. A host from before skips it without a line, and the picture waits for the
+  stream's next keyframe, as it did: the encoder makes one every fps × 4 encoded frames (no time
+  limit: none while the window stays still), when a device joins and when the stream restarts, never
+  because the window changed (its delta is dropped while the device waits). There was no
+  device-to-host keyframe request before: the host asked its encoder only for a joining device and a
+  dropped delta.
+- Device: HEVCDisplayView's `checkLayer` (network queue) flushes a layer that failed (`status`,
+  `error`), could not decode a frame (`failedToDecodeNotification`; one posted before the picture last
+  came back is ignored) or needs a flush to decode again (`requiresFlushToResumeDecoding`, and its
+  notification): at each frame, at each notification and when the picture's window becomes active.
+  It says so (`onNeedsKeyframe`), and a keyframe that ends the wait says the picture is back
+  (`onPictureBack`); a keyframe the flush throws away (the layer still read failed when it came) says
+  both, back first. The rule, `KeyframeRecovery` (pure, main thread): one ask per interruption while
+  its keyframe is due; an ask whose keyframe has not come within `answerWait` (max(4 s, 4 × the worst
+  round trip of the last second that measured one), the settings timeout's and the clipboard
+  receipt's measure) is owed again as a repeat, so a Mac that never answers is asked after 4, 8 and
+  16 s, then every 32 s, which costs a Mac from before kind 44 nothing; only while the picture's
+  window scene is foreground active (each Sill window has its own client) and something streams;
+  2 s apart at least; a picture that fails again within 10 s of its keyframe, Sill active throughout,
+  or an unanswered ask doubles the spacing (4, 8, 16, then 32 s); a trip away owes an ask that was
+  out again and starts the spacing at 2 s again; a keyframe that comes while Sill is away never makes
+  the next interruption a repeat; 10 s back ends a streak. The Mac sends its parameter sets before
+  every keyframe and each sample carries the format, so nothing else is sent again. DEBUG lines
+  "display: …" and "keyframe: …" ("no keyframe 4.0 s after the last ask; asked again");
+  `-SillLayerFail <s>[,<s>…]` (a frame that cannot decode, enqueued) and `-SillKeyframeLost <n>` (the
+  first n keyframes that end a wait thrown away by the flush); TEST ONLY `SILL_TEST_STILL_AFTER=<s>` (a
+  synthetic Desktop still from then on), `SILL_TEST_KEYFRAME_IGNORE=<n>` (a synthetic host ignores
+  the first n keyframe requests, as a Mac from before kind 44 ignores every one) and `sillclient.py
+  --keyframe@T`. site/privacy.html's list of what a device sends its Mac gains the request ("When the
+  picture on your device was interrupted, … a request to send the picture again."), between
+  `<!-- Keyframe` and `<!-- /Keyframe -->` for the release that ships it (docs/release-checklist.md
+  part 1 §3 has the perl line that cuts it for a republish before that release), and its date is
+  October 20. No words for the release yet (the next What's New, README, support.html): as #80's
+  did, they wait for Noah's device run of the trip to the background, the issue's own case, which no
+  simulator shows.
+- With #107 (on hold): its renderer already calls the same `onNeedsKeyframe`. It should drop its own
+  throttle (`PictureSmoothing.DecoderRecovery`) and its re-pick, and call `onPictureBack` where its
+  renderer takes a keyframe, so one rule serves both (Noah on #93, 2026-10-15: "One recovery mechanism
+  should serve all of them"). #66 compiles StreamClient.swift for its Mac client: the new UIScene and
+  UIApplication observers need its platform layer there.
+- Kind 44 is this pull request's (posted on #81, 2026-10-19: 43 is #94's sound, 44 this keyframe
+  request, 45 the Pencil's), but three open pull requests' checks still read 44 as free, and whichever
+  lands second renumbers (a check's assertion or a mutant, never kind 44): #94's `compatibility` check
+  asserts `StreamMessageKind(rawValue: 44) == nil` (its main.swift:258); #66's, #72's and #73's
+  `pointer-control` mutant "kind 26 numbered 44" renumbers onto 44 (with 44 taken that mutant no
+  longer compiles, which their mutants.py counts as not caught, so the mutants job fails: a free
+  number instead, not 45); and #94, #66 and
+  #158 each rewrite `pointer-control`'s "every other kind …" line around 44 (a textual conflict:
+  keep 44 among the known kinds). #128 (Sill Viewer for Mac, left untouched by Noah's decision of
+  2026-10-19) compiles iOSClient/StreamClient.swift with MacClient/HEVCDisplayView.swift, which has
+  no `renderQueue`, `onNeedsKeyframe`, `onPictureBack` or `checkLayer`, its PlatformShims.swift no
+  `UIScene.willDeactivateNotification`, `windowScene` or `activationState`, and its target no
+  KeyframeRecovery.swift: whichever of the two lands second gives the Mac viewer those or keeps the
+  recovery out of its build.
+- Verified (2026-10-19): `keyframe-recovery` 51 checks and 20,000 random sessions against a model of
+  the event history, 28 of 28 mutants (on the way it found a real fault: an ask held back until
+  `last + spacing` was held again at that very time by rounding); `pointer-control` takes kind 44
+  into its kind table (158 checks, its mutants again); `swift build -c release`; the iOS app for the
+  simulator (CI's command), only the known StreamClient warning; `run-all.sh`, all 45; the menu checks
+  against the fixture: reader 40, budget 4, mirror 69 (it failed 7 once while the screen was locked:
+  nothing presses a menu under the login window), close 4 (back in 1.01 s, as no answer, the close
+  delivered, the front app unchanged). Live on a private iPad simulator (iOS 27.0) against a loopback
+  synthetic host on the software encoder, its Desktop still from 3 s: `-SillLayerFail 6` gave the
+  layer's own -11821, one ask, one host line, the picture back 75 to 125 ms after, and one "Synthetic
+  capture" line (no re-pick); `-SillLayerFail 6,6.6,12` asked at once, then 4.0 to 4.2 and 8.1 to
+  8.3 s after the ask before (spacing 2, 4, 8), three host lines, twice; a trip to the background
+  (Settings for 2 s): the simulator's layer never stops, nothing asked, the picture as it was;
+  `sillclient.py --keyframe@3 --keyframe@3.2 --keyframe@3.4 --keyframe@5.5`: keyframes 50 to 60 ms
+  after the two taken, one "ignored" line, and nothing for a request while nothing streams.
+- The verifier's findings (2026-10-20, on 09549b3; each taken, one commit per theme): a keyframe
+  the layer's own flush threw away left its interruption open with its ask out for good while Sill
+  stayed active (now the picture back and lost again, and every ask has its wait); a trip to the
+  background kept a streak's spacing (24 s more of a frozen picture after the return in its probe),
+  and keyframes shown while away built one (now the trip starts the spacing at 2 s, and a keyframe
+  shown while away keeps the trip); DEVELOPMENT.md said a Mac from before kind 44 brings the picture
+  back when the window next changes (it waits for the stream's next keyframe; shown live against
+  0.5.1); the minimize and full screen words; Noah's TextEdit step and 0.5.1 step; these merge notes.
+- Verified after the fixes (2026-10-20, on the merge with main at 4d990e9, a machine shared with
+  other agents and its load average in the hundreds, so every time here is slow):
+  `keyframe-recovery` 95 checks and 20,000 random sessions against the model (never stuck while
+  open, active and streaming; a re-ask only once its last ask's keyframe was overdue; no two asks
+  less than 2 s apart, so the host's one a second never refuses a device's own ask), 39 of 39
+  mutants, three of them each finding put back (an ask out never asked again; a trip away keeping
+  the spacing; a keyframe shown while away ending the trip); `pointer-control` 158 checks and 33 of
+  33 mutants; `run-all.sh`, all 47 (main's new `virtual-display-api` among them); `swift build -c
+  release` on the merged tree, complete with no new warning; the iOS app for the simulator from
+  clean derived data (CI's command, Xcode 27.1 27A9275), only the known StreamClient warning
+  (StreamClient.swift:3819); `Scripts/menu-check/run.sh close`, 9 checks: back in 1.01 s as no
+  answer, the close delivered, every action's words, the front app unchanged. The host alone
+  (`sillclient.py`, loopback, software encoder): with `SILL_TEST_KEYFRAME_IGNORE=1`, requests at 4
+  and 6 s: the first ignored with its line, the second answered (its keyframe 0.09 s later); the
+  hook refuses `abc`, `0` and `-2` with its line. Live on a private iPad simulator (iOS 27.0)
+  against loopback synthetic hosts on the software encoder, their Desktop still from 3 s, one
+  "Synthetic capture" line a run (no re-pick): `-SillLayerFail 6`: the layer's own -11821, one ask,
+  one host line, the picture back 1.2 s after; with `SILL_TEST_KEYFRAME_IGNORE=1` on the host: the
+  first ask ignored with its line, then "keyframe: no keyframe 4.0 s after the last ask; asked the
+  Mac for a keyframe (spacing 4 s)" 4.2 s after it, the host's "Keyframe for …", the picture back
+  0.15 s later; `-SillKeyframeLost 1`: the keyframe that ended the wait thrown away ("flushed with
+  the keyframe it waited for"), the next ask 4.06 s after the first (a repeat's spacing), two host
+  lines, the picture back 0.08 s after it; `-SillLayerFail 6,9,13,21.5,37.5`: asks 4.05, 8.1 and
+  16.0 s apart (spacing 2, 4, 8, 16), the fifth interruption held 28.5 s by a 32 s spacing, then
+  Settings in front for 2 s and Sill back: asked at once ("spacing 2 s"), 21 s before the hold would
+  have let it, five host lines and one "Synthetic capture" line in all. This build against Sill for
+  Mac 0.5.1's host (`git archive v0.5.1`, its Desktop moving) with `-SillLayerFail 6`: asks at +0,
+  +4.1 and +12.3 s, no line on the host and no disconnect, its pongs and frames throughout, and the
+  picture back 15.2 s after the interruption with the stream's periodic keyframe.
+- **Untested, for Noah:** on the iPad (and the iPhone) with this build and a Sill.app from this
+  branch: a still window (TextEdit, nothing changing), Sill sent to the background for 2 s and back:
+  the console's "display: the picture was interrupted …", one "Keyframe for …" in Sill.log, the
+  picture at once, no "Capture started" and the window not raised; ten quick trips (a line each, and
+  each ask at once, never one held for 4 s or more after a trip); a video playing in Split View beside
+  Sill; two Sill windows, one swapped out and back; Close on a TextEdit window with unsaved changes:
+  its sheet on the Mac, input and picks unaffected meanwhile, and in Sill.log most likely "Window N
+  close: done" (a document's sheet returns at once; an app that asks in an alert of its own, or a
+  hung one, gives "no answer in time …" after 1 s: either is fine); this iPad against Sill for Mac
+  0.5.1: the device sends kind 44, which 0.5.1 skips with no line and no disconnect, the console's
+  asks again after 4, 8 and 16 s, then every 32 s, and the picture back only with the stream's next
+  keyframe (a still window's never, as before).
+**A sleeping display wakes for a device (2026-10-19, PR #151 from acalatrava's
+`fix/keep-display-awake`, reworked on top of its 2b8be47; issue #134).** Noah: "Modify the black
+windows pull request to implement it properly (user activity when a device connects as you said)."
+Host only: no wire change, nothing on the device, no setting. Towards #134, not Fixes: the device
+test is Noah's.
+- The rule (`DisplayWake`, pure, with StreamMessage.swift and Input.swift; `Tests/checks/display-wake`,
+  190 checks and 60 of 60 mutants, in CI's matrix): user activity is declared on the Mac as a key
+  press would declare it (`IOPMAssertionDeclareUserActivity`, `kIOPMUserActiveLocal`:
+  `DisplayActivity`, on a queue of its own) for a person at a device: its session connecting (every
+  connection), and an app opened (kind 7), input (8), a window's button (15), a menu item (25) or a
+  gesture (28), each only 5 s or more after the last declaration. Never what the device sends by
+  itself: a pick (kind 6: its own Desktop requests at a connection's start, after a capture stop and
+  once a watched window closed, and its re-pick after a move), the viewport (9), settings (17), "show
+  your pairing code" (21), a menu fetch (27), the clipboard (32), any other kind, input that does not
+  decode, nor a bare pointer move within 2 s after the host's own stream restart or new frame size
+  (`streamChanged`: a stream's first parameter sets and any that differ, the coordinator's
+  `parameterSetsSent`; the device's `pointerFrameChanged` re-centre). `handle` forwards every message
+  to the rule once (`deviceActive`), the connect from the client-connected path. Nothing is held: the
+  display sleeps again by the Mac's own setting, counted from the last declaration.
+- The lines (`DisplayWake.Report`, on DisplayActivity's queue): the main display read just before a
+  declaration and again 0.5 s later on the same queue (`secondLook`); "Woke the display for iPad
+  (iPad14,1), which connected." only when it read asleep then on, once for one wake (two connects in
+  a second share it); else "Declared activity for …, which sent input." (", but the display read
+  asleep 0.5 s later." when it did) at most once a minute, a woke line counting as that minute's;
+  `disp.wake` in the stats line. A test host (`--synthetic`, as `injector.dryRun`) declares nothing and
+  counts `disp.wakeDry`. TEST ONLY `SILL_TEST_USER_ACTIVE=remote` (every real host, Sill.app included,
+  with a "TEST:" line) declares `kIOPMUserActiveRemote` instead. docs/DEVELOPMENT.md, "A sleeping
+  display"; site/support.html, "The picture is black" (its Sill paragraph inside `<!-- Display wake`
+  markers, cut by docs/release-checklist.md part 1 §3's perl line for a republish before the release).
+- Changed from the PR as opened: its PreventUserIdleDisplaySleep assertion, held for every session
+  (the panel lit all session long, against #133's privacy mode, and at home the Mac kept from idle
+  sleep), and its single `kIOPMUserActiveRemote` declaration at the first device are gone; nothing
+  runs on test hosts; no NSLog. Its device change (the idle timer off while the stream screen shows)
+  is dropped: one window's stream screen leaving put auto-lock back while another window's session
+  went on, a window closed mid-session may never run its onDisappear, and a device kept lit beside a
+  Mac whose display now sleeps by itself shows black; it is its own decision, for its own PR.
+- The verifier's findings (2026-10-20), fixed: the support page's line; DEVELOPMENT.md's claims (counted
+  from the last declaration, the CLI's plain door, a pointer move or modifier key rather than a tap);
+  the device's own Desktop requests and re-centre no longer wake the display; which kinds count moved
+  from the coordinator's switch into the rule, checked; the woke line only once the display reads on,
+  never twice for one wake; the Untested list below.
+- Verified (2026-10-20, merged with main at 9a8e30c): `swift build -c release`, no new warning (the
+  real call never ran here); the check and its 60 mutants; `run-all.sh`, all 46; a loopback synthetic
+  host on the software encoder with two stand-in devices (a scratch client that, as
+  `pointerFrameChanged` does, moves its own pointer to the middle as a restarted stream's parameter
+  sets arrive; the software encoder's test pattern never changes size, so a restart stood in for a
+  new size): `disp.wakeDry` at both connects (1.3 s apart), a tap, a move 8 s after a restart and a
+  gesture; none for the Desktop asked for by itself (twice, each restarting the stream), the
+  stand-in's own move as the restarted stream's parameter sets arrived (6 s after the last
+  declaration), the other device's tap 1.3 s after the first's, a key 2 s after a move, or a pick of
+  nothing; no `disp.wake`, no line, `pmset -g assertions` nothing of the host's; Sill.app's previews
+  (140 files) identical to main's, rendered from one path. Again on the tree merged with main at
+  4d990e9 (#110, #87, #88; only lists conflicted, kept whole): `swift build -c release`, no warning;
+  the check (190); its mutants re-run until a pause stopped them, 54 of 60 caught and none missed (the
+  rule, its check and the two wire files are byte for byte those of the 60 of 60 run); `run-all.sh`,
+  all 47; the previews (140) identical; loopback runs with two stand-in devices and with two
+  `sillclient.py` devices: `disp.wakeDry` at both connects, a tap, a person's move 3.3 s after a
+  restart, a gesture and ⌘ alone; none for a second device's tap 2 s after the first, a pick of
+  nothing, the Desktop picked again, the device's own re-centres (5.8 to 8.2 s after the last
+  declaration), the viewport, a settings change, the clipboard, a menu fetch or input that does not
+  decode.
+- Known: a connection the device opens by itself counts as a connect (its reconnect after a dropped
+  connection, a move to the cable, to Wi-Fi or home), and so does its re-centre when it reaches the Mac
+  more than 2 s after the new stream's first parameter sets left (a slow remote link): either can wake
+  a sleeping display once with nobody at the device (docs/DEVELOPMENT.md, A sleeping display). Telling
+  them apart would need the device to say so, a wire change.
+- **Untested, for Noah,** with Sill.app from this branch (release-signed with the embedded profile):
+  `pmset displaysleepnow`, then connect the iPad at home and through Tailscale: the picture, not black
+  windows, and Sill.log's "Woke the display for …, which connected."; `pmset -g assertions` lists
+  `UserIsActive named: "Sill: a device is using this Mac"`, its timeout the display-sleep setting; with
+  the iPad left connected and untouched the display sleeps by its own setting and stays asleep (no
+  "Woke" line without a touch, also after "Capture stopped: …"), and a pointer move on the trackpad or
+  ⌘ alone on the Magic Keyboard wakes it (Shift alone goes to the device's text system and the key
+  row's modifiers only latch, so neither sends anything); a locked Mac (⌃⌘Q, the display asleep): its
+  lock screen on the iPad. Then:
+  whether `kIOPMUserActiveRemote` also wakes the panel, or keeps the picture live with the panel dark
+  (#133): quit Sill, `open --env SILL_TEST_USER_ACTIVE=remote /Applications/Sill.app` (Sill.log's
+  "TEST: user activity is declared as remote …"), `pmset displaysleepnow`, connect; Virtual Display
+  on, a window streaming from Sill's own CGVirtualDisplay with the panel asleep: whether its picture
+  needs the panel woken at all (if not, those sessions light the panel needlessly); and a laptop with
+  its lid closed on power (Sill.log's "…, but the display read asleep 0.5 s later." and no "Woke"
+  line; with an external display, that display).
+
 **The clipboard both ways (2026-10-14, branch `clipboard` from main at 985a733; issue #64; PR #78;
 the plan, its open questions with the default taken for each, the results and the review's fixes are
 in `docs/clipboard-plan.md`).** Noah: work on the clipboard (after #67/#68, #69, #59, #57, #58), text
@@ -18,10 +2106,8 @@ first. Wire, host and device; additive.
   Int as it rebases (a Bool does not decode). A device sends kind 32 only to a host that says 1 or
   more; any kind 32 subscribes, and `{}` is text alone: a host sends `image` only to a subscription
   that says it takes images (the floor; #66's host sends one to every subscriber). Text at most
-  256 KB of UTF-8, the JSON at most 1 MiB either way. Kinds 29–31 stay free (audio, #66's).
-- Rules, pure, both ends: `ClipboardPolicy` (StreamProtocol). Never sent: an item a password manager
-  or another app marks `org.nspasteboard.ConcealedType` or `org.nspasteboard.TransientType` (and
-  three older markers), one from another device through Universal Clipboard
+  256 KB of UTF-8, the JSON at most 1 MiB either way. Kinds 29–31 stay free (#66's; the sound, once planned at 29, is 43).
+- Rules, pure, both ends: `ClipboardPolicy` (StreamProtocol). Never sent: one from another device through Universal Clipboard
   (`com.apple.is-remote-clipboard`: reading it fetches it from there, found while building), the
   host's own write; types are judged before any data is read. A device's subscriptions and texts are
   rated 4 a second, its stop never (`hostReceives`).
@@ -74,7 +2160,7 @@ first. Wire, host and device; additive.
   read or written.
 - **Untested, for Noah:** on the iPad and iPhone with this Sill.app, at home and through Tailscale:
   copy in TextEdit, paste on the device; copy in Notes, back to Sill, Paste on the chip, ⌘V on the
-  Mac; a password copied in 1Password and in the Passwords app never arrives (and Sill.log has no
+  Mac; a password copied in 1Password and in the Passwords app arrives like any copy since 2026-10-29 (it never did before; Sill.log has no
   line for it); Universal Clipboard on (same Apple Account): the chip may come once for the Mac's own
   copy (known), an iPhone copy is not passed on; Settings › General's switch live; VoiceOver on the
   chip (its announcement, no time limit); Split View (the chip waits for Sill's next activation; the
@@ -83,6 +2169,49 @@ first. Wire, host and device; additive.
   orange line, Allow in System Settings…, Allow and Deny, then `defaults delete` it); Paste right
   after 10 s away from Sill ("Sent" only when ⌘V pastes it); on by default replacing a photo on the
   device's clipboard, and that clipboard empty 10 minutes later (say whether either should change).
+- **Paste right away (2026-10-29, branch `clipboard-autopaste` from main at 35a9c47, PR #242; the
+  plan's "Paste right away").** Noah, trying #241: "still doesn't automatically Cmd+V is that coming
+  later?". No wire change; the device's alone but for one change on the Mac since the review (below):
+  with Settings › This iPad's "Paste on ‹Mac› Right Away" on (under Share Clipboard;
+  `Sill.pasteRightAway`, on by default, never sent), a Paste's receipt also presses ⌘V on the Mac
+  (`ClipboardPolicy.pastesOnReceipt`: only a receipt in time, only while something streams, only while
+  the Mac's last list says it shares its clipboard, never while the tour shows; `KeyChord.paste`, ⌘'s
+  own key around V, through `sendFromKeyRow`), 50 ms after the receipt (`pasteDelay`: the host
+  writes the text on its Board queue while it echoes the ping at once; on loopback a ⌘V right behind
+  the receipt came before the write in 99 of 100 of a test client's pastes and 21 of 25 of the app's,
+  up to 14 ms early, and with 50 ms in none of 125); then "Pasted on ‹Mac›.", without ⌘V today's
+  words; the chip "Where the cursor is.". The other way stays the person's (no iOS app pastes into
+  another). Harness:
+  `-SillClipboardNote pasted`, `-Sill.pasteRightAway 0`, DEBUG `-SillPasteDelay <s>`. Verified:
+  `Tests/checks/clipboard` 285 checks and 91 of 91 mutants, `key-strokes` 359 (`KeyChord.paste` leaves
+  nothing held) and 86 of 86; `run-all.sh` all 56; the three iOS builds and `swift build -c
+  release`, only the known warnings; live on a private iPad simulator against a loopback synthetic host:
+  the write, then "key 55 flags changed (command)", "key 9 down (command)", "key 9 up (command)", "key
+  55 flags changed (none)"; the switch off, the write and no key; through a relay that stops
+  forwarding, neither and "Didn’t reach"; harness photos in
+  `~/Downloads/sill-handoff/device-tests/2026-10-29/autopaste/`; CI's Build and check passed on
+  89f2c21.
+- The review (2026-10-29, the plan's "The review"; six findings, each reproduced, then fixed in a commit
+  of its own): a Mac whose Share clipboard with devices went off while a Paste was on its way dropped
+  the text but echoed the receipt, and ⌘V pasted what it held before (a scratch host turning the
+  switch off on a signal, a relay adding 1 s): the rule takes the Mac's last list (`hostClipboard`,
+  2d9428a); the tour's hold, only in the glue and unchecked, is the rule's (`tourShows`, d435e8c); the
+  chip "Where the cursor is." ("It goes where the cursor is." was cut short on 375 and 393 pt iPhones at
+  xLarge text, 1ddadb9); under the Dvorak layout Paste presses ⌘K (V's place; the layouts' own data):
+  Known, the support page, open question 16 (3dc8596); `-SillSettingsScroll clipboard` for the Paste row
+  and footnote at 500x710 (734825d); and the Mac's one change, `HostClipboard`'s Board writes a device's
+  text before `received` returns (1d8cf03): a main actor busy as the text arrived (a host's first
+  stream start held it 70 to 150 ms) took the text and the keys back to back, and V came within half
+  a millisecond of the write's end, before it in 4 of 25, now never. Re-run: `clipboard` 285 and 91 of
+  91 at the head, 342 and 94 of 94 after; `key-strokes` 359 and 86 of 86; `run-all.sh` all 56 after;
+  the three iOS builds, `swift build -c release` (from `git archive` of the head: 46.7 s, the
+  CaptureProbe warning), the PR's live runs, the race (the app at 50 ms 0 of 25, at 0 ms 15 of 25), 11
+  of the 12 photos byte for byte; the review's photos in `review/`; CI's Build and check on 694d600.
+  **Untested, for Noah** (the plan's ten): a paste into TextEdit, Notes and a Terminal at their
+  cursor, the switch off, a paste with no text field in front, VoiceOver's words, Universal Clipboard
+  on, through Tailscale, the Settings panel's Paste row, a Paste as soon as the chip shows after Sill
+  comes back and right after a pick, a Mac with the Dvorak layout (⌘K; open question 16 is Noah's
+  call). The PR's description predates the review.
 
 **A hardware keyboard and trackpad on the device (2026-10-14, branch `hardware-keyboard` from main at
 985a733, PR #80; issues #67 and #68; the plan, its eleven open questions with the defaults taken, and the
@@ -2102,7 +4231,7 @@ display unchanged; no wire change.
   sizes on iPhone simulators); `-SillKeyboard 1` raises the keyboard for real
   in a live session; `-SillKeyboardToggle <s>[,<s>…]` toggles it as the
   Keyboard button does; `-SillDrawer`, `-SillSettings` and `-SillScaleOpen`
-  open theirs 1.5 s into a live session; `viewport: 386×241 pt, scale none,
+  open theirs 1.5 s into a live session; `viewport: 386×241 pt, scale off,
   60 fps` on the console; `-SillInputTest 1` (loopback only) runs the key
   row's and the trackpad's own code once; `-SillIdiom pad` draws an iPad
   window's arrangement on an iPhone simulator.
@@ -3571,8 +5700,8 @@ frames submitted | completed) shows neither was a wedge:
 
 What the host does now:
 - The fallback is temporary. `enterSoftwareFallback` (a hardware hang, or the
-  launch probe) says "… (busy or stuck); switching to the software encoder at
-  half scale until the hardware keeps up again (next check in 30 s)." While a
+  launch probe) says "… (busy or stuck); switching to the software encoder,
+  capturing at 1x, until the hardware keeps up again (next check in 30 s)." While a
   device is connected (an idle host opens no session; the task ends with the
   last device) `recheckLoop` tests the hardware at the size the stream would
   have on it (the running one's at full scale, else the Desktop's):
@@ -4037,8 +6166,10 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   16/17 stay compatible both ways (old device: ignores the key; old host: the
   device sees nil).
 - Host: `HostConfig.directWireless`, off in `standard` (the CLI and a fresh or
-  updated Sill.app), accepted from a device on every host, and absent from
-  `restartNeeded`: it is the listener's. `StreamServer` builds the listener
+  updated Sill.app), accepted from a device on every host (since 2026-10-29 only
+  from a paired session at home: the Current step's "Direct Wireless only from a
+  paired device"), and absent from `restartNeeded`: it is the listener's.
+  `StreamServer` builds the listener
   with `makeListener(peerToPeer:port:)`, with the setting when it is given
   before `start()`; after that `setPeerToPeer` replaces the listener live on
   its queue: cancel, wait for `.cancelled`, bind the same port at once with no
@@ -4344,8 +6475,11 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   find and connect to the Mac until pairing (M5); the host-settings plan's §9
   payload cap and a kind 17 rate limit matter more with it on. It is the first
   device-writable setting that widens who can reach the Mac, against that
-  plan's "a device sets stream quality, never network exposure": revisit it
-  with pairing. A Mac is known by its Bonjour name for a reconnect, so another
+  plan's "a device sets stream quality, never network exposure": revisited
+  with pairing on 2026-10-29 (the security scan's finding 8, PR #253): a
+  device sets it only from a session whose key is on the Mac's trust list,
+  never unpaired at an open door, at the CLI's plain door or from away. A Mac
+  is known by its Bonjour name for a reconnect, so another
   Mac of the same name running Sill on the device's network would be joined
   (pairing again; the move checks the launch ID, which a reconnect cannot, as
   the host may have relaunched). The host can print "Client left" twice for a
@@ -4496,7 +6630,9 @@ and apply live: `StreamCoordinator.setTarget` hands a new `HostConfig` to the ne
 `select`, which takes it between pipelines; a change restarts the stream once,
 or not at all when nothing running depends on it (the virtual display toggle
 restarts only a window stream, and sends a staged window home first). Virtual
-display off by default in both the CLI and the app.
+display off by default in the CLI; in the app off until 2026-10-27 and on since
+(`HostConfig.app`, registered, so a saved key still wins; Current step, "Tiles and
+Virtual Display on by default").
 - Rules. Host code is the `SillHostCore` library (folder `Sources/SillHost`),
   reached with `package` access; make it `public` only if an Xcode target ever
   needs it (M5 CloudKit). Never `MainActor.assumeIsolated` in core code: under
@@ -4568,12 +6704,16 @@ Milestone 3, scaling and the virtual display. Two paths exist; adopt the second.
   scale (`Viewport`); the host resizes the real Mac window through
   Accessibility (`WindowSizer`) to panel ÷ scale points, so text renders at
   that scale on the device. Until the slider is first touched the scale is nil
-  and the Mac window is left alone (the control shows 1×). Since 2026-10-14
+  and the Mac window is left alone (the control shows 1×; since PR #181 it
+  shows Off, a sixth detent left of 0.5×, and Off again puts a window Sill
+  sized back at once; no Off with the virtual display on; Aa dimmed unless a
+  window streams: Current step, "Aa's Off"). Since 2026-10-14
   (issue #57) the window goes back to its own frame when it stops streaming
   (`WindowRestore`; Current step, "A window Sill sized goes back"). Harness:
   `-SillScaleOpen 1` photographs the unfolded state.
 - **Virtual display (implemented 2026-09-22 behind `--virtual-display`, off by
-  default; Noah flips the default after trying it).** With the flag, SillHost
+  default; on by default in Sill.app since 2026-10-27, Noah's call, the CLI's
+  flag still opt-in).** With the flag, SillHost
   runs `NSApplication.run()` (activation policy `.prohibited`: no Dock icon,
   never activatable) instead of `dispatchMain()`, because only under the AppKit
   loop does the creating process see the display's modes. `select(.window)`
@@ -4677,7 +6817,8 @@ Milestone 3, scaling and the virtual display. Two paths exist; adopt the second.
   nil `sourceRect` (window capture on the virtual display ran at 59 fps in the
   probe).
 
-**Bar controls (2026-09-23).** Press and hold a thumbnail: macOS's three lights
+**Bar controls (2026-09-23).** Press and hold a thumbnail (0.5 s unless changed in
+Settings › This iPad, 0.2 to 2 s; issue #113, `ThumbnailHold`): macOS's three lights
 appear over it (close, minimize, full screen → `.windowCommand` = kind 15, JSON
 `WindowCommand`; the host presses the window's own buttons through
 Accessibility, using the staged element on the virtual display). Keep holding
@@ -4686,7 +6827,8 @@ Screen style; the arrangement is the device's own (`StreamClient.windowOrder`,
 persisted per Mac, host order for the rest). A "Leave" button disconnected
 (since the host settings step the last slot is Settings, with Disconnect in its
 panel's foot). The device asks for the Desktop whenever the host reports nothing
-streaming (at most every 10 s), so a fresh connection starts on the Desktop and
+streaming (at most every 10 s, and once more when those 10 s end if its own
+request brought nothing: 2026-10-28), so a fresh connection starts on the Desktop and
 the drawer no longer opens by itself. When the watched window has closed it
 waits 2 s first, and asks for nothing if the user picked or launched something
 meanwhile (the host cannot tell that request from a Desktop tap). Harness:
@@ -4794,8 +6936,9 @@ only one. Protections now in the host:
   session hung after 1.5 s and calls `onHung`. A stream whose session settles
   in the hardware's slow state gets a new session in place
   (`EncoderSlowState`; Current step, "A new session for the slow state").
-- The coordinator then restarts the source on the software encoder at half
-  scale (slow, ~10 fps under load, but live) and says so in the log; three
+- The coordinator then restarts the source on the software encoder, capturing
+  at 1x (half scale on a Retina display, the display's own on a 1x one; slow,
+  ~10 fps under load, but live) and says so in the log; three
   software hangs stop the stream instead of looping. Since 2026-09-25 that
   lasts only until a re-check finds the hardware keeping up (Current step,
   "The hardware encoder: busy, not stuck"); before, it lasted until the host
@@ -4897,7 +7040,17 @@ good.
   message kinds in both directions, HEVC parameter set encoding. Shared by both
   sides. Change it in one place. `Switcher.swift` — the catalog types
   (`WindowList`, with the host's per-launch `launchID`; `WindowInfo`,
-  `AppInfo`, `StreamSource`) and image blob framing.
+  `AppInfo`, `StreamSource`) and image blob framing. `Viewport.swift` —
+  `Viewport` (kind 9: the device's panel, Aa's scale and its rate),
+  `ClientStats` (with `lateSince`, a host's count of a device's late sound
+  packets, which never traps), `CursorShapeBlob`, and `ViewportBounds` (what a
+  host takes of a viewport: each side 1 to 16384 points, a scale 0.25 to 4 or
+  none, any other refused; what a device sends, `held`; and `whole`, a number
+  for a log line as Int() printed it, without its trap; pure,
+  `Tests/checks/viewport-bounds`).
+  (`WindowList`, with the host's per-launch `launchID` and what it takes and does:
+  `gestures`, `clipboard`, `keyRepeat`; `WindowInfo`, `AppInfo`, `StreamSource`) and
+  image blob framing.
   `HostSettings.swift` — the host settings a device sees and changes (kinds 16
   and 17): `StreamSettings`, `RunningStream`, `HostSettingsState`,
   `HostSettingsChange`, `SettingsChoices` (the Mac menu's values) and
@@ -4932,7 +7085,21 @@ good.
   which change of the Mac's pasteboard the host sends and to whom, and only
   while macOS allows every read (`MacAccess`); the device's subscription,
   which text from the Mac it writes, a Paste's receipt, the chip and its time,
-  every word; pure, `Tests/checks/clipboard`).
+  every word; pure, `Tests/checks/clipboard`). `Audio.swift` — the Mac's sound
+  (kind 43, host → device; 29 to 31 and 33 to 42 are PR #66's):
+  `AudioMessage`, type 1 a JSON `AudioFormat` (codec, rate, channels, packet
+  size, priming, bitrate, epoch, cookie, what it is of), type 2 binary
+  `AudioPackets` (epoch, seq, the segment flag, 1–255 packets); `AudioCodec`
+  ("aac-eld", and `choose`: the first of a device's `Hello.audio` the host
+  makes); only to a device whose hello lists one. `ScrollDirection.swift` —
+  which way a scroll on the device moves the Mac's content: the device's
+  Reverse Scrolling (issue #143, `Sill.reverseScroll`, never sent) turns a
+  finger's drag over the picture and two fingers on the on-screen trackpad
+  around, their coast too, never a connected trackpad's or mouse's scroll
+  events (iPadOS's own Natural Scrolling set those); pure,
+  `Tests/checks/protocol`. Kind 44, `keyframeRequest` (device → host, no
+  payload: this device's picture was interrupted and waits for a keyframe;
+  issue #101), has no type of its own.
 - `Sources/SillHost/` — the `SillHostCore` library. `StreamCoordinator` (main
   actor; owns the pipeline, switches sources on client request, raises the
   picked window in regular mode (never on the virtual display), applies
@@ -4945,13 +7112,16 @@ good.
   from near the Mac, Direct Wireless never from away), sends kind 18 with the
   catalog, says goodbye (kind 22) at quit, sends the streamed app's menus to
   the devices that ask (`MenuMirror`; a window source's app made active and
-  its window key first, as a click does: `focusForMenus`), and writes
-  `HostStatus`),
+  its window key first, as a click does: `focusForMenus`), answers a device's
+  keyframe request (kind 44) with `HEVCEncoder.requestKeyframe`, at most one a
+  second per connection, never a restart (a synthetic host ignores the first n
+  with the TEST ONLY SILL_TEST_KEYFRAME_IGNORE=<n>, as a Mac from before kind 44
+  ignores every one), and writes `HostStatus`),
   `HostConfig` (the knobs: maxFPS, captureScale, bitrate per 60 fps, the
   away pair awayBitrate and awayCaptureScale, prioritizeSpeed, virtualDisplay,
   directWireless, remoteAccess, remotePort, internetAccess, requirePairing,
-  shareClipboard; `standard` is the CLI's values and the app's defaults;
-  `effective(away:)`), `HostClipboard` (the clipboard's host side: who
+  sendAudio, shareClipboard; `standard` is the CLI's values, `app` Sill.app's
+  defaults, the same with the virtual display and Send Audio on (2026-10-27); `effective(away:)`), `HostClipboard` (the clipboard's host side: who
   subscribed, the look at the pasteboard's change count four times a second
   while one has and macOS allows every read, a device's text written
   `.currentHostOnly` with this launch's marker and passed to the others, one
@@ -4965,14 +7135,43 @@ good.
   rate, the suggestion, the host's lines, and which restarts judge afresh
   (`judgedAfresh`); pure, `Tests/checks/link-judge`),
   `HostStatus` (the snapshot the app shows, pushed on events; `onChange`
-  publishes the devices' settings state), `DeviceSettings` (what a device may
+  publishes the devices' settings state; `firewall`, the macOS firewall's
+  verdict), `FirewallRule` (what the macOS firewall's read-only answers mean
+  for this host: a rule that blocks the running executable or its bundle, or
+  Block all incoming connections, keeps devices out; Settings › General's
+  line with the Terminal command that unblocks it, the menu's subtitle, the
+  log's lines; the TEST ONLY SILL_TEST_FIREWALL's canned answers; pure,
+  `Tests/checks/firewall`) and `FirewallCheck` (asks `socketfilterfw` five
+  read-only questions, a process each, no privileges: at launch, when the
+  listener comes up, when Sill.app's status menu or General opens, when a
+  device gets in while the verdict says none can), `DeviceSettings` (what a device may
   set, `HostConfig` ↔ wire), `HostLog` (the print shadow, the app's ring and
   log file),
   `WindowCatalog` (polls windows and thumbnails only while a client is
-  connected; icons; installed apps in the background),
-  `WindowCapture` (ScreenCaptureKit), `SyntheticCapture` (test pattern for
+  connected; icons; installed apps in the background; when its last look
+  landed, `lookAge`), `CatalogLook` (whether a capture may be built from that
+  look or the catalog looks again first: its display no longer active, none, no
+  look, or older than two polls; the Desktop's lines and its one more try's;
+  pure, `Tests/checks/catalog-look`; the black screen of 2026-10-28), `InstalledApps`
+  (where those are found: each applications folder and the folders inside it,
+  at any depth (#135's), never inside a bundle, another package or a
+  framework, and never through a link inside a scanned folder (one given that
+  is itself a link is followed), #76; pure, `Tests/checks/installed-apps`),
+  `WindowCapture` (ScreenCaptureKit; its line names the scale it captures at),
+  `CaptureScale` (the pixel scale a capture runs at: the Resolution knob held to
+  the display's own, ScreenCaptureKit's `pointPixelScale` for the filter, so a
+  window on a 1x display fills its picture and nothing is upscaled; and
+  `InputLanding`, where a device's position lands on the Mac: at most the
+  source's last pixel row and column at its display's scale; and
+  `VirtualDisplaySize`, the size of Sill's virtual display, no side under 800
+  points, which macOS kept at 2x (an iPhone's 754×784 came up at 1x), and of
+  the window on it, 1 to 65536 points a side, the most a host takes, so a
+  full-screen window's crop keeps the panel's shape (`windowSize`); pure,
+  `Tests/checks/capture-scale`), `SyntheticCapture` (test pattern for
   `--synthetic`; SILL_TEST_PATTERN=noise adds a square of noise,
-  SILL_TEST_PATTERN=picture:<path> shows a still picture instead), `HEVCEncoder` (VideoToolbox with one frame inside, a
+  SILL_TEST_PATTERN=picture:<path> shows a still picture instead,
+  SILL_TEST_STILL_AFTER=<s> sends no frame from s seconds on, as a window that
+  stopped changing), `HEVCEncoder` (VideoToolbox with one frame inside, a
   one-slot mailbox behind it and a hang watchdog; hardware or software; says
   whether a stalled frame came back; gives a stream whose session settled in
   the slow state a new one), `EncoderSlowState` (when that is, and whether the
@@ -4990,7 +7189,9 @@ good.
   (`paceRemote`, docs/remote-bundle-plan.md §3); one sweep a second closing
   every client's second into its LinkJudge (`onClientLinkChanged`), the judges
   reset only at another quality (`resetLinks`, apart from `resetForNewStream`);
-  `send(each:)`, kind 16 per connection; the test-only
+  `send(each:)`, kind 16 per connection; a session `closeSessions` cuts off
+  marked revoked as it is told goodbye, its receive loop then handing on only a
+  key's or a button's up (`onClientRevoked`, RevokedInput); the test-only
   SILL_TEST_REMOTE_ORIGIN;
   the listener built with or without peer-to-peer and replaced live when Direct
   Wireless changes, and turned off, the devices on peer-to-peer Wi-Fi
@@ -4999,26 +7200,53 @@ good.
   (which route a client came by, from its endpoint's scope, and the menu card's
   word for it: Wired, Wi-Fi, Direct or none; pure, checked on its own with
   `swiftc -package-name sill`, which its `package` access needs),
-  `InputInjector` (CGEvents: pointer, scroll with phases, text with modifier
+  `InputInjector` (CGEvents: pointer and scroll where InputLanding lands them, scroll with phases, text with modifier
   flags cleared explicitly (a ⌘Space before typing otherwise tainted the text
   events and Spotlight ignored them), HID keys as KeyStrokes gives them, each
+  device's keys let go when it leaves (and a cut-off device's buttons) and every
+  key and button at the host's end, the check after each key's up, a button's
+  up with nowhere to land where the pointer is; the TEST ONLY input log),
+  `KeyStrokes` (a device's key as the
   device's keys let go when it leaves and every key and button at the host's
   end, the check after each key's up, a button's up with nowhere to land where
-  the pointer is; the TEST ONLY input log), `KeyStrokes` (a device's key as the
+  the pointer is; a held key's repeats, as KeyRepeat steps them (a Task on the
+  main actor), each a key down with the autorepeat flag; the TEST ONLY input
+  log), `KeyRepeat` (a device's key held down repeated as the Mac's own keyboard
+  repeats a key, #162: after NSEvent's keyRepeatDelay, at its keyRepeatInterval,
+  every key but the modifiers, Caps Lock, fn and the media keys, the last key
+  pressed alone, the flags in force at each repeat, stopped at its up, another
+  key, text, a gesture's shortcut, the device leaving, the host's end and input
+  with nowhere to land, waiting while input is held for an activation and while
+  the device is quiet half a second (StreamServer.lastHeard), its first repeat
+  only once the device is heard no earlier than `firstWord` (0.3 s) before it
+  (a key only tapped whose up a stall holds back never repeats); `generation`, said
+  in every window list as `keyRepeat`, so a device sends a hardware keyboard's
+  characters as keys; pure, `Tests/checks/key-repeat`), `KeyStrokes` (a device's key as the
   Mac's: its virtual key, and the flags each event carries from the modifier
   keys the devices hold down, so a key's up leaves only what is held;
   `KeyUpCheck`, whether an up took its modifiers out of the HID state table;
-  `DroppedInput`, what of input with nowhere to land still goes; pure,
+  `DroppedInput`, what of input with nowhere to land still goes;
+  `RevokedInput`, what still goes of a device the Mac no longer serves, or of
+  one that left while its input was held: the up of what it holds down, and
+  the buttons a cut-off device holds as it leaves (`buttonsLetGo`); pure,
   `Tests/checks/key-strokes`),
   `WindowSizer` (Accessibility resize for the Aa scale, returning what it did,
   `Fit`; `placement/move/restore` for the virtual display; `AXWindows`,
-  WindowRestore's reads and writes through Accessibility), `WindowRestore` (a
+  WindowRestore's reads and writes through Accessibility; `perform`, a window's
+  lights (kind 15), each element with a timeout, Close's button 1 s, and what
+  came of it, `CommandOutcome`: done, refused or no answer in time, its words
+  per action), `WindowRestore` (a
   window Sill sized for a device goes back when it stops streaming: each fit's
   record and `movedSince`, the decision at the stop, the sequences that fit a
   window and put it back over `WindowRestore.Access` (`fit`, `stop`,
   `stageHome`), `keepsStreaming` and `coversDisplay` for a window off the list
   on its way into or out of full screen, the ledger, the lines; pure,
-  `Tests/checks/window-restore`), `VirtualDisplay` (private-API wrapper),
+  `Tests/checks/window-restore`), `VirtualDisplay` (private-API wrapper; its
+  `TypeEncoding` says which type encodings the runtime may report for each method
+  it calls, a `BOOL` return spelled "B" or "c" (#87, #62); pure,
+  `Tests/checks/virtual-display-api`, which also runs `Runtime.method`'s decision
+  and the `applySettings:` call, through `methodProblem` and `applySettings(_:to:)`,
+  on classes it makes at run time),
   `VirtualStage` (`--virtual-display`: owns the display and the moved window,
   geometry, prepare/release, emergency restore), `HostShutdown` (signal
   sources + atexit, installed only with the flag in the CLI, always in the app;
@@ -5037,11 +7265,24 @@ good.
   `RemoteAccess` (main actor; ties them together, signs kind 18; owns
   pairing for both doors: the ask, the cable's devices, Require pairing,
   Remove at both doors). Pairing at home (docs/home-pairing-plan.md): `Door`
+  (admission at a TLS door, one class behind both listeners: the places
+  waiting for admission and their deadlines, the backoff and its line, the
+  verify block, the device gate, one pairing request per `sill-pair/1`
+  connection; `RemoteServer` keeps the remote door's listener), `DoorPolicy`
+  (who each door admits, the ask rule's six steps, `afterGate`,
+  `isTestHost`: a host that does not advertise and is not Sill.app's own
+  executable; `Places`, what waiting for admission costs an address and its
+  IPv6 /64, and the places kept for addresses that proved a paired key; pure,
+  `Tests/checks/door-policy`), `CableLink`
+  Remove at both doors; names the sessions each cut-off closes to the
+  coordinator as it decides, `onCutOff`, and says whether a session that
+  registers later is still served, `stillServes`). Pairing at home (docs/home-pairing-plan.md): `Door`
   (admission at a TLS door, one class behind both listeners: the pending
   caps, the backoff, the verify block, the device gate, one pairing request
   per `sill-pair/1` connection; `RemoteServer` keeps the remote door's
   listener), `DoorPolicy` (who each door admits, the ask rule's six steps,
-  `afterGate`, `isTestHost`: a host that does not advertise and is not
+  `afterGate`, `stillServes` (a session registered behind a change that cut
+  it off), `isTestHost`: a host that does not advertise and is not
   Sill.app's own executable; pure, `Tests/checks/door-policy`), `CableLink`
   (whether a connection came over the USB cable to an iPhone or iPad, from
   InterfaceSnapshot's IOKit reading, and the device's ID; pure,
@@ -5049,7 +7290,7 @@ good.
   (an unlocked console), `TestHooks` (the door and pairing hooks a host that
   is not a test host ignores, one line each), `AskLimits` (PairingWindow.swift:
   one device-opened window at a time, three in 10 minutes, the quiet after
-  the Mac's Cancel or a stop; `Tests/checks/ask-limits`) and
+  the Mac's Cancel or a stop, an IPv6 asker's by its /64; `Tests/checks/ask-limits`) and
   `RequirePairingValue` (HostIdentity.swift: Require pairing's record, off
   only with the Mac's own signature). StreamServer's home door is plain (the
   CLI without --pairing), TLS (`Door(.home)`, `p` in its TXT record) or
@@ -5072,7 +7313,8 @@ good.
   per element, 1.5 s a menu, and no item begun that would end past the
   request's deadline), `MenuMirror` (main actor: the target, the version, the
   subscribers (only they are served), one request at a time with its
-  deadline, the cache and the kept elements; the TEST ONLY
+  deadline, the cache and the kept elements; a cut-off device's waiting
+  requests neither read nor made, `clientRevoked`; the TEST ONLY
   SILL_TEST_MENU_PID, honoured only by a synthetic host, makes a process's
   menus the test pattern's) and `MenuSelfTest` (`--menu-selftest[=APP]`,
   read-only).
@@ -5098,13 +7340,50 @@ good.
   `InputInjector.chord` posts it (`in.gesture`), its key up with the HID
   state table's flags from before it (`KeyStrokes.chord`;
   `in.gestureModifiersLeft` if some stay).
+  The Mac's sound (docs/audio-plan.md; a beta since 2026-10-20): `AudioPipeline` (the source it follows
+  from `active`'s didSet, one transition at a time; on `sill.audio` the
+  packetizer, the encoder, the epochs and the stamps; the status and kind 16's
+  note; `prepare`, AAC-ELD's codec loaded once off `sill.audio` when Send Audio
+  is on), `AudioCapture` (ScreenCaptureKit's audio-only stream of one app, or of
+  every app but Sill's, bounded start and stop, the running stream under a
+  lock; never run by a test),
+  `SyntheticAudio` (a synthetic host's test tone; the TEST ONLY
+  `SILL_TEST_AUDIO_CHUNK` and `SILL_TEST_AUDIO_PAUSE`), `TestTone` (440 Hz and a
+  click at each whole second of the stamps' clock; pure), `AudioPacketizer`
+  (blocks, stamps and segments, `AudioSourceRule`, `PCMLayout`,
+  `AudioBufferTally`; pure, `Tests/checks/audio-packetizer`) and `AudioEncoder`
+  (AAC-ELD, AudioToolbox only; `Tests/checks/audio-codec`). StreamServer sends
+  kind 43 to the devices that play it on a send path of its own
+  (`broadcastAudio`: never `inflight`; its bytes in every client's `pendingBytes`
+  and `takenThisSecond`, so each device's LinkJudge sees them; `paceRemote`
+  drops only frames).
+  A sleeping display (issue #134): `DisplayWake` (which of a device's messages
+  are a person at it, so the host declares user activity on the Mac for it, as
+  a key press would: a session's connect every time, kinds 7, 8, 15, 25 and 28
+  only 5 s or more after the last declaration, never a pick or any other kind,
+  nor a bare pointer move within 2 s after the host's own stream restart or new
+  frame size (`streamChanged`); a test host counts `disp.wakeDry` instead; what
+  DisplayActivity says, `Report`: "Woke the display for …" only when the
+  display read asleep before and on 0.5 s after, once for one wake, else
+  "Declared activity for …" once a minute at most, and the refusal's, once; the
+  TEST ONLY `SILL_TEST_USER_ACTIVE`; pure, with StreamMessage.swift and
+  Input.swift, `Tests/checks/display-wake`) and `DisplayActivity`
+  (IOPMAssertionDeclareUserActivity with kIOPMUserActiveLocal, or Remote under
+  the TEST ONLY switch, on its own queue, the main display's sleep state read
+  just before it and 0.5 s after, `disp.wake`; nothing held: the display sleeps
+  again by the Mac's own setting); the coordinator's `handle` forwards every
+  message to the rule (`deviceActive`), and `parameterSetsSent` its stream
+  changes.
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint; `--pairing` (the home
   door's TLS with pairing required, a throwaway identity, the code and link
   on its own stdout), `--print-cable` and `--no-clipboard`.
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
   policy), `AppDelegate` (launch order, Quit, the modal-loop rule), `AppModel`
-  (owns the coordinator, presentation, App Nap guard, onboarding),
+  (owns the coordinator, presentation, App Nap guard, onboarding), `AppIdentity`
+  (whether this launch is Sill.app itself, by its signing identifier, signature and bundle
+  wherever it runs from, or the bare binary, the one test host; pure but for its reader,
+  `Tests/checks/test-host`),
   `HostSettings` (UserDefaults; the presets are StreamProtocol's
   `QualityPreset`), `StatusItemController` (+ `MenuBuilder`), `StatusText`
   (all status copy), `StatusCard`, `StatusGlyph`, `SettingsWindow` (its
@@ -5113,10 +7392,14 @@ good.
   goes; pure, `Tests/checks/settings-window`), `Permissions`, `LoginItem`,
   `LogWindow`, `MainMenu` (key
   equivalents), `DebugHooks`, `AppLog` (its print shadow), `DevicesPane`
-  (Settings › Devices: Require pairing, the paired devices, Remove and
-  rename), `RemoteAccessPane` (Settings › Remote Access), `PairDeviceWindow`
-  (the QR code and the typed code; the window a device's ask opens, and the
-  cable notice), `PairingWindowAddress` (the address that window gives to type:
+  (Settings › Devices: Require pairing, Show the pairing window to screen
+  sharing, the paired devices, Remove and rename), `RemoteAccessPane`
+  (Settings › Remote Access), `PairDeviceWindow` (the QR code and the typed
+  code; the window a device's ask opens, and the cable notice),
+  `PairingWindowSharing` (whether screen sharing shows that window: hidden
+  unless Settings › Devices' switch is on, whoever opened it, and the
+  window's `NSWindow.SharingType` for each, `.none` or `.readOnly`; issue #108;
+  pure, `Tests/checks/pairing-sharing`), `PairingWindowAddress` (the address that window gives to type:
   Tailscale's name and IPv4 first, another VPN's IP only under this network's
   address; pure, checked with swiftc), `UpdatePolicy` (the update check's rules
   and words; pure, checked with swiftc) and `UpdateChecker` (main actor; asks
@@ -5134,14 +7417,22 @@ good.
   the Local Network, Bonjour and camera entries, the privacy manifest, an
   Apple Distribution signature, an App Store profile, no get-task-allow, the
   required-reason APIs against the manifest), `--bump`, `--api-key`,
-  `--print-version` and `--privacy-report`; it refuses any Xcode before 27.1
+  `--print-version`, `--privacy-report`, `--build-number N` (xcodebuild's
+  `CURRENT_PROJECT_VERSION=N` for the run, never written to the project: the
+  nightly's and testflight.yml's commit count) and `--whats-new FILE` (with
+  `--upload` and `--api-key`, What to Test once processed, through
+  `Scripts/asc.swift`); it refuses any Xcode before 27.1
   or after 27 (the iOS 27.1 SDK the iPhone Duo's layouts need; the app it
   checks must say DTPlatformVersion 27.1 or later),
   with `--bump` or `--upload` a working tree with changes (new files in
   iOSClient and Sources/StreamProtocol count), and an App Store address in
   `SillLinks.swift` that isn't one, and sourced it only defines its
   functions (docs/release-checklist.md, TestFlight). `Scripts/make-app.sh`
-  builds, iconizes, signs and installs the bundle; `Scripts/release.sh`
+  builds, iconizes, signs and installs the bundle (with `SILL_UNIVERSAL=1`
+  arm64 and x86_64, each in its own scratch path under `.build/universal`,
+  joined with lipo, for an Intel tester, #62; off by default, so releases
+  stay arm64, and `release.sh`'s `check_signature` reads every slice);
+  `Scripts/release.sh`
   (M6) makes the downloads from it:
   `make-app.sh --release`, `make-dmg.sh --prepare` (the image's tool and
   background, before anything goes to Apple), a zip (`ditto -c -k
@@ -5169,11 +7460,33 @@ good.
   (`gh auth status` asks GET /user, which the Actions token can't answer), and
   refuses to start unless origin's tag v‹version› names HEAD (gh would make a
   missing tag from the default branch's tip; not asked in the release
-  workflow, whose checkout is that tag and keeps no credentials); in
+  workflow, whose checkout is the run's own commit with every tag, stopping
+  when its tag moved, and keeps no credentials); in
   Saffsanity/sill it passes gh `--verify-tag`, anywhere else it warns that no
   Sill.app will offer the release. It uploads `Sill.dmg`, `Sill.dmg.sha256`,
   `Sill.zip` and `Sill.zip.sha256` (the zip kept for older links: the download
   page names the image since 0.3.1). Sourced, it only defines its functions.
+  `release.sh --nightly [--dry-run | --publish]` (docs/release-checklist.md,
+  "Nightlies"): main's head built, signed, notarized and checked as a release,
+  without the tag rule (make-app.sh's `SILL_RELEASE_NIGHTLY=1`) and only with
+  the Developer ID profile, as `.build/Sill-nightly-<yyyymmdd>-<sha7>.dmg` and
+  `.zip` (`SILL_NIGHTLY_DATE`, UTC); `--publish` puts them and their `.sha256`
+  on the rolling pre-release `nightly` (made when missing, its tag moved to
+  the commit, never latest, `SILL_NIGHTLY_KEEP` newest nightlies kept, its notes
+  `SILL_NIGHTLY_NOTES` or nightly-notes.sh's, ending in the commit's sha in a
+  comment that `nightly_last_sha` reads for the skip rule).
+  `Scripts/nightly-notes.sh --markdown F --whats-new F`: a night's words for both
+  apps, the pull requests merged on main's first-parent line since the newest
+  tag `v<version>` (titles from `gh pr list`, else the commits), Markdown without
+  @mentions for the pre-release, What to Test within 4,000 bytes.
+  `Scripts/asc.swift` (Foundation and CryptoKit; compiled with swiftc or run as a
+  script): App Store Connect's API for TestFlight with an ES256 token from the
+  .p8 key (`groups`, `build-state`, `whats-new`, `distribute`: wait for
+  processing up to 90 minutes, What to Test, every internal group, the public
+  beta group only with `--public-beta` and `SILL_NIGHTLY_PUBLIC_BETA=true` in its
+  environment, Beta App Review only right after that); the token goes only to
+  api.appstoreconnect.apple.com (or a stand-in on 127.0.0.1 in tests) and is
+  never printed.
   `Scripts/make-dmg.sh --sign IDENTITY APP DMG` (`-` for ad hoc) makes the
   image: an HFS+ volume "Sill" (not APFS: Finder names the background by an
   HFS+ alias record, and Finder-made and current third-party images are
@@ -5194,16 +7507,17 @@ good.
   the tool and the background. Sourced, it only defines its functions.
   `Scripts/sillclient.py` is the wire-format test client
   (timed `--set=K=V[,K=V]@T` kind 17 changes with tokens 1, 2, 3…,
-  `--raw17=JSON@T`, `--pick=none|desktop|window:ID@T`, `--stats`,
+  `--raw17=JSON@T`, `--raw9=JSON@T` (a literal viewport, kind 9),
+  `--pick=none|desktop|window:ID@T`, `--stats`,
   `--expect=K=V[,…]` against the last kind 16, which it prints one per line,
   and each second's frames with their kB (the encoder's output);
   `--host`, `--device`, `--big-payload`, `--flood`, `--stop-ping@T`,
-  `--stop-read@T`, `--pairing-wanted@T`; the remote door with `--tls
+  `--stop-read@T`, `--pairing-wanted@T`, `--keyframe@T` (kind 44); the remote door with `--tls
   --identity=DIR`, `--pair-url`, `--pair-code`, `--pin=FP|none` and
   `--expect-tls-fail`, printing kinds 18, 20 and 22; pairing at home with
   `--pair-ask[=cable]`, `--then-code=FILE`, `--pair-hold=S`, `--pair-cancel`,
   `--pair-v=N` and `--expect-pair=R`; the Mac's pointer with
-  `--pointer` (each kind 26), `--move=X,Y@T`, `--tap=X,Y@T`, `--key=USAGE@T`
+  `--pointer` (each kind 26), `--move=X,Y@T`, `--tap=X,Y@T`, `--key=USAGE[,HOLD]@T`
   and `--input=JSON@T` (a literal kind 8), the input flags only to a
   `--synthetic` host on this Mac (lsof and ps); trackpad gestures with
   `--gesture=NAME[,FINGERS]@T` and `--raw28=JSON@T` (kind 28), likewise only to
@@ -5219,14 +7533,27 @@ good.
   `Scripts/menufixture.swift` (TEST ONLY) is the menu gates' app: an AppKit
   menu bar of known menus (Probe's marks, shortcuts, a disabled item, a
   retitled one, a slow action, Deep three levels, 300 and 600 items), the
-  prohibited policy so it can never take the front, its one window off every
-  display, every delegate call and action logged (an action also as "PRESS
+  prohibited policy so it can never take the front, its windows off every
+  display (the label's, and Slow Close, whose close holds its main thread 4 s
+  and keeps it open, as a close asking about unsaved changes does), every
+  delegate call and action logged (an action also as "PRESS
   'item' in 'menu'"), SIGUSR1 and SIGUSR2 giving Probe › Rebuilt a new NSMenu,
   SIGHUP inserting an item at the top of Probe in place and SIGALRM giving
   Probe a new NSMenu; `menufixture label PID` reads its label over
   Accessibility. `Scripts/menu-check/run.sh` runs the real MenuReader and
   MenuMirror against it with no host and no encoder (safe while Sill.app
-  streams; it needs Accessibility for whatever runs it).
+  streams; it needs Accessibility for whatever runs it, and an unlocked screen),
+  and its `close` step WindowSizer's Close (with WindowRestore.swift, which
+  WindowSizer needs since #75) against Slow Close: back within 1 s, as no answer.
+  `Scripts/audio/` is the
+  encoder-free sound harness (docs/audio-plan.md H5, H6, H8): `build.sh` makes
+  `.build/audio/host` (the working tree's StreamServer and the sound's host
+  files with `main.swift`: fake frames, the test tone, both doors on
+  127.0.0.1) and `.build/audio/audiocheck` (`Scripts/audiocheck.swift`, the
+  harness's device: every kind 43 decoded with iOSClient/AudioDecoder.swift and
+  each click found at its stamp), refusing a binary that links a media
+  framework but AudioToolbox; `run.sh [--cases a,b]` runs the gate cases and
+  `summarize.py` judges them.
   `Scripts/restore-probe/run.sh` (TEST ONLY; issue #57) drives the real
   `WindowSizer.resize` and a fitted window's way back (WindowRestore's `fit`
   and `stop` through `WindowSizer.AXWindows`) against a window of its own
@@ -5323,7 +7650,10 @@ good.
   (`autoDesktop`; issue #69); pairing at home's rows and words, a tap's dial, the device's
   cable check and how a session at home ends: `rowWord`, `homeDial`,
   `onCable`, `rowMac`, `reconnectEnd`, `macInfoNamesSession`,
-  `removalRevokes`; pure, checked with swiftc), `StreamScreen`
+  `removalRevokes`; the TXT record each row is read with, its result's own or else the last one that
+  result carried while the same browser lists it, forgotten once it leaves and when a browser is made
+  again (`rowRecords`, `RowRecordKey`: the cable pulled, 2026-10-27); pure, checked with swiftc),
+  `StreamScreen`
   (landscape: top bar, thumbnails, drawer, Aa, Keyboard, Desktop; layout
   selection by size incl. Duo outer display, and `DuoLayout.phoneArrangement`,
   the idiom: which arrangement `.outerPortrait` draws; `DuoLayout.isPortrait`,
@@ -5337,7 +7667,8 @@ good.
   pane, row 1's five buttons in their band, the strip, six caps, the trackpad
   and its vertical span, the Aa ruler, the drawer and the Settings panel across
   row 1, and the dim, and the Menus button ending the strip's row (`menus`,
-  `stripBesideMenus`); with Larger Picture's keyboard (`keyboard`, from
+  `stripBesideMenus`; no Sound button anywhere since 2026-10-27); with Larger
+  Picture's keyboard (`keyboard`, from
   `keyboardHeight(for:)`, only while a window streams: `largerPicture(switchOn:
   streaming:)` and `Streaming`, and only where it is larger: `largerPictureGains`,
   `offersLargerPicture(screen:)`) no strip, the room over the keyboard, Menus in
@@ -5359,22 +7690,71 @@ good.
   AB02/FB02),
   `InputOverlay` (direct touch, Pencil, keyboard, scroll momentum; each input
   says what drew this device's pointer; hardware keys through `ForwardedKeys`,
-  let go when the overlay stops taking keys; Esc's key commands; the iPad's
+  the characters too while `KeyTyping` says the Mac types them, let go when the
+  overlay stops taking keys; Esc's key commands; the iPad's
   trackpad's and a wheel's scroll pans beside the finger pan, one scroll path
-  (`scroll(_:at:translation:velocity:from:)`); `InputOverlayProxy`, who holds
+  (`scroll(_:at:translation:velocity:from:)`, a finger's drag in Reverse
+  Scrolling's direction, `ScrollDirection`); a `UITextInput` since #138: an
+  input method's composition over the picture, sent once chosen, dictation and
+  its corrections, ⌃Space to iPadOS with keyboards in two languages, Scribble
+  declined, what is composed sent first and what was typed forgotten when the
+  Mac's caret may move (`forgetTyped`, from `StreamClient.onCaretMayMove`, before
+  it goes out: a pick, a launch, a window's button and a menu item follow the
+  queued input, `sendAfterInput`), and what came before a Return or a Tab it types
+  made final (`TextComposition.fence`), what was typed kept;
+  `InputOverlayProxy`, who holds
   the keyboard, carrying out `HardwareKeyboardPolicy`; `HardwareKeyboardMonitor`,
-  GameController's keyboard), `HardwareKeyboardPolicy` (when the stream's input
+  GameController's keyboard), `TextComposition` (what the input view holds for
+  iPadOS's text system: the composition, what was typed since the Mac's caret
+  last moved, corrections as backspaces and text, none from a range taken before
+  a forget or a trim (`generation`) and none that would change what went before
+  a Return or a Tab typed (`fence`, `refusal`), what the text system selects of it
+  replaced by its next edit (`selection`: Korean's syllables built again);
+  `TextInputRules`, which input
+  moves the Mac's caret (no typed text, a Return or a Tab among it), where a
+  Return or a Tab typed ends (`endOfReturnOrTab`) and whose ⌃Space it is;
+  `KeyTyping`, who types a hardware keyboard's characters: the Mac, as keys,
+  when it says `keyRepeat`, for a keyboard in the Latin alphabet whose input
+  method composes nothing (`composingLatin`: Vietnamese, Hawaiian) with
+  nothing composed or latched, else iPadOS's text system (#162's letters); pure,
+  `Tests/checks/text-composition`; pbxproj AC0138/FC0138), `HardwareKeyboardPolicy` (when the stream's input
   view holds the keyboard for a hardware keyboard and when it is the person's
-  own; pure, `Tests/checks/hardware-keyboard`; pbxproj AC01/FC01), `KeyChords`
+  own; and `PointerScroll`, where a trackpad's or a wheel's scroll goes, the
+  pointer's place as it began, and its readings added up; pure,
+  `Tests/checks/hardware-keyboard`; pbxproj AC01/FC01), `KeyChords`
   (`KeyModifiers`; a
   shortcut with its modifiers' own keys pressed around it, the Spotlight key's
   ⌘Space, the trackpad's modifier keys around a click; `ForwardedKeys`, a
-  hardware key's up after its down, and Esc's key command sent once beside
-  pressesBegan; pure, `Tests/checks/key-strokes` with the
+  hardware key's up after its down, its way (a key, or the text system's)
+  decided at the down by `KeyTyping` (`characterUsages`; a letter with Caps Lock
+  on carries Shift, `carried`), and Esc's key command sent once beside
+  pressesBegan; `HeldCap`, the portrait key row's esc, tab and arrows down from
+  a finger's touch to its release, so the Mac repeats them (#162); pure,
+  `Tests/checks/key-strokes` with the
   host's KeyStrokes), `TrackpadView` (the relative pad: its
   cursor a `PadCursor`, from the anchor; a recognizer that only counts fingers;
-  `verticalSpan`, a phone's width ÷ 1.6, and the DEBUG input test),
-  `HEVCDisplayView` (shared display view, the one pointer sprite + DEBUG HUD),
+  `verticalSpan`, a phone's width ÷ 1.6; its two-finger scroll and coast in
+  Reverse Scrolling's direction, `ScrollDirection`; and the DEBUG input test), `StreamZoom` (pinch to zoom on
+  the picture, 1× to 5× around the point between the fingers, Photos-like, and `StreamZoom.Stroke`, which two
+  fingers belong to; pure, `Tests/checks/stream-zoom`; `StreamZoomModel` and `ZoomedStreamView` in
+  HEVCDisplayView.swift scale the picture inside the pane's clip; StrokeObserver's `onTouch` feeds it; every
+  touch and scroll lands through it: PR #196, issue #65), `ThumbnailHold` (how long a window's thumbnail is
+  held before its lights show and its drag can start: 0.2 to 2 s in tenths, 0.5 s unless changed, the words
+  of the Settings panel's stepper; pure, `Tests/checks/thumbnail-hold`; WindowStrip and HoldDragOverlay
+  in StreamScreen.swift take it, issue #113),
+  `HEVCDisplayView` (shared display view, the one pointer sprite + DEBUG HUD;
+  the picture's interruptions on the network queue: `checkLayer` flushes a layer
+  that failed, could not decode a frame or needs a flush to decode again, at each
+  frame, at its notifications and when the window becomes active, and says so,
+  `onNeedsKeyframe`, then `onPictureBack`, both, back first, for a keyframe the
+  flush throws away; DEBUG `-SillLayerFail` and `-SillKeyframeLost`),
+  `KeyframeRecovery` (when the device asks the Mac for a keyframe, kind 44,
+  after its picture was interrupted: one ask per interruption while its keyframe
+  is due, again when none came within `answerWait`, max(4 s, 4 round trips);
+  only while the picture's window is active and something streams; 2 s apart,
+  4 to 32 s for a picture that keeps failing or a Mac that never answers, 2 s
+  again after a trip away; pure, `Tests/checks/keyframe-recovery`; pbxproj
+  AC11/FC11),
   `DiagnosticsHUD` (client stats reporter),
   `StreamClient+Viewport`, `ContentView` (connect screen with rows ending in
   Wired, Wi-Fi, Direct or Remote, the hint and Search Nearby, Add a Mac…, and
@@ -5401,8 +7781,12 @@ good.
   the footnote, the slow-link callout for older Macs), `AwayCopy` (every
   string of away from home and the link on the device, which callout shows,
   and `LinkLine`, the stream screen's line over time; pure,
-  `Tests/checks/away-copy`; pbxproj A801/F801). Remote access: `DeviceIdentity`,
-  `SavedMacs` (pure; `homeTLS` and `revoked` for pairing at home),
+  `Tests/checks/away-copy`; pbxproj A801/F801). Remote access: `DeviceIdentity`
+  (the device key in the Keychain, carrying out `DeviceKeyPolicy`),
+  `SavedMacs` (pure; `homeTLS` and `revoked` for pairing at home; with
+  `DeviceKeyPolicy`, the device key's rules: when the launch clears the saved
+  Macs, when a key is made, when a key made is used; `Tests/checks/remote-rules`'
+  `launch.swift`, #140),
   `RemoteDialPolicy` (pure), `RemoteConnector`, `StreamClient+Remote`
   (pairing, remote dials, the reconnect order, links), `StreamClient+Home`
   (pairing at home: `DeviceTLS`, the one TLS builder for every connection to
@@ -5455,15 +7839,54 @@ good.
   `Sill.tourSkipped`, `TouchWatcher`, a recognizer on the window that counts
   every touch and takes none, and DEBUG `TourDebug`); StreamScreen runs it
   (targets, the rule's inputs, the layer above the layouts and under the
-  pairing overlay, Take the Tour from the Settings panel's last row).
+  pairing overlay, Take the Tour from the Settings panel's last row). The
+  connect screen's tiles and groups (issue #116, PR #117): `ConnectionList`
+  (rows or tiles, `Sill.connectionStyle`, tiles by default since 2026-10-27
+  (`defaultStyle`; a stored choice always wins); when a session's
+  end keeps a picture, `takesPreview`: only with tiles, from the session's own
+  window in front, for a saved Mac; the saved Mac a row stands for, `tileMac`:
+  its tag's or record's, else the one it is taken for by name, so every row
+  of one Mac (Wired, Wi-Fi, Direct, Remote) shows its one picture and is listed
+  under its group; what a launch or a change of style does,
+  `previewPlan`: the list hides the pictures and keeps their files, tiles show
+  them again, only the files of Macs no longer saved go; the picture's size,
+  `previewPixels`, 640 pixels wide at most, and `looksBlack`;
+  `keepsDecodedPicture`; whether Disconnect asks the Mac for a keyframe
+  first, `freshPicture`, every Mac whatever version it says; group names,
+  `Sill.macGroups`, and the sections' order; a superseded record's group; the
+  pictures' file names; pure, with KeyframeRecovery's spacing,
+  `Tests/checks/connection-list`; pbxproj AF01/FF01). ConnectScreen draws them
+  (the switch beside the title, the tiles, a saved Mac's Group menu and New
+  Group…), StreamClient+Remote keeps them (`savePreview` with complete file
+  protection in Library/Caches/SillPreviews, `syncPreviews` at launch and at a
+  change of style; only Remove Preview Picture and Forget delete a Mac's),
+  and StreamClient takes the picture: the session's last keyframe with its
+  parameter sets (`lastKeyframe`, on the network queue, one frame, dropped at
+  `tearDown`), decoded at the session's end by `KeyframePicture` (a
+  VTDecompressionSession of its own, off the main thread, 1 s at most;
+  pbxproj AF02/FF02), never a snapshot of the screen, which a device draws
+  black where the video is; Disconnect waits up to 300 ms for a fresh keyframe
+  first (kind 44, every Mac; one that skips it, Sill for Mac 0.5.1, costs that
+  pause, its picture the keyframe kept).
+  `AudioDecoder` (AAC-ELD to a buffer per channel, one packet at a time;
+  AudioToolbox only), `AudioPlayout` (the sound's timing; pure,
+  `Tests/checks/audio-playout`), `AudioOutput` (its queue, the decoder and the
+  engine; no video frame handed to its queue before the session's first format, the last 32 kept
+  for the guard) and `StreamClient+Audio` (this device's mute, `soundMuted`, the Settings panel's
+  Mute; `macHasSound`, whether it shows): pbxproj AA01–AA04; the host's `audio-codec` check and
+  the sound harness's device compile AudioDecoder too. The Settings panel (`HostSettingsPanel`)
+  holds the sound's two switches: the Mac's group's Send Audio (for every device, with a "Beta"
+  tag) and Mute right under it; no bar has a Sound button (Noah, 2026-10-27).
   `Info-Debug.plist` is the Debug configuration's Info.plist: Info.plist's
   keys, with `_silltest._tcp` beside `_sill._tcp` for the harness's
   `-SillServiceType` (Release declares `_sill._tcp` alone).
   `PrivacyInfo.xcprivacy`, a resource of the target, is the privacy manifest:
-  it declares UserDefaults (CA92.1) and `systemUptime` (35F9.1), and any new
-  use of a required-reason API (file dates, disk space, `mach_absolute_time`,
-  active keyboards) must add its category and reason there before the next
-  upload. New files need their four pbxproj entries by hand.
+  it declares UserDefaults (CA92.1), `systemUptime` (35F9.1) and the active
+  keyboards (54BD.1: `UITextInputMode.activeInputModes`, which decides whether ⌃Space is
+  iPadOS's keyboard switch or the Mac's, #138; found by release-ios.sh's check on 2026-10-29,
+  which refuses an export App Store Connect would refuse, ITMS-91053), and any new use of a
+  required-reason API (file dates, disk space, `mach_absolute_time`) must add its category
+  and reason there before the next upload. New files need their four pbxproj entries by hand.
   Swift 5 language mode.
 - `docs/BRIEF.md` — product decisions, competition, scope, risks.
 - `docs/DEVELOPMENT.md` — building, running and testing from source; the
@@ -5500,20 +7923,40 @@ good.
   pushed tag `v*`, or by hand with one; verify only (the tag, the checks,
   `make-app.sh` signed ad hoc, zipped, and `make-dmg.sh`'s image of it, ad hoc
   too, as two artifacts) unless the repository
-  variable `SILL_SIGN_IN_CI` is `true`, then the Developer ID .p12 into a
-  temporary keychain, the notary key stored as a profile in it, `release.sh
+  variable `SILL_SIGN_IN_CI` is `true`, then, in the environment `release`
+  (only `v*` tags, Noah its required reviewer; its first step names a missing
+  secret and refuses a run by hand not started from its tag; it checks out
+  the run's own commit, `github.sha`, and stops when the tag no longer names
+  it), the Developer
+  ID .p12 into a temporary keychain, the notary key stored as a profile in it, the Developer ID
+  profile decoded from `SILL_PROVISION_PROFILE` into
+  `Packaging/embedded.provisionprofile` (since the nightlies), `release.sh
   --publish`, Apple's notary logs kept as an artifact (`include-hidden-files:
   true`: upload-artifact skips whatever is under a folder whose name starts
   with a dot, `.build` included), and the keychain deleted in an always()
   step. Secrets,
   variables, rotation and costs: docs/release-checklist.md, "Releasing from
-  GitHub Actions". `testflight.yml`: by hand only; `release-ios.sh
+  GitHub Actions". `testflight.yml`: by hand from main only (the environment
+  `nightly`); `release-ios.sh
   --unsigned` without an App Store Connect key, `--sign-at-export` with one
   (the secrets `SILL_TESTFLIGHT_KEY_ID`, `SILL_TESTFLIGHT_ISSUER_ID`,
   `SILL_TESTFLIGHT_KEY_P8`, an Admin key: cloud signing, no certificate or
   profile stored), and `--upload` too when the variable `SILL_TESTFLIGHT_IN_CI`
-  is `true`; the .ipa is the artifact for 14 days (docs/release-checklist.md,
-  "TestFlight from GitHub Actions"). `.github/actions/select-xcode` —
+  is `true` and the commit is on main's first-parent line (another branch's
+  count can be a later nightly's), the build number the commit count
+  (`--build-number`); the .ipa is
+  the artifact for 14 days (docs/release-checklist.md, "TestFlight from GitHub
+  Actions"). `nightly.yml`: 09:17 UTC while the variable `SILL_NIGHTLY` is
+  `true`, and by hand (`verify_only`); decide (the skip rule against the
+  pre-release's sha, the date, the build number, the notes once), Sill for Mac
+  (`release.sh --nightly --publish` with `SILL_SIGN_IN_CI`, else ad hoc
+  artifacts), Sill for iPhone and iPad (`release-ios.sh --build-number`, the
+  upload with `SILL_TESTFLIGHT_IN_CI`, then `asc.swift distribute`: every
+  internal group, the public beta group only while `SILL_NIGHTLY_PUBLIC_BETA` is
+  `true`); only main builds: both jobs run in the environment `nightly` (only
+  main, no reviewer), which holds the nine secrets, none of them a repository
+  secret (docs/release-checklist.md, "Nightlies", "Secrets and variables").
+  `.github/actions/select-xcode` —
   selects the newest Xcode of the `version` asked for (27; CI's build 27.1)
   whose folder is not a beta and prints `xcodebuild -version`; with
   `allow-beta: 'true'` (CI's build alone, never a build for App Store
@@ -5527,22 +7970,45 @@ good.
   caught), and `build.sh` where a check compiles a module (StreamProtocol's
   sources with `import StreamProtocol` stripped), or a `module.txt` naming the
   files `module.py` compiles as one module (pairing at home's checks):
-  `addresses`, `ask-limits`, `cable-link`, `clientlink`, `clipboard`, `compatibility`,
-  `device-gate`, `dmg-layout` (Scripts/dmg-layout's `.DS_Store` and alias
+  `addresses`, `ask-limits`, `audio-codec` (the host's AAC-ELD encoder,
+  packetizer and tone with the device's decoder, in memory; AudioToolbox only),
+  `audio-packetizer`, `audio-playout` (iOSClient's AudioPlayout on a simulated
+  clock), `away-copy`, `away-quality`, `away-wire`, `cable-link`, `capture-scale`, `catalog-look`, `clientlink`,
+  `clipboard`, `compatibility`,
+  `connection-list`, `device-gate`, `display-wake`, `dmg-layout` (Scripts/dmg-layout's `.DS_Store` and alias
   writer, against Finder's own layout of the file, make-dmg.sh's layout
   arguments and the SVG's size and edge), `door-policy`, `duo` (DuoPosture;
   `tour` and `phone-portrait` take the Duo's real sizes too), `encoder-mailbox`,
-  `encoder-slowstate`, `fence`, `gesture-chords`, `gestures`, `goodbye`,
+  `encoder-slowstate`, `fence`, `firewall` (FirewallRule), `gesture-chords`, `gestures`, `goodbye`,
   `hardware-keyboard` (iOSClient's HardwareKeyboardPolicy),
-  `home-device`, `home-model`, `home-records`, `home-txt`, `key-strokes` (the
+  `encoder-slowstate`, `fence`, `gesture-chords`, `gestures`, `goodbye`,
+  `hardware-keyboard` (iOSClient's HardwareKeyboardPolicy and PointerScroll),
+  `home-device`, `home-model`, `home-records`, `home-txt`, `installed-apps`
+  (InstalledApps on a fake applications folder), `key-repeat` (the host's
+  KeyRepeat with KeyStrokes, against a model of InputInjector's glue and a
+  clock), `key-strokes` (the
   host's KeyStrokes and the device's KeyChords, against a model of the Mac's
-  HID state table and of a Mac from before), `ledger`,
+  HID state table and of a Mac from before), `keychain`, `keyframe-recovery` (iOSClient's
+  KeyframeRecovery, against a model of the event history), `ledger`, `link-judge`,
   `menu-state` (iOSClient's MacMenuState), `menus` (the host's MenuFormat and
   MenuPolicy, and MacMenu.swift's JSON), `message-reader`, `origin`,
-  `pairing-address`, `phone-portrait`, `pointer-control`, `pointer-presence`,
+  `pairing-address`, `pairing-sharing` (Sill.app's `PairingWindowSharing`),
+  `phone-portrait`, `pointer-control`, `pointer-presence`,
   `pointer-watch`, `policy` (with its `home.swift`), `protocol`,
   `remote-rules` (with its `home.swift`), `settings-window` (Sill.app's
-  `SettingsWindowFit`), `tour`, `update-policy`,
+  `SettingsWindowFit`), `stream-zoom` (iOSClient's StreamZoom), `test-host` (Sill.app's AppIdentity with
+  IdentityStorePlan), `text-composition` (iOSClient's TextComposition with
+  StreamProtocol's Input.swift), `tour`, `update-policy`, `virtual-display-api`
+  `SettingsWindowFit`), `stream-zoom` (iOSClient's StreamZoom), `text-composition` (iOSClient's TextComposition with
+  StreamProtocol's Input.swift), `thumbnail-hold` (iOSClient's ThumbnailHold), `tour`, `update-policy`, `virtual-display-api`
+  (VirtualDisplay.swift whole, as VirtualDisplayProbe compiles it: its surface,
+  `SettingsWindowFit`), `stream-zoom` (iOSClient's StreamZoom), `text-composition` (iOSClient's TextComposition with
+  StreamProtocol's Input.swift), `tour`, `update-policy`, `viewport-bounds`
+  (StreamProtocol's ViewportBounds: what a host takes of a device's viewport; and
+  ClientStats.lateSince),
+  `virtual-display-api` (VirtualDisplay.swift whole, as VirtualDisplayProbe compiles it: its surface,
+  TypeEncoding and Runtime.method's decision, on classes made at run time, against
+  the encodings measured on Apple silicon and reported from Intel machines),
   `window-restore` (WindowRestore's rule and sequences against a stand-in Mac,
   with a copy of the coordinator's glue around them) (the two encoder checks refuse a binary that links
   VideoToolbox). `run-all.sh
@@ -5572,7 +8038,8 @@ good.
   wheel scrolls posted from a virtual HID device inside the simulator (`xcrun
   simctl spawn`, as duorig), which UIKit routes as a real one's
   (pressesBegan, key commands, the text system, GameController, hover, scroll
-  pans); `run.sh build`, `run.sh UDID keys SPEC`, `run.sh UDID point SCRIPT`;
+  pans); `run.sh build`, `run.sh UDID keys SPEC` (`wait:S` among its steps holds
+  a key: `13:down,wait:2,13:up`), `run.sh UDID point SCRIPT`;
   only a booted simulator of your own, by UDID (its README has what it showed:
   after its keys UIKit there counts a hardware keyboard for good).
 
@@ -5584,9 +8051,12 @@ swift run -c release SillHost              # nothing streams until the iOS app p
 swift run -c release SillHost Safari       # optional: preselect a matching window
 swift run -c release SillHost --synthetic  # Desktop streams a test pattern; no Screen Recording needed
 swift run -c release SillHost --encoder-selftest   # is the hardware encoder alive? 5 s, exits
-swift run -c release SillHost --virtual-display   # picked windows stream from their own HiDPI display (off by default)
-swift run -c release SillHost --virtual-display-selftest   # create/destroy one display, report what sees it
+swift run -c release SillHost --virtual-display   # picked windows stream from their own HiDPI display (off by default in the CLI; on in Sill.app)
+swift run -c release SillHost --virtual-display-selftest   # create/destroy one display, report what sees it ([Hz] [WxH] after it: `60 800x830`)
 swift run -c release SillHost --direct-wireless   # also over peer-to-peer Wi-Fi (AWDL): devices without a shared network (off by default)
+swift run -c release SillHost --audio       # Send Audio (a beta) for this run: the streamed app's sound to devices that play it (with --synthetic, a test tone; off by default; a device's Settings panel turns it on or off too)
+SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 .build/release/SillHost --synthetic --audio   # the test tone on loopback; sillclient.py PORT 8 desktop --hello=0.6 --audio counts it
+Scripts/audio/run.sh                        # the encoder-free sound harness and its gates (~7 min; no encoder, capture, speaker or device)
 swift run -c release SillHost --remote      # the remote door for this run on any free port (--remote=PORT), a throwaway identity; the code and link print here
 swift run -c release SillHost --remote --internet   # also admit paired devices from outside this Mac's networks and VPNs
 swift run -c release SillHost --print-reachability  # the addresses a device would get away from home, then exit
@@ -5595,14 +8065,22 @@ swift run -c release SillHost --print-cable # what the cable rule reads on each 
 swift run -c release SillHost --menu-selftest=TextEdit   # the menus a device would be sent for that app (a pid, or the start of its name), read once; read-only
 python3 Scripts/sillclient.py PORT 5 none --pair-ask --then-code=$T/code --identity=$T/a   # a device's ask at a TLS home door, then the code the host printed (saved in $T/code)
 python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=bitrate=25000000   # a device's settings change
+SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_STILL_AFTER=3 .build/release/SillHost --synthetic   # the Desktop still from 3 s on: a device's picture comes back only through its keyframe request
+python3 Scripts/sillclient.py PORT 8 desktop --keyframe@3   # kind 44: "Keyframe for …" on the host, and the summary's "keyframes at" shows the one it brought
+SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_STILL_AFTER=3 SILL_TEST_KEYFRAME_IGNORE=1 .build/release/SillHost --synthetic   # the first keyframe request ignored, as a Mac from before kind 44 ignores every one: the device asks again 4 s later
+SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_NO_SCREEN=1 SILL_TEST_DESKTOP_FAIL=2 .build/release/SillHost --synthetic   # the first 2 Desktop starts fail, as ScreenCaptureKit's did on 2026-10-28 (1: the host's one more try streams; 2: a device asks again 10 s later)
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_POINTER_PATH=$T/path .build/release/SillHost --synthetic   # a scripted pointer on the test pattern, on 127.0.0.1 alone, never the hardware encoder
 python3 Scripts/sillclient.py PORT 6 desktop --pointer --move=0.25,0.25@3   # each kind 26 as it arrives; input goes only to a --synthetic host
 SILL_TEST_INPUT_LOG=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_POINTER_PATH=$T/path .build/release/SillHost --synthetic   # prints each event a dry run would post ("Test input: key 49 up (none)")
 python3 Scripts/sillclient.py PORT 3 desktop --input='{"key":{"hidUsage":44,"down":true,"modifiers":1048576}}@1' --input='{"key":{"hidUsage":44,"down":false,"modifiers":1048576}}@1.05' --tap=0.5,0.5@1.5   # an older device's Spotlight key, then a tap
+python3 Scripts/sillclient.py PORT 6 desktop --key=80,1.2@2   # ← held 1.2 s (pinging four a second, as a device): with the input log, "Test input: key 123 down (none)", repeats from 0.5 s on ("… repeat (none)", 30 a second on this Mac), then its up
 python3 Scripts/sillclient.py PORT 8 none --gesture=swipeUp@3 --gesture=swipeDown@4   # a synthetic host logs "Gesture from …: swipe up → Mission Control (shortcut 108: key 160, fn) (not posted: a test host)"
 SILL_TEST_LOOPBACK=1 SILL_TEST_HOTKEYS='108=off,173=off' .build/release/SillHost --synthetic   # TEST ONLY: the gestures read this table (over macOS 27's own; `defaults` alone) instead of this Mac's shortcuts
 swift run -c release SillHost --no-clipboard  # share nothing of the clipboard with devices (on by default, as in Sill.app)
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_PASTEBOARD=me.saffer.sill.test.x SILL_TEST_CLIPBOARD_LOG=1 .build/release/SillHost --synthetic   # the clipboard on a pasteboard of its own (never this Mac's), each decision printed with sizes
+SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: ScreenCaptureKit never asked (no window list, no thumbnails), so a host an agent runs asks macOS for no screen recording
+SILL_TEST_FIREWALL=executable SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: the macOS firewall's answers canned (executable|bundle|both|all|off|allowed|unreadable, or a file holding one, read at each check): "Firewall: the macOS firewall blocks Sill’s executable, …"
+/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate; …/socketfilterfw --listapps; …/socketfilterfw --getappblocked PATH   # the firewall, read-only as any user; never --unblockapp, --add, --remove or --set* (they change it, with sudo)
 python3 Scripts/sillclient.py PORT 6 none --clipboard --copy=hello@2 --expect=clipboard=none   # subscribe, send text as a device's Paste does; each kind 32 printed
 SILL_TOUCHRIG_SIM='Sill touchrig' Tests/touchrig/run.sh new && Tests/touchrig/run.sh --rev origin/main base && Tests/touchrig/compare.py .build/touchrig/base.log .build/touchrig/new.log   # the surfaces under synthesized touches
 Tests/checks/run-all.sh                 # every pure check, as CI runs them (~5 min; --mutants adds the mutants, well over an hour)
@@ -5610,6 +8088,7 @@ Scripts/pacing/run.sh                   # remote pacing and the link's judge, th
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_ORIGIN=vpn SILL_TEST_PATTERN=noise .build/release/SillHost --synthetic --remote   # an away session whose stream follows its quality
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
+SILL_UNIVERSAL=1 Scripts/make-app.sh    # .build/Sill.app for Apple silicon and Intel (arm64 and x86_64) for an Intel tester (#62): twice the build time; the x86_64 slice has not streamed on an Intel Mac
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release   # M6
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' SILL_NOTARY_PROFILE=sill-notary Scripts/release.sh [--dry-run]   # M6: the notarized download (docs/release-checklist.md)
 Scripts/release-ios.sh                  # the iOS app for App Store Connect: archive, export .build/ios/export/Sill.ipa, check it; uploads nothing
@@ -5631,7 +8110,8 @@ whatever launched it), Sill.app's to Sill itself.
 Sill.app: the log is `~/Library/Logs/Sill/Sill.log` (`tail -F`, not `-f`: at
 10 MB it moves to Sill.1.log; Show Log… in the menu); settings are `defaults
 read me.saffer.sill.mac` (maxFPS, captureScale, bitrate, prioritizeSpeed,
-virtualDisplay, directWireless, shareClipboard, updateCheck; the update check keeps
+virtualDisplay, directWireless, sendAudio, shareClipboard, updateCheck,
+showPairingWindowToScreenSharing; the update check keeps
 updateLastCheck, updateETag, updateLatestTag and updateLatestURL), and a launch
 argument such as `-maxFPS 60` or `-updateCheck 0` overrides one for one run. A device's change from its Settings panel is saved there too, like a
 menu click; the CLI keeps a device's change until SillHost quits. Test arguments for the bare binary (`.build/release/SillMenuBar`,
@@ -5686,8 +8166,11 @@ Remote access, headless: TEST ONLY variables, honoured only by a host that
 does not advertise: `SILL_TEST_REMOTE_DIR=<dir>` (the identity and trust list
 in a 0700 directory instead of memory or the keychain; the bare app's
 `-SillPairAfter <s>` leaves `pairing.url` and `pairing.code` there, 0600, never
-printed), `SILL_TEST_PAIRING_TTL=<s>`, `SILL_TEST_BACKOFF_SECONDS=<s>`,
-`SILL_TEST_ORIGIN=vpn|internet` (loopback counts as that origin),
+printed), `SILL_TEST_PAIRING_TTL=<s>`, `SILL_TEST_BACKOFF_SECONDS=<s>` (the backoff a TLS door
+gives an address whose connections waited unadmitted or were refused, five failures in a minute:
+a test client's `--pair-hold`s, refused handshakes or connections it keeps closing, from 127.0.0.1,
+meet it, "Home door backed off 127.0.0.1 for 300 s: …"), `SILL_TEST_ORIGIN=vpn|internet` (loopback
+counts as that origin),
 `SILL_TEST_REMOTE_ORIGIN=vpn|internet` (the same at the remote door alone, so
 one loopback host serves a device away and one at home: away from home's
 H8 and S4) and `SILL_TEST_NO_ROUTER=1` (never ask the router; set it on every
@@ -5710,16 +8193,35 @@ sample, points in the 1512×949 pattern, outside allowed; `#` comments; at most
 10,000 steps and 1 MiB, a bad file refused whole with one line): the test
 pattern then has a pointer, a test client's input lands in the pattern's space
 and a dry-run pointer event moves the scripted pointer (the newer of it and a
-step wins); `SILL_TEST_SOFTWARE_ENCODER=1` starts on the software encoder, with
+step wins); `SILL_TEST_NO_SCREEN=1` makes the window catalog leave ScreenCaptureKit alone (an empty
+window list, no thumbnails, no display lookup), so a test host with a client connected asks
+macOS for no screen recording: every ScreenCaptureKit call counts against the responsible app's
+grant (Claude's, for a host an agent runs), and macOS reminds the person once a month and after
+every rebuilt binary; set it on every headless host whose test needs no real window.
+`SILL_TEST_SOFTWARE_ENCODER=1` starts on the software encoder, with
 no launch probe and no re-check, so a test never touches the hardware encoder
 (60 fps at most: a 120 fps sampler test needs the hardware, and so the
 no-device check); `SILL_TEST_INPUT_LOG=1` prints each event the dry run would
 post, "Test input: key 49 down (command)" with the flags it was made with, and
 a pointer or scroll event with those the last keyboard event would have left
 in the HID state table, a button's with where it goes ("Test input: left mouse
-down (none) at 756,474"), and each check a key's up arms ("Test input: key 55
+down (none) at 756,474"), a scroll's with its point deltas, phase and place
+("Test input: scroll dy -12 dx 0, gesture changed (none) at 833,442": positive
+dy moves the content down, so the sign shows which way a device's scroll went,
+and every event of one scroll lands at one place), and each
+check a key's up arms ("Test input: key 55
 up: the table read again in 0.25 s for command"): what a device's keys and
-buttons leave for its next click (KeyStrokes), without posting anything.
+buttons leave for its next click (KeyStrokes), without posting anything; and
+where a device the Mac stops serving stops landing input ("Test input: iPad is
+no longer served: only the up of a key or a button it holds down goes from
+here on.", RevokedInput).
+A sleeping display, headless: a test host declares no user activity and counts
+`disp.wakeDry` where a real one would declare (`sillclient.py`'s connect, a tap,
+a key; never a pick, nor a move right after a restart). TEST ONLY
+`SILL_TEST_USER_ACTIVE=remote`, taken by every real host and Sill.app too
+(`open --env SILL_TEST_USER_ACTIVE=remote /Applications/Sill.app`, Sill quit
+first), declares `kIOPMUserActiveRemote` instead of Local; it acts on this Mac's
+display, so it is Noah's to try (docs/DEVELOPMENT.md, A sleeping display).
 The device floor, headless: `SILL_TEST_MIN_DEVICE_VERSION=1.2` raises the floor
 of a host that does not advertise (a device below it, or one that sends no
 hello, gets kind 22 "update" and is closed; a value that does not parse is
@@ -5744,10 +8246,13 @@ the Mac locked; `SILL_TEST_ASK_QUIET=<s>` shortens the 10 minutes of quiet
 after the Mac's Cancel or a stop; `SILL_TEST_ASK_FROM_THIS_MAC=1` skips the
 ask rule's step for an ask from this Mac itself (answered `openOnMac` unless a
 window is open, and lighting no menu item), so a test client on this Mac opens
-windows. The bare app takes `-requirePairing NO`, `-SillSetAfter '<s>
-requirePairing=0|1'`, `-SillCancelPairingAfter '<s>[; <s> …]'` (the window
-closed as its Cancel does), `-SillCableNoticeAfter <s>` (the cable notice for
-a sample device) and `-SillMenuAfter '<s>[; <s> …]'` (the status menu in the
+windows; `SILL_TEST_REQUIRE_PAIRING=0` (the CLI's) turns Require pairing off
+at `--pairing`'s door for the run, so an unpaired device's session can be
+tried (`sillclient.py --tls --identity=DIR --pin=none`). The bare app takes
+`-requirePairing NO`, `-SillSetAfter '<s> requirePairing=0|1'`,
+`-SillCancelPairingAfter '<s>[; <s> …]'` (the window closed as its Cancel
+does), `-SillCableNoticeAfter <s>` (the cable notice for a sample device) and
+`-SillMenuAfter '<s>[; <s> …]'` (the status menu in the
 log, line by line). Sill.app itself ignores every `-Sill…After` hook,
 `-requirePairing` and `SILL_TEST_REMOTE_DIR` with one line each (any process
 can start it with arguments and its grants); `-SillRenderPreviews`,
@@ -5756,7 +8261,14 @@ and the trust list live in the login keychain (service
 `me.saffer.sill.remote`, accounts `paired-devices` and `require-pairing`,
 beside the key "Sill Remote Access"), never in UserDefaults; Settings ›
 Devices' Remove forgets one device, and deleting those items makes this Mac
-new to every device.
+new to every device. Two hosts under one Bonjour name (a Mac that took
+another's name, the security scan's finding 3): run each without
+SILL_TEST_SERVICE_TYPE (whose registration is "Sill test ‹pid›") and advertise
+it in turn with `dns-sd -i lo0 -R "Studio f3" _silltest._tcp local PORT
+r=<16 base64url characters> p=0`, on lo0 alone (on every interface the
+simulator dials this Mac's other addresses first, which a loopback host never
+answers); the bare `SillMenuBar --synthetic -requirePairing NO`, under a name
+of its own and with `-SillLogFile`, is an open door.
 The Mac's menus, headless: `swiftc -O Scripts/menufixture.swift -o
 $T/menufixture -framework AppKit`, then `$T/menufixture serve $T/fixture.log
 60` (it exits by itself, 120 s at most, and can never take the front) and a
@@ -5820,9 +8332,24 @@ where the route line says how), away from home's and the link's settings cases
 `away|awaymixed|awayhome|linkbehind|linkmixed|linklow|linkstalled` (the header's
 away line, the footnote, the callout; `linkstalled` shows none) and
 `-SillLinkLine behind` (the mock reports the link behind: the stream's line),
-`-SillSettingsScript '<t> set K=V[,K=V] | suggestion; …'` (a live session to a
-synthetic host on loopback: the panel's controls and the link callout's button,
-t seconds after the first window list), `-SillMoveHomeTest to:HOST:PORT|refused|
+the Mac's sound's `-SillSound on|muted` (the mock Mac sends it, Send Audio on:
+Mute off or on; the mock plays nothing) and settings cases
+`sound|soundoff|soundnote|nosound` (the Send Audio switch on, off, on with the
+Mac's note, or a Mac without sound: the switch off and disabled, "Update
+Sill…", no Mute; `default` is Send Audio off with Mute), `-SillSettingsScroll
+sound|mute` (the panel at the Send Audio row, or at the Mute row under it), and in
+the normal app and under `-SillLive 1` `-SillSoundSink manual|device` (manual
+rendering, no output device: the simulator's default in every build; `device`
+plays through the Mac's speakers, never in a gate) with `-SillSoundVolume 0`,
+`-SillSoundToggle <s>[,<s>…]` (Mute flipped at those seconds),
+`-SillSoundSwitchAt <s>` (Mute on, then off a second later) and
+`-SillSettingsScript`'s `set sendAudio=1|0` (the device's Send Audio switch); the
+console's "audio: …" lines say what happened (the format, the engine and its
+latencies, a line a second, each jump with its size and cause, and in manual
+rendering where each click of a synthetic host's test tone was heard),
+`-SillSettingsScript '<t> set K=V[,K=V] | suggestion | disconnect; …'` (a live
+session to a synthetic host on loopback: the panel's controls, the link
+callout's button and Disconnect, t seconds after the first window list), `-SillMoveHomeTest to:HOST:PORT|refused|
 other:PORT` (with `-SillDialSaved 1`: the saved Mac listed as a network row a
 second into the remote session at a door that speaks TLS, so the move home
 runs against a synthetic `--remote --pairing` host with SILL_TEST_REMOTE_ORIGIN
@@ -5838,9 +8365,13 @@ vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|remove
 remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
 remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (the panel
 scrolled to its end), `-SillSettingsScroll gestures` (the panel scrolled to its
-This iPad group; the mock Mac takes gestures in every case but `legacy`),
+This iPad group; the mock Mac takes gestures in every case but `legacy`; `reverse`
+to its Reverse Scrolling switch; `hold` to its Hold to Show Window Controls stepper),
 `-Sill.trackpadGestures 0` (the device's Three-Finger Gestures off for one run,
-in the normal app too), `-Sill.largerPicture 1` (its Larger Picture on for one run,
+in the normal app too), `-Sill.reverseScroll 1` (its Reverse Scrolling on for one
+run, in the normal app too), `-Sill.thumbnailHold 0.3` (the thumbnails' hold at 0.3 s
+for one run, in the normal app too; the console's `thumbnails: hold 0.3 s` when a bar
+first reads it and at each change), `-Sill.largerPicture 1` (its Larger Picture on for one run,
 in effect while a window streams, as the mock does but with `-SillActive desktop|none`;
 the console's `larger picture: …` line says what the rule made of it;
 `-SillVideoSize WxH` the mock's frame, `-SillLargerPictureToggle <s>[,<s>…]` the
@@ -5856,7 +8387,16 @@ three dials of it that did not connect), `-SillBrowserFail N` (the normal app
 and `-SillLive 1`: each of the first N network browsers is reported failed with
 -65569, as iOS reports a suspended app's, half a second after it starts, so it
 is made again after 1, 2, 4… s; the console's "browser: …" lines, and the
-reconnect's "reconnect: …"),
+reconnect's "reconnect: …"), `-SillLayerFail <s>[,<s>…]` (the normal app and
+`-SillLive 1`: at each of these seconds after the launch's first picture a frame
+that cannot decode goes onto the display layer, so the picture's recovery runs
+for real, issue #101; the console's "display: …" and "keyframe: …" lines; against
+a host with SILL_TEST_STILL_AFTER the picture comes back only through the ask, and
+with SILL_TEST_KEYFRAME_IGNORE=<n> the first n asks go unanswered and are made
+again), `-SillKeyframeLost <n>` (with `-SillLayerFail`: the first n keyframes
+that end a wait are thrown away by the layer's flush, as though it still read
+failed, so the picture counts as back and lost again and the next ask waits a
+repeat's 4 s),
 `-SillPointer mac@X,Y|device@X,Y|hidden|pencil@X,Y` (the pointer sprite in one
 of docs/pointer-visibility-plan.md's states over the mock's frame, which it
 draws as a dim rectangle; `-SillPencilPointer 1` is Q2's flip),
@@ -5912,12 +8452,15 @@ cable and Wi-Fi come and go on cue, so the session follows the best path for
 real; the spec is ContentView's contract, the console's "path: …" lines say
 what happened), `-SillInputScript '<t> <step>; …'` (with `-SillLive 1`: input
 with no finger, t seconds after the session's first window list: `down`, `pad
-DX,DY`, `lift` and `click` on the portrait pad, `tap X,Y` on the stream at a
-frame fraction, `key USAGE` a hardware key, `row USAGE` a key of the portrait
+DX,DY`, `lift` and `click` on the portrait pad, `padscroll DX,DY` two fingers
+scrolling it with their coast, `tap X,Y` on the stream at a frame fraction,
+`drag DX,DY` a finger dragged over it (a scroll, with its coast), `key USAGE` a
+hardware key, `type TEXT` the on-screen keyboard's typing (TEXT handed to the input
+view as `insertText`), `row USAGE` a key of the portrait
 key row, `gesture NAME[,FINGERS]` a three-finger gesture through
 `StreamClient.sendGesture`, `esc [MODS]` Esc through the stream's key command
-(only while the input view takes Esc), `scroll DX,DY` a trackpad's two-finger
-scroll with its coast, `wheel DX,DY` a wheel's plain deltas, `keyboard
+(only while the input view takes Esc), `scroll DX,DY` a connected trackpad's
+two-finger scroll with its coast, `wheel DX,DY` a wheel's plain deltas, `keyboard
 attach|detach` a hardware keyboard coming or going, `orient landscape|portrait`
 the scene turned (an iPhone's); the console's "input script: …" and "pointer: …" lines say what
 happened; it runs only when the session was dialled by `-SillConnect` to a
@@ -5954,8 +8497,12 @@ those seconds as the Keyboard button does, and in a live session (the normal
 app with `-SillConnect`, or `-SillLive 1`) `-SillDrawer 1`, `-SillSettings 1`
 and `-SillScaleOpen 1` open theirs 1.5 s after the stream starts
 (`-SillDrawerSearch <text>`: the open drawer searches with its field's keyboard
-up). The console
-prints `viewport: 386×241 pt, scale none, 60 fps` for each viewport sent, and on
+up; the Aa ruler only while a window streams: over a synthetic host's Desktop
+Aa is dimmed and the console says the ruler stays closed;
+`-SillScaleScript '<s> <scale|off>[; …]'` sets Aa's value at those seconds as
+the ruler's release does, whatever streams, so a synthetic host's `[1s]` lines
+show `win.fitOff` for a scale then Off). The console
+prints `viewport: 386×241 pt, scale off, 60 fps` for each viewport sent, and on
 a phone upright `trackpad: …, vertical span …` and, once the keyboard has moved,
 `keyboard: up, 301 pt tall, its top at …; the key row ends 10 pt above it`.
 `-SillAXDump <s>` lists the stream screen's accessibility elements in the
@@ -5971,9 +8518,13 @@ pressesBegan (none): to the Mac` (or `keyCommand`) for every hardware key the in
 view sees; `-SillKeyProbe 1` adds GameController's own view of each key,
 `-SillEscViaCommand 1` hands Esc on from pressesBegan so its key commands take it,
 and `-SillTurnAt <s>[,<s>…]` turns an iPhone's scene mid-session (iPadOS's windowing
-refuses). `Tests/keyrig` presses real keys and turns a wheel inside the simulator;
-after its keys UIKit there counts a hardware keyboard, so a fresh simulator is the
-one that shows the software keyboard. A test host's Desktop takes input only with
+refuses). `Tests/keyrig` presses real keys (and holds them, `wait:S`) and turns a
+wheel inside the simulator; after its keys UIKit there counts a hardware keyboard,
+so a fresh simulator is the one that shows the software keyboard. Each hardware
+key's down line ends in who types its characters (`; the Mac types: en-US`, `;
+iPadOS types: zh-Hant`: KeyTyping), and the simulator takes another language's
+keyboards from `-AppleLanguages '(zh-Hant-TW, en-US)' -AppleLocale zh_TW` (or
+ja-JP, ru-RU…), not from its `AppleKeyboards` preference. A test host's Desktop takes input only with
 `SILL_TEST_POINTER_PATH` (else it has nowhere to land).
 `-SillIdiom pad` draws a screen taller than wide and narrower than 600 pt as
 an iPad does (the compact halves) rather than as a phone, so an iPhone
@@ -6004,10 +8555,15 @@ device keeps working with Macs from the first public build on, or each says why
   the plain-TCP `_sill._tcp` door, which only development builds and the CLI without `--pairing`
   keep; the ALPNs `sill/1` and `sill-pair/1`, which every host offers for good at both doors
   (`RemoteTLS.serverALPNs`: a later generation's `sill/2` only ever goes beside them); the 14-byte
-  header; kinds 0–28 and 32 and their payloads (HEVC with ParameterSets; the JSON of Switcher,
+  header; kinds 0–28, 32 and 44 and their payloads (HEVC with ParameterSets; the JSON of Switcher,
   Input, Viewport, HostSettings, Remote, Compatibility, Pointer, MacMenu, Gesture and Clipboard;
-  29 to 31 stay free, 29 the audio plan's, 30 and 31 pull request #66's), inside `sill/1` at
-  both doors (19 and 20 on their own `sill-pair/1` connection, the next bullet); the ping echo; a
+  44, a device's keyframe request after its picture was interrupted, empty, which a host from
+  before skips; 29 to 31 and 33 to 42 stay free, pull request #66's, and 43 is the Mac's sound's,
+  below), inside `sill/1` at both doors (19 and 20 on their own `sill-pair/1` connection, the
+  next bullet); the ping echo; a viewport (kind 9) within `ViewportBounds`, each side 1 to
+  16384 points and a text scale 0.25 to 4 or none: every device build's is, a host from
+  2026-10-29 on refuses any other whole (security scan, finding 4), so a later device keeps
+  within them; a
   kind 16 within 2 s of the first window list, one per connection since Sill for Mac 0.5.1 (away
   from home, docs/remote-bundle-plan.md §4): its `settings` the pair that connection's controls
   set (the away quality for a device away), and its optional `away` (AwayQuality, from a host with
@@ -6034,7 +8590,15 @@ device keeps working with Macs from the first public build on, or each says why
   the receiver's clipboard, `image` is reserved for that later generation; a subscription says what
   the device takes, `{}` being text alone, so a host sends `image` only to a connection whose
   subscription carries a later field saying it takes images (`"accepts":2`, say), never to one that
-  sent `{}`.
+  sent `{}`; a hardware keyboard's characters (letters, digits, Space, Delete…) go to a host as keys
+  only when its window list says `keyRepeat` 1 or more (it repeats a key held between its down and its
+  up, #162), to any other through iPadOS's text system as they always did; the Mac's sound (kind 43, Audio.swift), once a public build ships it, a beta or not:
+  its two types (a JSON AudioFormat, then packets whose layout never changes: a new layout is a new
+  type), AudioFormat's fields, the hello's `audio`, `sendAudio` and `audioNote`, kind 43 only to a
+  device whose hello lists a codec the host makes, and the reader's caps, which a later host keeps
+  within (a device drops a message past them whole): a format at most 4 KB, a packets message at
+  most 16 KB (`AudioMessage.parse`), so a host that batches packets never puts more than 16 KB in
+  one message.
 - Pairing as 1.0 does it (docs/home-pairing-plan.md §3): the Bonjour TXT keys `r` (the recognition
   tag) and `p` ("1" pairing required, "0" open, no `p` a plain door, any other value read as "1");
   a `sill-pair/1` connection is exactly one kind 19, with no hello (the device gate judges sessions
@@ -6105,4 +8669,10 @@ device keeps working with Macs from the first public build on, or each says why
 - Native feel is the bar: Flighty-level polish, iOS conventions, Duo layouts.
 - License: Apache-2.0, LICENSE since PR #15, kept when the repository went
   public on 2026-09-26 (paid plan is gone, so no GPL/CLA needed).
-- v1 out of scope: hole punching, multi-window, layout customization, audio.
+- v1 out of scope: hole punching, multi-window, layout customization. Audio is in scope since
+  2026-09-27 (Noah: "Audio: the plan is done and parked as a v2 feature by your earlier decision",
+  first in what he wanted worked on; docs/audio-plan.md, docs/BRIEF.md), and in, as a beta, since
+  2026-10-20 (Noah, about PR #94: "merge as beta support"): Send Audio, off by default. Since
+  2026-10-27 (Noah: "Sound should be a toggle in the settings menu") the Mac's menu and Settings and
+  a device's Settings panel set it for every device, and each device's Mute is its own; no Sound
+  button in the bar.

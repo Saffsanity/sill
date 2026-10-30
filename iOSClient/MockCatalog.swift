@@ -108,8 +108,9 @@ enum MockCatalog {
             }
         }
         // The clipboard (docs/clipboard-plan.md): `-SillClipboardChip 1` offers the chip over the
-        // stream (as after a copy on this device), and `-SillClipboardNote sent|long|notsent` shows a Paste's
-        // note in its place and under the Settings group's Paste; neither goes away by itself here.
+        // stream (as after a copy on this device), and `-SillClipboardNote sent|long|notsent|pasted` shows a
+        // Paste's note in its place and under the Settings group's Paste (`pasted`: with ⌘V, paste right
+        // away); neither goes away by itself here.
         if ClipboardPolicy.hostTakes(client.hostClipboard) {
             if UserDefaults.standard.bool(forKey: "SillClipboardChip") { client.clipboardChip = true }
             switch UserDefaults.standard.string(forKey: "SillClipboardNote") {
@@ -122,6 +123,9 @@ enum MockCatalog {
             case "notsent":
                 client.clipboardNote = ClipboardNote(text: ClipboardPolicy.Copy.notSent(mac: "Mac mini"), spoken: ClipboardPolicy.Copy.notSent(mac: "Mac mini"),
                                                      warning: true, at: 0)
+            case "pasted":
+                let note = ClipboardPolicy.receiptNote(pasted: true, mac: "Mac mini")
+                client.clipboardNote = ClipboardNote(text: note.text, spoken: note.spoken, warning: false, at: 0)
             default:
                 break
             }
@@ -291,8 +295,9 @@ enum MockCatalog {
     /// `-SillSettingsCase`: the states the Settings panel has to look right in. The mock streams
     /// 2880×1800 · 60 fps · 15 Mbps over Wi-Fi unless a case says otherwise.
     enum SettingsCase: String {
-        case `default`   // Sill.app: saved, the virtual display available and off
-        case cli         // SillHost without --virtual-display: kept until it quits, the switch off and disabled
+        case `default`   // Sill.app: saved, the virtual display available and off, Send Audio off (Mute under it shows)
+        case cli         // SillHost without --virtual-display: kept until it quits, the switch off and disabled; its
+                         // plain door is no paired session, so Direct Wireless is disabled too (2026-10-29)
         case software    // the hardware encoder is down: the callout, a 1440×900 stream under Retina / 120 fps targets
         case custom      // a bitrate set by hand on the Mac: "Custom — 12 Mbps"
         case vdproblem   // the virtual display on, but off for this session after repeated losses
@@ -302,7 +307,7 @@ enum MockCatalog {
         case timeout     // the Mac did not answer a pick: the inline problem
         case direct      // Direct Wireless Connection on (every other case has it off, so its row shows)
         case directlink  // on, and this device connected over it: "Direct" in the readout and the footer's warning
-        case nodirect    // a host without the setting (the ipad-host-settings build): no row
+        case nodirect    // a host without the setting (the ipad-host-settings build): no row, and no sound
         case wired       // the session runs over the USB cable (or Ethernet): "Wired" in the readout
         case noroute     // a path that names no link (loopback, a VPN): the readout ends in the bitrate
         case remote          // connected through Tailscale, 48 ms, a saved Mac: the route line, Paired
@@ -314,7 +319,8 @@ enum MockCatalog {
         // Pairing at home (docs/home-pairing-plan.md §7.6, §7.9): a session at home over TLS.
         case paired          // a saved Mac, Remote Access on: Paired, and how Sill reaches it from afar
         case pairedoff       // a saved Mac, Remote Access off: Paired, and how to turn it on
-        case openpair        // not saved, on a Mac that lets any device in (Require pairing off), Remote Access off: Pair This iPad…
+        case openpair        // not saved, on a Mac that lets any device in (Require pairing off), Remote Access off: Pair This iPad…,
+                             // and Direct Wireless disabled, the session not paired (2026-10-29)
         // Away from home and the link (docs/remote-bundle-plan.md §5.8, §6.7), through Tailscale:
         case away            // the away quality runs (Low · Standard; home Pro · Retina): "Away: Low · Standard"
         case awaymixed       // away, while a device at home is connected: "Home quality: Pro · Retina (…)"
@@ -323,6 +329,11 @@ enum MockCatalog {
         case linkmixed       // behind while a device at home keeps Pro: the callout without a button
         case linklow         // behind at Low · Standard: "even at Low", no button
         case linkstalled     // stalled: the Mac's alone, so no callout
+        // The Mac's sound (docs/audio-plan.md §7.8; Send Audio and Mute, the panel's two switches):
+        case sound           // the Mac sends its sound: the Send Audio row on, and Mute under it
+        case soundoff        // a Mac with sound, Send Audio off: the row off (as `default`), and Mute
+        case soundnote       // on, and the Mac could not capture it: the note under the row
+        case nosound         // a Mac without sound (Sill for Mac 0.5.1): the row off and disabled, "Update Sill…", no Mute
     }
 
     /// The away and link cases: the Mac's two qualities (home Pro · Retina, away Low · Standard unless
@@ -403,15 +414,20 @@ enum MockCatalog {
         client.hostClipboard = c == .legacy ? nil : ClipboardPolicy.generation
         guard c != .legacy else { return }
         var state = HostSettingsState(
+            // A Mac with sound, Send Audio off, as Sill for Mac has it since the sound came: the panel's
+            // Send Audio switch and Mute under it show. `nosound` and `nodirect` are older Macs. A
+            // paired session (`sessionPaired`, 2026-10-29), whose Direct Wireless switch works.
             settings: StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
-                                     directWireless: false),
+                                     directWireless: false, sendAudio: false),
             persistent: true, virtualDisplayAvailable: true, softwareEncoder: false,
-            stream: RunningStream(width: 2880, height: 1800, fps: 60, mbps: 15, onVirtualDisplay: false))
+            stream: RunningStream(width: 2880, height: 1800, fps: 60, mbps: 15, onVirtualDisplay: false),
+            sessionPaired: true)
         switch c {
         case .cli:
             state.persistent = false
             state.virtualDisplayAvailable = false
             state.virtualDisplayNote = "Start SillHost with --virtual-display to use it."
+            state.sessionPaired = false   // the plain door sees no key
         case .software:
             state.softwareEncoder = true
             state.stream = RunningStream(width: 1440, height: 900, fps: 60, mbps: 15, onVirtualDisplay: false)
@@ -432,6 +448,8 @@ enum MockCatalog {
             client.connectedDirectly = true
         case .nodirect:
             state.settings.directWireless = nil
+            state.settings.sendAudio = nil
+            state.sessionPaired = nil
         case .remote, .remoteslow:
             client.remoteRoute = .vpn("Tailscale")
             client.macInfo = macInfo()
@@ -445,8 +463,10 @@ enum MockCatalog {
             client.showMockLinkStats(linkStats(rtt: 120))
         case .remotepair:
             client.macInfo = macInfo()
+            state.sessionPaired = nil   // a Mac with a plain door, from before 2026-10-29
         case .remoteoff:
             client.macInfo = macInfo(remoteAccess: false)
+            state.sessionPaired = nil
         case .paired, .pairedoff:
             client.macInfo = macInfo(remoteAccess: c == .paired)
             client.macInfoSaved = true
@@ -454,10 +474,30 @@ enum MockCatalog {
         case .openpair:
             client.macInfo = macInfo(remoteAccess: false)
             client.mockHomeTLS = true
+            state.sessionPaired = false
         case .away, .awaymixed, .awayhome, .linkbehind, .linkmixed, .linklow, .linkstalled:
             seedAway(client, &state, c)
-        case .default, .legacy, .pending, .timeout, .wired, .noroute, .noremote:
+        case .sound:
+            state.settings.sendAudio = true
+        case .soundoff:
+            state.settings.sendAudio = false
+        case .soundnote:
+            state.settings.sendAudio = true
+            // The host's words (HostStatusSnapshot.Audio.note) for a start that ran out of time.
+            state.audioNote = "Couldn’t capture the sound of Safari: the stream did not start within 2 s."
+        case .nosound:
+            state.settings.sendAudio = nil
+        case .noremote:
+            state.sessionPaired = nil   // an older Mac
+        case .default, .legacy, .pending, .timeout, .wired, .noroute:
             break
+        }
+        // `-SillSound on|muted`: the Mac sends its sound (Send Audio on), and this device plays it or has it
+        // muted (Mute off or on; the mock plays nothing). Never saved.
+        switch UserDefaults.standard.string(forKey: "SillSound") {
+        case "on"?: state.settings.sendAudio = true; client.soundMuted = false
+        case "muted"?: state.settings.sendAudio = true; client.soundMuted = true
+        default: break
         }
         // `-SillLinkLine behind`: the Mac reports the link behind on this connection, whatever the
         // case, so the stream screen shows its line (with the panel closed). Its suggestion is the
@@ -514,6 +554,7 @@ enum MockCatalog {
         case homeolder       // a tap on an Update Sill row: "Mac mini runs an older Sill…"
         case pairingrequired // Require pairing turned on while this device was connected without pairing
         case asleep          // the automatic reconnect's dials of a listed row not answered: "Mac mini isn’t answering. It may be asleep…" (issue #69)
+        case tiles           // tiles with stored preview pictures and Home / Work / Other groups
     }
 
     /// How the connect screen starts in a case: the card unfolded, on the typed path, and the
@@ -673,6 +714,35 @@ enum MockCatalog {
             // dials have not connected: the line after DiscoveryPolicy.reconnectQuietAfter of them.
             client.macs = [home("Mac mini", .wifi, saved: true, homeTLS: true), studio]
             client.status = DiscoveryPolicy.reconnectLine(mac: "Mac mini", failed: DiscoveryPolicy.reconnectQuietAfter, direct: false)
+        case .tiles:
+            // The Mac mini twice, as on Noah's iPad (2026-10-27): its Wired row, taken for it by its Bonjour
+            // name (no tag of a saved Mac's, so its Remote row stays listed), and that Remote row. Both show
+            // its one picture (ConnectionList.tileMac); the Office iMac (not saved) and the Mac mini (2) (no
+            // picture kept) show the placeholder.
+            let wiredWord = DiscoveryPolicy.rowWord(door: .pairingRequired, saved: true, revoked: false, homeTLS: true,
+                                                    debug: StreamClient.debugBuild, method: .wired, cable: true)
+            let mini = FoundMac(name: "Mac mini", endpoint: .service(name: "Mac mini", type: "_sill._tcp", domain: "local.", interface: nil),
+                                route: .network, savedByName: "HOMEPAIRING8", method: .wired, door: .pairingRequired, homeWord: wiredWord)
+            let miniRemote = remote("Mac mini", "HOMEPAIRING8")
+            let pro = remote("Noah Saffer’s MacBook Pro in the Studio", "A3C5HR4RBV67YR21")
+            let second = remote("Mac mini (2)", "0123456789ABCDEF")
+            client.macs = [mini, studio, home("Office iMac", .wired, saved: false), miniRemote, pro, second]
+            if client.macGroups.isEmpty {
+                client.macGroups = ["HOMEPAIRING8": "Home", "HOMEPAIRING6": "Home", "A3C5HR4RBV67YR21": "Work"]
+            }
+            // `-SillVideoSize WxH`: the pictures at that shape (a 16:9 Desktop, a 2.39:1 ultrawide one), each
+            // 320 pt wide as a session's end keeps it, so a photo shows a tile keeping to its cell.
+            var size = CGSize(width: 208, height: 132)
+            if let raw = UserDefaults.standard.string(forKey: "SillVideoSize") {
+                let parts = raw.lowercased().split(separator: "x").compactMap { Double($0) }
+                if parts.count == 2, parts[0] > 0, parts[1] > 0 {
+                    size = CGSize(width: 320, height: (320 * parts[1] / parts[0]).rounded())
+                } else {
+                    print("-SillVideoSize \(raw): not WxH")
+                }
+            }
+            client.macPreviews = ["HOMEPAIRING8": thumbnail(seed: 0, size: size), "HOMEPAIRING6": thumbnail(seed: 1, size: size),
+                                  "A3C5HR4RBV67YR21": thumbnail(seed: 2, size: size)]
         }
         return client
     }
@@ -730,11 +800,10 @@ enum MockCatalog {
         }
     }
 
-    /// 208×132 window portrait: a dark body under a 9 pt title strip, with a few grey bars so it
-    /// reads as a tiny window rather than a blank rectangle.
-    private static func thumbnail(seed: Int) -> UIImage {
-        let size = CGSize(width: 208, height: 132)
-        return UIGraphicsImageRenderer(size: size).image { _ in
+    /// 208×132 window portrait (or `size`): a dark body under a 9 pt title strip, with a few grey bars
+    /// so it reads as a tiny window rather than a blank rectangle.
+    private static func thumbnail(seed: Int, size: CGSize = CGSize(width: 208, height: 132)) -> UIImage {
+        UIGraphicsImageRenderer(size: size).image { _ in
             colour(0x26282D).setFill()
             UIBezierPath(rect: CGRect(origin: .zero, size: size)).fill()
 

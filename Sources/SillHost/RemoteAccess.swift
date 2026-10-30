@@ -140,6 +140,14 @@ package final class RemoteAccess {
     /// A device paired by itself over the USB cable (its paired name and fingerprint): the app's
     /// notice. The core prints the line.
     package var onCablePaired: ((_ name: String, _ fingerprint: String) -> Void)?
+    /// The sessions a change cuts off (Remove, Require pairing turned on, Remote Access or internet
+    /// access turned off), named as `closeSessions` names them: the coordinator marks them revoked at
+    /// once, on the main actor as the change is decided (security scan finding 10, the review of
+    /// PR #254). Its messages still waiting for the main actor, read off the network while this Mac
+    /// saved the change (the keychain's write), then land nothing either: the server's own mark, as it
+    /// says goodbye, reaches the coordinator only behind them. A session admitted meanwhile, not yet
+    /// registered there, is cut off as it registers (`stillServes`).
+    var onCutOff: (((ClientRoute) -> Bool) -> Void)?
 
     /// TEST ONLY: the file store's directory, where a test hook may leave the current pairing link
     /// and code; nil for every other store.
@@ -236,9 +244,11 @@ package final class RemoteAccess {
         publishTrust()
         if wasOn, !remoteAccess {
             // Every remote session, those from the internet included: one goodbye each.
+            onCutOff?({ $0.isRemote })
             door?.closeSessions(Goodbye.remoteOff, matching: { _ in true },
                                 line: { name, endpoint in "Remote access off: disconnecting \(name) at \(endpoint)." })
         } else if wasInternet, !internetAccess {
+            onCutOff?({ $0.isRemote && $0.origin == .internet })
             door?.closeSessions(Goodbye.internetOff, matching: { $0.origin == .internet },
                                 line: { name, endpoint in "Internet access off: disconnecting \(name) at \(endpoint)." })
         }
@@ -248,8 +258,11 @@ package final class RemoteAccess {
                 // The snapshot already refuses unpaired keys at the next handshake; these are the
                 // ones admitted while it was off.
                 let pairedKeys = Set(paired.compactMap(\.fingerprintData))
-                server?.closeSessions(Goodbye.pairingRequired,
-                                      matching: { !$0.isRemote && $0.encrypted && !($0.fingerprint.map { pairedKeys.contains($0) } ?? false) },
+                let unpaired: @Sendable (ClientRoute) -> Bool = {
+                    !$0.isRemote && $0.encrypted && !($0.fingerprint.map { pairedKeys.contains($0) } ?? false)
+                }
+                onCutOff?(unpaired)
+                server?.closeSessions(Goodbye.pairingRequired, matching: unpaired,
                                       line: { name, endpoint in "Require pairing: disconnecting \(name) at \(endpoint), which isn’t paired." })
             }
         }
@@ -430,7 +443,7 @@ package final class RemoteAccess {
             openPairing(requestedBy: device)
             return
         }
-        let asker = PairingWindow.DeviceAsk(fingerprint: s.fingerprint, source: s.source, from: s.from)
+        let asker = PairingWindow.DeviceAsk(fingerprint: s.fingerprint, source: s.display, from: s.from)
         _ = decideAsk(name: device, display: s.display, asker: asker, fromThisMac: s.fromThisMac, cable: nil, cableClaimed: false)
     }
 
@@ -462,10 +475,25 @@ package final class RemoteAccess {
         publishTrust()
         publish()
         let fp = device.fingerprintData
-        server?.closeSessions(Goodbye.removed, matching: { fp != nil && $0.fingerprint == fp }, done: { n in
+        let removed: @Sendable (ClientRoute) -> Bool = { fp != nil && $0.fingerprint == fp }
+        onCutOff?(removed)
+        server?.closeSessions(Goodbye.removed, matching: removed, done: { n in
             print("Removed \(device.displayName); closed \(n) connection\(n == 1 ? "" : "s").")
         })
         return nil
+    }
+
+    /// Whether this Mac still serves a session admitted with `route`, by its settings and paired devices
+    /// now (DoorPolicy.stillServes): false for one a change has cut off since its door admitted it. The
+    /// coordinator asks as it registers a session, so one admitted while this Mac decided the change
+    /// (behind which its registration waited, out of `onCutOff`'s sight) is cut off before any message of
+    /// it lands (security scan finding 10, the review of PR #254).
+    func stillServes(_ route: ClientRoute) -> Bool {
+        let fp = route.fingerprint
+        let t = DoorPolicy.Trust(hasKey: fp != nil, paired: fp.map { key in paired.contains { $0.fingerprintData == key } } ?? false,
+                                 requirePairing: requirePairing, remoteAccess: remoteAccess, internetAccess: internetAccess)
+        return DoorPolicy.stillServes(route.isRemote ? .remote : .home, encrypted: route.encrypted,
+                                      wasPaired: route.pairedName != nil, origin: route.origin, t)
     }
 
     /// Renames a paired device (the Mac's own label for it).
@@ -600,7 +628,7 @@ package final class RemoteAccess {
     private func ask(_ a: Door.PairAttempt, _ identity: HostIdentity) -> PairResult {
         let name = Self.displayName(a.request)
         let from = a.origin == .direct ? "nearby" : (a.fromThisMac || a.origin == .loopback ? "on this Mac" : "on this network")
-        let asker = PairingWindow.DeviceAsk(fingerprint: a.deviceFingerprint, source: a.source, from: from)
+        let asker = PairingWindow.DeviceAsk(fingerprint: a.deviceFingerprint, source: a.display, from: from)
         let verdict = decideAsk(name: name, display: a.display, asker: asker, fromThisMac: a.fromThisMac,
                                 cable: a.cable, cableClaimed: a.request.cable == true)
         guard verdict == .pairNow, let cable = a.cable else {

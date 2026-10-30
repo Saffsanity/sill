@@ -174,6 +174,10 @@ extension StreamClient {
     /// Writes the list only (`recomputeMacs` itself writes what it learns of a Mac's door).
     func storeSavedMacs() {
         if !savedMacsSeeded { UserDefaults.standard.set(SavedMacs.encode(savedMacs), forKey: SavedMacs.defaultsKey) }
+        pruneSavedPreviews()
+        guard !savedMacsSeeded else { return }
+        let kept = Set(savedMacs.map(\.macID))
+        for macID in macGroups.keys where !kept.contains(macID) { setGroup(nil, for: macID) }
     }
 
     /// Forget: the record only. The Mac lists this device until it is removed there, and the
@@ -184,8 +188,112 @@ extension StreamClient {
         savedMacs.removeAll { $0.macID == macID }
         savedSightings.since[macID] = nil
         savedSightings.leftAt[macID] = nil
+        setGroup(nil, for: macID)
+        removePreview(for: macID)
         persistSavedMacs()
         status = "Forgot \(name). It still lists this \(Self.deviceWord) until you remove it in Sill’s Settings on the Mac."
+    }
+
+    // MARK: Connection groups and preview pictures (ConnectionList)
+
+    func setGroup(_ group: String?, for macID: String) {
+        storeGroups(ConnectionList.settingGroup(group, for: macID, in: macGroups))
+    }
+
+    /// A record retired for a newer one of the same Mac (SavedMacs.superseding, a re-pairing that
+    /// replaced a record whose Mac has a new key) gives its group to that one; before the list is
+    /// stored, which drops the groups of records no longer saved.
+    func carryGroup(from old: String, to new: String) {
+        storeGroups(ConnectionList.carryingGroup(from: old, to: new, in: macGroups))
+    }
+
+    private func storeGroups(_ next: [String: String]) {
+        guard next != macGroups else { return }
+        macGroups = next
+        if !macGroupsSeeded {
+            UserDefaults.standard.set(ConnectionList.encodeGroups(macGroups), forKey: ConnectionList.groupsKey)
+        }
+    }
+
+    /// The connect screen's arrangement (`Sill.connectionStyle`, which ConnectScreen's switch and a saved
+    /// Mac's menu set; tiles while nothing is stored, ConnectionList.defaultStyle): pictures are taken
+    /// only with tiles (ConnectionList.takesPreview), and shown only with tiles (`syncPreviews`).
+    var connectionStyle: ConnectionList.Style {
+        ConnectionList.storedStyle(UserDefaults.standard.string(forKey: ConnectionList.styleKey))
+    }
+
+    /// Caches: never in a backup, and iOS may empty it, which costs a tile its picture until the next
+    /// session ends.
+    private static var previewsDirectory: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("SillPreviews", isDirectory: true)
+    }
+
+    /// At launch, and whenever the connect screen's style may have changed (its switch, a saved Mac's
+    /// menu, another Sill window: ConnectScreen): with tiles each saved Mac's kept picture shows, read
+    /// from its file; with the list none shows and every file stays, so switching back to tiles shows them
+    /// at once (ConnectionList.previewPlan). The files of Macs no longer saved go either way. Nothing when
+    /// `style` is the one the shown pictures already follow, so a connect screen that comes back keeps
+    /// pictures that landed meanwhile (and the harness's mock keeps its own).
+    func syncPreviews(to style: ConnectionList.Style) {
+        guard style != previewStyle else { return }
+        previewStyle = style
+        let dir = Self.previewsDirectory
+        let files = dir.flatMap { try? FileManager.default.contentsOfDirectory(atPath: $0.path) } ?? []
+        let plan = ConnectionList.previewPlan(style: style, files: files, savedMacIDs: Set(savedMacs.map(\.macID)))
+        if !savedMacsSeeded, let dir {
+            for stale in plan.delete { try? FileManager.default.removeItem(at: dir.appendingPathComponent(stale)) }
+        }
+        var shown: [String: UIImage] = [:]
+        if let dir {
+            for macID in plan.show {
+                guard let name = ConnectionList.previewFileName(for: macID),
+                      let data = try? Data(contentsOf: dir.appendingPathComponent(name)),
+                      let image = UIImage(data: data) else { continue }
+                shown[macID] = image
+            }
+        }
+        if !(shown.isEmpty && macPreviews.isEmpty) { macPreviews = shown }
+        #if DEBUG
+        print("tiles: \(style): \(shown.count) picture\(shown.count == 1 ? "" : "s") shown, \(files.filter { $0.hasSuffix(".jpg") }.count - plan.delete.count) kept"
+              + (plan.delete.isEmpty ? "" : ", \(plan.delete.count) of Macs no longer saved deleted"))
+        #endif
+    }
+
+    /// A session's end with tiles on, once its last keyframe is decoded (`tearDown`, `takePreview`): the
+    /// tile shows it at once (`macPreviews`, published, so a connect screen already showing picks it
+    /// up) and its JPEG is written. The file has complete protection: unreadable while the device is
+    /// locked. Sill reads it only at launch and when tiles come back, and writes it only for a session
+    /// that ended in a window in front, a second at most later, so all happen while the device is unlocked.
+    func savePreview(_ image: UIImage, for macID: String) {
+        guard let name = ConnectionList.previewFileName(for: macID) else { return }
+        macPreviews[macID] = image
+        guard !savedMacsSeeded, let dir = Self.previewsDirectory,
+              let data = image.jpegData(compressionQuality: 0.72) else { return }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
+                                                 attributes: [.protectionKey: FileProtectionType.complete])
+        let file = dir.appendingPathComponent(name)
+        try? data.write(to: file, options: [.atomic, .completeFileProtection])
+        #if DEBUG
+        let protection = (try? FileManager.default.attributesOfItem(atPath: file.path))?[.protectionKey] as? FileProtectionType
+        print("tiles: kept the picture of \(macID), \(data.count / 1024) KB, protection \(protection?.rawValue ?? "not reported")")
+        #endif
+    }
+
+    func removePreview(for macID: String) {
+        macPreviews.removeValue(forKey: macID)
+        guard let dir = Self.previewsDirectory, let name = ConnectionList.previewFileName(for: macID) else { return }
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent(name))
+    }
+
+    func pruneSavedPreviews() {
+        let kept = Set(savedMacs.map(\.macID))
+        if macPreviews.keys.contains(where: { !kept.contains($0) }) { macPreviews = macPreviews.filter { kept.contains($0.key) } }
+        guard !savedMacsSeeded, let dir = Self.previewsDirectory,
+              let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return }
+        for stale in ConnectionList.stalePreviewFiles(in: files, keepingMacIDs: kept) {
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent(stale))
+        }
     }
 
     /// The card's Cancel while a pairing dial runs: it stops, nothing is saved. The home card's too:
@@ -334,6 +442,7 @@ extension StreamClient {
                     print("remote: \(winner.candidate.key) answered with the key of \(newer.macID), saved after \(macID): \(macID) superseded")
                     #endif
                     self.savedMacs = SavedMacs.superseding(old: macID, by: newer.macID, proof: winner.candidate.key, in: self.savedMacs)
+                    if self.savedMac(macID) == nil { self.carryGroup(from: macID, to: newer.macID) }
                     self.persistSavedMacs()
                     if self.reconnect?.macID == macID { self.reconnect?.macID = newer.macID }
                     macID = newer.macID
@@ -556,15 +665,25 @@ extension StreamClient {
 
     /// The automatic reconnect after a session with this Mac ended on its own (§7.4). `afterQuit`:
     /// the session ended with goodbye `quit`, so the Mac's row that is going is left alone for
-    /// DiscoveryPolicy.quitWait (`reconnectIfListed`); never for a notice.
+    /// DiscoveryPolicy.quitWait (`reconnectIfListed`); never for a notice. An open door's session
+    /// leaves the key it saw, which the reconnect's dials pin (DiscoveryPolicy.reconnectKey); one that
+    /// saw none (a tap's dial that ended before its handshake) the key the last session under its
+    /// name saw (`openKeys`, the review of #255).
     private func lostReconnect(session s: Session?, saved: SavedMac?, name: String, remoteAllowed: Bool,
                                afterQuit: Bool = false) -> Reconnect {
         let bonjour = s?.bonjourName ?? saved?.bonjourName
+        let earlier = bonjour.flatMap { openKeys[$0] }
+        let openKey = DiscoveryPolicy.reconnectKey(lost: s?.home, earlier: earlier)
+        #if DEBUG
+        if openKey != nil, DiscoveryPolicy.reconnectKey(lost: s?.home) == nil {
+            print("reconnect: the dial of \(name) saw no key; the reconnect pins the key the last session under its name saw")
+        }
+        #endif
         return Reconnect(macID: saved?.macID, bonjourName: bonjour, name: name,
                          lostAt: ProcessInfo.processInfo.systemUptime, pathAtLoss: pathSignature,
                          remoteAllowed: remoteAllowed,
                          rememberedDirect: bonjour.map { directWirelessMacs.contains($0) } ?? false,
-                         afterQuit: afterQuit)
+                         afterQuit: afterQuit, openKey: openKey)
     }
 
     /// The automatic reconnect's look, at every browser change, path change and due time
@@ -612,9 +731,12 @@ extension StreamClient {
             // The row's door decides whether the reconnect dials it at all (DiscoveryPolicy.homeDial,
             // never an ask): a Mac that removed this device, or an unsaved one that requires
             // pairing, waits for a tap, and one whose Sill is too old for this build is not dialed.
+            // An unsaved one on an open door is dialed pinned to the key its lost session saw
+            // (DiscoveryPolicy.reconnectTrust): another key ends the reconnect (homeSessionEnded); a
+            // plain door after that session is not dialed (a DEBUG build's), and the reconnect looks on.
             let id = mac.macID ?? r.macID
             let decision = homeDecision(mac, macID: id, tap: false)
-            if DiscoveryPolicy.sessionTrust(decision, savedPin: id.flatMap { savedMac($0)?.fingerprintData }) != nil {
+            if DiscoveryPolicy.reconnectTrust(decision, savedPin: id.flatMap { savedMac($0)?.fingerprintData }, seen: r.openKey) != nil {
                 // When (issue #69): the first dial of a listing at once, then 5, 10, 20 and every 30 s
                 // while its dials do not connect (a Mac a sleep proxy answers for, one stopped), 12 at
                 // most, in the foreground only (DiscoveryPolicy.redialRow). A listing seen afresh
@@ -655,14 +777,24 @@ extension StreamClient {
                 reconnect = r        // kept until the row's connection is ready (a TLS one's: its first window list)
                 #if DEBUG
                 lastRedialNote = nil
-                print("reconnect: dialing \(mac.name) (dial \(r.rowDials) of this listing)")
+                let pinnedToSeen = decision == .anyKey && r.openKey != nil
+                print("reconnect: dialing \(mac.name) (dial \(r.rowDials) of this listing)"
+                      + (pinnedToSeen ? ", pinned to the key its last session saw" : ""))
                 #endif
                 // False only when a TLS dial finds no key and none can be made: the status says why.
-                guard dial(mac, macID: id, tap: false) else { return false }
+                guard dial(mac, macID: id, tap: false, seen: r.openKey) else { return false }
                 status = line
                 return true
             }
             if decision == .updateSill { status = DiscoveryPolicy.updateSillStatus(mac: mac.name) }
+            #if DEBUG
+            // A plain door under the name after a session that saw a key over TLS: never dialed by the
+            // reconnect (DiscoveryPolicy.reconnectTrust, the review of #255), which looks on; a tap dials it.
+            if decision == .plain, r.openKey != nil, lastRedialNote != "plain \(mac.name)" {
+                lastRedialNote = "plain \(mac.name)"
+                print("reconnect: \(mac.name) is a plain door now, and its last session saw a key over TLS: not dialed (a tap dials it)")
+            }
+            #endif
             // A row that waits for a tap (an unsaved Mac that now asks devices to pair, a saved one
             // that removed this device): the reconnect never asks, so it ends here, with the words
             // a goodbye would have brought, rather than "…reconnects when it's back" for ever.

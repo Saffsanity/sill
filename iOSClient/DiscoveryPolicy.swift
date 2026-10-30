@@ -6,10 +6,11 @@ import Foundation
 /// on, when a reconnect may take a Direct row, when a session over AWDL moves to the network,
 /// when a live session at home moves to the cable that came or off the one that went (`pathPlan`),
 /// and, for the Macs this device paired with, when they show as Remote rows and when a lost one is
-/// dialed away from home; at home, what a row of a Mac whose door speaks TLS says and what a tap
-/// on it does, whether a connection runs over the USB cable as this device sees it, the key each
-/// connection of a session at home is pinned to and what its end means, what the Mac's answer to
-/// an ask means, where a pairing link goes, and the words for all of it.
+/// dialed away from home; at home, the TXT record a row is read with, what a row of a Mac whose
+/// door speaks TLS says and what a tap on it does, whether a connection runs over the USB cable as
+/// this device sees it, the key each connection of a session at home is pinned to and what its end
+/// means, what the Mac's answer to an ask means, where a pairing link goes, and the words for all
+/// of it.
 /// AWDL takes the radio off its Wi-Fi channel (CLAUDE.md, trackpad stutter), so the device asks for
 /// it only when a Mac it has seen with Direct Wireless Connection on is missing from the network,
 /// or when the user taps Search Nearby, never while connected, and leaves it once the network lists
@@ -773,6 +774,11 @@ enum DiscoveryPolicy {
         /// Asks for it once the closed window's wait has passed (two seconds and the worst recent round
         /// trip), unless the person picked or launched something meanwhile (StreamClient).
         case askAfterWait
+        /// Asks for it again in this many seconds, when the spacing since the last automatic request
+        /// ends: that request brought no stream that lasted (the Mac could not start the Desktop, the
+        /// black screen of 2026-10-28, or stopped it within the spacing) and the person chose nothing
+        /// since. One re-check, which StreamClient keeps and `autoDesktopRecheck` judges when it comes due.
+        case askIn(Double)
         /// Nothing.
         case leave
     }
@@ -788,13 +794,30 @@ enum DiscoveryPolicy {
     /// send); after the closed window's wait when a window it watched has left the list (a window can
     /// leave it for a second or two: a Space change, full screen); never when that window is still
     /// listed, a pick that failed, which is the person's to retry. Never within `autoDesktopSpacing` of
-    /// the last automatic request (`sinceLastAuto`).
-    static func autoDesktop(watched: Watched, sinceLastAuto: Double) -> AutoDesktop {
-        guard sinceLastAuto > autoDesktopSpacing else { return .leave }
+    /// the last automatic request (`sinceLastAuto`): within it, watching nothing or the Desktop, the
+    /// device asks again once the spacing ends (`askIn`), when the person chose nothing since that
+    /// request (`choseSinceLastAuto`: a pick, a launch, or a pick made again after a move). On
+    /// 2026-10-28 the Mac could not start the Desktop the device asked for on its first list, its
+    /// next lists came within the spacing, and nothing asked again: the panel stayed black until the
+    /// person left. A clock set back waits the spacing, never longer.
+    static func autoDesktop(watched: Watched, sinceLastAuto: Double, choseSinceLastAuto: Bool) -> AutoDesktop {
+        let spaced = sinceLastAuto > autoDesktopSpacing
         switch watched {
-        case .nothing, .desktop: return .ask
-        case .window(let listed): return listed ? .leave : .askAfterWait
+        case .nothing, .desktop:
+            if spaced { return .ask }
+            return choseSinceLastAuto ? .leave : .askIn(min(autoDesktopSpacing, autoDesktopSpacing - sinceLastAuto))
+        case .window(let listed):
+            guard spaced else { return .leave }
+            return listed ? .leave : .askAfterWait
         }
+    }
+
+    /// The re-check `askIn` set, come due: the Desktop again only while nothing streams still, the
+    /// person chose nothing since it was set, and no other automatic request went out (each starts its
+    /// own spacing, and its own re-check). So a Desktop that failed is asked for once more 10 s after,
+    /// and a Mac that keeps failing every 10 s, never faster.
+    static func autoDesktopRecheck(nothingStreams: Bool, choseSince: Bool, askedSince: Bool) -> Bool {
+        nothingStreams && !choseSince && !askedSince
     }
 
     /// The memory after a state from `mac`: true moves it to the front, false removes it, nil (an
@@ -851,6 +874,66 @@ enum DiscoveryPolicy {
     /// "0" a TLS door open to any device, anything else a TLS door for paired devices only.
     enum HomeDoor: Hashable { case plain, pairingRequired, open }
 
+    /// A Bonjour result's TXT record as its row reads it (§7.3): the recognition tag (`r`, nil for
+    /// none) and the home door (`p`). StreamClient.record(of:) reads it from the result's metadata,
+    /// and a result whose metadata is not `.bonjour`, or whose record holds no entry, carries none
+    /// (nil). A Sill with an identity always advertises `r` (HostIdentity.txtRecord), so its own
+    /// record is never empty; a plain door without one (an older Sill.app, the CLI) registers none.
+    struct RowRecord: Hashable {
+        var tag: String?
+        var door: HomeDoor
+    }
+
+    /// What a kept record belongs to (`rowRecords`): one browser's result for one service.
+    /// `browser` is the browser that delivered it: StreamClient numbers each browser it makes, so one
+    /// made again after the background or a failure (issue #69) is another browser, and the DEBUG
+    /// harness's test rows, which no browser lists, take 0. `name` and `domain` are the service's
+    /// Bonjour name and domain: a browser that lists a name in two domains has two results, and each
+    /// row is read with the record of the result it is built from.
+    struct RowRecordKey: Hashable {
+        var browser: Int
+        var name: String
+        var domain: String
+    }
+
+    /// The record each result shown is read with: its own, else the last record that result
+    /// (`RowRecordKey`: this browser, this name and domain) carried while its browser has listed it
+    /// without a break, forgotten once it leaves the browser's results (`previous`: the records
+    /// after the last look; `listed`: each result shown now, with its key and its own record).
+    /// Noah's iPad, 2026-10-27, on the connect screen with the USB cable in: the Mac was listed on
+    /// anpi0, en2 and en0 with its record (p=1); with the cable pulled the same result came back on
+    /// en2 and en0, then on en0 alone, with no record at all, so its row was taken by its name
+    /// alone and read as a plain door, "Update Sill" by the no-downgrade rule (`rowWord`), and a
+    /// tap dialed nothing, and it stayed so. A record that comes replaces the kept one, whatever it
+    /// says: it is the Mac's own word (a new tag, Require pairing turned off, `p` gone). A browser
+    /// made again is a break: its own results are read with what it delivers itself, which a fresh
+    /// browse resolves again (on the simulator a browser listed a new name only once its TXT record
+    /// answered), and the results of the browser it replaced, shown beside them while it settles
+    /// (`browserResults`), keep theirs only while they are shown. The replaced browser reported
+    /// nothing once it was suspended (iOS may have made its connection defunct without a word), so
+    /// a Mac whose registration went meanwhile, its name taken by another service with no record
+    /// (an older Sill, the CLI), would otherwise have been read as that Mac by its old tag (the
+    /// review of #232). So a row never gains a door that no record gave it: what is kept is a
+    /// record this very browser delivered for that result, and a tap dials as that record says
+    /// (`homeDial`: pinned to the saved Mac's key over TLS, never plain). A Mac that really went
+    /// back to a plain door reads "Update Sill" again once its name is listed afresh: the browser's
+    /// removal of the name (about a second after its Sill's goodbye) is the break, with no timer,
+    /// and another Sill's registration comes after it. While one browser keeps listing a result
+    /// without a break, though, a removal it never reported (a lost goodbye, a removal and a
+    /// registration in one report) leaves whatever service now answers under that name read with
+    /// the old record: as the Mac its tag names, whose Remote row is then hidden and whose
+    /// automatic remote dial is held back while it is listed, dialed pinned, and marked newKey by a
+    /// TLS answer with another key when no other row of that Mac is listed (`afterPinRefused`, as
+    /// for a refused tag-named row). A result never listed with a record reads as a plain door, as
+    /// before (`rowWord`, `homeDial`). A key listed twice is read by its first entry.
+    static func rowRecords(_ previous: [RowRecordKey: RowRecord], listed: [(key: RowRecordKey, record: RowRecord?)]) -> [RowRecordKey: RowRecord] {
+        var next: [RowRecordKey: RowRecord] = [:], seen = Set<RowRecordKey>()
+        for item in listed where seen.insert(item.key).inserted {
+            next[item.key] = item.record ?? previous[item.key]
+        }
+        return next
+    }
+
     /// The saved Mac a network or Direct row is (§7.3): the one its TXT tag names (`tagged`, the
     /// tag this device resolved), else, for a row that carries no tag at all (`carriesTag` false),
     /// the saved Mac last reached under the row's Bonjour name (`saved`: each saved Mac's ID and that
@@ -863,6 +946,9 @@ enum DiscoveryPolicy {
     /// stranger's until its key says otherwise: its pin then fails (-9808), and nothing of this
     /// device reaches it. The price: another Mac of the same name, reached only while the saved one
     /// is not listed, cannot be tapped until the saved one is forgotten.
+    ///
+    /// The tag and whether there is one come from the record the row is read with (`rowRecords`):
+    /// its result's own, else the last one that result carried while its browser listed it.
     ///
     /// A row whose tag names no saved Mac is not one, by its name or otherwise (Noah, 2026-09-27:
     /// Sill for Mac 0.4.0 made the Mac a new key and a new recognition key, its row read the saved
@@ -1124,7 +1210,8 @@ enum DiscoveryPolicy {
         /// A saved Mac: every connection `sill/1`, pinned to its key.
         case saved(pin: Data)
         /// An unsaved Mac on an open door (`p=0`): the session's first connection takes any key,
-        /// and every later one pins the key that one saw (`seen`).
+        /// and every later one pins the key that one saw (`seen`), its automatic reconnect's too
+        /// (`reconnectTrust`).
         case open(seen: Data?)
 
         /// The session speaks TLS: connected at its first window list, not at `.ready`, since with
@@ -1152,9 +1239,10 @@ enum DiscoveryPolicy {
         }
     }
 
-    /// The session a tap or an automatic reconnect starts (§7.4): the trust `homeDial`'s answer
-    /// gives it; nil when that answer dials no session (the ask, a Mac too old for this build, a
-    /// reconnect that waits for a tap) or a saved Mac's pin cannot be read.
+    /// The session a tap starts (§7.4), and the automatic reconnect's but at an open door
+    /// (`reconnectTrust`): the trust `homeDial`'s answer gives it; nil when that answer dials no
+    /// session (the ask, a Mac too old for this build, a reconnect that waits for a tap) or a saved
+    /// Mac's pin cannot be read.
     static func sessionTrust(_ dial: HomeDial, savedPin: Data?) -> HomeTrust? {
         switch dial {
         case .pinned: return savedPin.map { .saved(pin: $0) }
@@ -1162,6 +1250,42 @@ enum DiscoveryPolicy {
         case .plain: return .plain
         case .ask, .updateSill, .waitForTap: return nil
         }
+    }
+
+    /// The session the automatic reconnect starts at a row (§7.4): `sessionTrust`'s, except at an
+    /// unsaved Mac on an open door (`homeDial`'s `.anyKey`), which it dials pinned to the key its
+    /// lost session saw (`seen`, `reconnectKey`). With any key there the session, and with it what
+    /// this device types and its clipboard, went with no tap to whatever took the lost Mac's
+    /// Bonjour name with `p=0` (the security scan's finding 3, 2026-10-29): the reconnect finds an
+    /// unsaved Mac by its name alone, and anyone on the network can advertise any name and any `p`.
+    /// Another key answering ends the reconnect (`homeEnd`'s `.otherKey`), and a tap connects with
+    /// any key, as a tap on an open door always has. A lost session that never saw a key (a tap's
+    /// dial that ended before its handshake) is reconnected pinned to the key this device's last
+    /// session under that name saw (`reconnectKey`'s `earlier`), and with none, as that tap was,
+    /// with any key. A saved Mac, pinned to its saved key, is unchanged. Nor is a plain door (no
+    /// `p`) under the name dialed once the lost session saw a key (`homeDial`'s `.plain`, a DEBUG
+    /// build's: Release dials none): with no key to check, whatever advertised the name without `p`
+    /// got the session, as a tap of a DEBUG build's would (the review of #255, 2026-10-29). The
+    /// reconnect looks past it, as Release does, and a tap still dials it.
+    static func reconnectTrust(_ dial: HomeDial, savedPin: Data?, seen: Data?) -> HomeTrust? {
+        if dial == .anyKey, let seen { return .open(seen: seen) }
+        if dial == .plain, seen != nil { return nil }
+        return sessionTrust(dial, savedPin: savedPin)
+    }
+
+    /// The key a lost session at home saw, which its automatic reconnect pins (`reconnectTrust`): an
+    /// open session's, once its first connection was ready (`trust(_:readyWith:)`). An open one that
+    /// never saw a key (a tap's dial that ended before its handshake) takes `earlier`, the key this
+    /// device's last session under that Bonjour name saw (StreamClient's `openKeys`): a tap clears the
+    /// reconnect and dials any key, so one tap that did not connect, as the reconnect's own words
+    /// invite while the Mac is away ("…Sill keeps trying, or tap it to try now."), left a reconnect
+    /// that took any key under that name (the review of #255, 2026-10-29). Nil for any other: a saved
+    /// Mac's (its reconnect pinned to its saved key), a plain door's, a remote session's (no home
+    /// trust), and an open one that never saw a key under a name no session of this device saw one.
+    static func reconnectKey(lost trust: HomeTrust?, earlier: Data? = nil) -> Data? {
+        if case .open(nil) = trust { return earlier }
+        if case .open(let seen?) = trust { return seen }
+        return nil
     }
 
     /// The trust once the session's first connection is ready: an open session keeps the key that
@@ -1186,6 +1310,12 @@ enum DiscoveryPolicy {
         /// rows its tag names are dialed, pinned, before any words; never a plain retry. With none
         /// left the Mac is paired again (`afterPinRefused`: SavedMac.newKey, a tap asks).
         case wrongKey
+        /// Another key answered the automatic reconnect of an unsaved Mac on an open door, pinned to
+        /// the key its lost session saw (-9808, `reconnectTrust`): another Mac under its Bonjour
+        /// name, or the same Mac with a new key, which this device cannot tell apart. The reconnect
+        /// ends with its words (`HomeCopy.otherKey`), the row reads Not paired as before, and a tap
+        /// connects with any key.
+        case otherKey
         /// Anything else: the words and the reconnect as before.
         case other
     }
@@ -1204,7 +1334,8 @@ enum DiscoveryPolicy {
         case .saved:
             if keyRefused.contains(tls) { return .removed }
             return tls == pinRefused ? .wrongKey : .other
-        case .open:
+        case .open(let seen):
+            if seen != nil, tls == pinRefused { return .otherKey }
             return keyRefused.contains(tls) ? .pairingRequired : .other
         case .plain:
             return .other
@@ -1442,6 +1573,11 @@ enum DiscoveryPolicy {
         }
         static func pairingRequired(mac: String, device: String) -> String {
             "\(mac) now asks devices to pair. Tap it to pair this \(device)."
+        }
+        /// Another key answered the automatic reconnect of a Mac this device was connected to
+        /// without pairing (`HomeEnd.otherKey`).
+        static func otherKey(mac: String, device: String) -> String {
+            "\(mac) answered with another key, so this \(device) didn\u{2019}t reconnect. Tap it to connect."
         }
         /// The home card's errors, under its field or in its place (`homeRefusal`). After a stop
         /// or a closed code the Mac keeps this device quiet (a cancel on the Mac, a stop), so the

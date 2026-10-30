@@ -18,6 +18,8 @@ struct StatusPresentation: Equatable {
     struct Attention: Equatable, Identifiable {
         enum Action: Equatable {
             case allowScreenRecording, allowAccessibility, showRemoteAccess, showDevices
+            /// Settings › General, where the macOS firewall's line has the command that unblocks Sill.
+            case showGeneral
             /// "‹device› Wants to Pair": its window forward while it shows the code (`showing`), else
             /// a window opened on the Mac, asked by that device (its paired-style name).
             case pairingRequest(name: String, showing: Bool)
@@ -104,11 +106,19 @@ enum StatusText {
             attention.append(.init(title: "Devices Can’t Connect", subtitle: "Sill couldn’t use its key in your keychain.",
                                    action: .showDevices))
         }
+        // The macOS firewall blocks Sill (FirewallRule): its line and command are in Settings › General.
+        // Not beside the keychain's: with no home door there is nothing for the firewall to block.
+        let firewallBlocks = !homeDoorClosed ? s.firewall.flatMap(FirewallRule.Copy.menuSubtitle) : nil
+        if let firewallBlocks {
+            attention.append(.init(title: "Devices Can’t Connect", subtitle: firewallBlocks, action: .showGeneral))
+        }
 
         // The attention glyph means "Sill needs you". The test pattern needs no permission. A device
-        // waiting to pair and a closed home door need the user too; an older device is only news.
+        // waiting to pair, a closed home door and a firewall that blocks Sill need the user too; an
+        // older device is only news.
         let glyph: StatusGlyph.State
         if startupError != nil || isFailed(s.network) || remotePortTaken != nil || request != nil || homeDoorClosed
+            || firewallBlocks != nil
             || (!s.synthetic && !(permissions.screenRecording && permissions.accessibility)) {
             glyph = .attention
         } else if s.stream != nil {
@@ -231,7 +241,8 @@ enum StatusText {
 
     /// What streams: "Safari — Apple Developer" over "3024×1898 · 118 of 120 fps · 30 Mbps" (a still
     /// picture: "120 fps, still"), and with one device, how it is connected: "… · 30 Mbps · Wi-Fi".
-    /// With two or more, each device's own row says it.
+    /// With two or more, each device's own row says it. "· sound" ends it while a device gets the
+    /// Mac's sound.
     private static func sourceRow(_ s: HostStatusSnapshot) -> StatusPresentation.Row? {
         guard let stream = s.stream else { return nil }
         let title: String, symbol: String
@@ -255,6 +266,8 @@ enum StatusText {
             detail += " · real window (virtual display: \(s.lastStageFailure ?? s.virtualDisplayProblem ?? "unavailable"))"
         }
         if stream.softwareEncoder { detail += " · software encoder" }
+        // The Mac's sound goes out too, while a device gets it (docs/audio-plan.md, Q9).
+        if s.audio?.devices ?? 0 > 0 { detail += " · sound" }
         return StatusPresentation.Row(id: "source", symbol: symbol, title: title, detail: detail)
     }
 

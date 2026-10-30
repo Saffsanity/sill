@@ -40,6 +40,17 @@ package final class StreamCoordinator {
     private var prioritizeSpeed: Bool { config.prioritizeSpeed }
 
     let server: StreamServer
+    /// A sleeping display gives the stream black frames (issue #134): a device's session connecting,
+    /// and what a person does to the Mac from it, are user activity on the Mac, declared as a key press
+    /// would be (`deviceActive`). DisplayWake alone decides which messages count and when (`handle`
+    /// forwards every one); DisplayActivity makes the call, off the main actor. Nothing is held: the
+    /// display sleeps again by the Mac's own setting once no device uses it. A test host
+    /// (`--synthetic`, as `injector.dryRun`) only counts `disp.wakeDry`.
+    private var displayWake: DisplayWake
+    private let displayActivity: DisplayActivity
+    /// The parameter sets that last went out, forgotten as each stream starts (`select`): a stream's
+    /// first, and any that differ, are a new frame size for the devices (`parameterSetsSent`).
+    private var lastParameterSets: Data?
     let catalog = WindowCatalog()
     let capture = WindowCapture()
     /// `--synthetic`: the Desktop source streams a test pattern instead of the screen.
@@ -58,9 +69,16 @@ package final class StreamCoordinator {
     /// encoder, the launch probe never runs and the re-check never starts, so no test touches the
     /// Mac's one hardware encoder while Noah streams (PointerTestHooks).
     private let softwareOnly: Bool
-    /// The TEST ONLY hooks' lines (PointerTestHooks, InputInjector.testInputLog), printed as `start`
-    /// begins; empty without them.
+    /// The TEST ONLY hooks' lines (PointerTestHooks, InputInjector.testInputLog, `keyframeIgnoreHook`,
+    /// FirewallCheck.TestHook), printed as `start` begins; empty without them.
     private let testHookLines: [String]
+    /// The macOS firewall (FirewallRule, a user's report of 2026-10-29): the paths a rule may name
+    /// for this process, the TEST ONLY answers a test host takes instead of asking, and one check at
+    /// a time (`checkFirewall`), with one more after it when asked meanwhile.
+    private let firewallPaths: FirewallRule.Paths
+    private let firewallHook: FirewallCheck.TestHook?
+    private var firewallChecking = false
+    private var firewallAgain = false
     /// A picked window streams from its own HiDPI display (see VirtualStage): the CLI's
     /// `--virtual-display`, or the app's setting. Every branch this adds is behind this flag;
     /// without it the coordinator behaves as before. It changes only inside `select` (`adopt`).
@@ -80,12 +98,18 @@ package final class StreamCoordinator {
     /// Why that check failed, if it did: the virtual display then stays off for the whole run.
     private var apiProblem: String?
     private var encoder: HEVCEncoder? { didSet { encoderBox.current = encoder } }
+    /// The display's own pixel scale under the running pipeline (CaptureScale): ScreenCaptureKit's for
+    /// its filter (`pointPixelScale`), Sill's virtual display's (2) for a staged window, nil for the
+    /// test pattern. Set with `active` as a pipeline starts (`startPipeline`); the injector lands
+    /// input on that display's last pixel row and column at most (InputLanding).
+    private var streamDisplayScale: CGFloat?
     /// Hardware HEVC normally. When a hardware session stops returning frames, or the launch probe
-    /// gets no answer, the stream runs on the software encoder at half the capture scale and up to
-    /// 60 fps, slow but alive (`enterSoftwareFallback`), until a re-check finds the hardware keeping
-    /// up with the stream again (`recheckLoop`, `hardwareIsBack`). The hardware has been stuck for
-    /// hours (2026-09-22) and busy for seconds (2026-09-24, when this used to last until the host
-    /// relaunched: 3 h at half resolution after a 1.8 s stall).
+    /// gets no answer, the stream runs on the software encoder at 1x (Standard: half the scale each
+    /// way on a Retina display, the hardware's own on a 1x one) and up to 60 fps, slow but alive
+    /// (`enterSoftwareFallback`), until a re-check finds the hardware keeping up with the stream
+    /// again (`recheckLoop`, `hardwareIsBack`). The hardware has been stuck for hours (2026-09-22)
+    /// and busy for seconds (2026-09-24, when this used to last until the host relaunched: 3 h at
+    /// half resolution, a Retina display's Standard, after a 1.8 s stall).
     private var useSoftwareEncoder = false
     private var softwareRestarts = 0
     private var lastSoftwareHangAt: CFAbsoluteTime = 0
@@ -151,6 +175,7 @@ package final class StreamCoordinator {
             cursorShapes.running = active != .none
             pointer.setGeometry(pointerGeometry(), fps: fps)   // also on a restart of the same source
             menuTargetChanged()                     // the menus' app follows the source (only for devices that asked)
+            audioFollow()                           // and the sound (the same app keeps its stream)
         }
     }
     private var rectCache: (id: CGWindowID, rect: CGRect, at: CFAbsoluteTime)?
@@ -166,8 +191,13 @@ package final class StreamCoordinator {
     /// the user's pick.
     private var pickArrivedWhileSwitching: StreamSource?
     /// The client's last stream panel size and text scale. One stream, so with several clients
-    /// the last one to report wins.
+    /// the last one to report wins. Only ever one a host takes (ViewportBounds); a refused one
+    /// leaves it as it was.
     private var viewport: Viewport?
+    /// When each connection's last "Viewport from … refused" line was printed: one a second at most.
+    private var viewportRefusedLineAt: [ObjectIdentifier: CFAbsoluteTime] = [:]
+    /// Each connection's last viewport scale, nil for none: Aa going from a scale to Off puts the windows back.
+    private var fitScales: [ObjectIdentifier: Double] = [:]
     /// The windows Sill sized for a device in regular mode, each with its way back (WindowRestore,
     /// issue #57): recorded at the first fit (`fitToViewport`), put back when the window stops
     /// streaming (`restoreFits`), handed to the virtual display's stage when it takes the window.
@@ -176,6 +206,9 @@ package final class StreamCoordinator {
     /// frame covered a display), or when it was picked: off the list, it may be leaving full screen
     /// (`windowsChanged`, WindowRestore.keepsStreaming).
     private var listedFullScreen: CGWindowID?
+    /// The app of the window `select` last resolved, so the sound still finds it while a regular-mode
+    /// window streams on off the catalog's list (`windowsChanged`'s looks, issue #57; `audioKey`).
+    private var streamedPID: (window: CGWindowID, pid: pid_t)?
     /// Each connection's kind 17 changes of the last second (applied or refused), and when its
     /// "ignored" line was last printed: `settingsPerSecond` a second, one line a second at most.
     private var settingsArrivals: [ObjectIdentifier: [CFAbsoluteTime]] = [:]
@@ -190,8 +223,27 @@ package final class StreamCoordinator {
     private lazy var gestureDrops = RefusalSummary(queue: .main, categories: ["gestures"]) { counts in
         "Gestures ignored: \(counts["gestures"] ?? 0) in a minute, from devices sending more than \(StreamCoordinator.gesturesPerSecond) a second."
     }
-    /// Gestures waiting for a switch in flight to finish, in arrival order, and the task posting them.
-    private var pendingGestures: [(gesture: TrackpadGesture, device: String)] = []
+    /// A device's keyframe requests (kind 44, issue #101: its picture was interrupted): when each
+    /// connection's last one was taken, at most one a second, the rest dropped with one line a minute.
+    /// A device asks once per interruption, again only when the keyframe has not come in 4 s or more,
+    /// 2 s apart at least (KeyframeRecovery), and each costs a keyframe to every device.
+    private var keyframeRequestAt: [ObjectIdentifier: CFAbsoluteTime] = [:]
+    /// TEST ONLY. `SILL_TEST_KEYFRAME_IGNORE=<n>` on a --synthetic host: the first n keyframe requests
+    /// it takes are ignored, with a line each, as a Mac from before kind 44 skips every one, so a
+    /// device's ask again after its wait runs for real (`keyframeIgnoreHook`). Zero otherwise.
+    private var keyframeRequestsToIgnore: Int
+    /// TEST ONLY. `SILL_TEST_DESKTOP_FAIL=<n>` on a --synthetic host: the first n starts of the
+    /// Desktop's capture fail, as ScreenCaptureKit's "Start stream failed … The stream is nil" did on
+    /// 2026-10-28 (CatalogLook), so the host's one more try (n = 1) and a device's second ask (n = 2:
+    /// the try fails too) run for real (`desktopFailHook`). Zero otherwise.
+    private var desktopStartsToFail: Int
+    static let keyframeRequestSpacing: CFTimeInterval = 1
+    private lazy var keyframeRequestDrops = RefusalSummary(queue: .main, categories: ["keyframes"]) { counts in
+        "Keyframe requests ignored: \(counts["keyframes"] ?? 0) in a minute, from devices asking more than once a second."
+    }
+    /// Gestures waiting for a switch in flight to finish, in arrival order, with the connection that
+    /// sent each, and the task posting them.
+    private var pendingGestures: [(gesture: TrackpadGesture, device: String, id: ObjectIdentifier)] = []
     private var gestureDrain: Task<Void, Never>?
     /// A host that does not advertise (the synthetic test hosts, which tests reach by port) posts no
     /// gesture's chord: it logs the one it would post, "(not posted: a test host)", and counts
@@ -227,6 +279,12 @@ package final class StreamCoordinator {
     package let remote: RemoteAccess?
     /// Each admitted connection's route (home and its origin, or the remote door's), from the server.
     private var routes: [ObjectIdentifier: ClientRoute] = [:]
+    /// Connections the Mac no longer serves (StreamServer.closeSessions: a pairing removed, Remote
+    /// Access or internet access off, Require pairing on), from the moment the server marks them until
+    /// they leave: nothing they send lands but the up of a key or a button they hold down on the Mac
+    /// (RevokedInput), whether it comes now, waits in the input held for an activation or waits for a
+    /// switch (a gesture). Security scan finding 10.
+    private var revoked: Set<ObjectIdentifier> = []
     /// Away from home (docs/remote-bundle-plan.md §5; AwayPolicy): every connected device is away,
     /// so the away quality is the target. Kept while no device is connected; the next to register
     /// decides (`routesChanged`). What the Mac's card, menu and every device are told.
@@ -259,6 +317,13 @@ package final class StreamCoordinator {
     /// subscribed, while Share clipboard with devices (`HostConfig.shareClipboard`) is on. Looks at
     /// nothing while nobody subscribes.
     let clipboard: HostClipboard
+    /// The Mac's sound (kind 43, AudioPipeline): the sound of what streams, to the devices that play
+    /// it, while Send Audio is on. It follows the source from `active`'s didSet, as the pointer and
+    /// the menus do, so the picture always starts first, and nothing of it waits on the picture or the
+    /// other way round.
+    let audio = AudioPipeline()
+    /// Connected devices that play the sound (the server's count, from their hellos).
+    private var audioListeners = 0
     /// TEST ONLY. `SILL_TEST_MENU_PID=<pid>` on a --synthetic host: the test pattern's menus are that
     /// process's (the gates' fixture, Scripts/menufixture.swift), read and pressed through the same
     /// code, never activated (the Desktop's rule). Nil otherwise; `testMenuLine` is what `start`
@@ -293,9 +358,23 @@ package final class StreamCoordinator {
         let path = PointerTestHooks.pointerPath(synthetic: synthetic, environment: env)
         let software = PointerTestHooks.softwareEncoder(synthetic: synthetic, environment: env)
         let inputLog = InputInjector.testInputLog(synthetic: synthetic, environment: env)
+        let noScreen = PointerTestHooks.noScreen(synthetic: synthetic, environment: env)
+        WindowCatalog.screenless = noScreen.on
+        let keyframeIgnore = Self.keyframeIgnoreHook(synthetic: synthetic, environment: env)
+        let desktopFail = Self.desktopFailHook(synthetic: synthetic, environment: env)
         pointer = PointerWatch(synthetic: synthetic, path: path.path)
         softwareOnly = software.on
-        testHookLines = [path.line, software.line, inputLog.line].compactMap { $0 }
+        let userActive = DisplayWake.userActive(environment: env, testHost: synthetic)
+        displayActivity = DisplayActivity(remote: userActive.remote)
+        keyframeRequestsToIgnore = keyframeIgnore.count
+        // The firewall's TEST ONLY answers, for a test host alone (StreamServer's own rule).
+        let firewallTest = FirewallCheck.TestHook.read(testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
+                                                       environment: env)
+        firewallHook = firewallTest.hook
+        firewallPaths = FirewallRule.paths(executable: FirewallCheck.executablePath())
+        desktopStartsToFail = desktopFail.count
+        testHookLines = [path.line, software.line, inputLog.line, userActive.line, keyframeIgnore.line, desktopFail.line,
+                         noScreen.line, firewallTest.line].compactMap { $0 }
         status = HostStatus()
         var home = StreamServer.HomeDoorMode.plain
         if homePairing, let remote {
@@ -314,6 +393,7 @@ package final class StreamCoordinator {
         // executable: that narrowing is for the door and pairing hooks (TestHooks), and a gesture's
         // chord must never be posted from the test pattern.
         gesturesDry = synthetic                            // a test host never posts a gesture (§7.4)
+        displayWake = DisplayWake(testHost: synthetic)     // nor declares user activity (issue #134)
         testHotKeys = synthetic ? Self.testHotKeyTable() : nil
         menus = MenuMirror(server: server)
         let launch = UUID().uuidString
@@ -334,6 +414,9 @@ package final class StreamCoordinator {
         injector.watch = pointer
         injector.dryRun = synthetic
         injector.testLog = synthetic && inputLog.on
+        // A held key repeats (KeyRepeat) only while its device is heard from: a network can hold the
+        // key's up back for seconds before the device is given up.
+        injector.heardFrom = { [server] id in server.lastHeard(from: id) }
         stage.onWarp = { [pointer] in pointer.sillMoved() }
         // The identity's TXT record (its tag, and `p` on a TLS home door) must be in the first
         // registration: set before `server.start()`.
@@ -345,10 +428,24 @@ package final class StreamCoordinator {
         // the once-a-second stats send nothing). One before `server.start()` reaches nobody, and
         // every device gets a fresh state in `sendCatalog`, so early calls are harmless.
         status.onChange = { [weak self] in self?.publishSettings() }
+        injector.repeatLanding = { [weak self] in self?.keyRepeatLanding() ?? .nowhere }
         menus.prepare = { [weak self] in await self?.focusForMenus() ?? true }
         menus.currentTarget = { [weak self] in self?.menuTarget() }
         menus.onSubscribersChanged = { [weak self] any in self?.watchFrontmostApp(any) }
-        catalog.onPolled = { [weak self] in self?.menusPolled() }
+        catalog.onPolled = { [weak self] in self?.catalogPolled() }
+        // The sound's messages go straight from its queue to the network queue; its status to the Mac's.
+        let server = self.server
+        audio.onFormat = { data, epoch in server.broadcastAudio(format: data, epoch: epoch) }
+        audio.onPackets = { data, epoch in server.broadcastAudio(packets: data, epoch: epoch) }
+        audio.onStatus = { [weak self] _ in self?.showAudio() }
+        server.onAudioListenersChanged = { [weak self] count in
+            Task { @MainActor in
+                guard let self else { return }
+                self.audioListeners = count
+                self.audioFollow()
+                self.showAudio()
+            }
+        }
 
         server.onClientConnected = { [weak self] connection, route, link in
             Task { @MainActor in
@@ -361,20 +458,43 @@ package final class StreamCoordinator {
                     $0.devices.append(HostStatusSnapshot.Device(id: id, endpoint: "\(connection.endpoint)", name: route.pairedName,
                                                                 route: link, remoteRoute: route.label))
                 }
+                // Admitted while the Mac was deciding a change that cuts it off (Remove, Require pairing,
+                // Remote Access or internet access: the decision saved it, a keychain write or its prompt,
+                // while this registration waited behind it, out of `cutOff`'s sight): cut off now, before
+                // any message of it, which all come after this (security scan finding 10, the review of
+                // PR #254). The server says goodbye to it as to the others. Nothing of it wakes the display
+                // or counts as the paired device's last connection.
+                if let remote = self.remote, !remote.stillServes(route) { self.markRevoked(id) }
+                let cut = self.revoked.contains(id)
                 // A paired key's session, at either door: the pane's "last connected", and over the
                 // cable the iPhone or iPad the key runs on (learned once).
-                if let fp = route.fingerprint, route.pairedName != nil {
+                if !cut, let fp = route.fingerprint, route.pairedName != nil {
                     let words = route.label ?? Self.homeRouteWords(route, link: link)
                     self.remote?.sessionStarted(fingerprint: fp, route: words, cableDevice: route.cableDevice)
                 }
+                // A device got in from the network while the firewall's verdict said none could:
+                // that verdict is stale (FirewallRule.asksAgain).
+                if FirewallRule.asksAgain(after: self.status.snapshot.firewall, fromLoopback: route.origin == .loopback) {
+                    self.checkFirewall()
+                }
                 // Home or away before its catalog: its settings state says which quality it sets.
                 self.routesChanged(joined: id, endpoint: "\(connection.endpoint)")
+                // A sleeping display gives black frames: the session's start wakes it, as a key would.
+                if !cut { self.deviceActive(.connect, connection) }
                 // Catalog first: the client's UI needs it even if the keyframe is slow to come.
                 self.catalog.thumbnailsWanted = true
                 self.sendCatalog(to: connection)
                 self.encoder?.requestKeyframe()
             }
         }
+        // A device the Mac no longer serves: from now on nothing of it lands but what lets go of what it
+        // holds (RevokedInput), in the same order as its messages, which the server hands on after this.
+        server.onClientRevoked = { [weak self] connection in
+            Task { @MainActor in self?.clientRevoked(connection) }
+        }
+        // The same devices, marked as the Mac decides (RemoteAccess, on the main actor): before any of
+        // their messages already waiting here, which the server's mark above would only follow.
+        remote?.onCutOff = { [weak self] matching in self?.cutOff(matching) }
         // Each device's link (LinkJudge): the report its kind 16 carries, the card's row, one line.
         server.onClientLinkChanged = { [weak self] connection, verdict in
             let id = ObjectIdentifier(connection)
@@ -389,10 +509,13 @@ package final class StreamCoordinator {
             Task { @MainActor in
                 guard let self else { return }
                 self.clientFPS[ObjectIdentifier(connection)] = nil
+                self.fitScales[ObjectIdentifier(connection)] = nil
                 self.settingsArrivals[ObjectIdentifier(connection)] = nil
                 self.settingsIgnoredLineAt[ObjectIdentifier(connection)] = nil
                 let id = ObjectIdentifier(connection)
                 self.gestureArrivals[id] = nil
+                self.keyframeRequestAt[id] = nil
+                self.viewportRefusedLineAt[id] = nil
                 self.routes[id] = nil
                 self.lastPairingWanted[id] = nil
                 self.connections[id] = nil
@@ -401,7 +524,12 @@ package final class StreamCoordinator {
                 if self.flipWait == id { self.flipWait = nil }
                 self.menus.clientLeft(connection)
                 self.clipboard.clientLeft(connection)
+                // Its keys go up, and its buttons when the Mac no longer served it (`revoked`, read before
+                // it is forgotten below). Its input still held for an activation is judged as a departed
+                // device's from here on (`gone`: `leftWhileHeld`), and an identifier a later connection
+                // takes is never revoked.
                 self.releaseKeys(of: id)
+                self.revoked.remove(id)
                 self.status.update { $0.devices.removeAll { $0.id == id } }
                 // The last device at home left devices away behind: the away quality, at once.
                 let flipped = self.routesChanged(joined: nil, endpoint: nil)
@@ -420,7 +548,7 @@ package final class StreamCoordinator {
                 let wasEmpty = self.catalog.clientCount == 0
                 self.catalog.clientCount = count          // the catalog idles itself at 0
                 // Nobody is watching: stop capturing and encoding. The next client picks afresh.
-                if count == 0 { self.viewport = nil; self.clientFPS = [:] }   // the next device starts from scratch
+                if count == 0 { self.viewport = nil; self.clientFPS = [:]; self.fitScales = [:] }   // the next device starts from scratch
                 if count == 0 { self.gestureChords.forget() }                 // and did not open a view it could close
                 // On the software encoder, the hardware is checked only while someone watches.
                 if count == 0 { self.stopRecheck() } else { self.devicesPresent(firstArrived: wasEmpty) }
@@ -553,6 +681,9 @@ package final class StreamCoordinator {
                 $0.network = .registering
             }
         }
+        // The listener is up, at launch or replaced (Direct Wireless): whether the macOS firewall
+        // lets devices reach it.
+        if network == .registering { checkFirewall() }
     }
 
     /// Bonjour registered this name (nil: the registration went away, to come back).
@@ -566,6 +697,33 @@ package final class StreamCoordinator {
         }
     }
 
+    // MARK: The macOS firewall
+
+    /// Asks the macOS firewall, read-only, whether it blocks this process (FirewallCheck, then
+    /// FirewallRule's verdict into the status: Sill.app's Settings › General and its menu say so), and
+    /// prints one line when the verdict changes (none for a first one that blocks nothing). At launch,
+    /// whenever the listener comes up, when Sill.app's status menu opens (a block that came after
+    /// launch; the menu is built before the answer, so its item shows from the next opening), when
+    /// its Settings › General opens or Sill becomes active over it, and when a device gets in from
+    /// the network while the verdict says none can; never on a timer. One check at a time: one asked
+    /// for meanwhile runs once more after it, so its answer is never older than the request.
+    package func checkFirewall() {
+        guard !firewallChecking else { firewallAgain = true; return }
+        firewallChecking = true
+        let paths = firewallPaths, hook = firewallHook
+        Task { @MainActor in
+            let raw = await FirewallCheck.read(paths, hook: hook)
+            let verdict = FirewallRule.verdict(raw, paths: paths)
+            if let line = FirewallRule.Copy.logLine(from: status.snapshot.firewall, to: verdict) { print(line) }
+            status.update { $0.firewall = verdict }
+            firewallChecking = false
+            if firewallAgain {
+                firewallAgain = false
+                checkFirewall()
+            }
+        }
+    }
+
     /// `preselect` is the optional command-line match; without it nothing streams until a client picks.
     /// `promptForPermissions: false` (the app) asks for nothing at launch: no Accessibility alert,
     /// and no window list before Screen Recording is granted, because the first ScreenCaptureKit
@@ -574,6 +732,7 @@ package final class StreamCoordinator {
     package func start(preselect: String?, promptForPermissions: Bool = true) async {
         for line in testHookLines { print(line) }
         if let line = clipboard.testHookLine { print(line) }   // TEST ONLY, and only with one of its variables set
+        checkFirewall()                                         // at launch, beside the listener's own check
         if !synthetic, promptForPermissions { InputInjector.ensureAccessibility() }   // prompts once; input is dropped silently without it
         if softwareOnly {
             // TEST ONLY: a gate that must never touch the Mac's one hardware encoder (Noah may be
@@ -596,6 +755,7 @@ package final class StreamCoordinator {
             print("Direct wireless connection on: also advertised over peer-to-peer Wi-Fi (AWDL), which takes this Mac's Wi-Fi off its channel for up to ~100 ms twice a second.")
         }
         if let testMenuLine { print(testMenuLine) }   // TEST ONLY, and only with SILL_TEST_MENU_PID set
+        if config.sendAudio { audio.prepare() }       // the codec, loaded before the first chunk needs it
         server.start()
         remote?.apply(config)        // the remote door, when Remote Access is on (or a pairing window opens later)
         if promptForPermissions || CGPreflightScreenCaptureAccess() { await catalog.refreshWindows() }
@@ -725,7 +885,10 @@ package final class StreamCoordinator {
     /// quality (`away`): its rate (the devices' highest under the new limit, 60 at most on the
     /// software encoder), capture scale and bitrate (the pair `away` picks), encoder speed, or, for a
     /// window, the virtual display. The Desktop never uses the display. Direct Wireless is
-    /// deliberately absent: it is the listener's (`adopt` hands it over).
+    /// deliberately absent: it is the listener's (`adopt` hands it over). The capture scale is the
+    /// knob's: on a 1x display Retina and Standard are one capture (CaptureScale), and a change between
+    /// them still restarts once, to the same size, so the devices' links are judged afresh at a new
+    /// setting as everywhere else (`judgeLinks`).
     ///
     /// A new bitrate needs a new encoder session. VideoToolbox accepts AverageBitRate on a live
     /// session and reads it back, but the hardware HEVC encoder's rate control does not follow it
@@ -769,6 +932,11 @@ package final class StreamCoordinator {
         if !old.virtualDisplay && next.virtualDisplay { enableVirtualDisplay() }
         status.update { $0.virtualDisplayOn = next.virtualDisplay }
         print("Settings: " + old.changes(to: next))
+        // The sound's own stream's, not the pipeline's: at once when nothing is switching; inside a
+        // select, `active`'s didSet follows once the picture has started. Turned on, the codec loads
+        // in the background, before the first chunk needs it.
+        if !old.sendAudio, next.sendAudio { audio.prepare() }
+        if old.sendAudio != next.sendAudio, !switching { audioFollow() }
     }
 
     /// Settings › Virtual Display › Try Again: clear a run-level disable, and stage the streamed
@@ -848,7 +1016,8 @@ package final class StreamCoordinator {
         case .behind, .stalled:
             let behind = v.state == .behind
             let fps = status.snapshot.stream?.fps ?? self.fps
-            let suggestion = LinkJudge.suggestion(carriedKbps: v.carriedKbps, bitrate: bitrate, fps: fps, captureScale: Double(captureScale))
+            // Against what the capture runs at: on a 1x display Standard would change nothing.
+            let suggestion = LinkJudge.suggestion(carriedKbps: v.carriedKbps, bitrate: bitrate, fps: fps, captureScale: Double(streamPixelScale))
             let report = LinkReport(state: behind ? LinkReport.behind : LinkReport.stalled, withheldPerSecond: v.withheld,
                                     bitrate: bitrate, carriedKbps: v.carriedKbps,
                                     suggestedBitrate: suggestion?.bitrate, suggestedCaptureScale: suggestion?.captureScale)
@@ -875,29 +1044,47 @@ package final class StreamCoordinator {
     // MARK: Client messages
 
     private func handle(_ message: StreamMessage, from connection: NWConnection) async {
+        // Input decoded once, for the display's rule and for its case below.
+        let input = message.kind == .input ? Wire.decode(InputEvent.self, from: message.payload) : nil
+        // A device the Mac no longer serves (`revoked`): only the up of a key or a button it holds down
+        // on the Mac still goes, where the pointer is; nothing else of it acts, wakes the display or
+        // raises a window. Its connection closes within 0.25 s.
+        let sender = ObjectIdentifier(connection)
+        if revoked.contains(sender) {
+            if let input, injector.releasesWhatItHolds(input, from: sender) {
+                deliver(input, in: .null, from: sender)
+            } else if message.kind == .input || message.kind == .gesture {
+                Stats.shared.bump("in.revoked")
+            }
+            return
+        }
+        // Every message goes to DisplayWake, which alone says which of them is a person at the device
+        // (a pick never is: the device asks for the Desktop by itself), issue #134.
+        deviceActive(.message(message.kind, input), connection)
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
             // A window picked comes forward on the Mac, which closes a view a gesture opened; the
             // Desktop picked (as a device does before a gesture made over a window) leaves it.
             if case .window = source { gestureChords.forget() }
-            // A pick from the device's switcher: the device never selects a window by itself (its
-            // automatic requests are for the Desktop only).
+            // A pick from the device's switcher, or the device's own request (StreamClient's window
+            // list: the Desktop at a connection's start or once the Mac stopped it, and after a move
+            // what it watched, the Desktop or a window).
             await handlePick(source)
         case .windowCommand:
             // The bar's long-press menu: the window's own traffic lights, pressed through
             // Accessibility. The staged window's element is already matched; others are looked up.
             guard let cmd = Wire.decode(WindowCommand.self, from: message.payload) else { return }
             gestureChords.forget()              // a window's own button: a view a gesture opened is left behind
-            let done: Bool
+            let outcome: WindowSizer.CommandOutcome
             if virtualDisplay, let p = stage.placement, p.windowID == cmd.id {
-                done = WindowSizer.perform(cmd.action, element: p.element)
+                outcome = WindowSizer.perform(cmd.action, element: p.element)
             } else if let w = catalog.window(id: cmd.id) {
-                done = sizer.perform(cmd.action, on: w)
+                outcome = sizer.perform(cmd.action, on: w)
             } else {
-                done = false
+                outcome = .refused
             }
-            print("Window \(cmd.id) \(cmd.action.rawValue): \(done ? "done" : "refused")")
+            print("Window \(cmd.id) \(cmd.action.rawValue): \(outcome.words(for: cmd.action))")
             Stats.shared.bump("win.\(cmd.action.rawValue)")
             await catalog.refreshWindows()      // show the result now, not at the next poll
         case .launchApp:
@@ -913,14 +1100,15 @@ package final class StreamCoordinator {
                 if let error { print("Launch failed: \(error.localizedDescription)") }
             }
         case .input:
-            guard let event = Wire.decode(InputEvent.self, from: message.payload) else { return }
+            guard let event = input else { return }
             let device = ObjectIdentifier(connection)
             guard let rect = currentSourceRect() else {
                 // Nothing streams (between sources, or the stream stopped: the window closed under a
                 // drag): input has nowhere to land. The up of a key or a button the Mac has down still
                 // goes (DroppedInput), a button's where the pointer is (`.null`), so no modifier this
                 // device pressed stays down to make a later click a ⌘-click, and no button to make
-                // every later move a drag.
+                // every later move a drag. A held key no longer repeats (KeyRepeat).
+                injector.stopRepeating()
                 if injector.isUpOfSomethingDown(event) { deliver(event, in: .null, from: device) }
                 return
             }
@@ -946,17 +1134,63 @@ package final class StreamCoordinator {
             }
             recent.append(now)
             gestureArrivals[id] = recent
-            queueGesture(gesture, from: deviceName(connection))
-        case .viewport:
-            guard let v = Wire.decode(Viewport.self, from: message.payload) else { return }
-            viewport = v
+            queueGesture(gesture, from: deviceName(connection), id: id)
+        case .keyframeRequest:
+            // A device's picture was interrupted (its display layer failed, or iOS stopped it while
+            // Sill was away) and waits for a keyframe, which a still window never sends. The encoder
+            // makes one from the next repaint, or encodes a still window's last frame again
+            // (HEVCEncoder.requestKeyframe); every device gets it, as when a device joins. Never a
+            // restart or a pick: nothing else streams again and no window comes forward.
             let id = ObjectIdentifier(connection)
+            let now = CFAbsoluteTimeGetCurrent()
+            if let last = keyframeRequestAt[id], now >= last, now - last < Self.keyframeRequestSpacing {
+                keyframeRequestDrops.count("keyframes")
+                return
+            }
+            keyframeRequestAt[id] = now
+            if keyframeRequestsToIgnore > 0 {      // TEST ONLY: SILL_TEST_KEYFRAME_IGNORE
+                keyframeRequestsToIgnore -= 1
+                print("Test keyframes: ignored a keyframe request from \(deviceName(connection)) (\(keyframeRequestsToIgnore) more to ignore).")
+                return
+            }
+            guard active != .none, let encoder else { return }     // nothing streams: the next stream starts with one
+            print("Keyframe for \(deviceName(connection)): its picture was interrupted.")
+            encoder.requestKeyframe()
+        case .viewport:
+            // A device's panel and text scale. One outside what a host takes (ViewportBounds), or a
+            // payload that does not decode, is refused whole, with a line: the last viewport stands and
+            // nothing of the message is taken, its rate neither. Until 2026-10-29 a side of 1e300 points
+            // reached the window's fit and the virtual display's window size, whose lines trapped in
+            // Int(), and the host died with every device's session (security scan, finding 4).
+            guard let v = Wire.decode(Viewport.self, from: message.payload) else {
+                refuseViewport("it does not decode as a viewport", from: connection)
+                return
+            }
+            if let why = ViewportBounds.refusal(v) {
+                refuseViewport(why, from: connection)
+                return
+            }
+            let id = ObjectIdentifier(connection)
+            // Aa set to Off by the device that had fitted a window: the windows Sill sized go back to
+            // their own frames now, as when they stop streaming, not at the end of the session (#179).
+            // Per connection: another device's viewport without a scale ends nobody's fit.
+            let previousScale = fitScales[id]
+            fitScales[id] = v.scale
+            var restored = false
+            if TextScale.endsFit(from: previousScale, to: v.scale) {
+                Stats.shared.bump("win.fitOff")
+                restored = restoreFits(keeping: nil)
+            }
+            viewport = v
             clientFPS[id] = v.fps ?? 60
             // The flip its connection made waited for this, its rate (`flipAwaits`): the restart the
             // rate needs takes the flip too, and the flip alone restarts once when the rate needs none.
             let flipWaited = flipWait == id
             if flipWaited { flipWait = nil }
             if switching { viewportArrivedWhileSwitching = true; return }   // select's defer applies both
+            // The streamed window went back to its own size: the stream restarts at it now, as after a
+            // fit (`applyViewportToActiveWindow`), not at the catalog's next look up to 2 s later.
+            if restored { await catalog.refreshWindows() }
             await applyViewportToActiveWindow()
             if flipWaited { await applyPending() }
         case .pairingWanted:
@@ -1004,9 +1238,11 @@ package final class StreamCoordinator {
             recent.append(now)
             settingsArrivals[id] = recent
             // A connection whose route is not known (never: it is set before any message is
-            // handled) counts as remote, so nothing it sends can widen exposure.
+            // handled) counts as remote and unpaired, so nothing it sends can widen exposure. Paired:
+            // its key on the trust list as the Mac's status has it now (`sessionPaired`).
             let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: appKitLoop,
-                                                        fromRemote: routes[id].map { $0.isRemote } ?? true)
+                                                        fromRemote: routes[id].map { $0.isRemote } ?? true,
+                                                        paired: sessionPaired(id))
             if !refused.isEmpty { print("Settings from \(who) refused: \(refused.joined(separator: ", "))") }
             if !ok.isEmpty, !shuttingDown {
                 let before = target
@@ -1038,6 +1274,28 @@ package final class StreamCoordinator {
         default:
             break
         }
+    }
+
+    /// A device's session connected, or it sent a message: DisplayWake says whether someone is using
+    /// the Mac from it, as a key press on it would say (issue #134), and whether this one declares it;
+    /// DisplayActivity makes the call on its own queue and says "Woke the display for …" only when the
+    /// display read asleep before and on half a second later. A test host counts `disp.wakeDry` and
+    /// touches nothing.
+    private func deviceActive(_ event: DisplayWake.Event, _ connection: NWConnection) {
+        switch displayWake.decide(event, at: CFAbsoluteTimeGetCurrent()) {
+        case .nothing: break
+        case .count: Stats.shared.bump(DisplayWake.dryKey)
+        case .declare(let activity): displayActivity.declare(for: deviceName(connection), activity)
+        }
+    }
+
+    /// Parameter sets went out at `time` (the encoder's callback, hopped here). A stream's first, and
+    /// any that differ from the last, are a new frame size for the devices, which move their own
+    /// pointer to its middle as they arrive (DisplayWake.recentre).
+    private func parameterSetsSent(_ sets: Data, at time: CFAbsoluteTime) {
+        guard sets != lastParameterSets else { return }
+        lastParameterSets = sets
+        displayWake.streamChanged(at: time)
     }
 
     // MARK: Where input lands
@@ -1124,9 +1382,23 @@ package final class StreamCoordinator {
         // Asked again for a size the app already refused (its minimum): nothing moved.
         guard abs(actual.width - current.width) >= 1 || abs(actual.height - current.height) >= 1 else { return nil }
         Stats.shared.bump("win.resized")
-        print("Resized \(window.owningApplication?.applicationName ?? "?") to \(Int(actual.width))×\(Int(actual.height)) pt "
-              + "(asked \(Int(target.width))×\(Int(target.height)) for a \(Int(v.width))×\(Int(v.height)) panel at \(textScale)×)")
+        // ViewportBounds.whole prints as Int() did, without its trap (finding 4: 1e300 points got here).
+        print("Resized \(window.owningApplication?.applicationName ?? "?") to \(ViewportBounds.whole(actual)) pt "
+              + "(asked \(ViewportBounds.whole(target)) for a \(ViewportBounds.whole(CGSize(width: v.width, height: v.height))) panel at \(textScale)×)")
         return actual
+    }
+
+    /// A device's viewport refused (ViewportBounds; `why` its words, or that it does not decode):
+    /// counted (`vp.refused` in the stats line) and said in a line that names the device, at once and
+    /// then at most once a second per connection, so a device that sends nothing else costs a line a
+    /// second, not one per message.
+    private func refuseViewport(_ why: String, from connection: NWConnection) {
+        Stats.shared.bump("vp.refused")
+        let id = ObjectIdentifier(connection)
+        let now = CFAbsoluteTimeGetCurrent()
+        if let last = viewportRefusedLineAt[id], now >= last, now - last < 1 { return }
+        viewportRefusedLineAt[id] = now
+        print("Viewport from \(deviceName(connection)) refused: \(why)")
     }
 
     /// A new viewport while a window streams. The encoder is fixed to the old size, but the
@@ -1252,19 +1524,26 @@ package final class StreamCoordinator {
         // the Mac has down (DroppedInput: a modifier left down makes the next click a ⌘-click, a
         // button every move a drag), a button's where the pointer is (`.null`), not where the old
         // source would have put it. The keys of devices that left meanwhile go up after them.
+        // A device the Mac no longer serves, or one that left meanwhile, gets only the up of what it
+        // holds down itself (RevokedInput), and none of its gestures.
         let dropped = heldInput
         heldInput = []; holdUntil = 0
         for item in dropped {
             switch item {
             case .input(let event, _, let device):
-                if injector.isUpOfSomethingDown(event) { injector.apply(event, in: .null, from: device) }
-            case .chord(let keyCode, let flags):
+                if gone(device) ? injector.releasesWhatItHolds(event, from: device) : injector.isUpOfSomethingDown(event) {
+                    injector.apply(event, in: .null, from: device)
+                }
+            case .chord(let keyCode, let flags, let device):
+                if gone(device) { Stats.shared.bump("in.revoked"); continue }
                 injector.chord(keyCode: keyCode, flags: flags)
             }
         }
         releaseKeysOfDevicesThatLeft()
+        injector.stopRepeating()            // nor does a held key repeat into the next source (KeyRepeat)
         encoder = nil                  // deinit invalidates the VT session
         server.resetForNewStream()          // every client waits for the next parameter sets + keyframe
+        lastParameterSets = nil             // and the new stream's first go out as a new frame (DisplayWake)
         // New settings take effect here, between pipelines, before the rate, the scale and the
         // stage are worked out for the next one.
         var leftStage = false
@@ -1316,10 +1595,21 @@ package final class StreamCoordinator {
         // frame (WindowRestore, issue #57): another window or the Desktop picked, `.none` when the
         // last device leaves or the stream stops. A restart of the same window keeps it fitted.
         if case .window(let next) = source { restoreFits(keeping: next) } else { restoreFits(keeping: nil) }
+        // The catalog's look, before a capture is built from it (CatalogLook): after a spell with no
+        // device it can be hours old and its display gone (the black screen of 2026-10-28), so it is
+        // looked at again first. The Desktop reads its display after this and after its own await.
+        let lookBefore = (display: catalog.display?.displayID, age: catalog.lookAge)
+        if source != .none, !(synthetic && source == .desktop) {
+            await lookAgainIfStale()
+            guard !shuttingDown else { active = .none; broadcastList(); return }
+        }
 
         var filter: SCContentFilter?     // nil only for the synthetic test pattern
         var sourceRect: CGRect? = nil    // set only when the window streams from the virtual display
         var picked: SCWindow?            // the resolved window, for the fallback after a failed start
+        // The source's display's own pixel scale (CaptureScale): its filter's, the virtual display's
+        // for a staged window, none for the test pattern. The capture runs at the knob held to it.
+        var displayScale: CGFloat? = nil
         let width: Int, height: Int
         var describe = ""
         var title = ""                   // for the app's menu: "Safari — Apple Developer", "Whole Desktop"
@@ -1340,6 +1630,7 @@ package final class StreamCoordinator {
             print("Selecting window \(w.windowID) \(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "") frame \(w.frame) onScreen \(w.isOnScreen) active \(w.isActive)")
             picked = w
             listedFullScreen = WindowRestore.coversDisplay(w.frame, WindowSizer.displayFrames()) ? id : nil
+            streamedPID = w.owningApplication.map { (window: id, pid: $0.processID) }
             title = Self.menuTitle(for: w)
             var size = w.frame.size
             if virtualDisplay, stage.disabledReason == nil {
@@ -1348,12 +1639,15 @@ package final class StreamCoordinator {
                 // streamed): the stage keeps the frame it would have gone back to as its way home.
                 let home = stageHome(for: id)
                 do {
-                    let prepared = try await stage.prepare(window: w, wanted: want.size, envelope: want.envelope, captureScale: captureScale,
+                    // Sill's own display is 2x: the knob, as before (CaptureScale.virtualDisplay).
+                    let stageScale = CaptureScale.effective(knob: captureScale, displayScale: CaptureScale.virtualDisplay)
+                    let prepared = try await stage.prepare(window: w, wanted: want.size, envelope: want.envelope, captureScale: stageScale,
                                                            refreshHz: fps, home: home)
                     _ = fits.take(id)     // the stage puts it back from now on; a staging that failed keeps the record
                     guard !shuttingDown else { stage.release(); active = .none; broadcastList(); return }
                     filter = prepared.filter
                     sourceRect = prepared.sourceRect
+                    displayScale = CaptureScale.virtualDisplay
                     size = prepared.outputSize ?? prepared.sourceRect.size
                     describe = prepared.describe + (useSoftwareEncoder ? " (software encoder)" : "")
                     status.update { $0.lastStageFailure = nil }
@@ -1371,8 +1665,11 @@ package final class StreamCoordinator {
                 }
             }
             if sourceRect == nil {
-                // Today's path: capture the window where it is.
-                filter = SCContentFilter(desktopIndependentWindow: w)
+                // Today's path: capture the window where it is, at most at its display's own scale
+                // (a window on a 1x display drawn at 1x into a 2x buffer filled its top-left quarter).
+                let windowFilter = SCContentFilter(desktopIndependentWindow: w)
+                filter = windowFilter
+                displayScale = Self.displayScale(of: windowFilter)
                 // Regular mode raises the picked window (2026-09-23, Noah: the Mac must show the
                 // picked window). A covered window stops repainting, so it would stream frozen, and
                 // keys go to the active app's key window. Done before capture starts, so the first
@@ -1384,7 +1681,16 @@ package final class StreamCoordinator {
                 if let resized = fitToViewport(w) { size = Self.liveBounds(of: id)?.size ?? resized }
                 describe = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")\(useSoftwareEncoder ? " (software encoder)" : "")"
             }
-            width = evenPixels(size.width * captureScale); height = evenPixels(size.height * captureScale)
+            if sourceRect == nil {
+                // The window as it is, drawn 1:1 at its display's scale: an odd side rounds up, one black
+                // column or row past the window, never its pixels shrunk into one fewer (CaptureScale.windowPixels).
+                let pixels = CaptureScale.windowSize(size, knob: captureScale, displayScale: displayScale)
+                width = pixels.width; height = pixels.height
+            } else {
+                // A crop of Sill's virtual display, which ScreenCaptureKit scales to the buffer, as a display.
+                let pixelScale = CaptureScale.effective(knob: captureScale, displayScale: displayScale)
+                width = evenPixels(size.width * pixelScale); height = evenPixels(size.height * pixelScale)
+            }
             // Staged on the virtual display, nothing is activated or raised on select: the window
             // cannot be covered there, and the AX moves that put it there touch no focus.
         case .desktop:
@@ -1395,32 +1701,20 @@ package final class StreamCoordinator {
                 describe = "a synthetic test pattern\(useSoftwareEncoder ? " (software encoder)" : "")"
                 title = "Test Pattern"; kind = .testPattern
             } else {
-                guard let d = catalog.display else { active = .none; broadcastList(); return }
-                // Sill's own windows (Settings, Log, the pairing window with its code) never go out
-                // in a Desktop stream. Fixed here at pipeline start: a running SCStream is never
-                // reconfigured, so a host that can show a pairing code (remote access) looks for
-                // Sill among every window when the last on-screen look missed it; excluding nothing
-                // would let a pairing window opened later reach the devices. Without Sill anywhere
-                // (the CLI has no windows), as before.
-                var own = catalog.ownApplication
-                if own == nil, remote != nil {
-                    own = await catalog.resolveOwnApplication()
-                    guard !shuttingDown else { active = .none; broadcastList(); return }
-                }
-                if let own {
-                    filter = SCContentFilter(display: d, excludingApplications: [own], exceptingWindows: [])
-                } else {
-                    filter = SCContentFilter(display: d, excludingWindows: [])
-                }
-                width = evenPixels(CGFloat(d.width) * captureScale); height = evenPixels(CGFloat(d.height) * captureScale)
+                // The display as the newest look has it, read after every await (`desktopCapture`).
+                guard let plan = await desktopCapture() else { active = .none; broadcastList(); return }
+                if let line = CatalogLook.desktopLine(was: lookBefore.display, now: plan.displayID, age: lookBefore.age) { print(line) }
+                filter = plan.filter
+                displayScale = plan.displayScale
+                width = plan.width; height = plan.height
                 describe = "the whole desktop\(useSoftwareEncoder ? " (software encoder)" : "")"
                 title = "Whole Desktop"; kind = .desktop
             }
         }
 
         do {
-            try await startPipeline(source: source, filter: filter, sourceRect: sourceRect, width: width, height: height, describe: describe,
-                                    title: title, kind: kind)
+            try await startPipeline(source: source, filter: filter, sourceRect: sourceRect, displayScale: displayScale,
+                                    width: width, height: height, describe: describe, title: title, kind: kind)
         } catch {
             // `picked`, not a catalog lookup: a staged window may have left the on-screen list.
             if virtualDisplay, stage.isStaged, let w = picked {
@@ -1430,14 +1724,21 @@ package final class StreamCoordinator {
                 stage.release()
                 if comeForward, !shuttingDown { activateAndRaise(window: w) }   // regular mode now: a pick comes forward
                 let fallback = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")\(useSoftwareEncoder ? " (software encoder)" : "")"
+                let windowFilter = SCContentFilter(desktopIndependentWindow: w)
+                let windowScale = Self.displayScale(of: windowFilter)
+                let pixels = CaptureScale.windowSize(w.frame.size, knob: captureScale, displayScale: windowScale)
                 do {
-                    try await startPipeline(source: source, filter: SCContentFilter(desktopIndependentWindow: w), sourceRect: nil,
-                                            width: evenPixels(w.frame.width * captureScale), height: evenPixels(w.frame.height * captureScale),
+                    try await startPipeline(source: source, filter: windowFilter, sourceRect: nil, displayScale: windowScale,
+                                            width: pixels.width, height: pixels.height,
                                             describe: fallback, title: title, kind: kind)
                 } catch {
                     print("Could not start streaming \(fallback): \(error)")
                     active = .none
                 }
+            } else if source == .desktop {
+                // One more try, from a new look at the displays, with one line (CatalogLook.retryLine).
+                await startDesktopAgain(after: error, describe: describe, title: title, kind: kind,
+                                        testPattern: (width: width, height: height))
             } else {
                 print("Could not start streaming \(describe): \(error)")
                 if virtualDisplay { stage.release() }   // nothing streams: never leave a window on the virtual display
@@ -1448,10 +1749,83 @@ package final class StreamCoordinator {
         // Mid-switch requests (a viewport, the last client leaving) are applied by the defer.
     }
 
+    /// The catalog's look, before a capture is built from it (CatalogLook): looked at once more when it
+    /// is old (the first pick after a spell with no device), there was none, or its display is no
+    /// longer among the active ones. Nil when the last look will do, else why it looked again. One
+    /// ScreenCaptureKit call, about 50 ms; while a device keeps the catalog polling, a pick needs none.
+    @discardableResult
+    private func lookAgainIfStale() async -> CatalogLook.Why? {
+        guard let why = CatalogLook.lookAgain(age: catalog.lookAge, display: catalog.display?.displayID,
+                                              displaysNow: WindowCatalog.activeDisplayIDs(),
+                                              pollInterval: CatalogLook.seconds(WindowCatalog.pollInterval)) else { return nil }
+        await catalog.refreshWindows()
+        return why
+    }
+
+    /// The Desktop's capture as the catalog's newest look has it: its display's filter, with Sill's
+    /// own windows left out, the display's scale and the size. The display is read after this
+    /// function's own await, so a look that landed meanwhile is the one used: on 2026-10-28 the filter
+    /// was built on a display read before an await, which the look that landed during it had replaced
+    /// (CatalogLook). Nil when the catalog has no display, or the host is quitting.
+    private func desktopCapture() async -> (filter: SCContentFilter, displayID: UInt32, displayScale: CGFloat?, width: Int, height: Int)? {
+        guard catalog.display != nil else { return nil }
+        // Sill's own windows (Settings, Log, the pairing window with its code) never go out
+        // in a Desktop stream. Fixed here at pipeline start: a running SCStream is never
+        // reconfigured, so a host that can show a pairing code (remote access) looks for
+        // Sill among every window when the last on-screen look missed it; excluding nothing
+        // would let a pairing window opened later reach the devices. Without Sill anywhere
+        // (the CLI has no windows), as before.
+        var resolved: SCRunningApplication? = nil
+        if catalog.ownApplication == nil, remote != nil {
+            resolved = await catalog.resolveOwnApplication()
+            guard !shuttingDown else { return nil }
+        }
+        guard let d = catalog.display else { return nil }
+        let own = catalog.ownApplication ?? resolved      // the newest look's, read with its display
+        let displayFilter = own.map { SCContentFilter(display: d, excludingApplications: [$0], exceptingWindows: []) }
+            ?? SCContentFilter(display: d, excludingWindows: [])
+        // At most the display's own scale: ScreenCaptureKit scales a display up to fill a larger
+        // buffer (5120×2880 for a 1x 2560×1440 display: four times the pixels to encode).
+        let scale = Self.displayScale(of: displayFilter)
+        let pixelScale = CaptureScale.effective(knob: captureScale, displayScale: scale)
+        return (displayFilter, d.displayID, scale, evenPixels(CGFloat(d.width) * pixelScale), evenPixels(CGFloat(d.height) * pixelScale))
+    }
+
+    /// The Desktop's one more try, after a start that failed: from a new look at the displays (the
+    /// test pattern has none, so the same start again), with one line (CatalogLook.retryLine). A second
+    /// failure is the line as before, and nothing streams; `select` broadcasts either way. On
+    /// 2026-10-28 the first start failed on a display gone since the last look, and the host never
+    /// tried again.
+    private func startDesktopAgain(after error: Error, describe: String, title: String, kind: HostStatusSnapshot.Stream.Kind,
+                                   testPattern: (width: Int, height: Int)) async {
+        var plan: (filter: SCContentFilter?, displayID: UInt32?, displayScale: CGFloat?, width: Int, height: Int)
+            = (nil, nil, nil, testPattern.width, testPattern.height)
+        if !synthetic {
+            await catalog.refreshWindows()
+            guard !shuttingDown, let next = await desktopCapture() else {
+                if !shuttingDown { print("Could not start streaming \(describe): \(error)") }   // no display in the new look
+                active = .none
+                return
+            }
+            plan = (next.filter, next.displayID, next.displayScale, next.width, next.height)
+        }
+        print(CatalogLook.retryLine(source: describe, error: "\(error)", display: plan.displayID))
+        do {
+            try await startPipeline(source: .desktop, filter: plan.filter, sourceRect: nil, displayScale: plan.displayScale,
+                                    width: plan.width, height: plan.height, describe: describe, title: title, kind: kind)
+        } catch {
+            print("Could not start streaming \(describe): \(error)")
+            active = .none
+        }
+    }
+
     /// Encoder, then capture (ScreenCaptureKit for a filter, the test pattern without one), then
     /// `active`. Throws with `active` untouched if either refuses; the caller decides what to do.
-    /// `title` and `kind` describe the stream in the app's menu.
-    private func startPipeline(source: StreamSource, filter: SCContentFilter?, sourceRect: CGRect?, width: Int, height: Int, describe: String,
+    /// `title` and `kind` describe the stream in the app's menu. `displayScale`: the source's display's
+    /// own pixel scale (nil for the test pattern), which `width` and `height` were held to
+    /// (CaptureScale) and the injector lands input by (InputLanding).
+    private func startPipeline(source: StreamSource, filter: SCContentFilter?, sourceRect: CGRect?, displayScale: CGFloat?,
+                               width: Int, height: Int, describe: String,
                                title: String, kind: HostStatusSnapshot.Stream.Kind) async throws {
         let enc = try HEVCEncoder(width: width, height: height, fps: fps, bitrate: streamBitrate, prioritizeSpeed: prioritizeSpeed,
                                   software: useSoftwareEncoder)
@@ -1462,22 +1836,36 @@ package final class StreamCoordinator {
             }
         }
         let server = self.server
-        enc.onEncoded = { data, isKey, parameterSets in
+        enc.onEncoded = { [weak self] data, isKey, parameterSets in
             let now = Date().timeIntervalSince1970
             if let ps = parameterSets {
-                server.broadcast(StreamMessage(kind: .parameterSets, timestamp: now, isKeyframe: true, payload: ps.encoded()))
+                let sets = ps.encoded()
+                server.broadcast(StreamMessage(kind: .parameterSets, timestamp: now, isKeyframe: true, payload: sets))
+                // Every keyframe repeats them; a new frame size goes out with the first that differ.
+                let sentAt = CFAbsoluteTimeGetCurrent()
+                Task { @MainActor in self?.parameterSetsSent(sets, at: sentAt) }
             }
             server.broadcast(StreamMessage(kind: .frame, timestamp: now, isKeyframe: isKey, payload: data))
         }
+        if source == .desktop, desktopStartsToFail > 0 {
+            // TEST ONLY (SILL_TEST_DESKTOP_FAIL, a --synthetic host): this start fails where the capture
+            // would start, after the encoder was made, as ScreenCaptureKit's did on 2026-10-28.
+            desktopStartsToFail -= 1
+            throw NSError(domain: "CoreGraphicsErrorDomain", code: 1003,
+                          userInfo: [NSLocalizedDescriptionKey: "Start stream failed (TEST ONLY: SILL_TEST_DESKTOP_FAIL)"])
+        }
         if let filter {
             capture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
-            try await capture.start(filter: filter, width: width, height: height, fps: fps, showsCursor: false, sourceRect: sourceRect)
+            try await capture.start(filter: filter, width: width, height: height, fps: fps, showsCursor: false, sourceRect: sourceRect,
+                                    scaleWords: CaptureScale.words(knob: captureScale, displayScale: displayScale))
         } else {
             syntheticCapture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
             syntheticCapture.start(width: width, height: height, fps: fps)
         }
         encoder = enc
         active = source
+        streamDisplayScale = displayScale
+        injector.displayScale = displayScale
         print("Streaming \(describe) at \(width)×\(height), \(fps) fps, \(streamBitrate / 1_000_000) Mbps")
         status.update {
             $0.stream = HostStatusSnapshot.Stream(kind: kind, title: title, width: width, height: height, fps: fps,
@@ -1515,12 +1903,15 @@ package final class StreamCoordinator {
     private var lastActivationAt: CFAbsoluteTime = 0
     /// Input held for an activation, replayed in order once the app is up, each with the device that
     /// sent it (its keys are its own, KeyStrokes); a gesture's chord that arrives meanwhile waits
-    /// behind it, so a click just before the gesture lands first.
-    private enum Held { case input(InputEvent, CGRect, KeyStrokes.Device), chord(keyCode: UInt16, flags: UInt64) }
+    /// behind it, so a click just before the gesture lands first. A device the Mac no longer serves, or
+    /// one that left while it waited (`gone`), gets only the up of what it holds down (RevokedInput)
+    /// and none of its chords.
+    private enum Held { case input(InputEvent, CGRect, KeyStrokes.Device), chord(keyCode: UInt16, flags: UInt64, device: KeyStrokes.Device) }
     private var heldInput: [Held] = []
     private var holdUntil: CFAbsoluteTime = 0
-    /// Devices that left while input was held: their keys go up after it (`releaseKeys`).
-    private var leftWhileHeld: [KeyStrokes.Device] = []
+    /// Devices that left while input was held: their keys go up after it (`releaseKeys`), and the
+    /// buttons of one the Mac no longer served (`revoked`).
+    private var leftWhileHeld: [(device: KeyStrokes.Device, revoked: Bool)] = []
     /// How long held input waits for the app to become frontmost before it is replayed anyway.
     private static let activationTimeout: TimeInterval = 0.6
 
@@ -1537,25 +1928,82 @@ package final class StreamCoordinator {
         heldInput = []
         for item in held {
             switch item {
-            case .input(let event, let rect, let device): logClick(event, in: rect); injector.apply(event, in: rect, from: device)
-            case .chord(let keyCode, let flags): injector.chord(keyCode: keyCode, flags: flags)
+            case .input(let event, let rect, let device):
+                if gone(device) {
+                    if injector.releasesWhatItHolds(event, from: device) { injector.apply(event, in: .null, from: device) }
+                    else { Stats.shared.bump("in.revoked") }
+                    continue
+                }
+                logClick(event, in: rect); injector.apply(event, in: rect, from: device)
+            case .chord(let keyCode, let flags, let device):
+                if gone(device) { Stats.shared.bump("in.revoked"); continue }
+                injector.chord(keyCode: keyCode, flags: flags)
             }
         }
         releaseKeysOfDevicesThatLeft()
     }
 
-    /// A device left: the keys it still holds down on the Mac go up (InputInjector.releaseKeys),
-    /// after whatever of its input is still held for an activation, so no up of its own is overtaken
-    /// and no down of its own comes after.
+    /// A device the Mac no longer serves (`revoked`), or one that left while input was held
+    /// (`leftWhileHeld`): of what it sent, only the up of a key or a button it holds down still goes.
+    private func gone(_ device: KeyStrokes.Device) -> Bool {
+        revoked.contains(device) || leftWhileHeld.contains { $0.device == device }
+    }
+
+    /// StreamServer marked this device revoked (`closeSessions`). Ignored once it has left (no route):
+    /// its identifier may be a later connection's by then.
+    private func clientRevoked(_ connection: NWConnection) {
+        let id = ObjectIdentifier(connection)
+        guard routes[id] != nil else { return }
+        markRevoked(id)
+    }
+
+    /// RemoteAccess cut these devices off (Remove, Require pairing turned on, Remote Access or internet
+    /// access turned off), on the main actor as it decided: each connection whose route `matching`
+    /// names is marked now, so its messages still waiting for the main actor (read off the network
+    /// while the Mac saved the change, the keychain's write) land nothing either. The server marks each
+    /// again as it says goodbye (`clientRevoked`). A connection whose registration still waits here (one
+    /// admitted while the Mac was saving the change) is marked as it registers, before any message of it
+    /// (RemoteAccess.stillServes, `onClientConnected`).
+    private func cutOff(_ matching: (ClientRoute) -> Bool) {
+        for (id, route) in routes where matching(route) { markRevoked(id) }
+    }
+
+    private func markRevoked(_ id: ObjectIdentifier) {
+        guard revoked.insert(id).inserted else { return }
+        // A menu choice or fetch of it still waiting for its turn is neither made nor read.
+        menus.clientRevoked(id)
+        // TEST ONLY (SILL_TEST_INPUT_LOG, a synthetic host): where its input stops landing, so a test
+        // reads what was posted for it after this line.
+        if injector.testLog {
+            let device = status.snapshot.devices.first { $0.id == id }
+            print("Test input: \(device?.name ?? device?.endpoint ?? "a device") is no longer served: only the up of a key or a button it holds down goes from here on.")
+        }
+    }
+
+    /// A device left: the keys it still holds down on the Mac go up (InputInjector.releaseKeys), and
+    /// the buttons of one the Mac no longer served (`revoked`: RevokedInput.buttonsLetGo), after
+    /// whatever of its input is still held for an activation, so no up of its own is overtaken and no
+    /// down of its own comes after.
     private func releaseKeys(of device: KeyStrokes.Device) {
-        if !heldInput.isEmpty || CFAbsoluteTimeGetCurrent() < holdUntil { leftWhileHeld.append(device); return }
-        injector.releaseKeys(of: device)
+        let wasRevoked = revoked.contains(device)
+        if !heldInput.isEmpty || CFAbsoluteTimeGetCurrent() < holdUntil { leftWhileHeld.append((device, wasRevoked)); return }
+        injector.releaseKeys(of: device, revoked: wasRevoked)
     }
 
     private func releaseKeysOfDevicesThatLeft() {
         let left = leftWhileHeld
         leftWhileHeld = []
-        for device in left { injector.releaseKeys(of: device) }
+        for (device, wasRevoked) in left { injector.releaseKeys(of: device, revoked: wasRevoked) }
+    }
+
+    /// Where a held key's repeat would land now (InputInjector.repeatLanding, KeyRepeat), as a
+    /// device's input lands: nowhere while it has nowhere to land (nothing streams, or the source's
+    /// rectangle cannot be read: the repeat stops), held while input waits for an app's activation (a
+    /// repeat must not go out ahead of it), else on the source.
+    private func keyRepeatLanding() -> KeyRepeat.Landing {
+        guard currentSourceRect() != nil else { return .nowhere }
+        if !heldInput.isEmpty || CFAbsoluteTimeGetCurrent() < holdUntil { return .held }
+        return .lands
     }
 
     private func raiseIfInteracting(_ event: InputEvent) {
@@ -1675,7 +2123,7 @@ package final class StreamCoordinator {
         let now = CFAbsoluteTimeGetCurrent()
         guard now - lastClickLog > 1 else { return }
         lastClickLog = now
-        let p = CGPoint(x: rect.minX + rect.width * x, y: rect.minY + rect.height * y)
+        let p = InputLanding.point(x: x, y: y, in: rect, displayScale: streamDisplayScale)
         let top = Self.topmostWindow(at: p)
         let verdict = top?.id == id ? "the streamed window" : "window \(top.map { String($0.id) } ?? "none"), not the streamed \(id)"
         print("Click at (\(Int(p.x)),\(Int(p.y))) in (\(Int(rect.minX)),\(Int(rect.minY)),\(Int(rect.width))×\(Int(rect.height))) → \(verdict)")
@@ -1686,7 +2134,7 @@ package final class StreamCoordinator {
         guard let rect = currentSourceRect() else { return nil }
         switch event {
         case .pointer(_, let x, let y), .scroll(let x, let y, _, _), .scrollGesture(_, let x, let y):
-            return CGPoint(x: rect.minX + rect.width * x, y: rect.minY + rect.height * y)
+            return InputLanding.point(x: x, y: y, in: rect, displayScale: streamDisplayScale)
         default: return nil
         }
     }
@@ -1716,8 +2164,29 @@ package final class StreamCoordinator {
         return topmostWindow(at: nil)?.pid
     }
 
-    /// Retina normally; points when the software encoder is carrying the stream.
+    /// The Resolution knob of the pair that runs: Retina normally; points when the software encoder is
+    /// carrying the stream. A capture runs at it held to its display's own scale (CaptureScale).
     private var captureScale: CGFloat { useSoftwareEncoder ? min(scale, 1.0) : scale }
+
+    /// The pixels a point the running pipeline captures at: the knob held to its display's own scale.
+    private var streamPixelScale: CGFloat { CaptureScale.effective(knob: captureScale, displayScale: streamDisplayScale) }
+
+    /// A filter's display scale as ScreenCaptureKit gives it (`pointPixelScale`: the scale it draws that
+    /// content at), nil when it gives none.
+    private static func displayScale(of filter: SCContentFilter) -> CGFloat? {
+        CaptureScale.displayScale(pointPixelScale: filter.pointPixelScale)
+    }
+
+    /// The display scale ScreenCaptureKit has for `w` as it is, in regular mode: its filter's, made afresh.
+    private static func displayScale(of w: SCWindow) -> CGFloat? {
+        displayScale(of: SCContentFilter(desktopIndependentWindow: w))
+    }
+
+    /// The pixels a point a capture of `w` would run at now, in regular mode: the knob held to the
+    /// scale ScreenCaptureKit has for the window as it is.
+    private func capturePixelScale(of w: SCWindow) -> CGFloat {
+        CaptureScale.effective(knob: captureScale, displayScale: Self.displayScale(of: w))
+    }
 
     /// "Safari — Apple Developer" for the app's menu; just the app for an untitled window.
     private static func menuTitle(for w: SCWindow) -> String {
@@ -1769,6 +2238,22 @@ package final class StreamCoordinator {
     private func menuTargetChanged() {
         guard menus.hasSubscribers else { return }
         menus.setTarget(menuTarget())
+    }
+
+    /// Every catalog poll (2 s) while a device is connected: the menus, and a window streaming in
+    /// regular mode that moved onto a display of another scale. That keeps its size in points, so the
+    /// list does not change and `windowsChanged` never hears of it, and its capture would go on at the
+    /// old display's scale (from a 2x display onto a 1x one at Retina: the window in the top-left
+    /// quarter of the picture). Only the scale is compared here, never the size, which a list read
+    /// before a fit landed can still give at its old value; a resize is `windowsChanged`'s.
+    private func catalogPolled() {
+        menusPolled()
+        guard !switching, !shuttingDown, case .window(let id) = active, !(virtualDisplay && stage.isStaged),
+              let w = catalog.window(id: id), capturePixelScale(of: w) != streamPixelScale else { return }
+        Task { @MainActor in
+            guard !self.switching, self.active == .window(id) else { return }
+            await self.select(.window(id))
+        }
     }
 
     /// Every catalog poll (2 s) while a device is connected.
@@ -1852,6 +2337,28 @@ package final class StreamCoordinator {
         return Self.activePID(trustAppKit: appKitLoop) == pid
     }
 
+    /// TEST ONLY: `SILL_TEST_KEYFRAME_IGNORE=<n>`, honoured only by a --synthetic host, with the one
+    /// line `start` prints about it. Nothing, and no line, without it.
+    static func keyframeIgnoreHook(synthetic: Bool, environment env: [String: String]) -> (count: Int, line: String?) {
+        guard let raw = env["SILL_TEST_KEYFRAME_IGNORE"], !raw.isEmpty else { return (0, nil) }
+        let shown = SafeText.label(raw, limit: 32)
+        guard synthetic else { return (0, "SILL_TEST_KEYFRAME_IGNORE=\(shown) ignored: only a --synthetic host takes it.") }
+        guard let n = Int(raw), n > 0 else { return (0, "SILL_TEST_KEYFRAME_IGNORE=\(shown) ignored: a number of requests, 1 or more.") }
+        let which = n == 1 ? "the first keyframe request (kind 44)" : "the first \(n) keyframe requests (kind 44)"
+        return (n, "Test keyframes: \(which) ignored, as a Mac from before kind 44 skips every one (SILL_TEST_KEYFRAME_IGNORE).")
+    }
+
+    /// TEST ONLY: `SILL_TEST_DESKTOP_FAIL=<n>`, honoured only by a --synthetic host, with the one line
+    /// `start` prints about it. Nothing, and no line, without it.
+    static func desktopFailHook(synthetic: Bool, environment env: [String: String]) -> (count: Int, line: String?) {
+        guard let raw = env["SILL_TEST_DESKTOP_FAIL"], !raw.isEmpty else { return (0, nil) }
+        let shown = SafeText.label(raw, limit: 32)
+        guard synthetic else { return (0, "SILL_TEST_DESKTOP_FAIL=\(shown) ignored: only a --synthetic host takes it.") }
+        guard let n = Int(raw), n > 0 else { return (0, "SILL_TEST_DESKTOP_FAIL=\(shown) ignored: a number of starts, 1 or more.") }
+        let which = n == 1 ? "the first start of the Desktop's capture fails" : "the first \(n) starts of the Desktop's capture fail"
+        return (n, "Test Desktop: \(which), as ScreenCaptureKit's \"The stream is nil\" did on 2026-10-28 (SILL_TEST_DESKTOP_FAIL).")
+    }
+
     /// TEST ONLY: `SILL_TEST_MENU_PID`, honoured only by a --synthetic host (which does not
     /// advertise), with the one line `start` prints about it. Nothing, and no line, without it.
     private static func testMenuHook(synthetic: Bool) -> (pid: pid_t?, line: String?) {
@@ -1863,6 +2370,101 @@ package final class StreamCoordinator {
         }
         let name = NSRunningApplication(processIdentifier: pid)?.localizedName.map { SafeText.label($0) } ?? "no app name"
         return (pid, "Test menus: the test pattern's menus are pid \(pid)'s (\(name)); read and pressed without activating it.")
+    }
+
+    // MARK: The Mac's sound (AudioPipeline; docs/audio-plan.md §4.7)
+    //
+    // One function decides what the sound is of, from Send Audio, the devices that play it, the
+    // source and whether Sill is quitting, and hands it to the pipeline, which keeps the same app's
+    // stream through the picture's restarts and starts another for another source. It runs in
+    // `active`'s didSet (set on every path of `select`, once the picture has started, or to none),
+    // when the count of devices that play it changes, in `adopt` when Send Audio changed outside a
+    // select, and at quit. The sound adds no device → host kind and no per-connection state here: the
+    // server keeps each device's codec and epoch.
+
+    /// What the sound should be of now, and why none when none: the log's reason.
+    private func audioKey() -> (AudioKey, String) {
+        if shuttingDown { return (.none, "Sill is quitting") }
+        guard config.sendAudio else { return (.none, "Send Audio is off") }
+        guard audioListeners > 0 else { return (.none, "no connected device plays sound") }
+        switch active {
+        case .none:
+            return (.none, "nothing streams")
+        case .desktop:
+            // A filter of the same kind as the picture's; a synthetic host's Desktop is the test pattern,
+            // and its sound the test tone.
+            return (synthetic ? .test : .desktop, "")
+        case .window(let id):
+            // A synthetic host never captures a real app's sound: its tests hear only the tone.
+            if synthetic { return (.none, "a test host sends only its test tone") }
+            let pid: pid_t
+            if virtualDisplay, let p = stage.placement, p.windowID == id {
+                pid = p.pid
+            } else if let app = catalog.window(id: id)?.owningApplication {
+                pid = app.processID
+            } else if let s = streamedPID, s.window == id {
+                pid = s.pid    // off the list for a few looks (`windowsChanged`), still streaming
+            } else {
+                return (.none, "the streamed window's app is not known")
+            }
+            // Sill's own sound never goes out (and the capture leaves this process out anyway).
+            guard pid != WindowCatalog.ownPID else { return (.none, "Sill's own window streams") }
+            let name = NSRunningApplication(processIdentifier: pid)?.localizedName
+                ?? catalog.window(id: id)?.owningApplication?.applicationName ?? "pid \(pid)"
+            return (.app(pid: pid, name: SafeText.label(name)), "")
+        }
+    }
+
+    /// Hands the pipeline what the sound should be of now.
+    private func audioFollow() {
+        let (key, reason) = audioKey()
+        audio.follow(key, reason: reason) { [weak self] key in
+            await self?.makeAudioSource(key) ?? .failed("the host is shutting down")
+        }
+    }
+
+    /// The source for `key`: ScreenCaptureKit's sound of one app, or of every app but Sill's, on the
+    /// main display (sound does not depend on the display: an app on the virtual display is heard
+    /// the same); or a synthetic host's test tone.
+    private func makeAudioSource(_ key: AudioKey) async -> AudioPipeline.Made {
+        switch key {
+        case .none:
+            return .failed("nothing to capture")
+        case .test:
+            return .source(SyntheticAudio(queue: audio.queue), line: "Audio: a test tone (440 Hz at -30 dBFS, a click at each second).")
+        case .desktop:
+            guard let display = catalog.display else { return .failed("no display to capture from") }
+            let filter: SCContentFilter
+            if let own = catalog.ownApplication {
+                filter = SCContentFilter(display: display, excludingApplications: [own], exceptingWindows: [])
+            } else {
+                filter = SCContentFilter(display: display, excludingWindows: [])   // the CLI: no Sill app to leave out
+            }
+            return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing the whole Mac's sound (every app but Sill).")
+        case .app(let pid, let name):
+            guard let display = catalog.display else { return .failed("no display to capture from") }
+            guard let app = await runningApplication(pid) else { return .failed("\(name) is not among the apps ScreenCaptureKit lists") }
+            let filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
+            return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing \(name)'s sound (every window of it).")
+        }
+    }
+
+    /// The app with this pid as ScreenCaptureKit lists it: from the catalog's last look, else from one
+    /// bounded look at every window and app (a window staged on the virtual display, or a minimized
+    /// app's, can be off the on-screen list).
+    private func runningApplication(_ pid: pid_t) async -> SCRunningApplication? {
+        if let app = catalog.windows.first(where: { $0.owningApplication?.processID == pid })?.owningApplication { return app }
+        guard let all = await WindowCatalog.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 2) else { return nil }
+        return all.applications.first { $0.processID == pid }
+    }
+
+    /// The Mac's status of the sound, from the pipeline's and the devices' count.
+    private func showAudio() {
+        let s = audio.status
+        status.update {
+            $0.audio = s.map { HostStatusSnapshot.Audio(source: $0.source, devices: $0.capturing && $0.problem == nil ? audioListeners : 0,
+                                                        problem: $0.problem) }
+        }
     }
 
     // MARK: Virtual display lifecycle
@@ -1892,6 +2494,7 @@ package final class StreamCoordinator {
         injector.releaseAll()
         server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
         shuttingDown = true
+        audio.shutdown()   // "Audio stopped: Sill is quitting."
         restoreFits(keeping: nil)
         stage.release()
     }
@@ -1914,13 +2517,20 @@ package final class StreamCoordinator {
     /// moved through the element its first fit matched, as the virtual display's restore moves a window.
     /// A window the virtual display holds goes home with the stage, to the frame `stageHome` gave it:
     /// only when Quit or a signal lands while `select` waits in `prepare`. One line for each window acted
-    /// on; none for one gone or already home.
-    private func restoreFits(keeping keep: CGWindowID?) {
+    /// on; none for one gone or already home. Returns whether a window was put back (a restore that
+    /// went through), for Aa's Off, after which the stream restarts at the window's own size.
+    @discardableResult
+    private func restoreFits(keeping keep: CGWindowID?) -> Bool {
         var windows = WindowSizer.AXWindows(sizer: sizer)
+        var putBack = false
         for s in fits.restore(keeping: keep, staged: stage.placement?.windowID, on: &windows) {
-            if case .restore = s.decision { Stats.shared.bump(s.done ? "win.restored" : "win.restoreFailed") }
+            if case .restore = s.decision {
+                Stats.shared.bump(s.done ? "win.restored" : "win.restoreFailed")
+                putBack = putBack || s.done
+            }
             if let line = s.line { print(line) }
         }
+        return putBack
     }
 
     /// Where a window Sill sized would go back to now, for the virtual display's stage to keep as its
@@ -1967,8 +2577,9 @@ package final class StreamCoordinator {
 
     // MARK: The software fallback and the way back
 
-    /// From here the software encoder carries every stream, at half the capture scale and up to 60
-    /// fps: a hardware session stopped returning frames (`afterHang`), or the launch probe got no
+    /// From here the software encoder carries every stream, at 1x (its knob is 1 at most: half the
+    /// scale each way on a Retina display, the hardware's own on a 1x one) and up to 60 fps: a
+    /// hardware session stopped returning frames (`afterHang`), or the launch probe got no
     /// answer. Busy or stuck cannot be told apart yet (a busy engine's frame comes back seconds
     /// later, and the encoder's deinit says so), so both start the re-check. A hang soon after a
     /// return means the busy spell is still on: the next check waits longer.
@@ -1988,10 +2599,13 @@ package final class StreamCoordinator {
         lastRecheck = now
         recheckDue = now + recheckInterval
         let next = Int(recheckInterval)
+        // The scale the software encoder captures at, in the capture line's words ("capturing at 1x"):
+        // `captureScale` is its knob from here, held to the stream's display (nothing streams yet at launch).
+        let at = CaptureScale.words(knob: captureScale, displayScale: streamDisplayScale)
         if afterHang {
-            print("Hardware HEVC encoder is not returning frames (busy or stuck); switching to the software encoder at half scale until the hardware keeps up again (next check in \(next) s).")
+            print("Hardware HEVC encoder is not returning frames (busy or stuck); switching to the software encoder, \(at), until the hardware keeps up again (next check in \(next) s).")
         } else {
-            print("The Mac's hardware video encoder is not answering; streaming with the software encoder at half scale until a check finds it keeping up (every \(next) s while a device is connected).")
+            print("The Mac's hardware video encoder is not answering; streaming with the software encoder, \(at), until a check finds it keeping up (every \(next) s while a device is connected).")
         }
         startRecheck()
     }
@@ -2103,15 +2717,23 @@ package final class StreamCoordinator {
     }
 
     /// The size a hardware stream would have now: the running one's at the full capture scale, or
-    /// the Desktop's while nothing streams (a device asks for the Desktop first).
+    /// the Desktop's while nothing streams (a device asks for the Desktop first); either held to its
+    /// display's own scale (CaptureScale), as the stream would be.
     private var hardwareProbeSize: (width: Int, height: Int) {
         if let size = Self.testProbeSize { return size }
         if active != .none, let enc = encoder {
-            let factor = enc.software ? scale / min(scale, 1.0) : 1   // the software encoder runs at points
+            // The software encoder runs at points: the hardware's stream would run at the knob, both
+            // held to the display's own scale (on a 1x display the two are one size).
+            let hardware = CaptureScale.effective(knob: scale, displayScale: streamDisplayScale)
+            let software = CaptureScale.effective(knob: min(scale, 1.0), displayScale: streamDisplayScale)
+            let factor = enc.software ? hardware / software : 1
             return (evenPixels(CGFloat(enc.width) * factor), evenPixels(CGFloat(enc.height) * factor))
         }
         if synthetic { return (evenPixels(1512 * scale), evenPixels(949 * scale)) }
-        if let d = catalog.display { return (evenPixels(CGFloat(d.width) * scale), evenPixels(CGFloat(d.height) * scale)) }
+        if let d = catalog.display {
+            let s = CaptureScale.effective(knob: scale, displayScale: Self.displayScale(of: SCContentFilter(display: d, excludingWindows: [])))
+            return (evenPixels(CGFloat(d.width) * s), evenPixels(CGFloat(d.height) * s))
+        }
         return (evenPixels(1920 * scale), evenPixels(1080 * scale))
     }
 
@@ -2218,12 +2840,18 @@ package final class StreamCoordinator {
                 broadcastList()
                 return
             }
-            // The encoder is fixed to one size, so a resized window means a fresh pipeline.
-            if let scw = catalog.window(id: id),
-               evenPixels(scw.frame.width * captureScale) != encoderWidth || evenPixels(scw.frame.height * captureScale) != encoderHeight {
-                _ = w
-                await select(active)
-                return
+            // The encoder is fixed to one size, so a resized window means a fresh pipeline: when the
+            // size `select` would ask for it now, at the scale its capture would run at and by the same
+            // rounding, is not the encoder's (CaptureScale.windowNeedsRestart: a window whose odd side
+            // was rounded up never restarts at every poll; a move to a display of another scale alone
+            // is `catalogPolled`'s).
+            if let scw = catalog.window(id: id) {
+                if CaptureScale.windowNeedsRestart(encoder: (encoderWidth, encoderHeight), points: scw.frame.size,
+                                                   knob: captureScale, displayScale: Self.displayScale(of: scw)) {
+                    _ = w
+                    await select(active)
+                    return
+                }
             }
         }
         broadcastList()
@@ -2238,8 +2866,8 @@ package final class StreamCoordinator {
     /// gesture made while a window streamed comes right after the device's Desktop pick, the
     /// window may be on its way home from the virtual display, and the view should open over the
     /// Desktop, which is the only source that shows it.
-    private func queueGesture(_ gesture: TrackpadGesture, from device: String) {
-        pendingGestures.append((gesture, device))
+    private func queueGesture(_ gesture: TrackpadGesture, from device: String, id: ObjectIdentifier) {
+        pendingGestures.append((gesture, device, id))
         guard gestureDrain == nil else { return }
         gestureDrain = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -2249,7 +2877,9 @@ package final class StreamCoordinator {
             }
             while !self.pendingGestures.isEmpty {
                 let next = self.pendingGestures.removeFirst()
-                self.performGesture(next.gesture, from: next.device)
+                // Its device revoked or gone while the gesture waited for the switch: it acts no more.
+                if self.revoked.contains(next.id) || self.routes[next.id] == nil { Stats.shared.bump("in.revoked"); continue }
+                self.performGesture(next.gesture, from: next.device, id: next.id)
             }
             self.gestureDrain = nil
         }
@@ -2259,7 +2889,7 @@ package final class StreamCoordinator {
     /// one line saying what it did, and the chord posted, behind input held for an activation; on
     /// a host that does not advertise, only counted. Nothing is raised or activated first: these
     /// views act on the whole Mac (App Exposé on the app in front), as they do from its keyboard.
-    private func performGesture(_ gesture: TrackpadGesture, from device: String) {
+    private func performGesture(_ gesture: TrackpadGesture, from device: String, id: ObjectIdentifier) {
         guard !shuttingDown else { return }
         let outcome = gestureChords.resolve(gesture.gesture, table: hotKeyTable())
         print(GestureChords.line(device: device, gesture: gesture.gesture, fingers: gesture.fingers,
@@ -2270,7 +2900,7 @@ package final class StreamCoordinator {
             return
         }
         if !heldInput.isEmpty || CFAbsoluteTimeGetCurrent() < holdUntil {
-            heldInput.append(.chord(keyCode: keyCode, flags: flags))
+            heldInput.append(.chord(keyCode: keyCode, flags: flags, device: id))
             return
         }
         injector.chord(keyCode: keyCode, flags: flags)
@@ -2319,10 +2949,14 @@ package final class StreamCoordinator {
     // MARK: Catalog to clients
 
     private func listMessage() -> StreamMessage {
-        StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
-                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
-                                                      hostVersion: hostVersion, protocol: SillProtocol.current,
-                                                      gestures: TrackpadGesture.generation, clipboard: clipboard.advertised)))
+        var list = WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
+                              hostVersion: hostVersion, protocol: SillProtocol.current,
+                              gestures: TrackpadGesture.generation, clipboard: clipboard.advertised)
+        // This host repeats a device's held key (KeyRepeat), so a device sends it a hardware keyboard's
+        // characters as keys.
+        list.keyRepeat = KeyRepeat.generation
+        return StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
+                             payload: Wire.encode(list))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }
@@ -2363,11 +2997,12 @@ package final class StreamCoordinator {
     /// Connection `id`'s state (docs/remote-bundle-plan.md §5.4): the pair its controls set (the
     /// away quality for a device away), the home and away qualities with which one is the target
     /// (`away`, from a host with an identity, `remote`: SillHost --pairing alone too, where no
-    /// connection is ever away), and the rest shared. A pure function of the target,
-    /// `awayWanted`, the connection's route, the status snapshot and two constants (appKitLoop,
-    /// whether the hook is set). The target changes only in `setTarget`, the snapshot only in
-    /// `HostStatus.update`, and `awayWanted` only in `routesChanged`, which updates the snapshot
-    /// with it; all three publish, so no change can be missed and none can stick. Never the
+    /// connection is ever away), whether its key is paired (`sessionPaired`), and the rest shared. A
+    /// pure function of the target, `awayWanted`, the connection's route, the status snapshot (its
+    /// trust list too) and two constants (appKitLoop, whether the hook is set). The target changes
+    /// only in `setTarget`, the snapshot only in `HostStatus.update`, and `awayWanted` only in
+    /// `routesChanged`, which updates the snapshot with it; all three publish, so no change can be
+    /// missed and none can stick. Never the
     /// pipeline's `awayRunning`: it changes in `adopt`, which publishes only through a snapshot
     /// change, and none comes while nothing streams.
     private func settingsState(for id: ObjectIdentifier, answering: Int? = nil) -> HostSettingsState {
@@ -2389,7 +3024,21 @@ package final class StreamCoordinator {
                                  stream: s.stream?.wire,
                                  answering: answering,
                                  away: away,
-                                 link: link)
+                                 link: link,
+                                 audioNote: t.sendAudio ? s.audio?.note : nil,
+                                 sessionPaired: sessionPaired(id))
+    }
+
+    /// Whether connection `id`'s key is on this Mac's trust list now, as the status snapshot lists it
+    /// (RemoteAccess publishes every change of the list, and each change publishes the settings): the
+    /// one judgement both of what the connection may set (Direct Wireless, `DeviceSettings.accepted`)
+    /// and of what its state says (`sessionPaired`, so the device's panel disables what the Mac would
+    /// refuse). A pure function of the route and the snapshot, as `settingsState` is. False at the
+    /// plain door (no key), for an unpaired key at a door that lets any device in, on a host without
+    /// an identity (no list), and for a route not known.
+    private func sessionPaired(_ id: ObjectIdentifier) -> Bool {
+        let trusted = status.snapshot.remote?.paired.compactMap { Base64URL.decode($0.id) } ?? []
+        return DeviceSettings.paired(key: routes[id]?.fingerprint, trusted: trusted)
     }
 
     /// The Mac's Virtual Display pane in its order (SettingsPanes.swift, `statusText`), without the

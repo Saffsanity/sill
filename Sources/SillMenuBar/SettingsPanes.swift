@@ -14,12 +14,14 @@ struct SettingsPane: View {
     var previewUpdates: UpdatePolicy.Pane?
     /// …and its clipboard section with macOS's answer as given, never read from this Mac.
     var previewClipboardAccess: ClipboardPolicy.MacAccess?
+    /// …and what the macOS firewall does as given (FirewallRule), never asked.
+    var previewFirewall: FirewallRule.Verdict?
 
     var body: some View {
         Group {
             switch tab {
             case .general: GeneralPane(model: model, settings: model.settings, previewUpdates: previewUpdates,
-                                       previewClipboardAccess: previewClipboardAccess)
+                                       previewClipboardAccess: previewClipboardAccess, previewFirewall: previewFirewall)
             case .devices: LiveDevicesPane(model: model, settings: model.settings)
             case .streaming: StreamingPane(model: model, settings: model.settings)
             case .virtualDisplay: VirtualDisplayPane(model: model, settings: model.settings)
@@ -34,6 +36,8 @@ struct SettingsPane: View {
         // idle Sill with Settings closed wakes for nothing. The Devices and Remote Access panes
         // follow the host's status, which is pushed, so they poll nothing.
         .task(id: model.visibleSettingsTab == tab) {
+            // General on screen: whether the macOS firewall blocks Sill, asked again (FirewallCheck).
+            if model.visibleSettingsTab == tab, tab == .general { model.coordinator?.checkFirewall() }
             guard model.visibleSettingsTab == tab, tab != .streaming, tab != .devices, tab != .remoteAccess else { return }
             while !Task.isCancelled {
                 model.permissions.refresh()
@@ -44,6 +48,8 @@ struct SettingsPane: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.permissions.refresh()
             model.loginItem.refresh()
+            // Back from Terminal with the command run: General's firewall line follows.
+            if model.visibleSettingsTab == tab, tab == .general { model.coordinator?.checkFirewall() }
         }
     }
 }
@@ -84,6 +90,7 @@ private struct GeneralPane: View {
     @Bindable var settings: HostSettings
     var previewUpdates: UpdatePolicy.Pane?
     var previewClipboardAccess: ClipboardPolicy.MacAccess?
+    var previewFirewall: FirewallRule.Verdict?
 
     private static let runsFromApplications = Bundle.main.bundlePath.hasPrefix("/Applications/")
 
@@ -133,6 +140,11 @@ private struct GeneralPane: View {
                     Spacer(minLength: 0)
                 }
             }
+            // Beside the name devices see: the macOS firewall keeping them out (FirewallRule), only
+            // while it does.
+            if let firewall = previewFirewall ?? model.coordinator?.status.snapshot.firewall, firewall.blocksDevices {
+                FirewallSection(verdict: firewall)
+            }
             // How devices reach this Mac, so beside its name on the network. Applies at once without
             // restarting the stream (the listener is replaced); enabled in test pattern mode too,
             // where it is saved and changes only the listener.
@@ -180,6 +192,59 @@ private struct GeneralPane: View {
         case .failed: return "Not visible (the listener failed)"
         case .waiting: return "Not yet (waiting for the network)"
         case .starting, .registering: return "Registering…"
+        }
+    }
+}
+
+// MARK: Firewall
+
+/// The macOS firewall keeps devices out (FirewallRule; a user's report of 2026-10-29), in the
+/// Permissions pane's style: what it blocks and why that matters, then the Terminal command that
+/// unblocks Sill, the running executable's path in it, with Copy; or, for Block all incoming
+/// connections, where to turn it off. Nothing while the firewall lets devices in. Sill never runs the
+/// command itself (it needs an administrator). Drawn alone in the previews in each verdict.
+struct FirewallSection: View {
+    let verdict: FirewallRule.Verdict
+    @State private var copied = false
+
+    var body: some View {
+        if let line = FirewallRule.Copy.paneLine(verdict) {
+            let command = FirewallRule.Copy.command(verdict)
+            Section {
+                LabeledContent {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        if let command {
+                            Button(copied ? "Copied" : "Copy") { copy(command) }
+                                .help("Copies the command, to paste into Terminal")
+                        }
+                    }
+                } label: {
+                    Text("Firewall")
+                    Text(line)
+                }
+                if let lines = FirewallRule.Copy.commandLines(verdict) {
+                    // A line for the tool and one for each option, never "--" over "unblockapp".
+                    Text(verbatim: lines.joined(separator: "\n"))
+                        .font(.system(.callout, design: .monospaced))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel(command ?? "")
+                }
+            }
+        }
+    }
+
+    /// The command onto the clipboard, and "Copied" on the button for 2 s (VoiceOver hears it).
+    private func copy(_ command: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
+        copied = true
+        AccessibilityNotification.Announcement("Copied").post()
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            copied = false
         }
     }
 }
@@ -308,6 +373,17 @@ private struct StreamingPane: View {
             } footer: {
                 Footnote("Lower latency when the Mac is busy, at a softer picture.")
             }
+            // The Mac's sound (docs/audio-plan.md §6), a beta: its switch and its footnote say so. A device's
+            // Settings panel turns it on and off too, for every device, and mutes it for that device alone
+            // (Q8 as Noah revised it on 2026-10-27).
+            Section {
+                Toggle("Send audio (beta)", isOn: $settings.config.sendAudio)
+                if settings.config.sendAudio, let problem = model.coordinator?.status.snapshot.audio?.problem {
+                    Warning("Sill \(problem). The picture is unaffected.")
+                }
+            } footer: {
+                Footnote("Beta. Devices play the sound of what you stream: all of the streamed window’s app, or every app for the Desktop. The Mac keeps playing it too. A connected iPhone or iPad can also turn this on or off from Sill’s settings there, and mute it for itself alone. Nothing is recorded.")
+            }
             if let snapshot = model.coordinator?.status.snapshot, snapshot.softwareEncoder {
                 Section {
                     Label(snapshot.hardwareEncoderStuck
@@ -395,7 +471,7 @@ private struct PermissionsPane: View {
             Section {
                 PermissionRow(title: "Screen Recording", allowed: permissions.screenRecording,
                               // Not "on this network": a device connected over Direct Wireless shares none.
-                              explanation: "Lets Sill capture the windows you pick on your iPhone or iPad. Nothing is recorded or saved; frames go straight to your devices.",
+                              explanation: "Lets Sill capture the windows you pick on your iPhone or iPad, and their sound when Send Audio is on. Nothing is recorded or saved; frames and sound go straight to your devices.",
                               button: model.settings.askedScreenRecording ? "Open System Settings…" : "Allow…") {
                     permissions.requestScreenRecording()
                 }

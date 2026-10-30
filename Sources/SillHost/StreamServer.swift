@@ -66,6 +66,8 @@ final class StreamServer {
         /// them, so a report the rate limit skips still shows its spike. Only newer clients send maxima.
         var worstFrameAgeSincePrint = -1
         var worstRttSincePrint = -1
+        /// The sound's packets too late to play (ClientStats.audioLate) reported since that line.
+        var audioLateSincePrint = 0
         /// Which door and from where: `.home(origin, peer:)` decided at `.ready`, or the remote door's.
         var route = ClientRoute.home(.loopback, peer: nil)
         /// The device's own name from its last ClientStats, cleaned (SafeText), for its stats line
@@ -93,12 +95,13 @@ final class StreamServer {
         /// registration): no radio to keep awake, so no ticks.
         var onCable = false
         /// Bytes handed to the connection that it has not taken yet (`.contentProcessed`), every
-        /// message `inflight` counts: every client's, which its link judge reads (the home branch of
-        /// `broadcast` never does); and, remote clients only, the keyframes among them it is still
-        /// taking (sequence number and size, oldest first), with their bytes. Usually none or one;
-        /// two when a keyframe comes while another is still being taken: a restarted stream's first
-        /// (a pick, a rotation, a settings change), or the next one on a link that takes a keyframe
-        /// longer than the time between two.
+        /// message `inflight` counts and the sound's (`sendAudio`, which `inflight` leaves out):
+        /// every client's, which its link judge reads (the home branch of `broadcast` never does),
+        /// and away `paceRemote`'s budget; and, remote clients only, the keyframes among them it is
+        /// still taking (sequence number and size, oldest first), with their bytes. Usually none or
+        /// one; two when a keyframe comes while another is still being taken: a restarted stream's
+        /// first (a pick, a rotation, a settings change), or the next one on a link that takes a
+        /// keyframe longer than the time between two.
         var pendingBytes = 0
         var keyframesInFlight: [(seq: Int, bytes: Int)] = []
         var keyframeBytesInFlight = 0
@@ -121,6 +124,12 @@ final class StreamServer {
         var acceptedPeerToPeer = false
         /// A hello (kind 23) came on this connection: only the first counts.
         var helloSeen = false
+        /// The Mac no longer serves it (`closeSessions`: its pairing removed, Remote Access or internet
+        /// access off, Require pairing on), set as it is told goodbye: until its connection closes (at
+        /// most `within`, 0.25 s), its receive loop hands on nothing but the up of a key or a button
+        /// (RevokedInput.mayLetGo), which the coordinator posts only if it lets go of something this
+        /// device holds down on the Mac. Security scan finding 10.
+        var revoked = false
         /// The input messages (kind 8) read from it. Every kind 26 sent to it carries the count, so the
         /// device can drop one the host built before it read that device's latest input
         /// (docs/pointer-visibility-plan.md §3.3).
@@ -128,6 +137,14 @@ final class StreamServer {
         /// The last kind 26 sent to it; nil also while it drives the pointer, so the next one goes out
         /// whatever it says.
         var lastPointer: MacPointer?
+        /// The codec of the Mac's sound it gets, from its hello (`AudioCodec.choose`); nil for a device
+        /// that plays none (every device before 2026-09-27, a test client without --audio), which is
+        /// sent no kind 43.
+        var audioCodec: String?
+        /// The epoch whose format it was sent: a packet of another epoch goes after that epoch's format.
+        var audioEpochSent: Int?
+        /// Sound messages handed to its connection and not taken yet (`audioCap`).
+        var audioUnsent = 0
         init(_ c: NWConnection) { connection = c }
     }
 
@@ -140,6 +157,10 @@ final class StreamServer {
     /// when its connection does not say, and always for a remote session). Called on the network
     /// queue.
     var onClientConnected: ((NWConnection, ClientRoute, ClientLink.Route?) -> Void)?
+    /// The Mac no longer serves this client (`closeSessions`), in the same queue turn as its receive
+    /// loop stops handing on its input, before any message of it read later: the coordinator then
+    /// drops whatever of it still waits (RevokedInput). Called on the network queue.
+    var onClientRevoked: ((NWConnection) -> Void)?
     /// A connected home client's link changed with its connection's path. Only reported, never
     /// acted on: the menu card shows it. Called on the network queue.
     var onClientRouteChanged: ((NWConnection, ClientLink.Route?) -> Void)?
@@ -176,6 +197,14 @@ final class StreamServer {
     /// the source and a device is sent it, at the stream's frame rate; every device that is not
     /// moving it is sent where it is (kind 26). Set before `start()`.
     var pointerWatch: PointerWatch?
+    /// How many registered devices play the Mac's sound (their hello lists a codec this host makes),
+    /// whenever that changes: a hello, a device leaving. Called on the network queue.
+    var onAudioListenersChanged: ((Int) -> Void)?
+    /// The last count reported. On `queue`.
+    private var audioListeners = 0
+    /// The current epoch's format message, for a device whose first packet of the epoch is next. On
+    /// `queue`.
+    private var audioFormat: (epoch: Int, data: Data)?
 
     /// The oldest device version served (DeviceGate): the shipped "0" admits every device and
     /// nothing waits for a hello. TEST ONLY: SILL_TEST_MIN_DEVICE_VERSION on a host that does not
@@ -968,6 +997,7 @@ final class StreamServer {
     private func register(_ client: Client) {
         client.connectedAt = Date().timeIntervalSince1970
         client.lastHeardAt = client.connectedAt
+        heard(ObjectIdentifier(client.connection))
         clients[ObjectIdentifier(client.connection)] = client
         onClientCountChanged?(clients.count)
         updateTicking()
@@ -1022,12 +1052,17 @@ final class StreamServer {
 
     /// Every admitted session, of either door, whose route matches gets goodbye `reason` and is
     /// closed; `line` names one (its paired name, else the device's own, and its endpoint) for the
-    /// log, and `done` gets how many there were. Thread-safe.
+    /// log, and `done` gets how many there were. Each is marked revoked first (`Client.revoked`,
+    /// `onClientRevoked`): from that queue turn on nothing it sends reaches the Mac but the up of a
+    /// key or a button it holds down (RevokedInput), though its connection lasts until the goodbye is
+    /// handed to the network, or 0.25 s. Thread-safe.
     func closeSessions(_ reason: String, matching: @escaping @Sendable (ClientRoute) -> Bool,
                        line: (@Sendable (String, String) -> String)? = nil, done: (@Sendable (Int) -> Void)? = nil) {
         queue.async { [self] in
             let list = clients.values.filter { matching($0.route) }
             for client in list {
+                client.revoked = true
+                onClientRevoked?(client.connection)
                 if let line { print(line(client.route.pairedName ?? client.device ?? "a device", "\(client.connection.endpoint)")) }
                 goodbye(Goodbye(reason: reason), to: client.connection)
             }
@@ -1219,6 +1254,9 @@ final class StreamServer {
         let name = SafeText.label(hello.device ?? "")
         if client.device == nil, !name.isEmpty { client.device = name }
         print(DeviceGate.helloLine(hello, endpoint: "\(c.endpoint)"))
+        // The Mac's sound goes only to a device that said it plays a codec this host makes.
+        client.audioCodec = AudioCodec.choose(offered: hello.audio)
+        updateAudioListeners()
         onClientHello?(c, hello)
     }
 
@@ -1291,16 +1329,37 @@ final class StreamServer {
         }
     }
 
+    /// When each registered client was last heard from (the header of any message, a ping included),
+    /// by the repeat's clock (InputInjector.clock, seconds of system uptime): a held key repeats only
+    /// while its device is heard (KeyRepeat.silence). Written on `queue`, read from the main actor.
+    private let heardLock = NSLock()
+    private var heardAt: [ObjectIdentifier: Double] = [:]
+
+    /// On `queue`: `id` was heard from now.
+    private func heard(_ id: ObjectIdentifier) {
+        let now = ProcessInfo.processInfo.systemUptime
+        heardLock.lock(); heardAt[id] = now; heardLock.unlock()
+    }
+
+    /// When the registered client `id` was last heard from, by the repeat's clock; nil for one that
+    /// is not registered (it left, or is not admitted yet). From any thread.
+    func lastHeard(from id: ObjectIdentifier) -> Double? {
+        heardLock.lock(); defer { heardLock.unlock() }
+        return heardAt[id]
+    }
+
     /// On `queue`: forgets a registered client, once ("Client left" and the callbacks). A
     /// connection that was never registered (refused, or failed before it was ready) leaves no line.
     private func unregister(_ id: ObjectIdentifier) {
         guard let client = clients.removeValue(forKey: id) else { return }
+        heardLock.lock(); heardAt[id] = nil; heardLock.unlock()
         pointerWatch?.clientLeft(id)
         print("Client left: \(client.connection.endpoint)")
         onClientDisconnected?(client.connection)
         onClientCountChanged?(clients.count)
         updateTicking()
         updateSweep()
+        if client.audioCodec != nil { updateAudioListeners() }
     }
 
     /// The source is changing: forget the old parameter sets and make every client wait for
@@ -1368,6 +1427,7 @@ final class StreamServer {
                 return
             }
             client.lastHeardAt = Date().timeIntervalSince1970
+            if self.clients[ObjectIdentifier(c)] === client { self.heard(ObjectIdentifier(c)) }
             // A header can announce up to 4 GiB and the read below would wait for all of it. No
             // client message comes near a megabyte, so a bigger one is a broken or hostile peer.
             if header.payloadLength > StreamMessage.maxClientPayload {
@@ -1376,6 +1436,19 @@ final class StreamServer {
                 return
             }
             let deliver = { (payload: Data) in
+                if client.revoked {
+                    // The Mac no longer serves it (`closeSessions`): until its connection closes, only a
+                    // key's or a button's up goes on, which the coordinator posts only if it lets go of
+                    // something this device holds down (RevokedInput). No pong, no stats line, no
+                    // pointer handed to it; the rest of its input is counted (`in.revoked`).
+                    if header.kind == .input, let event = Wire.decode(InputEvent.self, from: payload), RevokedInput.mayLetGo(event) {
+                        self.onMessage?(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), c)
+                    } else if header.kind == .input || header.kind == .gesture {
+                        Stats.shared.bump("in.revoked")
+                    }
+                    self.receiveLoop(client)
+                    return
+                }
                 if header.kind == .input {
                     self.lastInputAt = Date().timeIntervalSince1970
                     if self.tickTimer == nil { self.updateTicking() }
@@ -1402,12 +1475,23 @@ final class StreamServer {
                         client.device = name.isEmpty ? nil : name
                         client.worstFrameAgeSincePrint = max(client.worstFrameAgeSincePrint, stats.frameAgeMaxMs ?? -1)
                         client.worstRttSincePrint = max(client.worstRttSincePrint, stats.rttMaxMs ?? -1)
+                        // The device's own count, added without overflow (ClientStats.lateSince): two
+                        // reports of Int.max within a line's 1.5 s trapped here and ended Sill.
+                        client.audioLateSincePrint = ClientStats.lateSince(client.audioLateSincePrint, adding: stats.audioLate)
                         let now = CFAbsoluteTimeGetCurrent()
                         if now - client.lastStatsPrint >= 1.5 {
                             client.lastStatsPrint = now
                             let age = Self.medianAndWorst(stats.frameAgeMs, worst: stats.frameAgeMaxMs.map { _ in client.worstFrameAgeSincePrint })
                             let rtt = Self.medianAndWorst(stats.rttMs, worst: stats.rttMaxMs.map { _ in client.worstRttSincePrint })
-                            print("client \(client.device ?? "\(c.endpoint)"): \(stats.fps) fps, frame age \(age), rtt \(rtt)")
+                            // The Mac's sound, from a device that plays it: how far it trailed the picture
+                            // that second, and the packets too late to play since the line before
+                            // (docs/audio-plan.md §4.10).
+                            var sound = ""
+                            if let behind = stats.audioBehindMs, behind >= 0 {
+                                sound = ", sound \(behind) ms behind" + (client.audioLateSincePrint > 0 ? ", \(client.audioLateSincePrint) late" : "")
+                            }
+                            client.audioLateSincePrint = 0
+                            print("client \(client.device ?? "\(c.endpoint)"): \(stats.fps) fps, frame age \(age), rtt \(rtt)\(sound)")
                             client.worstFrameAgeSincePrint = -1
                             client.worstRttSincePrint = -1
                         }
@@ -1488,6 +1572,79 @@ final class StreamServer {
                 send(data, to: client, isFrame: message.kind == .frame)
             }
         }
+    }
+
+    // MARK: The Mac's sound (kind 43; docs/audio-plan.md §4.6)
+    //
+    // A send path of its own, as the tick and kind 26 have: never counted in `inflight`,
+    // `inflightFrames` or the drain eviction, which stay the picture's, so a hundred small messages a
+    // second never make the picture drop a frame at home. Its bytes count in `pendingBytes` and, once
+    // taken, in `takenThisSecond`, as every message's do, because the link carries them: each
+    // client's link judge sees them (what waits, what the link carried), and away from home the
+    // budget, the slack, the hold behind a keyframe and the idle mark see them too. `paceRemote`
+    // decides for frames only, so it drops frames and never the sound, and never touches
+    // `keyframesInFlight` or `backlogFloor` for it (the floor follows `pendingBytes` down by itself).
+    // Each message sets `lastSentAt`, so a TLS client (every remote one, and a TLS home one) skips its
+    // tick while sound flows (the sound keeps the radio awake instead). Only a cap on what a device
+    // has not taken (`audioCap`) skips a packet: a stalled link's safety valve, not pacing.
+
+    /// Sound messages a device may leave untaken before a packet is skipped (`aud.drop`). At home a
+    /// second: the picture never queues there (the delta-drop rule), so a longer queue of sound is a
+    /// link that no longer carries it. Away as long as the drain backstop (`remoteDeadAfter`, 15 s):
+    /// remote pacing lets the picture's own queue hold a keyframe, the hold behind it and the budget,
+    /// which on a link that cannot carry the stream is seconds of it (the harness: 2.8 s behind at 8
+    /// Mbit/s and 5 s at 4 with 1.5 MB keyframes, where 3 s of sound skipped a fifth of its packets at
+    /// 4), and the sound waits with the picture rather than be cut; past that the device is dropped
+    /// anyway. 100 messages a second, about 190 bytes each.
+    static let audioCapHome = 100
+    static let audioCapRemote = 1500
+
+    /// On `queue`: the count of devices that play the sound, reported when it changed.
+    private func updateAudioListeners() {
+        let n = clients.values.filter { $0.audioCodec == AudioCodec.aacELD }.count
+        guard n != audioListeners else { return }
+        audioListeners = n
+        onAudioListenersChanged?(n)
+    }
+
+    /// The format message of a new epoch (a whole kind 43): kept, and sent to each device before its
+    /// first packet of that epoch, never skipped. Thread-safe.
+    func broadcastAudio(format: Data, epoch: Int) {
+        queue.async { [self] in audioFormat = (epoch, format) }
+    }
+
+    /// One packets message (a whole kind 43) of `epoch`, to every ready device that plays the sound:
+    /// the epoch's format first to a device that has not had it, then the packet, unless the device
+    /// has `audioCap` messages untaken. Thread-safe.
+    func broadcastAudio(packets: Data, epoch: Int) {
+        queue.async { [self] in
+            for client in clients.values where client.audioCodec == AudioCodec.aacELD && client.connection.state == .ready {
+                if client.audioEpochSent != epoch {
+                    guard let format = audioFormat, format.epoch == epoch else { continue }
+                    sendAudio(format.data, to: client)
+                    client.audioEpochSent = epoch
+                }
+                if client.audioUnsent >= (client.route.isRemote ? Self.audioCapRemote : Self.audioCapHome) {
+                    Stats.shared.bump("aud.drop")
+                    continue
+                }
+                sendAudio(packets, to: client)
+            }
+        }
+    }
+
+    /// On `queue`: one sound message to one device, counted as the section above says.
+    private func sendAudio(_ data: Data, to client: Client) {
+        client.audioUnsent += 1
+        client.lastSentAt = Date().timeIntervalSince1970
+        client.pendingBytes += data.count
+        client.connection.send(content: data, completion: .contentProcessed { [weak client] _ in
+            guard let client else { return }
+            client.audioUnsent -= 1
+            client.pendingBytes -= data.count
+            client.takenThisSecond += data.count
+        })
+        Stats.shared.bump("aud.sent")
     }
 
     /// Remote clients' frames (home clients keep the rule above byte for byte). What is queued is

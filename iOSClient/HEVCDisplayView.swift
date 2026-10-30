@@ -23,6 +23,23 @@ final class HEVCDisplayView: UIView {
     /// (`StreamClient.pointerFrameChanged`). Two hooks instead of a chain, so re-hosting after a
     /// rotation cannot stack closures.
     var onVideoSizeForPointer: ((CGSize) -> Void)?
+    /// The queue `apply` and `enqueue` run on (the client's network queue): the layer's own
+    /// notifications, which come on whatever thread AVFoundation posts them, are looked at there.
+    var renderQueue: DispatchQueue?
+    /// The picture was interrupted: the layer was flushed and waits for a keyframe (`checkLayer`),
+    /// which a still window on the Mac never sends by itself. The client asks for one
+    /// (KeyframeRecovery). On `renderQueue`.
+    var onNeedsKeyframe: (() -> Void)?
+    /// A keyframe ended a wait: the picture is back (after an interruption, or a new source's first).
+    /// When the layer still read interrupted at that keyframe, `checkLayer` throws it away with its
+    /// flush and says so first, then `onNeedsKeyframe`: for the client the picture came back and was
+    /// lost again at once, so it asks again, as for a repeat (KeyframeRecovery). On `renderQueue`.
+    var onPictureBack: (() -> Void)?
+    /// The layer's notifications (`observeLayer`).
+    private var layerObservers: [NSObjectProtocol] = []
+    /// When a keyframe last ended a wait (`CACurrentMediaTime`): a decode failure posted before then
+    /// is about a frame from before the picture came back. On `renderQueue`.
+    private var resumedAt: CFTimeInterval = 0
 
     // MARK: The pointer sprite
     //
@@ -41,6 +58,10 @@ final class HEVCDisplayView: UIView {
     /// Main-thread copy of the frame size the layer draws. `apply` runs on the network queue and
     /// hops here with it; `clear` zeroes it. Zero hides the sprite: there is no frame to point into.
     private var pointerVideoSize: CGSize = .zero
+    /// The picture's zoom (StreamZoom; ZoomedStreamView scales this whole view by it): the sprite is
+    /// drawn at the zoomed place by that, and at its own size by the inverse scale about its hotspot,
+    /// as iPadOS's pointer and the Mac's own stay their size over a zoomed picture.
+    private var zoom = StreamZoom()
     /// Stacking inside this view's layer, which is the video layer: sibling sublayers draw in
     /// zPosition order, so the sprite sits above the picture whatever the display layer adds
     /// underneath, and the DEBUG readout sits above the sprite.
@@ -68,10 +89,38 @@ final class HEVCDisplayView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .black
+        // The picture takes no touch: the input view over it takes every one. Zoomed (StreamZoom) it is
+        // drawn far past its pane, and a clip does not clip hit testing: sideways, where the bar comes
+        // before the picture, UIKit's hit test on the bar's buttons found this view at 5× (-SillHitTest).
+        isUserInteractionEnabled = false
         displayLayer.videoGravity = .resizeAspect
         layer.addSublayer(cursorLayer)
+        observeLayer()
     }
     required init?(coder: NSCoder) { fatalError() }
+    deinit { layerObservers.forEach(NotificationCenter.default.removeObserver) }
+
+    /// The layer says it could not decode a frame, or that it needs a flush before it decodes again
+    /// (iOS says so when Sill goes to the background, or another app takes the decoder): looked at on
+    /// `renderQueue` at once, since a still window sends no frame that would show it (`checkLayer`).
+    private func observeLayer() {
+        let center = NotificationCenter.default
+        layerObservers.append(center.addObserver(forName: .AVSampleBufferDisplayLayerFailedToDecode, object: displayLayer,
+                                                 queue: nil) { [weak self] note in
+            let error = note.userInfo?[AVSampleBufferDisplayLayerFailedToDecodeNotificationErrorKey] as? Error
+            let postedAt = CACurrentMediaTime()
+            self?.renderQueue?.async { [weak self] in
+                // A frame enqueued before the picture came back failed: the flush that preceded the
+                // keyframe already dealt with it, and acting now would throw the new picture away.
+                guard let self, postedAt >= self.resumedAt else { return }
+                self.checkLayer("(its notification)", failedToDecode: error)
+            }
+        })
+        layerObservers.append(center.addObserver(forName: .AVSampleBufferDisplayLayerRequiresFlushToResumeDecodingDidChange,
+                                                 object: displayLayer, queue: nil) { [weak self] _ in
+            self?.renderQueue?.async { [weak self] in self?.checkLayer("(its notification)") }
+        })
+    }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
@@ -91,10 +140,21 @@ final class HEVCDisplayView: UIView {
         }
         if let hud {
             // Rotation reparents this view into a new SwiftUI host; keep the readout above anything
-            // added since and pinned to the new bounds.
+            // added since and pinned to the new bounds (the part of them the zoom shows).
             bringSubviewToFront(hud)
-            hud.place(in: bounds)
+            hud.place(in: zoom.visibleRect(in: bounds.size), scale: zoom.scale)
         }
+        #endif
+    }
+
+    /// The picture's zoom changed (ZoomedStreamView, as it scales this view): the sprite keeps its size,
+    /// and the DEBUG readout its corner. Main thread.
+    func setZoom(_ new: StreamZoom) {
+        guard new != zoom else { return }
+        zoom = new
+        placeCursor()
+        #if DEBUG
+        if hud != nil { setNeedsLayout() }
         #endif
     }
 
@@ -186,6 +246,9 @@ final class HEVCDisplayView: UIView {
         }
         let x = min(max(p.x, 0), 1), y = min(max(p.y, 0), 1)
         cursorLayer.position = CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height)
+        // About the anchor, which is the hotspot: the tip stays on the point.
+        let unscale = 1 / max(StreamZoom.minScale, zoom.scale)
+        cursorLayer.setAffineTransform(zoom.isZoomed ? CGAffineTransform(scaleX: unscale, y: unscale) : .identity)
         cursorLayer.isHidden = false
     }
 
@@ -269,6 +332,9 @@ final class HEVCDisplayView: UIView {
         formatDescription = nil
         lastParameterSets = nil
         waitingForKeyframe = true
+        #if DEBUG
+        interruptedAt = nil
+        #endif
         displayLayer.flushAndRemoveImage()
         // The pointer's copy of the size is main-thread state; the client zeroes its own alongside.
         DispatchQueue.main.async { [weak self] in
@@ -279,6 +345,7 @@ final class HEVCDisplayView: UIView {
 
     func enqueue(_ data: Data, isKeyframe: Bool) {
         guard let desc = formatDescription else { return }
+        let resuming = waitingForKeyframe
         if waitingForKeyframe {
             guard isKeyframe else { return }
             waitingForKeyframe = false
@@ -309,18 +376,120 @@ final class HEVCDisplayView: UIView {
             first[kCMSampleAttachmentKey_DisplayImmediately as String] = true
         }
 
-        if displayLayer.status == .failed {
-            print("display layer failed: \(String(describing: displayLayer.error))")
-            displayLayer.flush()
-            waitingForKeyframe = true
-            return
+        var lost: Error?
+        #if DEBUG
+        if resuming, interruptedAt != nil, keyframesToLose > 0 {     // -SillKeyframeLost
+            keyframesToLose -= 1
+            print("display: -SillKeyframeLost: the keyframe that ends the wait is thrown away, as though the layer still read failed (\(keyframesToLose) more)")
+            lost = NSError(domain: "SillKeyframeLost", code: 0)
         }
+        #endif
+        if checkLayer("at a frame", failedToDecode: lost, droppingKeyframe: resuming) { return }
+        if resuming { resumedAt = CACurrentMediaTime() }
+        displayLayer.enqueue(sample)
+        if resuming {
+            #if DEBUG
+            if let at = interruptedAt {
+                print("display: the picture is back, \(Int(((CACurrentMediaTime() - at) * 1000).rounded())) ms after it was interrupted")
+                interruptedAt = nil
+            }
+            armLayerFailure()
+            #endif
+            onPictureBack?()
+        }
+    }
+
+    /// Whether the picture was interrupted: the layer failed (its `status`, with its `error`), could
+    /// not decode a frame (`failedToDecode`, from its notification), or needs a flush before it
+    /// decodes again (Sill was in the background, or another app took the decoder). If so the layer
+    /// is flushed (it keeps the last image it showed), waits for a keyframe, and `onNeedsKeyframe` is
+    /// told, since a still window on the Mac sends none. The Mac sends its parameter sets before
+    /// every keyframe and every sample carries the format, so nothing else needs sending again. From
+    /// each frame let through, the layer's notifications, and the picture's window becoming active
+    /// (StreamClient). `droppingKeyframe`: the frame is the keyframe that ends the wait, which the
+    /// flush throws away: `onPictureBack` is told first, so the client counts the picture back and
+    /// lost again and asks again at a repeat's spacing (KeyframeRecovery), rather than taking the
+    /// layer's word as part of an interruption whose keyframe already came. On `renderQueue`. True
+    /// when it flushed.
+    @discardableResult
+    func checkLayer(_ why: String, failedToDecode: Error? = nil, droppingKeyframe: Bool = false) -> Bool {
+        guard formatDescription != nil else { return false }    // no picture yet: nothing to lose
+        let failed = displayLayer.status == .failed || displayLayer.error != nil
+        let needsFlush = displayLayer.requiresFlushToResumeDecoding
+        guard failed || needsFlush || failedToDecode != nil else { return false }
+        #if DEBUG
+        let what = failedToDecode.map { "could not decode a frame (\(($0 as NSError).code))" }
+            ?? (failed ? "failed (\(displayLayer.error.map { "\(($0 as NSError).domain) \(($0 as NSError).code)" } ?? "no error"))"
+                       : "needs a flush to decode again")
+        print("display: the picture was interrupted \(why): the layer \(what)\(needsFlush && failed ? " and needs a flush" : ""); flushed"
+              + (droppingKeyframe ? " with the keyframe it waited for" : "") + ", waiting for a keyframe")
+        if interruptedAt == nil { interruptedAt = CACurrentMediaTime() }
+        #endif
+        displayLayer.flush()
+        waitingForKeyframe = true
+        if droppingKeyframe { onPictureBack?() }    // first: both reach the client in this order
+        onNeedsKeyframe?()
+        return true
+    }
+
+    #if DEBUG
+    /// When the picture was first interrupted, for the console's "back, N ms after" line.
+    private var interruptedAt: CFTimeInterval?
+    /// `-SillKeyframeLost <n>` (ContentView's harness contract): the first n keyframes that end a wait
+    /// after an interruption are thrown away by `checkLayer`'s flush, as though the layer still read
+    /// failed when they came (as it can while another app holds the decoder), so the client's next
+    /// ask runs for real.
+    private var keyframesToLose = UserDefaults.standard.integer(forKey: "SillKeyframeLost")
+    /// `-SillLayerFail <s>[,<s>…]` (ContentView's harness contract): at each of these seconds after the
+    /// launch's first picture, a frame that cannot decode goes onto the layer, so the recovery runs for
+    /// real: the layer's notification, the flush, the client's one ask (kind 44) and the Mac's keyframe.
+    private static let layerFailTimes: [Double] = (UserDefaults.standard.string(forKey: "SillLayerFail") ?? "")
+        .split(whereSeparator: { $0 == "," || $0 == " " }).compactMap { Double($0) }.filter { $0 > 0 }
+    private var layerFailArmed = true
+
+    /// On the first picture of the launch (`enqueue`, on `renderQueue`).
+    private func armLayerFailure() {
+        guard layerFailArmed, !Self.layerFailTimes.isEmpty, let queue = renderQueue else { return }
+        layerFailArmed = false
+        print("display: -SillLayerFail: a frame that cannot decode goes onto the layer at \(Self.layerFailTimes) s")
+        for time in Self.layerFailTimes {
+            queue.asyncAfter(deadline: .now() + time) { [weak self] in self?.breakLayer() }
+        }
+    }
+
+    /// A sample of noise behind an HEVC NAL length far longer than the sample, marked a keyframe to be
+    /// shown at once, in the stream's own format: the decoder refuses it.
+    private func breakLayer() {
+        guard let desc = formatDescription else { print("display: -SillLayerFail: no picture to break"); return }
+        var bytes: [UInt8] = [0x7F, 0xFF, 0xFF, 0xFF, 0x26, 0x01]
+        bytes += (0..<506).map { _ in UInt8.random(in: 0...255) }
+        var block: CMBlockBuffer?
+        var sample: CMSampleBuffer?
+        var size = bytes.count
+        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: .invalid, decodeTimeStamp: .invalid)
+        guard CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: bytes.count, blockAllocator: nil,
+                                                 customBlockSource: nil, offsetToData: 0, dataLength: bytes.count, flags: 0,
+                                                 blockBufferOut: &block) == noErr, let block,
+              CMBlockBufferReplaceDataBytes(with: bytes, blockBuffer: block, offsetIntoDestination: 0, dataLength: bytes.count) == noErr,
+              CMSampleBufferCreateReady(allocator: nil, dataBuffer: block, formatDescription: desc, sampleCount: 1,
+                                        sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleSizeEntryCount: 1,
+                                        sampleSizeArray: &size, sampleBufferOut: &sample) == noErr, let sample else {
+            print("display: -SillLayerFail: could not make the frame"); return
+        }
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true) as NSArray?,
+           let first = attachments.firstObject as? NSMutableDictionary {
+            first[kCMSampleAttachmentKey_DisplayImmediately as String] = true
+        }
+        print("display: -SillLayerFail: a frame that cannot decode goes onto the layer now")
         displayLayer.enqueue(sample)
     }
+    #endif
 }
 
 struct StreamView: UIViewRepresentable {
     let client: StreamClient
+    /// The picture's zoom, which the sprite counters (`HEVCDisplayView.setZoom`).
+    var zoom = StreamZoom()
 
     /// Hosts the client's single display view. SwiftUI may build the new layout's host before it
     /// dismantles the old one, so detach the view from wherever it was first.
@@ -331,6 +500,7 @@ struct StreamView: UIViewRepresentable {
         view.attachDiagnostics(to: client)
         #endif
         wirePointer(view)
+        view.setZoom(zoom)
         return view
     }
 
@@ -352,5 +522,52 @@ struct StreamView: UIViewRepresentable {
         client.renderPointer()
     }
 
-    func updateUIView(_ uiView: HEVCDisplayView, context: Context) {}
+    func updateUIView(_ uiView: HEVCDisplayView, context: Context) { uiView.setZoom(zoom) }
+}
+
+// MARK: - The picture's zoom
+
+/// The picture's zoom for one stream screen (StreamZoom; issue #65): StreamScreen's, so a turn keeps it
+/// and the next session starts at 1×. The input view reads it for every touch and writes it while two
+/// fingers pinch or move the picture (InputOverlay's `readZoom` and `writeZoom`); only
+/// `ZoomedStreamView` watches it, so a pinch redraws the picture's transform and nothing else of the
+/// stream screen.
+final class StreamZoomModel: ObservableObject {
+    @Published private(set) var zoom = StreamZoom()
+
+    func set(_ new: StreamZoom) {
+        if new != zoom { zoom = new }
+    }
+
+    /// Another source, whoever picked it: the whole picture.
+    func reset() {
+        var z = zoom
+        z.reset()
+        set(z)
+    }
+
+    /// The picture's pane is another size: the zoom stays on the same point of the picture.
+    func paneResized(to size: CGSize) {
+        var z = zoom
+        z.resized(to: size)
+        set(z)
+    }
+}
+
+/// The stream's view as the picture's zoom shows it: scaled about the pane's middle and moved
+/// (`.scaleEffect(scale).offset(offset)`, which `StreamZoom`'s mapping is the inverse of), inside the
+/// pane's clip; the pointer sprite at its own size (`StreamView.zoom`).
+struct ZoomedStreamView: View {
+    let client: StreamClient
+    @ObservedObject var zoom: StreamZoomModel
+
+    var body: some View {
+        StreamView(client: client, zoom: zoom.zoom)
+            .onGeometryChange(for: CGSize.self, of: { $0.size }) { zoom.paneResized(to: $0) }
+            .scaleEffect(zoom.zoom.scale)
+            .offset(zoom.zoom.offset)
+            // Drawn past the pane when zoomed, and a clip does not clip hit testing: never a touch's target
+            // (sideways the bar comes before the picture, and its buttons' touches must stay theirs).
+            .allowsHitTesting(false)
+    }
 }

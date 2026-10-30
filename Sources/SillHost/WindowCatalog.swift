@@ -12,7 +12,9 @@ import StreamProtocol
 /// Idle means idle: with no client connected nothing here runs on a timer. The window list is
 /// read once at startup (the coordinator's `refreshWindows()`, so the CLI can print a count) and
 /// then only while at least one client is connected, every `pollInterval`, together with the
-/// thumbnails. The installed-app scan runs once at startup, off the main thread.
+/// thumbnails. The installed-app scan runs once at startup, off the main thread. So after a spell
+/// with no client the last look can be hours old and its display gone: the coordinator looks again
+/// before it builds a capture from it (CatalogLook, `lookAge`).
 @MainActor
 final class WindowCatalog {
     private(set) var windows: [SCWindow] = []
@@ -23,6 +25,13 @@ final class WindowCatalog {
     /// out, so Sill's own windows (the pairing code above all) never reach a device. Nil when it
     /// is not listed (the CLI has no windows; see `resolveOwnApplication`).
     private(set) var ownApplication: SCRunningApplication?
+    /// When the last look (`refreshWindows`) landed, on the clock that keeps counting while the Mac
+    /// sleeps. Nil before the first. A capture is built from the look only while it will do
+    /// (CatalogLook, the coordinator's `lookAgainIfStale`): after a spell with no device it can be a
+    /// day old, its display gone (the black screen of 2026-10-28).
+    private(set) var lookedAt: ContinuousClock.Instant?
+    /// Seconds since the last look, nil before the first.
+    var lookAge: TimeInterval? { lookedAt.map { CatalogLook.seconds(ContinuousClock.now - $0) } }
 
     /// Fires when the window list changes (new, closed, retitled, resized, reordered).
     var onWindowsChanged: (([WindowInfo]) -> Void)?
@@ -122,6 +131,14 @@ final class WindowCatalog {
 
     static let ownPID = ProcessInfo.processInfo.processIdentifier
 
+    /// TEST ONLY (SILL_TEST_NO_SCREEN=1 on a --synthetic host, set by the coordinator): the catalog
+    /// never touches ScreenCaptureKit: no window list (it stays empty), no thumbnails, no display
+    /// lookup, so a test host that an agent runs with a client connected asks macOS for no screen
+    /// recording (every ScreenCaptureKit call is checked against the responsible app's grant, and
+    /// macOS reminds the person about it once a month and after every rebuilt binary). The Desktop
+    /// is the test pattern anyway. Read off the main actor by the bounded lookup below.
+    nonisolated(unsafe) static var screenless = false
+
     /// Starts the one-time installed-app scan, and polling if a client is already connected.
     /// Does not read the window list itself: the coordinator awaits `refreshWindows()` right after.
     func start() {
@@ -159,12 +176,24 @@ final class WindowCatalog {
     /// One of this process's own windows (Settings, the log, the pairing window with its code).
     static func isOwn(_ w: SCWindow) -> Bool { w.owningApplication?.processID == ownPID }
 
+    /// The displays macOS has active now (connected, awake, drawable; Sill's own virtual display too
+    /// while it exists), by ID: what the last look's display is judged against before a capture is
+    /// built from it (CatalogLook). No ScreenCaptureKit call. Empty when the call fails.
+    nonisolated static func activeDisplayIDs() -> [UInt32] {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
+        return Array(ids.prefix(Int(count)))
+    }
+
     /// `SCShareableContent`, but never for longer than `timeout`. Measured 2026-09-22: in a process
     /// without Screen Recording the call never returned once a virtual display existed (it returns
     /// promptly, with no windows, without one). The virtual-display paths use this so a hang there
     /// costs seconds and a fallback, not the coordinator's `switching` flag for good. The default
     /// path's `refreshWindows` keeps the plain call it always had.
     nonisolated static func shareableContent(excludingDesktopWindows: Bool, onScreenWindowsOnly: Bool, timeout: TimeInterval) async -> SCShareableContent? {
+        if screenless { return nil }                 // TEST ONLY: ScreenCaptureKit never asked
         final class Once: @unchecked Sendable {
             private let lock = NSLock(); private var done = false
             func first() -> Bool { lock.lock(); defer { lock.unlock() }; if done { return false }; done = true; return true }
@@ -229,6 +258,7 @@ final class WindowCatalog {
     func refreshWindows() async {
         refreshSeq += 1
         let seq = refreshSeq
+        guard !Self.screenless else { return }      // TEST ONLY: ScreenCaptureKit never asked
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else { return }
         // The staged window, if the on-screen list dropped it: one extra SCShareableContent call per
         // poll, and only then. Fetched before the sequence check so its await cannot let an older
@@ -241,6 +271,7 @@ final class WindowCatalog {
         }
         guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
         appliedSeq = seq
+        lookedAt = .now
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
         display = preferMainDisplay
             ? (content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first)
@@ -279,6 +310,7 @@ final class WindowCatalog {
     /// still catches content changing inside a window of fixed size and title. A window is
     /// stamped before the capture, so one that fails to capture also backs off to 6 s.
     private func refreshThumbnails() async {
+        guard !Self.screenless else { return }      // TEST ONLY: no captures either
         // 2× the 104×66 pt tile in the client's bar. Fit each window's aspect inside that box.
         let box = CGSize(width: 208, height: 132)
         let now = ContinuousClock.now
@@ -351,22 +383,10 @@ final class WindowCatalog {
     /// Sorted by display name, first bundle ID wins. Thread-safe (FileManager + Bundle only).
     nonisolated private static func findInstalledApps() -> [(name: String, bundleID: String, path: String)] {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let dirs = ["/Applications", "/Applications/Utilities", "/System/Applications", "/System/Applications/Utilities",
-                    home.appendingPathComponent("Applications").path]
-        var seen: Set<String> = []
-        var apps: [(name: String, bundleID: String, path: String)] = []
-        for dir in dirs {
-            guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else { continue }
-            for name in names where name.hasSuffix(".app") {
-                let url = URL(fileURLWithPath: dir).appendingPathComponent(name)
-                guard let bundle = Bundle(url: url), let id = bundle.bundleIdentifier, !seen.contains(id) else { continue }
-                seen.insert(id)
-                var display = FileManager.default.displayName(atPath: url.path)
-                if display.hasSuffix(".app") { display.removeLast(4) }
-                apps.append((display, id, url.path))
-            }
-        }
-        return apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        // Both Utilities folders are read twice, as a folder inside /Applications or /System/Applications
+        // and as given: harmless, since the first bundle with an ID wins and the second read finds the same ones.
+        return InstalledApps.find(in: ["/Applications", "/Applications/Utilities", "/System/Applications",
+                                       "/System/Applications/Utilities", home.appendingPathComponent("Applications").path])
     }
 
     // MARK: Image encoding (thread-safe)

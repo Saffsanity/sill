@@ -1,6 +1,7 @@
 #!/bin/bash
 # The touch rig (docs/trackpad-gestures-plan.md §9.2, H7): the app's real TrackpadView.swift and
-# InputOverlay.swift, with TrackpadGestures.swift where the sources have it, compiled into a scratch
+# InputOverlay.swift, with TrackpadGestures.swift, TextComposition.swift and the picture's zoom (StreamZoom.swift, or
+# PhonePortraitLayout.swift where #196's first version kept it) where the sources have them, compiled into a scratch
 # app for the iOS simulator that drives both surfaces with synthesized touches (TouchSynth, private
 # UIKit calls, test only) and logs what each would send the Mac. Nothing reaches the Mac: `send` and
 # `sendGesture` only log. Never linked into the app.
@@ -9,6 +10,7 @@
 #   Tests/touchrig/run.sh --rev REV NAME       the surfaces as they are at REV (git show), for a baseline
 #   Tests/touchrig/run.sh --switch off NAME    sendGesture answers false, as with the device's switch off
 #   Tests/touchrig/compare.py BASE.log NEW.log [OFF.log]   H7's verdict
+#   RIG_ONLY=zoom Tests/touchrig/run.sh NAME   the overlay's zoom strokes alone (#65), where the sources have the zoom
 #
 # It runs on a simulator of its own, named by SILL_TOUCHRIG_SIM (default "Sill touchrig"), made (an
 # iPad Pro 11-inch (M5) on the newest iOS) when there is none and deleted afterwards only when this
@@ -42,25 +44,28 @@ fetch() {
 }
 for f in iOSClient/TrackpadView.swift iOSClient/InputOverlay.swift iOSClient/PointerPresence.swift \
          iOSClient/TrackpadGestures.swift iOSClient/KeyChords.swift iOSClient/PortraitStreamScreen.swift \
-         iOSClient/HardwareKeyboardPolicy.swift Sources/StreamProtocol/Input.swift; do
+         iOSClient/HardwareKeyboardPolicy.swift iOSClient/TextComposition.swift Sources/StreamProtocol/Input.swift \
+         Sources/StreamProtocol/ScrollDirection.swift iOSClient/StreamZoom.swift iOSClient/PhonePortraitLayout.swift; do
     fetch "$f"
 done
 cd "$work/src"
-# One module: StreamProtocol's Input.swift is compiled in, so its import goes.
+# One module: StreamProtocol's Input.swift (and ScrollDirection.swift, Reverse Scrolling's rule, where the
+# sources have it) is compiled in, so its import goes.
 sed -i '' '/^import StreamProtocol$/d' TrackpadView.swift InputOverlay.swift $(ls KeyChords.swift 2>/dev/null)
 # HIDKey, the app's own, cut from PortraitStreamScreen.swift, with KeyModifiers where the sources keep
 # it there (before KeyChords.swift, which the surfaces' shortcuts and hardware keys go through).
 sed -n '/^\/\/ MARK: - Keys$/,/^\/\/ MARK: - Screen$/p' PortraitStreamScreen.swift > Keys.swift
 rm PortraitStreamScreen.swift
 flags=()
-# The gestures when the surfaces have them (the stroke gate and `sendGesture`).
+# The gestures when the surfaces have them (the stroke gate and `sendGesture`), and the picture's zoom (#65).
 if grep -q "var sendGesture" TrackpadView.swift; then flags+=(-D GESTURES); fi
+if grep -q "StreamZoom" InputOverlay.swift; then flags+=(-D ZOOM); fi
 cp "$here/Stubs.swift" "$here/main.swift" "$here/TouchSynth.h" "$here/TouchSynth.m" "$here/Bridging.h" .
 
 target=arm64-apple-ios17.0-simulator
 xcrun -sdk iphonesimulator clang -target $target -fobjc-arc -Wall -c TouchSynth.m -o TouchSynth.o
 xcrun -sdk iphonesimulator swiftc -target $target -swift-version 5 -module-name TouchRig -Onone ${flags[@]+"${flags[@]}"} \
-    -import-objc-header Bridging.h Stubs.swift Keys.swift Input.swift $(ls PointerPresence.swift TrackpadGestures.swift KeyChords.swift HardwareKeyboardPolicy.swift 2>/dev/null) \
+    -import-objc-header Bridging.h Stubs.swift Keys.swift Input.swift $(ls PointerPresence.swift TrackpadGestures.swift KeyChords.swift HardwareKeyboardPolicy.swift TextComposition.swift ScrollDirection.swift StreamZoom.swift PhonePortraitLayout.swift 2>/dev/null) \
     TrackpadView.swift InputOverlay.swift main.swift TouchSynth.o -o "$work/TouchRig.app/TouchRig"
 cat > "$work/TouchRig.app/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -104,7 +109,7 @@ xcrun simctl boot "$udid" 2>/dev/null || true
 xcrun simctl bootstatus "$udid" -b >/dev/null
 xcrun simctl install "$udid" "$work/TouchRig.app"
 log="$out/$name.log"
-SIMCTL_CHILD_RIG_SWITCH="$switch" perl -e 'alarm shift; exec @ARGV' 600 \
+SIMCTL_CHILD_RIG_SWITCH="$switch" SIMCTL_CHILD_RIG_ONLY="${RIG_ONLY:-}" perl -e 'alarm shift; exec @ARGV' 600 \
     xcrun simctl launch --console-pty --terminate-running-process "$udid" me.saffer.sill.touchrig > "$log" 2>&1 || true
 xcrun simctl uninstall "$udid" me.saffer.sill.touchrig || true
 if [ "$made" = 1 ]; then xcrun simctl shutdown "$udid" || true; xcrun simctl delete "$udid" || true; fi
