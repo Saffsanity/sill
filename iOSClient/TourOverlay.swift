@@ -423,17 +423,62 @@ private struct RingPulse: ViewModifier {
     let size: CGSize
     let step: TourTopic
     let on: Bool
+    @State private var phase = 0.0
+    @State private var work: Task<Void, Never>?
 
+    @ViewBuilder
     func body(content: Content) -> some View {
-        if on {
-            content.phaseAnimator([0.0, 1.0, 0.0], trigger: step) { ring, phase in
-                ring.scaleEffect(x: 1 + 8 * phase / max(hole.width, 1), y: 1 + 8 * phase / max(hole.height, 1),
-                                 anchor: UnitPoint(x: hole.midX / max(size.width, 1), y: hole.midY / max(size.height, 1)))
-            } animation: { phase in
-                phase == 1 ? .easeOut(duration: 0.15).delay(0.3) : .easeIn(duration: 0.15)
+        if #available(iOS 17.0, *) {
+            if on {
+                content.phaseAnimator([0.0, 1.0, 0.0], trigger: step) { ring, phase in
+                    ring.scaleEffect(
+                        x: 1 + 8 * phase / max(hole.width, 1),
+                        y: 1 + 8 * phase / max(hole.height, 1),
+                        anchor: UnitPoint(
+                            x: hole.midX / max(size.width, 1),
+                            y: hole.midY / max(size.height, 1)
+                        )
+                    )
+                } animation: { phase in
+                    phase == 1 ? .easeOut(duration: 0.15).delay(0.3) : .easeIn(duration: 0.15)
+                }
+            } else {
+                content
             }
         } else {
             content
+                .scaleEffect(
+                    x: on ? 1 + 8 * phase / max(hole.width, 1) : 1,
+                    y: on ? 1 + 8 * phase / max(hole.height, 1) : 1,
+                    anchor: UnitPoint(
+                        x: hole.midX / max(size.width, 1),
+                        y: hole.midY / max(size.height, 1)
+                    )
+                )
+                .sillOnChange(of: step, initial: true) { _, _ in
+                    pulse()
+                }
+                .onDisappear {
+                    work?.cancel()
+                    work = nil
+                }
+        }
+    }
+
+    private func pulse() {
+        guard on else {
+            phase = 0
+            return
+        }
+        work?.cancel()
+        phase = 0
+        work = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.15)) { phase = 1 }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeIn(duration: 0.15)) { phase = 0 }
         }
     }
 }
@@ -479,17 +524,14 @@ private struct TourCard: View {
                 words
                 ScrollViewReader { reader in
                     ScrollView { words.id(Self.wordsTop).padding(.bottom, 16) }
-                        .scrollIndicatorsFlash(onAppear: true)
-                        // Each step's words start at their top, and show there is more below: the card
-                        // keeps its identity from step to step (it slides), and so would the place a
-                        // reader scrolled the last step's words to.
-                        .scrollIndicatorsFlash(trigger: run.at)
-                        .onChange(of: run.at) { _, _ in
+                        .sillScrollPresentation(trigger: run.at)
+                        // Each step's words start at their top: the card keeps its identity from step
+                        // to step, and so would otherwise keep the previous step's scroll position.
+                        .sillOnChange(of: run.at) { _, _ in
                             var top = Transaction()
                             top.disablesAnimations = true
                             withTransaction(top) { reader.scrollTo(Self.wordsTop, anchor: .top) }
                         }
-                        .scrollBounceBehavior(.basedOnSize)
                         // Words that run on under the footer fade out instead of being cut mid-line.
                         .mask {
                             VStack(spacing: 0) {
@@ -517,11 +559,11 @@ private struct TourCard: View {
             titleFocused = true
         }
         // Each step: VoiceOver's focus on the new title, and a tick on an iPhone.
-        .onChange(of: run.at) { _, _ in
+        .sillOnChange(of: run.at) { _, _ in
             titleFocused = true
-            AccessibilityNotification.LayoutChanged().post()
+            SillAccessibility.layoutChanged()
         }
-        .sensoryFeedback(.selection, trigger: run.at)
+        .sillSelectionFeedback(trigger: run.at)
     }
 
     private var appearAnchor: UnitPoint {
@@ -589,9 +631,7 @@ private struct TourCard: View {
         Image(systemName: row.symbol)
             .font(.subheadline)
             .foregroundStyle(Palette.accent)
-            .contentTransition(.symbolEffect(.replace))
-            .symbolEffect(.bounce, value: run.at)
-            .symbolEffectsRemoved(reduceMotion)
+            .sillSymbolEffect(trigger: run.at, reduceMotion: reduceMotion)
             .accessibilityHidden(true)
     }
 
@@ -663,13 +703,47 @@ private struct TourCard: View {
         }
         .buttonStyle(.plain)
         .keyboardShortcut(.defaultAction)
-        // A tap on the dim: Next grows a little and back (brightens, under Reduce Motion).
-        .phaseAnimator([0.0, 1.0, 0.0], trigger: nudges) { button, phase in
-            button
-                .scaleEffect(reduceMotion ? 1 : 1 + 0.06 * phase)
-                .brightness(reduceMotion ? 0.15 * phase : 0)
-        } animation: { _ in
-            .easeInOut(duration: 0.125)
+        // A tap on the dim: Next grows a little and back; under Reduce Motion it brightens.
+        .modifier(ButtonNudge(trigger: nudges, reduceMotion: reduceMotion))
+    }
+
+    private struct ButtonNudge: ViewModifier {
+        let trigger: Int
+        let reduceMotion: Bool
+        @State private var phase = 0.0
+        @State private var work: Task<Void, Never>?
+
+        @ViewBuilder
+        func body(content: Content) -> some View {
+            if #available(iOS 17.0, *) {
+                content.phaseAnimator([0.0, 1.0, 0.0], trigger: trigger) { button, phase in
+                    button
+                        .scaleEffect(reduceMotion ? 1 : 1 + 0.06 * phase)
+                        .brightness(reduceMotion ? 0.15 * phase : 0)
+                } animation: { _ in
+                    .easeInOut(duration: 0.125)
+                }
+            } else {
+                content
+                    .scaleEffect(reduceMotion ? 1 : 1 + 0.06 * phase)
+                    .brightness(reduceMotion ? 0.15 * phase : 0)
+                    .sillOnChange(of: trigger) { _, _ in nudge() }
+                    .onDisappear {
+                        work?.cancel()
+                        work = nil
+                    }
+            }
+        }
+
+        private func nudge() {
+            work?.cancel()
+            phase = 0
+            work = Task { @MainActor in
+                withAnimation(.easeInOut(duration: 0.125)) { phase = 1 }
+                try? await Task.sleep(nanoseconds: 125_000_000)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeInOut(duration: 0.125)) { phase = 0 }
+            }
         }
     }
 

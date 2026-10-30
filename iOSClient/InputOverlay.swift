@@ -642,7 +642,9 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         switch gesture.state {
         case .began, .changed:
             if gesture.state == .began { hoverIsPencil = false }
-            if gesture.zOffset > 0 || gesture.altitudeAngle > 0 { hoverIsPencil = true }
+            if #available(iOS 16.4, *), gesture.zOffset > 0 || gesture.altitudeAngle > 0 {
+                hoverIsPencil = true
+            }
             let at = sendPointer(.move, at: gesture.location(in: self), clamped: true)
             if hoverIsPencil { setOwnPointer(at, .pencil) } else { setOwnPointer(nil, .none) }
         default:
@@ -727,7 +729,6 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     @objc var smartQuotesType: UITextSmartQuotesType = .no
     @objc var smartDashesType: UITextSmartDashesType = .no
     @objc var spellCheckingType: UITextSpellCheckingType = .no
-    @objc var inlinePredictionType: UITextInlinePredictionType = .no
     // Nor any of iPadOS's newer helpers that rewrite text already typed: what this view remembers is the
     // Mac's (TextComposition), and a rewrite of it would go out as backspaces and retyping there. Only an
     // input method or dictation revises it.
@@ -735,8 +736,10 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     @objc var writingToolsBehavior: UIWritingToolsBehavior { get { .none } set {} }
     @available(iOS 18.0, *)
     @objc var mathExpressionCompletionType: UITextMathExpressionCompletionType { get { .no } set {} }
+    #if compiler(>=6.2)
     @available(iOS 27.0, *)
     @objc var grammarCheckingType: UITextGrammarCheckingType { get { .no } set {} }
+    #endif
 
     /// Always true: there is text on the Mac, and the delete key has to keep working even though
     /// this view holds no text of its own.
@@ -1186,6 +1189,11 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     private func releaseForwardedKeys() {
         for up in forwarded.releaseAll() { send(up) }
     }
+}
+
+@available(iOS 17.0, *)
+extension InputOverlayView {
+    @objc var inlinePredictionType: UITextInlinePredictionType { get { .no } set {} }
 }
 
 // MARK: - Text input (#138)

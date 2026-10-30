@@ -450,10 +450,18 @@ They close the connection on an unexpected ALPN or an unexpected key.
   - the SPKI above;
   - signed by `SecKeyCreateSignature(key, .ecdsaSignatureMessageX962SHA256, tbs)`.
 
-  About 287 bytes. It is rebuilt at every launch from the stored key: the pin is the key, so the
-  certificate is never stored.
-- **TLS identity.** `SecIdentityCreate(nil, certificate, privateKey)` (public on macOS 10.12+ and
-  iOS 11.2+; `SecIdentity.h` in both 27.0 SDKs), then `sec_identity_create`.
+  About 287 bytes. It is rebuilt at every launch from the stored key: the pin is the key. With
+  Xcode 27 the certificate stays in memory; with Xcode 16 it is kept temporarily in the Keychain
+  only for the TLS identity's lifetime, then that exact random-DER certificate is removed.
+- **TLS identity.** With Xcode 27,
+  `SecIdentityCreate(nil, certificate, privateKey)` combines the certificate and key in memory,
+  then `sec_identity_create` makes the Network.framework identity. With Xcode 16, the public
+  cross-platform API can form an identity only from a permanent Keychain key and its matching
+  certificate: Sill adds the freshly rebuilt certificate, finds the resulting
+  `kSecClassIdentity` by the pinned SPKI fingerprint, and removes that exact certificate when the
+  identity dies. Stored host and device keys remain in their own stores. A transient CLI or test
+  key gets a unique temporary Keychain tag and is removed with its certificate. Neither path
+  weakens mutual TLS or writes an exportable copy of a stored key.
 - **Why no package.** No Apple API creates a certificate (`SecCertificateCreateWithData` only
   parses). The hand-built DER is verified by `SecCertificateCreateWithData`, by Network.framework on
   both ends and by `openssl x509`. Apple's swift-certificates package would be a dependency

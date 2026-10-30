@@ -72,7 +72,7 @@ final class WindowSizer {
 
     /// WindowRestore's reads and writes through Accessibility (a fit, a fitted window's way back),
     /// on the element a placement holds. The window server says whether the window is still listed.
-    @MainActor struct AXWindows: @MainActor WindowRestore.Access {
+    @MainActor struct AXWindows: @preconcurrency WindowRestore.Access {
         let sizer: WindowSizer
         func frame(_ p: Placement) -> CGRect? { WindowSizer.frame(of: p.element) }
         func isFullScreen(_ p: Placement) -> Bool { WindowSizer.isFullScreen(p.element) }
