@@ -2175,6 +2175,25 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
 - `swift run -c release CaptureProbe <window> [seconds] [--encode] [--software]
   [--synthetic]` isolates capture from encode from the network.
 
+### A tile with no picture in the window strip
+
+- The strip lists the apps' own windows (`CatalogWindows`, issue #114): those
+  on the Mac's normal layer, larger than 100 × 100 points, none of Sill's, and
+  no helper's: no LayerProbeParent, no window of macOS's own interface (Stage
+  Manager's strip and, from macOS 27, the wallpaper, both WindowManager's; the
+  Dock and Mission Control, Control Center, the menu bar's extras,
+  notifications and widgets, the screenshot tools) and no untitled window of a
+  process with no bundle (a tool's overlay, such as a window border). The log
+  names each owner it leaves out, once: "Catalog: leaving out the windows of
+  WindowManager (com.apple.WindowManager): they are macOS's own, not an
+  app's."
+- A tile that still shows no picture: pick it, and the log's "Selecting window
+  N ‹app› — ‹title› …" line names its owner. The device shows macOS's generic
+  app icon on a tile whose app has no icon of its own (WindowManager,
+  SystemUIServer, Notification Center and the screenshot tools have none), and
+  two letters of the app's name where the Mac sent no icon at all (an owner
+  with no bundle).
+
 ## Releasing
 
 Distribution: a release is a commit tagged `v` + the version both apps carry,

@@ -98,13 +98,16 @@ final class WindowCatalog {
     /// the client's bar and the coordinator can still find it.
     var stagedWindowID: CGWindowID?
 
-    /// Windows AppKit and SwiftUI make for themselves when a display appears ("LayerProbeParent":
-    /// an off-screen window that probes layer backing on the new screen). They carry the app's
-    /// name and no content, showed up as duplicate tiles with blank thumbnails, and the window
-    /// server drops them onto a real display when a virtual display goes away.
-    static func isSystemHelperWindow(_ w: SCWindow) -> Bool {
-        (w.title ?? "").lowercased().contains("layerprobe")
+    /// A window in the plain values CatalogWindows judges it by.
+    static func plain(_ w: SCWindow) -> CatalogWindows.Window {
+        CatalogWindows.Window(title: w.title, appName: w.owningApplication?.applicationName,
+                              bundleID: w.owningApplication?.bundleIdentifier,
+                              pid: w.owningApplication?.processID ?? -1, layer: w.windowLayer,
+                              width: Double(w.frame.width), height: Double(w.frame.height))
     }
+
+    /// The owners whose left-out windows Sill.log has named (CatalogWindows.leftOutLines): once each.
+    private var leftOutNamed: Set<String> = []
 
     /// Window list and thumbnails, while a client is connected.
     static let pollInterval: Duration = .seconds(2)
@@ -276,13 +279,11 @@ final class WindowCatalog {
         display = preferMainDisplay
             ? (content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first)
             : content.displays.first
-        var visible = content.windows.filter { w in
-            guard let app = w.owningApplication, !app.applicationName.isEmpty else { return false }
-            return w.windowLayer == 0                                  // drops widgets, wallpaper, backstop
-                && w.frame.width > 100 && w.frame.height > 100
-                && app.processID != Self.ownPID
-                && !Self.isSystemHelperWindow(w)
-        }
+        // An app's own windows only (CatalogWindows): no widgets, wallpaper or backstop, nothing of
+        // Sill's, and no helper's window (LayerProbeParent, macOS's own interface, a tool's overlay).
+        let plain = content.windows.map(Self.plain)
+        var visible = zip(content.windows, plain).filter { CatalogWindows.lists($1, ownPID: Self.ownPID) }.map(\.0)
+        for line in CatalogWindows.leftOutLines(plain, ownPID: Self.ownPID, named: &leftOutNamed) { print(line) }
         if let pinned, !visible.contains(where: { $0.windowID == pinned.windowID }) { visible.append(pinned) }
         // The system's order is not front-to-back and shuffles between polls. The brief wants a
         // fixed order in the bar, so keep first-seen order and append newcomers.
