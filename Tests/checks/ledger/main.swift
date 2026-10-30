@@ -21,10 +21,12 @@ func enc<T: Encodable>(_ v: T) -> Data { try! encoder.encode(v) }
 func dec<T: Decodable>(_ t: T.Type, _ d: Data) -> T? { try? decoder.decode(t, from: d) }
 
 /// The host's acceptance rule, as Sources/SillHost/DeviceSettings.swift has it (that file needs
-/// SillHostCore, so the model carries a copy): Send Audio taken from a device as any switch is (Noah,
-/// 2026-10-27; the beta's hosts refused it: `Host.betaSound`).
-func accepted(_ c: HostSettingsChange, virtualDisplayAvailable: Bool) -> HostSettingsChange {
-    var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed, directWireless: c.directWireless, sendAudio: c.sendAudio)
+/// SillHostCore, so the model carries a copy; Tests/checks/away-quality checks the real one): Send
+/// Audio taken from a device as any switch is (Noah, 2026-10-27; the beta's hosts refused it:
+/// `Host.betaSound`), and Direct Wireless only from a paired session, on or off (2026-10-29, the
+/// security scan's finding 8; the hosts before took it from any session at home: `Host.anySession`).
+func accepted(_ c: HostSettingsChange, virtualDisplayAvailable: Bool, paired: Bool = true) -> HostSettingsChange {
+    var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed, directWireless: paired ? c.directWireless : nil, sendAudio: c.sendAudio)
     if let v = c.maxFPS, SettingsChoices.maxFPS.contains(v) { ok.maxFPS = v }
     if let v = c.bitrate, SettingsChoices.bitrate.contains(v) { ok.bitrate = v }
     if let v = c.captureScale, SettingsChoices.captureScale.contains(v) { ok.captureScale = v }
@@ -170,6 +172,61 @@ do {   // unanswered: back at the timeout; a late answer still applies
     var h = base; h.directWireless = true
     check(l.receive(st(h, answering: 1)).isEmpty && l.displayed?.directWireless == true, "Direct Wireless: a late answer still applies")
 }
+// Direct Wireless only from a paired session (2026-10-29, the security scan's finding 8): the Mac's
+// state says whether this session is paired (`sessionPaired`), and the ledger's rule 10 never sends
+// Direct Wireless where it says not; the panel disables the switch there (`takesDirectWireless`).
+do {   // rule 10: a session the Mac says is not paired never sends it, on or off; the rest of a pick still goes
+    var unpaired = st(base); unpaired.sessionPaired = false
+    let wire = String(data: enc(unpaired), encoding: .utf8)!
+    var l = SettingsLedger(); _ = l.receive(dec(HostSettingsState.self, Data(wire.utf8))!)
+    check(wire.contains(#""sessionPaired":false"#) && l.host?.sessionPaired == false && l.host?.takesDirectWireless == false,
+          "sessionPaired false crosses the wire, and this Mac takes no Direct Wireless pick on this session")
+    check(l.pick(HostSettingsChange(directWireless: true), token: 1, now: 0) == nil && l.pending.isEmpty && l.displayed?.directWireless == false,
+          "rule 10: pick(directWireless: true) on an unpaired session sends nothing and shows nothing")
+    let mixed = l.pick(HostSettingsChange(bitrate: 25_000_000, directWireless: true), token: 2, now: 0)
+    check(mixed == HostSettingsChange(token: 2, bitrate: 25_000_000) && l.pending[.directWireless] == nil && l.pending[.bitrate] != nil,
+          "rule 10: a two-field pick on it sends the other field alone")
+    var on = unpaired; on.settings.directWireless = true
+    var o = SettingsLedger(); _ = o.receive(on)
+    check(o.pick(HostSettingsChange(directWireless: false), token: 1, now: 0) == nil && o.displayed?.directWireless == true,
+          "rule 10: nor off: the Mac refuses it both ways from an unpaired session")
+}
+do {   // a paired session, and a Mac that does not say: sent, as before
+    var paired = st(base); paired.sessionPaired = true
+    var l = SettingsLedger(); _ = l.receive(dec(HostSettingsState.self, enc(paired))!)
+    check(l.host?.sessionPaired == true && l.host?.takesDirectWireless == true
+          && l.pick(HostSettingsChange(directWireless: true), token: 1, now: 0) == HostSettingsChange(token: 1, directWireless: true),
+          "a paired session sends Direct Wireless")
+    var n = SettingsLedger(); _ = n.receive(st(base))
+    check(n.host?.sessionPaired == nil && n.host?.takesDirectWireless == true
+          && n.pick(HostSettingsChange(directWireless: true), token: 1, now: 0) == HostSettingsChange(token: 1, directWireless: true),
+          "a Mac from before 2026-10-29 (no sessionPaired) is sent it, as before: it takes it from any session at home")
+    check(!String(data: enc(st(base)), encoding: .utf8)!.contains("sessionPaired"), "a state without it leaves the key out")
+    let old = #"{"settings":{"maxFPS":120,"bitrate":15000000,"captureScale":2,"prioritizeSpeed":false,"virtualDisplay":false,"directWireless":false},"persistent":true,"virtualDisplayAvailable":true,"softwareEncoder":false}"#
+    check(dec(HostSettingsState.self, Data(old.utf8))?.sessionPaired == nil, "an older Mac's state decodes with sessionPaired nil")
+}
+do {   // paired during the session (Pair This iPad… at an open door): the Mac's next state says so, and the pick goes
+    var s = st(base); s.sessionPaired = false
+    var l = SettingsLedger(); _ = l.receive(s)
+    check(l.pick(HostSettingsChange(directWireless: true), token: 1, now: 0) == nil, "unpaired: nothing sent")
+    s.sessionPaired = true; _ = l.receive(s)
+    check(l.pick(HostSettingsChange(directWireless: true), token: 2, now: 0) == HostSettingsChange(token: 2, directWireless: true),
+          "paired during the session: the Mac's next state says so, and the pick goes")
+}
+do {   // the host's rule, and a device without rule 10 (older, or a test client) answered with the Mac's value
+    for v in [true, false] {
+        let c = HostSettingsChange(maxFPS: 60, directWireless: v)
+        check(accepted(c, virtualDisplayAvailable: true, paired: false) == HostSettingsChange(maxFPS: 60),
+              "the model host: Direct Wireless \(v ? "on" : "off") refused from an unpaired session, the rest of the change taken")
+        check(accepted(c, virtualDisplayAvailable: true, paired: true) == HostSettingsChange(maxFPS: 60, directWireless: v),
+              "…and taken from a paired one")
+    }
+    var l = SettingsLedger(); _ = l.receive(st(base))     // as an older device reads the state: no sessionPaired
+    _ = l.pick(HostSettingsChange(directWireless: true), token: 1, now: 0)
+    var answer = st(base, answering: 1); answer.sessionPaired = false
+    check(l.receive(answer) == [.directWireless] && l.displayed?.directWireless == false,
+          "an older device's pick from an unpaired session: refused, reported, and the switch goes back")
+}
 // Send Audio, the seventh field (optional: a host without sound does not report it; `base` is one).
 do {   // rule 9: a host without sound is never sent it
     var l = SettingsLedger(); _ = l.receive(st(base))
@@ -293,7 +350,7 @@ struct RNG: RandomNumberGenerator {
 }
 
 enum MainEvent { case handle(conn: Int, payload: Data, touched: [SettingsField]), sendCatalog(conn: Int) }
-enum NetEvent { case broadcast(Data), send(conn: Int, Data), ready(conn: Int), fromClient(conn: Int, Data, [SettingsField]), closed(conn: Int) }
+enum NetEvent { case send(conn: Int, Data), ready(conn: Int), fromClient(conn: Int, Data, [SettingsField]), closed(conn: Int) }
 
 final class Host {
     var target: StreamSettings
@@ -306,9 +363,22 @@ final class Host {
     /// A host from the sound's beta (2026-10-20 to 27): it reports Send Audio and refuses a device's
     /// change of it, on or off, as `DeviceSettings.accepted` then did; its own menu still sets it.
     let betaSound: Bool
+    /// A host from before 2026-10-29: it takes Direct Wireless from any session at home and says
+    /// nothing of pairing (no `sessionPaired`). Any other with Direct Wireless takes it only from a
+    /// paired session and says which each one is.
+    let anySession: Bool
     var softwareEncoder = false
     var note: String?
-    var lastPublished: HostSettingsState?
+    /// The devices (by name) whose keys are on the Mac's trust list: a door that lets any device in
+    /// (Require pairing off) serves the others too, unpaired. Pairing and Remove change it mid-run.
+    var trusted: Set<Int> = []
+    /// Which device each connection is.
+    var owner: [Int: Int] = [:]
+    /// What each connection was last sent by a publish or its first state, as the coordinator's
+    /// `lastPublished`: each connection's state is its own (`sessionPaired`), so each is published
+    /// on its own, once its first state went out (`catalogSent`), and never twice the same.
+    var lastPublished: [Int: HostSettingsState] = [:]
+    var catalogSent: Set<Int> = []
     var ready: Set<Int> = []
     var open: Set<Int> = []
     var mainQ: [MainEvent] = []
@@ -318,11 +388,12 @@ final class Host {
     var answersQueued = 0
     var broadcasts = 0
 
-    init(target: StreamSettings, app: Bool, old: Bool, noSound: Bool, betaSound: Bool = false) {
+    init(target: StreamSettings, app: Bool, old: Bool, noSound: Bool, betaSound: Bool = false, anySession: Bool = false) {
         self.target = target
         self.old = old
         self.noSound = noSound || old
         self.betaSound = betaSound && !(noSound || old)
+        self.anySession = anySession || old
         if old { self.target.directWireless = nil }
         if self.noSound { self.target.sendAudio = nil }
         persistent = app
@@ -330,18 +401,34 @@ final class Host {
         if !app { self.target.virtualDisplay = false; note = "Start SillHost with --virtual-display to use it." }
     }
 
-    func state(answering: Int? = nil) -> HostSettingsState {
+    /// Connection `conn`'s key is on the trust list now (`DeviceSettings.paired`).
+    func sessionPaired(_ conn: Int) -> Bool { owner[conn].map { trusted.contains($0) } ?? false }
+
+    func state(for conn: Int, answering: Int? = nil) -> HostSettingsState {
         HostSettingsState(settings: target, persistent: persistent, virtualDisplayAvailable: virtualDisplayAvailable,
-                          virtualDisplayNote: note, softwareEncoder: softwareEncoder, answering: answering)
+                          virtualDisplayNote: note, softwareEncoder: softwareEncoder, answering: answering,
+                          sessionPaired: anySession ? nil : sessionPaired(conn))
     }
 
-    /// The one publish point: after every change of the target or of the status snapshot.
+    /// The one publish point: after every change of the target, of the status snapshot or of the
+    /// trust list, to each connection whose state changed.
     func publish() {
-        let s = state()
-        guard s != lastPublished else { return }
-        lastPublished = s
-        broadcasts += 1
-        netQ.append(.broadcast(enc(s)))
+        for conn in catalogSent.sorted() where open.contains(conn) {
+            let s = state(for: conn)
+            guard s != lastPublished[conn] else { continue }
+            lastPublished[conn] = s
+            broadcasts += 1
+            netQ.append(.send(conn: conn, enc(s)))
+        }
+    }
+
+    /// A connection's first state, right after its window list (the coordinator's `sendCatalog`).
+    func sendCatalog(_ conn: Int) {
+        guard open.contains(conn) else { return }
+        let s = state(for: conn)
+        lastPublished[conn] = s
+        catalogSent.insert(conn)
+        netQ.append(.send(conn: conn, enc(s)))
     }
 
     func setTarget(_ requested: StreamSettings) {
@@ -356,8 +443,12 @@ final class Host {
     func handle(conn: Int, payload: Data, touched: [SettingsField]) {
         guard let change = dec(HostSettingsChange.self, payload) else { return }   // undecodable: dropped, no answer
         changesHandled += 1
-        var ok = accepted(change, virtualDisplayAvailable: virtualDisplayAvailable)
+        let paired = anySession || sessionPaired(conn)
+        var ok = accepted(change, virtualDisplayAvailable: virtualDisplayAvailable, paired: paired)
         if old { ok.directWireless = nil }   // JSONDecoder dropped the unknown key
+        if change.directWireless != nil, !old {
+            if paired { if anySession { dwFromAnySession += 1 } else { dwFromPaired += 1 } } else { dwRefusedUnpaired += 1 }
+        }
         if noSound { ok.sendAudio = nil }
         if betaSound, ok.sendAudio != nil { ok.sendAudio = nil; betaRefused += 1 }   // the beta's refusal: the device's switch goes back
         // An older host (before Direct Wireless) knows 8, 15, 25 and 40 Mbps only: Low, Ultra and
@@ -378,7 +469,14 @@ final class Host {
             fail("field \(f) changed by a change that does not name it")
         }
         answersQueued += 1
-        netQ.append(.send(conn: conn, enc(state(answering: change.token))))
+        netQ.append(.send(conn: conn, enc(state(for: conn, answering: change.token))))
+    }
+
+    /// The Mac's user pairs device `name` (Pair iPhone or iPad…, or its own Pair This iPad…): its
+    /// sessions are paired from then on, and their states say so.
+    func pair(_ name: Int) {
+        trusted.insert(name)
+        publish()
     }
 
     func macMenu(_ change: HostSettingsChange) {   // Sill.app: HostSettings.config → setTarget, synchronously
@@ -437,15 +535,18 @@ func run(seed: UInt64) -> (steps: Int, answers: Int, broadcasts: Int, expiries: 
     let old = Int.random(in: 0..<4, using: &rng) == 0
     let noSound = old || Int.random(in: 0..<3, using: &rng) == 0
     let betaSound = !noSound && Int.random(in: 0..<4, using: &rng) == 0
+    let anySession = !old && Int.random(in: 0..<4, using: &rng) == 0
     let start = StreamSettings(maxFPS: 120, bitrate: [15_000_000, 12_000_000].randomElement(using: &rng)!,   // 12 = a Mac-side custom value
                                captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
                                directWireless: Bool.random(using: &rng), sendAudio: Bool.random(using: &rng))
-    let host = Host(target: start, app: app, old: old, noSound: noSound, betaSound: betaSound)
+    let host = Host(target: start, app: app, old: old, noSound: noSound, betaSound: betaSound, anySession: anySession)
     var intentBase = start
     if !app { intentBase.virtualDisplay = false }
     if old { intentBase.directWireless = nil }
     if noSound { intentBase.sendAudio = nil }
     let devices = (0..<Int.random(in: 1...3, using: &rng)).map { Device(name: $0) }
+    // Each device paired or not at the start (a door that lets any device in serves both).
+    for d in devices where Int.random(in: 0..<3, using: &rng) > 0 { host.trusted.insert(d.name) }
     var nextConn = 1
     var now = 0.0
     let timeout = 4.0
@@ -456,6 +557,7 @@ func run(seed: UInt64) -> (steps: Int, answers: Int, broadcasts: Int, expiries: 
         let c = nextConn; nextConn += 1
         d.conn = c; d.inbox = []; d.outbox = []; d.ledger.reset(); d.lastAnswer = 0; d.sent = []; d.answered = []; d.picks = [:]
         host.open.insert(c)
+        host.owner[c] = d.name
         host.netQ.append(.ready(conn: c))
     }
     func disconnect(_ d: Device, rng: inout RNG) {
@@ -471,14 +573,12 @@ func run(seed: UInt64) -> (steps: Int, answers: Int, broadcasts: Int, expiries: 
         guard !host.mainQ.isEmpty else { return }
         switch host.mainQ.removeFirst() {
         case .handle(let conn, let payload, let touched): host.handle(conn: conn, payload: payload, touched: touched)
-        case .sendCatalog(let conn): host.netQ.append(.send(conn: conn, enc(host.state())))
+        case .sendCatalog(let conn): host.sendCatalog(conn)
         }
     }
     func stepNet() {
         guard !host.netQ.isEmpty else { return }
         switch host.netQ.removeFirst() {
-        case .broadcast(let data):
-            for d in devices { if let c = d.conn, host.ready.contains(c) { d.inbox.append(data) } }
         case .send(let conn, let data):
             if host.open.contains(conn), let d = devices.first(where: { $0.conn == conn }) { d.inbox.append(data) }
         case .ready(let conn):
@@ -489,6 +589,7 @@ func run(seed: UInt64) -> (steps: Int, answers: Int, broadcasts: Int, expiries: 
             host.mainQ.append(.handle(conn: conn, payload: data, touched: touched))   // a Task per message, FIFO on the main actor
         case .closed(let conn):
             host.ready.remove(conn); host.open.remove(conn)
+            host.catalogSent.remove(conn); host.lastPublished[conn] = nil
         }
     }
     func deliver(_ d: Device) {
@@ -521,12 +622,20 @@ func run(seed: UInt64) -> (steps: Int, answers: Int, broadcasts: Int, expiries: 
         }
         // The panel disables the switch only when it is off and unavailable; turning it off is always offered.
         if want.virtualDisplay == true, d.ledger.host?.virtualDisplayAvailable != true { return }
+        // Its Direct Wireless switch is disabled on a session the Mac says is not paired too, but the
+        // model leaves that to the ledger's rule 10, so the rule itself is what keeps the pick back.
+        let blocked = want.directWireless != nil && d.ledger.host?.sessionPaired == false
+            && d.ledger.displayed.map { want.only(.directWireless).applied(to: $0) != $0 } == true
+        if blocked { rule10Held += 1 }
         guard let out = d.ledger.pick(want, token: d.nextToken, now: now) else { return }
         if out.directWireless != nil, d.ledger.host?.settings.directWireless == nil {
             fail("rule 9: device \(d.name) sent directWireless to a host that never reported it (seed \(seed))")
         }
         if out.sendAudio != nil, d.ledger.host?.settings.sendAudio == nil {
             fail("rule 9: device \(d.name) sent sendAudio to a host without sound (seed \(seed))")
+        }
+        if out.directWireless != nil, d.ledger.host?.sessionPaired == false {
+            fail("rule 10: device \(d.name) sent directWireless on a session the Mac says is not paired (seed \(seed))")
         }
         let touched = out.fields
         for f in touched { d.picks[f] = (out.only(f), out.token!, now) }
@@ -546,7 +655,7 @@ func run(seed: UInt64) -> (steps: Int, answers: Int, broadcasts: Int, expiries: 
         steps += 1
         now += Double.random(in: 0...0.3, using: &rng)
         for d in devices where d.ledger.expire(now: now, timeout: timeout) { expiries += 1 }
-        switch Int.random(in: 0..<100, using: &rng) {
+        switch Int.random(in: 0..<101, using: &rng) {
         case 0..<22: stepMain()
         case 22..<44: stepNet()
         case 44..<66: if let d = devices.randomElement(using: &rng) { deliver(d) }
@@ -555,6 +664,18 @@ func run(seed: UInt64) -> (steps: Int, answers: Int, broadcasts: Int, expiries: 
         case 90..<94: if app { host.macMenu(randomChange(&rng, validOnly: true)) }
         case 94..<97: host.statusChanged(rng: &rng)
         case 97: if let d = devices.randomElement(using: &rng) { disconnect(d, rng: &rng) }
+        case 100:
+            // The trust list changes: an unpaired device is paired (its session too, from then on),
+            // or a paired one removed, which closes its session (RemoteAccess.remove), as below.
+            guard let d = devices.randomElement(using: &rng) else { break }
+            if host.trusted.contains(d.name) {
+                host.trusted.remove(d.name)
+                host.publish()
+                disconnect(d, rng: &rng)
+            } else {
+                if let c = d.conn, host.catalogSent.contains(c), !host.anySession { pairedDuringSession += 1 }
+                host.pair(d.name)
+            }
         default: if let d = devices.first(where: { $0.conn == nil }) { connect(d) }
         }
     }
@@ -571,8 +692,9 @@ func run(seed: UInt64) -> (steps: Int, answers: Int, broadcasts: Int, expiries: 
         default: if let d = devices.randomElement(using: &rng) { deviceWrite(d) }
         }
     }
-    let truth = host.state()
     for d in devices {
+        guard let c = d.conn else { fail("device \(d.name) not connected after the drain (seed \(seed))") }
+        let truth = host.state(for: c)
         guard let seen = d.ledger.host else { fail("device \(d.name) never received a state (seed \(seed))") }
         if seen != truth { fail("device \(d.name) state \(seen) != host \(truth) (seed \(seed))") }
         if !d.ledger.pending.isEmpty { fail("device \(d.name) still has pending \(d.ledger.pending) (seed \(seed))") }
@@ -594,6 +716,7 @@ func run(seed: UInt64) -> (steps: Int, answers: Int, broadcasts: Int, expiries: 
     if old, host.target.directWireless != nil { fail("an older host ended up reporting directWireless (seed \(seed))") }
     if noSound, host.target.sendAudio != nil { fail("a host without sound ended up reporting sendAudio (seed \(seed))") }
     if old { oldHostRuns += 1 }
+    if anySession { anySessionRuns += 1 }
     if noSound { noSoundRuns += 1 }
     if betaSound { betaSoundRuns += 1 }
     return (steps, host.answersQueued, host.broadcasts, expiries, refusals)
@@ -603,6 +726,12 @@ var oldHostRuns = 0
 var noSoundRuns = 0
 var betaSoundRuns = 0
 var betaRefused = 0
+var anySessionRuns = 0
+var dwFromPaired = 0
+var dwFromAnySession = 0
+var dwRefusedUnpaired = 0
+var rule10Held = 0
+var pairedDuringSession = 0
 var newAccepted = 0
 var newRefusedByOld = 0
 let runs = CommandLine.arguments.count > 1 ? Int(CommandLine.arguments[1]) ?? 5_000 : 5_000
@@ -618,3 +747,10 @@ print("ok   \(runs) random two-device + Mac-menu runs converged: \(totals.steps)
 print("ok   \(betaSoundRuns) runs against a host from the sound's beta, which refused a device's Send Audio \(betaRefused) times: each went back to the Mac's value, and every run converged")
 if betaSoundRuns == 0 || betaRefused == 0 { fail("no run against a beta host refused a device's Send Audio: the model lost that case") }
 print("ok   Low, Ultra or Extreme picked and applied \(newAccepted) times; refused by an older host \(newRefusedByOld) times (never applied there)")
+print("ok   Direct Wireless (2026-10-29): taken from a paired session \(dwFromPaired) times and refused from an unpaired one \(dwRefusedUnpaired) times "
+      + "(a test client's, or one in flight as its device was removed: rule 10 kept the ledger's \(rule10Held) picks from going); \(pairedDuringSession) devices paired during a session; "
+      + "\(anySessionRuns) runs against a host from before, which took it from any session \(dwFromAnySession) times; every run converged")
+if dwFromPaired == 0 || dwRefusedUnpaired == 0 || rule10Held == 0 || pairedDuringSession == 0 || dwFromAnySession == 0 {
+    fail("the model lost a Direct Wireless case: paired \(dwFromPaired), refused \(dwRefusedUnpaired), rule 10 \(rule10Held), "
+         + "paired during a session \(pairedDuringSession), from any session \(dwFromAnySession)")
+}

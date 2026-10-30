@@ -3,8 +3,8 @@ import UIKit
 import UniformTypeIdentifiers
 import StreamProtocol
 
-/// A moment's line after a Paste: "Sent to ‹Mac›’s clipboard…" or "Too long to send…", under the
-/// chip's place and the Settings group's Paste.
+/// A moment's line after a Paste: "Pasted on ‹Mac›.", "Sent to ‹Mac›’s clipboard…" or "Too long to
+/// send…", under the chip's place and the Settings group's Paste.
 struct ClipboardNote: Equatable {
     var text: String
     var spoken: String
@@ -35,6 +35,10 @@ struct ClipboardReceipt: Equatable {
 //   reads only `changeCount` and `hasStrings`, which never ask, to offer the chip; the text is read
 //   by the system's Paste control (UIPasteControl, SwiftUI's PasteButton) when the person taps it,
 //   and counts as sent only once the Mac has read it (a ping after it comes back: the receipt).
+// - Paste right away (2026-10-29): with Paste on ‹Mac› Right Away on, the receipt also presses ⌘V on
+//   the Mac a moment later (ClipboardPolicy.pastesOnReceipt, `pasteDelay`), so the text lands where
+//   its cursor is. iOS has no such way back: no app pastes into another, so the Mac's text waits on
+//   this device's clipboard for the person to paste.
 // - The subscription: an empty kind 32 once the Mac's list says it takes the clipboard and the switch
 //   is on, again on a move's new connection; `stop` when the switch goes off.
 //
@@ -48,6 +52,26 @@ extension StreamClient {
         // @AppStorage does, so the switch and the panel always agree.
         let defaults = UserDefaults.standard
         return defaults.object(forKey: clipboardKey) == nil || defaults.bool(forKey: clipboardKey)
+    }
+
+    /// This device's switch, Paste on ‹Mac› Right Away (the Settings panel's This iPad group, under
+    /// Share Clipboard, while it is on): on unless turned off. With it on, a Paste's receipt also
+    /// presses ⌘V on the Mac (ClipboardPolicy.pastesOnReceipt), and the chip and the panel say where the
+    /// text goes. The device's own preference, never sent; read at each receipt.
+    static let pasteRightAwayKey = "Sill.pasteRightAway"
+    static var pasteRightAwayOn: Bool {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: pasteRightAwayKey) == nil || defaults.bool(forKey: pasteRightAwayKey)
+    }
+
+    /// How long after the receipt ⌘V goes: ClipboardPolicy.pasteDelay. DEBUG `-SillPasteDelay <s>`
+    /// another (0: right behind the receipt), for the race docs/clipboard-plan.md measures.
+    static var pasteDelay: Double {
+        #if DEBUG
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: "SillPasteDelay") != nil { return max(0, defaults.double(forKey: "SillPasteDelay")) }
+        #endif
+        return ClipboardPolicy.pasteDelay
     }
 
     /// The clipboard's change count Sill last handled (sent, written from the Mac, the chip dismissed
@@ -136,6 +160,8 @@ extension StreamClient {
         clipboardReceipt = nil
         clipboardReceiptExpiry?.cancel()
         clipboardReceiptExpiry = nil
+        clipboardPasteWork?.cancel()        // a ⌘V for this session never goes to the next
+        clipboardPasteWork = nil
         hideClipboardChip()
         // The next stream screen says again whether the chip shows (its onChange starts from this).
         clipboardChipOnScreen = false
@@ -294,8 +320,10 @@ extension StreamClient {
         }
     }
 
-    /// A receipt's pong (StreamClient.handle): the Mac has read the text. "Sent…", and the copy is dealt
-    /// with. One that comes after its time ran out still counts.
+    /// A receipt's pong (StreamClient.handle): the Mac has read the text, and the copy is dealt with.
+    /// With Paste on ‹Mac› Right Away on, ⌘V follows (`pasteOnMac`) and the note says "Pasted on
+    /// ‹Mac›."; else "Sent…". One that comes after its time ran out still counts, and presses nothing
+    /// (ClipboardPolicy.pastesOnReceipt).
     func clipboardReceiptCame(_ payload: Data) {
         guard let receipt = clipboardReceipt, receipt.nonce == payload else { return }
         clipboardReceiptExpiry?.cancel()
@@ -303,12 +331,60 @@ extension StreamClient {
         clipboardReceipt = nil
         clipboardHandled = receipt.changeCount
         hideClipboardChip()
-        let mac = macName.isEmpty ? "the Mac" : macName
-        showClipboardNote(ClipboardPolicy.Copy.sent(mac: mac), spoken: ClipboardPolicy.Copy.sentSpoken(mac: mac), warning: false)
-        if UIDevice.current.userInterfaceIdiom == .phone { UINotificationFeedbackGenerator().notificationOccurred(.success) }
         #if DEBUG
         print("clipboard: the Mac has read it (its receipt" + (receipt.late ? ", after its time ran out)" : ")"))
         #endif
+        guard pastesNow(late: receipt.late) else { receiptNoted(pasted: false); return }
+        pasteOnMac()
+    }
+
+    /// Whether ⌘V goes now (ClipboardPolicy.pastesOnReceipt: the switch, a receipt in time, something
+    /// streaming, the Mac still sharing its clipboard, and never while the tour shows, which keeps
+    /// every input from the Mac).
+    private func pastesNow(late: Bool) -> Bool {
+        let pastes = ClipboardPolicy.pastesOnReceipt(rightAway: Self.pasteRightAwayOn, late: late, streaming: active != .none,
+                                                     hostClipboard: hostClipboard, tourShows: inputPaused)
+        #if DEBUG
+        if !pastes {
+            print("clipboard: no ⌘V: " + (!Self.pasteRightAwayOn ? "Paste on the Mac Right Away is off"
+                : late ? "the receipt came after its time ran out" : active == .none ? "nothing streams"
+                : !ClipboardPolicy.hostTakes(hostClipboard) ? "the Mac no longer shares its clipboard" : "the tour shows"))
+        }
+        #endif
+        return pastes
+    }
+
+    /// ⌘V on the Mac, `pasteDelay` after the receipt (the Mac writes the text to its pasteboard on a
+    /// queue of its own once it has read it; a ⌘V right behind the receipt could paste what was there
+    /// before), as a keyboard sends it (KeyChord.paste, so nothing stays held there), keeping what the
+    /// pointer sprite shows as a key of the portrait key row does (`sendFromKeyRow`): a paste moves no
+    /// pointer. Then the note, "Pasted on ‹Mac›.", or "Sent…" when the session lost what streams
+    /// meanwhile; the session's end cancels both (`resetClipboard`).
+    private func pasteOnMac() {
+        clipboardPasteWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.clipboardPasteWork = nil
+            guard self.connected, self.pastesNow(late: false) else { self.receiptNoted(pasted: false); return }
+            KeyChord.paste.forEach(self.sendFromKeyRow)
+            #if DEBUG
+            print("clipboard: ⌘V sent to the Mac")
+            #endif
+            self.receiptNoted(pasted: true)
+        }
+        clipboardPasteWork = work
+        let delay = Self.pasteDelay
+        #if DEBUG
+        print(String(format: "clipboard: ⌘V in %.3f s", delay))
+        #endif
+        if delay > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work) } else { work.perform() }
+    }
+
+    /// A receipt's note and, on an iPhone, the success haptic.
+    private func receiptNoted(pasted: Bool) {
+        let note = ClipboardPolicy.receiptNote(pasted: pasted, mac: macName.isEmpty ? "the Mac" : macName)
+        showClipboardNote(note.text, spoken: note.spoken, warning: false)
+        if UIDevice.current.userInterfaceIdiom == .phone { UINotificationFeedbackGenerator().notificationOccurred(.success) }
     }
 
     /// No receipt in time: "Didn’t reach…", and the copy not dealt with, so the chip offers it again (once
@@ -328,6 +404,9 @@ extension StreamClient {
     }
 
     func showClipboardNote(_ text: String, spoken: String, warning: Bool) {
+        #if DEBUG
+        print("clipboard: the note: \(text)")
+        #endif
         clipboardNote = ClipboardNote(text: text, spoken: spoken, warning: warning, at: uptime)
         UIAccessibility.post(notification: .announcement, argument: spoken)
         clipboardNoteExpiry?.cancel()

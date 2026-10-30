@@ -575,8 +575,8 @@ ClientHello (ALPN sill/1), both pinned ───────────▶  Mac
 
 | Where | Limit | On violation |
 |---|---|---|
-| Remote door, before admission | 8 pending connections in total, 2 per source address. A source with 5 failures in 60 s is refused for 300 s | Closed before TLS; counted for the minute's summary |
-| Remote door, before admission | 10 s from accept to admission (TLS, plus kind 19 on a pairing connection) | Closed |
+| Remote door, before admission | 8 pending connections in total, 2 per source address. A source with 5 failures in 60 s is refused for 300 s (since 2026-10-29, the security scan's finding 9: `DoorPolicy.Places`, docs/home-pairing-plan.md §9) | Closed before TLS; counted for the minute's summary |
+| Remote door, before admission | 10 s from accept to admission (TLS, plus kind 19 on a pairing connection); since finding 9, 4 s to `.ready` (10 s from a known address), then 4 s for the kind 19 | Closed |
 | Remote door, pairing connection | Exactly one message: kind 19, at most 4 KB | Anything else, or more: closed |
 | Remote door, admitted | 8 sessions | The 9th: goodbye `busy`, then closed |
 | Both doors, admitted | Any client → host payload at most 1 MiB (today a header can announce 4 GiB and the host waits for it all: StreamServer.swift:462) | Closed with one line |
@@ -1356,6 +1356,15 @@ An `NSWindowController` hosting a SwiftUI `PairDeviceView`.
   `127.0.0.1` for the simulator tests.
 - **At launch,** if saved Macs exist but the device key does not (a restore from backup, since the
   key is `ThisDeviceOnly`), the saved Macs are cleared.
+- **The key's life** (#140, 2026-10-28; `DeviceKeyPolicy`, SavedMacs.swift, pure): a key is made
+  only when the Keychain says there is none (errSecItemNotFound); any other failed read fails that
+  pairing or dial, so a read that failed for a moment never puts a second key under the tag. A key
+  made now is used only once the Keychain gives back this very key under the tag, as the next
+  launch looks for it; else it is added once by itself; still not given back, the pairing fails
+  with the Keychain's status ("couldn’t make its key (the Keychain didn’t keep it: ‹status›)") and
+  the key is deleted again. Before, a key the next launch could not find paired for one launch: the
+  launch then cleared the saved Mac as above, the person scanned the code again, and the Mac
+  trusted one more key of the device at every launch (#140's report).
 - **Forget** removes the record only. The Mac lists the device until it is removed there, and the
   copy says so.
 

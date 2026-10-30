@@ -58,6 +58,10 @@ final class HEVCDisplayView: UIView {
     /// Main-thread copy of the frame size the layer draws. `apply` runs on the network queue and
     /// hops here with it; `clear` zeroes it. Zero hides the sprite: there is no frame to point into.
     private var pointerVideoSize: CGSize = .zero
+    /// The picture's zoom (StreamZoom; ZoomedStreamView scales this whole view by it): the sprite is
+    /// drawn at the zoomed place by that, and at its own size by the inverse scale about its hotspot,
+    /// as iPadOS's pointer and the Mac's own stay their size over a zoomed picture.
+    private var zoom = StreamZoom()
     /// Stacking inside this view's layer, which is the video layer: sibling sublayers draw in
     /// zPosition order, so the sprite sits above the picture whatever the display layer adds
     /// underneath, and the DEBUG readout sits above the sprite.
@@ -85,6 +89,10 @@ final class HEVCDisplayView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .black
+        // The picture takes no touch: the input view over it takes every one. Zoomed (StreamZoom) it is
+        // drawn far past its pane, and a clip does not clip hit testing: sideways, where the bar comes
+        // before the picture, UIKit's hit test on the bar's buttons found this view at 5× (-SillHitTest).
+        isUserInteractionEnabled = false
         displayLayer.videoGravity = .resizeAspect
         layer.addSublayer(cursorLayer)
         observeLayer()
@@ -132,10 +140,21 @@ final class HEVCDisplayView: UIView {
         }
         if let hud {
             // Rotation reparents this view into a new SwiftUI host; keep the readout above anything
-            // added since and pinned to the new bounds.
+            // added since and pinned to the new bounds (the part of them the zoom shows).
             bringSubviewToFront(hud)
-            hud.place(in: bounds)
+            hud.place(in: zoom.visibleRect(in: bounds.size), scale: zoom.scale)
         }
+        #endif
+    }
+
+    /// The picture's zoom changed (ZoomedStreamView, as it scales this view): the sprite keeps its size,
+    /// and the DEBUG readout its corner. Main thread.
+    func setZoom(_ new: StreamZoom) {
+        guard new != zoom else { return }
+        zoom = new
+        placeCursor()
+        #if DEBUG
+        if hud != nil { setNeedsLayout() }
         #endif
     }
 
@@ -227,6 +246,9 @@ final class HEVCDisplayView: UIView {
         }
         let x = min(max(p.x, 0), 1), y = min(max(p.y, 0), 1)
         cursorLayer.position = CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height)
+        // About the anchor, which is the hotspot: the tip stays on the point.
+        let unscale = 1 / max(StreamZoom.minScale, zoom.scale)
+        cursorLayer.setAffineTransform(zoom.isZoomed ? CGAffineTransform(scaleX: unscale, y: unscale) : .identity)
         cursorLayer.isHidden = false
     }
 
@@ -466,6 +488,8 @@ final class HEVCDisplayView: UIView {
 
 struct StreamView: UIViewRepresentable {
     let client: StreamClient
+    /// The picture's zoom, which the sprite counters (`HEVCDisplayView.setZoom`).
+    var zoom = StreamZoom()
 
     /// Hosts the client's single display view. SwiftUI may build the new layout's host before it
     /// dismantles the old one, so detach the view from wherever it was first.
@@ -476,6 +500,7 @@ struct StreamView: UIViewRepresentable {
         view.attachDiagnostics(to: client)
         #endif
         wirePointer(view)
+        view.setZoom(zoom)
         return view
     }
 
@@ -497,5 +522,52 @@ struct StreamView: UIViewRepresentable {
         client.renderPointer()
     }
 
-    func updateUIView(_ uiView: HEVCDisplayView, context: Context) {}
+    func updateUIView(_ uiView: HEVCDisplayView, context: Context) { uiView.setZoom(zoom) }
+}
+
+// MARK: - The picture's zoom
+
+/// The picture's zoom for one stream screen (StreamZoom; issue #65): StreamScreen's, so a turn keeps it
+/// and the next session starts at 1×. The input view reads it for every touch and writes it while two
+/// fingers pinch or move the picture (InputOverlay's `readZoom` and `writeZoom`); only
+/// `ZoomedStreamView` watches it, so a pinch redraws the picture's transform and nothing else of the
+/// stream screen.
+final class StreamZoomModel: ObservableObject {
+    @Published private(set) var zoom = StreamZoom()
+
+    func set(_ new: StreamZoom) {
+        if new != zoom { zoom = new }
+    }
+
+    /// Another source, whoever picked it: the whole picture.
+    func reset() {
+        var z = zoom
+        z.reset()
+        set(z)
+    }
+
+    /// The picture's pane is another size: the zoom stays on the same point of the picture.
+    func paneResized(to size: CGSize) {
+        var z = zoom
+        z.resized(to: size)
+        set(z)
+    }
+}
+
+/// The stream's view as the picture's zoom shows it: scaled about the pane's middle and moved
+/// (`.scaleEffect(scale).offset(offset)`, which `StreamZoom`'s mapping is the inverse of), inside the
+/// pane's clip; the pointer sprite at its own size (`StreamView.zoom`).
+struct ZoomedStreamView: View {
+    let client: StreamClient
+    @ObservedObject var zoom: StreamZoomModel
+
+    var body: some View {
+        StreamView(client: client, zoom: zoom.zoom)
+            .onGeometryChange(for: CGSize.self, of: { $0.size }) { zoom.paneResized(to: $0) }
+            .scaleEffect(zoom.zoom.scale)
+            .offset(zoom.zoom.offset)
+            // Drawn past the pane when zoomed, and a clip does not clip hit testing: never a touch's target
+            // (sideways the bar comes before the picture, and its buttons' touches must stay theirs).
+            .allowsHitTesting(false)
+    }
 }

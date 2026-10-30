@@ -1,6 +1,7 @@
-// H3 (step 1): AskLimits (PairingWindow.swift), pure, compiled with StreamProtocol's sources as one
-// module: one window at a time is the ask rule's (the door check); here 10 minutes of quiet by key
-// and by address, 3 device-opened windows in any 10 minutes, which closes quiet their asker
+// H3 (step 1): AskLimits (PairingWindow.swift), pure, compiled with StreamProtocol's sources,
+// OriginPolicy and DoorPolicy (an IPv6 address's /64) as one module: one window at a time is the ask
+// rule's (the door check); here 10 minutes of quiet by key and by address (an IPv6 one by its /64),
+// 3 device-opened windows in any 10 minutes, which closes quiet their asker
 // (cancelled on the Mac and stopped; not used, not expired, not withdrawn by its device: the
 // security review, 2026-09-27), the reason a proof turned away closed hears, and the test override.
 import Foundation
@@ -31,6 +32,30 @@ check("quietSince: an expired close no longer counts (A from x is free at 701; f
 l.closedUnused(fingerprint: keyA, source: z, now: 800)
 check("closing again restarts the key's quiet", l.quiet(fingerprint: keyA, source: "10.9.9.9", now: 1399) && !l.quiet(fingerprint: keyA, source: "10.9.9.9", now: 1400))
 check("x's close at 100 no longer counts at 800 (another key from x is free)", !l.quiet(fingerprint: keyC, source: x, now: 800))
+
+// The quiet's address: an IPv6 asker's /64, with its interface when link-local (the security scan of
+// 2026-10-18, finding 9: a host takes any number of addresses in its prefix); an IPv4 asker's address.
+check("quietKey: an IPv4 address is itself (an IPv4-mapped one its IPv4 address)",
+      AskLimits.quietKey("10.128.0.41") == "10.128.0.41" && AskLimits.quietKey("::ffff:10.128.0.41") == "10.128.0.41")
+check("quietKey: an IPv6 address is its /64", AskLimits.quietKey("2601:600:1:2:aaaa:bbbb:cccc:dddd") == "2601:600:1:2::/64"
+      && AskLimits.quietKey(z) == "2601:600::/64")
+check("quietKey: a link-local address is its /64 on its interface",
+      AskLimits.quietKey("fe80::1c0f:2a:6e1:9b3%en0") == "fe80::/64%en0" && AskLimits.quietKey("fe80::1%awdl0") == "fe80::/64%awdl0")
+check("quietKey: text that is no address is kept as it is", AskLimits.quietKey("iPad") == "iPad" && AskLimits.quietKey("") == "")
+var q6 = AskLimits()
+q6.closedUnused(fingerprint: keyA, source: "2601:600:1:2::a", now: 0)
+check("by /64: another key from another address of the same /64 is quiet, and since when",
+      q6.quiet(fingerprint: keyB, source: "2601:600:1:2::b", now: 10) && q6.quietSince(fingerprint: keyC, source: "2601:600:1:2:ffff::c", now: 30) == 0)
+check("by /64: another key from the next /64 is not", !q6.quiet(fingerprint: keyB, source: "2601:600:1:3::b", now: 10))
+check("by /64: for 10 minutes, as an address", q6.quiet(fingerprint: keyB, source: "2601:600:1:2::b", now: 599.9) && !q6.quiet(fingerprint: keyB, source: "2601:600:1:2::b", now: 600))
+var q4 = AskLimits()
+q4.closedUnused(fingerprint: keyA, source: "10.0.0.5", now: 0)
+check("IPv4: another address of the same network is not quiet; the address itself is",
+      !q4.quiet(fingerprint: keyB, source: "10.0.0.6", now: 10) && q4.quiet(fingerprint: keyB, source: "10.0.0.5", now: 10))
+var qll = AskLimits()
+qll.closedUnused(fingerprint: keyA, source: "fe80::a%en0", now: 0)
+check("link-local: another address on the same link is quiet; the same address on another link is not",
+      qll.quiet(fingerprint: keyB, source: "fe80::b%en0", now: 10) && !qll.quiet(fingerprint: keyB, source: "fe80::a%awdl0", now: 10))
 
 // At most 3 device-opened windows in any 10 minutes.
 var w = AskLimits()
