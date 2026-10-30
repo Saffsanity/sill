@@ -688,6 +688,23 @@ try it, quit Sill, then `open --env SILL_TEST_USER_ACTIVE=remote
 `Sources/SillHost/DisplayWake.swift` is the rule (`Tests/checks/display-wake`),
 `DisplayActivity.swift` the call.
 
+On the device (PR #230): while one of Sill's windows the person can see (its
+scene in front) streams, the device's own auto-lock is held off
+(`UIApplication.isIdleTimerDisabled`) until 10 minutes after the person last
+used it: input sent to the Mac, one of the stream screen's controls, or the
+moment it began streaming or came to the front. A picture being read or watched
+does not lock under them, and a device left alone still locks by its own
+Auto-Lock setting, 10 minutes later than it would have; its session then ends as
+before, so no device left on a desk keeps the Mac streaming all night. The Mac's
+display can sleep before that by its own setting (counted from the same input):
+the device then shows black, lit, until a tap wakes it. `DeviceIdlePolicy`
+(`iOSClient/DeviceIdlePolicy.swift`, `Tests/checks/device-idle`) is the rule;
+`DeviceIdleTimer` (StreamScreen.swift) lists the open windows afresh at every
+look (each window's `WindowSessionObserver` gives its session and its window,
+both weak), so a window that closed counts for nothing and one window's stream
+screen going away leaves another's hold alone. DEBUG: the console's `idle:`
+lines; `-SillIdleLimit <s>` sets the limit for one run.
+
 ## Trackpad gestures
 
 Three fingers on the device's glass, on the portrait trackpad or over the

@@ -133,7 +133,9 @@ final class StreamClient: ObservableObject {
     /// The connect screen's rows (DiscoveryPolicy.rows): every Mac the network browser lists, then
     /// those seen only over peer-to-peer Wi-Fi.
     @Published var macs: [FoundMac] = []
-    @Published var connected = false
+    @Published var connected = false {
+        didSet { if connected != oldValue { DeviceIdleTimer.shared.update() } }   // auto-lock (PR #230)
+    }
     /// The nearby (peer-to-peer) browser runs: the status line says so, or under the hint the line
     /// in Search Nearby's place.
     @Published var searchingNearby = false
@@ -261,6 +263,7 @@ final class StreamClient: ObservableObject {
                 presence.streaming = streaming
                 renderPointer()
             }
+            if active != oldValue { DeviceIdleTimer.shared.update() }   // auto-lock (PR #230)
         }
     }
     @Published var thumbnails: [UInt32: UIImage] = [:] // by window ID
@@ -372,7 +375,10 @@ final class StreamClient: ObservableObject {
     /// tour's rule reads it when it decides. The device's own requests (the Desktop at a
     /// connection's start) are not the person's and leave it alone. Main thread.
     private(set) var lastActionAt: Double?
-    func noteAction() { lastActionAt = ProcessInfo.processInfo.systemUptime }
+    func noteAction() {
+        lastActionAt = ProcessInfo.processInfo.systemUptime
+        DeviceIdleTimer.shared.used()
+    }
     /// The tour is on screen (StreamScreen): nothing this device does reaches the Mac as input
     /// meanwhile. The one input it makes on its own, the pointer's move to the middle of a new frame
     /// size (`pointerFrameChanged`), waits for the pause to end, and goes then only if this device
@@ -3717,6 +3723,7 @@ final class StreamClient: ObservableObject {
         // Every input passes here, a hover and a flick's coast included: the tour's rule counts it
         // as something happening (StreamScreen.considerTour).
         lastInputAt = ProcessInfo.processInfo.systemUptime
+        DeviceIdleTimer.shared.used()          // the person is at the device: auto-lock held off again (PR #230)
         // A click or a key from any view: what the input view remembers of what was typed goes (#138).
         if TextInputRules.movesCaret(event) { onCaretMayMove?() }
         #if DEBUG
