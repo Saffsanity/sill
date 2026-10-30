@@ -676,16 +676,26 @@ extension StreamClient {
     /// may have ended on a goodbye that waited in its connection while the app was suspended
     /// (DiscoveryPolicy.returnRenews): ended just after the return, and up before it (its
     /// `startedAt`), what the browsers made then list counts as listed afresh at once
-    /// (`renewedFrom`); ended in the background, the return decides.
+    /// (`renewedFrom`); ended in the background, the return decides. An open door's session leaves
+    /// the key it saw, which the reconnect's dials pin (DiscoveryPolicy.reconnectKey); one that saw
+    /// none (a tap's dial that ended before its handshake) the key the last session under its name
+    /// saw (`openKeys`, the review of #255).
     private func lostReconnect(session s: Session?, saved: SavedMac?, name: String, remoteAllowed: Bool,
                                went: GoodbyePolicy.Went? = nil) -> Reconnect {
         let bonjour = s?.bonjourName ?? saved?.bonjourName
+        let earlier = bonjour.flatMap { openKeys[$0] }
+        let openKey = DiscoveryPolicy.reconnectKey(lost: s?.home, earlier: earlier)
+        #if DEBUG
+        if openKey != nil, DiscoveryPolicy.reconnectKey(lost: s?.home) == nil {
+            print("reconnect: the dial of \(name) saw no key; the reconnect pins the key the last session under its name saw")
+        }
+        #endif
         let lostAt = ProcessInfo.processInfo.systemUptime
         var r = Reconnect(macID: saved?.macID, bonjourName: bonjour, name: name,
                           lostAt: lostAt, pathAtLoss: pathSignature,
                           remoteAllowed: remoteAllowed,
                           rememberedDirect: bonjour.map { directWirelessMacs.contains($0) } ?? false,
-                          went: went)
+                          went: went, openKey: openKey)
         r.nextRemoteAt = DiscoveryPolicy.firstRemoteDial(macWentAt: r.wentAt)
         r.endedInBackground = !appInForeground
         if let wentAt = r.wentAt, let back = returnedAt,
@@ -768,9 +778,12 @@ extension StreamClient {
             // The row's door decides whether the reconnect dials it at all (DiscoveryPolicy.homeDial,
             // never an ask): a Mac that removed this device, or an unsaved one that requires
             // pairing, waits for a tap, and one whose Sill is too old for this build is not dialed.
+            // An unsaved one on an open door is dialed pinned to the key its lost session saw
+            // (DiscoveryPolicy.reconnectTrust): another key ends the reconnect (homeSessionEnded); a
+            // plain door after that session is not dialed (a DEBUG build's), and the reconnect looks on.
             let id = mac.macID ?? r.macID
             let decision = homeDecision(mac, macID: id, tap: false)
-            if DiscoveryPolicy.sessionTrust(decision, savedPin: id.flatMap { savedMac($0)?.fingerprintData }) != nil {
+            if DiscoveryPolicy.reconnectTrust(decision, savedPin: id.flatMap { savedMac($0)?.fingerprintData }, seen: r.openKey) != nil {
                 // When (issue #69): the first dial of a listing at once, then 5, 10, 20 and every 30 s
                 // while its dials do not connect (a Mac a sleep proxy answers for, one stopped), 12 at
                 // most, in the foreground only (DiscoveryPolicy.redialRow). A listing seen afresh
@@ -824,14 +837,24 @@ extension StreamClient {
                 reconnect = r        // kept until the row's connection is ready (a TLS one's: its first window list)
                 #if DEBUG
                 lastRedialNote = nil
-                print("reconnect: dialing \(mac.name) (dial \(r.rowDials) of this listing)")
+                let pinnedToSeen = decision == .anyKey && r.openKey != nil
+                print("reconnect: dialing \(mac.name) (dial \(r.rowDials) of this listing)"
+                      + (pinnedToSeen ? ", pinned to the key its last session saw" : ""))
                 #endif
                 // False only when a TLS dial finds no key and none can be made: the status says why.
-                guard dial(mac, macID: id, tap: false) else { return false }
+                guard dial(mac, macID: id, tap: false, seen: r.openKey) else { return false }
                 status = line
                 return true
             }
             if decision == .updateSill { status = DiscoveryPolicy.updateSillStatus(mac: mac.name) }
+            #if DEBUG
+            // A plain door under the name after a session that saw a key over TLS: never dialed by the
+            // reconnect (DiscoveryPolicy.reconnectTrust, the review of #255), which looks on; a tap dials it.
+            if decision == .plain, r.openKey != nil, lastRedialNote != "plain \(mac.name)" {
+                lastRedialNote = "plain \(mac.name)"
+                print("reconnect: \(mac.name) is a plain door now, and its last session saw a key over TLS: not dialed (a tap dials it)")
+            }
+            #endif
             // A row that waits for a tap (an unsaved Mac that now asks devices to pair, a saved one
             // that removed this device): the reconnect never asks, so it ends here, with the words
             // a goodbye would have brought, rather than "…reconnects when it's back" for ever.

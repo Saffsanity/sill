@@ -1,0 +1,627 @@
+# Nightly builds of Sill from main (docs/release-checklist.md, "Nightlies"): at 09:17 UTC every night
+# that main moved, and by hand (Actions › Nightly › Run workflow). Three jobs:
+#
+# - decide: on a schedule, nothing at all unless the repository variable SILL_NIGHTLY is true; by
+#   hand, always. A scheduled night whose main is the commit the last nightly was built from (the sha
+#   at the end of the pre-release "nightly"'s notes) builds nothing. It writes the night's words once
+#   for both apps (Scripts/nightly-notes.sh: the pull requests merged since the last release tag) and
+#   fixes the night's date, commit and build number (the commit count, never committed).
+# - Sill for Mac: the pure checks, then
+#   - with the repository variable SILL_SIGN_IN_CI true, from main, not "verify only": the Developer
+#     ID certificate into a temporary keychain, the notary key into a profile in it, the Developer ID
+#     provisioning profile into Packaging/embedded.provisionprofile (so the identity keychain is the
+#     data-protection one, as in a release), and Scripts/release.sh --nightly --publish: built
+#     universal (SILL_UNIVERSAL=1: Apple silicon and Intel), notarized, stapled and checked as a
+#     release is, as Sill-nightly-<yyyymmdd>-<sha7>.dmg and .zip
+#     with their .sha256, on the rolling pre-release "nightly" (never "latest", which the update check
+#     reads; the seven newest nightlies kept). The keychain and the key files are deleted at the end
+#     whatever happened.
+#   - otherwise: signed ad hoc, zipped and in a disk image, kept as two artifacts. No secret is read.
+# - Sill for iPhone and iPad: Scripts/release-ios.sh with the build number given (--build-number),
+#   - with the App Store Connect key and SILL_TESTFLIGHT_IN_CI true, from main, not "verify only":
+#     uploaded (unless App Store Connect has that build already), then Scripts/asc.swift waits for it
+#     to be processed, gives it What to Test, adds it to every internal TestFlight group, and to the
+#     public beta group (the external group with the public link) only while the repository variable
+#     SILL_NIGHTLY_PUBLIC_BETA is true, with the Beta App Review submission that needs. Noah tries a
+#     nightly in his internal group first (2026-10-29), so that variable starts unset.
+#   - with the key otherwise: signed through it and exported, nothing uploaded.
+#   - without the key: archived without signing and checked.
+#
+# Secrets: the environment nightly's (Settings › Environments; docs/release-checklist.md, "Secrets and
+# variables"), not the repository's. The Mac and iOS jobs run in it, only main may use it, and it has no
+# reviewer, so a night runs unattended: SILL_DEVELOPER_ID_P12, SILL_DEVELOPER_ID_P12_PASSWORD,
+# SILL_NOTARY_KEY_ID, SILL_NOTARY_ISSUER_ID, SILL_NOTARY_KEY_P8, SILL_PROVISION_PROFILE (the profile in
+# base64), SILL_TESTFLIGHT_KEY_ID, SILL_TESTFLIGHT_ISSUER_ID, SILL_TESTFLIGHT_KEY_P8. Variables (the
+# repository's): SILL_NIGHTLY, SILL_SIGN_IN_CI, SILL_TESTFLIGHT_IN_CI, SILL_NIGHTLY_PUBLIC_BETA. A run
+# from any other branch builds nothing (decide says so; GitHub would refuse it the environment anyway).
+#
+# Cost: nothing in a public repository (docs/release-checklist.md, "What it costs").
+name: Nightly
+
+on:
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+    inputs:
+      verify_only:
+        description: Verify only, whatever the variables say (Sill for Mac signed ad hoc, Sill for iPhone and iPad exported or unsigned; nothing published or uploaded)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Every run step under bash -eo pipefail (GitHub leaves pipefail off unless the shell is named).
+defaults:
+  run:
+    shell: bash
+
+# One nightly at a time; a second one waits rather than cancel the first mid-notarization or mid-upload.
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  decide:
+    name: What tonight builds
+    if: github.event_name == 'workflow_dispatch' || vars.SILL_NIGHTLY == 'true'
+    # As in ci.yml: the image with Xcode 27 (macOS 27, a public preview).
+    runs-on: xcode-27
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read # the merged pull requests' titles, for the notes
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+      publish: ${{ steps.decide.outputs.publish }}
+      sha: ${{ steps.decide.outputs.sha }}
+      date: ${{ steps.decide.outputs.date }}
+      build: ${{ steps.decide.outputs.build }}
+      notes: ${{ steps.notes.outputs.notes }}
+      whats_new: ${{ steps.notes.outputs.whats_new }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the build number is the commit count, and the notes go back to the last release tag
+          persist-credentials: false
+
+      - name: Decide
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          VERIFY_ONLY: ${{ inputs.verify_only }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          head="$(git rev-parse HEAD)"
+          date="$(date -u +%Y%m%d)"
+          build="$(git rev-list --count HEAD)"
+          publish=false
+          run=true
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            # Both builds run in the environment nightly, which only main may use.
+            run=false
+            words="This run is on $GITHUB_REF, not main: nothing is built. Sill for Mac and Sill for iPhone and iPad build in the environment nightly, which only main may use."
+            echo "::notice::$words"
+            echo "$words" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$VERIFY_ONLY" = true ]; then
+            echo "Verify only, as asked: nothing is published or uploaded."
+          else
+            publish=true
+          fi
+          if [ "$run" = true ] && [ "$EVENT" = schedule ]; then
+            last="$(source Scripts/release.sh && nightly_last_sha "$REPOSITORY")"
+            if [ "$last" = "$head" ]; then
+              run=false
+              echo "main is still ${head:0:12}, the commit the last nightly was built from: nothing to build tonight." | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          echo "Tonight: ${head:0:12} on $GITHUB_REF, build $build, $date (UTC); building: $run; publishing and uploading allowed: $publish."
+          {
+            echo "run=$run"
+            echo "publish=$publish"
+            echo "sha=$head"
+            echo "date=$date"
+            echo "build=$build"
+          } >> "$GITHUB_OUTPUT"
+
+      # The notes once, for both apps: Markdown for the pre-release, plain text for What to Test. They
+      # go to the other jobs in base64 (job outputs are strings; titles are other people's text).
+      - name: The notes (Scripts/nightly-notes.sh)
+        id: notes
+        if: steps.decide.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SILL_NIGHTLY_DATE: ${{ steps.decide.outputs.date }}
+        run: |
+          mkdir -p .build/nightly
+          Scripts/nightly-notes.sh --markdown .build/nightly/notes.md --whats-new .build/nightly/whats-new.txt --repo "$REPOSITORY"
+          {
+            echo "notes=$(base64 -i .build/nightly/notes.md | tr -d '\n')"
+            echo "whats_new=$(base64 -i .build/nightly/whats-new.txt | tr -d '\n')"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Tonight's notes"
+            echo
+            cat .build/nightly/notes.md
+            echo
+            echo "## What to Test ($(wc -c < .build/nightly/whats-new.txt | tr -d ' ') bytes of App Store Connect's 4,000)"
+            echo
+            echo '```text'
+            cat .build/nightly/whats-new.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the notes
+        if: steps.decide.outputs.run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nightly-notes-${{ steps.decide.outputs.date }}
+          path: |
+            .build/nightly/notes.md
+            .build/nightly/whats-new.txt
+          include-hidden-files: true
+          retention-days: 14
+          if-no-files-found: error
+
+  mac:
+    name: Sill for Mac
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
+    # The environment nightly (docs/release-checklist.md, "Secrets and variables"): only main may use
+    # it, it has no reviewer, and the secrets below are its own; the repository keeps none. An
+    # environment without them gives empty strings: the mode step names what is missing.
+    environment: nightly
+    runs-on: xcode-27
+    timeout-minutes: 120
+    permissions:
+      contents: write # the pre-release "nightly", with this repository's own token
+    env:
+      SILL_NIGHTLY_DATE: ${{ needs.decide.outputs.date }}
+      # Universal (Apple silicon and Intel, #62, #88), as the first nightly was (by hand, 2026-10-29) and as
+      # Noah told #62 the next version's download will be: make-app.sh builds both slices with lipo, and
+      # release.sh's check_signature checks each one. A release so far is Apple silicon only.
+      SILL_UNIVERSAL: '1'
+    steps:
+      - name: Check out tonight's commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.decide.outputs.sha }}
+          fetch-depth: 0 # make-app.sh's build number is the commit count
+          persist-credentials: false
+
+      # A nightly is built as a release is: with Xcode 27 or not at all.
+      - name: Select Xcode 27
+        uses: ./.github/actions/select-xcode
+        with:
+          version: '27'
+          fallback: 'false'
+
+      # An if: can't read secrets, so this step reads them and says which run this is.
+      - name: Which run this is
+        id: mode
+        env:
+          PUBLISH: ${{ needs.decide.outputs.publish }}
+          SILL_SIGN_IN_CI: ${{ vars.SILL_SIGN_IN_CI }}
+          SILL_DEVELOPER_ID_P12: ${{ secrets.SILL_DEVELOPER_ID_P12 }}
+          SILL_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.SILL_DEVELOPER_ID_P12_PASSWORD }}
+          SILL_NOTARY_KEY_ID: ${{ secrets.SILL_NOTARY_KEY_ID }}
+          SILL_NOTARY_ISSUER_ID: ${{ secrets.SILL_NOTARY_ISSUER_ID }}
+          SILL_NOTARY_KEY_P8: ${{ secrets.SILL_NOTARY_KEY_P8 }}
+          SILL_PROVISION_PROFILE: ${{ secrets.SILL_PROVISION_PROFILE }}
+        run: |
+          if [ "$PUBLISH" = true ] && [ "$SILL_SIGN_IN_CI" = true ]; then
+            missing=""
+            for name in SILL_DEVELOPER_ID_P12 SILL_DEVELOPER_ID_P12_PASSWORD SILL_NOTARY_KEY_ID SILL_NOTARY_ISSUER_ID SILL_NOTARY_KEY_P8 SILL_PROVISION_PROFILE; do
+              if [ -z "$(printenv "$name")" ]; then missing="$missing $name"; fi
+            done
+            if [ -n "$missing" ]; then
+              echo "::error::SILL_SIGN_IN_CI is true, but these secrets of the environment nightly are not set:$missing (gh secret set NAME --env nightly; docs/release-checklist.md, Nightlies)."
+              exit 1
+            fi
+            mode=publish
+            echo "Signed with Developer ID, notarized and published on the pre-release nightly."
+          else
+            mode=adhoc
+            echo "Signed ad hoc and kept as artifacts; nothing is published (SILL_SIGN_IN_CI is not true, or the run is verify only)."
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+
+      - name: Pure checks (Tests/checks/run-all.sh)
+        run: Tests/checks/run-all.sh
+
+      - name: Build Sill.app signed ad hoc, zip it and make the disk image
+        id: adhoc
+        if: steps.mode.outputs.mode == 'adhoc'
+        run: |
+          Scripts/make-app.sh
+          app=.build/Sill.app
+          version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
+          build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")"
+          codesign --verify --strict "$app"
+          for file in Assets.car AppIcon.icns; do
+            if [ ! -f "$app/Contents/Resources/$file" ]; then
+              echo "::error::Sill.app has no $file: make-app.sh could not make the icon (its warning above says why)."
+              exit 1
+            fi
+          done
+          stem="$(source Scripts/release.sh && nightly_stem)-adhoc"
+          ditto -c -k --keepParent "$app" ".build/$stem.zip"
+          Scripts/make-dmg.sh --sign - "$app" ".build/$stem.dmg"
+          echo "zip=.build/$stem.zip" >> "$GITHUB_OUTPUT"
+          echo "dmg=.build/$stem.dmg" >> "$GITHUB_OUTPUT"
+          {
+            echo "Sill for Mac $version ($build), a nightly of $(git rev-parse --short=12 HEAD), signed ad hoc: the checks passed and Sill.app built."
+            echo
+            echo "The artifacts $stem.zip and $stem.dmg are signed ad hoc, not with Developer ID, and not notarized: for trying out, not for anyone else to download. Nothing was published."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the zip as an artifact
+        if: steps.mode.outputs.mode == 'adhoc'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: ${{ steps.adhoc.outputs.zip }}
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+      # A second step: with archive false, each upload takes one file.
+      - name: Keep the disk image as an artifact
+        if: steps.mode.outputs.mode == 'adhoc'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: ${{ steps.adhoc.outputs.dmg }}
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Put the Developer ID certificate in a temporary keychain
+        if: steps.mode.outputs.mode == 'publish'
+        env:
+          SILL_DEVELOPER_ID_P12: ${{ secrets.SILL_DEVELOPER_ID_P12 }}
+          SILL_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.SILL_DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/sill-nightly.keychain-db"
+          p12="$RUNNER_TEMP/sill-developer-id.p12"
+          password="$(openssl rand -base64 32)"
+          echo "::add-mask::$password"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          # Inside an if, so a secret that isn't a .p12 in base64, or a wrong password, ends with this
+          # step's own words naming the secrets (security's are above them), not only security's.
+          if ! printf '%s' "$SILL_DEVELOPER_ID_P12" | base64 --decode > "$p12" 2>/dev/null \
+              || ! security import "$p12" -k "$keychain" -f pkcs12 -P "$SILL_DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign > /dev/null; then
+            rm -f "$p12"
+            echo "::error::SILL_DEVELOPER_ID_P12 is not the Developer ID certificate and its key as a .p12 in base64, or SILL_DEVELOPER_ID_P12_PASSWORD is not its password (base64 -i DeveloperID.p12 | gh secret set SILL_DEVELOPER_ID_P12 --env nightly; docs/release-checklist.md, Nightlies)."
+            exit 1
+          fi
+          rm -f "$p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
+          # codesign and release.sh look through the user's keychain list; notarytool keeps its
+          # profile in the default keychain. The image already has Apple's Developer ID
+          # intermediate certificate in the System keychain.
+          { echo "\"$keychain\""; security list-keychains -d user; } | xargs security list-keychains -d user -s
+          security default-keychain -d user -s "$keychain"
+          identity="$(security find-identity -v -p codesigning "$keychain" | awk '/"Developer ID Application: / && !found { print $2; found = 1 }')"
+          if [ -z "$identity" ]; then
+            echo "::error::SILL_DEVELOPER_ID_P12 holds no valid Developer ID Application identity (a certificate with its private key)."
+            exit 1
+          fi
+          echo "Signing with: $(security find-identity -v -p codesigning "$keychain" | grep "$identity" | sed 's/^[^"]*//')"
+          echo "SILL_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      - name: Store the notary credentials in that keychain
+        if: steps.mode.outputs.mode == 'publish'
+        env:
+          SILL_NOTARY_KEY_ID: ${{ secrets.SILL_NOTARY_KEY_ID }}
+          SILL_NOTARY_ISSUER_ID: ${{ secrets.SILL_NOTARY_ISSUER_ID }}
+          SILL_NOTARY_KEY_P8: ${{ secrets.SILL_NOTARY_KEY_P8 }}
+        run: |
+          keychain="$RUNNER_TEMP/sill-nightly.keychain-db"
+          key="$RUNNER_TEMP/sill-notary-key.p8"
+          if ! printf '%s' "$SILL_NOTARY_KEY_P8" | base64 --decode > "$key" 2>/dev/null \
+              || ! grep -q -e '-----BEGIN PRIVATE KEY-----' "$key"; then
+            rm -f "$key"
+            echo "::error::SILL_NOTARY_KEY_P8 is not an App Store Connect key file in base64 (base64 -i AuthKey_<Key ID>.p8 | gh secret set SILL_NOTARY_KEY_P8 --env nightly)."
+            exit 1
+          fi
+          # Validates the key with Apple before saving it, so a wrong key fails here.
+          if ! xcrun notarytool store-credentials sill-notary --key "$key" --key-id "$SILL_NOTARY_KEY_ID" \
+              --issuer "$SILL_NOTARY_ISSUER_ID" --keychain "$keychain"; then
+            rm -f "$key"
+            echo "::error::Apple's notary service refused the key (notarytool's words above): SILL_NOTARY_KEY_ID and SILL_NOTARY_ISSUER_ID must be the Key ID and Issuer ID of the key in SILL_NOTARY_KEY_P8, and the key must not be revoked."
+            exit 1
+          fi
+          rm -f "$key"
+          echo "SILL_NOTARY_PROFILE=sill-notary" >> "$GITHUB_ENV"
+
+      # The Developer ID provisioning profile (no secret inside; a secret keeps it out of the tree), at
+      # the path make-app.sh --release embeds from, which .gitignore leaves out. Not handed to
+      # make-app.sh as SILL_PROVISION_PROFILE: that name is a path there, and the secret is base64.
+      - name: Put the provisioning profile in Packaging/embedded.provisionprofile
+        if: steps.mode.outputs.mode == 'publish'
+        env:
+          SILL_PROVISION_PROFILE_B64: ${{ secrets.SILL_PROVISION_PROFILE }}
+        run: |
+          profile=Packaging/embedded.provisionprofile
+          if ! printf '%s' "$SILL_PROVISION_PROFILE_B64" | base64 --decode > "$profile" 2>/dev/null \
+              || ! security cms -D -i "$profile" > "$RUNNER_TEMP/profile.plist" 2>/dev/null; then
+            rm -f "$profile" "$RUNNER_TEMP/profile.plist"
+            echo "::error::SILL_PROVISION_PROFILE is not a provisioning profile in base64 (base64 -i Packaging/embedded.provisionprofile | gh secret set SILL_PROVISION_PROFILE --env nightly)."
+            exit 1
+          fi
+          echo "The profile: $(plutil -extract Name raw -o - "$RUNNER_TEMP/profile.plist"), until $(plutil -extract ExpirationDate raw -o - "$RUNNER_TEMP/profile.plist"). make-app.sh checks it against the app's entitlements and certificate."
+          rm -f "$RUNNER_TEMP/profile.plist"
+
+      - name: Build, notarize and publish the nightly (Scripts/release.sh --nightly --publish)
+        if: steps.mode.outputs.mode == 'publish'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SILL_RELEASE_REPO: ${{ github.repository }}
+          NOTES_B64: ${{ needs.decide.outputs.notes }}
+        run: |
+          mkdir -p .build
+          printf '%s' "$NOTES_B64" | base64 --decode > "$RUNNER_TEMP/nightly-notes.md"
+          SILL_NIGHTLY_NOTES="$RUNNER_TEMP/nightly-notes.md" Scripts/release.sh --nightly --publish 2>&1 | tee .build/nightly-mac.log
+          {
+            echo "Published on the pre-release nightly: https://github.com/$SILL_RELEASE_REPO/releases/tag/nightly"
+            echo
+            grep -E '^Sill .* is notarized and stapled|^[0-9a-f]{64}  ' .build/nightly-mac.log || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Both submissions' answers and Apple's logs, and the run's own log. include-hidden-files:
+      # upload-artifact skips whatever lies under a folder whose name starts with a dot (.build).
+      - name: Keep the logs
+        if: always() && steps.mode.outputs.mode == 'publish'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nightly-mac-logs-${{ needs.decide.outputs.date }}
+          path: |
+            .build/Sill-nightly-*-notary.plist
+            .build/Sill-nightly-*-notary-log.json
+            .build/nightly-mac.log
+          include-hidden-files: true
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Delete the keychain, the key files and the profile
+        if: always()
+        run: |
+          keychain="$RUNNER_TEMP/sill-nightly.keychain-db"
+          rm -f "$RUNNER_TEMP/sill-developer-id.p12" "$RUNNER_TEMP/sill-notary-key.p8" "$RUNNER_TEMP/profile.plist" Packaging/embedded.provisionprofile
+          if [ -f "$keychain" ]; then
+            security default-keychain -d user -s "$HOME/Library/Keychains/login.keychain-db" || true
+            security delete-keychain "$keychain"
+          fi
+          echo "Keychains left: $(security list-keychains -d user | tr -d ' "' | tr '\n' ' ')"
+
+  ios:
+    name: Sill for iPhone and iPad
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
+    # The environment nightly, as the Mac job: the App Store Connect key below is its own.
+    environment: nightly
+    runs-on: xcode-27
+    # The upload, then up to 90 minutes of App Store Connect's processing (Scripts/asc.swift's wait).
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    env:
+      BUILD_NUMBER: ${{ needs.decide.outputs.build }}
+    steps:
+      - name: Check out tonight's commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.decide.outputs.sha }}
+          fetch-depth: 0 # to check the build number, the commit count
+          persist-credentials: false
+
+      # As testflight.yml: the newest Xcode 27 that is not a beta, and release-ios.sh refuses one
+      # before 27.1 (the iOS 27.1 SDK the iPhone Duo's layouts need).
+      - name: Select Xcode 27
+        uses: ./.github/actions/select-xcode
+        with:
+          version: '27'
+          fallback: 'false'
+
+      - name: Which run this is
+        id: mode
+        env:
+          PUBLISH: ${{ needs.decide.outputs.publish }}
+          SILL_TESTFLIGHT_KEY_ID: ${{ secrets.SILL_TESTFLIGHT_KEY_ID }}
+          SILL_TESTFLIGHT_ISSUER_ID: ${{ secrets.SILL_TESTFLIGHT_ISSUER_ID }}
+          SILL_TESTFLIGHT_KEY_P8: ${{ secrets.SILL_TESTFLIGHT_KEY_P8 }}
+          SILL_TESTFLIGHT_IN_CI: ${{ vars.SILL_TESTFLIGHT_IN_CI }}
+        run: |
+          if [ "$BUILD_NUMBER" != "$(git rev-list --count HEAD)" ]; then
+            echo "::error::The build number $BUILD_NUMBER is not this commit's count ($(git rev-list --count HEAD))."
+            exit 1
+          fi
+          set_count=0
+          missing=""
+          for name in SILL_TESTFLIGHT_KEY_ID SILL_TESTFLIGHT_ISSUER_ID SILL_TESTFLIGHT_KEY_P8; do
+            if [ -n "$(printenv "$name")" ]; then set_count=$((set_count + 1)); else missing="$missing $name"; fi
+          done
+          if [ "$set_count" -eq 0 ] && [ "$SILL_TESTFLIGHT_IN_CI" = true ] && [ "$PUBLISH" = true ]; then
+            echo "::error::SILL_TESTFLIGHT_IN_CI is true, but the environment nightly has no App Store Connect API key:$missing (gh secret set NAME --env nightly; docs/release-checklist.md, Nightlies)."
+            exit 1
+          fi
+          if [ "$set_count" -ne 0 ] && [ "$set_count" -ne 3 ]; then
+            echo "::error::Only some of the App Store Connect API key's secrets are set in the environment nightly; missing:$missing. Set all three (gh secret set NAME --env nightly), or none for an unsigned check."
+            exit 1
+          fi
+          if [ "$set_count" -eq 0 ]; then
+            mode=unsigned
+            echo "::notice::The environment nightly has no App Store Connect API key: the archive is built without signing and checked; nothing is signed or uploaded."
+          elif [ "$SILL_TESTFLIGHT_IN_CI" = true ] && [ "$PUBLISH" = true ]; then
+            mode=upload
+            echo "Signed through the API key, exported, checked and uploaded to App Store Connect, then given to TestFlight's groups."
+          else
+            mode=export
+            echo "Signed through the API key, exported and checked; nothing is uploaded (SILL_TESTFLIGHT_IN_CI is not true, or the run is verify only)."
+          fi
+          version="$(Scripts/release-ios.sh --print-version --build-number "$BUILD_NUMBER" | sed 's/ (.*//')"
+          echo "Sill for iPhone and iPad $version ($BUILD_NUMBER)"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # In a folder of this run's own, outside the checkout (release-ios.sh refuses a key inside the
+      # repository), deleted by the last step whatever happened.
+      - name: Put the API key in a file
+        if: steps.mode.outputs.mode != 'unsigned'
+        env:
+          SILL_TESTFLIGHT_KEY_ID: ${{ secrets.SILL_TESTFLIGHT_KEY_ID }}
+          SILL_TESTFLIGHT_KEY_P8: ${{ secrets.SILL_TESTFLIGHT_KEY_P8 }}
+        run: |
+          dir="$RUNNER_TEMP/sill-testflight-key"
+          mkdir -m 700 "$dir"
+          key="$dir/AuthKey_$SILL_TESTFLIGHT_KEY_ID.p8"
+          # Tested inside the if, so a secret that isn't base64 gets this message too.
+          if ! printf '%s' "$SILL_TESTFLIGHT_KEY_P8" | base64 --decode > "$key" 2>/dev/null \
+              || ! grep -q -e '-----BEGIN PRIVATE KEY-----' "$key"; then
+            echo "::error::SILL_TESTFLIGHT_KEY_P8 is not an App Store Connect key file in base64 (base64 -i AuthKey_<Key ID>.p8 | gh secret set SILL_TESTFLIGHT_KEY_P8 --env nightly)."
+            exit 1
+          fi
+          chmod 600 "$key"
+          echo "SILL_TESTFLIGHT_KEY_FILE=$key" >> "$GITHUB_ENV"
+
+      - name: Build Scripts/asc.swift
+        if: steps.mode.outputs.mode != 'unsigned'
+        run: xcrun swiftc -O -o "$RUNNER_TEMP/asc" Scripts/asc.swift
+
+      # Reads only, in a verify-only run too: the key works with App Store Connect's API, and the
+      # summary lists the app's TestFlight groups as App Store Connect names them (internal ones get
+      # every nightly; the external one with the public link is the public beta group).
+      - name: TestFlight's groups (Scripts/asc.swift groups, reads only)
+        if: steps.mode.outputs.mode != 'unsigned'
+        env:
+          SILL_TESTFLIGHT_KEY_ID: ${{ secrets.SILL_TESTFLIGHT_KEY_ID }}
+          SILL_TESTFLIGHT_ISSUER_ID: ${{ secrets.SILL_TESTFLIGHT_ISSUER_ID }}
+        run: |
+          "$RUNNER_TEMP/asc" groups --key-file "$SILL_TESTFLIGHT_KEY_FILE" --key-id "$SILL_TESTFLIGHT_KEY_ID" \
+            --issuer "$SILL_TESTFLIGHT_ISSUER_ID" | tee "$RUNNER_TEMP/testflight-groups.txt"
+          {
+            echo "## TestFlight's groups"
+            echo
+            sed 's/^/    /' "$RUNNER_TEMP/testflight-groups.txt"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Archive without signing and check it (Scripts/release-ios.sh --unsigned)
+        if: steps.mode.outputs.mode == 'unsigned'
+        run: Scripts/release-ios.sh --unsigned --build-number "$BUILD_NUMBER" -v
+
+      - name: Archive, sign through the API key, export and check (Scripts/release-ios.sh --sign-at-export)
+        if: steps.mode.outputs.mode == 'export'
+        env:
+          SILL_TESTFLIGHT_KEY_ID: ${{ secrets.SILL_TESTFLIGHT_KEY_ID }}
+          SILL_TESTFLIGHT_ISSUER_ID: ${{ secrets.SILL_TESTFLIGHT_ISSUER_ID }}
+        run: |
+          Scripts/release-ios.sh --sign-at-export --build-number "$BUILD_NUMBER" -v --api-key "$SILL_TESTFLIGHT_KEY_FILE" \
+            --api-key-id "$SILL_TESTFLIGHT_KEY_ID" --api-issuer "$SILL_TESTFLIGHT_ISSUER_ID"
+
+      # A night run again by hand (the same commit, so the same build number) finds its build in App
+      # Store Connect already: it is exported for the artifact, not uploaded twice (App Store Connect
+      # refuses a number it has), and the next step gives it its groups. A build with this number is
+      # this commit's: only commits on main's first-parent line, where each count is one commit's, are
+      # uploaded with their commit count (here, and in testflight.yml, which runs from main alone).
+      - name: Archive, sign, export, check and upload (Scripts/release-ios.sh --sign-at-export --upload)
+        if: steps.mode.outputs.mode == 'upload'
+        env:
+          SILL_TESTFLIGHT_KEY_ID: ${{ secrets.SILL_TESTFLIGHT_KEY_ID }}
+          SILL_TESTFLIGHT_ISSUER_ID: ${{ secrets.SILL_TESTFLIGHT_ISSUER_ID }}
+          VERSION: ${{ steps.mode.outputs.version }}
+        run: |
+          mkdir -p .build/ios
+          state="$("$RUNNER_TEMP/asc" build-state --key-file "$SILL_TESTFLIGHT_KEY_FILE" --key-id "$SILL_TESTFLIGHT_KEY_ID" \
+            --issuer "$SILL_TESTFLIGHT_ISSUER_ID" --version "$VERSION" --build "$BUILD_NUMBER")"
+          if [ "$state" = missing ]; then
+            Scripts/release-ios.sh --sign-at-export --upload --build-number "$BUILD_NUMBER" -v --api-key "$SILL_TESTFLIGHT_KEY_FILE" \
+              --api-key-id "$SILL_TESTFLIGHT_KEY_ID" --api-issuer "$SILL_TESTFLIGHT_ISSUER_ID"
+          else
+            echo "::notice::App Store Connect has build $BUILD_NUMBER of $VERSION already ($state): exported for the artifact, not uploaded again."
+            Scripts/release-ios.sh --sign-at-export --build-number "$BUILD_NUMBER" -v --api-key "$SILL_TESTFLIGHT_KEY_FILE" \
+              --api-key-id "$SILL_TESTFLIGHT_KEY_ID" --api-issuer "$SILL_TESTFLIGHT_ISSUER_ID"
+          fi
+
+      # The public beta group only while SILL_NIGHTLY_PUBLIC_BETA is true: then this step passes
+      # --public-beta, and Scripts/asc.swift takes it only with the variable's value in its environment
+      # too. Otherwise no external group is touched and nothing goes to Beta App Review.
+      - name: Give the build to TestFlight's groups, with What to Test (Scripts/asc.swift distribute)
+        if: steps.mode.outputs.mode == 'upload'
+        # asc.swift's own bounds first: up to 90 minutes for processing, then What to Test, the groups and
+        # up to 10 minutes for the Beta App Review state, so its own words end a step that runs out.
+        timeout-minutes: 110
+        env:
+          SILL_TESTFLIGHT_KEY_ID: ${{ secrets.SILL_TESTFLIGHT_KEY_ID }}
+          SILL_TESTFLIGHT_ISSUER_ID: ${{ secrets.SILL_TESTFLIGHT_ISSUER_ID }}
+          SILL_NIGHTLY_PUBLIC_BETA: ${{ vars.SILL_NIGHTLY_PUBLIC_BETA }}
+          VERSION: ${{ steps.mode.outputs.version }}
+          WHATS_NEW_B64: ${{ needs.decide.outputs.whats_new }}
+        run: |
+          printf '%s' "$WHATS_NEW_B64" | base64 --decode > "$RUNNER_TEMP/whats-new.txt"
+          public=()
+          if [ "$SILL_NIGHTLY_PUBLIC_BETA" = true ]; then
+            public=(--public-beta)
+            echo "SILL_NIGHTLY_PUBLIC_BETA is true: the public beta group gets this build too, through Beta App Review."
+          else
+            echo "SILL_NIGHTLY_PUBLIC_BETA is not true: internal groups only; no external group, no Beta App Review."
+          fi
+          "$RUNNER_TEMP/asc" distribute --key-file "$SILL_TESTFLIGHT_KEY_FILE" --key-id "$SILL_TESTFLIGHT_KEY_ID" \
+            --issuer "$SILL_TESTFLIGHT_ISSUER_ID" --version "$VERSION" --build "$BUILD_NUMBER" \
+            --whats-new "$RUNNER_TEMP/whats-new.txt" ${public[@]+"${public[@]}"} 2>&1 | tee .build/ios/asc-distribute.log
+          {
+            echo "TestFlight: $(grep -E '^Assigned build ' .build/ios/asc-distribute.log || echo 'see the step log')"
+            grep -E '^Public beta' .build/ios/asc-distribute.log || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Name the .ipa and summarize
+        id: ipa
+        env:
+          MODE: ${{ steps.mode.outputs.mode }}
+        run: |
+          version="$(/usr/libexec/PlistBuddy -c 'Print :ApplicationProperties:CFBundleShortVersionString' .build/ios/Sill.xcarchive/Info.plist)"
+          build="$(/usr/libexec/PlistBuddy -c 'Print :ApplicationProperties:CFBundleVersion' .build/ios/Sill.xcarchive/Info.plist)"
+          if [ "$MODE" = unsigned ]; then
+            ipa=".build/ios/Sill-$version-$build-unsigned.ipa"
+            cp .build/ios/export/Sill-unsigned.ipa "$ipa"
+          else
+            ipa=".build/ios/Sill-$version-$build.ipa"
+            cp .build/ios/export/Sill.ipa "$ipa"
+          fi
+          echo "path=$ipa" >> "$GITHUB_OUTPUT"
+          {
+            echo "Sill for iPhone and iPad $version ($build), a nightly of $(git rev-parse --short=12 HEAD)."
+            echo
+            if [ "$MODE" = unsigned ]; then
+              echo "Built without signing and checked; the artifact $(basename "$ipa") is for looking inside only. No App Store Connect API key is set."
+            elif [ "$MODE" = export ]; then
+              echo "Signed for App Store Connect and checked; the artifact is $(basename "$ipa"). Nothing was uploaded."
+            else
+              echo "Uploaded to App Store Connect and given to TestFlight's groups (the step above says which). The artifact $(basename "$ipa") is the same build, exported the same way."
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the .ipa as an artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: ${{ steps.ipa.outputs.path }}
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nightly-ios-logs-${{ needs.decide.outputs.date }}
+          path: .build/ios/*.log
+          include-hidden-files: true
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Delete the API key file
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/sill-testflight-key"

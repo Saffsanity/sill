@@ -4,15 +4,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import module
 F = "Sources/SillHost/PairingWindow.swift"
 M = [
-    ("quiet by key only", F, "[quietKeys[fingerprint], quietSources[source]]", "[quietKeys[fingerprint]]"),
-    ("quiet by address only", F, "[quietKeys[fingerprint], quietSources[source]]", "[quietSources[source]]"),
+    ("quiet by key only", F, "[quietKeys[fingerprint], quietSources[Self.quietKey(source)]]", "[quietKeys[fingerprint]]"),
+    ("quiet by address only", F, "[quietKeys[fingerprint], quietSources[Self.quietKey(source)]]", "[quietSources[Self.quietKey(source)]]"),
     ("quiet for 10 minutes and a moment", F, ".compactMap { $0 }.filter { now - $0 < quietSeconds }.max()", ".compactMap { $0 }.filter { now - $0 <= quietSeconds }.max()"),
     ("quietSince: the earlier close", F, ".compactMap { $0 }.filter { now - $0 < quietSeconds }.max()", ".compactMap { $0 }.filter { now - $0 < quietSeconds }.min()"),
     ("quiet forever", F, ".compactMap { $0 }.filter { now - $0 < quietSeconds }.max()", ".compactMap { $0 }.max()"),
     ("every window ever counts", F, "        openedAt.filter { now - $0 < spanSeconds }.count", "        openedAt.count"),
     ("a window counts one span and a moment", F, "        openedAt.filter { now - $0 < spanSeconds }.count", "        openedAt.filter { now - $0 <= spanSeconds }.count"),
     ("opening forgets the others", F, "openedAt = openedAt.filter { now - $0 < spanSeconds } + [now]", "openedAt = [now]"),
-    ("closing keeps no address", F, "        quietKeys[fingerprint] = now\n        quietSources[source] = now", "        quietKeys[fingerprint] = now"),
+    ("closing keeps no address", F, "        quietKeys[fingerprint] = now\n        quietSources[Self.quietKey(source)] = now", "        quietKeys[fingerprint] = now"),
+    # Finding 9 of the security scan of 2026-10-18: an IPv6 asker is quiet by its /64.
+    ("quiet looked up by the address alone, not its /64", F, "[quietKeys[fingerprint], quietSources[Self.quietKey(source)]]",
+     "[quietKeys[fingerprint], quietSources[source]]"),
+    ("closing keeps the address alone, not its /64", F, "        quietSources[Self.quietKey(source)] = now", "        quietSources[source] = now"),
+    ("quietKey: the address itself", F, "        return DoorPolicy.source(bytes, scope: zone).group", "        return DoorPolicy.source(bytes, scope: zone).address"),
+    ("quietKey: a link-local address's interface dropped", F, "        return DoorPolicy.source(bytes, scope: zone).group", "        return DoorPolicy.source(bytes, scope: nil).group"),
     ("an expired window quiets (as before the review)", F, "case .cancelled, .stopped: return true\n        case .used, .expired, .withdrawn, .none: return false",
      "case .cancelled, .stopped, .expired: return true\n        case .used, .withdrawn, .none: return false"),
     ("a withdrawn window quiets", F, "case .cancelled, .stopped: return true\n        case .used, .expired, .withdrawn, .none: return false",

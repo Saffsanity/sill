@@ -109,12 +109,16 @@ final class DiagnosticsHUDView: UIView {
     }
 
     /// Called from the host view's `layoutSubviews`: pin to the top-right corner of `bounds`.
-    func place(in bounds: CGRect) {
+    /// `scale`: the picture's zoom, which scales the display view this sits in; `bounds` is then the part
+    /// of it on screen (StreamZoom.visibleRect), and the readout keeps its size and its corner of the pane.
+    func place(in bounds: CGRect, scale: CGFloat = 1) {
         let text = label.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude))
         let p = Self.padding
         let size = CGSize(width: ceil(text.width) + p.left + p.right, height: ceil(text.height) + p.top + p.bottom)
-        frame = CGRect(x: bounds.maxX - Self.inset - size.width, y: bounds.minY + Self.inset,
-                       width: size.width, height: size.height)
+        let s = max(1, scale)
+        transform = s > 1 ? CGAffineTransform(scaleX: 1 / s, y: 1 / s) : .identity
+        self.bounds = CGRect(origin: .zero, size: size)
+        center = CGPoint(x: bounds.maxX - (Self.inset + size.width / 2) / s, y: bounds.minY + (Self.inset + size.height / 2) / s)
         label.frame = CGRect(x: p.left, y: p.top, width: ceil(text.width), height: ceil(text.height))
         layer.cornerRadius = size.height / 2
     }

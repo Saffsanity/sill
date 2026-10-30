@@ -58,6 +58,18 @@ MUTANTS = [
     ("M29 what was asked ignored: always the keyboard's", "            hold = automatic ? .automatic : .own", "            hold = .automatic"),
     ("M30 a resignation forgets what was held", "        if hold != .none { lastHeld = hold }\n", ""),
     ("M31 a resignation keeps the hold", "        if hold != .none { lastHeld = hold }\n        hold = .none\n", "        if hold != .none { lastHeld = hold }\n"),
+    # PointerScroll (#130, PR #217)
+    ("P1 a pointer scroll goes where the pan's location ran to", "        at = CGPoint(x: location.x - reading.x, y: location.y - reading.y)\n",
+     "        at = location\n"),
+    ("P2 a pointer scroll's place follows its readings", "        total = CGPoint(x: total.x + reading.x, y: total.y + reading.y)\n",
+     "        total = CGPoint(x: total.x + reading.x, y: total.y + reading.y)\n        at = CGPoint(x: at.x + reading.x, y: at.y + reading.y)\n"),
+    ("P3 the first reading lost (a lone notch sends nothing)", "        total = reading\n", "        total = .zero\n"),
+    ("P4 the readings not added up (each taken as the total so far)", "        total = CGPoint(x: total.x + reading.x, y: total.y + reading.y)\n",
+     "        total = reading\n"),
+    ("P5 the first reading added to the pointer, not taken off", "        at = CGPoint(x: location.x - reading.x, y: location.y - reading.y)\n",
+     "        at = CGPoint(x: location.x - reading.x, y: location.y + reading.y)\n"),
+    ("P6 a new scroll keeps the last one's total", "        total = reading\n",
+     "        total = CGPoint(x: total.x + reading.x, y: total.y + reading.y)\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
