@@ -235,6 +235,28 @@ struct ForwardedKeys {
     /// The letters A to Z, by their keys' places (HID usages 0x04 to 0x1D).
     static let letterUsages: ClosedRange<UInt16> = 0x04...0x1D
 
+    /// System-intercepted `⌘` shortcut keys (`⌘W`, `⌘C`, `⌘V`, `⌘X`, `⌘Z`, `⌘A`, `⌘F`, `⌘G`, `⌘H`,
+    /// `⌘M`, `⌘N`, `⌘O`, `⌘P`, `⌘R`, `⌘S`, `⌘T`, `⌘B`, `⌘I`, `⌘U`, `⌘,`, `⌘/`, `⌘[`, `⌘]`, `⌘-`,
+    /// `⌘=`, `⌘0`, ``⌘` ``) whose menu-bar equivalents macOS ("Designed for iPad", issue #129) or
+    /// iPadOS can claim before `pressesBegan`: each `UIKeyCommand.input` and its HID usage.
+    static let shortcutCommandKeys: [(input: String, usage: UInt16)] = [
+        ("a", 0x04), ("b", 0x05), ("c", 0x06), ("f", 0x09), ("g", 0x0A), ("h", 0x0B),
+        ("i", 0x0C), ("m", 0x10), ("n", 0x11), ("o", 0x12), ("p", 0x13), ("r", 0x15),
+        ("s", 0x16), ("t", 0x17), ("u", 0x18), ("v", 0x19), ("w", 0x1A), ("x", 0x1B),
+        ("z", 0x1D), ("0", 0x27), ("-", 0x2D), ("=", 0x2E), ("[", 0x2F), ("]", 0x30),
+        ("`", 0x35), (",", 0x36), ("/", 0x38),
+    ]
+
+    private static let shortcutUsagesByInput: [String: UInt16] = Dictionary(
+        uniqueKeysWithValues: shortcutCommandKeys.map { ($0.input, $0.usage) }
+    )
+
+    /// The HID usage for a shortcut `UIKeyCommand`'s `input` string (case-insensitive), or nil.
+    static func shortcutUsage(forInput input: String?) -> UInt16? {
+        guard let key = input?.lowercased(), !key.isEmpty else { return nil }
+        return shortcutUsagesByInput[key]
+    }
+
     /// Whether a key pressed with these modifiers goes to the Mac as a key rather than to the text
     /// system: one of `keyUsages`, return or tab with shift held (`shiftedKeyUsages`), any key
     /// while ⌘, ⌃ or ⌥ is held, as those make shortcuts (⌘S, ⌃A, ⌥←) and never reach the text

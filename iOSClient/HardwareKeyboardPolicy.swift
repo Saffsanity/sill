@@ -71,6 +71,14 @@ struct HardwareKeyboardPolicy: Equatable {
         self.attached = attached
     }
 
+    /// Whether a hardware keyboard counts as attached (`HardwareKeyboardMonitor`): GameController's
+    /// coalesced keyboard, or true when the iPad app runs on a Mac (`isiOSAppOnMac`, issue #129),
+    /// where `GCKeyboard.coalesced` can be nil before the first key event, unless overridden for a
+    /// test run (`-SillHardwareKeyboard 1|0`).
+    static func isAttached(coalesced: Bool, isiOSAppOnMac: Bool = false, override: Bool? = nil) -> Bool {
+        override ?? (coalesced || isiOSAppOnMac)
+    }
+
     /// The hardware keyboard's hold is wanted: a session's input view in a window, a keyboard attached,
     /// nothing open that takes the keyboard.
     var wantsAutomatic: Bool { onScreen && attached && takers.isEmpty }

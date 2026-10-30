@@ -70,6 +70,11 @@ MUTANTS = [
      "        at = CGPoint(x: location.x - reading.x, y: location.y + reading.y)\n"),
     ("P6 a new scroll keeps the last one's total", "        total = reading\n",
      "        total = CGPoint(x: total.x + reading.x, y: total.y + reading.y)\n"),
+    # Running the iPad app on a Mac (ProcessInfo.processInfo.isiOSAppOnMac, #129)
+    ("M32 isiOSAppOnMac ignored in isAttached (#129)", "        override ?? (coalesced || isiOSAppOnMac)\n",
+     "        override ?? coalesced\n"),
+    ("M33 override ignored on a Mac in isAttached (#129)", "        override ?? (coalesced || isiOSAppOnMac)\n",
+     "        isiOSAppOnMac || (override ?? coalesced)\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
