@@ -75,7 +75,7 @@ struct HardwareKeyboardPolicy: Equatable {
     /// coalesced keyboard, or true when the iPad app runs on a Mac (`isiOSAppOnMac`, issue #129),
     /// where `GCKeyboard.coalesced` can be nil before the first key event, unless overridden for a
     /// test run (`-SillHardwareKeyboard 1|0`).
-    static func isAttached(coalesced: Bool, isiOSAppOnMac: Bool = false, override: Bool? = nil) -> Bool {
+    static func isAttached(coalesced: Bool, isiOSAppOnMac: Bool, override: Bool?) -> Bool {
         override ?? (coalesced || isiOSAppOnMac)
     }
 

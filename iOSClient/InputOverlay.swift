@@ -962,8 +962,8 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     }
 
     /// Priority key commands for `⌘` shortcuts (`⌘W`, `⌘C`, `⌘V`, `⌘X`, `⌘Z`, `⌘A`, `⌘F`, `⌘,`, etc.)
-    /// that macOS ("Designed for iPad", issue #129) or iPadOS's menu bar can claim before `pressesBegan`.
-    /// Sent once through `ForwardedKeys.commanded`, whichever channel delivers the press.
+    /// that macOS's menu bar can claim before `pressesBegan` when the iPad app runs on a Mac (issue
+    /// #129). Sent once through `ForwardedKeys.commanded`, whichever channel delivers the press.
     private static let shortcutCommands: [UIKeyCommand] = ForwardedKeys.shortcutCommandKeys.flatMap { entry in
         (0..<8).map { mask in
             var flags: UIKeyModifierFlags = [.command]
@@ -986,7 +986,10 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
 
     override var keyCommands: [UIKeyCommand]? {
         guard takesEscape else { return super.keyCommands }
-        return (super.keyCommands ?? []) + Self.escapeCommands + Self.shortcutCommands
+        // On an iPad the ⌘ shortcuts already reach pressesBegan (docs/menu-bar-plan.md), which keeps the
+        // Mac's own key repeat for a held one; only the iPad app on a Mac needs them claimed first.
+        return (super.keyCommands ?? []) + Self.escapeCommands
+            + (ProcessInfo.processInfo.isiOSAppOnMac ? Self.shortcutCommands : [])
     }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
@@ -994,7 +997,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
             || action == #selector(InputOverlayView.shortcutKeyCommand(_:)) {
             return takesEscape
         }
-        return false
+        return super.canPerformAction(action, withSender: sender)
     }
 
     /// Esc to the Mac, down and up at once with the command's modifiers, through `ForwardedKeys` as a

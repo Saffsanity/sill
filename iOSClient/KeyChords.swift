@@ -237,8 +237,8 @@ struct ForwardedKeys {
 
     /// System-intercepted `⌘` shortcut keys (`⌘W`, `⌘C`, `⌘V`, `⌘X`, `⌘Z`, `⌘A`, `⌘F`, `⌘G`, `⌘H`,
     /// `⌘M`, `⌘N`, `⌘O`, `⌘P`, `⌘R`, `⌘S`, `⌘T`, `⌘B`, `⌘I`, `⌘U`, `⌘,`, `⌘/`, `⌘[`, `⌘]`, `⌘-`,
-    /// `⌘=`, `⌘0`, ``⌘` ``) whose menu-bar equivalents macOS ("Designed for iPad", issue #129) or
-    /// iPadOS can claim before `pressesBegan`: each `UIKeyCommand.input` and its HID usage.
+    /// `⌘=`, `⌘0`, ``⌘` ``) whose menu-bar equivalents macOS can claim before `pressesBegan` when the
+    /// iPad app runs on a Mac (issue #129): each `UIKeyCommand.input` and its HID usage.
     static let shortcutCommandKeys: [(input: String, usage: UInt16)] = [
         ("a", 0x04), ("b", 0x05), ("c", 0x06), ("f", 0x09), ("g", 0x0A), ("h", 0x0B),
         ("i", 0x0C), ("m", 0x10), ("n", 0x11), ("o", 0x12), ("p", 0x13), ("r", 0x15),
