@@ -352,6 +352,8 @@ struct StreamScreen: View {
         .onChange(of: windowMenu) { _, menu in if menu != nil { setSettings(false) } }
         .ignoresSafeArea(edges: .bottom)
         .onAppear {
+            // Where the software keyboard is, from now on: the laptop pose's key row follows it (#215).
+            _ = KeyboardFrameMonitor.shared
             // A click, a key, a pick, a menu item or a gesture from anywhere on this screen, before it
             // goes out: the input view sends what is still composed, then forgets what was typed, which
             // dictation and an input method may revise (#138).

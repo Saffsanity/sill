@@ -366,8 +366,11 @@ it: the thumbnails end short of it, the bar's buttons begin past it, and
 the Settings panel, the tour's cards, the window lights, the link's line and
 the connect screen stay on one side. Half folded upright, the laptop pose, the picture is above the fold and the bar, the keys
 and the trackpad below it, and the connect screen's list scrolls above the
-fold; open flat upright, the picture takes its own shape across the width and
-the trackpad the rest. Closed, the cover is a phone (below) beside its
+fold; with the software keyboard up there, the key row alone sits between the
+fold and the keyboard (its Keyboard cap takes the keyboard down) and the bar
+comes back with the keyboard down (issue #215; the emoji and Chinese keyboards,
+445 pt tall, leave it 10 pt: docs/iphone-duo-plan.md); open flat upright, the
+picture takes its own shape across the width and the trackpad the rest. Closed, the cover is a phone (below) beside its
 camera's strip. Folding moves the session to the other display, and every
 layout is what it was on any other device.
 
@@ -1856,6 +1859,15 @@ simulator:
   `trackpad: 412×389 pt, vertical span 257.5 pt` when the pad or its span
   changes and `keyboard: up, 320 pt tall, its top at 574 pt in the stream
   screen; the key row ends 10 pt above it, …` once the keyboard has moved.
+  `keyboard frame: top 455.5, 495.5 pt tall` (or `none`) is the software
+  keyboard as UIKit reports it, and in the Duo's laptop pose `keyboard row:
+  the caps 500–551 (51 pt) between the fold's edge at 496 and the keyboard's
+  glass at 555 (…)` where the key row goes alone above it (#215);
+  `-SillKeyboardProbe 1` prints every keyboard notification with its begin
+  and end frames. On the iPhone Duo simulator folded into the laptop pose
+  (`Tests/duorig/run.sh UDID pose laptop`), the mock at its own size,
+  `-SillLayout 669x951 -SillHinge half -SillKeyboardToggle 1.5`, raises the
+  real keyboard under the row.
 - Larger Picture: `-Sill.largerPicture 1` turns the device's switch on for
   one run (in the normal app too); it acts while a window streams, which the
   mock does unless `-SillActive desktop` (or `none`) says otherwise, and the
