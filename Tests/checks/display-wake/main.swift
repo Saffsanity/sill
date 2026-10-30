@@ -2,7 +2,8 @@
 // (Sources/StreamProtocol/StreamMessage.swift and Input.swift): when the host declares user activity
 // on the Mac for a device (issue #134, PR #151), what a key press on the Mac does, so a sleeping
 // display wakes for a person at the device and sleeps again by the Mac's own setting once nobody
-// uses it.
+// uses it; and the waking click (PR #228): a press on a display that reads asleep held back with its
+// release, so a tap on a black picture clicks nothing out of sight.
 //
 //   Tests/checks/display-wake/run.sh   (build.sh compiles the three files with this one)
 //
@@ -16,8 +17,13 @@
 // exactly where a real one declares; the lines; what DisplayActivity says after its second look
 // (Report: a wake only when the display read asleep before and on after, once for one wake, any other
 // declaration's line at most once a minute, a woke line counting as that minute's, a refusal once,
-// again after a success); the TEST ONLY user type (SILL_TEST_USER_ACTIVE); then 20,000 random
-// sessions against the rule's invariants and 20,000 against Report's:
+// again after a success); the TEST ONLY user type (SILL_TEST_USER_ACTIVE); the waking click (`pass`:
+// a press on a sleeping display a move to its spot, waking, its release held back whenever it comes,
+// each device's own and each button's, the display read only for a press, the 5 s grace from the
+// first press held back, a gap of 5 s or a clock set back starting afresh, a press on an awake display
+// ending the run, a device that left forgotten; a press held back declaring at once, whatever the
+// interval; the TEST ONLY display, SILL_TEST_DISPLAY_ASLEEP); then 20,000 random sessions against the
+// rule's invariants, 20,000 against Report's and 20,000 against the waking click's:
 //   I1 every connect declares (a test host: counts);
 //   I2 two declarations by anything but a connect are never under 5 s apart, unless the clock went back;
 //   I3 a person's activity (this file's own table) 5 s or more after the last declaration declares,
@@ -27,12 +33,14 @@
 //      declaration is never over 5 s + g: the display stays on as it would for local input;
 //   I6 the device's own (a pick, a bare move in the window after a stream change, any other kind,
 //      input that does not decode) never declares nor counts, and moves nothing;
+//   I7 every press held back declares (a test host: counts), whatever the interval;
 //   R1 a woke line only for a declaration whose display read asleep before and on at its look;
 //   R2 one woke line for one wake: never two for declarations made before the same woke line;
 //   R3 every wake said: asleep before, on at the look, and made after the last woke line;
 //   R4 any other line at most once a minute (counting woke lines), unless the clock went back, and
 //      said whenever that allows;
-//   R5 a refusal said once, and again only after a declaration went through; it takes no look.
+//   R5 a refusal said once, and again only after a declaration went through; it takes no look;
+//   P1–P6 the waking click's, at its random sessions below.
 import Foundation
 
 var failures = 0, passes = 0
@@ -85,6 +93,8 @@ eq(W.assertionName, "Sill: a device is using this Mac", "the assertion's name in
 check(W.assertionName.utf8.count <= 128, "the assertion's name within IOPMLib.h's 128 characters (\(W.assertionName.utf8.count))")
 eq(W.declaredKey, "disp.wake", "the stats key for a declaration")
 eq(W.dryKey, "disp.wakeDry", "the stats key for a test host's count")
+eq(W.heldKey, "disp.heldPress", "the stats key for a press held back")
+check(Set([W.declaredKey, W.dryKey, W.heldKey]).count == 3, "the three keys differ")
 eq(W.success, 0, "kIOReturnSuccess is 0")
 check(W.declaredKey != W.dryKey, "the two keys differ")
 eq(W.userActiveVariable, "SILL_TEST_USER_ACTIVE", "the TEST ONLY variable's name")
@@ -372,6 +382,152 @@ do {
     check(W.userActive(environment: ["SILL_TEST_USERACTIVE": "remote"], testHost: false) == (false, nil), "another variable: nothing")
 }
 
+// MARK: - The waking click (PR #228)
+
+/// A device for `pass`: any object's identity, as the coordinator's connection's.
+final class Device {}
+let deviceA = Device(), deviceB = Device()
+let devA = ObjectIdentifier(deviceA), devB = ObjectIdentifier(deviceB)
+let downL = InputEvent.pointer(.leftDown, x: 0.25, y: 0.75), upL = InputEvent.pointer(.leftUp, x: 0.25, y: 0.75)
+let downR = InputEvent.pointer(.rightDown, x: 0.4, y: 0.6), upR = InputEvent.pointer(.rightUp, x: 0.4, y: 0.6)
+let goesOn = { (e: InputEvent) in W.Passed(event: e, waking: false) }
+let heldPress = { (x: Double, y: Double) in W.Passed(event: .pointer(.move, x: x, y: y), waking: true) }
+let heldRelease = W.Passed(event: nil, waking: false)
+
+eq(W.wakeGrace, 5, "presses held back for 5 s from the first while the display keeps reading asleep")
+do {
+    var w = W(testHost: false)
+    var asked = 0
+    func pass(_ e: InputEvent, _ d: ObjectIdentifier = devA, at t: TimeInterval, asleep: Bool) -> W.Passed {
+        w.pass(e, from: d, at: t, asleep: { asked += 1; return asleep })
+    }
+    eq(pass(downL, at: 0, asleep: true), heldPress(0.25, 0.75), "a left press on a sleeping display: held back, a move to its spot, waking")
+    eq(w.heldBack[devA], [.left], "the press is held back for its release")
+    eq(pass(.pointer(.move, x: 0.3, y: 0.7), at: 0.05, asleep: true), goesOn(.pointer(.move, x: 0.3, y: 0.7)),
+       "a move while it is held: a plain move (the Mac has no button down)")
+    eq(pass(upL, at: 0.1, asleep: false), heldRelease, "its release, the display awake by then: held back too")
+    eq(w.heldBack[devA], nil, "nothing held once the release came")
+    eq(pass(downL, at: 2, asleep: false), goesOn(downL), "the next press, the display awake: goes on as it came")
+    eq(pass(upL, at: 2.1, asleep: true), goesOn(upL), "its release goes on, even with the display asleep again (the Mac has the button down)")
+    eq(pass(downR, at: 3, asleep: true), heldPress(0.4, 0.6), "a right press on a sleeping display: held back, a move, waking")
+    eq(pass(upR, at: 3.1, asleep: true), heldRelease, "its release: held back")
+    eq(pass(upR, at: 3.2, asleep: true), goesOn(upR), "a release with no press held back goes on")
+    asked = 0
+    for (e, what) in [(InputEvent.pointer(.move, x: 0.5, y: 0.5), "a move"), (.scroll(x: 0.5, y: 0.5, dx: 0, dy: 0.01), "a scroll"),
+                      (.scrollGesture(.began, x: 0.5, y: 0.5), "a scroll's start"), (.text("a"), "text"), (shift, "a key"),
+                      (.key(hidUsage: 225, down: false, modifiers: 0), "a key up")] {
+        eq(pass(e, at: 4, asleep: true), goesOn(e), "\(what) on a sleeping display: goes on as it came")
+    }
+    eq(asked, 0, "the display is not read for a move, a scroll, a key or text")
+    _ = pass(downL, at: 10, asleep: true)
+    eq(asked, 1, "a press reads it once")
+    _ = pass(upL, at: 10.1, asleep: false)
+    eq(asked, 1, "a release never reads it")
+}
+do {
+    // Two devices: each one's presses its own (one rule had one flag for every device: a second
+    // device's release taken for the first's left the second's button down on the Mac).
+    var w = W(testHost: false)
+    eq(w.pass(downL, from: devB, at: 0, asleep: { false }), goesOn(downL), "device B presses, the display awake: goes on")
+    eq(w.pass(downL, from: devA, at: 0.5, asleep: { true }), heldPress(0.25, 0.75), "the display sleeps; device A's press: held back")
+    eq(w.pass(upL, from: devB, at: 0.6, asleep: { true }), goesOn(upL), "device B's release goes on (its press did)")
+    eq(w.pass(upL, from: devA, at: 0.7, asleep: { true }), heldRelease, "device A's release: held back")
+    eq(w.pass(downR, from: devA, at: 0.8, asleep: { true }), heldPress(0.4, 0.6), "device A's right press: held back")
+    w.forget(devA)
+    eq(w.heldBack[devA], nil, "a device that left: its presses held back forgotten")
+    eq(w.heldBack.isEmpty, true, "and nobody else's held")
+}
+do {
+    // Left held back, right goes on: each button its own.
+    var w = W(testHost: false)
+    _ = w.pass(downL, from: devA, at: 0, asleep: { true })
+    eq(w.pass(downR, from: devA, at: 6, asleep: { false }), goesOn(downR), "a right press once the display reads awake: goes on")
+    eq(w.pass(upR, from: devA, at: 6.1, asleep: { false }), goesOn(upR), "its release goes on")
+    eq(w.pass(upL, from: devA, at: 6.2, asleep: { false }), heldRelease, "the left release still held back")
+}
+do {
+    // The grace: a display that keeps reading asleep is not woken by the presses, or its picture is
+    // live while it reads asleep: presses go on 5 s after the first held back.
+    var w = W(testHost: false)
+    let asleep = { true }
+    for t in [0.0, 1, 2.5, 4.999] {
+        eq(w.pass(downL, from: devA, at: t, asleep: asleep).waking, true, "a press at \(t) s, the display still asleep: held back")
+        _ = w.pass(upL, from: devA, at: t + 0.0005, asleep: asleep)
+    }
+    eq(w.asleepPresses?.first, 0, "the run counts from the first press held back")
+    eq(w.pass(downL, from: devA, at: 5, asleep: asleep), goesOn(downL), "a press 5 s after the first, still asleep: goes on")
+    eq(w.pass(upL, from: devA, at: 5.1, asleep: asleep), goesOn(upL), "and its release")
+    eq(w.pass(downL, from: devA, at: 9.9, asleep: asleep), goesOn(downL), "presses coming within 5 s of each other keep going on")
+    _ = w.pass(upL, from: devA, at: 10, asleep: asleep)
+    eq(w.pass(downL, from: devA, at: 14.9, asleep: asleep).waking, true, "a press 5 s after the last: afresh, held back")
+    _ = w.pass(upL, from: devA, at: 15, asleep: asleep)
+    eq(w.asleepPresses?.first, 14.9, "the new run from that press")
+    eq(w.pass(downL, from: devA, at: 16, asleep: { false }), goesOn(downL), "a press on a display that reads awake goes on")
+    _ = w.pass(upL, from: devA, at: 16.1, asleep: { false })
+    check(w.asleepPresses == nil, "and ends the run")
+    eq(w.pass(downL, from: devA, at: 17, asleep: asleep).waking, true, "asleep again a second later: a new run, held back")
+    _ = w.pass(upL, from: devA, at: 17.1, asleep: asleep)
+    eq(w.pass(downL, from: devA, at: 21.9, asleep: asleep).waking, true, "4.9 s into the new run: held back")
+    _ = w.pass(upL, from: devA, at: 22, asleep: asleep)
+    eq(w.pass(downL, from: devA, at: 22.1, asleep: asleep), goesOn(downL), "5.1 s into it: goes on")
+    _ = w.pass(upL, from: devA, at: 22.2, asleep: asleep)
+    eq(w.pass(downL, from: devA, at: 3, asleep: asleep).waking, true, "the clock set back: afresh, held back")
+    eq(w.asleepPresses?.first, 3, "the run from the set-back time")
+}
+do {
+    // The grace is the display's: every device's presses count in one run.
+    var w = W(testHost: false)
+    _ = w.pass(downL, from: devA, at: 0, asleep: { true })
+    eq(w.pass(downL, from: devB, at: 3, asleep: { true }).waking, true, "another device's press 3 s in: held back")
+    eq(w.pass(downR, from: devB, at: 5.5, asleep: { true }), goesOn(downR), "5.5 s in, from either device: goes on")
+    eq(w.pass(upL, from: devA, at: 5.6, asleep: { true }), heldRelease, "the first device's release still held back")
+    eq(w.pass(upL, from: devB, at: 5.7, asleep: { true }), heldRelease, "the second's left release held back")
+    eq(w.pass(upR, from: devB, at: 5.8, asleep: { true }), goesOn(upR), "its right release goes on (its press did)")
+}
+do {
+    // A press held back, then one of the same button that goes on (no release between: a device that
+    // lost one): its release goes on, the Mac having that button down.
+    var w = W(testHost: false)
+    _ = w.pass(downL, from: devA, at: 0, asleep: { true })
+    eq(w.pass(downL, from: devA, at: 1, asleep: { false }), goesOn(downL), "a second press, the display awake: goes on")
+    eq(w.pass(upL, from: devA, at: 1.1, asleep: { false }), goesOn(upL), "its release goes on")
+}
+do {
+    // A double click on a sleeping display: both clicks held back, both waking.
+    var w = W(testHost: false)
+    let seq: [(InputEvent, TimeInterval)] = [(downL, 0), (upL, 0.08), (downL, 0.2), (upL, 0.28)]
+    let out = seq.map { w.pass($0.0, from: devA, at: $0.1, asleep: { true }) }
+    eq(out, [heldPress(0.25, 0.75), heldRelease, heldPress(0.25, 0.75), heldRelease], "a double click on a sleeping display: nothing clicked")
+}
+
+// A press held back declares at once, whatever the interval.
+eq(fresh.activity(.wakingPress, at: 100), .wakingPress, "a press held back: a person's")
+eq(run([(person, 0), (.wakingPress, 0.5), (.wakingPress, 0.6), (person, 1)]),
+   [.declare(.input), .declare(.wakingPress), .declare(.wakingPress), .nothing],
+   "a press held back 0.5 s after input's declaration: declares (the display read asleep), every one")
+eq(run([(.wakingPress, 0), (person, 4.9), (person, 5)]), [.declare(.wakingPress), .nothing, .declare(.input)],
+   "a waking press restarts the interval")
+eq(run([(.connect, 0), (.wakingPress, 0.1)], testHost: true), [.count, .count], "a test host counts a press held back")
+eq(W.why(.wakingPress), "clicked while the display was asleep; the click was held back", "why: a press held back")
+eq(W.wokeLine(device: "iPad (iPad14,1)", activity: .wakingPress),
+   "Woke the display for iPad (iPad14,1), which clicked while the display was asleep; the click was held back.",
+   "the woke line for a press held back")
+
+// The TEST ONLY display of a test host.
+eq(W.displayAsleepVariable, "SILL_TEST_DISPLAY_ASLEEP", "the TEST ONLY display's variable")
+do {
+    func asleepHook(_ value: String?, testHost: Bool) -> (path: String?, line: String?) {
+        W.testDisplayAsleep(environment: value.map { [W.displayAsleepVariable: $0] } ?? [:], testHost: testHost)
+    }
+    check(asleepHook(nil, testHost: true) == (nil, nil), "unset: no file, no line")
+    check(asleepHook("", testHost: true) == (nil, nil), "empty: as unset")
+    check(asleepHook("/tmp/asleep", testHost: true) == ("/tmp/asleep",
+          "Test display: the test pattern's display reads asleep while the file SILL_TEST_DISPLAY_ASLEEP names exists."),
+          "a test host: the file, and a line that does not echo it")
+    check(asleepHook("/tmp/asleep", testHost: false) == (nil, "SILL_TEST_DISPLAY_ASLEEP ignored: only a --synthetic host takes it."),
+          "a real host (Sill.app too): ignored, with one line; it reads its displays")
+}
+
 // MARK: - 20,000 random sessions: the rule
 
 /// SplitMix64: the same sessions every run.
@@ -399,7 +555,7 @@ let five: TimeInterval = 5, two: TimeInterval = 2
 /// The model's own table of what is a person at the device.
 func isPerson(_ event: W.Event, now: TimeInterval, lastChange: TimeInterval?) -> Bool {
     switch event {
-    case .connect: return true
+    case .connect, .wakingPress: return true
     case .message(let kind, let input):
         switch kind.rawValue {
         case 7, 15, 25, 28: return true
@@ -412,7 +568,7 @@ func isPerson(_ event: W.Event, now: TimeInterval, lastChange: TimeInterval?) ->
     }
 }
 let otherKinds: [Kind] = (0...255).compactMap { Kind(rawValue: UInt8($0)) }.filter { ![7, 8, 15, 25, 28].contains($0.rawValue) }
-var steps = 0, declared = 0, counted = 0, heldOff = 0, clockBacks = 0, streamed = 0, own = 0, ownMoves = 0, changes = 0
+var steps = 0, declared = 0, counted = 0, heldOff = 0, clockBacks = 0, streamed = 0, own = 0, ownMoves = 0, changes = 0, wakingPresses = 0
 for session in 0..<20_000 {
     let testHost = rng.below(4) == 0
     var w = W(testHost: testHost)
@@ -458,13 +614,14 @@ for session in 0..<20_000 {
         case ..<29: event = msg(.launchApp)
         case ..<35: event = msg([Kind.windowCommand, .pressMenuItem, .gesture][rng.below(3)])
         case ..<65: event = msg(.input, rng.below(3) == 0 ? recentred : move)
+        case ..<69: event = .wakingPress
         default: event = msg(.input, events[rng.below(events.count)].0)
         }
         let personNow = isPerson(event, now: now, lastChange: lastChange)
         let detail = "session \(session) (test host \(testHost)): \(event) at \(now), last \(lastDecl.map { "\($0)" } ?? "none"), change \(lastChange.map { "\($0)" } ?? "none")"
         // I5, before the decision: through a person's activity that keeps coming, never more than 5 s + the
         // gap since the last declaration.
-        if personNow, event != .connect, let prev = lastPersonAt, now - prev >= 0, now - prev <= streamGap, let last = lastDecl {
+        if personNow, event != .connect, event != .wakingPress, let prev = lastPersonAt, now - prev >= 0, now - prev <= streamGap, let last = lastDecl {
             streamed += 1
             if now - last > five + streamGap { violated("I5 a person's activity kept coming and the display was not kept on", detail) }
         }
@@ -479,9 +636,10 @@ for session in 0..<20_000 {
             own += 1
             if case .message(.input, let input?) = event, case .pointer(.move, _, _) = input { ownMoves += 1 }
             if acted { violated("I6 the device's own message declared or counted", said) }
-        } else if event == .connect {
-            // I1
-            if !acted { violated("I1 a connect that did not declare", said) }
+        } else if event == .connect || event == .wakingPress {
+            // I1, I7
+            if !acted { violated(event == .connect ? "I1 a connect that did not declare" : "I7 a press held back that did not declare", said) }
+            if event == .wakingPress { wakingPresses += 1 }
         } else if let last = lastDecl {
             // I2, I3
             if acted, now >= last, now - last < five { violated("I2 two declarations under 5 s apart", said) }
@@ -490,7 +648,8 @@ for session in 0..<20_000 {
         } else if !acted {
             violated("I3 the first declaration held off", said)
         }
-        if case .declare(let activity) = d, (activity == .connect) != (event == .connect) {
+        if case .declare(let activity) = d, (activity == .connect) != (event == .connect)
+            || (activity == .wakingPress) != (event == .wakingPress) {
             violated("a declaration for the wrong activity", said)
         }
         if personNow { lastPersonAt = now }
@@ -508,8 +667,8 @@ for (what, count) in violations.sorted(by: { $0.key < $1.key }) {
     check(false, "\(what): \(count) times; first: \(firstViolation[what] ?? "")")
 }
 check(violations.isEmpty && declared > 50_000 && counted > 15_000 && heldOff > 100_000 && clockBacks > 10_000 && streamed > 100_000
-      && own > 100_000 && ownMoves > 5_000 && changes > 30_000,
-      "20,000 random sessions, \(steps) steps (\(declared) declared, \(counted) counted on test hosts, \(heldOff) held off, "
+      && own > 100_000 && ownMoves > 5_000 && changes > 30_000 && wakingPresses > 10_000,
+      "20,000 random sessions, \(steps) steps (\(declared) declared, \(counted) counted on test hosts, \(heldOff) held off, \(wakingPresses) presses held back, "
       + "\(own) the device's own, \(ownMoves) of them its moves after \(changes) stream changes, \(clockBacks) clocks set back, "
       + "\(streamed) of a person's that kept coming): every invariant")
 
@@ -607,6 +766,119 @@ check(violations.isEmpty && wokeLines > 5_000 && sharedWakes > 500 && declaredLi
       "20,000 random sessions of DisplayActivity, \(looks) looks (\(wokeLines) woke lines, \(sharedWakes) wakes already said, "
       + "\(declaredLines) other lines, \(quiet) held to the minute; \(refusals) refusals, \(refusalLines) said; "
       + "\(wallBacks) wall clocks set back): every invariant")
+
+// MARK: - 20,000 random sessions: the waking click
+
+// Devices that each send well-formed input (a button's press, then its release, moves and other input
+// between and around, presses of the other button inside), interleaved, while the display goes to
+// sleep and wakes at random, with gaps from milliseconds to over the grace and the clock set back now
+// and then. The model, written from the documented rule (`grace` written out):
+//   P1 a release reaches the Mac only for a press of that device and button that reached it;
+//   P2 every press that reached the Mac has its release reach it (no button left down);
+//   P3 a press on a display that reads awake reaches the Mac as it came;
+//   P4 a press on a display that reads asleep is held back (a move to its spot, waking) unless the
+//      presses on it since one last read it awake, with no gap of 5 s between them and none timed
+//      before the one before, began 5 s or more before; then it reaches the Mac as it came;
+//   P5 nothing but a press held back is waking, and nothing but presses and releases is changed;
+//   P6 the display is read once for each press, and for nothing else.
+violations = [:]; firstViolation = [:]
+let grace: TimeInterval = 5
+var pressCount = 0, heldPresses = 0, graceOver = 0, heldReleases = 0, otherInput = 0, sleeps = 0
+let others: [InputEvent] = [move, .scroll(x: 0.2, y: 0.3, dx: 0.01, dy: 0), .scrollGesture(.ended, x: 0.2, y: 0.3), .text("é"), shift,
+                            .key(hidUsage: 4, down: false, modifiers: 0)]
+for session in 0..<20_000 {
+    var w = W(testHost: false)
+    let devices = (0..<(1 + rng.below(3))).map { _ in Device() }
+    let ids = devices.map(ObjectIdentifier.init)
+    var down: [Int: [W.Button: Bool]] = [:]          // the device's own: which of its buttons it holds
+    var mac: [Int: [W.Button: Bool]] = [:]           // which of its buttons reached the Mac pressed
+    var asleep = rng.below(2) == 0
+    var run: (first: TimeInterval, last: TimeInterval)?   // the model's own run of presses held back
+    var now = rng.unit() * 1_000_000
+    for _ in 0..<(10 + rng.below(80)) {
+        let roll = rng.below(100)
+        now += roll < 2 ? -(rng.unit() * 60) : roll < 50 ? rng.unit() * 0.5 : roll < 85 ? rng.unit() * 4 : rng.unit() * 20
+        if rng.below(10) == 0 { asleep.toggle(); if asleep { sleeps += 1 }; continue }
+        let d = rng.below(devices.count)
+        // The device's next input: a press of a button it does not hold, the release of one it holds,
+        // or other input.
+        let button: W.Button = rng.below(3) == 0 ? .right : .left
+        let holds = down[d]?[button] == true
+        let pick = rng.below(10)
+        let event: InputEvent
+        if pick < 5 {
+            let (x, y) = (rng.unit(), rng.unit())
+            event = .pointer(holds ? (button == .left ? .leftUp : .rightUp) : (button == .left ? .leftDown : .rightDown), x: x, y: y)
+        } else {
+            event = others[rng.below(others.count)]
+        }
+        var reads = 0
+        let readAsleep = asleep
+        let out = w.pass(event, from: ids[d], at: now, asleep: { reads += 1; return readAsleep })
+        let detail = "session \(session) device \(d) at \(now) (asleep \(asleep)): \(event) -> \(out)"
+        guard case .pointer(let action, let x, let y) = event, action != .move else {
+            otherInput += 1
+            if out != W.Passed(event: event, waking: false) { violated("P5 other input changed", detail) }
+            if reads != 0 { violated("P6 the display read for other input", detail) }
+            continue
+        }
+        let isPress = action == .leftDown || action == .rightDown
+        if isPress {
+            pressCount += 1
+            down[d, default: [:]][button] = true
+            if reads != 1 { violated("P6 a press read the display \(reads) times", detail) }
+            if !asleep {
+                run = nil
+                if out != W.Passed(event: event, waking: false) { violated("P3 a press on an awake display changed", detail) }
+            } else {
+                if let r = run, now >= r.last, now - r.last < grace { run = (r.first, now) } else { run = (now, now) }
+                let due = now - run!.first >= grace
+                if due {
+                    graceOver += 1
+                    if out != W.Passed(event: event, waking: false) { violated("P4 a press past the grace held back", detail) }
+                } else {
+                    heldPresses += 1
+                    if out != W.Passed(event: .pointer(.move, x: x, y: y), waking: true) { violated("P4 a press on a sleeping display not held back", detail) }
+                }
+            }
+            if out.event == event {
+                if mac[d]?[button] == true { violated("P1 a press reached the Mac with that button down", detail) }
+                mac[d, default: [:]][button] = true
+            }
+        } else {
+            down[d]?[button] = false
+            if reads != 0 { violated("P6 a release read the display", detail) }
+            if out.waking { violated("P5 a release waking", detail) }
+            if out.event == event {
+                if mac[d]?[button] != true { violated("P1 a release reached the Mac with no press of its own there", detail) }
+                mac[d]?[button] = false
+            } else if out.event == nil {
+                heldReleases += 1
+                if mac[d]?[button] == true { violated("P2 the release of a press that reached the Mac held back", detail) }
+            } else {
+                violated("P5 a release changed into something else", detail)
+            }
+        }
+    }
+    // The devices let go of every button they hold: each release reaches the Mac exactly when its press did.
+    for (d, buttons) in down {
+        for (button, holds) in buttons where holds {
+            let up: InputEvent = .pointer(button == .left ? .leftUp : .rightUp, x: 0.5, y: 0.5)
+            let out = w.pass(up, from: ids[d], at: now + 0.1, asleep: { true })
+            let reached = out.event == up
+            if reached != (mac[d]?[button] == true) { violated("P2 a release at the end that disagrees with its press", "session \(session) device \(d): \(button) \(out)") }
+            if reached { mac[d]?[button] = false }
+        }
+    }
+    if mac.values.contains(where: { $0.values.contains(true) }) { violated("P2 a button left down on the Mac", "session \(session)") }
+    if !w.heldBack.isEmpty { violated("P2 presses still held back after every release", "session \(session): \(w.heldBack)") }
+}
+for (what, count) in violations.sorted(by: { $0.key < $1.key }) {
+    check(false, "\(what): \(count) times; first: \(firstViolation[what] ?? "")")
+}
+check(violations.isEmpty && heldPresses > 50_000 && graceOver > 2_000 && heldReleases > 30_000 && otherInput > 200_000 && sleeps > 40_000,
+      "20,000 random sessions of the waking click, \(pressCount) presses (\(heldPresses) held back, \(graceOver) past the grace), "
+      + "\(heldReleases) releases held back, \(otherInput) other input, \(sleeps) sleeps: every invariant")
 
 print(failures == 0 ? "ok: \(passes) checks" : "FAILED: \(failures) of \(passes + failures) checks")
 exit(failures == 0 ? 0 : 1)

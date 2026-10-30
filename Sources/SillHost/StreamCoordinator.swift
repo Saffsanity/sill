@@ -232,6 +232,10 @@ package final class StreamCoordinator {
     /// it takes are ignored, with a line each, as a Mac from before kind 44 skips every one, so a
     /// device's ask again after its wait runs for real (`keyframeIgnoreHook`). Zero otherwise.
     private var keyframeRequestsToIgnore: Int
+    /// TEST ONLY. `SILL_TEST_DISPLAY_ASLEEP=<file>` on a --synthetic host: its display reads asleep
+    /// while the file exists, so a test client's press shows DisplayWake.pass at work
+    /// (`pressLandsAsleep`). Nil otherwise: a test host's display never reads asleep.
+    private let testDisplayAsleepFile: String?
     /// TEST ONLY. `SILL_TEST_DESKTOP_FAIL=<n>` on a --synthetic host: the first n starts of the
     /// Desktop's capture fail, as ScreenCaptureKit's "Start stream failed … The stream is nil" did on
     /// 2026-10-28 (CatalogLook), so the host's one more try (n = 1) and a device's second ask (n = 2:
@@ -367,6 +371,8 @@ package final class StreamCoordinator {
         let userActive = DisplayWake.userActive(environment: env, testHost: synthetic)
         displayActivity = DisplayActivity(remote: userActive.remote)
         keyframeRequestsToIgnore = keyframeIgnore.count
+        let displayAsleep = DisplayWake.testDisplayAsleep(environment: env, testHost: synthetic)
+        testDisplayAsleepFile = displayAsleep.path
         // The firewall's TEST ONLY answers, for a test host alone (StreamServer's own rule).
         let firewallTest = FirewallCheck.TestHook.read(testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
                                                        environment: env)
@@ -374,7 +380,7 @@ package final class StreamCoordinator {
         firewallPaths = FirewallRule.paths(executable: FirewallCheck.executablePath())
         desktopStartsToFail = desktopFail.count
         testHookLines = [path.line, software.line, inputLog.line, userActive.line, keyframeIgnore.line, desktopFail.line,
-                         noScreen.line, firewallTest.line].compactMap { $0 }
+                         noScreen.line, firewallTest.line, displayAsleep.line].compactMap { $0 }
         status = HostStatus()
         var home = StreamServer.HomeDoorMode.plain
         if homePairing, let remote {
@@ -524,6 +530,7 @@ package final class StreamCoordinator {
                 if self.flipWait == id { self.flipWait = nil }
                 self.menus.clientLeft(connection)
                 self.clipboard.clientLeft(connection)
+                self.displayWake.forget(id)
                 // Its keys go up, and its buttons when the Mac no longer served it (`revoked`, read before
                 // it is forgotten below). Its input still held for an activation is judged as a departed
                 // device's from here on (`gone`: `leftWhileHeld`), and an identifier a later connection
@@ -1058,9 +1065,17 @@ package final class StreamCoordinator {
             }
             return
         }
+        // A press on a display that reads asleep wakes it and goes no further, nor does its release
+        // (DisplayWake.pass, PR #228): a tap on a black picture clicks nothing out of sight.
+        let passed = input.map { event in
+            displayWake.pass(event, from: sender, at: CFAbsoluteTimeGetCurrent(),
+                             asleep: { pressLandsAsleep(event) })
+        }
+        if passed?.waking == true { Stats.shared.bump(DisplayWake.heldKey) }
         // Every message goes to DisplayWake, which alone says which of them is a person at the device
-        // (a pick never is: the device asks for the Desktop by itself), issue #134.
-        deviceActive(.message(message.kind, input), connection)
+        // (a pick never is: the device asks for the Desktop by itself), issue #134; a press held back
+        // declares at once.
+        deviceActive(passed?.waking == true ? .wakingPress : .message(message.kind, input), connection)
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
@@ -1100,7 +1115,7 @@ package final class StreamCoordinator {
                 if let error { print("Launch failed: \(error.localizedDescription)") }
             }
         case .input:
-            guard let event = input else { return }
+            guard let event = passed?.event else { return }     // it does not decode, or a release held back
             let device = ObjectIdentifier(connection)
             guard let rect = currentSourceRect() else {
                 // Nothing streams (between sources, or the stream stopped: the window closed under a
@@ -1287,6 +1302,25 @@ package final class StreamCoordinator {
         case .count: Stats.shared.bump(DisplayWake.dryKey)
         case .declare(let activity): displayActivity.declare(for: deviceName(connection), activity)
         }
+    }
+
+    /// Whether the display a device's press lands on reads asleep (DisplayWake.pass asks only for a
+    /// press): the display under the press in the streamed source, the virtual display when a window
+    /// is staged there, as CoreGraphics reads it; the main display when nothing streams or the press
+    /// lands on no display. A test host never reads a display: its test pattern never sleeps, but
+    /// under SILL_TEST_DISPLAY_ASLEEP while that file exists.
+    private func pressLandsAsleep(_ event: InputEvent) -> Bool {
+        if synthetic { return testDisplayAsleepFile.map { FileManager.default.fileExists(atPath: $0) } ?? false }
+        guard case .pointer(_, let x, let y) = event, let rect = currentSourceRect(), !rect.isNull else {
+            return CGDisplayIsAsleep(CGMainDisplayID()) != 0
+        }
+        var display = CGDirectDisplayID(0)
+        var count: UInt32 = 0
+        let point = InputLanding.point(x: x, y: y, in: rect, displayScale: nil)
+        guard CGGetDisplaysWithPoint(point, 1, &display, &count) == .success, count == 1 else {
+            return CGDisplayIsAsleep(CGMainDisplayID()) != 0
+        }
+        return CGDisplayIsAsleep(display) != 0
     }
 
     /// Parameter sets went out at `time` (the encoder's callback, hopped here). A stream's first, and
