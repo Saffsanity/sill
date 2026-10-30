@@ -578,6 +578,24 @@ do {
           ScrollDirection.Source.allCases.allSatisfy { s in [false, true].allSatisfy { abs(ScrollDirection.factor(s, reversed: $0)) == 1 } })
 }
 
+// MARK: - Magnify (a two-finger pinch): InputEvent.magnify and WindowList.magnify
+
+for (phase, amount) in [(MagnifyPhase.began, 0.0), (.changed, 0.05), (.changed, -0.2), (.ended, 0.0)] {
+    let event = InputEvent.magnify(phase, x: 0.25, y: 0.75, amount: amount)
+    check("magnify \(phase.rawValue) \(amount) round-trips", Wire.decode(InputEvent.self, from: Wire.encode(event)) == event)
+}
+check("magnify: kind 8 carries it as JSON a host decodes",
+      Wire.decode(InputEvent.self, from: Data(#"{"magnify":{"_0":"changed","x":0.5,"y":0.5,"amount":0.05}}"#.utf8))
+        == .magnify(.changed, x: 0.5, y: 0.5, amount: 0.05))
+check("magnify: other events are untouched",
+      Wire.decode(InputEvent.self, from: Wire.encode(InputEvent.scroll(x: 0.1, y: 0.2, dx: 0.3, dy: 0.4)))
+        == .scroll(x: 0.1, y: 0.2, dx: 0.3, dy: 0.4))
+var magnifyList = WindowList(macName: "Mac", windows: [], active: .desktop)
+check("magnify: a window list without it says nil (a host before it)", magnifyList.magnify == nil
+      && Wire.decode(WindowList.self, from: Wire.encode(magnifyList))?.magnify == nil)
+magnifyList.magnify = Magnify.generation
+check("magnify: a window list carries the generation", Wire.decode(WindowList.self, from: Wire.encode(magnifyList))?.magnify == 1)
+
 // MARK: - Aa's detents (issue #179): Off is a detent of its own, and leaving it for a scale or back is a fit
 check("text scale: with Off offered the ruler is Off, 0.5, 0.75, 1, 1.25, 1.5", TextScale.detents(offered: true) == [0.25, 0.5, 0.75, 1.0, 1.25, 1.5])
 check("text scale: without Off (the virtual display) it is the five scales", TextScale.detents(offered: false) == [0.5, 0.75, 1.0, 1.25, 1.5])

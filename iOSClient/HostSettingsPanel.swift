@@ -54,6 +54,10 @@ struct HostSettingsPanel: View {
     /// picture's input view and the on-screen trackpad as each scroll begins (`ScrollDirection`), never
     /// sent.
     @AppStorage(StreamClient.reverseScrollKey) private var reverseScroll = false
+    /// This device's choice of what a two-finger pinch on the picture does, Zoom Stream (false, the
+    /// picture) or Zoom App (true, the Mac's own pinch): Zoom Stream unless chosen, read by the input
+    /// view at each touch, never sent.
+    @AppStorage(InputOverlayView.pinchZoomsMacKey) private var pinchZoomsMac = false
     /// This device's switch for Larger Picture (docs/larger-picture-plan.md): off unless turned on,
     /// read by the stream screen, never sent.
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
@@ -635,6 +639,23 @@ struct HostSettingsPanel: View {
             }
         }
         Footnote(text: gesturesFooter)
+        // Only for a Mac that takes the pinch (`WindowList.magnify`): for any other Zoom App would do nothing.
+        if client.hostMagnify != nil {
+            Rows {
+                AdaptiveRow(title: "Pinch Behavior", since: nil) {
+                    Picker("Pinch Behavior", selection: $pinchZoomsMac) {
+                        Text("Zoom Stream").tag(false)
+                        Text("Zoom App").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                }
+            }
+            Footnote(text: "What two fingers pinching the picture do. Zoom Stream magnifies the picture on this \(device) "
+                     + "and sends nothing to \(mac). Zoom App sends the pinch to \(mac) as a trackpad pinch, so an app "
+                     + "that zooms (Maps, Photos, Safari, Preview) zooms its own content and the picture keeps its "
+                     + "size. The \(device)’s trackpad pinch always zooms the app.")
+        }
     }
 
     /// Under Send Audio's switch and the Mute row below it (docs/audio-plan.md §7.7): on, that every

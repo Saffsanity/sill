@@ -118,7 +118,7 @@ struct PointerControl {
     /// scroll-gesture event. Keys and typed text cannot.
     static func movesPointer(_ event: InputEvent) -> Bool {
         switch event {
-        case .pointer, .scroll, .scrollGesture: return true
+        case .pointer, .scroll, .scrollGesture, .magnify: return true
         case .text, .key: return false
         }
     }

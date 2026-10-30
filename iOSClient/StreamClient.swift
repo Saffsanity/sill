@@ -865,6 +865,9 @@ final class StreamClient: ObservableObject {
     /// six, nil from a Mac before 2026-09-27, which is sent none (`sendGesture`). Cleared with the
     /// session.
     @Published var hostGestures: Int?
+    /// Whether this session's Mac takes a two-finger pinch (`WindowList.magnify`, `InputEvent.magnify`);
+    /// nil from a Mac before it, which is sent none. Cleared with the session.
+    @Published var hostMagnify: Int?
     /// Whether this session's Mac repeats a key held down (`WindowList.keyRepeat`, KeyRepeat on the host):
     /// 1 from a Mac with key repeat, nil from one before it. The stream's input view sends a hardware
     /// keyboard's characters as keys only to a Mac that says so (KeyTyping); to one before it they go
@@ -3502,6 +3505,7 @@ final class StreamClient: ObservableObject {
         hostVersion = nil
         hostProtocol = nil
         hostGestures = nil
+        hostMagnify = nil
         hostKeyRepeat = nil
         remoteRoute = nil
         macInfo = nil
@@ -3916,7 +3920,8 @@ final class StreamClient: ObservableObject {
         let sent: PointerFeedState.Sent
         switch event {
         case .pointer(_, let x, let y): sent = .pointer(CGPoint(x: x, y: y))
-        case .scroll(let x, let y, _, _), .scrollGesture(_, let x, let y): sent = .scroll(CGPoint(x: x, y: y))
+        case .scroll(let x, let y, _, _), .scrollGesture(_, let x, let y), .magnify(_, let x, let y, _):
+            sent = .scroll(CGPoint(x: x, y: y))
         case .text, .key: sent = .other
         }
         guard pointerFeed.sent(sent, now: CACurrentMediaTime()) else { return }
@@ -4091,6 +4096,7 @@ final class StreamClient: ObservableObject {
                 if self.hostVersion != list.hostVersion { self.hostVersion = list.hostVersion }
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
+                if self.hostMagnify != list.magnify { self.hostMagnify = list.magnify }
                 self.hostKeyRepeat = list.keyRepeat
                 // The clipboard: subscribe (or stop) as the Mac's word and this device's switch say.
                 self.hostClipboardChanged(list.clipboard)

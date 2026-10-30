@@ -32,6 +32,23 @@ public enum InputEvent: Codable, Hashable {
     /// A key by USB HID usage (UIKeyboardHIDUsage.rawValue on iOS) with UIKeyModifierFlags bits,
     /// which are the same bit positions as CGEventFlags for shift/control/option/command.
     case key(hidUsage: UInt16, down: Bool, modifiers: UInt64)
+
+    /// A two-finger pinch on the glass, as the Mac's trackpad makes one (the magnify gesture that
+    /// zooms Maps, Preview, Safari, Photos). `began` → `changed`… → `ended`, at the point between the
+    /// fingers. `amount` is the change since the last event as a fraction of the size (+0.05 spreads
+    /// the content 5 % larger, -0.05 pinches it 5 % smaller), the unit of `NSEvent.magnification`.
+    /// A device sends it only to a host whose window list says `magnify` 1 or more (`Magnify.generation`);
+    /// an older host cannot decode the case and would drop the message.
+    case magnify(MagnifyPhase, x: Double, y: Double, amount: Double)
+}
+
+public enum MagnifyPhase: String, Codable {
+    case began, changed, ended
+}
+
+public enum Magnify {
+    /// `WindowList.magnify` from a host that takes `InputEvent.magnify`.
+    public static let generation = 1
 }
 
 public enum ScrollPhase: String, Codable {

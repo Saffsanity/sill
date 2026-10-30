@@ -1845,6 +1845,7 @@ package final class StreamCoordinator {
         case .pointer(let action, _, _): guard action == .leftDown || action == .rightDown else { return }; needsFocus = true
         case .scroll: needsFocus = false
         case .scrollGesture(let phase, _, _): guard phase == .began else { return }; needsFocus = false
+        case .magnify(let phase, _, _, _): guard phase == .began else { return }; needsFocus = false
         case .key(_, let down, _): guard down else { return }; needsFocus = true
         case .text: needsFocus = true
         }
@@ -1958,7 +1959,8 @@ package final class StreamCoordinator {
     private func injectorProbePoint(_ event: InputEvent) -> CGPoint? {
         guard let rect = currentSourceRect() else { return nil }
         switch event {
-        case .pointer(_, let x, let y), .scroll(let x, let y, _, _), .scrollGesture(_, let x, let y):
+        case .pointer(_, let x, let y), .scroll(let x, let y, _, _), .scrollGesture(_, let x, let y),
+             .magnify(_, let x, let y, _):
             return InputLanding.point(x: x, y: y, in: rect, displayScale: streamDisplayScale)
         default: return nil
         }
@@ -2738,7 +2740,7 @@ package final class StreamCoordinator {
             case .leftDown, .rightDown: return .buttonDown
             case .leftUp, .rightUp: return .buttonUp
             }
-        case .scroll, .scrollGesture: return .scroll
+        case .scroll, .scrollGesture, .magnify: return .scroll
         case .key(_, let down, _): return down ? .keyDown : .keyUp
         case .text: return .text
         }
@@ -2775,6 +2777,7 @@ package final class StreamCoordinator {
         var list = WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
                               hostVersion: hostVersion, protocol: SillProtocol.current,
                               gestures: TrackpadGesture.generation, clipboard: clipboard.advertised)
+        list.magnify = Magnify.generation
         // This host repeats a device's held key (KeyRepeat), so a device sends it a hardware keyboard's
         // characters as keys.
         list.keyRepeat = KeyRepeat.generation
