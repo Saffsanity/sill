@@ -758,5 +758,20 @@ for rule in largerRules {
     check("Larger Picture grid (\(largerSizes) layouts): \(rule.name)" + (rule.firstFailure.map { " — first failure at \($0)" } ?? ""), rule.firstFailure == nil)
 }
 
+// MARK: Hide Top Bar + Shake to Restore (issue #92)
+
+typealias TBV = TopBarVisibility
+check("TopBarVisibility.key", TBV.key == "Sill.hideTopBar")
+check("barHidden only when switchOn, isLandscape, and !overlayOpen",
+      TBV.barHidden(switchOn: true, isLandscape: true, overlayOpen: false) == true
+      && TBV.barHidden(switchOn: false, isLandscape: true, overlayOpen: false) == false
+      && TBV.barHidden(switchOn: true, isLandscape: false, overlayOpen: false) == false
+      && TBV.barHidden(switchOn: true, isLandscape: true, overlayOpen: true) == false)
+check("afterShake turns switch off and returns announcement only when switch was on",
+      TBV.afterShake(switchOn: true) == (false, Optional("Top bar shown"))
+      && TBV.afterShake(switchOn: false) == (false, Optional<String>.none))
+check("TopBarVisibility copy",
+      !TBV.Copy.toggleTitle.isEmpty && TBV.Copy.footnote(device: "iPad").contains("iPad"))
+
 print("\(passes) passed, \(fails) failed")
 exit(fails == 0 ? 0 : 1)

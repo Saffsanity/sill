@@ -367,3 +367,28 @@ struct PhonePortraitLayout: Equatable {
         }
     }
 }
+
+/// Hide Top Bar in landscape + shake to restore (issue #92, Noah's decision of 2026-10-19):
+/// - Toggle in Settings › This iPad / This iPhone (`Hide Top Bar`, `Sill.hideTopBar`, off by default).
+/// - Shaking the device turns the toggle off and brings the bar back.
+/// Pure (`CoreGraphics` + `Foundation`).
+enum TopBarVisibility {
+    static let key = "Sill.hideTopBar"
+
+    static func barHidden(switchOn: Bool, isLandscape: Bool, overlayOpen: Bool) -> Bool {
+        switchOn && isLandscape && !overlayOpen
+    }
+
+    static func afterShake(switchOn: Bool) -> (switchOn: Bool, announcement: String?) {
+        guard switchOn else { return (false, nil) }
+        return (false, "Top bar shown")
+    }
+
+    enum Copy {
+        static let toggleTitle = "Hide Top Bar"
+        static let showBarLabel = "Show Top Bar"
+        static func footnote(device: String) -> String {
+            "Hides the top bar when this \(device) is held sideways so the picture fills the screen. Shake this \(device) (or tap the top-right button, or press ⇧⌘B) to show the bar again."
+        }
+    }
+}
