@@ -17,8 +17,8 @@ here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
 out="$root/.build/audio"
 cd "$root"
-host_files=(StreamServer CableLink ClientLink DeviceGate Door DoorPolicy HostIdentity HostLog InterfaceSnapshot LinkJudge
-            OriginPolicy PairingWindow PointerControl PointerWatch RefusalSummary Stats
+host_files=(StreamServer CableLink ClientLink DeviceGate Door DoorPolicy HostIdentity HostLog InterfaceSnapshot KeyStrokes
+            LinkJudge OriginPolicy PairingWindow PointerControl PointerWatch RefusalSummary Stats
             AudioPipeline AudioPacketizer AudioEncoder SyntheticAudio TestTone)
 
 put() {   # put DEST: stdin to DEST, only if it differs

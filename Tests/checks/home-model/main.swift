@@ -369,5 +369,68 @@ check("13 …where one key for both browsers (the rule as #232 first had it) rea
       unplugRow(sameKeyM[macMini()], [iEn0]) == (.method(.wifi), .pinned, macM)
       && P.afterPinRefused(macID: macM, tried: ["network:Mac mini"], rows: [("network:Mac mini", macM)], tagNamed: true, tapped: false) == .newKey)
 
+// MARK: 14. The reconnect of a Mac this device was connected to without pairing (the security scan's
+// finding 3, 2026-10-29)
+
+// The device tapped "Studio", a Mac with Require pairing off (p=0), and connected without pairing: any
+// key, then for the rest of the session the key its first connection saw (a real one, a P-256 key's
+// fingerprint). Studio's Sill quits or crashes, without a goodbye that ends the reconnect (the scan's
+// chain: a crash), and stops advertising. Another Mac takes the name, with p=0, its own key and a tag of
+// its own: its owner named it so, or a stranger advertises it (the TXT record is no proof of anything).
+if let keyS = RemoteKey.generate(), let idS = RemoteIdentity(privateKey: keyS), let keyO = RemoteKey.generate(),
+   let idO = RemoteIdentity(privateKey: keyO) {
+    let fS = idS.fingerprint, fO = idO.fingerprint
+    let studioTap = P.homeDial(door: .open, saved: false, revoked: false, homeTLS: false, debug: false, tap: true)
+    let studio = P.trust(P.sessionTrust(studioTap, savedPin: nil)!, readyWith: fS)
+    let lostStudio = GoodbyePolicy.outcome(nil, mac: "Studio", device: "iPad", saved: false)
+    check("14 a tap on Studio's open door connects with any key; the session keeps Studio's key", studioTap == .anyKey && P.pin(studio) == .key(fS))
+    check("14 lost without a goodbye: its words promise a reconnect; Studio is no saved Mac", lostStudio.reconnect && saved.allSatisfy { $0.bonjourName != "Studio" })
+    // The other Mac's row: its tag names no saved Mac, under a name no saved Mac has; the reconnect takes it by the name.
+    let otherTag = SavedMacs.recognize(tag: RecognitionTag.make(recognitionKey: Data(repeating: 0x61, count: 32))!, in: saved)
+    let byNames = saved.map { (macID: $0.macID, bonjourName: $0.bonjourName) }
+    check("14 the other Mac's row under Studio's name is no saved Mac, its door stays open, and the reconnect takes it by the name",
+          otherTag == nil && P.rowMac(tagged: otherTag, carriesTag: true, name: "Studio", saved: byNames) == nil
+          && P.rowDoor(.open, otherTagUnderSavedName: P.otherTagUnderSavedName(tagged: otherTag, carriesTag: true, name: "Studio", saved: byNames)) == .open
+          && P.reconnectMatches(savedID: nil, bonjourName: "Studio", rowMacID: otherTag, rowName: "Studio", rowCarriesTag: true))
+    let reconnectDial = P.homeDial(door: .open, saved: false, revoked: false, homeTLS: false, debug: false, tap: false)
+    let pinned = P.reconnectTrust(reconnectDial, savedPin: nil, seen: P.reconnectKey(lost: studio))
+    check("14 the reconnect dials it pinned to Studio's key, where it took any key before (sessionTrust, the tap's)",
+          reconnectDial == .anyKey && pinned.map(P.pin) == .key(fS) && P.sessionTrust(reconnectDial, savedPin: nil).map(P.pin) == .anyKey)
+    check("14 the other Mac's key fails that pin (-9808): the reconnect ends with its own words (no session: no hello, no input, no clipboard)",
+          fO != fS && pinned.map { P.homeEnd(trust: $0, goodbye: nil, tls: P.pinRefused) } == .otherKey
+          && P.HomeCopy.otherKey(mac: "Studio", device: "iPad") == "Studio answered with another key, so this iPad didn\u{2019}t reconnect. Tap it to connect.")
+    check("14 its row reads Not paired, and a tap connects with any key: the person's choice, as before",
+          P.rowWord(door: .open, saved: false, revoked: false, homeTLS: false, debug: false, method: .wifi, cable: false).word == "Not paired"
+          && P.sessionTrust(P.homeDial(door: .open, saved: false, revoked: false, homeTLS: false, debug: false, tap: true), savedPin: nil) == .open(seen: nil))
+    check("14 Studio itself back with its key: the pin holds, and its reconnected session keeps Studio's key",
+          pinned.map { P.trust($0, readyWith: fS) } == .open(seen: fS))
+    check("14 Studio back with Require pairing on: the reconnect waits for a tap and ends with \"now asks devices to pair\"",
+          P.reconnectEnd(P.homeDial(door: .pairingRequired, saved: false, revoked: false, homeTLS: false, debug: false, tap: false), saved: false) == .pairingRequired)
+    // The review of #255 (2026-10-29): the name taken by a plain door (no p: no TXT record at all, as the CLI's or an
+    // older Sill.app's), which a DEBUG build dials. After Studio's session, no build's reconnect dials it, and the
+    // reconnect goes on looking; a DEBUG build's tap still dials it plain.
+    let plainDial = { (debug: Bool, tap: Bool) in P.homeDial(door: mapped(HomeDoorTXT.door([:])), saved: false, revoked: false, homeTLS: false, debug: debug, tap: tap) }
+    check("14 a plain door under Studio's name: not dialed by the reconnect, DEBUG or Release; the reconnect looks on; a DEBUG tap dials it plain",
+          [true, false].allSatisfy { P.reconnectTrust(plainDial($0, false), savedPin: nil, seen: P.reconnectKey(lost: studio)) == nil
+                                     && P.reconnectEnd(plainDial($0, false), saved: false) == nil }
+          && P.sessionTrust(plainDial(true, true), savedPin: nil) == .plain)
+    // The review of #255 (2026-10-29): "Studio isn't answering. It may be asleep. Sill keeps trying, or tap it to try
+    // now." The person taps it: the reconnect is cleared and the tap's dial takes any key. It waits (this device's
+    // own network down or changing) and is let go before its handshake, with no goodbye, so a reconnect follows it
+    // (GoodbyePolicy's own outcome) from that dial's trust, which saw no key: it pins the key this device's last
+    // session under the name saw. (A dial that only gets no answer stays preparing and ends at the tap's deadline,
+    // with no reconnect at all.)
+    let retap = P.sessionTrust(studioTap, savedPin: nil)!
+    let afterTap = GoodbyePolicy.outcome(nil, mac: "Studio", device: "iPad", saved: false)
+    let repinned = P.reconnectTrust(reconnectDial, savedPin: nil, seen: P.reconnectKey(lost: retap, earlier: P.reconnectKey(lost: studio)))
+    check("14 a tap during the reconnect whose dial saw no key: a reconnect follows it, still pinned to Studio's key; the other Mac's key ends it",
+          P.pin(retap) == .anyKey && afterTap.reconnect && repinned.map(P.pin) == .key(fS)
+          && repinned.map { P.homeEnd(trust: $0, goodbye: nil, tls: P.pinRefused) } == .otherKey)
+    check("14 …where before the review that reconnect took any key, the other Mac's included",
+          P.reconnectTrust(reconnectDial, savedPin: nil, seen: P.reconnectKey(lost: retap)).map(P.pin) == .anyKey)
+} else {
+    check("14 two P-256 keys", false)
+}
+
 print(fails == 0 ? "ALL PASS (\(passes))" : "\(fails) FAIL, \(passes) pass")
 if fails > 0 { exit(1) }

@@ -83,7 +83,7 @@ MUTANTS = [
     ("the keyboard key's row on a phone", "if layout != .phone {\n                rows.append(row(\"keyboard\", [strong(\"The keyboard key\")", "if true {\n                rows.append(row(\"keyboard\", [strong(\"The keyboard key\")"),
     ("a phone's laptop hint as the halves'", 'case .phone: hint = thumbnails ? "Under the windows: the row of keys, then the trackpad." : "Under the buttons: the row of keys, then the trackpad."',
      'case .phone: hint = "Below the bar: the row of keys, then the trackpad."'),
-    ("Aa not said to be a window's", "plain(\": touch it and slide to make a window’s text larger or smaller.\")", "plain(\": touch it and slide to make text larger or smaller.\")"),
+    ("Aa not said to be a window's", "plain(\": while a window shows, touch it and slide to make its text larger or smaller.\")", "plain(\": touch it and slide to make text larger or smaller.\")"),
     ("the caps not spoken by name", "spoken: \"Command, Option, Control and Shift stay on for the next key or trackpad click: tap Command, then C, to copy.\")", "spoken: nil)"),
     # Larger Picture (docs/larger-picture-plan.md): no thumbnails on a phone.
     ("Larger Picture's bar card lights the strip", "case .bar where layout == .phone && !thumbnails: return [.apps, .textSize, .keyboard]",

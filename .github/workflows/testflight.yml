@@ -1,10 +1,14 @@
-# TestFlight builds of Sill for iPhone and iPad, only by hand: Actions › TestFlight › Run workflow,
-# on the branch or tag to build. Never on a push, a tag or a pull request.
+# TestFlight builds of Sill for iPhone and iPad, only by hand and only from main (Actions ›
+# TestFlight › Run workflow). Never on a push, a tag or a pull request. The job runs in the
+# environment nightly (the nightlies' own; docs/release-checklist.md, "Secrets and variables"), which
+# only main may use: GitHub refuses a run from any other branch or a tag before it starts, and the
+# App Store Connect key is that environment's, not the repository's. To send a branch to
+# TestFlight, upload it from a Mac (release-ios.sh --bump --upload).
 #
-# What a run does depends on the repository's secrets and variables (Settings › Secrets and
+# What a run does depends on that key and the repository's variable (Settings › Secrets and
 # variables › Actions; docs/release-checklist.md, "TestFlight from GitHub Actions"):
 #
-# - Without the App Store Connect API key (the secrets SILL_TESTFLIGHT_KEY_ID,
+# - Without the App Store Connect API key (the environment nightly's secrets SILL_TESTFLIGHT_KEY_ID,
 #   SILL_TESTFLIGHT_ISSUER_ID and SILL_TESTFLIGHT_KEY_P8): Scripts/release-ios.sh --unsigned. The
 #   Release archive is built without signing and checked (the version and build, the export
 #   compliance key, the Local Network, Bonjour and camera entries, the privacy manifest, the
@@ -13,15 +17,23 @@
 # - With the key: Scripts/release-ios.sh --sign-at-export. The archive is built without signing
 #   (the runner has no development certificate) and the export signs it through the key, with
 #   Apple's cloud-managed Apple Distribution certificate and an App Store profile that Xcode makes
-#   or fetches, so no certificate, private key or profile is kept in this repository's secrets.
+#   or fetches, so no certificate, private key or profile is kept in the secrets.
 #   That needs a key with the Admin role: any other gets "Cloud signing permission error".
 #   Sill-<version>-<build>.ipa, signed for App Store Connect, is kept for 14 days. Nothing is
 #   uploaded, unless:
-# - the repository variable SILL_TESTFLIGHT_IN_CI is true. Then the same run also uploads the
-#   archive to App Store Connect (--upload), where it becomes a TestFlight build once Apple has
-#   processed it. Its build number is the committed CURRENT_PROJECT_VERSION: on a Mac, run
-#   Scripts/release-ios.sh --bump (or set the number and commit it), push, then run this. An
-#   upload of a number App Store Connect already has is refused.
+# - the repository variable SILL_TESTFLIGHT_IN_CI is true and the commit is on main's own line.
+#   Then the same run also uploads the archive to App Store Connect (--upload), where it becomes a
+#   TestFlight build once Apple has processed it. An upload of a number App Store Connect already
+#   has is refused. The environment keeps the job to main; the mode step still checks main's line
+#   before an upload, and exports with a notice otherwise.
+#
+# The build number is the commit count (git rev-list --count HEAD), given to release-ios.sh with
+# --build-number for the run only, as the nightly workflow does (docs/release-checklist.md,
+# "Nightlies"): so a run never needs a bump committed first. Along main's first-parent line the
+# count grows with every commit, so there it names one commit alone; another branch's commit can
+# have the count of a later commit of main, and the nightly of that commit would then find "its"
+# build in App Store Connect and give this one to TestFlight's groups. Hence uploads only from
+# main's line. The checkout keeps the whole history (all branches) for both.
 #
 # Cost: nothing in a public repository. In a private one (GitHub's prices on 2026-09-25), a run
 # takes about 5 minutes of macOS time, under 10, and each macOS minute counts as ten of the
@@ -49,6 +61,10 @@ concurrency:
 jobs:
   testflight:
     name: Archive, export, and upload when asked
+    # The environment nightly (docs/release-checklist.md, "Secrets and variables"): only main may use
+    # it, and the App Store Connect key below is its own; the repository keeps none. An environment
+    # without the key gives empty strings: the mode step says so, and stops when an upload is asked for.
+    environment: nightly
     # As in ci.yml: the image with Xcode 27 (macOS 27, a public preview in September 2026).
     runs-on: xcode-27
     timeout-minutes: 40
@@ -56,6 +72,7 @@ jobs:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0 # the build number is the commit count
           persist-credentials: false
 
       # A build for App Store Connect is made with the newest Xcode 27 that is not a beta or not at
@@ -83,24 +100,38 @@ jobs:
             if [ -n "$(printenv "$name")" ]; then set_count=$((set_count + 1)); else missing="$missing $name"; fi
           done
           if [ "$set_count" -eq 0 ] && [ "$SILL_TESTFLIGHT_IN_CI" = true ]; then
-            echo "::error::SILL_TESTFLIGHT_IN_CI is true, but the App Store Connect API key is not set:$missing. docs/release-checklist.md, TestFlight from GitHub Actions."
+            echo "::error::SILL_TESTFLIGHT_IN_CI is true, but the environment nightly has no App Store Connect API key:$missing (gh secret set NAME --env nightly; docs/release-checklist.md, TestFlight from GitHub Actions)."
             exit 1
           fi
           if [ "$set_count" -ne 0 ] && [ "$set_count" -ne 3 ]; then
-            echo "::error::Only some of the App Store Connect API key's secrets are set; missing:$missing. Set all three, or none for an unsigned check."
+            echo "::error::Only some of the App Store Connect API key's secrets are set in the environment nightly; missing:$missing. Set all three (gh secret set NAME --env nightly), or none for an unsigned check."
             exit 1
+          fi
+          # Whether this commit is on main's first-parent line, where each commit's count is its own
+          # (grep without -q reads all of rev-list's output: with pipefail, -q's early exit would
+          # fail the pipeline through rev-list's broken pipe).
+          head="$(git rev-parse HEAD)"
+          on_main=false
+          if git rev-list --first-parent refs/remotes/origin/main 2>/dev/null | grep -Fx "$head" >/dev/null; then
+            on_main=true
           fi
           if [ "$set_count" -eq 0 ]; then
             mode=unsigned
-            echo "No App Store Connect API key: the archive is built without signing and checked; nothing is signed or uploaded."
-          elif [ "$SILL_TESTFLIGHT_IN_CI" = true ]; then
+            echo "::notice::The environment nightly has no App Store Connect API key: the archive is built without signing and checked; nothing is signed or uploaded."
+          elif [ "$SILL_TESTFLIGHT_IN_CI" = true ] && [ "$on_main" = true ]; then
             mode=upload
             echo "SILL_TESTFLIGHT_IN_CI is true: the archive is signed through the API key, exported, checked and uploaded to App Store Connect."
+          elif [ "$SILL_TESTFLIGHT_IN_CI" = true ]; then
+            mode=export
+            echo "::notice::$GITHUB_REF_NAME's commit ${head:0:12} is not on main's own line: the archive is signed through the API key, exported and checked, but not uploaded. Its commit count can be the build number of a later nightly of main, which would then take this build for its own; upload a branch from a Mac with release-ios.sh --bump --upload (docs/release-checklist.md, TestFlight from GitHub Actions)."
           else
             mode=export
             echo "The archive is signed through the API key, exported and checked; nothing is uploaded (SILL_TESTFLIGHT_IN_CI is not true)."
           fi
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          build="$(git rev-list --count HEAD)"
+          echo "The build number: $build, the commit count of $(git rev-parse --short=12 HEAD) (--build-number; the project's own is not changed)."
+          echo "build=$build" >> "$GITHUB_OUTPUT"
 
       # In a folder of this run's own, outside the checkout (release-ios.sh refuses a key inside
       # the repository), deleted by the last step whatever happened.
@@ -117,7 +148,7 @@ jobs:
           # pipefail would otherwise end the step at base64's own complaint.
           if ! printf '%s' "$SILL_TESTFLIGHT_KEY_P8" | base64 --decode > "$key" 2>/dev/null \
               || ! grep -q -e '-----BEGIN PRIVATE KEY-----' "$key"; then
-            echo "::error::SILL_TESTFLIGHT_KEY_P8 is not an App Store Connect key file in base64 (base64 -i AuthKey_<Key ID>.p8 | gh secret set SILL_TESTFLIGHT_KEY_P8)."
+            echo "::error::SILL_TESTFLIGHT_KEY_P8 is not an App Store Connect key file in base64 (base64 -i AuthKey_<Key ID>.p8 | gh secret set SILL_TESTFLIGHT_KEY_P8 --env nightly)."
             exit 1
           fi
           chmod 600 "$key"
@@ -125,15 +156,18 @@ jobs:
 
       - name: Archive without signing and check it (Scripts/release-ios.sh --unsigned)
         if: steps.mode.outputs.mode == 'unsigned'
-        run: Scripts/release-ios.sh --unsigned -v
+        env:
+          BUILD_NUMBER: ${{ steps.mode.outputs.build }}
+        run: Scripts/release-ios.sh --unsigned --build-number "$BUILD_NUMBER" -v
 
       - name: Archive, sign through the API key, export and check (Scripts/release-ios.sh --sign-at-export)
         if: steps.mode.outputs.mode == 'export'
         env:
           SILL_TESTFLIGHT_KEY_ID: ${{ secrets.SILL_TESTFLIGHT_KEY_ID }}
           SILL_TESTFLIGHT_ISSUER_ID: ${{ secrets.SILL_TESTFLIGHT_ISSUER_ID }}
+          BUILD_NUMBER: ${{ steps.mode.outputs.build }}
         run: |
-          Scripts/release-ios.sh --sign-at-export -v --api-key "$SILL_TESTFLIGHT_KEY_FILE" \
+          Scripts/release-ios.sh --sign-at-export --build-number "$BUILD_NUMBER" -v --api-key "$SILL_TESTFLIGHT_KEY_FILE" \
             --api-key-id "$SILL_TESTFLIGHT_KEY_ID" --api-issuer "$SILL_TESTFLIGHT_ISSUER_ID"
 
       - name: Archive, sign, export, check and upload to App Store Connect (Scripts/release-ios.sh --sign-at-export --upload)
@@ -141,8 +175,9 @@ jobs:
         env:
           SILL_TESTFLIGHT_KEY_ID: ${{ secrets.SILL_TESTFLIGHT_KEY_ID }}
           SILL_TESTFLIGHT_ISSUER_ID: ${{ secrets.SILL_TESTFLIGHT_ISSUER_ID }}
+          BUILD_NUMBER: ${{ steps.mode.outputs.build }}
         run: |
-          Scripts/release-ios.sh --sign-at-export --upload -v --api-key "$SILL_TESTFLIGHT_KEY_FILE" \
+          Scripts/release-ios.sh --sign-at-export --upload --build-number "$BUILD_NUMBER" -v --api-key "$SILL_TESTFLIGHT_KEY_FILE" \
             --api-key-id "$SILL_TESTFLIGHT_KEY_ID" --api-issuer "$SILL_TESTFLIGHT_ISSUER_ID"
 
       - name: Name the .ipa and summarize
@@ -164,9 +199,9 @@ jobs:
             echo "Sill for iPhone and iPad $version ($build), from $(git rev-parse --short HEAD) on $GITHUB_REF_NAME."
             echo
             if [ "$MODE" = unsigned ]; then
-              echo "Built without signing and checked. The artifact $(basename "$ipa") is not signed: for looking inside, not for installing or uploading. No App Store Connect API key is set (docs/release-checklist.md, TestFlight from GitHub Actions)."
+              echo "Built without signing and checked. The artifact $(basename "$ipa") is not signed: for looking inside, not for installing or uploading. The environment nightly has no App Store Connect API key (docs/release-checklist.md, TestFlight from GitHub Actions)."
             elif [ "$MODE" = export ]; then
-              echo "Signed for App Store Connect and checked; the artifact is $(basename "$ipa"). Nothing was uploaded: the repository variable SILL_TESTFLIGHT_IN_CI is not true."
+              echo "Signed for App Store Connect and checked; the artifact is $(basename "$ipa"). Nothing was uploaded: the repository variable SILL_TESTFLIGHT_IN_CI is not true, or this commit is not on main's own line (the step \"Which run this is\" says which)."
             else
               echo "Uploaded to App Store Connect. It shows under TestFlight once Apple has processed it (usually within 30 minutes, with an email). The artifact $(basename "$ipa") is the same build, exported the same way."
             fi

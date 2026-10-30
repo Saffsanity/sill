@@ -24,8 +24,13 @@ import StreamProtocol
 /// `StreamClient.largerPictureKey`,
 /// on an iPhone without a hinge whose picture it makes larger, `largerPictureOffered`; Share Clipboard,
 /// `StreamClient.clipboardKey`, while the Mac shares its clipboard, with the system's Paste for this
-/// device's text; Reverse Scrolling, `StreamClient.reverseScrollKey`; Three-Finger Gestures,
-/// `StreamClient.gesturesKey`), and whose gesture rows, as accessibility actions, do their gestures
+/// device's text; Reverse Scrolling, `StreamClient.reverseScrollKey`; Hold to Show Window Controls, a
+/// stepper, `ThumbnailHold.key`; Three-Finger Gestures, `StreamClient.gesturesKey`), and whose gesture
+/// rows, as accessibility actions, do their gestures
+/// `StreamClient.clipboardKey`, while the Mac shares its clipboard, with Paste on ‹Mac› Right Away,
+/// `StreamClient.pasteRightAwayKey`, and the system's Paste for this device's text; Reverse
+/// Scrolling, `StreamClient.reverseScrollKey`; Three-Finger Gestures, `StreamClient.gesturesKey`),
+/// and whose gesture rows, as accessibility actions, do their gestures
 /// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour.
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
@@ -58,6 +63,17 @@ struct HostSettingsPanel: View {
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
+    /// This device's hold before a thumbnail's lights (issue #113, ThumbnailHold): 0.5 s unless changed,
+    /// read by every bar's thumbnails at once, never sent. Read for its changes; the length through
+    /// `ThumbnailHold.seconds(stored:)`, which takes `-Sill.thumbnailHold 0.3`'s string too.
+    @AppStorage(ThumbnailHold.key) private var storedThumbnailHold = ThumbnailHold.standard
+    private var thumbnailHold: Double {
+        _ = storedThumbnailHold
+        return ThumbnailHold.seconds(stored: UserDefaults.standard.object(forKey: ThumbnailHold.key))
+    }
+    /// Paste on ‹Mac› Right Away (paste right away, ClipboardPolicy.pastesOnReceipt): on unless turned
+    /// off, read by StreamClient+Clipboard at each receipt, never sent.
+    @AppStorage(StreamClient.pasteRightAwayKey) private var pasteRightAway = true
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -77,7 +93,10 @@ struct HostSettingsPanel: View {
     /// photo of a short screen shows its switches and rows, which the footnote under them pushes out
     /// of `-SillSettingsEnd`'s view; `sound`, to the Send Audio row; `mute`, to the Mute row
     /// under it; `reverse`, to Reverse Scrolling's switch, so a photo of the panel in the lower half shows
-    /// it and its footnote, which the clipboard's rows above it push out of `gestures`' view there.
+    /// it and its footnote, which the clipboard's rows above it push out of `gestures`' view there;
+    /// `hold`, to Hold to Show Window Controls, the same for its row and footnote.
+    /// `clipboard`, to the clipboard's Paste row, so that photo shows it and the group's footnote under
+    /// it (the review of #242: `gestures` shows only the two switches above them there).
     private static var startsAt: String? {
         #if DEBUG
         switch UserDefaults.standard.string(forKey: "SillSettingsScroll") {
@@ -85,6 +104,8 @@ struct HostSettingsPanel: View {
         case "sound"?: return sendAudioID
         case "mute"?: return muteID
         case "reverse"?: return reverseScrollRowID
+        case "hold"?: return thumbnailHoldRowID
+        case "clipboard"?: return clipboardRowsID
         default: return nil
         }
         #else
@@ -95,6 +116,8 @@ struct HostSettingsPanel: View {
     private static let sendAudioID = "sendAudio"
     private static let muteID = "mute"
     private static let reverseScrollRowID = "reverseScroll"
+    private static let thumbnailHoldRowID = "thumbnailHold"
+    private static let clipboardRowsID = "clipboardPaste"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
     static var voiceOverRunning: Bool {
@@ -353,22 +376,25 @@ struct HostSettingsPanel: View {
                 // Direct Wireless Connection: how devices reach the Mac, not how it streams; after the
                 // closing footer, whose "the stream restarts" is not true of it, and last, the least
                 // changed row with the longest footer (the compact halves' 259 pt shows the rest
-                // first). Disabled only away from home (the Mac refuses it from a remote connection):
-                // off from a directly connected device is allowed, as on the Mac, and its consequence
-                // is written beside it. No row for a host without it.
+                // first). Disabled away from home (the Mac refuses it from a remote connection) and on
+                // a session the Mac says is not paired (it takes it only from a paired device:
+                // `takesDirectWireless`, 2026-10-29): off from a directly connected device is
+                // allowed, as on the Mac, and its consequence is written beside it. No row for a host
+                // without it.
                 if let direct = shown.directWireless {
+                    let locked = Self.directWirelessLock(remote: remoteRoute != nil, takes: state.takesDirectWireless, mac: mac)
                     Rows {
                         Toggle(isOn: binding(direct) { HostSettingsChange(directWireless: $0) }) {
                             RowTitle(title: "Direct Wireless Connection", since: client.settings.pendingSince(.directWireless))
                         }
-                        // A warning about turning it off, so only while the switch shows on.
-                        .accessibilityHint(client.connectedDirectly && direct ? "Turning this off disconnects this \(device)." : "")
-                        // From afar the Mac refuses it anyway: how devices near the Mac reach it is
-                        // theirs and the Mac's to change.
-                        .disabled(remoteRoute != nil)
+                        // A warning about turning it off, so only while the switch shows on and works.
+                        .accessibilityHint(locked == nil && client.connectedDirectly && direct ? "Turning this off disconnects this \(device)." : "")
+                        // From afar, or unpaired, the Mac refuses it anyway: how devices near the Mac
+                        // reach it is the Mac's and its paired devices' to change.
+                        .disabled(locked != nil)
                         .rowFrame()
                     }
-                    Footnote(text: remoteRoute != nil ? "Change this on \(mac), or from a device near it." : directFooter(on: direct))
+                    Footnote(text: locked ?? directFooter(on: direct))
                 }
                 if !state.persistent {
                     Footnote(text: "SillHost keeps these until it quits.")
@@ -525,6 +551,10 @@ struct HostSettingsPanel: View {
 
     /// This device's own group, after the Mac's: on an iPhone its switch for Larger Picture, then Share Clipboard while the Mac shares its clipboard,
     /// with Paste on ‹Mac› (the system's Paste control) under it while on, then Reverse Scrolling (for
+    /// every Mac: it only turns this device's own deltas around), then how long a thumbnail is held for
+    /// its window's lights (for every Mac: the thumbnails are this device's), then its switch for three-finger
+    /// with Paste on ‹Mac› Right Away (whether a Paste also presses ⌘V there) and Paste on ‹Mac› (the
+    /// system's Paste control) under it while on, then Reverse Scrolling (for
     /// every Mac: it only turns this device's own deltas around), then its switch for three-finger
     /// gestures, and what each does when the Mac takes them (Take the Tour follows it). After the Mac's
     /// rows because it is the least changed, and the compact halves' 259 pt show the Mac's rows first.
@@ -560,7 +590,15 @@ struct HostSettingsPanel: View {
                 .onChange(of: clipboardOn) { _, _ in client.clipboardSwitchChanged() }
                 if clipboardOn {
                     RowDivider()
+                    // Paste right away (2026-10-29): with it on, a Paste's receipt presses ⌘V on the Mac.
+                    Toggle(isOn: $pasteRightAway) {
+                        Text(ClipboardPolicy.Copy.rightAwayTitle(mac: mac)).foregroundStyle(Palette.text)
+                    }
+                    .padding(.vertical, 6)          // a long Mac name takes two lines
+                    .rowFrame()
+                    RowDivider()
                     ClipboardPasteRow(client: client, title: ClipboardPolicy.Copy.rowTitle(mac: mac))
+                        .id(Self.clipboardRowsID)
                 }
             }
             if clipboardOn, let note = client.clipboardNote {
@@ -568,7 +606,7 @@ struct HostSettingsPanel: View {
                     .padding(.bottom, -6)
                     .accessibilityHidden(true)      // announced as it came
             }
-            Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, mac: mac, device: device))
+            Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, rightAway: pasteRightAway, mac: mac, device: device))
         }
         Rows {
             Toggle(isOn: $reverseScroll) {
@@ -578,6 +616,13 @@ struct HostSettingsPanel: View {
         }
         .id(Self.reverseScrollRowID)
         Footnote(text: Self.reverseScrollFooter(device: device))
+        // How long a thumbnail is held before its window's lights show and it can be dragged (issue #113;
+        // Noah, 2026-10-29).
+        Rows {
+            ThumbnailHoldRow(seconds: thumbnailHold) { storedThumbnailHold = $0 }
+        }
+        .id(Self.thumbnailHoldRowID)
+        Footnote(text: ThumbnailHold.footnote)
         Rows {
             Toggle(isOn: $gesturesOn) {
                 Text("Three-Finger Gestures").foregroundStyle(Palette.text)
@@ -710,6 +755,16 @@ struct HostSettingsPanel: View {
 
     /// "iPhone" or "iPad", for copy about this device.
     private var device: String { UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad" }
+
+    /// Why the Direct Wireless Connection switch is disabled, as its footnote says it, or nil while
+    /// this device may change it: away from home (`remote`) the Mac refuses it from a remote
+    /// connection, and on a session it says is not paired (`takes` false:
+    /// `HostSettingsState.takesDirectWireless`) from any device it did not pair.
+    static func directWirelessLock(remote: Bool, takes: Bool, mac: String) -> String? {
+        if remote { return "Change this on \(mac), or from a device near it." }
+        if !takes { return "Change this on \(mac), or from a device paired with it." }
+        return nil
+    }
 
     /// Under the Direct Wireless Connection row: what it does and costs, and, while the switch shows
     /// on and this device is connected over it, what turning it off does to this device: the Mac
@@ -866,6 +921,104 @@ private struct GestureRow: View {
             .foregroundStyle(Palette.muted)
             .frame(width: 24)
             .accessibilityHidden(true)
+    }
+}
+
+/// Hold to Show Window Controls (issue #113; ThumbnailHold): the title, the length beside it ("0.5 s")
+/// and the system's stepper, − and + a tenth of a second a press from 0.2 to 2 s (the capsule on iOS 26
+/// and later), counting whole tenths so no sum of presses drifts off the grid. The title wraps beside the
+/// stepper, as a switch's does, rather than the row stacking: in a panel 340 or 360 pt wide it never fits
+/// on one line beside the value and the stepper (two lines there, three at the larger text sizes). It stays
+/// beside them only while it has room for three lines with every word whole (`ThumbnailHold.titleLines`):
+/// in a narrower panel (a 320 pt iPhone with Display Zoom, an iPad window as narrow as Slide Over) the row
+/// stacks, the title over the length and the stepper, as `AdaptiveRow` does; beside them it ran to four
+/// lines there, and at the larger text sizes to seven, "Win-dow" and "Con-trols" broken (the review,
+/// 2026-10-29).
+///
+/// For VoiceOver one adjustable element: "Hold to show window controls, 0.5 seconds", a swipe up or down a
+/// tenth (`ThumbnailHold.adjusted`). The system's stepper on iOS 27 is two buttons instead, each read with
+/// the whole label and the visible "0.5 s" ("…, 0.5 s, Hold to show window controls, Decrement"), which
+/// says neither the value in words nor what the row is.
+private struct ThumbnailHoldRow: View {
+    let seconds: Double
+    let set: (Double) -> Void
+    /// Measured afresh when the text size changes, as `AdaptiveRow` is.
+    @Environment(\.dynamicTypeSize) private var typeSize
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            stepper {
+                HStack(spacing: 8) {
+                    WrappingTitle {
+                        // Never shown: what the title must have room for beside the stepper.
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(ThumbnailHold.titleLines, id: \.self) { Text($0) }
+                        }
+                        .hidden()
+                        title
+                    }
+                    Spacer(minLength: 8)
+                    value
+                }
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                title.fixedSize(horizontal: false, vertical: true)
+                stepper { value }
+            }
+            .padding(.vertical, 8)
+        }
+        .id(typeSize)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(ThumbnailHold.spokenTitle)
+        .accessibilityValue(ThumbnailHold.spokenValue(seconds))
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: set(ThumbnailHold.adjusted(seconds, up: true))
+            case .decrement: set(ThumbnailHold.adjusted(seconds, up: false))
+            @unknown default: break
+            }
+        }
+        .padding(.vertical, 4)
+        // Never wider than the panel offers it. At the edge of fitting the title beside the stepper, its lines'
+        // widths, rounded to the pixel, can come to a third of a point more than the row was offered (the Duo's
+        // cover upright at xxLarge: 298.333 pt in 298), and `rowFrame`'s frame, a maximum alone, passes that on:
+        // every row of the panel grew by it and the panel's edge moved a pixel past main's (the review,
+        // 2026-10-29). With a minimum too, the frame takes what it is offered, whatever the row asks.
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        .rowFrame()
+    }
+
+    private var title: some View { Text(ThumbnailHold.title).foregroundStyle(Palette.text) }
+
+    private var value: some View {
+        Text(ThumbnailHold.valueText(seconds))
+            .monospacedDigit()
+            .foregroundStyle(Palette.muted)
+            .fixedSize()
+    }
+
+    /// The system's stepper over whole tenths, with its label beside it.
+    private func stepper<Label: View>(@ViewBuilder label: () -> Label) -> some View {
+        Stepper(value: Binding(get: { ThumbnailHold.tenths(seconds) }, set: { set(ThumbnailHold.seconds(tenths: $0)) }),
+                in: ThumbnailHold.tenthsRange, label: label)
+    }
+}
+
+/// A title that wraps in the width it is given, as a Text does (the second view), but whose ideal width,
+/// which `ViewThatFits` measures a row by, is the first view's (never shown): the narrowest it may be.
+private struct WrappingTitle: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.count == 2 else { return .zero }
+        guard let width = proposal.width else {
+            let floor = subviews[0].sizeThatFits(.unspecified).width
+            return CGSize(width: floor, height: subviews[1].sizeThatFits(ProposedViewSize(width: floor, height: nil)).height)
+        }
+        return subviews[1].sizeThatFits(ProposedViewSize(width: width, height: nil))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 2 else { return }
+        subviews[0].place(at: bounds.origin, proposal: .zero)
+        subviews[1].place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
     }
 }
 

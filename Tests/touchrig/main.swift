@@ -61,6 +61,9 @@ enum Step {
     case end([Int])
     case cancel
     case wait(Int)
+    /// The picture's zoom (#65): set to `factor` about a point of the overlay (from 1×), and logged.
+    case zoom(CGFloat, CGPoint)
+    case logZoom
 }
 
 enum Gesture {
@@ -179,6 +182,54 @@ func scenarios(_ c: CGPoint) -> [(String, [Step])] {
     return out + reviewScenarios(c, nudge: nudge)
 }
 
+#if ZOOM
+/// The picture's zoom (#65, #196), the overlay only: who two fingers belong to (the Mac's scroll or the
+/// picture), the zoom each stroke leaves (`zoom:` lines), and what reaches the Mac meanwhile.
+func zoomScenarios(_ c: CGPoint) -> [(String, [Step])] {
+    var out: [(String, [Step])] = []
+    let two = Gesture.fingers(2, around: c)
+    out.append(("2-finger spread to 2.5 about a still midpoint", [.zoom(1, c)] + Gesture.pinch(2, at: c, scale: 2.5) + [.logZoom]))
+    out.append(("zoomed 2x: 2-finger scroll up 150", [.zoom(2, c)] + Gesture.swipe(2, at: c, dx: 0, dy: -150, frames: 8) + [.logZoom]))
+    out.append(("zoomed 2x: 1-finger drag right 120", [.zoom(2, c)] + Gesture.swipe(1, at: c, dx: 120, dy: 0, frames: 12) + [.logZoom]))
+    out.append(("zoomed 2x: 1-finger tap", [.zoom(2, c)] + Gesture.tap(1, at: CGPoint(x: c.x + 40, y: c.y - 30)) + [.logZoom]))
+    out.append(("at 2.5x: 2-finger pinch in to 0.3 (all the way out)", [.zoom(2.5, c)] + Gesture.pinch(2, at: c, scale: 0.3) + [.logZoom]))
+    // A two-finger scroll whose fingers drift 8 pt apart over 150: the Mac's, as before.
+    let drift = [CGPoint(x: two[0].x - 4, y: two[0].y - 150), CGPoint(x: two[1].x + 4, y: two[1].y - 150)]
+    out.append(("at 1x: 2-finger scroll up 150, the fingers drifting 8 pt apart", [.zoom(1, c)] + Gesture.stroke(two, to: drift, frames: 8) + [.logZoom]))
+    // A pinch led by one finger: one still, the other 120 pt further away.
+    let led = [two[0], CGPoint(x: two[1].x + 120, y: two[1].y)]
+    out.append(("at 1x: a spread led by one finger, 120 pt", [.zoom(1, c)] + Gesture.stroke(two, to: led, frames: 12) + [.logZoom]))
+    // A spread to 2, then one finger lifts and the other moves 100 pt: nothing for the Mac (#196's first version
+    // scrolled it by the pan's whole translation, outside a gesture).
+    let spread = two.map { CGPoint(x: c.x + ($0.x - c.x) * 2, y: c.y + ($0.y - c.y) * 2) }
+    var lift: [Step] = [.zoom(1, c)] + Array(Gesture.stroke(two, to: spread, frames: 10).dropLast(2))
+    lift.append(.end([0]))
+    for k in 1...10 { lift.append(.move([CGPoint(x: spread[1].x - CGFloat(k) * 10, y: spread[1].y - CGFloat(k) * 4)])) }
+    lift += [.end([0]), .logZoom]
+    out.append(("at 1x: a spread to 2, one finger lifts, the other moves 100", lift))
+    out.append(("zoomed 2x: 3-finger spread (to 1.8)", [.zoom(2, c)] + Gesture.pinch(3, at: c, scale: 1.8) + [.logZoom]))
+    // One finger scrolling 30 pt, then a second lands and both spread: a scroll, never a zoom.
+    var join: [Step] = [.zoom(1, c), .begin([two[0]])]
+    for k in 1...3 { join.append(.move([CGPoint(x: two[0].x, y: two[0].y - CGFloat(k) * 10)])) }
+    join.append(.begin([CGPoint(x: two[1].x, y: two[1].y - 30)]))
+    for k in 1...10 { join.append(.move([CGPoint(x: two[0].x - CGFloat(k) * 8, y: two[0].y - 30), CGPoint(x: two[1].x + CGFloat(k) * 8, y: two[1].y - 30)])) }
+    join += [.end([0]), .end([0]), .logZoom]
+    out.append(("at 1x: a 1-finger scroll of 30, a 2nd lands, both spread", join))
+    out.append(("at 1.5x: 2-finger pinch in to 0.675 (1.01x) and lift", [.zoom(1.5, c)] + Gesture.pinch(2, at: c, scale: 0.675) + [.logZoom]))
+    // A two-finger scroll whose fingers drift 30 pt apart over 150: the Mac's still.
+    let wide = [CGPoint(x: two[0].x - 15, y: two[0].y - 150), CGPoint(x: two[1].x + 15, y: two[1].y - 150)]
+    out.append(("at 1x: 2-finger scroll up 150, the fingers drifting 30 pt apart", [.zoom(1, c)] + Gesture.stroke(two, to: wide, frames: 8) + [.logZoom]))
+    // A spread led by one finger (its midpoint moves, so the finger pan begins too), then the still finger lifts and
+    // the other moves on 100 pt: nothing for the Mac (#196's first version sent the pan's whole translation).
+    var ledLift: [Step] = [.zoom(1, c)] + Array(Gesture.stroke(two, to: led, frames: 12).dropLast(2))
+    ledLift.append(.end([0]))
+    for k in 1...10 { ledLift.append(.move([CGPoint(x: led[1].x - CGFloat(k) * 4, y: led[1].y - CGFloat(k) * 10)])) }
+    ledLift += [.end([0]), .logZoom]
+    out.append(("at 1x: a spread led by one finger, the still one lifts, the other moves on 100", ledLift))
+    return out
+}
+#endif
+
 /// The review's strokes (2026-09-27): fingers placed slowly, a thumb resting on the glass, a pinch led by
 /// the thumb, the Mac's own thumb-and-three-finger pinch, a brief extra contact, and one- and two-finger
 /// strokes made right after a gesture on the same surface (compare.py holds them to the same strokes made
@@ -266,6 +317,9 @@ func reviewScenarios(_ c: CGPoint, nudge: [Step]) -> [(String, [Step])] {
 // MARK: - The runner
 
 final class Runner {
+    #if ZOOM
+    static func zoomText(_ z: StreamZoom) -> String { String(format: "%.3fx offset (%.1f, %.1f)", z.scale, z.offset.width, z.offset.height) }
+    #endif
     let window: UIWindow
     let synth: TouchSynth
     var queue: [(String, UIView, [Step])] = []
@@ -319,6 +373,19 @@ final class Runner {
         case .end(let idx): synth.end(IndexSet(idx)); RigLog.log("[touch] end \(idx.count) → \(synth.activeCount) down")
         case .cancel: synth.cancelAll(); RigLog.log("[touch] cancel all")
         case .wait(let n): waitLeft = n - 1
+        case .zoom(let factor, let at):
+            #if ZOOM
+            if let overlay = view as? InputOverlayView {
+                var z = StreamZoom()
+                z.pinch(factor: factor, from: at, to: at, in: overlay.bounds.size)
+                overlay.zoom = z
+                RigLog.log("[zoom] set " + Runner.zoomText(overlay.zoom))
+            }
+            #endif
+        case .logZoom:
+            #if ZOOM
+            if let overlay = view as? InputOverlayView { RigLog.log("zoom: " + Runner.zoomText(overlay.zoom)) }
+            #endif
         }
     }
 }
@@ -394,8 +461,15 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         self.runner = runner
         let tc = CGPoint(x: root.trackpad.bounds.midX, y: root.trackpad.bounds.midY + 60)
         let oc = CGPoint(x: root.overlay.bounds.midX, y: root.overlay.bounds.midY + 60)
-        for (title, steps) in scenarios(tc) { runner.add("TRACKPAD \(title)", root.trackpad, steps) }
-        for (title, steps) in scenarios(oc) { runner.add("OVERLAY \(title)", root.overlay, steps) }
+        // RIG_ONLY=zoom: the overlay's zoom strokes alone (#65), a minute instead of five.
+        let onlyZoom = ProcessInfo.processInfo.environment["RIG_ONLY"] == "zoom"
+        if !onlyZoom {
+            for (title, steps) in scenarios(tc) { runner.add("TRACKPAD \(title)", root.trackpad, steps) }
+            for (title, steps) in scenarios(oc) { runner.add("OVERLAY \(title)", root.overlay, steps) }
+        }
+        #if ZOOM
+        for (title, steps) in zoomScenarios(oc) { runner.add("OVERLAY ZOOM \(title)", root.overlay, steps) }
+        #endif
         runner.start { print("RIG done"); exit(0) }
     }
 }

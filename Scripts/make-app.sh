@@ -10,6 +10,9 @@
 #                                          the signature is Developer ID; Scripts/release.sh --dry-run
 #                                          sets SILL_RELEASE_DRY_RUN=1, which only warns about the tag)
 #   SILL_INSTALL_DIR=~/Applications Scripts/make-app.sh --install   (another install folder)
+#   SILL_RELEASE_NIGHTLY=1 … Scripts/make-app.sh --release
+#                                          a nightly (Scripts/release.sh --nightly sets it): main's head,
+#                                          untagged, signed and checked exactly as a release is
 #
 # Why a script: SwiftPM builds executables, not app bundles, and everything the host needs from
 # macOS belongs to an app bundle. Screen Recording, Accessibility, Local Network and Login Items
@@ -43,12 +46,17 @@ fi
 # CFBundleShortVersionString (v0.4.0 for 0.4.0), and every Sill.app's update check compares the
 # latest release's tag on GitHub with the version it runs (Sources/SillMenuBar/UpdatePolicy.swift).
 # A rehearsal (release.sh --dry-run, which sets SILL_RELEASE_DRY_RUN=1) builds any commit and only
-# warns: its zip is never notarized, so it is never published.
+# warns: its zip is never notarized, so it is never published. A nightly (release.sh --nightly, which
+# sets SILL_RELEASE_NIGHTLY=1) builds main's head, which no tag names: it carries the version main
+# says, the next release's, with the commit count as its build, and is published only as the rolling
+# pre-release "nightly", which no update check reads (docs/release-checklist.md, "Nightlies").
 if [ "$release" = 1 ]; then
     version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Packaging/Info.plist)"
     tags="$(git tag --points-at HEAD 2>/dev/null | tr '\n' ' ' | sed 's/ $//' || true)"
     if ! git tag --points-at HEAD 2>/dev/null | grep -Fx "v$version" >/dev/null; then   # -F: dots are dots
-        if [ "${SILL_RELEASE_DRY_RUN:-}" = 1 ]; then
+        if [ "${SILL_RELEASE_NIGHTLY:-}" = 1 ]; then
+            echo "A nightly: HEAD is not tagged v$version, and needn't be; it is published only as the pre-release 'nightly'." >&2
+        elif [ "${SILL_RELEASE_DRY_RUN:-}" = 1 ]; then
             echo "warning: HEAD is not tagged v$version (it is tagged '${tags:-nothing}'); a dry run builds it anyway, a release only a commit tagged v$version." >&2
         else
             echo "error: --release builds only a commit tagged v$version (HEAD is tagged '${tags:-nothing}'): the update check compares the release's tag with this version." >&2
