@@ -2238,6 +2238,28 @@ do {
           "pressed and released for S and ←")
     check(f.commanded(uS, modifiers: 0, at: 2).isEmpty, "a key the text system takes: no command sends it")
 }
+// Priority key commands for system-intercepted ⌘ shortcuts (#129: ⌘W, ⌘C, ⌘V, ⌘X, ⌘Z, ⌘A, ⌘, on iPad-on-Mac and iPadOS):
+// each maps its UIKeyCommand input to its HID usage and goes through `commanded` once, leaving nothing held on either Mac.
+do {
+    check(ForwardedKeys.shortcutUsage(forInput: "w") == 0x1A && ForwardedKeys.shortcutUsage(forInput: "W") == 0x1A
+          && ForwardedKeys.shortcutUsage(forInput: "c") == uC && ForwardedKeys.shortcutUsage(forInput: "v") == 0x19
+          && ForwardedKeys.shortcutUsage(forInput: "x") == 0x1B && ForwardedKeys.shortcutUsage(forInput: "z") == uZ
+          && ForwardedKeys.shortcutUsage(forInput: "a") == uA && ForwardedKeys.shortcutUsage(forInput: ",") == 0x36
+          && ForwardedKeys.shortcutUsage(forInput: nil) == nil && ForwardedKeys.shortcutUsage(forInput: "?") == nil,
+          "shortcutUsage: maps menu-intercepted shortcut inputs to HID usages (#129)")
+    check(ForwardedKeys.shortcutCommandKeys.allSatisfy {
+              $0.input.count == 1 && ForwardedKeys.characterUsages.contains($0.usage)
+                  && KeyStrokes.virtualKeys[$0.usage] != nil
+                  && ForwardedKeys.shortcutUsage(forInput: $0.input) == $0.usage
+          }, "every shortcut command key is a character usage every Sill for Mac answers to (#129)")
+    var f = ForwardedKeys()
+    let cmdW = f.commanded(0x1A, modifiers: command, at: 3.0)
+    let pressW = f.pressed(0x1A, modifiers: command, at: 2.999, typing: .keys)
+    let upW = f.released(0x1A)
+    check(cmdW == [key(0x1A, true, command), key(0x1A, false, 0)] && pressW == .swallow && upW == .swallow,
+          "⌘W via priority key command: sent once, duplicate press and release swallowed (#129): \(cmdW)")
+    _ = onBothMacs(cmdW, "⌘W via priority key command")
+}
 
 // MARK: Who types a hardware keyboard's characters (KeyTyping, #162's letters)
 
