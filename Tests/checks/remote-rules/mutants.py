@@ -85,6 +85,20 @@ M = [
     (S, "SUP with itself", "guard old != new, let o = list.first", "guard let o = list.first"),
     (S, "SUP remote order oldest first", "            out += byDate.filter { $0.name == mac.name }.reversed()", "            out += byDate.filter { $0.name == mac.name }"),
     (S, "SUP remote order newest first overall", "        let byDate = list.sorted { ($0.pairedAt, $0.macID) < ($1.pairedAt, $1.macID) }\n        var out", "        let byDate = list.sorted { ($0.pairedAt, $0.macID) > ($1.pairedAt, $1.macID) }\n        var out"),
+    # #140: the device key's rules (DeviceKeyPolicy), through launch.swift's model.
+    (S, "K1 clearing with no tag asked", "        !answers.isEmpty && answers.allSatisfy { $0 == .notFound }", "        answers.allSatisfy { $0 == .notFound }"),
+    (S, "K2 clearing when any tag has none", "        !answers.isEmpty && answers.allSatisfy { $0 == .notFound }", "        answers.contains { $0 == .notFound }"),
+    (S, "K3 a failed read counts as no key", "        !answers.isEmpty && answers.allSatisfy { $0 == .notFound }", "        !answers.isEmpty && answers.allSatisfy { $0 != .found }"),
+    (S, "K4 a failed read makes another key (before #140's fix)", "        case .failed(let status): return .fail(status)\n        }\n    }\n\n    enum Made",
+        "        case .failed: return .make\n        }\n    }\n\n    enum Made"),
+    (S, "K5 no key made when there is none", "        case .notFound: return .make\n", "        case .notFound: return .fail(itemNotFound)\n"),
+    (S, "K6 a found key not used", "        case .found: return .use\n        case .notFound", "        case .found: return .make\n        case .notFound"),
+    (S, "K7 a made key used unread (before #140's fix)", "        if readBack == .found { return .use }\n", "        return .use\n"),
+    (S, "K8 no explicit add", "        guard let added else { return .add }\n", "        guard let added else { return .fail(itemNotFound) }\n"),
+    (S, "K9 used after the add whatever it read", "        return .fail(added != 0 ? added : itemNotFound)\n", "        return .use\n"),
+    (S, "K10 the add's status lost", "        return .fail(added != 0 ? added : itemNotFound)\n", "        return .fail(itemNotFound)\n"),
+    (S, "K11 the read-back's own failure lost", "        if case .failed(let status) = readBack { return .fail(status) }\n", ""),
+    (S, "K12 errSecItemNotFound misspelt", "    static let itemNotFound: Int32 = -25300\n", "    static let itemNotFound: Int32 = -25299\n"),
 ]
 caught = 0
 for f, name, old, new in M:

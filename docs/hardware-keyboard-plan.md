@@ -61,7 +61,9 @@ The Mac already takes both kinds of scroll: phased gestures with momentum, and b
 - The action sends the key down and up through the path a forwarded hardware key takes
   (`ForwardedKeys`), carrying the command's modifiers: down with them, up with the modifier keys down
   on the Mac. A key command gives no key-up, so the up follows the down at once (a tap; holding Esc
-  repeats it, as UIKit repeats a held key's command).
+  repeats it, as UIKit repeats a held key's command). Since #162 (2026-10-28) an Esc held through
+  `pressesBegan` is down on the Mac until its release, and the Mac's host repeats it at the Mac's own
+  timing, as every key held there (open question 12).
 - **Both channels, one key press.** A device that delivers the press to `pressesBegan` as well must
   not send Esc twice (`ForwardedKeys`, pure, checked in `key-strokes`):
   - the press came first: Esc is down on the Mac through it (`down` has it), so the key command
@@ -188,6 +190,59 @@ Settings panel already cover the stream for hit-testing.
     (`UIAccessibility.isSwitchControlRunning`) but not Full Keyboard Access (the iOS 27.1 SDK's UIKit
     headers name no such test), so for Full Keyboard Access the alternative is Q1's: the Keyboard button's
     second press stops keys for the session.
+12. **Key repeat** (#162, branch `key-repeat`; Noah, 2026-10-27: "same as a regular keyboard, wait times
+    and all … Same as desktop", so decided; what follows are the build's defaults). The Mac's host repeats a
+    key held down on the device after the Mac's own Delay Until Repeat and at its Key Repeat Rate
+    (`KeyRepeat`, read from NSEvent at each key's down): the keys that reach the Mac as keys (the arrows,
+    Esc, Forward Delete, Home, End, Page Up and Down, the F-keys, any key with ⌘, ⌃ or ⌥ held), and the
+    portrait key row's esc, tab and arrows, down from the touch to the release (`HeldCap`; a phone's esc and
+    tab stay taps at the accessibility text sizes, where a long press shows the cap large), and an Esc
+    through its key command iPadOS's repeat of the command.
+
+    The text system's keys were thought to keep iPadOS's own repeat; a letter never repeats there (Noah,
+    2026-10-29, the iPad mini with a Bluetooth keyboard and through Universal Control: "hold p didnt work …
+    When I held down e it showed the keyboard options for Spanish characters"; in the simulator with
+    Tests/keyrig: one insertText for P held 2.3 s, E's accent popover, which stays after the release), and
+    Delete and Space repeat at iPadOS's own timing (0.4 s, then about ten a second), each a separate press
+    on the Mac. So a hardware keyboard's characters now go to the Mac as keys whenever the Mac may type them
+    (`KeyTyping.keys`): it says it repeats a held key (`WindowList.keyRepeat` 1: a Sill for Mac from before
+    key repeat would type each once, where iPadOS repeats Delete and Space, so it is sent nothing new), the
+    keyboard selected on the iPad types the Latin alphabet directly, nothing is composed, nothing is latched
+    on the key row. Letters, digits, punctuation, Space, Delete, Return, Tab and Shift
+    (`ForwardedKeys.characterUsages`) then repeat at the Mac's timing, take the Mac's layout and dead keys,
+    and never bring up iPadOS's accents; a letter with Caps Lock on carries Shift (Caps Lock stays the
+    iPad's). The Mac's own press and hold applies to them as to its own keyboard (the repeats carry the
+    autorepeat flag): in TextEdit with macOS's default a held E shows the Mac's accent menu and a held P
+    types once, and Terminal, iTerm2 and apps with `ApplePressAndHoldEnabled` off repeat. Default taken: the
+    Latin alphabet only. An input method's keyboard (Chinese, Cantonese, Japanese, Korean, Vietnamese,
+    Hawaiian, the transliteration keyboards) and another script's (Russian, Greek, Arabic, Hindi…) keep
+    iPadOS's typing, with no repeat: the input method has to see its first letter, and a keyboard in another
+    script says which characters are meant, which the Mac's layout would not give (with keyboards in two
+    languages ⌃Space is iPadOS's, so a Mac-side switch would be out of reach). Vietnamese and Hawaiian are
+    the Latin alphabet's two keyboards whose input managers say they compose text (TextInput's
+    doesComposeText, in the iOS 27.0 simulator runtime: `KeyTyping.composingLatin`); whether Hawaiian's
+    marks text for a hardware keyboard only a device shows, and the default leaves it to iPadOS. Latin
+    keyboards that compose a letter with its accents (`UIKeyboardComposesText`: Czech, Slovak, Faroese,
+    Navajo, Guarani…) type on the Mac like the rest: a hardware keyboard's dead keys make those, and the
+    Mac's input source has its own. Alternative: every keyboard that
+    does not compose types on the Mac (Russian then needs the Mac's Russian input source, and the iPad's own
+    choice of keyboard no longer matters but for input methods). Known: the iPad's hardware keyboard layout
+    setting and its Key Repeat setting no longer apply to the Mac's keys (the Mac's input source does:
+    AZERTY on the iPad and ABC on the Mac type QWERTY's letters); the keypad and the ISO keyboards' Non-US `\`
+    and # stay iPadOS's (no Sill for Mac before has them as keys).
+
+    Defaults taken: a modifier pressed or let go mid-hold changes the repeats after it and never stops them,
+    as on a Mac; one key at a time, the last pressed, and an earlier key still held does not take over
+    again; the repeats wait while the device has said nothing for half a second (a stalled link can hold the
+    key's up back for seconds before the Mac gives the device up) and start over after the delay once it
+    speaks; a key's first repeat waits for a word from its device heard no earlier than 0.3 s before it is
+    due (`KeyRepeat.firstWord`, the review of #162's letters: a letter typed or a Delete, its up held back by
+    a stall, is never repeated; a key held has its word in time, a ping every quarter of a second); a delay
+    under 0.1 s and an interval under 15 ms count as those, and Off (a delay or an interval
+    of a minute or more) repeats nothing. Known: while iPadOS types the characters, ⇧ let go while a
+    hardware ⇧→ is held keeps selecting until → comes up (the text system keeps ⇧'s own key, so the Mac
+    never hears it go; while the Mac types them ⇧ is a key of its own and the repeats follow it).
+    Alternative: the device repeats (#163: 0.4 s, then 20 a second, its own timing, not the Mac's).
 
 ## Test plan
 
@@ -493,6 +548,38 @@ So steps 1, 3, 4, 6, 7 and 9 of "Untested, for Noah" pass on Universal Control's
 trackpad. Not a physical Magic Keyboard: which channel brings Esc there, the on-screen keyboard
 staying away when it is folded, an input method's candidates, VoiceOver, Full Keyboard Access and
 two windows (steps 2, 5, 8, 10 to 13) are still Noah's.
+
+## #130 and PR #217 (2026-10-28)
+
+andrewgribben's PR #217 ("Trackpad scroll sends each event's own movement", Fixes #130) read each scroll
+pan's reading as that event's own movement on a Magic Keyboard, so that §3's diff of a running total sent
+almost nothing. Checked on a private iPad Pro 11-inch simulator (iOS 27.0) with keyrig and a probe app of
+pans side by side, then Sill's own build against a loopback synthetic host with `SILL_TEST_INPUT_LOG=1`:
+- The translation is a running total, as a finger's (three notches: 3, 6, 9 pt), and Apple's guidance is
+  to give an existing finger pan a scroll mask with its handler unchanged. Main's build and #217's posted
+  the same wheel scroll, event for event (one notch 6 pt; three 5, 6, 5; ten 6, 5, 6, 5, 6, 6, 5, 6, 5, 6
+  points on the test pattern), and the same phased scroll within its timing (194 and 190 points). The
+  issue's reports were of 0.5.1, whose finger pan had no scroll mask (a pan's default is 0, read there):
+  no scroll event reached it at all.
+- What was wrong: the pan's location runs on with its translation while the pointer stays put (the
+  pointer at y 308.8, the pan at 311.8, 314.8, 317.8), and the scroll, its end and its coast were posted
+  there: ten notches walked from y 447 to 497 of the pattern's 949, a phased scroll from 459 to 636, so the
+  Mac scrolled the window under the pointer at first and then whatever the point reached. Now every event
+  goes where the pointer was as the scroll began (`PointerScroll`, in HardwareKeyboardPolicy.swift): at
+  y 442 throughout, the amounts unchanged.
+- #217's zeroing of each reading stays (it reads the movement since the last event whether UIKit adds them
+  up or not); its `minimumNumberOfTouches = 0` and its three stats keys go (`in.scrollMiss` could not count
+  for a Sill device, `in.scroll0` counts every coast's tail, `in.scrollY` watched for amounts that were
+  never lost), and the input log says where a scroll lands instead.
+- Not seen: a real trackpad's events in the continuous pan (none reached it in the simulator: keyrig's
+  mouse and its phased events go to the discrete pan, and a virtual touch pad's two-finger digitizer frames
+  came as touch events). The DEBUG console's `scroll:` line, one a scroll, says
+  on a device how far it went, where, and how far UIKit's own location for the pan had run from there.
+- Untested, for Noah (one step, the iPad with the Magic Keyboard, a Debug build from the branch): two
+  fingers on the trackpad scroll a window and the Desktop, the whole way, under the pointer: a long scroll
+  down and up in Safari and in Finder's list; a flick coasts once (note a double coast: the content running
+  on twice as far, or a second stretch after the first ends); a mouse's wheel, one notch and a spin; the
+  console's `scroll:` lines (the pan's own location running on by about the scroll, or not).
 
 ## Progress
 

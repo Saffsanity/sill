@@ -1,6 +1,6 @@
-"""Mutants of CaptureScale.swift (Sources/SillHost; CaptureScale, VirtualDisplaySize, InputLanding): each
-changes it in one place, is compiled with the check (main.swift) and must make it fail. A mutant that
-does not compile is not counted as caught.
+"""Mutants of CaptureScale.swift (Sources/SillHost; CaptureScale, VirtualDisplaySize with the window's size on
+the virtual display, InputLanding): each changes it in one place, is compiled with the check (main.swift) and
+must make it fail. A mutant that does not compile is not counted as caught.
 usage: mutants.py"""
 import os, subprocess, sys
 SP = os.path.dirname(os.path.abspath(__file__))
@@ -24,6 +24,11 @@ CMP = "        return want.width != encoder.width || want.height != encoder.heig
 SIDES = ("        (windowPixels(points.width, knob: knob, displayScale: displayScale),\n"
          "         windowPixels(points.height, knob: knob, displayScale: displayScale))\n")
 EVEN = "func evenPixels(_ v: CGFloat) -> Int { Int(v.rounded(.down)) & ~1 }\n"
+STAGE = ("        return CGSize(width: min(max((panel.width / s).rounded(), 1), maxWindowSide),\n"
+         "                      height: min(max((panel.height / s).rounded(), 1), maxWindowSide))\n")
+STAGE_GUARD = ("        guard let panel, panel.width.isFinite, panel.height.isFinite, panel.width > 0, panel.height > 0 "
+               "else { return own }\n")
+STAGE_SCALE = "        let s = scale.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? 1\n"
 MUTANTS = [
     # The capture's pixel scale.
     ("C1 the knob never held to the display (the bug: a window on a 1x display in the top-left quarter)", HOLD,
@@ -101,6 +106,32 @@ MUTANTS = [
      "        guard let panel, panel.height > 0 else"),
     ("V9 the ceiling raised past VirtualDisplay's 8192 pixels at 2x", "    static let maxSide: CGFloat = 4096\n",
      "    static let maxSide: CGFloat = 8192\n"),
+    # The window's size on the virtual display: held to 1…65536 points (security scan, finding 4; the review).
+    ("S1 the window's size unheld (the bug: 1e300 points, the \"insists on\" line's Int() trapped)", STAGE,
+     "        return CGSize(width: (panel.width / s).rounded(),\n"
+     "                      height: (panel.height / s).rounded())\n"),
+    ("S2 only the width held", STAGE,
+     "        return CGSize(width: min(max((panel.width / s).rounded(), 1), maxWindowSide),\n"
+     "                      height: (panel.height / s).rounded())\n"),
+    ("S3 no floor of a point (a quarter point asked 0×0)", STAGE,
+     "        return CGSize(width: min((panel.width / s).rounded(), maxWindowSide),\n"
+     "                      height: min((panel.height / s).rounded(), maxWindowSide))\n"),
+    ("S4 the envelope's floor, 800, for the window too", STAGE,
+     "        return CGSize(width: min(max((panel.width / s).rounded(), minSide), maxWindowSide),\n"
+     "                      height: min(max((panel.height / s).rounded(), minSide), maxWindowSide))\n"),
+    ("S5 a panel that is not a number taken", STAGE_GUARD,
+     "        guard let panel, panel.width > 0, panel.height > 0 else { return own }\n"),
+    ("S6 a scale of 0 divides", STAGE_SCALE, "        let s = scale.flatMap { $0.isFinite ? $0 : nil } ?? 1\n"),
+    ("S7 an infinite scale divides", STAGE_SCALE, "        let s = scale.flatMap { $0 > 0 ? $0 : nil } ?? 1\n"),
+    ("S8 the scale ignored", STAGE_SCALE, "        let s: CGFloat = 1\n"),
+    ("S9 the sides swapped", STAGE,
+     "        return CGSize(width: min(max((panel.height / s).rounded(), 1), maxWindowSide),\n"
+     "                      height: min(max((panel.width / s).rounded(), 1), maxWindowSide))\n"),
+    ("S10 the window held to the display's 4096 (the review: a full-screen crop lost the panel's shape)", STAGE,
+     "        return CGSize(width: min(max((panel.width / s).rounded(), 1), maxSide),\n"
+     "                      height: min(max((panel.height / s).rounded(), 1), maxSide))\n"),
+    ("S11 the window's ceiling under the largest viewport a host takes", "    static let maxWindowSide: CGFloat = 65536\n",
+     "    static let maxWindowSide: CGFloat = 65535\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

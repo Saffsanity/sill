@@ -3,7 +3,7 @@
 # HID service inside the simulator, so UIKit routes them as a real keyboard's and mouse's.
 #
 #   Tests/keyrig/run.sh build                         compile keyrig for the simulator: .build/keyrig/keyrig
-#   Tests/keyrig/run.sh UDID keys SPEC [SETTLE] [HOLD]    SPEC: USAGE[:down|:up],… in hex (29 Esc, 04 a, e3 ⌘)
+#   Tests/keyrig/run.sh UDID keys SPEC [SETTLE] [HOLD]    SPEC: USAGE[:down|:up],… in hex (29 Esc, 04 a, e3 ⌘), wait:S
 #   Tests/keyrig/run.sh UDID point SCRIPT [SETTLE] [HOLD] SCRIPT: move DX,DY | wheel DY | phase P DX,DY | momentum B DY | wait S
 #
 # Only a booted simulator, by UDID: one of your own, made for the test (never a shared one: the keys go to

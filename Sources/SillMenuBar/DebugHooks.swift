@@ -37,7 +37,10 @@ import StreamProtocol
 ///     -SillMenuAfter '<s>[; <s> …]'            print the status menu as menu.txt shows it, one
 ///                                              "SillMenuAfter <s> s: " line per line, s seconds
 ///                                              after launch (the "‹device› Wants to Pair",
-///                                              older-device and "Devices Can’t Connect" items)
+///                                              older-device and "Devices Can’t Connect" items);
+///                                              the macOS firewall is asked again first, as the
+///                                              menu does when it opens, its answer shown by the
+///                                              next print
 ///     -SillQuitAfter <s>                       Quit (NSApp.terminate) s seconds after launch
 ///     -SillUpdateFeed <url>                    the update check asks this feed instead of GitHub:
 ///                                              a feed on this Mac only (http or https to
@@ -52,7 +55,8 @@ import StreamProtocol
 ///                                              s; no jitter)
 ///     -SillPrintMenuAfter <s>                  print the status menu as it would open (as menu.txt
 ///                                              draws it, "menu: " before each line) and Settings ›
-///                                              General's update line, s seconds after launch
+///                                              General's update and firewall lines, s seconds after
+///                                              launch
 ///     -SillSettingsAfter '<s> <tab>[; <s> <tab> …]'
 ///                                              open Settings on that tab s seconds after launch,
 ///                                              as the menu does, and 0.6 s later print the window's
@@ -72,17 +76,20 @@ import StreamProtocol
 ///                                              (title bar, toolbar, pane) to <dir>/settings-<s>s-<tab>.png
 ///     -SillRenderPreviews <dir>                write the Settings panes (the Devices and Remote
 ///                                              Access panes in each of their states, General's
-///                                              update section in each of its), the pairing
+///                                              update section in each of its, General with the
+///                                              macOS firewall's line and that line alone in each
+///                                              of its verdicts), the pairing
 ///                                              window's states and the cable notice,
 ///                                              status cards, glyphs and menu.txt to <dir>, then
 ///                                              exit (no Screen Recording needed: views render
 ///                                              offscreen; no identity is loaded, no listener)
 ///
 /// These are the bare SillMenuBar binary's (defaults domain "SillMenuBar"; delete it after). Sill.app
-/// itself, an app bundle's executable, ignores every `-Sill…After` hook and `-requirePairing`, each
-/// with one line (docs/home-pairing-plan.md §6.6): they open, answer or remove pairings, or change
-/// what the doors admit, and any process of this user can start Sill.app with arguments, which then
-/// runs with Sill's Screen Recording and Accessibility grants. `-SillTestScreenHeight` and
+/// itself (`AppModel.bundled`: Sill's own code wherever it runs from, AppIdentity) ignores every
+/// `-Sill…After` hook and `-requirePairing`, each with one line (docs/home-pairing-plan.md §6.6):
+/// they open, answer or remove pairings, or change what the doors admit, and any process of this
+/// user can start Sill.app, or a copy of it, with arguments, which then runs with Sill's Screen
+/// Recording and Accessibility grants. `-SillTestScreenHeight` and
 /// `-SillSettingsShot` go with `-SillSettingsAfter` and are ignored the same way: Sill.app has no
 /// use for them. `--synthetic`, `-SillLogFile`,
 /// `-SillRenderPreviews` and the update check's `-SillUpdateFeed`, `-SillUpdateNow`,
@@ -218,6 +225,7 @@ enum DebugHooks {
         for delay in times(defaults.string(forKey: "SillMenuAfter")) {
             after(delay) {
                 model.permissions.refresh()
+                model.coordinator?.checkFirewall()   // as the menu does when it opens; the answer shows at the next
                 for line in MenuBuilder.dump(MenuBuilder.entries(for: model), card: model.presentation).split(separator: "\n") {
                     print("SillMenuAfter \(delay) s: \(line)")
                 }
@@ -228,10 +236,18 @@ enum DebugHooks {
             after(printAfter) {
                 model.permissions.refresh()
                 model.loginItem.refresh()
+                model.coordinator?.checkFirewall()   // as the menu does when it opens
                 print("SillPrintMenuAfter \(printAfter) s:")
                 let text = MenuBuilder.dump(MenuBuilder.entries(for: model), card: model.presentation)
                 for line in text.split(separator: "\n", omittingEmptySubsequences: false) where !line.isEmpty { print("menu: \(line)") }
                 print("Settings › General's update line: \(model.updates.pane.line)")
+                // The macOS firewall's line as the pane shows it (FirewallRule), with its command.
+                let firewall = model.coordinator?.status.snapshot.firewall
+                if let firewall, let line = FirewallRule.Copy.paneLine(firewall) {
+                    print("Settings › General's firewall line: \(line)\(FirewallRule.Copy.command(firewall).map { " \($0)" } ?? "")")
+                } else {
+                    print("Settings › General's firewall line: none (\(firewall.map { String(describing: $0) } ?? "not asked yet"))")
+                }
             }
         }
         let shots = defaults.string(forKey: "SillSettingsShot").flatMap { $0.isEmpty ? nil : $0 }
@@ -391,6 +407,23 @@ enum DebugHooks {
                 .background(Color(nsColor: .windowBackgroundColor))
             for (name, appearance) in appearances {
                 render(pane, appearance: appearance, to: out.appendingPathComponent("pane-devices-\(sample.name)-\(name).png"))
+            }
+        }
+        // General while the macOS firewall blocks Sill's executable (the report's Mac), and the line alone
+        // in each verdict that shows one (FirewallRule).
+        for (name, appearance) in appearances {
+            render(SettingsPane(tab: .general, model: model, previewUpdates: neverChecked, previewClipboardAccess: .allowed,
+                                previewFirewall: firewallSamples[0].verdict)
+                    .background(Color(nsColor: .windowBackgroundColor)),
+                   appearance: appearance, to: out.appendingPathComponent("pane-general-firewall-\(name).png"))
+        }
+        for (sampleName, verdict) in firewallSamples {
+            let section = Form { FirewallSection(verdict: verdict) }
+                .formStyle(.grouped)
+                .frame(width: 520)
+                .background(Color(nsColor: .windowBackgroundColor))
+            for (name, appearance) in appearances {
+                render(section, appearance: appearance, to: out.appendingPathComponent("pane-firewall-\(sampleName)-\(name).png"))
             }
         }
         // General's clipboard section in each of macOS's answers (ClipboardPolicy.MacAccess), and with
@@ -605,8 +638,31 @@ enum DebugHooks {
         closed.remote = RemoteStatus(identityProblem: keychainProblem,
                                      homeDoor: .unavailable("Sill couldn’t use its key in the keychain (\(keychainProblem))"))
         list.append(Sample(name: "devices-cant-connect", snapshot: closed))
+        // The macOS firewall blocks Sill's executable (the report's Mac), and blocks every incoming
+        // connection: "Devices Can’t Connect", which opens Settings › General.
+        var blocked = idle
+        blocked.remote = RemoteStatus(homeDoor: .pairingRequired)
+        blocked.firewall = firewallSamples[0].verdict
+        list.append(Sample(name: "firewall-blocked", snapshot: blocked))
+        var blocksAll = blocked
+        blocksAll.firewall = firewallSamples.first { $0.name == "all" }?.verdict
+        list.append(Sample(name: "firewall-blocks-all", snapshot: blocksAll))
         return list
     }
+
+    /// The macOS firewall's verdicts that Settings › General shows a line for (pane-firewall-<name>),
+    /// each FirewallRule's own verdict on the answers SILL_TEST_FIREWALL's word gives (as macOS 27
+    /// prints them) for Sill.app in Applications: the report's Mac first (its executable blocked), its
+    /// bundle, both, every incoming connection, and a copy whose path a shell needs quoted.
+    static let firewallSamples: [(name: String, verdict: FirewallRule.Verdict)] = {
+        let installed = FirewallRule.paths(executable: "/Applications/Sill.app/Contents/MacOS/Sill")
+        let spaced = FirewallRule.paths(executable: "/Applications/Sill Beta.app/Contents/MacOS/Sill")
+        func judged(_ word: String, _ paths: FirewallRule.Paths) -> FirewallRule.Verdict {
+            FirewallRule.verdict(FirewallRule.testAnswers(.word(word), fileText: nil, paths: paths), paths: paths)
+        }
+        return [("executable", judged("executable", installed)), ("bundle", judged("bundle", installed)),
+                ("both", judged("both", installed)), ("all", judged("all", installed)), ("quoted", judged("executable", spaced))]
+    }()
 
     /// The remote device of `remote-device`, every connected device away: the away quality runs.
     private static func remoteAway() -> HostStatusSnapshot {

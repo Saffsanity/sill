@@ -17,7 +17,8 @@ Tests/keyrig/run.sh UDID keys 29,04,e3:down,1a,e3:up            # Esc, a, then â
 Tests/keyrig/run.sh UDID point 'move 300,200|wheel -3|wait 0.2|wheel -3'   # the pointer over a view, two notches
 ```
 
-`keys` takes `USAGE[:down|:up]` steps (a bare usage is a press: down, 60 ms, up), 250 ms apart. `point`
+`keys` takes `USAGE[:down|:up]` steps (a bare usage is a press: down, 60 ms, up), 250 ms apart, and
+`wait:S`, S seconds more: `13:down,wait:2,13:up` holds P for about 2.3 s. `point`
 takes `move DX,DY`, `wheel DY` (lines), `phase began|changed|ended DX,DY`, `momentum BITS DY` (the
 momentum bits in hex: 2 start, 1 continue, 4 end) and `wait S`, separated by `;` or `|`. Each run makes
 its own virtual device, waits `SETTLE` seconds (0.6) for the event system to take it, posts, and keeps it
@@ -47,6 +48,15 @@ attached, so its software keyboard stops coming up (as on a device after a keybo
   0.2 s after the last, so a single notch has no change at all. Scroll events with phases, in lines or
   pixels, also reach the discrete pan, never a `.continuous` one: the simulator's own trackpad path is not
   reproduced here. Events marked as momentum after a scroll's end never reach a pan.
+- (2026-10-28, #130, PR #217; iOS 27.0, a probe app of its own with pans side by side.) A pan's translation
+  adds a scroll's events up as a finger's does: three notches read 3, 6 and 9 pt. Its location runs on with
+  it while the pointer stays put (the pointer at y 308.8, the pan at 311.8, 314.8, 317.8), so a scroll posted
+  at the pan's location walks off the pointer; Sill's goes where the pointer was as it began
+  (`PointerScroll`). Zeroing the translation after each reading (`setTranslation(.zero, in:)`) makes each
+  reading the movement since the last and changes neither the location nor the velocity. A
+  UIPanGestureRecognizer's own `allowedScrollTypesMask` is 0: a pan given none, as 0.5.1's finger pan, gets
+  no scroll event at all. Two-finger digitizer frames from a virtual touch pad (page 13, usage 5) came to
+  the view as touch events, not as scrolls: that does not make a trackpad either.
 - Its pointer moves reach a `UIHoverGestureRecognizer`.
 - Turning: duorig's orientation event does not turn an iPad simulator, and iPadOS 27's windowing refuses
   `requestGeometryUpdate` ("The current windowing mode does not allow for programmatic changes to

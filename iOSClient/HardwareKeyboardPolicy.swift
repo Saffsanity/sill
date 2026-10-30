@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// The stream's input view (InputOverlayView) and a hardware keyboard on this device: whether the view
@@ -177,5 +178,44 @@ struct HardwareKeyboardPolicy: Equatable {
     mutating func resigned() {
         if hold != .none { lastHeld = hold }
         hold = .none
+    }
+}
+
+/// A scroll from the iPad's own trackpad (two fingers), a Magic Mouse or a mouse's wheel over the picture
+/// (docs/hardware-keyboard-plan.md §3, issue #130, PR #217): how far it has gone, and where on the picture
+/// all of it goes. Its pan (InputOverlayView's `trackpadScroll` and `wheelScroll`) has no touch and the
+/// pointer stays where it is, but UIKit moves the pan's location on by its translation, as if a finger had
+/// been dragged from the pointer (measured in the iOS 27 simulator, three notches of a wheel over a pointer
+/// at y 308.8: the pan's translation 3, 6 and 9 pt, its location at y 311.8, 314.8 and 317.8). Posted at
+/// the pan's location, a scroll's events walked off the pointer by as much as it scrolled (a synthetic
+/// host's log: ten notches from y 447 to 497 of the picture's 949, phased events of 194 points from 459 to 636),
+/// and the Mac takes each to what is under it (InputInjector's `postScroll`): at first the window under the
+/// pointer, then whatever the point had reached, or the picture's edge it is held to.
+/// Every event of the scroll, its end and its coast now go where the pointer was as it began: the pan's
+/// first location less its first reading.
+///
+/// Each reading is taken and the pan's translation zeroed (InputOverlayView), so a reading is what moved
+/// since the last one whether UIKit adds a scroll's events up, as it does in the simulator (and as it does
+/// a finger's), or hands each event only its own movement, as PR #217 reasoned a Magic Keyboard does: `total`
+/// adds the readings up into the translation a finger's pan would have, which the scroll path diffs as it
+/// does a finger's.
+///
+/// Pure: Foundation and CoreGraphics, checked in Tests/checks/hardware-keyboard.
+struct PointerScroll {
+    /// Where the pointer was as the scroll began, in the view's points: where every event of it goes.
+    private(set) var at: CGPoint = .zero
+    /// The scroll so far: every reading since it began added up.
+    private(set) var total: CGPoint = .zero
+
+    /// The pan began: its location, and its first reading (what moved before it began, which that
+    /// location already has in it).
+    mutating func began(at location: CGPoint, reading: CGPoint) {
+        at = CGPoint(x: location.x - reading.x, y: location.y - reading.y)
+        total = reading
+    }
+
+    /// A later event (a change, the end, a cancel): what moved since the last reading.
+    mutating func moved(_ reading: CGPoint) {
+        total = CGPoint(x: total.x + reading.x, y: total.y + reading.y)
     }
 }

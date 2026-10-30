@@ -28,6 +28,13 @@ Sill's own [tap](https://github.com/Saffsanity/homebrew-sill). Sill for iPhone
 and iPad is free on the [App Store](https://apps.apple.com/app/id6816359860),
 and you can also build it from source (below).
 
+To try the next version before it ships: Sill for iPhone and iPad has a
+[public beta on TestFlight](https://testflight.apple.com/join/6v7nqyn3), and Sill for Mac
+has [nightly builds](https://github.com/Saffsanity/sill/releases/tag/nightly) on
+GitHub, notarized like a release but not supported. Your devices stay paired
+(a nightly uses the release's identity), and Sill's update check never offers
+a nightly: the release above is the one to use.
+
 ## Screenshots
 
 These are the iPad screenshots from the App Store; on iPhone and iPhone Duo,
@@ -86,7 +93,10 @@ Sill has layouts of its own.
 - **The clipboard** goes both ways while Share Clipboard is on, in both apps:
   text you copy on your Mac is ready to paste on your device, and Paste in
   Sill sends what you copied on your device to your Mac's clipboard, where you
-  press ⌘V. Sill never reads your device's clipboard by itself, and copies a
+  press ⌘V. Sill never reads your device's clipboard by itself.
+  Sill pastes what you copied on your device where your Mac's cursor is (with
+  Paste on … Right Away off, it only goes to your Mac's clipboard, where you
+  press ⌘V). Sill never reads your device's clipboard by itself, and copies a
   password manager marks as concealed stay on your Mac.
 - **Sound from your Mac** is a beta, on by default; Send Audio (Beta) in the
   Sill menu or Sill's Settings on your Mac, or in the settings panel of Sill on
@@ -139,7 +149,9 @@ Sill has layouts of its own.
   Mac's screen. The window goes back to its own size and place when Sill stops
   showing it: you pick another window or the Desktop, your last device
   disconnects, or you quit Sill. With the virtual display off, a window you
-  moved on your Mac meanwhile keeps its new place.
+  moved on your Mac meanwhile keeps its new place, and Aa starts at Off, which
+  leaves the window as it is: slide Aa back to Off and a window Sill resized
+  goes back at once. Aa sizes a window, so it's dimmed while the Desktop shows.
 - **The virtual display**, on unless you turn it off in the Sill menu or in
   Sill's Settings on your Mac, or in the settings panel of Sill on your iPhone
   or iPad, moves the window you stream onto a display of
@@ -166,6 +178,11 @@ version number for each release. With Sill for Mac 0.3.1 or earlier,
 connections on your local network, over the cable and over Direct Wireless
 Connection are not encrypted, and anything that reaches your Mac there can
 connect without pairing: update it.
+Nightly builds: every night main changes, a notarized Sill for Mac built from it
+goes to the [nightly pre-release](https://github.com/Saffsanity/sill/releases/tag/nightly),
+and Sill for iPhone and iPad to TestFlight's testers. Nobody has tried a nightly
+by hand and it can break; Sill's update check never offers one, and going back
+from a nightly Sill for Mac to the release keeps its settings and paired devices.
 
 ## Tips
 

@@ -69,6 +69,10 @@
   <!-- Pinch zoom: for the release that ships it (PR #196); a republish before that release takes this section out. -->
   <p>Pinch the picture with two fingers to zoom it, up to five times, around the point between your fingers. While it’s zoomed, two fingers move it and one finger still taps, clicks and scrolls on your Mac, on what you see under it. Pinch all the way out to see the whole picture again. Zooming happens on your iPhone or iPad only: your Mac’s window stays as it is.</p>
   <!-- /Pinch zoom -->
+  <!-- Thumbnail hold: for the release that ships it (PR #248, issue #113); a republish before that release takes this section out. -->
+  <h2 id="window-controls">Closing, minimizing or moving a window</h2>
+  <p>Touch and hold a window’s thumbnail in Sill’s bar: after half a second, its close, minimize and full-screen buttons show beside it. Keep holding and drag to move the thumbnail to another place in the bar. To hold longer or shorter, from 0.2 to 2 seconds, use Hold to Show Window Controls under This iPad (This iPhone on iPhone) in the settings panel on your iPhone or iPad.</p>
+  <!-- /Thumbnail hold -->
 
   <h2 id="mac-not-listed">Your Mac isn’t listed</h2>
   <ul>
@@ -78,6 +82,11 @@
     <li>Put your Mac and your iPhone or iPad on the same Wi-Fi network. Guest networks, and many office and hotel networks, keep devices apart. There, use a USB cable or <a href="#direct-wireless">Direct Wireless Connection</a>.</li>
     <li>Connect your iPhone or iPad to your Mac with a USB cable. Your Mac then shows as Wired.</li>
     <li>Check that Local Network is on for Sill on both, as below.</li>
+    <li class="command">If your iPhone or iPad lists your Mac but can’t connect to it, and the firewall is on in System Settings › Network › Firewall on your Mac, the firewall may be blocking Sill even though it shows Sill as allowed: it can keep one rule for Sill and another for the program inside it. To unblock that program, open Terminal on your Mac, run <code>sudo /usr/libexec/ApplicationFirewall/socketfilterfw <span class="option">--unblockapp</span> /Applications/Sill.app/Contents/MacOS/Sill</code> and enter your Mac’s password.
+    <!-- Firewall: for the release that ships it (PR #250); a republish before that release takes this sentence out. -->
+    Sill for Mac says so in its menu, as Devices Can’t Connect, and in its Settings › General, with the command to copy.
+    <!-- /Firewall -->
+    </li>
   </ul>
 
   <h2 id="local-network">Local Network is off</h2>
@@ -107,7 +116,7 @@
   <h2 id="direct-wireless">Direct Wireless Connection</h2>
   <p>Direct Wireless Connection lets an iPhone or iPad near your Mac connect without a shared Wi-Fi network, the way AirDrop does.</p>
   <ul>
-    <li>Turn it on in the Sill menu on your Mac, or in Sill’s settings under General.</li>
+    <li>Turn it on in the Sill menu on your Mac, or in Sill’s settings under General. An iPhone or iPad you paired can also turn it on or off in its settings panel<!-- Remote Access: take this out for a release without Remote Access. -->, but not while it’s connected through Remote Access<!-- /Remote Access -->.</li>
     <li>If nothing is listed on your iPhone or iPad, tap Search Nearby. Your Mac then shows as Direct.<!-- Remote Access: take this out for a release without Remote Access. --> An iPhone or iPad you already paired lists your Mac as Remote instead, with no Search Nearby: it looks for your Mac nearby by itself only if Direct Wireless Connection was on the last time the two connected on the same network or over a USB cable (a connection through a VPN doesn’t count). If it wasn’t, connect them once over a USB cable while it’s on, then unplug.<!-- /Remote Access --></li>
     <li>Leave it off when your devices share a network. While it’s on, the Wi-Fi on your Mac keeps stepping away from its network, and streams over Wi-Fi can stutter.</li>
     <li>While it’s on, anyone nearby with Sill can find your Mac. Only devices you paired can connect, unless you turn off Require pairing.</li>
@@ -138,6 +147,9 @@
 
   <h2 id="window-size">A window on your Mac changed size</h2>
   <p>When you change the text size with Aa on your iPhone or iPad, Sill resizes the window you’re using on your Mac to fit your device, unless Virtual Display is on, and keeps it at that size while you use it. When you switch to another window or to the Desktop, disconnect, or quit Sill, the window goes back to the size and place it had. With more than one device connected, it goes back when the last one disconnects.</p>
+  <!-- Aa Off: for the release that ships it (PR #181); a republish before that release takes this paragraph out. -->
+  <p>Aa starts at Off, which leaves the window as it is. Slide Aa all the way to the left, to Off, and the window goes back to its own size and place right away. While the window is on Sill’s virtual display (Virtual Display on), Aa has no Off: there the window always fits your device. Aa sizes a window, so it’s dimmed while the Desktop is showing.</p>
+  <!-- /Aa Off -->
   <ul>
     <li>If you moved the window on your Mac meanwhile, it keeps its new place and gets its size back.</li>
     <li>A window that’s full screen when you stop stays as it is. When it leaves full screen it keeps the size Sill gave it; resize it yourself.</li>
@@ -146,11 +158,12 @@
 
   <!-- Clipboard: for the release that ships it (PR #78); a republish before that release takes this section out. -->
   <h2 id="clipboard">Copy and paste between your Mac and your iPhone or iPad</h2>
-  <p>While Share Clipboard is on, text you copy on your Mac while your iPhone or iPad is connected is ready to paste on the device. To paste on your Mac what you copied on your iPhone or iPad, come back to Sill and tap Paste, on the note by Sill’s bar or in the settings panel, then press ⌘V on your Mac. Sill never reads your iPhone or iPad’s clipboard by itself.</p>
+  <p>While Share Clipboard is on, text you copy on your Mac while your iPhone or iPad is connected is ready to paste on the device. To paste on your Mac what you copied on your iPhone or iPad, come back to Sill and tap Paste, on the note by Sill’s bar or in the settings panel: the text goes where your Mac’s cursor is, as if you had pressed ⌘V there. If you’d rather press ⌘V yourself, turn off Paste on … Right Away (the switch names your Mac), under Share Clipboard in the settings panel: Paste then only puts the text on your Mac’s clipboard. Sill never reads your iPhone or iPad’s clipboard by itself.</p>
   <ul>
     <li>Both apps have the switch: Share clipboard with devices in Sill’s Settings › General on your Mac, and Share Clipboard in the settings panel on your iPhone or iPad.</li>
-    <li>Only text goes, up to 256 KB at a time, and only what you copy while a device is connected. Copies a password manager marks as concealed stay on your Mac, and so does text that came to your Mac from another of your devices through Universal Clipboard.</li>
+    <li>Only text goes, up to 256 KB at a time, and only what you copy while a device is connected. Text that came to your Mac from another of your devices through Universal Clipboard stays on your Mac; a password manager’s copies go like any other.</li>
     <li>Text from your Mac stays on your iPhone or iPad’s clipboard for 10 minutes.</li>
+    <li>Paste presses ⌘ with the key that is V on a U.S. keyboard. If your Mac uses a keyboard layout that puts V somewhere else for shortcuts, such as Dvorak, turn off Paste on … Right Away and press ⌘V yourself.</li>
     <li>If nothing arrives, update Sill on both: an older Sill on either side doesn’t share the clipboard.</li>
     <li>If what you copy on your Mac doesn’t arrive, look under Share clipboard with devices in Sill’s Settings › General on your Mac. When macOS asks before apps read the clipboard, Sill says so there and takes you to where you allow it: Paste from Other Apps, in System Settings › Privacy & Security.</li>
   </ul>

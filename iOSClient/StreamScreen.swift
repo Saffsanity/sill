@@ -115,8 +115,9 @@ struct StreamScreen: View {
     @State private var textScale: Double? = nil
     /// The Aa slider is unfolded (finger down): the bars fade their other buttons meanwhile.
     @State private var scaleOpen = false
-    /// The thumbnail whose traffic-light submenu is open (held for 1.5 s). The bars clip their
-    /// content, so the submenu is drawn by this root, anchored to the thumbnail's frame.
+    /// The thumbnail whose traffic-light submenu is open (held for ThumbnailHold's length, 0.5 s unless
+    /// changed in Settings; issue #113). The bars clip their content, so the submenu is drawn by this
+    /// root, anchored to the thumbnail's frame.
     @State private var windowMenu: UInt32? = nil
     /// The Settings panel (the Mac's streaming settings) is open. Up here, next to the drawer, so a
     /// rotation keeps it open and it re-anchors in the other layout.
@@ -481,7 +482,7 @@ struct StreamScreen: View {
             let fps = StreamClient.wantedFPS(remote: client.awayCapsFrameRate)
             #if DEBUG
             print("viewport: \(Self.points(panelSize.width))×\(Self.points(panelSize.height)) pt, scale "
-                  + (textScale.map { TextScaleControl.label($0) } ?? "none") + ", \(fps) fps")
+                  + (textScale.map { TextScaleControl.label($0) } ?? "off") + ", \(fps) fps")
             #endif
             client.sendViewport(Viewport(width: Double(panelSize.width),
                                          height: Double(panelSize.height),
@@ -629,9 +630,32 @@ struct StreamScreen: View {
         if defaults.bool(forKey: "SillScaleOpen") {
             after(1.5) {
                 let scale = defaults.double(forKey: "SillScale")
-                if scale > 0 { textScale = scale }
+                if scale > 0 { textScale = TextScale.scale(at: scale) }     // 0.25 is Off's place: no scale
+                // Aa sizes a window: over the Desktop, or nothing, its ruler does not open (TextScale.selectable).
+                guard client.textScaleSelectable else {
+                    print("harness: the Aa ruler stays closed: Aa is for a window, and none streams")
+                    return
+                }
                 print("harness: the Aa ruler opened")
                 scaleOpen = true
+            }
+        }
+        // `-SillScaleScript '<s> <scale|off>[; …]'`: Aa's value set s seconds in, as the ruler's release
+        // sets it, whatever streams (a synthetic host streams only the Desktop, over which Aa is dimmed):
+        // the viewport it sends (the console's `viewport: …` line), and the host's `win.fitOff` for a
+        // scale then Off (issue #179). A test hook: the bars never send a scale while Aa is dimmed.
+        for step in (defaults.string(forKey: "SillScaleScript") ?? "").split(separator: ";") {
+            let parts = step.split(separator: " ")
+            let time = parts.count == 2 ? Double(parts[0]) : nil
+            let off = parts.count == 2 && parts[1].lowercased() == "off"
+            let scale = parts.count == 2 ? Double(parts[1]).map { TextScale.snap($0, offered: false) } : nil
+            guard let time, time >= 0, off || scale != nil else {
+                print("harness: -SillScaleScript: “\(step.trimmingCharacters(in: .whitespaces))” is not “<s> <scale|off>”; skipped")
+                continue
+            }
+            after(time) {
+                print("harness: Aa set to " + (off ? "Off" : TextScale.title(at: scale!)) + " at " + Self.points(CGFloat(time)) + " s")
+                textScale = off ? nil : scale
             }
         }
     }
@@ -672,7 +696,15 @@ struct StreamScreen: View {
             if element.isAccessibilityElement {
                 let f = element.accessibilityFrame
                 let label = element.accessibilityLabel ?? element.accessibilityValue ?? "(no label)"
-                lines.append("\(label) (\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height)))")
+                // What VoiceOver says after the name: the value, the hint, dimmed and adjustable (Aa's
+                // Off and its dimmed state over the Desktop, issue #179).
+                var said: [String] = []
+                if element.accessibilityLabel != nil, let value = element.accessibilityValue, !value.isEmpty { said.append("value “\(value)”") }
+                if let hint = element.accessibilityHint, !hint.isEmpty { said.append("hint “\(hint)”") }
+                if element.accessibilityTraits.contains(.notEnabled) { said.append("dimmed") }
+                if element.accessibilityTraits.contains(.adjustable) { said.append("adjustable") }
+                lines.append("\(label) (\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height)))"
+                             + (said.isEmpty ? "" : ": " + said.joined(separator: ", ")))
                 return
             }
             if let children = element.accessibilityElements, !children.isEmpty {
@@ -1151,6 +1183,7 @@ struct StreamScreen: View {
                              latchedModifiers: latched,
                              onModifiersConsumed: { latched = [] },
                              sendGesture: { client.sendGesture($0, fingers: $1) },
+                             macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
                              readZoom: { [zoom] in zoom.zoom },
                              writeZoom: { [zoom] in zoom.set($0) })
             }
@@ -1347,7 +1380,8 @@ private struct TopBar: View {
             // the right, over the two buttons after it, which fade while it is open.
             TextScaleControl(scale: $textScale, open: $scaleOpen,
                              width: metrics.buttonWidth, height: metrics.buttonHeight,
-                             pointsPerStep: metrics.buttonHeight >= 60 ? 44 : 40)
+                             pointsPerStep: metrics.buttonHeight >= 60 ? 44 : 40,
+                             offered: client.textScaleOffersOff, available: client.textScaleSelectable)
                 .tourTarget(.textSize)
 
             button(open: keyboardShown, symbol: "keyboard", label: "Keyboard",
@@ -1450,11 +1484,14 @@ struct BarButton<Content: View>: View {
 
 /// The Aa control: a bar button that opens into a ruler while the finger is down, the way the
 /// camera's zoom button opens into its dial and the Dynamic Island timer scrubs. The thumb stays
-/// put at the button's centre and the ruler slides under it: five detents, 0.5× to 1.5× in 0.25
-/// steps, a tick of haptic at each. The bar fades the buttons next to it while `open` and brings
-/// them back on release, when the chosen value is applied once (every change restarts the stream,
-/// so nothing is sent mid-drag). A nil scale means the Mac window has never been asked to fit; it
-/// shows 1×.
+/// put at the button's centre and the ruler slides under it: six detents, Off and then 0.5× to 1.5×
+/// in 0.25 steps, a tick of haptic at each. The bar fades the buttons next to it while `open` and
+/// brings them back on release, when the chosen value is applied once (every change restarts the
+/// stream, so nothing is sent mid-drag). A nil scale means the Mac window is not fitted: the leftmost
+/// detent, Off, one step below 0.5× (`TextScale`; issue #179). Off is not offered while the virtual
+/// display is on, where a nil scale is 1× (`offered`). Only a window is sized by it: while anything
+/// else streams it is dimmed, its ruler never opens and VoiceOver hears why (`available`,
+/// `TextScale.selectable`; Noah, 2026-10-29).
 struct TextScaleControl: View {
     @Binding var scale: Double?
     @Binding var open: Bool
@@ -1469,14 +1506,28 @@ struct TextScaleControl: View {
     /// text, 2 pt over the value (every bar that has always had it).
     var iconBox: CGFloat? = nil
     var iconSpacing: CGFloat = 2
+    /// Whether the ruler has an Off detent (`TextScale.detents`, `TextScale.offersOff`).
+    var offered = true
+    /// Whether Aa can be used now (`TextScale.selectable`: only while a window streams). Otherwise
+    /// dimmed, no ruler, a VoiceOver swipe changes nothing, and VoiceOver hears
+    /// `TextScale.unavailableHint`; its value stays, for the next window.
+    var available = true
 
-    static let steps: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5]
+    var steps: [Double] { TextScale.detents(offered: offered) }
     /// Padding either side of the visible ruler; two detents show each side of the thumb.
     static let sliderInset: CGFloat = 30
-    var sliderWidth: CGFloat { pointsPerStep * CGFloat(Self.steps.count - 1) + Self.sliderInset * 2 }
+    /// The ruler's frame shows two detents either side of the thumb, whatever the detents: Off's
+    /// sixth slides in as the finger nears it. So every bar's ruler keeps the width it had with five,
+    /// and a phone's row 1 the room it was laid out for (PhonePortraitLayout's `rulerSpans`).
+    static let detentsEachSide = 2
+    var sliderWidth: CGFloat { pointsPerStep * CGFloat(2 * Self.detentsEachSide) + Self.sliderInset * 2 }
+    /// How much of itself a dimmed Aa shows.
+    static let unavailableOpacity = 0.35
 
     @State private var live: Double = 1.0
     @State private var startValue: Double = 1.0
+    /// Where the ruler has the scale now.
+    private var position: Double { TextScale.position(of: scale, offered: offered) }
     @State private var startX: CGFloat = 0
 
     var body: some View {
@@ -1491,10 +1542,11 @@ struct TextScaleControl: View {
                     .font(.system(size: height >= 60 ? 19 : 17, weight: .semibold))
                     .foregroundStyle(Palette.text)
             }
-            Text(Self.label(scale ?? 1.0) + "×")
+            Text(TextScale.title(at: position))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Palette.barLabel)
         }
+        .opacity(available ? 1 : Self.unavailableOpacity)     // dimmed: Aa sizes a window, and none streams
         .frame(width: width, height: height)
         .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Palette.control))
         .opacity(open ? 0 : 1)
@@ -1506,13 +1558,21 @@ struct TextScaleControl: View {
                 .allowsHitTesting(false)
         }
         .zIndex(open ? 1 : 0)
-        .onChange(of: open, initial: true) { _, isOpen in if isOpen { live = scale ?? 1.0 } }
+        // A ruler asked open while Aa cannot be used (the harness's `-SillScaleOpen` over the Desktop)
+        // folds at once; one open when the window stops streaming (closed on the Mac, the Desktop
+        // picked from another device) folds without applying (`onChange(of: available)`, and `onEnded`
+        // applies nothing while Aa cannot be used).
+        .onChange(of: open, initial: true) { _, isOpen in
+            guard isOpen else { return }
+            if available { live = position } else { open = false }
+        }
+        .onChange(of: available) { _, now in if !now, open { withAnimation(.easeOut(duration: 0.2)) { open = false } } }
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 0, coordinateSpace: .local)
                 .onChanged { g in
                     if !open {
-                        startValue = scale ?? 1.0
+                        startValue = position
                         live = startValue
                         startX = g.location.x
                         withAnimation(.spring(duration: 0.22, bounce: 0.15)) { open = true }
@@ -1520,50 +1580,61 @@ struct TextScaleControl: View {
                     // The ruler follows the finger: dragging right raises the value, and the ticks
                     // slide left under the fixed thumb.
                     let dx = g.location.x - startX
-                    let snapped = Self.snap(startValue + Double(dx / pointsPerStep) * 0.25)
+                    let snapped = TextScale.snap(startValue + Double(dx / pointsPerStep) * 0.25, offered: offered)
                     if snapped != live {
                         UISelectionFeedbackGenerator().selectionChanged()
                         withAnimation(.easeOut(duration: 0.1)) { live = snapped }
                     }
                 }
                 .onEnded { _ in
-                    if (scale ?? 1.0) != live { scale = live }     // a plain tap on an untouched control changes nothing
+                    // A plain tap on an untouched control changes nothing, and nor does a drag the
+                    // stream left a window during.
+                    if available, position != live { scale = TextScale.scale(at: live) }
                     withAnimation(.easeOut(duration: 0.2)) { open = false }
-                }
+                },
+            including: available ? .all : .none      // dimmed: a touch opens nothing
         )
         .onDisappear { open = false }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Text size")
-        .accessibilityValue("\(Self.label(scale ?? 1.0)) times")
+        .accessibilityValue(TextScale.spoken(at: position))
+        .accessibilityHint(available ? "" : TextScale.unavailableHint)
+        // Always adjustable, so Aa stays one view and one accessibility element when a window starts or
+        // stops streaming: VoiceOver keeps its place on it, and the ruler's fold above runs. Dimmed, it
+        // is what a disabled slider is ("dimmed, adjustable"): a swipe changes nothing. (Adding the
+        // action only while Aa can be used made a new view and element at every change: the review of
+        // #181.)
         .accessibilityAdjustableAction { direction in
-            let i = Self.steps.firstIndex(of: scale ?? 1.0) ?? 2
+            guard available else { return }
             switch direction {
-            case .increment: scale = Self.steps[min(i + 1, Self.steps.count - 1)]
-            case .decrement: scale = Self.steps[max(i - 1, 0)]
+            case .increment: scale = TextScale.scale(at: TextScale.step(from: position, up: true, offered: offered))
+            case .decrement: scale = TextScale.scale(at: TextScale.step(from: position, up: false, offered: offered))
             @unknown default: break
             }
         }
+        .disabled(!available)     // VoiceOver: "dimmed"
     }
 
-    /// The ruler: a track with five ticks and labels that slides so the live value sits under the
-    /// fixed thumb; the ends fade out where they run past the panel.
+    /// The ruler: a track with a tick and a label at each detent that slides so the live value sits
+    /// under the fixed thumb; the ends fade out where they run past the frame (two detents each side).
     private var slider: some View {
         let w = sliderWidth
         let step = pointsPerStep
         let midX = w / 2
         let midY = height / 2 + 4
         func x(_ value: Double) -> CGFloat { midX + CGFloat((value - live) / 0.25) * step }
+        let steps = self.steps
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Palette.controlOpen)
             ZStack(alignment: .topLeading) {
                 Capsule().fill(Palette.barLabel.opacity(0.35))
-                    .frame(width: step * CGFloat(Self.steps.count - 1), height: 3)
-                    .offset(x: x(Self.steps[0]), y: midY - 1.5)
-                ForEach(Self.steps, id: \.self) { value in
+                    .frame(width: step * CGFloat(steps.count - 1), height: 3)
+                    .offset(x: x(steps[0]), y: midY - 1.5)
+                ForEach(steps, id: \.self) { value in
                     Rectangle().fill(Palette.barLabel.opacity(0.6))
                         .frame(width: 2, height: 9)
                         .offset(x: x(value) - 1, y: midY - 4.5)
-                    Text(Self.label(value))
+                    Text(value == TextScale.off ? "Off" : TextScale.number(value))
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(value == live ? Palette.text : Palette.barLabel)
                         .frame(width: step, alignment: .center)
@@ -1584,7 +1655,7 @@ struct TextScaleControl: View {
             // (a phone's row 1, the compact window bar) `midY - 34` put the top of its digits 2 pt
             // outside the clip; it sits where the 58 pt bars put it (1 pt above the frame's top,
             // the digits 2 pt inside), and in the taller bars as it always has.
-            Text(Self.label(live) + "×")
+            Text(TextScale.title(at: live))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Palette.text)
                 .frame(width: 60, alignment: .center)
@@ -1594,19 +1665,8 @@ struct TextScaleControl: View {
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
     }
 
-    /// Nearest detent, clamped to the ends.
-    static func snap(_ value: Double) -> Double {
-        let clamped = min(max(value, steps[0]), steps[steps.count - 1])
-        return steps.min { abs($0 - clamped) < abs($1 - clamped) } ?? 1.0
-    }
-
     /// 0.5, 0.75, 1, 1.25, 1.5: trailing zeros dropped, and "1" rather than "1.0".
-    static func label(_ scale: Double) -> String {
-        var text = String(format: "%.2f", scale)
-        while text.hasSuffix("0") { text.removeLast() }
-        if text.hasSuffix(".") { text.removeLast() }
-        return text
-    }
+    static func label(_ scale: Double) -> String { TextScale.number(scale) }
 }
 
 // MARK: - Window thumbnails
@@ -1630,11 +1690,30 @@ struct WindowStrip: View {
     /// the submenu outside this clipped strip.
     @Binding var menuFor: UInt32?
 
-    /// Press and hold a thumbnail for 1.5 s: it starts to wiggle and its traffic lights (close,
-    /// minimize, full screen) appear in a submenu beside it, the way a held Home Screen icon
-    /// offers its menu. Keep holding and move: the submenu goes, the thumbnail lifts and drags
+    /// Press and hold a thumbnail for the hold (ThumbnailHold: 0.5 s unless changed in Settings ›
+    /// This iPad or iPhone, 0.2 to 3 s; issue #113, it was a fixed 1.5 s): it starts to wiggle and its traffic
+    /// lights (close, minimize, full screen) appear in a submenu beside it, the way a held Home Screen
+    /// icon offers its menu. Keep holding and move: the submenu goes, the thumbnail lifts and drags
     /// into a new slot. The arrangement is the device's own, persisted per Mac. A tap selects.
-    static let holdToOpen: TimeInterval = 1.5
+    ///
+    /// `Sill.thumbnailHold`, read for its changes (the panel's stepper writes it, and this redraws the
+    /// strip, whose thumbnails take the new length at once); the length itself through
+    /// `ThumbnailHold.seconds(stored:)`, since `-Sill.thumbnailHold 0.3` is a string in UserDefaults.
+    @AppStorage(ThumbnailHold.key) private var storedHold = ThumbnailHold.standard
+    private var hold: TimeInterval {
+        _ = storedHold
+        return ThumbnailHold.seconds(stored: UserDefaults.standard.object(forKey: ThumbnailHold.key))
+    }
+    #if DEBUG
+    /// The last length the console was told ("thumbnails: hold 0.5 s"), so a strip that comes and goes
+    /// (a rotation, another bar) says it only when it changes.
+    @MainActor private static var loggedHold: TimeInterval?
+    @MainActor private static func logHold(_ hold: TimeInterval) {
+        guard loggedHold != hold else { return }
+        loggedHold = hold
+        print(ThumbnailHold.consoleLine(hold))
+    }
+    #endif
     /// What the tour lights of the strip: its thumbnails' band (the strip is as tall as its bar),
     /// with the active halo's 5 pt above and the app badge's 6 pt below.
     static func tourBand(pad: CGFloat) -> EdgeInsets {
@@ -1647,6 +1726,7 @@ struct WindowStrip: View {
     var body: some View {
         let windows = client.orderedWindows
         let slot = width + spacing
+        let hold = self.hold    // read here, in the body, so a change of the setting redraws the strip
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: spacing) {
                 ForEach(Array(windows.enumerated()), id: \.element.id) { index, window in
@@ -1664,7 +1744,7 @@ struct WindowStrip: View {
                                         client.persistWindowOrder()
                                     })
                         .overlay {
-                            HoldDragOverlay(minimumHold: Self.holdToOpen,
+                            HoldDragOverlay(minimumHold: hold,
                                             onTap: { if menuFor != nil { closeMenu() } else { client.select(.window(window.id)) } },
                                             onHold: { openMenu(for: window.id) },
                                             onMove: { t in holdMoved(window: window, index: index, count: windows.count, slot: slot, translation: t) },
@@ -1699,8 +1779,10 @@ struct WindowStrip: View {
         #if DEBUG
         // Harness: `-SillWindowMenu 1` opens the first window's submenu at launch.
         .onAppear {
+            Self.logHold(hold)
             if UserDefaults.standard.bool(forKey: "SillWindowMenu"), let first = client.orderedWindows.first { menuFor = first.id }
         }
+        .onChange(of: hold) { _, now in Self.logHold(now) }
         #endif
     }
 
@@ -1747,6 +1829,8 @@ struct WindowStrip: View {
 /// ScrollView (2026-09-23), and UIKit's long press is exactly the Home Screen mechanic: by the time
 /// it recognizes, the scroll view's pan has already given up, so the drag is ours.
 struct HoldDragOverlay: UIViewRepresentable {
+    /// The hold's length (ThumbnailHold): a change reaches the long press already made, so the
+    /// thumbnails on screen wait the new length from their next press.
     var minimumHold: TimeInterval
     var onTap: () -> Void
     var onHold: () -> Void
@@ -1763,14 +1847,21 @@ struct HoldDragOverlay: UIViewRepresentable {
         hold.allowableMovement = 12        // more than this before the hold fires is a scroll, not a hold
         view.addGestureRecognizer(tap)
         view.addGestureRecognizer(hold)
+        context.coordinator.hold = hold
         return view
     }
 
-    func updateUIView(_ view: UIView, context: Context) { context.coordinator.parent = self }
+    func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.parent = self
+        // Settings › This iPad (or iPhone) changed the hold: this thumbnail's next press waits the new length.
+        if let hold = context.coordinator.hold, hold.minimumPressDuration != minimumHold { hold.minimumPressDuration = minimumHold }
+    }
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     final class Coordinator: NSObject {
         var parent: HoldDragOverlay
+        /// The thumbnail's long press, for `updateUIView` to give it a new length.
+        weak var hold: UILongPressGestureRecognizer?
         private var start = CGPoint.zero
         init(_ parent: HoldDragOverlay) { self.parent = parent }
 

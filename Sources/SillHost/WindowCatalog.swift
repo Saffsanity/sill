@@ -12,7 +12,9 @@ import StreamProtocol
 /// Idle means idle: with no client connected nothing here runs on a timer. The window list is
 /// read once at startup (the coordinator's `refreshWindows()`, so the CLI can print a count) and
 /// then only while at least one client is connected, every `pollInterval`, together with the
-/// thumbnails. The installed-app scan runs once at startup, off the main thread.
+/// thumbnails. The installed-app scan runs once at startup, off the main thread. So after a spell
+/// with no client the last look can be hours old and its display gone: the coordinator looks again
+/// before it builds a capture from it (CatalogLook, `lookAge`).
 @MainActor
 final class WindowCatalog {
     private(set) var windows: [SCWindow] = []
@@ -23,6 +25,13 @@ final class WindowCatalog {
     /// out, so Sill's own windows (the pairing code above all) never reach a device. Nil when it
     /// is not listed (the CLI has no windows; see `resolveOwnApplication`).
     private(set) var ownApplication: SCRunningApplication?
+    /// When the last look (`refreshWindows`) landed, on the clock that keeps counting while the Mac
+    /// sleeps. Nil before the first. A capture is built from the look only while it will do
+    /// (CatalogLook, the coordinator's `lookAgainIfStale`): after a spell with no device it can be a
+    /// day old, its display gone (the black screen of 2026-10-28).
+    private(set) var lookedAt: ContinuousClock.Instant?
+    /// Seconds since the last look, nil before the first.
+    var lookAge: TimeInterval? { lookedAt.map { CatalogLook.seconds(ContinuousClock.now - $0) } }
 
     /// Fires when the window list changes (new, closed, retitled, resized, reordered).
     var onWindowsChanged: (([WindowInfo]) -> Void)?
@@ -170,6 +179,17 @@ final class WindowCatalog {
     /// One of this process's own windows (Settings, the log, the pairing window with its code).
     static func isOwn(_ w: SCWindow) -> Bool { w.owningApplication?.processID == ownPID }
 
+    /// The displays macOS has active now (connected, awake, drawable; Sill's own virtual display too
+    /// while it exists), by ID: what the last look's display is judged against before a capture is
+    /// built from it (CatalogLook). No ScreenCaptureKit call. Empty when the call fails.
+    nonisolated static func activeDisplayIDs() -> [UInt32] {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
+        return Array(ids.prefix(Int(count)))
+    }
+
     /// `SCShareableContent`, but never for longer than `timeout`. Measured 2026-09-22: in a process
     /// without Screen Recording the call never returned once a virtual display existed (it returns
     /// promptly, with no windows, without one). The virtual-display paths use this so a hang there
@@ -254,6 +274,7 @@ final class WindowCatalog {
         }
         guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
         appliedSeq = seq
+        lookedAt = .now
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
         display = preferMainDisplay
             ? (content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first)

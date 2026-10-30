@@ -26,7 +26,8 @@ enum IdentityStoreChoice: Equatable {
 enum IdentityStorePlan {
     /// The store for this launch (docs/keychain-plan.md §4).
     ///
-    /// - `bundled`: running from a `.app` (real Sill.app), not the bare SillMenuBar test binary.
+    /// - `bundled`: Sill.app's own code (AppIdentity: signed as Sill or with any certificate, a bundle
+    ///   that says it is Sill, or a `.app`), wherever it runs from, not the bare SillMenuBar test binary.
     /// - `synthetic`: `--synthetic` (a test host, off Bonjour).
     /// - `entitledAccessGroup`: the `keychain-access-groups` value the running binary actually holds,
     ///   read from its own signature at launch (nil for any build without an embedded profile: every
