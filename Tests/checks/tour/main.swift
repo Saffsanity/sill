@@ -1003,12 +1003,12 @@ let B3offVO = "Virtual Display, in Settings, streams a window you pick from a di
 let B4 = "Keyboard brings up the on-screen keyboard to type on Mac mini."
 let B5 = "New: A hardware keyboard types on Mac mini by itself, Esc included, and Keyboard then brings up the keyboard bar."
 let S1 = "New: With Share Clipboard, text you copy on Mac mini is ready to paste on this iPad."
-let S2 = "New: Copy on this iPad, then come back to Sill: Paste on Mac mini puts it where Mac mini’s cursor is."
-let S2off = "New: Copy on this iPad, then come back to Sill: Paste on Mac mini sends it to Mac mini’s clipboard."
+let S2 = "New: Copy on this iPad, then come back to Sill: Paste on Mac mini, on the note Sill shows then or in Settings, puts it where Mac mini’s cursor is."
+let S2off = "New: Copy on this iPad, then come back to Sill: Paste on Mac mini, on the note Sill shows then or in Settings, sends it to Mac mini’s clipboard."
 let S3 = "New: Send Audio, a beta, plays Mac mini’s sound here, and Mute silences this iPad alone."
 let S4 = "New: Update Sill on Mac mini to copy and paste between it and this iPad, and to hear its sound here."
 let G1 = "Disconnect is at the bottom of Settings.", G2 = "Take the Tour is there too, to see this again."
-let G3 = "New: Reverse Scrolling turns a finger’s drag and the trackpad’s two-finger scroll around."
+let G3 = "New: Reverse Scrolling turns a finger’s drag and the on-screen trackpad’s two-finger scroll around."
 let G4 = "New: Hold to Show Window Controls sets how long you hold a window’s thumbnail before its controls show."
 let G5 = "Hold your iPad upright for a trackpad and keys."
 let K1 = "cmd, opt, ctrl and shift stay on for the next key or trackpad click: tap cmd, then C, to copy."
@@ -1044,7 +1044,7 @@ for f in everyFeatures {
 let barL = words(.bar, L)
 check(barL.title == "Windows and Menus" && barL.subtitle == nil, "bar: title, no subtitle")
 check(texts(barL) == [B1, B2, B3on, B4, B5], "bar sideways: \(texts(barL))")
-check(barL.rows.map(\.symbol) == ["hand.point.up.left", "filemenu.and.selection", "display", "keyboard", "escape"], "bar's symbols")
+check(barL.rows.map(\.symbol) == ["hand.point.up.left", "filemenu.and.selection", "display", "keyboard", "keyboard.badge.ellipsis"], "bar's symbols")
 check(texts(words(.bar, P)) == [B1, B2, B3on], "bar upright: no Keyboard rows (it is a cap)")
 check(barL.hint == "In the bar at the top, after Apps." && words(.bar, P).hint == "In the bar below the picture, after Apps.", "bar's hints")
 check(texts(words(.bar, L, mac: "Studio")).suffix(2) == ["Keyboard brings up the on-screen keyboard to type on Studio.",
@@ -1063,7 +1063,7 @@ for f in everyFeatures {
     check(bar.rows.contains { $0.symbol == "filemenu.and.selection" } == f.menus && bar.title == (f.menus ? "Windows and Menus" : "Windows"),
           "the Menus row and the title follow the button: \(f)")
     check(bar.rows.first { $0.symbol == "display" }?.text == (f.virtualDisplay ? B3on : B3off), "Virtual Display's row follows the Mac's setting: \(f)")
-    check(words(.bar, P, features: f).rows.allSatisfy { $0.symbol != "keyboard" && $0.symbol != "escape" }, "no Keyboard rows in the halves' bar card: \(f)")
+    check(words(.bar, P, features: f).rows.allSatisfy { $0.symbol != "keyboard" && $0.symbol != "keyboard.badge.ellipsis" }, "no Keyboard rows in the halves' bar card: \(f)")
 }
 
 // The clipboard's and the sound's card: what this Mac has, and the update an older one needs.
@@ -1086,9 +1086,9 @@ check(words(.sharing, F, device: "iPhone").hint == "In Settings, the last button
       "sharing's hints")
 check(words(.sharing, L, voiceOver: true) == sharingL && words(.sharing, F, device: "iPhone", voiceOver: true) == words(.sharing, F, device: "iPhone"),
       "the same words under VoiceOver")
-check(texts(words(.sharing, L, mac: "Studio")).contains("New: Copy on this iPad, then come back to Sill: Paste on Studio puts it where Studio’s cursor is."),
+check(texts(words(.sharing, L, mac: "Studio")).contains("New: Copy on this iPad, then come back to Sill: Paste on Studio, on the note Sill shows then or in Settings, puts it where Studio’s cursor is."),
       "the Mac's name in Paste's row")
-check(texts(words(.sharing, L, mac: "")).contains("New: Copy on this iPad, then come back to Sill: Paste on your Mac puts it where your Mac’s cursor is."),
+check(texts(words(.sharing, L, mac: "")).contains("New: Copy on this iPad, then come back to Sill: Paste on your Mac, on the note Sill shows then or in Settings, puts it where your Mac’s cursor is."),
       "the “your Mac” fallback in Paste's row")
 for f in everyFeatures {
     let s = words(.sharing, L, features: f)
@@ -1120,7 +1120,7 @@ check(texts(laptopFirst) == [K1, K2, K3, K4, K5], "laptop: \(texts(laptopFirst))
 check(laptopFirst.rows[0].spoken == "Command, Option, Control and Shift stay on for the next key or trackpad click: tap Command, then C, to copy.", "the caps spoken by name")
 check(laptopFirst.rows[4].spans.filter(\.strong).map(\.text) == ["Touch and hold", "then drag"], "two names in the drag row")
 check(laptopFirst.rows[2].spans.filter(\.strong).map(\.text) == ["New:", "A hardware keyboard", "the keyboard key"], "two names in the hardware keyboard's row")
-check(laptopFirst.rows.map(\.symbol) == ["command", "keyboard", "escape", "cursorarrow.click.2", "hand.draw"], "laptop's symbols")
+check(laptopFirst.rows.map(\.symbol) == ["command", "keyboard", "keyboard.badge.ellipsis", "cursorarrow.click.2", "hand.draw"], "laptop's symbols")
 check(laptopFirst.hint == "Below the bar: the row of keys, then the trackpad.", "laptop's hint")
 check(everyFeatures.allSatisfy { words(.laptop, P, first: true, features: $0) == laptopFirst }, "the halves' laptop card is the same for every Mac")
 check(touchPad.rows[1].spoken == "Touch and hold to right-click.", "a row is spoken as it reads")
@@ -1226,7 +1226,7 @@ check(mostRows == 6, "at most six rows on any card: \(mostRows)")
 check(TourPolicy.newPrefix == "New:", "the mark")
 func expectedNew(_ row: TourRow, _ f: TourFeatures) -> Bool {
     switch row.symbol {
-    case "plus.magnifyingglass", "escape", "doc.on.clipboard", "doc.on.doc", "speaker.wave.2", "arrow.down.circle",
+    case "plus.magnifyingglass", "keyboard.badge.ellipsis", "doc.on.clipboard", "doc.on.doc", "speaker.wave.2", "arrow.down.circle",
          "arrow.up.arrow.down", "timer", "rectangle.expand.vertical": return true
     case "display": return f.virtualDisplay
     default: return false
@@ -1271,7 +1271,7 @@ for layout in [L, P, F] {
         }
     }
 }
-check(newRows == ["plus.magnifyingglass", "display", "escape", "doc.on.clipboard", "doc.on.doc", "speaker.wave.2", "arrow.down.circle",
+check(newRows == ["plus.magnifyingglass", "display", "keyboard.badge.ellipsis", "doc.on.clipboard", "doc.on.doc", "speaker.wave.2", "arrow.down.circle",
                   "arrow.up.arrow.down", "timer", "rectangle.expand.vertical"], "the New rows: T5, B3, B5, S1–S4, G3, G4, K3, K6: \(newRows.sorted())")
 check(["hand.raised.fingers.spread", "filemenu.and.selection", "keyboard", "display", "hand.tap", "command"].allSatisfy(oldRows.contains),
       "the gestures', Menus', the Keyboard rows', Virtual Display's off form and the old rows unmarked")

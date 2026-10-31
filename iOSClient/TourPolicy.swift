@@ -634,7 +634,7 @@ enum TourPolicy {
             // it (HardwareKeyboardPolicy), and with one attached it brings iPadOS's keyboard bar.
             if layout != .portrait {
                 rows.append(row("keyboard", [strong("Keyboard"), plain(" brings up the on-screen keyboard to type on \(mac).")]))
-                rows.append(row("escape", [strong("A hardware keyboard"), plain(" types on \(mac) by itself, Esc included, and "), strong("Keyboard"), plain(" then brings up the keyboard bar.")], new: true))
+                rows.append(row("keyboard.badge.ellipsis", [strong("A hardware keyboard"), plain(" types on \(mac) by itself, Esc included, and "), strong("Keyboard"), plain(" then brings up the keyboard bar.")], new: true))
             }
             let hint: String
             switch layout {
@@ -656,6 +656,7 @@ enum TourPolicy {
             if features.clipboard {
                 rows.append(row("doc.on.clipboard", [plain("With "), strong("Share Clipboard"), plain(", text you copy on \(mac) is ready to paste on this \(device).")], new: true))
                 rows.append(row("doc.on.doc", [plain("Copy on this \(device), then come back to Sill: "), strong("Paste on \(mac)"),
+                                               plain(", on the note Sill shows then or in Settings,"),
                                                plain(features.pasteRightAway ? " puts it where \(mac)’s cursor is." : " sends it to \(mac)’s clipboard.")], new: true))
             }
             if features.sound {
@@ -673,7 +674,7 @@ enum TourPolicy {
             // This device's own new switches (its Settings group): a finger's drag and a thumbnail's
             // hold, which VoiceOver has no way of its own to make.
             if !voiceOver {
-                rows.append(row("arrow.up.arrow.down", [strong("Reverse Scrolling"), plain(" turns a finger’s drag and the trackpad’s two-finger scroll around.")], new: true))
+                rows.append(row("arrow.up.arrow.down", [strong("Reverse Scrolling"), plain(" turns a finger’s drag and the on-screen trackpad’s two-finger scroll around.")], new: true))
                 rows.append(row("timer", [strong("Hold to Show Window Controls"), plain(" sets how long you hold a window’s thumbnail before its controls show.")], new: true))
             }
             if layout == .landscape {
@@ -694,7 +695,7 @@ enum TourPolicy {
             // A phone's keyboard is row 1's button, which the bar card names; the halves' is a cap.
             if layout != .phone {
                 rows.append(row("keyboard", [strong("The keyboard key"), plain(" brings up the on-screen keyboard to type on \(mac).")]))
-                rows.append(row("escape", [strong("A hardware keyboard"), plain(" types on \(mac) by itself, Esc included, and "), strong("the keyboard key"), plain(" then brings up the keyboard bar.")], new: true))
+                rows.append(row("keyboard.badge.ellipsis", [strong("A hardware keyboard"), plain(" types on \(mac) by itself, Esc included, and "), strong("the keyboard key"), plain(" then brings up the keyboard bar.")], new: true))
             }
             if !voiceOver {
                 rows.append(row("cursorarrow.click.2", [strong("Tap with two fingers"), plain(" on the trackpad to right-click.")]))

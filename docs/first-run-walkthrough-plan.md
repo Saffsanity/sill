@@ -1453,11 +1453,11 @@ The words (‹Mac› the Mac's name, ‹device› iPad or iPhone; **bold** a str
 | B4 | | sideways, a phone | **Keyboard** brings up the on-screen keyboard to type on ‹Mac›. |
 | B5 | | sideways, a phone | New: **A hardware keyboard** types on ‹Mac› by itself, Esc included, and **Keyboard** then brings up the keyboard bar. |
 | S1 | sharing, "Clipboard and Sound" ("Clipboard", "Sound") | clipboard | New: With **Share Clipboard**, text you copy on ‹Mac› is ready to paste on this ‹device›. |
-| S2 | | clipboard | New: Copy on this ‹device›, then come back to Sill: **Paste on ‹Mac›** puts it where ‹Mac›’s cursor is. (Right Away off: "…sends it to ‹Mac›’s clipboard.") |
+| S2 | | clipboard | New: Copy on this ‹device›, then come back to Sill: **Paste on ‹Mac›**, on the note Sill shows then or in Settings, puts it where ‹Mac›’s cursor is. (Right Away off: "…sends it to ‹Mac›’s clipboard.") |
 | S3 | | sound | New: **Send Audio**, a beta, plays ‹Mac›’s sound here, and **Mute** silences this ‹device› alone. |
 | S4 | | neither | New: **Update Sill on ‹Mac›** to copy and paste between it and this ‹device›, and to hear its sound here. |
 | G1, G2 | settings | always | as before (Disconnect, Take the Tour) |
-| G3 | | sighted | New: **Reverse Scrolling** turns a finger’s drag and the trackpad’s two-finger scroll around. |
+| G3 | | sighted | New: **Reverse Scrolling** turns a finger’s drag and the on-screen trackpad’s two-finger scroll around. |
 | G4 | | sighted | New: **Hold to Show Window Controls** sets how long you hold a window’s thumbnail before its controls show. |
 | G5 | | sideways, last | as before (**Hold your ‹device› upright** / **Turn your iPhone on its side**) |
 | K1 | laptop | always | as before |
@@ -1472,7 +1472,7 @@ hardware keyboard types by itself) are gone; Aa is named only in B3 (Noah's word
 button in the bar." elsewhere. A phone's bar hints name Menus while it shows ("Under the picture: Aa
 and Keyboard in the first row, the windows and Menus in the second."; with Larger Picture "…Apps,
 Menus, Aa and Keyboard."). Symbols, iOS 16 or older: plus.magnifyingglass,
-hand.raised.fingers.spread, filemenu.and.selection, display, keyboard, escape, doc.on.clipboard,
+hand.raised.fingers.spread, filemenu.and.selection, display, keyboard, keyboard.badge.ellipsis, doc.on.clipboard,
 doc.on.doc, speaker.wave.2, arrow.down.circle, arrow.up.arrow.down, timer, rectangle.expand.vertical.
 
 Rows with every feature there: sideways 6 (5 on an iPhone), 5, 3, 5; the halves 6, 3, 3, 4, 5; a
