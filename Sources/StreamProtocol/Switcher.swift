@@ -68,12 +68,28 @@ public struct WindowList: Codable {
     /// sends them as keys only to a host that says so (the device's KeyTyping). Set after the initializer,
     /// whose parameters stay as they were: `list.keyRepeat = KeyRepeat.generation`.
     public var keyRepeat: Int?
+    /// This Mac's screen is locked, or another user's session is on its console (the host's LockPolicy,
+    /// docs/locked-mac-plan.md): true, with no windows and no `clipboard` in the list, while only its lock
+    /// screen streams (the Desktop) and a window picked, an app launched, the menus, gestures and the
+    /// clipboard are refused. Left out otherwise, and by every host before 2026-10-31, whose lists are
+    /// what they were. A device shows `LockedMac.line` where the windows would be. Set after the
+    /// initializer, as `keyRepeat`.
+    public var locked: Bool?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
                 hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil) {
         self.macName = macName; self.windows = windows; self.active = active; self.launchID = launchID
         self.hostVersion = hostVersion; self.protocol = `protocol`; self.gestures = gestures
         self.clipboard = clipboard
+    }
+}
+
+/// A locked Mac on the device (`WindowList.locked`; docs/locked-mac-plan.md): the one line the Apps
+/// drawer and the Settings panel's header show where the Mac's windows would be, which VoiceOver reads
+/// as it is. Pure; checked with the host's rule (Tests/checks/lock-policy).
+public enum LockedMac {
+    public static func line(mac: String) -> String {
+        "\(mac.isEmpty ? "The Mac" : mac) is locked. Unlock it to see its windows."
     }
 }
 
