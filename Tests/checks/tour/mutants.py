@@ -6,7 +6,7 @@ usage: mutants.py WORKTREE"""
 import os, subprocess, sys, tempfile
 WT = sys.argv[1]; HERE = os.path.dirname(os.path.abspath(__file__))
 F = os.path.join(WT, "iOSClient/TourPolicy.swift")
-PINCH = 'rows.append(row("plus.magnifyingglass", [strong("Pinch"), plain(" to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still works \\(mac).")], new: true))'
+PINCH = 'rows.append(row("plus.magnifyingglass", [strong("Pinch"), plain(" to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still taps, holds and drags on \\(mac).")], new: true))'
 MUTANTS = [
     # When it shows by itself.
     ("the beat dropped", "if m.now < opens + beat { return .wait(until: opens + beat) }", "if false { return .wait(until: opens + beat) }"),
@@ -151,7 +151,7 @@ MUTANTS = [
     ("no space after the mark", 'TourSpan(text: newPrefix, strong: true, isNew: true), TourSpan(text: " ")]', 'TourSpan(text: newPrefix, strong: true, isNew: true), TourSpan(text: "")]'),
     ("the mark's word changed", 'static let newPrefix = "New:"', 'static let newPrefix = "NEW:"'),
     ("VoiceOver reads a New row without its mark", "?? all.map(\\.text).joined())", "?? spans.map(\\.text).joined())"),
-    ("the pinch row unmarked", 'one finger still works \\(mac).")], new: true))', 'one finger still works \\(mac).")]))'),
+    ("the pinch row unmarked", 'one finger still taps, holds and drags on \\(mac).")], new: true))', 'one finger still taps, holds and drags on \\(mac).")]))'),
     ("the pinch row on iPad only", PINCH, "if iPad { " + PINCH + " }"),
     ("the swipe row unmarked", 'and sideways between Spaces.")], new: true))', 'and sideways between Spaces.")]))'),
     ("the Menus row unmarked", 'you’re using on \\(mac).")], new: true))', 'you’re using on \\(mac).")]))'),

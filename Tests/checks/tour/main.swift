@@ -989,7 +989,7 @@ func texts(_ c: TourCopy) -> [String] { c.rows.map(\.text) }
 // Every row of every card, as the plan's table has it (docs/first-run-walkthrough-plan.md, "The tour
 // once more, for 0.6"), for Mac mini and an iPad unless said.
 let T1 = "Tap to click.", T2 = "Touch and hold to right-click.", T3 = "Drag to scroll.", T4 = "Apple Pencil works as a mouse."
-let T5 = "New: Pinch to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still works Mac mini."
+let T5 = "New: Pinch to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still taps, holds and drags on Mac mini."
 let T6 = "New: Swipe with three fingers: up for Mission Control, down for App Exposé, and sideways between Spaces."
 let B1 = "Touch and hold a window to close, minimize or go full screen. Keep holding and drag to move it."
 let B1VO = "Each window has actions: close, minimize, full screen, and move left or right. Swipe up or down to hear them."
@@ -1031,7 +1031,7 @@ check(words(.touch, P).hint == "The picture of Mac mini fills the top half of th
 check(texts(words(.touch, L, device: "iPhone")) == [T1, T2, T3, T5, T6], "no Pencil row on iPhone, the pinch's for both")
 check(texts(words(.touch, L, features: with { $0.gestures = false })) == [T1, T2, T3, T4, T5], "the gestures off, or a Mac that takes none: no swipe row")
 check(texts(words(.touch, F, device: "iPhone", features: allOff)) == [T1, T2, T3, T5], "the pinch row whatever the Mac")
-check(texts(words(.touch, P, mac: "Studio")).contains("New: Pinch to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still works Studio."),
+check(texts(words(.touch, P, mac: "Studio")).contains("New: Pinch to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still taps, holds and drags on Studio."),
       "the Mac's name in the pinch row")
 check(words(.touch, L, mac: "").subtitle == "What you do here happens on your Mac." && words(.touch, P, mac: "").hint == "The picture of your Mac fills the top half of the screen.",
       "the “your Mac” fallback")

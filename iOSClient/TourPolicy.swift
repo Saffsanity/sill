@@ -588,7 +588,7 @@ enum TourPolicy {
             if iPad { rows.append(row("applepencil", [strong("Apple Pencil"), plain(" works as a mouse.")])) }
             // Pinch to zoom (StreamZoom, PR #196): this device's alone, 1× to 5× about the pinch;
             // zoomed in, two fingers are the picture's and one finger still the Mac's.
-            rows.append(row("plus.magnifyingglass", [strong("Pinch"), plain(" to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still works \(mac).")], new: true))
+            rows.append(row("plus.magnifyingglass", [strong("Pinch"), plain(" to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still taps, holds and drags on \(mac).")], new: true))
             // The three-finger gestures (TrackpadGestures, the Mac's GestureChords): only while this
             // device's switch is on and the Mac takes them. The pinch and the spread are the Settings
             // panel's rows.

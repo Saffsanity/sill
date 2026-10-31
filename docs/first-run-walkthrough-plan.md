@@ -1445,7 +1445,7 @@ The words (‹Mac› the Mac's name, ‹device› iPad or iPhone; **bold** a str
 |---|---|---|---|
 | T1–T3 | touch, "Tap, Hold, Drag and Pinch" | always | **Tap** to click. / **Touch and hold** to right-click. / **Drag** to scroll. |
 | T4 | | iPad | **Apple Pencil** works as a mouse. |
-| T5 | | always | New: **Pinch** to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still works ‹Mac›. |
+| T5 | | always | New: **Pinch** to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still taps, holds and drags on ‹Mac›. |
 | T6 | | gestures | New: **Swipe with three fingers**: up for Mission Control, down for App Exposé, and sideways between Spaces. |
 | B1 | bar, "Windows and Menus" (or "Windows") | always | as before (VoiceOver's own; Apps' with Larger Picture) |
 | B2 | | menus | New: **Menus** has the menu bar of the app you’re using on ‹Mac›. |
