@@ -93,6 +93,16 @@ enum MockCatalog {
         client.thumbnails = thumbnails
 
         seed(client, settings: settings)
+        // `-SillMacLocked 1` (docs/locked-mac-plan.md): the mock Mac is locked, as its LockPolicy sends it:
+        // no windows, thumbnails, apps or clipboard, the Desktop (its lock screen) streaming.
+        if UserDefaults.standard.bool(forKey: "SillMacLocked") {
+            client.macLocked = true
+            client.windows = []
+            client.thumbnails = [:]
+            client.apps = []
+            client.hostClipboard = nil
+            client.active = .desktop
+        }
         // `-SillOverlayLine asking|shown|openonmac|locked|noanswer`: Pair This iPad…'s line over a
         // session at home that speaks TLS, as the Mac's answer to its ask sets it (the mock never
         // asks: over it the overlay reads "…is showing a code now." as over a plain door).

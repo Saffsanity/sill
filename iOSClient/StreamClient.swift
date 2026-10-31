@@ -889,6 +889,10 @@ final class StreamClient: ObservableObject {
     /// Mac takes and sends (`WindowList.clipboard`, 1 for text), nil from a Mac before it or with Share
     /// clipboard with devices off. Cleared with the session.
     @Published var hostClipboard: Int?
+    /// This session's Mac is locked (`WindowList.locked`; docs/locked-mac-plan.md): its lists have no
+    /// windows while only its lock screen streams, and the Apps drawer and the Settings panel's header say
+    /// so where the windows would be (`LockedMac.line`). False from a Mac before it. Cleared with the session.
+    @Published var macLocked = false
     /// The chip "Paste on ‹Mac›" is offered (ClipboardPolicy.offersChip) until it is used, dismissed or
     /// its time is up; the stream screen hides it while something is open over the stream.
     @Published var clipboardChip = false
@@ -3560,6 +3564,7 @@ final class StreamClient: ObservableObject {
         self.status = status
         macName = ""
         windows = []
+        macLocked = false
         active = .none
         thumbnails = [:]
         icons = [:]
@@ -4116,6 +4121,8 @@ final class StreamClient: ObservableObject {
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
                 self.hostKeyRepeat = list.keyRepeat
+                // A locked Mac's list has no windows: the drawer and the panel say why (LockedMac).
+                if self.macLocked != (list.locked == true) { self.macLocked = list.locked == true }
                 // The clipboard: subscribe (or stop) as the Mac's word and this device's switch say.
                 self.hostClipboardChanged(list.clipboard)
                 if !self.sessionListed {

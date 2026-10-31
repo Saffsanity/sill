@@ -2089,41 +2089,66 @@ struct AppDrawer: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            searchField
-            ScrollView {
-                VStack(spacing: 6) {
-                    if !openApps.isEmpty {
-                        header("Open now")
-                        ForEach(openApps) { app in
-                            DrawerRow(height: 50,
-                                      highlighted: app.bundleID == activeBundleID,
-                                      title: app.name,
-                                      trailing: app.windows.count == 1 ? "1 window" : "\(app.windows.count) windows",
-                                      action: { show(app) }) {
-                                AppIcon(image: client.icons[app.bundleID], name: app.name,
-                                        size: 32, radius: 9, fontSize: 12)
+            if client.macLocked {
+                // A locked Mac sends no windows, apps or icons (its LockPolicy, docs/locked-mac-plan.md),
+                // and launches nothing: one line where they would be.
+                lockedLine
+                Spacer(minLength: 0)
+            } else {
+                searchField
+                ScrollView {
+                    VStack(spacing: 6) {
+                        if !openApps.isEmpty {
+                            header("Open now")
+                            ForEach(openApps) { app in
+                                DrawerRow(height: 50,
+                                          highlighted: app.bundleID == activeBundleID,
+                                          title: app.name,
+                                          trailing: app.windows.count == 1 ? "1 window" : "\(app.windows.count) windows",
+                                          action: { show(app) }) {
+                                    AppIcon(image: client.icons[app.bundleID], name: app.name,
+                                            size: 32, radius: 9, fontSize: 12)
+                                }
                             }
                         }
-                    }
-                    if !closedApps.isEmpty {
-                        header("All apps").padding(.top, 2)
-                        ForEach(closedApps) { app in
-                            DrawerRow(height: 46, highlighted: false, title: app.name, trailing: nil,
-                                      action: { client.launch(bundleID: app.bundleID) }) {
-                                AppIcon(image: client.icons[app.bundleID], name: app.name,
-                                        size: 32, radius: 9, fontSize: 12)
+                        if !closedApps.isEmpty {
+                            header("All apps").padding(.top, 2)
+                            ForEach(closedApps) { app in
+                                DrawerRow(height: 46, highlighted: false, title: app.name, trailing: nil,
+                                          action: { client.launch(bundleID: app.bundleID) }) {
+                                    AppIcon(image: client.icons[app.bundleID], name: app.name,
+                                            size: 32, radius: 9, fontSize: 12)
+                                }
                             }
                         }
                     }
                 }
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Palette.bar))
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
             .strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
         .shadow(color: .black.opacity(0.65), radius: 30, x: 0, y: 24)
+    }
+
+    /// A locked Mac (`StreamClient.macLocked`): one line in place of the search field and both lists, read
+    /// by VoiceOver as it is (the lock symbol is not).
+    private var lockedLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 15))
+                .foregroundStyle(Palette.muted)
+                .accessibilityHidden(true)
+            Text(LockedMac.line(mac: client.macName))
+                .font(.system(size: 15))
+                .foregroundStyle(Palette.text)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Palette.control))
     }
 
     private var searchField: some View {
