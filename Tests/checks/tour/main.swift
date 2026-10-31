@@ -2,11 +2,13 @@ import Foundation
 import CoreGraphics
 // H2 of docs/first-run-walkthrough-plan.md: TourPolicy (iOSClient/TourPolicy.swift) on its own. The
 // steps and targets per layout, what is owed, the rule of the automatic tour at every boundary,
-// memory, runs, a rotation mid-run, the crease, the card's width and place (pinned at the Duo's four
-// sizes and the iPhone SE's two, against an oracle written from the plan's words, and properties
-// over a grid of screens and card heights; a phone held upright with PhonePortraitLayout's own
-// rects), and every string. Compiled with the files as they are:
-//   swiftc -O iOSClient/TourPolicy.swift iOSClient/PhonePortraitLayout.swift Tests/checks/tour/main.swift -o .build/checks/tour/check
+// memory and the tour's version (0.6: the tour once more, "The tour once more, for 0.6"), runs, a
+// rotation mid-run, the crease, the card's width and place (pinned at the Duo's four sizes and the
+// iPhone SE's two, against an oracle written from the plan's words, and properties over a grid of
+// screens and card heights; a phone held upright with PhonePortraitLayout's own rects), and every
+// string, with what it depends on (TourFeatures) and which rows start with "New:". Compiled with the
+// files as they are:
+//   swiftc -O iOSClient/TourPolicy.swift iOSClient/PhonePortraitLayout.swift iOSClient/DuoPosture.swift Tests/checks/tour/main.swift -o .build/checks/tour/check
 var failures = 0, checks = 0
 func check(_ ok: Bool, _ what: @autoclosure () -> String, line: Int = #line) {
     checks += 1
@@ -14,36 +16,48 @@ func check(_ ok: Bool, _ what: @autoclosure () -> String, line: Int = #line) {
 }
 
 let L = TourLayout.landscape, P = TourLayout.portrait, F = TourLayout.phone
-let all: [TourTopic] = [.touch, .bar, .settings, .laptop]
+let all: [TourTopic] = [.touch, .bar, .sharing, .settings, .laptop]
+/// The sideways steps: every one but the laptop half's.
+let sidewaysSteps: [TourTopic] = [.touch, .bar, .sharing, .settings]
 
 // MARK: - Steps and targets
 
 check(TourTopic.allCases == all, "the tour's order")
-check(TourTopic.touch < .bar && TourTopic.bar < .settings && TourTopic.settings < .laptop && !(TourTopic.laptop < .touch), "Comparable follows the order")
-check(TourPolicy.steps(L, voiceOver: false) == [.touch, .bar, .settings], "landscape: three cards")
-check(TourPolicy.steps(P, voiceOver: false) == [.touch, .bar, .settings, .laptop], "portrait: four cards")
-check(TourPolicy.steps(L, voiceOver: true) == [.bar, .settings], "landscape under VoiceOver: no touch")
-check(TourPolicy.steps(P, voiceOver: true) == [.bar, .settings, .laptop], "portrait under VoiceOver: no touch, laptop kept")
+check(TourTopic.touch < .bar && TourTopic.bar < .sharing && TourTopic.sharing < .settings && TourTopic.settings < .laptop
+      && !(TourTopic.laptop < .touch) && !(TourTopic.settings < .sharing), "Comparable follows the order")
+check(TourTopic.sharing.rawValue == "sharing", "the new card's saved name")
+check(TourPolicy.steps(L, voiceOver: false) == sidewaysSteps, "landscape: four cards")
+check(TourPolicy.steps(P, voiceOver: false) == all, "portrait: five cards")
+check(TourPolicy.steps(L, voiceOver: true) == [.bar, .sharing, .settings], "landscape under VoiceOver: no touch")
+check(TourPolicy.steps(P, voiceOver: true) == [.bar, .sharing, .settings, .laptop], "portrait under VoiceOver: no touch, laptop kept")
 check(TourPolicy.only(P) == [.laptop] && TourPolicy.only(L) == [], "only(): the laptop half is portrait's alone")
 check(TourPolicy.targets(.touch, L) == [.stream] && TourPolicy.targets(.touch, P) == [.stream], "touch lights the picture")
-check(TourPolicy.targets(.bar, L) == [.strip, .textSize, .keyboard], "landscape bar: the strip, Aa and Keyboard")
-check(TourPolicy.targets(.bar, P) == [.strip, .textSize], "portrait bar: the strip and Aa (the keyboard is a cap)")
+check(TourPolicy.targets(.bar, L) == [.strip, .menus, .textSize, .keyboard], "landscape bar: the strip, Menus, Aa and Keyboard")
+check(TourPolicy.targets(.bar, P) == [.strip, .menus, .textSize], "portrait bar: the strip, Menus and Aa (the keyboard is a cap)")
 check(TourPolicy.targets(.settings, L) == [.settings] && TourPolicy.targets(.settings, P) == [.settings], "settings lights its button")
+// The clipboard and the sound: their switches are behind the Settings button, which their card lights.
+check([L, P, F].allSatisfy { TourPolicy.targets(.sharing, $0) == [.settings] } && TourPolicy.targets(.sharing, F, thumbnails: false) == [.settings],
+      "the clipboard's and the sound's card lights the Settings button")
 check(TourPolicy.targets(.laptop, P) == [.keys, .trackpad], "laptop: the keys, then the trackpad")
-check(TourTarget.allCases.count == 8 && TourTarget.allCases.contains(.apps), "eight targets, Apps among them")
-// A phone held upright (PhonePortraitLayout): the halves' four steps; its Keyboard button is in
+check(TourTarget.allCases.count == 9 && TourTarget.allCases.contains(.apps) && TourTarget.allCases.contains(.menus), "nine targets, Apps and Menus among them")
+// A phone held upright (PhonePortraitLayout): the halves' five steps; its Keyboard button is in
 // row 1, over the thumbnails, so `bar` lights it, as sideways.
-check(TourPolicy.steps(F, voiceOver: false) == [.touch, .bar, .settings, .laptop] && TourPolicy.steps(F, voiceOver: true) == [.bar, .settings, .laptop],
-      "a phone upright: four cards, three under VoiceOver")
+check(TourPolicy.steps(F, voiceOver: false) == all && TourPolicy.steps(F, voiceOver: true) == [.bar, .sharing, .settings, .laptop],
+      "a phone upright: five cards, four under VoiceOver")
 check(TourPolicy.only(F) == [.laptop] && F.upright && P.upright && !L.upright, "only(): the keys and the trackpad are upright's alone")
-check(TourPolicy.targets(.bar, F) == [.strip, .textSize, .keyboard], "a phone's bar: the strip, Aa and row 1's Keyboard")
+check(TourPolicy.targets(.bar, F) == [.strip, .menus, .textSize, .keyboard], "a phone's bar: the strip, row 2's Menus, Aa and row 1's Keyboard")
 check(TourPolicy.targets(.touch, F) == [.stream] && TourPolicy.targets(.settings, F) == [.settings] && TourPolicy.targets(.laptop, F) == [.keys, .trackpad],
       "a phone's other targets")
+// The Menus button lights where it is drawn, in every bar (and nothing reports it when it is not).
+check([L, P, F].allSatisfy { TourPolicy.targets(.bar, $0).contains(.menus) } && TourPolicy.targets(.bar, F, thumbnails: false).contains(.menus),
+      "every bar card lights the Menus button")
+check(TourTopic.allCases.allSatisfy { t in t == .bar || [L, P, F].allSatisfy { !TourPolicy.targets(t, $0).contains(.menus) } },
+      "only the bar card lights Menus")
 // A phone with Larger Picture (docs/larger-picture-plan.md): no thumbnails, so the bar card lights
-// Apps, Aa and Keyboard in row 1; every other step, and every other layout, as before.
-check(TourPolicy.targets(.bar, F, thumbnails: false) == [.apps, .textSize, .keyboard], "Larger Picture: the bar card lights Apps, Aa and Keyboard")
+// Apps, Menus, Aa and Keyboard in row 1; every other step, and every other layout, as before.
+check(TourPolicy.targets(.bar, F, thumbnails: false) == [.apps, .menus, .textSize, .keyboard], "Larger Picture: the bar card lights Apps, Menus, Aa and Keyboard")
 check(TourPolicy.targets(.bar, F, thumbnails: true) == TourPolicy.targets(.bar, F), "the thumbnails shown is the default")
-check([TourTopic.touch, .settings, .laptop].allSatisfy { TourPolicy.targets($0, F, thumbnails: false) == TourPolicy.targets($0, F) },
+check([TourTopic.touch, .sharing, .settings, .laptop].allSatisfy { TourPolicy.targets($0, F, thumbnails: false) == TourPolicy.targets($0, F) },
       "Larger Picture: the other steps light what they did")
 check([L, P].allSatisfy { layout in all.allSatisfy { TourPolicy.targets($0, layout, thumbnails: false) == TourPolicy.targets($0, layout) } },
       "no thumbnails changes nothing sideways or in the halves")
@@ -51,31 +65,42 @@ check([L, P].allSatisfy { layout in all.allSatisfy { TourPolicy.targets($0, layo
 // MARK: - Memory and what is owed
 
 let fresh = TourMemory()
-let sideways = TourMemory(seen: [.touch, .bar, .settings])
+let sideways = TourMemory(seen: Set(TourPolicy.steps(L, voiceOver: false)))
 let everything = TourMemory(seen: Set(all))
 let skipped = TourMemory(skipped: true)
-check(TourPolicy.owed(L, voiceOver: false, fresh) == [.touch, .bar, .settings], "fresh, landscape")
+// What version 1 of the tour (0.5, 0.5.1) left: its four cards, or its three sideways, or Skip.
+let v1Done = TourMemory(seen: [.touch, .bar, .settings, .laptop])
+let v1Sideways = TourMemory(seen: [.touch, .bar, .settings])
+let v1Skipped = TourMemory(seen: [.touch], skipped: true)
+check(sideways.seen == [.touch, .bar, .sharing, .settings], "a tour taken sideways: its four steps")
+check(TourPolicy.owed(L, voiceOver: false, fresh) == sidewaysSteps, "fresh, landscape")
 check(TourPolicy.owed(P, voiceOver: false, fresh) == all, "fresh, portrait")
 check(TourPolicy.owed(P, voiceOver: false, sideways) == [.laptop], "a tour taken sideways leaves laptop owed")
 check(TourPolicy.owed(L, voiceOver: false, sideways) == [], "nothing new sideways after it")
 check(TourPolicy.owed(P, voiceOver: false, everything) == [] && TourPolicy.owed(L, voiceOver: false, everything) == [], "all seen")
 check(TourPolicy.owed(P, voiceOver: false, skipped) == [] && TourPolicy.owed(L, voiceOver: true, skipped) == [], "skipped: nothing, ever")
-check(TourPolicy.owed(L, voiceOver: false, TourMemory(seen: [.touch])) == [.bar, .settings], "a session that ended after touch")
-check(TourPolicy.owed(P, voiceOver: true, fresh) == [.bar, .settings, .laptop], "VoiceOver: touch not owed here")
-check(TourPolicy.owed(L, voiceOver: false, TourMemory(seen: [.bar, .settings])) == [.touch], "touch stays owed after a VoiceOver tour")
+check(TourPolicy.owed(L, voiceOver: false, TourMemory(seen: [.touch])) == [.bar, .sharing, .settings], "a session that ended after touch")
+check(TourPolicy.owed(P, voiceOver: true, fresh) == [.bar, .sharing, .settings, .laptop], "VoiceOver: touch not owed here")
+check(TourPolicy.owed(L, voiceOver: false, TourMemory(seen: [.bar, .sharing, .settings])) == [.touch], "touch stays owed after a VoiceOver tour")
+// Version 1's memory as it is (without the upgrade, as a Debug build without -SillTourState reads it):
+// only the new card owed. The upgrade clears it (below), so the whole tour shows once more.
+check(TourPolicy.owed(P, voiceOver: false, v1Done) == [.sharing] && TourPolicy.owed(L, voiceOver: false, v1Sideways) == [.sharing],
+      "a version-1 memory as it is: the new card alone")
 check(TourMemory(names: ["touch", "settings", "gestures", ""], skipped: false) == TourMemory(seen: [.touch, .settings]), "unknown names ignored")
-check(TourMemory(seen: [.laptop, .touch, .settings]).names == ["touch", "settings", "laptop"], "saved in the tour's order")
+check(TourMemory(names: ["sharing", "laptop"], skipped: false) == TourMemory(seen: [.sharing, .laptop]), "sharing is a name this build knows")
+check(TourMemory(seen: [.laptop, .touch, .settings, .sharing]).names == ["touch", "sharing", "settings", "laptop"], "saved in the tour's order")
 check(TourMemory(names: [], skipped: true).skipped && TourMemory(names: [], skipped: true).seen.isEmpty, "skipped read back")
 check(TourPolicy.passed(.bar, fresh) == TourMemory(seen: [.bar]), "Next saves the step it leaves")
 check(TourPolicy.passed(.bar, TourMemory(seen: [.bar])) == TourMemory(seen: [.bar]), "passing again changes nothing")
+check(TourPolicy.passed(.sharing, TourMemory(seen: [.touch, .bar])) == TourMemory(seen: [.touch, .bar, .sharing]), "Next saves the new card")
 check(TourPolicy.passed(.laptop, sideways) == everything, "the upright card completes it")
-check(TourPolicy.skipped(sideways) == TourMemory(seen: [.touch, .bar, .settings], skipped: true), "Skip keeps what was seen")
+check(TourPolicy.skipped(sideways) == TourMemory(seen: Set(sidewaysSteps), skipped: true), "Skip keeps what was seen")
 check(!TourPolicy.skipped(fresh).seen.contains(.touch) && TourPolicy.skipped(fresh).skipped, "Skip saves no step")
 // Skip in the automatic tour turns it off; in Take the Tour it only closes the run.
-let automaticRun = TourRun(steps: [.touch, .bar, .settings], at: .touch, replay: false)
-let replayRun = TourRun(steps: [.touch, .bar, .settings], at: .touch, replay: true)
+let automaticRun = TourRun(steps: sidewaysSteps, at: .touch, replay: false)
+let replayRun = TourRun(steps: sidewaysSteps, at: .touch, replay: true)
 check(TourPolicy.skip(automaticRun, fresh) == TourMemory(skipped: true), "Skip in the automatic tour: off for good")
-check(TourPolicy.skip(automaticRun, sideways) == TourMemory(seen: [.touch, .bar, .settings], skipped: true), "…keeping what was seen")
+check(TourPolicy.skip(automaticRun, sideways) == TourMemory(seen: Set(sidewaysSteps), skipped: true), "…keeping what was seen")
 check(TourPolicy.skip(replayRun, sideways) == sideways, "Skip in Take the Tour: nothing saved, the tour not turned off")
 check(TourPolicy.owed(P, voiceOver: false, TourPolicy.skip(replayRun, sideways)) == [.laptop],
       "after Take the Tour's Skip the upright card is still owed")
@@ -97,10 +122,10 @@ check(decide(moment(now: 20, offered: true)) == .pass(.nothingOwed), "one decisi
 check(decide(moment(now: 20, picture: nil)) == .wait(until: nil), "no picture yet: wait for it")
 check(decide(moment(now: 10)) == .wait(until: 11), "at the picture: wait a beat")
 check(decide(moment(now: 10.99)) == .wait(until: 11), "0.99 s into the beat: still waiting")
-check(decide(moment(now: 11.0)) == .show([.touch, .bar, .settings]), "1.0 s: the tour")
-check(decide(moment(now: 11.0), P) == .show(all), "portrait: all four")
-check(decide(moment(now: 30)) == .show([.touch, .bar, .settings]), "a late look at a quiet session still shows it")
-check(decide(moment(now: 11, activity: 9.99)) == .show([.touch, .bar, .settings]), "a touch before the picture does not count")
+check(decide(moment(now: 11.0)) == .show(sidewaysSteps), "1.0 s: the tour")
+check(decide(moment(now: 11.0), P) == .show(all), "portrait: all five")
+check(decide(moment(now: 30)) == .show(sidewaysSteps), "a late look at a quiet session still shows it")
+check(decide(moment(now: 11, activity: 9.99)) == .show(sidewaysSteps), "a touch before the picture does not count")
 check(decide(moment(now: 11, activity: 10)) == .pass(.used), "a touch at the picture counts")
 check(decide(moment(now: 10.5, activity: 10.4)) == .pass(.used), "used during the beat: not this session, at once")
 check(decide(moment(now: 11, down: 1)) == .pass(.busy), "a touch still down")
@@ -110,11 +135,11 @@ check(decide(moment(now: 11), L, sideways) == .pass(.nothingOwed), "seen: nothin
 check(decide(moment(now: 11), L, skipped) == .pass(.nothingOwed), "skipped: nothing owed")
 check(decide(moment(now: 11), L, skipped) == decide(moment(now: 11, enabled: false), L, fresh), "skipped as good as off")
 check(decide(moment(now: 11), P, sideways) == .show([.laptop]), "a later session upright: the laptop card")
-check(decide(moment(now: 11, voiceOver: true)) == .show([.bar, .settings]), "VoiceOver: without touch")
-check(decide(moment(now: 11, voiceOver: true), L, TourMemory(seen: [.bar, .settings])) == .pass(.nothingOwed), "VoiceOver: touch never owed there")
+check(decide(moment(now: 11, voiceOver: true)) == .show([.bar, .sharing, .settings]), "VoiceOver: without touch")
+check(decide(moment(now: 11, voiceOver: true), L, TourMemory(seen: [.bar, .sharing, .settings])) == .pass(.nothingOwed), "VoiceOver: touch never owed there")
 // A rotation during the beat starts it again, with every step owed in the new layout.
 check(decide(moment(now: 11, layoutAt: 10.6), P) == .wait(until: 11.6), "turned in the beat: a beat from the turn")
-check(decide(moment(now: 11.6, layoutAt: 10.6), P) == .show(all), "then all four")
+check(decide(moment(now: 11.6, layoutAt: 10.6), P) == .show(all), "then all five")
 check(decide(moment(now: 11.6, layoutAt: 10.6, activity: 10.3), P) == .show(all), "a touch before the turn does not count")
 check(decide(moment(now: 11.6, layoutAt: 10.6, activity: 10.6), P) == .pass(.used), "a touch at the turn does")
 // After the picture's decision a turn offers only what its layout has alone, from the turn.
@@ -139,10 +164,57 @@ check(decide(moment(now: 11, decided: true, activity: 7), P) == .show([.laptop])
 check(decide(moment(now: 11, decided: true, activity: 10.2), P) == .pass(.used), "a touch after it does")
 check(decide(moment(now: 11, decided: true), L) == .pass(.nothingOwed), "a reconnect sideways: nothing new")
 // A phone held upright follows the same rule as the halves.
-check(decide(moment(now: 11), F) == .show(all), "a phone upright: all four")
+check(decide(moment(now: 11), F) == .show(all), "a phone upright: all five")
 check(decide(moment(now: 40, layoutAt: 39, decided: true), F) == .show([.laptop]), "a turn upright on a phone: laptop alone")
 check(decide(moment(now: 40, layoutAt: 39, decided: true), F, sideways) == .show([.laptop]), "the upright card on a phone after a tour sideways")
-check(decide(moment(now: 11), F, TourMemory(seen: [.touch, .bar, .settings, .laptop])) == .pass(.nothingOwed), "a phone: all seen")
+check(decide(moment(now: 11), F, everything) == .pass(.nothingOwed), "a phone: all seen")
+check(decide(moment(now: 11), F, v1Done) == .show([.sharing]), "version 1's four seen, read as they are: the new card alone")
+
+// MARK: - The tour's version (0.6: once more for everyone who launches it)
+
+/// TourStore's reading of what is saved, as a pair to compare.
+func upgrade(_ m: TourMemory, _ v: Int?) -> (memory: TourMemory, write: Bool) { TourPolicy.upgraded(m, savedVersion: v) }
+/// Cleared, and this version to be written with it.
+func cleared(_ r: (memory: TourMemory, write: Bool)) -> Bool { r.memory == TourMemory() && r.write }
+/// Kept as it was, nothing written.
+func kept(_ r: (memory: TourMemory, write: Bool), _ m: TourMemory) -> Bool { r.memory == m && !r.write }
+check(TourPolicy.version == 2, "the tour's version is 2")
+check(cleared(upgrade(fresh, nil)), "a fresh install: nothing saved, cleared (as it was) and the version written")
+check(cleared(upgrade(v1Done, nil)), "0.5.x's Done (all four, no version stored): cleared, the version written")
+check(cleared(upgrade(v1Sideways, nil)), "0.5.x's tour taken sideways: cleared")
+check(cleared(upgrade(v1Skipped, nil)) && cleared(upgrade(skipped, nil)), "0.5.x's Skip: cleared, so the tour shows once more")
+check(cleared(upgrade(everything, nil)), "every step of this version's seen, but no version stored: cleared")
+for v in [1, 0, -3, Int.min] {
+    check(cleared(upgrade(v1Done, v)) && cleared(upgrade(skipped, v)) && cleared(upgrade(everything, v)), "an explicit version \(v): cleared, written")
+}
+check(kept(upgrade(everything, 2), everything), "this version's Done: kept, nothing written")
+check(kept(upgrade(skipped, 2), skipped) && kept(upgrade(TourMemory(seen: [.touch, .sharing], skipped: true), 2), TourMemory(seen: [.touch, .sharing], skipped: true)),
+      "this version's Skip: kept")
+check(kept(upgrade(fresh, 2), fresh) && kept(upgrade(sideways, 2), sideways) && kept(upgrade(v1Sideways, 2), v1Sideways), "this version's, part seen: kept")
+for v in [3, 4, Int.max] {
+    check(kept(upgrade(everything, v), everything) && kept(upgrade(skipped, v), skipped) && kept(upgrade(v1Sideways, v), v1Sideways)
+          && kept(upgrade(fresh, v), fresh), "a later version \(v) (a downgrade back to this build): kept, the version never lowered")
+}
+// Idempotent: SwiftUI makes a TourStore at every StreamScreen init, and each reads what the first wrote.
+for (m, v) in [(v1Done, nil), (skipped, 1), (fresh, nil), (everything, 0), (v1Skipped, nil)] as [(TourMemory, Int?)] {
+    let first = upgrade(m, v)
+    check(first.write && kept(upgrade(first.memory, TourPolicy.version), TourMemory()), "upgraded once, then read back at version 2: as it was, nothing written")
+}
+// After the upgrade the whole tour shows, in every layout, under VoiceOver too; a version-2 Done or
+// Skip leaves nothing owed.
+for m in [v1Done, v1Sideways, v1Skipped, skipped, fresh] {
+    let now = upgrade(m, nil).memory
+    check(decide(moment(now: 11), L, now) == .show(TourPolicy.steps(L, voiceOver: false)) && decide(moment(now: 11), P, now) == .show(all)
+          && decide(moment(now: 11), F, now) == .show(all), "after the upgrade of \(m): the whole tour, sideways and upright")
+    check(decide(moment(now: 11, voiceOver: true), P, now) == .show([.bar, .sharing, .settings, .laptop])
+          && decide(moment(now: 11, voiceOver: true), L, now) == .show([.bar, .sharing, .settings]), "…and under VoiceOver")
+}
+check(decide(moment(now: 11), P, upgrade(everything, 2).memory) == .pass(.nothingOwed) && decide(moment(now: 11), L, upgrade(everything, 2).memory) == .pass(.nothingOwed),
+      "a version-2 Done: nothing owed")
+check(decide(moment(now: 11), L, upgrade(skipped, 2).memory) == .pass(.nothingOwed) && decide(moment(now: 11), F, upgrade(skipped, 2).memory) == .pass(.nothingOwed),
+      "a version-2 Skip: nothing owed")
+// Done on version 2's tour sideways: the upright card is all that is owed after it.
+check(decide(moment(now: 40, layoutAt: 39, decided: true), P, upgrade(sideways, 2).memory) == .show([.laptop]), "version 2 sideways, then a turn: the laptop card")
 
 // MARK: - Sessions
 
@@ -164,62 +236,82 @@ check(TourPolicy.nextSession(after: middle, reconnected: true) == decidedHere, "
 // MARK: - Runs
 
 let replayL = TourPolicy.replay(L, voiceOver: false)!
-check(replayL == TourRun(steps: [.touch, .bar, .settings], at: .touch, replay: true), "Take the Tour sideways")
+check(replayL == TourRun(steps: sidewaysSteps, at: .touch, replay: true), "Take the Tour sideways")
 check(TourPolicy.replay(P, voiceOver: false, from: .settings) == TourRun(steps: all, at: .settings, replay: true), "-SillTour settings upright")
+check(TourPolicy.replay(P, voiceOver: false, from: .sharing) == TourRun(steps: all, at: .sharing, replay: true)
+      && TourPolicy.replay(L, voiceOver: true, from: .sharing) == TourRun(steps: [.bar, .sharing, .settings], at: .sharing, replay: true),
+      "-SillTour sharing, upright and under VoiceOver sideways")
 check(TourPolicy.replay(L, voiceOver: false, from: .laptop)?.at == .touch, "a step the layout lacks starts at the first")
 check(TourPolicy.replay(L, voiceOver: true, from: .touch)?.at == .bar, "under VoiceOver touch is not there")
-check(TourPolicy.replay(P, voiceOver: true)?.steps == [.bar, .settings, .laptop], "Take the Tour under VoiceOver")
+check(TourPolicy.replay(P, voiceOver: true)?.steps == [.bar, .sharing, .settings, .laptop], "Take the Tour under VoiceOver")
 check(TourPolicy.run(owed: []) == nil, "nothing owed: no run")
 check(TourPolicy.run(owed: [.settings]) == TourRun(steps: [.settings], at: .settings, replay: false), "one card owed")
 let r2 = TourPolicy.next(replayL)!
-check(r2.at == .bar && r2.passed == [.touch] && r2.index == 1 && r2.count == 3, "Next: the second card")
+check(r2.at == .bar && r2.passed == [.touch] && r2.index == 1 && r2.count == 4, "Next: the second card")
 let r3 = TourPolicy.next(r2)!
-check(r3.at == .settings && r3.isLast && r3.passed == [.touch, .bar], "the last card")
-check(TourPolicy.next(r3) == nil, "Done ends it")
+check(r3.at == .sharing && !r3.isLast && r3.passed == [.touch, .bar] && r3.index == 2, "the third card: the clipboard and the sound")
+let r4 = TourPolicy.next(r3)!
+check(r4.at == .settings && r4.isLast && r4.passed == [.touch, .bar, .sharing], "the last card")
+check(TourPolicy.next(r4) == nil, "Done ends it")
 check(!replayL.isLast && replayL.firstOfRun && !r2.firstOfRun, "first and last")
 // A session that ends mid-tour: steps passed stay passed; the next session starts at the first owed.
 var memory = fresh
 var walk = TourPolicy.run(owed: TourPolicy.owed(L, voiceOver: false, memory))!
 memory = TourPolicy.passed(walk.at, memory); walk = TourPolicy.next(walk)!
 memory = TourPolicy.passed(walk.at, memory); walk = TourPolicy.next(walk)!
-check(walk.at == .settings && memory.seen == [.touch, .bar], "two passed, the Mac quits at the third")
+check(walk.at == .sharing && memory.seen == [.touch, .bar], "two passed, the Mac quits at the third")
+check(TourPolicy.run(owed: TourPolicy.owed(L, voiceOver: false, memory)) == TourRun(steps: [.sharing, .settings], at: .sharing, replay: false),
+      "the next session: the clipboard and the sound, then settings")
+check(TourPolicy.run(owed: TourPolicy.owed(P, voiceOver: false, memory))?.steps == [.sharing, .settings, .laptop], "or upright: then laptop")
+memory = TourPolicy.passed(walk.at, memory); walk = TourPolicy.next(walk)!
+check(walk.at == .settings && memory.seen == [.touch, .bar, .sharing], "three passed, the Mac quits at the fourth")
 check(TourPolicy.run(owed: TourPolicy.owed(L, voiceOver: false, memory)) == TourRun(steps: [.settings], at: .settings, replay: false), "the next session: settings alone")
-check(TourPolicy.run(owed: TourPolicy.owed(P, voiceOver: false, memory))?.steps == [.settings, .laptop], "or upright: settings, then laptop")
 
 // A rotation mid-run: every step both ways, with and without VoiceOver, replay and automatic.
 func run(_ steps: [TourTopic], at: TourTopic, passed: Set<TourTopic> = [], replay: Bool = false) -> TourRun {
     TourRun(steps: steps, at: at, passed: passed, replay: replay)
 }
-let autoL = run([.touch, .bar, .settings], at: .touch)
-check(TourPolicy.carry(autoL, to: P, voiceOver: false, memory: fresh) == run(all, at: .touch), "touch, landscape → portrait: 1 of 4")
-check(TourPolicy.carry(run([.touch, .bar, .settings], at: .bar, passed: [.touch]), to: P, voiceOver: false, memory: TourMemory(seen: [.touch]))
-      == run(all, at: .bar, passed: [.touch]), "bar → portrait: 2 of 4, the count goes on")
-check(TourPolicy.carry(run([.touch, .bar, .settings], at: .settings, passed: [.touch, .bar]), to: P, voiceOver: false, memory: TourMemory(seen: [.touch, .bar]))
-      == run(all, at: .settings, passed: [.touch, .bar]), "settings → portrait: 3 of 4, laptop after it")
-check(TourPolicy.carry(run(all, at: .touch), to: L, voiceOver: false, memory: fresh) == run([.touch, .bar, .settings], at: .touch), "touch, portrait → landscape")
+let autoL = run(sidewaysSteps, at: .touch)
+check(TourPolicy.carry(autoL, to: P, voiceOver: false, memory: fresh) == run(all, at: .touch), "touch, landscape → portrait: 1 of 5")
+check(TourPolicy.carry(run(sidewaysSteps, at: .bar, passed: [.touch]), to: P, voiceOver: false, memory: TourMemory(seen: [.touch]))
+      == run(all, at: .bar, passed: [.touch]), "bar → portrait: 2 of 5, the count goes on")
+check(TourPolicy.carry(run(sidewaysSteps, at: .sharing, passed: [.touch, .bar]), to: P, voiceOver: false, memory: TourMemory(seen: [.touch, .bar]))
+      == run(all, at: .sharing, passed: [.touch, .bar]), "sharing → portrait: 3 of 5")
+check(TourPolicy.carry(run(sidewaysSteps, at: .settings, passed: [.touch, .bar, .sharing]), to: P, voiceOver: false, memory: TourMemory(seen: [.touch, .bar, .sharing]))
+      == run(all, at: .settings, passed: [.touch, .bar, .sharing]), "settings → portrait: 4 of 5, laptop after it")
+check(TourPolicy.carry(run(all, at: .touch), to: L, voiceOver: false, memory: fresh) == run(sidewaysSteps, at: .touch), "touch, portrait → landscape")
 check(TourPolicy.carry(run(all, at: .bar, passed: [.touch]), to: L, voiceOver: false, memory: TourMemory(seen: [.touch]))
-      == run([.touch, .bar, .settings], at: .bar, passed: [.touch]), "bar, portrait → landscape")
-check(TourPolicy.carry(run(all, at: .settings, passed: [.touch, .bar]), to: L, voiceOver: false, memory: TourMemory(seen: [.touch, .bar]))
-      == run([.touch, .bar, .settings], at: .settings, passed: [.touch, .bar]), "settings, portrait → landscape: now the last")
-check(TourPolicy.carry(run(all, at: .laptop, passed: [.touch, .bar, .settings]), to: L, voiceOver: false, memory: sideways) == nil,
+      == run(sidewaysSteps, at: .bar, passed: [.touch]), "bar, portrait → landscape")
+check(TourPolicy.carry(run(all, at: .sharing, passed: [.touch, .bar]), to: L, voiceOver: false, memory: TourMemory(seen: [.touch, .bar]))
+      == run(sidewaysSteps, at: .sharing, passed: [.touch, .bar]), "sharing, portrait → landscape")
+check(TourPolicy.carry(run(all, at: .settings, passed: [.touch, .bar, .sharing]), to: L, voiceOver: false, memory: TourMemory(seen: [.touch, .bar, .sharing]))
+      == run(sidewaysSteps, at: .settings, passed: [.touch, .bar, .sharing]), "settings, portrait → landscape: now the last")
+check(TourPolicy.carry(run(all, at: .laptop, passed: [.touch, .bar, .sharing, .settings]), to: L, voiceOver: false, memory: sideways) == nil,
       "laptop turned sideways: nothing left, the tour ends")
 check(TourPolicy.carry(run([.laptop], at: .laptop), to: L, voiceOver: false, memory: fresh) == nil,
       "the turn's laptop card turned back: ends, nothing owed there counts after it")
 check(TourPolicy.carry(run(all, at: .laptop, replay: true), to: L, voiceOver: false, memory: fresh) == nil,
       "-SillTour laptop turned sideways: nothing after laptop, it ends (not back to touch)")
-check(TourPolicy.carry(run([.settings, .laptop], at: .settings), to: L, voiceOver: false, memory: TourMemory(seen: [.touch, .bar]))
+check(TourPolicy.carry(run([.settings, .laptop], at: .settings), to: L, voiceOver: false, memory: TourMemory(seen: [.touch, .bar, .sharing]))
       == run([.settings], at: .settings), "an owed run sideways keeps only what is owed there")
-check(TourPolicy.carry(run([.touch, .bar, .settings], at: .bar, passed: [.touch], replay: true), to: P, voiceOver: false, memory: everything)
+check(TourPolicy.carry(run([.sharing, .settings, .laptop], at: .sharing), to: L, voiceOver: false, memory: TourMemory(seen: [.touch, .bar]))
+      == run([.sharing, .settings], at: .sharing), "an owed run at the new card, turned sideways: it stays, settings after it")
+check(TourPolicy.carry(run(sidewaysSteps, at: .bar, passed: [.touch], replay: true), to: P, voiceOver: false, memory: everything)
       == run(all, at: .bar, passed: [.touch], replay: true), "Take the Tour: every step of the new layout, whatever was seen")
-check(TourPolicy.carry(run([.touch, .bar, .settings], at: .touch), to: L, voiceOver: true, memory: fresh) == run([.bar, .settings], at: .bar),
+check(TourPolicy.carry(run(sidewaysSteps, at: .touch), to: L, voiceOver: true, memory: fresh) == run([.bar, .sharing, .settings], at: .bar),
       "VoiceOver on during touch: on to the next step, bar")
-check(TourPolicy.carry(run([.bar, .settings, .laptop], at: .laptop, passed: [.bar, .settings]), to: L, voiceOver: true, memory: TourMemory(seen: [.bar, .settings])) == nil,
+check(TourPolicy.carry(run([.bar, .sharing, .settings, .laptop], at: .laptop, passed: [.bar, .sharing, .settings]), to: L, voiceOver: true,
+                       memory: TourMemory(seen: [.bar, .sharing, .settings])) == nil,
       "VoiceOver, laptop turned sideways: ends")
-check(TourPolicy.carry(run([.bar, .settings], at: .bar, replay: true), to: P, voiceOver: true, memory: fresh) == run([.bar, .settings, .laptop], at: .bar, replay: true),
+check(TourPolicy.carry(run([.bar, .sharing, .settings], at: .bar, replay: true), to: P, voiceOver: true, memory: fresh) == run([.bar, .sharing, .settings, .laptop], at: .bar, replay: true),
       "VoiceOver replay turned upright")
+var sharingCarried: Set<String> = []
 for (layout, other) in [(L, P), (P, L), (L, F), (F, L)] {
     for voiceOver in [false, true] {
         for step in TourPolicy.steps(layout, voiceOver: voiceOver) {
+            if step == .sharing, TourPolicy.carry(TourPolicy.replay(layout, voiceOver: voiceOver, from: step)!, to: other, voiceOver: voiceOver, memory: fresh)?.at == .sharing {
+                sharingCarried.insert("\(layout.rawValue)→\(other.rawValue)")
+            }
             let before = TourPolicy.replay(layout, voiceOver: voiceOver, from: step)!
             let after = TourPolicy.carry(before, to: other, voiceOver: voiceOver, memory: fresh)
             if TourPolicy.steps(other, voiceOver: voiceOver).contains(step) {
@@ -232,6 +324,7 @@ for (layout, other) in [(L, P), (P, L), (L, F), (F, L)] {
         }
     }
 }
+check(sharingCarried == ["landscape→portrait", "portrait→landscape", "landscape→phone", "phone→landscape"], "the new card keeps its place turning either way: \(sharingCarried)")
 
 // MARK: - The crease, the width, the cutout
 
@@ -267,7 +360,8 @@ check(TourPolicy.cutout([CGRect(x: 100, y: 10, width: 50, height: 60), CGRect(x:
 check(TourPolicy.cutout([CGRect(x: 1, y: 1, width: 50, height: 50)], screen: CGSize(width: 1000, height: 710)) == CGRect(x: 0, y: 0, width: 55, height: 55),
       "clipped to the screen")
 check(TourPolicy.cutout([], screen: CGSize(width: 10, height: 10)) == nil && TourPolicy.cutout([.null], screen: CGSize(width: 10, height: 10)) == nil, "no targets, no cutout")
-check(TourPolicy.radius(.touch) == 16 && TourPolicy.radius(.bar) == 20 && TourPolicy.radius(.settings) == 20 && TourPolicy.radius(.laptop) == 20, "radii")
+check(TourPolicy.radius(.touch) == 16 && TourPolicy.radius(.bar) == 20 && TourPolicy.radius(.sharing) == 20 && TourPolicy.radius(.settings) == 20
+      && TourPolicy.radius(.laptop) == 20, "radii")
 
 // MARK: - The layouts' targets, as the stream screen reports them (BarMetrics, PortraitMetrics)
 
@@ -286,8 +380,10 @@ struct Screen {
     }
 }
 /// The stream screen at a size: DuoLayout's choice and the frames each target reports. The strip is
-/// reported as its thumbnails' band with their halo (5 pt) above and badge (6 pt) below.
-func model(_ w: CGFloat, _ h: CGFloat) -> Screen {
+/// reported as its thumbnails' band with their halo (5 pt) above and badge (6 pt) below. `menus`:
+/// the Mac sent menus, and the Menus button sits between the strip and Aa, one button and one gap
+/// taken from the strip (TopBar, the halves' window bar), where it reports itself.
+func model(_ w: CGFloat, _ h: CGFloat, menus: Bool = false) -> Screen {
     let size = CGSize(width: w, height: h)
     if h > w && w < 600 || !(w > h) {
         let regular = !(h > w && w < 600)
@@ -297,33 +393,39 @@ func model(_ w: CGFloat, _ h: CGFloat) -> Screen {
         let barY = half + padTop
         let settingsX = w - padSide - bw
         let aaX = settingsX - 2 * (12 + bw)
+        let menusX = aaX - 12 - bw
         let stripX = padSide + bw + 12
         let by = barY + (barH - bh) / 2
         let keysY = barY + barH + gap
         let keysH = split ? capH * 2 + 8 : capH
         let padY = keysY + keysH + gap
-        return Screen(size: size, layout: P, stream: CGRect(x: 8, y: 8, width: w - 16, height: half - 16), targets: [
+        var targets: [TourTarget: CGRect] = [
             .stream: CGRect(x: 8, y: 8, width: w - 16, height: half - 16),
-            .strip: CGRect(x: stripX, y: barY + thumbPad - 5, width: aaX - 12 - stripX, height: barH - (thumbPad - 5) - (thumbPad - 6)),
+            .strip: CGRect(x: stripX, y: barY + thumbPad - 5, width: (menus ? menusX : aaX) - 12 - stripX, height: barH - (thumbPad - 5) - (thumbPad - 6)),
             .textSize: CGRect(x: aaX, y: by, width: bw, height: bh),
             .settings: CGRect(x: settingsX, y: by, width: bw, height: bh),
             .keys: CGRect(x: padSide, y: keysY, width: w - 2 * padSide, height: keysH),
-            .trackpad: CGRect(x: padSide, y: padY, width: w - 2 * padSide, height: h - padBottom - padY)])
+            .trackpad: CGRect(x: padSide, y: padY, width: w - 2 * padSide, height: h - padBottom - padY)]
+        if menus { targets[.menus] = CGRect(x: menusX, y: by, width: bw, height: bh) }
+        return Screen(size: size, layout: P, stream: CGRect(x: 8, y: 8, width: w - 16, height: half - 16), targets: targets)
     }
     let compact = h < 560
     let (barH, pad, bw, bh): (CGFloat, CGFloat, CGFloat, CGFloat) = compact ? (78, 14, 64, 58) : (86, 22, 66, 66)
     let settingsX = w - pad - bw
     let keyboardX = settingsX - 2 * (12 + bw)
     let aaX = keyboardX - 12 - bw
+    let menusX = aaX - 12 - bw
     let stripX = pad + bw + 12
     let by = (barH - bh) / 2
     let stream = CGRect(x: 8, y: barH + 8, width: w - 16, height: h - barH - 16)
-    return Screen(size: size, layout: L, stream: stream, targets: [
+    var targets: [TourTarget: CGRect] = [
         .stream: stream,
-        .strip: CGRect(x: stripX, y: 5, width: aaX - 12 - stripX, height: barH - 9),
+        .strip: CGRect(x: stripX, y: 5, width: (menus ? menusX : aaX) - 12 - stripX, height: barH - 9),
         .textSize: CGRect(x: aaX, y: by, width: bw, height: bh),
         .keyboard: CGRect(x: keyboardX, y: by, width: bw, height: bh),
-        .settings: CGRect(x: settingsX, y: by, width: bw, height: bh)])
+        .settings: CGRect(x: settingsX, y: by, width: bw, height: bh)]
+    if menus { targets[.menus] = CGRect(x: menusX, y: by, width: bw, height: bh) }
+    return Screen(size: size, layout: L, stream: stream, targets: targets)
 }
 // The model against the plan's table (§6.3).
 let duoInner = model(1000, 710), duoOuter = model(710, 500), duoUp = model(710, 1000), duoOuterUp = model(500, 710)
@@ -341,18 +443,23 @@ check(seUp.layout == P && seUp.stream == CGRect(x: 8, y: 8, width: 359, height: 
 /// A phone held upright: PhonePortraitLayout's rects, where PortraitStreamScreen places its views and
 /// so where they report themselves: the picture's pane, row 1's Aa, Keyboard and Settings, the strip
 /// as its thumbnails' band (the halo's 5 pt above, the badge's 6 below: WindowStrip.tourBand at the
-/// strip's 6 pt pad), the six caps and the trackpad.
-func phoneModel(_ w: CGFloat, _ h: CGFloat) -> Screen {
+/// strip's 6 pt pad), the six caps and the trackpad. `menus`: the Mac sent menus, and the Menus
+/// button is at the end of row 2, under Settings (`l.menus`, placed there with an offset), the strip
+/// ending a gap before it (`stripBesideMenus`).
+func phoneModel(_ w: CGFloat, _ h: CGFloat, menus: Bool = false) -> Screen {
     let l = PhonePortraitLayout(size: CGSize(width: w, height: h))
     let pad = (PhonePortraitLayout.stripHeight - 50) / 2
-    let band = CGRect(x: l.strip.minX, y: l.strip.minY + max(0, pad - 5), width: l.strip.width,
-                      height: l.strip.height - max(0, pad - 5) - max(0, pad - 6))
-    return Screen(size: l.size, layout: F, stream: l.picture, targets: [
+    let strip = menus ? l.stripBesideMenus : l.strip
+    let band = CGRect(x: strip.minX, y: strip.minY + max(0, pad - 5), width: strip.width,
+                      height: strip.height - max(0, pad - 5) - max(0, pad - 6))
+    var targets: [TourTarget: CGRect] = [
         .stream: l.picture, .strip: band,
         .textSize: l.buttons[PhonePortraitLayout.Button.textSize.rawValue],
         .keyboard: l.buttons[PhonePortraitLayout.Button.keyboard.rawValue],
         .settings: l.buttons[PhonePortraitLayout.Button.settings.rawValue],
-        .keys: l.keys, .trackpad: l.trackpad])
+        .keys: l.keys, .trackpad: l.trackpad]
+    if menus { targets[.menus] = l.menus }
+    return Screen(size: l.size, layout: F, stream: l.picture, targets: targets)
 }
 // The phones' stream screens upright (their screens less the top inset; the iPhone SE's status bar is
 // 20 pt), and the Duo's outer display, which an iPhone Duo draws as a phone.
@@ -365,18 +472,21 @@ check(seTall.stream.height == 224 && seTall.targets[.settings]!.minY == 256 && s
 /// A phone held upright with Larger Picture: PhonePortraitLayout's rects above a keyboard this tall,
 /// the picture's frame for a picture of `video`'s shape (PortraitStreamScreen places the pane there,
 /// and it reports itself as the stream), the room it sits in, row 1's Apps, Aa and Keyboard (beside the
-/// Mac's Menus button, six to the row, or five), Settings, the caps and the trackpad; no strip.
+/// Mac's Menus button, six to the row, the Menus button there too, or five), Settings, the caps and the
+/// trackpad; no strip.
 func largerModel(_ w: CGFloat, _ h: CGFloat, keyboard: CGFloat, video: CGSize = .zero, menus: Bool = true) -> Screen {
     let l = PhonePortraitLayout(size: CGSize(width: w, height: h), keyboard: keyboard)
     let row = menus ? l.buttonsBesideMenus : l.buttons
     let pane = l.pane(video: video)
-    return Screen(size: l.size, layout: F, stream: pane, targets: [
+    var targets: [TourTarget: CGRect] = [
         .stream: pane,
         .apps: row[PhonePortraitLayout.Button.apps.rawValue],
         .textSize: row[PhonePortraitLayout.Button.textSize.rawValue],
         .keyboard: row[PhonePortraitLayout.Button.keyboard.rawValue],
         .settings: row[PhonePortraitLayout.Button.settings.rawValue],
-        .keys: l.keys, .trackpad: l.trackpad], room: l.picture, thumbnails: false)
+        .keys: l.keys, .trackpad: l.trackpad]
+    if menus { targets[.menus] = l.menus }
+    return Screen(size: l.size, layout: F, stream: pane, targets: targets, room: l.picture, thumbnails: false)
 }
 /// A picture of a 14-inch MacBook Pro's Desktop's shape (3024×1964, 1.54:1): with Larger Picture, a
 /// window of that shape (the Desktop itself keeps the standard arrangement since 2026-10-15, below).
@@ -388,6 +498,30 @@ check(largerMacShape.stream == CGRect(x: 8, y: 8, width: 424, height: 275) && la
       && largerMacShape.targets[.trackpad]! == CGRect(x: 14, y: 574, width: 412, height: 304), "the 18 Pro Max with Larger Picture and a window of the Desktop's shape: \(largerMacShape.targets)")
 check(largerFitted.stream == largerFitted.room!, "a window fitted to the room: the picture is the room")
 check(largerFive.union(.bar)! == CGRect(x: 14, y: 454, width: 244, height: 50), "before the Mac's menus come: Apps, Aa and Keyboard of five")
+do {
+    let menus = largerMacShape.targets[.menus]!, apps = largerMacShape.targets[.apps]!
+    check(menus.size == apps.size && menus.minY == apps.minY && abs(menus.minX - (apps.maxX + PhonePortraitLayout.gap)) < 0.001,
+          "Larger Picture's Menus button: row 1's second of six, a gap after Apps: \(menus)")
+}
+// The Menus button takes its room from the strip, so where it is drawn the bar card's lit span is the
+// same sideways and in the halves; on a phone it ends under Settings, 8 pt short of where the strip's
+// band ended (the strip's padding), and with Larger Picture it is between Apps and Aa.
+for (w, h) in [(1000, 710), (710, 500), (951, 669), (832, 440), (1376, 1032), (710, 1000), (500, 710), (669, 951), (1032, 1376)] as [(CGFloat, CGFloat)] {
+    let plain = model(w, h), withMenus = model(w, h, menus: true)
+    check(withMenus.union(.bar) == plain.union(.bar) && withMenus.targets[.menus]!.maxX + 12 == withMenus.targets[.textSize]!.minX
+          && withMenus.targets[.strip]!.maxX + 12 == withMenus.targets[.menus]!.minX, "\(w)×\(h): the Menus button between the strip and Aa, the lit span as before")
+}
+let proMaxMenus = phoneModel(440, 894, menus: true)
+check(proMaxMenus.targets[.menus]! == CGRect(x: 350, y: 369, width: 76, height: 50) && proMaxMenus.targets[.strip]! == CGRect(x: 6, y: 364, width: 336, height: 61)
+      && proMaxMenus.union(.bar)! == CGRect(x: 6, y: 297, width: 420, height: 128), "the 18 Pro Max with menus: row 2's Menus under Settings: \(proMaxMenus.targets)")
+do {
+    var noMenus = largerMacShape.targets
+    noMenus[.menus] = nil
+    let without = Screen(size: largerMacShape.size, layout: F, stream: largerMacShape.stream, targets: noMenus, room: largerMacShape.room, thumbnails: false)
+    check(without.union(.bar) == largerMacShape.union(.bar)
+          && largerMacShape.targets[.menus]!.minX > largerMacShape.targets[.apps]!.maxX && largerMacShape.targets[.menus]!.maxX < largerMacShape.targets[.textSize]!.minX,
+          "Larger Picture: the Menus button between Apps and Aa, inside the lit span")
+}
 
 // MARK: - Where the card goes: an oracle from the plan's words
 
@@ -577,8 +711,10 @@ var gridScreens: [Screen] = []
 for w0 in widths {
     for h0 in heights {
         gridScreens.append(model(w0, h0))
+        gridScreens.append(model(w0, h0, menus: true))
         if h0 > w0 && w0 < 600 {
             gridScreens.append(phoneModel(w0, h0))
+            gridScreens.append(phoneModel(w0, h0, menus: true))
             // Larger Picture, where the room over the keyboard is 120 pt or more (on every phone it
             // applies to it is 262 or more, the SE's; Display Zoom at 320 pt wide does not take it),
             // above each keyboard measured.
@@ -825,121 +961,338 @@ for (s, fold) in [(bookScreen, bookInfo), (book867, bookInfo), (laptop, laptopIn
         }
     }
 }
-check(duoGrid == 2592, "the Duo's grid: \(duoGrid) placements")
+check(duoGrid == 3360, "the Duo's grid: \(duoGrid) placements (five screens of four steps sideways, three of five upright)")
 
 // MARK: - The words
 
+/// Every feature there (an up-to-date Mac with menus, gestures on, Virtual Display on, an iPhone that
+/// offers Larger Picture), none of it (an older Mac on a device with gestures off), and all 128 ways.
+let allOn = TourFeatures(menus: true, gestures: true, virtualDisplay: true, clipboard: true, pasteRightAway: true, sound: true, largerPicture: true)
+let allOff = TourFeatures(menus: false, gestures: false, virtualDisplay: false, clipboard: false, pasteRightAway: false, sound: false, largerPicture: false)
+let everyFeatures: [TourFeatures] = (0..<128).map { i in
+    TourFeatures(menus: i & 1 != 0, gestures: i & 2 != 0, virtualDisplay: i & 4 != 0, clipboard: i & 8 != 0,
+                 pasteRightAway: i & 16 != 0, sound: i & 32 != 0, largerPicture: i & 64 != 0)
+}
+check(Set(everyFeatures.map { "\($0)" }).count == 128, "the 128 combinations differ")
+func with(_ base: TourFeatures = allOn, _ change: (inout TourFeatures) -> Void) -> TourFeatures {
+    var f = base
+    change(&f)
+    return f
+}
 func words(_ t: TourTopic, _ layout: TourLayout, mac: String = "Mac mini", device: String = "iPad", voiceOver: Bool = false,
-           first: Bool = false, onItsSide: Bool = false, thumbnails: Bool = true) -> TourCopy {
-    TourPolicy.copy(t, layout, mac: mac, device: device, voiceOver: voiceOver, firstOfRun: first, keysOnItsSide: onItsSide, thumbnails: thumbnails)
+           first: Bool = false, onItsSide: Bool = false, thumbnails: Bool = true, features: TourFeatures = allOn) -> TourCopy {
+    TourPolicy.copy(t, layout, mac: mac, device: device, voiceOver: voiceOver, firstOfRun: first, keysOnItsSide: onItsSide,
+                    thumbnails: thumbnails, features: features)
 }
 func texts(_ c: TourCopy) -> [String] { c.rows.map(\.text) }
+
+// Every row of every card, as the plan's table has it (docs/first-run-walkthrough-plan.md, "The tour
+// once more, for 0.6"), for Mac mini and an iPad unless said.
+let T1 = "Tap to click.", T2 = "Touch and hold to right-click.", T3 = "Drag to scroll.", T4 = "Apple Pencil works as a mouse."
+let T5 = "New: Pinch to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still taps, holds and drags on Mac mini."
+let T6 = "New: Swipe with three fingers: up for Mission Control, down for App Exposé, and sideways between Spaces."
+let B1 = "Touch and hold a window to close, minimize or go full screen. Keep holding and drag to move it."
+let B1VO = "Each window has actions: close, minimize, full screen, and move left or right. Swipe up or down to hear them."
+let B1Apps = "Apps lists the apps on Mac mini: tap an open one again for its next window."
+let B1AppsVO = "Apps lists the apps on Mac mini. Choose an open one again for its next window."
+let B2 = "New: Menus has the menu bar of the app you’re using on Mac mini."
+let B3on = "New: Virtual Display is on: a window you pick streams from a display of its own on Mac mini, so it keeps updating when something covers it; Aa then sizes its text."
+let B3off = "New: Virtual Display, in Settings, streams a window you pick from a display of its own on Mac mini, so it keeps updating when something covers it; Aa then sizes its text."
+let B3onVO = "New: Virtual Display is on: a window you pick streams from a display of its own on Mac mini, so it keeps updating when something covers it; Text size then makes its text larger or smaller: swipe up or down on it."
+let B3offVO = "New: Virtual Display, in Settings, streams a window you pick from a display of its own on Mac mini, so it keeps updating when something covers it; Text size then makes its text larger or smaller: swipe up or down on it."
+let B4 = "Keyboard brings up the on-screen keyboard to type on Mac mini."
+let B5 = "New: A hardware keyboard types on Mac mini by itself, Esc included, and Keyboard then brings up the keyboard bar."
+let S1 = "New: With Share Clipboard, text you copy on Mac mini is ready to paste on this iPad."
+let S2 = "New: Copy on this iPad, then come back to Sill: Paste on Mac mini, on the note Sill shows then or in Settings, puts it where Mac mini’s cursor is."
+let S2off = "New: Copy on this iPad, then come back to Sill: Paste on Mac mini, on the note Sill shows then or in Settings, sends it to Mac mini’s clipboard."
+let S3 = "New: Send Audio, a beta, plays Mac mini’s sound here, and Mute silences this iPad alone."
+let S4 = "New: Update Sill on Mac mini to copy and paste between it and this iPad, and to hear its sound here."
+let G1 = "Disconnect is at the bottom of Settings.", G2 = "Take the Tour is there too, to see this again."
+let G3 = "New: Reverse Scrolling turns a finger’s drag and the on-screen trackpad’s two-finger scroll around."
+let G4 = "New: Hold to Show Window Controls sets how long you hold a window’s thumbnail before its controls show."
+let G5 = "Hold your iPad upright for a trackpad and keys."
+let K1 = "cmd, opt, ctrl and shift stay on for the next key or trackpad click: tap cmd, then C, to copy."
+let K1VO = "cmd, opt, ctrl and shift stay on for the next key: cmd, then C, copies."
+let K2 = "The keyboard key brings up the on-screen keyboard to type on Mac mini."
+let K3 = "New: A hardware keyboard types on Mac mini by itself, Esc included, and the keyboard key then brings up the keyboard bar."
+let K4 = "Tap with two fingers on the trackpad to right-click.", K5 = "Touch and hold the trackpad, then drag, to move a window or select text."
+let K6 = "New: Larger Picture, in Settings: a window’s picture takes the place of the thumbnails and reaches down to where the keyboard comes up."
+func onIPhone(_ s: String) -> String { s.replacingOccurrences(of: "this iPad", with: "this iPhone") }
+
+// The picture's card: a fifth row, the pinch, for everyone; the gestures' only while on and taken.
 let touchPad = words(.touch, L, first: true)
-check(touchPad.title == "Tap, Hold and Drag" && touchPad.subtitle == "What you do here happens on Mac mini.", "touch: title and subtitle")
-check(texts(touchPad) == ["Tap to click.", "Touch and hold to right-click.", "Drag to scroll.", "Apple Pencil works as a mouse."], "touch on iPad: \(texts(touchPad))")
-check(touchPad.rows.map(\.symbol) == ["hand.tap", "contextualmenu.and.cursorarrow", "hand.draw", "applepencil"], "touch's symbols")
+check(touchPad.title == "Tap, Hold, Drag and Pinch" && touchPad.subtitle == "What you do here happens on Mac mini.", "touch: title and subtitle")
+check(texts(touchPad) == [T1, T2, T3, T4, T5, T6], "touch on iPad: \(texts(touchPad))")
+check(touchPad.rows.map(\.symbol) == ["hand.tap", "contextualmenu.and.cursorarrow", "hand.draw", "applepencil", "plus.magnifyingglass", "hand.raised.fingers.spread"],
+      "touch's symbols")
 check(touchPad.rows[0].spans == [TourSpan(text: "Tap", strong: true), TourSpan(text: " to click.", strong: false)], "the control's name semibold")
 check(touchPad.hint == "The picture of Mac mini fills the screen below the bar.", "touch's hint sideways")
 check(words(.touch, P).hint == "The picture of Mac mini fills the top half of the screen.", "touch's hint upright")
-check(texts(words(.touch, L, device: "iPhone")) == ["Tap to click.", "Touch and hold to right-click.", "Drag to scroll."], "no Pencil row on iPhone")
+check(texts(words(.touch, L, device: "iPhone")) == [T1, T2, T3, T5, T6], "no Pencil row on iPhone, the pinch's for both")
+check(texts(words(.touch, L, features: with { $0.gestures = false })) == [T1, T2, T3, T4, T5], "the gestures off, or a Mac that takes none: no swipe row")
+check(texts(words(.touch, F, device: "iPhone", features: allOff)) == [T1, T2, T3, T5], "the pinch row whatever the Mac")
+check(texts(words(.touch, P, mac: "Studio")).contains("New: Pinch to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still taps, holds and drags on Studio."),
+      "the Mac's name in the pinch row")
 check(words(.touch, L, mac: "").subtitle == "What you do here happens on your Mac." && words(.touch, P, mac: "").hint == "The picture of your Mac fills the top half of the screen.",
       "the “your Mac” fallback")
+for f in everyFeatures {
+    check(words(.touch, L, features: f).rows.contains { $0.symbol == "hand.raised.fingers.spread" } == f.gestures, "the swipe row follows the gestures: \(f)")
+}
+
+// The bar's card: Windows (and Menus), the Virtual Display row with Aa in it, the Keyboard button and a
+// hardware keyboard where the bar has the button.
 let barL = words(.bar, L)
-check(barL.title == "Windows and Text Size" && barL.subtitle == nil, "bar: title, no subtitle")
-check(texts(barL) == ["Touch and hold a window to close, minimize or go full screen. Keep holding and drag to move it.",
-                      "Aa: while a window shows, touch it and slide to make its text larger or smaller.",
-                      "Keyboard types on Mac mini, on screen or with a hardware keyboard."], "bar sideways: \(texts(barL))")
-check(barL.rows.map(\.symbol) == ["hand.point.up.left", "textformat.size", "keyboard"], "bar's symbols")
-check(texts(words(.bar, P)) == Array(texts(barL).prefix(2)), "bar upright: no Keyboard row (it is a cap)")
+check(barL.title == "Windows and Menus" && barL.subtitle == nil, "bar: title, no subtitle")
+check(texts(barL) == [B1, B2, B3on, B4, B5], "bar sideways: \(texts(barL))")
+check(barL.rows.map(\.symbol) == ["hand.point.up.left", "filemenu.and.selection", "display", "keyboard", "keyboard.badge.ellipsis"], "bar's symbols")
+check(texts(words(.bar, P)) == [B1, B2, B3on], "bar upright: no Keyboard rows (it is a cap)")
 check(barL.hint == "In the bar at the top, after Apps." && words(.bar, P).hint == "In the bar below the picture, after Apps.", "bar's hints")
-check(texts(words(.bar, L, mac: "Studio")).last == "Keyboard types on Studio, on screen or with a hardware keyboard.", "the Mac's name in the Keyboard row")
+check(texts(words(.bar, L, mac: "Studio")).suffix(2) == ["Keyboard brings up the on-screen keyboard to type on Studio.",
+                                                          "New: A hardware keyboard types on Studio by itself, Esc included, and Keyboard then brings up the keyboard bar."],
+      "the Mac's name in the Keyboard rows")
+check(words(.bar, L, features: with { $0.menus = false }).title == "Windows" && texts(words(.bar, L, features: with { $0.menus = false })) == [B1, B3on, B4, B5],
+      "no Menus button on screen: no Menus row, and the title Windows")
+check(texts(words(.bar, L, features: with { $0.virtualDisplay = false })) == [B1, B2, B3off, B4, B5], "Virtual Display off: where the switch is, New too")
+check(texts(words(.bar, P, features: with { $0.virtualDisplay = false; $0.menus = false })) == [B1, B3off], "the halves, an older Mac: two rows")
+check(words(.bar, L).rows[2].spans.filter(\.strong).map(\.text) == ["New:", "Virtual Display", "Aa"]
+      && words(.bar, L, features: with { $0.virtualDisplay = false }).rows[2].spans.filter(\.strong).map(\.text) == ["New:", "Virtual Display", "Aa"],
+      "the Virtual Display row names Virtual Display and Aa")
+check(words(.bar, L).rows[4].spans.filter(\.strong).map(\.text) == ["New:", "A hardware keyboard", "Keyboard"], "two names in the hardware keyboard's row")
+for f in everyFeatures {
+    let bar = words(.bar, L, features: f)
+    check(bar.rows.contains { $0.symbol == "filemenu.and.selection" } == f.menus && bar.title == (f.menus ? "Windows and Menus" : "Windows"),
+          "the Menus row and the title follow the button: \(f)")
+    check(bar.rows.first { $0.symbol == "display" }?.text == (f.virtualDisplay ? B3on : B3off), "Virtual Display's row follows the Mac's setting: \(f)")
+    check(words(.bar, P, features: f).rows.allSatisfy { $0.symbol != "keyboard" && $0.symbol != "keyboard.badge.ellipsis" }, "no Keyboard rows in the halves' bar card: \(f)")
+}
+
+// The clipboard's and the sound's card: what this Mac has, and the update an older one needs.
+let sharingL = words(.sharing, L)
+check(sharingL.title == "Clipboard and Sound" && sharingL.subtitle == nil && sharingL.hint == "In Settings, the last button in the bar.", "sharing: title, hint")
+check(texts(sharingL) == [S1, S2, S3], "sharing: \(texts(sharingL))")
+check(sharingL.rows.map(\.symbol) == ["doc.on.clipboard", "doc.on.doc", "speaker.wave.2"], "sharing's symbols")
+check(sharingL.rows.map { $0.spans.filter(\.strong).map(\.text) } == [["New:", "Share Clipboard"], ["New:", "Paste on Mac mini"], ["New:", "Send Audio", "Mute"]],
+      "the switches' and the chip's names semibold")
+check(texts(words(.sharing, L, features: with { $0.pasteRightAway = false })) == [S1, S2off, S3], "Paste on Mac mini Right Away off: it goes to the clipboard")
+let clipboardOnly = words(.sharing, P, features: with { $0.sound = false })
+check(clipboardOnly.title == "Clipboard" && texts(clipboardOnly) == [S1, S2], "a Mac with the clipboard but no sound")
+let soundOnly = words(.sharing, P, features: with { $0.clipboard = false })
+check(soundOnly.title == "Sound" && texts(soundOnly) == [S3], "a Mac with sound but no clipboard")
+let older = words(.sharing, L, features: allOff)
+check(older.title == "Clipboard and Sound" && texts(older) == [S4] && older.rows[0].symbol == "arrow.down.circle", "an older Mac: the update row alone")
+check(texts(words(.sharing, F, device: "iPhone")) == [S1, S2, S3].map(onIPhone) && texts(words(.sharing, F, device: "iPhone", features: allOff)) == [onIPhone(S4)],
+      "this iPhone, on an iPhone")
+check(words(.sharing, F, device: "iPhone").hint == "In Settings, the last button in the row under the picture." && words(.sharing, P).hint == sharingL.hint,
+      "sharing's hints")
+check(words(.sharing, L, voiceOver: true) == sharingL && words(.sharing, F, device: "iPhone", voiceOver: true) == words(.sharing, F, device: "iPhone"),
+      "the same words under VoiceOver")
+check(texts(words(.sharing, L, mac: "Studio")).contains("New: Copy on this iPad, then come back to Sill: Paste on Studio, on the note Sill shows then or in Settings, puts it where Studio’s cursor is."),
+      "the Mac's name in Paste's row")
+check(texts(words(.sharing, L, mac: "")).contains("New: Copy on this iPad, then come back to Sill: Paste on your Mac, on the note Sill shows then or in Settings, puts it where your Mac’s cursor is."),
+      "the “your Mac” fallback in Paste's row")
+for f in everyFeatures {
+    let s = words(.sharing, L, features: f)
+    check(s.rows.contains { $0.symbol == "doc.on.clipboard" } == f.clipboard && s.rows.contains { $0.symbol == "doc.on.doc" } == f.clipboard
+          && s.rows.contains { $0.symbol == "speaker.wave.2" } == f.sound && s.rows.contains { $0.symbol == "arrow.down.circle" } == (!f.clipboard && !f.sound)
+          && !s.rows.isEmpty, "the card follows the Mac: \(f)")
+    check(s.title == (f.clipboard == f.sound ? "Clipboard and Sound" : f.clipboard ? "Clipboard" : "Sound"), "its title: \(f)")
+    if f.clipboard { check(s.rows[1].text == (f.pasteRightAway ? S2 : S2off), "Paste's row follows Right Away: \(f)") }
+}
+
+// Settings: this device's two new switches (sighted), and sideways the upright row last.
 let settingsL = words(.settings, L)
 check(settingsL.title == "Settings" && settingsL.subtitle == nil && settingsL.hint == "The last button in the bar.", "settings: title, hint")
-check(texts(settingsL) == ["Disconnect is at the bottom of Settings.", "Take the Tour is there too, to see this again.",
-                           "Hold your iPad upright for a trackpad and keys."], "settings sideways on iPad")
-check(settingsL.rows.map(\.symbol) == ["xmark.circle", "questionmark.circle", "ipad"], "settings' symbols on iPad")
+check(texts(settingsL) == [G1, G2, G3, G4, G5], "settings sideways on iPad: \(texts(settingsL))")
+check(settingsL.rows.map(\.symbol) == ["xmark.circle", "questionmark.circle", "arrow.up.arrow.down", "timer", "ipad"], "settings' symbols on iPad")
 check(texts(words(.settings, L, device: "iPhone")).last == "Hold your iPhone upright for a trackpad and keys."
       && words(.settings, L, device: "iPhone").rows.last?.symbol == "iphone", "the upright row on iPhone")
-check(texts(words(.settings, P)) == Array(texts(settingsL).prefix(2)), "no upright row when upright")
+check(texts(words(.settings, P)) == [G1, G2, G3, G4], "no upright row when upright")
+check(texts(words(.settings, L, voiceOver: true)) == [G1, G2, G5] && texts(words(.settings, P, voiceOver: true)) == [G1, G2],
+      "under VoiceOver no Reverse Scrolling or hold rows (a drag and a hold)")
+check(everyFeatures.allSatisfy { words(.settings, L, features: $0) == settingsL && words(.settings, F, device: "iPhone", features: $0) == words(.settings, F, device: "iPhone") },
+      "the Settings card is the same for every Mac")
+
+// The laptop half's card.
 let laptopFirst = words(.laptop, P, first: true)
 check(laptopFirst.title == "Keys and Trackpad" && laptopFirst.subtitle == "Upright, Sill adds keys and a trackpad.", "laptop as a run's first card")
 check(words(.laptop, P, first: false).subtitle == nil, "laptop's subtitle only as a run's first")
+check(texts(laptopFirst) == [K1, K2, K3, K4, K5], "laptop: \(texts(laptopFirst))")
+check(laptopFirst.rows[0].spoken == "Command, Option, Control and Shift stay on for the next key or trackpad click: tap Command, then C, to copy.", "the caps spoken by name")
+check(laptopFirst.rows[4].spans.filter(\.strong).map(\.text) == ["Touch and hold", "then drag"], "two names in the drag row")
+check(laptopFirst.rows[2].spans.filter(\.strong).map(\.text) == ["New:", "A hardware keyboard", "the keyboard key"], "two names in the hardware keyboard's row")
+check(laptopFirst.rows.map(\.symbol) == ["command", "keyboard", "keyboard.badge.ellipsis", "cursorarrow.click.2", "hand.draw"], "laptop's symbols")
+check(laptopFirst.hint == "Below the bar: the row of keys, then the trackpad.", "laptop's hint")
+check(everyFeatures.allSatisfy { words(.laptop, P, first: true, features: $0) == laptopFirst }, "the halves' laptop card is the same for every Mac")
+check(touchPad.rows[1].spoken == "Touch and hold to right-click.", "a row is spoken as it reads")
+
 // The iPhone Duo open: its keys and trackpad come with the device on its side (the laptop pose, open
 // flat upright), so the words say so where an iPhone's and the Duo's cover's say upright.
 let duoSettings = words(.settings, L, device: "iPhone", onItsSide: true)
 check(texts(duoSettings).last == "Turn your iPhone on its side for a trackpad and keys." && duoSettings.rows.last?.symbol == "iphone"
       && duoSettings.rows.last?.spans.first == TourSpan(text: "Turn your iPhone on its side", strong: true), "the Duo's inner display sideways")
-check(texts(duoSettings).prefix(2) == texts(words(.settings, L, device: "iPhone")).prefix(2), "the Duo: the other rows as before")
+check(texts(duoSettings).prefix(4) == texts(words(.settings, L, device: "iPhone")).prefix(4), "the Duo: the other rows as before")
 check(words(.laptop, P, device: "iPhone", first: true, onItsSide: true).subtitle == "On its side, Sill adds keys and a trackpad.", "the Duo's laptop card")
 check(words(.laptop, P, device: "iPhone", first: false, onItsSide: true).subtitle == nil, "…only as a run's first")
 check(texts(words(.laptop, P, device: "iPhone", onItsSide: true)) == texts(words(.laptop, P, device: "iPhone")), "the Duo's laptop rows as before")
-for t in [TourTopic.touch, .bar] {
+for t in [TourTopic.touch, .bar, .sharing] {
     for layout in [L, P] { check(words(t, layout, onItsSide: true) == words(t, layout), "\(t) \(layout): the same words on the Duo") }
 }
-check(texts(laptopFirst) == ["cmd, opt, ctrl and shift stay on for the next key or trackpad click: tap cmd, then C, to copy.",
-                             "The keyboard key types on Mac mini, on screen or with a hardware keyboard.",
-                             "Tap with two fingers on the trackpad to right-click.",
-                             "Touch and hold the trackpad, then drag, to move a window or select text."], "laptop: \(texts(laptopFirst))")
-check(laptopFirst.rows[0].spoken == "Command, Option, Control and Shift stay on for the next key or trackpad click: tap Command, then C, to copy.", "the caps spoken by name")
-check(laptopFirst.rows[3].spans.filter(\.strong).map(\.text) == ["Touch and hold", "then drag"], "two names in the drag row")
-check(laptopFirst.rows.map(\.symbol) == ["command", "keyboard", "cursorarrow.click.2", "hand.draw"], "laptop's symbols")
-check(laptopFirst.hint == "Below the bar: the row of keys, then the trackpad.", "laptop's hint")
-check(touchPad.rows[1].spoken == "Touch and hold to right-click.", "a row is spoken as it reads")
+// The Duo's cover upright is a phone, with no Larger Picture there (a hinge): three rows on its laptop card.
+check(texts(words(.laptop, F, device: "iPhone", first: true, features: with { $0.largerPicture = false })) == [K1, K4, K5], "the Duo's cover: no Larger Picture row")
+
 // A phone held upright: the bar card names row 1's Keyboard, as sideways; the laptop card has no
-// keyboard key (that is row 1's button); the hints say where the rows are.
+// keyboard key (that is row 1's button), and Larger Picture's row where the panel offers it.
 let barPhone = words(.bar, F, device: "iPhone")
-check(texts(barPhone) == texts(words(.bar, L, device: "iPhone")) && texts(barPhone).count == 3, "a phone's bar card: as sideways, with Keyboard")
-check(barPhone.hint == "Under the picture: Aa and Keyboard in the first row, the windows in the second.", "a phone's bar hint")
+check(texts(barPhone) == texts(words(.bar, L, device: "iPhone")) && texts(barPhone) == [B1, B2, B3on, B4, B5], "a phone's bar card: as sideways, with Keyboard")
+check(barPhone.hint == "Under the picture: Aa and Keyboard in the first row, the windows and Menus in the second.", "a phone's bar hint with Menus")
+check(words(.bar, F, device: "iPhone", features: with { $0.menus = false }).hint == "Under the picture: Aa and Keyboard in the first row, the windows in the second.",
+      "a phone's bar hint without")
 check(words(.touch, F, device: "iPhone").hint == "The picture of Mac mini is at the top of the screen.", "a phone's picture hint")
 check(words(.settings, F, device: "iPhone").hint == "The last button in the row under the picture."
-      && texts(words(.settings, F, device: "iPhone")) == Array(texts(settingsL).prefix(2)), "a phone's settings card: no upright row")
+      && texts(words(.settings, F, device: "iPhone")) == [G1, G2, G3, G4], "a phone's settings card: no upright row")
 let laptopPhone = words(.laptop, F, device: "iPhone", first: true)
-check(texts(laptopPhone) == ["cmd, opt, ctrl and shift stay on for the next key or trackpad click: tap cmd, then C, to copy.",
-                             "Tap with two fingers on the trackpad to right-click.",
-                             "Touch and hold the trackpad, then drag, to move a window or select text."], "a phone's laptop card: no keyboard key: \(texts(laptopPhone))")
+check(texts(laptopPhone) == [K1, K4, K5, K6], "a phone's laptop card: no keyboard key, Larger Picture's row last: \(texts(laptopPhone))")
+check(laptopPhone.rows.map(\.symbol) == ["command", "cursorarrow.click.2", "hand.draw", "rectangle.expand.vertical"], "a phone's laptop symbols")
 check(laptopPhone.hint == "Under the windows: the row of keys, then the trackpad." && laptopPhone.subtitle == "Upright, Sill adds keys and a trackpad.",
       "a phone's laptop hint and subtitle")
 check(words(.laptop, F, device: "iPhone", voiceOver: true, first: true).rows.map(\.spoken)
-      == ["Command, Option, Control and Shift stay on for the next key: Command, then C, copies."], "a phone's laptop card under VoiceOver")
+      == ["Command, Option, Control and Shift stay on for the next key: Command, then C, copies.", K6], "a phone's laptop card under VoiceOver")
+check(words(.laptop, F, device: "iPhone", voiceOver: true, first: true, features: with { $0.largerPicture = false }).rows.map(\.spoken)
+      == ["Command, Option, Control and Shift stay on for the next key: Command, then C, copies."], "…and where Larger Picture is not offered")
+for f in everyFeatures {
+    check(words(.laptop, F, device: "iPhone", features: f).rows.contains { $0.symbol == "rectangle.expand.vertical" } == f.largerPicture,
+          "Larger Picture's row only where it is offered: \(f)")
+    check(!words(.laptop, P, features: f).rows.contains { $0.symbol == "rectangle.expand.vertical" }, "never in the halves: \(f)")
+}
+
 // A phone with Larger Picture: no thumbnails, so the bar card's first row is about Apps, its hint
 // names row 1's buttons, and the laptop card's hint says the keys are under the buttons; the rest
 // as with the thumbnails.
 let barLarger = words(.bar, F, device: "iPhone", thumbnails: false)
-check(texts(barLarger) == ["Apps lists the apps on Mac mini: tap an open one again for its next window.",
-                           "Aa: while a window shows, touch it and slide to make its text larger or smaller.",
-                           "Keyboard types on Mac mini, on screen or with a hardware keyboard."], "Larger Picture's bar card: \(texts(barLarger))")
+check(texts(barLarger) == [B1Apps, B2, B3on, B4, B5], "Larger Picture's bar card: \(texts(barLarger))")
 check(barLarger.rows[0].symbol == "magnifyingglass" && barLarger.rows[0].spans.first == TourSpan(text: "Apps", strong: true)
-      && barLarger.title == "Windows and Text Size" && barLarger.subtitle == nil, "Apps' row: the button's symbol and name")
-check(barLarger.hint == "Under the picture, in the row of buttons: Apps, Aa and Keyboard.", "Larger Picture's bar hint")
-check(texts(words(.bar, F, device: "iPhone", voiceOver: true, thumbnails: false))
-      == ["Apps lists the apps on Mac mini. Choose an open one again for its next window.",
-          "Text size makes a window’s text on Mac mini larger or smaller. Swipe up or down on it while a window shows.",
-          "Keyboard types on Mac mini, on screen or with a hardware keyboard."], "Larger Picture's bar card under VoiceOver")
+      && barLarger.title == "Windows and Menus" && barLarger.subtitle == nil, "Apps' row: the button's symbol and name")
+check(barLarger.hint == "Under the picture, in the row of buttons: Apps, Menus, Aa and Keyboard.", "Larger Picture's bar hint with Menus")
+check(words(.bar, F, device: "iPhone", thumbnails: false, features: with { $0.menus = false }).hint == "Under the picture, in the row of buttons: Apps, Aa and Keyboard.",
+      "…and without")
+check(texts(words(.bar, F, device: "iPhone", voiceOver: true, thumbnails: false)) == [B1AppsVO, B2, B3onVO, B4, B5], "Larger Picture's bar card under VoiceOver")
 check(words(.laptop, F, device: "iPhone", first: true, thumbnails: false).hint == "Under the buttons: the row of keys, then the trackpad."
       && texts(words(.laptop, F, device: "iPhone", first: true, thumbnails: false)) == texts(laptopPhone),
       "Larger Picture's laptop card: the keys under the buttons, its rows as before")
-check([TourTopic.touch, .settings].allSatisfy { words($0, F, device: "iPhone", thumbnails: false) == words($0, F, device: "iPhone") },
+check([TourTopic.touch, .sharing, .settings].allSatisfy { words($0, F, device: "iPhone", thumbnails: false) == words($0, F, device: "iPhone") },
       "Larger Picture's other cards as before")
 check(texts(words(.bar, F, mac: "Studio", device: "iPhone", thumbnails: false)).first == "Apps lists the apps on Studio: tap an open one again for its next window.",
       "the Mac's name in Apps' row")
 check([L, P].allSatisfy { layout in all.allSatisfy { words($0, layout, thumbnails: false) == words($0, layout) } },
       "no thumbnails changes no words sideways or in the halves")
+
 // Under VoiceOver: no touch card, no trackpad rows, and no gesture VoiceOver cannot make.
 let barVO = words(.bar, L, voiceOver: true)
-check(texts(barVO) == ["Each window has actions: close, minimize, full screen, and move left or right. Swipe up or down to hear them.",
-                       "Text size makes a window’s text on Mac mini larger or smaller. Swipe up or down on it while a window shows.",
-                       "Keyboard types on Mac mini, on screen or with a hardware keyboard."], "bar under VoiceOver: \(texts(barVO))")
+check(texts(barVO) == [B1VO, B2, B3onVO, B4, B5], "bar under VoiceOver: \(texts(barVO))")
+check(texts(words(.bar, P, voiceOver: true, features: with { $0.virtualDisplay = false })) == [B1VO, B2, B3offVO], "the halves' bar under VoiceOver, Virtual Display off")
+check(barVO.rows[2].spans.filter(\.strong).map(\.text) == ["New:", "Virtual Display", "Text size"], "Text size, by its VoiceOver name")
 let laptopVO = words(.laptop, P, voiceOver: true, first: true)
-check(laptopVO.rows.count == 2 && laptopVO.rows[0].spoken == "Command, Option, Control and Shift stay on for the next key: Command, then C, copies."
-      && laptopVO.rows[1].text == "The keyboard key types on Mac mini, on screen or with a hardware keyboard.", "laptop under VoiceOver: the keys' rows")
+check(laptopVO.rows.count == 3 && laptopVO.rows[0].spoken == "Command, Option, Control and Shift stay on for the next key: Command, then C, copies."
+      && laptopVO.rows[1].text == K2 && laptopVO.rows[2].text == K3, "laptop under VoiceOver: the keys' rows")
+
+// The rows per card (the plan's §1.5): at most six anywhere, with every feature there.
+func counts(_ layout: TourLayout, device: String, voiceOver: Bool = false, features: TourFeatures = allOn) -> [Int] {
+    TourPolicy.steps(layout, voiceOver: voiceOver).map { words($0, layout, device: device, voiceOver: voiceOver, features: features).rows.count }
+}
+check(counts(L, device: "iPad") == [6, 5, 3, 5] && counts(L, device: "iPhone") == [5, 5, 3, 5], "sideways: 6 (5 on iPhone), 5, 3, 5")
+check(counts(P, device: "iPad") == [6, 3, 3, 4, 5] && counts(F, device: "iPhone") == [5, 5, 3, 4, 4], "the halves 6, 3, 3, 4, 5; a phone 5, 5, 3, 4, 4")
+check(counts(F, device: "iPhone", features: with { $0.largerPicture = false }).last == 3, "the Duo's cover: three on its laptop card")
+check(counts(L, device: "iPad", voiceOver: true) == [5, 3, 3] && counts(P, device: "iPad", voiceOver: true) == [3, 3, 2, 3]
+      && counts(F, device: "iPhone", voiceOver: true) == [5, 3, 2, 2], "under VoiceOver: bar 5/3/5, sharing 3, settings 3/2/2, laptop 3/2")
+var mostRows = 0
+for layout in [L, P, F] {
+    for voiceOver in [false, true] {
+        for device in ["iPad", "iPhone"] {
+            for thumbnails in [true, false] {
+                for f in everyFeatures {
+                    for step in TourPolicy.steps(layout, voiceOver: voiceOver) {
+                        mostRows = max(mostRows, words(step, layout, device: device, voiceOver: voiceOver, first: true, thumbnails: thumbnails, features: f).rows.count)
+                    }
+                }
+            }
+        }
+    }
+}
+check(mostRows == 6, "at most six rows on any card: \(mostRows)")
+
+// "New:": exactly the rows about what is new since the tour was written (0.6's, and the Menus
+// button's, the gestures' and Virtual Display's, in either form, which the old tour never told of),
+// first, semibold and marked, then a space, in the words and in what VoiceOver reads; every older
+// row carries none.
+check(TourPolicy.newPrefix == "New:", "the mark")
+func expectedNew(_ row: TourRow, _ f: TourFeatures) -> Bool {
+    switch row.symbol {
+    case "plus.magnifyingglass", "hand.raised.fingers.spread", "filemenu.and.selection", "display", "keyboard.badge.ellipsis",
+         "doc.on.clipboard", "doc.on.doc", "speaker.wave.2", "arrow.down.circle", "arrow.up.arrow.down", "timer",
+         "rectangle.expand.vertical": return true
+    default: return false
+    }
+}
+var newRows: Set<String> = [], oldRows: Set<String> = []
+for layout in [L, P, F] {
+    for voiceOver in [false, true] {
+        for device in ["iPad", "iPhone"] {
+            for thumbnails in [true, false] {
+                for onItsSide in [false, true] {
+                    for f in everyFeatures {
+                        for step in TourPolicy.steps(layout, voiceOver: voiceOver) {
+                            let copy = words(step, layout, device: device, voiceOver: voiceOver, first: true, onItsSide: onItsSide, thumbnails: thumbnails, features: f)
+                            for row in copy.rows {
+                                let label = "\(step) \(layout) \(device) vo \(voiceOver): \(row.text)"
+                                if row.isNew {
+                                    newRows.insert(row.symbol)
+                                    check(row.spans.count >= 3 && row.spans[0] == TourSpan(text: "New:", strong: true, isNew: true)
+                                          && row.spans[1] == TourSpan(text: " ", strong: false, isNew: false)
+                                          && row.text.hasPrefix("New: ") && row.spoken.hasPrefix("New: ") && !row.text.hasPrefix("New: New:"),
+                                          "a New row's mark first, then a space, in its words and VoiceOver's: \(label)")
+                                } else {
+                                    oldRows.insert(row.symbol)
+                                    check(!row.text.hasPrefix("New") && !row.spoken.hasPrefix("New"), "an unmarked row says no New: \(label)")
+                                }
+                                check(row.isNew == expectedNew(row, f), "New on exactly the new rows: \(label)")
+                                check(row.spans.dropFirst().allSatisfy { !$0.isNew }, "only the first span is the mark: \(label)")
+                                check(!row.text.lowercased().contains("password") && !row.spoken.lowercased().contains("password"),
+                                      "no row speaks of passwords (a password manager's copies go like any other): \(label)")
+                                // Aa only in Virtual Display's row, sighted; Text size only there under VoiceOver.
+                                check(!row.text.contains("Aa") || (row.symbol == "display" && !voiceOver), "Aa outside the Virtual Display row: \(label)")
+                                check(!row.text.contains("Text size") || (row.symbol == "display" && voiceOver), "Text size outside the Virtual Display row: \(label)")
+                                if row.symbol == "display" {
+                                    check(row.spans.contains(TourSpan(text: voiceOver ? "Text size" : "Aa", strong: true)), "the Virtual Display row names Aa: \(label)")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+check(newRows == ["plus.magnifyingglass", "hand.raised.fingers.spread", "filemenu.and.selection", "display", "keyboard.badge.ellipsis",
+                  "doc.on.clipboard", "doc.on.doc", "speaker.wave.2", "arrow.down.circle", "arrow.up.arrow.down", "timer",
+                  "rectangle.expand.vertical"], "the New rows: T5, T6, B2, B3, B5, S1–S4, G3, G4, K3, K6: \(newRows.sorted())")
+check(["keyboard", "hand.tap", "command", "hand.point.up.left", "xmark.circle"].allSatisfy(oldRows.contains) && !oldRows.contains("display"),
+      "the Keyboard rows and the old rows unmarked; Virtual Display's never")
+check(words(.touch, L).rows.first { $0.symbol == "hand.raised.fingers.spread" }!.isNew && words(.bar, L).rows.first { $0.symbol == "filemenu.and.selection" }!.isNew,
+      "the swipe and Menus rows carry New (the old tour never told of them)")
+check(words(.bar, L, features: with { $0.virtualDisplay = false }).rows.first { $0.symbol == "display" }!.isNew && words(.bar, L).rows.first { $0.symbol == "display" }!.isNew,
+      "Virtual Display's row is New in both forms")
+check(T5.hasPrefix("New: ") && texts(touchPad)[4] == T5 && touchPad.rows[4].spoken == T5, "VoiceOver says “New: Pinch to zoom…”")
+
 for layout in [L, P, F] {
     for step in TourPolicy.steps(layout, voiceOver: true) {
         for device in ["iPad", "iPhone"] {
             for thumbnails in [true, false] {
-                for row in words(step, layout, device: device, voiceOver: true, first: true, thumbnails: thumbnails).rows {
-                    let spoken = row.spoken.lowercased()
-                    check(!spoken.contains("tap") && !spoken.contains("touch and hold") && !spoken.contains("slide") && !spoken.contains("drag"),
-                          "a gesture in a VoiceOver row (\(step), \(layout), thumbnails \(thumbnails)): \(row.spoken)")
+                for f in everyFeatures {
+                    for row in words(step, layout, device: device, voiceOver: true, first: true, thumbnails: thumbnails, features: f).rows {
+                        let spoken = row.spoken.lowercased()
+                        check(!spoken.contains("tap") && !spoken.contains("touch and hold") && !spoken.contains("slide") && !spoken.contains("drag"),
+                              "a gesture in a VoiceOver row (\(step), \(layout), thumbnails \(thumbnails), \(f)): \(row.spoken)")
+                    }
                 }
             }
         }
@@ -948,10 +1301,12 @@ for layout in [L, P, F] {
 // Every row is read whole, never its symbol's name.
 for layout in [L, P, F] {
     for step in TourPolicy.steps(layout, voiceOver: false) {
-        for row in words(step, layout, first: true).rows + words(step, layout, first: true, thumbnails: false).rows {
-            // Read as its words (the key row's caps by name), never with the symbol's name before them.
-            check(!row.spoken.isEmpty && !row.spoken.hasPrefix(row.symbol) && !(row.symbol.contains(".") && row.spoken.contains(row.symbol))
-                  && (row.spoken == row.text || row.symbol == "command") && row.spoken.hasSuffix("."), "\(step): a row read whole: \(row.spoken)")
+        for f in everyFeatures {
+            for row in words(step, layout, first: true, features: f).rows + words(step, layout, first: true, thumbnails: false, features: f).rows {
+                // Read as its words (the key row's caps by name), never with the symbol's name before them.
+                check(!row.spoken.isEmpty && !row.spoken.hasPrefix(row.symbol) && !(row.symbol.contains(".") && row.spoken.contains(row.symbol))
+                      && (row.spoken == row.text || row.symbol == "command") && row.spoken.hasSuffix("."), "\(step): a row read whole: \(row.spoken)")
+            }
         }
     }
 }
@@ -996,8 +1351,8 @@ for (name, w, h) in uprightPhones {
             check(tourOf(on) == tourOf(off) && tourOf(on, voiceOver: true) == tourOf(off, voiceOver: true),
                   "\(name), the switch on while \(what) streams: the tour is the switch off's, every card's words, lights and places (under VoiceOver too)")
         }
-        check(TourPolicy.targets(.bar, F, thumbnails: streamScreen(w, h, switchOn: true, streaming: streaming).thumbnails) == [.strip, .textSize, .keyboard],
-              "\(name), the switch on while \(what) streams: the bar card lights the thumbnails, Aa and Keyboard")
+        check(TourPolicy.targets(.bar, F, thumbnails: streamScreen(w, h, switchOn: true, streaming: streaming).thumbnails) == [.strip, .menus, .textSize, .keyboard],
+              "\(name), the switch on while \(what) streams: the bar card lights the thumbnails, Menus, Aa and Keyboard")
     }
     let keyboard = PhonePortraitLayout.keyboardHeight(for: CGSize(width: w, height: h))
     for video in [macBook, CGSize(width: 848, height: 844)] {
@@ -1006,9 +1361,10 @@ for (name, w, h) in uprightPhones {
         check(same(window, larger) && !window.thumbnails && window.room != nil && tourOf(window) == tourOf(larger),
               "\(name), the switch on while a window streams: Larger Picture's tour as before (Apps lit, the cards against the room)")
     }
-    check(TourPolicy.targets(.bar, F, thumbnails: streamScreen(w, h, switchOn: true, streaming: .window).thumbnails) == [.apps, .textSize, .keyboard]
+    check(TourPolicy.targets(.bar, F, thumbnails: streamScreen(w, h, switchOn: true, streaming: .window).thumbnails) == [.apps, .menus, .textSize, .keyboard]
             && tourOf(streamScreen(w, h, switchOn: true, streaming: .window)) != tourOf(off),
-          "\(name), a window: the bar card lights Apps, Aa and Keyboard, so the tour differs from the Desktop's")
+          "\(name), a window: the bar card lights Apps, Menus, Aa and Keyboard, so the tour differs from the Desktop's")
+    check(tourOf(off).contains("sharing") && tourOf(off).contains("Clipboard and Sound"), "\(name): the tour has the clipboard's and the sound's card")
     check(PhonePortraitLayout.Streaming.allCases.allSatisfy { same(streamScreen(w, h, switchOn: false, streaming: $0), off) },
           "\(name), the switch off: the standard tour whatever streams")
 }
@@ -1026,7 +1382,8 @@ do {
           "the 15 Pro with the Desktop: the 16:10 pane (377×235), the bar card the switch off's, not in the black under a 377×244 Desktop")
 }
 
-check(TourPolicy.spokenTitle(barL, index: 1, count: 3) == "Windows and Text Size, step 2 of 3", "VoiceOver hears the count")
+check(TourPolicy.spokenTitle(barL, index: 1, count: 4) == "Windows and Menus, step 2 of 4", "VoiceOver hears the count")
+check(TourPolicy.spokenTitle(sharingL, index: 2, count: 5) == "Clipboard and Sound, step 3 of 5", "…on the new card too")
 check(TourPolicy.spokenTitle(laptopFirst, index: 0, count: 1) == "Keys and Trackpad", "a one-card run has no count")
 check(TourPolicy.skipTitle == "Skip" && TourPolicy.nextTitle == "Next" && TourPolicy.doneTitle == "Done", "the buttons")
 check(TourPolicy.skipHint == "Ends the tour. Take the Tour in Settings shows it again.", "Skip's hint")

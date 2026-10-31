@@ -55,6 +55,9 @@ struct MacMenuButton: View {
             MacMenuTrigger(client: client, open: $open, onOpen: onOpen, onClose: onClose)
                 .frame(width: width, height: height)
         }
+        // The first-run tour's bar card lights it wherever it is drawn, and only then (TourPolicy):
+        // nothing drawn, nothing hit-tested.
+        .tourTarget(.menus)
     }
 
     /// Whether a bar holds the Menus button beside its other buttons and still one whole thumbnail
