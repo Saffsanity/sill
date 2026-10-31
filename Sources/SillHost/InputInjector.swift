@@ -85,6 +85,12 @@ final class InputInjector {
     /// input with nowhere to land that still goes (`isUpOfSomethingDown`: StreamCoordinator), a
     /// button's up then going where the pointer is.
     func apply(_ event: InputEvent, in rect: CGRect, from device: KeyStrokes.Device) {
+        // A Mac off console takes nothing from a device but the up of what it holds down (LockPolicy,
+        // docs/locked-mac-plan.md): the coordinator decides first; this is the last word before a post.
+        if lockReading?() == .offConsole, !releasesWhatItHolds(event, from: device) {
+            Stats.shared.bump("in.locked")
+            return
+        }
         if !dryRun { remindAboutAccessibilityIfNeeded() }
         switch event {
         case .pointer(let action, let x, let y):
@@ -608,6 +614,10 @@ final class InputInjector {
     var heardFrom: ((KeyStrokes.Device) -> Double?)?
     /// Where a repeat would land now (the coordinator's, KeyRepeat.Landing). Unset: on the source.
     var repeatLanding: (() -> KeyRepeat.Landing)?
+    /// The lock's reading now (the coordinator's: SessionLock's gate; LockPolicy). Off console nothing is
+    /// posted but the up of what a device holds down; locked, no gesture's shortcut and no key repeat.
+    /// Unset: as ever.
+    var lockReading: (() -> LockPolicy.Reading)?
 
     /// The repeat's clock: seconds of system uptime (StreamServer.lastHeard's).
     static func clock() -> Double { ProcessInfo.processInfo.systemUptime }
@@ -651,6 +661,14 @@ final class InputInjector {
     /// One step of the held key's repeat now (KeyRepeat.step): a repeat posted or not, and how long
     /// until the next; nil when nothing repeats any more.
     private func repeatStep() -> Double? {
+        // A locked Mac repeats no key (LockPolicy): the coordinator stops the repeat at the lock, and a
+        // step that comes first finds the gate.
+        if lockReading?().locked == true {
+            repeating.stop()
+            repeatScheduled = nil
+            repeatTask = nil
+            return nil
+        }
         let now = Self.clock()
         var heard: Double? = now
         if let held = repeating.held, let heardFrom { heard = heardFrom(held.device) }
@@ -697,6 +715,8 @@ final class InputInjector {
     /// Spotlight key's ⌘ once reached the text typed after it (`type`). The shortcut acts on the key
     /// down. `checkModifiersLeft` says so in the log if the table still holds the chord's modifiers.
     func chord(keyCode: UInt16, flags: UInt64) {
+        // No gesture's shortcut at a locked Mac (LockPolicy): the coordinator refuses it first.
+        if lockReading?().locked == true { Stats.shared.bump("in.locked"); return }
         if !dryRun { remindAboutAccessibilityIfNeeded() }
         let before = CGEventSource.flagsState(.hidSystemState).rawValue
         let strokes = KeyStrokes.chord(virtualKey: keyCode, flags: flags, before: before)

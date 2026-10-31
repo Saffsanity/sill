@@ -327,6 +327,13 @@ final class HEVCDisplayView: UIView {
         displayLayer.flushAndRemoveImage()
     }
 
+    /// A locked Mac (docs/locked-mac-plan.md): the picture removed at once, nothing shown until the next
+    /// keyframe, the format kept. On `renderQueue` (the client's network queue), as `apply` and `enqueue`.
+    func blank() {
+        waitingForKeyframe = true
+        displayLayer.flushAndRemoveImage()
+    }
+
     /// Session over: drop the picture and forget the format so the next Mac starts clean.
     func clear() {
         formatDescription = nil

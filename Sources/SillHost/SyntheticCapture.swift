@@ -116,6 +116,63 @@ final class SyntheticCapture: @unchecked Sendable {   // state is confined to `q
     }
 }
 
+/// A locked Mac's placeholder (LockPolicy, docs/locked-mac-plan.md): one black frame, made here and given
+/// to the encoder at the start and once more half a second later, then nothing. No ScreenCaptureKit and
+/// nothing of the Mac: the frame is zeros. Its keyframe replaces every device's last picture, an older
+/// device's too; a device that connects later gets it from the encoder's keyframe request, which encodes
+/// the last frame again. `onFrame` is set by the main actor while stopped; the rest lives on `queue`.
+final class StillCapture: @unchecked Sendable {
+    var onFrame: ((CVPixelBuffer, CMTime) -> Void)?
+    private let queue = DispatchQueue(label: "sill.still", qos: .userInitiated)
+    /// Bumped by each start and stop, so a late second delivery of an older one does nothing.
+    private var generation = 0
+
+    func start(width: Int, height: Int) {
+        queue.async { [self] in
+            generation += 1
+            let mine = generation
+            guard let frame = Self.black(width: width, height: height) else {
+                print("Placeholder: could not make a \(width)×\(height) frame")
+                return
+            }
+            deliver(frame)
+            queue.asyncAfter(deadline: .now() + 0.5) { [self] in if generation == mine { deliver(frame) } }
+        }
+    }
+
+    /// Returns once nothing more is delivered, so no late frame reaches the next encoder.
+    func stop() async {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            queue.async { [self] in
+                generation += 1
+                c.resume()
+            }
+        }
+    }
+
+    private func deliver(_ frame: CVPixelBuffer) {
+        Stats.shared.bump("cap.placeholder")
+        onFrame?(frame, CMClockGetTime(CMClockGetHostTimeClock()))
+    }
+
+    /// Full-range 4:2:0, the test pattern's format: luma 0, chroma 128 (black).
+    private static func black(width: Int, height: Int) -> CVPixelBuffer? {
+        let attrs: [CFString: Any] = [kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary]
+        var pb: CVPixelBuffer?
+        guard CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, attrs as CFDictionary, &pb) == kCVReturnSuccess,
+              let pb else { return nil }
+        CVPixelBufferLockBaseAddress(pb, [])
+        if let y = CVPixelBufferGetBaseAddressOfPlane(pb, 0) {
+            memset(y, 0, CVPixelBufferGetBytesPerRowOfPlane(pb, 0) * CVPixelBufferGetHeightOfPlane(pb, 0))
+        }
+        if let uv = CVPixelBufferGetBaseAddressOfPlane(pb, 1) {
+            memset(uv, 128, CVPixelBufferGetBytesPerRowOfPlane(pb, 1) * CVPixelBufferGetHeightOfPlane(pb, 1))
+        }
+        CVPixelBufferUnlockBaseAddress(pb, [])
+        return pb
+    }
+}
+
 /// TEST ONLY (`SILL_TEST_PATTERN=picture:<path>`): a picture as the synthetic Desktop's two planes,
 /// made once at the frame's size: drawn to fill it (cropped to its shape, centred), then turned into
 /// full-range Y and interleaved CbCr (BT.709).

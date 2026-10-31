@@ -1188,6 +1188,8 @@ struct StreamScreen: View {
                              writeZoom: { [zoom] in zoom.set($0) })
             }
             .background(Palette.panel)
+            // A locked Mac: its cover over the picture (LockedMac), under the link's line.
+            .overlay { LockedMacShade(client: client) }
             .overlay(alignment: .top) { LinkLineView(text: shownLinkLine) }
             .clipShape(streamShape)
             .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
@@ -1283,6 +1285,53 @@ struct LinkLineView: View {
         .frame(maxWidth: .infinity, alignment: .top)
         .allowsHitTesting(false)
         .animation(.easeOut(duration: 0.2), value: text)
+    }
+}
+
+// MARK: - A locked Mac's cover
+
+/// What covers the stream while the Mac shows nothing of itself (`StreamClient.lockShade`, LockedMac,
+/// docs/locked-mac-plan.md): an opaque panel with why, then after the unlock "Unlocking…" until its
+/// picture's first keyframe. The picture under it was removed at the lock (HEVCDisplayView.blank), and the
+/// Mac streams a black placeholder meanwhile. It takes no touch: a paired device's keys and taps still
+/// reach a locked screen, where the Mac takes them; off console the Mac drops them. VoiceOver reads it as
+/// one element.
+struct LockedMacShade: View {
+    @ObservedObject var client: StreamClient
+
+    var body: some View {
+        ZStack {
+            if let shade = client.lockShade {
+                Palette.panel
+                VStack(spacing: 10) {
+                    if shade == .unlocking {
+                        ProgressView().tint(Palette.muted)
+                    } else {
+                        Image(systemName: shade == .locked(.otherUser) ? "person.2.fill" : "lock.fill")
+                            .font(.system(size: 28))
+                            .foregroundStyle(Palette.muted)
+                            .accessibilityHidden(true)
+                    }
+                    Text(LockedMac.title(mac: client.macName, shade: shade))
+                        .font(.headline)
+                        .foregroundStyle(Palette.text)
+                        .multilineTextAlignment(.center)
+                    if let detail = LockedMac.detail(shade: shade, paired: client.settings.host?.sessionPaired) {
+                        Text(detail)
+                            .font(.subheadline)
+                            .foregroundStyle(Palette.muted)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(24)
+                .frame(maxWidth: 440)
+                .accessibilityElement(children: .combine)
+                .transition(.opacity)
+            }
+        }
+        .allowsHitTesting(false)
+        .animation(.easeOut(duration: 0.2), value: client.lockShade)
     }
 }
 
@@ -2089,10 +2138,10 @@ struct AppDrawer: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            if client.macLocked {
+            if let why = client.lockWhy {
                 // A locked Mac sends no windows, apps or icons (its LockPolicy, docs/locked-mac-plan.md),
                 // and launches nothing: one line where they would be.
-                lockedLine
+                lockedLine(why)
                 Spacer(minLength: 0)
             } else {
                 searchField
@@ -2133,15 +2182,15 @@ struct AppDrawer: View {
         .shadow(color: .black.opacity(0.65), radius: 30, x: 0, y: 24)
     }
 
-    /// A locked Mac (`StreamClient.macLocked`): one line in place of the search field and both lists, read
+    /// A locked Mac (`StreamClient.lockWhy`): one line in place of the search field and both lists, read
     /// by VoiceOver as it is (the lock symbol is not).
-    private var lockedLine: some View {
+    private func lockedLine(_ why: LockedMac.Why) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Image(systemName: "lock.fill")
+            Image(systemName: why == .otherUser ? "person.2.fill" : "lock.fill")
                 .font(.system(size: 15))
                 .foregroundStyle(Palette.muted)
                 .accessibilityHidden(true)
-            Text(LockedMac.line(mac: client.macName))
+            Text(LockedMac.line(mac: client.macName, why: why))
                 .font(.system(size: 15))
                 .foregroundStyle(Palette.text)
                 .fixedSize(horizontal: false, vertical: true)

@@ -232,10 +232,10 @@ struct HostSettingsPanel: View {
                                                            rttMs: client.linkStats?.rtt?.median)
                                         + (AwayCopy.headerLine(state.away)?.spoken ?? ""))
                 }
-                // A locked Mac's lists have no windows while only its lock screen streams (its LockPolicy,
+                // A locked Mac's lists have no windows while it shows nothing of itself (its LockPolicy,
                 // docs/locked-mac-plan.md): why, under the readout, its own element for VoiceOver.
-                if client.macLocked {
-                    Text(LockedMac.line(mac: client.macName))
+                if let why = client.lockWhy {
+                    Text(LockedMac.line(mac: client.macName, why: why))
                         .font(.footnote)
                         .foregroundStyle(Palette.text)
                         .fixedSize(horizontal: false, vertical: true)

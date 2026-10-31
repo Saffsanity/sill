@@ -68,13 +68,17 @@ public struct WindowList: Codable {
     /// sends them as keys only to a host that says so (the device's KeyTyping). Set after the initializer,
     /// whose parameters stay as they were: `list.keyRepeat = KeyRepeat.generation`.
     public var keyRepeat: Int?
-    /// This Mac's screen is locked, or another user's session is on its console (the host's LockPolicy,
-    /// docs/locked-mac-plan.md): true, with no windows and no `clipboard` in the list, while only its lock
-    /// screen streams (the Desktop) and a window picked, an app launched, the menus, gestures and the
-    /// clipboard are refused. Left out otherwise, and by every host before 2026-10-31, whose lists are
-    /// what they were. A device shows `LockedMac.line` where the windows would be. Set after the
-    /// initializer, as `keyRepeat`.
+    /// This Mac shows nothing of itself to devices (the host's LockPolicy, docs/locked-mac-plan.md): its
+    /// screen is locked, or another user, the login window or nobody is on its console. True, with no
+    /// windows and no `clipboard` in the list, while the host streams a placeholder (a black frame) and
+    /// sends no thumbnail, icon, app list, sound, clipboard, pointer or cursor shape. Left out otherwise,
+    /// and by every host before 2026-10-31, whose lists are what they were. A device covers its stream
+    /// and says why (`LockedMac`). Set after the initializer, as `keyRepeat`.
     public var locked: Bool?
+    /// With `locked`: true while this Mac's console is not this session's (another user's session, the
+    /// login window, or none), left out while its own screen is locked. A device words its cover by it:
+    /// nothing typed reaches the Mac then (`LockedMac.Why`).
+    public var offConsole: Bool?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
                 hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil) {
@@ -84,13 +88,74 @@ public struct WindowList: Codable {
     }
 }
 
-/// A locked Mac on the device (`WindowList.locked`; docs/locked-mac-plan.md): the one line the Apps
-/// drawer and the Settings panel's header show where the Mac's windows would be, which VoiceOver reads
-/// as it is. Pure; checked with the host's rule (Tests/checks/lock-policy).
+/// A locked Mac on the device (`WindowList.locked`, `offConsole`; docs/locked-mac-plan.md): why, the one
+/// line the Apps drawer and the Settings panel's header show where the Mac's windows would be, and the
+/// cover over the stream (`Shade`) with its words, which VoiceOver reads as they are. Pure; checked with
+/// the host's rule (Tests/checks/lock-policy).
 public enum LockedMac {
-    public static func line(mac: String) -> String {
-        "\(mac.isEmpty ? "The Mac" : mac) is locked. Unlock it to see its windows."
+    /// Why a Mac's list says `locked`: its own screen is locked, or it is switched to another user (or
+    /// to the login window).
+    public enum Why: Equatable, Sendable { case screenLocked, otherUser }
+
+    /// Why `list` says locked; nil for a list that does not (every host before 2026-10-31's).
+    public static func why(_ list: WindowList) -> Why? {
+        guard list.locked == true else { return nil }
+        return list.offConsole == true ? .otherUser : .screenLocked
     }
+
+    /// What covers the stream: the Mac locked, then, after the unlock, until its picture comes back.
+    public enum Shade: Equatable, Sendable {
+        case locked(Why)
+        case unlocking
+    }
+
+    /// The cover after a window list that says `why` (nil: not locked): locked while it says so; after a
+    /// locked one, "Unlocking…" until the next keyframe (`shade(_:frameIsKeyframe:)`); else none.
+    public static func shade(_ was: Shade?, list why: Why?) -> Shade? {
+        if let why { return .locked(why) }
+        return was == nil ? nil : .unlocking
+    }
+
+    /// The cover after a frame: a keyframe ends "Unlocking…" (the picture is back); nothing else does.
+    public static func shade(_ was: Shade?, frameIsKeyframe: Bool) -> Shade? {
+        was == .unlocking && frameIsKeyframe ? nil : was
+    }
+
+    /// How long "Unlocking…" waits for the picture at most before it goes anyway.
+    public static let unlockingTimeout: Double = 4
+
+    /// The Apps drawer's and the Settings panel's line, where the Mac's windows would be.
+    public static func line(mac: String, why: Why) -> String {
+        switch why {
+        case .screenLocked: return "\(name(mac)) is locked. Unlock it to see its windows."
+        case .otherUser: return "\(name(mac)) is switched to another user. Its windows come back when you switch back on the Mac."
+        }
+    }
+
+    /// The cover's title.
+    public static func title(mac: String, shade: Shade) -> String {
+        switch shade {
+        case .locked(.screenLocked): return "\(name(mac)) is locked"
+        case .locked(.otherUser): return "\(name(mac)) is switched to another user"
+        case .unlocking: return "Unlocking…"
+        }
+    }
+
+    /// The cover's line under its title. `paired`: this session's key is the Mac's (its settings state's
+    /// `sessionPaired`; nil before it has said): only then do keys typed here reach a locked screen.
+    public static func detail(shade: Shade, paired: Bool?) -> String? {
+        switch shade {
+        case .locked(.screenLocked):
+            return paired == true ? "To unlock it from here, type its password and press Return. Its windows come back once it is unlocked."
+                                  : "Its windows come back once it is unlocked."
+        case .locked(.otherUser):
+            return "Its windows come back when you switch back to your account on the Mac. Nothing typed here reaches it meanwhile."
+        case .unlocking:
+            return nil
+        }
+    }
+
+    private static func name(_ mac: String) -> String { mac.isEmpty ? "The Mac" : mac }
 }
 
 public struct LaunchApp: Codable {

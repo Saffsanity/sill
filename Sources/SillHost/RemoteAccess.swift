@@ -653,7 +653,7 @@ package final class RemoteAccess {
         let asDevice = DoorPolicy.testAsksAsDevice(testHost: testHost, environment: ProcessInfo.processInfo.environment)
         let thisMac = fromThisMac && !asDevice
         let quietSince = askLimits.quietSince(fingerprint: asker.fingerprint, source: asker.source, now: now)
-        let verdict = DoorPolicy.ask(unlocked: SessionLock.shared.unlocked(testHost: testHost), cableSeen: cable != nil,
+        let verdict = DoorPolicy.ask(unlocked: SessionLock.shared.unlocked, cableSeen: cable != nil,
                                      cableClaimed: cableClaimed, otherKeyOfDevice: otherKey, windowOpen: window.isOpen,
                                      fromThisMac: thisMac, quiet: quietSince != nil,
                                      recentDeviceWindows: askLimits.recentWindows(now: now))

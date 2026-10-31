@@ -46,6 +46,11 @@ final class HostClipboard {
     /// paused both ways, nothing read (no look) and nothing written (a device's text dropped), while the
     /// subscriptions stay.
     private(set) var locked = false
+    /// The lock's gate now (SessionLock's, set on its own queue the moment a witness says locked): asked
+    /// before each look and each write, so neither happens after the lock even before `setLocked`. The
+    /// server withholds a kind 32 to a device from that moment too.
+    var isLocked: () -> Bool = { false }
+    private var paused: Bool { locked || isLocked() }
 
     private let server: StreamServer
     /// The pasteboard, on its own queue: `NSPasteboard.general`, or a synthetic host's own.
@@ -175,7 +180,7 @@ final class HostClipboard {
         case .set(let text):
             subscribe(connection, who: who)
             // Locked: written nowhere and sent to nobody (LockPolicy); the subscription stays.
-            guard LockPolicy.decide(.clipboardText, locked: locked, paired: false) == .take else { return false }
+            guard !paused else { return false }
             board.write(text)
             Stats.shared.bump("clip.recv")
             let others = ClipboardPolicy.forward(to: order, from: id).compactMap { subscribers[$0]?.connection }
@@ -223,9 +228,13 @@ final class HostClipboard {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(ClipboardPolicy.lookInterval))
                 guard !Task.isCancelled, let board = self?.board else { return }
+                // A locked Mac's pasteboard is not read (LockPolicy), even before `setLocked` stops this.
+                if self?.paused == true { continue }
                 // On the board's queue; the main actor waits for nothing meanwhile.
                 let looked = await board.look()
                 guard !Task.isCancelled, let self else { return }
+                // Locked during the look: what it found goes nowhere (and its change counts as seen).
+                if self.paused { continue }
                 self.lookedAt(looked)
             }
         }

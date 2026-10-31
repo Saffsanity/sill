@@ -66,6 +66,11 @@ final class WindowCatalog {
     var locked = false {
         didSet { if oldValue && !locked { resendAllThumbnails() } }
     }
+    /// The lock's gate now (SessionLock's, set on its own queue the moment a witness says locked): asked
+    /// before each thumbnail, so none is taken after the lock even before the coordinator has set `locked`.
+    var isLocked: () -> Bool = { false }
+    /// Locked by either: what this catalog withholds by.
+    private var withholding: Bool { locked || isLocked() }
     /// What `locked` withheld from the devices that were connected: the icons announced meanwhile, and
     /// whether the installed apps' scan ended meanwhile (`takeWithheld`).
     private var withheldIcons: [String] = []
@@ -255,7 +260,7 @@ final class WindowCatalog {
             await refreshWindows()
             if Task.isCancelled { break }
             onPolled?()
-            if thumbnailsWanted && !locked { await refreshThumbnails() }
+            if thumbnailsWanted && !withholding { await refreshThumbnails() }
             if Task.isCancelled { break }
             if passOwed { continue }
             let nap = Task { _ = try? await Task.sleep(for: Self.pollInterval) }
@@ -337,7 +342,7 @@ final class WindowCatalog {
         let infoByID = Dictionary(uniqueKeysWithValues: infos.map { ($0.id, $0) })
         thumbStamps = thumbStamps.filter { infoByID[$0.key] != nil }      // forget closed windows
         for w in windows {
-            if Task.isCancelled || locked { return }        // locked meanwhile: no more captures
+            if Task.isCancelled || withholding { return }   // locked meanwhile: no more captures
             guard let info = infoByID[w.windowID] else { continue }
             if let stamp = thumbStamps[w.windowID], stamp.info == info, w.windowID != activeWindowID,
                now - stamp.at < Self.staticThumbnailInterval { continue }
@@ -351,7 +356,7 @@ final class WindowCatalog {
             guard let image = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config),
                   let jpeg = Self.jpeg(image, quality: 0.6) else { continue }
             // Locked while it was taken: dropped (the unlock takes every thumbnail afresh).
-            if locked { return }
+            if withholding { return }
             onThumbnail?(w.windowID, jpeg)
         }
     }
@@ -373,7 +378,7 @@ final class WindowCatalog {
         announcedIcons.insert(bundleID)
         // With nobody connected a broadcast reaches no one; `allIcons` carries it to the next client.
         // While locked it waits for the unlock (`takeWithheld`).
-        if clientCount > 0 && !locked { onNewIcon?(bundleID, png) } else if locked { withheldIcons.append(bundleID) }
+        if clientCount > 0 && !withholding { onNewIcon?(bundleID, png) } else if withholding { withheldIcons.append(bundleID) }
     }
 
     // MARK: Installed apps
@@ -400,7 +405,7 @@ final class WindowCatalog {
         installedApps = apps
         // A running app's icon, announced by a window refresh meanwhile, wins over the file icon.
         for (id, png) in rendered where !announcedIcons.contains(id) { announce(bundleID: id, png: png) }
-        if clientCount > 0 && !locked { onInstalledAppsReady?(apps) } else if locked { appsWithheld = true }   // the unlock sends them
+        if clientCount > 0 && !withholding { onInstalledAppsReady?(apps) } else if withholding { appsWithheld = true }   // the unlock sends them
     }
 
     /// Sorted by display name, first bundle ID wins. Thread-safe (FileManager + Bundle only).

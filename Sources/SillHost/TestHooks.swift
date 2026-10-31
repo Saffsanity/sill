@@ -15,8 +15,10 @@ enum TestHooks {
         "SILL_TEST_REMOTE_ORIGIN",
         "SILL_TEST_LOOPBACK", "SILL_TEST_BACKOFF_SECONDS", "SILL_TEST_PAIRING_TTL", "SILL_TEST_NO_ROUTER",
         "SILL_TEST_CABLE_INTERFACE", "SILL_TEST_LOCKED", "SILL_TEST_ASK_FROM_THIS_MAC", "SILL_TEST_ASK_QUIET",
-        // SessionLock's file (LockPolicy, docs/locked-mac-plan.md): locked while it holds "1".
-        "SILL_TEST_LOCKED_FILE",
+        // SessionLock's (LockPolicy, docs/locked-mac-plan.md): the file (1 screen locked, 2 off console),
+        // the screen's lock state from a notify name of the test's own, notifications delivered on cue,
+        // and each look's witnesses printed.
+        "SILL_TEST_LOCKED_FILE", "SILL_TEST_LOCK_NOTIFY", "SILL_TEST_LOCK_NOTE", "SILL_TEST_LOCK_LOG",
         // The CLI's (main.swift): "0" turns Require pairing off at --pairing's TLS home door.
         "SILL_TEST_REQUIRE_PAIRING",
         // The device gate's (DeviceGate): a floor above "0" refuses devices.
