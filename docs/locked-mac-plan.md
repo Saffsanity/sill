@@ -189,7 +189,8 @@ and with an empty top level no Menus button. DEBUG `-SillMacLocked 1` draws the 
   software encoder, no router and no screen: idle 35 s, 8 lines each, identical masked and sorted; with a
   test client on the Desktop (stats, menus, clipboard) for 20 s, 45 lines each, identical masked and
   sorted but the `[1s]` lines, the same stats keys, and the clients' outputs identical but their
-  per-second lines. Unlocked, nothing new prints.
+  per-second lines. Unlocked, nothing new prints. Run again on the final build: the same, but the base's
+  client got 5 more cursor shapes (kind 14: this Mac's own pointer changed shape while it ran).
 - **Live, locked** (`SILL_TEST_LOCKED=1`, the CLI's plain door, two test clients): "Locked: …" as the
   first connects, its catalog "no windows, icons or apps (this Mac is locked)", every list "0 windows
   … locked=1" without `clipboard`, no kind 4 or 5 sent; a window picked, an app launched (`--raw7`, a
@@ -231,7 +232,9 @@ iPad build:
    Mac's screen is locked; …" and, with Virtual Display on, the window back on the Mac's display.
 2. **Typing the password from the iPad** (a paired iPad): the Magic Keyboard or the on-screen keyboard,
    Return: the Mac unlocks, Sill.log "Unlocked: …", and the window that streamed comes back by itself
-   (without coming forward), its thumbnails and the Apps list back.
+   (without coming forward), its thumbnails and the Apps list back. Whether macOS's password field takes
+   events Sill posts (it turns on secure input) was never tried here: if nothing types, note which way
+   failed, a hardware keyboard's keys (sent as keys) or the on-screen keyboard's characters (sent as text).
 3. **Another user at the login screen** (fast user switching: the Users & Groups menu, another user, then
    Cancel at the password): the iPad shows the login window or a black picture, nothing of your session;
    the drawer says locked; back in your session, the windows return.
