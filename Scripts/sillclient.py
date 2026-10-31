@@ -98,6 +98,13 @@ The clipboard (kind 32; docs/clipboard-plan.md). Each kind 32 received is printe
   --copy-bytes=N@T   the same with N bytes of "x" (the cap is 262,144)
   --raw32=JSON@T     this literal kind 32 payload T seconds in (split on the last @), as written:
                      {"stop":true} ends the subscription
+A locked Mac (docs/locked-mac-plan.md): the window list's line ends in locked=1 while the host says it is
+locked (its lists then have no windows and no clipboard), and these send what a locked Mac refuses:
+  --raw7=JSON@T      this literal kind 7 payload (an app launch) T seconds in; its bundleID must start with
+                     me.saffer.sill.test., which no app has, so an unlocked host launches nothing either
+  --raw15=JSON@T     this literal kind 15 payload (a window's traffic light, {"id":N,"action":"close"}) T
+                     seconds in, only to a --synthetic host on this Mac; one without SILL_TEST_NO_SCREEN lists
+                     this Mac's windows and would press the button of the one with that id
   --expect=clipboard=TEXT  (with --expect's other keys, or alone) at exit, the last kind 32's text;
                      clipboard=none: none came
 The remote door (TLS 1.3, both keys pinned; PORT is the remote door's):
@@ -161,7 +168,7 @@ SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisp
 AWAY_KEYS = {"homeBitrate", "homeCaptureScale", "awayBitrate", "awayCaptureScale", "thisConnectionAway", "awayRunning"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "sessionPaired", "linkState", "clipboard"} | AWAY_KEYS
 TIMED = ("set", "raw17", "raw9", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "keyframe", "fetch", "press", "raw25",
-         "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32")
+         "raw27", "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32", "raw7", "raw15")
 INPUT = ("move", "tap", "key", "input")
 # What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
 GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
@@ -579,6 +586,18 @@ try:
     if any(e[2] in ("gesture", "raw28") for e in events):
         if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
             raise ValueError(f"--gesture and --raw28 only go to a --synthetic host on this Mac, which posts no gesture; nothing on port {port} is one.")
+    # A launch is real on any host (a --synthetic one too): only a bundle no app has.
+    for e in events:
+        if e[2] == "raw7":
+            try:
+                bundle = json.loads(e[3]).get("bundleID", "")
+            except (ValueError, AttributeError):
+                bundle = ""
+            if not isinstance(bundle, str) or not bundle.startswith("me.saffer.sill.test."):
+                raise ValueError("--raw7's bundleID must start with me.saffer.sill.test. (no app has one), so nothing is ever launched.")
+    if any(e[2] == "raw15" for e in events):
+        if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
+            raise ValueError(f"--raw15 only goes to a --synthetic host on this Mac; nothing on port {port} is one.")
 except ValueError as e:
     print(f"sillclient.py: {e}", file=sys.stderr); sys.exit(2)
 show_pointer = "--pointer" in flags
@@ -801,6 +820,8 @@ def fire(e, now):
         s.sendall(msg(32, body)); print(f"  sent clipboard text, {len(parsed.encode())} bytes ({len(body)} of JSON) at {at}")
     elif name == "raw32":
         s.sendall(msg(32, text.encode())); print(f"  sent raw kind 32 {text} at {at}")
+    elif name in ("raw7", "raw15"):
+        s.sendall(msg(int(name[3:]), text.encode())); print(f"  sent raw kind {name[3:]} {text} at {at}")
 while time.time() - t0 < dur:
     now = time.time()
     try:
@@ -853,7 +874,8 @@ while time.time() - t0 < dur:
         elif kind == 2:
             d = json.loads(payload)
             print(f"  windowList: {len(d.get('windows', []))} windows, active={d.get('active')}"
-                  + (f" clipboard={d['clipboard']}" if "clipboard" in d else ""))
+                  + (f" clipboard={d['clipboard']}" if "clipboard" in d else "")
+                  + (f" locked={1 if d['locked'] else 0}" if "locked" in d else ""))
         elif kind == 32:
             try:
                 d = json.loads(payload)
