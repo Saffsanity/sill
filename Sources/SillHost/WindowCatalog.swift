@@ -58,6 +58,26 @@ final class WindowCatalog {
         didSet { if thumbnailsWanted && clientCount > 0 { resendAllThumbnails() } }
     }
 
+    /// This Mac's screen is locked (the coordinator's reading; LockPolicy, docs/locked-mac-plan.md): no
+    /// thumbnail is taken, and none that a capture under way brings back is sent, no new icon goes out
+    /// and the installed apps are not sent when their scan ends (`allIcons` and `installedApps` keep
+    /// them for the unlock, which the coordinator sends). The window list is still read, so the unlock
+    /// finds the windows as they are. Unlocked again: every thumbnail is taken and sent afresh.
+    var locked = false {
+        didSet { if oldValue && !locked { resendAllThumbnails() } }
+    }
+    /// What `locked` withheld from the devices that were connected: the icons announced meanwhile, and
+    /// whether the installed apps' scan ended meanwhile (`takeWithheld`).
+    private var withheldIcons: [String] = []
+    private var appsWithheld = false
+
+    /// What was withheld while locked, once: the coordinator sends it at the unlock to the devices that
+    /// were connected before the lock (one that connected while locked gets every icon and the apps).
+    func takeWithheld() -> (icons: [(bundleID: String, png: Data)], apps: Bool) {
+        defer { withheldIcons = []; appsWithheld = false }
+        return (withheldIcons.compactMap { id in icons[id].map { (id, $0) } }, appsWithheld)
+    }
+
     /// Connected clients, from the server. 0→N starts polling (with an immediate pass); N→0 stops
     /// it, so an idle host makes no ScreenCaptureKit calls at all.
     ///
@@ -235,7 +255,7 @@ final class WindowCatalog {
             await refreshWindows()
             if Task.isCancelled { break }
             onPolled?()
-            if thumbnailsWanted { await refreshThumbnails() }
+            if thumbnailsWanted && !locked { await refreshThumbnails() }
             if Task.isCancelled { break }
             if passOwed { continue }
             let nap = Task { _ = try? await Task.sleep(for: Self.pollInterval) }
@@ -317,7 +337,7 @@ final class WindowCatalog {
         let infoByID = Dictionary(uniqueKeysWithValues: infos.map { ($0.id, $0) })
         thumbStamps = thumbStamps.filter { infoByID[$0.key] != nil }      // forget closed windows
         for w in windows {
-            if Task.isCancelled { return }
+            if Task.isCancelled || locked { return }        // locked meanwhile: no more captures
             guard let info = infoByID[w.windowID] else { continue }
             if let stamp = thumbStamps[w.windowID], stamp.info == info, w.windowID != activeWindowID,
                now - stamp.at < Self.staticThumbnailInterval { continue }
@@ -330,6 +350,8 @@ final class WindowCatalog {
             let filter = SCContentFilter(desktopIndependentWindow: w)
             guard let image = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config),
                   let jpeg = Self.jpeg(image, quality: 0.6) else { continue }
+            // Locked while it was taken: dropped (the unlock takes every thumbnail afresh).
+            if locked { return }
             onThumbnail?(w.windowID, jpeg)
         }
     }
@@ -350,7 +372,8 @@ final class WindowCatalog {
         icons[bundleID] = png
         announcedIcons.insert(bundleID)
         // With nobody connected a broadcast reaches no one; `allIcons` carries it to the next client.
-        if clientCount > 0 { onNewIcon?(bundleID, png) }
+        // While locked it waits for the unlock (`takeWithheld`).
+        if clientCount > 0 && !locked { onNewIcon?(bundleID, png) } else if locked { withheldIcons.append(bundleID) }
     }
 
     // MARK: Installed apps
@@ -377,7 +400,7 @@ final class WindowCatalog {
         installedApps = apps
         // A running app's icon, announced by a window refresh meanwhile, wins over the file icon.
         for (id, png) in rendered where !announcedIcons.contains(id) { announce(bundleID: id, png: png) }
-        if clientCount > 0 { onInstalledAppsReady?(apps) }
+        if clientCount > 0 && !locked { onInstalledAppsReady?(apps) } else if locked { appsWithheld = true }   // the unlock sends them
     }
 
     /// Sorted by display name, first bundle ID wins. Thread-safe (FileManager + Bundle only).

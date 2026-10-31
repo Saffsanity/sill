@@ -191,6 +191,20 @@ final class MenuMirror {
         enqueue { await self.servePress(r, to: c, who: who, arrived: now) }
     }
 
+    /// This Mac's screen is locked (the coordinator's LockPolicy, docs/locked-mac-plan.md): a kind 27
+    /// with an id, or a kind 25, answered at once with `note` (a choice: not pressed), nothing read,
+    /// pressed, activated or queued. The subscription itself (kind 27 without an id) is served as ever:
+    /// the coordinator gives the mirror no app while locked, so its top level is empty.
+    func refuse(_ r: FetchMenu, from c: NWConnection, note: String) {
+        Stats.shared.bump("menu.refused")
+        send(MacMenu(version: version, answering: r.token, menu: r.id.flatMap(MenuPath.init)?.id, items: [], note: note), to: c)
+    }
+
+    func refuse(_ r: PressMenuItem, from c: NWConnection, note: String) {
+        Stats.shared.bump("menu.refused")
+        send(MacMenu(version: version, answering: r.token, pressed: false, note: note), to: c)
+    }
+
     /// A connection's client stats, about once a second: its worst round trip of that second (a
     /// negative one: none measured, and the last one measured stands).
     func clientStats(_ c: NWConnection, rttMs: Int) {
