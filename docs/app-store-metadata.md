@@ -470,7 +470,13 @@ Copy and paste between your Mac and your iPhone or iPad: text you copy on your M
 Sound from your Mac, a beta feature: your iPhone or iPad plays the sound of the window you’re using, or of every app for the Desktop, a moment behind the picture. Send Audio in Sill’s settings on your iPhone or iPad, or in the Sill menu on your Mac, turns it off and on for every device, and Mute in Sill’s settings silences it on one device. It needs Sill for Mac from this release.
 
 Aa now starts at Off, which leaves your Mac’s window as it is, and sliding it back to Off puts a window Sill resized back to its own size right away. That needs Sill for Mac from this release: with an earlier one, Off only stops the resizing. On Sill’s virtual display a window always fits, so Aa has no Off there. Aa is dimmed while the Desktop shows: it sizes a window.
+
+A locked Mac now shows only its lock screen: type its password from your iPhone or iPad to unlock it, and its windows come back. Until then the Apps list, its menus, its sound and the clipboard wait, and only an iPhone or iPad you paired can type at it. It needs Sill for Mac from this release.
 ```
+
+The locked Mac's paragraph (branch locked-mac, docs/locked-mac-plan.md, 294 characters) is a security
+fix found on 2026-10-31: say what it does, not what it fixed. Its device test (the plan's Untested) is
+Noah's: a real lock screen, another user at the login screen, the password typed from the iPad.
 
 The sound's paragraph (PR #94) is "a beta feature", never a beta of the app (guideline 2.2), and waits,
 as the description's bullet does, for its device tests (Before you submit).

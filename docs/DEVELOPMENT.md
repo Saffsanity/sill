@@ -1237,6 +1237,36 @@ reads nothing for it. An app that draws its menus in its own window (Blender's
 File and Edit) has there only what its menu bar lists; tap the rest in the
 picture.
 
+## A locked Mac
+
+While the Mac's screen is locked, or another user is selected at the login
+screen while your session runs in the background, a device sees the lock screen
+and nothing else, as with Screen Sharing (docs/locked-mac-plan.md): the Desktop
+alone streams, and it shows the lock screen or the login window; the window
+list is empty (the Apps drawer and the Settings panel's header say "Mac mini is
+locked. Unlock it to see its windows."), no thumbnail is taken, no icon or
+installed app is sent, a window picked, an app launched, a window's traffic
+lights, the Mac's menus and trackpad gestures are refused, the clipboard waits
+(nothing read or written, no Paste offered), and no sound is captured. Only a
+paired device types at a locked Mac, so you can type its password from the
+iPad or iPhone; a device at a door that lets any device in (Require pairing
+off, or the command-line host's plain door) types nothing then. A window that
+streamed when the lock began goes home and comes back once the Mac is unlocked,
+unless something else was picked meanwhile. Sill.log says "Locked: …" and
+"Unlocked: …", and at most one line a minute for each kind of request it
+refused. The CLI reads the lock once a second while a device is connected;
+Sill.app also hears it at once.
+
+Testing it headless: `SILL_TEST_LOCKED=1` makes a test host (`--synthetic`, as
+the pairing hooks) locked for the run, and `SILL_TEST_LOCKED_FILE=<path>`
+locked while that file holds `1`, read every second, so `echo 1 > $F` and
+`echo 0 > $F` lock and unlock a running host. Sill.app ignores both, with a
+line. `sillclient.py`'s window list line ends in `locked=1` while the host says
+it is locked; `--raw7` (an app launch, for a bundle under
+`me.saffer.sill.test.` only) and `--raw15` (a window's traffic light) send what
+a locked Mac refuses. The iOS harness's `-SillMacLocked 1` draws the mock Mac
+locked.
+
 ## Direct Wireless Connection
 
 Direct Wireless Connection (Settings › General, and the status menu) lets an
