@@ -51,9 +51,9 @@ nothing else, and only a paired device types. Host, wire (additive) and device.
   list's line, `--raw7` (a launch, only for a bundle under `me.saffer.sill.test.`) and `--raw15`.
 - Verified (the plan's Results): `lock-policy` 141 checks and 57 of 57 mutants (13 scenarios and 5,000 random
   sessions of the glue; the model found the switch under way at the lock, fixed by `lockedMidSwitch` before the
-  first host commit); `swift build -c release`, only the CaptureProbe warning; the iOS app Debug and Release for
-  the simulator and Debug for a device, only the known `StreamClient` capture warning (StreamClient.swift:4203,
-  main's 4196); H2 against e4d30349 from `git archive`: idle 35 s identical masked and sorted (8 lines), a client
+  first host commit); `run-all.sh`, all 63; `swift build -c release` from `git archive`, only the CaptureProbe
+  warning; the iOS app Debug and Release for the simulator and Debug for a device, only the known `StreamClient`
+  capture warning (StreamClient.swift:4203, main's 4196); H2 against e4d30349 from `git archive`: idle 35 s identical masked and sorted (8 lines), a client
   on the Desktop 20 s identical but the `[1s]` lines (45 lines); live on loopback synthetic hosts: locked, every
   kind refused with its line, no icons, apps or clipboard, input dropped at the plain door (`in.locked` 5) and
   posted from a paired session at `--pairing`'s door (`in.dry` 5) beside an unpaired one dropped; the file

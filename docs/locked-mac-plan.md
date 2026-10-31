@@ -182,9 +182,11 @@ and with an empty top level no Menus button. DEBUG `-SillMacLocked 1` draws the 
   window's pipeline, so its first frames would have gone out before the Desktop took over; now the
   switch ends with nothing streaming and the Desktop follows (`lockedMidSwitch`), and nothing is
   remembered, nor the Desktop started, once the last device has left.
-- **Builds**: `swift build -c release`, only the CaptureProbe warning; the iOS app Debug for the
-  simulator as CI builds it, Release for the simulator and Debug for a device, unsigned, Xcode 27.1, only
-  the known `StreamClient` capture warning (StreamClient.swift:4203, main's 4196).
+- **Builds and checks**: `Tests/checks/run-all.sh`, all 63; `swift build -c release` from a clean
+  `git archive` of the head, only the CaptureProbe warning; the iOS app Debug for the simulator as CI
+  builds it, Release for the simulator and Debug for a device, unsigned, Xcode 27.1, only the known
+  `StreamClient` capture warning (StreamClient.swift:4203, main's 4196); `Scripts/menu-check`'s mirror
+  harness builds (it compiles MenuMirror with a stand-in connection; not run: it needs Accessibility).
 - **H2**: the CLI's output against origin/main's (e4d30349, from `git archive`), both on loopback with the
   software encoder, no router and no screen: idle 35 s, 8 lines each, identical masked and sorted; with a
   test client on the Desktop (stats, menus, clipboard) for 20 s, 45 lines each, identical masked and
