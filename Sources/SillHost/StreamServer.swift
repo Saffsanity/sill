@@ -172,6 +172,10 @@ final class StreamServer {
     /// icon, app list, sound, clipboard, pointer or cursor shape (`LockPolicy.withheld`), whatever the main
     /// actor is doing; and the Mac's pointer is not even read. The default never locks (the harnesses).
     var lockGate = LockGate()
+    /// An icon or the installed apps the gate withheld: a send that left the coordinator just before the
+    /// Mac read locked. The connection it was for, nil for a broadcast's (every device): the unlock sends
+    /// that device every icon and the apps again. Called on the network queue.
+    var onCatalogWithheld: ((ObjectIdentifier?) -> Void)?
     /// A client fell behind and lost a delta frame; the encoder should produce a keyframe now
     /// rather than in up to 4 s. Called on the network queue.
     var onKeyframeNeeded: (() -> Void)?
@@ -1410,7 +1414,7 @@ final class StreamServer {
         queue.async { [self] in
             for (id, kind, data) in items {
                 guard let client = clients[id], client.connection.state == .ready else { continue }
-                if lockGate.withholds(kind) { Stats.shared.bump("lock.withheld"); continue }   // a locked Mac (LockPolicy)
+                if lockGate.withholds(kind) { withheld(kind, for: id); continue }   // a locked Mac (LockPolicy)
                 send(data, to: client)
             }
         }
@@ -1425,9 +1429,16 @@ final class StreamServer {
                 print("send: no client for \(connection.endpoint) (\(clients.count) known)")
                 return
             }
-            if lockGate.withholds(kind) { Stats.shared.bump("lock.withheld"); return }   // a locked Mac (LockPolicy)
+            if lockGate.withholds(kind) { withheld(kind, for: ObjectIdentifier(connection)); return }   // a locked Mac (LockPolicy)
             send(data, to: client)
         }
+    }
+
+    /// A message the gate withheld (LockPolicy): counted, and an icon's or the apps' reported
+    /// (`onCatalogWithheld`). On the network queue.
+    private func withheld(_ kind: StreamMessageKind, for id: ObjectIdentifier?) {
+        Stats.shared.bump("lock.withheld")
+        if kind == .appIcon || kind == .appList { onCatalogWithheld?(id) }
     }
 
     /// Client → host messages share the same framing. Small and rare, so read them one at a time.
@@ -1557,7 +1568,7 @@ final class StreamServer {
     func broadcast(_ message: StreamMessage, picture: LockPolicy.Picture? = nil) {
         let data = message.serialized()
         queue.async { [self] in
-            if lockGate.withholds(message.kind, picture: picture) { Stats.shared.bump("lock.withheld"); return }
+            if lockGate.withholds(message.kind, picture: picture) { withheld(message.kind, for: nil); return }
             if message.kind == .parameterSets { lastParameterSets = data }
             if message.kind == .frame, message.isKeyframe { lastKeyframeAt = Date().timeIntervalSince1970 }
             var wantKeyframe = false
@@ -1639,7 +1650,7 @@ final class StreamServer {
     /// has `audioCap` messages untaken. None while the Mac reads locked (LockPolicy). Thread-safe.
     func broadcastAudio(packets: Data, epoch: Int) {
         queue.async { [self] in
-            if lockGate.withholds(.audio) { Stats.shared.bump("lock.withheld"); return }
+            if lockGate.withholds(.audio) { withheld(.audio, for: nil); return }
             for client in clients.values where client.audioCodec == AudioCodec.aacELD && client.connection.state == .ready {
                 if client.audioEpochSent != epoch {
                     guard let format = audioFormat, format.epoch == epoch else { continue }

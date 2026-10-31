@@ -451,6 +451,14 @@ package final class StreamCoordinator {
         // first reading the gate reads off console.
         let gate = lockGate
         server.lockGate = gate
+        // An icon or the apps that raced the lock (the gate withheld them on the network queue after this
+        // side had sent them): the device they were for gets every icon and the apps at the unlock.
+        server.onCatalogWithheld = { [weak self] id in
+            Task { @MainActor in
+                guard let self else { return }
+                if let id { self.appsAndIconsSent.remove(id) } else { self.appsAndIconsSent.removeAll() }
+            }
+        }
         catalog.isLocked = { gate.locked }
         clipboard.isLocked = { gate.locked }
         menus.isLocked = { gate.locked }
