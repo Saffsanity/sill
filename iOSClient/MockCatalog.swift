@@ -140,8 +140,9 @@ enum MockCatalog {
                 break
             }
         }
-        // nil under `-SillLive 1`: the mock is never shown then, and must say nothing on the console.
-        if let menus { client.showMockMenus(macMenus(menus)) }
+        // nil under `-SillLive 1`: the mock is never shown then, and must say nothing on the console. A
+        // locked mock Mac has no app's menus (`-SillMacLocked 1`: an empty top level, no Menus button).
+        if let menus { client.showMockMenus(macMenus(client.macLocked ? MenuCase.none : menus)) }
         if let pointer { seedPointer(client, pointer, pencilPointer: pencilPointer) }
         return client
     }
