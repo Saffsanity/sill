@@ -1,8 +1,11 @@
 #!/bin/bash
-# LockPolicy (Sources/SillHost/LockPolicy.swift; docs/locked-mac-plan.md): what a locked Mac shows and what
-# a device may do at it. Each request locked and unlocked, paired and not; the window list (no windows, no
-# clipboard, `locked`) and its JSON both ways; what else is shown; the TEST ONLY file's words; the State's
-# readings, the select gate, the window that comes back at the unlock; the lines; the device's line
+# LockPolicy (Sources/SillHost/LockPolicy.swift; docs/locked-mac-plan.md): a locked Mac. The three readings
+# and every combination of the witnesses (unknown counts as locked); what each notification sets; the settle
+# before an unlock (the flap of a return to the console; random witness sequences); when SessionLock reads;
+# what each reading allows; what the server's gate withholds by kind and picture; each request at each
+# reading, paired and not, judged at the more restrictive of its arrival and now; the window list
+# (`locked`, `offConsole`) and its JSON both ways; the placeholder's size; `reconciles`; the window that comes
+# back (`Restore`); the TEST ONLY hooks' words; the lines; LockGate; the device's words and cover
 # (StreamProtocol's LockedMac); and a copy of the coordinator's glue run through directed and random
 # sessions against the rule's invariants.
 # Compiled with the files in module.txt as one module (../module.py drops their `import StreamProtocol`).
