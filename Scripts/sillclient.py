@@ -99,7 +99,13 @@ The clipboard (kind 32; docs/clipboard-plan.md). Each kind 32 received is printe
   --raw32=JSON@T     this literal kind 32 payload T seconds in (split on the last @), as written:
                      {"stop":true} ends the subscription
 A locked Mac (docs/locked-mac-plan.md): the window list's line ends in locked=1 while the host says it is
-locked (its lists then have no windows and no clipboard), and these send what a locked Mac refuses:
+locked (its lists then have no windows and no clipboard), and offConsole=1 while it says another user, the
+login window or nobody is on its console; and these send what a locked Mac refuses:
+  --dump=DIR         every message's arrival in DIR/messages.tsv (seconds in, kind, keyframe, bytes, and a
+                     window list's windows, locked and offConsole), each parameter sets payload as
+                     DIR/ps-N.bin and each keyframe as DIR/key-N.bin (N in arrival order, and DIR/index.tsv
+                     says which parameter sets each keyframe came after): Scripts/lock-check/frames.swift
+                     decodes them
   --raw7=JSON@T      this literal kind 7 payload (an app launch) T seconds in; its bundleID must start with
                      me.saffer.sill.test., which no app has, so an unlocked host launches nothing either
   --raw15=JSON@T     this literal kind 15 payload (a window's traffic light, {"id":N,"action":"close"}) T
@@ -173,7 +179,7 @@ INPUT = ("move", "tap", "key", "input")
 # What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
 GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
 VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "hello-delay", "then-code",
-          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping")
+          "pair-hold", "expect-pair", "pair-v", "expect-menus", "ping", "dump")
 PAIR_RESULTS = ("ok", "cable", "shown", "openOnMac", "locked", "closed", "code", "busy", "expired", "stopped")
 # Sends that read or press the host's menus: only against a host started with the fixture's pid.
 MENU_SENDS = ("fetch", "press", "raw25", "raw27")
@@ -534,6 +540,8 @@ try:
     def valued(name, default=None):
         return next((a.partition("=")[2] for a in flags if a.startswith(f"--{name}=")), default)
     host = valued("host", "127.0.0.1")
+    dump_dir = valued("dump")
+    if dump_dir is not None: os.makedirs(dump_dir, exist_ok=True)
     device = unescape(valued("device")) if valued("device") is not None else None
     big_payload = number(valued("big-payload"), "--big-payload") if valued("big-payload") else None
     flood = number(valued("flood"), "--flood") if valued("flood") else 0
@@ -736,6 +744,11 @@ def describe(d):
 
 buf = b""; t0 = time.time(); last = t0; nextping = t0; nextstats = t0
 per = {}; tot = {}; frames = 0; keys = 0; kb = 0; kb_sec = 0; rtt = None; first_frame = None; ps_seen = []
+# --dump: what arrived when, and the parameter sets and keyframes themselves (a locked Mac's tests).
+dump_log = open(os.path.join(dump_dir, "messages.tsv"), "w") if dump_dir is not None else None
+dump_index = open(os.path.join(dump_dir, "index.tsv"), "w") if dump_dir is not None else None
+dump_ps = 0; dump_keys = 0
+if dump_log is not None: dump_log.write(f"# t0 {t0:.6f}\n"); dump_log.flush()    # this run's start, epoch seconds
 token = 2 if "--menus" in flags else 1; last_state = None; settings_msgs = 0
 # The Mac's menus: the last top level (its version and titles), every title an answer listed by id,
 # and what each token asked for (a fetch's id, a press's id).
@@ -860,6 +873,21 @@ while time.time() - t0 < dur:
         payload = buf[14:14+ln]; buf = buf[14+ln:]
         name = KIND.get(kind, str(kind)); bump(name); served = True
         if len(first_kinds) < 400 and kind not in (0, 1, 3, 11, 13, 26, 43): first_kinds.append(kind)
+        if dump_log is not None and kind not in (11, 13):
+            at = time.time() - t0
+            extra = ""
+            if kind == 2:
+                try:
+                    d = json.loads(payload)
+                    extra = f"\twindows={len(d.get('windows', []))} locked={1 if d.get('locked') else 0} offConsole={1 if d.get('offConsole') else 0} active={json.dumps(d.get('active'))}"
+                except ValueError:
+                    extra = "\tundecodable"
+            elif kind == 0:
+                dump_ps += 1; open(os.path.join(dump_dir, f"ps-{dump_ps}.bin"), "wb").write(payload); extra = f"\tps-{dump_ps}.bin"
+            elif kind == 1 and key:
+                dump_keys += 1; open(os.path.join(dump_dir, f"key-{dump_keys}.bin"), "wb").write(payload); extra = f"\tkey-{dump_keys}.bin"
+                dump_index.write(f"key-{dump_keys}.bin\tps-{dump_ps}.bin\t{at:.3f}\n"); dump_index.flush()
+            dump_log.write(f"{at:.3f}\t{kind}\t{key}\t{ln}{extra}\n"); dump_log.flush()
         if kind == 1:
             frames += 1; kb += ln / 1024; kb_sec += ln / 1024
             ages.append((time.time() - ts) * 1000)       # the host's clock is this Mac's: a true age
@@ -875,7 +903,8 @@ while time.time() - t0 < dur:
             d = json.loads(payload)
             print(f"  windowList: {len(d.get('windows', []))} windows, active={d.get('active')}"
                   + (f" clipboard={d['clipboard']}" if "clipboard" in d else "")
-                  + (f" locked={1 if d['locked'] else 0}" if "locked" in d else ""))
+                  + (f" locked={1 if d['locked'] else 0}" if "locked" in d else "")
+                  + (f" offConsole={1 if d['offConsole'] else 0}" if "offConsole" in d else ""))
         elif kind == 32:
             try:
                 d = json.loads(payload)
