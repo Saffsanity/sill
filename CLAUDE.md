@@ -8,6 +8,64 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**A locked Mac shows its lock screen (2026-10-31, branch `locked-mac` from main at e4d30349; Noah's finding of
+2026-10-31, a security fix: no public issue; the rule, the open questions with the default taken for each, the
+results and Noah's steps are in `docs/locked-mac-plan.md`).** Sill read the console's lock (SessionLock) only for
+the pairing ask and the cable's pairing: with the screen locked, or another user selected at the login screen
+while Noah's session ran in the background, a paired device (and at a door that lets any device in, an unpaired
+one) could still pick a window and see it (window capture ignores what covers it, and the virtual display's app
+filter leaves the lock screen out), see every thumbnail, launch apps (Noah saw it), use the Mac's menus, gestures,
+sound and clipboard, and any session typed into the password field. Now as Screen Sharing: the lock screen and
+nothing else, and only a paired device types. Host, wire (additive) and device.
+- The rule (`LockPolicy`, pure, Sources/SillHost/LockPolicy.swift; `Tests/checks/lock-policy`): while locked a
+  window picked, an app launched, kind 15, kinds 27 with an id and 25 ("The Mac is locked."), kind 28 and a
+  device's clipboard text are refused; input lands from a paired session (`sessionPaired`, PR #253's), from any
+  other only the up of a key or a button it holds down (`letGo`, where the pointer is); the menus' and the
+  clipboard's subscriptions, settings, the viewport, a keyframe and Pair This iPad… as ever. Shown: the Desktop
+  alone (the lock screen, or the login window); the list with no windows, no `clipboard` and `locked`; no
+  thumbnail, icon or installed app; the menus with no app; no sound; the pasteboard neither read nor written.
+  One line at each change ("Locked: this Mac's screen is locked; devices see the lock screen until it is
+  unlocked." / "Unlocked: …") and one a minute at most per refused kind (RefusalSummary); Stats `lock.refused`
+  and `in.locked`. Unlocked: nothing changes, nothing prints.
+- Host (StreamCoordinator's `readLock`, `lockChanged`, `enforceLock`, `afterUnlock`, `lockedMidSwitch`,
+  `lockDecision`): the lock read once a second while a device is connected, as a device connects (before its
+  catalog), before each request the lock may refuse and at each select, and in Sill.app at once on
+  `com.apple.screenIsLocked`/`Unlocked` and NSWorkspace's session switches (`SessionLock.onChange`). At the lock
+  a window that streams goes home (the stage's way, WindowRestore's) and the Desktop streams, the window
+  remembered (`LockPolicy.State`); while locked `select` turns any window into the Desktop (a restart, a launched
+  app's first window, a pick queued before the lock), and a switch to a window that finds the Mac locked before
+  its pipeline starts streams none of it; at the unlock the catalog is looked at afresh, the withheld icons and
+  apps go out (all of them to a device that connected while locked; WindowCatalog.takeWithheld), every
+  thumbnail is taken again, and the window comes back as a restart (nothing comes forward) if still listed, the
+  Desktop still streams and a device is connected; a pick made after the unlock, or the last device leaving,
+  forgets it. WindowCatalog.locked (no thumbnail, icon or apps sent), HostClipboard.setLocked (no look, no
+  write, subscriptions kept, what was copied meanwhile never sent), MenuMirror.refuse, the held key's repeat
+  stopped, held input and queued gestures judged by the lock too; a refused message wakes no display.
+- Wire: `WindowList.locked` (Switcher.swift; true while locked, left out otherwise: an unlocked list is byte for
+  byte what it was), and StreamProtocol's `LockedMac.line` for the device. The compatibility floor has its line.
+- Device: `StreamClient.macLocked`; the Apps drawer shows "‹Mac› is locked. Unlock it to see its windows." in place
+  of its search field and lists, the Settings panel's header under its readout, each read by VoiceOver; nothing
+  else changes (no `clipboard`: no Paste; an empty top level: no Menus button). DEBUG `-SillMacLocked 1` (the mock).
+- TEST ONLY: `SILL_TEST_LOCKED_FILE=<path>` (locked while the file holds 1, read at each reading; a test host
+  only, TestHooks lists it; "Test lock: …" at start); `SILL_TEST_LOCKED=1` as before. sillclient: `locked=1` on the
+  list's line, `--raw7` (a launch, only for a bundle under `me.saffer.sill.test.`) and `--raw15`.
+- Verified (the plan's Results): `lock-policy` 141 checks and 57 of 57 mutants (13 scenarios and 5,000 random
+  sessions of the glue; the model found the switch under way at the lock, fixed by `lockedMidSwitch` before the
+  first host commit); `swift build -c release`, only the CaptureProbe warning; the iOS app Debug and Release for
+  the simulator and Debug for a device, only the known `StreamClient` capture warning (StreamClient.swift:4203,
+  main's 4196); H2 against e4d30349 from `git archive`: idle 35 s identical masked and sorted (8 lines), a client
+  on the Desktop 20 s identical but the `[1s]` lines (45 lines); live on loopback synthetic hosts: locked, every
+  kind refused with its line, no icons, apps or clipboard, input dropped at the plain door (`in.locked` 5) and
+  posted from a paired session at `--pairing`'s door (`in.dry` 5) beside an unpaired one dropped; the file
+  flipped mid-stream: the lines, the sound stopped and back, the Desktop streaming throughout, a late client's
+  122 icons and apps at the unlock, a copy made after it forwarded and the one during it never written; on a
+  private iPad mini simulator the drawer's and the panel's line live against a locked host and sideways in the
+  mock, VoiceOver's element (photos in `~/Downloads/sill-handoff/locked-mac/`).
+- **Untested, for Noah (the plan's 1–7):** a real lock with a window streaming (Virtual Display on and off), the
+  password typed from the iPad and the window coming back, another user at the login screen, an unpaired device
+  at a locked Mac (Require pairing off), the rest refused and back after the unlock, Sill.app's notifications,
+  mixed builds.
+
 **The door's waiting places (2026-10-29, branch `sec-door-pending` from main at 150479b5, PR #252; finding 9 of the
 security scan of 2026-10-18, Low; Noah's go of 2026-10-29).** A TLS door (the remote one, and the home one of
 Sill.app and `SillHost --pairing`) held 8 connections waiting for admission, 2 per address, 10 s each, and backed an
@@ -7039,8 +7097,10 @@ good.
 - `Sources/StreamProtocol/StreamMessage.swift` — 14-byte header + payload framing,
   message kinds in both directions, HEVC parameter set encoding. Shared by both
   sides. Change it in one place. `Switcher.swift` — the catalog types
-  (`WindowList`, with the host's per-launch `launchID`; `WindowInfo`,
-  `AppInfo`, `StreamSource`) and image blob framing. `Viewport.swift` —
+  (`WindowList`, with the host's per-launch `launchID` and, while the Mac is
+  locked, `locked`; `WindowInfo`, `AppInfo`, `StreamSource`), `LockedMac` (the
+  device's one line for a locked Mac, checked with the host's LockPolicy) and
+  image blob framing. `Viewport.swift` —
   `Viewport` (kind 9: the device's panel, Aa's scale and its rate),
   `ClientStats` (with `lateSince`, a host's count of a device's late sound
   packets, which never traps), `CursorShapeBlob`, and `ViewportBounds` (what a
@@ -7287,7 +7347,13 @@ good.
   (whether a connection came over the USB cable to an iPhone or iPad, from
   InterfaceSnapshot's IOKit reading, and the device's ID; pure,
   `Tests/checks/cable-link`), `CableReport` (`--print-cable`), `SessionLock`
-  (an unlocked console), `TestHooks` (the door and pairing hooks a host that
+  (an unlocked console; the TEST ONLY SILL_TEST_LOCKED and SILL_TEST_LOCKED_FILE;
+  Sill.app's notifications, `onChange`), `LockPolicy` (a locked Mac,
+  docs/locked-mac-plan.md: what each request becomes, what the devices are
+  shown, the window list, the select gate and the window that comes back at
+  the unlock, the lines; pure, `Tests/checks/lock-policy`; the coordinator's
+  `readLock`, `lockChanged`, `enforceLock`, `afterUnlock`, `lockedMidSwitch`
+  and `lockDecision`), `TestHooks` (the door and pairing hooks a host that
   is not a test host ignores, one line each), `AskLimits` (PairingWindow.swift:
   one device-opened window at a time, three in 10 minutes, the quiet after
   the Mac's Cancel or a stop, an IPv6 asker's by its /64; `Tests/checks/ask-limits`) and
@@ -7990,7 +8056,8 @@ good.
   host's KeyStrokes and the device's KeyChords, against a model of the Mac's
   HID state table and of a Mac from before), `keychain`, `keyframe-recovery` (iOSClient's
   KeyframeRecovery, against a model of the event history), `ledger`, `link-judge`,
-  `menu-state` (iOSClient's MacMenuState), `menus` (the host's MenuFormat and
+  `lock-policy` (the host's LockPolicy and StreamProtocol's LockedMac, with a copy of
+  the coordinator's glue), `menu-state` (iOSClient's MacMenuState), `menus` (the host's MenuFormat and
   MenuPolicy, and MacMenu.swift's JSON), `message-reader`, `origin`,
   `pairing-address`, `pairing-sharing` (Sill.app's `PairingWindowSharing`),
   `phone-portrait`, `pointer-control`, `pointer-presence`,
@@ -8242,7 +8309,12 @@ there through, so a client at this Mac's link-local address on it
 on the cable, and the simulator's `-SillCableTest 1` for the device's side
 (lo0's `fe80::1%lo0` keeps such a test on this Mac; it needs a listener there,
 which SILL_TEST_LOOPBACK's 127.0.0.1 alone is not); `SILL_TEST_LOCKED=1` makes
-the Mac locked; `SILL_TEST_ASK_QUIET=<s>` shortens the 10 minutes of quiet
+the Mac locked for the run, and `SILL_TEST_LOCKED_FILE=<path>` while that file
+holds `1`, read every second while a device is connected, so `echo 1 > $F` and
+`echo 0 > $F` lock and unlock a running test host (docs/locked-mac-plan.md: the
+lock screen alone, no windows, apps, menus, gestures, sound or clipboard, input
+only from a paired session; `sillclient.py`'s list line says `locked=1`, and
+`--raw7` and `--raw15` send a launch and a window's button); `SILL_TEST_ASK_QUIET=<s>` shortens the 10 minutes of quiet
 after the Mac's Cancel or a stop; `SILL_TEST_ASK_FROM_THIS_MAC=1` skips the
 ask rule's step for an ask from this Mac itself (answered `openOnMac` unless a
 window is open, and lighting no menu item), so a test client on this Mac opens
@@ -8404,7 +8476,9 @@ draws as a dim rectangle; `-SillPencilPointer 1` is Q2's flip),
 chip and a Paste's note on the mock's stream, docs/clipboard-plan.md; the mock Mac
 shares its clipboard in every settings case but `legacy`; live, `-SillSettingsScript
 '<t> paste TEXT'` sends TEXT as the Paste control hands it over, and
-`-SillSettingsCloseAt <s>` closes the panel `-SillSettings 1` opened), and in
+`-SillSettingsCloseAt <s>` closes the panel `-SillSettings 1` opened),
+`-SillMacLocked 1` (the mock Mac locked: no windows, apps or clipboard, the Desktop
+streaming, the drawer's and the panel header's line, docs/locked-mac-plan.md), and in
 the normal app and under `-SillLive 1` `-SillPairURL '<sill://pair…>'` (pair
 at launch, no confirmation, at the link's own addresses only: a confirmed link
 tries the home rows first, which `-SillTapRow` and `-SillHomeLink` below reach),
@@ -8592,7 +8666,13 @@ device keeps working with Macs from the first public build on, or each says why
   subscription carries a later field saying it takes images (`"accepts":2`, say), never to one that
   sent `{}`; a hardware keyboard's characters (letters, digits, Space, Delete…) go to a host as keys
   only when its window list says `keyRepeat` 1 or more (it repeats a key held between its down and its
-  up, #162), to any other through iPadOS's text system as they always did; the Mac's sound (kind 43, Audio.swift), once a public build ships it, a beta or not:
+  up, #162), to any other through iPadOS's text system as they always did; a locked Mac's window list
+  (docs/locked-mac-plan.md): `locked` true, no windows and no `clipboard` while the Mac is locked or
+  another user's session is on its console, left out otherwise, so an unlocked list is what it was
+  (a device that knows it shows why the list is empty; one from before shows an empty list), and
+  while locked a host streams no window, refuses a window picked, an app launched, kind 15, kinds 27
+  with an id and 25 ("The Mac is locked."), kind 28 and a device's clipboard text, and takes kind 8
+  only from a paired session; the Mac's sound (kind 43, Audio.swift), once a public build ships it, a beta or not:
   its two types (a JSON AudioFormat, then packets whose layout never changes: a new layout is a new
   type), AudioFormat's fields, the hello's `audio`, `sendAudio` and `audioNote`, kind 43 only to a
   device whose hello lists a codec the host makes, and the reader's caps, which a later host keeps
