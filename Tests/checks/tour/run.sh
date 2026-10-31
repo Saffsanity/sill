@@ -1,9 +1,11 @@
 #!/bin/bash
 # TourPolicy (iOSClient/TourPolicy.swift), the first-run tour's rules on their own: the steps and
 # targets per layout, what is owed, when the tour shows by itself (the beat, a touch or input since
-# the picture, a turn), memory and runs, a rotation mid-run, the crease, the card's width and place
-# (pinned at the Duo's four sizes and the iPhone SE's two, an oracle, and a grid of properties), and
-# every string (docs/first-run-walkthrough-plan.md, H2). A phone held upright is placed with
+# the picture, a turn), memory, the tour's version (0.6: an older memory cleared once, a later one
+# kept), runs, a rotation mid-run, the crease, the card's width and place (pinned at the Duo's four
+# sizes and the iPhone SE's two, an oracle, and a grid of properties), and every string, with what
+# it depends on (TourFeatures, all 128 ways) and which rows start with "New:"
+# (docs/first-run-walkthrough-plan.md, H2, and "The tour once more, for 0.6"). A phone held upright is placed with
 # PhonePortraitLayout's own rects, compiled in; the iPhone Duo's real sizes with its fold as iOS 27.1
 # reports it, with DuoPosture.swift (docs/iphone-duo-plan.md).
 #   Tests/checks/tour/run.sh             compile and run the check
