@@ -573,6 +573,9 @@ package final class StreamCoordinator {
             Task { @MainActor in
                 guard let self else { return }
                 let wasEmpty = self.catalog.clientCount == 0
+                // A locked Mac (LockPolicy): read before the catalog's first poll, which this count starts,
+                // can take a thumbnail (whichever of this and the connection's callback comes first).
+                if wasEmpty, count > 0 { self.readLock() }
                 self.catalog.clientCount = count          // the catalog idles itself at 0
                 // Nobody is watching: stop capturing and encoding. The next client picks afresh.
                 if count == 0 { self.viewport = nil; self.clientFPS = [:]; self.fitScales = [:] }   // the next device starts from scratch
