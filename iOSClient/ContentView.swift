@@ -450,10 +450,15 @@ struct ContentView: View {
 ///   normal app. Without one of these no Debug build ever shows it by itself, so every other photo
 ///   and live test looks as it did; Release and TestFlight builds always follow its rule.
 ///   `-SillTourState fresh|landscape|done|skipped|saved` turns the automatic tour on: `fresh` is
-///   nothing seen, `landscape` the three sideways steps seen (an upright size shows the laptop
-///   card), `done` all of it, `skipped` Skip tapped, each for this run only and never written;
-///   `saved` reads and writes `Sill.tourSeen` and `Sill.tourSkipped`, as a Release build does. In
-///   the mock the picture counts from launch. `-SillTour touch|bar|settings|laptop` starts the tour
+///   nothing seen, `landscape` the sideways steps seen (an upright size shows the laptop card),
+///   `done` all of it, `skipped` Skip tapped, each for this run only and never written; `saved`
+///   reads and writes `Sill.tourSeen`, `Sill.tourSkipped` and `Sill.tourVersion`, as a Release build
+///   does: a memory of an older tour version, or of none, is cleared once and stored with this one
+///   (TourPolicy.upgraded, the console's "tour: memory of … cleared"). Without `saved` no Debug build
+///   writes `Sill.tourVersion`, so none uses up the tour's showing once more that a TestFlight or
+///   App Store build gives. In the mock the picture counts from launch. Each card's rows, and what
+///   they looked at (TourFeatures), are a "tour: card …" line. `-SillTour
+///   touch|bar|sharing|settings|laptop` starts the tour
 ///   at that step as Take the Tour shows it (every step of the layout, from that one; a step the
 ///   layout lacks starts at the first), with no beat, at the first picture. Stand-ins for what the
 ///   gates may not do: `-SillTourPress next@S|skip@S` presses Next (Done on the last card) S
