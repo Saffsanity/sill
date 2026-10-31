@@ -21,8 +21,9 @@ who has it, and the newest iPhone and iPad app.
 - The connection on the Mac's own networks, over a USB cable and with Direct
   Wireless Connection: what Sill for Mac accepts, and what a device can make
   it do.
-- A locked Mac, or one with another user at its login screen: a device should
-  see its lock screen and nothing else, and only a paired device type at it.
+- A locked Mac, or one switched to another user: a device should see none of
+  it, and nothing a device sends should act on it, but a paired device's typing
+  at its own lock screen.
 - Remote Access's connection, and pairing, at home and away: the QR code, the
   typed code, `sill://pair` links, a USB cable's automatic pairing, Require
   pairing, and the paired devices and keys Sill for Mac keeps in the keychain.

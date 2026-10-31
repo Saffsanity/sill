@@ -471,12 +471,13 @@ Sound from your Mac, a beta feature: your iPhone or iPad plays the sound of the 
 
 Aa now starts at Off, which leaves your Mac’s window as it is, and sliding it back to Off puts a window Sill resized back to its own size right away. That needs Sill for Mac from this release: with an earlier one, Off only stops the resizing. On Sill’s virtual display a window always fits, so Aa has no Off there. Aa is dimmed while the Desktop shows: it sizes a window.
 
-A locked Mac now shows only its lock screen: type its password from your iPhone or iPad to unlock it, and its windows come back. Until then the Apps list, its menus, its sound and the clipboard wait, and only an iPhone or iPad you paired can type at it. It needs Sill for Mac from this release.
+While your Mac is locked or switched to another user, Sill shows none of it: your iPhone or iPad says so, and the Apps list, the Mac’s menus, its sound and the clipboard wait until it is unlocked. It needs Sill for Mac from this release.
 ```
 
-The locked Mac's paragraph (branch locked-mac, docs/locked-mac-plan.md, 294 characters) is a security
+The locked Mac's paragraph (branch locked-mac, docs/locked-mac-plan.md, 237 characters) is a security
 fix found on 2026-10-31: say what it does, not what it fixed. Its device test (the plan's Untested) is
-Noah's: a real lock screen, another user at the login screen, the password typed from the iPad.
+Noah's: a real lock, another user at the login screen. Typing the Mac's password from the device waits
+for his test (the plan's step 2): add it here only once a posted password unlocks a Mac.
 
 The sound's paragraph (PR #94) is "a beta feature", never a beta of the app (guideline 2.2), and waits,
 as the description's bullet does, for its device tests (Before you submit).

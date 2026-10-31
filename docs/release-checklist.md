@@ -149,7 +149,7 @@ serves the root or `/docs`, never `/site`. So:
   support.html's sentence that Sill for Mac names a firewall that blocks it, in its menu and its
   Settings (PR #250; the item's command before it holds for the builds out too), between
   `<!-- Firewall` and `<!-- /Firewall -->`, and support.html's section on a locked Mac (branch
-  `locked-mac`: a locked Mac shows only its lock screen) between `<!-- Locked Mac` and
+  `locked-mac`: a locked Mac shows none of itself) between `<!-- Locked Mac` and
   `<!-- /Locked Mac -->`. A republish before those
   releases (for words that hold for the builds already out, such as support.html's on a Mac asleep
   or restarted, or on a black picture) deletes the blocks of each release not out yet in the
@@ -188,7 +188,7 @@ perl -0pi -e 's/[ \t]*<!-- Virtual Display:.*?<!-- \/Virtual Display -->\n//gs' 
 perl -0pi -e 's/[ \t]*<!-- Aa Off:.*?<!-- \/Aa Off -->\n//gs' ../sill-site/*.html   # only before the release with PR #181 (Aa's Off)
 perl -0pi -e 's/[ \t]*<!-- Thumbnail hold:.*?<!-- \/Thumbnail hold -->\n//gs' ../sill-site/*.html   # only before the thumbnail hold's release (PR #248)
 perl -0pi -e 's/[ \t]*<!-- Firewall:.*?<!-- \/Firewall -->\n//gs' ../sill-site/*.html   # only before the release that names a firewall that blocks Sill
-perl -0pi -e 's/[ \t]*<!-- Locked Mac:.*?<!-- \/Locked Mac -->\n//gs' ../sill-site/*.html   # only before the release that shows a locked Mac's lock screen alone
+perl -0pi -e 's/[ \t]*<!-- Locked Mac:.*?<!-- \/Locked Mac -->\n//gs' ../sill-site/*.html   # only before the release that shows nothing of a locked Mac
 git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" && git -C ../sill-site push
 ```
 
