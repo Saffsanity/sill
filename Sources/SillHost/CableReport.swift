@@ -11,7 +11,7 @@ package enum CableReport {
             out.append("\(name): " + describe(InterfaceSnapshot.readCable(name)))
         }
         // No test hook here: the report reads the real console.
-        out.append("This Mac: " + SessionLock.consoleDescription(testHost: false))
+        out.append("This Mac: " + SessionLock.consoleDescription())
         return out
     }
 

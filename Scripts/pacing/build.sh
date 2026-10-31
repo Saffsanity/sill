@@ -22,7 +22,7 @@ git rev-parse --verify --quiet "$base^{commit}" > /dev/null || { echo "build.sh:
 # (PR #39) it judges each device's link (LinkJudge). Since a revoked session's receive loop hands on
 # only what lets go of a key or a button (security scan finding 10), it reads RevokedInput (KeyStrokes).
 host_files=(StreamServer CableLink ClientLink DeviceGate Door DoorPolicy HostIdentity HostLog InterfaceSnapshot KeyStrokes
-            LinkJudge OriginPolicy PairingWindow PointerControl PointerWatch RefusalSummary Stats)
+            LinkJudge LockPolicy OriginPolicy PairingWindow PointerControl PointerWatch RefusalSummary Stats)
 # The Mac's sound (docs/audio-plan.md H6): where a side has these, they are compiled in with SILL_AUDIO
 # defined, and main.swift's --audio runs the test tone through the real pipeline and send path.
 audio_files=(AudioPipeline AudioPacketizer AudioEncoder SyntheticAudio TestTone)

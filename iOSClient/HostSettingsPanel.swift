@@ -232,6 +232,15 @@ struct HostSettingsPanel: View {
                                                            rttMs: client.linkStats?.rtt?.median)
                                         + (AwayCopy.headerLine(state.away)?.spoken ?? ""))
                 }
+                // A locked Mac's lists have no windows while it shows nothing of itself (its LockPolicy,
+                // docs/locked-mac-plan.md): why, under the readout, its own element for VoiceOver.
+                if let why = client.lockWhy {
+                    Text(LockedMac.line(mac: client.macName, why: why))
+                        .font(.footnote)
+                        .foregroundStyle(Palette.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2)
+                }
             }
             Spacer(minLength: 8)
             // A 44 pt tall tap area (the word alone is about 42×22) without moving the header: the
