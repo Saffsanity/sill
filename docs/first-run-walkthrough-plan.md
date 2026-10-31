@@ -1524,10 +1524,11 @@ reconnect's session keeps the last decision; Take the Tour as before).
   On a phone it is 8 pt shorter on the right: the button sits under Settings, inside the rows'
   14 pt side margin, where the strip's band ran to its own 6 pt one (the 18 Pro Max: 6 to 426
   instead of 434). The check pins it.
-- **The support page's two lines** (Universal Control, Paste from Other Apps) came to the plan as
-  Noah's words; they are the handoff's of 2026-10-30 (the Keyboard button under Universal Control,
-  which Noah closed as iPadOS's own behavior, and the chip's missing Paste, which Settings › Apps ›
-  Sill › Paste from Other Apps fixed on his iPad), written here in the page's own words.
+- **The support page's two lines** (Universal Control, Paste from Other Apps), which the build took
+  from the handoff of 2026-10-30, are gone since the review: Noah closed the Keyboard button under
+  Universal Control as iPadOS's own behavior with no support line asked, and the chip's missing Paste
+  (which Settings › Apps › Sill › Paste from Other Apps fixed on his iPad) is not the tour's; a line
+  for it, if wanted, is a change of its own.
 - **The App Store description's clipboard bullet** still said that a password manager's concealed
   copies stay on the Mac, untrue since 2026-10-29: it loses that sentence, as README's bullet does.
 - **The site's marker** names the branch, not a pull request number, until the pull request is
@@ -1661,9 +1662,5 @@ shows the tour once. Delete the app to see it fresh.
   keys reach the Mac again.
 - **P10**: Skip on the new tour's first card: no tour at the next session, nor upright.
 - **P11**: Take the Tour shows the new cards, and its Skip only closes it.
-- **P12, Universal Control**: the Keyboard button shows no on-screen keyboard while the Mac's keyboard
-  drives the iPad (the support line).
-- **P13**: Settings › Apps › Sill › Paste from Other Apps set to Deny, then whether the chip's Paste
-  goes missing; Ask or Allow and reopen: it is back (the support line).
-- **P14**: on an iPhone Duo, if at hand: the six poses.
+- **P12**: on an iPhone Duo, if at hand: the six poses.
 

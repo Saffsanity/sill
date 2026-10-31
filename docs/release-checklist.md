@@ -149,11 +149,9 @@ serves the root or `/docs`, never `/site`. So:
   support.html's sentence that Sill for Mac names a firewall that blocks it, in its menu and its
   Settings (PR #250; the item's command before it holds for the builds out too), between
   `<!-- Firewall` and `<!-- /Firewall -->`, and the tour once more (branch `tour-0-6`, tour version
-  2: support.html's paragraph that the tour shows once more after an update and its line on the
-  Keyboard button under Universal Control, and privacy.html's item on the tour's version; the tour's
-  section's first paragraph and the clipboard list's line on Paste from Other Apps, inside the
-  Clipboard block, hold for the builds out and the chip's release) between `<!-- Tour 0.6` and
-  `<!-- /Tour 0.6 -->`. A republish before those
+  2: support.html's paragraph that the tour shows once more after an update, and privacy.html's item
+  on the tour's version; the tour's section's first paragraph holds for the builds out) between
+  `<!-- Tour 0.6` and `<!-- /Tour 0.6 -->`. A republish before those
   releases (for words that hold for the builds already out, such as support.html's on a Mac asleep
   or restarted, or on a black picture) deletes the blocks of each release not out yet in the
   sill-site copy after the rsync below (the perl lines, one per marker) and puts privacy.html's
@@ -171,8 +169,7 @@ serves the root or `/docs`, never `/site`. So:
   `grep -n 'Aa starts at Off' ../sill-site/*.html`,
   `grep -n "hold a window’s thumbnail" ../sill-site/*.html`,
   `grep -n 'Devices Can’t Connect' ../sill-site/*.html`,
-  `grep -n 'tour shows once more' ../sill-site/*.html`,
-  `grep -n 'Universal Control' ../sill-site/*.html` and
+  `grep -n 'tour shows once more' ../sill-site/*.html` and
   `grep -n 'version of the tour' ../sill-site/*.html` print nothing. The release that ships each
   deletes its markers in `site/` and keeps the words.
 - Once sill is public, it can serve the site itself: `git subtree push --prefix site origin gh-pages`,

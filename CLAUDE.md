@@ -42,8 +42,8 @@ no wire change, nothing in `Sources/`, no new file, one new UserDefaults key.
   `-SillTourState saved` (so a Debug build never uses up TestFlight's once more); DEBUG console "tour:
   memory of tour version 1 (…) cleared: version 2 shows once" and each card's "tour: card …".
 - Docs: README (a tour bullet; the clipboard bullet's repeated sentence and its concealed-copies claim
-  gone), support.html (the tour's section; behind `<!-- Tour 0.6` the once-more paragraph and the
-  Keyboard button under Universal Control; the Paste from Other Apps line inside the Clipboard block),
+  gone), support.html (the tour's section; behind `<!-- Tour 0.6` the once-more paragraph; the
+  review took out a Universal Control line and a Paste from Other Apps line, not the tour's),
   privacy.html (the tour's version, marked; October 31), the checklist's marker, perl line and greps,
   the metadata (the pinch's paragraph moved from 0.5.1's What's New into the next one's draft with the
   tour's; the description's clipboard bullet without its concealed-copies sentence), DEVELOPMENT.md.
@@ -61,14 +61,13 @@ no wire change, nothing in `Sources/`, no new file, one new UserDefaults key.
   iPhone either way, the Duo's cover) the bar card's five rows scroll at the default size, the last one
   or two under the fade with the footer in reach (the plan's risk 5); at 500x710 the laptop card's last
   row does.
-- **Untested, for Noah** (the plan's P1–P14, a TestFlight 0.6 or a Debug build with `-SillTourState
+- **Untested, for Noah** (the plan's P1–P12, a TestFlight 0.6 or a Debug build with `-SillTourState
   saved`): over 0.5.1 with the old tour done, and again after skipping it, the tour once more (four
   cards sideways, five upright, "New:" in blue), then never again; each New row true on the device
   (the pinch, Virtual Display "is on" with Sill for Mac 0.6, Menus lit, the clipboard both ways, Send
   Audio and Mute, Reverse Scrolling, the hold, a Magic Keyboard's keys and Esc); the iPhone's five and
   four, clear of the Dynamic Island; against Sill for Mac 0.5.1 the update row; VoiceOver; the largest
-  text size; a hardware keyboard's Return and Esc; Skip, Take the Tour; Universal Control's keyboard
-  (the support line); Paste from Other Apps set to Deny (the support line); the Duo's poses.
+  text size; a hardware keyboard's Return and Esc; Skip, Take the Tour; the Duo's poses.
 
 **The door's waiting places (2026-10-29, branch `sec-door-pending` from main at 150479b5, PR #252; finding 9 of the
 security scan of 2026-10-18, Low; Noah's go of 2026-10-29).** A TLS door (the remote one, and the home one of
