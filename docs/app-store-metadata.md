@@ -87,8 +87,8 @@ These texts are only true once these are:
   the number both apps share from this release on (Noah, 2026-10-09): App
   Store Connect adds a version only once the current one is Ready for
   Distribution (the + beside iOS App), and copies its metadata into it. The
-  third is 0.5.5, which main says since 2026-10-29 for both apps (the pre-release number; the store release will be 0.6.0), so its
-  TestFlight builds go to the version 0.5.5 (0.5.1's is closed now it is
+  third is 0.6.0 (main said 0.5.5 from 2026-10-29, the pre-release number of its TestFlight builds and nightlies, and 0.6.0 since 2026-10-31), so its
+  TestFlight builds go to the version 0.6.0 (0.5.1's is closed now it is
   released).
 - Every claim in the description has been seen working on a device. Still
   open: pairing at home (PR #37's P1 to P16: the code over Wi-Fi, the cable
@@ -416,7 +416,7 @@ company's name.
 |---|---|
 | Support URL | `https://getsill.app/support` |
 | Marketing URL (optional) | `https://getsill.app` |
-| Version | 0.5.5 for the third version, the same number as Sill for Mac 0.5.5 (main says it since 2026-10-29). 0.5.1 was the second, the same number as Sill for Mac 0.5.1. The first was 0.5 (App Store Connect proposed 1.0 for a new app; the build said 0.5) |
+| Version | 0.6.0 for the third version, the same number as Sill for Mac 0.6.0 (main says it since 2026-10-31; 0.5.5 was its pre-release number, carried by the TestFlight builds and the nightlies before the release). 0.5.1 was the second, the same number as Sill for Mac 0.5.1. The first was 0.5 (App Store Connect proposed 1.0 for a new app; the build said 0.5) |
 | Copyright | `2026 Noah Saffer` (App Store Connect adds the ©) |
 | App Previews | None for the first version. They are optional, and the sizzle reel can't be one: 2.3.4 allows only captures of the app itself, and previews run 15 to 30 seconds. |
 | Screenshots | Section 9 |
