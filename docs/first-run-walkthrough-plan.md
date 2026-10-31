@@ -1630,6 +1630,40 @@ and deleted after; photos with `simctl io … screenshot` or Tests/duorig's `sho
     lasted 10 s).
 - Not verified: a device; a Release build's own upgrade (`-SillConnect` is DEBUG only); TestFlight.
 
+### The review and its fixes (2026-10-31)
+
+One review of 228f3aec (two lenses: the words against the code, and the engineering); nothing had to
+be fixed before a merge. Its six findings, each checked here first; one commit per theme:
+
+1. **The Menus and three-finger rows carried no "New:"** (should-fix: the task's "each marked with a
+   visible 'New:' prefix" names both). Taken: both are marked, and so is Virtual Display's row in both
+   forms (finding 5), since the old tour told of none of them (280fa7dd, open question 1).
+2. **support.html's Universal Control line** (should-fix): Noah closed that case as iPadOS's own with
+   no support line asked. Taken out, with the checklist's grep and marker words and the
+   device step (19866a1e).
+3. **support.html's Paste from Other Apps line** (nit: not the tour's). Taken out too, for a change of
+   its own if wanted.
+4. **The Duo's cover at accessibility-extra-large**: the bar card's first view shows its title on two
+   lines and only the first row's symbol above the fade. Left as it is: the tour's rule (the words
+   scroll beside the controls, Skip and Next in reach), as the card scrolled there before; Noah's call
+   (a shorter title on narrow rooms, or no hardware-keyboard row on the cover).
+5. **Virtual Display's off form unmarked**: marked (with 1).
+6. **Small wording points** (c3319e18): (a) the Paste row now says where Paste is ("…: **Paste
+   on ‹Mac›**, on the note Sill shows then or in Settings, puts it…"); (b) Reverse Scrolling's row says "the on-screen
+   trackpad’s two-finger scroll" (ScrollDirection turns a connected trackpad's and a wheel's never);
+   (c) the hardware keyboard's rows use `keyboard.badge.ellipsis` (iOS 14), not `escape`, which draws
+   as a circular arrow; (d) CLAUDE.md's clipboard entry on this branch already says a password
+   manager's copy arrives like any other since 2026-10-29: no change.
+
+Verified after the fixes: `Tests/checks/tour` 732,447 checks, 0 failed, and 126 of 126 mutants (the
+three "marked New" mutants now "unmarked" ones); `run-all.sh`, all 62; the iOS app Debug for the
+generic simulator (CI's command, Xcode 27.1), Release for the simulator and Debug for a generic device,
+each with `nice -n 10` under a load average of 20, only the known StreamClient capture warning
+(StreamClient.swift:4196); the 94 iPad photos (a private iPad Pro 13-inch, iOS 27.0) and the 68 Duo
+photos (a private iPhone Duo, iOS 27.1 24A94232, Tests/duorig's poses) taken again with the same
+arguments and looked at as contact sheets, both simulators deleted after. The upgrade rule did not
+change, so S5 was not run again.
+
 ### Untested, for Noah (the iPad mini and the iPhone 15 Pro)
 
 A Debug build from Xcode shows the tour by itself only with `-SillTourState saved` (the scheme's
@@ -1652,7 +1686,7 @@ shows the tour once. Delete the app to see it fresh.
   every ring on its control, every card clear of the Dynamic Island and the home indicator; the bar
   card's last rows scroll (found here): say whether to shorten it.
 - **P5**: against Sill for Mac 0.5.1, if at hand: "Update Sill on ‹Mac›…", and Virtual Display's row
-  without New.
+  in its "in Settings" form.
 - **P6**: Virtual Display off in Settings, then Take the Tour: the row's other form.
 - **P7, VoiceOver**: no touch card; rows read "New: …"; titles "step N of M"; the bar's Virtual Display
   row says "Text size… swipe up or down"; no Reverse Scrolling or hold rows.

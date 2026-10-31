@@ -61,6 +61,12 @@ no wire change, nothing in `Sources/`, no new file, one new UserDefaults key.
   iPhone either way, the Duo's cover) the bar card's five rows scroll at the default size, the last one
   or two under the fade with the footer in reach (the plan's risk 5); at 500x710 the laptop card's last
   row does.
+- The review (2026-10-31, of 228f3aec; the plan's "The review and its fixes"): New: on the Menus,
+  three-finger and Virtual Display rows too; support.html's Universal Control and Paste from Other Apps
+  lines out (not the tour's); the Paste row says where Paste is, Reverse Scrolling's names the on-screen
+  trackpad, the hardware keyboard's symbol `keyboard.badge.ellipsis`; the Duo's cover at
+  accessibility-extra-large left to Noah. Again: `tour` 732,447 and 126 of 126 mutants, `run-all.sh` all
+  62, the three iOS builds, the 94 iPad and 68 Duo photos retaken.
 - **Untested, for Noah** (the plan's P1–P12, a TestFlight 0.6 or a Debug build with `-SillTourState
   saved`): over 0.5.1 with the old tour done, and again after skipping it, the tour once more (four
   cards sideways, five upright, "New:" in blue), then never again; each New row true on the device
