@@ -46,7 +46,20 @@ no wire change, nothing in `Sources/`, no new file, one new UserDefaults key.
   privacy.html (the tour's version, marked; October 31), the checklist's marker, perl line and greps,
   the metadata (the pinch's paragraph moved from 0.5.1's What's New into the next one's draft with the
   tour's; the description's clipboard bullet without its concealed-copies sentence), DEVELOPMENT.md.
-- Verified: to come (the plan's Results).
+- Verified (the plan's Results): `tour` 732,447 checks and 126 of 126 mutants (42 new); `run-all.sh`, all 62 (565 s);
+  the iOS app Debug for the simulator (CI's command, Xcode 27.1), Release for the simulator and Debug
+  for a device, only the known StreamClient capture warning, and the first commit's state on its own;
+  H3's greps; H4, main's build against the branch's, 18 of 18 photos identical (iPad and Duo simulators:
+  the mock, Settings, the Menus pull-down); 94 photos on a private iPad Pro 13-inch simulator (iOS 27.0)
+  and 68 on a private iPhone Duo (iOS 27.1, 24A94232, the six poses folded by Tests/duorig), at the
+  default text size and accessibility-extra-large, each looked at; the accessibility tree; live on a
+  private iPhone 18 Pro Max (iOS 27.0) against the test host, every card upright and sideways at both
+  sizes; and the upgrade (S5): main's build's Done and its Skip each cleared once by this build (the
+  whole tour, 1 of 5, 1.1 s after the picture), a fresh install, a later version kept (the new card
+  alone over version 1's memory), a Debug build without `saved` writing nothing. Found: on a phone (an
+  iPhone either way, the Duo's cover) the bar card's five rows scroll at the default size, the last one
+  or two under the fade with the footer in reach (the plan's risk 5); at 500x710 the laptop card's last
+  row does.
 - **Untested, for Noah** (the plan's P1–P14, a TestFlight 0.6 or a Debug build with `-SillTourState
   saved`): over 0.5.1 with the old tour done, and again after skipping it, the tour once more (four
   cards sideways, five upright, "New:" in blue), then never again; each New row true on the device

@@ -1548,7 +1548,81 @@ reconnect's session keeps the last decision; Take the Tour as before).
 
 ### Results (2026-10-31)
 
-To come, after the gates.
+Built on main at e4d30349. Every build with `nice -n 10` while the load average was under 20; the
+test hosts only `SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1
+SILL_TEST_NO_SCREEN=1 .build/release/SillHost --synthetic`, one at a time, each killed by PID within
+55 s, no input sent (no `in.` counter in any host's lines); three private simulators, created for this
+and deleted after; photos with `simctl io … screenshot` or Tests/duorig's `shot`.
+
+- **H2, the check** (`Tests/checks/tour`): 732,447 checks, 0 failed (main: 111,189); its mutants 126 of
+  126 caught (main: 84). The 42 new: the version rule's 8 (not raised, `>` and `==` for `>=`, a cleared
+  memory that keeps Skip or what was seen, the upgrade not written, no version read as this one, a write
+  when current), the cards' and targets' 5 (sharing missing sideways, lighting the picture, after
+  Settings; Menus dropped from the bar's targets sideways and in the halves), the words that follow
+  TourFeatures 18, and "New:"'s 11 (dropped, not marked, not semibold, no space, another word, not
+  read by VoiceOver, the pinch unmarked or on iPad only, the swipe's and Menus' rows marked, the
+  hardware keyboard's unmarked); seven patterns of main's mutants follow the new lines, and "Aa not said
+  to be a window's" became "B3's Aa clause dropped". `Tests/checks/run-all.sh`: all 62 (565 s).
+- **H1**: the iOS app Debug for the generic simulator (CI's command, Xcode 27.1, 27A9275), Release for
+  the simulator and Debug for a generic device, unsigned: only the known StreamClient capture warning
+  (StreamClient.swift:4196). The first commit's state (TourPolicy, its check, StreamScreen's and
+  MacMenuButton's wiring, with main's TourOverlay and ContentView) built for the simulator on its own.
+- **H3**: no `.sheet(`, `.popover(` or TipKit in Tour*.swift (the one hit is the comment that forbids
+  them); TourPolicy imports Foundation and CoreGraphics alone; nothing in `Sources`, `Packaging`,
+  `Scripts`, `iOSClient/Info.plist`, the privacy manifest or the project file differs from main.
+- **H4, nothing else changed**: the mock with no tour argument, with `-SillSettings 1` and with
+  `-SillMenusOpen 1`, at 1000x710, 710x1000, 500x710 and 710x500 on the iPad simulator and at 951x669
+  (open flat) and 466x678 (the cover) on the Duo's, main's build against the branch's: 18 of 18
+  identical. (Main's first photo of Settings at 710x1000 differed from its own retake by 6 pixels at a
+  step of 1; the retake equals the branch's.)
+- **S1–S3, the photos** (each looked at; in `~/Downloads/sill-handoff/tour-0-6/`, INDEX.md):
+  - A private iPad Pro 13-inch (M5) simulator, iOS 27.0 (24A434), the mock: 1000x710 (4 cards),
+    710x1000 (5), 500x710 (5), 440x894 as a phone (5) and with Larger Picture (bar, laptop), 832x440 as
+    a phone (4); Virtual Display on (the bar sideways and upright, the laptop card), no menus
+    ("Windows", no Menus row), `nosound` ("Clipboard"), `legacy` (the update row, no swipe row, the
+    off form), Paste right away off, gestures off, Take the Tour from Settings; VoiceOver's runs at
+    1000x710, 710x1000 and 440x894. 47 photos at the default text size and 47 at
+    accessibility-extra-large. The rings sit on their controls; on a phone the ring takes in the row-2
+    Menus button, so `frame(in:)` includes its offset (the bar card's tail at 216, the union with the
+    button there; 174 without it).
+  - A private iPhone Duo simulator, iOS 27.1 (24A94232, the older of the two 27.1 runtimes installed),
+    folded by Tests/duorig: book 4, open flat sideways 4, laptop 5, open flat upright 5, the cover
+    upright 5, on its side 4, and VoiceOver's in the book and laptop poses; 34 at each text size. In the
+    book pose each card stays on its targets' page; in the laptop pose none crosses the fold; "iPhone",
+    no Pencil row, no Larger Picture row, "Turn your iPhone on its side".
+  - Found: on a phone (an iPhone upright and sideways, the Duo's cover either way) the bar card, five
+    rows with the Menus button, scrolls at the default text size: its last one or two rows are under
+    the card's fade, the footer in reach and the scroll indicator flashing as it shows (the risk this
+    plan took, 5). At 500x710, the iPad's compact halves, the laptop card (five rows now) fills its room
+    exactly and its last row scrolls. At accessibility sizes most cards scroll, as before.
+- **The accessibility tree** (`-SillAXDump 3` at 1000x710 and 710x1000, every card): each title
+  "…, step N of M" with its hint, each new row's label "New: …".
+- **S4, live**: a private iPhone 18 Pro Max simulator, iOS 27.0, the normal app against the test host,
+  `-SillTour` each card upright (5: "Windows", for a synthetic host sends no menus; Virtual Display's
+  off form; the clipboard's and the sound's rows; Larger Picture's on the laptop card) and with
+  `-SillOrientation landscape` (4), at both text sizes, each card clear of the Dynamic Island and the
+  home indicator. These photos carry this Mac's name and stay out of the handoff folder.
+- **S5, the upgrade, live** on that simulator (the app container's preferences read with plutil after
+  each session):
+  - (A) main's build (e4d30349) with `-SillTourState saved -SillTourPress next@1.5` passed its four
+    cards: stored `Sill.tourSeen` touch, bar, settings, laptop, no `Sill.tourVersion`. This build over
+    it, no `-SillTourState`: no tour, nothing written. With `saved`: "tour: memory of tour version 1
+    (none stored) (seen: touch, bar, settings, laptop) cleared: version 2 shows once", the first card
+    "1 of 5" 1.13 s after the picture; stored version 2, nothing seen. All five passed, then a
+    relaunch: "nothing owed here".
+  - (B) main's Skip on its first card (main itself then reads "seen: none; skipped"): this build
+    "(seen: none; skipped) cleared", 1 of 5 at 1.14 s.
+  - (C) a fresh install with `saved`: cleared (nothing stored), version 2 written at the first stream
+    screen, the five cards, Done, then nothing owed.
+  - (D) `-Sill.tourVersion 3` over the full memory: no tour, the stored version still 2. (E) version 3
+    over version 1's four seen: kept as it is, the new card alone (1 of 1), nothing written. (F)
+    `-Sill.tourVersion 1` over the full memory: cleared once, the whole tour.
+  - Two traps of the harness, not of the code: `xcrun simctl spawn … defaults write me.saffer.sill`
+    writes a domain the app also reads, outside its container, which an uninstall keeps (it planted a
+    memory in one run, deleted with `defaults delete` before the run above); and a launch terminated
+    about 2 s after main's stand-in Skip lost that Skip's write (main read it back once the session
+    lasted 10 s).
+- Not verified: a device; a Release build's own upgrade (`-SillConnect` is DEBUG only); TestFlight.
 
 ### Untested, for Noah (the iPad mini and the iPhone 15 Pro)
 
