@@ -1427,7 +1427,9 @@ and the sideways tour still ends on "Hold your iPad upright…".
 **"New:"** (`TourPolicy.newPrefix`): a row built with `new: true` starts with the spans "New:"
 (strong, `isNew`) and " ". `TourCard.attributed` draws the `isNew` span semibold in the accent
 (#9BB7FF on the bar's #16181C), one Text with the row, so it wraps with it at every size; VoiceOver
-reads the row's words, "New: Pinch to zoom…". Only rows about what is new since 0.5.1 carry it, on
+reads the row's words, "New: Pinch to zoom…". Only rows about what is new since the tour was written carry it (0.6's, and the Menus button's, the
+three-finger swipes' and Virtual Display's in either form, which the old tour never told of; the
+review's change, below), on
 every install (it marks what this version adds; a later tour version clears its own marks).
 
 **What rows depend on** (`TourFeatures`, built by StreamScreen at each render): the Menus button on
@@ -1444,11 +1446,11 @@ The words (‹Mac› the Mac's name, ‹device› iPad or iPhone; **bold** a str
 | T1–T3 | touch, "Tap, Hold, Drag and Pinch" | always | **Tap** to click. / **Touch and hold** to right-click. / **Drag** to scroll. |
 | T4 | | iPad | **Apple Pencil** works as a mouse. |
 | T5 | | always | New: **Pinch** to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still works ‹Mac›. |
-| T6 | | gestures | **Swipe with three fingers**: up for Mission Control, down for App Exposé, and sideways between Spaces. |
+| T6 | | gestures | New: **Swipe with three fingers**: up for Mission Control, down for App Exposé, and sideways between Spaces. |
 | B1 | bar, "Windows and Menus" (or "Windows") | always | as before (VoiceOver's own; Apps' with Larger Picture) |
-| B2 | | menus | **Menus** has the menu bar of the app you’re using on ‹Mac›. |
+| B2 | | menus | New: **Menus** has the menu bar of the app you’re using on ‹Mac›. |
 | B3 | | Virtual Display on | New: **Virtual Display** is on: a window you pick streams from a display of its own on ‹Mac›, so it keeps updating when something covers it; **Aa** then sizes its text. |
-| B3 | | otherwise | **Virtual Display**, in Settings, streams a window you pick from a display of its own on ‹Mac›, so it keeps updating when something covers it; **Aa** then sizes its text. |
+| B3 | | otherwise | New: **Virtual Display**, in Settings, streams a window you pick from a display of its own on ‹Mac›, so it keeps updating when something covers it; **Aa** then sizes its text. |
 | B3 | | VoiceOver | either form, ending "; **Text size** then makes its text larger or smaller: swipe up or down on it." |
 | B4 | | sideways, a phone | **Keyboard** brings up the on-screen keyboard to type on ‹Mac›. |
 | B5 | | sideways, a phone | New: **A hardware keyboard** types on ‹Mac› by itself, Esc included, and **Keyboard** then brings up the keyboard bar. |
@@ -1533,8 +1535,11 @@ reconnect's session keeps the last decision; Take the Tour as before).
 
 ### Open questions for Noah (the defaults taken)
 
-1. Mark the Menus and three-finger rows "New:"? **Default: no**: they shipped in 0.5 and 0.5.1.
-   The flip is `new: true` on T6's and B2's rows (and the check's `expectedNew`).
+1. Mark the Menus and three-finger rows "New:"? **Yes, since the review** (the build's default was
+   no: they shipped in 0.5 and 0.5.1). The task asks for every feature added since the tour was
+   written to be marked, and the old tour told of neither; Virtual Display's row is marked in both
+   forms for the same reason. The flip back is `new: false` on T6's, B2's and B3's off form (and the
+   check's `expectedNew`).
 2. "New:" on a fresh install's tour too? **Default: yes**: it marks what this version adds.
 3. Clipboard and Sound as its own card, before Settings, lighting the Settings button? **Default:
    yes.**

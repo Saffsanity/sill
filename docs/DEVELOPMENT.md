@@ -417,8 +417,8 @@ picture (tap, hold, drag, pinch, and three-finger swipes), the thumbnails with
 the Menus button and Aa (and Keyboard, sideways and on a phone upright), with a
 row on Virtual Display and one on a hardware keyboard, then the Settings button
 twice, for the clipboard and the Mac's sound and for Settings itself, and
-upright the key row and the trackpad. Rows about what is new since 0.5.1 start
-with "New:", in the accent; a row about what this Mac or this device lacks (an
+upright the key row and the trackpad. Rows about what is new since the tour was
+written start with "New:", in the accent; a row about what this Mac or this device lacks (an
 older Mac's clipboard and sound, the Menus button where there is none) is left
 out or reworded, and Aa is named only in the Virtual Display row. A card
 stays beside what it lights at every text size, its words scrolling there. Skip

@@ -21,16 +21,17 @@ no wire change, nothing in `Sources/`, no new file, one new UserDefaults key.
   button) lights the Menus button too (`TourTarget.menus`, reported by MacMenuButton wherever it is
   drawn, a phone's row-2 one through its offset) and has Menus, then Virtual Display with Aa in it (the
   only row that names Aa: "New: Virtual Display is on: … Aa then sizes its text." while the Mac's setting
-  is on, else where the switch is, unmarked), then sideways and on a phone the Keyboard button and a
+  is on, else where the switch is, New too), then sideways and on a phone the Keyboard button and a
   hardware keyboard (New); Clipboard and Sound, lighting Settings (Share Clipboard, Paste on ‹Mac›, Send
   Audio and Mute, or for an older Mac "Update Sill on ‹Mac›…"); Settings gains Reverse Scrolling and Hold
   to Show Window Controls (sighted; New); the laptop card a hardware keyboard (the halves; New) and on a
   phone where it is offered Larger Picture (New). The old Aa row and "…on screen or with a hardware
   keyboard" are gone. No row on passwords (a password manager's copies go like any other since
   2026-10-29). At most six rows a card.
-- "New:" (`TourPolicy.newPrefix`, `TourSpan.isNew`): the rows about what is new since the App Store's
-  0.5.1 start with it, semibold in the accent, read by VoiceOver with the row; not the Menus button's or
-  the gestures' (both in 0.5 and 0.5.1: open question 1), on every install.
+- "New:" (`TourPolicy.newPrefix`, `TourSpan.isNew`): the rows about what is new since the tour was
+  written start with it, semibold in the accent, read by VoiceOver with the row: 0.6's, and since the
+  review the Menus button's, the gestures' and Virtual Display's in both forms too (the old tour told of
+  none of them: open question 1), on every install.
 - What rows follow (`TourFeatures`, StreamScreen's `tourFeatures` at each render): the Menus button on
   screen, gestures on and taken, the Mac's Virtual Display, its clipboard, Paste on ‹Mac› Right Away,
   its sound, Larger Picture offered here.

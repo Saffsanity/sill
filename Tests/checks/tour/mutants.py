@@ -127,7 +127,7 @@ MUTANTS = [
     ("a phone's bar hint without Menus while it shows", 'case .phone: hint = features.menus ? "Under the picture: Aa and Keyboard in the first row, the windows and Menus in the second."',
      'case .phone: hint = features.menus && false ? "Under the picture: Aa and Keyboard in the first row, the windows and Menus in the second."'),
     ("Virtual Display is on while it is off", "if features.virtualDisplay {", "if features.virtualDisplay || true {"),
-    ("Virtual Display's off form marked New", 'so it keeps updating when something covers it")] + aa))', 'so it keeps updating when something covers it")] + aa, new: true))'),
+    ("Virtual Display's off form unmarked", 'something covers it")] + aa, new: true))\n            }\n', 'something covers it")] + aa))\n            }\n'),
     ("Aa named under VoiceOver", "let aa = voiceOver ? [", "let aa = false ? ["),
     ("the Keyboard rows in the halves' bar card", "if layout != .portrait {\n                rows.append(row(\"keyboard\", [strong(\"Keyboard\")",
      "if true {\n                rows.append(row(\"keyboard\", [strong(\"Keyboard\")"),
@@ -153,8 +153,8 @@ MUTANTS = [
     ("VoiceOver reads a New row without its mark", "?? all.map(\\.text).joined())", "?? spans.map(\\.text).joined())"),
     ("the pinch row unmarked", 'one finger still works \\(mac).")], new: true))', 'one finger still works \\(mac).")]))'),
     ("the pinch row on iPad only", PINCH, "if iPad { " + PINCH + " }"),
-    ("the swipe row marked New (0.5's)", 'and sideways between Spaces.")]))', 'and sideways between Spaces.")], new: true))'),
-    ("the Menus row marked New (0.5's)", 'you’re using on \\(mac).")]))', 'you’re using on \\(mac).")], new: true))'),
+    ("the swipe row unmarked", 'and sideways between Spaces.")], new: true))', 'and sideways between Spaces.")]))'),
+    ("the Menus row unmarked", 'you’re using on \\(mac).")], new: true))', 'you’re using on \\(mac).")]))'),
     ("the hardware keyboard's bar row unmarked", 'strong("Keyboard"), plain(" then brings up the keyboard bar.")], new: true))', 'strong("Keyboard"), plain(" then brings up the keyboard bar.")]))'),
 ]
 # Larger Picture only while a window streams (Noah, 2026-10-15): the rule is PhonePortraitLayout's

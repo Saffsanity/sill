@@ -990,16 +990,16 @@ func texts(_ c: TourCopy) -> [String] { c.rows.map(\.text) }
 // once more, for 0.6"), for Mac mini and an iPad unless said.
 let T1 = "Tap to click.", T2 = "Touch and hold to right-click.", T3 = "Drag to scroll.", T4 = "Apple Pencil works as a mouse."
 let T5 = "New: Pinch to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still works Mac mini."
-let T6 = "Swipe with three fingers: up for Mission Control, down for App Exposé, and sideways between Spaces."
+let T6 = "New: Swipe with three fingers: up for Mission Control, down for App Exposé, and sideways between Spaces."
 let B1 = "Touch and hold a window to close, minimize or go full screen. Keep holding and drag to move it."
 let B1VO = "Each window has actions: close, minimize, full screen, and move left or right. Swipe up or down to hear them."
 let B1Apps = "Apps lists the apps on Mac mini: tap an open one again for its next window."
 let B1AppsVO = "Apps lists the apps on Mac mini. Choose an open one again for its next window."
-let B2 = "Menus has the menu bar of the app you’re using on Mac mini."
+let B2 = "New: Menus has the menu bar of the app you’re using on Mac mini."
 let B3on = "New: Virtual Display is on: a window you pick streams from a display of its own on Mac mini, so it keeps updating when something covers it; Aa then sizes its text."
-let B3off = "Virtual Display, in Settings, streams a window you pick from a display of its own on Mac mini, so it keeps updating when something covers it; Aa then sizes its text."
+let B3off = "New: Virtual Display, in Settings, streams a window you pick from a display of its own on Mac mini, so it keeps updating when something covers it; Aa then sizes its text."
 let B3onVO = "New: Virtual Display is on: a window you pick streams from a display of its own on Mac mini, so it keeps updating when something covers it; Text size then makes its text larger or smaller: swipe up or down on it."
-let B3offVO = "Virtual Display, in Settings, streams a window you pick from a display of its own on Mac mini, so it keeps updating when something covers it; Text size then makes its text larger or smaller: swipe up or down on it."
+let B3offVO = "New: Virtual Display, in Settings, streams a window you pick from a display of its own on Mac mini, so it keeps updating when something covers it; Text size then makes its text larger or smaller: swipe up or down on it."
 let B4 = "Keyboard brings up the on-screen keyboard to type on Mac mini."
 let B5 = "New: A hardware keyboard types on Mac mini by itself, Esc included, and Keyboard then brings up the keyboard bar."
 let S1 = "New: With Share Clipboard, text you copy on Mac mini is ready to paste on this iPad."
@@ -1052,10 +1052,10 @@ check(texts(words(.bar, L, mac: "Studio")).suffix(2) == ["Keyboard brings up the
       "the Mac's name in the Keyboard rows")
 check(words(.bar, L, features: with { $0.menus = false }).title == "Windows" && texts(words(.bar, L, features: with { $0.menus = false })) == [B1, B3on, B4, B5],
       "no Menus button on screen: no Menus row, and the title Windows")
-check(texts(words(.bar, L, features: with { $0.virtualDisplay = false })) == [B1, B2, B3off, B4, B5], "Virtual Display off: where the switch is, not New")
+check(texts(words(.bar, L, features: with { $0.virtualDisplay = false })) == [B1, B2, B3off, B4, B5], "Virtual Display off: where the switch is, New too")
 check(texts(words(.bar, P, features: with { $0.virtualDisplay = false; $0.menus = false })) == [B1, B3off], "the halves, an older Mac: two rows")
 check(words(.bar, L).rows[2].spans.filter(\.strong).map(\.text) == ["New:", "Virtual Display", "Aa"]
-      && words(.bar, L, features: with { $0.virtualDisplay = false }).rows[2].spans.filter(\.strong).map(\.text) == ["Virtual Display", "Aa"],
+      && words(.bar, L, features: with { $0.virtualDisplay = false }).rows[2].spans.filter(\.strong).map(\.text) == ["New:", "Virtual Display", "Aa"],
       "the Virtual Display row names Virtual Display and Aa")
 check(words(.bar, L).rows[4].spans.filter(\.strong).map(\.text) == ["New:", "A hardware keyboard", "Keyboard"], "two names in the hardware keyboard's row")
 for f in everyFeatures {
@@ -1220,15 +1220,16 @@ for layout in [L, P, F] {
 }
 check(mostRows == 6, "at most six rows on any card: \(mostRows)")
 
-// "New:": exactly the rows about what is new since 0.5.1, first, semibold and marked, then a space,
-// in the words and in what VoiceOver reads; the Menus button's and the gestures' (in 0.5 and 0.5.1)
-// and every older row carry none, nor Virtual Display's row while it says where the switch is.
+// "New:": exactly the rows about what is new since the tour was written (0.6's, and the Menus
+// button's, the gestures' and Virtual Display's, in either form, which the old tour never told of),
+// first, semibold and marked, then a space, in the words and in what VoiceOver reads; every older
+// row carries none.
 check(TourPolicy.newPrefix == "New:", "the mark")
 func expectedNew(_ row: TourRow, _ f: TourFeatures) -> Bool {
     switch row.symbol {
-    case "plus.magnifyingglass", "keyboard.badge.ellipsis", "doc.on.clipboard", "doc.on.doc", "speaker.wave.2", "arrow.down.circle",
-         "arrow.up.arrow.down", "timer", "rectangle.expand.vertical": return true
-    case "display": return f.virtualDisplay
+    case "plus.magnifyingglass", "hand.raised.fingers.spread", "filemenu.and.selection", "display", "keyboard.badge.ellipsis",
+         "doc.on.clipboard", "doc.on.doc", "speaker.wave.2", "arrow.down.circle", "arrow.up.arrow.down", "timer",
+         "rectangle.expand.vertical": return true
     default: return false
     }
 }
@@ -1271,14 +1272,15 @@ for layout in [L, P, F] {
         }
     }
 }
-check(newRows == ["plus.magnifyingglass", "display", "keyboard.badge.ellipsis", "doc.on.clipboard", "doc.on.doc", "speaker.wave.2", "arrow.down.circle",
-                  "arrow.up.arrow.down", "timer", "rectangle.expand.vertical"], "the New rows: T5, B3, B5, S1–S4, G3, G4, K3, K6: \(newRows.sorted())")
-check(["hand.raised.fingers.spread", "filemenu.and.selection", "keyboard", "display", "hand.tap", "command"].allSatisfy(oldRows.contains),
-      "the gestures', Menus', the Keyboard rows', Virtual Display's off form and the old rows unmarked")
-check(!words(.touch, L).rows.first { $0.symbol == "hand.raised.fingers.spread" }!.isNew && !words(.bar, L).rows.first { $0.symbol == "filemenu.and.selection" }!.isNew,
-      "the swipe and Menus rows (0.5 and 0.5.1) carry no New")
-check(!words(.bar, L, features: with { $0.virtualDisplay = false }).rows.first { $0.symbol == "display" }!.isNew && words(.bar, L).rows.first { $0.symbol == "display" }!.isNew,
-      "Virtual Display's row is New only as it says it is on")
+check(newRows == ["plus.magnifyingglass", "hand.raised.fingers.spread", "filemenu.and.selection", "display", "keyboard.badge.ellipsis",
+                  "doc.on.clipboard", "doc.on.doc", "speaker.wave.2", "arrow.down.circle", "arrow.up.arrow.down", "timer",
+                  "rectangle.expand.vertical"], "the New rows: T5, T6, B2, B3, B5, S1–S4, G3, G4, K3, K6: \(newRows.sorted())")
+check(["keyboard", "hand.tap", "command", "hand.point.up.left", "xmark.circle"].allSatisfy(oldRows.contains) && !oldRows.contains("display"),
+      "the Keyboard rows and the old rows unmarked; Virtual Display's never")
+check(words(.touch, L).rows.first { $0.symbol == "hand.raised.fingers.spread" }!.isNew && words(.bar, L).rows.first { $0.symbol == "filemenu.and.selection" }!.isNew,
+      "the swipe and Menus rows carry New (the old tour never told of them)")
+check(words(.bar, L, features: with { $0.virtualDisplay = false }).rows.first { $0.symbol == "display" }!.isNew && words(.bar, L).rows.first { $0.symbol == "display" }!.isNew,
+      "Virtual Display's row is New in both forms")
 check(T5.hasPrefix("New: ") && texts(touchPad)[4] == T5 && touchPad.rows[4].spoken == T5, "VoiceOver says “New: Pinch to zoom…”")
 
 for layout in [L, P, F] {

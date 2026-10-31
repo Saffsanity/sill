@@ -571,8 +571,10 @@ enum TourPolicy {
     /// Tour version 2 (0.6; Noah, 2026-10-31: "Mark the new features with 'New:' and make the tutorial
     /// run for anyone who launches this version for the first time. You don't need to explain the Aa
     /// stuff, maybe add an explanation with Virtual Desktop's explanation"): the rows about what is new
-    /// since 0.5.1 start with "New:" (`newPrefix`); Aa is named only in the Virtual Display row. The
-    /// Menus button and the three-finger gestures shipped in 0.5 and 0.5.1, so theirs carry none.
+    /// since the tour was written start with "New:" (`newPrefix`): what 0.6 adds, and what came after the
+    /// tour of 0.5 without a card of its own (the Menus button, the three-finger gestures, Virtual
+    /// Display in either form), which that tour never explained. Aa is named only in the Virtual
+    /// Display row.
     static func copy(_ t: TourTopic, _ layout: TourLayout, mac: String, device: String,
                      voiceOver: Bool, firstOfRun: Bool, keysOnItsSide: Bool = false, thumbnails: Bool = true,
                      features: TourFeatures) -> TourCopy {
@@ -591,7 +593,7 @@ enum TourPolicy {
             // device's switch is on and the Mac takes them. The pinch and the spread are the Settings
             // panel's rows.
             if features.gestures {
-                rows.append(row("hand.raised.fingers.spread", [strong("Swipe with three fingers"), plain(": up for Mission Control, down for App Exposé, and sideways between Spaces.")]))
+                rows.append(row("hand.raised.fingers.spread", [strong("Swipe with three fingers"), plain(": up for Mission Control, down for App Exposé, and sideways between Spaces.")], new: true))
             }
             let hint: String
             switch layout {
@@ -616,18 +618,18 @@ enum TourPolicy {
             }
             // The Menus button (MacMenuButton): only while it is on screen.
             if features.menus {
-                rows.append(row("filemenu.and.selection", [strong("Menus"), plain(" has the menu bar of the app you’re using on \(mac).")]))
+                rows.append(row("filemenu.and.selection", [strong("Menus"), plain(" has the menu bar of the app you’re using on \(mac).")], new: true))
             }
             // Virtual Display, on by default in Sill for Mac since PR #236 (HostConfig.app), with Aa in it:
             // the only row that names Aa. Aa sizes a window, never the Desktop (dimmed over it:
             // TextScale.selectable), and on the virtual display a window is the panel ÷ Aa's scale.
-            // "Is on", the Mac's setting as it is, is new; off, the row says where the switch is.
+            // On, it says so; off, where the switch is. Both forms are New: the tour never told of it.
             let aa = voiceOver ? [plain("; "), strong("Text size"), plain(" then makes its text larger or smaller: swipe up or down on it.")]
                                : [plain("; "), strong("Aa"), plain(" then sizes its text.")]
             if features.virtualDisplay {
                 rows.append(row("display", [strong("Virtual Display"), plain(" is on: a window you pick streams from a display of its own on \(mac), so it keeps updating when something covers it")] + aa, new: true))
             } else {
-                rows.append(row("display", [strong("Virtual Display"), plain(", in Settings, streams a window you pick from a display of its own on \(mac), so it keeps updating when something covers it")] + aa))
+                rows.append(row("display", [strong("Virtual Display"), plain(", in Settings, streams a window you pick from a display of its own on \(mac), so it keeps updating when something covers it")] + aa, new: true))
             }
             // The Keyboard button is the bar's sideways and a phone's upright; the halves' keyboard
             // is a cap, which the laptop card names. A hardware keyboard's keys go to the Mac without
