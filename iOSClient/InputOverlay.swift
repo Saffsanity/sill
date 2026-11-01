@@ -38,6 +38,8 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// Modifiers the portrait key row is holding down for the next keystroke. Empty in landscape
     /// unless the user latched one before rotating.
     var latchedModifiers: KeyModifiers = []
+    /// The part of `latchedModifiers` a use leaves latched: locked on the key row (ModifierLock).
+    var lockedModifiers: KeyModifiers = []
     /// Fires once a latch has been spent, so the key row can un-highlight itself.
     var onModifiersConsumed: (() -> Void)?
 
@@ -871,8 +873,8 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     }
 
     private func consumeLatch() {
-        guard !latchedModifiers.isEmpty else { return }
-        latchedModifiers = []
+        guard !latchedModifiers.subtracting(lockedModifiers).isEmpty else { return }
+        latchedModifiers = lockedModifiers
         onModifiersConsumed?()
     }
 
@@ -1542,6 +1544,7 @@ struct InputOverlay: UIViewRepresentable {
     /// The person's own keyboard is up (the proxy's `onOwnChange`): never the hardware keyboard's hold.
     @Binding var isKeyboardShown: Bool
     var latchedModifiers: KeyModifiers = []
+    var lockedModifiers: KeyModifiers = []
     var onModifiersConsumed: () -> Void = {}
     /// `StreamClient.sendGesture`; see `InputOverlayView.sendGesture`.
     var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
@@ -1565,6 +1568,7 @@ struct InputOverlay: UIViewRepresentable {
         uiView.videoSize = videoSize
         uiView.send = send
         uiView.setOwnPointer = setOwnPointer
+        uiView.lockedModifiers = lockedModifiers
         uiView.latchedModifiers = latchedModifiers
         uiView.sendGesture = sendGesture
         uiView.macRepeatsKeys = macRepeatsKeys

@@ -145,6 +145,8 @@ struct PortraitStreamScreen: View {
     @Binding var scaleOpen: Bool
     @Binding var windowMenu: UInt32?
     @Binding var latched: KeyModifiers
+    /// The part of `latched` a use does not spend: a modifier locked by a long press on its cap (ModifierLock).
+    @Binding var locked: KeyModifiers
     let overlay: InputOverlayProxy
     /// The Settings panel, owned by `StreamScreen` (see its `setSettings`).
     let settingsOpen: Bool
@@ -468,7 +470,8 @@ struct PortraitStreamScreen: View {
                          proxy: overlay,
                          isKeyboardShown: $keyboardShown,
                          latchedModifiers: latched,
-                         onModifiersConsumed: { latched = [] },
+                         lockedModifiers: locked,
+                         onModifiersConsumed: { latched = ModifierLock.spent(locked: locked) },
                          sendGesture: { client.sendGesture($0, fingers: $1) },
                          macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
                          readZoom: { [zoom] in zoom.zoom },
@@ -492,7 +495,7 @@ struct PortraitStreamScreen: View {
 
     /// A key row key keeps what the sprite shows (StreamClient.sendFromKeyRow).
     private func keyRow(_ keys: KeyRow.Keys) -> some View {
-        KeyRow(metrics: metrics, keys: keys, latched: $latched, keyboardShown: keyboardShown,
+        KeyRow(metrics: metrics, keys: keys, latched: $latched, locked: $locked, keyboardShown: keyboardShown,
                send: { client.sendFromKeyRow($0) },
                toggleKeyboard: { overlay.toggleKeyboard() },
                showSpotlight: client.active == .desktop)
@@ -505,7 +508,8 @@ struct PortraitStreamScreen: View {
                  feed: { let f = client.pointerFeedState; return (f.anchor, f.reseeds) },
                  onFingers: { client.trackpadFingers($0) },
                  latched: latched,
-                 onModifiersConsumed: { latched = [] },
+                 onModifiersConsumed: { latched = ModifierLock.spent(locked: locked) },
+                 locked: locked,
                  verticalSpan: verticalSpan,
                  sendGesture: { client.sendGesture($0, fingers: $1) })
             .tourTarget(.trackpad)
@@ -757,6 +761,8 @@ private struct KeyRow: View {
     let metrics: PortraitMetrics
     let keys: Keys
     @Binding var latched: KeyModifiers
+    /// The part of `latched` a use does not spend (ModifierLock).
+    @Binding var locked: KeyModifiers
     let keyboardShown: Bool
     let send: (InputEvent) -> Void
     let toggleKeyboard: () -> Void
@@ -765,6 +771,13 @@ private struct KeyRow: View {
     let showSpotlight: Bool
     /// Escape, tab or an arrow held down (HeldCap): its key is down on the Mac until the finger leaves.
     @State private var heldCap = HeldCap()
+    /// A finger on a modifier's cap: the task that locks the modifier once the finger has stayed
+    /// `ModifierLock.holdSeconds` (cancelled by its lifting first), then the one that forgets the lock
+    /// was the hold's once the cap's own action could no longer be its release.
+    @State private var lockTask: Task<Void, Never>?
+    /// The hold locked the cap under the finger, so the action that comes as the finger lifts is the
+    /// hold's end, not a tap (a tap on a locked modifier lets it go).
+    @State private var lockedByHold = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// Whether escape, tab and the arrows are held from the touch to the release: everywhere but where a
     /// long press shows a cap large (the phone's caps at the accessibility text sizes), so that long press
@@ -818,7 +831,7 @@ private struct KeyRow: View {
         .frame(height: metrics.keyBlockHeight)
         // Gone from the screen (a turn, the stream's end) with a cap held: no release comes, so it
         // comes up here.
-        .onDisappear { heldCap.releaseAll().forEach(send) }
+        .onDisappear { heldCap.releaseAll().forEach(send); lockTask?.cancel() }
         #if DEBUG
         .onAppear(perform: runInputTest)
         #endif
@@ -861,7 +874,7 @@ private struct KeyRow: View {
         guard down else { heldCap.touchUp(usage, at: now).forEach(send); return }
         let events = heldCap.touchDown(usage, latched: latched, at: now)
         events.forEach(send)
-        if HeldCap.spendsLatch(events) { latched = [] }
+        if HeldCap.spendsLatch(events) { spendLatch() }
     }
 
     /// Escape's, tab's or an arrow's action: nothing after a finger's touch (its key went down and up
@@ -870,7 +883,7 @@ private struct KeyRow: View {
     private func activate(_ usage: UInt16) {
         let events = heldCap.activated(usage, latched: latched, at: ProcessInfo.processInfo.systemUptime)
         events.forEach(send)
-        if HeldCap.spendsLatch(events) { latched = [] }
+        if HeldCap.spendsLatch(events) { spendLatch() }
     }
 
     /// What a tap on each cap does (escape, tab and the arrows: a whole press at once, as an assistive
@@ -880,13 +893,15 @@ private struct KeyRow: View {
         case .press(_, let usage, _), .arrow(_, let usage, _):
             press(usage)
         case .modifier(_, let flag, _):
-            latched.formSymmetricDifference(flag)
+            // The release after a hold that locked the cap is the hold's own, not a tap.
+            if lockedByHold { lockedByHold = false; return }
+            (latched, locked) = ModifierLock.tapped(flag, latched: latched, locked: locked)
         case .keyboard:
             toggleKeyboard()
         case .spotlight:
             // Latched modifiers do not join ⌘Space, but the tap still spends them.
             Spotlight.press(send: send)
-            latched = []
+            spendLatch()
         }
     }
 
@@ -928,24 +943,69 @@ private struct KeyRow: View {
             .foregroundStyle(Palette.text)
     }
 
-    /// A latching modifier: it stays lit until something uses it, or until it is tapped again.
+    /// A latching modifier: it stays lit until something uses it, or until it is tapped again. Held for
+    /// `ModifierLock.holdSeconds` it locks (a small lock on the cap) and stays lit through every use
+    /// until it is tapped (#268). Where a long press shows the cap large (`capsHold`) the hold is that
+    /// look's; the lock is then VoiceOver's action, as it is for anyone who cannot hold a cap.
     private func latchKey(_ key: Key, _ title: String, _ flag: KeyModifiers, label: String) -> some View {
+        let isLocked = locked.contains(flag)
         let on = latched.contains(flag)
         return cap(open: on,
-                   label: on ? "\(label), held. Tap to release." : "\(label), hold for the next key",
-                   largeContent: title, action: { tap(key) }) {
+                   label: isLocked ? "\(label), locked. Tap to release." : on ? "\(label), held. Tap to release." : "\(label), hold for the next key",
+                   largeContent: title, held: capsHold ? { modifierTouch(flag, down: $0) } : nil, action: { tap(key) }) {
             Text(title)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(on ? Palette.accent : Palette.text)
+                .overlay(alignment: .topTrailing) {
+                    if isLocked {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(Palette.accent)
+                            .offset(x: 9, y: -6)
+                            .accessibilityHidden(true)
+                    }
+                }
         }
+        .accessibilityActions {
+            if !isLocked { Button("Lock until released") { lock(flag, byHold: false) } }
+        }
+    }
+
+    /// A finger landed on a modifier's cap, or left it: after `ModifierLock.holdSeconds` on it, it locks.
+    private func modifierTouch(_ flag: KeyModifiers, down: Bool) {
+        lockTask?.cancel()
+        if down {
+            lockedByHold = false
+            lockTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(ModifierLock.holdSeconds))
+                guard !Task.isCancelled else { return }
+                lock(flag, byHold: true)
+            }
+        } else if lockedByHold {
+            lockTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(HeldCap.actionWindow))
+                guard !Task.isCancelled else { return }
+                lockedByHold = false
+            }
+        }
+    }
+
+    /// `flag` locked, with a tap of the Taptic Engine where there is one (an iPhone's) the first time.
+    private func lock(_ flag: KeyModifiers, byHold: Bool) {
+        lockedByHold = byHold
+        if !locked.contains(flag) { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
+        (latched, locked) = ModifierLock.held(flag, latched: latched, locked: locked)
     }
 
     /// escape, tab and the arrows: down and up, carrying whatever is latched, and the latch is
     /// spent — ⌥← is one tap on opt then one on the left arrow.
     private func press(_ usage: UInt16) {
         KeyChord.press(usage, with: latched).forEach(send)
-        latched = []
+        spendLatch()
     }
+
+    /// A key has used what is latched: a tapped modifier is gone, a locked one stays (ModifierLock).
+    private func spendLatch() { latched = ModifierLock.spent(locked: locked) }
 
     #if DEBUG
     /// DEBUG `-SillInputTest 1` (ContentView's contract), the key row's half: once per launch, taps

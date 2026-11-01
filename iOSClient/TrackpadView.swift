@@ -21,6 +21,8 @@ struct Trackpad: View {
     let onFingers: (Int) -> Void
     let latched: KeyModifiers
     let onModifiersConsumed: () -> Void
+    /// The part of `latched` a click leaves latched (ModifierLock).
+    var locked: KeyModifiers = []
     /// What the pad's vertical motion is measured against: nil is its own height (see
     /// `TrackpadSurface.verticalSpan`).
     var verticalSpan: CGFloat? = nil
@@ -34,7 +36,7 @@ struct Trackpad: View {
             Palette.trackpad
             DotGrid().allowsHitTesting(false)
             TrackpadView(send: send, setPointer: setPointer, feed: feed, onFingers: onFingers,
-                         latched: latched, onModifiersConsumed: onModifiersConsumed,
+                         latched: latched, onModifiersConsumed: onModifiersConsumed, locked: locked,
                          verticalSpan: verticalSpan, sendGesture: sendGesture)
             VStack {
                 Spacer(minLength: 0)
@@ -83,6 +85,7 @@ struct TrackpadView: UIViewRepresentable {
     let onFingers: (Int) -> Void
     let latched: KeyModifiers
     let onModifiersConsumed: () -> Void
+    var locked: KeyModifiers = []
     var verticalSpan: CGFloat? = nil
     var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
 
@@ -101,6 +104,7 @@ struct TrackpadView: UIViewRepresentable {
         uiView.setPointer = setPointer
         uiView.feed = feed
         uiView.onFingers = onFingers
+        uiView.lockedModifiers = locked
         uiView.latchedModifiers = latched
         uiView.verticalSpan = verticalSpan
         uiView.sendGesture = sendGesture
@@ -124,6 +128,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     var onFingers: (Int) -> Void = { _ in }
     /// Modifiers the key row is holding for the next click. Cleared here when one is spent.
     var latchedModifiers: KeyModifiers = []
+    var lockedModifiers: KeyModifiers = []
     var onModifiersConsumed: (() -> Void)?
     /// How far a finger travels down the pad for the share of the frame that the pad's width is
     /// across: nil is the pad's own height. A phone's pad is far taller than the picture's shape,
@@ -565,8 +570,8 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     }
 
     private func consumeLatch() {
-        guard !latchedModifiers.isEmpty else { return }
-        latchedModifiers = []
+        guard !latchedModifiers.subtracting(lockedModifiers).isEmpty else { return }
+        latchedModifiers = lockedModifiers
         onModifiersConsumed?()
     }
 

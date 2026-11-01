@@ -107,6 +107,9 @@ struct StreamScreen: View {
     /// Modifiers held down by the portrait key row until the next key, character or click uses
     /// them. Lives up here so rotating the iPad does not drop a half-typed shortcut.
     @State private var latched: KeyModifiers = []
+    /// The part of `latched` a use does not spend: a modifier locked by a long press on its cap
+    /// (ModifierLock). Lives here with `latched`, for the same reason.
+    @State private var locked: KeyModifiers = []
     /// The bar's Keyboard button drives the overlay's first responder through this.
     @State private var overlay = InputOverlayProxy()
     /// The Aa control's text scale, device points per Mac point; nil means the Mac window has never
@@ -1151,7 +1154,7 @@ struct StreamScreen: View {
         PortraitStreamScreen(client: client, metrics: metrics, drawerOpen: $drawerOpen,
                              keyboardShown: $keyboardShown,
                              textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
-                             latched: $latched, overlay: overlay,
+                             latched: $latched, locked: $locked, overlay: overlay,
                              settingsOpen: settingsOpen,
                              setSettings: { setSettings($0, restoreKeyboard: $1) },
                              menusOpened: menusOpened, menusClosed: menusClosed,
@@ -1181,7 +1184,8 @@ struct StreamScreen: View {
                              proxy: overlay,
                              isKeyboardShown: $keyboardShown,
                              latchedModifiers: latched,
-                             onModifiersConsumed: { latched = [] },
+                             lockedModifiers: locked,
+                             onModifiersConsumed: { latched = ModifierLock.spent(locked: locked) },
                              sendGesture: { client.sendGesture($0, fingers: $1) },
                              macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
                              readZoom: { [zoom] in zoom.zoom },
