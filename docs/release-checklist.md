@@ -385,11 +385,11 @@ comes later, when the cask qualifies (below).
       never a Sill for Mac 0.4.1). A release that changes only one app is Noah's call: both at
       the new number, or the other left at its last (nothing in the code compares the two).
       main carries the next release's number, both apps together, from soon after the last
-      release on: 0.5.5 since 2026-10-29 (PR #244), ahead of 0.5.1 on
+      release on: 0.6.0 since 2026-10-31 (0.5.5 from 2026-10-29, PR #244, was the pre-release number its TestFlight builds and nightlies carried), ahead of 0.5.1 on
       the App Store and on GitHub. App Store Connect takes no new build of a version it has
       released (its train is closed), so every build of main for TestFlight needs the next
       number; and Sill.app's update check compares only release tags with the version it runs,
-      so a build of main saying 0.5.5 is offered nothing until a release newer than 0.5.5 exists.
+      so a build of main saying 0.6.0 is offered nothing until a release newer than 0.6.0 exists.
       The release's tag then names a commit of main that already says its number.
 - [ ] A Mac release and a device build that need each other (a change to the home door or the wire
       that older builds on the other side can't follow): the release notes say which versions go
@@ -925,8 +925,10 @@ What a nightly is:
   the build (a look a minute, 90 minutes at most), gives it What to Test, and gives it to TestFlight's
   groups (below). A night run again by hand finds its build in App Store Connect and only gives it its
   groups again.
-- Versions: what main says (0.5.5 since 2026-10-29, the pre-release number, part 2's first item; the store release will be 0.6.0), with the commit count as
-  the build number on both apps, as in "Sill 0.5.5 (990)". Never committed: make-app.sh has always
+- Versions: what main says (0.6.0 since 2026-10-31, part 2's first item; 0.5.5 was the pre-release number from 2026-10-29, and after the 0.6.0 release main moves to 0.6.1), with the commit count as
+  the build number on both apps, as in "Sill 0.6.0 (1250)". The store release's own build is uploaded with the same number
+  (`Scripts/release-ios.sh --build-number "$(git rev-list --count HEAD)" --upload`), never `--bump`: App Store Connect wants a
+  version's build numbers to rise, and the nightlies have already used the commit counts under that version. Never committed: make-app.sh has always
   stamped the count into the Mac's bundle, and `--build-number` gives it to xcodebuild for the run.
   Only commits on main's first-parent line are uploaded with their count (the nightlies, and
   testflight.yml, which runs from main alone and checks its line before an upload), so a build
@@ -967,7 +969,7 @@ For a nightly tester:
 - The update check never offers a nightly: it reads only
   `https://api.github.com/repos/Saffsanity/sill/releases/latest`, which never lists a pre-release
   (`UpdatePolicy.feed`), refuses an answer that says `prerelease` anyway (`UpdatePolicy.release`), and
-  "nightly" is no version. A nightly Sill.app says 0.5.5 with its build number, so the update check offers it the 0.6.0 release once that is published, like everyone else's.
+  "nightly" is no version. A nightly Sill.app says main's version with its build number (0.5.5 until 2026-10-31, 0.6.0 since), so the update check offers it the 0.6.0 release once that is published, like everyone else's, and the nightlies after the release, saying 0.6.1, are offered the 0.6.1 release in turn.
 - Going back: on the Mac, quit Sill, download the release from https://getsill.app/download and
   replace Sill in Applications; nothing to set up again. On a device, TestFlight › Sill › Previous
   Builds installs an earlier build, and the App Store installs the release over a TestFlight build
