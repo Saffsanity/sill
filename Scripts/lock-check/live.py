@@ -20,9 +20,14 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 HOST = os.path.join(ROOT, ".build/release/SillHost")
 CLIENT = os.path.join(ROOT, "Scripts/sillclient.py")
 FRAMES = os.path.join(ROOT, ".build/lock-check/frames")
-BASE_ENV = {"SILL_TEST_LOOPBACK": "1", "SILL_TEST_SOFTWARE_ENCODER": "1", "SILL_TEST_NO_ROUTER": "1", "SILL_TEST_NO_SCREEN": "1"}
+# SILL_TEST_LOCK_IGNORE_MAC: the hosts go by the test's hooks alone, so the check runs while this Mac's own screen is locked.
+BASE_ENV = {"SILL_TEST_LOOPBACK": "1", "SILL_TEST_SOFTWARE_ENCODER": "1", "SILL_TEST_NO_ROUTER": "1", "SILL_TEST_NO_SCREEN": "1",
+            "SILL_TEST_LOCK_IGNORE_MAC": "1"}
 
 verdicts = []
+# The rule's switch: a locked screen streams its display (the lock screen) or the placeholder.
+STREAMS = "static let lockScreenStreams = true" in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "Sources", "SillHost", "LockPolicy.swift")).read()
+
 def verdict(ok, what):
     verdicts.append((ok, what))
     print(("ok   " if ok else "FAIL ") + what, flush=True)
@@ -181,23 +186,29 @@ def run_poll(out):
     ps1 = [at for at, kind, _, _, _ in rows1 if kind == 0]
     def big(a, b): return [f for f in frames1 if a <= f[0] < b and f[2] > 4000]
     def count(a, b): return [f for f in frames1 if a <= f[0] < b]
-    if L1 and U1:
-        late = [f for f in count(L1 + 0.1, U1) if f[2] > 4000]
-        verdict(len(big(L1 - 3, L1)) > 5 and not late,
-                f"the pattern's frames stop at the lock: {len(big(L1 - 3, L1))} in the 3 s before it, {len(late)} large ones after it until the unlock "
-                f"({len(count(L1 + 0.1, U1))} frames in all then, {sum(f[2] for f in count(L1 + 0.1, U1))} bytes)")
-        last_big = max([f[0] for f in frames1 if f[0] < L1 + 1 and f[2] > 4000], default=None)
-        verdict(last_big is not None and last_big <= L1 + 0.1, f"the last frame of the pattern came {((last_big or 0) - L1) * 1000:.0f} ms after the lock's line")
+    # Where the placeholder streams: off console (15 to 25 s) with the lock screen streaming, else from the lock.
+    S, E = (L2, L3) if STREAMS else (L1, U1)
+    if S and E:
+        late = [f for f in count(S + 0.1, E) if f[2] > 4000]
+        verdict(len(big(S - 3, S)) > 5 and not late,
+                f"the pattern's frames stop where the placeholder begins ({'off console' if STREAMS else 'the lock'}): {len(big(S - 3, S))} in the 3 s before it, {len(late)} large ones after it until it ends "
+                f"({len(count(S + 0.1, E))} frames in all then, {sum(f[2] for f in count(S + 0.1, E))} bytes)")
+        last_big = max([f[0] for f in frames1 if f[0] < S + 1 and f[2] > 4000], default=None)
+        verdict(last_big is not None and last_big <= S + 0.1, f"the last frame of the pattern came {((last_big or 0) - S) * 1000:.0f} ms after its line")
+    if STREAMS and L1 and L2 and L3 and U1:
+        verdict(len(big(L1 + 0.5, L2)) > 10 and len(big(L3 + 1.5, U1)) > 10,
+                f"the display streams while the screen is locked (the lock screen): {len(big(L1 + 0.5, L2))} large frames between the lock and off console, {len(big(L3 + 1.5, U1))} back on the console locked")
     if U2:
         back = big(U2, U2 + 3)
         verdict(len(back) > 10, f"the pattern back after the last unlock: {len(back)} large frames in the 3 s after it")
-    blacks = [k for k in keys1 if k[0] is not None and L1 and U1 and L1 <= k[0] < U1]
+    blacks = [k for k in keys1 if k[0] is not None and S and E and S <= k[0] < E]
     verdict(bool(blacks) and all(k[1] < 1.0 and k[2] <= 16 and k[3] == 0 for k in blacks),
-            f"every keyframe while locked is black: {[(round(k[0], 2), k[1], k[2], k[3], k[4]) for k in blacks]}")
+            f"every keyframe while the placeholder streams is black: {[(round(k[0], 2), k[1], k[2], k[3], k[4]) for k in blacks]}")
     before = [k for k in keys1 if k[0] is not None and L1 and k[0] < L1]
     verdict(bool(before) and all(k[1] > 50 for k in before), f"the keyframes before the lock are the pattern: {[(round(k[0], 2), k[1]) for k in before]}")
     after = [k for k in keys1 if k[0] is not None and U2 and k[0] > U2]
-    verdict(bool(after) and all(k[1] > 50 for k in after), f"the keyframe after the unlock is the pattern again: {[(round(k[0], 2), k[1]) for k in after]}")
+    verdict((bool(after) or STREAMS) and all(k[1] > 50 for k in after),
+            f"the keyframe after the unlock is the pattern again{' (none needed: the lock screen streamed on)' if STREAMS else ''}: {[(round(k[0], 2), k[1]) for k in after]}")
 
     # The lists: why, at each change.
     l1 = lists(rows1)
@@ -208,7 +219,8 @@ def run_poll(out):
     verdict(b is not None and b[2] and b[3] and b[0] - L2 < 0.2, f"off console the list says offConsole: {b}")
     verdict(c is not None and c[2] and not c[3], f"back on the console: locked, not offConsole: {c}")
     verdict(u is not None and not u[2] and not u[3], f"after the unlock: neither: {u}")
-    inside = [x for x in l1 if L1 and U1 and L1 + 0.2 <= x[0] < U1]
+    # A list sent as the unlock's line is printed lands a moment before the runner reads the line: 0.1 s off both ends.
+    inside = [x for x in l1 if L1 and U1 and L1 + 0.2 <= x[0] < U1 - 0.1]
     verdict(all(x[1] == 0 and x[2] for x in inside), f"no list while locked has a window or lacks locked ({len(inside)} lists)")
 
     # Nothing else of the Mac while locked: thumbnails 3, icons 4, apps 5, cursor 14, pointer 26, clipboard 32, sound 43.
@@ -222,8 +234,12 @@ def run_poll(out):
     verdict(len(snd2) > 10, f"the sound back after the last unlock: {len(snd2)} messages")
 
     # The client that connected off console (18 s): the black keyframe, no icons or apps until the unlock.
-    keysc2 = [k for k in keys2 if k[0] is not None and U1 and k[0] < U1]
+    end2 = L3 if STREAMS else U1
+    keysc2 = [k for k in keys2 if k[0] is not None and end2 and k[0] < end2]
     verdict(bool(keysc2) and all(k[1] < 1.0 for k in keysc2), f"a device connecting off console gets the black keyframe: {[(round(k[0], 2), k[1]) for k in keysc2]}")
+    if STREAMS:
+        back2 = [k for k in keys2 if k[0] is not None and L3 and U1 and L3 <= k[0] < U1]
+        verdict(bool(back2) and all(k[1] > 50 for k in back2), f"…and the lock screen's keyframe once this session is back on the console, locked: {[(round(k[0], 2), k[1]) for k in back2]}")
     early = [r for r in rows2 if r[1] in (3, 4, 5, 14, 26, 43) and U1 and r[0] < U1]
     late45 = [r for r in rows2 if r[1] in (4, 5) and U1 and r[0] >= U1]
     verdict(not early and late45, f"…none of the Mac's icons, apps, thumbnails, cursor, pointer or sound until the unlock ({len(early)}), then its icons and apps ({len(late45)})")
@@ -270,8 +286,8 @@ def run_start(out):
     verdict(U is not None and 2.0 <= U - 6.0 <= 3.6, f"its unlock (file 0 at 6.0 s) waits for the settle: 'Unlocked:' at {U} s")
     early = [k for k in keys if k[0] is not None and U and k[0] < U]
     late = [k for k in keys if k[0] is not None and U and k[0] >= U]
-    verdict(bool(early) and all(k[1] < 1.0 for k in early) and bool(late) and all(k[1] > 50 for k in late),
-            f"black keyframes before the unlock {[(round(k[0], 2), k[1]) for k in early]}, the pattern after {[(round(k[0], 2), k[1]) for k in late]}")
+    verdict(bool(early) and all((k[1] > 50) if STREAMS else (k[1] < 1.0) for k in early) and (bool(late) or STREAMS) and all(k[1] > 50 for k in late),
+            f"the keyframes before the unlock ({'the lock screen: the pattern' if STREAMS else 'black'}) {[(round(k[0], 2), k[1]) for k in early]}, the pattern after {[(round(k[0], 2), k[1]) for k in late]}")
 
 
 def run_notify(out):
@@ -303,8 +319,12 @@ def run_notify(out):
     verdict(N is not None and L2 is not None and 0 <= L2 - N < 0.05, f"a delivered sessionDidResignActive at {N} s: off console at {L2} s, at once")
     verdict(U2 is not None and 2.0 <= U2 - 22.0 <= 2.8, f"sessionDidBecomeActive at 22 s: 'Unlocked:' at {U2} s, after the settle")
     frames = [(at, n) for at, kind, _, n, _ in rows if kind == 1]
-    for L, label in [(L1, "the notify lock"), (L2, "the delivered notification")]:
+    for L, label, screen in [(L1, "the notify lock", True), (L2, "the delivered notification", False)]:
         if L is None: continue
+        if STREAMS and screen:
+            on = [f for f in frames if L + 0.1 <= f[0] < L + 2 and f[1] > 4000]
+            verdict(len(on) > 10, f"after {label}: the lock screen streams on ({len(on)} large frames in the 2 s after it)")
+            continue
         last_big = max([f[0] for f in frames if f[0] < L + 1 and f[1] > 4000], default=None)
         verdict(last_big is not None and last_big <= L + 0.1, f"after {label}: the last frame of the pattern {((last_big or 0) - L) * 1000:.0f} ms after the line")
         late = [f for f in frames if L + 0.1 <= f[0] < L + 2 and f[1] > 4000]

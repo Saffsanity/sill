@@ -327,9 +327,9 @@ let open = P.allowed(.unlocked), screen = P.allowed(.screenLocked), off = P.allo
 check(open == P.Allowed(display: true, windows: true, appsAndIcons: true, launches: true, sound: true, clipboard: true, pointer: true,
                          gestures: true, virtualDisplay: true, input: .everyone, wakeOnConnect: true, wakeOnActivity: true),
       "unlocked: everything")
-check(!P.lockScreenStreams, "a locked screen's display does not stream (the placeholder instead), until a test shows its frames")
-check(screen == P.Allowed(display: false, windows: false, appsAndIcons: false, launches: false, sound: false, clipboard: false, pointer: false,
-                           gestures: false, virtualDisplay: false, input: .paired, wakeOnConnect: false, wakeOnActivity: true),
+check(P.lockScreenStreams, "a locked screen's display streams: the device sees the lock screen itself (Noah, 2026-10-31)")
+check(screen == P.Allowed(display: true, windows: false, appsAndIcons: false, launches: false, sound: false, clipboard: false, pointer: false,
+                           gestures: false, virtualDisplay: false, input: .paired, wakeOnConnect: true, wakeOnActivity: true),
       "screen locked: nothing of the Mac, a paired device's input alone, which may wake the display")
 check(off == P.Allowed(display: false, windows: false, appsAndIcons: false, launches: false, sound: false, clipboard: false, pointer: false,
                         gestures: false, virtualDisplay: false, input: .nobody, wakeOnConnect: false, wakeOnActivity: false),
@@ -349,7 +349,8 @@ for rd in readings { for kind in gateKinds { for picture in pictures {
     let want: Bool
     if !rd.locked { want = false } else {
         switch kind {
-        case .frame, .parameterSets: want = picture != .placeholder
+        // A window's frames always; the display's where the rule does not let it stream (a locked screen does, off console never).
+        case .frame, .parameterSets: want = (picture ?? .window) == .window || (picture == .display && !P.allowed(rd).display)
         case .thumbnail, .appIcon, .appList, .audio, .clipboard, .cursorShape, .macPointer: want = true
         default: want = false
         }
@@ -493,7 +494,11 @@ v = u
 check(v.afterUnlock(listed: [8], active: .window(9), placeholder: false, devices: 1, reading: .unlocked) == nil && v.comesBack == nil,
       "after the unlock: something else picked since (no placeholder): nothing")
 v = u
-check(v.afterUnlock(listed: [8], active: .desktop, placeholder: false, devices: 1, reading: .unlocked) == nil, "the display streams already: nothing")
+check(v.afterUnlock(listed: [8], active: .desktop, placeholder: false, devices: 1, reading: .unlocked) == .window(8) && v.comesBack == nil,
+      "after the unlock with the lock screen streaming (no placeholder): the remembered window comes back")
+v = u
+check(v.afterUnlock(listed: [7], active: .desktop, placeholder: false, devices: 1, reading: .unlocked) == nil && v.comesBack == nil,
+      "…and gone from the list, the display streams on: nothing")
 v = u
 check(v.afterUnlock(listed: [8], active: .desktop, placeholder: true, devices: 0, reading: .unlocked) == nil && v.comesBack == nil,
       "no device connected: nothing")
@@ -582,8 +587,10 @@ check(LockedMac.detail(shade: .locked(.screenLocked), paired: true) == "To unloc
       "the cover's line at a locked screen: the password only for a paired session")
 check(LockedMac.detail(shade: .locked(.otherUser), paired: true) == "Its windows come back when you switch back to your account on the Mac. Nothing typed here reaches it meanwhile."
       && LockedMac.detail(shade: .unlocking, paired: true) == nil, "the cover's line for another user: nothing typed reaches it; none while unlocking")
-check(LockedMac.shade(nil, list: nil) == nil && LockedMac.shade(nil, list: .screenLocked) == .locked(.screenLocked)
-      && LockedMac.shade(.locked(.screenLocked), list: .otherUser) == .locked(.otherUser), "the cover follows a locked list")
+check(LockedMac.shade(nil, list: nil) == nil && LockedMac.shade(nil, list: .screenLocked) == nil
+      && LockedMac.shade(nil, list: .otherUser) == .locked(.otherUser) && LockedMac.shade(.locked(.otherUser), list: .otherUser) == .locked(.otherUser)
+      && LockedMac.shade(.locked(.otherUser), list: .screenLocked) == .unlocking && LockedMac.shade(.unlocking, list: .screenLocked) == .unlocking,
+      "the cover only for another user's console: a locked screen streams the lock screen, and a cover gives way to it through Unlocking…")
 check(LockedMac.shade(.locked(.otherUser), list: nil) == .unlocking && LockedMac.shade(.unlocking, list: nil) == .unlocking,
       "after a locked list, an unlocked one: Unlocking… until the picture")
 check(LockedMac.shade(.unlocking, frameIsKeyframe: true) == nil && LockedMac.shade(.unlocking, frameIsKeyframe: false) == .unlocking
@@ -594,24 +601,26 @@ check(LockedMac.unlockingTimeout == 4, "Unlocking… waits 4 s at most")
 var shadeBroken = 0
 for _ in 0..<2_000 {
     var shade: LockedMac.Shade? = nil
-    var lastLocked = false, waiting = false
+    var lastOff = false, waiting = false
     for _ in 0..<30 {
         if rng.int(2) == 0 {
             let why: LockedMac.Why? = [nil, .screenLocked, .otherUser][rng.int(3)]
             shade = LockedMac.shade(shade, list: why)
-            if why != nil { waiting = false } else if lastLocked || waiting { waiting = true }
-            lastLocked = why != nil
+            // The cover only while another user has the console; a locked screen streams the lock screen.
+            let off = why == .otherUser
+            if off { waiting = false } else if lastOff || waiting { waiting = true }
+            lastOff = off
         } else {
             let key = rng.int(3) == 0
             shade = LockedMac.shade(shade, frameIsKeyframe: key)
             if key, waiting { waiting = false }
         }
-        if lastLocked, shade == nil || shade == .unlocking { shadeBroken += 1 }
+        if lastOff, shade != .locked(.otherUser) { shadeBroken += 1 }
         if waiting, shade != .unlocking { shadeBroken += 1 }
-        if !lastLocked, !waiting, shade != nil { shadeBroken += 1 }
+        if !lastOff, !waiting, shade != nil { shadeBroken += 1 }
     }
 }
-check(shadeBroken == 0, "2000 random sessions of lists and frames: the cover while locked, Unlocking… until a keyframe after it, none otherwise")
+check(shadeBroken == 0, "2000 random sessions of lists and frames: the cover while another user has the console (a locked screen streams its lock screen), Unlocking… until a keyframe after it, none otherwise")
 
 // MARK: - The coordinator's glue
 
@@ -662,7 +671,7 @@ struct Glue {
 
     mutating func enforceLock() {
         guard gate.locked, inFlight == nil, devices > 0 else { return }
-        if active == .desktop, placeholder || P.allowed(gate).display { return }
+        if active == .desktop, placeholder != P.allowed(gate).display { return }
         select(.desktop, pick: false)
     }
 
@@ -693,7 +702,7 @@ struct Glue {
             if P.allowed(gate).display {
                 active = .desktop
                 started.append("display at \(gate)")
-                if gate.locked { violations.append("the display started while the gate read \(gate)") }
+                if !P.allowed(gate).display { violations.append("the display started while the gate read \(gate)") }
             } else {
                 active = .desktop
                 placeholder = true
@@ -794,7 +803,7 @@ struct Glue {
 
     var settledViolation: String? {
         if gate.locked, case .window(let id) = active { return "settled at \(gate) with window \(id) streaming" }
-        if gate.locked, active == .desktop, !placeholder { return "settled at \(gate) with the display streaming" }
+        if gate.locked, active == .desktop, !placeholder, !P.allowed(gate).display { return "settled at \(gate) with the display streaming" }
         if gate.locked, devices > 0, active != .desktop, active != .none { return "settled at \(gate) without the placeholder" }
         if !gate.locked, acted == .unlocked, placeholder { return "settled unlocked with the placeholder streaming" }
         return nil
@@ -809,11 +818,11 @@ func scenario(_ name: String, _ body: (inout Glue) -> Bool) {
     check(ok && g.violations.isEmpty, "\(name)\(g.violations.isEmpty ? "" : ": " + g.violations.joined(separator: "; "))")
 }
 
-scenario("S1: a window streams, the screen locks: the placeholder streams; the unlock: the window comes back") { g in
+scenario("S1: a window streams, the screen locks: the Desktop streams (the lock screen; the placeholder with the switch off); the unlock: the window comes back") { g in
     g.devicePick(.window(2), arrived: .unlocked); g.settle()
     guard g.active == .window(2) else { return false }
     g.gateChanges(to: .screenLocked); g.settle()
-    guard g.active == .desktop, g.placeholder, g.restore.comesBack == 2 else { return false }
+    guard g.active == .desktop, g.placeholder == !P.lockScreenStreams, g.restore.comesBack == 2 else { return false }
     g.gateChanges(to: .unlocked); g.settle()
     return g.active == .window(2) && !g.placeholder
 }
@@ -846,7 +855,7 @@ scenario("S5: a device's window pick while locked is refused, and never streams,
     g.devicePick(.desktop, arrived: .unlocked); g.settle()
     g.gateChanges(to: .screenLocked); g.settle()
     g.devicePick(.window(3), arrived: .screenLocked); g.settle()
-    guard g.active == .desktop, g.placeholder, g.restore.comesBack == nil else { return false }
+    guard g.active == .desktop, g.placeholder == !P.lockScreenStreams, g.restore.comesBack == nil else { return false }
     g.gateChanges(to: .unlocked); g.settle()
     return g.active == .desktop && !g.placeholder
 }
@@ -861,7 +870,7 @@ scenario("S7: a restart while locked and the placeholder streaming: nothing rest
     g.devicePick(.window(1), arrived: .unlocked); g.settle()
     g.gateChanges(to: .screenLocked); g.settle()
     g.select(.window(1), pick: false)                // a settings change's restart of what streamed
-    guard g.inFlight == nil, g.active == .desktop, g.placeholder else { return false }
+    guard g.inFlight == nil, g.active == .desktop, g.placeholder == !P.lockScreenStreams else { return false }
     g.gateChanges(to: .unlocked); g.settle()
     return g.active == .window(1)
 }
@@ -871,7 +880,7 @@ scenario("S8: the last device leaves while locked: nothing comes back for the ne
     g.deviceLeaves(); g.settle()
     guard g.active == .none else { return false }
     g.deviceJoins(); g.devicePick(.desktop, arrived: .screenLocked); g.settle()
-    guard g.placeholder else { return false }
+    guard g.placeholder == !P.lockScreenStreams else { return false }
     g.gateChanges(to: .unlocked); g.settle()
     return g.active == .desktop && !g.placeholder
 }
@@ -880,7 +889,7 @@ scenario("S9: a launch asked for before the lock picks nothing while locked") { 
     g.deviceLaunch(9, arrived: .unlocked)
     g.gateChanges(to: .screenLocked); g.settle()
     g.windowAppears(9); g.settle()
-    guard g.active == .desktop, g.placeholder else { return false }
+    guard g.active == .desktop, g.placeholder == !P.lockScreenStreams else { return false }
     g.gateChanges(to: .unlocked); g.settle()
     return g.active == .desktop && !g.placeholder
 }
@@ -897,13 +906,13 @@ scenario("S11: locked again before the unlock's look: the window waits for the n
     g.gateChanges(to: .screenLocked); g.settle()
     g.gate = .unlocked; g.gate = .screenLocked       // an unlock and a lock before lockChanged ran
     g.jobs.append(.lockChanged); g.settle()
-    guard g.active == .desktop, g.placeholder, g.restore.comesBack == 2 else { return false }
+    guard g.active == .desktop, g.placeholder == !P.lockScreenStreams, g.restore.comesBack == 2 else { return false }
     g.gateChanges(to: .unlocked); g.settle()
     return g.active == .window(2)
 }
-scenario("S12: nothing streams at the lock with a device connected: the placeholder, then the Desktop after the unlock") { g in
+scenario("S12: nothing streams at the lock with a device connected: the lock screen (the placeholder with the switch off), then the Desktop after the unlock") { g in
     g.gateChanges(to: .screenLocked); g.settle()
-    guard g.active == .desktop, g.placeholder else { return false }
+    guard g.active == .desktop, g.placeholder == !P.lockScreenStreams else { return false }
     g.gateChanges(to: .unlocked); g.settle()
     return g.active == .desktop && !g.placeholder
 }
@@ -912,18 +921,18 @@ scenario("S13: the Desktop asked for while off console streams the placeholder, 
     g.devicePick(.desktop, arrived: .offConsole); g.settle()
     return g.active == .desktop && g.placeholder && g.started.isEmpty
 }
-scenario("S14: the Desktop asked for while the screen is locked: the placeholder too (the display only with lockScreenStreams)") { g in
+scenario("S14: the Desktop asked for while the screen is locked: the lock screen streams (the placeholder with lockScreenStreams off)") { g in
     g.gateChanges(to: .screenLocked); g.settle()
     g.devicePick(.desktop, arrived: .screenLocked); g.settle()
-    return g.active == .desktop && g.placeholder && g.started.isEmpty
+    return g.active == .desktop && g.placeholder != P.lockScreenStreams && (P.lockScreenStreams || g.started.isEmpty)
 }
-scenario("S15: the display streams, another user takes the console: the placeholder at once; back and locked: still it") { g in
+scenario("S15: the display streams, another user takes the console: the placeholder at once; back and locked: the lock screen (the placeholder with the switch off)") { g in
     g.devicePick(.desktop, arrived: .unlocked); g.settle()
     guard g.active == .desktop, !g.placeholder else { return false }
     g.gateChanges(to: .offConsole); g.settle()
     guard g.placeholder else { return false }
     g.gateChanges(to: .screenLocked); g.settle()
-    guard g.placeholder else { return false }
+    guard g.placeholder != P.lockScreenStreams else { return false }
     g.gateChanges(to: .unlocked); g.settle()
     return g.active == .desktop && !g.placeholder
 }
@@ -975,7 +984,7 @@ for _ in 0..<5_000 {
         if firstBroken == nil { firstBroken = g.violations.joined(separator: "; ") + " after " + log.joined(separator: ", ") }
     }
 }
-check(sessionsBroken == 0, "\(sessionsRun) random sessions: no window or display starts while the gate reads locked, a locked Mac settles on the placeholder, the remembered window comes back"
+check(sessionsBroken == 0, "\(sessionsRun) random sessions: no window starts while the gate reads locked and the display only where the rule lets it (a locked screen), a locked Mac settles on the placeholder or the lock screen, the remembered window comes back"
       + (firstBroken.map { ": \($0)" } ?? ""))
 check(returned > 150 && lockedSettles > 1_000 && refusedSeen > 1_000,
       "the random sessions reach what they test: \(returned) windows came back after an unlock, \(lockedSettles) settled locked, \(refusedSeen) steps after a refused pick")

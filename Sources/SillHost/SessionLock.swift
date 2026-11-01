@@ -32,7 +32,9 @@ import os
 /// SILL_TEST_LOCKED=1 (this session's screen locked for the run), SILL_TEST_LOCKED_FILE=<path> (read at
 /// each look: 1 screen locked, 2 off console, anything else nothing), SILL_TEST_LOCK_NOTIFY=<name> (the
 /// screen's lock state from a notify name of the test's own, under me.saffer.sill.test.),
-/// SILL_TEST_LOCK_NOTE='<s> <name>[; …]' (notifications delivered to `note` on cue, nothing posted) and
+/// SILL_TEST_LOCK_NOTE='<s> <name>[; …]' (notifications delivered to `note` on cue, nothing posted),
+/// SILL_TEST_LOCK_IGNORE_MAC=1 (this Mac's own witnesses read as unlocked and the session dictionary is
+/// never read, so the test's hooks alone decide: a live check runs while this Mac's screen is locked) and
 /// SILL_TEST_LOCK_LOG=1 (each look's witnesses and reading).
 package final class SessionLock: @unchecked Sendable {
     package static let shared = SessionLock()
@@ -71,6 +73,8 @@ package final class SessionLock: @unchecked Sendable {
         var file: String?
         var notifyName: String?
         var notes: [(at: Double, name: String)] = []
+        /// This Mac's own witnesses are not consulted (SILL_TEST_LOCK_IGNORE_MAC).
+        var ignoreMac = false
         var log = false
     }
 
@@ -171,15 +175,20 @@ package final class SessionLock: @unchecked Sendable {
     /// Reads the console's user, the screen's state and the TEST ONLY hooks, then makes the reading (with
     /// `update` applied first). On `queue`.
     private func look(cause: String, update: ((inout LockPolicy.Reader) -> Void)? = nil) {
-        let console = readConsole(), screen = readScreen(), test = testReading()
+        // TEST ONLY (ignoreMac): this Mac's console user, screen state (unless a test notify name stands in)
+        // and session dictionary read as unlocked, so the hooks alone decide.
+        let console = hooks.ignoreMac ? LockPolicy.Console.thisUser : readConsole()
+        let screen = hooks.ignoreMac && hooks.notifyName == nil ? LockPolicy.Screen.unlocked : readScreen()
+        let test = testReading()
         let now = Self.clock()
         let (change, startRead, line) = state.withLockUnchecked { s -> (LockPolicy.Change?, Bool, String?) in
             update?(&s.reader)
             s.reader.console(console)
             s.reader.screen(screen)
             s.reader.test(test)
+            if hooks.ignoreMac { s.reader.session(.unlocked, startedAt: now) }
             let change = settle(&s, now: now)
-            let startRead = s.sessionReadStarted == nil && LockPolicy.readsSession(s.reader.witnesses)
+            let startRead = !hooks.ignoreMac && s.sessionReadStarted == nil && LockPolicy.readsSession(s.reader.witnesses)
             if startRead { s.sessionReadStarted = now }
             return (change, startRead, hooks.log ? logLine(s.reader, cause: cause) : nil)
         }
@@ -330,6 +339,7 @@ package final class SessionLock: @unchecked Sendable {
         if let path = env["SILL_TEST_LOCKED_FILE"], !path.isEmpty { h.file = path }
         h.notifyName = LockPolicy.testNotifyName(env["SILL_TEST_LOCK_NOTIFY"])
         h.notes = LockPolicy.testNotes(env["SILL_TEST_LOCK_NOTE"]) ?? []
+        h.ignoreMac = env["SILL_TEST_LOCK_IGNORE_MAC"] == "1"
         h.log = env["SILL_TEST_LOCK_LOG"] == "1"
         return h
     }
@@ -350,6 +360,7 @@ package final class SessionLock: @unchecked Sendable {
             lines.append(LockPolicy.testNotes(raw).map { "Test lock: \($0.count) notification\($0.count == 1 ? "" : "s") to deliver (SILL_TEST_LOCK_NOTE)." }
                          ?? "SILL_TEST_LOCK_NOTE=\(raw) ignored: '<seconds> <name>' parts split by ';', each name one SessionLock hears.")
         }
+        if env["SILL_TEST_LOCK_IGNORE_MAC"] == "1" { lines.append("Test lock: this Mac's own witnesses are ignored; the test's hooks alone decide (SILL_TEST_LOCK_IGNORE_MAC).") }
         if env["SILL_TEST_LOCK_LOG"] == "1" { lines.append("Test lock: each look's witnesses are printed (SILL_TEST_LOCK_LOG).") }
         return lines
     }
