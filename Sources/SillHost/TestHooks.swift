@@ -18,7 +18,7 @@ enum TestHooks {
         // SessionLock's (LockPolicy, docs/locked-mac-plan.md): the file (1 screen locked, 2 off console),
         // the screen's lock state from a notify name of the test's own, notifications delivered on cue,
         // and each look's witnesses printed.
-        "SILL_TEST_LOCKED_FILE", "SILL_TEST_LOCK_NOTIFY", "SILL_TEST_LOCK_NOTE", "SILL_TEST_LOCK_LOG",
+        "SILL_TEST_LOCKED_FILE", "SILL_TEST_LOCK_NOTIFY", "SILL_TEST_LOCK_NOTE", "SILL_TEST_LOCK_IGNORE_MAC", "SILL_TEST_LOCK_LOG",
         // The CLI's (main.swift): "0" turns Require pairing off at --pairing's TLS home door.
         "SILL_TEST_REQUIRE_PAIRING",
         // The device gate's (DeviceGate): a floor above "0" refuses devices.

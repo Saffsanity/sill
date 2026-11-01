@@ -265,10 +265,12 @@ enum LockPolicy {
 
     // MARK: What each reading allows
 
-    /// Whether the Desktop's display streams while this session's screen is locked (it would show the
-    /// lock screen), instead of the placeholder. Off until a test on a Mac shows that a capture of a
-    /// locked display is the lock screen and nothing else (docs/locked-mac-plan.md, open question 1).
-    static let lockScreenStreams = false
+    /// Whether the Desktop's display streams while this session's screen is locked, so a device sees the
+    /// lock screen itself, instead of the placeholder. On since 2026-10-31 (Noah: "show the real lock
+    /// screen's picture"); what a capture of a locked display holds is his test's to show
+    /// (docs/locked-mac-plan.md, open question 1). Off console the placeholder streams whatever this says:
+    /// from this session a capture shows this session's own desktop, never the login window.
+    static let lockScreenStreams = true
 
     /// Who types at the Mac.
     enum Input: Equatable, Sendable {
@@ -495,9 +497,12 @@ enum LockPolicy {
         mutating func afterUnlock(listed: [UInt32], active: StreamSource, placeholder: Bool, devices: Int, reading r: Reading) -> StreamSource? {
             guard !r.locked else { return nil }
             defer { comesBack = nil }
-            guard devices > 0, placeholder, active == .desktop else { return nil }
+            // The Desktop streaming is the lock's own (a device's pick since would have cleared `comesBack`
+            // or changed `active`): the remembered window back if it is still listed; else the display in
+            // place of the placeholder, and nothing where the lock screen streamed (the display goes on).
+            guard devices > 0, active == .desktop else { return nil }
             if let id = comesBack, listed.contains(id) { return .window(id) }
-            return .desktop
+            return placeholder ? .desktop : nil
         }
 
         /// The last device left: nothing comes back for the next one.

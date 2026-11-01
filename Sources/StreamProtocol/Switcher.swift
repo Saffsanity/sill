@@ -109,10 +109,12 @@ public enum LockedMac {
         case unlocking
     }
 
-    /// The cover after a window list that says `why` (nil: not locked): locked while it says so; after a
-    /// locked one, "Unlocking…" until the next keyframe (`shade(_:frameIsKeyframe:)`); else none.
+    /// The cover after a window list that says `why` (nil: not locked): the Mac switched to another user
+    /// while it says so; this session's own screen locked shows no cover, since the Mac streams its lock
+    /// screen (`LockPolicy.lockScreenStreams`); after a cover, "Unlocking…" until the next keyframe
+    /// (`shade(_:frameIsKeyframe:)`, the lock screen's or the window's); else none.
     public static func shade(_ was: Shade?, list why: Why?) -> Shade? {
-        if let why { return .locked(why) }
+        if why == .otherUser { return .locked(.otherUser) }
         return was == nil ? nil : .unlocking
     }
 

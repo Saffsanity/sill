@@ -96,7 +96,7 @@ it through `onChange` and acts on the reading as it is when it runs.
 
 | | unlocked | screen locked | off console |
 |---|---|---|---|
-| The picture | the source | a placeholder: a black still, no capture (`lockScreenStreams`, off, would stream the display) | the placeholder |
+| The picture | the source | the display, the lock screen itself (`lockScreenStreams`, on; off, a placeholder: a black still, no capture) | the placeholder |
 | Windows: listed, picked, staged, sized, thumbnails, buttons, menus | yes | no | no |
 | Icons, the installed apps, launches | yes | no (withheld, sent at the unlock) | no |
 | Sound, clipboard, pointer (26), cursor shape (14), gestures | yes | no | no |
@@ -203,6 +203,9 @@ lists them, and anywhere else each is ignored with one line):
 - `SILL_TEST_LOCK_NOTE='<s> <name>[; <s> <name>]'`: each named notification delivered to SessionLock's
   handler s seconds after it starts, as that notification would be: the handler's path without a real
   lock and without posting anything another app hears.
+- `SILL_TEST_LOCK_IGNORE_MAC=1`: this Mac's own witnesses (the console's user, the screen's
+  state, the session dictionary) read as unlocked and the dictionary is never read, so the hooks
+  above alone decide; `Scripts/lock-check/live.py` sets it, so it runs while this Mac is locked.
 - `SILL_TEST_LOCK_LOG=1`: each look's witnesses and reading.
 
 `Scripts/lock-check/` runs the whole host through locks and unlocks with test clients reading frames:
@@ -258,10 +261,14 @@ VideoToolbox's software decoder: their size and luma). `sillclient.py` also prin
 
 ## Open questions, with the default taken
 
-1. **A locked screen's picture.** The placeholder (`lockScreenStreams` false): nobody has seen what a
-   display capture of a locked screen holds (build 1232 delivered 32 to 39 frames a second at 04:26:54,
-   screen locked, content unknown). If Noah's test shows it is the lock screen alone, one constant
-   streams it. Default taken.
+1. **A locked screen's picture.** The display streams (`lockScreenStreams` true): Noah, 2026-10-31,
+   "show the real lock screen's picture at all times instead of this overlay panel". Nobody has seen
+   what a display capture of a locked screen holds (build 1232 delivered 32 to 39 frames a second at
+   04:26:54, screen locked, content unknown): his test shows it, and if it is anything but the lock
+   screen the constant goes back to the placeholder. Off console the placeholder stays: from this
+   session a capture shows this session's own desktop, never the login window (build 1232), so the
+   real login screen cannot be shown without a helper outside the session. The device's cover shows
+   only off console; a locked screen needs none. Noah's choice.
 2. **Typing the password from a device.** A paired session's input is posted at a locked screen; whether
    macOS's password field takes events Sill posts (it turns on secure input) was never tried. The
    device's cover says so to a paired session; the public words wait. Default taken: post it.
@@ -351,9 +358,10 @@ iPad build; Sill.log has a "Locked:" line at each lock or switch, "Unlocked:" ab
 unlock:
 
 1. **The lock with a window streaming** (Virtual Display on, then off): lock the Mac (⌃⌘Q). The iPad
-   shows "‹Mac› is locked" over a black picture at once, the thumbnails and the Apps list go; with
+   shows the Mac's own lock screen (no cover; the Apps drawer says "‹Mac› is locked"), the
+   thumbnails and the Apps list go; with
    Virtual Display on, the window is back on the Mac's display and no "Sill" display remains.
-2. **The password from the iPad** (a paired iPad): with the cover up, type the Mac's password on the
+2. **The password from the iPad** (a paired iPad): with the lock screen showing, type the Mac's password on the
    Magic Keyboard or the on-screen keyboard and press Return. If the Mac unlocks: "Unlocked:", then
    "Unlocking…" briefly and the window back by itself. If nothing types, note it (and which keyboard):
    macOS's secure input may refuse posted keys, and the cover's words change then.
@@ -367,5 +375,5 @@ unlock:
    its taps and keys do nothing ("Locked: dropped …"). Turn Require pairing back on.
 6. **The rest while locked**: no Menus button, a three-finger swipe does nothing, no Paste offered, no
    sound, the Mac's pointer not drawn; all back after the unlock.
-7. **Mixed builds**: the App Store iPad (0.5.x) against this Sill.app while locked: a black picture (the
-   placeholder), an empty bar and drawer, no words; this iPad against Sill for Mac 0.5.1: as before.
+7. **Mixed builds**: the App Store iPad (0.5.x) against this Sill.app: the lock screen while locked, and
+   switched to another user a black picture (the placeholder), an empty bar and drawer, no words; this iPad against Sill for Mac 0.5.1: as before.

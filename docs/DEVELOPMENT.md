@@ -1253,8 +1253,9 @@ picture.
 
 While the Mac's screen is locked, or it is switched to another user (or to the
 login window) while your session runs in the background, a device sees none of
-it (docs/locked-mac-plan.md). The host streams a placeholder, a black still with
-no capture at all, in place of the window or the Desktop; the window list is
+it (docs/locked-mac-plan.md). The host streams the display while your own screen is locked (the lock
+screen itself) and, while another user has the console, a placeholder, a black
+still with no capture at all, in place of the window or the Desktop; the window list is
 empty and says `locked` (and `offConsole` while another user is on the
 console); no thumbnail is taken, no icon, installed app, sound, clipboard,
 pointer or cursor shape goes out; a window picked, an app launched, a window's
@@ -1296,6 +1297,9 @@ Sill.app ignores each with a line):
   `screenIsUnlocked`, `sessionDidMoveOffConsole`, `sessionDidMoveOnConsole`,
   `sessionDidResignActive`, `sessionDidBecomeActive`, or their full names), as
   it would be: nothing is posted, so no other app hears it.
+- `SILL_TEST_LOCK_IGNORE_MAC=1`: this Mac's own witnesses (the console's user, the screen's
+  state, the session dictionary) read as unlocked and the dictionary is never read, so the hooks
+  above alone decide; `Scripts/lock-check/live.py` sets it, so it runs while this Mac is locked.
 - `SILL_TEST_LOCK_LOG=1`: each look's witnesses and reading.
 
 `sillclient.py`'s window list line ends in `locked=1` (and `offConsole=1`)

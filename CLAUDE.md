@@ -38,9 +38,9 @@ heartbeat gate was built. His next test is the first one of this fix. Host, wire
   MenuMirror, InputInjector and VirtualStage (`mayMakeDisplay`, `mayWarp`, `Failure.locked`) ask it too. An icon or
   the app list it withheld after the coordinator had sent them (a send that raced the lock) is reported
   (`StreamServer.onCatalogWithheld`), and the unlock sends that device every icon and the apps.
-- Allowed (`LockPolicy.allowed`): screen locked and off console stream a placeholder, a black still with no
-  capture (`StillCapture`; `lockScreenStreams` false, the one switch to stream a locked screen's display, an open
-  question for Noah's test); no windows, icons, apps, launches, sound, clipboard, pointer, gestures or virtual
+- Allowed (`LockPolicy.allowed`): a locked screen streams the display, the lock screen itself (`lockScreenStreams` true: Noah,
+  2026-10-31, "show the real lock screen's picture"; what the capture holds is his test's to show), off console a
+  placeholder, a black still with no capture (`StillCapture`), since a capture from this session shows its own desktop; no windows, icons, apps, launches, sound, clipboard, pointer, gestures or virtual
   display; input from a paired session at a locked screen (the password), nobody's off console but the up of what
   is held (`takesInput`, the coordinator's `lockedOut`, the injector's own last word); DisplayWake declares nothing
   off console and at a locked screen only a paired session's taken input.
@@ -48,7 +48,7 @@ heartbeat gate was built. His next test is the first one of this fix. Host, wire
   (`StreamServer.onMessage`'s third argument) and now; a window pick, a launch, kind 15, kinds 27 with an id and
   25 ("The Mac is locked."), kind 28 and a device's clipboard text refused; the Desktop or nothing picked taken.
 - The stream (`lockChanged`, `enforceLock`, `lockedMidSwitch`, `afterUnlock`, `LockPolicy.Restore`): at the lock a
-  window goes home and the placeholder streams, remembered; while locked any select of a window becomes the
+  window goes home and the Desktop streams (the lock screen; the placeholder off console), remembered; while locked any select of a window becomes the
   placeholder; after the unlock the catalog afresh, withheld icons and apps, the list, then the remembered window
   (as a restart) or the Desktop. `LockPolicy.reconciles`: coalesced changes acted on by what streams (found by the
   check's random sessions). Lines at the change (SessionLock's): "Locked: this Mac's screen is locked; …", "Locked:
@@ -63,6 +63,7 @@ heartbeat gate was built. His next test is the first one of this fix. Host, wire
 - TEST ONLY (test hosts only, TestHooks lists them): `SILL_TEST_LOCKED=1`; `SILL_TEST_LOCKED_FILE` (1 screen locked,
   2 off console); `SILL_TEST_LOCK_NOTIFY=<me.saffer.sill.test.…>` (the screen's notify name of the test's own);
   `SILL_TEST_LOCK_NOTE='<s> <name>; …'` (notifications delivered to the handler, nothing posted);
+  `SILL_TEST_LOCK_IGNORE_MAC=1` (this Mac's own witnesses read as unlocked: the live check on a locked Mac),
   `SILL_TEST_LOCK_LOG=1`. sillclient: `offConsole=1`, `--dump=DIR`. `Scripts/lock-check/` (live.py, frames.swift).
 - The review (2026-10-31, after b1404215; the plan's "The review"): fourteen findings (four must-fix), all taken,
   the code in one commit (the rule's rewrite reaches every file), then one each for the icons that raced the

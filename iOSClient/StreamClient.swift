@@ -970,6 +970,8 @@ final class StreamClient: ObservableObject {
     /// A locked Mac (docs/locked-mac-plan.md), on `queue`: the last window list said `locked` (the picture
     /// was cleared then), and, after a list that no longer does, the first keyframe ends the cover.
     private var lockListed = false
+    /// The last list said another user has the console (the cover, and the picture cleared once).
+    private var offConsoleListed = false
     private var unlockWaitsForKeyframe = false
 
     // Liveness, on `queue` (docs/remote-access-plan.md §7.6). The host answers every ping, so a
@@ -3586,7 +3588,7 @@ final class StreamClient: ObservableObject {
         lockShade = nil
         lockShadeExpiry?.cancel()
         lockShadeExpiry = nil
-        queue.async { [weak self] in self?.lockListed = false; self?.unlockWaitsForKeyframe = false }
+        queue.async { [weak self] in self?.lockListed = false; self?.offConsoleListed = false; self?.unlockWaitsForKeyframe = false }
         active = .none
         thumbnails = [:]
         icons = [:]
@@ -4150,11 +4152,13 @@ final class StreamClient: ObservableObject {
         case .windowList:
             guard let list = Wire.decode(WindowList.self, from: data) else { return }
             let from = connection
-            // A locked Mac (docs/locked-mac-plan.md): its picture goes at once, here, before any later
-            // frame (the Mac sends a black placeholder; an older one's last frame would stay otherwise),
-            // and after the unlock the first keyframe ends the cover.
+            // A Mac switched to another user (docs/locked-mac-plan.md): its picture goes at once, here,
+            // before any later frame (the Mac sends a black placeholder; an older one's last frame would stay
+            // otherwise), and after the unlock the first keyframe ends the cover. This session's own screen
+            // locked: the Mac streams its lock screen, so the picture stays.
             let why = LockedMac.why(list)
-            if why != nil, !lockListed { onBlank?() }
+            if why == .otherUser, !offConsoleListed { onBlank?() }
+            offConsoleListed = why == .otherUser
             if why == nil, lockListed { unlockWaitsForKeyframe = true }
             if why != nil { unlockWaitsForKeyframe = false }
             lockListed = why != nil

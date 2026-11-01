@@ -87,7 +87,7 @@ M = [
     ("pollInterval: 5 s", F, "static let pollInterval: Double = 1", "static let pollInterval: Double = 5"),
     ("sessionBound: 5 s", F, "static let sessionBound: Double = 0.5", "static let sessionBound: Double = 5"),
     # What each reading allows.
-    ("lockScreenStreams: on", F, "static let lockScreenStreams = false", "static let lockScreenStreams = true"),
+    ("lockScreenStreams: off", F, "static let lockScreenStreams = true", "static let lockScreenStreams = false"),
     ("allowed: a locked screen's windows", F, "return Allowed(display: lockScreenStreams, windows: false,", "return Allowed(display: lockScreenStreams, windows: true,"),
     ("allowed: a locked screen's sound", F, "launches: false, sound: false,\n                           clipboard: false, pointer: false",
      "launches: false, sound: true,\n                           clipboard: false, pointer: false"),

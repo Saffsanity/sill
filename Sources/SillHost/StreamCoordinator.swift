@@ -1444,7 +1444,11 @@ package final class StreamCoordinator {
     private func enforceLock() async {
         // With no device left, the client count's own select(.none) stops the stream instead.
         guard lockReading.locked, !switching, catalog.clientCount > 0 else { return }
-        if active == .desktop, placeholderStreams || LockPolicy.allowed(lockReading).display { return }
+        // The Desktop already as this reading has it (the placeholder, or the display where it may stream:
+        // a locked screen with `LockPolicy.lockScreenStreams`); else the Desktop again, so another user
+        // taking the console turns the display into the placeholder, and this session back on it, locked,
+        // turns the placeholder into the lock screen.
+        if active == .desktop, placeholderStreams != LockPolicy.allowed(lockReading).display { return }
         await select(.desktop)
     }
 
