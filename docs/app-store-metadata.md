@@ -471,6 +471,7 @@ Sound from your Mac, a beta feature: your iPhone or iPad plays the sound of the 
 
 Aa now starts at Off, which leaves your Mac’s window as it is, and sliding it back to Off puts a window Sill resized back to its own size right away. That needs Sill for Mac from this release: with an earlier one, Off only stops the resizing. On Sill’s virtual display a window always fits, so Aa has no Off there. Aa is dimmed while the Desktop shows: it sizes a window.
 
+While your Mac is locked, Sill shows its lock screen and nothing else, and while it is switched to another user, your iPhone or iPad says so. The Apps list, your Mac’s menus, its sound and the clipboard wait until it is unlocked.
 After this update, the tour of Sill’s controls shows once more, with what’s new marked New. Take the Tour, at the bottom of Settings, shows it again any time.
 ```
 
@@ -478,6 +479,11 @@ The pinch's paragraph (PR #196) sat in 0.5.1's block above, which App Store Conn
 the pinch ships with the next version, so it is in this draft (the tour's last paragraph came with it,
 2026-10-31). For that version's TestFlight build, What to Test can say: "The tour shows once more after
 this update; please tell us if a New: row is wrong."
+
+The locked Mac's paragraph (branch locked-mac, docs/locked-mac-plan.md, 229 characters) is a security
+fix found on 2026-10-31: say what it does, not what it fixed. Its device test (the plan's Untested) is
+Noah's: a real lock, another user at the login screen. Typing the Mac's password from the device waits
+for his test (the plan's step 2): add it here only once a posted password unlocks a Mac.
 
 The sound's paragraph (PR #94) is "a beta feature", never a beta of the app (guideline 2.2), and waits,
 as the description's bullet does, for its device tests (Before you submit).

@@ -52,9 +52,13 @@ final class VirtualStage {
         case moveRefused(AXError)
         case notOnDisplay(CGRect)
         case windowMissing
+        /// This Mac read locked as the display was about to be made (LockPolicy: no virtual display while
+        /// locked). Never counted as a creation failure; the coordinator streams nothing of the window.
+        case locked
 
         var description: String {
             switch self {
+            case .locked: return "locked (this Mac is locked: no virtual display is made)"
             case .disabled(let why): return "virtual display disabled: \(why)"
             case .accessibilityOff: return "accessibilityOff (Accessibility permission is needed to move the window)"
             case .screenRecordingOff: return "screenRecordingOff (Screen Recording is needed to capture the display; without it ScreenCaptureKit also hangs while a virtual display exists)"
@@ -81,6 +85,7 @@ final class VirtualStage {
             case .moveRefused: return "the app refused the move"
             case .notOnDisplay: return "the window didn’t move"
             case .windowMissing: return "the window went away"
+            case .locked: return "this Mac is locked"
             }
         }
     }
@@ -141,6 +146,11 @@ final class VirtualStage {
     /// not the Mac's user taking over the pointer (PointerWatch.sillMoved). Before the warp, never
     /// after, for the reason InputInjector's `watch` gives. Main actor.
     var onWarp: (() -> Void)?
+    /// The coordinator's lock (LockPolicy, docs/locked-mac-plan.md): no display is made while it says
+    /// locked (`Failure.locked`), and the cursor is never warped while `mayWarp` says no (off console the
+    /// cursor is the console's, another user's). Unset: as ever.
+    var mayMakeDisplay: (() -> Bool)?
+    var mayWarp: (() -> Bool)?
 
     let sizer: WindowSizer
     let catalog: WindowCatalog
@@ -516,6 +526,8 @@ final class VirtualStage {
         if placement != nil { releaseWindow() }
         destroyDisplay()
 
+        // A locked Mac makes no display: off console one joined the console's display set (2026-10-31).
+        if let may = mayMakeDisplay, !may() { throw Failure.locked }
         let t0 = Date()
         let d: VirtualDisplay
         do {
@@ -656,7 +668,7 @@ final class VirtualStage {
         }
         // The Mac cursor followed the device onto the virtual display: bring it back where it was
         // (or to the middle of the main display) so it is not stranded on a screen about to vanish.
-        if let d = display, d.isAlive, let here = CGEvent(source: nil)?.location, CGDisplayBounds(d.displayID).contains(here) {
+        if mayWarp?() ?? true, let d = display, d.isAlive, let here = CGEvent(source: nil)?.location, CGDisplayBounds(d.displayID).contains(here) {
             let main = CGDisplayBounds(CGMainDisplayID())
             onWarp?()
             CGWarpMouseCursorPosition(cursorBefore ?? CGPoint(x: main.midX, y: main.midY))

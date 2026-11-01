@@ -145,13 +145,15 @@ serves the root or `/docs`, never `/site`. So:
   since 2026-10-27) between `<!-- Virtual Display` and `<!-- /Virtual Display -->`, support.html's
   paragraph on Aa's Off and Aa dimmed over the Desktop (PR #181, issue #179) between `<!-- Aa Off`
   and `<!-- /Aa Off -->`, the thumbnail hold's (PR #248, issue #113: privacy.html's item and
-  support.html's section) between `<!-- Thumbnail hold` and `<!-- /Thumbnail hold -->`, and
+  support.html's section) between `<!-- Thumbnail hold` and `<!-- /Thumbnail hold -->`,
   support.html's sentence that Sill for Mac names a firewall that blocks it, in its menu and its
   Settings (PR #250; the item's command before it holds for the builds out too), between
-  `<!-- Firewall` and `<!-- /Firewall -->`, and the tour once more (branch `tour-0-6`, tour version
+  `<!-- Firewall` and `<!-- /Firewall -->`, the tour once more (branch `tour-0-6`, tour version
   2: support.html's paragraph that the tour shows once more after an update, and privacy.html's item
   on the tour's version; the tour's section's first paragraph holds for the builds out) between
-  `<!-- Tour 0.6` and `<!-- /Tour 0.6 -->`. A republish before those
+  `<!-- Tour 0.6` and `<!-- /Tour 0.6 -->`, and support.html's section on a locked Mac (branch
+  `locked-mac`: a locked Mac shows its lock screen and nothing else) between `<!-- Locked Mac` and
+  `<!-- /Locked Mac -->`. A republish before those
   releases (for words that hold for the builds already out, such as support.html's on a Mac asleep
   or restarted, or on a black picture) deletes the blocks of each release not out yet in the
   sill-site copy after the rsync below (the perl lines, one per marker) and puts privacy.html's
@@ -168,6 +170,7 @@ serves the root or `/docs`, never `/site`. So:
   `grep -n 'Virtual Display is on unless' ../sill-site/*.html`,
   `grep -n 'Aa starts at Off' ../sill-site/*.html`,
   `grep -n "hold a window’s thumbnail" ../sill-site/*.html`,
+  `grep -n 'Your Mac is locked' ../sill-site/*.html`,
   `grep -n 'Devices Can’t Connect' ../sill-site/*.html`,
   `grep -n 'tour shows once more' ../sill-site/*.html` and
   `grep -n 'version of the tour' ../sill-site/*.html` print nothing. The release that ships each
@@ -191,6 +194,7 @@ perl -0pi -e 's/[ \t]*<!-- Aa Off:.*?<!-- \/Aa Off -->\n//gs' ../sill-site/*.htm
 perl -0pi -e 's/[ \t]*<!-- Thumbnail hold:.*?<!-- \/Thumbnail hold -->\n//gs' ../sill-site/*.html   # only before the thumbnail hold's release (PR #248)
 perl -0pi -e 's/[ \t]*<!-- Firewall:.*?<!-- \/Firewall -->\n//gs' ../sill-site/*.html   # only before the release that names a firewall that blocks Sill
 perl -0pi -e 's/[ \t]*<!-- Tour 0\.6:.*?<!-- \/Tour 0\.6 -->\n//gs' ../sill-site/*.html   # only before the release that shows the tour once more (tour version 2)
+perl -0pi -e 's/[ \t]*<!-- Locked Mac:.*?<!-- \/Locked Mac -->\n//gs' ../sill-site/*.html   # only before the release that shows a locked Mac's lock screen and nothing else
 git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" && git -C ../sill-site push
 ```
 

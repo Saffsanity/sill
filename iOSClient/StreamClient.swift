@@ -508,8 +508,12 @@ final class StreamClient: ObservableObject {
         }
         onParameterSets = { ps in view.apply(ps) }
         onFrame = { data, isKey in view.enqueue(data, isKeyframe: isKey) }
+        onBlank = { view.blank() }
         return view
     }()
+    /// On `queue`: the picture removed until the next keyframe (a locked Mac, docs/locked-mac-plan.md).
+    /// Nil until the display view exists: then there is no picture to remove.
+    var onBlank: (() -> Void)?
 
     var onParameterSets: ((ParameterSets) -> Void)? {
         didSet {
@@ -889,6 +893,20 @@ final class StreamClient: ObservableObject {
     /// Mac takes and sends (`WindowList.clipboard`, 1 for text), nil from a Mac before it or with Share
     /// clipboard with devices off. Cleared with the session.
     @Published var hostClipboard: Int?
+    /// Why this session's Mac shows nothing of itself (`WindowList.locked`, `offConsole`;
+    /// docs/locked-mac-plan.md): its screen is locked, or it is switched to another user. Its lists have no
+    /// windows then, it streams a black placeholder, and the Apps drawer and the Settings panel's header
+    /// say why where the windows would be (`LockedMac.line`). Nil from a Mac before it. Cleared with the
+    /// session.
+    @Published var lockWhy: LockedMac.Why?
+    var macLocked: Bool { lockWhy != nil }
+    /// What covers the stream (`LockedMac.Shade`): the Mac locked, then "Unlocking…" until the first
+    /// keyframe after the unlock (`unlockingTimeout` at most). The picture under it was cleared at the
+    /// lock (`HEVCDisplayView.blank`), so the last frame from before the lock never shows. Cleared with
+    /// the session.
+    @Published var lockShade: LockedMac.Shade?
+    /// "Unlocking…"'s timeout.
+    private var lockShadeExpiry: DispatchWorkItem?
     /// The chip "Paste on ‹Mac›" is offered (ClipboardPolicy.offersChip) until it is used, dismissed or
     /// its time is up; the stream screen hides it while something is open over the stream.
     @Published var clipboardChip = false
@@ -949,6 +967,10 @@ final class StreamClient: ObservableObject {
     /// Disconnect waits for a keyframe (`freshPictureWait`'s token): the next to come is told to the
     /// main thread. On `queue`.
     private var keyframeWanted: Int?
+    /// A locked Mac (docs/locked-mac-plan.md), on `queue`: the last window list said `locked` (the picture
+    /// was cleared then), and, after a list that no longer does, the first keyframe ends the cover.
+    private var lockListed = false
+    private var unlockWaitsForKeyframe = false
 
     // Liveness, on `queue` (docs/remote-access-plan.md §7.6). The host answers every ping, so a
     // live connection never goes quiet for long; a dead path used to keep a frozen picture.
@@ -3560,6 +3582,11 @@ final class StreamClient: ObservableObject {
         self.status = status
         macName = ""
         windows = []
+        lockWhy = nil
+        lockShade = nil
+        lockShadeExpiry?.cancel()
+        lockShadeExpiry = nil
+        queue.async { [weak self] in self?.lockListed = false; self?.unlockWaitsForKeyframe = false }
         active = .none
         thumbnails = [:]
         icons = [:]
@@ -3585,6 +3612,23 @@ final class StreamClient: ObservableObject {
         sound.sessionEnded()
         // Nor the clipboard's subscription, its chip or its note.
         resetClipboard()
+    }
+
+    /// The cover over the stream (a locked Mac, `LockedMac.Shade`): set, and "Unlocking…" given
+    /// `LockedMac.unlockingTimeout` at most, should the picture not come back by itself. Main thread.
+    private func lockShadeChanged(_ next: LockedMac.Shade?) {
+        guard next != lockShade else { return }
+        lockShade = next
+        lockShadeExpiry?.cancel()
+        lockShadeExpiry = nil
+        guard next == .unlocking else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.lockShade == .unlocking else { return }
+            self.lockShade = nil
+            self.queue.async { self.unlockWaitsForKeyframe = false }
+        }
+        lockShadeExpiry = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + LockedMac.unlockingTimeout, execute: work)
     }
 
     // MARK: - Client → host
@@ -4096,11 +4140,24 @@ final class StreamClient: ObservableObject {
                     DispatchQueue.main.async { self.freshKeyframeCame(token, timedOut: false) }
                 }
             }
+            // The first keyframe after a locked Mac's unlock: its picture is back, the cover goes.
+            if header.isKeyframe, unlockWaitsForKeyframe {
+                unlockWaitsForKeyframe = false
+                DispatchQueue.main.async { self.lockShadeChanged(LockedMac.shade(self.lockShade, frameIsKeyframe: true)) }
+            }
             frameForSound(header)
             onFrame?(data, header.isKeyframe)
         case .windowList:
             guard let list = Wire.decode(WindowList.self, from: data) else { return }
             let from = connection
+            // A locked Mac (docs/locked-mac-plan.md): its picture goes at once, here, before any later
+            // frame (the Mac sends a black placeholder; an older one's last frame would stay otherwise),
+            // and after the unlock the first keyframe ends the cover.
+            let why = LockedMac.why(list)
+            if why != nil, !lockListed { onBlank?() }
+            if why == nil, lockListed { unlockWaitsForKeyframe = true }
+            if why != nil { unlockWaitsForKeyframe = false }
+            lockListed = why != nil
             DispatchQueue.main.async {
                 // Only from the current connection: a list queued by a replaced one must not
                 // describe the next session.
@@ -4116,6 +4173,10 @@ final class StreamClient: ObservableObject {
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
                 self.hostKeyRepeat = list.keyRepeat
+                // A locked Mac's list has no windows: the drawer and the panel say why, the cover over the
+                // stream too (LockedMac).
+                if self.lockWhy != why { self.lockWhy = why }
+                self.lockShadeChanged(LockedMac.shade(self.lockShade, list: why))
                 // The clipboard: subscribe (or stop) as the Mac's word and this device's switch say.
                 self.hostClipboardChanged(list.clipboard)
                 if !self.sessionListed {

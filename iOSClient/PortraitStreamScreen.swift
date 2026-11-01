@@ -475,6 +475,8 @@ struct PortraitStreamScreen: View {
                          writeZoom: { [zoom] in zoom.set($0) })
         }
         .background(Palette.panel)
+        // A locked Mac: its cover over the picture (LockedMac), under the link's line.
+        .overlay { LockedMacShade(client: client) }
         .overlay(alignment: .top) { LinkLineView(text: linkLine) }
         .clipShape(streamShape)
         .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
