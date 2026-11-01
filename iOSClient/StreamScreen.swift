@@ -284,15 +284,22 @@ struct StreamScreen: View {
                 // outside link puts the tour aside until the overlay has closed.
                 if let run = tour, !overlayShown {
                     // With Larger Picture no thumbnails: the bar card is about Apps, and the cards
-                    // upright stand in the picture's whole room, the black under a short picture.
-                    TourOverlay(run: run, copy: tourCopy(run, layout, keysOnItsSide: posture.onInnerDisplay,
-                                                         thumbnails: largerKeyboard == nil),
+                    // upright stand in the picture's whole room, the black under a short picture. The
+                    // words follow what this Mac and this device have now (TourFeatures).
+                    let features = tourFeatures(offersLarger: offersLarger)
+                    let copy = tourCopy(run, layout, keysOnItsSide: posture.onInnerDisplay,
+                                        thumbnails: largerKeyboard == nil, features: features)
+                    TourOverlay(run: run, copy: copy,
                                 layout: layout, targets: tourTargets,
                                 thumbnails: largerKeyboard == nil,
                                 room: largerKeyboard.map { PhonePortraitLayout(size: geo.size, keyboard: $0).picture },
                                 screen: geo.size, bottomInset: geo.safeAreaInsets.bottom,
                                 next: tourNext, skip: tourSkip)
                         .transition(.opacity)
+                        #if DEBUG
+                        // The console's line for the photo gates: each card's rows and what they looked at.
+                        .onChange(of: Self.tourRowsLine(run, copy, features), initial: true) { _, line in print(line) }
+                        #endif
                 }
                 // A sibling in the same stack, not an `.overlay`: over the stream's UIKit input
                 // view, only a sibling drawn after it received the touches (measured on the
@@ -880,12 +887,43 @@ struct StreamScreen: View {
     }
 
     /// `keysOnItsSide`: the iPhone Duo open, whose keys and trackpad come with the device on its side.
-    /// `thumbnails`: false for a phone with Larger Picture.
-    private func tourCopy(_ run: TourRun, _ layout: TourLayout, keysOnItsSide: Bool = false, thumbnails: Bool = true) -> TourCopy {
+    /// `thumbnails`: false for a phone with Larger Picture. `features`: `tourFeatures`.
+    private func tourCopy(_ run: TourRun, _ layout: TourLayout, keysOnItsSide: Bool = false, thumbnails: Bool = true,
+                          features: TourFeatures) -> TourCopy {
         TourPolicy.copy(run.at, layout, mac: client.macName, device: StreamClient.deviceWord,
                         voiceOver: tourVoiceOver, firstOfRun: run.firstOfRun, keysOnItsSide: keysOnItsSide,
-                        thumbnails: thumbnails)
+                        thumbnails: thumbnails, features: features)
     }
+
+    /// What the tour's words depend on now (TourFeatures): the Menus button on screen (its target
+    /// reported), this device's Three-Finger Gestures with a Mac that takes them, the Mac's Virtual
+    /// Display setting as the Settings panel shows it, the clipboard the Mac's window list shares, this
+    /// device's Paste on ‹Mac› Right Away, a Mac with sound (Send Audio, on or off), and
+    /// `offersLarger`, the Settings panel's Larger Picture switch offered here (`body`). The window
+    /// list comes before the picture and kind 16 right after it, so a card sees them; a late change
+    /// redraws its rows.
+    private func tourFeatures(offersLarger: Bool) -> TourFeatures {
+        TourFeatures(menus: tourTargets[.menus] != nil,
+                     gestures: StreamClient.gesturesOn && (client.hostGestures ?? 0) >= TrackpadGesture.generation,
+                     virtualDisplay: client.settings.displayed?.virtualDisplay == true,
+                     clipboard: ClipboardPolicy.hostTakes(client.hostClipboard),
+                     pasteRightAway: StreamClient.pasteRightAwayOn,
+                     sound: client.macHasSound,
+                     largerPicture: offersLarger)
+    }
+
+    #if DEBUG
+    /// "tour: card bar (Windows and Menus): 5 rows, 2 New; Menus button, gestures, no Virtual Display,
+    /// clipboard, paste right away, sound, no Larger Picture".
+    static func tourRowsLine(_ run: TourRun, _ copy: TourCopy, _ f: TourFeatures) -> String {
+        func has(_ on: Bool, _ name: String) -> String { on ? name : "no " + name }
+        let what = [has(f.menus, "Menus button"), has(f.gestures, "gestures"), has(f.virtualDisplay, "Virtual Display"),
+                    has(f.clipboard, "clipboard"), has(f.pasteRightAway, "paste right away"), has(f.sound, "sound"),
+                    has(f.largerPicture, "Larger Picture")]
+        return "tour: card \(run.at.rawValue) (\(copy.title)): \(copy.rows.count) rows, \(copy.rows.filter(\.isNew).count) New; "
+            + what.joined(separator: ", ")
+    }
+    #endif
 
     private func tourLog(_ line: @autoclosure () -> String) {
         #if DEBUG

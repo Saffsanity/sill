@@ -363,7 +363,7 @@ submission of both apps, and needs Sill for Mac from the same release): add this
 touch", after the one that starts "Type with":
 
 ```text
-• Copy text on your Mac and paste it on your iPhone or iPad. To paste on your Mac what you copied on your device, tap Paste in Sill: it goes where your Mac’s cursor is. Copies a password manager marks as concealed stay on your Mac.
+• Copy text on your Mac and paste it on your iPhone or iPad. To paste on your Mac what you copied on your device, tap Paste in Sill: it goes where your Mac’s cursor is.
 ```
 
 **For the next version, with the sound** (PR #94, a beta feature; docs/audio-plan.md: it ships with
@@ -435,8 +435,6 @@ changed since the build before.
 Made for iPhone Duo. Open it flat and your Mac fills the inner display. Half open, it’s a laptop: the picture above the fold, a trackpad and keys below. Closed, Sill runs on the cover display. Nothing you touch sits on the fold.
 
 Away from home, Sill now starts at a quality a slower connection can carry, tells you when the connection can’t keep up and offers a quality it can, and moves your session back to your home network by itself when you get home. Also fixed: if your Mac showed twice away from home after Sill for Mac 0.4.0 gave it a new key, the row that didn’t work now connects, and the other goes. For the away quality and the notice, update Sill for Mac to 0.5.1 from getsill.app: from this release on, both apps share one version number.
-
-Pinch to zoom: two fingers zoom the picture up to 5× around the point between them, and move it while it’s zoomed. Taps, clicks and scrolls land on what you see under your finger. Pinch all the way out to see everything again.
 ```
 
 Local-only build (0.5.1's other changes are all away from home's):
@@ -457,6 +455,8 @@ With a keyboard attached to your iPhone or iPad, what you type goes to your Mac 
 
 Reverse Scrolling, in Settings: a finger dragged over the picture, or two fingers on the trackpad below it, scroll the other way. A trackpad or mouse connected to your iPad keeps following its Natural Scrolling setting.
 
+Pinch to zoom: two fingers zoom the picture up to 5× around the point between them, and move it while it’s zoomed. Taps, clicks and scrolls land on what you see under your finger. Pinch all the way out to see everything again.
+
 Hold a window’s thumbnail and its close, minimize and full-screen controls now show after half a second, not a second and a half. To hold longer or shorter, from 0.2 to 2 seconds, use Hold to Show Window Controls in Settings.
 
 Fixed: after Sill sat in the background for hours, it could stop finding your Mac until you closed and reopened it. Sill now looks again when you come back, keeps trying for a few minutes while your Mac doesn’t answer (when it’s asleep, say), and connects when it does.
@@ -470,7 +470,14 @@ Copy and paste between your Mac and your iPhone or iPad: text you copy on your M
 Sound from your Mac, a beta feature: your iPhone or iPad plays the sound of the window you’re using, or of every app for the Desktop, a moment behind the picture. Send Audio in Sill’s settings on your iPhone or iPad, or in the Sill menu on your Mac, turns it off and on for every device, and Mute in Sill’s settings silences it on one device. It needs Sill for Mac from this release.
 
 Aa now starts at Off, which leaves your Mac’s window as it is, and sliding it back to Off puts a window Sill resized back to its own size right away. That needs Sill for Mac from this release: with an earlier one, Off only stops the resizing. On Sill’s virtual display a window always fits, so Aa has no Off there. Aa is dimmed while the Desktop shows: it sizes a window.
+
+After this update, the tour of Sill’s controls shows once more, with what’s new marked New. Take the Tour, at the bottom of Settings, shows it again any time.
 ```
+
+The pinch's paragraph (PR #196) sat in 0.5.1's block above, which App Store Connect showed for 0.5.1;
+the pinch ships with the next version, so it is in this draft (the tour's last paragraph came with it,
+2026-10-31). For that version's TestFlight build, What to Test can say: "The tour shows once more after
+this update; please tell us if a New: row is wrong."
 
 The sound's paragraph (PR #94) is "a beta feature", never a beta of the app (guideline 2.2), and waits,
 as the description's bullet does, for its device tests (Before you submit).
@@ -877,6 +884,15 @@ Safe:
   goes where the Mac's cursor is, 231 characters (222 before); the next What's New gains the
   clipboard's paragraph, 289 characters, before the sound's (the clipboard had none, though it ships
   with that version): the draft 2,176 characters (1,885 on main at 35a9c47); the rest unchanged.
+- With the tour once more (branch `tour-0-6`, tour version 2; Noah, 2026-10-31), measured by a script
+  on the blocks, each without its last newline: the pinch's paragraph (226 characters) moved from
+  0.5.1's What's New, which App Store Connect showed for 0.5.1 without it (981 characters on main at
+  e4d30349, 753 now, as it was measured for 0.5.1), into the next version's draft, after Reverse
+  Scrolling's; the tour's paragraph (158) at the draft's end; the draft 3,164 characters of 4,000
+  (2,776 on main at e4d30349). The description's clipboard bullet for the next version lost "Copies a
+  password manager marks as concealed stay on your Mac." (untrue since 2026-10-29, when they began
+  to go like any other copy): 168 characters (231). The description block itself, 3,032, and the
+  review notes unchanged. Its "The first time, a short tour shows you the controls." stays true.
 - The encryption key, now in `iOSClient/Info.plist`: Release builds of this
   branch for the simulator and for a device each have
   `"ITSAppUsesNonExemptEncryption" => false` in the built Sill.app's
