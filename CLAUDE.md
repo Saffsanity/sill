@@ -55,11 +55,20 @@ heartbeat gate was built. His next test is the first one of this fix. Host, wire
   another user, or the login window, is on this Mac's screen; …", "Unlocked: …"; none for an unlocked start.
   Stats `lock.withheld`, `lock.refused`, `in.locked`, `cap.placeholder`.
 - Wire: `WindowList.locked` and `offConsole` (Switcher.swift; left out unlocked: a list byte for byte as before).
-- Device: `StreamClient.lockWhy`, `lockShade`; at a locked list the picture removed on the network queue
-  (`HEVCDisplayView.blank`, `onBlank`) and `LockedMacShade` over both picture panes: "‹Mac› is locked" (a paired
-  session told it can type the password), "‹Mac› is switched to another user" ("Nothing typed here reaches it"),
-  then "Unlocking…" until the first keyframe after the unlock (4 s at most); the drawer's and the panel's line by
-  reason. StreamProtocol's `LockedMac` has every word (checked). DEBUG `-SillMacLocked 1|2|unlocking`.
+- Device: `StreamClient.lockWhy`, `lockShade`; at an off-console list the picture removed on the network queue
+  (`HEVCDisplayView.blank`, `onBlank`) and `LockedMacShade` over both picture panes, only then: "‹Mac› is at its
+  login window" ("The login window isn’t part of your account, even when it shows your name, and neither is
+  another user’s session, so Sill can’t show it or type into it. Log in on the Mac itself; …"); a locked screen
+  shows no cover (its lock screen streams; the drawer's and the panel's line say "‹Mac› is locked"); after a
+  cover, "Unlocking…" until the first keyframe after it, the lock screen's or a window's (`unlockWaitsForKeyframe`;
+  4 s at most). StreamProtocol's `LockedMac` has every word (checked). DEBUG `-SillMacLocked 1|2|unlocking`, the
+  console's `lock:` lines.
+- Noah's tests (2026-11-01 and 02, his iPhone and Mac; both switches read in macOS's own log, the plan's
+  Results): a fast user switch starts a new login window session that holds the console, whoever's name is
+  chosen on it, until the password typed on the Mac brings this session back (locked, if it was locked before
+  the switch: then the lock screen streams and the password typed on the phone unlocks it); Sill read every
+  step right, and the cover's words now say so for a prompt with this user's name. Fixed on the device: a
+  locked list after an off-console one left "Unlocking…" that no keyframe ended (its 4 s instead).
 - TEST ONLY (test hosts only, TestHooks lists them): `SILL_TEST_LOCKED=1`; `SILL_TEST_LOCKED_FILE` (1 screen locked,
   2 off console); `SILL_TEST_LOCK_NOTIFY=<me.saffer.sill.test.…>` (the screen's notify name of the test's own);
   `SILL_TEST_LOCK_NOTE='<s> <name>; …'` (notifications delivered to the handler, nothing posted);

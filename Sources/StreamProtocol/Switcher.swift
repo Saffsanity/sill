@@ -151,7 +151,7 @@ public enum LockedMac {
             return paired == true ? "To unlock it from here, type its password and press Return. Its windows come back once it is unlocked."
                                   : "Its windows come back once it is unlocked."
         case .locked(.otherUser):
-            return "Sill can’t show or type into the login window, or another user’s session. Log in on the Mac itself; your windows come back once your account is back on its screen."
+            return "The login window isn’t part of your account, even when it shows your name, and neither is another user’s session, so Sill can’t show it or type into it. Log in on the Mac itself; your windows come back once your account is back on its screen."
         case .unlocking:
             return nil
         }
