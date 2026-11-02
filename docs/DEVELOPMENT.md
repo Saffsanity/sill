@@ -65,15 +65,17 @@ hoc and says so, and then Screen Recording and Accessibility have to be granted
 again after every rebuild (see Permissions).
 
 `SILL_UNIVERSAL=1 Scripts/make-app.sh` builds a universal Sill.app, arm64 and
-x86_64, for someone testing on an Intel Mac (#62): one build per architecture,
+x86_64, as the releases and the nightlies are (#62): one build per architecture,
 each in its own scratch path under `.build/universal`, joined with `lipo`, then
 stamped, iconized and signed as usual. It takes about twice as long, and
 `.build/release/SillMenuBar` is not refreshed, so it is off by default; unset,
-the build is for this Mac's architecture alone. The x86_64 slice has never
-streamed on an Intel Mac: until it has, README, the site, the App Store text
-and the Homebrew cask's `depends_on arch: :arm64` stay Apple silicon, and
-releases stay arm64 (`release.sh` names the architectures it built and checks
-every slice's signature). On the Intel Mac, `Sill.app/Contents/MacOS/Sill
+the build is for this Mac's architecture alone. Releases are universal from
+0.6.0 on (Noah, 2026-11-02: "D1 - Universal"; release.yml's publish job sets
+`SILL_UNIVERSAL=1`, as the nightlies do): README and the site say Apple silicon
+or Intel, and the App Store description names no chip; 0.5.1 and earlier were arm64 only. A nightly
+ran on an Intel iMac 5K (#62: fine at Standard; its hardware encoder refuses a
+5K Retina stream). `release.sh` names the architectures it built and checks
+every slice's signature. On the Intel Mac, `Sill.app/Contents/MacOS/Sill
 --virtual-display-selftest` checks the virtual display (moving the pointer onto
 it for a moment) and `--encoder-selftest` the video encoder.
 
@@ -360,7 +362,9 @@ display; unplugged, the Desktop falls back and returns when it is back), moves
 the Mac's pointer to the new display's centre, and logs "Desktop: display 2 of
 3 (DELL U2723QE), asked by ‹device›." (`Sources/StreamProtocol/DesktopDisplays.swift`,
 checked in `Tests/checks/desktop-displays`). Every device watching the Desktop
-moves with it: the Mac streams one source.
+moves with it: the Mac streams one source. A locked Mac lists no displays and
+refuses kind 47 as it refuses a window pick (`LockPolicy`, checked in
+`Tests/checks/lock-policy`), so the button reads "Desktop" and steps nowhere.
 
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom. After the Mac's settings
@@ -427,19 +431,31 @@ the Settings panel closes, so the panel never moves under the finger.
 The first time a Mac's picture shows on a device, and nothing is touched, sent,
 used (by any means, VoiceOver's double tap included) or opened in the second
 after it, a short tour dims the screen and lights one part at a time: the
-picture (tap, hold, drag), the thumbnails with Aa (and Keyboard, sideways and
-on a phone upright), Settings, and upright the key row and the trackpad. A card
+picture (tap, hold, drag, pinch, and three-finger swipes), the thumbnails with
+the Menus button and Aa (and Keyboard, sideways and on a phone upright), with a
+row on Virtual Display and one on a hardware keyboard, then the Settings button
+twice, for the clipboard and the Mac's sound and for Settings itself, and
+upright the key row and the trackpad. Rows about what is new since the tour was
+written start with "New:", in the accent; a row about what this Mac or this device lacks (an
+older Mac's clipboard and sound, the Menus button where there is none) is left
+out or reworded, and Aa is named only in the Virtual Display row. A card
 stays beside what it lights at every text size, its words scrolling there. Skip
 ends it for good on that device (in Take the Tour it only closes it); a step
 passed stays passed; the automatic reconnect's session keeps the decision the
 last one made; after a tour taken sideways, the upright card comes the first
 time the device is held upright and left alone for a second. Settings › Take
 the Tour, the panel's last row, shows it again. Nothing reaches the Mac while it shows, and it sends
-nothing. What it remembers is two keys in the app's own defaults,
-`Sill.tourSeen` and `Sill.tourSkipped` (delete the app, or `xcrun simctl
-uninstall`, to see it afresh). Debug builds show it by themselves only with
-`-SillTourState` (the harness below). docs/first-run-walkthrough-plan.md has
-the rules; `iOSClient/TourPolicy.swift` is them, checked in `Tests/checks/tour`.
+nothing. What it remembers is three keys in the app's own defaults,
+`Sill.tourSeen`, `Sill.tourSkipped` and `Sill.tourVersion`, the tour's version
+(2 since 0.6): a memory of an older version, or with none stored (0.5 and
+0.5.1 stored none), is cleared once, so the tour shows once more to everyone
+who launches 0.6, whether they finished or skipped it before (delete the app,
+or `xcrun simctl uninstall`, to see it afresh). Debug builds show it by
+themselves only with `-SillTourState`, and write the version only with
+`-SillTourState saved`, so a Debug build never uses up the once more that a
+TestFlight or App Store build gives (the harness below).
+docs/first-run-walkthrough-plan.md has the rules ("The tour once more, for
+0.6"); `iOSClient/TourPolicy.swift` is them, checked in `Tests/checks/tour`.
 
 Every connection starts with the device's hello (its Sill version, build and
 name, sent only to the Mac it connects to). A later Mac that needs a newer Sill
@@ -1251,6 +1267,75 @@ reads nothing for it. An app that draws its menus in its own window (Blender's
 File and Edit) has there only what its menu bar lists; tap the rest in the
 picture.
 
+## A locked Mac
+
+While the Mac's screen is locked, or it is switched to another user (or to the
+login window) while your session runs in the background, a device sees none of
+it (docs/locked-mac-plan.md). The host streams the display while your own screen is locked (the lock
+screen itself) and, while another user has the console, a placeholder, a black
+still with no capture at all, in place of the window or the Desktop; the window list is
+empty and says `locked` (and `offConsole` while another user is on the
+console); no thumbnail is taken, no icon, installed app, sound, clipboard,
+pointer or cursor shape goes out; a window picked, an app launched, a window's
+traffic lights, the Mac's menus and trackpad gestures are refused; no virtual
+display is made, and the display is not woken from a switched-out session. At a
+locked screen the device shows the lock screen with no cover (a paired iPad or
+iPhone can type the Mac's password there), and the Apps drawer and the Settings
+panel's header say "Mac mini is locked. Unlock it to see its windows." While
+another user has the console it covers its picture: "Another user started
+controlling this Mac." and "Log in to your account to reactivate screen sharing
+with Sill." (Noah, 2026-11-02), which the drawer and the header say in one line.
+Only a paired device's keys and taps reach a locked screen; while the Mac is
+switched to another user nothing does, but the up of a key or a button held
+down. A window that streamed when the lock began goes home and comes back once
+the Mac is unlocked, unless something else was picked meanwhile; the unlock
+counts only after every witness has said so for 2 s (macOS locks itself again a
+second after each return to the console). Sill.log says "Locked: …" and
+"Unlocked: …", and at most one line a minute for each kind of request it
+refused.
+
+The host reads the lock on a queue of its own, never on the main actor: the
+console's user (the dynamic store), the screen's lock state (notify(3)'s
+`com.apple.sessionagent.screenIsLocked`), both watched, and the session
+dictionary, bounded, read at start and to confirm an unlock; Sill.app also hears loginwindow's and
+NSWorkspace's notifications, delivered at once whether it is active or not. The
+server drops everything of the Mac the moment the reading says locked, whatever
+the main actor is doing. Anything it cannot read counts as locked.
+
+Testing it headless (test hosts only: `--synthetic`, as the pairing hooks;
+Sill.app ignores each with a line):
+
+- `SILL_TEST_LOCKED=1`: the screen locked for the run.
+- `SILL_TEST_LOCKED_FILE=<path>`: read at each look, once a second while a
+  device is connected: `1` the screen locked, `2` switched to another user,
+  anything else nothing. `echo 1 > $F`, `echo 2 > $F`, `echo 0 > $F` lock,
+  switch and unlock a running host.
+- `SILL_TEST_LOCK_NOTIFY=<name>`: the screen's lock state from a notify name of
+  your own, under `me.saffer.sill.test.`; set it with `notify_set_state` and
+  `notify_post` (Python's ctypes has both) for the immediate path the CLI has.
+- `SILL_TEST_LOCK_NOTE='<s> <name>[; <s> <name>]'`: a notification delivered
+  to the host's handler s seconds after it starts (`screenIsLocked`,
+  `screenIsUnlocked`, `sessionDidMoveOffConsole`, `sessionDidMoveOnConsole`,
+  `sessionDidResignActive`, `sessionDidBecomeActive`, or their full names), as
+  it would be: nothing is posted, so no other app hears it.
+- `SILL_TEST_LOCK_IGNORE_MAC=1`: this Mac's own witnesses (the console's user, the screen's
+  state, the session dictionary) read as unlocked and the dictionary is never read, so the hooks
+  above alone decide; `Scripts/lock-check/live.py` sets it, so it runs while this Mac is locked.
+- `SILL_TEST_LOCK_LOG=1`: each look's witnesses and reading.
+
+`sillclient.py`'s window list line ends in `locked=1` (and `offConsole=1`)
+while the host says so; `--dump=DIR` saves what arrived when, the parameter
+sets and the keyframes; `--raw7` (an app launch, for a bundle under
+`me.saffer.sill.test.` only) and `--raw15` (a window's traffic light) send what
+a locked Mac refuses. `Scripts/lock-check/live.py OUT` runs a test host through
+locks, a switch, the unlock's settle, the flap and a start while locked, with
+clients reading frames, and decodes their keyframes
+(`Scripts/lock-check/build.sh` builds the decoder, VideoToolbox's software
+one): every verdict on one line. Never lock this Mac or
+switch its user to test it, and never post a notification by those names: other
+apps listen to them. The iOS harness's `-SillMacLocked 1|2|unlocking` draws the
+mock Mac locked, switched, or just unlocked.
+
 ## Direct Wireless Connection
 
 Direct Wireless Connection (Settings › General, and the status menu) lets an
@@ -1938,8 +2023,9 @@ simulator:
 - The first-run tour, in the mock, under `-SillLive 1` and in the normal app:
   `-SillTourState fresh|landscape|done|skipped|saved` turns the automatic tour
   on (a Debug build never shows it by itself otherwise; `saved` reads and
-  writes the real keys, the others last one run), `-SillTour
-  touch|bar|settings|laptop` starts it at that step, and the stand-ins
+  writes the real keys, `Sill.tourVersion` and its upgrade included, the others
+  last one run, `landscape` the sideways steps seen), `-SillTour
+  touch|bar|sharing|settings|laptop` starts it at that step, and the stand-ins
   `-SillTourPress next@S|skip@S`, `-SillTourActivityAt S`, `-SillTakeTourAt S`
   and `-SillTourVoiceOver 1` press, touch, take it from Settings and speak as
   VoiceOver would. `-SillOrientation landscape` turns the normal app sideways
@@ -2300,9 +2386,9 @@ Nightlies (`.github/workflows/nightly.yml`; docs/release-checklist.md,
 "Nightlies"): every night main moved (09:17 UTC, while the repository variable
 `SILL_NIGHTLY` is `true`) and by hand, from main only: both builds run in the
 environment `nightly`, which holds the nine secrets. `Scripts/release.sh
---nightly --publish` builds main's head as a release, but universal
-(`SILL_UNIVERSAL=1`; make-app.sh takes `SILL_RELEASE_NIGHTLY=1` for an
-untagged HEAD), as `Sill-nightly-<yyyymmdd>-<sha7>.dmg` and `.zip` on the
+--nightly --publish` builds main's head as a release, universal as releases
+are since 0.6.0 (`SILL_UNIVERSAL=1`; make-app.sh takes `SILL_RELEASE_NIGHTLY=1`
+for an untagged HEAD), as `Sill-nightly-<yyyymmdd>-<sha7>.dmg` and `.zip` on the
 rolling pre-release `nightly` (the seven newest kept, never "latest");
 `release-ios.sh --build-number <commit count>` uploads the iOS build, and
 `Scripts/asc.swift` (App Store Connect's API: an ES256 token from the .p8 key
@@ -2310,9 +2396,10 @@ with CryptoKit, Foundation only) waits for App Store Connect to process it,
 sets What to Test and gives it to every internal TestFlight group, and to the
 public beta group only while `SILL_NIGHTLY_PUBLIC_BETA` is `true`.
 `Scripts/nightly-notes.sh` writes both apps' words from the pull requests
-merged since the last release tag. A nightly says the version main says,
-0.5.5, the pre-release number (the store release will be 0.6.0), with the
-commit count as its build; the update check never offers a nightly, and offers
+merged since the last release tag. A nightly says the version main says, the
+version of main's next release (0.6.0 until main moves to 0.6.1 after the 0.6.0
+release; 0.5.5 was the pre-release number before 2026-10-31), with the commit
+count as its build, as in "Sill nightly 0.6.0 (1276)"; the update check never offers a nightly, and offers
 one nothing until a release newer than its version exists. A nightly reads the
 release's data-protection keychain items, so a device paired with one stays
 paired with the other. `swift Scripts/asc.swift groups --key-file … --key-id …

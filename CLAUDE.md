@@ -8,6 +8,86 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Release 0.6.0 (2026-11-02, PR #274 `integrate-0-6` from main at e4d3034, carrying #269 (the version),
+#270 (the tour once more) and #271 (a locked Mac); Noah's go after testing #274's builds: "Test passed,
+merge please. Do phases 1 through 3").** One version for both apps, as since 0.5.1: Sill for Mac 0.6.0
+(1276) with Sill for iPhone and iPad 0.6.0 (1276), both from the merge commit a39084f4 (`git rev-list
+--count` 1276: the build number is the commit count on both apps since the nightlies, never committed,
+never `--bump`). The steps, the decisions and every text pasted are in sill-handoff's
+`release-060/` (guide-0.6.0.md, STATUS.md, notes-0.6.0.md, the App Store texts).
+- In it since v0.5.1: 43 pull requests (the release notes list them): among them the clipboard both
+  ways (#78), the Mac's sound as a beta (#94), a hardware keyboard and trackpad (#80), Larger Picture
+  (#79), a window Sill sized going back (#75), finding the Mac after hours idle (#77), the Settings
+  window on a small screen (#74), tiles (#117), Virtual Display and Send Audio on by default, pinch to zoom
+  (#196), Reverse Scrolling (#159), other languages and dictation (#147), the thumbnail hold (#248),
+  Aa's Off (#181), the security fixes of 2026-10-29, the tour once more and a locked Mac (the two
+  entries below).
+- Noah's decisions (2026-11-02, the guide's D1–D6): D1 universal, "D1 - Universal": Sill for Mac runs
+  on Apple silicon and Intel from 0.6.0 (release.yml's publish job sets `SILL_UNIVERSAL: '1'`, as the
+  nightlies do; README, the site, the description and the review notes say so; the Homebrew cask loses
+  `depends_on arch: :arm64`); D2 the sound stays in the words (What's New's paragraph and the
+  description's bullet); D3 no sentence on typing the Mac's password from the device; D4 0.6.0 (1276)
+  to TestFlight's 'Public Beta', his own click after his TestFlight check; D5 the screenshots kept ("we
+  can update later"); D6 the review notes trimmed, with a NEW IN 0.6.0 paragraph (3,993 bytes;
+  docs/app-store-metadata.md §7).
+- The order run (STATUS.md): the words commit 7871d5c (the 0.6.0 markers' lines out of `site/`, the
+  words kept; privacy.html dated November 2, 2026; `style.css?v=2026-11-02`; What's New's blank line),
+  the universal commit 8751676 (D1), CI green on it (run 41416969051), #274 merged with a merge commit
+  (a39084f4, 09:15 UTC); the nightly dispatched by hand on it, run 41419194155: Sill for iPhone and iPad
+  0.6.0 (1276) uploaded and processed in 2 minutes ("Assigned build 1276 of 0.6.0 to: no group; by
+  automatic distribution: Internal."), and the Mac pre-release "Sill nightly 0.6.0 (1276), 2026-11-02",
+  universal ("for x86_64 arm64"), both notarizations accepted (a scheduled duplicate, 41420241620, was
+  cancelled); the annotated tag v0.6.0 (tag object 715f0dda) on a39084f4; release.yml's run 41421820998
+  ("Sign, notarize and publish", environment `release`), approved by Noah, publishing the GitHub
+  Release "Sill 0.6.0" at 10:00:51 UTC (Sill.dmg 5,864,060 B, SHA-256
+  de1f5afe1176b419af90743f8beb71112bf3f2eee905f7956bcce96a0149a46d; Sill.zip 5,863,229 B, SHA-256
+  abcba6c500f1b3dc44a416b9fa23920a53c989b26692222ddc4aedffa5eb11ac; universal, notarized and stapled).
+- Lessons from the day: never dispatch the mutants matrix on a release day (run 41414798311 held every
+  macOS runner and was cancelled; a check's mutants run here instead); dispatch the release's nightly
+  after 09:17 UTC, or cancel the schedule's duplicate.
+- Still open: the App Store (Noah: 0.6.0 created in App Store Connect with the texts, build 0.6.0
+  (1276), Add for Review and Submit once getsill.app/download gives 0.6.0; manual release; approval
+  date: to fill); Public Beta (D4); right after App Review approves, main to 0.6.1 (`Packaging/Info.plist`
+  and `MARKETING_VERSION`, the checklist's part 2 first item and Nightlies, metadata's Version row,
+  DEVELOPMENT.md's nightly paragraph), merged before the next 09:17 UTC nightly, since the approval
+  closes 0.6.0's train (a nightly of a main saying 0.6.0 would then fail its iOS upload); the Homebrew
+  bump (Saffsanity/homebrew-sill's `Casks/sill.rb` to 0.6.0, its dmg SHA-256, `depends_on arch` gone);
+  #62 told what 0.6.0 is. Docs after the release (this entry, the checklist's part 1 §3, SECURITY.md,
+  the metadata's 0.6.0 texts and sizes, the Intel wording) are PR "Docs: the 0.6.0 release".
+- Closed by this release, with their facts in their plans: the version (#269, branch
+  `store-version-0.6.0`: main at 0.6.0 since 2026-10-31, after 0.5.5, the pre-release number; no entry
+  of its own), and the two entries that follow.
+
+**A locked Mac shows nothing of itself (2026-10-31, branch `locked-mac`, PR #271; shipped in 0.6.0, the
+entry above).** The rule, the review, the open questions, the results and Noah's tests of 2026-11-01 and 02
+are in `docs/locked-mac-plan.md`. In brief: three readings (`LockPolicy`, pure, `Tests/checks/lock-policy`;
+`SessionLock` on `sill.lock`): unlocked, screen locked (its lock screen streams; a paired session's input
+reaches it, the password included), off console (a black placeholder, `StillCapture`, and the device's cover
+"Another user started controlling this Mac.", Noah's words); `LockGate` withholds windows, thumbnails, icons,
+apps, launches, menus, gestures, sound, clipboard, pointer and the virtual display; `WindowList.locked` and
+`offConsole` (additive). TEST ONLY: `SILL_TEST_LOCKED`, `SILL_TEST_LOCKED_FILE`, `SILL_TEST_LOCK_NOTIFY`,
+`SILL_TEST_LOCK_NOTE`, `SILL_TEST_LOCK_IGNORE_MAC`, `SILL_TEST_LOCK_LOG`; `Scripts/lock-check/`; DEBUG
+`-SillMacLocked 1|2|unlocking`.
+- **Untested, for Noah (the plan's 1–7):** a real lock with a window streaming (Virtual Display on and off); the
+  password typed from the paired iPad (secure input may refuse posted keys); another user at the login screen
+  (the switched-to-another-user cover, nothing typed reaches the Mac, macOS's own lock after the switch back);
+  Sill.app inactive at the lock and the unlock (`.deliverImmediately`); an unpaired device at a locked Mac; the
+  rest refused and back after the unlock; mixed builds (the App Store iPad gets the black placeholder).
+
+**The tour once more, with what's new (2026-10-31, branch `tour-0-6`, PR #270; shipped in 0.6.0, the
+entry above).** The plan, its defaults, the results and the review are in docs/first-run-walkthrough-plan.md,
+"The tour once more, for 0.6". In brief: `TourPolicy.version` 2 (`Sill.tourVersion`) clears an older
+memory once, so everyone who launches 0.6 sees the whole tour again; rows about what is new start with
+"New:" (`TourPolicy.newPrefix`); a Clipboard and Sound card; the rows follow `TourFeatures`. Debug builds
+take the once-more only with `-SillTourState saved`.
+- **Untested, for Noah** (the plan's P1–P12, a TestFlight 0.6 or a Debug build with `-SillTourState
+  saved`): over 0.5.1 with the old tour done, and again after skipping it, the tour once more (four
+  cards sideways, five upright, "New:" in blue), then never again; each New row true on the device
+  (the pinch, Virtual Display "is on" with Sill for Mac 0.6, Menus lit, the clipboard both ways, Send
+  Audio and Mute, Reverse Scrolling, the hold, a Magic Keyboard's keys and Esc); the iPhone's five and
+  four, clear of the Dynamic Island; against Sill for Mac 0.5.1 the update row; VoiceOver; the largest
+  text size; a hardware keyboard's Return and Esc; Skip, Take the Tour; the Duo's poses.
+
 **The door's waiting places (2026-10-29, branch `sec-door-pending` from main at 150479b5, PR #252; finding 9 of the
 security scan of 2026-10-18, Low; Noah's go of 2026-10-29).** A TLS door (the remote one, and the home one of
 Sill.app and `SillHost --pairing`) held 8 connections waiting for admission, 2 per address, 10 s each, and backed an
@@ -494,7 +574,9 @@ out in Insiders first tomorrow". Merge "Version 0.5.5 for both apps" (PR #244, b
   TestFlight group, and the public beta group (the external group with the public link) only while
   `SILL_NIGHTLY_PUBLIC_BETA` is `true`, with Beta App Review right after; asc.swift refuses `--public-beta`
   unless its environment says that too. Unset at first, on Noah's word.
-- A nightly is 0.5.5 (N), N the commit count on both apps, never committed (the store release will be 0.6.0). The update check never offers
+- A nightly is main's version with the commit count N as its build on both apps, never committed: 0.5.5 (N)
+  until 2026-10-31, 0.6.0 (N) since (the 0.6.0 release's own builds are 0.6.0 (1276)), 0.6.1 (N) once main
+  moves on after App Review approves 0.6.0. The update check never offers
   one (`UpdatePolicy.feed` is /releases/latest, which lists no pre-release; `UpdatePolicy.release` refuses
   `prerelease: true`; "nightly" is no version), and offers a nightly nothing until a release newer than its
   version exists. A nightly reads the release's data-protection keychain items (same team, bundle ID and
@@ -3887,7 +3969,9 @@ cf05a78, merged with main at 5c6a850 and 2b38179, not rebased, PR #35; the
 plan, its critique and the results are in
 `docs/first-run-walkthrough-plan.md`).** Noah (2026-09-26): "Add to feature
 list, app usage walkthrough first time after pairing/connecting". The device
-only: no wire change, nothing sent to the Mac, two UserDefaults keys.
+only: no wire change, nothing sent to the Mac, three UserDefaults keys (the
+third, `Sill.tourVersion`, since tour version 2: the entry "The tour once
+more, with what's new").
 - What it does: a second after the first picture from a Mac (the window list,
   a frame size, a source), if nothing was touched anywhere on the screen, sent
   to the Mac, used or opened since (a recognizer on the window that takes
@@ -3901,7 +3985,10 @@ only: no wire change, nothing sent to the Mac, two UserDefaults keys.
   upright Keyboard), `settings` (Disconnect
   and Take the Tour live there; sideways "Hold your iPad upright"), upright
   `laptop` (the sticky modifiers, the keyboard key, the trackpad's two-finger
-  tap and hold-then-drag). Three cards sideways, four upright. Whoever touched
+  tap and hold-then-drag). Three cards sideways, four upright; since tour
+  version 2 (0.6) four and five, with `sharing` (Clipboard and Sound) before
+  Settings, rows marked "New:", the Menus button lit, and Aa named only in
+  the Virtual Display row (the entry "The tour once more"). Whoever touched
   anything in that second is left alone for the session; one decision per
   session and layout, and a turn after it offers only what its layout has
   alone (the laptop card). The automatic reconnect's session goes on with the
@@ -7039,8 +7126,11 @@ good.
 - `Sources/StreamProtocol/StreamMessage.swift` — 14-byte header + payload framing,
   message kinds in both directions, HEVC parameter set encoding. Shared by both
   sides. Change it in one place. `Switcher.swift` — the catalog types
-  (`WindowList`, with the host's per-launch `launchID`; `WindowInfo`,
-  `AppInfo`, `StreamSource`) and image blob framing. `Viewport.swift` —
+  (`WindowList`, with the host's per-launch `launchID` and, while the Mac is
+  locked, `locked` and `offConsole`; `WindowInfo`, `AppInfo`, `StreamSource`),
+  `LockedMac` (the device's words for a locked Mac: why, the drawer's and the
+  panel's line, the cover over the stream and its "Unlocking…", checked with the
+  host's LockPolicy) and image blob framing. `Viewport.swift` —
   `Viewport` (kind 9: the device's panel, Aa's scale and its rate),
   `ClientStats` (with `lateSince`, a host's count of a device's late sound
   packets, which never traps), `CursorShapeBlob`, and `ViewportBounds` (what a
@@ -7191,8 +7281,11 @@ good.
   reset only at another quality (`resetLinks`, apart from `resetForNewStream`);
   `send(each:)`, kind 16 per connection; a session `closeSessions` cuts off
   marked revoked as it is told goodbye, its receive loop then handing on only a
-  key's or a button's up (`onClientRevoked`, RevokedInput); the test-only
-  SILL_TEST_REMOTE_ORIGIN;
+  key's or a button's up (`onClientRevoked`, RevokedInput); a locked Mac's
+  gate (`lockGate`, LockPolicy.withheld) read on its queue for every message,
+  frames tagged with what they show (`broadcast(_:picture:)`), each message
+  handed on with the reading at its arrival, an icon or app list it withheld
+  reported (`onCatalogWithheld`); the test-only SILL_TEST_REMOTE_ORIGIN;
   the listener built with or without peer-to-peer and replaced live when Direct
   Wireless changes, and turned off, the devices on peer-to-peer Wi-Fi
   disconnected; the test-only SILL_TEST_SERVICE_TYPE, SILL_TEST_SWAP_FAIL,
@@ -7287,7 +7380,21 @@ good.
   (whether a connection came over the USB cable to an iPhone or iPad, from
   InterfaceSnapshot's IOKit reading, and the device's ID; pure,
   `Tests/checks/cable-link`), `CableReport` (`--print-cable`), `SessionLock`
-  (an unlocked console), `TestHooks` (the door and pairing hooks a host that
+  (this Mac's console, docs/locked-mac-plan.md: the witnesses on its own queue
+  `sill.lock`, never the main actor: the console's user in the dynamic store and
+  notify(3)'s screen state, both watched, the session dictionary bounded and off
+  main; Sill.app's notifications, `.deliverImmediately`, whose handler sets the
+  reading; `gate`, set the moment the reading changes; `onChange`, `devices`;
+  the TEST ONLY SILL_TEST_LOCKED, SILL_TEST_LOCKED_FILE, SILL_TEST_LOCK_NOTIFY,
+  SILL_TEST_LOCK_NOTE and SILL_TEST_LOCK_LOG), `LockPolicy` (a locked Mac: the
+  three readings and the witnesses' rule, unknown counting as locked; `Reader`,
+  the settle before an unlock; what each reading allows; what the server's gate
+  withholds; each request at each reading; the window list; the placeholder's
+  size; `reconciles`; `Restore`, the window that comes back; the lines; and
+  `LockGate`, the reading every queue reads; pure, `Tests/checks/lock-policy`;
+  the coordinator's `lockChanged`, `enforceLock`, `afterUnlock`,
+  `lockedMidSwitch` and `lockDecision`), `StillCapture` (SyntheticCapture.swift:
+  a locked Mac's placeholder, one black frame, no ScreenCaptureKit), `TestHooks` (the door and pairing hooks a host that
   is not a test host ignores, one line each), `AskLimits` (PairingWindow.swift:
   one device-opened window at a time, three in 10 minutes, the quiet after
   the Mac's Cancel or a stop, an IPv6 asker's by its /64; `Tests/checks/ask-limits`) and
@@ -7430,8 +7537,9 @@ good.
   functions (docs/release-checklist.md, TestFlight). `Scripts/make-app.sh`
   builds, iconizes, signs and installs the bundle (with `SILL_UNIVERSAL=1`
   arm64 and x86_64, each in its own scratch path under `.build/universal`,
-  joined with lipo, for an Intel tester, #62; off by default, so releases
-  stay arm64, and `release.sh`'s `check_signature` reads every slice);
+  joined with lipo, #62; off by default here, on in the nightlies and, since
+  0.6.0, in release.yml's publish job, so releases are universal; `release.sh`'s
+  `check_signature` reads every slice);
   `Scripts/release.sh`
   (M6) makes the downloads from it:
   `make-app.sh --release`, `make-dmg.sh --prepare` (the image's tool and
@@ -7561,7 +7669,15 @@ good.
   every window), frames before, during and after, fourteen steps (its app
   stopped with SIGSTOP at a fit and at a stop among them); the front app must
   not change. It needs Accessibility, Screen Recording and an unlocked screen,
-  and exits 2 saying which is missing. `Scripts/sillrelay.py` is a
+  and exits 2 saying which is missing. `Scripts/lock-check/` (TEST ONLY;
+  docs/locked-mac-plan.md): `live.py OUT [poll|start|notify|paired|all]` runs
+  synthetic test hosts on loopback (each under 60 s) through locks, a switch to
+  another user, the unlock's settle, the flap and a start while locked, with the
+  TEST ONLY lock hooks and test clients that save what they receive
+  (`sillclient.py --dump`), and prints a verdict per rule; `frames.swift` (`build.sh`: with StreamProtocol, into
+  `.build/lock-check/frames`) decodes the saved keyframes on VideoToolbox's
+  software decoder and prints each one's size and luma, so the placeholder's
+  black is measured. `Scripts/sillrelay.py` is a
   shaping passthrough relay (`--listen 0 --to HOST:PORT [--delay-ms N]
   [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
   through). `Scripts/pacing/` is the remote pacing harness
@@ -7830,16 +7946,21 @@ good.
   AD64/FD64); StreamScreen places the chip, the Settings panel's This iPad
   group has Share Clipboard and Paste on ‹Mac›. The
   first-run tour: `TourPolicy` (its steps and targets per layout, the halves,
-  a phone's rows and sideways; when it shows by itself, what it remembers,
-  what a session decided and the reconnect's, a rotation mid-run, the crease,
-  where the card goes, every word; pure, Foundation and CoreGraphics,
-  `Tests/checks/tour`) and `TourOverlay` (the dim with the lit cutout and its
-  ring, the card placed by a Layout, the targets' preference in the stream
-  screen's named space `sill.screen`, `TourStore` for `Sill.tourSeen` and
-  `Sill.tourSkipped`, `TouchWatcher`, a recognizer on the window that counts
+  a phone's rows and sideways; when it shows by itself, what it remembers and
+  the tour's version (`version`, 2 since 0.6; `upgraded`, an older memory
+  cleared once), what a session decided and the reconnect's, a rotation
+  mid-run, the crease, where the card goes, every word, with `TourFeatures`,
+  what this Mac and this device have, and "New:" (`newPrefix`, `TourSpan.isNew`);
+  pure, Foundation and CoreGraphics, `Tests/checks/tour`) and `TourOverlay`
+  (the dim with the lit cutout and its ring, the card placed by a Layout, the
+  "New:" drawn in the accent, the targets' preference in the stream screen's
+  named space `sill.screen`, `TourStore` for `Sill.tourSeen`,
+  `Sill.tourSkipped` and `Sill.tourVersion` (the upgrade, in Release and under
+  `-SillTourState saved` only), `TouchWatcher`, a recognizer on the window that counts
   every touch and takes none, and DEBUG `TourDebug`); StreamScreen runs it
-  (targets, the rule's inputs, the layer above the layouts and under the
-  pairing overlay, Take the Tour from the Settings panel's last row). The
+  (targets, the rule's inputs, `tourFeatures`, the layer above the layouts and
+  under the pairing overlay, Take the Tour from the Settings panel's last row),
+  and MacMenuButton reports the Menus button as the target `menus`. The
   connect screen's tiles and groups (issue #116, PR #117): `ConnectionList`
   (rows or tiles, `Sill.connectionStyle`, tiles by default since 2026-10-27
   (`defaultStyle`; a stored choice always wins); when a session's
@@ -7990,7 +8111,8 @@ good.
   host's KeyStrokes and the device's KeyChords, against a model of the Mac's
   HID state table and of a Mac from before), `keychain`, `keyframe-recovery` (iOSClient's
   KeyframeRecovery, against a model of the event history), `ledger`, `link-judge`,
-  `menu-state` (iOSClient's MacMenuState), `menus` (the host's MenuFormat and
+  `lock-policy` (the host's LockPolicy and StreamProtocol's LockedMac, with a copy of
+  the coordinator's glue), `menu-state` (iOSClient's MacMenuState), `menus` (the host's MenuFormat and
   MenuPolicy, and MacMenu.swift's JSON), `message-reader`, `origin`,
   `pairing-address`, `pairing-sharing` (Sill.app's `PairingWindowSharing`),
   `phone-portrait`, `pointer-control`, `pointer-presence`,
@@ -8088,7 +8210,7 @@ Scripts/pacing/run.sh                   # remote pacing and the link's judge, th
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_ORIGIN=vpn SILL_TEST_PATTERN=noise .build/release/SillHost --synthetic --remote   # an away session whose stream follows its quality
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
-SILL_UNIVERSAL=1 Scripts/make-app.sh    # .build/Sill.app for Apple silicon and Intel (arm64 and x86_64) for an Intel tester (#62): twice the build time; the x86_64 slice has not streamed on an Intel Mac
+SILL_UNIVERSAL=1 Scripts/make-app.sh    # .build/Sill.app for Apple silicon and Intel (arm64 and x86_64), as releases are since 0.6.0 (#62): twice the build time
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release   # M6
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' SILL_NOTARY_PROFILE=sill-notary Scripts/release.sh [--dry-run]   # M6: the notarized download (docs/release-checklist.md)
 Scripts/release-ios.sh                  # the iOS app for App Store Connect: archive, export .build/ios/export/Sill.ipa, check it; uploads nothing
@@ -8242,7 +8364,24 @@ there through, so a client at this Mac's link-local address on it
 on the cable, and the simulator's `-SillCableTest 1` for the device's side
 (lo0's `fe80::1%lo0` keeps such a test on this Mac; it needs a listener there,
 which SILL_TEST_LOOPBACK's 127.0.0.1 alone is not); `SILL_TEST_LOCKED=1` makes
-the Mac locked; `SILL_TEST_ASK_QUIET=<s>` shortens the 10 minutes of quiet
+this session's screen locked for the run, and `SILL_TEST_LOCKED_FILE=<path>`
+read at each look (once a second while a device is connected): `1` the screen
+locked, `2` off console (another user), anything else nothing, so `echo 1 > $F`,
+`echo 2 > $F` and `echo 0 > $F` lock, switch and unlock a running test host
+(docs/locked-mac-plan.md: a black placeholder, no windows, apps, menus, gestures,
+sound, clipboard, pointer or cursor shape, input only from a paired session at a
+locked screen and from nobody off console, the unlock after a 2 s settle);
+`SILL_TEST_LOCK_NOTIFY=<me.saffer.sill.test.…>` reads the screen's lock state
+from a notify name of the test's own (set it with notify_set_state and
+notify_post: the CLI's immediate path), `SILL_TEST_LOCK_NOTE='<s> <name>; …'`
+delivers loginwindow's or NSWorkspace's notifications to SessionLock's handler on
+cue (nothing posted: never post those names, other apps hear them), and
+`SILL_TEST_LOCK_LOG=1` prints each look's witnesses; `sillclient.py`'s list line
+says `locked=1` and `offConsole=1`, `--dump=DIR` saves what arrived when with the
+parameter sets and keyframes, and `--raw7` and `--raw15` send a launch and a
+window's button; `Scripts/lock-check/live.py OUT [poll|start|notify|paired|all]` runs a
+test host through all of it and decodes the keyframes (`build.sh` first);
+`SILL_TEST_ASK_QUIET=<s>` shortens the 10 minutes of quiet
 after the Mac's Cancel or a stop; `SILL_TEST_ASK_FROM_THIS_MAC=1` skips the
 ask rule's step for an ask from this Mac itself (answered `openOnMac` unless a
 window is open, and lighting no menu item), so a test client on this Mac opens
@@ -8404,7 +8543,10 @@ draws as a dim rectangle; `-SillPencilPointer 1` is Q2's flip),
 chip and a Paste's note on the mock's stream, docs/clipboard-plan.md; the mock Mac
 shares its clipboard in every settings case but `legacy`; live, `-SillSettingsScript
 '<t> paste TEXT'` sends TEXT as the Paste control hands it over, and
-`-SillSettingsCloseAt <s>` closes the panel `-SillSettings 1` opened), and in
+`-SillSettingsCloseAt <s>` closes the panel `-SillSettings 1` opened),
+`-SillMacLocked 1|2|unlocking` (the mock Mac's screen locked, switched to another
+user, or just unlocked: no windows, apps or clipboard, the cover over the stream,
+the drawer's and the panel header's line, docs/locked-mac-plan.md), and in
 the normal app and under `-SillLive 1` `-SillPairURL '<sill://pair…>'` (pair
 at launch, no confirmation, at the link's own addresses only: a confirmed link
 tries the home rows first, which `-SillTapRow` and `-SillHomeLink` below reach),
@@ -8473,15 +8615,18 @@ drops a launch argument that starts with `[`, and StreamClient.init registers
 line). The first-run tour, in the mock, under `-SillLive 1` and in
 the normal app: `-SillTourState fresh|landscape|done|skipped|saved` turns the
 automatic tour on (a Debug build never shows it by itself otherwise; `saved`
-reads and writes `Sill.tourSeen` and `Sill.tourSkipped`, the others last one
-run), `-SillTour touch|bar|settings|laptop` starts it at that step, and the
+reads and writes `Sill.tourSeen`, `Sill.tourSkipped` and `Sill.tourVersion`,
+an older memory cleared once as a Release build does, the others last one run
+and `landscape` the sideways steps; without `saved` no Debug build writes the
+version), `-SillTour touch|bar|sharing|settings|laptop` starts it at that step, and the
 stand-ins `-SillTourPress next@S|skip@S`, `-SillTourActivityAt S` (the app
 run's first session only), `-SillTakeTourAt S` (Settings, then its Take the
 Tour) and
 `-SillTourVoiceOver 1`; `-SillOrientation landscape|portrait` asks the normal
 app's scene for that orientation (a phone simulator sideways with its real
-safe areas); the console's "tour: …" lines say what happened, and a card's
-line gives its frame and tail. `xcrun simctl launch --console-pty` streams the
+safe areas); the console's "tour: …" lines say what happened, a card's
+line gives its frame and tail, and "tour: card …" its rows (how many New) and
+what they looked at (TourFeatures). `xcrun simctl launch --console-pty` streams the
 console; `--stdout=PATH` writes inside the simulated device's own file system.
 A fake screen wider than the
 simulator but fitting on its side (1133x744 on an upright iPad Pro 13") is
@@ -8592,7 +8737,12 @@ device keeps working with Macs from the first public build on, or each says why
   subscription carries a later field saying it takes images (`"accepts":2`, say), never to one that
   sent `{}`; a hardware keyboard's characters (letters, digits, Space, Delete…) go to a host as keys
   only when its window list says `keyRepeat` 1 or more (it repeats a key held between its down and its
-  up, #162), to any other through iPadOS's text system as they always did; the Mac's sound (kind 43, Audio.swift), once a public build ships it, a beta or not:
+  up, #162), to any other through iPadOS's text system as they always did; a locked Mac's window list
+  (docs/locked-mac-plan.md): `locked` true with no windows and no `clipboard` while the Mac is locked or
+  another user, the login window or nobody is on its console, and `offConsole` true in that second case,
+  both left out otherwise, so an unlocked list is what it was; a device that knows them says why the list
+  is empty, and while locked a host sends no picture of the Mac (a placeholder frame at most), which also
+  replaces the last picture of a device from before them; the Mac's sound (kind 43, Audio.swift), once a public build ships it, a beta or not:
   its two types (a JSON AudioFormat, then packets whose layout never changes: a new layout is a new
   type), AudioFormat's fields, the hello's `audio`, `sendAudio` and `audioNote`, kind 43 only to a
   device whose hello lists a codec the host makes, and the reader's caps, which a later host keeps

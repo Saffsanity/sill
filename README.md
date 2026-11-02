@@ -46,7 +46,7 @@ Sill has layouts of its own.
 
 ## Requirements
 
-- A Mac with Apple silicon, on macOS 14 or later.
+- A Mac with Apple silicon or an Intel processor, on macOS 14 or later.
 - An iPhone or iPad with iOS 17 or iPadOS 17 or later.
 - On your Mac, Sill asks for Screen Recording, to show your windows, and
   Accessibility, to click, scroll and type for you and to move and size the
@@ -92,12 +92,9 @@ Sill has layouts of its own.
   picture; with it off, once you set the window's text size with Aa.
 - **The clipboard** goes both ways while Share Clipboard is on, in both apps:
   text you copy on your Mac is ready to paste on your device, and Paste in
-  Sill sends what you copied on your device to your Mac's clipboard, where you
-  press ⌘V. Sill never reads your device's clipboard by itself.
   Sill pastes what you copied on your device where your Mac's cursor is (with
   Paste on … Right Away off, it only goes to your Mac's clipboard, where you
-  press ⌘V). Sill never reads your device's clipboard by itself, and copies a
-  password manager marks as concealed stay on your Mac.
+  press ⌘V). Sill never reads your device's clipboard by itself.
 - **Sound from your Mac** is a beta, on by default; Send Audio (Beta) in the
   Sill menu or Sill's Settings on your Mac, or in the settings panel of Sill on
   your iPhone or iPad, turns it off and on. Sill for Mac captures the sound of
@@ -118,6 +115,9 @@ Sill has layouts of its own.
   with its screen as your last session with it ended. The picture stays on
   your device until you remove it or forget the Mac. The button beside
   "Connect to a Mac" lists them instead, and Sill remembers which you chose.
+- **A short tour** shows Sill's controls the first time your device shows a
+  Mac's picture, and once more after an update that adds controls, with
+  what's new marked New; Take the Tour, in the settings panel, shows it again.
 - **Nearby**, your device finds your Mac with Bonjour on your local network.
   Over a USB cable, your Mac shows as Wired and the connection uses the cable.
   With no shared network, Direct Wireless Connection (off by default) connects
@@ -180,8 +180,8 @@ Connection are not encrypted, and anything that reaches your Mac there can
 connect without pairing: update it.
 Nightly builds: every night main changes, a notarized Sill for Mac built from it
 goes to the [nightly pre-release](https://github.com/Saffsanity/sill/releases/tag/nightly),
-and Sill for iPhone and iPad to TestFlight's testers. Nobody has tried a nightly
-by hand and it can break; Sill's update check never offers one, and going back
+and Sill for iPhone and iPad to TestFlight's testers. A nightly is tested less
+than a release and can break; Sill's update check never offers one, and going back
 from a nightly Sill for Mac to the release keeps its settings and paired devices.
 
 ## Tips

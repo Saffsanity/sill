@@ -155,6 +155,10 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write # the GitHub Release, with this repository's own token
+    env:
+      # Universal (Apple silicon and Intel, #62, #88) from 0.6.0 on, as the nightlies are: make-app.sh
+      # builds both slices with lipo, and release.sh's check_signature checks each one.
+      SILL_UNIVERSAL: '1'
     steps:
       # First, before anything is checked out or built. An environment without its secrets gives empty
       # strings, not an error, so a missing one is named here. And a run by hand starts from the tag it
