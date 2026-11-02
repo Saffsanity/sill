@@ -21,7 +21,7 @@ and the command under the table changes every copy in this file.
 | Privacy Policy URL | `https://getsill.app/privacy` | `site/privacy.html`; the same link as `SillLinks.privacy` in the app. |
 | Mac download | `https://getsill.app/download` | `site/download.html`; the same link as `SillLinks.download` in the app. |
 | Contact address | `support@getsill.app` | Noah's: Cloudflare Email Routing forwards it to his mailbox (2026-09-25). |
-| Mac requirement | Apple silicon, macOS 14 or later | Today's Sill.app is arm64 only; `LSMinimumSystemVersion` is 14.0. If the release build becomes universal, take "with Apple silicon" out of the description and the review notes. |
+| Mac requirement | macOS 14 or later, Apple silicon or Intel | Sill.app is universal (arm64 and x86_64) from 0.6.0 on (#62; release.yml's publish job sets `SILL_UNIVERSAL=1`, as the nightlies do); `LSMinimumSystemVersion` is 14.0. The description and the review notes say "a Mac with macOS 14 or later", without "with Apple silicon". |
 | App Store Connect record | "Sill – Mac Streaming", Apple ID 6816359860, SKU `sill-ios` | Created 2026-09-26 (section 1). Builds 0.5 (1) to (3) went to TestFlight; 0.5 (3) went to App Review as the first version, live 2026-10-08; 0.5.1 (4), the version both apps share from Sill for Mac 0.5.1 on, live 2026-10-10 (section 5). |
 | Remote Access | In every version since 0.5, and in Sill for Mac since 0.3.0 (PR #13) | The live listing names it; the Remote Access switch below is only for a build without it. |
 
@@ -315,7 +315,7 @@ not the sound's bullet (below) is in yet.
 ```text
 Sill puts your Mac on your iPhone and iPad. Pick any window, or the whole desktop, and use it with touch, a trackpad, a keyboard or Apple Pencil. Your apps keep running on your Mac. Sill shows them and sends back what you do.
 
-Sill needs the free Sill for Mac on the Mac you want to use. Get it at getsill.app. It runs on a Mac with Apple silicon and macOS 14 or later.
+Sill needs the free Sill for Mac on the Mac you want to use. Get it at getsill.app. It runs on a Mac with macOS 14 or later.
 
 Get started
 • Open Sill for Mac and allow Screen Recording and Accessibility.
@@ -575,7 +575,7 @@ NO VPN FUNCTIONALITY
 Sill creates, configures and operates no VPN and uses no Network Extension (no NEVPNManager, tunnel or proxy provider, no such entitlement). Only Network.framework, for TCP with TLS 1.3 to the user's own Mac. "VPN" appears only because a user may optionally reach their Mac through a VPN they already run themselves (such as Tailscale); Sill just connects to the Mac's address over the network the device has and names that connection. It collects no user information through VPN or anything else, and shares nothing with third parties.
 
 WHAT YOU NEED
-- A Mac with Apple silicon and macOS 14 or later.
+- A Mac with macOS 14 or later.
 - An iPhone or iPad on the same Wi-Fi network.
 - Sill for Mac 0.5.1 or later, free: https://getsill.app/download (Developer ID, notarized).
 
