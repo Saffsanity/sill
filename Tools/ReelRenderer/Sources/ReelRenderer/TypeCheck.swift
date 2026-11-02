@@ -42,10 +42,14 @@ final class TypeChecker {
     private(set) var worst: Measure?
     private(set) var offs: [Double] = []
     private var perShot: [String: (n: Int, worst: Double)] = [:]
+    /// Frames checked per shot, measured or not, so a shot whose type was never recorded shows in the summary.
+    private var framesPerShot: [String: Int] = [:]
     private var report = ""
 
-    /// `with` renders the frames with their type (in `render --typecheck`, the film's own compositor); a second
-    /// compositor renders them with the type canvases empty, so neither SwiftUI graph ever sees the other state.
+    /// `with` renders the frames with their type, `without` with the type canvases empty, each its own compositor, so
+    /// neither SwiftUI graph ever sees the other state. In `render --typecheck`, `with` is never the film's compositor
+    /// either: that one has just drawn the same frame, and SwiftUI may then reuse a subtree's drawing (the 0.6.0
+    /// cutaway's masked column) without running its canvases, so the probe recorded none of its glyphs.
     init(with: Compositor) {
         self.with = with
         self.without = Compositor()
@@ -105,6 +109,7 @@ final class TypeChecker {
         let lo = lumaRaw(layers, frame: frame, comp: without)
         probe.set { $0.hidden = false }
         frames += 1
+        framesPerShot[shot, default: 0] += 1
         guard !glyphs.isEmpty else { return nil }
         let W = TypeChecker.W, H = TypeChecker.H
         var d = [Float](repeating: 0, count: W * H)
@@ -448,6 +453,10 @@ final class TypeChecker {
         }
         for (k, v) in skipped.sorted(by: { $0.key < $1.key }) { out += "  not measured, \(k): \(v)\n" }
         for (shot, s) in perShot.sorted(by: { $0.key < $1.key }) { out += String(format: "  %@: %d frames, worst %.4f px\n", shot, s.n, s.worst) }
+        let unmeasured = framesPerShot.keys.filter { perShot[$0] == nil }.sorted()
+        if !unmeasured.isEmpty {
+            out += "  no glyph measured in: " + unmeasured.map { "\($0) (\(framesPerShot[$0]!) frames)" }.joined(separator: ", ") + "\n"
+        }
         let bitmaps = TypeProbe.shared.bitmapGlyphs
         if bitmaps > 0 { out += "  glyphs without an outline (drawn by Core Text, not measured): \(bitmaps)\n" }
         out += "  strings drawn: \(TypeProbe.shared.strings.count)\n"

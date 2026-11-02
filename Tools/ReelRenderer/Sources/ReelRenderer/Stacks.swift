@@ -4,9 +4,11 @@ import SwiftUI
 @MainActor
 struct Env {
     let clips: ClipLibrary
-    let portrait: CGImage          // HT-C, the portrait harness screenshot, cropped to its interior
-    let v3: V3Stills               // v3: the harness screenshots and Mac previews of the new beats (V3.swift)
+    let portrait: CGImage?         // HT-C, the portrait harness screenshot, cropped to its interior (v3.1 only)
+    let v3: V3Stills!              // v3: the harness screenshots and Mac previews of the new beats (V3.swift; v3.1 only)
     // v2: the Mac pane and HT-S left with the shared-settings shots (note 13).
+    /// 0.6.0: its stills, pictures and the v3.1 film it quotes (Reel060.swift); nil for v3.1.
+    var f: Footage060! = nil
 }
 
 /// Positive yaw brings the device's right side toward the lens; positive pitch its top edge.

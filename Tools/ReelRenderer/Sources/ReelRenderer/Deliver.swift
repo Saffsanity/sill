@@ -110,6 +110,7 @@ func contactSheet(args: [String]) throws {
     gen.requestedTimeToleranceAfter = .zero
     gen.appliesPreferredTrackTransform = true
     let cols = 6, tileW = 300, tileH = 169, gutter = 14, label = 26
+    let sheetTimes = ReelCut.current == .r060 ? sheetTimes060 : sheetTimes
     let rows = (sheetTimes.count + cols - 1) / cols
     let W = cols * tileW + (cols + 1) * gutter
     let titleH = 56
@@ -125,7 +126,9 @@ func contactSheet(args: [String]) throws {
         ctx.textPosition = CGPoint(x: x, y: y)
         CTLineDraw(CTLineCreateWithAttributedString(a), ctx)
     }
-    text("Sill sizzle reel v3.1 · contact sheet · one frame per shot (from the MP4) · S24–S27: Wi‑Fi, Wired, Direct, Remote", gutter, H - 36, 18, .semibold, 0.85)
+    text(ReelCut.current == .r060 ? "Sill 0.6.0 update · contact sheet · one frame per shot (from the MP4) · S04–S17: the new features, S19–S20: the fixes"
+                                  : "Sill sizzle reel v3.1 · contact sheet · one frame per shot (from the MP4) · S24–S27: Wi‑Fi, Wired, Direct, Remote",
+         gutter, H - 36, 18, .semibold, 0.85)
     for (k, (id, t)) in sheetTimes.enumerated() {
         let (cg, _) = try loadSync { try await gen.image(at: CMTime(seconds: t, preferredTimescale: 600)) }
         let col = k % cols, row = k / cols
@@ -221,16 +224,18 @@ func verify(args: [String]) throws {
                 let idStr = String(bytes: [24, 16, 8, 0].map { UInt8((id >> $0) & 0xFF) }, encoding: .ascii) ?? "?"
                 print("  audio: \(idStr) \(Int(asbd.mSampleRate)) Hz, \(asbd.mChannelsPerFrame) ch, range \(String(format: "%.4f+%.4f", arange.start.seconds, arange.duration.seconds))")
             }
-            // Levels: overall peak, RMS, and the 57.60–58.00 window (v2).
+            // Levels: overall peak, RMS, and the silence (v2's 57.60–58.00; v3's 65.60–66.00; 0.6.0's 71.40–72.00, after the
+            // thud at the squash).
             let ar = try AVAssetReader(asset: asset)
             let ao = AVAssetReaderTrackOutput(track: a, outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 32,
                                                                          AVLinearPCMIsFloatKey: true, AVLinearPCMIsNonInterleaved: false,
                                                                          AVSampleRateKey: 48_000, AVNumberOfChannelsKey: 2])
             ar.add(ao); ar.startReading()
             var peak: Float = 0, sumSq = 0.0, n = 0.0, silPeak: Float = 0, idx = 0, innerPeak: Float = 0
-            // v3: the silence moved with Act IV (65.60–66.00).
-            let silA = Int(65.60 * 48_000), silB = Int(66.00 * 48_000)
-            let inA = Int(65.65 * 48_000), inB = Int(65.95 * 48_000)
+            // v3: the silence moved with Act IV (65.60–66.00). 0.6.0: 71.40–72.00.
+            let sil: (Double, Double) = ReelCut.current == .r060 ? (71.40, 72.00) : (65.60, 66.00)
+            let silA = Int(sil.0 * 48_000), silB = Int(sil.1 * 48_000)
+            let inA = Int((sil.0 + 0.05) * 48_000), inB = Int((sil.1 - 0.05) * 48_000)
             var nonzero = 0
             while let s = ao.copyNextSampleBuffer() {
                 guard let bb = CMSampleBufferGetDataBuffer(s) else { continue }
@@ -248,14 +253,17 @@ func verify(args: [String]) throws {
                 idx += count
             }
             let db = { (x: Double) in x > 0 ? 20 * log10(x) : -999 }
-            print(String(format: "  audio levels: peak %.2f dBFS, RMS %.2f dBFS, 65.60–66.00 peak %@ (%d non-zero samples), 65.65–65.95 peak %@",
-                         db(Double(peak)), db((sumSq / max(n, 1)).squareRoot()),
+            print(String(format: "  audio levels: peak %.2f dBFS, RMS %.2f dBFS, %.2f–%.2f peak %@ (%d non-zero samples), %.2f–%.2f peak %@",
+                         db(Double(peak)), db((sumSq / max(n, 1)).squareRoot()), sil.0, sil.1,
                          silPeak == 0 ? "digital silence (0)" : String(format: "%.1f dBFS", db(Double(silPeak))), nonzero,
+                         sil.0 + 0.05, sil.1 - 0.05,
                          innerPeak == 0 ? "digital silence (0)" : String(format: "%.1f dBFS", db(Double(innerPeak)))))
         }
-        // Blacks: frame 3951 (65.85 s, inside the 0.4 s of true black; v2's 3471) must decode to Y 16.
+        // Blacks: frame 3951 (65.85 s, inside the 0.4 s of true black; v2's 3471) must decode to Y 16. 0.6.0: frame 4790
+        // (79.83 s, after the sill line has retracted).
+        let blackFrame = ReelCut.current == .r060 ? 4790 : 3951
         let yr = try AVAssetReader(asset: asset)
-        yr.timeRange = CMTimeRange(start: CMTime(value: 3951, timescale: 60), duration: CMTime(value: 1, timescale: 60))
+        yr.timeRange = CMTimeRange(start: CMTime(value: CMTimeValue(blackFrame), timescale: 60), duration: CMTime(value: 1, timescale: 60))
         let yo = AVAssetReaderTrackOutput(track: v, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange])
         yr.add(yo); yr.startReading()
         if let s = yo.copyNextSampleBuffer(), let pb = CMSampleBufferGetImageBuffer(s) {
@@ -268,8 +276,10 @@ func verify(args: [String]) throws {
             }
             CVPixelBufferUnlockBaseAddress(pb, .readOnly)
             let used = hist.enumerated().filter { $0.element > 0 }.map { "Y\($0.offset)×\($0.element)" }
-            print("  true black at 65.85 s (frame 3951): \(used.joined(separator: ", ")) (want all 16)")
+            print(String(format: "  true black at %.2f s (frame %d): ", Double(blackFrame) / 60, blackFrame) + "\(used.joined(separator: ", ")) (want all 16)")
         }
+        // The hero frame below is v3's (S10's one black frame); 0.6.0 has none.
+        if ReelCut.current == .r060 { continue }
         // The hero (§11.2 check 3): mean luma of S10's stream area, frames 1118…1124 (v2: 1122 is the black one).
         let hr = try AVAssetReader(asset: asset)
         hr.timeRange = CMTimeRange(start: CMTime(value: 1118, timescale: 60), duration: CMTime(value: 7, timescale: 60))
@@ -437,7 +447,7 @@ private func shiftChunkOffsets(_ b: Box, by delta: Int) -> Box {
 }
 
 /// The title written as iTunes `©nam` (fourth cut: the files had cover art but no title).
-let movieTitle = "Sill sizzle reel v3.1"
+var movieTitle: String { ReelCut.current == .r060 ? "What’s new in Sill 0.6.0" : "Sill sizzle reel v3.1" }
 
 private func coverArt(_ jpeg: Data) -> Box {
     // hdlr: version/flags 0, pre_defined 0, handler 'mdir', reserved 'appl' 0 0, empty name.

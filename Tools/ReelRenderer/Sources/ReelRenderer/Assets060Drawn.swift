@@ -590,8 +590,10 @@ struct HoldRing060: View {
             c.opacity = alpha
             let d = diameter * CGFloat(s)
             let dot = CGRect(x: center.x - d / 2, y: center.y - d / 2, width: d, height: d)
+            if TouchDot.rimmed { c.fill(Path(ellipseIn: dot), with: .color(.black.opacity(0.12))) }
             c.fill(Path(ellipseIn: dot), with: .color(.white.opacity(0.18)))
             c.stroke(Path(ellipseIn: dot.insetBy(dx: 0.75 * w, dy: 0.75 * w)), with: .color(.white.opacity(0.45)), lineWidth: 1.5 * w)
+            if TouchDot.rimmed { c.stroke(Path(ellipseIn: dot), with: .color(.black.opacity(0.30)), lineWidth: 1.5 * w) }
             let ringR = d / 2 + 4 * w
             let p = progress
             if p > 0 {

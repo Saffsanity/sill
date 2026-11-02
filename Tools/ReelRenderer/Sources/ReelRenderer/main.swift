@@ -26,6 +26,10 @@ func makeEnv(_ comp: Compositor) throws -> Env {
     ShadowCache.shared.ci = comp.ci
     IconShadows.shared.build(ci: comp.ci)
     let clips = ClipLibrary(ci: comp.ci)
+    if ReelCut.current == .r060 {
+        // 0.6.0 reads none of v3.1's inputs: its own stills and pictures, and v3.1's film (Reel060.swift).
+        return Env(clips: clips, portrait: nil, v3: nil, f: try Footage060(ci: comp.ci, clips: clips))
+    }
     guard let portrait = loadStill(reelDir.appendingPathComponent("capture/final-portrait.png"),
                                    crop: CGRect(x: 322, y: 376, width: 1420, height: 2000), ci: comp.ci) else {
         throw NSError(domain: "Reel", code: 1, userInfo: [NSLocalizedDescriptionKey: "portrait still missing"])
@@ -43,8 +47,8 @@ func layers(frame i: Int, env: Env) throws -> FrameLayers {
 @MainActor
 func render(args: [String]) throws {
     // v3: never the delivered files in design/reel (first cut, v2-preview, v2 or v3); the working copy is W/v3/out.
-    // v3.1: W/v31/out.
-    var out = reelDir.appendingPathComponent("v31/out/silent.mp4")
+    // v3.1: W/v31/out. 0.6.0: 060/out under its REEL_DIR.
+    var out = reelDir.appendingPathComponent(ReelCut.current == .r060 ? "060/out/silent.mp4" : "v31/out/silent.mp4")
     var from = 0.0, to = Stage.duration
     var framesDir: URL?
     var every = 12
@@ -73,7 +77,9 @@ func render(args: [String]) throws {
     if let framesDir { try FileManager.default.createDirectory(at: framesDir, withIntermediateDirectories: true) }
     let first = Int((from * 60).rounded()), last = min(Stage.frames, Int((to * 60).rounded())) - 1
     let writer = video ? try VideoWriter(url: out) : nil
-    let checker = typecheckEvery.map { _ in TypeChecker(with: comp) }
+    // The check draws each frame on compositors of its own: on the film's, which has just drawn the same frame, SwiftUI
+    // may reuse a subtree's drawing without running its canvases, and the probe would record none of its glyphs.
+    let checker = typecheckEvery.map { _ in TypeChecker(with: Compositor()) }
     let started = Date()
     var lastReport = Date()
     for f in first...last {
@@ -184,7 +190,7 @@ do {
     case "stills": try MainActor.assumeIsolated { try stills(args: Array(args.dropFirst())) }
     case "icon-check": try MainActor.assumeIsolated { try iconCheck(args: Array(args.dropFirst())) }
     case "assets": try MainActor.assumeIsolated { try assetPreviews060(args: Array(args.dropFirst())) }
-    case "score": try Score.render(args: Array(args.dropFirst()))
+    case "score": try ReelCut.current == .r060 ? Score060.render(args: Array(args.dropFirst())) : Score.render(args: Array(args.dropFirst()))
     case "mux": try muxScore(args: Array(args.dropFirst()))
     case "sheet": try contactSheet(args: Array(args.dropFirst()))
     case "verify": try verify(args: Array(args.dropFirst()))

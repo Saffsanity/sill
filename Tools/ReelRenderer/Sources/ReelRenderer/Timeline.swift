@@ -107,7 +107,9 @@ enum P {
 
 @MainActor
 enum Timeline {
-    static let shots: [Shot] = [
+    /// The cut's shots: v3.1's below, or the 0.6.0 update video's (Reel060.swift) with `REEL=060`.
+    static var shots: [Shot] { ReelCut.current == .r060 ? Timeline060.shots : v31 }
+    static let v31: [Shot] = [
         // Act I · darkness and the promise (0–9.6, 6 bars)
         Shot(id: "S01", start: 0.0, end: 2.4, source: "drawn", clip: nil, build: s01),
         Shot(id: "S02", start: 2.4, end: 4.4, source: "drawn", clip: nil, build: s02),

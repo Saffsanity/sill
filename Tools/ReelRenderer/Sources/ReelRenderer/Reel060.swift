@@ -1,0 +1,415 @@
+// Reel060.swift — the 0.6.0 update video (REEL=060): its inputs, the stills it derives from them, its copy, and its
+// timeline. The storyboard is ~/Downloads/sill-handoff/release-060/reel-0.6.0-storyboard.md (approved 2026-11-02);
+// the shot list with the as-built numbers is design/reel/v4/SHOTLIST-0.6.0.md. 80.0 s, 50 bars at 150 BPM, 23 shots.
+//
+// Inputs, under `reelDir` (REEL_DIR; the assemble step's `.build/reel060/input`):
+// - `stills/`: harness screenshots of Sill 0.6.0 (origin/main c4a331f) on private simulators: the iPad mini's
+//   2266×1488 px screen (its Mac picture at x 106–2159, y 188–1471: Device060/MacPicture060), the iPhone's 786×1704.
+// - `pictures/`: the drawn Mac pictures (2880×1800) and the drawn iPad note pages (2266×1488) the stills show.
+// - `v31film/Sill-sizzle-v3.1-silent.mp4`: the delivered v3.1 film, decoded only (ClipID.v31film): Weather's window
+//   behind S07–S08 (Noah's decision (c)) and the movie QuickTime plays in S06.
+// Six of the scenes stand in for Noah's takes A–F (storyboard §5): each is a swap-in point the shot list names.
+import AppKit
+import CoreImage
+import SwiftUI
+
+// MARK: - Copy (storyboard §2–§4; every line traced in its §7)
+
+enum Copy060 {
+    static let whatsNew = "What\u{2019}s new."
+    static let version = "0.6.0"
+    // S04–S05
+    static let copyMac = "Copy on your Mac.", pasteIPad = "Paste on your iPad."
+    static let needsMac = "Needs Sill for Mac 0.6.0."
+    static let copyIPad = "Copy on your iPad.", pasteMac = "Paste on your Mac."
+    static let pasteSub = "Tap Paste in Sill. It lands where the cursor is."
+    static let pasteFoot = "Text, up to 256 KB. Share Clipboard turns it off and on."
+    // S06
+    static let sound = "Sound from your Mac."
+    static let soundSub = "The window you\u{2019}re using, a moment behind the picture."
+    static let soundFoot = "A beta. Send Audio covers every device, and Mute silences one."
+    // S07–S08
+    static let locked = "Mac locked?", lockScreen = "Sill shows its lock screen."
+    /// "And nothing else: no windows, apps, menus, sound or clipboard." on two lines, so it clears the iPad.
+    static let lockSub = ["And nothing else: no windows,", "apps, menus, sound or clipboard."]
+    static let unlock = "Unlock it from here."
+    static let unlockSub = "Type your password on your iPad."
+    static let unlockFoot = "Only a paired device can type at the lock screen."
+    // S09
+    static let pinch = "Pinch to zoom.", upTo5 = "Up to 5\u{00D7}."
+    static let pinchSub = "Taps and clicks land on what you see."
+    // S10
+    static let larger = "Larger Picture.", upright = "On iPhone, held upright."
+    /// "The picture reaches down to where the keyboard comes up." on two lines.
+    static let largerSub = ["The picture reaches down to", "where the keyboard comes up."]
+    static let largerFoot = "In Settings. The Desktop keeps the usual layout."
+    // S11
+    static let attach = "Attach a keyboard.", justType = "Just type."
+    static let esc = ["Esc", "included."]
+    static let escFoot = "No Keyboard button needed."
+    // S12
+    static let scroll = "Two-finger scroll.", wheel = "Or a mouse wheel."
+    static let reverseSub = "Or the other way, with Reverse Scrolling."
+    static let reverseFoot = "A trackpad or mouse keeps its own Natural Scrolling."
+    // S13
+    static let greetings = ["\u{4F60}\u{597D}", "\u{3053}\u{3093}\u{306B}\u{3061}\u{306F}", "\u{C548}\u{B155}\u{D558}\u{C138}\u{C694}"]
+    static let greetingLanguages = ["zh-Hans", "ja", "ko"]
+    static let composeSub = "Compose here. It types on your Mac."
+    static let composeFoot = "Chinese, Japanese, Korean and more. Dictation too."
+    // S14
+    static let tiles = "Every Mac, a tile."
+    /// "Each as you last left it, in groups like Home and Work." on two lines.
+    static let tilesSub = ["Each as you last left it,", "in groups like Home and Work."]
+    static let tilesFoot = "Prefer a list? Tap beside Connect to a Mac."
+    // S15
+    static let aaOff = "Aa starts at Off."
+    static let aaSub = "Slide back to Off, and the window goes back to its own size."
+    static let aaFoot = "With Sill for Mac 0.6.0."
+    // S16
+    static let hold = "Hold a thumbnail.", halfSecond = "Controls in half a second."
+    static let holdFoot = "Hold to Show Window Controls sets 0.2 to 2 seconds."
+    // S17
+    static let tour = "The tour marks what\u{2019}s new."
+    static let tourSub = "It shows once after the update, and any time from Settings."
+    // S18
+    static let intel = "Sill for Mac now runs on Intel."
+    static let intelSub = "Apple silicon or an Intel processor, macOS 14 or later."
+    static let intelFoot = "Virtual Display and Send Audio are now on by default."
+    // S21–S22
+    static let wordmark = "Sill"
+    static let freeOpen = "Free. Open source."
+    static let appStore = "For iPhone and iPad on the App Store."
+    static let download = "For Mac at getsill.app/download"
+    static let legal = ["Mac, iPad and iPhone are trademarks of Apple Inc., registered in the U.S. and other countries. App Store is a service mark of Apple Inc.",
+                        "Intel is a trademark of Intel Corporation. Other names and apps shown belong to their owners."]
+}
+
+// MARK: - The inputs
+
+/// The iPad mini's stills (2266×1488 px) and where their parts are.
+enum Mini060 {
+    static let source = Device060.miniSource
+    /// The Mac's picture (16:10) with the Settings panel closed, measured on L0: x 106–2159, y 188–1471.
+    static let picture = CGRect(x: 106, y: 188, width: 2054, height: 1284)
+    /// The stream panel the picture is fitted in (its hairline at x 16–17), measured on L0 and L1.
+    static let panel = CGRect(x: 16, y: 188, width: 2234, height: 1284)
+    /// The first thumbnail (L0): its selection ring's box, its picture and its app badge.
+    static let thumbRing = CGRect(x: 206, y: 10, width: 228, height: 152)
+    static let thumbImage = CGRect(x: 216, y: 20, width: 208, height: 132)
+    static let thumbBadge = CGRect(x: 204, y: 116, width: 48, height: 48)
+    /// The bar's height (the bar is y 0–171; the panel starts at 188).
+    static let bar: CGFloat = 172
+}
+
+/// The 0.6.0 reel's stills and pictures, the stills it derives from them, and v3.1's film.
+@MainActor final class Footage060 {
+    let ci: CIContext
+    let clips: ClipLibrary
+    let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
+    private var full: [String: CGImage] = [:]
+    private var cache: [String: CGImage] = [:]
+    private var order: [String] = []
+
+    /// Every input the cut reads, checked at start so a missing one fails at once, not mid-render.
+    static let required = [
+        "stills/A1-te-select", "stills/A2-te-cursor", "stills/A3p-chip", "stills/A4-note-pasted",
+        "pictures/ipad-notes-paste", "pictures/ipad-notes-copy", "pictures/ipad-notes-pasted",
+        "stills/B1-qt", "stills/B4-sound-sendaudio", "stills/B3-sound-muted", "pictures/qt-play",
+        "stills/L0-unlocked", "stills/L1-locked", "stills/C0-sheet", "pictures/sheet",
+        "stills/D1-iphone-standard", "stills/D4-iphone-settings-off", "stills/D5-iphone-settings-on",
+        "stills/D2-iphone-larger-1610", "stills/D3-iphone-larger-fitted",
+        "stills/E0-te-empty", "stills/E1-te-typed", "stills/E2-te-save", "stills/E3-longdoc0", "pictures/longdoc-page",
+        "stills/E6-reverse-off", "stills/E7-reverse-on",
+        "stills/F0-cjk0", "stills/F1-cjk1", "stills/F2-cjk2", "stills/F3-cjk3", "stills/F4-cjk4",
+        "stills/N1-tiles", "stills/N2-list", "stills/H1-scale125-open", "stills/H2-scaleoff-open",
+        "stills/J1-windowmenu", "stills/J2-hold-row", "stills/K1-tour-touch",
+    ]
+
+    init(ci: CIContext, clips: ClipLibrary) throws {
+        self.ci = ci
+        self.clips = clips
+        for name in Footage060.required { _ = try image(name) }
+    }
+
+    private func remember(_ key: String, _ make: () throws -> CGImage) rethrows -> CGImage {
+        if let hit = cache[key] { return hit }
+        let img = try make()
+        cache[key] = img
+        order.append(key)
+        if order.count > 120 { cache[order.removeFirst()] = nil }
+        return img
+    }
+
+    /// An input at full size ("stills/A1-te-select", "pictures/sheet"), or a derived still ("derived/L0w", below).
+    func image(_ name: String) throws -> CGImage {
+        if let hit = full[name] { return hit }
+        let img: CGImage
+        if name.hasPrefix("derived/") {
+            img = try derive(String(name.dropFirst("derived/".count)))
+        } else {
+            let url = reelDir.appendingPathComponent(name + ".png")
+            guard let src = CGImageSourceCreateWithURL(url as CFURL, nil), let i = CGImageSourceCreateImageAtIndex(src, 0, nil) else {
+                throw NSError(domain: "Reel060", code: 1, userInfo: [NSLocalizedDescriptionKey: "missing \(url.path)"])
+            }
+            img = i
+        }
+        full[name] = img
+        return img
+    }
+
+    /// `name` Lanczos-scaled to `width` px (its aspect kept), cached.
+    func scaled(_ name: String, width: CGFloat) throws -> CGImage {
+        let src = try image(name)
+        let w = width.rounded()
+        return try remember("\(name)|w\(Int(w))") { scale(src, CGFloat(w) / CGFloat(src.width)) }
+    }
+
+    /// The region `r` (top-left origin, in `name`'s px) Lanczos-scaled by `scale`, cached.
+    func crop(_ name: String, _ r: CGRect, scale: CGFloat) throws -> CGImage {
+        let src = try image(name)
+        return try remember("\(name)|\(r)|\(String(format: "%.5f", scale))") {
+            guard let c = src.cropping(to: r.integral) else { throw NSError(domain: "Reel060", code: 2) }
+            return self.scale(c, scale)
+        }
+    }
+
+    /// A CGImage Lanczos-scaled by `s` (sRGB), as V3Stills does.
+    func scale(_ img: CGImage, _ s: CGFloat) -> CGImage {
+        if abs(s - 1) < 1e-4 { return img }
+        let w = (CGFloat(img.width) * s).rounded(), h = (CGFloat(img.height) * s).rounded()
+        let out = CIImage(cgImage: img).applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: s, kCIInputAspectRatioKey: 1])
+        return ci.createCGImage(out, from: CGRect(x: 0, y: 0, width: w, height: h), format: .BGRA8, colorSpace: srgb)!
+    }
+
+    /// v3.1's film at reel time `t` (its latest sample at or before), the whole 1920×1080 frame, scaled by `scale`.
+    func film(_ t: Double, scale: CGFloat = 1) throws -> CGImage {
+        try clips.image(.v31film, at: t, treatment: .none, scale: scale, crop: CGRect(x: 0, y: 0, width: 1920, height: 1080)).image
+    }
+
+    // MARK: Derived stills (composed once, at full size)
+
+    /// A context of `size` px, top-left origin (y down), sRGB.
+    private func canvas(_ w: Int, _ h: Int, _ draw: (CGContext) throws -> Void) rethrows -> CGImage {
+        let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: srgb,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.translateBy(x: 0, y: CGFloat(h)); ctx.scaleBy(x: 1, y: -1)
+        ctx.interpolationQuality = .high
+        try draw(ctx)
+        return ctx.makeImage()!
+    }
+
+    /// Draws `img` upright into `r` (top-left origin) of a y-down context.
+    static func put(_ ctx: CGContext, _ img: CGImage, in r: CGRect) {
+        ctx.saveGState()
+        ctx.translateBy(x: r.minX, y: r.maxY); ctx.scaleBy(x: 1, y: -1)
+        ctx.draw(img, in: CGRect(x: 0, y: 0, width: r.width, height: r.height))
+        ctx.restoreGState()
+    }
+
+    /// The colour of one pixel of `img` (top-left origin).
+    func sample(_ img: CGImage, _ x: Int, _ y: Int) -> CGColor {
+        var px = [UInt8](repeating: 0, count: 4)
+        let c = CGContext(data: &px, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: srgb,
+                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        c.draw(img.cropping(to: CGRect(x: x, y: y, width: 1, height: 1))!, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return CGColor(srgbRed: CGFloat(px[0]) / 255, green: CGFloat(px[1]) / 255, blue: CGFloat(px[2]) / 255, alpha: 1)
+    }
+
+    private func derive(_ name: String) throws -> CGImage {
+        switch name {
+        case "weather":
+            // v3.1's Weather window (S08, 15.9 s: the device frontal, the swipe settled), its stream picture measured at
+            // x 273.5–1567.5, y 201.5–992.5 of the frame, cut to 16:10 inside its rounded edges (Noah's decision (c)).
+            return try film(15.9).cropping(to: CGRect(x: 298, y: 207, width: 1246, height: 779))!
+        case "L0w":
+            // L0 (the stream screen, unlocked) with Weather in the picture and on the first thumbnail, badge "We".
+            let l0 = try image("stills/L0-unlocked"), w = try image("derived/weather")
+            let gap = sample(l0, 212, 60)
+            return try canvas(l0.width, l0.height) { c in
+                Footage060.put(c, l0, in: CGRect(x: 0, y: 0, width: l0.width, height: l0.height))
+                Footage060.put(c, w, in: Mini060.picture)
+                c.setFillColor(gap)
+                c.addPath(CGPath(roundedRect: Mini060.thumbImage.insetBy(dx: -2, dy: -2), cornerWidth: 20, cornerHeight: 20, transform: nil)); c.fillPath()
+                c.saveGState()
+                c.addPath(Path(roundedRect: Mini060.thumbImage, cornerRadius: 18, style: .continuous).cgPath); c.clip()
+                let th = Mini060.thumbImage.height, tw = th * CGFloat(w.width) / CGFloat(w.height)
+                Footage060.put(c, scale(w, th / CGFloat(w.height)), in: CGRect(x: Mini060.thumbImage.midX - tw / 2, y: Mini060.thumbImage.minY, width: tw, height: th))
+                c.restoreGState()
+                // The app badge: the harness draws an app's first two letters on its colour (Te, Nu, Qu, No).
+                let b = Mini060.thumbBadge
+                c.setFillColor(gap)
+                c.addPath(CGPath(roundedRect: b.insetBy(dx: -4, dy: -4), cornerWidth: 15, cornerHeight: 15, transform: nil)); c.fillPath()
+                c.setFillColor(CGColor.hex(0x2F7BE0))
+                c.addPath(CGPath(roundedRect: b, cornerWidth: 11, cornerHeight: 11, transform: nil)); c.fillPath()
+                let font = NSFont.systemFont(ofSize: 27, weight: .semibold)
+                let line = CTLineCreateWithAttributedString(NSAttributedString(string: "We", attributes: [.font: font, .foregroundColor: NSColor.white]))
+                let lb = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+                c.saveGState()
+                c.translateBy(x: b.midX - lb.midX, y: b.midY + lb.midY); c.scaleBy(x: 1, y: -1)
+                c.textPosition = .zero
+                CTLineDraw(line, c)
+                c.restoreGState()
+            }
+        case "L1x":
+            // L1's bar (the locked Mac's: no thumbnails, no Menus) over L0's stream panel: 0.6.0 covers nothing while
+            // this session's screen is locked (LockedMac.shade), the Mac streams its lock screen, which the shot draws
+            // into the picture. L1's own picture is the harness's cover for a mock with no frame.
+            let l0 = try image("derived/L0w"), l1 = try image("stills/L1-locked")
+            return try canvas(l0.width, l0.height) { c in
+                Footage060.put(c, l0, in: CGRect(x: 0, y: 0, width: l0.width, height: l0.height))
+                c.saveGState(); c.clip(to: CGRect(x: 0, y: 0, width: l1.width, height: 188))
+                Footage060.put(c, l1, in: CGRect(x: 0, y: 0, width: l1.width, height: l1.height))
+                c.restoreGState()
+            }
+        case "notes-plain":
+            // The iPad's note before the Mac's line is pasted: "Sounds good, see you then." alone.
+            let p = try image("pictures/ipad-notes-pasted")
+            let white = sample(p, 1200, 460)
+            return try canvas(p.width, p.height) { c in
+                Footage060.put(c, p, in: CGRect(x: 0, y: 0, width: p.width, height: p.height))
+                c.setFillColor(white); c.fill(CGRect(x: 140, y: 420, width: 700, height: 80))
+            }
+        case "B5-muted":
+            // Mute on with Send Audio still in view: B4 (Send Audio on, Mute off) with B3's panel content (Mute on and
+            // its footnote's "This iPad is muted.") from the Mute row down, aligned on that row (measured: 89 px), down to the scrolling part's end above the pinned Disconnect.
+            let b4 = try image("stills/B4-sound-sendaudio"), b3 = try image("stills/B3-sound-muted")
+            return try canvas(b4.width, b4.height) { c in
+                Footage060.put(c, b4, in: CGRect(x: 0, y: 0, width: b4.width, height: b4.height))
+                c.saveGState()
+                c.clip(to: Footage060.b5Clip)
+                Footage060.put(c, b3, in: CGRect(x: 0, y: Footage060.b5Shift, width: CGFloat(b3.width), height: CGFloat(b3.height)))
+                c.restoreGState()
+            }
+        default:
+            throw NSError(domain: "Reel060", code: 3, userInfo: [NSLocalizedDescriptionKey: "no derived still \(name)"])
+        }
+    }
+
+    /// B5-muted's patch: B3's rows moved down by `b5Shift` into the panel's scrolling part below B4's Mute row.
+    static let b5Shift: CGFloat = 89
+    static let b5Clip = CGRect(x: 1504, y: 406, width: 716, height: 904)
+}
+
+// MARK: - Drawing the iPad mini's screen
+
+/// One layer of an iPad mini's screen: a still (or a derived one) filling the screen, `opacity`, and an x offset in
+/// screen widths (an app switch slides one screen over the other).
+struct MiniLayer {
+    var name: String
+    var opacity: Double = 1
+    var slide: CGFloat = 0
+}
+
+extension Footage060 {
+    /// A still scaled to fill an interior of `width` px, at `fetch` × that (so a push of up to `fetch` stays ≤ 1:1).
+    func screen(_ name: String, width: CGFloat, fetch: CGFloat = 1) throws -> CGImage {
+        try scaled(name, width: width * fetch)
+    }
+}
+
+/// An iPad mini's screen in its interior's coordinates: the layers (stills), then `overlay` (drawn in the
+/// interior's px; `k` = interior px per still px), then the touch dots (in the stills' px).
+struct MiniScreen<Overlay: View>: View {
+    let size: CGSize
+    let layers: [(CGImage, MiniLayer)]
+    var dots: [TouchDotSpec] = []
+    var t: Double
+    @ViewBuilder var overlay: () -> Overlay
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.black
+            ForEach(0..<layers.count, id: \.self) { i in
+                let (img, l) = layers[i]
+                if l.opacity > 0.001 {
+                    Image(decorative: img, scale: 1).resizable().interpolation(.high)
+                        .frame(width: size.width, height: size.height)
+                        .offset(x: l.slide * size.width)
+                        .opacity(l.opacity)
+                }
+            }
+            overlay()
+            ForEach(0..<dots.count, id: \.self) { i in
+                TouchDot(spec: dots[i], t: t, clipScale: size.width / dots[i].interiorWidth)
+            }
+        }
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+        .clipped()
+    }
+}
+
+extension View {
+    /// A camera move as one render transform: scales the full-canvas view by `s` about `from` and puts that point at
+    /// `to` (no layout rounding, so a move glides).
+    func camera(_ s: CGFloat, from: CGPoint, to: CGPoint) -> some View {
+        transformEffect(CGAffineTransform(translationX: -from.x, y: -from.y)
+            .concatenating(CGAffineTransform(scaleX: s, y: s))
+            .concatenating(CGAffineTransform(translationX: to.x, y: to.y)))
+    }
+}
+
+/// A rect in a still's px → an interior's px (`k` interior px per still px).
+func scaledRect(_ r: CGRect, _ k: CGFloat) -> CGRect { CGRect(x: r.minX * k, y: r.minY * k, width: r.width * k, height: r.height * k) }
+
+/// Where an interior point of an unturned device at `center` lands on the canvas.
+func onCanvas(_ spec: DeviceSpec, center: CGPoint, _ p: CGPoint) -> CGPoint {
+    CGPoint(x: center.x - spec.interior.width / 2 + p.x, y: center.y - spec.interior.height / 2 + p.y)
+}
+
+/// A touch dot in canvas px, drawn in screen space (for drawn controls in front of a device: S08's keyboard): its
+/// diameter `d`.
+struct CanvasDot: View {
+    let at: Double
+    let point: CGPoint
+    let d: CGFloat
+    let t: Double
+    var body: some View {
+        // TouchDot draws a 128-unit dot at point × clipScale: hand it the canvas point in those units.
+        let cs = d / 128
+        TouchDot(spec: TouchDotSpec(at: at, point: CGPoint(x: point.x / cs, y: point.y / cs), interiorWidth: 1), t: t, clipScale: cs)
+            .frame(width: Stage.size.width, height: Stage.size.height, alignment: .topLeading)
+    }
+}
+
+// MARK: - The timeline (80.0 s, 50 bars; acts on bar lines at 0, 6.4, 28.8 and 62.4)
+
+@MainActor
+enum Timeline060 {
+    static let shots: [Shot] = [
+        // Act I · the open (0–6.4, 4 bars)
+        Shot(id: "S01", start: 0.0, end: 2.4, source: "drawn (v3's close: glint, sill line, the lit icon)", clip: nil, build: s060_01),
+        Shot(id: "S02", start: 2.4, end: 4.8, source: "drawn (v3's lockup)", clip: nil, build: s060_02),
+        Shot(id: "S03", start: 4.8, end: 6.4, source: "type", clip: nil, build: s060_03),
+        // Act II · the big three (6.4–28.8, 14 bars)
+        Shot(id: "S04", start: 6.4, end: 10.4, source: "stand-in for take A part 1: stills A1, drawn notes; drawn keycaps", clip: nil, build: s060_04),
+        Shot(id: "S05", start: 10.4, end: 14.4, source: "stand-in for take A part 2: drawn notes, stills A2, A3p, A4", clip: nil, build: s060_05),
+        Shot(id: "S06", start: 14.4, end: 19.2, source: "stand-in for take B: still B1 + v3.1 1.6–6.4, B4, B5; drawn arcs", clip: nil, build: s060_06),
+        Shot(id: "S07", start: 19.2, end: 24.0, source: "stills L0w, L1x; drawn lock screen", clip: nil, build: s060_07),
+        Shot(id: "S08", start: 24.0, end: 28.8, source: "drawn lock screen and keyboard; stills L1x, L0w", clip: nil, build: s060_08),
+        // Act III · on iPhone and iPad (28.8–62.4, 21 bars)
+        Shot(id: "S09", start: 28.8, end: 32.8, source: "stand-in for take C: still C0, picture sheet zoomed", clip: nil, build: s060_09),
+        Shot(id: "S10", start: 32.8, end: 36.8, source: "stand-in for take D: stills D1, D4, D5, D2, D3", clip: nil, build: s060_10),
+        Shot(id: "S11", start: 36.8, end: 40.8, source: "stand-in for take E part 1: stills E0, E1, E2; drawn keyboard", clip: nil, build: s060_11),
+        Shot(id: "S12", start: 40.8, end: 44.0, source: "stand-in for take E part 2: still E3, picture longdoc-page; stills E6, E7", clip: nil, build: s060_12),
+        Shot(id: "S13", start: 44.0, end: 48.8, source: "stand-in for take F: stills F0–F4", clip: nil, build: s060_13),
+        Shot(id: "S14", start: 48.8, end: 52.8, source: "stills N1, N2", clip: nil, build: s060_14),
+        Shot(id: "S15", start: 52.8, end: 56.0, source: "stills H1, H2; drawn Mac (v3)", clip: nil, build: s060_15),
+        Shot(id: "S16", start: 56.0, end: 59.2, source: "stills L0w, J1, J2; drawn hold ring", clip: nil, build: s060_16),
+        Shot(id: "S17", start: 59.2, end: 62.4, source: "still K1", clip: nil, build: s060_17),
+        // Act IV · the Mac, the fixes, the close (62.4–80.0, 11 bars)
+        Shot(id: "S18", start: 62.4, end: 65.6, source: "drawn (the icon's iMac)", clip: nil, build: s060_18),
+        Shot(id: "S19", start: 65.6, end: 70.4, source: "type (the fixes' column)", clip: nil, build: s060_19),
+        Shot(id: "S20", start: 70.4, end: 72.0, source: "drawn (the bug) + type", clip: nil, build: s060_19),
+        Shot(id: "S21", start: 72.0, end: 74.4, source: "drawn + type", clip: nil, build: s060_21),
+        Shot(id: "S22", start: 74.4, end: 77.6, source: "type", clip: nil, build: s060_21),
+        Shot(id: "S23", start: 77.6, end: 80.0, source: "—", clip: nil, build: s060_21),
+    ]
+}
+
+/// The contact sheet's tiles: one frame per shot that shows its point.
+let sheetTimes060: [(String, Double)] = [
+    ("S01", 1.9), ("S02", 4.2), ("S03", 5.6), ("S04", 8.9), ("S05", 13.3), ("S06", 17.9),
+    ("S07", 22.4), ("S08", 25.05), ("S09", 30.2), ("S10", 35.9), ("S11", 39.35), ("S12", 43.3),
+    ("S13", 47.9), ("S14", 50.0), ("S15", 54.9), ("S16", 58.6), ("S17", 61.6), ("S18", 63.7),
+    ("S19", 68.0), ("S20", 71.25), ("S21", 73.7), ("S22", 77.2), ("S23", 79.2),
+]

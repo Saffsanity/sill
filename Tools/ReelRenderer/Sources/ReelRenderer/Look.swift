@@ -4,13 +4,22 @@ import SwiftUI
 
 // MARK: - Canvas
 
+/// Which cut the renderer draws: v3.1 (the default, the proof of reproduction) or the 0.6.0 update video
+/// (`REEL=060`, Reel060.swift). Every command reads it: render, stills, typecheck, score, sheet and verify.
+enum ReelCut: String {
+    case v31
+    case r060 = "060"
+    static let current: ReelCut = ReelCut(rawValue: ProcessInfo.processInfo.environment["REEL"] ?? "") ?? .v31
+}
+
 enum Stage {
     static let width = 1920
     static let height = 1080
     static let size = CGSize(width: 1920, height: 1080)
     static let fps = 60
-    static let frames = 4992                 // 83.2 s (v3: 52 bars at 150 BPM; v2 was 47 bars, 75.2 s)
-    static let duration = 83.2
+    /// v3.1: 83.2 s, 4,992 frames (52 bars at 150 BPM; v2 was 47 bars, 75.2 s). 0.6.0: 80.0 s, 4,800 frames (50 bars).
+    static var frames: Int { ReelCut.current == .r060 ? 4800 : 4992 }
+    static var duration: Double { ReelCut.current == .r060 ? 80.0 : 83.2 }
 }
 
 // MARK: - Easing (CSS cubic-bézier, solved per frame)

@@ -25,9 +25,14 @@ enum ClipID: String, CaseIterable {
     // Round-3 real captures (real-captures/README-3.md): N2, the Aa ruler resizing Weather (S16), and N3, the
     // trackpad moving the client-drawn pointer, portrait (S18). Round 4: N1, window → Desktop (S13), take 1.
     case n1, n2, n3
+    /// 0.6.0 (Reel060.swift): the delivered v3.1 film (silent), which the 0.6.0 reel quotes twice: Weather's window
+    /// behind S07–S08's lock, and the movie QuickTime plays in S06. Read from `v31film/` under `reelDir` (a link to
+    /// design/reel/v3/Sill-sizzle-v3.1-silent.mp4); decoded only.
+    case v31film
 
     var url: URL {
         switch self {
+        case .v31film: return reelDir.appendingPathComponent("v31film/Sill-sizzle-v3.1-silent.mp4")
         case .r01: return reelDir.appendingPathComponent("real-captures/01-connect-desktop.mov")
         case .r02: return reelDir.appendingPathComponent("real-captures/02-drawer-launch.mov")
         case .r04: return reelDir.appendingPathComponent("real-captures/04-pick-vscode.mov")
@@ -61,6 +66,8 @@ enum ClipID: String, CaseIterable {
         case .n1: return [1.15...4.95]
         case .n2: return AaResize.reverse ? [9.95...13.35] : [2.20...5.55]
         case .n3: return [2.85...5.40]
+        // S06's movie (v3.1 1.6–6.4) and the Weather frame behind the lock (v3.1 15.9).
+        case .v31film: return [1.5...6.5, 15.8...16.0]
         }
     }
 }

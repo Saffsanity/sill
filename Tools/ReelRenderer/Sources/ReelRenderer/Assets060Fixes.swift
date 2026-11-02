@@ -269,18 +269,21 @@ enum Fixes060 {
 /// dot over it), before the fades' mask.
 struct FixesColumn060: View {
     let t: Double
+    /// False in the film: its type is FixesType060's (Shots060Mac.swift), glyph outlines on the scroll's path that
+    /// typecheck measures; this view then draws the bug and its touch dot. True for the asset previews.
+    var drawsType = true
     var body: some View {
         Canvas { ctx, _ in
             let F = Fixes060.self
             // The title: v3's snap, word by word, then it scrolls with the column.
             let ty = F.screenY(0, t)
-            if ty > -60 {
+            if drawsType && ty > -60 {
                 Outline060.snapLine(F.title, in: &ctx, t: t, snap: F.titleSnap, size: TypeStyle.T1s.size, weight: .bold,
                                     tracking: TypeStyle.T1s.tracking, color: Color(hex: Palette.text1),
                                     x: F.columnX, baseline: ty, leading: true)
             }
             let alpha = F.columnOpacity(t)
-            if alpha > 0.002 {
+            if drawsType && alpha > 0.002 {
                 var c = ctx
                 c.opacity = alpha
                 for p in F.placed {

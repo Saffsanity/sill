@@ -145,14 +145,20 @@ struct TouchDot: View {
         let alpha = t < appear ? 0 : (t <= drag.up ? 1 : 1 - ramp(t, drag.up, drag.up + 0.25))
         let p = drag.point(min(max(t, drag.down), drag.up))
         return ZStack {
+            if TouchDot.rimmed { Circle().fill(Color.black.opacity(0.10)) }
             Circle().fill(Color.white.opacity(0.12))
             Circle().strokeBorder(Color.white.opacity(0.32), lineWidth: 1.5 * max(1, clipScale / 0.5))
+            if TouchDot.rimmed { Circle().stroke(Color.black.opacity(0.28), lineWidth: 1.5 * max(1, clipScale / 0.5)) }
         }
         .frame(width: d, height: d)
         .scaleEffect(s)
         .opacity(alpha)
         .offset(x: p.x * clipScale - d / 2, y: p.y * clipScale - d / 2)
     }
+
+    /// 0.6.0: its fingers land on white pages (Notes, TextEdit, a spreadsheet), where v3's white dot vanished, so the
+    /// dot gets a faint dark disc and rim under its white ones (invisible on the dark screens v3 touched). v3.1 as it was.
+    static var rimmed: Bool { ReelCut.current == .r060 }
 
     private var tapBody: some View {
         // 64 pt on the device (128 interior px): 64 px at M size, "scaled with the shot".
@@ -168,8 +174,10 @@ struct TouchDot: View {
             alpha *= 1 - ramp(t, appear + 0.12, appear + 0.12 + 0.25)
         }
         return ZStack {
+            if TouchDot.rimmed { Circle().fill(Color.black.opacity(0.12)) }
             Circle().fill(Color.white.opacity(0.18))
             Circle().strokeBorder(Color.white.opacity(0.45), lineWidth: 1.5 * max(1, clipScale / 0.5))
+            if TouchDot.rimmed { Circle().stroke(Color.black.opacity(0.30), lineWidth: 1.5 * max(1, clipScale / 0.5)) }
             if spec.hold != nil, ring > 0 {
                 Circle().trim(from: 0, to: ring)
                     .stroke(Color(hex: Palette.accent), style: StrokeStyle(lineWidth: 3 * max(1, clipScale / 0.5), lineCap: .round))

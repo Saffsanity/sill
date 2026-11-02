@@ -68,12 +68,15 @@ The commands (`main.swift` has them all):
 | `typecheck [--from s] [--to s] [--every n] [--threshold px] [--report f] [--dump f.tsv] [--verbose]` | every glyph of the frames measured against its path (The type); exit 1 if one strays more than 0.1 px |
 | `render … --typecheck [n]` | the same check on every n-th frame of a render, which then fails (exit 1) if it fails |
 | `typetest [--out f.mp4] [--seconds 3] [--typecheck] [--frames dir] [--no-video]` | two moving lines on the reel's stage, rendered and checked |
+| `assets <dir> [prefix …]`, `assets --report`, `assets --motion` | the 0.6.0 drawn assets as PNG stills at their key times (with `index.png`), the cutaway's numbers, its motion check |
 
 `Scripts/pipeline.sh` runs the delivery steps v3.1 ran (score, render, mux, the poster still at 75.2 s, finalize,
-verify, sheet) into `work/v31/out/`, under `taskpolicy -c utility`, and since 0.6.0 its render type-checks every frame
-(The type). A whole render takes about 4 minutes on an M2 Pro (20.9 fps for 4,992 frames), and the check about
-7 minutes more
-(11.9 frames/s).
+verify, sheet) into `work/v31/out/` (with `REEL=060`, the 0.6.0 video into `work/060/out/`, its poster at 77.2 s),
+under `taskpolicy -c utility`, encoding only while no device is connected to Sill.app (the repository's
+`Scripts/encoder-check/no-device.sh`: it waits for one to leave, and pauses a running step while one connects), and
+since 0.6.0 its render type-checks every frame (The type). A whole v3.1 render takes about 4 minutes on an M2 Pro
+(20.9 fps for 4,992 frames), and the check about 7 minutes more (11.9 frames/s); the 0.6.0 film with its check took
+664 s (7.2 fps for 4,800 frames).
 
 ### Inputs
 
@@ -188,7 +191,9 @@ neighbours' sake but not judged, only counted: glyphs below 25 % of their own op
 (a parent's opacity, a mask), `covered` or `checked: false`, or whose fit leaves over 8 % unexplained (something
 covers them); left out with a fence around them: glyphs blurred more than 0.5 px (a snap's first frames, a rack) and
 glyphs at the frame's edge. It also fails a number printed raw (more than two decimals, an exponent, nan, inf,
-`Optional(`).
+`Optional(`). Both renders are on compositors of the check's own, never the film's: one that has just drawn the
+same frame may have SwiftUI reuse a subtree's drawing without running its canvases (0.6.0's masked fix column), and
+the probe then records nothing there. The summary names any shot checked with no glyph measured.
 
 Its own proof: on `typetest`'s two moving lines (a T1 line gliding 0.11 px a frame under the hold; a 44 px line with
 Chinese, Japanese and Korean scrolling up 0.62 px a frame), 5,916 glyph measurements, median 0.0008 px, worst
@@ -200,9 +205,39 @@ placeholders' stand-in footage): 4,992 frames, 119,297 glyph measurements, media
 under 25 % of their own opacity and 7 under S20's wipe. The two test switches are never set for a
 delivered render (`pipeline.sh` refuses them).
 
-The 0.6.0 assets draw some type of their own (`Assets060Text.swift`'s `Outline060`: the fixes column, the lock
-screen's clock, the keycaps), with the same outlines and smoothing but in their own canvases, which the probe does not
-record: `typecheck` leaves that type alone (it is in both of its renders), and `assets --motion` checks its motion.
+The 0.6.0 assets draw some type of their own (`Assets060Text.swift`'s `Outline060`: the lock screen's clock, the
+keycaps), with the same outlines and smoothing but in their own canvases, which the probe does not record: `typecheck`
+leaves that type alone (it is in both of its renders), and `assets --motion` checks its motion. The film's cutaway
+draws its fix lines with `FixesType060` (`Shots060Mac.swift`) on `GlyphCanvas`, so `typecheck` measures them; the
+previews' `FixesColumn060` still draws them itself.
+
+## The 0.6.0 update video (`REEL=060`)
+
+`REEL=060` selects the 0.6.0 update video (80.0 s, 4,800 frames, 23 shots on 50 bars) in place of v3.1, which stays
+the default and renders as before (`ReelCut`, `Look.swift`). `Stage`, `Timeline.shots`, the score (`Score060.swift`),
+the sheet's tiles and title, `verify`'s silence window (71.40–72.00) and true-black frame (4790), and the movie's
+title follow it. Its shot list is `design/reel/v4/SHOTLIST-0.6.0.md`.
+
+| File | What it holds |
+|---|---|
+| `Reel060.swift` | the inputs (`Footage060`: stills, pictures and the stills derived from them), the copy (`Copy060`), the timeline (`Timeline060`) and the sheet's times |
+| `Shots060Open.swift` | S01–S03, the open, and S21–S23, the close |
+| `Shots060Clip.swift` | S04–S08: the clipboard both ways, sound, a locked Mac and unlocking it |
+| `Shots060Device.swift` | S09–S17: pinch, Larger Picture, a keyboard, scrolling, composition, tiles, Aa, the hold, the tour |
+| `Shots060Mac.swift` | S18, Intel, and the cutaway, S19–S20, its type on `GlyphCanvas` |
+| `Score060.swift` | the cue sheet and the voices, on v3's engine |
+| `Assets060*.swift` | the drawn assets (the bug, the lock screen, the keyboards, the arcs, the iPhone, the iMac) and `assets` |
+
+Its inputs under `reelDir` are `stills/`, `pictures/` and `thumbs/`, the footage stand-ins (harness screenshots and
+drawn Mac pictures, each made as their own README says), and `v31film/Sill-sizzle-v3.1-silent.mp4`, the delivered
+v3.1 film, of which S06's movie (1.6–6.4 s) and the Weather frame behind S07–S08 (15.9 s) are read
+(`ClipID.v31film`). Eight scenes stand in for Noah's takes A–F: each builder is marked `SWAP-IN` with the take's
+path and the times it must meet, and the shot list's §7 has the steps.
+
+```
+cd Tools/ReelRenderer && swift build -c release
+REEL=060 REEL_DIR=<inputs> Scripts/pipeline.sh     # encodes only while no device is connected to Sill.app
+```
 
 ## The shot list
 

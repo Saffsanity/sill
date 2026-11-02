@@ -216,6 +216,9 @@ struct KeyboardSlab060: View {
     var origin: CGPoint
     var t: Double
     var esc: KeyPress060? = nil
+    /// Other keys pressed (the 0.6.0 timeline's typing and ⌘S): a key's row and index in `rows`, and when it goes down
+    /// (0.07 s down, then up).
+    var pressed: [(row: Int, key: Int, at: Double)] = []
 
     /// The rows, each key's width in units of the key pitch (every row 14.5u). Row 0 is the function row, 0.6u
     /// tall; the last row ends in the arrows: ← and → half height, ↑ over ↓ in one key's place.
@@ -266,8 +269,10 @@ struct KeyboardSlab060: View {
                         }
                     } else {
                         let rect = CGRect(x: x + g / 2, y: y + g / 2, width: kw - g, height: rowH - g)
+                        var travel = isEsc ? esc?.travel(t) ?? 0 : 0
+                        for p in pressed where p.row == ri && p.key == ki { travel = max(travel, KeyPress060(down: p.at, up: p.at + 0.07).travel(t)) }
                         Keycap060Painter.draw(&ctx, key: Keycap060(legend: isEsc ? "esc" : ""), rect: rect, unit: u,
-                                              travel: isEsc ? esc?.travel(t) ?? 0 : 0, light: isEsc ? esc?.light(t) ?? 0 : 0,
+                                              travel: travel, light: isEsc ? esc?.light(t) ?? 0 : 0,
                                               plain: true, legendColor: Palette.text2, legendAlpha: 0.8)
                     }
                     x += kw
