@@ -1248,10 +1248,13 @@ empty and says `locked` (and `offConsole` while another user is on the
 console); no thumbnail is taken, no icon, installed app, sound, clipboard,
 pointer or cursor shape goes out; a window picked, an app launched, a window's
 traffic lights, the Mac's menus and trackpad gestures are refused; no virtual
-display is made, and the display is not woken from a switched-out session. The
-device covers its picture: "Mac mini is locked" (a paired iPad or iPhone is told
-it can type the Mac's password there) or "Mac mini is switched to another user",
-and the Apps drawer and the Settings panel's header say the same in one line.
+display is made, and the display is not woken from a switched-out session. At a
+locked screen the device shows the lock screen with no cover (a paired iPad or
+iPhone can type the Mac's password there), and the Apps drawer and the Settings
+panel's header say "Mac mini is locked. Unlock it to see its windows." While
+another user has the console it covers its picture: "Another user started
+controlling this Mac." and "Log in to your account to reactivate screen sharing
+with Sill." (Noah, 2026-11-02), which the drawer and the header say in one line.
 Only a paired device's keys and taps reach a locked screen; while the Mac is
 switched to another user nothing does, but the up of a key or a button held
 down. A window that streamed when the lock began goes home and comes back once

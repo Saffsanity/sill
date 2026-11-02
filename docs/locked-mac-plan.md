@@ -180,20 +180,20 @@ for the two cases (`LockedMac`, StreamProtocol, checked with the host's rule):
 - locked: "‹Mac› is locked", and "To unlock it from here, type its password and press Return. Its
   windows come back once it is unlocked." for a paired session, "Its windows come back once it is
   unlocked." for any other;
-- at the login window or switched to another user: "‹Mac› is at its login window", "The login window isn’t part
-  of your account, even when it shows your name, and neither is another user’s session, so Sill can’t show it or
-  type into it. Log in on the Mac itself; your windows come back once your account is back on its screen."
-  (Noah, 2026-11-01 and 02: with his own account chosen at the login window the cover stayed until he logged in
-  on the Mac, which is right but read as a bug: macOS's log shows that a fast user switch starts a new login
-  window session, which holds the console, his name on it or not, until its password brings his session back;
-  the Results have both switches);
+- at the login window or switched to another user: "Another user started controlling this Mac." and "Log in to
+  your account to reactivate screen sharing with Sill.", the Mac's name in neither (Noah, 2026-11-02: "Keep the
+  current overlay, change the text to …"); the cover stays until the password is typed on the Mac, also with this
+  user's own name chosen at the login window (Noah's tests of 2026-11-01 and 02: a fast user switch starts a new
+  login window session, which holds the console, his name on it or not, until its password brings his session
+  back; the Results have both switches);
 - after a cover, "Unlocking…" until the first keyframe after it, the lock screen's (this session back on the
   console, still locked) or a window's, 4 s at most.
 
 The Apps drawer and the Settings panel's header show the one line ("‹Mac› is locked. Unlock it to see
-its windows." or "‹Mac› is at its login window or switched to another user. Log in on the Mac to see its
-windows again."). VoiceOver reads the cover as one element. The cover takes no touch: a paired device's keys and
-taps still go to a locked screen, where the Mac takes them. DEBUG `-SillMacLocked 1|2|unlocking`.
+its windows." or the cover's two sentences, "Another user started controlling this Mac. Log in to your account
+to reactivate screen sharing with Sill."). VoiceOver reads the cover as one element. The cover takes no touch: a
+paired device's keys and taps still go to a locked screen, where the Mac takes them. DEBUG
+`-SillMacLocked 1|2|unlocking`.
 
 ## TEST ONLY
 
@@ -363,8 +363,10 @@ notification another app hears, never this Mac's screen, encoder or clipboard) a
   the lock screen streamed and the password typed on the phone unlocked it 32 s later), on Nov 2 "Unlocked" 2 s
   after it came back unlocked. The phone's cover said so throughout and its typing was dropped ("Locked: dropped
   an input event"): Sill in this session can neither capture the login window session's screen (what 0.5.5
-  streamed there was this session's own desktop, his finding of Oct 31) nor post into it; the cover's words now
-  say so for a prompt with this user's name. Found on the device and fixed (2026-11-02): a locked list after an
+  streamed there was this session's own desktop, his finding of Oct 31) nor post into it, whoever's name the
+  prompt shows; the cover now says so in Noah's words (2026-11-02, "Keep the current overlay, change the text
+  to …"): "Another user started controlling this Mac. Log in to your account to reactivate screen sharing with
+  Sill." Found on the device and fixed (2026-11-02): a locked list after an
   off-console one made "Unlocking…" that no keyframe could end (`unlockWaitsForKeyframe` was cleared by any
   locked list), so it sat its 4 s; now the lock screen's first keyframe ends it. A private iPad mini simulator
   against a test host (`SILL_TEST_LOCKED_FILE` 2 → 1 → 0, then 2 → 0; the console's `lock:` lines stamped with
@@ -391,8 +393,8 @@ unlock:
    Magic Keyboard or the on-screen keyboard and press Return. If the Mac unlocks: "Unlocked:", then
    "Unlocking…" briefly and the window back by itself. If nothing types, note it (and which keyboard):
    macOS's secure input may refuse posted keys, and the cover's words change then.
-3. **Another user at the login screen** (fast user switching): "‹Mac› is at its login window" on the
-   iPad, a black picture, nothing of your session, no app opens from the Apps button (there is no list),
+3. **Another user at the login screen** (fast user switching): "Another user started controlling this Mac."
+   on the iPad, a black picture, nothing of your session, no app opens from the Apps button (there is no list),
    taps and keys do nothing; Sill.log "Locked: another user…". Switch back (your name in the login window,
    the password on the Mac): if you had locked your screen before the switch, your session comes back
    locked, the lock screen streams within about a second and the password typed on the iPad unlocks it;
