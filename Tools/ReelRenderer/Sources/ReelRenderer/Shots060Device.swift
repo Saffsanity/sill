@@ -372,8 +372,8 @@ enum Scroll060 {
     /// frame and stair-stepped at its ends).
     struct Fling { let start: Double; let lift: Double; let v0: Double }
     static let rise = 0.1, tau = 0.12
-    /// 20 canvas px/s in document px: a document px is 0.713 still px × 0.362 interior px × the camera's 1.25.
-    static let cutoff = 20 / (0.7132 * 0.3619 * 1.25)
+    /// 20 canvas px/s in document px: a document px is 0.713 still px × 0.362 interior px × the camera's 1.15.
+    static let cutoff = 20 / (0.7132 * 0.3619 * 1.15)
     static func distance(_ f: Fling, _ t: Double) -> Double {
         guard t > f.start else { return 0 }
         func fingers(_ u: Double) -> Double {
@@ -483,8 +483,9 @@ struct ScrollDoc060: View {
     let h = KeyboardSlab060.height(width: K.slabWidth)
     let slab = KeyboardSlab060(width: K.slabWidth, origin: CGPoint(x: 960 - K.slabWidth / 2, y: 540 - h / 2), t: t)
         .modifier(Tilt(yaw: 0, pitch: 58)).offset(x: K.slabOffset.width, y: K.slabOffset.height)
-    // Closer than S11: the iPad's screen fills the right half, its left edge fading out 80 px or more from the words.
-    let camera = 1.25 + 0.025 * CGFloat(ramp(t, 40.8, 44.0))
+    // Closer than S11: the iPad's screen fills the right half, the Settings panel whole inside the frame (its Done and its
+    // switch are tapped), its left edge fading out 80 px or more from the words.
+    let camera = 1.15 + 0.02 * CGFloat(ramp(t, 40.8, 44.0))
     let edge = LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .clear, location: 945 / 1920),
                                       .init(color: .white, location: 1025 / 1920), .init(color: .white, location: 1)],
                               startPoint: .leading, endPoint: .trailing).canvas()
@@ -497,7 +498,7 @@ struct ScrollDoc060: View {
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: CGPoint(x: 1490, y: 520))
         ZStack { slab; device }.canvas()
-            .camera(camera, from: K.centre, to: CGPoint(x: 1455, y: 470))
+            .camera(camera, from: K.centre, to: CGPoint(x: 1435, y: 470))
             .mask(edge)
         TypeLayer(lines: lines, t: t)
     }.canvas()

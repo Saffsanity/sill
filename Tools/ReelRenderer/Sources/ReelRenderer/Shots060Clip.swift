@@ -18,12 +18,13 @@ import SwiftUI
 enum Pad060 {
     /// The iPad mini beside a left column of words (x 128, T1c lines up to 951 px with their hold): a 790×519 interior
     /// (the first cut's 820 made 3.7 % smaller, so it clears the words by 80 px and still fits the frame), turned 4° (its
-    /// inner edge toward the lens, as v3's devices beside words): its outer edge at about x 1037–1897.
+    /// inner edge toward the lens, as v3's devices beside words): its outer edge at about x 1031–1891, 1909 at the end of
+    /// S04's drift (11 px from the frame's edge).
     static let spec = DeviceSpec(interior: CGSize(width: 790, height: 519), bezel: 27, innerRadius: 21, outerRadius: 48)
-    static let centre = CGPoint(x: 1484, y: 560)
+    static let centre = CGPoint(x: 1478, y: 560)
     static let yaw: Double = -4
     /// A drift's anchor: the turned iPad's left edge, so it grows away from the words, never toward them.
-    static let leftEdge = CGPoint(x: 1037, y: 560)
+    static let leftEdge = CGPoint(x: 1031, y: 560)
     /// Interior px per still px.
     static var k: CGFloat { spec.interior.width / Mini060.source.width }
     /// A still point (px) on the canvas, for this iPad unturned at `centre`.
