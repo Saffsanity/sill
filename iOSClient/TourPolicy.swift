@@ -196,6 +196,8 @@ struct TourFeatures: Equatable {
     var sound: Bool
     /// The Settings panel offers Larger Picture here: an iPhone without a hinge, where it is larger.
     var largerPicture: Bool
+    /// This device's Touch Mode is Trackpad (#178): the picture is a trackpad, over direct touch.
+    var trackpadMode = false
 }
 
 struct TourCopy: Equatable {
@@ -581,6 +583,20 @@ enum TourPolicy {
         let mac = mac.isEmpty ? "your Mac" : mac
         let iPad = device == "iPad"
         switch t {
+        case .touch where features.trackpadMode:
+            // Trackpad mode (TouchMode, #178): the trackpad lies over the picture, so neither the Pencil
+            // nor the pinch reaches direct touch.
+            var direct = features
+            direct.trackpadMode = false
+            let touch = copy(.touch, layout, mac: mac, device: device, voiceOver: voiceOver, firstOfRun: firstOfRun,
+                             keysOnItsSide: keysOnItsSide, thumbnails: thumbnails, features: direct)
+            let rows = [row("hand.point.up.left", [strong("Drag"), plain(" to move the pointer.")]),
+                        row("hand.tap", [strong("Tap"), plain(" to click where the pointer is.")]),
+                        row("cursorarrow.click.2", [strong("Tap with two fingers"), plain(" to right-click.")]),
+                        row("hand.draw", [strong("Touch and hold"), plain(", "), strong("then drag"), plain(", to move a window or select text.")]),
+                        row("scroll", [strong("Drag with two fingers"), plain(" to scroll.")])]
+                + touch.rows.filter { $0.symbol == "hand.raised.fingers.spread" }
+            return TourCopy(title: "The Picture Is a Trackpad", subtitle: touch.subtitle, rows: rows, hint: touch.hint)
         case .touch:
             var rows = [row("hand.tap", [strong("Tap"), plain(" to click.")]),
                         row("contextualmenu.and.cursorarrow", [strong("Touch and hold"), plain(" to right-click.")]),

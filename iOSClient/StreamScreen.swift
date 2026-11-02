@@ -913,7 +913,8 @@ struct StreamScreen: View {
                      clipboard: ClipboardPolicy.hostTakes(client.hostClipboard),
                      pasteRightAway: StreamClient.pasteRightAwayOn,
                      sound: client.macHasSound,
-                     largerPicture: offersLarger)
+                     largerPicture: offersLarger,
+                     trackpadMode: TouchMode.stored(touchModeRaw) == .trackpad)
     }
 
     #if DEBUG
