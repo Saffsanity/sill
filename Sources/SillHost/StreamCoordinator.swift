@@ -812,6 +812,7 @@ package final class StreamCoordinator {
             if !hardwareResponds { enterSoftwareFallback(afterHang: false) }
         }
         if virtualDisplay { enableVirtualDisplay() }
+        watchPower()
         catalog.start()
         // The only startup line Direct Wireless adds, and only when it is on: the default path
         // prints what it always printed.
@@ -2642,6 +2643,40 @@ package final class StreamCoordinator {
             self.menuFrontCheckAt = CFAbsoluteTimeGetCurrent()
             if self.active == .desktop { self.menuTargetChanged() }
         }
+    }
+
+    /// Under the AppKit loop (Sill.app, the CLI's --virtual-display; dispatchMain never hears
+    /// NSWorkspace): the Mac going to sleep, or shutting down, restarting or logging out, tells every
+    /// device why and closes it (#105), so it says so rather than "disconnected" and reconnects when
+    /// the Mac is back. A device's keys go up as it leaves.
+    private func watchPower() {
+        guard appKitLoop else { return }
+        let center = NSWorkspace.shared.notificationCenter
+        for (name, goodbye, line) in [(NSWorkspace.willSleepNotification, Goodbye.sleeping(mac: macName), "The Mac is going to sleep"),
+                                      (NSWorkspace.willPowerOffNotification, Goodbye.shuttingDown(mac: macName),
+                                       "The Mac is shutting down, restarting or logging out")] {
+            _ = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    print("\(line): telling every device and closing its connection.")
+                    self?.server.goodbyeAll(goodbye, within: 0.25, closing: true)
+                }
+            }
+        }
+        _ = center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.server.welcomeBack() }
+        }
+        // TEST ONLY: SILL_TEST_POWER=sleep@S or shutdown@S, a --synthetic host posting the notification
+        // to itself S seconds in, as the Mac would.
+        guard let raw = ProcessInfo.processInfo.environment["SILL_TEST_POWER"] else { return }
+        let parts = raw.split(separator: "@"), at = parts.count == 2 ? Double(parts[1]) : nil
+        let name: Notification.Name? = parts.first == "sleep" ? NSWorkspace.willSleepNotification
+            : parts.first == "shutdown" ? NSWorkspace.willPowerOffNotification : nil
+        guard synthetic, let name, let at, at >= 0 else {
+            print("SILL_TEST_POWER=\(SafeText.label(raw, limit: 32)) ignored: a --synthetic host takes sleep@S or shutdown@S.")
+            return
+        }
+        print("Test power: \(name.rawValue) posted \(at) s in (SILL_TEST_POWER).")
+        DispatchQueue.main.asyncAfter(deadline: .now() + at) { center.post(name: name, object: NSWorkspace.shared) }
     }
 
     /// Under the AppKit loop (Sill.app, the CLI's --virtual-display), while a device subscribes:

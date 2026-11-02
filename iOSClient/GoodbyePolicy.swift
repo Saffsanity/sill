@@ -35,7 +35,7 @@ enum GoodbyePolicy {
     /// The reasons whose words and reconnects are this build's own; "update" and any other reason
     /// are notices.
     static let knownReasons: Set<String> = [Goodbye.quit, Goodbye.removed, Goodbye.remoteOff, Goodbye.internetOff, Goodbye.busy,
-                                            Goodbye.pairingRequired]
+                                            Goodbye.pairingRequired, Goodbye.sleep, Goodbye.shutdown]
 
     /// A goodbye this build shows by the Mac's words: "update", or a reason it does not know (a
     /// kind 22 that did not decode reads as reason "").
@@ -55,6 +55,12 @@ enum GoodbyePolicy {
         switch goodbye.reason {
         case Goodbye.quit:
             return Outcome(text: "\(mac) quit Sill. This \(device) reconnects when it’s back.",
+                           reconnect: true, remoteAllowed: saved, isNotice: false)
+        case Goodbye.sleep:
+            return Outcome(text: "\(mac) went to sleep. This \(device) reconnects when it wakes.",
+                           reconnect: true, remoteAllowed: saved, isNotice: false)
+        case Goodbye.shutdown:
+            return Outcome(text: "\(mac) is shutting down, restarting or logging out. This \(device) reconnects when it’s back.",
                            reconnect: true, remoteAllowed: saved, isNotice: false)
         case Goodbye.removed:
             return Outcome(text: "\(mac) removed this \(device). To use it again, pair it again.",
