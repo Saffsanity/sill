@@ -4,7 +4,9 @@
 // legends, the fixes cutaway's column): every line is shaped once by Core Text, each run in its own font (so a
 // fallback font keeps its glyphs), and its glyph outlines are filled with anti-aliasing wherever the frame puts
 // them, so a line that moves glides instead of jumping a pixel at a time. Nothing here is rasterised and then
-// moved. The words' snap is v3's §3.5 recipe (TypeViews.swift's `snapState`), redrawn on the outlines.
+// moved. The words' snap is v3's §3.5 recipe (TypeViews.swift's `snapState`), redrawn on the outlines. The outlines
+// are grown as Core Graphics' font smoothing grows the strokes of text it draws itself (`smoothing`, the 0.6.0
+// type fix's measurement of v3.1's own type), so this type keeps the weight of the film's other lines.
 import AppKit
 import CoreText
 import SwiftUI
@@ -23,6 +25,10 @@ enum Outline060 {
 
     private static var cache: [String: Line] = [:]
     private static var order: [String] = []
+
+    /// How far font smoothing grows a stroke at `size` px: 0.21 px at 24 px, 0.25 at 28, 0.32 from 34 px up (the
+    /// 0.6.0 type fix's fit to v3.1's SwiftUI Text, GlyphText.swift `ShapedText.smoothing`).
+    static func smoothing(_ size: CGFloat) -> CGFloat { 0.32 * min(1, max(0, (size - 4) / 30)) }
 
     static func font(size: CGFloat, weight: NSFont.Weight, monoDigits: Bool = false) -> NSFont {
         monoDigits ? NSFont.monospacedDigitSystemFont(ofSize: size, weight: weight) : NSFont.systemFont(ofSize: size, weight: weight)
@@ -49,10 +55,14 @@ enum Outline060 {
             var positions = [CGPoint](repeating: .zero, count: n)
             CTRunGetGlyphs(run, CFRange(location: 0, length: 0), &glyphs)
             CTRunGetPositions(run, CFRange(location: 0, length: 0), &positions)
+            let grow = smoothing(size)
             for i in 0..<n {
-                guard let glyph = CTFontCreatePathForGlyph(runFont, glyphs[i], nil) else { continue }
+                guard let glyph = CTFontCreatePathForGlyph(runFont, glyphs[i], nil), !glyph.isEmpty else { continue }
+                // Grown by `grow` px on every side (its union with a stroke twice that wide along it).
+                let grown = grow > 0.0005 ? glyph.union(glyph.copy(strokingWithWidth: 2 * grow, lineCap: .round, lineJoin: .round, miterLimit: 4),
+                                                        using: .winding) : glyph
                 // Glyph space is y up from the baseline; the canvas is y down.
-                outlines.addPath(glyph, transform: CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: positions[i].x, ty: -positions[i].y))
+                outlines.addPath(grown, transform: CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: positions[i].x, ty: -positions[i].y))
             }
         }
         let laid = Line(path: Path(outlines), width: width, ascent: ascent, descent: descent,
