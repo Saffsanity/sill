@@ -237,6 +237,16 @@ check(rule(.desktop, .running, .desktop) == .keep && rule(.test, .running, .test
 check(rule(.desktop, .running, .test) == .start && rule(.test, .running, .desktop) == .start, "the tone and the Desktop are different sources")
 check(rule(safari, .running, .none) == .stop && rule(safari, .starting, .none) == .stop && rule(safari, .ended, .none) == .stop,
       "none wanted: stop, whatever the phase")
+// A restart asked for (2026-11-02): the same sound captured another way, the quiet Mac's process tap or
+// ScreenCaptureKit (Play on the Mac too switched, the permission granted), starts again whatever the phase.
+func restart(_ current: AudioKey, _ phase: R.Phase, since: Double = 0, _ wanted: AudioKey) -> R.Action {
+    R.decide(current: current, phase: phase, lastStartAt: 100, wanted: wanted, now: 100 + since, restart: true)
+}
+check(restart(.desktop, .running, .desktop) == .start, "a restart of the same sound, running: started again")
+check(restart(.desktop, .starting, .desktop) == .start, "a restart of the same sound, starting: started again")
+check(restart(.desktop, .ended, since: 1, .desktop) == .start, "a restart of the same sound that ended 1 s ago: at once, not after 10 s")
+check(restart(.desktop, .running, .none) == .stop && restart(.none, .idle, .none) == .keep, "a restart with none wanted: as without")
+check(restart(safari, .running, music) == .start, "a restart to another source: started, as without")
 check(R.retryInterval == 10, "the retry is 10 s")
 check(safari == safariRenamed && safari != music && AudioKey.desktop != .test && AudioKey.none != .desktop, "keys: an app by its pid")
 

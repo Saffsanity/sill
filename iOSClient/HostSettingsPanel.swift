@@ -360,6 +360,21 @@ struct HostSettingsPanel: View {
                     .accessibilityInputLabels(["Send Audio"])
                     .accessibilityHint(send == nil ? "Update Sill on \(mac) to use this." : "")
                     .rowFrame()
+                    // Play on Mac Too (2026-11-02): where the sound plays, for every device as Send Audio is.
+                    // Off, the Mac goes quiet while devices play it; only from a Mac that reports it.
+                    if let playOnMac = shown.playOnMac {
+                        RowDivider()
+                        Toggle(isOn: binding(playOnMac) { HostSettingsChange(playOnMac: $0) }) {
+                            HStack(spacing: 8) {
+                                Text("Play on Mac Too").foregroundStyle(Palette.text)
+                                PendingSpinner(since: client.settings.pendingSince(.playOnMac))
+                            }
+                        }
+                        .disabled(send != true)
+                        .accessibilityLabel("Play on \(mac) too")
+                        .accessibilityInputLabels(["Play on Mac Too", "Play on \(mac) too"])
+                        .rowFrame()
+                    }
                     // Mute, right under Send Audio (Noah, 2026-10-27): this device's own (`soundMuted`,
                     // off by default, remembered, never sent), the only control of the Mac's sound on the
                     // device since the bars' Sound button went. For every Mac with sound, Send Audio on

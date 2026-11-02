@@ -35,6 +35,10 @@ eq(Q.usesTap(macOS: (13, 9), declared: true, synthetic: false, permission: .gran
 eq(Q.usesTap(macOS: (15, 0), declared: true, synthetic: false, permission: .granted), true, "macOS 15.0: the tap")
 eq(Q.usesTap(macOS: (27, 0), declared: false, synthetic: false, permission: .granted), false, "no usage string (the CLI): ScreenCaptureKit")
 eq(Q.usesTap(macOS: (27, 0), declared: true, synthetic: true, permission: .granted), false, "a synthetic host: its test tone, never a tap")
+// Play on the Mac too (2026-11-02): the person wants both, so no tap and the Mac keeps playing.
+eq(Q.usesTap(macOS: (27, 0), declared: true, synthetic: false, permission: .granted, playOnMac: true), false,
+   "Play on the Mac too: ScreenCaptureKit, the Mac keeps playing")
+eq(Q.usesTap(macOS: (27, 0), declared: true, synthetic: false, permission: .granted, playOnMac: false), true, "not on: the tap")
 
 // MARK: What starts first
 

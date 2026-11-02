@@ -442,6 +442,8 @@ enum MockCatalog {
             persistent: true, virtualDisplayAvailable: true, softwareEncoder: false,
             stream: RunningStream(width: 2880, height: 1800, fps: 60, mbps: 15, onVirtualDisplay: false),
             sessionPaired: true)
+        // A Mac with Play on the Mac too (2026-11-02), off: its switch shows under Send Audio.
+        state.settings.playOnMac = false
         switch c {
         case .cli:
             state.persistent = false

@@ -281,6 +281,20 @@ check(json(muted).contains(#""audioMuted":true"#) && !json(quiet).contains("audi
 check(Wire.decode(ClientStats.self, from: Wire.encode(muted))?.audioMuted == true, "audioMuted round-trips")
 // Kind 16's `macQuiet` (2026-11-02): the Mac silences itself while devices play its sound (QuietMac), and Send
 // Audio's footnote says so; nil from older hosts and from one that keeps playing, whose words are as before.
+// `playOnMac` (2026-11-02): Send Audio's "Play on ‹Mac› too", kind 16's StreamSettings and kind 17's change.
+// Additive both ways: nil from a host without it (the device shows no switch, sends none), skipped by an older reader.
+var both = StreamSettings(maxFPS: 60, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
+                          directWireless: false, sendAudio: true)
+check(!json(both).contains("playOnMac") && both.playOnMac == nil, "settings without it leave playOnMac out")
+both.playOnMac = true
+check(json(both).contains(#""playOnMac":true"#) && Wire.decode(StreamSettings.self, from: Wire.encode(both))?.playOnMac == true,
+      "settings with Play on the Mac too round-trip")
+let playChange = HostSettingsChange(token: 3, playOnMac: true)
+check(!playChange.isEmpty && json(playChange).contains(#""playOnMac":true"#), "a change of playOnMac alone is not empty")
+check(playChange.applied(to: StreamSettings(maxFPS: 60, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false,
+                                            virtualDisplay: false, directWireless: false, sendAudio: true)).playOnMac == true,
+      "the change lays playOnMac over the settings")
+check(HostSettingsChange(token: 4).playOnMac == nil && HostSettingsChange(token: 4).isEmpty, "a change without it is still empty")
 func eq(_ a: String, _ b: String, _ what: String, line: Int = #line) { check(a == b, what + (a == b ? "" : ": \(a)"), line: line) }
 var quietState = HostSettingsState(settings: StreamSettings(maxFPS: 60, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false,
                                                             virtualDisplay: false, directWireless: false, sendAudio: true),

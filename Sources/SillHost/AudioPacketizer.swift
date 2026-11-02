@@ -185,10 +185,12 @@ enum AudioSourceRule {
     /// The same source (an app by its pid) running or starting: keep it (a resize, a rotation,
     /// another window of the same app). The same one ended by itself or failed: start it again, at
     /// most once every `retryInterval` since its last start. Another app, the Desktop, the test tone:
-    /// a new stream and a new epoch. None: stop.
+    /// a new stream and a new epoch. None: stop. `restart`: the same sound captured another way (the
+    /// quiet Mac's process tap or ScreenCaptureKit): started again, whatever the phase.
     static func decide(current: AudioKey, phase: Phase, lastStartAt: TimeInterval, wanted: AudioKey,
-                       now: TimeInterval) -> Action {
+                       now: TimeInterval, restart: Bool = false) -> Action {
         if wanted == .none { return current == .none && phase == .idle ? .keep : .stop }
+        if restart { return .start }
         guard wanted == current, phase != .idle else { return .start }
         switch phase {
         case .starting, .running: return .keep

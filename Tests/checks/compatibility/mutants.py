@@ -36,7 +36,10 @@ MUTANTS = [
     ("Send Audio never kept in the settings", "HostSettings.swift", "        self.sendAudio = sendAudio\n    }\n}\n\n/// The pipeline", "        self.sendAudio = nil\n    }\n}\n\n/// The pipeline"),
     ("Send Audio left out of isEmpty", "HostSettings.swift", "&& directWireless == nil && sendAudio == nil", "&& directWireless == nil"),
     ("Send Audio left out of applied(to:)", "HostSettings.swift", "        if let v = sendAudio { r.sendAudio = v }\n", ""),
-    ("a change's Send Audio never kept", "HostSettings.swift", "        self.directWireless = directWireless\n        self.sendAudio = sendAudio\n    }\n\n    /// All setting", "        self.directWireless = directWireless\n        self.sendAudio = nil\n    }\n\n    /// All setting"),
+    ("a change's Send Audio never kept", "HostSettings.swift", "        self.directWireless = directWireless\n        self.sendAudio = sendAudio\n        self.playOnMac = playOnMac\n    }\n\n    /// All setting", "        self.directWireless = directWireless\n        self.sendAudio = nil\n        self.playOnMac = playOnMac\n    }\n\n    /// All setting"),
+    ("a change's Play on the Mac too never kept", "HostSettings.swift", "        self.playOnMac = playOnMac\n    }\n\n    /// All setting", "        self.playOnMac = nil\n    }\n\n    /// All setting"),
+    ("Play on the Mac too alone is an empty change", "HostSettings.swift", "&& sendAudio == nil && playOnMac == nil", "&& sendAudio == nil"),
+    ("the change never lays Play on the Mac too", "HostSettings.swift", "        if let v = playOnMac { r.playOnMac = v }\n", ""),
     ("the audio note never kept", "HostSettings.swift", "self.audioNote = audioNote", "self.audioNote = nil"),
     # Kind 16's sessionPaired (2026-10-29, the security scan's finding 8).
     ("sessionPaired never kept", "HostSettings.swift", "        self.sessionPaired = sessionPaired\n", "        self.sessionPaired = nil\n"),

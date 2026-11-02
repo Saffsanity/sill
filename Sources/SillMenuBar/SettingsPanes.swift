@@ -378,11 +378,14 @@ private struct StreamingPane: View {
             // (Q8 as Noah revised it on 2026-10-27).
             Section {
                 Toggle("Send audio (beta)", isOn: $settings.config.sendAudio)
+                // Where the sound plays (2026-11-02): off, the Mac goes quiet while devices play it.
+                Toggle("Play on this Mac too", isOn: $settings.config.playOnMac)
+                    .disabled(!settings.config.sendAudio)
                 if settings.config.sendAudio, let problem = model.coordinator?.status.snapshot.audio?.problem {
                     Warning("Sill \(problem). The picture is unaffected.")
                 }
             } footer: {
-                Footnote("Beta. Devices play the sound of what you stream: all of the streamed window’s app, or every app for the Desktop. The Mac keeps playing it too. A connected iPhone or iPad can also turn this on or off from Sill’s settings there, and mute it for itself alone. Nothing is recorded.")
+                Footnote("Beta. Devices play the sound of what you stream: all of the streamed window’s app, or every app for the Desktop. This Mac goes quiet while they play it (macOS asks once to let Sill record its sound), unless Play on This Mac Too is on. A connected iPhone or iPad can also change both from Sill’s settings there, and mute it for itself alone. Nothing is recorded.")
             }
             if let snapshot = model.coordinator?.status.snapshot, snapshot.softwareEncoder {
                 Section {

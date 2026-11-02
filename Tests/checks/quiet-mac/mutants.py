@@ -8,7 +8,7 @@ OUT = os.path.join(ROOT, ".build", "checks", "quiet-mac")
 os.makedirs(OUT, exist_ok=True)
 SRC = os.path.join(ROOT, "Sources/SillHost/QuietMac.swift")
 orig = open(SRC).read()
-RULE = "        (macOS.major, macOS.minor) >= (14, 2) && declared && !synthetic && permission != .denied\n"
+RULE = "        (macOS.major, macOS.minor) >= (14, 2) && declared && !synthetic && permission != .denied && !playOnMac\n"
 MUTANTS = [
     ("Q1 granted read as declined", "        case 0: return .granted\n", "        case 0: return .denied\n"),
     ("Q2 declined read as granted", "        case 1: return .denied\n", "        case 1: return .granted\n"),
@@ -16,13 +16,14 @@ MUTANTS = [
     ("Q11 not asked: the tap first (a prompt left unanswered leaves no sound)", "        case .unknown: return .screenWhileAsking\n", "        case .unknown: return .tap\n"),
     ("Q12 not asked: never asked", "        case .unknown: return .screenWhileAsking\n", "        case .unknown: return .screen\n"),
     ("Q13 granted: ScreenCaptureKit", "        case .granted: return .tap\n", "        case .granted: return .screen\n"),
-    ("Q4 macOS 14.0 taps", RULE, "        (macOS.major, macOS.minor) >= (14, 0) && declared && !synthetic && permission != .denied\n"),
-    ("Q5 macOS 14.2 does not tap", RULE, "        (macOS.major, macOS.minor) > (14, 2) && declared && !synthetic && permission != .denied\n"),
-    ("Q6 the minor version ignored", RULE, "        macOS.major >= 14 && declared && !synthetic && permission != .denied\n"),
-    ("Q7 no usage string taps", RULE, "        (macOS.major, macOS.minor) >= (14, 2) && !synthetic && permission != .denied\n"),
-    ("Q8 a synthetic host taps", RULE, "        (macOS.major, macOS.minor) >= (14, 2) && declared && permission != .denied\n"),
-    ("Q9 declined still taps", RULE, "        (macOS.major, macOS.minor) >= (14, 2) && declared && !synthetic\n"),
-    ("Q10 not asked does not tap", RULE, "        (macOS.major, macOS.minor) >= (14, 2) && declared && !synthetic && permission == .granted\n"),
+    ("Q4 macOS 14.0 taps", RULE, "        (macOS.major, macOS.minor) >= (14, 0) && declared && !synthetic && permission != .denied && !playOnMac\n"),
+    ("Q5 macOS 14.2 does not tap", RULE, "        (macOS.major, macOS.minor) > (14, 2) && declared && !synthetic && permission != .denied && !playOnMac\n"),
+    ("Q6 the minor version ignored", RULE, "        macOS.major >= 14 && declared && !synthetic && permission != .denied && !playOnMac\n"),
+    ("Q7 no usage string taps", RULE, "        (macOS.major, macOS.minor) >= (14, 2) && !synthetic && permission != .denied && !playOnMac\n"),
+    ("Q8 a synthetic host taps", RULE, "        (macOS.major, macOS.minor) >= (14, 2) && declared && permission != .denied && !playOnMac\n"),
+    ("Q9 declined still taps", RULE, "        (macOS.major, macOS.minor) >= (14, 2) && declared && !synthetic && !playOnMac\n"),
+    ("Q10 not asked does not tap", RULE, "        (macOS.major, macOS.minor) >= (14, 2) && declared && !synthetic && permission == .granted && !playOnMac\n"),
+    ("Q14 Play on the Mac too ignored", RULE, "        (macOS.major, macOS.minor) >= (14, 2) && declared && !synthetic && permission != .denied\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

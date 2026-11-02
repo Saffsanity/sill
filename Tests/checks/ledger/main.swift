@@ -227,6 +227,22 @@ do {   // the host's rule, and a device without rule 10 (older, or a test client
     check(l.receive(answer) == [.directWireless] && l.displayed?.directWireless == false,
           "an older device's pick from an unpaired session: refused, reported, and the switch goes back")
 }
+// Play on the Mac too, the eighth (2026-11-02; optional: a host without it does not report it, `base` is one).
+do {
+    var l = SettingsLedger(); _ = l.receive(st(base))
+    check(l.pick(HostSettingsChange(playOnMac: true), token: 1, now: 0) == nil && l.pending.isEmpty,
+          "rule 9: pick(playOnMac: true) against a host without it sends nothing")
+    var withIt = base; withIt.sendAudio = true; withIt.playOnMac = false
+    var m = SettingsLedger(); _ = m.receive(st(withIt))
+    let out = m.pick(HostSettingsChange(playOnMac: true), token: 2, now: 0)
+    check(out == HostSettingsChange(token: 2, playOnMac: true) && m.displayed?.playOnMac == true && m.pending[.playOnMac] != nil,
+          "a Play on the Mac too pick sends exactly its field and shows at once")
+    var h = withIt; h.playOnMac = true
+    check(m.receive(st(h, answering: 2)).isEmpty && m.pending.isEmpty && m.displayed?.playOnMac == true, "its answer settles it on")
+    check(HostSettingsChange(playOnMac: true).fields == [.playOnMac] && HostSettingsChange(token: 1, playOnMac: false).only(.playOnMac) == HostSettingsChange(playOnMac: false)
+          && HostSettingsChange(token: 3).adding(HostSettingsChange(playOnMac: true)) == HostSettingsChange(token: 3, playOnMac: true),
+          "fields, only and adding know it")
+}
 // Send Audio, the seventh field (optional: a host without sound does not report it; `base` is one).
 do {   // rule 9: a host without sound is never sent it
     var l = SettingsLedger(); _ = l.receive(st(base))

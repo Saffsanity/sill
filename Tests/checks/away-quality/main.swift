@@ -94,7 +94,7 @@ do {
     check(!off.validated().shareClipboard && standard.validated().shareClipboard, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: false, sendAudio: false)
+                          requirePairing: true, shareClipboard: false, sendAudio: false, playOnMac: false)
     check(!made.shareClipboard, "a HostConfig made with it off has it off (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
@@ -215,6 +215,17 @@ do {
     check(on.streamSettings(away: true).sendAudio == true && on.streamSettings(away: false).sendAudio == true
           && standard.streamSettings(away: true).sendAudio == false && standard.streamSettings(away: false).sendAudio == false,
           "a device sees the Mac's Send Audio, at home and away")
+    // Play on the Mac too (2026-11-02): a device's to set, as Send Audio is, from either door.
+    let (playOK, playRefused) = DeviceSettings.accepted(HostSettingsChange(token: 6, playOnMac: true), virtualDisplayAvailable: false, fromRemote: true, paired: false)
+    check(playOK == HostSettingsChange(playOnMac: true) && playRefused.isEmpty, "accepted: Play on the Mac too, from afar and unpaired too")
+    check(!standard.playOnMac && !HostConfig.app.playOnMac, "standard and app: the Mac goes quiet (Play on the Mac too off)")
+    var plays = standard
+    plays.playOnMac = true
+    eq(standard.changes(to: plays), "play on the Mac too off → on", "changes: Play on the Mac too, as the log names it")
+    check(standard.applying(HostSettingsChange(playOnMac: true)) == plays && plays.applyingAway(HostSettingsChange(playOnMac: false)) == standard,
+          "a device's Play on the Mac too alone moves nothing else, at home or away")
+    check(plays.streamSettings(away: false).playOnMac == true && plays.streamSettings(away: true).playOnMac == true
+          && standard.streamSettings(away: false).playOnMac == false, "a device sees it, at home and away")
 }
 
 // MARK: AwayPolicy

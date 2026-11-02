@@ -15,7 +15,7 @@ import StreamProtocol
 ///                                              a control would (maxFPS, captureScale, bitrate,
 ///                                              awayBitrate, awayCaptureScale,
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
-///                                              sendAudio, remoteAccess, remotePort, internetAccess,
+///                                              sendAudio, playOnMac, remoteAccess, remotePort, internetAccess,
 ///                                              shareClipboard, remoteAddressName=host[:port],
 ///                                              updateCheck, showPairingWindowToScreenSharing=0|1,
 ///                                              requirePairing=0|1). Saved like any change
@@ -365,6 +365,7 @@ enum DebugHooks {
         case "virtualDisplay": config.virtualDisplay = flag
         case "directWireless": config.directWireless = flag
         case "sendAudio": config.sendAudio = flag
+        case "playOnMac": config.playOnMac = flag
         case "remoteAccess": config.remoteAccess = flag
         case "remotePort": if let v = Int(value) { config.remotePort = v }
         case "internetAccess": config.internetAccess = flag

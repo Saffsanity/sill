@@ -84,6 +84,10 @@ public struct StreamSettings: Codable, Hashable, Sendable {
     /// host without sound (the device's switch shows off and disabled, says to update the Mac, and
     /// never sends it).
     public var sendAudio: Bool?
+    /// Send Audio's "Play on ‹Mac› too" (2026-11-02): with Send Audio on, the Mac keeps playing its sound
+    /// while devices play it (ScreenCaptureKit), rather than going quiet (the host's QuietMac process tap).
+    /// Nil from a host without it: the device shows no switch and never sends it. Set after the initializer.
+    public var playOnMac: Bool?
 
     /// `directWireless` and `sendAudio` have no default: every host must say, so the compiler finds
     /// one that forgets.
@@ -263,20 +267,23 @@ public struct HostSettingsChange: Codable, Hashable, Sendable {
     /// revised). The beta's hosts (2026-10-20 to 27) refused it, on or off, and named it in their log
     /// ("send audio (set on this Mac only)"), so a device's switch went back to the Mac's value.
     public var sendAudio: Bool?
+    /// Play on the Mac too, from a device's Settings panel: applied for every device as Send Audio is.
+    public var playOnMac: Bool?
 
     public init(token: Int? = nil, maxFPS: Int? = nil, bitrate: Int? = nil, captureScale: Double? = nil,
                 prioritizeSpeed: Bool? = nil, virtualDisplay: Bool? = nil, directWireless: Bool? = nil,
-                sendAudio: Bool? = nil) {
+                sendAudio: Bool? = nil, playOnMac: Bool? = nil) {
         self.token = token; self.maxFPS = maxFPS; self.bitrate = bitrate; self.captureScale = captureScale
         self.prioritizeSpeed = prioritizeSpeed; self.virtualDisplay = virtualDisplay
         self.directWireless = directWireless
         self.sendAudio = sendAudio
+        self.playOnMac = playOnMac
     }
 
     /// All setting fields nil (the token does not count).
     public var isEmpty: Bool {
         maxFPS == nil && bitrate == nil && captureScale == nil && prioritizeSpeed == nil && virtualDisplay == nil
-            && directWireless == nil && sendAudio == nil
+            && directWireless == nil && sendAudio == nil && playOnMac == nil
     }
 
     /// `s` with this change laid over it: the device's merge (its ledger, and the DEBUG mock's
@@ -292,6 +299,7 @@ public struct HostSettingsChange: Codable, Hashable, Sendable {
         if let v = virtualDisplay { r.virtualDisplay = v }
         if let v = directWireless { r.directWireless = v }
         if let v = sendAudio { r.sendAudio = v }
+        if let v = playOnMac { r.playOnMac = v }
         return r
     }
 }

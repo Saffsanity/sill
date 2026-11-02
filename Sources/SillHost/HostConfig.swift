@@ -67,11 +67,16 @@ package struct HostConfig: Equatable, Sendable {
     /// shared field: Noah, 2026-10-27, docs/audio-plan.md's Q8 as revised); each device mutes it for
     /// itself alone, and that never reaches the Mac.
     package var sendAudio: Bool
+    /// Send Audio's "Play on this Mac too" (2026-11-02): with it on the Mac keeps playing its sound while
+    /// devices play it (ScreenCaptureKit); off, it goes quiet then (QuietMac's process tap, where it can).
+    /// Off by default. A device's to set, as Send Audio is (`DeviceSettings.accepted`). The sound's own
+    /// stream's: a change starts the sound again another way, never the picture.
+    package var playOnMac: Bool
 
     /// Every knob is required, so the compiler finds each place that builds one when a knob is added.
     package init(maxFPS: Int, captureScale: CGFloat, bitrate: Int, awayBitrate: Int, awayCaptureScale: CGFloat,
                  prioritizeSpeed: Bool, virtualDisplay: Bool, directWireless: Bool, remoteAccess: Bool, remotePort: Int,
-                 internetAccess: Bool, requirePairing: Bool, shareClipboard: Bool, sendAudio: Bool) {
+                 internetAccess: Bool, requirePairing: Bool, shareClipboard: Bool, sendAudio: Bool, playOnMac: Bool) {
         self.maxFPS = maxFPS
         self.captureScale = captureScale
         self.bitrate = bitrate
@@ -86,6 +91,7 @@ package struct HostConfig: Equatable, Sendable {
         self.requirePairing = requirePairing
         self.shareClipboard = shareClipboard
         self.sendAudio = sendAudio
+        self.playOnMac = playOnMac
     }
 
     /// The spike's knobs, formerly the `let`s at the top of the CLI's main.swift: the CLI's values, and
@@ -103,7 +109,8 @@ package struct HostConfig: Equatable, Sendable {
                                              awayBitrate: 4_000_000, awayCaptureScale: 1,
                                              prioritizeSpeed: false, virtualDisplay: false, directWireless: false,
                                              remoteAccess: false, remotePort: 7455, internetAccess: false,
-                                             requirePairing: true, shareClipboard: true, sendAudio: false)
+                                             requirePairing: true, shareClipboard: true, sendAudio: false,
+                                             playOnMac: false)
 
     /// Sill.app's defaults: `standard` with the virtual display on (Noah, 2026-10-27: "have Virtual
     /// Desktop on by default. Of course, if a user changes a setting remember their choice for future
@@ -160,6 +167,7 @@ package struct HostConfig: Equatable, Sendable {
         if requirePairing != new.requirePairing { parts.append("require pairing \(onOff(requirePairing)) → \(onOff(new.requirePairing))") }
         if shareClipboard != new.shareClipboard { parts.append("share clipboard \(onOff(shareClipboard)) → \(onOff(new.shareClipboard))") }
         if sendAudio != new.sendAudio { parts.append("send audio \(onOff(sendAudio)) → \(onOff(new.sendAudio))") }
+        if playOnMac != new.playOnMac { parts.append("play on the Mac too \(onOff(playOnMac)) → \(onOff(new.playOnMac))") }
         return parts.isEmpty ? "no change" : parts.joined(separator: ", ")
     }
 

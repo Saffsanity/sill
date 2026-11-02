@@ -36,8 +36,10 @@ enum QuietMac {
 
     /// Whether the sound goes through the tap: from macOS 14.2 (AudioHardwareCreateProcessTap), in an app
     /// that declares NSAudioCaptureUsageDescription (macOS ends a process that asks without one), never on a
-    /// synthetic host, and not once the permission is declined.
-    static func usesTap(macOS: (major: Int, minor: Int), declared: Bool, synthetic: Bool, permission: Permission) -> Bool {
-        (macOS.major, macOS.minor) >= (14, 2) && declared && !synthetic && permission != .denied
+    /// synthetic host, not once the permission is declined, and not while the Mac's user wants it played
+    /// on the Mac too (`playOnMac`, 2026-11-02).
+    static func usesTap(macOS: (major: Int, minor: Int), declared: Bool, synthetic: Bool, permission: Permission,
+                        playOnMac: Bool = false) -> Bool {
+        (macOS.major, macOS.minor) >= (14, 2) && declared && !synthetic && permission != .denied && !playOnMac
     }
 }

@@ -90,6 +90,7 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
     private struct Request {
         let key: AudioKey
         let reason: String
+        let restart: Bool
         let make: @MainActor (AudioKey) async -> Made
     }
     private var requested: Request?
@@ -134,9 +135,11 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
     /// source running is kept; one that ended by itself or failed is started again at most every 10 s
     /// (`AudioSourceRule`); anything else stops what runs and starts the wanted one, with a new epoch.
     /// `make` builds the source when one is to start.
+    /// `restart`: the same sound captured another way (the quiet Mac's tap or ScreenCaptureKit), so even
+    /// a running source of `key` starts again; a newer call before it began keeps the restart.
     @MainActor
-    func follow(_ key: AudioKey, reason: String = "", make: @escaping @MainActor (AudioKey) async -> Made) {
-        requested = Request(key: key, reason: reason, make: make)
+    func follow(_ key: AudioKey, reason: String = "", restart: Bool = false, make: @escaping @MainActor (AudioKey) async -> Made) {
+        requested = Request(key: key, reason: reason, restart: restart || requested?.restart == true, make: make)
         wanted = key
         if key == .none { status = nil }
         if worker == nil { worker = Task { @MainActor in await self.run() } }
@@ -150,7 +153,7 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
             stopSaid = true
             print("Audio stopped: Sill is quitting.")
         }
-        requested = Request(key: .none, reason: "Sill is quitting", make: { _ in .failed("quitting") })
+        requested = Request(key: .none, reason: "Sill is quitting", restart: false, make: { _ in .failed("quitting") })
         wanted = .none
         status = nil
         if worker == nil { worker = Task { @MainActor in await self.run() } }
@@ -161,7 +164,7 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
         while let r = requested {
             requested = nil
             switch AudioSourceRule.decide(current: current, phase: phase, lastStartAt: lastStartAt, wanted: r.key,
-                                          now: HostClock.now()) {
+                                          now: HostClock.now(), restart: r.restart) {
             case .keep:
                 // The source there is stays (a stop asked for and taken back before it ran included).
                 if r.key != .none { status = sourceStatus }

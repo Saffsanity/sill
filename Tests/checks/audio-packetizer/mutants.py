@@ -27,6 +27,8 @@ MUTANTS = [
     ("an ended stream never restarted", "case .ended: return now - lastStartAt >= retryInterval ? .start : .keep", "case .ended: return .keep"),
     ("an ended stream restarted at once", "case .ended: return now - lastStartAt >= retryInterval ? .start : .keep", "case .ended: return .start"),
     ("a running one restarted", "case .starting, .running: return .keep", "case .starting, .running: return .start"),
+    ("a restart ignored", "        if restart { return .start }\n", ""),
+    ("a restart stops", "        if restart { return .start }\n", "        if restart { return .stop }\n"),
     ("the retry at 5 s", "static let retryInterval: TimeInterval = 10", "static let retryInterval: TimeInterval = 5"),
     ("an app told apart by its name", "case (.app(let p, _), .app(let q, _)): return p == q", "case (.app(let p, let n), .app(let q, let m)): return p == q && n == m"),
     ("an ended source kept when none is wanted", "if wanted == .none { return current == .none && phase == .idle ? .keep : .stop }", "if wanted == .none { return current == .none || phase == .ended ? .keep : .stop }"),

@@ -13,9 +13,11 @@ extension HostConfig {
     /// home pair for any other; the other five are shared.
     func streamSettings(away: Bool) -> StreamSettings {
         let pair = effective(away: away)
-        return StreamSettings(maxFPS: maxFPS, bitrate: pair.bitrate, captureScale: Double(pair.captureScale),
-                              prioritizeSpeed: prioritizeSpeed, virtualDisplay: virtualDisplay,
-                              directWireless: directWireless, sendAudio: sendAudio)
+        var settings = StreamSettings(maxFPS: maxFPS, bitrate: pair.bitrate, captureScale: Double(pair.captureScale),
+                                      prioritizeSpeed: prioritizeSpeed, virtualDisplay: virtualDisplay,
+                                      directWireless: directWireless, sendAudio: sendAudio)
+        settings.playOnMac = playOnMac
+        return settings
     }
 
     /// This config with a device's change laid over it; nil fields keep their value. `package`:
@@ -29,6 +31,7 @@ extension HostConfig {
         if let v = change.virtualDisplay { c.virtualDisplay = v }
         if let v = change.directWireless { c.directWireless = v }
         if let v = change.sendAudio { c.sendAudio = v }
+        if let v = change.playOnMac { c.playOnMac = v }
         return c
     }
 
@@ -78,7 +81,7 @@ enum DeviceSettings {
     /// No defaults: the caller says where the change came from, so a new caller cannot leave it open.
     static func accepted(_ c: HostSettingsChange, virtualDisplayAvailable: Bool, fromRemote: Bool,
                          paired: Bool) -> (HostSettingsChange, refused: [String]) {
-        var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed, sendAudio: c.sendAudio)
+        var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed, sendAudio: c.sendAudio, playOnMac: c.playOnMac)
         var refused: [String] = []
         if let v = c.directWireless {
             if fromRemote {

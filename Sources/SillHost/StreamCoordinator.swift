@@ -351,6 +351,8 @@ package final class StreamCoordinator {
     let audio = AudioPipeline()
     /// Connected devices that play the sound (the server's count, from their hellos).
     private var audioListeners = 0
+    /// Play on the Mac too changed: the next `audioFollow` starts the sound again, the other way.
+    private var audioRestartOwed = false
     /// TEST ONLY. `SILL_TEST_MENU_PID=<pid>` on a --synthetic host: the test pattern's menus are that
     /// process's (the gates' fixture, Scripts/menufixture.swift), read and pressed through the same
     /// code, never activated (the Desktop's rule). Nil otherwise; `testMenuLine` is what `start`
@@ -1001,6 +1003,9 @@ package final class StreamCoordinator {
         // in the background, before the first chunk needs it.
         if !old.sendAudio, next.sendAudio { audio.prepare() }
         if old.sendAudio != next.sendAudio, !switching { audioFollow() }
+        // The same sound captured another way: the tap (the Mac quiet) or ScreenCaptureKit (the Mac plays too).
+        // Owed until the next follow, so a change taken mid-switch restarts it when `select` follows.
+        if old.playOnMac != next.playOnMac { audioRestartOwed = true; if !switching { audioFollow() } }
     }
 
     /// Settings › Virtual Display › Try Again: clear a run-level disable, and stage the streamed
@@ -2787,13 +2792,15 @@ package final class StreamCoordinator {
         let v = ProcessInfo.processInfo.operatingSystemVersion
         return QuietMac.usesTap(macOS: (v.majorVersion, v.minorVersion),
                                 declared: Bundle.main.object(forInfoDictionaryKey: "NSAudioCaptureUsageDescription") != nil,
-                                synthetic: synthetic, permission: AudioRecordingPermission.now())
+                                synthetic: synthetic, permission: AudioRecordingPermission.now(), playOnMac: config.playOnMac)
     }
 
     /// Hands the pipeline what the sound should be of now.
     private func audioFollow() {
         let (key, reason) = audioKey()
-        audio.follow(key, reason: reason) { [weak self] key in
+        let restart = audioRestartOwed
+        audioRestartOwed = false
+        audio.follow(key, reason: reason, restart: restart) { [weak self] key in
             await self?.makeAudioSource(key) ?? .failed("the host is shutting down")
         }
     }

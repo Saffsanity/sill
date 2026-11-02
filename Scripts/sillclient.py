@@ -10,7 +10,7 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --fps-after=N@T    send a second viewport asking for N fps after T seconds
   --set=K=V[,K=V]@T  send a settings change (kind 17) T seconds in, with integer tokens 1, 2, 3...
                      in send order. Keys: maxFPS, bitrate, captureScale, prioritizeSpeed,
-                     virtualDisplay, directWireless, sendAudio; booleans accept 1/0/true/false/on/off
+                     virtualDisplay, directWireless, sendAudio, playOnMac; booleans accept 1/0/true/false/on/off
   --raw17=JSON@T     send this literal kind 17 payload T seconds in (split on the last @)
   --raw9=JSON@T      send this literal kind 9 payload (a viewport) T seconds in (split on the last @);
                      a host refuses one outside 1 to 16384 points a side or 0.25 to 4 for its scale,
@@ -165,11 +165,11 @@ import json, re, socket, struct, sys, time
 
 KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye",24:"menu",26:"pointer",32:"clipboard",43:"audio"}
 BOOL = {"1": True, "0": False, "true": True, "false": False, "on": True, "off": False, "yes": True, "no": False}
-BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "sendAudio", "persistent", "virtualDisplayAvailable",
+BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "sendAudio", "playOnMac", "persistent", "virtualDisplayAvailable",
              "thisConnectionAway", "awayRunning", "sessionPaired"}
-# What --set may send: HostSettingsChange's seven fields. The host drops any other key without a
+# What --set may send: HostSettingsChange's eight fields. The host drops any other key without a
 # word, so a misspelt one would only show up as an unchanged answer.
-SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless", "sendAudio"}
+SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless", "sendAudio", "playOnMac"}
 # Away from home (docs/remote-bundle-plan.md): read from the state's `away`, and its `link`'s state.
 AWAY_KEYS = {"homeBitrate", "homeCaptureScale", "awayBitrate", "awayCaptureScale", "thisConnectionAway", "awayRunning"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "sessionPaired", "linkState", "clipboard"} | AWAY_KEYS
@@ -726,6 +726,7 @@ def describe(d):
     note = d.get("virtualDisplayNote")
     dw = "-" if st.get("directWireless") is None else b(st.get("directWireless"))   # "-": an older host
     au = "-" if st.get("sendAudio") is None else b(st.get("sendAudio"))             # "-": a host without sound
+    pm = "-" if st.get("playOnMac") is None else b(st.get("playOnMac"))             # "-": a host before 2026-11-02
     sp = "-" if d.get("sessionPaired") is None else b(d.get("sessionPaired"))       # "-": a host before 2026-10-29
     away = d.get("away"); link = d.get("link")
     dash = lambda x: "-" if x is None else x
@@ -738,7 +739,7 @@ def describe(d):
         extra += (f" link={link.get('state')},withheld={link.get('withheldPerSecond')},bitrate={link.get('bitrate')},"
                   f"carried={dash(link.get('carriedKbps'))},suggested={suggested}")
     return (f"maxFPS={st.get('maxFPS')} bitrate={st.get('bitrate')} scale={st.get('captureScale')} speed={b(st.get('prioritizeSpeed'))} "
-            f"vd={b(st.get('virtualDisplay'))} dw={dw} paired={sp} audio={au} persistent={b(d.get('persistent'))} vdAvail={b(d.get('virtualDisplayAvailable'))} "
+            f"vd={b(st.get('virtualDisplay'))} dw={dw} paired={sp} audio={au} playOnMac={pm} persistent={b(d.get('persistent'))} vdAvail={b(d.get('virtualDisplayAvailable'))} "
             f"sw={b(d.get('softwareEncoder'))} stream={running}" + (f" note={note!r}" if note else "")
             + (f" audioNote={d['audioNote']!r}" if d.get("audioNote") else "") + extra)
 
