@@ -180,8 +180,8 @@ Connection are not encrypted, and anything that reaches your Mac there can
 connect without pairing: update it.
 Nightly builds: every night main changes, a notarized Sill for Mac built from it
 goes to the [nightly pre-release](https://github.com/Saffsanity/sill/releases/tag/nightly),
-and Sill for iPhone and iPad to TestFlight's testers. Nobody has tried a nightly
-by hand and it can break; Sill's update check never offers one, and going back
+and Sill for iPhone and iPad to TestFlight's testers. A nightly is tested less
+than a release and can break; Sill's update check never offers one, and going back
 from a nightly Sill for Mac to the release keeps its settings and paired devices.
 
 ## Tips

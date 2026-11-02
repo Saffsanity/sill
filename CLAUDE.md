@@ -8,150 +8,78 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
-**A locked Mac shows nothing of itself (2026-10-31, branch `locked-mac` from main at e4d30349; Noah's finding of
-2026-10-31, a security fix: no public issue; his rule: "When the user is locked, it should only show the lock
-screen, no virtual desktop, no desktop, no apps, nothing other than the login screen", and "make sure this fixes
-it for good!"; the rule, the review, the open questions with the default taken for each, the results and Noah's
-steps are in `docs/locked-mac-plan.md`).** Sill read the console's lock (SessionLock) only for the pairing ask
-and the cable's pairing: with the screen locked, or another user selected at the login screen while Noah's
-session ran in the background, a paired device (and at an open door an unpaired one) could still pick a window
-and see it, stream the Desktop (off console this session's own desktop, not the login window), see thumbnails,
-launch apps (Noah saw it), use the menus, gestures, sound, clipboard, pointer and cursor shape, type and click,
-wake the console's display and make a virtual display. **Noah's live test of 2026-10-31 ran main's Sill.app
-0.5.5 (1232)**, not this branch (build 1245 started 26 s after his unlock and has seen no lock since); the
-blocked-main-actor diagnosis given the review that morning was wrong (1232's main actor printed throughout): no
-heartbeat gate was built. His next test is the first one of this fix. Host, wire (additive) and device.
-- Three readings (`LockPolicy`, pure; `Tests/checks/lock-policy`): unlocked, screen locked (this session on the
-  console, its lock screen up), off console (another user, the login window or nobody). Witnesses
-  (`SessionLock`, on its own queue `sill.lock`, never the main actor; any one saying locked wins, unknown counts
-  as locked): the console's user (SCDynamicStore State:/Users/ConsoleUser, watched; the top-level user, never
-  SessionInfo's per-session key), notify(3)'s `com.apple.sessionagent.screenIsLocked` (`notify_register_dispatch`),
-  the session dictionary (bounded 0.5 s, off main, read at start, then only to confirm an unlock), and in Sill.app loginwindow's four
-  distributed notifications and NSWorkspace's two, `.deliverImmediately`, whose handler sets the reading itself.
-  `LockPolicy.Reader`: a lock and a change between locked readings at once; an unlock only after 2 s of every
-  witness unlocked and a session read since (the flap of macOS's own lock a second after each return to the
-  console never unlocks); the first full reading taken as it is. Looks: at start, each witness's change, once a
-  second while a device is connected (`SessionLock.devices`), the settle's end.
-- The gate (`LockGate`, `LockPolicy.withheld`): SessionLock sets it the moment the reading changes; StreamServer
-  drops on its network queue every frame but the placeholder's (`broadcast(_:picture:)`), thumbnails, icons, the
-  app list, cursor shape, pointer (not even read), clipboard and sound from then on; WindowCatalog, HostClipboard,
-  MenuMirror, InputInjector and VirtualStage (`mayMakeDisplay`, `mayWarp`, `Failure.locked`) ask it too. An icon or
-  the app list it withheld after the coordinator had sent them (a send that raced the lock) is reported
-  (`StreamServer.onCatalogWithheld`), and the unlock sends that device every icon and the apps.
-- Allowed (`LockPolicy.allowed`): a locked screen streams the display, the lock screen itself (`lockScreenStreams` true: Noah,
-  2026-10-31, "show the real lock screen's picture"; what the capture holds is his test's to show), off console a
-  placeholder, a black still with no capture (`StillCapture`), since a capture from this session shows its own desktop; no windows, icons, apps, launches, sound, clipboard, pointer, gestures or virtual
-  display; input from a paired session at a locked screen (the password), nobody's off console but the up of what
-  is held (`takesInput`, the coordinator's `lockedOut`, the injector's own last word); DisplayWake declares nothing
-  off console and at a locked screen only a paired session's taken input.
-- Requests (`LockPolicy.decide`, `restrictive`): judged by the more restrictive of the gate as each arrived
-  (`StreamServer.onMessage`'s third argument) and now; a window pick, a launch, kind 15, kinds 27 with an id and
-  25 ("The Mac is locked."), kind 28 and a device's clipboard text refused; the Desktop or nothing picked taken.
-- The stream (`lockChanged`, `enforceLock`, `lockedMidSwitch`, `afterUnlock`, `LockPolicy.Restore`): at the lock a
-  window goes home and the Desktop streams (the lock screen; the placeholder off console), remembered; while locked any select of a window becomes the
-  placeholder; after the unlock the catalog afresh, withheld icons and apps, the list, then the remembered window
-  (as a restart) or the Desktop. `LockPolicy.reconciles`: coalesced changes acted on by what streams (found by the
-  check's random sessions). Lines at the change (SessionLock's): "Locked: this Mac's screen is locked; …", "Locked:
-  another user, or the login window, is on this Mac's screen; …", "Unlocked: …"; none for an unlocked start.
-  Stats `lock.withheld`, `lock.refused`, `in.locked`, `cap.placeholder`.
-- Wire: `WindowList.locked` and `offConsole` (Switcher.swift; left out unlocked: a list byte for byte as before).
-- Device: `StreamClient.lockWhy`, `lockShade`; at an off-console list the picture removed on the network queue
-  (`HEVCDisplayView.blank`, `onBlank`) and `LockedMacShade` over both picture panes, only then: "Another user
-  started controlling this Mac." ("Log in to your account to reactivate screen sharing with Sill."; Noah's words,
-  2026-11-02: "Keep the current overlay, change the text to …"; the drawer's and the panel's line are the two in
-  one); a locked screen shows no cover (its lock screen streams; the drawer's and the panel's line say "‹Mac› is
-  locked"); after a cover, "Unlocking…" until the first keyframe after it, the lock screen's or a window's
-  (`unlockWaitsForKeyframe`; 4 s at most). StreamProtocol's `LockedMac` has every word (checked). DEBUG
-  `-SillMacLocked 1|2|unlocking`, the console's `lock:` lines.
-- Noah's tests (2026-11-01 and 02, his iPhone and Mac; both switches read in macOS's own log, the plan's
-  Results): a fast user switch starts a new login window session that holds the console, whoever's name is
-  chosen on it, until the password typed on the Mac brings this session back (locked, if it was locked before
-  the switch: then the lock screen streams and the password typed on the phone unlocks it); Sill read every
-  step right, and the cover now says so in Noah's words (2026-11-02). Fixed on the device: a
-  locked list after an off-console one left "Unlocking…" that no keyframe ended (its 4 s instead).
-- TEST ONLY (test hosts only, TestHooks lists them): `SILL_TEST_LOCKED=1`; `SILL_TEST_LOCKED_FILE` (1 screen locked,
-  2 off console); `SILL_TEST_LOCK_NOTIFY=<me.saffer.sill.test.…>` (the screen's notify name of the test's own);
-  `SILL_TEST_LOCK_NOTE='<s> <name>; …'` (notifications delivered to the handler, nothing posted);
-  `SILL_TEST_LOCK_IGNORE_MAC=1` (this Mac's own witnesses read as unlocked: the live check on a locked Mac),
-  `SILL_TEST_LOCK_LOG=1`. sillclient: `offConsole=1`, `--dump=DIR`. `Scripts/lock-check/` (live.py, frames.swift).
-- The review (2026-10-31, after b1404215; the plan's "The review"): fourteen findings (four must-fix), all taken,
-  the code in one commit (the rule's rewrite reaches every file), then one each for the icons that raced the
-  lock (found re-reading the gate), the test tools, the public words and the docs. Verified (the plan's
-  Results): `lock-policy` 531 checks and 137 of 137 mutants (in CI's matrix; 33 min here); `run-all.sh`
-  all 63 passed; `swift build -c release` from a clean `git archive` (only the CaptureProbe warning) and the iOS
-  app from it, Debug and Release for the simulator and Debug for a device (only the `StreamClient` capture
-  warning, StreamClient.swift:4257); H2 against main (idle and a Desktop client identical masked and sorted, but
-  for the idle heartbeat's leeway and one second's counters); on test hosts (`Scripts/lock-check/live.py OUT
-  all`, 58 of 58): each lock at the next look (0.16 to 0.19 s), through notify(3) 0.4 ms after the post and a
-  delivered notification at once, every unlock after the settle (2.0 to 2.2 s), the flap never unlocking, the
-  pattern's frames stopping at the lock and every keyframe while locked black (1280×800, luma 0), nothing else
-  of the Mac to a device, the refusals with their lines, a paired session's taps posted at a locked screen and
-  none off console (its held key let go), a host started locked; photos of the cover on a private iPad
-  simulator (sill-handoff's `locked-mac/`). Not run: a real lock or user switch, Sill.app, a device.
+**Release 0.6.0 (2026-11-02, PR #274 `integrate-0-6` from main at e4d3034, carrying #269 (the version),
+#270 (the tour once more) and #271 (a locked Mac); Noah's go after testing #274's builds: "Test passed,
+merge please. Do phases 1 through 3").** One version for both apps, as since 0.5.1: Sill for Mac 0.6.0
+(1276) with Sill for iPhone and iPad 0.6.0 (1276), both from the merge commit a39084f4 (`git rev-list
+--count` 1276: the build number is the commit count on both apps since the nightlies, never committed,
+never `--bump`). The steps, the decisions and every text pasted are in sill-handoff's
+`release-060/` (guide-0.6.0.md, STATUS.md, notes-0.6.0.md, the App Store texts).
+- In it since v0.5.1: 43 pull requests (the release notes list them): among them the clipboard both
+  ways (#78), the Mac's sound as a beta (#94), a hardware keyboard and trackpad (#80), Larger Picture
+  (#79), a window Sill sized going back (#75), finding the Mac after hours idle (#77), the Settings
+  window on a small screen (#74), tiles (#117), Virtual Display and Send Audio on by default, pinch to zoom
+  (#196), Reverse Scrolling (#159), other languages and dictation (#147), the thumbnail hold (#248),
+  Aa's Off (#181), the security fixes of 2026-10-29, the tour once more and a locked Mac (the two
+  entries below).
+- Noah's decisions (2026-11-02, the guide's D1–D6): D1 universal, "D1 - Universal": Sill for Mac runs
+  on Apple silicon and Intel from 0.6.0 (release.yml's publish job sets `SILL_UNIVERSAL: '1'`, as the
+  nightlies do; README, the site, the description and the review notes say so; the Homebrew cask loses
+  `depends_on arch: :arm64`); D2 the sound stays in the words (What's New's paragraph and the
+  description's bullet); D3 no sentence on typing the Mac's password from the device; D4 0.6.0 (1276)
+  to TestFlight's 'Public Beta', his own click after his TestFlight check; D5 the screenshots kept ("we
+  can update later"); D6 the review notes trimmed, with a NEW IN 0.6.0 paragraph (3,993 bytes;
+  docs/app-store-metadata.md §7).
+- The order run (STATUS.md): the words commit 7871d5c (the 0.6.0 markers' lines out of `site/`, the
+  words kept; privacy.html dated November 2, 2026; `style.css?v=2026-11-02`; What's New's blank line),
+  the universal commit 8751676 (D1), CI green on it (run 41416969051), #274 merged with a merge commit
+  (a39084f4, 09:15 UTC); the nightly dispatched by hand on it, run 41419194155: Sill for iPhone and iPad
+  0.6.0 (1276) uploaded and processed in 2 minutes ("Assigned build 1276 of 0.6.0 to: no group; by
+  automatic distribution: Internal."), and the Mac pre-release "Sill nightly 0.6.0 (1276), 2026-11-02",
+  universal ("for x86_64 arm64"), both notarizations accepted (a scheduled duplicate, 41420241620, was
+  cancelled); the annotated tag v0.6.0 (tag object 715f0dda) on a39084f4; release.yml's run 41421820998
+  ("Sign, notarize and publish", environment `release`), approved by Noah, publishing the GitHub
+  Release "Sill 0.6.0" at 10:00:51 UTC (Sill.dmg 5,864,060 B, SHA-256
+  de1f5afe1176b419af90743f8beb71112bf3f2eee905f7956bcce96a0149a46d; Sill.zip 5,863,229 B, SHA-256
+  abcba6c500f1b3dc44a416b9fa23920a53c989b26692222ddc4aedffa5eb11ac; universal, notarized and stapled).
+- Lessons from the day: never dispatch the mutants matrix on a release day (run 41414798311 held every
+  macOS runner and was cancelled; a check's mutants run here instead); dispatch the release's nightly
+  after 09:17 UTC, or cancel the schedule's duplicate.
+- Still open: the App Store (Noah: 0.6.0 created in App Store Connect with the texts, build 0.6.0
+  (1276), Add for Review and Submit once getsill.app/download gives 0.6.0; manual release; approval
+  date: to fill); Public Beta (D4); right after App Review approves, main to 0.6.1 (`Packaging/Info.plist`
+  and `MARKETING_VERSION`, the checklist's part 2 first item and Nightlies, metadata's Version row,
+  DEVELOPMENT.md's nightly paragraph), merged before the next 09:17 UTC nightly, since the approval
+  closes 0.6.0's train (a nightly of a main saying 0.6.0 would then fail its iOS upload); the Homebrew
+  bump (Saffsanity/homebrew-sill's `Casks/sill.rb` to 0.6.0, its dmg SHA-256, `depends_on arch` gone);
+  #62 told what 0.6.0 is. Docs after the release (this entry, the checklist's part 1 §3, SECURITY.md,
+  the metadata's 0.6.0 texts and sizes, the Intel wording) are PR "Docs: the 0.6.0 release".
+- Closed by this release, with their facts in their plans: the version (#269, branch
+  `store-version-0.6.0`: main at 0.6.0 since 2026-10-31, after 0.5.5, the pre-release number; no entry
+  of its own), and the two entries that follow.
+
+**A locked Mac shows nothing of itself (2026-10-31, branch `locked-mac`, PR #271; shipped in 0.6.0, the
+entry above).** The rule, the review, the open questions, the results and Noah's tests of 2026-11-01 and 02
+are in `docs/locked-mac-plan.md`. In brief: three readings (`LockPolicy`, pure, `Tests/checks/lock-policy`;
+`SessionLock` on `sill.lock`): unlocked, screen locked (its lock screen streams; a paired session's input
+reaches it, the password included), off console (a black placeholder, `StillCapture`, and the device's cover
+"Another user started controlling this Mac.", Noah's words); `LockGate` withholds windows, thumbnails, icons,
+apps, launches, menus, gestures, sound, clipboard, pointer and the virtual display; `WindowList.locked` and
+`offConsole` (additive). TEST ONLY: `SILL_TEST_LOCKED`, `SILL_TEST_LOCKED_FILE`, `SILL_TEST_LOCK_NOTIFY`,
+`SILL_TEST_LOCK_NOTE`, `SILL_TEST_LOCK_IGNORE_MAC`, `SILL_TEST_LOCK_LOG`; `Scripts/lock-check/`; DEBUG
+`-SillMacLocked 1|2|unlocking`.
 - **Untested, for Noah (the plan's 1–7):** a real lock with a window streaming (Virtual Display on and off); the
   password typed from the paired iPad (secure input may refuse posted keys); another user at the login screen
   (the switched-to-another-user cover, nothing typed reaches the Mac, macOS's own lock after the switch back);
   Sill.app inactive at the lock and the unlock (`.deliverImmediately`); an unpaired device at a locked Mac; the
   rest refused and back after the unlock; mixed builds (the App Store iPad gets the black placeholder).
-**The tour once more, with what's new (2026-10-31, branch `tour-0-6` from main at e4d30349; the plan,
-its open questions with the defaults taken, where the build departs from it and the results are in
-docs/first-run-walkthrough-plan.md, "The tour once more, for 0.6").** Noah: "Mark the new features with
-“New:” and make the tutorial run for anyone who launches this version for the first time. You don’t
-need to explain the Aa stuff, maybe add an explanation with Virtual Desktop’s explanation." (with "Those
-new features will come to 0.6.1": the open pull requests wait for it; this tour is 0.6's). Device only:
-no wire change, nothing in `Sources/`, no new file, one new UserDefaults key.
-- The cards (`TourTopic`: touch, bar, **sharing**, settings, laptop; four sideways, five upright): the
-  picture's "Tap, Hold, Drag and Pinch" gains the pinch (New) and the three-finger swipes (while this
-  device's switch is on and the Mac takes them); the bar's "Windows and Menus" ("Windows" without the
-  button) lights the Menus button too (`TourTarget.menus`, reported by MacMenuButton wherever it is
-  drawn, a phone's row-2 one through its offset) and has Menus, then Virtual Display with Aa in it (the
-  only row that names Aa: "New: Virtual Display is on: … Aa then sizes its text." while the Mac's setting
-  is on, else where the switch is, New too), then sideways and on a phone the Keyboard button and a
-  hardware keyboard (New); Clipboard and Sound, lighting Settings (Share Clipboard, Paste on ‹Mac›, Send
-  Audio and Mute, or for an older Mac "Update Sill on ‹Mac›…"); Settings gains Reverse Scrolling and Hold
-  to Show Window Controls (sighted; New); the laptop card a hardware keyboard (the halves; New) and on a
-  phone where it is offered Larger Picture (New). The old Aa row and "…on screen or with a hardware
-  keyboard" are gone. No row on passwords (a password manager's copies go like any other since
-  2026-10-29). At most six rows a card.
-- "New:" (`TourPolicy.newPrefix`, `TourSpan.isNew`): the rows about what is new since the tour was
-  written start with it, semibold in the accent, read by VoiceOver with the row: 0.6's, and since the
-  review the Menus button's, the gestures' and Virtual Display's in both forms too (the old tour told of
-  none of them: open question 1), on every install.
-- What rows follow (`TourFeatures`, StreamScreen's `tourFeatures` at each render): the Menus button on
-  screen, gestures on and taken, the Mac's Virtual Display, its clipboard, Paste on ‹Mac› Right Away,
-  its sound, Larger Picture offered here.
-- Once more (`TourPolicy.version` 2, `upgraded`; TourStore's `Sill.tourVersion`): a memory with no
-  version stored (a fresh install, 0.5 and 0.5.1) or an older one is cleared and stored with version 2
-  at the first stream screen, so everyone who launches 0.6 gets the whole tour once, finished or skipped
-  before; version 2's or a later build's memory is kept, never lowered. Release always; Debug only with
-  `-SillTourState saved` (so a Debug build never uses up TestFlight's once more); DEBUG console "tour:
-  memory of tour version 1 (…) cleared: version 2 shows once" and each card's "tour: card …".
-- Docs: README (a tour bullet; the clipboard bullet's repeated sentence and its concealed-copies claim
-  gone), support.html (the tour's section; behind `<!-- Tour 0.6` the once-more paragraph; the
-  review took out a Universal Control line and a Paste from Other Apps line, not the tour's),
-  privacy.html (the tour's version, marked; October 31), the checklist's marker, perl line and greps,
-  the metadata (the pinch's paragraph moved from 0.5.1's What's New into the next one's draft with the
-  tour's; the description's clipboard bullet without its concealed-copies sentence), DEVELOPMENT.md.
-- Verified (the plan's Results): `tour` 732,447 checks and 126 of 126 mutants (42 new); `run-all.sh`, all 62 (565 s);
-  the iOS app Debug for the simulator (CI's command, Xcode 27.1), Release for the simulator and Debug
-  for a device, only the known StreamClient capture warning, and the first commit's state on its own;
-  H3's greps; H4, main's build against the branch's, 18 of 18 photos identical (iPad and Duo simulators:
-  the mock, Settings, the Menus pull-down); 94 photos on a private iPad Pro 13-inch simulator (iOS 27.0)
-  and 68 on a private iPhone Duo (iOS 27.1, 24A94232, the six poses folded by Tests/duorig), at the
-  default text size and accessibility-extra-large, each looked at; the accessibility tree; live on a
-  private iPhone 18 Pro Max (iOS 27.0) against the test host, every card upright and sideways at both
-  sizes; and the upgrade (S5): main's build's Done and its Skip each cleared once by this build (the
-  whole tour, 1 of 5, 1.1 s after the picture), a fresh install, a later version kept (the new card
-  alone over version 1's memory), a Debug build without `saved` writing nothing. Found: on a phone (an
-  iPhone either way, the Duo's cover) the bar card's five rows scroll at the default size, the last one
-  or two under the fade with the footer in reach (the plan's risk 5); at 500x710 the laptop card's last
-  row does.
-- The review (2026-10-31, of 228f3aec; the plan's "The review and its fixes"): New: on the Menus,
-  three-finger and Virtual Display rows too; support.html's Universal Control and Paste from Other Apps
-  lines out (not the tour's); the Paste row says where Paste is, Reverse Scrolling's names the on-screen
-  trackpad, the hardware keyboard's symbol `keyboard.badge.ellipsis`; the Duo's cover at
-  accessibility-extra-large left to Noah. Again: `tour` 732,447 and 126 of 126 mutants, `run-all.sh` all
-  62, the three iOS builds, the 94 iPad and 68 Duo photos retaken.
+
+**The tour once more, with what's new (2026-10-31, branch `tour-0-6`, PR #270; shipped in 0.6.0, the
+entry above).** The plan, its defaults, the results and the review are in docs/first-run-walkthrough-plan.md,
+"The tour once more, for 0.6". In brief: `TourPolicy.version` 2 (`Sill.tourVersion`) clears an older
+memory once, so everyone who launches 0.6 sees the whole tour again; rows about what is new start with
+"New:" (`TourPolicy.newPrefix`); a Clipboard and Sound card; the rows follow `TourFeatures`. Debug builds
+take the once-more only with `-SillTourState saved`.
 - **Untested, for Noah** (the plan's P1–P12, a TestFlight 0.6 or a Debug build with `-SillTourState
   saved`): over 0.5.1 with the old tour done, and again after skipping it, the tour once more (four
   cards sideways, five upright, "New:" in blue), then never again; each New row true on the device
@@ -646,7 +574,9 @@ out in Insiders first tomorrow". Merge "Version 0.5.5 for both apps" (PR #244, b
   TestFlight group, and the public beta group (the external group with the public link) only while
   `SILL_NIGHTLY_PUBLIC_BETA` is `true`, with Beta App Review right after; asc.swift refuses `--public-beta`
   unless its environment says that too. Unset at first, on Noah's word.
-- A nightly is 0.5.5 (N), N the commit count on both apps, never committed (the store release will be 0.6.0). The update check never offers
+- A nightly is main's version with the commit count N as its build on both apps, never committed: 0.5.5 (N)
+  until 2026-10-31, 0.6.0 (N) since (the 0.6.0 release's own builds are 0.6.0 (1276)), 0.6.1 (N) once main
+  moves on after App Review approves 0.6.0. The update check never offers
   one (`UpdatePolicy.feed` is /releases/latest, which lists no pre-release; `UpdatePolicy.release` refuses
   `prerelease: true`; "nightly" is no version), and offers a nightly nothing until a release newer than its
   version exists. A nightly reads the release's data-protection keychain items (same team, bundle ID and
@@ -7607,8 +7537,9 @@ good.
   functions (docs/release-checklist.md, TestFlight). `Scripts/make-app.sh`
   builds, iconizes, signs and installs the bundle (with `SILL_UNIVERSAL=1`
   arm64 and x86_64, each in its own scratch path under `.build/universal`,
-  joined with lipo, for an Intel tester, #62; off by default, so releases
-  stay arm64, and `release.sh`'s `check_signature` reads every slice);
+  joined with lipo, #62; off by default here, on in the nightlies and, since
+  0.6.0, in release.yml's publish job, so releases are universal; `release.sh`'s
+  `check_signature` reads every slice);
   `Scripts/release.sh`
   (M6) makes the downloads from it:
   `make-app.sh --release`, `make-dmg.sh --prepare` (the image's tool and
@@ -8279,7 +8210,7 @@ Scripts/pacing/run.sh                   # remote pacing and the link's judge, th
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_ORIGIN=vpn SILL_TEST_PATTERN=noise .build/release/SillHost --synthetic --remote   # an away session whose stream follows its quality
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
-SILL_UNIVERSAL=1 Scripts/make-app.sh    # .build/Sill.app for Apple silicon and Intel (arm64 and x86_64) for an Intel tester (#62): twice the build time; the x86_64 slice has not streamed on an Intel Mac
+SILL_UNIVERSAL=1 Scripts/make-app.sh    # .build/Sill.app for Apple silicon and Intel (arm64 and x86_64), as releases are since 0.6.0 (#62): twice the build time
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release   # M6
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' SILL_NOTARY_PROFILE=sill-notary Scripts/release.sh [--dry-run]   # M6: the notarized download (docs/release-checklist.md)
 Scripts/release-ios.sh                  # the iOS app for App Store Connect: archive, export .build/ios/export/Sill.ipa, check it; uploads nothing
