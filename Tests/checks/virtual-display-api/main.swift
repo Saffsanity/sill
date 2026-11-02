@@ -200,6 +200,25 @@ check(HDP.stillNeeded(physicalDisplays: 0) == true, "no real display online: the
 check(HDP.stillNeeded(physicalDisplays: 1) == false, "the lid opened, the built-in display back: the fallback display goes")
 check(HDP.stillNeeded(physicalDisplays: 2) == false, "two monitors plugged in: the fallback display goes")
 
+// macOS's own stand-in, a 1x 1920×1080 "Display" (vendor 'unkn', model 'virt') with the lid closed and nothing
+// attached (seen on macOS 27, 2026-11-02): not a real display, so Sill's Retina one is made in its place.
+check(HDP.isStandIn(vendor: 0x756e6b6e, model: 0x76697274) == true, "macOS's stand-in ('unkn', 'virt') is no real display")
+check(HDP.isStandIn(vendor: 0x5111, model: 0x0001) == false, "Sill's own virtual display is not the stand-in")
+check(HDP.isStandIn(vendor: 0x610, model: 0xa050) == false, "Apple's built-in panel is a real display")
+check(HDP.isStandIn(vendor: 0x756e6b6e, model: 0x1234) == false, "an unknown vendor alone is not the stand-in")
+// Which displays the Desktop may stream: a real one, else Sill's, else the stand-in.
+check(HDP.pool([HDP.Kind.standIn, .sills, .real], kind: { $0 }) == [.real], "a real display online: it alone")
+check(HDP.pool([HDP.Kind.standIn, .sills], kind: { $0 }) == [.sills], "the lid closed, Sill's Retina display made: it, not macOS's stand-in")
+check(HDP.pool([HDP.Kind.standIn], kind: { $0 }) == [.standIn], "only macOS's stand-in (before Sill's is made): the stand-in")
+check(HDP.pool([HDP.Kind](), kind: { $0 }) == [], "no display: none")
+// Its size: the MacBook's own screen as Sill last saw it, so windows keep their places (Noah's choice, 2026-11-02).
+check(HDP.desktopDimensions(builtIn: (1800, 1169), viewportWidth: 1366, viewportHeight: 1024) == HDP.Dimensions(widthPt: 1800, heightPt: 1168, scale: 2),
+      "the built-in screen last seen at 1800×1169 pt: 1800×1168 @2× (even), not the iPad's size")
+check(HDP.desktopDimensions(builtIn: (1512, 982), viewportWidth: nil, viewportHeight: nil) == HDP.Dimensions(widthPt: 1512, heightPt: 982, scale: 2),
+      "a 14-inch MacBook Pro's default 1512×982 pt: kept")
+check(HDP.desktopDimensions(builtIn: nil, viewportWidth: 1366, viewportHeight: 1024) == HDP.Dimensions(widthPt: 1366, heightPt: 1024, scale: 2),
+      "the built-in screen never seen (a Mac mini): the viewport, as before")
+
 check(HDP.desktopDimensions(viewportWidth: nil, viewportHeight: nil) == HDP.Dimensions(widthPt: 1920, heightPt: 1080, scale: 2),
       "no viewport defaults to 1920×1080 @2×")
 check(HDP.desktopDimensions(viewportWidth: 1366, viewportHeight: 1024) == HDP.Dimensions(widthPt: 1366, heightPt: 1024, scale: 2),

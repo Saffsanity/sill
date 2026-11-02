@@ -498,6 +498,29 @@ enum HeadlessDesktopPolicy {
     /// lid opened, a monitor plugged in) it goes at once, so the windows macOS moved onto it come back.
     static func stillNeeded(physicalDisplays: Int) -> Bool { physicalDisplays == 0 }
 
+    /// macOS's own stand-in display, a 1x 1920×1080 "Display" (vendor 'unkn', model 'virt') that it makes when a
+    /// Mac has no screen at all (the lid closed and nothing attached, seen on macOS 27). Not a real display:
+    /// Sill's Retina one is made in its place.
+    static func isStandIn(vendor: UInt32, model: UInt32) -> Bool { vendor == 0x756e6b6e && model == 0x76697274 }
+
+    enum Kind: Equatable { case real, sills, standIn }
+
+    /// The displays the Desktop may stream: the real ones, else Sill's, else macOS's stand-in.
+    static func pool<T>(_ displays: [T], kind: (T) -> Kind) -> [T] {
+        for wanted in [Kind.real, .sills] {
+            let some = displays.filter { kind($0) == wanted }
+            if !some.isEmpty { return some }
+        }
+        return displays
+    }
+
+    /// The fallback display's size: the MacBook's own screen as Sill last saw it, so windows keep their places;
+    /// never seen (a Mac mini), the device's viewport, as before.
+    static func desktopDimensions(builtIn: (widthPt: Int, heightPt: Int)?, viewportWidth: Double?, viewportHeight: Double?) -> Dimensions {
+        guard let builtIn else { return desktopDimensions(viewportWidth: viewportWidth, viewportHeight: viewportHeight) }
+        return desktopDimensions(viewportWidth: Double(builtIn.widthPt), viewportHeight: Double(builtIn.heightPt))
+    }
+
     static func desktopDimensions(viewportWidth: Double?, viewportHeight: Double?) -> Dimensions {
         guard let w = viewportWidth, let h = viewportHeight, w > 0, h > 0 else {
             return Dimensions(widthPt: defaultWidthPt, heightPt: defaultHeightPt, scale: 2)

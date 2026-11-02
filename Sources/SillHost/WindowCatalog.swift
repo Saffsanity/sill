@@ -131,6 +131,19 @@ final class WindowCatalog {
         (w.title ?? "").lowercased().contains("layerprobe")
     }
 
+    /// The MacBook's own screen in points, as the last look that saw it had it: the size of Sill's Retina
+    /// display with the lid closed (HeadlessDesktopPolicy). Kept in the preferences, so a relaunch with the
+    /// lid already closed still knows it.
+    static var lastBuiltIn: (widthPt: Int, heightPt: Int)? {
+        guard let a = UserDefaults.standard.array(forKey: builtInKey) as? [Int], a.count == 2 else { return nil }
+        return (a[0], a[1])
+    }
+    private static let builtInKey = "lastBuiltInDisplayPoints"
+    private static func rememberBuiltIn(widthPt: Int, heightPt: Int) {
+        guard widthPt > 0, heightPt > 0, lastBuiltIn.map({ $0 == (widthPt, heightPt) }) != true else { return }
+        UserDefaults.standard.set([widthPt, heightPt], forKey: builtInKey)
+    }
+
     /// Window list and thumbnails, while a client is connected.
     static let pollInterval: Duration = .seconds(2)
     /// A window whose `WindowInfo` (title, app, size) has not changed since its last thumbnail,
@@ -298,8 +311,8 @@ final class WindowCatalog {
         appliedSeq = seq
         lookedAt = .now
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
-        let physical = content.displays.filter { !StreamCoordinator.isSillVirtualDisplay($0.displayID) }
-        let pool = physical.isEmpty ? content.displays : physical
+        let pool = HeadlessDesktopPolicy.pool(content.displays) { StreamCoordinator.displayKind($0.displayID) }
+        if let b = content.displays.first(where: { CGDisplayIsBuiltin($0.displayID) != 0 }) { Self.rememberBuiltIn(widthPt: b.width, heightPt: b.height) }
         display = preferMainDisplay
             ? (pool.first { $0.displayID == CGMainDisplayID() } ?? pool.first)
             : pool.first
