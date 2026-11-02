@@ -775,11 +775,25 @@ own long press is (it was a fixed 1.5 s). It is the device's own
 with every Sill for Mac. Every bar's thumbnails (sideways, an iPad's window bar
 upright, a phone's row 2) take a change at once, the drag's start with it; the
 drag's own rules (12 pt before the hold is a scroll of the strip, 8 pt after
-it lifts the thumbnail) and the picture's long press (a right click, 0.45 s)
-do not change. VoiceOver reads the row as "Hold to show window controls, 0.5
+it lifts the thumbnail) and the picture's long press (a right click or a drag,
+0.45 s) do not change. VoiceOver reads the row as "Hold to show window controls, 0.5
 seconds", adjustable: a swipe up or down is a tenth.
 `iOSClient/ThumbnailHold.swift` is the rule, checked in
 `Tests/checks/thumbnail-hold`.
+
+## Holding on the picture
+
+A finger held on the picture for 0.45 s is the Mac's right button or its left
+(issue #178). Lifted where it was pressed (within 8 pt), it right-clicks there,
+at the lift; moved on past 8 pt, it presses the left button where it was
+pressed and drags to where it lifts, so a window, a slider or a selection moves
+under the finger. A tap still clicks and a finger that moves before the hold
+still scrolls; a three-finger stroke or a cancel mid-drag lets the button up and
+clicks nothing. Before this the right click came at the hold itself and the
+finger's moves after it were dropped. No wire change: the drag is the left
+button's down, moves and up, as the Pencil's. `iOSClient/TouchHold.swift` is
+the rule, checked in `Tests/checks/touch-hold`; `RIG_ONLY=hold
+Tests/touchrig/run.sh NAME` drives the real overlay with synthesized touches.
 
 ## Pinch zoom
 
@@ -787,7 +801,7 @@ Two fingers on the picture zoom it as a photo zooms in Photos (issue #65): sprea
 them and the picture grows about the point between them, up to 5×, and moves
 with them, the point under the fingers staying under them. On a zoomed picture
 any two fingers move it and pinch it, and one finger is still the Mac's (a tap
-clicks, a hold right-clicks, a drag scrolls), landing on what shows under it, as
+clicks, a hold right-clicks or drags, a drag scrolls), landing on what shows under it, as
 the Pencil, a hover and the iPad's own pointer do. On the whole picture two
 fingers scroll the Mac as before, unless they pinch first (their spacing changes
 12 pt, and more than the point between them moves). A slight pinch out leaves

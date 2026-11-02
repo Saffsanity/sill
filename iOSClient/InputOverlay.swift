@@ -127,6 +127,8 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// The finger pan opened the Mac's scroll (its stroke was the Mac's when it began): its steps and its
     /// end go out. A pan whose stroke the picture took sends nothing at all.
     private var fingerScroll = false
+    /// A finger held on the picture: a right click at its lift, or a left drag once it moves (TouchHold).
+    private var hold = TouchHold()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -151,7 +153,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         addGestureRecognizer(tap)
 
         let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress))
-        longPress.minimumPressDuration = 0.45
+        longPress.minimumPressDuration = TouchHold.press
         longPress.allowedTouchTypes = directOnly
         addGestureRecognizer(longPress)
 
@@ -275,17 +277,37 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         sendPointer(.leftUp, at: point, clamped: false)
     }
 
-    /// Long press: the right button, since there is no second finger to spare for it. What is composed
-    /// goes, and what was typed is forgotten, only past the letterbox's guard, as for a tap.
+    /// Long press: lifted where it was pressed, the right button, since there is no second finger to
+    /// spare for it; moved on, a drag with the left button (TouchHold). The pointer goes there as the
+    /// hold begins; what is composed goes, and what was typed is forgotten, only past the letterbox's
+    /// guard, as for a tap.
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-        guard !strokes.silent else { return }
-        guard gesture.state == .began else { return }
-        setOwnPointer(nil, .none)
         let point = gesture.location(in: self)
-        guard sendPointer(.move, at: point, clamped: false) != nil else { return }
-        forgetTyped()
-        sendPointer(.rightDown, at: point, clamped: false)
-        sendPointer(.rightUp, at: point, clamped: false)
+        switch gesture.state {
+        case .began:
+            guard !strokes.silent else { return }
+            setOwnPointer(nil, .none)
+            guard sendPointer(.move, at: point, clamped: false) != nil else { return }
+            forgetTyped()
+            hold.began(at: point)
+        case .changed: sendHeld(hold.moved(to: point))
+        case .ended: sendHeld(hold.ended(at: point))
+        case .cancelled, .failed: sendHeld(hold.cancelled())
+        default: break
+        }
+    }
+
+    private func sendHeld(_ held: [TouchHold.Send]) {
+        for s in held {
+            switch s {
+            case .leftDown(let p): sendPointer(.leftDown, at: p, clamped: true)
+            case .move(let p): sendPointer(.move, at: p, clamped: true)
+            case .leftUp(let p): sendPointer(.leftUp, at: p, clamped: true)
+            case .rightClick(let p):
+                sendPointer(.rightDown, at: p, clamped: false)
+                sendPointer(.rightUp, at: p, clamped: false)
+            }
+        }
     }
 
     /// Finger pan: scrolling, not dragging, shaped like a Mac trackpad gesture so the Mac
@@ -478,6 +500,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     private func strokeSilenced() {
         lastPanTranslation = .zero
         fingerScroll = false
+        sendHeld(hold.cancelled())
         var z = zoom
         if zoomStroke.silenced(zoom: &z) { zoom = z }
         guard scrollGestureOpen else { return }

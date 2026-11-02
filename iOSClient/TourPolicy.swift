@@ -583,7 +583,7 @@ enum TourPolicy {
         switch t {
         case .touch:
             var rows = [row("hand.tap", [strong("Tap"), plain(" to click.")]),
-                        row("contextualmenu.and.cursorarrow", [strong("Touch and hold"), plain(" to right-click.")]),
+                        row("contextualmenu.and.cursorarrow", [strong("Touch and hold"), plain(" to right-click, or hold, then drag, to move a window or select text.")]),
                         row("hand.draw", [strong("Drag"), plain(" to scroll.")])]
             if iPad { rows.append(row("applepencil", [strong("Apple Pencil"), plain(" works as a mouse.")])) }
             // Pinch to zoom (StreamZoom, PR #196): this device's alone, 1× to 5× about the pinch;
