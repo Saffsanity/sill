@@ -13,11 +13,14 @@ RR=$HERE/.build/release/ReelRenderer
 # The renderer takes the hardware encoder whenever SILL_HW_ENCODER is set, to any value (Render.swift), empty included.
 [ -z "${SILL_HW_ENCODER+set}" ] || { echo "SILL_HW_ENCODER is set: refusing (the software encoder only)"; exit 1; }
 [ -z "${REEL_V31_NO_ARROW:-}${REEL_V31_FLAT:-}${REEL_V31_NO_GRAIN:-}" ] || { echo "a REEL_V31_ test switch is set: refusing"; exit 1; }
+# The type's test switches (GlyphText.swift) take effect when set to anything, empty included.
+[ -z "${REEL_TYPE_LEGACY+set}${REEL_TYPE_OFFSET+set}" ] || { echo "REEL_TYPE_LEGACY or REEL_TYPE_OFFSET is set: refusing"; exit 1; }
 (cd "$HERE" && taskpolicy -c utility swift build -c release)
 mkdir -p "$OUT"
 cd "$OUT"
 [ -f score.wav ] || taskpolicy -c utility "$RR" score score.m4a --wav score.wav
-taskpolicy -c utility "$RR" render --out silent.mp4 > render.log 2>&1
+# The render checks every frame's type against its path (README, The type) and fails if a glyph strays.
+taskpolicy -c utility "$RR" render --out silent.mp4 --typecheck > render.log 2>&1 || { tail -40 render.log; exit 1; }
 taskpolicy -c utility "$RR" mux silent.mp4 score.wav scored.mp4
 taskpolicy -c utility "$RR" stills poster 75.2
 taskpolicy -c utility "$RR" finalize --cover poster/still-S32-75.200.png --poster-out poster.jpg scored.mp4 silent.mp4

@@ -20,7 +20,8 @@ transcript recorded for them right after the delivery render (`md5 -q Sources/Re
 match the delivered film's to within the encoder's noise (PSNR 51–53 dB). The record of the recovery, file by
 file, is kept outside the repository with the rest of the reel's working files.
 
-This copy differs from the recovered v3.1 in three places:
+This copy differs from the recovered v3.1 in three places (and since 2026-11-02 in its type, drawn as glyph outlines on
+its exact path, The type below, so frames with type no longer match v3.1's bit for bit):
 - `Clip.swift`: `reelDir`, the folder the inputs are read from, is `REEL_DIR` when set, else `work/` beside
   `Package.swift`. v3.1 named the scratch folder.
 - `Timeline.swift`: one comment no longer lists the names of the files a privacy blur covered in a clip.
@@ -64,10 +65,15 @@ The commands (`main.swift` has them all):
 | `verify <movie> [<silent>]` | format, colour, frame timing, edit lists, audio levels and the silence, the true-black frame and the hero frame |
 | `sheet <movie> <out.png>` | the contact sheet, one tile per shot |
 | `icon-check <reference.png> <out.png>` | the drawn icon against a render of `design/AppIcon.svg` |
+| `typecheck [--from s] [--to s] [--every n] [--threshold px] [--report f] [--dump f.tsv] [--verbose]` | every glyph of the frames measured against its path (The type); exit 1 if one strays more than 0.1 px |
+| `render … --typecheck [n]` | the same check on every n-th frame of a render, which then fails (exit 1) if it fails |
+| `typetest [--out f.mp4] [--seconds 3] [--typecheck] [--frames dir] [--no-video]` | two moving lines on the reel's stage, rendered and checked |
 
 `Scripts/pipeline.sh` runs the delivery steps v3.1 ran (score, render, mux, the poster still at 75.2 s, finalize,
-verify, sheet) into `work/v31/out/`, under `taskpolicy -c utility`. A whole render takes about 4 minutes on an
-M2 Pro (20.9 fps for 4,992 frames).
+verify, sheet) into `work/v31/out/`, under `taskpolicy -c utility`, and since 0.6.0 its render type-checks every frame
+(The type). A whole render takes about 4 minutes on an M2 Pro (20.9 fps for 4,992 frames), and the check about
+7 minutes more
+(11.9 frames/s).
 
 ### Inputs
 
@@ -134,6 +140,70 @@ implements its shot list; the code names the shot list's sections in its comment
 Then: `pipeline.sh`, `verify`, the contact sheet, a frame review of the MP4 (copy, privacy, motion, blacks), and
 the shot list's as-built section with every number.
 
+## The type
+
+0.6.0 fixed what Noah called "the floating point issues with the text". v3.1 drew each line as SwiftUI `Text`, which
+`ImageRenderer` replays into the frame's 8-bit Core Graphics context, and there every glyph landed on a whole pixel:
+under the +1.2 % hold a glyph held still, then jumped a pixel, each glyph on its own frame, so the gaps between letters
+flickered. Measured on the delivered `Sill-sizzle-v3.1-silent.mp4` (decoded, with the storyboard's centroid trackers):
+"No subscription." (66.35–67.2 s), 42 whole-pixel jumps and 705 held steps of 750, up to 0.99 px off its path; the
+legal line after its snap (76.8–78.3 s), 36 jumps, its baseline stepping a whole pixel twice (+1.98 px where the hold
+moves it +1.26).
+
+The context's subpixel flags alone (subpixel positioning on, quantisation off; `Render.swift` sets them, for anything
+Core Text still draws itself, such as an emoji's bitmap) fixed the 128 px line but not the 24 px one (62 jumps
+through its snap, 0.30 px off after it), and SwiftUI's layout still rounds each word's place. So `GlyphText.swift`
+draws the type as glyph outlines: Core Text shapes each string once in its style (each run in its own font, so
+fallback fonts carry Chinese, Japanese and Korean; a line names its `language` to get that language's fonts, as S13's
+greetings should: "ja" sets こんにちは in Hiragino, where untagged kana fall to a Chinese font), and the outlines are filled with anti-aliasing at the exact
+positions the motion gives them, in floating point up to the fill. `TypeViews.swift` lays a line out with v3.1's
+recipes (the snap, the hold, the ease-out, the haptic jitter), composing by hand every transform v3.1's view tree
+applied. A line at rest sits on whole pixels: its left edge or centre, each word's origin and its baseline are rounded
+where it lands, and every motion is computed from there, so nothing jumps when it stops. It keeps v3.1's look: each word
+takes its Text frame's width (rounded up to a whole pixel, as v3.1's HStack spaced them), and the outlines are grown by
+the stem thickening Core Graphics' font smoothing gave v3.1's text (`ShapedText.smoothing`: 0.21 px at 24 px, 0.25 at
+28, 0.32 from 34 px up, measured by fitting the outlines to v3.1's own drawing). Against v3.1's drawing at rest the
+glyphs sit within ±0.04 px horizontally and 0.2–0.3 px lower (v3.1 rounded the frame's top, not the baseline), with
+their ink within 0.4 %. The same passages after the fix, rendered to H.264 and decoded: "No subscription." 0 jumps,
+worst 0.05 px; the legal line 0 jumps, its baseline moving +1.26 px exactly (worst 0.02 px).
+
+The rules for a shot's type:
+- Draw it only with `TypeLayer`, `TypeLine`, `StaticLine` or `GlyphCanvas` (a tree of `TypeNode`s of `PlacedRun`s for
+  anything custom, as `RollingFPS` and S20's title are), never with SwiftUI `Text`.
+- Move a type layer with its `transform:` (canvas to canvas: a card's hold, S05's lift) and fade it with `.opacity`;
+  never `.offset`, `.scaleEffect`, `.rotationEffect` or a device's tilt around it, so the path recorded is the path drawn.
+- Declare where the shot masks or covers its type (`covered:`, as S20's wipe does), and mark text that belongs to a
+  picture (`checked: false`), such as words drawn on a device's screen, which move with the picture.
+- Every number on screen is a fixed string in `Copy`, never a computed value printed.
+
+### typecheck
+
+`typecheck` renders each frame twice without the finish (the grain, vignette and dither move nothing): with its type,
+recording every glyph's outline and transform as it is drawn (`TypeProbe`), and with the type canvases empty. In the
+luma difference it measures each glyph: the recorded outline, rasterised where its path puts it, is fitted to it by
+Gauss–Newton (Lucas–Kanade), with a gain for the glyph's opacity and the background behind it, a damped slope of that
+gain across it, and a shift, all of a line's glyphs together so that touching neighbours share their pixels. A glyph
+more than 0.1 px off its path fails the check (exit 1), and `render --typecheck` fails the render. Fitted for their
+neighbours' sake but not judged, only counted: glyphs below 25 % of their own opacity or faded below 20 % in the frame
+(a parent's opacity, a mask), `covered` or `checked: false`, or whose fit leaves over 8 % unexplained (something
+covers them); left out with a fence around them: glyphs blurred more than 0.5 px (a snap's first frames, a rack) and
+glyphs at the frame's edge. It also fails a number printed raw (more than two decimals, an exponent, nan, inf,
+`Optional(`).
+
+Its own proof: on `typetest`'s two moving lines (a T1 line gliding 0.11 px a frame under the hold; a 44 px line with
+Chinese, Japanese and Korean scrolling up 0.62 px a frame), 5,916 glyph measurements, median 0.0008 px, worst
+0.0055 px; with every glyph drawn 0.25 px off its path (`REEL_TYPE_OFFSET=0.25,0`) it measured 0.2494 px and failed,
+at 0.094 px off it measured 0.0941 and passed, 0.15 px down measured 0.1499 and failed; v3.1's own SwiftUI Text
+(`REEL_TYPE_LEGACY=1`) failed, median 0.87 px off, worst 2.4 px. Over the whole v3.1 timeline (every frame, on the
+placeholders' stand-in footage): 4,992 frames, 119,297 glyph measurements, median 0.0009 px, 99th percentile
+0.0040 px, worst 0.0167 px (the 24 px legal line); not judged, 7,500 blurred, 5,341 faded by a parent or covered, 26
+under 25 % of their own opacity and 7 under S20's wipe. The two test switches are never set for a
+delivered render (`pipeline.sh` refuses them).
+
+The 0.6.0 assets draw some type of their own (`Assets060Text.swift`'s `Outline060`: the fixes column, the lock
+screen's clock, the keycaps), with the same outlines and smoothing but in their own canvases, which the probe does not
+record: `typecheck` leaves that type alone (it is in both of its renders), and `assets --motion` checks its motion.
+
 ## The shot list
 
 A shot list (`design/reel/v3/SHOTLIST-v3.md` is the model) has:
@@ -153,6 +223,8 @@ A shot list (`design/reel/v3/SHOTLIST-v3.md` is the model) has:
 
 - **Plain bezels.** No camera, lens, notch or sensor on any drawn device, the app icon's iPad included (Noah,
   2026-09-26). The devices are drawn, never Apple's artwork.
+- **The type is glyph outlines on its path** (The type): drawn by `GlyphText.swift`, moved only by its layer's
+  `transform:`, and checked by `typecheck` (`pipeline.sh` renders with `--typecheck`).
 - **The pointer is drawn.** A cursor or pointer in motion is drawn by the renderer on an eased path at
   sub-pixel positions, never taken from a recording (v3.1, after a recorded one stuttered: a simulator
   recording writes a sample only when the screen changes, with holes and jitter). Its motion must be even at
@@ -179,13 +251,15 @@ A shot list (`design/reel/v3/SHOTLIST-v3.md` is the model) has:
    `MacPreview` (`V3.swift`), loaded in `makeEnv` (`main.swift`). Add it to `Scripts/placeholders.swift`.
 3. **Write its builder:** `@MainActor func sNN(_ t: Double, _ e: Env) throws -> FrameLayers`, from
    `deviceShot` (a whole device), `macroShot` (a crop of one), `TypeLayer` with `LineSpec`s (copy that snaps on
-   a beat), `Backdrop`, `rackState` or `dimState`. New copy goes in `Copy` (`Look.swift`).
+   a beat; moved by its `transform:`, The type), `Backdrop`, `rackState` or `dimState`. New copy goes in `Copy`
+   (`Look.swift`), numbers as fixed strings.
 4. **Put it in the timeline:** a `Shot` in `Timeline.shots`. Later shots move by whole bars, keeping their
    builders and handed the time they had (as v3 did for Act IV with `ActIV.shift`).
 5. **Lengthen the film:** `Stage.frames` and `Stage.duration` (`Look.swift`); the score's `END`, its stops and
    its cues (`Score.swift`); the sheet's tiles and title and `verify`'s silence window and true-black frame
    (`Deliver.swift`).
-6. **Check it:** `stills` at its key times, a short `render --from --to`, then `pipeline.sh` and a frame review.
+6. **Check it:** `stills` at its key times, `typecheck --from --to` over it, a short `render --from --to`, then
+   `pipeline.sh` (which type-checks the render) and a frame review.
 
 ## What it needs from a person
 
