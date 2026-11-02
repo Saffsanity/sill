@@ -36,6 +36,8 @@
 	</array>
 	<key>NSHumanReadableCopyright</key>
 	<string>Sill is free and open source.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Sill plays this Mac's sound on your iPhone or iPad and keeps the Mac quiet meanwhile. Nothing is recorded or saved.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Sill makes this Mac visible to your iPhone and iPad on the same network so they can stream its windows.</string>
 	<key>NSPrincipalClass</key>

@@ -250,6 +250,9 @@ struct PCMLayout: Equatable, CustomStringConvertible {
 
     private var bytesPerSample: Int { sample == .int16 ? 2 : 4 }
 
+    /// How many frames a buffer of this many bytes holds (the first one, when non-interleaved).
+    func frames(bytes: Int) -> Int { bytes / (bytesPerSample * (interleaved ? max(1, channels) : 1)) }
+
     /// `frames` frames from `buffers` (one per channel when non-interleaved, else one holding every
     /// channel) as interleaved stereo Float32: one channel doubled, the first two of more. Nil when
     /// the buffers are fewer or shorter than the layout says.

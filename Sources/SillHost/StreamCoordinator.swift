@@ -2760,6 +2760,9 @@ package final class StreamCoordinator {
         case .window(let id):
             // A synthetic host never captures a real app's sound: its tests hear only the tone.
             if synthetic { return (.none, "a test host sends only its test tone") }
+            // The process tap hears processes, not an app with its helpers: the whole Mac's sound, quiet on
+            // the Mac (QuietMac; Noah's choice, 2026-11-02).
+            if quietMac { return (.desktop, "") }
             let pid: pid_t
             if virtualDisplay, let p = stage.placement, p.windowID == id {
                 pid = p.pid
@@ -2776,6 +2779,15 @@ package final class StreamCoordinator {
                 ?? catalog.window(id: id)?.owningApplication?.applicationName ?? "pid \(pid)"
             return (.app(pid: pid, name: SafeText.label(name)), "")
         }
+    }
+
+    /// Whether the sound goes through the process tap, which keeps the Mac quiet (QuietMac): Sill.app from
+    /// macOS 14.2 with the permission not declined. Read afresh each time: the permission can change.
+    private var quietMac: Bool {
+        let v = ProcessInfo.processInfo.operatingSystemVersion
+        return QuietMac.usesTap(macOS: (v.majorVersion, v.minorVersion),
+                                declared: Bundle.main.object(forInfoDictionaryKey: "NSAudioCaptureUsageDescription") != nil,
+                                synthetic: synthetic, permission: AudioRecordingPermission.now())
     }
 
     /// Hands the pipeline what the sound should be of now.
@@ -2803,7 +2815,12 @@ package final class StreamCoordinator {
             } else {
                 filter = SCContentFilter(display: display, excludingWindows: [])   // the CLI: no Sill app to leave out
             }
-            return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing the whole Mac's sound (every app but Sill).")
+            let screen = AudioCapture(filter: filter, queue: audio.queue)
+            if quietMac, #available(macOS 14.2, *) {
+                return .source(TapOrScreenCapture(tap: ProcessTapCapture(queue: audio.queue), fallback: screen),
+                               line: "Audio: capturing the whole Mac's sound through a process tap (every app but Sill); the Mac stays quiet while devices play it.")
+            }
+            return .source(screen, line: "Audio: capturing the whole Mac's sound (every app but Sill).")
         case .app(let pid, let name):
             guard let display = catalog.display else { return .failed("no display to capture from") }
             guard let app = await runningApplication(pid) else { return .failed("\(name) is not among the apps ScreenCaptureKit lists") }

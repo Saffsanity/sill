@@ -27,6 +27,8 @@ enum HostClock {
     }()
 
     static func now() -> Double { Double(mach_absolute_time()) * scale }
+    /// Core Audio's `mHostTime`, in the same seconds.
+    static func seconds(ticks: UInt64) -> Double { Double(ticks) * scale }
 }
 
 /// The Mac's sound, from its source to the server (docs/audio-plan.md §4.5): the source, the
