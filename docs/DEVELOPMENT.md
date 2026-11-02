@@ -2381,9 +2381,9 @@ sets What to Test and gives it to every internal TestFlight group, and to the
 public beta group only while `SILL_NIGHTLY_PUBLIC_BETA` is `true`.
 `Scripts/nightly-notes.sh` writes both apps' words from the pull requests
 merged since the last release tag. A nightly says the version main says, the
-version of main's next release (0.6.0 until main moves to 0.6.1 after the 0.6.0
-release; 0.5.5 was the pre-release number before 2026-10-31), with the commit
-count as its build, as in "Sill nightly 0.6.0 (1276)"; the update check never offers a nightly, and offers
+version of main's next release (0.6.1 since App Review approved 0.6.0; 0.6.0
+from 2026-10-31 until then, 0.5.5 the pre-release number before), with the commit
+count as its build, as in "Sill nightly 0.6.1 (1280)"; the update check never offers a nightly, and offers
 one nothing until a release newer than its version exists. A nightly reads the
 release's data-protection keychain items, so a device paired with one stays
 paired with the other. `swift Scripts/asc.swift groups --key-file … --key-id …

@@ -47,7 +47,8 @@ never `--bump`). The steps, the decisions and every text pasted are in sill-hand
   after 09:17 UTC, or cancel the schedule's duplicate.
 - Still open: the App Store (Noah: 0.6.0 created in App Store Connect with the texts, build 0.6.0
   (1276), Add for Review and Submit once getsill.app/download gives 0.6.0; manual release; approval
-  date: to fill); Public Beta (D4); right after App Review approves, main to 0.6.1 (`Packaging/Info.plist`
+  date: to fill); Public Beta (D4); right after App Review approves, main to 0.6.1 by PR #286
+  (`version-0-6-1`, prepared 2026-11-02, held until the approval: `Packaging/Info.plist`
   and `MARKETING_VERSION`, the checklist's part 2 first item and Nightlies, metadata's Version row,
   DEVELOPMENT.md's nightly paragraph), merged before the next 09:17 UTC nightly, since the approval
   closes 0.6.0's train (a nightly of a main saying 0.6.0 would then fail its iOS upload); the Homebrew
