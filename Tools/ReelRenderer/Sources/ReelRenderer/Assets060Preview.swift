@@ -142,7 +142,7 @@ import SwiftUI
         // S06's arcs.
         let s06 = DeviceSpec.miniM
         let s06c = CGPoint(x: 960, y: 620)
-        let arcsAt = CGPoint(x: s06c.x + s06.outer.width / 2 + 18, y: s06c.y)
+        let arcsAt = SoundArcs060.origin(beside: s06, center: s06c)
         for (name, t, note) in [("sound-arcs-1440-beat", 14.43, "a beat: the inner arc lit"), ("sound-arcs-1450", 14.50, "the pulse at the outer arc"),
                                 ("sound-arcs-1530-rest", 15.30, "between beats (30 %)"), ("sound-arcs-1768-folding", 17.68, "Mute at 17.6: folding, outer first"),
                                 ("sound-arcs-1800-folded", 18.0, "muted: gone"), ("sound-arcs-1846-back", 18.46, "Mute off at 18.4: open again, on the beat")] {
@@ -254,14 +254,16 @@ import SwiftUI
         // S16: the hold ring on a thumbnail, close (1 pt = 2.6 px, as v3's S19 macro at 1.3).
         let pt16: CGFloat = 2.6
         func barClose(_ t: Double) -> some View {
-            // With the footage: the bar of L0 (before the controls open at 56.9) and J1 (after), 1.3 px per still px.
+            // With the footage: the bar of L0 (before the controls open at 56.9) and J1 (after), 1.3 px per still px,
+            // the hold on the first thumbnail (Device060.miniFirstThumbnail).
             let k: CGFloat = 1.3, origin = CGPoint(x: 120, y: 260)
             if let img = footage(t < 56.9 ? "L0-unlocked" : "J1-windowmenu"), let bar = img.cropping(to: CGRect(x: 0, y: 0, width: 1340, height: 520)) {
                 return any(ZStack(alignment: .topLeading) {
                     Image(decorative: bar, scale: 1).resizable().interpolation(.high)
                         .frame(width: 1340 * k, height: 520 * k).offset(x: origin.x, y: origin.y)
                         .mask(LinearGradient(colors: [.white, .white, .clear], startPoint: .top, endPoint: .bottom).frame(width: 1340 * k, height: 520 * k).offset(x: origin.x, y: origin.y))
-                    HoldRing060(center: CGPoint(x: origin.x + 324 * k, y: origin.y + 86 * k), diameter: 128 * k, t: t)
+                    HoldRing060(center: CGPoint(x: origin.x + Device060.miniFirstThumbnail.x * k, y: origin.y + Device060.miniFirstThumbnail.y * k),
+                                diameter: 128 * k, t: t)
                 }.canvas())
             }
             return any(ZStack(alignment: .topLeading) {

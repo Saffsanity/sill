@@ -83,6 +83,12 @@ struct SoundArcs060: View {
         stride(from: a, to: b - 1e-9, by: step).map { $0 }
     }
 
+    /// The arcs' centre beside a device placed at `center` (unturned): `gap` px out from its right side (or its
+    /// left, with `facing: .pi`), at its middle.
+    static func origin(beside spec: DeviceSpec, center: CGPoint, left: Bool = false, gap: CGFloat = 18) -> CGPoint {
+        CGPoint(x: center.x + (left ? -1 : 1) * (spec.outer.width / 2 + gap), y: center.y)
+    }
+
     /// 1 open … 0 folded, for arc `i` (0 the inner).
     func open(_ i: Int) -> Double {
         var f = 1.0

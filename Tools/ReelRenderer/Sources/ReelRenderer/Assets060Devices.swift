@@ -14,6 +14,9 @@ enum Device060 {
     /// The iPhone 15 Pro's screen, upright, in points and in its screen recordings' pixels.
     static let phonePoints = CGSize(width: 393, height: 852)
     static let phoneSource = CGSize(width: 1179, height: 2556)
+    /// The first thumbnail's centre in an iPad mini still (2266×1488 px): its selection ring spans x 206–433,
+    /// y 10–161 (measured on the footage stand-ins L0 and J1). S16's hold lands there.
+    static let miniFirstThumbnail = CGPoint(x: 319.5, y: 85.5)
     /// The iPhone's status strip, the status bar's 54 pt, which `PhoneScreen060` masks black: no island is drawn,
     /// and no clock, carrier or battery from a recording shows (storyboard S10).
     static let phoneStatusStrip: CGFloat = 54
