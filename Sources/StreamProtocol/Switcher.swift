@@ -130,7 +130,7 @@ public enum LockedMac {
     public static func line(mac: String, why: Why) -> String {
         switch why {
         case .screenLocked: return "\(name(mac)) is locked. Unlock it to see its windows."
-        case .otherUser: return "\(name(mac)) is switched to another user. Its windows come back when you switch back on the Mac."
+        case .otherUser: return "\(name(mac)) is at its login window or switched to another user. Log in on the Mac to see its windows again."
         }
     }
 
@@ -138,7 +138,7 @@ public enum LockedMac {
     public static func title(mac: String, shade: Shade) -> String {
         switch shade {
         case .locked(.screenLocked): return "\(name(mac)) is locked"
-        case .locked(.otherUser): return "\(name(mac)) is switched to another user"
+        case .locked(.otherUser): return "\(name(mac)) is at its login window"
         case .unlocking: return "Unlocking…"
         }
     }
@@ -151,7 +151,7 @@ public enum LockedMac {
             return paired == true ? "To unlock it from here, type its password and press Return. Its windows come back once it is unlocked."
                                   : "Its windows come back once it is unlocked."
         case .locked(.otherUser):
-            return "Its windows come back when you switch back to your account on the Mac. Nothing typed here reaches it meanwhile."
+            return "Sill can’t show or type into the login window, or another user’s session. Log in on the Mac itself; your windows come back once your account is back on its screen."
         case .unlocking:
             return nil
         }
