@@ -297,7 +297,7 @@ VideoToolbox's software decoder: their size and luma). `sillclient.py` also prin
 Proven on test hosts (`SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1
 SILL_TEST_NO_SCREEN=1 .build/release/SillHost --synthetic`, the hooks above; never a real lock, never a
 notification another app hears, never this Mac's screen, encoder or clipboard) and by the check:
-- **The check** (`Tests/checks/lock-policy`, compiling LockPolicy.swift with StreamProtocol): 531 checks;
+- **The check** (`Tests/checks/lock-policy`, compiling LockPolicy.swift with StreamProtocol): 532 checks;
   137 of 137 mutants caught. The three readings and all 1,920 combinations of the witnesses, what
   each notification sets, the settle (the flap of a return to the console, 4,000 random witness sequences),
   when SessionLock reads, what each reading allows, what the gate withholds by kind and picture, each
