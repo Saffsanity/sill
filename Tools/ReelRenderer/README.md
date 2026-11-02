@@ -77,8 +77,8 @@ verify, sheet) into `work/v31/out/` (with `REEL=060`, the 0.6.0 video into `work
 under `taskpolicy -c utility`, encoding only while no device is connected to Sill.app (the repository's
 `Scripts/encoder-check/no-device.sh`: it waits for one to leave, and pauses a running step while one connects), and
 since 0.6.0 its render type-checks every frame (The type). A whole v3.1 render takes about 4 minutes on an M2 Pro
-(20.9 fps for 4,992 frames), and the check about 7 minutes more (11.9 frames/s); the 0.6.0 film with its check took
-664 s (7.2 fps for 4,800 frames).
+(20.9 fps for 4,992 frames), and the check about 7 minutes more (11.9 frames/s); the 0.6.0 film with its check takes
+about 650 s (646 s at 7.4 fps for 4,800 frames in its last delivery run).
 
 ### Inputs
 
@@ -234,9 +234,10 @@ title follow it. Its shot list is `design/reel/v4/SHOTLIST-0.6.0.md`.
 
 Its inputs under `reelDir` are `stills/`, `pictures/` and `thumbs/`, the footage stand-ins (harness screenshots and
 drawn Mac pictures, each made as their own README says), and `v31film/Sill-sizzle-v3.1-silent.mp4`, the delivered
-v3.1 film, of which S06's movie (1.6–6.4 s) and the Weather frame behind S07–S08 (15.9 s) are read
-(`ClipID.v31film`). Eight scenes stand in for Noah's takes A–F: each builder is marked `SWAP-IN` with the take's
-path and the times it must meet, and the shot list's §7 has the steps.
+v3.1 film, of which S06's movie (1.6–6.4 s), the picture in QuickTime's thumbnails and S14's tile (5.2 s) and the
+Weather frame behind S07–S08 (15.9 s, its saved places retouched: `Retouch060.weather`) are read
+(`ClipID.v31film`). Eight scenes stand in for Noah's takes A–F: each builder is marked `SWAP-IN` with the take's path
+and the times it must meet, and the shot list's §7 has the steps.
 
 ```
 cd Tools/ReelRenderer && swift build -c release

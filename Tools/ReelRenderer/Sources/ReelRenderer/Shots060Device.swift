@@ -354,11 +354,13 @@ struct Typing060: View {
                  leftLine(Copy060.justType, .T1c, baseline: 504, snap: 37.65, end: 40.8),
                  esc,
                  leftLine(Copy060.escFoot, .T3, baseline: 640, snap: 36.90, end: 40.8, cascade: false)]
-    // The iPad and its keyboard 5 % smaller toward the frame's right edge, then a 2 % push about the iPad's left edge, so
-    // it keeps 80 px or more from "Attach a keyboard." (the review; `clearance`) and drifts away from it.
+    // The iPad and its keyboard 8 % smaller about x 1517, which keeps the iPad's left edge where the review's fix put it
+    // (x 1034, 80 px or more from "Attach a keyboard.": `clearance`), then a 2 % push about that edge, so it drifts away
+    // from the words and the slab's near right corner stays inside the frame to the end (0.95 about x 1900 left that
+    // corner on the frame's edge at 36.8 and about 18 px past it by 40.8).
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: CGPoint(x: 1450, y: 520))
-        group.scaled(0.95, about: CGPoint(x: 1900, y: 520))
+        group.scaled(0.92, about: CGPoint(x: 1517, y: 520))
             .scaled(1 + 0.02 * CGFloat(ramp(t, 36.8, 40.8)), about: CGPoint(x: 1030, y: 520))
         TypeLayer(lines: lines, t: t)
     }.canvas()

@@ -122,11 +122,12 @@ enum Retouch060 {
         let cityFont = NSFont.systemFont(ofSize: 22, weight: .semibold)
         let white = rgb(240, 245, 249)
         return over(p.image()) { c in
-            // Cupertino at 4:04 PM, where the first card's place was (an hour before the Central cards' 6:04 PM, as
-            // Pacific time is).
-            text(c, "Cupertino", font: cityFont, color: white, .inkLeft(2), baseline: 158.5)
-            text(c, "4:04 PM", font: NSFont.systemFont(ofSize: 13, weight: .medium), color: rgb(215, 217, 240), .inkLeft(2), baseline: 180.3)
-            text(c, "Cupertino", font: NSFont.systemFont(ofSize: 32, weight: .regular), color: rgb(243, 250, 255), .center(790.5), baseline: 156.3)
+            // Philadelphia at 7:04 PM, where the first card's place was: Eastern, as the place it replaces and as the main
+            // pane's hourly row ("Now, 8PM, 9PM…") and the Eastern cards' 7:04 PM say (Cupertino's 4:04 PM, the first fix,
+            // disagreed with that row).
+            text(c, "Philadelphia", font: cityFont, color: white, .inkLeft(2), baseline: 158.5)
+            text(c, "7:04 PM", font: NSFont.systemFont(ofSize: 13, weight: .medium), color: rgb(215, 217, 240), .inkLeft(2), baseline: 180.3)
+            text(c, "Philadelphia", font: NSFont.systemFont(ofSize: 32, weight: .regular), color: rgb(243, 250, 255), .center(790.5), baseline: 156.3)
             text(c, "Chicago", font: cityFont, color: rgb(239, 245, 249), .inkLeft(3), baseline: 286.5)       // Central, as the place it replaces
             text(c, "Kingston", font: cityFont, color: rgb(241, 243, 250), .inkLeft(3), baseline: 416.5)      // Jamaica, as the place it replaces
             text(c, "Boston", font: cityFont, color: rgb(238, 241, 245), .inkLeft(3), baseline: 543)          // Eastern, as the place it replaces
