@@ -2691,6 +2691,9 @@ package final class StreamCoordinator {
         releasingHeadless = true
         Task { @MainActor in
             defer { self.releasingHeadless = false }
+            // A switch under way first (a pick, a restart): `select` would return at once, and the display
+            // would go from under the capture that switch starts. At most 5 s.
+            for _ in 0..<100 where self.switching { try? await Task.sleep(for: .milliseconds(50)) }
             // The look first: a fresh one still has the fallback display as the Desktop's (11:38:45, 2026-11-02).
             await self.catalog.refreshWindows()
             if self.active == .desktop { await self.select(.desktop) }
