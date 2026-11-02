@@ -69,7 +69,8 @@ The commands (`main.swift` has them all):
 | `render … --typecheck [n]` | the same check on every n-th frame of a render, which then fails (exit 1) if it fails |
 | `typetest [--out f.mp4] [--seconds 3] [--typecheck] [--frames dir] [--no-video]` | two moving lines on the reel's stage, rendered and checked |
 | `assets <dir> [prefix …]`, `assets --report`, `assets --motion`, `assets --splat <dir>` | the 0.6 drawn assets as PNG stills at their key times (with `index.png`), the cutaway's numbers, its motion check, the bug's splat (`splat.png`, `splat-strip.png`: 12 frames about the hit) |
-| `retime` | (`REEL=060`) each scene's time map (Retime060.swift): its segments, rates and dwells, and the beat each statement and event lands on |
+| `retime [t …]` | (`REEL=060`) each scene's time map (Retime060.swift): its segments, rates and dwells, and the beat each statement and event lands on; with times, the film time of each v4 time |
+| `blacks <movie> <from> <to>` | per frame (60 fps numbers): key frame or not, and the luma samples that are not 16 (the film's true-black tail) |
 | `holds [--from s] [--to s] [--every n]` | (`REEL=060`) every line of words against the reading rule (0.22 s a word + 0.9 s after it is in, never under 2.0 s), measured on the builders' type frame by frame; exit 1 if one is short |
 | `clearance [--from s] [--to s] [--every n] [--min px]` | how close each line of type comes to what is drawn beside it (a device, a macro), per shot; exit 1 under `--min` (80 px, v2 S23's rule) |
 | `derived <dir> <name>…` | 0.6.0's derived stills (`L0w`, `N1x`, `D1x`, `qtv`, …: Reel060.swift, Retouch060.swift) as PNG |
@@ -223,7 +224,10 @@ previews' `FixesColumn060` still draws them itself.
 window and true-black frame, and the movie's title follow it. v4 (80.0 s, 4,800 frames, 50 bars) is
 `design/reel/v4/SHOTLIST-0.6.0.md`; v4.1, Noah's notes of 2026-11-02 (slower transitions, words held long enough to read,
 S05's third line, the bug's splat, "0.6"), is 139.2 s, 8,352 frames, 87 bars, and its shot list is
-`design/reel/v4.1/SHOTLIST-0.6.md`: verify's silence window 122.20–123.20, its true-black frame 8340.
+`design/reel/v4.1/SHOTLIST-0.6.md`: verify's silence window 122.20–123.20, its true-black frame 8340. For this cut the
+writer encodes through a VTCompressionSession (the same software H.264 encoder and settings) so it can force a key frame
+on the first frame of the true-black tail (`Retime060.keyframes`, 8321): through AVAssetWriter the encoder left the
+fade's last near-black blocks skipped in the black (luma 15 and 17); v3.1 keeps AVAssetWriter's own compression.
 
 v4.1 plays v4's builders through a time map per scene (`Retime060.swift`): film time T → the builder's v4 time t, every
 segment at 0.8 v4 seconds per film second (all motion 1.25× slower) but the dwells, quiet moments held longer so the
