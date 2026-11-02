@@ -3621,12 +3621,18 @@ final class StreamClient: ObservableObject {
     private func lockShadeChanged(_ next: LockedMac.Shade?) {
         guard next != lockShade else { return }
         lockShade = next
+        #if DEBUG
+        print("lock: cover \(next.map { "\($0)" } ?? "none")")
+        #endif
         lockShadeExpiry?.cancel()
         lockShadeExpiry = nil
         guard next == .unlocking else { return }
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.lockShade == .unlocking else { return }
             self.lockShade = nil
+            #if DEBUG
+            print("lock: cover none (Unlocking… timed out after \(LockedMac.unlockingTimeout) s)")
+            #endif
             self.queue.async { self.unlockWaitsForKeyframe = false }
         }
         lockShadeExpiry = work
@@ -4157,10 +4163,18 @@ final class StreamClient: ObservableObject {
             // otherwise), and after the unlock the first keyframe ends the cover. This session's own screen
             // locked: the Mac streams its lock screen, so the picture stays.
             let why = LockedMac.why(list)
-            if why == .otherUser, !offConsoleListed { onBlank?() }
+            let wasOffConsole = offConsoleListed
+            if why == .otherUser, !wasOffConsole { onBlank?() }
             offConsoleListed = why == .otherUser
-            if why == nil, lockListed { unlockWaitsForKeyframe = true }
-            if why != nil { unlockWaitsForKeyframe = false }
+            // The cover ends at the first keyframe after the Mac's picture comes back (LockedMac.shade): an
+            // unlock, or this session back on the console with its screen locked, whose lock screen streams
+            // (Noah's switch back of 2026-11-01: the list said locked, the lock screen's keyframe came, and
+            // the cover sat its 4 s instead). Off console no frame of the Mac comes, so no keyframe ends it.
+            switch why {
+            case nil: if lockListed { unlockWaitsForKeyframe = true }
+            case .screenLocked: if wasOffConsole { unlockWaitsForKeyframe = true }
+            case .otherUser: unlockWaitsForKeyframe = false
+            }
             lockListed = why != nil
             DispatchQueue.main.async {
                 // Only from the current connection: a list queued by a replaced one must not
@@ -4181,6 +4195,9 @@ final class StreamClient: ObservableObject {
                 // stream too (LockedMac).
                 if self.lockWhy != why { self.lockWhy = why }
                 self.lockShadeChanged(LockedMac.shade(self.lockShade, list: why))
+                #if DEBUG
+                print("lock: list \(list.locked == true ? "locked" : "unlocked")\(list.offConsole == true ? ", off console" : ""); cover \(self.lockShade.map { "\($0)" } ?? "none")")
+                #endif
                 // The clipboard: subscribe (or stop) as the Mac's word and this device's switch say.
                 self.hostClipboardChanged(list.clipboard)
                 if !self.sessionListed {

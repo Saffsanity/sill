@@ -585,7 +585,7 @@ check(LockedMac.detail(shade: .locked(.screenLocked), paired: true) == "To unloc
       && LockedMac.detail(shade: .locked(.screenLocked), paired: false) == "Its windows come back once it is unlocked."
       && LockedMac.detail(shade: .locked(.screenLocked), paired: nil) == "Its windows come back once it is unlocked.",
       "the cover's line at a locked screen: the password only for a paired session")
-check(LockedMac.detail(shade: .locked(.otherUser), paired: true) == "Sill can’t show or type into the login window, or another user’s session. Log in on the Mac itself; your windows come back once your account is back on its screen."
+check(LockedMac.detail(shade: .locked(.otherUser), paired: true) == "The login window isn’t part of your account, even when it shows your name, and neither is another user’s session, so Sill can’t show it or type into it. Log in on the Mac itself; your windows come back once your account is back on its screen."
       && LockedMac.detail(shade: .unlocking, paired: true) == nil, "the cover's line for another user: nothing typed reaches it; none while unlocking")
 check(LockedMac.shade(nil, list: nil) == nil && LockedMac.shade(nil, list: .screenLocked) == nil
       && LockedMac.shade(nil, list: .otherUser) == .locked(.otherUser) && LockedMac.shade(.locked(.otherUser), list: .otherUser) == .locked(.otherUser)
