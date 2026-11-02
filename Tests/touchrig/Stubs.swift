@@ -36,3 +36,9 @@ enum EscapeKey {
 enum StreamClient {
     static let reverseScrollOn = false
 }
+
+/// StreamProtocol's ClipboardPolicy as KeyChords.swift asks it since the clipboard's Paste on the Mac: V's
+/// HID usage, nothing else of the clipboard (its wire types are not compiled in).
+enum ClipboardPolicy {
+    static let pasteKey: UInt16 = 0x19
+}
