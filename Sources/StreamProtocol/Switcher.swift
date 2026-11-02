@@ -126,32 +126,35 @@ public enum LockedMac {
     /// How long "Unlocking…" waits for the picture at most before it goes anyway.
     public static let unlockingTimeout: Double = 4
 
-    /// The Apps drawer's and the Settings panel's line, where the Mac's windows would be.
+    /// The Apps drawer's and the Settings panel's line, where the Mac's windows would be. Another user's
+    /// is the cover's title and line together, in Noah's words (2026-11-02), with no Mac's name in them.
     public static func line(mac: String, why: Why) -> String {
         switch why {
         case .screenLocked: return "\(name(mac)) is locked. Unlock it to see its windows."
-        case .otherUser: return "\(name(mac)) is at its login window or switched to another user. Log in on the Mac to see its windows again."
+        case .otherUser: return "Another user started controlling this Mac. Log in to your account to reactivate screen sharing with Sill."
         }
     }
 
-    /// The cover's title.
+    /// The cover's title. Another user's is Noah's words (2026-11-02: "Keep the current overlay, change the
+    /// text to …"), with no Mac's name in them.
     public static func title(mac: String, shade: Shade) -> String {
         switch shade {
         case .locked(.screenLocked): return "\(name(mac)) is locked"
-        case .locked(.otherUser): return "\(name(mac)) is at its login window"
+        case .locked(.otherUser): return "Another user started controlling this Mac."
         case .unlocking: return "Unlocking…"
         }
     }
 
     /// The cover's line under its title. `paired`: this session's key is the Mac's (its settings state's
     /// `sessionPaired`; nil before it has said): only then do keys typed here reach a locked screen.
+    /// Another user's, Noah's words too, is the same either way: nothing typed here reaches that session.
     public static func detail(shade: Shade, paired: Bool?) -> String? {
         switch shade {
         case .locked(.screenLocked):
             return paired == true ? "To unlock it from here, type its password and press Return. Its windows come back once it is unlocked."
                                   : "Its windows come back once it is unlocked."
         case .locked(.otherUser):
-            return "The login window isn’t part of your account, even when it shows your name, and neither is another user’s session, so Sill can’t show it or type into it. Log in on the Mac itself; your windows come back once your account is back on its screen."
+            return "Log in to your account to reactivate screen sharing with Sill."
         case .unlocking:
             return nil
         }
