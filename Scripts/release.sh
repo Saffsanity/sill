@@ -15,6 +15,13 @@
 #                                    in, and the tag pushed: origin's v<version> must name HEAD)
 #   SILL_RELEASE_TAG=v0.3.0 Scripts/release.sh --check-tag
 #                                    only checks the tag against Packaging/Info.plist, then exits
+#   Scripts/release.sh --nightly [--dry-run | --publish]
+#                                    a nightly of main's head (.github/workflows/nightly.yml): built,
+#                                    signed, notarized, stapled and checked exactly as a release, but
+#                                    untagged, its files named Sill-nightly-<yyyymmdd>-<sha7>.dmg and
+#                                    .zip; --publish puts them on the rolling pre-release "nightly"
+#                                    (made when missing, the seven newest nightlies kept, its notes the
+#                                    pull requests merged since the last release and its commit's sha)
 #
 # SILL_RELEASE_TAG, when set, is the tag this release is for: it must be v<CFBundleShortVersionString>
 # of Packaging/Info.plist (the release this run creates), and when the tag is here, the commit being
@@ -30,6 +37,17 @@
 # whose releases every Sill.app's update check reads (Sources/SillMenuBar/UpdatePolicy.swift,
 # `feed`). A release anywhere else can be downloaded, but no Sill.app offers it, and the script
 # warns before it builds and again as it publishes.
+#
+# A nightly (--nightly; docs/release-checklist.md, "Nightlies") skips only what makes a release a
+# release: the tag rule (main's head carries the next release's version untagged; make-app.sh gets
+# SILL_RELEASE_NIGHTLY=1) and the GitHub Release v<version>. Its files carry the night's date (UTC,
+# or SILL_NIGHTLY_DATE=YYYYMMDD) and the commit, and --publish updates the pre-release with the tag
+# "nightly" in SILL_RELEASE_REPO: never "latest", never a plain release (it refuses a release of that
+# tag that isn't a pre-release), so no Sill.app's update check is ever pointed at it (UpdatePolicy reads
+# /releases/latest, which never lists a pre-release, and refuses one anyway). The tag is moved to the
+# commit built; the newest SILL_NIGHTLY_KEEP builds' files stay (7), older ones are deleted; the notes
+# are SILL_NIGHTLY_NOTES (a Markdown file), or Scripts/nightly-notes.sh's, and end with the commit's
+# sha in a comment the nightly workflow reads to skip a night main didn't move.
 #
 # Why each step:
 # - make-app.sh --release signs with the hardened runtime and a secure timestamp and without
@@ -65,6 +83,7 @@ set -euo pipefail
 usage() {
     cat <<'USAGE'
 usage: Scripts/release.sh [--dry-run | --publish | --check-tag]
+       Scripts/release.sh --nightly [--dry-run | --publish]
 
   SILL_SIGN_IDENTITY='Developer ID Application: … (TEAMID)' SILL_NOTARY_PROFILE=sill-notary Scripts/release.sh
       builds Sill.app with make-app.sh --release, zips it, has Apple notarize it, staples the
@@ -86,6 +105,12 @@ usage: Scripts/release.sh [--dry-run | --publish | --check-tag]
   --check-tag
       only checks that $SILL_RELEASE_TAG is v<version> of Packaging/Info.plist (and, when the tag
       is here, that it names the commit checked out), then exits.
+
+  --nightly
+      main's head as a nightly: the same build, signature, notarization and checks, without the tag
+      rule, as .build/Sill-nightly-<yyyymmdd>-<sha7>.dmg and .zip; with --publish, the rolling
+      pre-release "nightly" in $SILL_RELEASE_REPO gets them (the seven newest nightlies kept), and its
+      notes (docs/release-checklist.md, "Nightlies").
 
   With SILL_RELEASE_TAG set, every run makes the same check before it builds anything.
 
@@ -157,9 +182,9 @@ publish_problems() {
 
 # Everything a run needs before it builds, checked at once so that one run names every gap.
 # Prints one problem per line, and nothing when all is well. $1 is 1 for a dry run, $2 is 1 for
-# --publish.
+# --publish, $3 is 1 for --nightly.
 preflight_problems() {
-    local dry_run="$1" publish="${2:-0}" identity="${SILL_SIGN_IDENTITY:-}" profile="${SILL_NOTARY_PROFILE:-}"
+    local dry_run="$1" publish="${2:-0}" nightly="${3:-0}" identity="${SILL_SIGN_IDENTITY:-}" profile="${SILL_NOTARY_PROFILE:-}"
     local matches count others tool version tags
     if [ -z "$identity" ]; then
         echo "SILL_SIGN_IDENTITY is not set. Set it to your Developer ID Application identity, as in SILL_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)'."
@@ -175,12 +200,12 @@ preflight_problems() {
             echo "SILL_SIGN_IDENTITY ('$identity') matches $count identities, and codesign refuses an ambiguous name. Use the SHA-1 hash of one of them: $(printf '%s\n' "$matches" | awk -F'\t' '{ printf "%s%s (%s)", sep, $1, $2; sep = ", " }')."
         fi
     fi
-    if [ "$dry_run" = 0 ] && ! head_is_release_tag; then
+    if [ "$dry_run" = 0 ] && [ "$nightly" = 0 ] && ! head_is_release_tag; then
         version="$(plist_value CFBundleShortVersionString Packaging/Info.plist)" || version="<version>"
         tags="$(git tag --points-at HEAD 2>/dev/null | tr '\n' ' ' | sed 's/ $//' || true)"
         echo "HEAD is not tagged v$version (it is tagged '${tags:-nothing}'). A release is built only from the commit tagged v + Packaging/Info.plist's CFBundleShortVersionString, which every Sill.app's update check compares with the version it runs: commit the version, then git tag v$version and git push origin v$version."
     fi
-    if [ "$dry_run" = 0 ] && [ "$publish" = 1 ] && ! in_release_workflow \
+    if [ "$dry_run" = 0 ] && [ "$publish" = 1 ] && [ "$nightly" = 0 ] && ! in_release_workflow \
         && version="$(plist_value CFBundleShortVersionString Packaging/Info.plist)"; then
         remote_tag_problem "$version"
     fi
@@ -193,8 +218,17 @@ preflight_problems() {
                 || echo "xcrun can't find $tool. Select Xcode as the developer directory: sudo xcode-select -s /Applications/Xcode.app"
         done
     fi
+    # A nightly keeps its identity where the release does (the data-protection keychain), so a device
+    # paired with one stays paired with the other: the profile is not optional for it.
+    if [ "$nightly" = 1 ] && [ "$dry_run" = 0 ] && [ ! -f "${SILL_PROVISION_PROFILE:-Packaging/embedded.provisionprofile}" ]; then
+        echo "A nightly embeds the Developer ID provisioning profile, as a release does, so it keeps its identity in the data-protection keychain and a device paired with it stays paired with the release: put the profile at ${SILL_PROVISION_PROFILE:-Packaging/embedded.provisionprofile} (docs/release-checklist.md, Part 1 §5)."
+    fi
     tag_problems
-    if [ "$publish" = 1 ]; then publish_problems; fi
+    if [ "$publish" = 1 ] && [ "$nightly" = 1 ]; then
+        nightly_publish_problems
+    elif [ "$publish" = 1 ]; then
+        publish_problems
+    fi
 }
 
 # Whether HEAD carries the tag a release needs: v + Packaging/Info.plist's CFBundleShortVersionString.
@@ -207,11 +241,11 @@ head_is_release_tag() {
 }
 
 # Whether this run is the release workflow's (.github/workflows/release.yml): on a GitHub runner,
-# with SILL_RELEASE_TAG set to the tag that started it. Its checkout is origin's tag itself
-# (refs/tags/$SILL_RELEASE_TAG, with every tag fetched), so origin's tag names HEAD exactly when the
-# local one does, which tag_problems and head_is_release_tag check; git ls-remote would need the
-# credentials that checkout does not keep (persist-credentials: false) while the repository is
-# private.
+# with SILL_RELEASE_TAG set to the tag that started it. Its checkout is the commit the run was
+# started for (github.sha), with every tag fetched as origin has it, so origin's tag names HEAD
+# exactly when the local one does, which the workflow's own tag check (a tag moved after the run
+# began), tag_problems and head_is_release_tag check; git ls-remote would need the credentials that
+# checkout does not keep (persist-credentials: false) while the repository is private.
 in_release_workflow() {
     [ "${GITHUB_ACTIONS:-}" = true ] && [ -n "${SILL_RELEASE_TAG:-}" ]
 }
@@ -382,17 +416,26 @@ check_disk_image() {
 }
 
 main() {
-    local dry_run=0 publish=0 check_tag=0 arg
+    local dry_run=0 publish=0 check_tag=0 nightly=0 arg
     for arg in "$@"; do
         case "$arg" in
             --dry-run) dry_run=1 ;;
             --publish) publish=1 ;;
             --check-tag) check_tag=1 ;;
+            --nightly) nightly=1 ;;
             -h|--help) usage; exit 0 ;;
             *) usage >&2; exit 2 ;;
         esac
     done
     cd "$(dirname "${BASH_SOURCE[0]}")/.."
+    if [ "$nightly" = 1 ]; then
+        if [ "$check_tag" = 1 ] || { [ "$dry_run" = 1 ] && [ "$publish" = 1 ]; }; then usage >&2; exit 2; fi
+        if [ -n "${SILL_RELEASE_TAG:-}" ]; then
+            echo "error: a nightly has no tag of its own, and SILL_RELEASE_TAG is set ($SILL_RELEASE_TAG): unset it, or drop --nightly for the release." >&2
+            exit 2
+        fi
+        if ! nightly_stem >/dev/null; then exit 2; fi
+    fi
 
     if [ "$check_tag" = 1 ]; then
         local tag_problem
@@ -410,7 +453,7 @@ main() {
     fi
 
     local problems
-    problems="$(preflight_problems "$dry_run" "$publish")"
+    problems="$(preflight_problems "$dry_run" "$publish" "$nightly")"
     if [ -n "$problems" ]; then
         {
             echo "error: Scripts/release.sh can't start:"
@@ -419,33 +462,40 @@ main() {
         } >&2
         exit 2
     fi
-    if [ "$publish" = 1 ]; then
+    if [ "$publish" = 1 ] && [ "$nightly" = 0 ]; then
         feed_warning "${SILL_RELEASE_REPO:-$feed_repo}"
     fi
     if [ "$dry_run" = 1 ] && [ -z "${SILL_NOTARY_PROFILE:-}" ]; then
         echo "warning: SILL_NOTARY_PROFILE is not set; a real run needs it (docs/release-checklist.md)." >&2
     fi
-    if [ "$dry_run" = 1 ] && ! head_is_release_tag; then
+    if [ "$dry_run" = 1 ] && [ "$nightly" = 0 ] && ! head_is_release_tag; then
         echo "warning: HEAD is not tagged v$(plist_value CFBundleShortVersionString Packaging/Info.plist || echo '<version>'); a real run needs that tag (docs/release-checklist.md, part 2)." >&2
     fi
     if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
         echo "warning: the working tree has uncommitted changes. Release from a commit: the build number is the commit count, so a build of that commit without these changes has the same number." >&2
     fi
 
-    say "Building and signing Sill.app (Scripts/make-app.sh --release)"
-    if [ "$dry_run" = 1 ]; then
-        SILL_RELEASE_DRY_RUN=1 Scripts/make-app.sh --release
+    if [ "$nightly" = 1 ]; then
+        say "Building and signing Sill.app, a nightly (Scripts/make-app.sh --release)"
+        SILL_RELEASE_NIGHTLY=1 Scripts/make-app.sh --release
     else
-        Scripts/make-app.sh --release
+        say "Building and signing Sill.app (Scripts/make-app.sh --release)"
+        if [ "$dry_run" = 1 ]; then
+            SILL_RELEASE_DRY_RUN=1 Scripts/make-app.sh --release
+        else
+            Scripts/make-app.sh --release
+        fi
     fi
 
-    local app=.build/Sill.app version build zip dmg
+    local app=.build/Sill.app version build zip dmg stem
     # Read as make-app.sh's last line reads it: the version from Packaging/Info.plist, and the
     # build number (the commit count) it stamped into the bundle.
     version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
     build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")"
-    zip=".build/Sill-$version.zip"
-    dmg=".build/Sill-$version.dmg"
+    # The files' names, and their notary logs': Sill-<version> for a release, the night's for a nightly.
+    if [ "$nightly" = 1 ]; then stem="$(nightly_stem)"; else stem="Sill-$version"; fi
+    zip=".build/$stem.zip"
+    dmg=".build/$stem.dmg"
     check_signature "$app"
     # make-app.sh only warns when Quick Look or actool can't make the icon (a build machine without
     # them, such as a CI runner, would still build); a release must not ship the generic icon.
@@ -470,12 +520,12 @@ main() {
 Dry run: stopped before notarization. $zip and $dmg are signed but not notarized, so don't publish them.
 A real run goes on with:
   xcrun notarytool submit $zip --keychain-profile "${SILL_NOTARY_PROFILE:-<SILL_NOTARY_PROFILE>}" --wait --output-format plist
-  xcrun notarytool log <submission id> --keychain-profile "${SILL_NOTARY_PROFILE:-<SILL_NOTARY_PROFILE>}" .build/Sill-$version-notary-log.json
+  xcrun notarytool log <submission id> --keychain-profile "${SILL_NOTARY_PROFILE:-<SILL_NOTARY_PROFILE>}" .build/$stem-notary-log.json
   xcrun stapler staple $app
   ditto -c -k --keepParent $app $zip   (again, now with the ticket inside)
   xcrun stapler validate and spctl -a -vv -t exec, on $app and on a copy unpacked from $zip
   Scripts/make-dmg.sh --sign "\$SILL_SIGN_IDENTITY" $app $dmg   (again, now with the stapled app inside)
-  xcrun notarytool submit $dmg (the same way; its log .build/Sill-$version-dmg-notary-log.json), then xcrun stapler staple $dmg
+  xcrun notarytool submit $dmg (the same way; its log .build/$stem-dmg-notary-log.json), then xcrun stapler staple $dmg
   hdiutil verify, xcrun stapler validate and spctl -a -vv -t open --context context:primary-signature on $dmg,
     then xcrun stapler validate and spctl -a -vv -t exec on the Sill.app inside it
   shasum -a 256 $dmg $zip
@@ -483,7 +533,7 @@ DRY
         exit 0
     fi
 
-    notarize "$zip" ".build/Sill-$version-notary.plist" ".build/Sill-$version-notary-log.json"
+    notarize "$zip" ".build/$stem-notary.plist" ".build/$stem-notary-log.json"
 
     say "Stapling the ticket to $app"
     xcrun stapler staple "$app"
@@ -501,7 +551,7 @@ DRY
 
     say "Making the disk image $dmg with the stapled app (Scripts/make-dmg.sh)"
     Scripts/make-dmg.sh --sign "$SILL_SIGN_IDENTITY" "$app" "$dmg"
-    notarize "$dmg" ".build/Sill-$version-dmg-notary.plist" ".build/Sill-$version-dmg-notary-log.json"
+    notarize "$dmg" ".build/$stem-dmg-notary.plist" ".build/$stem-dmg-notary-log.json"
     say "Stapling the ticket to $dmg"
     xcrun stapler staple "$dmg"
     say "Checking $dmg, and the Sill.app inside it"
@@ -513,8 +563,14 @@ DRY
     echo
     echo "Sill $version ($build) is notarized and stapled, in a disk image and in a zip:"
     shasum -a 256 "$dmg" "$zip"
-    if [ "$publish" = 1 ]; then
+    if [ "$publish" = 1 ] && [ "$nightly" = 1 ]; then
+        publish_nightly "$zip" "$dmg" "$version" "$build"
+    elif [ "$publish" = 1 ]; then
         publish_release "$zip" "$dmg" "$version" "$build" "$sha" "$dmg_sha"
+    elif [ "$nightly" = 1 ]; then
+        echo "Next: Scripts/release.sh --nightly --publish puts them on the pre-release 'nightly' (the nightly workflow does)."
+        echo "  SHA-256  $dmg_sha  $(basename "$dmg")"
+        echo "  SHA-256  $sha  $(basename "$zip")"
     else
         echo "Next (docs/release-checklist.md): Scripts/release.sh --publish creates the GitHub Release"
         echo "v$version with Sill.dmg, Sill.zip and their .sha256 files, which https://getsill.app/download links."
@@ -558,6 +614,193 @@ publish_release() {
     else
         echo "The site's Download button links $feed_repo's newest release: point site/download.html's GitHub links at $repo while releases go there."
     fi
+}
+
+# Nightlies (--nightly; docs/release-checklist.md, "Nightlies"). The nightly workflow
+# (.github/workflows/nightly.yml) runs release.sh --nightly --publish, and sources this file for
+# nightly_last_sha, its skip rule.
+
+# Sill for iPhone and iPad's public beta on TestFlight (docs/release-checklist.md, TestFlight §7): the
+# pre-release's notes carry its link, as the README and the download page do, since every night's
+# notes replace the last; a new link is changed here too.
+nightly_testflight_link=https://testflight.apple.com/join/6v7nqyn3
+
+# The night's date, YYYYMMDD in UTC: SILL_NIGHTLY_DATE when it is set (the nightly workflow gives its
+# jobs the same one), else today.
+nightly_date() {
+    local date="${SILL_NIGHTLY_DATE:-$(date -u +%Y%m%d)}"
+    if ! [[ "$date" =~ ^20[0-9][0-9][01][0-9][0-3][0-9]$ ]]; then
+        echo "error: SILL_NIGHTLY_DATE is '$date', not a date such as 20261030" >&2
+        return 1
+    fi
+    printf '%s\n' "$date"
+}
+
+# A nightly's files' stem: Sill-nightly-<yyyymmdd>-<the commit's first seven hex digits>.
+nightly_stem() {
+    local date head
+    date="$(nightly_date)" || return 1
+    head="$(git rev-parse HEAD 2>/dev/null)" || { echo "error: not in a git checkout" >&2; return 1; }
+    printf 'Sill-nightly-%s-%s\n' "$date" "${head:0:7}"
+}
+
+# The commit the pre-release "nightly" in the repository $1 was built from, as the comment at the end
+# of its notes says, or nothing (no such release, or notes without the comment).
+nightly_last_sha() {
+    local body
+    body="$(gh api "repos/$1/releases/tags/nightly" --jq .body 2>/dev/null)" || return 0
+    printf '%s\n' "$body" | sed -n 's/.*<!-- sill-nightly-sha: \([0-9a-f]\{40\}\) -->.*/\1/p' | tail -n 1
+}
+
+# What stops --nightly --publish before it builds: gh can't reach the repository, or the release
+# with the tag "nightly" there isn't a pre-release (a nightly never turns a plain release into one, or
+# touches it). Prints one problem per line, and nothing when all is well. publish_nightly asks again.
+nightly_publish_problems() {
+    local repo="${SILL_RELEASE_REPO:-$feed_repo}" prerelease
+    if ! command -v gh >/dev/null; then
+        echo "gh is not installed (brew install gh), or not on PATH."
+        return 0
+    fi
+    if ! gh api "repos/$repo" --silent >/dev/null 2>&1; then
+        echo "gh can't reach $repo: run gh auth login (in the nightly workflow: GH_TOKEN)."
+        return 0
+    fi
+    if prerelease="$(gh api "repos/$repo/releases/tags/nightly" --jq .prerelease 2>/dev/null)" && [ "$prerelease" != true ]; then
+        echo "$repo has a release with the tag nightly that is not a pre-release; a nightly never touches it. Make it a pre-release, or delete it, first."
+    fi
+}
+
+# Given a release's assets as "<name><tab><created at>" lines on stdin, the stems of the nightlies
+# among them, newest first, one a line: an asset named Sill-nightly-<yyyymmdd>-<sha>.dmg, .zip, or
+# either with .sha256, belongs to the stem before its extension, and a stem is as new as its newest
+# asset (ISO 8601 times, as GitHub gives them, sort as text). Other assets are left out.
+nightly_stems() {
+    awk -F '\t' '
+        $1 ~ /^Sill-nightly-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9a-f]+\.(dmg|zip)(\.sha256)?$/ {
+            stem = $1; sub(/\.(dmg|zip)(\.sha256)?$/, "", stem)
+            if (!(stem in newest) || $2 > newest[stem]) newest[stem] = $2
+        }
+        END {
+            n = 0
+            for (s in newest) order[++n] = s
+            for (i = 2; i <= n; i++) {          # newest first; the later stem first on a tie
+                v = order[i]; j = i - 1
+                while (j > 0 && (newest[order[j]] < newest[v] || (newest[order[j]] == newest[v] && order[j] < v))) { order[j + 1] = order[j]; j-- }
+                order[j + 1] = v
+            }
+            for (i = 1; i <= n; i++) print order[i]
+        }'
+}
+
+# Given the same lines, the names of the assets to delete so that only the $1 newest nightlies stay.
+nightly_prune_names() {
+    local keep="$1" listing stems
+    listing="$(cat)"
+    stems="$(printf '%s\n' "$listing" | nightly_stems | tail -n +"$((keep + 1))")"
+    [ -n "$stems" ] || return 0
+    # The stems through the environment: awk's -v refuses a value with a newline in it (macOS's awk).
+    printf '%s\n' "$listing" | SILL_PRUNE_STEMS="$stems" awk -F '\t' '
+        BEGIN { n = split(ENVIRON["SILL_PRUNE_STEMS"], list, "\n"); for (i = 1; i <= n; i++) old[list[i]] = 1 }
+        $1 ~ /^Sill-nightly-/ { stem = $1; sub(/\.(dmg|zip)(\.sha256)?$/, "", stem); if (stem in old) print $1 }'
+}
+
+# The pre-release's notes, in Markdown, on stdout: what a nightly is, the newest build's files and
+# their SHA-256, the merged pull requests ($7, a file), the earlier nightlies still there ($8, Markdown
+# lines), and the comment with the commit's sha that nightly_last_sha reads.
+nightly_body() {
+    local repo="$1" version="$2" build="$3" stem="$4" dmg_sha="$5" zip_sha="$6" notes="$7" older="$8"
+    local head date url
+    head="$(git rev-parse HEAD)"
+    date="${stem#Sill-nightly-}"
+    date="${date%%-*}"
+    url="https://github.com/$repo/releases/download/nightly"
+    cat <<BODY
+**Not a release.** A nightly is Sill for Mac built from \`main\` on a night it changed: signed with Developer ID and notarized like a release, but not tried by hand, so it can break. Sill's update check never offers a nightly. To go back, download the release from https://getsill.app/download and replace Sill in your Applications folder: a nightly keeps its settings, permissions and paired devices where the release keeps them, so nothing has to be set up again either way.
+
+**Newest: Sill for Mac $version ($build), ${date:0:4}-${date:4:2}-${date:6:2}, from [\`${head:0:7}\`](https://github.com/$repo/commit/$head)**
+
+| File | SHA-256 |
+|---|---|
+| [$stem.dmg]($url/$stem.dmg) | \`$dmg_sha\` |
+| [$stem.zip]($url/$stem.zip) | \`$zip_sha\` |
+
+The same night's Sill for iPhone and iPad goes to TestFlight. Sill for iPhone and iPad's public beta: $nightly_testflight_link
+
+$(cat "$notes")
+BODY
+    if [ -n "$older" ]; then
+        printf '\n**Earlier nightlies on this page** (the newest %s are kept):\n\n%s\n' "${SILL_NIGHTLY_KEEP:-7}" "$older"
+    fi
+    printf '\n<!-- sill-nightly-sha: %s -->\n' "$head"
+}
+
+# --nightly --publish: the four files on the pre-release "nightly" in SILL_RELEASE_REPO (made when
+# missing, from this commit; otherwise its tag moved here), the nightlies beyond the newest
+# SILL_NIGHTLY_KEEP (7) deleted, then its title and notes, the sha last: a run that stops before the
+# notes leaves the old sha there, so the next night builds again.
+publish_nightly() {
+    local zip="$1" dmg="$2" version="$3" build="$4"
+    local repo="${SILL_RELEASE_REPO:-$feed_repo}" keep="${SILL_NIGHTLY_KEEP:-7}" problem head stem dir notes
+    local dmg_sha zip_sha listing name names older="" kept day
+    problem="$(nightly_publish_problems)"
+    if [ -n "$problem" ]; then fail "$problem (The notarized files are $dmg and $zip.)"; fi
+    [[ "$keep" =~ ^[1-9][0-9]?$ ]] || fail "SILL_NIGHTLY_KEEP is '$keep', not a number of nightlies from 1 to 99"
+    head="$(git rev-parse HEAD)"
+    stem="$(basename "$dmg" .dmg)"
+    dir="$(mktemp -d "${TMPDIR:-/tmp}/sill-nightly.XXXXXX")"
+    cp "$dmg" "$dir/$stem.dmg"
+    cp "$zip" "$dir/$stem.zip"
+    (cd "$dir" && shasum -a 256 "$stem.dmg" > "$stem.dmg.sha256" && shasum -a 256 "$stem.zip" > "$stem.zip.sha256")
+    dmg_sha="$(awk '{ print $1 }' "$dir/$stem.dmg.sha256")"
+    zip_sha="$(awk '{ print $1 }' "$dir/$stem.zip.sha256")"
+    notes="${SILL_NIGHTLY_NOTES:-}"
+    if [ -z "$notes" ]; then
+        notes="$dir/notes.md"
+        Scripts/nightly-notes.sh --markdown "$notes" --repo "$repo" || { rm -rf "$dir"; fail "Scripts/nightly-notes.sh couldn't write the notes. The notarized files are $dmg and $zip."; }
+    fi
+    [ -f "$notes" ] || { rm -rf "$dir"; fail "SILL_NIGHTLY_NOTES names $notes, which isn't a file. The notarized files are $dmg and $zip."; }
+    if gh api "repos/$repo/releases/tags/nightly" --silent >/dev/null 2>&1; then
+        say "Moving the tag nightly in $repo to ${head:0:12}"
+        if ! gh api -X PATCH "repos/$repo/git/refs/tags/nightly" -f sha="$head" -F force=true --silent >/dev/null 2>&1; then
+            echo "warning: couldn't move the tag nightly to ${head:0:12}; the notes name the commit built, which is what counts." >&2
+        fi
+        say "Uploading $stem's four files to the pre-release nightly in $repo"
+        gh release upload nightly "$dir/$stem.dmg" "$dir/$stem.dmg.sha256" "$dir/$stem.zip" "$dir/$stem.zip.sha256" \
+            --repo "$repo" --clobber \
+            || { rm -rf "$dir"; fail "gh release upload failed for the pre-release nightly in $repo (its message is above). The notarized files are $dmg and $zip."; }
+    else
+        # A tag left behind by a deleted release would otherwise be used where it stands.
+        gh api -X PATCH "repos/$repo/git/refs/tags/nightly" -f sha="$head" -F force=true --silent >/dev/null 2>&1 || true
+        say "Creating the pre-release nightly in $repo, at ${head:0:12}"
+        gh release create nightly "$dir/$stem.dmg" "$dir/$stem.dmg.sha256" "$dir/$stem.zip" "$dir/$stem.zip.sha256" \
+            --repo "$repo" --prerelease --latest=false --target "$head" --title "Sill nightly $version ($build)" \
+            --notes "Sill for Mac's nightly: the notes follow in a moment." \
+            || { rm -rf "$dir"; fail "gh release create failed for the pre-release nightly in $repo (its message is above). The notarized files are $dmg and $zip."; }
+    fi
+    listing="$(gh api "repos/$repo/releases/tags/nightly" --jq '.assets[] | [.name, .created_at] | @tsv')" \
+        || { rm -rf "$dir"; fail "couldn't list the pre-release nightly's files in $repo"; }
+    names="$(printf '%s\n' "$listing" | nightly_prune_names "$keep")"
+    while IFS= read -r name; do
+        [ -n "$name" ] || continue
+        say "Deleting $name (the pre-release keeps the $keep newest nightlies)"
+        gh release delete-asset nightly "$name" --repo "$repo" --yes \
+            || echo "warning: couldn't delete $name from the pre-release nightly; the next nightly tries again." >&2
+    done <<<"$names"
+    while IFS= read -r kept; do
+        [ -n "$kept" ] && [ "$kept" != "$stem" ] || continue
+        day="${kept#Sill-nightly-}"
+        day="${day%%-*}"
+        older="$older- ${day:0:4}-${day:4:2}-${day:6:2}, \`${kept##*-}\`: [$kept.dmg](https://github.com/$repo/releases/download/nightly/$kept.dmg), [$kept.zip](https://github.com/$repo/releases/download/nightly/$kept.zip)"$'\n'
+    done < <(printf '%s\n' "$listing" | nightly_stems | head -n "$keep")
+    nightly_body "$repo" "$version" "$build" "$stem" "$dmg_sha" "$zip_sha" "$notes" "${older%$'\n'}" >"$dir/body.md"
+    say "Writing the pre-release's title and notes (built from ${head:0:12})"
+    day="${stem#Sill-nightly-}"
+    day="${day%%-*}"
+    gh release edit nightly --repo "$repo" --prerelease --latest=false \
+        --title "Sill nightly $version ($build), ${day:0:4}-${day:4:2}-${day:6:2}" --notes-file "$dir/body.md" \
+        || { rm -rf "$dir"; fail "gh release edit failed for the pre-release nightly in $repo: its files are up, its notes and sha are not (its message is above)."; }
+    rm -rf "$dir"
+    echo "Published: https://github.com/$repo/releases/tag/nightly ($stem: Sill for Mac $version ($build))"
 }
 
 # Sourced (to test its functions), the script only defines them.

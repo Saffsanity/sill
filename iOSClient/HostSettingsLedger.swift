@@ -10,6 +10,15 @@ enum SettingsField: CaseIterable, Hashable {
     case maxFPS, bitrate, captureScale, prioritizeSpeed, virtualDisplay, directWireless, sendAudio
 }
 
+extension HostSettingsState {
+    /// Whether this Mac takes a Direct Wireless pick on this session: not when it says the session is
+    /// not paired (`sessionPaired` false), since it takes the setting only from a paired device
+    /// (2026-10-29); a Mac that does not say (nil: an older one) takes it from any session at home.
+    /// The ledger's rule 10, and the panel's switch. Away from home the Mac refuses it too, which the
+    /// panel knows from the session's route (`StreamClient.remoteRoute`), not from here.
+    var takesDirectWireless: Bool { sessionPaired != false }
+}
+
 extension HostSettingsChange {
     /// The setting fields this change names.
     var fields: [SettingsField] {
@@ -72,6 +81,9 @@ extension HostSettingsChange {
 /// 9. A field this Mac did not report (nil in its state: an older host; Direct Wireless and Send
 ///    Audio) is never sent, so an older host is never asked for what it cannot show. A property of the
 ///    model, not of the view.
+/// 10. Direct Wireless is never sent on a session the Mac says is not paired (`sessionPaired` false:
+///    an unpaired key at a door that lets any device in, or a plain door): the Mac takes it only
+///    from a paired device, and the panel disables the switch there (`takesDirectWireless`).
 struct SettingsLedger: Equatable {
     /// One field's unanswered pick. `change` names that field only.
     struct Entry: Equatable {
@@ -103,6 +115,8 @@ struct SettingsLedger: Equatable {
             // Rule 9: applied(to:) would set the field anyway, and a nil differs from any value.
             if field == .directWireless, shown.directWireless == nil { continue }
             if field == .sendAudio, shown.sendAudio == nil { continue }
+            // Rule 10: the Mac would refuse it.
+            if field == .directWireless, host?.takesDirectWireless == false { continue }
             let single = change.only(field)
             guard single.applied(to: shown) != shown else { continue }
             pending[field] = Entry(change: single, token: token, sentAt: now)

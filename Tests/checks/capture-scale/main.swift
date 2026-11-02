@@ -437,5 +437,88 @@ check(smallerThanBefore == 0, "never smaller than before (\(smallerThanBefore))"
 check(notMonotonicEnv == 0, "a larger panel never gets a smaller envelope (\(notMonotonicEnv))")
 check(noPanelWrong == 0, "no panel: the window's own size, held to 800…4096 (\(noPanelWrong) not)")
 
+// MARK: - The window's size on Sill's virtual display: held to 1…65536 points, the most a host takes
+
+/// Before 2026-10-29 (VirtualStage.windowSize, a copy): the panel ÷ the scale, unheld, so a viewport
+/// of 1e300 points, or a scale of 1e-300, gave a side no Int holds, and the "insists on …" line's
+/// Int() trapped (security scan, finding 4).
+func oldWindowSize(panel: CGSize?, scale: CGFloat?, own: CGSize) -> CGSize {
+    guard let panel, panel.width > 0, panel.height > 0 else { return own }
+    let s = (scale ?? 1) > 0 ? (scale ?? 1) : 1
+    return CGSize(width: (panel.width / s).rounded(), height: (panel.height / s).rounded())
+}
+/// Int() of a side traps: no Int holds it.
+func traps(_ s: CGSize) -> Bool {
+    Int(exactly: Double(s.width).rounded(.towardZero)) == nil || Int(exactly: Double(s.height).rounded(.towardZero)) == nil
+}
+let ownSize = CGSize(width: 640, height: 480)
+func staged(_ w: CGFloat, _ h: CGFloat, _ s: CGFloat?) -> CGSize { V.windowSize(panel: CGSize(width: w, height: h), scale: s, own: ownSize) }
+
+check(text(staged(1117, 610, 1)) == "1117×610" && text(staged(1117, 610, 0.5)) == "2234×1220",
+      "the iPad's 1117×610 panel: 1117×610 at Aa 1x, 2234×1220 at 0.5x, as before")
+check(text(staged(1117, 610, 1.5)) == "745×407" && text(staged(377, 235, 0.5)) == "754×470",
+      "1.5x rounds to whole points (745×407), an iPhone upright at 0.5x 754×470, as before")
+check(text(staged(1117, 610, nil)) == "1117×610", "no scale (Aa never touched) counts as 1")
+for bad: CGFloat in [0, -1, .nan, .infinity, -.infinity] {
+    check(text(staged(1117, 610, bad)) == "1117×610", "a scale of \(bad) counts as 1")
+}
+check(V.windowSize(panel: nil, scale: 1, own: ownSize) == ownSize, "no viewport yet: the window's own size, as before")
+for (w, h) in [(CGFloat(0), CGFloat(610)), (1117, 0), (-5, 610), (.nan, 610), (1117, .infinity), (-.infinity, 610)] {
+    check(V.windowSize(panel: CGSize(width: w, height: h), scale: 1, own: ownSize) == ownSize,
+          "a panel of \(w)×\(h) counts as none: the window's own size")
+}
+// The scan's viewport and its kin: before, a size no Int holds; now the ceiling.
+check(V.maxWindowSide == 65536, "the ceiling: 65536 points a side, the largest viewport a host takes (16384 points at 0.25)")
+check(traps(oldWindowSize(panel: CGSize(width: 1e300, height: 1e300), scale: 1, own: ownSize)) && text(staged(1e300, 1e300, 1)) == "65536×65536",
+      "1e300 points: before 1e300, which the \"insists on\" line's Int() trapped on; now 65536×65536")
+check(traps(oldWindowSize(panel: CGSize(width: 1000, height: 1000), scale: 1e-300, own: ownSize)) && text(staged(1000, 1000, 1e-300)) == "65536×65536",
+      "1000 points at a scale of 1e-300: before 1e303; now 65536×65536")
+check(oldWindowSize(panel: CGSize(width: 1e300, height: 1e300), scale: 1e-300, own: ownSize).width.isInfinite
+      && text(staged(1e300, 1e300, 1e-300)) == "65536×65536", "1e300 at 1e-300: before infinite; now 65536×65536")
+check(text(staged(16384, 16384, 0.25)) == "65536×65536" && staged(16384, 16384, 0.25) == oldWindowSize(panel: CGSize(width: 16384, height: 16384), scale: 0.25, own: ownSize),
+      "the largest viewport a host takes (16384 at 0.25): 65536×65536, as before")
+check(text(staged(1, 1, 4)) == "1×1" && oldWindowSize(panel: CGSize(width: 1, height: 1), scale: 4, own: ownSize) == .zero,
+      "the smallest (1 point at 4x, a quarter point): 1×1, where it was 0×0")
+// A panel past the display keeps its size, so its shape: the placement fits the window to the display
+// (VirtualStage.prepare's `dest`), and a full-screen window's crop takes this size's shape. Held at the
+// display's 4096 (the review of finding 4), a 2560×1400 panel at 0.5x was asked 4096×2800, 1.46:1 for a
+// 1.83:1 panel, and a full-screen video's crop came out that shape, black bars on the device.
+check(text(staged(2560, 1400, 0.5)) == "5120×2800" && text(staged(5000, 300, 1)) == "5000×300",
+      "a panel past the display, an iPad's Stage Manager window at 0.5x (5120×2800) or 5000×300 at 1x: as asked, the panel's shape kept")
+check(text(staged(1e5, 300, 0.25)) == "65536×1200", "each side held on its own")
+
+// Every viewport a host takes (ViewportBounds: each side 1 to 16384 points, a scale 0.25 to 4 or none):
+// the size it was before the hold, a side under half a point aside (1, not 0), so the same shape.
+var takenNotAsBefore = 0
+for _ in 0..<50_000 {
+    let w = 1 + CGFloat(next() % 1_638_301) / 100, h = 1 + CGFloat(next() % 1_638_301) / 100   // 1 to 16384
+    let s: CGFloat? = next() % 2 == 0 ? pick([nil, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 4]) : 0.25 + CGFloat(next() % 3_751) / 1_000
+    let then = oldWindowSize(panel: CGSize(width: w, height: h), scale: s, own: ownSize)
+    let now = V.windowSize(panel: CGSize(width: w, height: h), scale: s, own: ownSize)
+    if now != CGSize(width: max(then.width, 1), height: max(then.height, 1)) { takenNotAsBefore += 1 }
+}
+check(takenNotAsBefore == 0, "50,000 viewports a host takes: each window asked for as before (\(takenNotAsBefore) not)")
+
+// Random panels and scales, real and hostile: every size finite, 1 to 65536 points or the window's own,
+// never one Int() traps on, and the same as before wherever before was already within 1…65536.
+var stageUnheld = 0, stageNotAsBefore = 0, stageNotOwn = 0
+let wildSides: [CGFloat] = [0, -1, 0.3, 1, 4096, 4097, 16384, 16385, 65536, 65537, 1e18, 1e300, .nan, .infinity, -.infinity]
+let wildScales: [CGFloat?] = [nil, 0, -1, 1e-300, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 4, 1e300, .nan, .infinity]
+for _ in 0..<20_000 {
+    let w: CGFloat = next() % 3 == 0 ? pick(wildSides) : CGFloat(next() % 3_000) / pick([CGFloat(1), 2, 3])
+    let h: CGFloat = next() % 3 == 0 ? pick(wildSides) : CGFloat(next() % 3_000) / pick([CGFloat(1), 2, 3])
+    let s: CGFloat? = pick(wildScales)
+    let panel = CGSize(width: w, height: h)
+    let now = V.windowSize(panel: panel, scale: s, own: ownSize)
+    if w.isFinite, h.isFinite, w > 0, h > 0 {
+        if traps(now) || now.width < 1 || now.width > 65536 || now.height < 1 || now.height > 65536 { stageUnheld += 1 }
+        let then = oldWindowSize(panel: panel, scale: s, own: ownSize)
+        if then.width >= 1, then.width <= 65536, then.height >= 1, then.height <= 65536, then != now { stageNotAsBefore += 1 }
+    } else if now != ownSize { stageNotOwn += 1 }
+}
+check(stageUnheld == 0, "20,000 random panels and scales: every window 1 to 65536 points a side, never a size Int() traps on (\(stageUnheld) not)")
+check(stageNotAsBefore == 0, "wherever the old size was within 1…65536, the same as before (\(stageNotAsBefore) not)")
+check(stageNotOwn == 0, "a panel whose sides are not positive numbers: the window's own size (\(stageNotOwn) not)")
+
 print("\(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

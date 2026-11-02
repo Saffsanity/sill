@@ -1,6 +1,6 @@
 """Mutants of the device's settings ledger (iOSClient/HostSettingsLedger.swift) and of the merge it
-uses in Sources/StreamProtocol/HostSettings.swift, the sound's seventh field among them: each must
-compile and fail the ledger check (main.swift). usage: mutants.py"""
+uses in Sources/StreamProtocol/HostSettings.swift, the sound's seventh field and Direct Wireless's
+rule 10 among them: each must compile and fail the ledger check (main.swift). usage: mutants.py"""
 import os, subprocess, sys
 SP = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(SP, "..", "..", ".."))
@@ -26,6 +26,15 @@ MUTANTS = {
     "L10 rule 7: a reset keeps the picks": (LEDGER, "        host = nil\n        pending = [:]\n", "        host = nil\n"),
     "L11 isEmpty without Send Audio": (WIRE, "&& directWireless == nil && sendAudio == nil", "&& directWireless == nil"),
     "L12 applied(to:) without Send Audio": (WIRE, "        if let v = sendAudio { r.sendAudio = v }\n", ""),
+    # Direct Wireless only from a paired session (2026-10-29, the security scan's finding 8): rule 10.
+    "L13 rule 10 dropped: Direct Wireless sent on an unpaired session": (LEDGER,
+        "            if field == .directWireless, host?.takesDirectWireless == false { continue }\n", ""),
+    "L14 an older Mac's silence read as unpaired": (LEDGER,
+        "var takesDirectWireless: Bool { sessionPaired != false }", "var takesDirectWireless: Bool { sessionPaired == true }"),
+    "L15 rule 10 holds back every field": (LEDGER,
+        "            if field == .directWireless, host?.takesDirectWireless == false { continue }\n",
+        "            if host?.takesDirectWireless == false { continue }\n"),
+    "L16 sessionPaired never kept": (WIRE, "        self.sessionPaired = sessionPaired\n", "        self.sessionPaired = nil\n"),
 }
 caught = 0
 for name, (rel, old, new) in MUTANTS.items():

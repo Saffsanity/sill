@@ -38,6 +38,9 @@ MUTANTS = [
     ("Send Audio left out of applied(to:)", "HostSettings.swift", "        if let v = sendAudio { r.sendAudio = v }\n", ""),
     ("a change's Send Audio never kept", "HostSettings.swift", "        self.directWireless = directWireless\n        self.sendAudio = sendAudio\n    }\n\n    /// All setting", "        self.directWireless = directWireless\n        self.sendAudio = nil\n    }\n\n    /// All setting"),
     ("the audio note never kept", "HostSettings.swift", "self.audioNote = audioNote", "self.audioNote = nil"),
+    # Kind 16's sessionPaired (2026-10-29, the security scan's finding 8).
+    ("sessionPaired never kept", "HostSettings.swift", "        self.sessionPaired = sessionPaired\n", "        self.sessionPaired = nil\n"),
+    ("sessionPaired false by default", "HostSettings.swift", "                sessionPaired: Bool? = nil) {", "                sessionPaired: Bool? = false) {"),
     ("the late count never kept", "Viewport.swift", "self.audioBehindMs = audioBehindMs; self.audioLate = audioLate", "self.audioBehindMs = audioBehindMs; self.audioLate = nil"),
     ("kind 43 as 253", "StreamMessage.swift", "    case audio = 43 ", "    case audio = 253 "),
 ]

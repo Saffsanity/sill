@@ -52,6 +52,11 @@ import Foundation
 // who can reach the Mac. Require pairing (docs/home-pairing-plan.md §4.1, §6.5) is one too, and
 // stricter still: it lives in the identity store beside the trust list, never in the app's
 // HostSettings (UserDefaults) or a launch argument, since any process of this user can write those.
+// Direct Wireless is the one listener knob a device sets (docs/direct-wireless-plan.md, open
+// question 1), and only from a session whose key is on the Mac's trust list, at home: never from an
+// unpaired key at an open door (Require pairing off), the CLI's plain door, or away from home
+// (`DeviceSettings.accepted`; the security scan's finding 8, 2026-10-29). Kind 16's
+// `sessionPaired` tells the device's panel, which disables its switch on a session that may not.
 
 /// The settings a device sees and changes, as the Mac's menu and Settings show them: five for the
 /// stream, one (Direct Wireless) for how devices reach the Mac, and one (Send Audio) for what they
@@ -68,7 +73,8 @@ public struct StreamSettings: Codable, Hashable, Sendable {
     /// Direct Wireless Connection: the host's listener and its Bonjour registration include
     /// peer-to-peer Wi-Fi (AWDL), so devices with no network in common can find and reach it.
     /// Optional because it came sixth: nil is a host without the setting (the device shows no row
-    /// and never sends it).
+    /// and never sends it). Every device sees it; only a paired one at home changes it
+    /// (`HostSettingsState.sessionPaired`).
     public var directWireless: Bool?
     /// Send Audio: every connected device whose hello lists a codec it plays gets the sound of what
     /// streams (kind 43, Audio.swift): the streamed window's app, or every app for the Desktop. The Mac
@@ -174,8 +180,8 @@ public struct LinkReport: Codable, Hashable, Sendable {
 
 /// Host → device (`.hostSettings`): on connect (right after the window list), whenever it changes,
 /// and, with `answering` set, as the reply to one device's `HostSettingsChange`. Each connection gets
-/// its own (`away` and `link` are the connection's, and so are `settings.bitrate` and
-/// `settings.captureScale` on a host that sends `away`).
+/// its own (`away`, `link` and `sessionPaired` are the connection's, and so are `settings.bitrate`
+/// and `settings.captureScale` on a host that sends `away`).
 public struct HostSettingsState: Codable, Hashable, Sendable {
     /// The target: a change still waiting for its restart is already reported, because the Mac's
     /// menu checks it too. `bitrate` and `captureScale` are the quality this connection's controls
@@ -208,15 +214,25 @@ public struct HostSettingsState: Codable, Hashable, Sendable {
     /// while all is well, while Send Audio is off, and from hosts without sound. The Mac's, the same
     /// for every connection.
     public var audioNote: String?
+    /// This connection's key is on the Mac's trust list now: a paired device, which alone changes
+    /// Direct Wireless (`HostSettingsChange.directWireless`; at home: away from home the Mac refuses
+    /// it whatever this says). False for an unpaired key at a door that lets any device in (Require
+    /// pairing off) and at a plain door (SillHost without --pairing), which sees no key; true
+    /// through the remote door, which admits only paired keys. Recomputed with the trust list, so a
+    /// device that pairs during its session hears true. Nil from hosts before 2026-10-29, which took
+    /// Direct Wireless from any session at home. The connection's own, like `away` and `link`.
+    public var sessionPaired: Bool?
 
     public init(settings: StreamSettings, persistent: Bool, virtualDisplayAvailable: Bool,
                 virtualDisplayNote: String? = nil, softwareEncoder: Bool, stream: RunningStream? = nil,
-                answering: Int? = nil, away: AwayQuality? = nil, link: LinkReport? = nil, audioNote: String? = nil) {
+                answering: Int? = nil, away: AwayQuality? = nil, link: LinkReport? = nil, audioNote: String? = nil,
+                sessionPaired: Bool? = nil) {
         self.settings = settings; self.persistent = persistent
         self.virtualDisplayAvailable = virtualDisplayAvailable; self.virtualDisplayNote = virtualDisplayNote
         self.softwareEncoder = softwareEncoder; self.stream = stream; self.answering = answering
         self.away = away; self.link = link
         self.audioNote = audioNote
+        self.sessionPaired = sessionPaired
     }
 }
 
@@ -233,6 +249,9 @@ public struct HostSettingsChange: Codable, Hashable, Sendable {
     public var captureScale: Double?
     public var prioritizeSpeed: Bool?
     public var virtualDisplay: Bool?
+    /// Taken only from a paired device at home (`HostSettingsState.sessionPaired`): a host from
+    /// 2026-10-29 refuses it, on or off, from an unpaired session and from away, and its answer keeps
+    /// the Mac's value; one before took it from any session at home.
     public var directWireless: Bool?
     /// Send Audio from a device's Settings panel: a host applies it for every device, on or off, from
     /// either door, and Sill.app saves it as a menu click (Noah, 2026-10-27: docs/audio-plan.md's Q8 as

@@ -46,6 +46,26 @@ MUTANTS = [
      "        c.virtualDisplay = true\n", "        c.virtualDisplay = true\n        c.directWireless = true\n"),
     ("AQ30 Sill.app's Send Audio off (the default before 2026-10-27)", H + "HostConfig.swift",
      "        c.sendAudio = true\n", "        c.sendAudio = false\n"),
+    # Direct Wireless only from a paired session at home (2026-10-29, the security scan's finding 8).
+    ("AQ31 Direct Wireless from an unpaired session (the rule before 2026-10-29)", H + "DeviceSettings.swift",
+     "            } else if !paired {\n", "            } else if false {\n"),
+    ("AQ32 only an unpaired device's on refused (off taken)", H + "DeviceSettings.swift",
+     "            } else if !paired {\n", "            } else if !paired && v {\n"),
+    ("AQ33 Direct Wireless from afar", H + "DeviceSettings.swift",
+     "            if fromRemote {\n                refused.append(", "            if false {\n                refused.append("),
+    ("AQ34 an unpaired session's refusal unnamed", H + "DeviceSettings.swift",
+     '                refused.append("direct wireless (only a paired device)")\n', "                _ = refused\n"),
+    ("AQ35 the unpaired reason first, from afar too", H + "DeviceSettings.swift",
+     "            if fromRemote {\n                refused.append(\"direct wireless (not from a remote connection)\")\n            } else if !paired {",
+     "            if !paired {\n                refused.append(\"direct wireless (only a paired device)\")\n            } else if fromRemote {"),
+    ("AQ36 the plain door counts as paired", H + "DeviceSettings.swift",
+     "        guard let key else { return false }\n", "        guard let key else { return true }\n"),
+    ("AQ37 any key counts as paired", H + "DeviceSettings.swift",
+     "        return trusted.contains(key)\n", "        return !key.isEmpty\n"),
+    ("AQ38 a key counts once the list has any", H + "DeviceSettings.swift",
+     "        return trusted.contains(key)\n", "        return !trusted.isEmpty\n"),
+    ("AQ39 a prefix of a paired key counts", H + "DeviceSettings.swift",
+     "        return trusted.contains(key)\n", "        return trusted.contains { $0.starts(with: key) }\n"),
 ]
 caught = 0
 for name, rel, old, new in MUTANTS:
