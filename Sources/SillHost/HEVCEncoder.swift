@@ -144,6 +144,26 @@ final class HEVCEncoder {
         watchdog = t
     }
 
+    /// Whether this Mac's hardware makes an HEVC session of this size: VideoToolbox asked for one that
+    /// must be hardware (without that it quietly makes a software one, #278), a few milliseconds, then
+    /// let go. Asked once a size for the process's life.
+    static func hardwareTakes(width: Int, height: Int) -> Bool {
+        let key = "\(width)×\(height)"
+        serialLock.lock(); let known = hardwareSizes[key]; serialLock.unlock()
+        if let known { return known }
+        var s: VTCompressionSession?
+        let spec = [kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: true] as CFDictionary
+        let status = VTCompressionSessionCreate(allocator: nil, width: Int32(width), height: Int32(height),
+                                                codecType: kCMVideoCodecType_HEVC, encoderSpecification: spec,
+                                                imageBufferAttributes: nil, compressedDataAllocator: nil,
+                                                outputCallback: nil, refcon: nil, compressionSessionOut: &s)
+        if let s { VTCompressionSessionInvalidate(s) }
+        let takes = status == noErr && s != nil
+        serialLock.lock(); hardwareSizes[key] = takes; serialLock.unlock()
+        return takes
+    }
+    private static var hardwareSizes: [String: Bool] = [:]   // under serialLock
+
     /// A session with this encoder's settings, ready for its first frame: the stream's first, and
     /// each one that replaces a session settled in the slow state.
     private static func makeSession(width: Int, height: Int, fps: Int, bitrate: Int, prioritizeSpeed: Bool,
