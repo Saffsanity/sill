@@ -65,15 +65,17 @@ hoc and says so, and then Screen Recording and Accessibility have to be granted
 again after every rebuild (see Permissions).
 
 `SILL_UNIVERSAL=1 Scripts/make-app.sh` builds a universal Sill.app, arm64 and
-x86_64, for someone testing on an Intel Mac (#62): one build per architecture,
+x86_64, as the releases and the nightlies are (#62): one build per architecture,
 each in its own scratch path under `.build/universal`, joined with `lipo`, then
 stamped, iconized and signed as usual. It takes about twice as long, and
 `.build/release/SillMenuBar` is not refreshed, so it is off by default; unset,
-the build is for this Mac's architecture alone. The x86_64 slice has never
-streamed on an Intel Mac: until it has, README, the site, the App Store text
-and the Homebrew cask's `depends_on arch: :arm64` stay Apple silicon, and
-releases stay arm64 (`release.sh` names the architectures it built and checks
-every slice's signature). On the Intel Mac, `Sill.app/Contents/MacOS/Sill
+the build is for this Mac's architecture alone. Releases are universal from
+0.6.0 on (Noah, 2026-11-02: "D1 - Universal"; release.yml's publish job sets
+`SILL_UNIVERSAL=1`, as the nightlies do): README and the site say Apple silicon
+or Intel, and the App Store description names no chip; 0.5.1 and earlier were arm64 only. A nightly
+ran on an Intel iMac 5K (#62: fine at Standard; its hardware encoder refuses a
+5K Retina stream). `release.sh` names the architectures it built and checks
+every slice's signature. On the Intel Mac, `Sill.app/Contents/MacOS/Sill
 --virtual-display-selftest` checks the virtual display (moving the pointer onto
 it for a moment) and `--encoder-selftest` the video encoder.
 
@@ -2368,9 +2370,9 @@ Nightlies (`.github/workflows/nightly.yml`; docs/release-checklist.md,
 "Nightlies"): every night main moved (09:17 UTC, while the repository variable
 `SILL_NIGHTLY` is `true`) and by hand, from main only: both builds run in the
 environment `nightly`, which holds the nine secrets. `Scripts/release.sh
---nightly --publish` builds main's head as a release, but universal
-(`SILL_UNIVERSAL=1`; make-app.sh takes `SILL_RELEASE_NIGHTLY=1` for an
-untagged HEAD), as `Sill-nightly-<yyyymmdd>-<sha7>.dmg` and `.zip` on the
+--nightly --publish` builds main's head as a release, universal as releases
+are since 0.6.0 (`SILL_UNIVERSAL=1`; make-app.sh takes `SILL_RELEASE_NIGHTLY=1`
+for an untagged HEAD), as `Sill-nightly-<yyyymmdd>-<sha7>.dmg` and `.zip` on the
 rolling pre-release `nightly` (the seven newest kept, never "latest");
 `release-ios.sh --build-number <commit count>` uploads the iOS build, and
 `Scripts/asc.swift` (App Store Connect's API: an ES256 token from the .p8 key
@@ -2378,9 +2380,10 @@ with CryptoKit, Foundation only) waits for App Store Connect to process it,
 sets What to Test and gives it to every internal TestFlight group, and to the
 public beta group only while `SILL_NIGHTLY_PUBLIC_BETA` is `true`.
 `Scripts/nightly-notes.sh` writes both apps' words from the pull requests
-merged since the last release tag. A nightly says the version main says,
-0.5.5, the pre-release number (the store release will be 0.6.0), with the
-commit count as its build; the update check never offers a nightly, and offers
+merged since the last release tag. A nightly says the version main says, the
+version of main's next release (0.6.0 until main moves to 0.6.1 after the 0.6.0
+release; 0.5.5 was the pre-release number before 2026-10-31), with the commit
+count as its build, as in "Sill nightly 0.6.0 (1276)"; the update check never offers a nightly, and offers
 one nothing until a release newer than its version exists. A nightly reads the
 release's data-protection keychain items, so a device paired with one stays
 paired with the other. `swift Scripts/asc.swift groups --key-file … --key-id …

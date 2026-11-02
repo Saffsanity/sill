@@ -127,74 +127,26 @@ serves the root or `/docs`, never `/site`. So:
 - [x] Done 2026-09-25: the public repository Saffsanity/sill-site holds a copy of `site/`, with
       Pages on (main, / root) and the custom domain set. Republish when `site/` changes, right
       after the release whose builds the change describes (part 2, the last item):
-- Words on main for a release not out yet are marked: the clipboard's (PR #78) between
-  `<!-- Clipboard` and `<!-- /Clipboard -->`, privacy.html's item on the device's request for the
-  picture again after it was interrupted (PR #93, kind 44) between `<!-- Keyframe` and
-  `<!-- /Keyframe -->`, the display wake's (PR #151, support.html's paragraph on Sill waking a
-  sleeping display) between `<!-- Display wake` and `<!-- /Display wake -->`,
-  support.html's paragraph on other languages and dictation (PR #147, issue #138) between
-  `<!-- Other languages` and `<!-- /Other languages -->`, the sound's (PR #94, Send
-  Audio, a beta) between `<!-- Sound` and `<!-- /Sound -->`, the connect screen's tiles'
-  (PR #117, privacy.html's items on the tiles' pictures and group names and on the request
-  for the picture once more as you disconnect) between `<!-- Tiles` and `<!-- /Tiles -->`,
-  Reverse Scrolling's (PR #159: privacy.html's item and support.html's section) between
-  `<!-- Reverse Scrolling` and `<!-- /Reverse Scrolling -->`, support.html's item on the
-  pairing window and screen sharing (PR #157, Sill for Mac's Show the pairing window to screen
-  sharing) between `<!-- Pairing window` and `<!-- /Pairing window -->`, support.html's
-  paragraph that Virtual Display is on unless you turn it off (PR #236, Sill for Mac's default
-  since 2026-10-27) between `<!-- Virtual Display` and `<!-- /Virtual Display -->`, support.html's
-  paragraph on Aa's Off and Aa dimmed over the Desktop (PR #181, issue #179) between `<!-- Aa Off`
-  and `<!-- /Aa Off -->`, the thumbnail hold's (PR #248, issue #113: privacy.html's item and
-  support.html's section) between `<!-- Thumbnail hold` and `<!-- /Thumbnail hold -->`,
-  support.html's sentence that Sill for Mac names a firewall that blocks it, in its menu and its
-  Settings (PR #250; the item's command before it holds for the builds out too), between
-  `<!-- Firewall` and `<!-- /Firewall -->`, the tour once more (branch `tour-0-6`, tour version
-  2: support.html's paragraph that the tour shows once more after an update, and privacy.html's item
-  on the tour's version; the tour's section's first paragraph holds for the builds out) between
-  `<!-- Tour 0.6` and `<!-- /Tour 0.6 -->`, and support.html's section on a locked Mac (branch
-  `locked-mac`: a locked Mac shows its lock screen and nothing else) between `<!-- Locked Mac` and
-  `<!-- /Locked Mac -->`. A republish before those
-  releases (for words that hold for the builds already out, such as support.html's on a Mac asleep
-  or restarted, or on a black picture) deletes the blocks of each release not out yet in the
-  sill-site copy after the rsync below (the perl lines, one per marker) and puts privacy.html's
-  date back to the one last published; then `grep -n -i clipboard ../sill-site/*.html` prints only
-  privacy.html's log line ("which devices share the clipboard", true of the builds out too, as
-  "what you copy" in its lede and "never what you copy" in both log lines are), and
-  `grep -n -i keyframe ../sill-site/*.html`,
-  `grep -n "wakes your Mac’s display" ../sill-site/*.html`,
-  `grep -n -i -E 'dictation|Control-Space' ../sill-site/*.html`,
-  `grep -n -i -E 'sound|send audio' ../sill-site/*.html`,
-  `grep -n -i -E 'tiles|group name' ../sill-site/*.html`,
-  `grep -n -i 'reverse scrolling' ../sill-site/*.html`,
-  `grep -n -i 'screen sharing' ../sill-site/*.html`,
-  `grep -n 'Virtual Display is on unless' ../sill-site/*.html`,
-  `grep -n 'Aa starts at Off' ../sill-site/*.html`,
-  `grep -n "hold a window’s thumbnail" ../sill-site/*.html`,
-  `grep -n 'Your Mac is locked' ../sill-site/*.html`,
-  `grep -n 'Devices Can’t Connect' ../sill-site/*.html`,
-  `grep -n 'tour shows once more' ../sill-site/*.html` and
-  `grep -n 'version of the tour' ../sill-site/*.html` print nothing. The release that ships each
-  deletes its markers in `site/` and keeps the words.
+- Words on main for a release not out yet are marked: each block sits between `<!-- Name: …`
+  and `<!-- /Name -->` (the Remote Access markers are another matter: they stay, for a build
+  without it). None is open since 0.6.0 (2026-11-02): that release shipped the words of the
+  Clipboard, Keyframe, Display wake, Other languages, Sound, Tiles, Reverse Scrolling, Pairing
+  window, Virtual Display, Aa Off, Thumbnail hold, Firewall, Tour 0.6, Locked Mac and Pinch zoom
+  markers, and its words commit (7871d5c) took their marker lines out of `site/` and kept the
+  words. A republish before a release whose words are marked (for words that hold for the builds
+  already out, such as support.html's on a Mac asleep or restarted, or on a black picture) deletes
+  each such block in the sill-site copy after the rsync below, one line a marker,
+  `perl -0pi -e 's/[ \t]*<!-- Name:.*?<!-- \/Name -->\n//gs' ../sill-site/*.html` (a `.` in the
+  name escaped), puts privacy.html's date back to the one last published, and checks with a
+  `grep -n` of a phrase from each block that nothing of it is left. Add the marker's line and its
+  grep here when a pull request marks words; the release that ships them deletes its markers in
+  `site/`, keeps the words, and takes its lines out of here.
 - Once sill is public, it can serve the site itself: `git subtree push --prefix site origin gh-pages`,
   then Settings › Pages › gh-pages, / (root). Retire sill-site then.
 
 ```
 git clone https://github.com/Saffsanity/sill-site.git ../sill-site     # once
 rsync -a --delete --exclude .git --exclude .github --exclude .nojekyll site/ ../sill-site/   # when the site changes
-perl -0pi -e 's/[ \t]*<!-- Clipboard:.*?<!-- \/Clipboard -->\n//gs' ../sill-site/*.html   # only before the clipboard's release
-perl -0pi -e 's/[ \t]*<!-- Keyframe:.*?<!-- \/Keyframe -->\n//gs' ../sill-site/*.html   # only before the keyframe request's release (PR #93)
-perl -0pi -e 's/[ \t]*<!-- Display wake:.*?<!-- \/Display wake -->\n//gs' ../sill-site/*.html   # only before the display wake's release
-perl -0pi -e 's/[ \t]*<!-- Other languages:.*?<!-- \/Other languages -->\n//gs' ../sill-site/*.html   # only before the release of other languages and dictation
-perl -0pi -e 's/[ \t]*<!-- Sound:.*?<!-- \/Sound -->\n//gs' ../sill-site/*.html   # only before the sound's release
-perl -0pi -e 's/[ \t]*<!-- Tiles:.*?<!-- \/Tiles -->\n//gs' ../sill-site/*.html           # only before the tiles' release
-perl -0pi -e 's/[ \t]*<!-- Reverse Scrolling:.*?<!-- \/Reverse Scrolling -->\n//gs' ../sill-site/*.html   # only before Reverse Scrolling's release
-perl -0pi -e 's/[ \t]*<!-- Pairing window:.*?<!-- \/Pairing window -->\n//gs' ../sill-site/*.html   # only before the release with PR #157
-perl -0pi -e 's/[ \t]*<!-- Virtual Display:.*?<!-- \/Virtual Display -->\n//gs' ../sill-site/*.html   # only before the release that turns Virtual Display on by default
-perl -0pi -e 's/[ \t]*<!-- Aa Off:.*?<!-- \/Aa Off -->\n//gs' ../sill-site/*.html   # only before the release with PR #181 (Aa's Off)
-perl -0pi -e 's/[ \t]*<!-- Thumbnail hold:.*?<!-- \/Thumbnail hold -->\n//gs' ../sill-site/*.html   # only before the thumbnail hold's release (PR #248)
-perl -0pi -e 's/[ \t]*<!-- Firewall:.*?<!-- \/Firewall -->\n//gs' ../sill-site/*.html   # only before the release that names a firewall that blocks Sill
-perl -0pi -e 's/[ \t]*<!-- Tour 0\.6:.*?<!-- \/Tour 0\.6 -->\n//gs' ../sill-site/*.html   # only before the release that shows the tour once more (tour version 2)
-perl -0pi -e 's/[ \t]*<!-- Locked Mac:.*?<!-- \/Locked Mac -->\n//gs' ../sill-site/*.html   # only before the release that shows a locked Mac's lock screen and nothing else
 git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" && git -C ../sill-site push
 ```
 
@@ -513,9 +465,9 @@ comes later, when the cask qualifies (below).
 - [ ] If what Sill does or keeps changed, update `site/` too, with the privacy policy's date, and
       republish it (part 1 §3) right after the release is published: the pages describe the builds
       people can download, so words for a newer build wait for it, and words for the old one go
-      with it. Since 2026-09-27 the published pages are v0.4.0's `site/`: privacy.html's line
-      for the link report (PR #39, on main since 2026-10-08) and the away sentences of
-      support.html and index.html go out with 0.5.1, with the privacy page's date.
+      with it. The published pages are the newest release's `site/` (0.6.0's since
+      2026-11-02, with its markers' words in and the privacy page dated November 2, 2026);
+      words marked for a release not out yet stay out of them (part 1 §3).
 
 ### The pairing release: Sill for Mac 0.4.0 with Sill for iPhone and iPad 0.5 (2)
 
@@ -800,7 +752,7 @@ Scripts/release-ios.sh --privacy-report   # what the archive's privacy manifest 
 ```text
 Sill puts your Mac on your iPhone and iPad. Pick any window, or the whole desktop, and use it with touch, a trackpad, a keyboard or Apple Pencil.
 
-It needs the free Sill for Mac 0.4.0 or later, from https://getsill.app/download, on a Mac with Apple silicon and macOS 14 or later. Open Sill for Mac and allow Screen Recording and Accessibility, then open Sill on your iPhone or iPad on the same Wi-Fi and tap your Mac. The first time, pair: scan the code your Mac shows, or type it. Over a USB cable, it pairs by itself.
+It needs the free Sill for Mac 0.4.0 or later, from https://getsill.app/download, on a Mac with macOS 14 or later (Apple silicon or Intel). Open Sill for Mac and allow Screen Recording and Accessibility, then open Sill on your iPhone or iPad on the same Wi-Fi and tap your Mac. The first time, pair: scan the code your Mac shows, or type it. Over a USB cable, it pairs by itself.
 
 To send feedback, take a screenshot while you use Sill, or use Send Beta Feedback in TestFlight. Write to support@getsill.app for anything else.
 ```
@@ -912,9 +864,9 @@ What a nightly is:
 
 - Sill for Mac: main's head built as a release is, by `Scripts/release.sh --nightly`:
   `make-app.sh --release` (Developer ID, the hardened runtime, the Developer ID provisioning profile
-  embedded), but universal (`SILL_UNIVERSAL=1`: Apple silicon and Intel, #62 and #88), as the first
-  nightly was (by hand, 2026-10-29) and as Noah told #62 the next version's download will be, where
-  a release so far is Apple silicon only; notarized and stapled, checked as Gatekeeper will check it, in a zip and a disk image
+  embedded), universal (`SILL_UNIVERSAL=1`: Apple silicon and Intel, #62 and #88), as the first
+  nightly was (by hand, 2026-10-29) and as every release is since 0.6.0 (Noah, 2026-11-02: "D1 -
+  Universal"; release.yml's publish job sets it too; 0.5.1 and earlier were Apple silicon only); notarized and stapled, checked as Gatekeeper will check it, in a zip and a disk image
   named `Sill-nightly-<yyyymmdd>-<sha7>.dmg` and `.zip`, each with its `.sha256`, on the pre-release
   [`nightly`](https://github.com/Saffsanity/sill/releases/tag/nightly). One pre-release for all
   the nights: its tag `nightly` moves to each night's commit, its notes say what a nightly is, list the
@@ -959,7 +911,7 @@ The two kinds of TestFlight group:
   automatic distribution gets it by itself, and asc.swift leaves it alone.
 - The public beta group, the external group with the public link on, gets nightlies only while the
   repository variable `SILL_NIGHTLY_PUBLIC_BETA` is `true`. It is unset at first: Noah tries a nightly
-  in his Insiders group first (2026-10-29: "hold off on giving the testflight build to public beta
+  in the internal group, App Store Connect's 'Internal', first (2026-10-29: "hold off on giving the testflight build to public beta
   until I try it out in Insiders first tomorrow"). Without it no external group is ever touched and
   nothing goes to Beta App Review; the job's log says which groups got the build and that the public
   beta didn't. asc.swift takes `--public-beta` only with the variable's value in its environment too.
@@ -1064,10 +1016,11 @@ The first run, for Noah:
    nightly's, the notes with the public beta link, "Pre-release"), the
    Mac job's log ("Identity keychain: data-protection", twice "Notarized Developer ID"), the disk image
    on a second Mac (downloaded, so quarantined: it opens, the drag, Sill opens, the iPad still
-   paired), the iOS job's last step ("Assigned build … to: Insiders", "Public beta: not given") and
+   paired), the iOS job's last step ("Assigned build … to: no group; by automatic distribution: Internal.",
+   "Public beta: not given") and
    TestFlight on the iPad (the build with its What to Test).
 8. `gh variable set SILL_NIGHTLY --body true`: every night from the next 09:17 UTC on.
-9. Once a nightly has worked in Insiders: `gh variable set SILL_NIGHTLY_PUBLIC_BETA --body true`
+9. Once a nightly has worked in 'Internal': `gh variable set SILL_NIGHTLY_PUBLIC_BETA --body true`
    (§6's Test Information filled in first). The next nightly goes to the public beta group and to Beta
    App Review; the first build of a version is reviewed in full.
 
