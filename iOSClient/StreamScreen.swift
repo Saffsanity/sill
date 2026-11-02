@@ -1474,6 +1474,7 @@ private struct TopBar: View {
             button(open: keyboardShown, symbol: "keyboard", label: "Keyboard",
                    accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
                    action: { setSettings(false, false); toggleKeyboard() })
+                .contextMenu { KeysMenu(macTakesFn: (client.hostFnKey ?? 0) >= 1, send: { client.sendFromKeyRow($0) }) }
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
                 .tourTarget(.keyboard)
@@ -1511,6 +1512,32 @@ private struct TopBar: View {
                 Text(label)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(open ? Palette.accent : Palette.barLabel)
+            }
+        }
+    }
+}
+
+// MARK: - The Keys menu
+
+/// A long press on the Keyboard button, on every bar (2026-11-02): the Mac's shortcuts a device has no key
+/// for (MacShortcut), one press each, and the window tiling (#272) for a Mac that takes fn.
+struct KeysMenu: View {
+    let macTakesFn: Bool
+    let send: (InputEvent) -> Void
+
+    var body: some View {
+        let shown = MacShortcut.shown(macTakesFn: macTakesFn)
+        Section("Mac") {
+            ForEach(shown.filter { !$0.needsFn }, id: \.self) { item in
+                Button(item.title) { item.events.forEach(send) }
+            }
+        }
+        let tiling = shown.filter(\.needsFn)
+        if !tiling.isEmpty {
+            Section("Window") {
+                ForEach(tiling, id: \.self) { item in
+                    Button(item.title) { item.events.forEach(send) }
+                }
             }
         }
     }

@@ -202,8 +202,39 @@ check(KeyStrokes.flags(fromDevice: 0) == 0, "no modifiers: no flags")
 check(KeyStrokes.flags(fromDevice: 1 << 16) == capsLock && KeyStrokes.flags(fromDevice: 1 << 17) == shift
       && KeyStrokes.flags(fromDevice: 1 << 18) == control && KeyStrokes.flags(fromDevice: 1 << 19) == option
       && KeyStrokes.flags(fromDevice: 1 << 20) == command, "each device bit is the same CGEventFlags bit")
-check(KeyStrokes.flags(fromDevice: (1 << 21) | (1 << 24) | 0xFFFF | (1 << 23)) == 0,
+check(KeyStrokes.flags(fromDevice: (1 << 21) | (1 << 24) | 0xFFFF) == 0,
       "the numeric pad, iOS-only and low bits never reach the Mac")
+// The Globe key's bit (2026-11-02, #272): Sill's own window tiling shortcuts set it (UIKit has no fn flag, so
+// no hardware keyboard does); it reaches the Mac as CGEventFlags' maskSecondaryFn, the same bit.
+check(KeyStrokes.flags(fromDevice: 1 << 23) == fn && KeyStrokes.fn == fn, "the fn bit reaches the Mac as maskSecondaryFn")
+// The window list's fnKey, the device's tiling: only from macOS 15, whose Globe-Control shortcuts tile; on 14
+// an arrow already carries fn, so fn⌃← would be ⌃←, the Space on the left (the review, 2026-11-02).
+check(KeyStrokes.fnKey(macOSMajor: 15) == 1 && KeyStrokes.fnKey(macOSMajor: 27) == 1, "macOS 15 and later: fnKey 1")
+check(KeyStrokes.fnKey(macOSMajor: 14) == nil && KeyStrokes.fnKey(macOSMajor: 13) == nil, "macOS 14: none, so no tiling is offered")
+
+// MARK: The Keys menu's shortcuts (MacShortcut, 2026-11-02)
+
+/// What the Mac posts for `events` from one device, through the host's own KeyStrokes.
+func posted(_ events: [InputEvent]) -> (strokes: [KeyStroke], held: UInt64) {
+    var keys = KeyStrokes(); let d = ObjectIdentifier(Conn()); var out: [KeyStroke] = []
+    for e in events { if case .key(let u, let down, let m) = e { out += keys.key(usage: u, down: down, modifiers: m, from: d) ?? [] } }
+    return (out, keys.heldFlags)
+}
+let shortcutChords: [(MacShortcut, UInt16, UInt64)] = [
+    (.lockScreen, 12, control | command), (.forceQuit, 53, option | command), (.screenshot, 23, shift | command),
+    (.lastApp, 48, command), (.tileLeft, 123, fn | control), (.tileRight, 124, fn | control), (.tileTop, 126, fn | control),
+    (.tileBottom, 125, fn | control), (.fill, 3, fn | control), (.center, 8, fn | control), (.previousSize, 15, fn | control),
+]
+check(shortcutChords.map(\.0) == MacShortcut.allCases, "every shortcut checked, in the menu's order")
+for (s, virtualKey, flags) in shortcutChords {
+    let (strokes, held) = posted(s.events)
+    let down = strokes.first { $0.virtualKey == virtualKey && $0.down }
+    check(down?.flags == flags && held == 0, "\(s.title): key \(virtualKey) down with \(KeyStrokes.names(flags))\(flags & fn != 0 ? " + fn" : ""), nothing held after (got \(down.map { KeyStrokes.names($0.flags) } ?? "no down"))")
+}
+check(MacShortcut.allCases.filter(\.needsFn) == [.tileLeft, .tileRight, .tileTop, .tileBottom, .fill, .center, .previousSize],
+      "only the window tiling needs fn: a Mac that drops it would take ⌃← for the Space on the left")
+check(MacShortcut.shown(macTakesFn: false) == [.lockScreen, .forceQuit, .screenshot, .lastApp]
+      && MacShortcut.shown(macTakesFn: true) == MacShortcut.allCases, "a Mac that takes fn gets the tiling too")
 check(KeyStrokes.flags(fromDevice: 0x1F_0000 | (1 << 21)) == capsLock | modifierBits, "all five, nothing else")
 check(command == 0x10_0000 && shift == 0x02_0000 && control == 0x04_0000 && option == 0x08_0000 && capsLock == 0x01_0000,
       "CGEventFlags' masks")

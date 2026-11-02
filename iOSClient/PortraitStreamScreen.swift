@@ -413,6 +413,7 @@ struct PortraitStreamScreen: View {
                           setSettings(false, false)
                           overlay.toggleKeyboard()
                       })
+                .contextMenu { KeysMenu(macTakesFn: (client.hostFnKey ?? 0) >= 1, send: { client.sendFromKeyRow($0) }) }
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
                 .tourTarget(.keyboard)
@@ -497,7 +498,7 @@ struct PortraitStreamScreen: View {
         KeyRow(metrics: metrics, keys: keys, latched: $latched, keyboardShown: keyboardShown,
                send: { client.sendFromKeyRow($0) },
                toggleKeyboard: { overlay.toggleKeyboard() },
-               showSpotlight: client.active == .desktop)
+               showSpotlight: client.active == .desktop, macTakesFn: (client.hostFnKey ?? 0) >= 1)
             .tourTarget(.keys)
     }
 
@@ -750,7 +751,8 @@ private enum Key {
 /// 44 pt caps do not fit across 472 pt, six and then six, 72 pt wide at 500 pt. On a phone
 /// (`.phone`): escape, tab and the four modifiers, six caps across the row; the Keyboard button is
 /// in row 1, and Spotlight is cmd then space on the keyboard (a latched ⌘ turns a typed space into
-/// ⌘Space). Arrows there come from a hardware keyboard. Escape, tab and the arrows are down on the
+/// ⌘Space). The phone's arrows (#287) are a second page of the row, a swipe across it away: esc, the four
+/// arrows and shift, the latched modifiers carried over (⌥ latched, then ←: ⌥←). Escape, tab and the arrows are down on the
 /// Mac while a finger holds them, so the Mac repeats them (HeldCap, #162), but for the phone's at the
 /// accessibility text sizes, whose long press shows the cap large (`capsHold`).
 private struct KeyRow: View {
@@ -765,6 +767,16 @@ private struct KeyRow: View {
     /// Spotlight's panel is its own Mac window, so it only shows up in the stream while the whole
     /// desktop is the source. Anywhere else the key would be a cap that does something invisible.
     let showSpotlight: Bool
+    /// The Keys menu's window tiling (`WindowList.fnKey`).
+    let macTakesFn: Bool
+    /// The phone's page of arrows, a swipe across the row (#287). DEBUG: `-SillKeyPage arrows` starts on it.
+    @State private var arrowsPage: Bool = {
+        #if DEBUG
+        return UserDefaults.standard.string(forKey: "SillKeyPage") == "arrows"
+        #else
+        return false
+        #endif
+    }()
     /// Escape, tab or an arrow held down (HeldCap): its key is down on the Mac until the finger leaves.
     @State private var heldCap = HeldCap()
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -790,6 +802,8 @@ private struct KeyRow: View {
 
     /// The six that name a key.
     private static let phone = Array(all.prefix(6))
+    /// The phone's second page: esc, the four arrows and shift, where esc and shift are on the first.
+    private static let phoneArrows = [all[0], all[6], all[7], all[8], all[9], all[5]]
 
     private var shown: [Key] {
         switch keys {
@@ -807,14 +821,19 @@ private struct KeyRow: View {
     }
 
     var body: some View {
-        VStack(spacing: metrics.keyRowGap) {
-            ForEach(rows.indices, id: \.self) { row in
-                HStack(spacing: metrics.keyGap) {
-                    ForEach(rows[row].indices, id: \.self) { index in
-                        key(rows[row][index])
-                    }
+        Group {
+            if keys == .phone {
+                // Two pages a swipe apart (#287): the row's room is what it was.
+                TabView(selection: $arrowsPage) {
+                    capsRow(Self.phone).tag(false)
+                    capsRow(Self.phoneArrows).tag(true)
                 }
+                .tabViewStyle(.page(indexDisplayMode: .never))
                 .frame(height: metrics.capHeight)
+            } else {
+                VStack(spacing: metrics.keyRowGap) {
+                    ForEach(rows.indices, id: \.self) { row in capsRow(rows[row]) }
+                }
             }
         }
         .frame(height: metrics.keyBlockHeight)
@@ -824,6 +843,21 @@ private struct KeyRow: View {
         #if DEBUG
         .onAppear(perform: runInputTest)
         #endif
+    }
+
+    private func capsRow(_ row: [Key]) -> some View {
+        HStack(spacing: metrics.keyGap) {
+            ForEach(row.indices, id: \.self) { index in
+                if keys == .phone {
+                    key(row[index]).accessibilityAction(named: arrowsPage ? "Show the modifier keys" : "Show the arrow keys") {
+                        arrowsPage.toggle()
+                    }
+                } else {
+                    key(row[index])
+                }
+            }
+        }
+        .frame(height: metrics.capHeight)
     }
 
     @ViewBuilder private func key(_ key: Key) -> some View {
@@ -847,6 +881,7 @@ private struct KeyRow: View {
                     .font(.system(size: 20))
                     .foregroundStyle(keyboardShown ? Palette.accent : Palette.text)
             }
+            .contextMenu { KeysMenu(macTakesFn: macTakesFn, send: send) }
         case .spotlight:
             cap(open: false, label: "Open Spotlight on the Mac", action: { tap(key) }) {
                 Image(systemName: Spotlight.symbol)
