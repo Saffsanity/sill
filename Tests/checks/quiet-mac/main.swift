@@ -36,6 +36,14 @@ eq(Q.usesTap(macOS: (15, 0), declared: true, synthetic: false, permission: .gran
 eq(Q.usesTap(macOS: (27, 0), declared: false, synthetic: false, permission: .granted), false, "no usage string (the CLI): ScreenCaptureKit")
 eq(Q.usesTap(macOS: (27, 0), declared: true, synthetic: true, permission: .granted), false, "a synthetic host: its test tone, never a tap")
 
+// MARK: What starts first
+
+// Not asked yet: ScreenCaptureKit at once, so a prompt left unanswered never leaves the device without sound;
+// the tap takes over once it is granted.
+eq(Q.firstSource(permission: .granted), .tap, "granted: the tap at once")
+eq(Q.firstSource(permission: .unknown), .screenWhileAsking, "not asked yet: ScreenCaptureKit while macOS asks")
+eq(Q.firstSource(permission: .denied), .screen, "declined: ScreenCaptureKit")
+
 for major in 12...28 { for minor in 0...4 { for declared in [false, true] { for synthetic in [false, true] {
     for p in [Q.Permission.granted, .denied, .unknown] {
         let want = (major > 14 || (major == 14 && minor >= 2)) && declared && !synthetic && p != .denied

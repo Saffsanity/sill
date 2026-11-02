@@ -43,6 +43,9 @@ MUTANTS = [
     ("sessionPaired false by default", "HostSettings.swift", "                sessionPaired: Bool? = nil) {", "                sessionPaired: Bool? = false) {"),
     ("the late count never kept", "Viewport.swift", "self.audioBehindMs = audioBehindMs; self.audioLate = audioLate", "self.audioBehindMs = audioBehindMs; self.audioLate = nil"),
     ("kind 43 as 253", "StreamMessage.swift", "    case audio = 43 ", "    case audio = 253 "),
+    ("a quiet Mac said to keep playing", "Audio.swift", "let playing = quiet ? \"\\(mac) stays quiet meanwhile\" : \"\\(mac) keeps playing it too\"", "let playing = \"\\(mac) keeps playing it too\""),
+    ("a quiet Mac's Mute words as before", "Audio.swift", "let mute = (quiet ?", "let mute = (false ?"),
+    ("audioMuted read as nil", "Viewport.swift", "    public var audioMuted: Bool?\n", "    public var audioMuted: Bool? { get { nil } set {} }\n"),
 ]
 caught = 0
 for name, file, old, new in MUTANTS:

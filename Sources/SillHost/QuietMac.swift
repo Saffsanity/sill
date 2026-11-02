@@ -21,6 +21,19 @@ enum QuietMac {
         }
     }
 
+    enum FirstSource: Equatable { case tap, screenWhileAsking, screen }
+
+    /// What starts: the tap once granted; while not asked yet ScreenCaptureKit at once, with macOS's prompt
+    /// meanwhile, so a prompt left unanswered never leaves the devices without sound (the tap takes over
+    /// once it is granted); declined, ScreenCaptureKit.
+    static func firstSource(permission: Permission) -> FirstSource {
+        switch permission {
+        case .granted: return .tap
+        case .unknown: return .screenWhileAsking
+        case .denied: return .screen
+        }
+    }
+
     /// Whether the sound goes through the tap: from macOS 14.2 (AudioHardwareCreateProcessTap), in an app
     /// that declares NSAudioCaptureUsageDescription (macOS ends a process that asks without one), never on a
     /// synthetic host, and not once the permission is declined.

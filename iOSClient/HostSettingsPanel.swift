@@ -381,7 +381,7 @@ struct HostSettingsPanel: View {
                 if send == true, let note = state.audioNote {
                     Footnote(text: note, warning: true)
                 }
-                Footnote(text: Self.sendAudioFooter(send, muted: client.soundMuted, mac: mac, device: device))
+                Footnote(text: SoundWords.sendAudioFooter(send, muted: client.soundMuted, quiet: state.macQuiet == true, mac: mac, device: device))
                 // Direct Wireless Connection: how devices reach the Mac, not how it streams; after the
                 // closing footer, whose "the stream restarts" is not true of it, and last, the least
                 // changed row with the longest footer (the compact halves' 259 pt shows the rest
@@ -647,23 +647,6 @@ struct HostSettingsPanel: View {
             }
         }
         Footnote(text: gesturesFooter)
-    }
-
-    /// Under Send Audio's switch and the Mute row below it (docs/audio-plan.md §7.7): on, that every
-    /// device hears it and that Mute silences this one alone; off, what turning it on does, and Mute
-    /// the same; either way, that this device is muted while it is; for a Mac without sound (nil), what
-    /// to update (no Mute row then). Each starts with "Beta.".
-    static func sendAudioFooter(_ send: Bool?, muted: Bool, mac: String, device: String) -> String {
-        let mute = " Mute silences it on this \(device) alone; \(mac) keeps sending and playing it."
-            + (muted ? " This \(device) is muted." : "")
-        switch send {
-        case true?:
-            return "Beta. Every connected device hears what streams, and \(mac) keeps playing it too." + mute
-        case false?:
-            return "Beta. Turn this on to hear what streams on every connected device; \(mac) keeps playing it too." + mute
-        case nil:
-            return "Beta. Update Sill on \(mac) to hear its sound on this \(device)."
-        }
     }
 
     /// Under Reverse Scrolling's switch: what it turns around, a finger's drag over the picture and two

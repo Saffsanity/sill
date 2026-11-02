@@ -3429,7 +3429,7 @@ package final class StreamCoordinator {
                         awayBitrate: t.awayBitrate, awayCaptureScale: Double(t.awayCaptureScale),
                         thisConnectionAway: thisAway, awayRunning: awayWanted)
         }
-        return HostSettingsState(settings: t.streamSettings(away: thisAway),
+        var state = HostSettingsState(settings: t.streamSettings(away: thisAway),
                                  persistent: onDeviceSettingsChange != nil,
                                  virtualDisplayAvailable: appKitLoop,
                                  virtualDisplayNote: virtualDisplayNote(target: t, snapshot: s),
@@ -3440,6 +3440,9 @@ package final class StreamCoordinator {
                                  link: link,
                                  audioNote: t.sendAudio ? s.audio?.note : nil,
                                  sessionPaired: sessionPaired(id))
+        // Send Audio's footnote on the device: this Mac stays quiet while devices play its sound (QuietMac).
+        state.macQuiet = quietMac ? true : nil
+        return state
     }
 
     /// Whether connection `id`'s key is on this Mac's trust list now, as the status snapshot lists it

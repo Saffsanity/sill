@@ -190,3 +190,25 @@ public enum AudioMessage: Hashable, Sendable {
         }
     }
 }
+
+/// Send Audio's footnote in the device's Settings panel, under its switch and the Mute row (docs/audio-plan.md
+/// §7.7), from what the Mac says (kind 16): `send` its Send Audio (nil: a Mac without sound, no Mute row then),
+/// `quiet` its `macQuiet` (it silences itself while devices play its sound), and this device's Mute. Each
+/// starts with "Beta.". Pure; checked by Tests/checks/compatibility. Here beside the wire, as LockedMac's
+/// words are, so a check can read them without the device's interface.
+public enum SoundWords {
+    public static func sendAudioFooter(_ send: Bool?, muted: Bool, quiet: Bool, mac: String, device: String) -> String {
+        let mute = (quiet ? " Mute silences it on this \(device); while every device is muted, \(mac) plays it itself."
+                          : " Mute silences it on this \(device) alone; \(mac) keeps sending and playing it.")
+            + (muted ? " This \(device) is muted." : "")
+        let playing = quiet ? "\(mac) stays quiet meanwhile" : "\(mac) keeps playing it too"
+        switch send {
+        case true?:
+            return "Beta. Every connected device hears what streams, and \(playing)." + mute
+        case false?:
+            return "Beta. Turn this on to hear what streams on every connected device; \(playing)." + mute
+        case nil:
+            return "Beta. Update Sill on \(mac) to hear its sound on this \(device)."
+        }
+    }
+}

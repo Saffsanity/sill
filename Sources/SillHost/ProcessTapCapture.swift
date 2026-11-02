@@ -37,9 +37,6 @@ final class ProcessTapCapture: AudioSource, @unchecked Sendable {
     }
 
     func start() async throws {
-        if AudioRecordingPermission.now() == .unknown, await AudioRecordingPermission.request() == false {
-            throw Failure(description: "the permission to record this Mac's sound was declined")
-        }
         guard AudioRecordingPermission.now() != .denied else {
             throw Failure(description: "the permission to record this Mac's sound is declined (System Settings › Privacy & Security)")
         }
@@ -178,8 +175,10 @@ enum AudioRecordingPermission {
     }
 }
 
-/// The process tap, and ScreenCaptureKit when the tap does not start (the permission declined, an error):
-/// the iPad hears the sound either way; only the tap keeps the Mac quiet.
+/// The process tap, and ScreenCaptureKit when the tap does not start (the permission declined, an error)
+/// or while macOS asks for the permission (QuietMac.firstSource): the iPad hears the sound either way; only
+/// the tap keeps the Mac quiet. Granted while ScreenCaptureKit runs, this source ends itself, and the
+/// pipeline starts the sound again (within its 10 s), through the tap this time.
 final class TapOrScreenCapture: AudioSource, @unchecked Sendable {
     var onPCM: ((PCMChunk) -> Void)? { didSet { tap.onPCM = onPCM; fallback.onPCM = onPCM } }
     var onStopped: ((String) -> Void)? { didSet { tap.onStopped = onStopped; fallback.onStopped = onStopped } }
@@ -193,6 +192,24 @@ final class TapOrScreenCapture: AudioSource, @unchecked Sendable {
     }
 
     func start() async throws {
+        switch QuietMac.firstSource(permission: AudioRecordingPermission.now()) {
+        case .tap:
+            break
+        case .screen:
+            try await fallback.start()
+            running = fallback
+            return
+        case .screenWhileAsking:
+            try await fallback.start()
+            running = fallback
+            print("Audio: asking for the permission to record this Mac's sound; meanwhile through ScreenCaptureKit, and the Mac keeps playing.")
+            let screen = fallback
+            Task { [weak self] in
+                guard await AudioRecordingPermission.request() == true, let self, self.running === screen else { return }
+                self.onStopped?("the permission to record this Mac's sound was granted: the process tap takes over")
+            }
+            return
+        }
         do {
             try await tap.start()
             running = tap

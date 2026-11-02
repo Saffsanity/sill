@@ -119,6 +119,10 @@ public struct ClientStats: Codable, Hashable {
     public var audioBehindMs: Int?
     /// The sound's packets of that second that came too late to play. Nil as `audioBehindMs`.
     public var audioLate: Int?
+    /// True while this device's Mute is on (2026-11-02): a Mac that silences itself while devices play its
+    /// sound (a process tap) does not count it, or nothing would play anywhere. Nil when not muted, and from
+    /// an older client. Set after the initializer.
+    public var audioMuted: Bool?
 
     public init(fps: Int, frameAgeMs: Int, rttMs: Int, device: String,
                 frameAgeMaxMs: Int? = nil, rttMaxMs: Int? = nil, audioBehindMs: Int? = nil, audioLate: Int? = nil) {

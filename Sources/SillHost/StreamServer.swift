@@ -141,6 +141,8 @@ final class StreamServer {
         /// that plays none (every device before 2026-09-27, a test client without --audio), which is
         /// sent no kind 43.
         var audioCodec: String?
+        /// Its Mute is on (its stats' `audioMuted`): not counted among the devices that play the sound.
+        var audioMuted = false
         /// The epoch whose format it was sent: a packet of another epoch goes after that epoch's format.
         var audioEpochSent: Int?
         /// Sound messages handed to its connection and not taken yet (`audioCap`).
@@ -1507,6 +1509,10 @@ final class StreamServer {
                         // The device's own count, added without overflow (ClientStats.lateSince): two
                         // reports of Int.max within a line's 1.5 s trapped here and ended Sill.
                         client.audioLateSincePrint = ClientStats.lateSince(client.audioLateSincePrint, adding: stats.audioLate)
+                        if client.audioMuted != (stats.audioMuted == true) {
+                            client.audioMuted = stats.audioMuted == true
+                            self.updateAudioListeners()
+                        }
                         let now = CFAbsoluteTimeGetCurrent()
                         if now - client.lastStatsPrint >= 1.5 {
                             client.lastStatsPrint = now
@@ -1631,9 +1637,10 @@ final class StreamServer {
     static let audioCapHome = 100
     static let audioCapRemote = 1500
 
-    /// On `queue`: the count of devices that play the sound, reported when it changed.
+    /// On `queue`: the count of devices that play the sound, reported when it changed. A muted device
+    /// does not count: with none left nothing is captured, so a Mac kept quiet by the tap plays again.
     private func updateAudioListeners() {
-        let n = clients.values.filter { $0.audioCodec == AudioCodec.aacELD }.count
+        let n = clients.values.filter { $0.audioCodec == AudioCodec.aacELD && !$0.audioMuted }.count
         guard n != audioListeners else { return }
         audioListeners = n
         onAudioListenersChanged?(n)

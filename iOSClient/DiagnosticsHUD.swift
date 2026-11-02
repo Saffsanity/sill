@@ -32,7 +32,7 @@ final class ClientStatsReporter: ObservableObject {
     /// a sample; the maxima ride in the optional fields that only newer hosts read.
     private func report(_ s: StreamClient.LinkStats) {
         guard let client, client.connected else { return }
-        let stats = ClientStats(fps: s.fps,
+        var stats = ClientStats(fps: s.fps,
                                 frameAgeMs: s.frameAge?.median ?? -1,
                                 rttMs: s.rtt?.median ?? -1,
                                 device: Self.deviceName,
@@ -40,6 +40,8 @@ final class ClientStatsReporter: ObservableObject {
                                 rttMaxMs: s.rtt?.max ?? -1,
                                 audioBehindMs: s.soundBehindMs,
                                 audioLate: s.soundLate)
+        // So a Mac that silences itself while devices play its sound does not count this one while muted.
+        stats.audioMuted = client.soundMuted ? true : nil
         client.send(.clientStats, payload: Wire.encode(stats))
     }
 

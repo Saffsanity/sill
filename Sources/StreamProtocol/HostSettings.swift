@@ -222,6 +222,11 @@ public struct HostSettingsState: Codable, Hashable, Sendable {
     /// device that pairs during its session hears true. Nil from hosts before 2026-10-29, which took
     /// Direct Wireless from any session at home. The connection's own, like `away` and `link`.
     public var sessionPaired: Bool?
+    /// True while this Mac silences its own output for the devices that play its sound (a process tap;
+    /// the host's QuietMac): Send Audio's footnote says it stays quiet (SoundWords). Nil from hosts before
+    /// 2026-11-02 and from one that keeps playing. The Mac's, the same for every connection. Set after the
+    /// initializer.
+    public var macQuiet: Bool?
 
     public init(settings: StreamSettings, persistent: Bool, virtualDisplayAvailable: Bool,
                 virtualDisplayNote: String? = nil, softwareEncoder: Bool, stream: RunningStream? = nil,

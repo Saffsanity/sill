@@ -272,6 +272,39 @@ check(Wire.decode(OldClientStats.self, from: Wire.encode(heard))
 let quiet = ClientStats(fps: 60, frameAgeMs: 9, rttMs: 7, device: "iPad")
 check(!json(quiet).contains("audio") && Wire.decode(ClientStats.self, from: Wire.encode(quiet))?.audioLate == nil,
       "a device that played no sound sends neither")
+// `audioMuted` (2026-11-02): the device's Mute on, so a Mac that quiets itself while devices play its sound
+// (QuietMac's process tap) does not count it; muted, nothing would play anywhere. Set after the initializer.
+var muted = quiet
+muted.audioMuted = true
+check(json(muted).contains(#""audioMuted":true"#) && !json(quiet).contains("audioMuted") && quiet.audioMuted == nil,
+      "a muted device says audioMuted true; one not muted leaves the key out: \(json(muted))")
+check(Wire.decode(ClientStats.self, from: Wire.encode(muted))?.audioMuted == true, "audioMuted round-trips")
+// Kind 16's `macQuiet` (2026-11-02): the Mac silences itself while devices play its sound (QuietMac), and Send
+// Audio's footnote says so; nil from older hosts and from one that keeps playing, whose words are as before.
+func eq(_ a: String, _ b: String, _ what: String, line: Int = #line) { check(a == b, what + (a == b ? "" : ": \(a)"), line: line) }
+var quietState = HostSettingsState(settings: StreamSettings(maxFPS: 60, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false,
+                                                            virtualDisplay: false, directWireless: false, sendAudio: true),
+                                   persistent: true, virtualDisplayAvailable: true, softwareEncoder: false)
+check(!json(quietState).contains("macQuiet") && quietState.macQuiet == nil, "a Mac that keeps playing leaves macQuiet out")
+quietState.macQuiet = true
+check(json(quietState).contains(#""macQuiet":true"#) && Wire.decode(HostSettingsState.self, from: Wire.encode(quietState))?.macQuiet == true,
+      "a quiet Mac says macQuiet true, and it round-trips")
+eq(SoundWords.sendAudioFooter(true, muted: false, quiet: false, mac: "Mac mini", device: "iPad"),
+   "Beta. Every connected device hears what streams, and Mac mini keeps playing it too. Mute silences it on this iPad alone; Mac mini keeps sending and playing it.",
+   "a Mac that keeps playing: today's words")
+eq(SoundWords.sendAudioFooter(false, muted: true, quiet: false, mac: "Mac mini", device: "iPad"),
+   "Beta. Turn this on to hear what streams on every connected device; Mac mini keeps playing it too. Mute silences it on this iPad alone; Mac mini keeps sending and playing it. This iPad is muted.",
+   "off and muted, a Mac that keeps playing: today's words")
+eq(SoundWords.sendAudioFooter(true, muted: false, quiet: true, mac: "Mac mini", device: "iPad"),
+   "Beta. Every connected device hears what streams, and Mac mini stays quiet meanwhile. Mute silences it on this iPad; while every device is muted, Mac mini plays it itself.",
+   "a quiet Mac: it stays quiet, and plays again once every device is muted")
+eq(SoundWords.sendAudioFooter(false, muted: true, quiet: true, mac: "Mac mini", device: "iPhone"),
+   "Beta. Turn this on to hear what streams on every connected device; Mac mini stays quiet meanwhile. Mute silences it on this iPhone; while every device is muted, Mac mini plays it itself. This iPhone is muted.",
+   "a quiet Mac, off and muted")
+eq(SoundWords.sendAudioFooter(nil, muted: false, quiet: true, mac: "Mac mini", device: "iPad"),
+   "Beta. Update Sill on Mac mini to hear its sound on this iPad.", "a Mac without sound: as before")
+check(Wire.decode(OldClientStats.self, from: Wire.encode(muted)) == OldClientStats(fps: 60, frameAgeMs: 9, rttMs: 7, device: "iPad"),
+      "an older host reads a muted device's stats and skips audioMuted")
 // Kind 43.
 check(StreamMessageKind.audio.rawValue == 43 && StreamMessageKind(rawValue: 43) == .audio, "kind 43 is audio")
 check(StreamMessageKind(rawValue: 29) == nil && StreamMessageKind(rawValue: 42) == nil && StreamMessageKind(rawValue: 44) == .keyframeRequest,
