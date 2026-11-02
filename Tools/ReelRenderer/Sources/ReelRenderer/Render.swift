@@ -141,6 +141,12 @@ final class Compositor {
             ctx.clear(CGRect(origin: .zero, size: Stage.size))
         }
         ctx.interpolationQuality = .high
+        // 0.6.0: glyphs at their exact fractional positions wherever Core Graphics draws text (the reel's type is
+        // glyph outlines, GlyphText.swift; this covers any text Core Text draws itself, such as an emoji's bitmap).
+        ctx.setAllowsFontSubpixelPositioning(true)
+        ctx.setShouldSubpixelPositionFonts(true)
+        ctx.setAllowsFontSubpixelQuantization(false)
+        ctx.setShouldSubpixelQuantizeFonts(false)
         renderer.content = view
         renderer.render { _, render in render(ctx) }
         CVPixelBufferUnlockBaseAddress(pb, [])
@@ -155,10 +161,12 @@ final class Compositor {
 
     /// The finished frame as a Core Image graph (SwiftUI layers already drawn into buffers).
     func composeImage(_ layers: FrameLayers, frame index: Int) -> CIImage {
+        TypeProbe.shared.set { $0.layer = .base }              // typecheck: which layer each glyph is drawn in
         draw(layers.base, into: bufA, opaque: true)
         var img = CIImage(cvPixelBuffer: bufA, options: [.colorSpace: sRGB])
         let canvas = CGRect(origin: .zero, size: Stage.size)
         if let (other, w) = layers.mix, w > 0.001 {
+            TypeProbe.shared.set { $0.layer = .mix }
             draw(other, into: bufC, opaque: true)
             let b = CIImage(cvPixelBuffer: bufC, options: [.colorSpace: sRGB])
             img = CIFilter(name: "CIDissolveTransition", parameters: [kCIInputImageKey: img, kCIInputTargetImageKey: b,
@@ -182,6 +190,7 @@ final class Compositor {
                 "inputBVector": CIVector(x: 0, y: 0, z: b, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1)])
         }
         if let overlay = layers.overlay {
+            TypeProbe.shared.set { $0.layer = .overlay }
             draw(overlay, into: bufB, opaque: false)
             let o = CIImage(cvPixelBuffer: bufB, options: [.colorSpace: sRGB])
             img = o.composited(over: img)

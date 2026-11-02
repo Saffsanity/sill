@@ -75,16 +75,32 @@ struct Backdrop: View {
     }
 }
 
-/// The type layer of a shot: several lines, each with its own snap.
+/// The type layer of a shot: several lines, each with its own snap, drawn as glyph outlines in one canvas.
+/// `transform` moves the whole layer (canvas → canvas: a card's hold, S05's lift): move type with it, never with
+/// SwiftUI's `.offset` or `.scaleEffect` around the layer, so typecheck knows where every glyph should be.
 struct TypeLayer: View {
     let lines: [LineSpec]
     let t: Double
+    var transform: CGAffineTransform = .identity
+    /// Where the shot masks or covers this layer, in canvas coordinates (GlyphCanvas's `covered`).
+    var covered: [CGRect] = []
+    /// False for type that belongs to a picture (GlyphCanvas's `checked`).
+    var checked = true
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            Color.clear.canvas()
-            ForEach(0..<lines.count, id: \.self) { i in TypeLine(spec: lines[i], t: t) }
+        let nodes = lines.compactMap { TypeLine.node($0, t) }
+        if TypeProbe.legacy {
+            // REEL_TYPE_LEGACY=1 (comparison only): v3.1's SwiftUI Text, moved as v3.1 moved it, over the canvas
+            // that records where the glyphs should be.
+            ZStack(alignment: .topLeading) {
+                Color.clear.canvas()
+                ForEach(0..<lines.count, id: \.self) { i in LegacyTypeLine(spec: lines[i], t: t) }
+            }
+            .canvas()
+            .transformEffect(transform)
+            .overlay(GlyphCanvas(nodes: nodes, transform: transform, covered: covered, checked: checked))
+        } else {
+            GlyphCanvas(nodes: nodes, transform: transform, covered: covered, checked: checked)
         }
-        .canvas()
     }
 }
 

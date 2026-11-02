@@ -11,6 +11,10 @@
 //   ReelRenderer verify <movie.mp4> [<silent.mp4>] format, blacks, silence, hero timing
 //   ReelRenderer strip-edts <movie.mp4> …          remove the video track's identity edit list
 //   ReelRenderer finalize [--cover p.png [--poster-out p.jpg]] <movie.mp4> …   no video elst, cover art, moov first
+//   ReelRenderer typecheck [--from s] [--to s] [--every n] [--threshold px] [--report f] [--verbose]
+//                                                  every glyph against its path (TypeCheck.swift); exit 1 if one strays
+//   ReelRenderer typetest [--out f.mp4] [--seconds 3] [--typecheck] [--frames dir] [--no-video]   two moving lines
+//   render … --typecheck [n]                       the same check on every n-th frame of a render (exit 1 if it fails)
 import AppKit
 import AVFoundation
 import CoreImage
@@ -45,6 +49,7 @@ func render(args: [String]) throws {
     var framesDir: URL?
     var every = 12
     var video = true
+    var typecheckEvery: Int?
     var i = 0
     while i < args.count {
         switch args[i] {
@@ -54,6 +59,9 @@ func render(args: [String]) throws {
         case "--frames": framesDir = URL(fileURLWithPath: args[i + 1], isDirectory: true); i += 2
         case "--every": every = Int(args[i + 1])!; i += 2
         case "--no-video": video = false; i += 1
+        case "--typecheck":
+            typecheckEvery = 1
+            if i + 1 < args.count, let n = Int(args[i + 1]) { typecheckEvery = max(1, n); i += 2 } else { i += 1 }
         default: i += 1
         }
     }
@@ -65,6 +73,7 @@ func render(args: [String]) throws {
     if let framesDir { try FileManager.default.createDirectory(at: framesDir, withIntermediateDirectories: true) }
     let first = Int((from * 60).rounded()), last = min(Stage.frames, Int((to * 60).rounded())) - 1
     let writer = video ? try VideoWriter(url: out) : nil
+    let checker = typecheckEvery.map { _ in TypeChecker(with: comp) }
     let started = Date()
     var lastReport = Date()
     for f in first...last {
@@ -77,6 +86,9 @@ func render(args: [String]) throws {
             if !video && (f - first) % every != 0 { continue }
             let img = comp.still(l, frame: f)
             writePNG(img, to: framesDir.appendingPathComponent(String(format: "f%04d-%@-%06.3f.png", f, Timeline.shot(at: f).id, Double(f) / 60)))
+        }
+        if let checker, let n = typecheckEvery, (f - first) % n == 0 {
+            try checker.check(frame: f, shot: Timeline.shot(at: f).id) { try layers(frame: f, env: env) }
         }
         if Date().timeIntervalSince(lastReport) > 10 {
             lastReport = Date()
@@ -94,6 +106,11 @@ func render(args: [String]) throws {
     // Speed check data: every clip read, for §11.2 check 2.
     for (id, ts) in env.clips.reads.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
         print("  reads \(id.rawValue): \(ts.count) frames, \(String(format: "%.3f", ts.min() ?? 0))…\(String(format: "%.3f", ts.max() ?? 0)) s")
+    }
+    if let checker {
+        let (text, passed) = checker.summary()
+        print(text, terminator: "")
+        if !passed { throw TypeCheckFailed(summary: "") }
     }
 }
 
@@ -171,6 +188,8 @@ do {
     case "mux": try muxScore(args: Array(args.dropFirst()))
     case "sheet": try contactSheet(args: Array(args.dropFirst()))
     case "verify": try verify(args: Array(args.dropFirst()))
+    case "typecheck": try MainActor.assumeIsolated { try typecheckCommand(args: Array(args.dropFirst())) }
+    case "typetest": try MainActor.assumeIsolated { try typetestCommand(args: Array(args.dropFirst())) }
     case "strip-edts": for a in args.dropFirst() { try stripVideoEditList(URL(fileURLWithPath: a)) }
     case "finalize":
         // finalize [--cover poster.png [--poster-out poster.jpg]] <movie.mp4> …

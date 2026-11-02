@@ -511,9 +511,10 @@ struct Streak: View {
 @MainActor func s20Type(_ t: Double) -> AnyView {
     let head = Streak.headX(t)
     // "Latency you don’t notice." is revealed left to right by a wipe keyed to the streak's x.
-    let title = Text(Copy.latency).font(TypeStyle.T1s.font).tracking(TypeStyle.T1s.tracking)
-        .foregroundStyle(Color(hex: Palette.text1)).fixedSize()
-        .placed(x: 960, baseline: 540, align: .center)
+    let style = TypeStyle.T1s
+    let titleShape = ShapedText.shape(Copy.latency, style)
+    let title = TypeNode.run(PlacedRun(shape: titleShape, transform: CGAffineTransform(translationX: (960 - titleShape.frameWidth / 2).rounded(), y: 540),
+                                       color: style.color, tag: Copy.latency))
     let wipe = LinearGradient(stops: [.init(color: .white, location: 0), .init(color: .white, location: max(0, min(1, (head - 30) / 1920))),
                                       .init(color: .white.opacity(0), location: max(0.0001, min(1, (head + 10) / 1920)))],
                               startPoint: .leading, endPoint: .trailing).canvas()
@@ -524,15 +525,18 @@ struct Streak: View {
     // v2: the card now holds 0.8 s longer (note 10), so the title and subline share the §3.5 hold drift
     // (+1.2 % from the moment the subline has settled) instead of standing still for 1.5 s.
     let hold = 1 + 0.012 * CGFloat(ramp(t, Latency.sub + 0.30, Latency.easeOut + 0.20))
+    // 0.6.0: the card's hold and lift are the type's own transform (GlyphText.swift), and the wipe is scaled with
+    // the card, as v3's mask was inside the card's scale.
+    let card = CGAffineTransform.scaling(hold, about: CGPoint(x: 960, y: 540))
+        .concatenating(CGAffineTransform(translationX: 0, y: -12 * CGFloat(out)))
+    // The wipe's soft edge (head − 30 … head + 10, scaled with the card): typecheck leaves the glyphs it crosses.
+    let edge = CGRect(x: 960 + (head - 30 - 960) * hold, y: 0, width: 40 * hold, height: Stage.size.height)
     let v = ZStack {
-        title.mask(wipe)
-        TypeLayer(lines: [sub], t: t)
+        GlyphCanvas(nodes: [title], transform: card, opacity: 1 - out, blur: 8 * CGFloat(out), covered: [edge])
+            .mask(wipe.scaled(hold, about: CGPoint(x: 960, y: 540)))
+        GlyphCanvas(nodes: TypeLine.node(sub, t).map { [$0] } ?? [], transform: card, opacity: 1 - out, blur: 8 * CGFloat(out))
     }
     .canvas()
-    .scaleEffect(hold, anchor: UnitPoint(x: 0.5, y: 0.5))
-    .blur(radius: 8 * CGFloat(out))
-    .offset(y: -12 * CGFloat(out))
-    .opacity(1 - out)
     return any(v)
 }
 
@@ -558,29 +562,39 @@ enum Rate {
 
 struct RollingFPS: View {
     let t: Double
-    var body: some View {
+    var body: some View { GlyphCanvas(nodes: [RollingFPS.node(t)]) }
+
+    /// "Up to 60 fps." whose number rolls to 120, as v3's HStack laid it out ("Up to ", the number's slot, " fps.")
+    /// but in floating point: the slot's width eases from 60's to 120's, so " fps." slides over smoothly, and the
+    /// numbers roll in it (60 up and out, 120 up from below), each centred in the slot. 0.6.0: glyph outlines; the
+    /// line at rest ("Up to 120 fps.") is centred on a whole pixel.
+    static func node(_ t: Double) -> TypeNode {
         let style = TypeStyle.T0r
         let p = ease(t, Rate.roll, Rate.rollDur, .appleOut)
         let snap = snapState(t, start: Rate.snap)
-        let w60 = measure("60", style), w120 = measure("120", style)
-        let numberWidth = lerp(w60, w120, p)
-        let text = { (s: String) in Text(s).font(style.font).tracking(style.tracking + snap.trackingExtra * style.size)
-            .foregroundStyle(Color(hex: style.color)).fixedSize() }
-        return HStack(alignment: .firstTextBaseline, spacing: 0) {
-            text(Copy.upTo)
-            ZStack(alignment: .bottom) {
-                text("60").offset(y: -60 * CGFloat(p)).opacity(1 - p)
-                text("120").offset(y: 60 * CGFloat(1 - p)).opacity(p)
-            }
-            .frame(width: numberWidth)
-            text(Copy.fps)
+        let extra = snap.trackingExtra * style.size
+        let up = ShapedText.shape(Copy.upTo, style), fps = ShapedText.shape(Copy.fps, style)
+        let n60 = ShapedText.shape("60", style), n120 = ShapedText.shape("120", style)
+        let slot = lerp(n60.frameWidth, n120.frameWidth, p)  // v3: measure()'s widths, at the style's tracking
+        let width = up.frameWidth(extra: extra) + slot + fps.frameWidth(extra: extra)
+        let restWidth = up.frameWidth + n120.frameWidth + fps.frameWidth
+        let baseline: CGFloat = 575
+        let left = (960 - restWidth / 2).rounded() - (width - restWidth) / 2
+        let midY = baseline - up.ascent + up.height / 2
+        let line = CGAffineTransform.scaling(snap.scale * (1 + 0.012 * CGFloat(ramp(t, Rate.snap + 0.30, Rate.end))),
+                                             about: CGPoint(x: left + width / 2, y: midY))
+            .concatenating(CGAffineTransform(translationX: 0, y: snap.dy))
+        let slotLeft = left + up.frameWidth(extra: extra)
+        func run(_ s: ShapedText, x: CGFloat, dy: CGFloat = 0, opacity: Double = 1) -> TypeNode {
+            .run(PlacedRun(shape: s, extra: extra, transform: CGAffineTransform(translationX: x, y: baseline + dy).concatenating(line),
+                           color: style.color, opacity: opacity, tag: "Up to 60/120 fps.: \(s.text)"))
         }
-        .fixedSize()
-        .scaleEffect(snap.scale * (1 + 0.012 * CGFloat(ramp(t, Rate.snap + 0.30, Rate.end))))
-        .blur(radius: snap.blur)
-        .offset(y: snap.dy)
-        .opacity(snap.opacity)
-        .placed(x: 960, baseline: 575, align: .center)
+        return .group([
+            run(up, x: left),
+            run(n60, x: slotLeft + (slot - n60.frameWidth(extra: extra)) / 2, dy: -60 * CGFloat(p), opacity: 1 - p),
+            run(n120, x: slotLeft + (slot - n120.frameWidth(extra: extra)) / 2, dy: 60 * CGFloat(1 - p), opacity: p),
+            run(fps, x: slotLeft + slot),
+        ], opacity: snap.opacity, blur: snap.blur)
     }
 }
 

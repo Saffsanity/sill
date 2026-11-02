@@ -99,8 +99,8 @@ private func dollyAnchor(_ t: Double) -> CGPoint {
     let v = ZStack {
         Backdrop(glow: 0.05)
         SillLine(y: 930, length: 1200 * CGFloat(draw))
-        TypeLayer(lines: [line], t: t)
-            .offset(y: -40 * CGFloat(lift))
+        // 0.6.0: the lift is the type layer's own transform (GlyphText.swift's rules), as v3's `.offset` was.
+        TypeLayer(lines: [line], t: t, transform: CGAffineTransform(translationX: 0, y: -40 * CGFloat(lift)))
             .opacity(1 - lift)
     }.canvas()
     return FrameLayers(base: any(v))
@@ -168,16 +168,19 @@ func s34Size(_ t: Double) -> CGFloat { 560 * (1 + s34Push * CGFloat(ramp(t, clos
         lines.append(LineSpec(Copy.legal[1], .T6, baseline: 1008, snap: 68.45, holdEnd: 68.45, cascade: false))
     }
     for i in lines.indices { lines[i].holdScale = false }
+    // 0.6.0: the card's hold scales the backdrop and icon as before, and the type through its layer's transform
+    // (GlyphText.swift's rules), so its glyphs move on exactly the card's path.
+    let card = CGAffineTransform.scaling(hold, about: CGPoint(x: 960, y: 540))
     let v = ZStack {
-        Backdrop(glow: 0.06 * fade, glowCenter: centre)
         ZStack {
-            IconCanvas(s: st, part: .all)
-            TypeLayer(lines: lines, t: t)
+            Backdrop(glow: 0.06 * fade, glowCenter: centre)
+            IconCanvas(s: st, part: .all).opacity(fade)
         }
-        .opacity(fade)
+        .canvas()
+        .scaled(hold, about: CGPoint(x: 960, y: 540))
+        TypeLayer(lines: lines, t: t, transform: card).opacity(fade)
     }
     .canvas()
-    .scaled(hold, about: CGPoint(x: 960, y: 540))
     return any(v)
 }
 
