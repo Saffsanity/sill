@@ -78,7 +78,10 @@ func render(args: [String]) throws {
     if PointerArrow.noGrain { print("TEST: REEL_V31_NO_GRAIN=1: no grain (never a delivered render)") }
     if let framesDir { try FileManager.default.createDirectory(at: framesDir, withIntermediateDirectories: true) }
     let first = Int((from * 60).rounded()), last = min(Stage.frames, Int((to * 60).rounded())) - 1
-    let writer = video ? try VideoWriter(url: out) : nil
+    // v4.1: the 0.6 film forces a key frame on the first frame of its true-black tail (Retime060.keyframes), so the black
+    // is exact; v3.1 keeps AVAssetWriter's own compression.
+    let keyframes = ReelCut.current == .r060 ? Set(Retime060.keyframes.filter { $0 >= first && $0 <= last }.map { $0 - first }) : []
+    let writer = video ? try VideoWriter(url: out, keyframes: keyframes) : nil
     // The check draws each frame on compositors of its own: on the film's, which has just drawn the same frame, SwiftUI
     // may reuse a subtree's drawing without running its canvases, and the probe would record none of its glyphs.
     let checker = typecheckEvery.map { _ in TypeChecker(with: Compositor()) }
@@ -196,6 +199,7 @@ do {
     case "mux": try muxScore(args: Array(args.dropFirst()))
     case "sheet": try contactSheet(args: Array(args.dropFirst()))
     case "verify": try verify(args: Array(args.dropFirst()))
+    case "blacks": try blacks(args: Array(args.dropFirst()))
     case "typecheck": try MainActor.assumeIsolated { try typecheckCommand(args: Array(args.dropFirst())) }
     case "typetest": try MainActor.assumeIsolated { try typetestCommand(args: Array(args.dropFirst())) }
     case "clearance": try MainActor.assumeIsolated { try clearanceCommand(args: Array(args.dropFirst())) }

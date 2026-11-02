@@ -140,6 +140,10 @@ enum Retime060 {
     /// 46.4–105.6 (37), Act IV 105.6–139.2 (21): S18 105.6–112.0, the cutaway 112.0–123.2, the close 123.2–139.2.
     static let duration = 139.2
     static let frames = 8352
+    /// The writer forces a key frame on the first frame of the true-black tail (the line's last pixels are frame 8320,
+    /// 138.667; frame 8321, 138.683, is pure black, as is every frame to the end), so the encoder leaves no near-black
+    /// block of the fade behind (VideoWriter).
+    static let keyframes: [Int] = [8321]
 
     // MARK: The plan (old v4 segment ends, and the film seconds each gets beyond 1.25 × its length)
 
