@@ -240,6 +240,13 @@ struct ContentView: View {
 ///   after a copy on this device; it stays), and `-SillClipboardNote sent|long|notsent|pasted` shows a
 ///   Paste's note in its place and under the group's Paste (`pasted`: "Pasted on ‹Mac›.", the note
 ///   after ⌘V; docs/clipboard-plan.md).
+/// * `-SillMacLocked 1|2|unlocking` — the mock Mac's screen is locked (1) or it is switched to another
+///   user (2) (docs/locked-mac-plan.md): its list has no windows, apps or clipboard and says `locked` (and
+///   `offConsole` for 2), its placeholder streams as the Desktop, the cover over the stream says why
+///   (`LockedMac.title` and `detail`), and the Apps drawer and the Settings panel's header show the line
+///   ("Mac mini is locked. Unlock it to see its windows."); `unlocking` shows the cover's "Unlocking…". A
+///   live session against a locked test host (SILL_TEST_LOCKED=1, or SILL_TEST_LOCKED_FILE holding 1 or
+///   2) shows the same.
 /// * `-Sill.pasteRightAway 0` — not a harness argument either: this device's Paste on ‹Mac› Right Away
 ///   (the This iPad group, under Share Clipboard) off for one run, in the normal app too: a Paste's
 ///   receipt then presses no ⌘V on the Mac, and the chip, the note and the group's footnote say what
@@ -450,10 +457,15 @@ struct ContentView: View {
 ///   normal app. Without one of these no Debug build ever shows it by itself, so every other photo
 ///   and live test looks as it did; Release and TestFlight builds always follow its rule.
 ///   `-SillTourState fresh|landscape|done|skipped|saved` turns the automatic tour on: `fresh` is
-///   nothing seen, `landscape` the three sideways steps seen (an upright size shows the laptop
-///   card), `done` all of it, `skipped` Skip tapped, each for this run only and never written;
-///   `saved` reads and writes `Sill.tourSeen` and `Sill.tourSkipped`, as a Release build does. In
-///   the mock the picture counts from launch. `-SillTour touch|bar|settings|laptop` starts the tour
+///   nothing seen, `landscape` the sideways steps seen (an upright size shows the laptop card),
+///   `done` all of it, `skipped` Skip tapped, each for this run only and never written; `saved`
+///   reads and writes `Sill.tourSeen`, `Sill.tourSkipped` and `Sill.tourVersion`, as a Release build
+///   does: a memory of an older tour version, or of none, is cleared once and stored with this one
+///   (TourPolicy.upgraded, the console's "tour: memory of … cleared"). Without `saved` no Debug build
+///   writes `Sill.tourVersion`, so none uses up the tour's showing once more that a TestFlight or
+///   App Store build gives. In the mock the picture counts from launch. Each card's rows, and what
+///   they looked at (TourFeatures), are a "tour: card …" line. `-SillTour
+///   touch|bar|sharing|settings|laptop` starts the tour
 ///   at that step as Take the Tour shows it (every step of the layout, from that one; a step the
 ///   layout lacks starts at the first), with no beat, at the first picture. Stand-ins for what the
 ///   gates may not do: `-SillTourPress next@S|skip@S` presses Next (Done on the last card) S

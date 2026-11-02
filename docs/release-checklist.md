@@ -145,10 +145,15 @@ serves the root or `/docs`, never `/site`. So:
   since 2026-10-27) between `<!-- Virtual Display` and `<!-- /Virtual Display -->`, support.html's
   paragraph on Aa's Off and Aa dimmed over the Desktop (PR #181, issue #179) between `<!-- Aa Off`
   and `<!-- /Aa Off -->`, the thumbnail hold's (PR #248, issue #113: privacy.html's item and
-  support.html's section) between `<!-- Thumbnail hold` and `<!-- /Thumbnail hold -->`, and
+  support.html's section) between `<!-- Thumbnail hold` and `<!-- /Thumbnail hold -->`,
   support.html's sentence that Sill for Mac names a firewall that blocks it, in its menu and its
   Settings (PR #250; the item's command before it holds for the builds out too), between
-  `<!-- Firewall` and `<!-- /Firewall -->`. A republish before those
+  `<!-- Firewall` and `<!-- /Firewall -->`, the tour once more (branch `tour-0-6`, tour version
+  2: support.html's paragraph that the tour shows once more after an update, and privacy.html's item
+  on the tour's version; the tour's section's first paragraph holds for the builds out) between
+  `<!-- Tour 0.6` and `<!-- /Tour 0.6 -->`, and support.html's section on a locked Mac (branch
+  `locked-mac`: a locked Mac shows its lock screen and nothing else) between `<!-- Locked Mac` and
+  `<!-- /Locked Mac -->`. A republish before those
   releases (for words that hold for the builds already out, such as support.html's on a Mac asleep
   or restarted, or on a black picture) deletes the blocks of each release not out yet in the
   sill-site copy after the rsync below (the perl lines, one per marker) and puts privacy.html's
@@ -164,8 +169,11 @@ serves the root or `/docs`, never `/site`. So:
   `grep -n -i 'screen sharing' ../sill-site/*.html`,
   `grep -n 'Virtual Display is on unless' ../sill-site/*.html`,
   `grep -n 'Aa starts at Off' ../sill-site/*.html`,
-  `grep -n "hold a window’s thumbnail" ../sill-site/*.html` and
-  `grep -n 'Devices Can’t Connect' ../sill-site/*.html` print nothing. The release that ships each
+  `grep -n "hold a window’s thumbnail" ../sill-site/*.html`,
+  `grep -n 'Your Mac is locked' ../sill-site/*.html`,
+  `grep -n 'Devices Can’t Connect' ../sill-site/*.html`,
+  `grep -n 'tour shows once more' ../sill-site/*.html` and
+  `grep -n 'version of the tour' ../sill-site/*.html` print nothing. The release that ships each
   deletes its markers in `site/` and keeps the words.
 - Once sill is public, it can serve the site itself: `git subtree push --prefix site origin gh-pages`,
   then Settings › Pages › gh-pages, / (root). Retire sill-site then.
@@ -185,6 +193,8 @@ perl -0pi -e 's/[ \t]*<!-- Virtual Display:.*?<!-- \/Virtual Display -->\n//gs' 
 perl -0pi -e 's/[ \t]*<!-- Aa Off:.*?<!-- \/Aa Off -->\n//gs' ../sill-site/*.html   # only before the release with PR #181 (Aa's Off)
 perl -0pi -e 's/[ \t]*<!-- Thumbnail hold:.*?<!-- \/Thumbnail hold -->\n//gs' ../sill-site/*.html   # only before the thumbnail hold's release (PR #248)
 perl -0pi -e 's/[ \t]*<!-- Firewall:.*?<!-- \/Firewall -->\n//gs' ../sill-site/*.html   # only before the release that names a firewall that blocks Sill
+perl -0pi -e 's/[ \t]*<!-- Tour 0\.6:.*?<!-- \/Tour 0\.6 -->\n//gs' ../sill-site/*.html   # only before the release that shows the tour once more (tour version 2)
+perl -0pi -e 's/[ \t]*<!-- Locked Mac:.*?<!-- \/Locked Mac -->\n//gs' ../sill-site/*.html   # only before the release that shows a locked Mac's lock screen and nothing else
 git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" && git -C ../sill-site push
 ```
 
@@ -385,11 +395,11 @@ comes later, when the cask qualifies (below).
       never a Sill for Mac 0.4.1). A release that changes only one app is Noah's call: both at
       the new number, or the other left at its last (nothing in the code compares the two).
       main carries the next release's number, both apps together, from soon after the last
-      release on: 0.5.5 since 2026-10-29 (PR #244), ahead of 0.5.1 on
+      release on: 0.6.0 since 2026-10-31 (0.5.5 from 2026-10-29, PR #244, was the pre-release number its TestFlight builds and nightlies carried), ahead of 0.5.1 on
       the App Store and on GitHub. App Store Connect takes no new build of a version it has
       released (its train is closed), so every build of main for TestFlight needs the next
       number; and Sill.app's update check compares only release tags with the version it runs,
-      so a build of main saying 0.5.5 is offered nothing until a release newer than 0.5.5 exists.
+      so a build of main saying 0.6.0 is offered nothing until a release newer than 0.6.0 exists.
       The release's tag then names a commit of main that already says its number.
 - [ ] A Mac release and a device build that need each other (a change to the home door or the wire
       that older builds on the other side can't follow): the release notes say which versions go
@@ -925,8 +935,10 @@ What a nightly is:
   the build (a look a minute, 90 minutes at most), gives it What to Test, and gives it to TestFlight's
   groups (below). A night run again by hand finds its build in App Store Connect and only gives it its
   groups again.
-- Versions: what main says (0.5.5 since 2026-10-29, the pre-release number, part 2's first item; the store release will be 0.6.0), with the commit count as
-  the build number on both apps, as in "Sill 0.5.5 (990)". Never committed: make-app.sh has always
+- Versions: what main says (0.6.0 since 2026-10-31, part 2's first item; 0.5.5 was the pre-release number from 2026-10-29, and after the 0.6.0 release main moves to 0.6.1), with the commit count as
+  the build number on both apps, as in "Sill 0.6.0 (1250)". The store release's own build is uploaded with the same number
+  (`Scripts/release-ios.sh --build-number "$(git rev-list --count HEAD)" --upload`), never `--bump`: App Store Connect wants a
+  version's build numbers to rise, and the nightlies have already used the commit counts under that version. Never committed: make-app.sh has always
   stamped the count into the Mac's bundle, and `--build-number` gives it to xcodebuild for the run.
   Only commits on main's first-parent line are uploaded with their count (the nightlies, and
   testflight.yml, which runs from main alone and checks its line before an upload), so a build
@@ -967,7 +979,7 @@ For a nightly tester:
 - The update check never offers a nightly: it reads only
   `https://api.github.com/repos/Saffsanity/sill/releases/latest`, which never lists a pre-release
   (`UpdatePolicy.feed`), refuses an answer that says `prerelease` anyway (`UpdatePolicy.release`), and
-  "nightly" is no version. A nightly Sill.app says 0.5.5 with its build number, so the update check offers it the 0.6.0 release once that is published, like everyone else's.
+  "nightly" is no version. A nightly Sill.app says main's version with its build number (0.5.5 until 2026-10-31, 0.6.0 since), so the update check offers it the 0.6.0 release once that is published, like everyone else's, and the nightlies after the release, saying 0.6.1, are offered the 0.6.1 release in turn.
 - Going back: on the Mac, quit Sill, download the release from https://getsill.app/download and
   replace Sill in Applications; nothing to set up again. On a device, TestFlight › Sill › Previous
   Builds installs an earlier build, and the App Store installs the release over a TestFlight build
