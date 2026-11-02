@@ -166,6 +166,7 @@ do {
     case "render": try MainActor.assumeIsolated { try render(args: Array(args.dropFirst())) }
     case "stills": try MainActor.assumeIsolated { try stills(args: Array(args.dropFirst())) }
     case "icon-check": try MainActor.assumeIsolated { try iconCheck(args: Array(args.dropFirst())) }
+    case "assets": try MainActor.assumeIsolated { try assetPreviews060(args: Array(args.dropFirst())) }
     case "score": try Score.render(args: Array(args.dropFirst()))
     case "mux": try muxScore(args: Array(args.dropFirst()))
     case "sheet": try contactSheet(args: Array(args.dropFirst()))
