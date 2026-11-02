@@ -258,11 +258,21 @@ struct ChipInset060: View {
     // The push (storyboard: 1.0 → 1.3 on the chip): into the screen's top strip, from TextEdit's line (x 193) to the
     // chip's end (x 2235), so the chip and where the text lands both stay in view. The iPad's far edge, pushed toward
     // the words, fades out (v3's macro edge) 80 px clear of them.
-    let p = CGFloat(ease(t, c.push, c.pushEnd - c.push, .appleOut))
+    // v4.1, the review: the chip is held still half a bar before Paste (Retime060.s05's dwell, v4's 11.87–11.91), so the
+    // push runs on film time, its 0.55 s 1.25× slower (0.6875 s) from v4's 11.6, settling inside that held moment instead of
+    // stalling in it; the drift starts as it settles. Without a clock (asset previews) both are v4's.
+    let p: CGFloat, drift: CGFloat
+    if e.clock != nil {
+        let a = e.film(c.push), d = 1.25 * (c.pushEnd - c.push)
+        p = CGFloat(ease(e.filmTime(t), a, d, .appleOut))
+        drift = 1 + 0.012 * CGFloat(ramp(e.filmTime(t), a + d, e.film(14.4)))
+    } else {
+        p = CGFloat(ease(t, c.push, c.pushEnd - c.push, .appleOut))
+        drift = 1 + 0.012 * CGFloat(e.glide(t, c.pushEnd, 14.4))
+    }
     let s = 1 + (c.pushTo - 1) * p
     let from = Pad060.canvas(CGPoint(x: (193 + 2235) / 2, y: 330))
     let to = CGPoint(x: lerp(from.x, 1490, Double(p)), y: lerp(from.y, 430, Double(p)))
-    let drift = 1 + 0.012 * CGFloat(e.glide(t, c.pushEnd, 14.4))
     let edge = LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .clear, location: c.fadeFrom / 1920),
                                       .init(color: .white, location: c.fadeTo / 1920), .init(color: .white, location: 1)],
                               startPoint: .leading, endPoint: .trailing).canvas()
@@ -288,10 +298,18 @@ enum Sound060 {
     static let spec = DeviceSpec.miniM
     static let centre = CGPoint(x: 960, y: 654)
     static var k: CGFloat { spec.interior.width / Mini060.source.width }
-    /// The movie: v3.1's own opening, 1.6–6.4 s (the icon assembling, the dolly into the Mac): the one 4.8 s of v3.1 with
-    /// no type in it, so no line of the old reel competes with this one's. v4 played it 1:1 in its 4.8 s; the film's S06
-    /// is 8.4 s, so it plays evenly over the shot on film time, `p` 0 … 1 (0.57×: slow, never stopping at a dwell).
+    /// The movie: v3.1's own opening from 1.6 s (the icon assembling, the dolly into the Mac), inside the one stretch of
+    /// v3.1 with no type in it (1.6–6.4), so no line of the old reel competes with this one's. v4 played 1.6–6.4 1:1 in its
+    /// 4.8 s. v4.1's S06 is 8.4 s: its first cut played the 4.8 s evenly over it (0.57×), which advanced v3.1's frames 2, 2,
+    /// 2, 1 film frames apart, a judder in the dolly (the review of v4.1); now it plays at exactly half speed, each of
+    /// v3.1's frames on two of the film's (an even 30 fps): 252 frames, 1.6–5.783 s, over the shot's 504.
     static func movieTime(progress p: Double) -> Double { 1.6 + 4.8 * p }
+    static let movieFirstFrame = 96, movieFrames = 252
+    /// v3.1's time for film frame `n` of a shot whose first frame is `n0`: frame 96 + (n − n0) / 2, a tenth of a
+    /// millisecond past its own time so the reader's "latest sample at or before" takes it whatever the rounding.
+    static func movieTime(filmFrame n: Int, sceneStart n0: Int) -> Double {
+        Double(movieFirstFrame + min(movieFrames - 1, max(0, n - n0) / 2)) / 60 + 0.0001
+    }
     /// QuickTime's picture (2880×1800) in the still's picture rect: the film letterboxed at y 90–1710, its title bar
     /// (y 0–104) and its controls drawn over it (QuickTime060, as tools/draw.swift drew them, titled "Sill.mp4").
     static let qt = QuickTime060.size
@@ -322,7 +340,13 @@ func qtToStill(_ r: CGRect) -> CGRect {
     // The movie playing: v3.1's frame, with QuickTime's title bar and controls drawn over it (its time and progress the
     // movie's own).
     let movieRect = scaledRect(qtToStill(S.movie), k)
-    let mt = S.movieTime(progress: e.glide(t, 14.4, 19.2))
+    // At half speed on film frames (each of v3.1's frames twice); without a clock (asset previews) v4's 1:1.
+    let mt: Double
+    if let c = e.clock {
+        mt = S.movieTime(filmFrame: Int((c.T * 60).rounded()), sceneStart: Int((e.film(14.4) * 60).rounded()))
+    } else {
+        mt = S.movieTime(progress: ramp(t, 14.4, 19.2))
+    }
     let film = try e.f.film(mt, scale: movieRect.width / 1920)
     let qs = Mini060.picture.width / S.qt.width * k
     let chrome = Canvas { ctx, _ in

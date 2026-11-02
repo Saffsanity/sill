@@ -11,29 +11,32 @@
 // pulse doubling a bar before the squash and the hard stop at the squash into digital silence but for the thud; the
 // final chord from the close, the end card's tones, the release and the master's last 150 ms to zero.
 //
-// v4.1 (Noah's notes of 2026-11-02): the film is 139.2 s (87 bars). Every cue written to a picture event is that event's
-// film time (Retime060.film of v4's time, through the scene's time map), so it lands with the picture; the chords change
-// on the bar lines nearest v4's (the dark F♯m9 on the lock's bar); the pulse, the arpeggio, the off-beat ticks and the
-// Mac's sound keep the 150 BPM grid from the acts' bar lines; the riser starts with the cutaway (its bar line, 25 beats
-// before the squash), the pulse doubles 4 beats before it, everything stops dead on it but the thud, and the silence
-// runs from 0.2 s after it to the close, 1.2 s after it (3 beats), all as in v4 relative to the squash.
+// v4.1 (Noah's notes of 2026-11-02): the film is 144.0 s (90 bars; 139.2 s, 87 bars, before the review of v4.1 held four
+// scenes longer, a bar per act). Every cue written to a picture event is that event's film time (Retime060.film of v4's
+// time, through the scene's time map), so it lands with the picture; the chords change on the bar lines nearest v4's (the
+// dark F♯m9 on the lock's bar), computed from the maps; the pulse, the arpeggio, the off-beat ticks and the Mac's sound
+// keep the 150 BPM grid from the acts' bar lines; the arpeggio and the off-beats end at the cutaway; the riser and the
+// pad's opening start 14 beats before the squash, as in v4 (the review of v4.1: they had started with the cutaway, 25
+// beats before it), the pulse doubles 4 beats before it, everything stops dead on it but the thud, and the silence runs
+// from 0.2 s after it to the close, 1.2 s after it (3 beats), all as in v4 relative to the squash.
 import AudioToolbox
 import AVFoundation
 import Foundation
 
 private let SR = 48_000.0
-private let END = Retime060.duration    // 139.2
+private let END = Retime060.duration    // 144.0
 private let TOTAL = Int(END * SR)
-private let CRESC = Fixes060.start      // 112.0: the cutaway: the pad opens, the riser rises
-private let STOP = Fixes060.tap         // 122.0: the squash: everything stops dead but the thud
-private let DOUBLE = STOP - 1.6         // 120.4: the pulse doubles, 4 beats before the squash
+private let CUTAWAY = Fixes060.start    // 116.8: the cutaway: E6/9, the arpeggio and the off-beats end
+private let STOP = Fixes060.tap         // 126.8: the squash: everything stops dead but the thud
+private let CRESC = STOP - 14 * 0.4     // 121.2: the pad opens, the riser rises, 14 beats before the squash (v4's)
+private let DOUBLE = STOP - 1.6         // 125.2: the pulse doubles, 4 beats before the squash
 private let SILENT = STOP + 0.2         // digital silence from here (the thud's tail is under −50 dB by then)…
-private let RESUME = Fixes060.closeStart // …until the final chord blooms, 123.2
+private let RESUME = Fixes060.closeStart // …until the final chord blooms, 128.0
 private let FINAL = Fixes060.closeStart
-private let RELEASE = Retime060.film(78.8) // 137.6: the chord releases with the picture's fade
+private let RELEASE = Retime060.film(78.8) // 142.4: the chord releases with the picture's fade
 private let TAIL = 0.15
 /// The acts' first bar lines (film s).
-private let ACT2 = 11.2, ACT3 = 46.4
+private let ACT2 = Retime060.s04.newStart, ACT3 = Retime060.s09.newStart   // 11.2, 48.0
 
 @inline(__always) private func db(_ d: Double) -> Double { pow(10, d / 20) }
 @inline(__always) private func midi(_ n: Double) -> Double { 440 * pow(2, (n - 69) / 12) }
@@ -71,15 +74,21 @@ enum Cues060 {
     static let fsm9: [Double] = [42, 49, 52, 56, 57]
     static let dMaj9: [Double] = [38, 45, 49, 52, 54]
     static let e69: [Double] = [40, 47, 49, 54, 56]
+    /// The bar line nearest a film time.
+    private static func bar(_ T: Double) -> Double { (T / 1.6).rounded() * 1.6 }
+    /// The lock lands on a bar line (35.2), and the dark F♯m9 with it; the unlock's bar (43.2) brings A add9 back.
+    static let lockBar = bar(f(Lock060.seq.lock)), unlockBar = bar(f(25.6))
     /// The pad's chords, on bar lines: v4's, each change on the bar line nearest its film time (v4's 9.6 → 16.0, 14.4 →
-    /// 24.0, 25.6 → 41.6, 28.8 → 46.4, 35.2 → 56.0, 41.6 → 67.2, 48.0 → 78.4, 54.4 → 89.6, 60.8 → 102.4, 65.6 → 112.0),
-    /// the dark F♯m9 on the lock's bar (33.6): the open and S04 on A add9, then F♯m9 (S05), D maj9 (S06), F♯m9 darkened while
+    /// 25.6, 25.6 → 43.2, 28.8 → 48.0, 35.2 → 57.6, 41.6 → 68.8, 48.0 → 80.0, 54.4 → 92.8, 60.8 → 105.6, 65.6 → 116.8),
+    /// the dark F♯m9 on the lock's bar (35.2): the open and S04 on A add9, then F♯m9 (S05), D maj9 (S06), F♯m9 darkened while
     /// the Mac is locked (S07–S08), A add9 again at the unlock; Act III round the cycle; E6/9 under the cutaway.
-    static let chords: [(Double, Double, [Double])] = [
-        (0.0, 16.0, aAdd9), (16.0, 24.0, fsm9), (24.0, 33.6, dMaj9), (33.6, 41.6, fsm9), (41.6, 46.4, aAdd9),
-        (46.4, 56.0, e69), (56.0, 67.2, aAdd9), (67.2, 78.4, fsm9), (78.4, 89.6, dMaj9), (89.6, 102.4, e69),
-        (102.4, 112.0, dMaj9), (112.0, STOP, e69),
-    ]
+    static let chords: [(Double, Double, [Double])] = {
+        let c = [0.0, bar(f(9.6)), bar(f(14.4)), lockBar, unlockBar, ACT3, bar(f(35.2)), bar(f(41.6)), bar(f(48.0)), bar(f(54.4)),
+                 bar(f(60.8)), CUTAWAY, STOP]
+        let notes = [aAdd9, fsm9, dMaj9, fsm9, aAdd9, e69, aAdd9, fsm9, dMaj9, e69, dMaj9, e69]
+        precondition(zip(c, c.dropFirst()).allSatisfy { $0 < $1 }, "Cues060.chords: out of order \(c)")
+        return (0..<notes.count).map { (c[$0], c[$0 + 1], notes[$0]) }
+    }()
     static let finalChord: [Double] = [45, 52, 57, 59, 61, 64, 69]
 
     /// A picture event's film time: its v4 time through the scene's map.
@@ -224,7 +233,7 @@ private final class TonalVoice060 {
         // cutaway.
         var t = ACT3
         var step = 0
-        while t < CRESC - 1e-6 {
+        while t < CUTAWAY - 1e-6 {
             if let chord = Cues060.chords.first(where: { t >= $0.0 && t < $0.1 })?.2 {
                 let upper = Array(chord.suffix(3)).map { $0 + 12 }
                 let pattern = [0, 1, 2, 1]
@@ -285,7 +294,7 @@ private final class DryVoice060 {
         t = DOUBLE
         while t < STOP - 1e-6 { pulses.append((t, db(-22) * db(1.5 * (t - DOUBLE) / (STOP - DOUBLE)))); t += 0.4 }
         t = ACT3 + 0.2
-        while t < CRESC - 1e-6 { offbeats.append(t); t += 0.4 }
+        while t < CUTAWAY - 1e-6 { offbeats.append(t); t += 0.4 }
         tickBP.setBandPass(6000, q: 2.5)
         crossBP.setBandPass(4200, q: 3)
         // The small speaker: 700 Hz high-pass, 4.5 kHz low-pass.
@@ -422,17 +431,29 @@ private final class DryVoice060 {
 // MARK: - The engine (Score.swift's)
 
 enum Score060 {
+    /// The cue sheet's film times, for `retime` and the shot list.
+    static func summary() -> String {
+        let chords = Cues060.chords.map { String(format: "%.1f", $0.0) }.joined(separator: ", ")
+        return String(format: "score: chord changes at %@ (the lock's bar %.1f, the unlock's %.1f); Act III's arpeggio and off-beats %.1f–%.1f; " +
+                      "the riser and the pad's opening from %.1f (%.0f beats before the squash); the pulse doubles at %.1f; the squash %.2f; " +
+                      "digital silence %.2f–%.2f; the final chord %.1f, released from %.2f; the end %.1f",
+                      chords, Cues060.lockBar, Cues060.unlockBar, ACT3, CUTAWAY, CRESC, (STOP - CRESC) / 0.4, DOUBLE, STOP, SILENT, RESUME,
+                      FINAL, RELEASE, END)
+    }
+
     /// The pad's low-pass: dark under the open, opening into Act II; darkened while the Mac is locked; opening through
-    /// the cutaway; the close at 4.5 kHz.
+    /// the riser; the close at 4.5 kHz.
     static func padCutoff(_ t: Double) -> Double {
         // v4's, at the film's times: dark until the rise (3.2), opening to Act II (11.2); closing over 0.75 s on the lock's
-        // bar (33.6) and opening again on the unlock's (41.6); opening through the cutaway; the close at 4.5 kHz.
+        // bar (35.2) and opening again on the unlock's (43.2); opening with the riser (14 beats before the squash); the
+        // close at 4.5 kHz.
+        let lock = Cues060.lockBar, unlock = Cues060.unlockBar
         if t < 3.2 { return 900 }
         if t < ACT2 { return 900 * pow(3800.0 / 900, (t - 3.2) / (ACT2 - 3.2)) }
-        if t < 33.6 { return 3800 }
-        if t < 34.35 { return 3800 * pow(1400.0 / 3800, (t - 33.6) / 0.75) }
-        if t < 41.6 { return 1400 }
-        if t < 42.35 { return 1400 * pow(3800.0 / 1400, (t - 41.6) / 0.75) }
+        if t < lock { return 3800 }
+        if t < lock + 0.75 { return 3800 * pow(1400.0 / 3800, (t - lock) / 0.75) }
+        if t < unlock { return 1400 }
+        if t < unlock + 0.75 { return 1400 * pow(3800.0 / 1400, (t - unlock) / 0.75) }
         if t < CRESC { return 3800 }
         if t < STOP { return 3800 * pow(9000.0 / 3800, (t - CRESC) / (STOP - CRESC)) }
         return 4500

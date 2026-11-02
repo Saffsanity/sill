@@ -3,50 +3,54 @@
 // its ink fly out along the sill line, its body spreads into a puddle that settles and thins into the 2 px accent sill
 // line the close stands on (y 666).
 //
-// v4.1 (Noah's notes of 2026-11-02): the cutaway runs on film time, 112.0–123.2 (v4: 65.6–72.0). Every transition is
-// 1.25× v4's (the title's snap, the scroll's start and its slowing, the column's steps, the line's thinning and stretch);
-// the title holds still 2.25 s after it is in; the scroll runs at 300 px/s (v4: 450), so each line crosses the middle on
-// an eighth of the 150 BPM grid; the squash is on the beat at 122.0 (frame 7320), the close at 123.2. "The bug needs a
-// better splat animation when it is smashed": on the squash, 12 ink specks in the device black with grey rims and 3 in
-// the accent fly out along the sill line and a little up, decelerating, smeared for their first frames; the body spreads
-// into a wider, uneven puddle with a soft edge that settles over 0.35 s, then thins into the line; a one-frame flash of
-// the accent under the body at the hit (Splat060). The column's type is drawn as glyph outlines at its exact scroll
-// position (Shots060Mac.swift), so it glides at 5 px a frame without a whole-pixel step.
+// v4.1 (Noah's notes of 2026-11-02): the cutaway runs on film time, 116.8–128.0 (v4: 65.6–72.0; 112.0–123.2 in v4.1's
+// first cut, before the review held four scenes longer). Every time below is an offset from its start, so it moves with
+// S18's end. Every transition is 1.25× v4's (the title's snap, the scroll's start and its slowing, the column's steps,
+// the line's thinning and stretch); the title holds still 2.25 s after it is in; the scroll runs at 300 px/s (v4: 450), so
+// each line crosses the middle on an eighth of the 150 BPM grid; the squash is on the beat at 126.8 (frame 7608), the
+// close at 128.0. "The bug needs a better splat animation when it is smashed": on the squash, 12 ink specks in the device
+// black with grey rims and 3 in the accent fly out along the sill line and a little up, decelerating, smeared for their
+// first frames; the body spreads into a wider, uneven, lumpy puddle with a soft edge that settles over 0.35 s, then thins
+// into the line; a one-frame flash of the accent under the body at the hit (Splat060). The review of v4.1: the touch dot
+// presses down onto the puddle with the squash and lifts from the hit; the spray 1.3× wider and its drops 1.3× larger,
+// spaced so none touches another at rest; the puddle's edge settles at ±3.5 px with two lobes; small drops' glints
+// halved. The column's type is drawn as glyph outlines at its exact scroll position (Shots060Mac.swift), so it glides at
+// 5 px a frame without a whole-pixel step.
 import AppKit
 import SwiftUI
 
 enum Fixes060 {
     // MARK: The beats (film s)
 
-    static let start = 112.0, end = 123.2
-    /// The close (S21) begins on the line at 123.2, a bar line.
-    static let closeStart = 123.2
-    /// 1. The title snaps (T1s) on the hard cut to black: v4's snap (its 65.65) played 1.25× slower, from 112.05.
-    static let titleSnap = 112.05, titleSnapV4 = 65.65
+    /// S18's end, a bar line: 116.8 (v4.1's first cut: 112.0).
+    static let start = (Retime060.s18.newEnd * 1e9).rounded() / 1e9
+    static let end = start + 11.2
+    /// The close (S21) begins on the line at 128.0, a bar line.
+    static let closeStart = end
+    /// 1. The title snaps (T1s) on the hard cut to black: v4's snap (its 65.65) played 1.25× slower, from 116.85.
+    static let titleSnap = start + 0.05, titleSnapV4 = 65.65
     /// The title's own clock: v4's time for its snap and cascade, 1.25× slower.
     static func titleClock(_ t: Double) -> Double { titleSnapV4 + 0.8 * (t - titleSnap) }
-    /// 2. The scroll: still until 114.8 (the title in by 112.55 and held 2.25 s), up to speed over 0.375 s (v4: 0.3),
+    /// 2. The scroll: still until 119.6 (the title in by 117.35 and held 2.25 s), up to speed over 0.375 s (v4: 0.3),
     /// then 300 px/s (v4: 450): a line every eighth (0.2 s), its tick on the grid.
-    static let scrollStart = 114.8, accelEnd = 115.175
+    static let scrollStart = start + 2.8, accelEnd = start + 3.175
     /// 3. The bug rides in: the scroll slows (appleOut from the cruise's speed) to rest exactly at the tap, over 0.883 s
     /// (v4's 0.7065, 1.25×); the slowing carries the bug onto the sill line and the column's 6 px overshoot.
     static let brakeDuration = 0.7065 * 1.25
     static var brakeStart: Double { tap - brakeDuration }
     /// 4. The touch dot appears over the bug 0.1 s before the tap (v4: 0.08); 5. the anticipation stretch (0.075 s).
-    static let dotAppears = 121.9, stretchEnd = 121.975
-    /// 6. The squash: on the beat (frame 7320) it is already three quarters flat: its 0.08 s appleOut (an impact, kept
-    /// quick) starts a frame before; the legs splay flat and fade (0.15 s).
-    static let tap = 122.0, squashStart = 122.0 - 1.0 / 60, squashDuration = 0.08, legsGone = 0.15
+    static let dotAppears = start + 9.9, stretchEnd = start + 9.975
+    /// 6. The squash: on the beat (frame 7608, 126.8) it is already three quarters flat: its 0.08 s appleOut (an impact,
+    /// kept quick) starts a frame before; the legs splay flat and fade (0.15 s).
+    static let tap = start + 10.0, squashStart = tap - 1.0 / 60, squashDuration = 0.08, legsGone = 0.15
     /// 7. The splat (Splat060): the specks fly out from just before the beat's frame; the puddle settles over 0.35 s; the
     /// haptic jitter (v3's: 18 Hz, 3 px, 0.3 s); the column's 6 px return from its overshoot (0.375 s), at rest at both ends.
-    static let settleEnd = 122.375, puddleSettle = 0.35, jitterDuration = 0.3
-    /// 8. The line: the settled puddle turns accent and thins to 2 px (122.35–122.5), then stretches (ease in and out) to
-    /// the lockup's sill line, 520 px (122.5–122.9125).
-    static let morph = 122.35, morphDuration = 0.15, lineStretch = 0.33 * 1.25
+    static let settleEnd = tap + 0.375, puddleSettle = 0.35, jitterDuration = 0.3
+    /// 8. The line: the settled puddle turns accent and thins to 2 px (tap + 0.35 … + 0.5), then stretches (ease in and out)
+    /// to the lockup's sill line, 520 px (tap + 0.5 … + 0.9125).
+    static let morph = tap + 0.35, morphDuration = 0.15, lineStretch = 0.33 * 1.25
     /// 9. Black and the sill line alone, to the close.
     static let lineAlone = morph + morphDuration + lineStretch
-    /// The touch dot fades from here (0.3125 s).
-    static let dotFade = 122.25
 
     static let speed = 300.0
     static let overshoot: CGFloat = 6
@@ -65,7 +69,7 @@ enum Fixes060 {
     static let fade: CGFloat = 140
     static let lineSize: CGFloat = 44, lineTracking: CGFloat = -0.5
     static let headerSize: CGFloat = 28
-    /// The first line crosses the middle on the grid's 11th step (117.0): the first header then starts just below the
+    /// The first line crosses the middle on the grid's 11th step (121.8): the first header then starts just below the
     /// frame, so the title is alone, and the bug ends 247 px under the last line.
     static let firstCrossingStep = 11
 
@@ -210,7 +214,8 @@ enum Fixes060 {
         var look: Double = 0
     }
 
-    /// The puddle at rest: 188 px wide (1.96 × the bug's footprint), 11 px tall.
+    /// The puddle at rest: 188 px wide (1.96 × the bug's footprint), 11 px tall; its edge uneven by ±3.5 px once settled
+    /// (the review of v4.1: ±1.7 px had read as a smooth capsule), with two lobes (`Bug060.lobes`).
     static let puddleWidth: CGFloat = 188, puddleHeight: CGFloat = 11
 
     static func bugState(_ t: Double) -> BugState {
@@ -233,7 +238,7 @@ enum Fixes060 {
         let swing = exp(-u / 0.09) * cos(2 * Double.pi * u / 0.24)
         s.puddleWidth = puddleWidth * CGFloat(1 + 0.07 * swing)
         s.puddleHeight = puddleHeight * CGFloat(1 - 0.28 * swing)
-        s.wobble = CGFloat(1.5 + 2.6 * exp(-u / 0.14))
+        s.wobble = CGFloat(3.5 + 2.2 * exp(-u / 0.14))
         s.wobblePhase = 1.6 * (1 - exp(-u / 0.12))
         s.jitter = buzz(t, start: tap, duration: jitterDuration, amplitude: 3)
         // 8. The line: the puddle itself turns accent and thins to 2 px, its edge evening out (0.15 s), then stretches,
@@ -256,15 +261,21 @@ enum Fixes060 {
                 1.0 * sin(w * u * 0.75 + 2.0) * env)
     }
 
-    /// The touch dot: v3's tap dot (0.7 → 1 over 0.15 s from 121.9), pinned where the finger lands, on the bug's upper back
-    /// (its head and the top of its shell, at x 960, y 604), 72 px and light, so the stretch under it and the shell's lower
-    /// half beside it read; it fades from 122.25 (0.3125 s).
+    /// The touch dot: v3's tap dot (0.7 → 1 over 0.15 s from 0.1 s before the tap), where the finger lands, on the bug's
+    /// upper back (its head and the top of its shell, at x 960, y 604), 72 px and light, so the stretch under it and the
+    /// shell's lower half beside it read. The review of v4.1 (it had stayed up, at full strength, 13 px above the puddle
+    /// for 0.25 s after the hit, so the finger looked to stop short of the bug): with the squash it presses down with the
+    /// body, 16 px, its centre at y 620 so its lower edge rests on the puddle's top (y about 654), shrinking to 0.94 as a
+    /// pressed fingertip, and it lifts from the hit, fading out over 0.2 s, with the squash and the jitter (the impact's
+    /// own quick moves).
     static let dotDiameter: CGFloat = 72
     static let dotCentre = CGPoint(x: 960, y: 604)
+    static let dotPress: CGFloat = 16, dotLift = 0.2
     static func dot(_ t: Double, _ bug: BugState) -> (center: CGPoint, scale: CGFloat, alpha: Double)? {
-        guard t >= dotAppears, t < dotFade + 0.3125 else { return nil }
-        let scale = CGFloat(0.7 + 0.3 * ease(t, dotAppears, 0.15, .appleOut))
-        return (dotCentre, scale, 1 - ramp(t, dotFade, dotFade + 0.3125))
+        guard t >= dotAppears, t < tap + dotLift else { return nil }
+        let q = bug.squash
+        let scale = CGFloat(0.7 + 0.3 * ease(t, dotAppears, 0.15, .appleOut)) * (1 - 0.06 * q)
+        return (CGPoint(x: dotCentre.x, y: dotCentre.y + dotPress * q), scale, 1 - ramp(t, tap, tap + dotLift))
     }
 
     // MARK: The shot
@@ -412,10 +423,15 @@ enum Bug060 {
     /// The stretched bug's shell at the touch (its width × 0.94, its height × 1.10): where the slab of the squash starts.
     static let stretchedShell = CGSize(width: shell.width * 0.94, height: shell.height * 1.10)
 
+    /// The puddle's two lobes, where they sit round its outline (0 the top's middle, clockwise: 0.12 on the top right of
+    /// the middle, 0.755 the left end's upper corner), how far they push out (× the wobble: 5.3 and 4.9 px settled) and their
+    /// half-width (a fraction of the outline: 12 and 11 px on the settled puddle); each a rounded bump, (1 − u²)².
+    static let lobes: [(at: Double, gain: Double, width: Double)] = [(0.12, 1.5, 0.032), (0.755, 1.4, 0.028)]
+
     /// The body's outline from the squash on (its own space, the base at the origin, y down): a fully rounded slab `w` × `h`
-    /// sitting on the line, its edge pushed out along its normal by up to `wobble` px of a fixed noise (the top and the ends
-    /// uneven; the bottom flat on the line, only ever lifted a little), clockwise from the top's middle.
-    static func slab(w: CGFloat, h: CGFloat, wobble: CGFloat, phase: Double, n: Int = 160) -> Path {
+    /// sitting on the line, its edge pushed out along its normal by up to `wobble` px of a fixed noise and its two lobes (the
+    /// top and the ends uneven; the bottom flat on the line, only ever lifted a little), clockwise from the top's middle.
+    static func slab(w: CGFloat, h: CGFloat, wobble: CGFloat, phase: Double, n: Int = 220) -> Path {
         let r = max(0.01, min(w, h) / 2)
         let hx = w / 2
         let arc = CGFloat.pi * r / 2
@@ -440,8 +456,13 @@ enum Bug060 {
             default: p = CGPoint(x: -hx + r + d, y: -h); ny = -1
             }
             let v = Double(i) / Double(n)
-            let noise = 0.55 * sin(2 * .pi * 5 * v + 0.7 + phase) + 0.30 * sin(2 * .pi * 8 * v + 2.1 - 0.6 * phase)
+            var noise = 0.55 * sin(2 * .pi * 5 * v + 0.7 + phase) + 0.30 * sin(2 * .pi * 8 * v + 2.1 - 0.6 * phase)
                 + 0.15 * sin(2 * .pi * 13 * v + 4.0 + 1.3 * phase)
+            for lobe in lobes {
+                var dv = abs(v - lobe.at); dv = min(dv, 1 - dv)
+                let u = dv / lobe.width
+                if u < 1 { noise += lobe.gain * (1 - u * u) * (1 - u * u) }
+            }
             var off = wobble * CGFloat(noise)
             if ny > 0.5 { off = min(0, off * 0.25) }              // the bottom stays on the line
             let q = CGPoint(x: p.x + off * nx, y: p.y + off * ny)
@@ -586,13 +607,18 @@ enum Bug060 {
 // MARK: - The splat
 
 /// v4.1, Noah: "The bug needs a better splat animation when it is smashed." Its ink, flying out on the squash: 12 drops in
-/// the device black (lit from above, v3's grey rim, a glint on the larger ones) and 3 in the accent leave from along the
-/// body's top as it flattens, from half a frame before the beat, and fly out along the sill line and a little up (2° to
-/// 12°), decelerating (each covers 1 − e^(−u/0.065 s) of its reach, 50 to 255 px), drawn smeared along their motion for
-/// their first three frames; they land as splatter does, rounded heads with a tapering tail pointing back at the hit, then,
-/// still, fade as the line forms (the dark ones 122.35–122.65, the accent ones 122.45–122.8). They ride with the column
-/// (its 6 px return), not with the puddle's buzz. The flash: on the beat's frame alone (frame 7320), the accent under the
-/// body, a soft glow and a bright core along the line. No face, nothing red: the reel's palette.
+/// the device black (lit from above, v3's grey rim, a glint on each) and 3 in the accent leave from along the body's top as
+/// it flattens, from half a frame before the beat, and fly out along the sill line and a little up (2° to 12°),
+/// decelerating (each covers 1 − e^(−u/0.065 s) of its flight), drawn smeared along their motion for their first three
+/// frames; they land as splatter does, rounded heads with a tapering tail pointing back at the hit, then, still, fade as
+/// the line forms (the dark ones from the morph over 0.3 s, the accent ones from 0.1 s after it over 0.35 s). They ride
+/// with the column (its 6 px return), not with the puddle's buzz. The flash: on the beat's frame alone, the accent under
+/// the body, a soft glow and a bright core along the line. No face, nothing red: the reel's palette.
+/// The review of v4.1: the spray 1.3× (its drops' radii 4.0–9.4 px, their heads coming to rest 100–300 px from the hit
+/// along the line, so it reads at a YouTube window's size), each side's drops one to a band of that span, their angles
+/// alternating low and high by band, and each placed only where its resting shape (head and tail) keeps 4 px from every
+/// other's, so none lands on another (clusters of two or three had read as one); the glint halved on the smaller drops
+/// (it had made them read as beads).
 enum Splat060 {
     struct Speck {
         let origin: CGVector       // from the bug's base, at the launch
@@ -610,28 +636,74 @@ enum Splat060 {
     /// The drops' body: the device black, lit a little from above.
     static let bodyTop: UInt32 = 0x2A2D34
 
+    /// Where the drops' heads come to rest, from the hit along the line (px), and the gap every drop keeps from the others.
+    static let near: CGFloat = 100, far: CGFloat = 300, gap: CGFloat = 4
+
+    /// A drop at rest: its head's centre and the end of its tail (from the bug's base), and their radii.
+    static func rest(_ s: Speck) -> (head: CGPoint, tail: CGPoint, r1: CGFloat, r2: CGFloat) {
+        let o = offset(s, 10)
+        let length = s.tail * s.radius
+        return (CGPoint(x: o.dx, y: o.dy), CGPoint(x: o.dx - s.direction.dx * length, y: o.dy - s.direction.dy * length),
+                s.radius, s.radius * 0.42)
+    }
+
+    /// The closest two resting drops come (px, edge to edge, each as the capsule round its head and tail).
+    static func clearance(_ a: Speck, _ b: Speck) -> CGFloat {
+        let p = rest(a), q = rest(b)
+        func segDist(_ a0: CGPoint, _ a1: CGPoint, _ b0: CGPoint, _ b1: CGPoint) -> CGFloat {
+            // The distance between two segments, by sampling (short segments: exact enough to a tenth of a pixel).
+            var best = CGFloat.infinity
+            for i in 0...24 {
+                let u = CGFloat(i) / 24
+                let pa = CGPoint(x: a0.x + (a1.x - a0.x) * u, y: a0.y + (a1.y - a0.y) * u)
+                for j in 0...24 {
+                    let v = CGFloat(j) / 24
+                    let pb = CGPoint(x: b0.x + (b1.x - b0.x) * v, y: b0.y + (b1.y - b0.y) * v)
+                    best = min(best, hypot(pa.x - pb.x, pa.y - pb.y))
+                }
+            }
+            return best
+        }
+        return segDist(p.head, p.tail, q.head, q.tail) - max(p.r1, p.r2) - max(q.r1, q.r2)
+    }
+
     static let specks: [Speck] = {
         var rng = SplitMix64(seed: 0x5711_5B1A7)
         func rand() -> CGFloat { CGFloat(Double(rng.next() % 1_000_001) / 1_000_000) }
         var out: [Speck] = []
-        // Each side's dark drops spread along it: their reaches drawn one from each sixth of 50…255 px (in a shuffled
-        // order), so they neither clump nor leave a gap; the accent ones two to the right, one to the left.
-        var slots: [[Int]] = [[0, 1, 2, 3, 4, 5], [0, 1, 2, 3, 4, 5]]
-        for k in 0..<2 { for j in stride(from: 5, to: 0, by: -1) { slots[k].swapAt(j, Int(rng.next() % UInt64(j + 1))) } }
-        for i in 0..<15 {
-            let accent = i == 3 || i == 8 || i == 12
-            // Alternate sides, the right a drop richer; out along the line, 2° to 12° up.
-            let side: CGFloat = i % 2 == 0 ? 1 : -1
-            let up = (2 + 10 * Double(rand())) * .pi / 180
-            let direction = CGVector(dx: side * CGFloat(cos(up)), dy: -CGFloat(sin(up)))
-            let origin = CGVector(dx: side * (10 + 50 * rand()), dy: -(3 + 5 * rand()))
-            let slot = accent ? 0 : slots[side > 0 ? 0 : 1].removeLast()
-            let reach: CGFloat = accent ? 100 + 120 * rand() : 50 + 205 * (CGFloat(slot) + 0.15 + 0.7 * rand()) / 6
-            // Big drops land near, small ones far.
-            var radius: CGFloat = accent ? 2.6 + 1.6 * rand() : 3.2 + 4.6 * rand()
-            if !accent { radius *= 1.15 - 0.45 * (reach - 50) / 205 }
-            out.append(Speck(origin: origin, direction: direction, reach: reach, radius: radius,
-                             tail: 0.9 + 1.1 * (reach - 50) / 205 + 0.3 * rand(), accent: accent))
+        // Per side, six dark drops and the accent ones (two to the right, one to the left), one to each band of the span
+        // their heads rest in (100…300 px from the hit; the accent ones in the middle bands), the bands in a shuffled
+        // order, their angles low (2°–6°) in even bands and high (7°–12°) in odd ones. A drop is drawn again (its angle,
+        // place in its band, launch point and size) until its resting shape keeps `gap` from every drop already placed.
+        for side: CGFloat in [1, -1] {
+            let accents: Set<Int> = side > 0 ? [2, 5] : [3]
+            let n = 6 + accents.count
+            var bands = Array(0..<n)
+            for j in stride(from: n - 1, to: 0, by: -1) { bands.swapAt(j, Int(rng.next() % UInt64(j + 1))) }
+            let width = (far - near) / CGFloat(n)
+            for band in bands {
+                let accent = accents.contains(band)
+                var placed: Speck? = nil
+                for _ in 0..<400 {
+                    let degrees = band % 2 == 0 ? 2 + 4 * Double(rand()) : 7 + 5 * Double(rand())
+                    let up = degrees * .pi / 180
+                    let direction = CGVector(dx: side * CGFloat(cos(up)), dy: -CGFloat(sin(up)))
+                    let origin = CGVector(dx: side * (10 + 50 * rand()), dy: -(3 + 5 * rand()))
+                    // The head comes to rest in its band: its flight is what is left of the band's distance after the
+                    // launch point's.
+                    let restX = near + width * (CGFloat(band) + 0.2 + 0.6 * rand())
+                    let reach = (restX - abs(origin.dx)) / CGFloat(cos(up))
+                    let frac = (restX - near) / (far - near)
+                    // Big drops land near, small ones far (1.3× v4.1's first cut's).
+                    var radius: CGFloat = accent ? 1.3 * (2.6 + 1.6 * rand()) : 1.3 * (3.2 + 4.6 * rand()) * (1.15 - 0.45 * frac)
+                    radius = accent ? min(max(radius, 3.4), 5.5) : min(max(radius, 4.0), 9.4)
+                    let speck = Speck(origin: origin, direction: direction, reach: reach, radius: radius,
+                                      tail: 0.9 + 1.1 * frac + 0.3 * rand(), accent: accent)
+                    if out.allSatisfy({ clearance($0, speck) >= gap }) { placed = speck; break }
+                }
+                precondition(placed != nil, "Splat060: no room for a drop in band \(band)")
+                out.append(placed!)
+            }
         }
         return out
     }()
@@ -710,11 +782,10 @@ enum Splat060 {
             } else {
                 c.fill(shape, with: .linearGradient(body, startPoint: CGPoint(x: head.x, y: b.minY), endPoint: CGPoint(x: head.x, y: b.maxY)))
                 c.stroke(shape, with: .linearGradient(rim, startPoint: CGPoint(x: b.minX, y: b.minY), endPoint: CGPoint(x: b.maxX, y: b.maxY)), lineWidth: 1.1)
-                if s.radius >= 3.4 {
-                    let r = s.radius
-                    c.fill(Path(ellipseIn: CGRect(x: head.x - 0.62 * r, y: head.y - 0.66 * r, width: 0.62 * r, height: 0.46 * r)),
-                           with: .color(.white.opacity(0.30)))
-                }
+                // The glint: whole on the larger drops, half on the smaller ones (under 7 px), so they read as ink, not beads.
+                let r = s.radius
+                c.fill(Path(ellipseIn: CGRect(x: head.x - 0.62 * r, y: head.y - 0.66 * r, width: 0.62 * r, height: 0.46 * r)),
+                       with: .color(.white.opacity(r >= 7 ? 0.30 : 0.15)))
             }
         }
     }

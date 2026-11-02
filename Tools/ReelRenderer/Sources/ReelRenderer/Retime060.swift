@@ -39,6 +39,9 @@ struct SceneMap060 {
     /// for a segment that runs faster than the rest, S16's real-time ring).
     init(_ ids: [String], old a: Double, new A: Double, _ segments: [(Double, Double)]) {
         self.ids = ids
+        // Its start to a nanosecond: a scene starts where the one before ends (its `newEnd`, summed segment by segment), on
+        // its exact beat.
+        let A = (A * 1e9).rounded() / 1e9
         oldStart = a; newStart = A
         var ko = [a], kn = [A], r: [Double] = []
         for (end, extra) in segments {
@@ -136,14 +139,16 @@ extension Env {
 }
 
 enum Retime060 {
-    /// The film: 139.2 s, 8,352 frames, 87 bars of 150 BPM. Act I 0–11.2 (7 bars), Act II 11.2–46.4 (22), Act III
-    /// 46.4–105.6 (37), Act IV 105.6–139.2 (21): S18 105.6–112.0, the cutaway 112.0–123.2, the close 123.2–139.2.
-    static let duration = 139.2
-    static let frames = 8352
-    /// The writer forces a key frame on the first frame of the true-black tail (the line's last pixels are frame 8320,
-    /// 138.667; frame 8321, 138.683, is pure black, as is every frame to the end), so the encoder leaves no near-black
-    /// block of the fade behind (VideoWriter).
-    static let keyframes: [Int] = [8321]
+    /// The film: 144.0 s, 8,640 frames, 90 bars of 150 BPM (v4.1's first cut: 139.2 s, 87 bars; the review of v4.1 held
+    /// S05, S12, S14 and S18 longer so their words read in order, a bar per act). Act I 0–11.2 (7 bars), Act II 11.2–48.0
+    /// (23), Act III 48.0–108.8 (38), Act IV 108.8–144.0 (22): S18 108.8–116.8, the cutaway 116.8–128.0, the close
+    /// 128.0–144.0.
+    static let duration = 144.0
+    static let frames = 8640
+    /// The writer forces a key frame on the first frame of the true-black tail (the line's last pixels are frame 8608,
+    /// 143.467; frame 8609, 143.483, is pure black, as is every frame to the end), so the encoder leaves no near-black
+    /// block of the fade behind (VideoWriter). 31 frames before the end, as in v4.1's first cut (8321 of 8,352).
+    static let keyframes: [Int] = [frames - 31]
 
     // MARK: The plan (old v4 segment ends, and the film seconds each gets beyond 1.25 × its length)
 
@@ -156,57 +161,61 @@ enum Retime060 {
     /// S04: a breath after the keycaps rise (⌘C on beat 3), one after ⌘C (the second statement on beat 7), the tail held.
     static let s04 = SceneMap060(["S04"], old: 6.4, new: 11.2, [
         (7.05, 0), (7.10, 0.2), (7.45, 0), (7.60, 0.1), (8.90, 0), (10.4, 0.7)])
-    /// S05: a breath before the subline (beat 8), the pasted note held while the subline reads (3.25 s).
-    static let s05 = SceneMap060(["S05"], old: 10.4, new: 17.2, [(12.50, 0), (12.85, 0.2), (13.40, 0), (14.4, 2.0)])
+    /// S05: the chip held still a half bar before Paste (the review of v4.1: its large words had read for 0.65 s), so Paste
+    /// lands on beat 7 and its statement snaps there; a breath before the subline (beat 10); the pasted note held while the
+    /// subline reads, and half a bar more so the scene's words read in order (8.8 s).
+    static let s05 = SceneMap060(["S05"], old: 10.4, new: 17.2, [(11.87, 0), (11.91, 0.8), (12.50, 0), (12.85, 0.2), (13.40, 0), (14.4, 2.8)])
     /// S06: the subline on beat 3, Settings on beat 8, Mute on beat 11, unmuted on beat 16: muted 2.0 s and 2.0 s of sound
     /// after, so the footnote (Mute's) reads.
-    static let s06 = SceneMap060(["S06"], old: 14.4, new: 24.4, [
+    static let s06 = SceneMap060(["S06"], old: 14.4, new: s05.newEnd, [
         (14.90, 0), (15.25, 0.2), (17.09, 0), (17.60, 0.2), (17.95, 0), (18.32, 1.0), (18.69, 0), (19.2, 1.0)])
     /// S07: "Mac locked?" lands, a beat's pause, the lock on beat 2; the subline on beat 6.
-    static let s07 = SceneMap060(["S07"], old: 19.2, new: 32.8, [
+    static let s07 = SceneMap060(["S07"], old: 19.2, new: s06.newEnd, [
         (19.52, 0), (19.60, 0.3), (20.15, 0), (20.85, 0.1), (21.40, 0), (24.0, 0.4)])
     /// S08: the field's spinner a moment longer after Return (it spins on film time), the unlock on beat 7.
-    static let s08 = SceneMap060(["S08"], old: 24.0, new: 39.6, [(25.55, 0), (25.60, 0.3), (26.60, 0), (28.8, 0.5)])
+    static let s08 = SceneMap060(["S08"], old: 24.0, new: s07.newEnd, [(25.55, 0), (25.60, 0.3), (26.60, 0), (28.8, 0.5)])
     /// S09: "Up to 5×." on beat 3 (the headline and the spread's start a little slower), a breath at 3× before the move,
     /// the full sheet held at the end.
-    static let s09 = SceneMap060(["S09"], old: 28.8, new: 46.4, [
+    static let s09 = SceneMap060(["S09"], old: 28.8, new: s08.newEnd, [
         (28.85, 0), (29.65, 0.2), (30.05, 0), (30.22, 0.1), (32.5, 0), (32.8, 1.1)])
     /// S10: the panel open a beat longer before the switch; the larger layout a moment before the subline; the fitted
     /// window held.
-    static let s10 = SceneMap060(["S10"], old: 32.8, new: 52.8, [
+    static let s10 = SceneMap060(["S10"], old: 32.8, new: s09.newEnd, [
         (33.44, 0), (33.65, 0.2), (34.58, 0), (34.85, 0.1), (35.52, 0), (36.8, 1.5)])
     /// S11: the sentence typed evenly a little slower (about 8.9 keys a second), so "Just type." lands on beat 3 inside
     /// it; the Save sheet down a moment longer, Esc on beat 9.
     static let s11: SceneMap060 = {
         let r = 0.45 / (1.25 * 0.45 + 0.2)              // the typing's rate, kept through 37.2–38.27
         let typed = 0.62 / r - 1.25 * 0.62
-        return SceneMap060(["S11"], old: 36.8, new: 59.6, [
+        return SceneMap060(["S11"], old: 36.8, new: s10.newEnd, [
             (37.2, 0), (37.65, 0.2), (38.27, typed), (38.65, 0), (39.2, 0.6 - 0.2 - typed), (39.8, 0), (40.8, 0.8)])
     }()
     /// S12: "Or a mouse wheel." on the half beat with the scroll; a breath before the subline (beat 6); the finger rests
-    /// after its drag.
-    static let s12 = SceneMap060(["S12"], old: 40.8, new: 66.0, [
-        (40.85, 0), (41.25, 0.1), (42.29, 0), (42.45, 0.3), (43.80, 0), (43.84, 1.2), (44.0, 0)])
+    /// after its drag, half a bar longer since the review of v4.1, so the scene's 22 words read in order (6.4 s).
+    static let s12 = SceneMap060(["S12"], old: 40.8, new: s11.newEnd, [
+        (40.85, 0), (41.25, 0.1), (42.29, 0), (42.45, 0.3), (43.80, 0), (43.84, 2.0), (44.0, 0)])
     /// S13: each greeting's composition held a moment with its candidate chosen, so each arrives on a beat (2, 5, 8);
     /// the dictation, then the line held.
-    static let s13 = SceneMap060(["S13"], old: 44.0, new: 71.6, [
+    static let s13 = SceneMap060(["S13"], old: 44.0, new: s12.newEnd, [
         (44.20, 0), (44.38, 0.3), (44.96, 0), (45.18, 0.2), (45.67, 0), (45.98, 0.2), (46.36, 0), (46.53, 0.2),
         (47.55, 0), (48.8, 1.1)])
-    /// S14: the subline on beat 3, the list on beat 6 and held, tiles on beat 9, the footnote held.
-    static let s14 = SceneMap060(["S14"], old: 48.8, new: 79.6, [
-        (49.30, 0), (49.65, 0.2), (50.20, 0), (50.40, 0.2), (51.18, 0.2), (51.55, 0), (52.8, 1.6)])
+    /// S14: the subline on beat 3, the list on beat 6 and held, tiles on beat 9, the footnote held (half a bar longer since
+    /// the review of v4.1, so the scene's 25 words read in order: 8.0 s).
+    static let s14 = SceneMap060(["S14"], old: 48.8, new: s13.newEnd, [
+        (49.30, 0), (49.65, 0.2), (50.20, 0), (50.40, 0.2), (51.18, 0.2), (51.55, 0), (52.8, 2.4)])
     /// S15: the subline on beat 4, Aa at Off on beat 6 (Aa060.off, moved to 54.64 so it does), the subline held.
-    static let s15 = SceneMap060(["S15"], old: 52.8, new: 86.8, [(53.30, 0), (54.05, 0.1), (54.95, 0), (56.0, 2.3)])
+    static let s15 = SceneMap060(["S15"], old: 52.8, new: s14.newEnd, [(53.30, 0), (54.05, 0.1), (54.95, 0), (56.0, 2.3)])
     /// S16: the touch on beat 2 (Hold060's times moved 0.24 s later); the ring from down to open in real time, exactly
     /// 0.5 s ("Controls in half a second."); the row on beat 7; the footnote held.
-    static let s16 = SceneMap060(["S16"], old: 56.0, new: 93.2, [
+    static let s16 = SceneMap060(["S16"], old: 56.0, new: s15.newEnd, [
         (56.64, 0), (57.14, -0.125), (57.79, 0), (58.24, 0.125), (58.6, 0), (59.2, 2.4)])
     /// S17: a beat more for the headline; the push on film time to the cut; the subline held.
-    static let s17 = SceneMap060(["S17"], old: 59.2, new: 99.6, [(59.75, 0), (60.45, 0.1), (61.0, 0), (62.4, 1.9)])
-    /// S18: the headline alone a bar longer (the glint on beat 4), the subline held.
-    static let s18 = SceneMap060(["S18"], old: 62.4, new: 105.6, [(63.05, 0), (63.2, 0.6), (64.1, 0), (65.6, 1.8)])
+    static let s17 = SceneMap060(["S17"], old: 59.2, new: s16.newEnd, [(59.75, 0), (60.45, 0.1), (61.0, 0), (62.4, 1.9)])
+    /// S18: the headline alone a bar longer (the glint on beat 4), the subline held (a bar longer since the review of v4.1,
+    /// so the scene's 27 words read in order: 8.0 s).
+    static let s18 = SceneMap060(["S18"], old: 62.4, new: s17.newEnd, [(63.05, 0), (63.2, 0.6), (64.1, 0), (65.6, 3.4)])
     /// S21–S23, one take: each line of the card on its beat, the legal line held 7.6 s (its 25 words), the fade 1.25×.
-    static let close = SceneMap060(["S21", "S22", "S23"], old: 72.0, new: 123.2, [
+    static let close = SceneMap060(["S21", "S22", "S23"], old: 72.0, new: Fixes060.closeStart, [
         (73.0, 0), (73.05, 0.3), (73.35, 0), (74.45, 0.3), (74.85, 0), (75.25, 0.2), (75.55, 0), (75.65, 0.3),
         (75.95, 0), (76.05, 0.3), (76.35, 0), (78.8, 4.5), (79.7, 0), (80.0, 0.1)])
 
@@ -235,7 +244,8 @@ enum Retime060 {
             "S01": [("the rise", 2.4), ("wordmark", 3.05), ("version", 3.45)],
             "S03": [("What’s new.", 4.85), ("ease-out", 6.2)],
             "S04": [("Copy on your Mac.", 6.45), ("C down", 7.20), ("to Notes", 7.6), ("Paste on your iPad.", 8.45), ("lands", 8.40)],
-            "S05": [("Copy on your iPad.", 10.45), ("Paste tap", 12.0), ("Paste on your Mac.", 12.05), ("subline", 12.85)],
+            "S05": [("Copy on your iPad.", 10.45), ("chip inset in", 11.62), ("chip inset risen", 11.87), ("Paste dot", 11.92),
+                    ("Paste tap", 12.0), ("Paste on your Mac.", 12.05), ("note", 12.15), ("subline", 12.85)],
             "S06": [("Sound from your Mac.", 14.45), ("subline", 15.25), ("Settings", 16.8), ("Mute", 17.6), ("footnote", 17.65), ("unmute", 18.4)],
             "S07": [("Mac locked?", 19.25), ("lock", 19.6), ("Sill shows its lock screen.", 19.65), ("subline", 20.85)],
             "S08": [("Unlock it from here.", 24.05), ("Return", 25.2), ("unlock", 26.0), ("subline", 26.05)],
@@ -268,5 +278,14 @@ enum Retime060 {
             }
         }
         print(String(format: "the film: %.1f s, %d frames, %.2f bars", duration, frames, duration / 1.6))
+        print(Score060.summary())
+        // S06's movie: v3.1's frames over the shot's, each on two (Sound060.movieTime(filmFrame:sceneStart:)).
+        let n0 = Int((s06.newStart * 60).rounded()), n1 = Int((s06.newEnd * 60).rounded())
+        var shown: [Int: Int] = [:]
+        for n in n0..<n1 { shown[Int((Sound060.movieTime(filmFrame: n, sceneStart: n0) * 60).rounded(.down)), default: 0] += 1 }
+        let counts = Set(shown.values)
+        print(String(format: "S06's movie: film frames %d–%d show v3.1's frames %d–%d (%.3f–%.3f s), each on %@ film frame(s)", n0, n1 - 1,
+                     shown.keys.min()!, shown.keys.max()!, Double(shown.keys.min()!) / 60, Double(shown.keys.max()!) / 60,
+                     counts.sorted().map(String.init).joined(separator: " or ")))
     }
 }

@@ -322,13 +322,14 @@ import SwiftUI
                 })
         }
 
-        // S19–S20: the cutaway, beat by beat (v4.1's film times: the squash at 122.0).
-        let H = Fixes060.tap
+        // S19–S20: the cutaway, beat by beat (v4.1's film times: the cutaway from 116.8, the squash at 126.8; times as
+        // offsets from its start, as Fixes060's).
+        let H = Fixes060.tap, C = Fixes060.start
         let beats: [(Double, String)] = [
-            (112.20, "1 the title snapping"), (113.60, "1 the title alone"), (115.40, "2 the scroll under way"), (117.00, "2 the first line on the middle"),
-            (118.00, "2 the Mac's group"), (119.20, "2 the Mac's group, the security header"), (120.40, "2 the security group; the bug below"),
+            (C + 0.20, "1 the title snapping"), (C + 1.60, "1 the title alone"), (C + 3.40, "2 the scroll under way"), (C + 5.00, "2 the first line on the middle"),
+            (C + 6.00, "2 the Mac's group"), (C + 7.20, "2 the Mac's group, the security header"), (C + 8.40, "2 the security group; the bug below"),
             (Fixes060.brakeStart, "3 the brake from 300 px/s"), (H - 0.5, "3 the bug riding in"), (H - 0.15, "3 the bug, walking"),
-            (H - 0.08, "4 the touch dot appears"), (H - 0.03, "5 stretched tall"), (H, "6 the squash, frame 7320: the flash, the specks"),
+            (H - 0.08, "4 the touch dot appears"), (H - 0.03, "5 stretched tall"), (H, "6 the squash, frame \(Int((H * 60).rounded())): the flash, the specks, the dot pressed"),
             (H + 2.0 / 60, "6 the specks smeared, the puddle spreading"), (H + 0.1, "7 the puddle, buzzing; the lines back to 45 %"),
             (H + 0.2, "7 the puddle settling, the specks at rest"), (H + 0.3, "7 settled"), (H + 0.42, "8 turning accent, thinning"),
             (H + 0.55, "8 the stretch"), (H + 0.75, "8 the stretch, the glow"), (Fixes060.lineAlone, "8 the line at 520 px"),
@@ -339,7 +340,7 @@ import SwiftUI
         }
 
         // The bug, close: its gait and its squash at 3×.
-        out.append(Still(name: "bug-sheet", t: 120.0, layers: FrameLayers(base: any(BugSheet060()), grain: false, vignette: false), note: "the bug at 3×"))
+        out.append(Still(name: "bug-sheet", t: C + 8.0, layers: FrameLayers(base: any(BugSheet060()), grain: false, vignette: false), note: "the bug at 3×"))
         return out
     }
 
@@ -368,7 +369,7 @@ import SwiftUI
     }
 
     /// v4.1, for the review of Noah's third note: `splat.png`, the film's frame 3 frames after the hit, whole; and
-    /// `splat-strip.png`, 12 consecutive frames from 2 before the hit (frame 7318) to 9 after (7329), each cropped about the
+    /// `splat-strip.png`, 12 consecutive frames from 2 before the hit (frame 7606) to 9 after (7617), each cropped about the
     /// bug (x 580–1340, y 560–700) and shown at 1.5×, labelled. The frames are the film's own (s060_19, finished as the
     /// film's: grain, dither).
     static func splat(dir: URL) throws {
@@ -415,7 +416,7 @@ import SwiftUI
         print(String(format: "  first line %.1f px under the title's baseline; bug base %.1f px; last line → bug base %.1f px",
                      F.firstLine, F.bugBase, F.bugBase - (F.placed.last?.y ?? 0)))
         func v(_ t: Double) -> Double { (F.scroll(t + 0.0005) - F.scroll(t - 0.0005)) / 0.001 }
-        for t in [F.scrollStart, F.accelEnd, 118.0, F.brakeStart, H - 0.1, H, H + 0.15, F.settleEnd] {
+        for t in [F.scrollStart, F.accelEnd, F.start + 6.0, F.brakeStart, H - 0.1, H, H + 0.15, F.settleEnd] {
             let b = F.bugState(t)
             print(String(format: "  t %.3f  scroll %8.2f px  bug base y %7.2f  speed %6.1f px/s", t, F.scroll(t), b.base.y, v(t)))
         }
@@ -450,7 +451,7 @@ import SwiftUI
     }
 
     /// The cutaway's type in motion, measured: frames rendered without grain, dither or vignette at 60 fps through
-    /// the cruise (118.0–118.5), the brightness-weighted centroid of one line followed frame to frame. On outlines it
+    /// the cruise (the cutaway's 6.0–6.5 s: 122.8–123.3), the brightness-weighted centroid of one line followed frame to frame. On outlines it
     /// moves exactly 5 px every frame (300 px/s).
     static func motion() throws {
         let comp = Compositor()
@@ -460,7 +461,8 @@ import SwiftUI
         var worst = 0.0
         let F = Fixes060.self
         guard let line = F.placed.first(where: { if case .line = $0.item { return true }; return false }) else { return }
-        for f in 7080...7110 {
+        let f0 = Int(((Fixes060.start + 6.0) * 60).rounded())
+        for f in f0...(f0 + 30) {
             let t = Double(f) / 60
             var l = Fixes060.frame(t)
             l.grain = false; l.vignette = false
@@ -516,8 +518,8 @@ struct BugSheet060: View {
             let F = Fixes060.self
             var rows: [(String, [(Double, Fixes060.BugState)])] = []
             let gait = (0..<6).map { i -> (Double, Fixes060.BugState) in
-                let t = 120.0 + Double(i) / 36
-                var s = F.bugState(120.0)
+                let t = F.start + 8.0 + Double(i) / 36
+                var s = F.bugState(F.start + 8.0)
                 s.gaitTime = t
                 return (t, s)
             }

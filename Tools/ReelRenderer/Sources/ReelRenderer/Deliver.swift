@@ -303,8 +303,9 @@ func verify(args: [String]) throws {
                          innerPeak == 0 ? "digital silence (0)" : String(format: "%.1f dBFS", db(Double(innerPeak)))))
         }
         // Blacks: frame 3951 (65.85 s, inside the 0.4 s of true black; v2's 3471) must decode to Y 16. 0.6.0: frame 4790
-        // (79.83 s, after the sill line has retracted). v4.1: frame 8340 (139.0 s; the line retracted by 138.73).
-        let blackFrame = ReelCut.current == .r060 ? 8340 : 3951
+        // (79.83 s, after the sill line has retracted). v4.1: 12 frames before the end, frame 8628 (143.8 s; the line
+        // retracted by 143.47; frame 8340 in v4.1's first cut).
+        let blackFrame = ReelCut.current == .r060 ? Retime060.frames - 12 : 3951
         let yr = try AVAssetReader(asset: asset)
         yr.timeRange = CMTimeRange(start: CMTime(value: CMTimeValue(blackFrame), timescale: 60), duration: CMTime(value: 1, timescale: 60))
         let yo = AVAssetReaderTrackOutput(track: v, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange])
