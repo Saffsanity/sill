@@ -36,6 +36,9 @@ struct KeyModifiers: OptionSet {
     /// Caps Lock on (UIKeyModifierFlags.alphaShift): a state of the keyboard, never a key the device
     /// holds down for the Mac.
     static let capsLock = KeyModifiers(rawValue: 1 << 16)
+    /// fn, the Globe key: Sill's own bit for it (UIKeyModifierFlags has none), CGEventFlags' maskSecondaryFn,
+    /// set only by MacShortcut's window tiling, for a Mac that says it takes it (`WindowList.fnKey`).
+    static let fn = KeyModifiers(rawValue: 1 << 23)
 
     /// The three that make shortcuts instead of characters. Shift is not one of them: it changes
     /// which character the keyboard produces, which the text path already handles.
@@ -351,4 +354,54 @@ struct ForwardedKeys {
 
     /// The modifier flags of the modifier keys down on the Mac.
     private var held: UInt64 { down.reduce(0) { $0 | (KeyModifiers.flag(forKey: $1)?.rawValue ?? 0) } }
+}
+
+/// The Keys menu (a long press on the Keyboard button, every bar; 2026-11-02): the Mac's shortcuts a
+/// device has no key for, each one press as the key row's caps send it (`KeyChord.press`). The window
+/// tiling (#272) is the Mac's own (macOS 15: Window › Move & Resize, the Globe key with Control), so only
+/// for a Mac that takes fn (`WindowList.fnKey`): one that drops it would take fn⌃← as ⌃←, the Space on the
+/// left. Pure; checked with the host's KeyStrokes in Tests/checks/key-strokes.
+enum MacShortcut: CaseIterable, Equatable {
+    case lockScreen, forceQuit, screenshot, lastApp
+    case tileLeft, tileRight, tileTop, tileBottom, fill, center, previousSize
+
+    var title: String {
+        switch self {
+        case .lockScreen: return "Lock Screen"
+        case .forceQuit: return "Force Quit…"
+        case .screenshot: return "Screenshot…"
+        case .lastApp: return "Switch to the Last App"
+        case .tileLeft: return "Left Half"
+        case .tileRight: return "Right Half"
+        case .tileTop: return "Top Half"
+        case .tileBottom: return "Bottom Half"
+        case .fill: return "Fill"
+        case .center: return "Center"
+        case .previousSize: return "Return to Previous Size"
+        }
+    }
+
+    /// The HID usage and the modifiers it is pressed with.
+    private var chord: (usage: UInt16, modifiers: KeyModifiers) {
+        let tile: KeyModifiers = [.fn, .control]
+        switch self {
+        case .lockScreen: return (0x14, [.control, .command])          // ⌃⌘Q
+        case .forceQuit: return (0x29, [.option, .command])            // ⌥⌘⎋
+        case .screenshot: return (0x22, [.shift, .command])            // ⇧⌘5
+        case .lastApp: return (0x2B, .command)                         // ⌘⇥
+        case .tileLeft: return (0x50, tile)
+        case .tileRight: return (0x4F, tile)
+        case .tileTop: return (0x52, tile)
+        case .tileBottom: return (0x51, tile)
+        case .fill: return (0x09, tile)                                // F
+        case .center: return (0x06, tile)                              // C
+        case .previousSize: return (0x15, tile)                        // R
+        }
+    }
+
+    var events: [InputEvent] { KeyChord.press(chord.usage, with: chord.modifiers) }
+    var needsFn: Bool { chord.modifiers.contains(.fn) }
+
+    /// The menu's items for a Mac that does (or does not) take fn.
+    static func shown(macTakesFn: Bool) -> [MacShortcut] { allCases.filter { macTakesFn || !$0.needsFn } }
 }
