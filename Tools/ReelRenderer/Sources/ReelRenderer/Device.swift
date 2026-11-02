@@ -119,6 +119,9 @@ struct TouchDotSpec {
     var point: CGPoint             // interior px
     var hold: (start: Double, end: Double)? = nil   // hold variant: finger down over this reel range
     var interiorWidth: CGFloat = 2000
+    /// 0.6.0: how long a hold's dot takes to fade after its finger lifts (v3's 0.25 s; the edit menus' holds lift in
+    /// 0.04 s, so the tap that follows never shows two fingers).
+    var liftFade: Double = 0.25
     /// v2 final, drag variant (S18): the finger is down over `down…up` (reel time) and at `point(t)` (interior
     /// px) in between: the logged path of a real stroke. No ring; it fades in and out like a tap.
     var drag: (down: Double, up: Double, point: (Double) -> CGPoint)? = nil
@@ -153,7 +156,7 @@ struct TouchDot: View {
         .frame(width: d, height: d)
         .scaleEffect(s)
         .opacity(alpha)
-        .offset(x: p.x * clipScale - d / 2, y: p.y * clipScale - d / 2)
+        .dotPlaced(x: p.x * clipScale - d / 2, y: p.y * clipScale - d / 2)
     }
 
     /// 0.6.0: its fingers land on white pages (Notes, TextEdit, a spreadsheet), where v3's white dot vanished, so the
@@ -169,7 +172,7 @@ struct TouchDot: View {
         var ring = 0.0
         if let hold = spec.hold {
             ring = ease(t, hold.start, 0.6, .inOut)
-            if t > hold.end { alpha = 1 - ramp(t, hold.end, hold.end + 0.25) }
+            if t > hold.end { alpha = 1 - ramp(t, hold.end, hold.end + spec.liftFade) }
         } else {
             alpha *= 1 - ramp(t, appear + 0.12, appear + 0.12 + 0.25)
         }
@@ -188,7 +191,16 @@ struct TouchDot: View {
         .frame(width: d, height: d)
         .scaleEffect(s)
         .opacity(alpha)
-        .offset(x: spec.point.x * clipScale - d / 2, y: spec.point.y * clipScale - d / 2)
+        .dotPlaced(x: spec.point.x * clipScale - d / 2, y: spec.point.y * clipScale - d / 2)
+    }
+}
+
+extension View {
+    /// Moves a touch dot to its place. v3.1 used `.offset`, which SwiftUI rounds to whole pixels, so a moving dot (a
+    /// drag's, a pinch's) stepped; 0.6.0 moves it by a render transform, on its exact path (measured: an image's place
+    /// follows a transformEffect to within 0.003 px, an offset to the nearest pixel). v3.1 as it was.
+    @ViewBuilder func dotPlaced(x: CGFloat, y: CGFloat) -> some View {
+        if ReelCut.current == .r060 { transformEffect(CGAffineTransform(translationX: x, y: y)) } else { offset(x: x, y: y) }
     }
 }
 

@@ -14,10 +14,11 @@ func picRect(_ r: CGRect) -> CGRect {
 }
 func picPoint(_ p: CGPoint) -> CGPoint { let r = picRect(CGRect(origin: p, size: .zero)); return r.origin }
 
-/// The large iPad of S09 and S13: 1280×841 interior, its right edge past the frame (v3's large device, cropped).
+/// The large iPad of S09 and S13: 1280×841 interior, its right edge past the frame (v3's large device, cropped), its left
+/// edge 80 px or more from the words (the review; `clearance`).
 enum Large060 {
     static let spec = DeviceSpec.miniH
-    static let centre = CGPoint(x: 1500, y: 560)
+    static let centre = CGPoint(x: 1540, y: 560)
     static var k: CGFloat { spec.interior.width / Mini060.source.width }
 }
 
@@ -96,8 +97,11 @@ struct ZoomedSheet060: View {
         let cell = Pinch060.cell
         let sel = CGRect(x: x + cell.minX / 2880 * w, y: y + cell.minY / 1800 * h, width: cell.width / 2880 * w, height: cell.height / 1800 * h)
         return ZStack(alignment: .topLeading) {
+            // The picture scaled and moved by one render transform, so the zoom glides (a frame and an offset are rounded
+            // to whole pixels).
             Image(decorative: sheet, scale: 1).resizable().interpolation(.high)
-                .frame(width: w, height: h).offset(x: x, y: y)
+                .frame(width: P.width, height: P.height)
+                .transformEffect(CGAffineTransform(a: z, b: 0, c: 0, d: z, tx: x, ty: y))
             if t >= Pinch060.tap + 0.05 {
                 Path(roundedRect: sel, cornerRadius: 2 * z * k).stroke(Color(hex: 0x007AFF), lineWidth: 3 * z * k * 1.4)
             }
@@ -120,8 +124,8 @@ struct ZoomedSheet060: View {
                  leftLine(Copy060.upTo5, .T4, baseline: 536, snap: 29.65, end: 32.8),
                  leftLine(Copy060.pinchSub, .T2, baseline: 612, snap: 30.85, end: 32.8)]
     let v = ZStack {
-        Backdrop(glow: 0.06, glowCenter: CGPoint(x: 1400, y: 560))
-        device.canvas().scaled(1 + 0.02 * CGFloat(ramp(t, 28.8, 32.8)), about: CGPoint(x: 1442, y: 565))
+        Backdrop(glow: 0.06, glowCenter: CGPoint(x: 1440, y: 560))
+        device.canvas().scaled(1 + 0.02 * CGFloat(ramp(t, 28.8, 32.8)), about: CGPoint(x: 1482, y: 565))
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v))
@@ -152,13 +156,12 @@ extension Footage060 {
         return img
     }
 
-    /// D4 with the switch on (D5's) and the header patched: "This iPhone".
+    /// D4 with the switch on (D5's), its header reading "This iPhone" and row 1's Aa "1×" (Retouch060.iphone; the
+    /// review: the header's ink had been taken from the panel's background, so it drew nearly invisible).
     func larger(on: Bool) throws -> CGImage {
         let name = on ? "derived/D4on" : "derived/D4p"
         if let hit = derivedLarger[name] { return hit }
         let d4 = try image("stills/D4-iphone-settings-off"), d5 = try image("stills/D5-iphone-settings-on")
-        let bg = sample(d4, 300, 925)
-        let ink = sample(d4, 87, 924)
         let ctx = CGContext(data: nil, width: d4.width, height: d4.height, bitsPerComponent: 8, bytesPerRow: 0, space: srgb,
                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         ctx.translateBy(x: 0, y: CGFloat(d4.height)); ctx.scaleBy(x: 1, y: -1)
@@ -166,17 +169,7 @@ extension Footage060 {
         if on, let sw = d5.cropping(to: Larger060.switchOn) {
             Footage060.put(ctx, sw, in: Larger060.switchOff)
         }
-        // "This iPad" → "This iPhone", in the header's own size and grey (SF Pro Text, 30 px at 2×).
-        let h = Larger060.header
-        ctx.setFillColor(bg); ctx.fill(h)
-        let font = NSFont.systemFont(ofSize: 30, weight: .regular)
-        let line = CTLineCreateWithAttributedString(NSAttributedString(string: "This iPhone", attributes: [.font: font, .foregroundColor: NSColor(cgColor: ink) ?? .gray]))
-        ctx.saveGState()
-        ctx.translateBy(x: 86, y: 935); ctx.scaleBy(x: 1, y: -1)
-        ctx.textPosition = .zero
-        CTLineDraw(line, ctx)
-        ctx.restoreGState()
-        let img = ctx.makeImage()!
+        let img = Retouch060.iphone(ctx.makeImage()!, larger: false, header: true)
         derivedLarger[name] = img
         return img
     }
@@ -219,11 +212,11 @@ struct PhoneLayers060: View {
     func still(_ n: String) throws -> CGImage { try e.f.scaled(n, width: w) }
     let d4p = try e.f.larger(on: false, width: w)
     let d4on = try e.f.larger(on: true, width: w)
-    var layers: [(CGImage, Double)] = [(try still("stills/D1-iphone-standard"), 1)]
+    var layers: [(CGImage, Double)] = [(try still("derived/D1x"), 1)]
     layers.append((d4p, ramp(t, L.panel, L.panel + 0.2)))
     layers.append((d4on, ramp(t, L.switchTap + 0.04, L.switchTap + 0.16)))
-    layers.append((try still("stills/D2-iphone-larger-1610"), CubicBezier.inOut(ramp(t, L.larger, L.larger + 0.28))))
-    layers.append((try still("stills/D3-iphone-larger-fitted"), CubicBezier.inOut(ramp(t, L.fitted, L.fitted + 0.22))))
+    layers.append((try still("derived/D2x"), CubicBezier.inOut(ramp(t, L.larger, L.larger + 0.28))))
+    layers.append((try still("derived/D3x"), CubicBezier.inOut(ramp(t, L.fitted, L.fitted + 0.22))))
     // Drop the layers a later one covers whole.
     if let top = layers.lastIndex(where: { $0.1 >= 0.999 }) { layers = Array(layers[top...]) }
     let dots = [Device060.dot(at: L.settingsTap, L.settingsPoint, source: L.source), Device060.dot(at: L.switchTap, L.switchPoint, source: L.source),
@@ -231,11 +224,11 @@ struct PhoneLayers060: View {
     let phone = PlacedDevice(spec: L.spec, center: L.centre, yaw: -4) {
         PhoneLayers060(spec: L.spec, layers: layers, dots: dots, t: t)
     }
-    let lines = [leftLine(Copy060.larger, .T1c, baseline: 400, snap: 32.85, end: 36.8),
-                 leftLine(Copy060.upright, .T4, baseline: 486, snap: 33.65, end: 36.8),
-                 leftLine(Copy060.largerSub[0], .T2, baseline: 566, snap: 34.85, end: 36.8),
-                 leftLine(Copy060.largerSub[1], .T2, baseline: 608, snap: 35.10, end: 36.8),
-                 leftLine(Copy060.largerFoot, .T3, baseline: 660, snap: 35.65, end: 36.8, cascade: false)]
+    var lines = [leftLine(Copy060.larger, .T1c, baseline: 400, snap: 32.85, end: 36.8),
+                 leftLine(Copy060.upright, .T4, baseline: 486, snap: 33.65, end: 36.8)]
+    lines += capped([leftLine(Copy060.largerSub[0], .T2, baseline: 566, snap: 34.85, end: 36.8),
+                     leftLine(Copy060.largerSub[1], .T2, baseline: 608, snap: 35.10, end: 36.8)])
+    lines.append(leftLine(Copy060.largerFoot, .T3, baseline: 660, snap: 32.90, end: 36.8, cascade: false))
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: L.centre)
         SillLine(y: 1036, length: 900, centerX: L.centre.x)
@@ -248,7 +241,7 @@ struct PhoneLayers060: View {
 // MARK: S11–S12 · a keyboard, and scrolling (36.8–44.0)
 
 enum Keys060 {
-    static let spec = Pad060.spec
+    static let spec = DeviceSpec(interior: CGSize(width: 820, height: 538), bezel: 28, innerRadius: 22, outerRadius: 50)
     static let centre = CGPoint(x: 1430, y: 392)
     static var k: CGFloat { spec.interior.width / Mini060.source.width }
     static let slabWidth: CGFloat = 960
@@ -318,7 +311,7 @@ struct Typing060: View {
                 Path(content).fill(Color.black.opacity(0.10 * down))
                 Image(decorative: sheet, scale: 1).resizable().interpolation(.high)
                     .frame(width: s.width, height: s.height)
-                    .offset(x: s.minX, y: s.minY - s.height * CGFloat(1 - down))
+                    .transformEffect(CGAffineTransform(translationX: s.minX, y: s.minY - s.height * CGFloat(1 - down)))
                     .mask(Path(content).fill(Color.white).frame(width: size.width, height: size.height))
             }
         }
@@ -360,32 +353,63 @@ struct Typing060: View {
     let lines = [leftLine(Copy060.attach, .T1c, baseline: 400, snap: 36.85, end: 40.8),
                  leftLine(Copy060.justType, .T1c, baseline: 504, snap: 37.65, end: 40.8),
                  esc,
-                 leftLine(Copy060.escFoot, .T3, baseline: 640, snap: 39.65, end: 40.8, cascade: false)]
+                 leftLine(Copy060.escFoot, .T3, baseline: 640, snap: 36.90, end: 40.8, cascade: false)]
+    // The iPad and its keyboard 5 % smaller toward the frame's right edge, then a 2 % push about the iPad's left edge, so
+    // it keeps 80 px or more from "Attach a keyboard." (the review; `clearance`) and drifts away from it.
     let v = ZStack {
-        Backdrop(glow: 0.06, glowCenter: CGPoint(x: 1430, y: 520))
-        group.scaled(1 + 0.02 * CGFloat(ramp(t, 36.8, 40.8)), about: CGPoint(x: 1430, y: 520))
+        Backdrop(glow: 0.06, glowCenter: CGPoint(x: 1450, y: 520))
+        group.scaled(0.95, about: CGPoint(x: 1900, y: 520))
+            .scaled(1 + 0.02 * CGFloat(ramp(t, 36.8, 40.8)), about: CGPoint(x: 1030, y: 520))
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v))
 }
 
 enum Scroll060 {
-    /// The document's scroll (picture px): down 520 with a two-finger scroll (40.95–41.5), back up to 160 (41.6–42.15).
+    /// One scroll on the trackpad, in the document's px: the two fingers' speed rises over 0.1 s (smoothstep) to `v0` and
+    /// holds until they lift; the content then coasts, its speed falling by e every 0.12 s, and stops once it is under
+    /// the cutoff (20 px/s on the canvas), with no sub-pixel creep (the review: the first cut started at full speed in one
+    /// frame and stair-stepped at its ends).
+    struct Fling { let start: Double; let lift: Double; let v0: Double }
+    static let rise = 0.1, tau = 0.12
+    /// 20 canvas px/s in document px: a document px is 0.713 still px × 0.362 interior px × the camera's 1.25.
+    static let cutoff = 20 / (0.7132 * 0.3619 * 1.25)
+    static func distance(_ f: Fling, _ t: Double) -> Double {
+        guard t > f.start else { return 0 }
+        func fingers(_ u: Double) -> Double {
+            if u < rise { let x = u / rise; return f.v0 * rise * (x * x * x - x * x * x * x / 2) }
+            return f.v0 * (rise / 2 + (u - rise))
+        }
+        if t <= f.lift { return fingers(t - f.start) }
+        let atLift = fingers(f.lift - f.start)
+        let stop = tau * log(f.v0 / cutoff)
+        let u = min(t - f.lift, stop)
+        return atLift + f.v0 * tau * (1 - exp(-u / tau))
+    }
+    /// Down 520 px (40.95–41.55), then back up 200 (41.56–42.04): v0 2,110 and 902 px/s.
+    static let down = Fling(start: 40.95, lift: 41.13, v0: 2110), up = Fling(start: 41.56, lift: 41.72, v0: 902)
+    /// After Reverse Scrolling, a finger on the picture: up 180 still px (43.30–43.82, inOut), and the document goes the
+    /// other way, down by as much (252 document px).
+    static let drag = (43.30, 43.82)
+    static let dragFrom = CGPoint(x: 1000, y: 1120), dragUp: CGFloat = 180
+    static func dragProgress(_ t: Double) -> CGFloat { CGFloat(CubicBezier.inOut(ramp(t, drag.0, drag.1))) }
     static func offset(_ t: Double) -> CGFloat {
-        let down = 520 * CGFloat(ease(t, 40.95, 0.55, .appleOut))
-        let up = 360 * CGFloat(ease(t, 41.6, 0.55, .appleOut))
-        return down - up
+        CGFloat(distance(down, t) - distance(up, t)) - dragUp / 0.7132 * dragProgress(t)
     }
-    /// The pointer (iPadOS's round one) over the text, in the picture's px, drifting a little.
+    /// iPadOS's round pointer: it comes to rest over the text by 40.95 and stays there while two fingers scroll (a
+    /// trackpad's scroll moves no pointer); it fades as a finger touches the screen (42.0), as iPadOS hides it.
     static func pointer(_ t: Double) -> CGPoint {
-        CGPoint(x: 1260 + 40 * CGFloat(sin(0.9 * (t - 40.8))), y: 820 + 18 * CGFloat(sin(1.3 * (t - 40.8) + 0.6)))
+        let p = CGFloat(CubicBezier.inOut(ramp(t, 40.8, 40.95)))
+        return CGPoint(x: 1180 + 80 * p, y: 900 - 80 * p)
     }
-    static let panel = 42.4, flip = 42.8
-    static let flipPoint = CGPoint(x: 2106, y: 431)
+    static func pointerAlpha(_ t: Double) -> Double { 1 - ramp(t, panel, panel + 0.15) }
+    /// Settings in at 42.0 (a beat before the subline), Reverse Scrolling on at 42.8, Done at 43.05 (the panel out by 43.25).
+    static let panel = 42.0, flip = 42.8, done = 43.05
+    static let flipPoint = CGPoint(x: 2106, y: 431), donePoint = CGPoint(x: 2143, y: 237)
 }
 
 /// The long document scrolled in TextEdit (E3's chrome over longdoc-page), its scroller, and the pointer, in the
-/// iPad's interior px.
+/// iPad's interior px. The page moves by a render transform, on its exact fractional offset.
 struct ScrollDoc060: View {
     let page: CGImage
     let k: CGFloat
@@ -403,33 +427,39 @@ struct ScrollDoc060: View {
         return ZStack(alignment: .topLeading) {
             Image(decorative: page, scale: 1).resizable().interpolation(.high)
                 .frame(width: doc.width, height: pageH)
-                .offset(x: doc.minX, y: doc.minY - off * s)
+                .transformEffect(CGAffineTransform(translationX: doc.minX, y: doc.minY - off * s))
                 .mask(Path(doc).fill(Color.white))
             Path(roundedRect: bar, cornerRadius: bar.width / 2).fill(Color.black.opacity(0.35))
-            Circle().fill(Color(white: 0.32, opacity: 0.55))
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.5), lineWidth: max(1, 0.6 * k * 1.4)))
-                .frame(width: d, height: d).offset(x: pc.x - d / 2, y: pc.y - d / 2)
+            if Scroll060.pointerAlpha(t) > 0.002 {
+                Circle().fill(Color(white: 0.32, opacity: 0.55))
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.5), lineWidth: max(1, 0.6 * k * 1.4)))
+                    .frame(width: d, height: d)
+                    .opacity(Scroll060.pointerAlpha(t))
+                    .transformEffect(CGAffineTransform(translationX: pc.x - d / 2, y: pc.y - d / 2))
+            }
         }
         .frame(width: doc.maxX, height: doc.maxY + 40, alignment: .topLeading)
     }
 }
 
 // SWAP-IN (S12, take E part 2): replace with Noah's clip E if provided at /Users/noah/Downloads/sill-handoff/release-060/captures/take-E.mov (its scrolling part), inside
-// the iPad in place of ScrollDoc060 (E3 and longdoc-page). Marks: the scroll down 40.95–41.5, back up 41.6–42.15. The
-// Settings panel (E6, then E7 at 42.8) stays the harness's stills.
+// the iPad in place of ScrollDoc060 (E3 and longdoc-page). Marks: the scroll down 40.95–41.55, back up 41.56–42.04; the
+// Settings panel (E6, then E7 at 42.8, Done at 43.05) stays the harness's stills; then a finger dragged up over the
+// picture (43.30–43.82) with Reverse Scrolling on, the document going down: the take's, if it has one, else keep the
+// drawn drag over the take's last frame.
 @MainActor func s060_12(_ t: Double, _ e: Env) throws -> FrameLayers {
     let K = Keys060.self, S = Scroll060.self
     let k = K.k * 1.25
     let page = try e.f.image("pictures/longdoc-page")
-    // The Settings panel: E6's (Reverse Scrolling off), then E7's (on), in with the app's transition.
+    // The Settings panel: E6's (Reverse Scrolling off), then E7's (on), in with the app's transition, out after Done.
     let panelRect = scaledRect(Sound060.panel, K.k)
     let off = try e.f.crop("stills/E6-reverse-off", Sound060.panel, scale: k), on = try e.f.crop("stills/E7-reverse-on", Sound060.panel, scale: k)
     let button = try e.f.crop("stills/E6-reverse-off", Sound060.settingsButton, scale: k)
-    let panelIn = ease(t, S.panel, 0.25, .appleOut)
+    let panelIn = ease(t, S.panel, 0.25, .appleOut) * (1 - ease(t, S.done + 0.02, 0.2, .appleIn))
     let size = K.spec.interior
     let screen = ZStack(alignment: .topLeading) {
         ScrollDoc060(page: page, k: K.k, t: t)
-        if t >= S.panel {
+        if t >= S.panel && panelIn > 0.002 {
             image(button, in: scaledRect(Sound060.settingsButton, K.k))
             ZStack(alignment: .topLeading) {
                 image(off, in: panelRect)
@@ -441,7 +471,11 @@ struct ScrollDoc060: View {
         }
     }
     .frame(width: size.width, height: size.height, alignment: .topLeading)
-    let dots = [Device060.dot(at: S.panel, Sound060.settingsPoint), Device060.dot(at: S.flip, S.flipPoint)]
+    let finger = TouchDotSpec(at: S.drag.0, point: .zero, interiorWidth: Mini060.source.width, drag: (S.drag.0, S.drag.1, { t in
+        CGPoint(x: S.dragFrom.x, y: S.dragFrom.y - S.dragUp * S.dragProgress(t))
+    }))
+    let dots = [Device060.dot(at: S.panel, Sound060.settingsPoint), Device060.dot(at: S.flip, S.flipPoint),
+                Device060.dot(at: S.done, S.donePoint), finger]
     let base = try e.f.scaled("stills/E3-longdoc0", width: size.width * 1.3)
     let device = PlacedDevice(spec: K.spec, center: K.centre, yaw: 0) {
         MiniScreen(size: size, layers: [(base, MiniLayer(name: "stills/E3-longdoc0"))], dots: dots, t: t) { screen }
@@ -449,19 +483,21 @@ struct ScrollDoc060: View {
     let h = KeyboardSlab060.height(width: K.slabWidth)
     let slab = KeyboardSlab060(width: K.slabWidth, origin: CGPoint(x: 960 - K.slabWidth / 2, y: 540 - h / 2), t: t)
         .modifier(Tilt(yaw: 0, pitch: 58)).offset(x: K.slabOffset.width, y: K.slabOffset.height)
-    // Closer than S11: the iPad's screen fills the right half, its left edge fading under the words.
+    // Closer than S11: the iPad's screen fills the right half, its left edge fading out 80 px or more from the words.
     let camera = 1.25 + 0.025 * CGFloat(ramp(t, 40.8, 44.0))
-    let edge = LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .clear, location: 880 / 1920),
-                                      .init(color: .white, location: 960 / 1920), .init(color: .white, location: 1)],
+    let edge = LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .clear, location: 945 / 1920),
+                                      .init(color: .white, location: 1025 / 1920), .init(color: .white, location: 1)],
                               startPoint: .leading, endPoint: .trailing).canvas()
+    // The footnote with the first statement; the subline whole, a beat before Reverse Scrolling flips on (the review:
+    // they had been readable for about 0.7 s).
     let lines = [leftLine(Copy060.scroll, .T1c, baseline: 400, snap: 40.85, end: 44.0),
                  leftLine(Copy060.wheel, .T4, baseline: 486, snap: 41.25, end: 44.0),
-                 leftLine(Copy060.reverseSub, .T2, baseline: 566, snap: 42.85, end: 44.0),
-                 leftLine(Copy060.reverseFoot, .T3, baseline: 616, snap: 43.25, end: 44.0, cascade: false)]
+                 leftLine(Copy060.reverseSub, .T2, baseline: 566, snap: 42.45, end: 44.0, cascade: false),
+                 leftLine(Copy060.reverseFoot, .T3, baseline: 616, snap: 40.90, end: 44.0, cascade: false)]
     let v = ZStack {
-        Backdrop(glow: 0.06, glowCenter: CGPoint(x: 1430, y: 520))
+        Backdrop(glow: 0.06, glowCenter: CGPoint(x: 1490, y: 520))
         ZStack { slab; device }.canvas()
-            .camera(camera, from: K.centre, to: CGPoint(x: 1395, y: 470))
+            .camera(camera, from: K.centre, to: CGPoint(x: 1455, y: 470))
             .mask(edge)
         TypeLayer(lines: lines, t: t)
     }.canvas()
@@ -485,34 +521,38 @@ enum Compose060 {
     static let dictation = (46.55, 47.30)
 }
 
-/// The composition strip over the lower middle of the iPad's screen (interior px): the typed text underlined, then the
-/// candidates with the first chosen; the dictation's listening bars. Drawn as glyph outlines in the picture.
+/// The composition as Sill 0.6.0 shows it (InputOverlay.swift's composition label): the marked text in a label at the
+/// top middle of the picture, 16 pt under its top edge (Title 3, white, on #1C1C1E at 92 %, 12 pt by 6 pt of padding,
+/// 8 pt corners), and iPadOS's candidates for a hardware keyboard beside it, under the label (drawn simply, the first
+/// chosen); dictation's listening bars at the same place, where Sill's caret is (the review: the first cut drew them at
+/// the bottom of the picture, far from both). Interior px; glyph outlines, part of the picture.
 struct ComposeStrip060: View {
     let size: CGSize
     let t: Double
     var body: some View {
         Canvas { ctx, _ in
             let C = Compose060.self
-            let pt = size.width / Device060.miniPoints.width
+            let k = size.width / Mini060.source.width          // interior px per still px (2 still px a point)
+            let anchor = CGPoint(x: (Mini060.picture.midX) * k, y: (Mini060.picture.minY + 32) * k)
             for (i, c) in C.compose.enumerated() {
                 let end = C.arrive[i]
                 guard t >= c.from - 0.001, t < end + 0.12 else { continue }
                 let a = ramp(t, c.from, c.from + 0.12) * (1 - ramp(t, end, end + 0.12))
-                draw(&ctx, typed: c.typed, candidates: c.candidates, pt: pt, alpha: a, chosen: t >= end - 0.25)
+                draw(&ctx, typed: c.typed, candidates: c.candidates, k: k, anchor: anchor, alpha: a, chosen: t >= end - 0.25)
             }
             let (d0, d1) = C.dictation
             if t >= d0 && t < d1 + 0.12 {
                 let a = ramp(t, d0, d0 + 0.12) * (1 - ramp(t, d1, d1 + 0.12))
                 var c = ctx
                 c.opacity = a
-                let w = 150 * pt, h = 46 * pt
-                let r = CGRect(x: size.width / 2 - w / 2, y: size.height * 0.80 - h / 2, width: w, height: h)
-                c.fill(Path(roundedRect: r, cornerRadius: h / 2, style: .continuous), with: .color(Color(hex: 0x2C2C2E, alpha: 0.94)))
-                for k in 0..<7 {
-                    let phase = Double(k) * 0.9 + t * 11
-                    let bh = (8 + 22 * abs(sin(phase))) * pt
-                    let x = r.midX + CGFloat(k - 3) * 13 * pt
-                    c.fill(Path(roundedRect: CGRect(x: x - 2.5 * pt, y: r.midY - bh / 2, width: 5 * pt, height: bh), cornerRadius: 2.5 * pt),
+                let w = 150 * 2 * k, h = 46 * 2 * k
+                let r = CGRect(x: anchor.x - w / 2, y: anchor.y, width: w, height: h)
+                c.fill(Path(roundedRect: r, cornerRadius: h / 2, style: .continuous), with: .color(Color(hex: 0x1C1C1E, alpha: 0.92)))
+                for j in 0..<7 {
+                    let phase = Double(j) * 0.9 + t * 11
+                    let bh = (8 + 22 * abs(sin(phase))) * 2 * k
+                    let x = r.midX + CGFloat(j - 3) * 13 * 2 * k
+                    c.fill(Path(roundedRect: CGRect(x: x - 2.5 * 2 * k, y: r.midY - bh / 2, width: 5 * 2 * k, height: bh), cornerRadius: 2.5 * 2 * k),
                            with: .color(Color(hex: Palette.accent)))
                 }
             }
@@ -520,29 +560,37 @@ struct ComposeStrip060: View {
         .frame(width: size.width, height: size.height)
     }
 
-    private func draw(_ ctx: inout GraphicsContext, typed: String, candidates: [String], pt: CGFloat, alpha: Double, chosen: Bool) {
+    private func draw(_ ctx: inout GraphicsContext, typed: String, candidates: [String], k: CGFloat, anchor: CGPoint, alpha: Double, chosen: Bool) {
         var c = ctx
         c.opacity = alpha
-        let fs = 19 * pt, h = 46 * pt, pad = 16 * pt
-        let typedLine = Outline060.line(typed, size: fs, weight: .regular)
-        let cands = candidates.map { Outline060.line($0, size: fs, weight: .regular) }
-        let gap = 26 * pt
-        let w = pad * 2 + typedLine.width + (cands.isEmpty ? 0 : gap + cands.reduce(0) { $0 + $1.width + gap } - gap / 2)
-        let r = CGRect(x: size.width / 2 - w / 2, y: size.height * 0.80 - h / 2, width: w, height: h)
-        c.fill(Path(roundedRect: r, cornerRadius: 12 * pt, style: .continuous), with: .color(Color(hex: 0x2C2C2E, alpha: 0.94)))
-        c.stroke(Path(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), cornerRadius: 12 * pt, style: .continuous), with: .color(.white.opacity(0.12)), lineWidth: 1)
-        let base = r.midY + fs * 0.36
-        var x = r.minX + pad
-        Outline060.fill(typedLine, in: &c, at: CGPoint(x: x, y: base), color: .white)
-        c.fill(Path(CGRect(x: x, y: base + 4 * pt, width: typedLine.width, height: 1.5 * pt)), with: .color(.white.opacity(0.8)))
-        x += typedLine.width + gap
-        for (k, l) in cands.enumerated() {
-            if k == 0 {
-                let hl = CGRect(x: x - 8 * pt, y: r.minY + 7 * pt, width: l.width + 16 * pt, height: h - 14 * pt)
+        let pt = 2 * k                                          // interior px per point
+        // The label: Title 3 (20 pt), its line 25 pt tall.
+        let fs = 20 * pt
+        let label = Outline060.line(typed, size: fs, weight: .regular)
+        let lw = label.width + 24 * pt, lh = 25 * pt + 12 * pt
+        let lr = CGRect(x: anchor.x - lw / 2, y: anchor.y, width: lw, height: lh)
+        c.fill(Path(roundedRect: lr, cornerRadius: 8 * pt, style: .continuous), with: .color(Color(hex: 0x1C1C1E, alpha: 0.92)))
+        Outline060.fill(label, in: &c, at: CGPoint(x: lr.minX + 12 * pt, y: lr.midY + fs * 0.36), color: .white)
+        guard !candidates.isEmpty else { return }
+        // iPadOS's candidates, beside the label (under it, its left edge with the label's).
+        let cs = 18 * pt, ch = 40 * pt, pad = 12 * pt, gap = 20 * pt
+        let cands = candidates.map { Outline060.line($0, size: cs, weight: .regular) }
+        let cw = pad * 2 + cands.reduce(0) { $0 + $1.width + gap } - gap
+        let cr = CGRect(x: lr.minX, y: lr.maxY + 6 * pt, width: cw, height: ch)
+        c.drawLayer { g in
+            g.addFilter(.blur(radius: 8 * pt))
+            g.fill(Path(roundedRect: cr.offsetBy(dx: 0, dy: 3 * pt), cornerRadius: 10 * pt, style: .continuous), with: .color(.black.opacity(0.35)))
+        }
+        c.fill(Path(roundedRect: cr, cornerRadius: 10 * pt, style: .continuous), with: .color(Color(hex: 0x2C2C2E, alpha: 0.97)))
+        let base = cr.midY + cs * 0.36
+        var x = cr.minX + pad
+        for (j, l) in cands.enumerated() {
+            if j == 0 {
+                let hl = CGRect(x: x - 7 * pt, y: cr.minY + 5 * pt, width: l.width + 14 * pt, height: ch - 10 * pt)
                 c.fill(Path(roundedRect: hl, cornerRadius: 7 * pt, style: .continuous),
                        with: .color(chosen ? Color(hex: Palette.accent, alpha: 0.9) : Color.white.opacity(0.16)))
             }
-            Outline060.fill(l, in: &c, at: CGPoint(x: x, y: base), color: k == 0 && chosen ? Color(hex: Palette.deviceBody) : .white)
+            Outline060.fill(l, in: &c, at: CGPoint(x: x, y: base), color: j == 0 && chosen ? Color(hex: Palette.deviceBody) : .white)
             x += l.width + gap
         }
     }
@@ -567,7 +615,7 @@ struct ComposeStrip060: View {
         lines.append(l)
     }
     lines.append(leftLine(Copy060.composeSub, .T2, baseline: 638, snap: 46.85, end: 48.8))
-    lines.append(leftLine(Copy060.composeFoot, .T3, baseline: 688, snap: 47.25, end: 48.8, cascade: false))
+    lines.append(leftLine(Copy060.composeFoot, .T3, baseline: 688, snap: 44.50, end: 48.8, cascade: false))
     // A slow push on TextEdit's lines, where the words arrive.
     let about = onCanvas(L.spec, center: L.centre, CGPoint(x: 240 * L.k, y: 480 * L.k))
     let v = ZStack {
@@ -591,18 +639,21 @@ enum Tiles060 {
 
 @MainActor func s060_14(_ t: Double, _ e: Env) throws -> FrameLayers {
     let T = Tiles060.self
-    let name = t >= T.toList && t < T.toTiles ? "stills/N2-list" : "stills/N1-tiles"
+    // N1x: N1 with Noah’s MacBook Pro’s tile showing QuickTime as S06 left it (Reel060.swift; the review: its picture
+    // had been v3.1's Weather frame, with Noah's saved places).
+    let name = t >= T.toList && t < T.toTiles ? "stills/N2-list" : "derived/N1x"
     // Soft edges all round: the stills' background is the connect screen's near-black, which a hard edge would show.
-    let m = MacroSpec(crop: T.crop, scale: T.scale, center: CGPoint(x: T.centre.x - 6 * CGFloat(t - 48.8), y: T.centre.y), feather: 50,
-                      hardEdges: [], interior: CGSize(width: 1488, height: 2266))
+    let m = MacroSpec(crop: T.crop, scale: T.scale, center: T.centre, feather: 50, hardEdges: [], interior: CGSize(width: 1488, height: 2266))
     let img = try e.f.crop(name, m.fetchRect, scale: m.scale)
-    let lines = [leftLine(Copy060.tiles, .T1c, baseline: 430, snap: 48.85, end: 52.8),
-                 leftLine(Copy060.tilesSub[0], .T2, baseline: 512, snap: 49.65, end: 52.8),
-                 leftLine(Copy060.tilesSub[1], .T2, baseline: 554, snap: 49.90, end: 52.8),
-                 leftLine(Copy060.tilesFoot, .T3, baseline: 610, snap: 51.25, end: 52.8, cascade: false)]
+    var lines = [leftLine(Copy060.tiles, .T1c, baseline: 430, snap: 48.85, end: 52.8)]
+    lines += capped([leftLine(Copy060.tilesSub[0], .T2, baseline: 512, snap: 49.65, end: 52.8),
+                     leftLine(Copy060.tilesSub[1], .T2, baseline: 554, snap: 49.90, end: 52.8)])
+    lines.append(leftLine(Copy060.tilesFoot, .T3, baseline: 610, snap: 51.25, end: 52.8, cascade: false))
+    // The drift (6 px a second to the left) is a render transform, so it glides (a macro's place is rounded to whole px).
     let v = ZStack {
         Backdrop(glow: 0.05, glowCenter: T.centre)
         MacroView(spec: m, image: img) { EmptyView() }
+            .transformEffect(CGAffineTransform(translationX: -6 * CGFloat(t - 48.8), y: 0))
             .scaled(1 + 0.02 * CGFloat(ramp(t, 48.8, 52.8)), about: T.centre)
         TypeLayer(lines: lines, t: t)
     }.canvas()
@@ -624,9 +675,10 @@ enum Aa060 {
     let name = t >= A.off ? "stills/H2-scaleoff-open" : "stills/H1-scale125-open"
     let m = macro(crop: A.crop, scale: A.scale, center: A.centre, snap: 40, feather: 60, interior: Mini060.source)
     let img = try e.f.crop(name, m.fetchRect, scale: m.scale)
-    let lines = [LineSpec(Copy060.aaOff, .T1s, baseline: 150, snap: 52.85, holdEnd: 56.0),
-                 LineSpec(Copy060.aaSub, .T2, baseline: 214, snap: 54.45, holdEnd: 56.0),
-                 LineSpec(Copy060.aaFoot, .T3, baseline: 258, snap: 54.85, holdEnd: 56.0, cascade: false)]
+    // The subline a beat before Aa goes to Off (it says what that does), the footnote with the first statement.
+    var lines = [LineSpec(Copy060.aaOff, .T1s, baseline: 150, snap: 52.85, holdEnd: 56.0)]
+    lines += capped([LineSpec(Copy060.aaSub, .T2, baseline: 214, snap: 54.05, holdEnd: 56.0)])
+    lines.append(LineSpec(Copy060.aaFoot, .T3, baseline: 258, snap: 52.90, holdEnd: 56.0, cascade: false))
     let v = ZStack {
         Backdrop(glow: 0.05, glowCenter: CGPoint(x: 960, y: 600))
         AaMac060(k: 0.86, center: CGPoint(x: 520, y: 640), t: t, shrink: A.off)
@@ -662,12 +714,15 @@ enum Hold060 {
     // The Settings row slides in under the bar at 58.0 (0.35 s appleOut, 40 px up, fading in).
     let row = try e.f.crop("stills/J2-hold-row", H.rowRect, scale: 1.0)
     let p = ease(t, H.row, 0.35, .appleOut)
-    let rowView = Image(decorative: row, scale: 1).resizable().interpolation(.high)
-        .frame(width: H.rowRect.width, height: H.rowRect.height)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .position(x: H.rowCentre.x, y: H.rowCentre.y + 40 * CGFloat(1 - p))
-        .opacity(p)
-        .canvas()
+    let rowView = ZStack(alignment: .topLeading) {
+        Color.clear.canvas()
+        Image(decorative: row, scale: 1).resizable().interpolation(.high)
+            .frame(width: H.rowRect.width, height: H.rowRect.height)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .opacity(p)
+            .transformEffect(CGAffineTransform(translationX: H.rowCentre.x - H.rowRect.width / 2,
+                                               y: H.rowCentre.y - H.rowRect.height / 2 + 40 * CGFloat(1 - p)))
+    }.frame(width: Stage.size.width, height: Stage.size.height, alignment: .topLeading)
     let lines = [LineSpec(Copy060.hold, .T1c, x: 1060, baseline: 470, align: .leading, snap: 56.05, holdEnd: 59.2),
                  LineSpec(Copy060.halfSecond, .T4, x: 1060, baseline: 556, align: .leading, snap: 56.95, holdEnd: 59.2),
                  LineSpec(Copy060.holdFoot, .T3, x: 1060, baseline: 616, align: .leading, snap: 58.05, holdEnd: 59.2, cascade: false)]
@@ -688,6 +743,11 @@ enum Hold060 {
 // MARK: S17 · The tour (59.2–62.4)
 
 enum Tour060 {
+    /// S17's iPad: the first cut's (Pad060 became S04–S08's smaller one), its push onto the card's row 101 px clear of the
+    /// words (`clearance`).
+    static let spec = DeviceSpec(interior: CGSize(width: 820, height: 538), bezel: 28, innerRadius: 22, outerRadius: 50)
+    static let centre = CGPoint(x: 1426, y: 560)
+    static var k: CGFloat { spec.interior.width / Mini060.source.width }
     /// The tour's card on K1; its row "New: Pinch to zoom the picture here, up to 5×…" (x 809–1461, y 800–950).
     static let row = CGPoint(x: 1050, y: 836)
     static let push: (Double, Double) = (59.6, 62.4)
@@ -696,21 +756,21 @@ enum Tour060 {
 
 @MainActor func s060_17(_ t: Double, _ e: Env) throws -> FrameLayers {
     let T = Tour060.self
-    let device = try padDevice(e, spec: Pad060.spec, centre: Pad060.centre, yaw: 0, t: t, fetch: T.to,
+    let device = try padDevice(e, spec: T.spec, centre: T.centre, yaw: 0, t: t, fetch: T.to,
                                layers: [MiniLayer(name: "stills/K1-tour-touch")])
     let p = CGFloat(CubicBezier.inOut(ramp(t, T.push.0, T.push.1)))
     let s = 1 + (T.to - 1) * p
-    let from = Pad060.canvas(T.row)
+    let from = onCanvas(T.spec, center: T.centre, CGPoint(x: T.row.x * T.k, y: T.row.y * T.k))
     let to = CGPoint(x: lerp(from.x, 1380, Double(p)), y: lerp(from.y, 560, Double(p)))
     let edge = LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .clear, location: 880 / 1920),
                                       .init(color: .white, location: 960 / 1920), .init(color: .white, location: 1)],
                               startPoint: .leading, endPoint: .trailing).canvas()
-    let lines = [leftLine(Copy060.tourLines[0], .T1c, baseline: 400, snap: 59.25, end: 62.4),
-                 leftLine(Copy060.tourLines[1], .T1c, baseline: 504, snap: 59.40, end: 62.4),
-                 leftLine(Copy060.tourSubLines[0], .T2, baseline: 588, snap: 60.45, end: 62.4),
-                 leftLine(Copy060.tourSubLines[1], .T2, baseline: 630, snap: 60.75, end: 62.4)]
+    var lines = [leftLine(Copy060.tourLines[0], .T1c, baseline: 400, snap: 59.25, end: 62.4),
+                 leftLine(Copy060.tourLines[1], .T1c, baseline: 504, snap: 59.40, end: 62.4)]
+    lines += capped([leftLine(Copy060.tourSubLines[0], .T2, baseline: 588, snap: 60.45, end: 62.4),
+                     leftLine(Copy060.tourSubLines[1], .T2, baseline: 630, snap: 60.75, end: 62.4)])
     let v = ZStack {
-        Backdrop(glow: 0.06, glowCenter: Pad060.centre)
+        Backdrop(glow: 0.06, glowCenter: T.centre)
         device.canvas().camera(s, from: from, to: to).mask(edge)
         TypeLayer(lines: lines, t: t)
     }.canvas()

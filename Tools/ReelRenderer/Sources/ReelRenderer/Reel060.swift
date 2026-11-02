@@ -206,6 +206,32 @@ enum Mini060 {
         ctx.restoreGState()
     }
 
+    /// A thumbnail in the bar redrawn (a y-down context of a 2266×1488 still): `img` filling the thumbnail's picture box by
+    /// its height, inside its 18 px continuous corners, over the bar's own colour `gap`; then its app badge, the harness's
+    /// two letters on the app's colour, drawn again over it.
+    static func thumbnail(_ c: CGContext, _ img: CGImage, thumb: CGRect, badge b: CGRect, badgeColor: CGColor, letters: String, gap: CGColor,
+                          scale: (CGImage, CGFloat) -> CGImage) {
+        c.setFillColor(gap)
+        c.addPath(CGPath(roundedRect: thumb.insetBy(dx: -2, dy: -2), cornerWidth: 20, cornerHeight: 20, transform: nil)); c.fillPath()
+        c.saveGState()
+        c.addPath(Path(roundedRect: thumb, cornerRadius: 18, style: .continuous).cgPath); c.clip()
+        let th = thumb.height, tw = th * CGFloat(img.width) / CGFloat(img.height)
+        put(c, scale(img, th / CGFloat(img.height)), in: CGRect(x: thumb.midX - tw / 2, y: thumb.minY, width: tw, height: th))
+        c.restoreGState()
+        c.setFillColor(gap)
+        c.addPath(CGPath(roundedRect: b.insetBy(dx: -4, dy: -4), cornerWidth: 15, cornerHeight: 15, transform: nil)); c.fillPath()
+        c.setFillColor(badgeColor)
+        c.addPath(CGPath(roundedRect: b, cornerWidth: 11, cornerHeight: 11, transform: nil)); c.fillPath()
+        let font = NSFont.systemFont(ofSize: 27, weight: .semibold)
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: letters, attributes: [.font: font, .foregroundColor: NSColor.white]))
+        let lb = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+        c.saveGState()
+        c.translateBy(x: b.midX - lb.midX, y: b.midY + lb.midY); c.scaleBy(x: 1, y: -1)
+        c.textPosition = .zero
+        CTLineDraw(line, c)
+        c.restoreGState()
+    }
+
     /// The colour of one pixel of `img` (top-left origin).
     func sample(_ img: CGImage, _ x: Int, _ y: Int) -> CGColor {
         var px = [UInt8](repeating: 0, count: 4)
@@ -219,36 +245,66 @@ enum Mini060 {
         switch name {
         case "weather":
             // v3.1's Weather window (S08, 15.9 s: the device frontal, the swipe settled), its stream picture measured at
-            // x 273.5–1567.5, y 201.5–992.5 of the frame, cut to 16:10 inside its rounded edges (Noah's decision (c)).
-            return try film(15.9).cropping(to: CGRect(x: 298, y: 207, width: 1246, height: 779))!
+            // x 273.5–1567.5, y 201.5–992.5 of the frame, cut to 16:10 inside its rounded edges (Noah's decision (c)),
+            // its saved places renamed and its home and location labels painted out (the review: Retouch060.weather).
+            return Retouch060.weather(try film(15.9).cropping(to: CGRect(x: 298, y: 207, width: 1246, height: 779))!)
+        case "qtv":
+            // QuickTime Player playing v3.1 at 5.2 s, inside what S06's movie plays (its open: the icon's iMac and window, no
+            // words of the old reel; at 6.4 it is dark), titled "Sill.mp4": the picture "as you last left it" on S14's
+            // tile and in the bars' QuickTime thumbnails.
+            return QuickTime060.picture(frame: try film(5.2), movieTime: 5.2)
+        case "N1x":
+            // N1 (the tiles) with the Work tile's picture, Noah's MacBook Pro's, as qtv: its band is 175×92 pt (x 384–734,
+            // y 1169–1353 px, measured), the picture filling it (scaledToFill, centred) inside the tile's 1 pt border and
+            // its 12 pt top corners (ContentView.macTile).
+            let n1 = try image("stills/N1-tiles"), q = try image("derived/qtv")
+            return try canvas(n1.width, n1.height) { c in
+                Footage060.put(c, n1, in: CGRect(x: 0, y: 0, width: n1.width, height: n1.height))
+                let band = CGRect(x: 384, y: 1169, width: 350, height: 184)
+                c.saveGState()
+                let inner = band.insetBy(dx: 2, dy: 0).offsetBy(dx: 0, dy: 2)
+                c.addPath(UnevenRoundedRectangle(topLeadingRadius: 22, bottomLeadingRadius: 0, bottomTrailingRadius: 0,
+                                                 topTrailingRadius: 22, style: .continuous)
+                    .path(in: CGRect(x: inner.minX, y: inner.minY, width: inner.width, height: band.maxY - inner.minY)).cgPath)
+                c.clip()
+                let h = band.width * CGFloat(q.height) / CGFloat(q.width)
+                Footage060.put(c, scale(q, band.width / CGFloat(q.width)), in: CGRect(x: band.minX, y: band.midY - h / 2, width: band.width, height: h))
+                c.restoreGState()
+            }
+        case "B1x":
+            // B1 with its QuickTime thumbnail (the third, selected: picture x 696–904, y 20–152, as the first's on L0, 240 px
+            // apart) as qtv's, and its badge "Qu" drawn again over it, as L0w's first thumbnail is.
+            let b1 = try image("stills/B1-qt"), q = try image("derived/qtv")
+            let thumb = Mini060.thumbImage.offsetBy(dx: 480, dy: 0), badge = Mini060.thumbBadge.offsetBy(dx: 480, dy: 0)
+            let gap = sample(b1, 692, 60)
+            return try canvas(b1.width, b1.height) { c in
+                Footage060.put(c, b1, in: CGRect(x: 0, y: 0, width: b1.width, height: b1.height))
+                Footage060.thumbnail(c, q, thumb: thumb, badge: badge, badgeColor: CGColor.hex(0x3A3D44), letters: "Qu", gap: gap, scale: { self.scale($0, $1) })
+            }
+        case "notes-selected":
+            // The iPad's note with the reply selected, its drawn Copy callout painted out (the shots draw the edit menu
+            // themselves, opaque, with its tail).
+            let p = try image("pictures/ipad-notes-copy")
+            return try canvas(p.width, p.height) { c in
+                Footage060.put(c, p, in: CGRect(x: 0, y: 0, width: p.width, height: p.height))
+                c.setFillColor(CGColor(gray: 1, alpha: 1)); c.fill(CGRect(x: 150, y: 214, width: 196, height: 112))
+            }
+        case "D1x", "D2x", "D3x":
+            // S10's iPhone stills with Aa at 1× (Retouch060.iphone).
+            let src = ["D1x": "stills/D1-iphone-standard", "D2x": "stills/D2-iphone-larger-1610", "D3x": "stills/D3-iphone-larger-fitted"][name]!
+            return Retouch060.iphone(try image(src), larger: name != "D1x", header: false)
         case "L0w":
-            // L0 (the stream screen, unlocked) with Weather in the picture and on the first thumbnail, badge "We".
-            let l0 = try image("stills/L0-unlocked"), w = try image("derived/weather")
+            // L0 (the stream screen, unlocked) with Weather in the picture and on the first thumbnail, badge "We", and its
+            // QuickTime thumbnail (the third) as qtv's.
+            let l0 = try image("stills/L0-unlocked"), w = try image("derived/weather"), q = try image("derived/qtv")
             let gap = sample(l0, 212, 60)
             return try canvas(l0.width, l0.height) { c in
                 Footage060.put(c, l0, in: CGRect(x: 0, y: 0, width: l0.width, height: l0.height))
                 Footage060.put(c, w, in: Mini060.picture)
-                c.setFillColor(gap)
-                c.addPath(CGPath(roundedRect: Mini060.thumbImage.insetBy(dx: -2, dy: -2), cornerWidth: 20, cornerHeight: 20, transform: nil)); c.fillPath()
-                c.saveGState()
-                c.addPath(Path(roundedRect: Mini060.thumbImage, cornerRadius: 18, style: .continuous).cgPath); c.clip()
-                let th = Mini060.thumbImage.height, tw = th * CGFloat(w.width) / CGFloat(w.height)
-                Footage060.put(c, scale(w, th / CGFloat(w.height)), in: CGRect(x: Mini060.thumbImage.midX - tw / 2, y: Mini060.thumbImage.minY, width: tw, height: th))
-                c.restoreGState()
-                // The app badge: the harness draws an app's first two letters on its colour (Te, Nu, Qu, No).
-                let b = Mini060.thumbBadge
-                c.setFillColor(gap)
-                c.addPath(CGPath(roundedRect: b.insetBy(dx: -4, dy: -4), cornerWidth: 15, cornerHeight: 15, transform: nil)); c.fillPath()
-                c.setFillColor(CGColor.hex(0x2F7BE0))
-                c.addPath(CGPath(roundedRect: b, cornerWidth: 11, cornerHeight: 11, transform: nil)); c.fillPath()
-                let font = NSFont.systemFont(ofSize: 27, weight: .semibold)
-                let line = CTLineCreateWithAttributedString(NSAttributedString(string: "We", attributes: [.font: font, .foregroundColor: NSColor.white]))
-                let lb = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
-                c.saveGState()
-                c.translateBy(x: b.midX - lb.midX, y: b.midY + lb.midY); c.scaleBy(x: 1, y: -1)
-                c.textPosition = .zero
-                CTLineDraw(line, c)
-                c.restoreGState()
+                Footage060.thumbnail(c, w, thumb: Mini060.thumbImage, badge: Mini060.thumbBadge, badgeColor: CGColor.hex(0x2F7BE0),
+                                     letters: "We", gap: gap, scale: { self.scale($0, $1) })
+                Footage060.thumbnail(c, q, thumb: Mini060.thumbImage.offsetBy(dx: 480, dy: 0), badge: Mini060.thumbBadge.offsetBy(dx: 480, dy: 0),
+                                     badgeColor: CGColor.hex(0x3A3D44), letters: "Qu", gap: gap, scale: { self.scale($0, $1) })
             }
         case "L1x":
             // L1's bar (the locked Mac's: no thumbnails, no Menus) over L0's stream panel: 0.6.0 covers nothing while

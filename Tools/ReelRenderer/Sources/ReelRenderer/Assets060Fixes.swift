@@ -17,18 +17,24 @@ enum Fixes060 {
     static let titleSnap = 65.65
     /// 2. The scroll: up to speed over 0.3 s, then 450 px/s.
     static let scrollStart = 66.4, accelEnd = 66.7
-    /// 3. The bug rides in: the scroll slows (appleOut) to 25 px/s by 71.12.
+    /// 3. The bug rides in: the scroll slows (appleOut) to rest at the tap. The review: the first cut slowed to 25 px/s by
+    /// 71.12 and then lurched into its 18 px settle at about 256 px/s; now the slowing itself carries the last 18 px and the
+    /// 6 px overshoot, so the column comes to rest exactly at the tap (the impact frame still but for the bug), and only
+    /// the overshoot's return follows it. The cruise runs on 0.094 s past 70.4 so the appleOut, from the cruise's speed,
+    /// covers just that (`brakeStart`).
     static let cruiseEnd = 70.4, rideEnd = 71.12
     /// 4. The touch dot appears over the bug, 0.08 s before the tap (v3's recipe); 5. the anticipation stretch.
     static let dotAppears = 71.12, stretchEnd = 71.18
-    /// 6. The squash, on the beat (frame 4272), in 0.08 s appleOut; the legs splay and fade in 0.12 s.
-    static let tap = 71.20, squashDuration = 0.08, legsGone = 0.12
-    /// 7. The jitter (v3's haptic, 18 Hz, 3 px, 0.30 s) and the scroll's settle: 18 px more, a 6 px overshoot.
+    /// 6. The squash: on the beat (frame 4272) it is already three quarters flat: its 0.08 s appleOut starts a frame
+    /// before (frame 4271), so the picture lands with the thud; the legs splay and fade in 0.12 s.
+    static let tap = 71.20, squashStart = 71.20 - 1.0 / 60, squashDuration = 0.08, legsGone = 0.12
+    /// 7. The jitter (v3's haptic, 18 Hz, 3 px, 0.30 s) and the column's 6 px return from its overshoot, at rest at both ends.
     static let settleEnd = 71.50
-    /// 8. The stretch: the flattened bug turns accent (0.12 s) and stretches to the sill line (0.35 s).
-    static let morph = 71.40, morphDuration = 0.12, lineStretch = 0.35
+    /// 8. The line: the flattened shell turns accent and thins to 2 px (71.40–71.52), then stretches (ease in and out) to
+    /// the lockup's sill line, 520 px (71.52–71.85).
+    static let morph = 71.40, morphDuration = 0.12, lineStretch = 0.33
     /// 9. Black and the sill line alone.
-    static let lineAlone = 71.80
+    static let lineAlone = 71.85
 
     static let speed = 450.0, rideSpeed = 25.0
     static let settle: CGFloat = 18, overshoot: CGFloat = 6
@@ -80,7 +86,10 @@ enum Fixes060 {
 
     // MARK: The sill line it ends on (the lockup's, S21)
 
-    static let sillY: CGFloat = 666, sillLength: CGFloat = 1200, sillX: CGFloat = 960
+    /// The lockup's own sill line: S01–S02's (Open060), y 666, 520 px (its ink 493 px: the faded ends). The review: the
+    /// storyboard's "1,200 px" contradicted its own "the lockup's own sill line", and the close showed a line 2.26 times the
+    /// open's.
+    static let sillY: CGFloat = 666, sillLength: CGFloat = 520, sillX: CGFloat = 960
     /// The bug walks up the column's middle, and flattens there.
     static let bugX: CGFloat = 960
     /// The flattened bug's foot comes to rest on the sill line's lower edge.
@@ -91,8 +100,26 @@ enum Fixes060 {
     /// appleOut's slope at 0 (its first control point is (0.16, 1)).
     private static let appleOutSlope = 1 / 0.16
 
-    /// How far the column has scrolled up at `t`, in px. Smooth (continuous speed) from rest through the cruise
-    /// and the slow ride; the tap starts the settle, its last 18 px easing out past a 6 px overshoot and back.
+    /// The scroll at 70.4, where the cruise would have begun to slow.
+    private static var cruiseScroll: Double {
+        let a = accelEnd - scrollStart
+        return speed * a / 2 + speed * (cruiseEnd - accelEnd)
+    }
+    /// Where the column comes to rest (after its overshoot's return): the first cut's, so every place below is as it was
+    /// (its 25 px/s ride to 71.12 and on to the tap, and its 18 px settle, from 70.4: 86.96 px).
+    static var restScroll: Double {
+        let d = rideEnd - cruiseEnd
+        return cruiseScroll + rideSpeed * d + (speed - rideSpeed) * d / appleOutSlope + rideSpeed * (tap - rideEnd) + Double(settle)
+    }
+    /// The slowing's start: the cruise runs on until an appleOut from its speed, ending at rest at the tap, covers what is
+    /// left to the overshoot's peak: 450 c + 450 (t − c)/6.25 = rest + 6 − scroll(70.4), t = 0.8 s.
+    static var brakeStart: Double {
+        let left = restScroll + Double(overshoot) - cruiseScroll, total = tap - cruiseEnd
+        return cruiseEnd + (left - speed * total / appleOutSlope) / (speed - speed / appleOutSlope)
+    }
+
+    /// How far the column has scrolled up at `t`, in px. Smooth (continuous speed) from rest through the cruise and the
+    /// slowing, at rest at the tap 6 px past where it settles, then back by those 6 px (71.2–71.5), at rest at both ends.
     static func scroll(_ t: Double) -> Double {
         if t <= scrollStart { return 0 }
         let a = accelEnd - scrollStart
@@ -101,31 +128,15 @@ enum Fixes060 {
             return speed * a * (u * u * u - u * u * u * u / 2)
         }
         let s0 = speed * a / 2
-        if t < cruiseEnd { return s0 + speed * (t - accelEnd) }
-        let s1 = s0 + speed * (cruiseEnd - accelEnd)
-        let d = rideEnd - cruiseEnd
-        let brake = (speed - rideSpeed) * d / appleOutSlope   // so the speed at 70.4 is still 450 px/s
-        if t < rideEnd { return s1 + rideSpeed * (t - cruiseEnd) + brake * CubicBezier.appleOut((t - cruiseEnd) / d) }
-        let s2 = s1 + rideSpeed * d + brake
-        if t < tap { return s2 + rideSpeed * (t - rideEnd) }
-        let s3 = s2 + rideSpeed * (tap - rideEnd)
-        return s3 + Double(settle) * settleCurve((t - tap) / (settleEnd - tap))
-    }
-
-    /// 0 → 1 over the settle: out past (18 + 6)/18 by 45 % of it, then back to 1, at rest at both ends of the return
-    /// (cubic Hermite pieces; it leaves the tap at the ride's 25 px/s).
-    static func settleCurve(_ u: Double) -> Double {
-        let u = clamp01(u)
-        let peak = Double((settle + overshoot) / settle), split = 0.45
-        func hermite(_ v: Double, _ p0: Double, _ p1: Double, _ m0: Double, _ m1: Double) -> Double {
-            let v2 = v * v, v3 = v2 * v
-            return (2 * v3 - 3 * v2 + 1) * p0 + (v3 - 2 * v2 + v) * m0 + (-2 * v3 + 3 * v2) * p1 + (v3 - v2) * m1
-        }
-        if u < split {
-            let m0 = rideSpeed * (settleEnd - tap) / Double(settle) * split
-            return hermite(u / split, 0, peak, m0, 0)
-        }
-        return hermite((u - split) / (1 - split), peak, 1, 0, 0)
+        let b = brakeStart
+        if t < b { return s0 + speed * (t - accelEnd) }
+        let s1 = s0 + speed * (b - accelEnd)
+        let d = tap - b
+        let brake = speed * d / appleOutSlope      // so the speed at the brake's start is still 450 px/s
+        if t < tap { return s1 + brake * CubicBezier.appleOut((t - b) / d) }
+        let peak = s1 + brake
+        let u = clamp01((t - tap) / (settleEnd - tap))
+        return peak - Double(overshoot) * (1 - cos(Double.pi * u)) / 2
     }
 
     /// Screen y of a point `y` px down the column (the title's baseline is 0) at `t`.
@@ -159,7 +170,7 @@ enum Fixes060 {
     }()
 
     /// The bug's base down the column: where the settle leaves it on the sill line.
-    static var bugBase: CGFloat { restingBase + settle - titleBaseline + CGFloat(scroll(tap)) }
+    static var bugBase: CGFloat { restingBase - titleBaseline + CGFloat(restScroll) }
 
     /// When each line crosses the middle (its x-height's middle at y 540): the score's quiet ticks.
     static var crossings: [Double] {
@@ -198,7 +209,7 @@ enum Fixes060 {
         var morph: Double = 0
         /// The line's length while it stretches (px).
         var length: CGFloat = 0
-        /// 0 the bug's own accent line … 1 handed over to `SillLine`'s look (71.52–71.80).
+        /// 0 the bug's own accent line … 1 handed over to `SillLine`'s look (71.52–71.85).
         var look: Double = 0
     }
 
@@ -208,18 +219,20 @@ enum Fixes060 {
         // 5. Anticipation: tall and narrow.
         let a = CGFloat(ease(t, dotAppears, stretchEnd - dotAppears, .appleOut))
         s.sx = 1 - 0.06 * a; s.sy = 1 + 0.10 * a
-        // 6. The squash, pinned at the base.
-        let q = CGFloat(ease(t, tap, squashDuration, .appleOut))
+        // 6. The squash, pinned at the base: three quarters flat on the beat's frame.
+        let q = CGFloat(ease(t, squashStart, squashDuration, .appleOut))
         s.squash = q
         s.sx = lerp(s.sx, 1.80, Double(q)); s.sy = lerp(s.sy, 0.14, Double(q))
-        s.legAlpha = 1 - ramp(t, tap, tap + legsGone)
-        s.flare = t >= tap ? 1 - ramp(t, tap + 0.03, tap + 0.20) : 0
+        s.legAlpha = 1 - ramp(t, squashStart, squashStart + legsGone)
+        // The accent dot flares with the flattening it marks, from the frame after the beat's (4273), not before it.
+        s.flare = t >= tap + 1.0 / 120 ? 1 - ramp(t, tap + 0.03, tap + 0.20) : 0
         s.dotAlpha = 1 - ramp(t, tap + 0.06, tap + 0.20)
         // 7. The jitter.
         s.jitter = buzz(t, start: tap, duration: settleEnd - tap, amplitude: 3)
-        // 8. The line.
-        s.morph = ease(t, morph, morphDuration, .appleOut)
-        s.length = lerp(Bug060.footprint.width * 1.80, sillLength, ease(t, morph, lineStretch, .appleOut))
+        // 8. The line: the shell itself turns accent and thin (71.40–71.52), then stretches, easing in and out, from its
+        // own 172.8 px (1.80 × 96) to the lockup's line (71.52–71.85): under 2 px on its first frame, none of it a pop.
+        s.morph = ease(t, morph, morphDuration, .inOut)
+        s.length = lerp(Bug060.footprint.width * 1.80, sillLength, CubicBezier.inOut(ramp(t, morph + morphDuration, morph + morphDuration + lineStretch)))
         s.look = ramp(t, morph + morphDuration, lineAlone)
         return s
     }
@@ -236,20 +249,22 @@ enum Fixes060 {
                 1.0 * sin(w * u * 0.75 + 2.0) * env)
     }
 
-    /// The touch dot over the bug: v3's tap dot (0.7 → 1 over 0.12 s from 71.12), 96 px (the bug's width), on the
-    /// bug's middle as it squashes and settles; it fades from 71.40 (0.25 s).
-    static let dotDiameter: CGFloat = 96
+    /// The touch dot: v3's tap dot (0.7 → 1 over 0.12 s from 71.12), pinned where the finger lands, on the bug's upper back
+    /// (its head and the top of its shell, at x 960, y 604), 72 px and light, so the stretch under it and the shell's lower
+    /// half beside it read (the review: at 96 px on the bug's middle it covered the whole bug and followed it down 38 px as
+    /// it flattened); it fades from 71.40 (0.25 s).
+    static let dotDiameter: CGFloat = 72
+    static let dotCentre = CGPoint(x: 960, y: 604)
     static func dot(_ t: Double, _ bug: BugState) -> (center: CGPoint, scale: CGFloat, alpha: Double)? {
         guard t >= dotAppears, t < morph + 0.25 else { return nil }
-        let h = Bug060.footprint.height * bug.sy
         let scale = CGFloat(0.7 + 0.3 * ease(t, dotAppears, 0.12, .appleOut))
-        return (CGPoint(x: bug.base.x, y: bug.base.y - h / 2), scale, 1 - ramp(t, morph, morph + 0.25))
+        return (dotCentre, scale, 1 - ramp(t, morph, morph + 0.25))
     }
 
     // MARK: The shot
 
     /// S19–S20 at `t` (65.6–72.0): black, the column (title, headers, lines, bug) inside the 140 px fades, the touch
-    /// dot, the line. From 71.80 black and the sill line alone (exactly `SillLine(y: 666, length: 1200)`).
+    /// dot, the line. From 71.85 black and the sill line alone (exactly `SillLine(y: 666, length: 520)`, the lockup's).
     @MainActor static func frame(_ t: Double) -> FrameLayers {
         let v = ZStack {
             Color.black
@@ -308,8 +323,8 @@ struct FixesColumn060: View {
                 var c = ctx
                 c.opacity = d.alpha
                 let r = CGRect(x: d.center.x - dd / 2, y: d.center.y - dd / 2, width: dd, height: dd)
-                c.fill(Path(ellipseIn: r), with: .color(.white.opacity(0.18)))
-                c.stroke(Path(ellipseIn: r.insetBy(dx: 1.1, dy: 1.1)), with: .color(.white.opacity(0.45)), lineWidth: 2.2)
+                c.fill(Path(ellipseIn: r), with: .color(.white.opacity(0.14)))
+                c.stroke(Path(ellipseIn: r.insetBy(dx: 1, dy: 1)), with: .color(.white.opacity(0.42)), lineWidth: 2)
             }
         }
         .canvas()
@@ -317,8 +332,8 @@ struct FixesColumn060: View {
 }
 
 /// The sill line taking over from the bug: from the morph its glow fades in under the stretching line (the bug's
-/// own shell, drawn by `Bug060`), and over 71.52–71.80 the line hands over to `SillLine`'s own look (its 35 % core
-/// with faded ends, its glow), so from 71.80 the frame is exactly `SillLine(y: 666, length: 1200)`.
+/// own shell, drawn by `Bug060`), and over 71.52–71.85 the line hands over to `SillLine`'s own look (its 35 % core
+/// with faded ends, its glow), so from 71.85 the frame is exactly `SillLine(y: 666, length: 520)`, the lockup's.
 struct FixesLine060: View {
     let t: Double
     var body: some View {

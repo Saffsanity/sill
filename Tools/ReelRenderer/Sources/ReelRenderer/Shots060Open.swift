@@ -25,14 +25,15 @@ enum Open060 {
 
 enum Close060 {
     static let start = 72.0
-    /// The icon fades in above the line the bug left (y 666, 1,200 px), the glint round it, then the lockup's words.
+    /// The icon fades in above the line the bug left (y 666, 520 px: the lockup's own, as the open's), the glint round it,
+    /// then the lockup's words.
     static let iconIn = 72.0, glint = 72.1, glintDuration = 0.9
     static let wordmark = 72.65, version = 73.05
     static let freeOpen = 74.45, appStore = 75.25, download = 75.65, legal = 76.05
     /// The card holds +1.2 % from the version's landing to the fade; everything but the line fades 78.8–79.4, the line
     /// retracts by 79.7, then black to 80.0.
     static let holdFrom = 73.35, fade = 78.8, fadeEnd = 79.4, retract = 79.1, retractEnd = 79.7
-    static let sillLength: CGFloat = 1200
+    static let sillLength: CGFloat = Open060.sillLength
     static let iconCentre = CGPoint(x: 960, y: 340), iconSize: CGFloat = 300
     // Baselines: the wordmark on the line (650/666), the version, the lines under it, the legal line in title-safe.
     static let baselines = (wordmark: CGFloat(650), version: CGFloat(736), freeOpen: CGFloat(812), appStore: CGFloat(866),

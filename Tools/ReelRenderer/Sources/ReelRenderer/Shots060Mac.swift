@@ -8,14 +8,15 @@ import SwiftUI
 
 enum Intel060 {
     static let start = 62.4, end = 65.6
-    static let headline = 62.45, sub = 63.25, foot = 63.65
+    /// The footnote snaps with the headline (the review: v3's footnotes snap with their shot's first statement).
+    static let headline = 62.45, sub = 63.25, foot = 62.50
 }
 
 @MainActor func s060_18(_ t: Double, _ e: Env) throws -> FrameLayers {
     let i = Intel060.self
-    let lines = [LineSpec(Copy060.intel, .T1c, baseline: 158, snap: i.headline, holdEnd: i.end),
-                 LineSpec(Copy060.intelSub, .T2, baseline: 222, snap: i.sub, holdEnd: i.end),
-                 LineSpec(Copy060.intelFoot, .T3, baseline: 266, snap: i.foot, holdEnd: i.end, cascade: false)]
+    var lines = [LineSpec(Copy060.intel, .T1c, baseline: 158, snap: i.headline, holdEnd: i.end)]
+    lines += capped([LineSpec(Copy060.intelSub, .T2, baseline: 222, snap: i.sub, holdEnd: i.end)])
+    lines.append(LineSpec(Copy060.intelFoot, .T3, baseline: 266, snap: i.foot, holdEnd: i.end, cascade: false))
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: CGPoint(x: 960, y: 660))
         IntelIMac060(t: t, k: 1.06, center: CGPoint(x: 960, y: 668))

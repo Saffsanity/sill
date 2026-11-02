@@ -69,6 +69,8 @@ The commands (`main.swift` has them all):
 | `render … --typecheck [n]` | the same check on every n-th frame of a render, which then fails (exit 1) if it fails |
 | `typetest [--out f.mp4] [--seconds 3] [--typecheck] [--frames dir] [--no-video]` | two moving lines on the reel's stage, rendered and checked |
 | `assets <dir> [prefix …]`, `assets --report`, `assets --motion` | the 0.6.0 drawn assets as PNG stills at their key times (with `index.png`), the cutaway's numbers, its motion check |
+| `clearance [--from s] [--to s] [--every n] [--min px]` | how close each line of type comes to what is drawn beside it (a device, a macro), per shot; exit 1 under `--min` (80 px, v2 S23's rule) |
+| `derived <dir> <name>…` | 0.6.0's derived stills (`L0w`, `N1x`, `D1x`, `qtv`, …: Reel060.swift, Retouch060.swift) as PNG |
 
 `Scripts/pipeline.sh` runs the delivery steps v3.1 ran (score, render, mux, the poster still at 75.2 s, finalize,
 verify, sheet) into `work/v31/out/` (with `REEL=060`, the 0.6.0 video into `work/060/out/`, its poster at 77.2 s),
@@ -227,6 +229,8 @@ title follow it. Its shot list is `design/reel/v4/SHOTLIST-0.6.0.md`.
 | `Shots060Mac.swift` | S18, Intel, and the cutaway, S19–S20, its type on `GlyphCanvas` |
 | `Score060.swift` | the cue sheet and the voices, on v3's engine |
 | `Assets060*.swift` | the drawn assets (the bug, the lock screen, the keyboards, the arcs, the iPhone, the iMac) and `assets` |
+| `Retouch060.swift` | the stills' retouches (Weather's places, the iPhone's "This iPhone" and Aa "1×") and QuickTime Player's window, drawn |
+| `Clearance060.swift` | `clearance`: the words' distance from the devices beside them |
 
 Its inputs under `reelDir` are `stills/`, `pictures/` and `thumbs/`, the footage stand-ins (harness screenshots and
 drawn Mac pictures, each made as their own README says), and `v31film/Sill-sizzle-v3.1-silent.mp4`, the delivered

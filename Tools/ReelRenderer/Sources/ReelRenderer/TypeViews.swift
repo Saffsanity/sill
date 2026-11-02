@@ -13,6 +13,8 @@ struct LineSpec {
     var align: LineAlign = .center
     var snap: Double                  // reel time the snap starts
     var cascade = true                // words 0.05 s apart (false: the whole line at once)
+    /// 0.6.0: the time between two words' snaps in a cascade (v3's 0.05 s; `capped` shortens it for long sublines).
+    var step = 0.05
     var holdEnd: Double               // the hold's scale runs to here (usually the shot's end)
     var easeOut: Double? = nil        // start of the 0.20 s ease-out, if the shot asks for one
     var colors: [Int: UInt32] = [:]   // per-word colour overrides ("sit." in accent)
@@ -100,7 +102,7 @@ struct TypeLine: View {
         let last = spec.words.count - 1
         guard last >= 0 else { return nil }
         let style = spec.style
-        let snapEnd = spec.snap + (spec.cascade ? 0.05 * Double(last) : 0) + 0.30
+        let snapEnd = spec.snap + (spec.cascade ? spec.step * Double(last) : 0) + 0.30
         let hold = spec.holdScale ? 1 + 0.012 * CGFloat(ramp(t, snapEnd, max(spec.holdEnd, snapEnd + 0.01))) : 1
         var outOpacity = 1.0, outDy: CGFloat = 0, outBlur: CGFloat = 0
         if let e = spec.easeOut, t >= e {
@@ -109,7 +111,7 @@ struct TypeLine: View {
         }
         guard outOpacity > 0.0005 else { return nil }
         let shapes = (0...last).map { ShapedText.shape(spec.words[$0] + ($0 < last ? " " : ""), style, language: spec.language) }
-        let states = (0...last).map { snapState(t, start: spec.snap + (spec.cascade ? 0.05 * Double($0) : 0)) }
+        let states = (0...last).map { snapState(t, start: spec.snap + (spec.cascade ? spec.step * Double($0) : 0)) }
         let extras = states.map { $0.trackingExtra * style.size }
         let widths = (0...last).map { shapes[$0].frameWidth(extra: extras[$0]) }
         let width = widths.reduce(0, +)
@@ -164,7 +166,7 @@ struct LegacyTypeLine: View {
     private var legacy: some View {
         let last = spec.words.count - 1
         // Hold: +1.2 % linear from the end of the last word's snap to holdEnd.
-        let snapEnd = spec.snap + (spec.cascade ? 0.05 * Double(last) : 0) + 0.30
+        let snapEnd = spec.snap + (spec.cascade ? spec.step * Double(last) : 0) + 0.30
         let hold = spec.holdScale ? 1 + 0.012 * CGFloat(ramp(t, snapEnd, max(spec.holdEnd, snapEnd + 0.01))) : 1
         // Ease out: 0.20 s appleIn: opacity → 0, y −12, blur 0 → 8.
         var outOpacity = 1.0, outDy: CGFloat = 0, outBlur: CGFloat = 0
@@ -174,7 +176,7 @@ struct LegacyTypeLine: View {
         }
         return HStack(alignment: .firstTextBaseline, spacing: 0) {
             ForEach(0...max(last, 0), id: \.self) { i in
-                let s = snapState(t, start: spec.snap + (spec.cascade ? 0.05 * Double(i) : 0))
+                let s = snapState(t, start: spec.snap + (spec.cascade ? spec.step * Double(i) : 0))
                 let j = spec.jitter.map { $0.word == i ? hapticJitter(t, start: $0.start, duration: $0.duration, amplitude: $0.amplitude) : (0, 0, 0) } ?? (0, 0, 0)
                 Text(spec.words[i] + (i < last ? " " : ""))
                     .font(spec.style.font)

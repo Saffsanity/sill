@@ -196,6 +196,19 @@ do {
     case "verify": try verify(args: Array(args.dropFirst()))
     case "typecheck": try MainActor.assumeIsolated { try typecheckCommand(args: Array(args.dropFirst())) }
     case "typetest": try MainActor.assumeIsolated { try typetestCommand(args: Array(args.dropFirst())) }
+    case "clearance": try MainActor.assumeIsolated { try clearanceCommand(args: Array(args.dropFirst())) }
+    case "derived":
+        // derived <out-dir> <name>… : 0.6.0's derived stills (Reel060.swift, Retouch060.swift) as PNG, to look at them.
+        try MainActor.assumeIsolated {
+            let comp = Compositor()
+            let env = try makeEnv(comp)
+            let dir = URL(fileURLWithPath: args[1], isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            for name in args.dropFirst(2) {
+                writePNG(try env.f.image("derived/" + name), to: dir.appendingPathComponent(name + ".png"))
+                print(name)
+            }
+        }
     case "strip-edts": for a in args.dropFirst() { try stripVideoEditList(URL(fileURLWithPath: a)) }
     case "finalize":
         // finalize [--cover poster.png [--poster-out poster.jpg]] <movie.mp4> …

@@ -59,9 +59,10 @@ enum MacWindow060 {
 
 /// Three thin accent arcs beside a device, pulsing out on every beat while the Mac's sound plays (S06): each
 /// beat lights the inner arc, then the middle and the outer 0.05 s apart (a 0.03 s attack, a 0.18 s decay, the
-/// arc easing 5 px outward at its peak). A mute folds them away (outer first, 0.15 s appleIn: each arc's sweep
-/// closes onto the facing line and its radius draws in); its end opens them again (inner first, 0.20 s
-/// appleOut) on that beat's pulse.
+/// arc easing 5 px outward at its peak). A mute folds them away with the sound's cut, all three at once: the fold
+/// starts a frame before the beat, so the beat's own frame already shows most of it (0.08 s appleOut: each arc's
+/// sweep closes onto the facing line and its radius draws in), and its end opens them again the same way (0.12 s) on
+/// that beat's pulse (the review: they had trailed the sound by a beat's tenth).
 struct SoundArcs060: View {
     /// The arcs' centre: on the device's side, at its middle, just outside the bezel.
     var origin: CGPoint
@@ -92,11 +93,12 @@ struct SoundArcs060: View {
     /// 1 open … 0 folded, for arc `i` (0 the inner).
     func open(_ i: Int) -> Double {
         var f = 1.0
+        let frame = 1.0 / 60
         for m in muted {
-            if t >= m.lowerBound && t < m.upperBound {
-                f = min(f, 1 - ease(t, m.lowerBound + 0.03 * Double(radii.count - 1 - i), 0.15, .appleIn))
-            } else if t >= m.upperBound && t < m.upperBound + 0.4 {
-                f = min(f, ease(t, m.upperBound + 0.03 * Double(i), 0.20, .appleOut))
+            if t >= m.lowerBound - frame && t < m.upperBound - frame {
+                f = min(f, 1 - ease(t, m.lowerBound - frame, 0.08, .appleOut))
+            } else if t >= m.upperBound - frame && t < m.upperBound + 0.4 {
+                f = min(f, ease(t, m.upperBound - frame, 0.12, .appleOut))
             }
         }
         return f

@@ -329,7 +329,7 @@ import SwiftUI
             (70.40, "3 the brake: 450 → 25 px/s"), (70.80, "3 the bug riding in"), (71.10, "3 the bug, walking"), (71.14, "4 the touch dot appears"),
             (71.18, "5 stretched tall"), (71.2167, "6 the squash, frame 4273"), (71.25, "6 squashing, the dot flaring"),
             (71.30, "7 flat, buzzing; the lines back to 45 %"), (71.36, "7 the settle's overshoot"), (71.42, "8 turning accent"),
-            (71.50, "8 the stretch"), (71.60, "8 the stretch, the glow"), (71.75, "8 the line at 1,200 px"), (71.90, "9 black and the sill line alone"),
+            (71.50, "8 the stretch"), (71.60, "8 the stretch, the glow"), (71.85, "8 the line at 520 px"), (71.90, "9 black and the sill line alone"),
         ]
         for (t, note) in beats {
             out.append(Still(name: String(format: "fixes-%05.0f", t * 100), t: t, layers: Fixes060.frame(t), note: "S19–S20 " + note))
@@ -374,11 +374,25 @@ import SwiftUI
             print(String(format: "  t %.3f  scroll %8.2f px  bug base y %7.2f  centre y %7.2f  speed %6.1f px/s", t, F.scroll(t), b.base.y,
                          b.base.y - Bug060.footprint.height * b.sy / 2, (F.scroll(t + 0.0005) - F.scroll(t - 0.0005)) / 0.001))
         }
-        let peak = (0...300).map { F.scroll(F.tap + 0.001 * Double($0)) }.max() ?? 0
-        print(String(format: "  settle: %.2f px after the tap, peak %.2f (overshoot %.2f px)", F.scroll(F.settleEnd) - F.scroll(F.tap),
-                     peak - F.scroll(F.tap), peak - F.scroll(F.settleEnd)))
-        print(String(format: "  line: %.1f px at %.2f, %.1f px at %.2f; resting at y %.1f", F.bugState(F.morph).length, F.morph,
-                     F.bugState(F.morph + F.lineStretch).length, F.morph + F.lineStretch, F.bugState(F.end).base.y - 1))
+        // The review's settle: at rest exactly at the tap (6 px past where it settles), then back, at rest at both ends.
+        func v(_ t: Double) -> Double { (F.scroll(t + 0.0005) - F.scroll(t - 0.0005)) / 0.001 }
+        print(String(format: "  slowing from %.4f s; speed %.1f px/s at 70.40, %.1f at 71.12, %.2f at the tap; overshoot %.2f px, back by %.2f s",
+                     F.brakeStart, v(70.4), v(71.12), v(F.tap - 0.0006), F.scroll(F.tap) - F.scroll(F.settleEnd), F.settleEnd))
+        var worstStep = 0.0
+        for f in 4224...4320 {
+            let a = F.scroll(Double(f - 1) / 60), b = F.scroll(Double(f) / 60), c = F.scroll(Double(f + 1) / 60)
+            worstStep = max(worstStep, abs((c - b) - (b - a)))
+        }
+        print(String(format: "  the column's largest change of step from one frame to the next, 70.4–72.0: %.3f px", worstStep))
+        let b4272 = F.bugState(4272.0 / 60)
+        print(String(format: "  frame 4272 (the beat): the bug's height %.3f of its own (flat %.0f %%), flare %.2f; frame 4273 flare %.2f",
+                     b4272.sy, 100 * Double(b4272.squash), b4272.flare, F.bugState(4273.0 / 60).flare))
+        print(String(format: "  the line: %.1f px at 71.52, %.1f px a frame later (%.2f px grown), %.1f px at 71.85",
+                     F.bugState(71.52).length, F.bugState(71.52 + 1.0 / 60).length, F.bugState(71.52 + 1.0 / 60).length - F.bugState(71.52).length,
+                     F.bugState(71.85).length))
+        print(String(format: "  line: %.1f px at %.2f, %.1f px at %.2f; resting at y %.1f (the lockup's line: %.0f px at y %.0f)",
+                     F.bugState(F.morph).length, F.morph, F.bugState(F.lineAlone).length, F.lineAlone, F.bugState(F.end).base.y - 1,
+                     Open060.sillLength, Open060.sillY))
         let ticks = F.crossings
         print("  ticks (each line crossing y 540, its x-height's middle): " + ticks.map { String(format: "%.3f", $0) }.joined(separator: " "))
         print("  on the 7.5/s grid from 66.4 (steps): " + ticks.map { String(format: "%.3f", ($0 - F.scrollStart) * 7.5) }.joined(separator: " "))

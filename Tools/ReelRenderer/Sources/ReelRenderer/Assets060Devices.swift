@@ -25,8 +25,9 @@ enum Device060 {
     /// the iPad Pro 13" simulator's 2000/1420 px interiors; these devices show their own).
     static func scale(_ spec: DeviceSpec, source: CGSize) -> CGFloat { spec.interior.width / source.width }
     /// A touch dot for a recording of `source` px (64 pt on the device, as every v3 dot): `point` in its pixels.
-    static func dot(at time: Double, _ point: CGPoint, source: CGSize = miniSource, hold: (start: Double, end: Double)? = nil) -> TouchDotSpec {
-        TouchDotSpec(at: time, point: point, hold: hold, interiorWidth: source.width)
+    static func dot(at time: Double, _ point: CGPoint, source: CGSize = miniSource, hold: (start: Double, end: Double)? = nil,
+                    liftFade: Double = 0.25) -> TouchDotSpec {
+        TouchDotSpec(at: time, point: point, hold: hold, interiorWidth: source.width, liftFade: liftFade)
     }
 }
 
