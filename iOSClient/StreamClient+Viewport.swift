@@ -15,9 +15,11 @@ extension StreamClient {
     /// A viewport that leaves `localCursor` nil (StreamScreen measures panels and knows nothing
     /// about pointers) gets the current flag filled in, so a rotation or an Aa change never puts
     /// the Mac cursor back under a client-drawn one. Remembers what went out in `lastViewport`.
-    /// A no-op on the wire without a connection. Main thread.
+    /// Held to what a Mac takes (ViewportBounds.held: each side 1 to 16384 points, a scale 0.25 to 4),
+    /// so no Mac refuses it; a panel not measured yet sends nothing. A no-op on the wire without a
+    /// connection. Main thread.
     func sendViewport(_ v: Viewport) {
-        var v = v
+        guard var v = ViewportBounds.held(v) else { return }
         if v.localCursor == nil { v.localCursor = localCursorState.wanted }
         lastViewport = v
         send(.viewport, payload: Wire.encode(v))
@@ -44,6 +46,19 @@ extension StreamClient {
     }
 
     private static let localCursorDebounce: TimeInterval = 0.2
+
+    /// Whether Aa's ruler has Off (`TextScale.offersOff`): not while the window streams on the Mac's
+    /// virtual display, by the running stream the Mac reports while a window streams (Virtual Display
+    /// can be on while the window streams in place), else by the Mac's Virtual Display setting as this
+    /// device knows it. Every bar's Aa asks here.
+    var textScaleOffersOff: Bool {
+        TextScale.offersOff(virtualDisplay: settings.displayed?.virtualDisplay, streaming: active,
+                            onVirtualDisplay: settings.host?.stream?.onVirtualDisplay)
+    }
+
+    /// Whether Aa can be used now: only while a window streams (`TextScale.selectable`; Noah,
+    /// 2026-10-29). Every bar's Aa asks here, and the harness's `-SillScaleOpen`.
+    var textScaleSelectable: Bool { TextScale.selectable(streaming: active) }
 
     /// The session ended (`tearDown`): its last viewport and a pointer re-send still waiting go with
     /// it, so neither reaches the next connection, whose stream screen sends a viewport of its own

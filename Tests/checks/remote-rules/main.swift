@@ -280,5 +280,8 @@ check("remote order: distinct names keep the pairing date's order", SavedMacs.re
 // Pairing at home (docs/home-pairing-plan.md): the home model and the saved Macs' home fields, in home.swift.
 homeRemote()
 
+// #140: the launch, a pairing, a SIGKILL and the next launch with each Keychain and UserDefaults fault, in launch.swift.
+launchModel()
+
 print("\(passes) passed, \(fails) failed")
 exit(fails == 0 ? 0 : 1)

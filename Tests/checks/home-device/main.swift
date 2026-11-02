@@ -306,6 +306,7 @@ func endOracle(_ t: T?, _ g: String?, _ s: Int32?) -> E {
     if g != nil { return .other }                             // quit, busy…: the words as before
     guard let s else { return .other }
     if case .saved = t { return s == -9825 || s == -9829 ? .removed : (s == -9808 ? .wrongKey : .other) }
+    if t != .open(seen: nil), s == -9808 { return .otherKey }   // the reconnect pinned to the key its lost session saw
     return s == -9825 || s == -9829 ? .pairingRequired : .other
 }
 var he = 0, heOK = 0
@@ -514,6 +515,97 @@ check("reconnectEnd: over all \(endsAll) reconnects, it ends exactly at a row th
 check("reconnectEnd's words: the goodbye's own", C.pairingRequired(mac: mini, device: "iPad") == "Mac mini now asks devices to pair. Tap it to pair this iPad."
       && C.removed(mac: mini, device: "iPad") == "Mac mini removed this iPad. Tap it to pair again.")
 
+// MARK: The reconnect of an unsaved Mac on an open door pins the key its lost session saw (the security
+// scan's finding 3, 2026-10-29: it took any key, so whatever advertised the lost Mac's Bonjour name with
+// p=0 got the session, what this device typed and its clipboard, with no tap)
+
+let kA = Data(repeating: 0x41, count: 32), kB = Data(repeating: 0x42, count: 32)
+check("reconnectKey: an open session's key once its first connection was ready", P.reconnectKey(lost: P.trust(.open(seen: nil), readyWith: kA)) == kA)
+check("reconnectKey: none from an open session that saw none, a saved Mac's, a plain door's, a remote session's (no home trust)",
+      P.reconnectKey(lost: .open(seen: nil)) == nil && P.reconnectKey(lost: .saved(pin: kA)) == nil
+      && P.reconnectKey(lost: .plain) == nil && P.reconnectKey(lost: nil) == nil)
+// Every reconnect: each homeDial answer, each saved pin, no key seen or one of two.
+func reconnectOracle(_ d: H, _ pin: Data?, _ seen: Data?) -> T? {
+    if d == .anyKey, let seen { return .open(seen: seen) }       // pinned to the key the lost session saw
+    if d == .plain, seen != nil { return nil }                     // never plain after it (DEBUG; the review of #255)
+    return trustOracle(d, pin)                                     // everything else as before
+}
+var rt = 0, rtOK = 0, neverAnyKey = true, neverPlain = true, savedAsBefore = true, unseenAsBefore = true
+for d in doors { for bits in 0..<32 { for pin in [nil, kA] as [Data?] { for seen in [nil, kA, kB] as [Data?] {
+    let b = { (i: Int) in bits & (1 << i) != 0 }
+    let dial = P.homeDial(door: d, saved: b(0), revoked: b(1), homeTLS: b(2), debug: b(3), tap: b(4))
+    let t = P.reconnectTrust(dial, savedPin: pin, seen: seen)
+    rt += 1
+    if t == reconnectOracle(dial, pin, seen) { rtOK += 1 }
+    else { print("  reconnectTrust \(dial) \(String(describing: pin)) \(String(describing: seen)): \(String(describing: t))") }
+    if seen != nil, let t, P.pin(t) == .anyKey { neverAnyKey = false }
+    if seen != nil, let t, P.pin(t) == .plainTCP { neverPlain = false }
+    if b(0), dial != .plain || seen == nil, t != P.sessionTrust(dial, savedPin: pin) { savedAsBefore = false }
+    if seen == nil, t != P.sessionTrust(dial, savedPin: pin) { unseenAsBefore = false }
+} } } }
+check("reconnectTrust: \(rtOK) of \(rt) combinations (an open door's row pinned to the key the lost session saw, a plain door not dialed after it, the rest as before)", rt == rtOK)
+check("reconnectTrust: once the lost session saw a key, the reconnect never dials with any key", neverAnyKey)
+check("reconnectTrust: …nor plain: a plain door under the name, which a DEBUG build dials, is not dialed after that session (the review of #255)", neverPlain)
+check("reconnectTrust: a saved Mac's reconnect as before, pinned to its saved key whatever the lost session saw", savedAsBefore)
+check("reconnectTrust: a lost session that never saw a key reconnects as its tap dialed (any key at an open door)", unseenAsBefore)
+check("reconnectTrust: an open door's row pinned to that key exactly", P.reconnectTrust(.anyKey, savedPin: nil, seen: kA) == .open(seen: kA)
+      && P.reconnectTrust(.anyKey, savedPin: nil, seen: kA).map(P.pin) == .key(kA))
+check("a tap on that row still takes any key, as a tap on an open door always has", P.sessionTrust(.anyKey, savedPin: nil).map(P.pin) == .anyKey)
+check("otherKey: another key at that pinned reconnect (-9808) ends it", P.homeEnd(trust: .open(seen: kA), goodbye: nil, tls: P.pinRefused) == .otherKey)
+check("otherKey: never from a tap's open dial (any key: no pin to refuse), nor a saved Mac's pin (wrongKey)",
+      P.homeEnd(trust: .open(seen: nil), goodbye: nil, tls: P.pinRefused) == .other && P.homeEnd(trust: .saved(pin: kA), goodbye: nil, tls: P.pinRefused) == .wrongKey)
+check("otherKey: the Mac refusing this device's key, and a goodbye, read as before",
+      P.homeEnd(trust: .open(seen: kA), goodbye: nil, tls: -9825) == .pairingRequired && P.homeEnd(trust: .open(seen: kA), goodbye: "quit", tls: P.pinRefused) == .other
+      && P.homeEnd(trust: .open(seen: kA), goodbye: "pairingRequired", tls: nil) == .pairingRequired)
+check("otherKey's words", C.otherKey(mac: mini, device: "iPad") == "Mac mini answered with another key, so this iPad didn\u{2019}t reconnect. Tap it to connect."
+      && C.otherKey(mac: mini, device: "iPhone") == "Mac mini answered with another key, so this iPhone didn\u{2019}t reconnect. Tap it to connect.")
+// Walked through the rules as StreamClient chains them: a tap on the open door's row, the session's first
+// connection ready with A's key, the session lost, the reconnect's dial of a row under the same name.
+let openTap = P.sessionTrust(P.homeDial(door: .open, saved: false, revoked: false, homeTLS: false, debug: false, tap: true), savedPin: nil)!
+let openSession = P.trust(openTap, readyWith: kA)
+let openAgain = P.reconnectTrust(P.homeDial(door: .open, saved: false, revoked: false, homeTLS: false, debug: false, tap: false), savedPin: nil,
+                                 seen: P.reconnectKey(lost: openSession))
+check("walk: the tap with any key; A's key for the rest of the session; the reconnect pinned to A",
+      P.pin(openTap) == .anyKey && P.pin(openSession) == .key(kA) && openAgain.map(P.pin) == .key(kA))
+check("walk: B answering under A's name is refused (-9808) and ends the reconnect; A answering keeps it, and its session keeps A",
+      openAgain.map { P.homeEnd(trust: $0, goodbye: nil, tls: P.pinRefused) } == .otherKey && openAgain.map { P.trust($0, readyWith: kA) } == .open(seen: kA))
+check("walk: the reconnect's own session, lost too, pins A again", openAgain.map { P.reconnectKey(lost: P.trust($0, readyWith: kA)) } == kA)
+check("walk: that session's moves (to the cable, to Wi-Fi) were pinned to A already", P.pin(openSession) == .key(kA))
+// The review of #255 (2026-10-29): a DEBUG build dials a plain door (no `p`), and so its reconnect took a plain door
+// that advertised the lost Mac's name, no key to check (Release says Update Sill and dials none).
+let plainRow = { (debug: Bool, tap: Bool) in P.homeDial(door: .plain, saved: false, revoked: false, homeTLS: false, debug: debug, tap: tap) }
+check("walk (DEBUG): a plain door under A's name is not dialed by the reconnect after A's session, nor in Release",
+      plainRow(true, false) == .plain && P.reconnectTrust(plainRow(true, false), savedPin: nil, seen: P.reconnectKey(lost: openSession)) == nil
+      && plainRow(false, false) == .updateSill && P.reconnectTrust(plainRow(false, false), savedPin: nil, seen: P.reconnectKey(lost: openSession)) == nil)
+check("walk (DEBUG): the reconnect after a plain session still dials a plain door, and a tap dials one, as before",
+      P.reconnectTrust(plainRow(true, false), savedPin: nil, seen: P.reconnectKey(lost: .plain)) == .plain
+      && P.sessionTrust(plainRow(true, true), savedPin: nil) == .plain)
+check("walk: that plain door looked past, the reconnect goes on (it does not wait for a tap)", P.reconnectEnd(plainRow(true, false), saved: false) == nil)
+// The review of #255 (2026-10-29): a tap clears the reconnect and dials any key, so one tap whose dial ended
+// before its handshake (as "…Sill keeps trying, or tap it to try now." invites while the Mac is away) left a
+// reconnect that took any key under the lost Mac's name. It takes the key the last session under that name saw.
+check("reconnectKey: a session that never saw a key takes the earlier one under its name (the review of #255)",
+      P.reconnectKey(lost: .open(seen: nil), earlier: kA) == kA)
+check("reconnectKey: what the session saw wins over the earlier key (a tap that connected to another key: that one now)",
+      P.reconnectKey(lost: .open(seen: kB), earlier: kA) == kB && P.reconnectKey(lost: P.trust(.open(seen: nil), readyWith: kB), earlier: kA) == kB)
+check("reconnectKey: no earlier key for a saved Mac's, a plain door's or a remote session's loss, and none without one (a first tap)",
+      P.reconnectKey(lost: .saved(pin: kA), earlier: kB) == nil && P.reconnectKey(lost: .plain, earlier: kB) == nil
+      && P.reconnectKey(lost: nil, earlier: kB) == nil && P.reconnectKey(lost: .open(seen: nil), earlier: nil) == nil)
+let openRow = { (tap: Bool) in P.homeDial(door: .open, saved: false, revoked: false, homeTLS: false, debug: false, tap: tap) }
+let retap = P.sessionTrust(openRow(true), savedPin: nil)!                    // the reconnect cleared, any key
+let earlierA = P.reconnectKey(lost: openSession)                            // StreamClient's openKeys[name], A's
+let afterRetap = P.reconnectTrust(openRow(false), savedPin: nil, seen: P.reconnectKey(lost: retap, earlier: earlierA))
+check("walk: a tap during the reconnect takes any key, as a tap always has", P.pin(retap) == .anyKey)
+check("walk: that tap's dial ended before its handshake: the reconnect after it is pinned to A still, B refused (otherKey), A taken",
+      afterRetap.map(P.pin) == .key(kA) && afterRetap.map { P.homeEnd(trust: $0, goodbye: nil, tls: P.pinRefused) } == .otherKey
+      && afterRetap.map { P.trust($0, readyWith: kA) } == .open(seen: kA))
+check("walk: before the review the same tap left a reconnect that took any key",
+      P.reconnectTrust(openRow(false), savedPin: nil, seen: P.reconnectKey(lost: retap)).map(P.pin) == .anyKey)
+check("walk: a tap that connected to B (by design: any key) makes B's key the one its reconnects pin",
+      P.reconnectKey(lost: P.trust(retap, readyWith: kB), earlier: earlierA) == kB)
+check("walk: …and a plain door under the name is not dialed after that tap either (DEBUG)",
+      P.reconnectTrust(plainRow(true, false), savedPin: nil, seen: P.reconnectKey(lost: retap, earlier: earlierA)) == nil)
+
 // MARK: Kind 18 and a goodbye "removed" speak for the Mac whose key the session has (the security
 // review, 2026-09-27)
 
@@ -596,6 +688,194 @@ check("reconnectEnd: a Mac marked newKey ends the reconnect with its words",
       P.reconnectEnd(P.homeDial(door: .pairingRequired, saved: true, revoked: false, homeTLS: true, debug: false, tap: false, newKey: true), saved: true, newKey: true) == .newKey
       && C.newKey(mac: noah, device: "iPad") == "Noah’s MacBook Pro has a new key since this iPad paired. Tap it to pair again.")
 check("a dial not the reconnect's ends after 10 s, the reconnect's own 5 s left as it is", P.tapDialDeadline == 10)
+
+// MARK: A row keeps its TXT record while its result stays listed (Noah's iPad, 2026-10-27: with the USB
+// cable pulled, iPadOS listed the Mac on en2 and en0, then on en0 alone, with no TXT record at all, so
+// its row was taken by its name alone and read "Update Sill"); a browser made again starts afresh (the
+// review of #232); each result of a name keeps its own (two domains)
+
+typealias Rec = DiscoveryPolicy.RowRecord
+typealias Key = DiscoveryPolicy.RowRecordKey
+let r1 = Rec(tag: "TAG", door: .pairingRequired), rOpen = Rec(tag: "TAG", door: .open), rPlain = Rec(tag: "TAG", door: .plain)
+let rNew = Rec(tag: "NEW", door: .pairingRequired)
+/// A result of browser `b` (the first browser unless said) for `name` in `domain` ("local." unless said).
+func k(_ name: String, _ b: Int = 1, _ domain: String = "local.") -> Key { Key(browser: b, name: name, domain: domain) }
+/// The records after these looks, each look the results shown, in order, with their own records.
+func records(_ looks: [[(Key, Rec?)]]) -> [Key: Rec] {
+    looks.reduce([:]) { r, look in P.rowRecords(r, listed: look.map { (key: $0.0, record: $0.1) }) }
+}
+let mac = k("Mac")
+check("rowRecords: a result's own record is read as it is", records([[(mac, r1)]]) == [mac: r1] && records([[(mac, rPlain)]]) == [mac: rPlain])
+check("rowRecords: a result without one keeps the last it carried, look after look",
+      records([[(mac, r1)], [(mac, nil)]]) == [mac: r1] && records([[(mac, r1)], [(mac, nil)], [(mac, nil)], [(mac, nil)]]) == [mac: r1])
+check("rowRecords: a record that comes replaces the kept one, whatever it says (a new tag, p=0, p gone)",
+      records([[(mac, r1)], [(mac, nil)], [(mac, rNew)]]) == [mac: rNew] && records([[(mac, r1)], [(mac, rOpen)]]) == [mac: rOpen]
+      && records([[(mac, r1)], [(mac, nil)], [(mac, rPlain)], [(mac, nil)]]) == [mac: rPlain])
+check("rowRecords: a result that leaves the results is forgotten; listed afresh without a record, it has none",
+      records([[(mac, r1)], []]) == [:] && records([[(mac, r1)], [], [(mac, nil)]]) == [:]
+      && records([[(mac, r1)], [(k("Office"), nil)], [(mac, nil)]]) == [:])
+check("rowRecords: listed afresh with a record, that one", records([[(mac, r1)], [], [(mac, rOpen)]]) == [mac: rOpen])
+check("rowRecords: a result never listed with a record has none: a plain door, as before",
+      records([[(mac, nil)]]) == [:] && records([[(mac, nil)], [(mac, nil)]]) == [:])
+check("rowRecords: one name's record is never another's", records([[(mac, r1), (k("Office"), nil)]]) == [mac: r1]
+      && records([[(mac, r1)], [(k("Office"), nil)]]) == [:] && records([[(mac, r1), (k("Office"), nil)], [(k("Office"), nil), (mac, nil)]]) == [mac: r1])
+check("rowRecords: a browser made again starts afresh: its result for the name is read with what it delivers itself, never the old one's record",
+      records([[(mac, r1)], [(k("Mac", 2), nil)]]) == [:] && records([[(mac, r1)], [(mac, nil)], [(k("Mac", 2), nil)], [(k("Mac", 2), nil)]]) == [:]
+      && records([[(mac, r1)], [(k("Mac", 2), rOpen)], [(k("Mac", 2), nil)]]) == [k("Mac", 2): rOpen])
+check("rowRecords: the old browser's result, shown beside the new one's while it settles, keeps its record only while it is shown",
+      records([[(mac, r1)], [(mac, nil), (k("Office", 2), nil)]]) == [mac: r1]
+      && records([[(mac, r1)], [(mac, nil), (k("Office", 2), nil)], [(k("Mac", 2), nil), (k("Office", 2), nil)]]) == [:])
+check("rowRecords: a name in two domains is two results, each with its own record, whichever is listed first",
+      records([[(k("Mac", 1, "local."), r1), (k("Mac", 1, "example.com."), nil)]]) == [k("Mac", 1, "local."): r1]
+      && records([[(k("Mac", 1, "local."), r1), (k("Mac", 1, "example.com."), nil)], [(k("Mac", 1, "example.com."), nil), (k("Mac", 1, "local."), nil)]])
+         == [k("Mac", 1, "local."): r1]
+      && records([[(k("Mac", 1, "local."), r1)], [(k("Mac", 1, "example.com."), nil)]]) == [:])
+check("rowRecords: a key listed twice is read by its first entry",
+      P.rowRecords([:], listed: [(mac, r1), (mac, rOpen)]) == [mac: r1] && P.rowRecords([:], listed: [(mac, nil), (mac, rOpen)]) == [:]
+      && P.rowRecords([mac: r1], listed: [(mac, nil), (mac, rOpen)]) == [mac: r1])
+
+// Every history of three looks at two names, each look made by browser 1 or 2 (a browser made again
+// between two looks) and each name absent, listed without a record, or listed with one of three
+// records, against an oracle that reads each key's history: the last record in its present run of
+// looks, a look by another browser being a break, none once it left.
+enum Look: Equatable { case absent, bare, carries(Rec) }
+let lookChoices: [Look] = [.absent, .bare, .carries(r1), .carries(rOpen), .carries(rPlain)]
+func lastRecord(_ history: [Look]) -> Rec? {
+    for look in history.reversed() {
+        switch look {
+        case .absent: return nil
+        case .bare: continue
+        case .carries(let r): return r
+        }
+    }
+    return nil
+}
+var histories = 0, historiesOK = 0, onlyGiven = true, neverPlainOverTLS = true
+let historyNames = ["A", "B"], historySteps = 3, lookCount = 2 * lookChoices.count * lookChoices.count
+for n in 0..<Int(pow(Double(lookCount), Double(historySteps))) {
+    var code = n, ok = true
+    var looks: [(browser: Int, of: [String: Look])] = [], memory: [Key: Rec] = [:]
+    for _ in 0..<historySteps {
+        let browser = 1 + code % 2
+        code /= 2
+        var of: [String: Look] = [:], listed: [(key: Key, record: Rec?)] = []
+        for name in historyNames {
+            let look = lookChoices[code % lookChoices.count]
+            code /= lookChoices.count
+            of[name] = look
+            switch look {
+            case .absent: break
+            case .bare: listed.append((k(name, browser), nil))
+            case .carries(let r): listed.append((k(name, browser), r))
+            }
+        }
+        looks.append((browser, of))
+        memory = P.rowRecords(memory, listed: listed)
+        for name in historyNames { for b in [1, 2] {
+            let history = looks.map { $0.browser == b ? $0.of[name]! : .absent }
+            let got = memory[k(name, b)]
+            if got != lastRecord(history) { ok = false }
+            // Never a door no record gave: a result is read with a record delivered for it since it was last listed afresh, by its own browser.
+            if let got, !history.reversed().prefix(while: { $0 != .absent }).contains(.carries(got)) { onlyGiven = false }
+            // A saved Mac seen over TLS: whatever the history, a tap never dials it plain (DEBUG included).
+            if P.homeDial(door: got?.door ?? .plain, saved: true, revoked: false, homeTLS: true, debug: true, tap: true) == .plain { neverPlainOverTLS = false }
+        } }
+    }
+    histories += 1
+    if ok { historiesOK += 1 }
+}
+check("rowRecords: \(historiesOK) of \(histories) histories (three looks, each by browser 1 or 2, at two names: absent, no record, or one of three) read as the oracle",
+      historiesOK == histories && histories == 125_000)
+check("rowRecords: a result is only ever read with a record its own browser delivered for it since it was last listed afresh", onlyGiven)
+check("rowRecords: a saved Mac seen over TLS is never dialed plain, whatever its records did", neverPlainOverTLS)
+
+// The console's three listings as recomputeMacs reads them: the Mac's record with the cable in (anpi0,
+// en2 and en0), then en2 and en0, then en0 alone, without one. "TAG" names the saved Mac "M", reached
+// as "Noah’s MacBook Pro" and seen over TLS.
+let savedNoah: [(macID: String, bonjourName: String?)] = [("M", noah)]
+let noahKey = k(noah)
+func unplugRow(_ record: Rec?, _ interfaces: [I], debug: Bool = false, homeTLS: Bool = true)
+    -> (word: W, tap: H, reconnect: H, byName: Bool, macID: String?) {
+    let tagged = record?.tag == "TAG" ? "M" : nil                  // SavedMacs.recognize, the saved record's tag
+    let carries = !(record?.tag ?? "").isEmpty
+    let named = P.rowMac(tagged: tagged, carriesTag: carries, name: noah, saved: savedNoah)
+    let door = P.rowDoor(record?.door ?? .plain, otherTagUnderSavedName: P.otherTagUnderSavedName(tagged: tagged, carriesTag: carries, name: noah, saved: savedNoah))
+    let method = P.method(direct: false, interfaces: interfaces)
+    let cable = P.dialInterface(direct: false, interfaces: interfaces).map { P.carriesOnlyLinkLocal($0, own: iPadOwn) } ?? false
+    return (P.rowWord(door: door, saved: named != nil, revoked: false, homeTLS: homeTLS, debug: debug, method: method, cable: cable),
+            P.homeDial(door: door, saved: named != nil, revoked: false, homeTLS: homeTLS, debug: debug, tap: true),
+            P.homeDial(door: door, saved: named != nil, revoked: false, homeTLS: homeTLS, debug: debug, tap: false),
+            named?.tagNamed == false, tagged)
+}
+var unplugMemory: [Key: Rec] = [:]
+var unplugRows: [(word: W, tap: H, reconnect: H, byName: Bool, macID: String?)] = []
+for (record, interfaces) in [(r1, [anpi0, en2, en0]), (nil, [en2, en0]), (nil, [en0])] as [(Rec?, [I])] {
+    unplugMemory = P.rowRecords(unplugMemory, listed: [(noahKey, record)])
+    unplugRows.append(unplugRow(unplugMemory[noahKey], interfaces))
+}
+check("the cable pulled: Wired, Wired, then Wi‑Fi, its record kept (p=1, named by its tag, not by its name alone)",
+      unplugRows.map(\.word) == [.method(.wired), .method(.wired), .method(.wifi)] && unplugRows.allSatisfy { !$0.byName } && unplugMemory == [noahKey: r1])
+check("the cable pulled: a tap and the reconnect dial the saved Mac pinned at every step, never plain",
+      unplugRows.allSatisfy { $0.tap == .pinned && $0.reconnect == .pinned })
+check("before the fix (each listing's own record alone): Update Sill by its name alone, nothing dialed, in DEBUG too",
+      unplugRow(nil, [en2, en0]).word == .updateSill && unplugRow(nil, [en2, en0]).byName && unplugRow(nil, [en0]).word == .updateSill
+      && unplugRow(nil, [en0], debug: true).tap == .updateSill && unplugRow(nil, [en0], debug: true).reconnect == .updateSill)
+unplugMemory = P.rowRecords(unplugMemory, listed: [(noahKey, r1)])
+check("its record again on en0: Wi‑Fi, pinned", unplugMemory == [noahKey: r1] && unplugRow(unplugMemory[noahKey], [en0]).word == .method(.wifi)
+      && unplugRow(unplugMemory[noahKey], [en0]).tap == .pinned)
+unplugMemory = P.rowRecords(unplugMemory, listed: [(noahKey, nil)])
+unplugMemory = P.rowRecords(unplugMemory, listed: [(noahKey, nil)])
+unplugMemory = P.rowRecords(unplugMemory, listed: [(noahKey, r1)])
+check("the cable back in (anpi0, en2, en0 with its record): Wired, pinned", unplugRow(unplugMemory[noahKey], [anpi0, en2, en0]).word == .method(.wired)
+      && unplugRow(unplugMemory[noahKey], [anpi0, en2, en0]).tap == .pinned)
+unplugMemory = P.rowRecords(unplugMemory, listed: [(noahKey, nil)])
+unplugMemory = P.rowRecords(unplugMemory, listed: [(noahKey, rOpen)])
+check("Require pairing turned off while listed (a record with p=0 after one without): read; the saved Mac says Wi‑Fi, dialed pinned",
+      unplugMemory == [noahKey: rOpen] && unplugRow(unplugMemory[noahKey], [en0]).word == .method(.wifi) && unplugRow(unplugMemory[noahKey], [en0]).tap == .pinned)
+unplugMemory = P.rowRecords(unplugMemory, listed: [(noahKey, rPlain)])
+unplugMemory = P.rowRecords(unplugMemory, listed: [(noahKey, nil)])
+check("a record with its tag and no p, the Mac's own word, then none: Update Sill, nothing dialed, in DEBUG too",
+      unplugRow(unplugMemory[noahKey], [en0]).word == .updateSill && unplugRow(unplugMemory[noahKey], [en0], debug: true).tap == .updateSill)
+// A Mac that really went back to a plain door: its name leaves the results (the browser's removal, about a
+// second after its Sill's goodbye), then comes back without a record.
+var downgraded = P.rowRecords([:], listed: [(noahKey, r1)])
+downgraded = P.rowRecords(downgraded, listed: [])
+downgraded = P.rowRecords(downgraded, listed: [(noahKey, nil)])
+check("a Mac gone back to a plain door, listed afresh without a record: Update Sill, nothing dialed, in DEBUG too",
+      downgraded[noahKey] == nil && unplugRow(downgraded[noahKey], [en0]).word == .updateSill && unplugRow(downgraded[noahKey], [en0], debug: true).tap == .updateSill
+      && unplugRow(downgraded[noahKey], [en0], debug: true).reconnect == .updateSill)
+check("…and in DEBUG, a Mac never seen over TLS: its method, dialed plain, as before",
+      unplugRow(downgraded[noahKey], [en0], debug: true, homeTLS: false).word == .method(.wifi)
+      && unplugRow(downgraded[noahKey], [en0], debug: true, homeTLS: false).tap == .plain)
+var away = P.rowRecords([:], listed: [(noahKey, r1), (k("Office"), nil)])
+away = P.rowRecords(away, listed: [(k("Office"), nil)])
+away = P.rowRecords(away, listed: [(k("Office"), nil), (noahKey, nil)])
+check("a name gone and back without a record, another name listed throughout: none for it, as a plain door (Update Sill)",
+      away[noahKey] == nil && unplugRow(away[noahKey], [en0]).word == .updateSill)
+// The review of #232: Sill in the background (or its browser failed), M's registration gone meanwhile and
+// its name taken by another service with no record (an older Sill, the CLI); on the return the browser is
+// made again and lists that name with no record. The old browser's result, shown beside the new one's
+// while it settles, still has M's record; the new browser's result is read with nothing of it.
+var rebuilt = P.rowRecords([:], listed: [(noahKey, r1)])            // the old browser, before the background
+rebuilt = P.rowRecords(rebuilt, listed: [(noahKey, r1)])            // made again: its last results kept, shown
+rebuilt = P.rowRecords(rebuilt, listed: [(k(noah, 2), nil)])        // the new browser lists the name, no record
+let stranger = unplugRow(rebuilt[k(noah, 2)], [en0])
+check("a browser made again, the name's new result without a record: read with none, by its name alone: Update Sill, nothing dialed",
+      rebuilt.isEmpty && stranger.word == .updateSill && stranger.byName && stranger.tap == .updateSill && stranger.reconnect == .updateSill
+      && stranger.macID == nil)
+check("…so M's Remote row stays (no row names M), and a refused pinned dial of that row is only skipped by the reconnect, never newKey",
+      P.remoteRows(saved: [(macID: "M", name: noah)], listedIDs: Set([stranger.macID].compactMap { $0 }), now: 10, searchingSince: 0,
+                   localNetworkDenied: false).map(\.macID) == ["M"]
+      && P.afterPinRefused(macID: "M", tried: ["network:\(noah)"], rows: [("network:\(noah)", stranger.macID)], tagNamed: !stranger.byName,
+                           tapped: false) == .skipRow)
+// One key for both browsers (the rule as #232 first had it): the old browser's record read for the new result.
+var oneKey = P.rowRecords([:], listed: [(noahKey, r1)])
+oneKey = P.rowRecords(oneKey, listed: [(noahKey, nil)])
+let readAsM = unplugRow(oneKey[noahKey], [en0])
+check("…where one key for both browsers read it as M by its old tag: dialed pinned, M's Remote row hidden, a refusal marking M newKey",
+      readAsM.macID == "M" && readAsM.reconnect == .pinned && !readAsM.byName
+      && P.remoteRows(saved: [(macID: "M", name: noah)], listedIDs: ["M"], now: 10, searchingSince: 0, localNetworkDenied: false).isEmpty
+      && P.afterPinRefused(macID: "M", tried: ["network:\(noah)"], rows: [("network:\(noah)", "M")], tagNamed: true, tapped: false) == .newKey)
 
 print(fails == 0 ? "ALL PASS (\(passes))" : "\(fails) FAIL, \(passes) pass")
 if fails > 0 { exit(1) }

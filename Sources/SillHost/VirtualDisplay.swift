@@ -103,6 +103,14 @@ final class VirtualDisplay {
 
     var isAlive: Bool { object != nil }
 
+    /// The current mode's pixels a point, whole: 2 at the HiDPI mode asked for, 1 at a mode macOS
+    /// chose instead (VirtualStage's creation line). 0 before the display is online.
+    var currentScale: Int {
+        let b = bounds, px = pixelSize
+        guard b.width > 0, px.width > 0 else { return 0 }
+        return Int((Double(px.width) / Double(b.width)).rounded())
+    }
+
     /// The retained CGVirtualDisplay instance. Releasing it removes the display.
     private var object: AnyObject?
     private let queue = DispatchQueue(label: "sill.virtualdisplay")
@@ -485,6 +493,10 @@ enum HeadlessDesktopPolicy {
     ) -> Bool {
         !hasDisplay && clientCount > 0 && appKitLoop && !synthetic && apiAvailable
     }
+
+    /// Whether the fallback display stays: only while no real display is online. Once one is back (the
+    /// lid opened, a monitor plugged in) it goes at once, so the windows macOS moved onto it come back.
+    static func stillNeeded(physicalDisplays: Int) -> Bool { physicalDisplays == 0 }
 
     static func desktopDimensions(viewportWidth: Double?, viewportHeight: Double?) -> Dimensions {
         guard let w = viewportWidth, let h = viewportHeight, w > 0, h > 0 else {

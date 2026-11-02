@@ -193,6 +193,13 @@ check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: tru
 check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: false) == false,
       "when CGVirtualDisplay API is unavailable does not create a headless display")
 
+// The lid opened (or a monitor plugged in) while the fallback display exists: macOS moved every window
+// onto it when the last real display went, so it goes at once and they come back, not when the last
+// device leaves.
+check(HDP.stillNeeded(physicalDisplays: 0) == true, "no real display online: the fallback display stays")
+check(HDP.stillNeeded(physicalDisplays: 1) == false, "the lid opened, the built-in display back: the fallback display goes")
+check(HDP.stillNeeded(physicalDisplays: 2) == false, "two monitors plugged in: the fallback display goes")
+
 check(HDP.desktopDimensions(viewportWidth: nil, viewportHeight: nil) == HDP.Dimensions(widthPt: 1920, heightPt: 1080, scale: 2),
       "no viewport defaults to 1920×1080 @2×")
 check(HDP.desktopDimensions(viewportWidth: 1366, viewportHeight: 1024) == HDP.Dimensions(widthPt: 1366, heightPt: 1024, scale: 2),

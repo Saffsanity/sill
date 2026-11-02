@@ -27,6 +27,8 @@ struct PairingWindow {
     /// address, for AskLimits' quiet rule, and where it asked from, for the window's copy.
     struct DeviceAsk: Equatable {
         let fingerprint: Data
+        /// The address as the log names it, with its interface when it is link-local ("fe80::1%en0"):
+        /// AskLimits keeps the quiet under its `quietKey`.
         let source: String
         /// "on this network", "nearby" (peer-to-peer Wi-Fi) or "on this Mac".
         var from: String = "on this network"
@@ -170,11 +172,12 @@ struct PairingWindow {
 /// How often devices may put a code on this Mac's screen by asking (docs/home-pairing-plan.md
 /// §4.7, the ask rule's step 5): at most `maxWindows` device-opened windows in any `span`, and a
 /// device whose window the Mac's user cancelled, or that stopped after five wrong codes, opens none
-/// for `quietFor`, by its key and by its address, so a stranger asking again with a new key from
-/// the same address, or from a new address with the same key, stays quiet. A window that simply
-/// ran out, or that its device withdrew, quiets nobody (the security review, 2026-09-27): its
-/// person, tapping again, gets a fresh code, as the device's words say, and `maxWindows` still
-/// bounds how often a device can put one up. One window at a time is the ask rule's own step 3.
+/// for `quietFor`, by its key and by its address (an IPv6 address by its /64, `quietKey`), so a
+/// stranger asking again with a new key from the same address, or from a new address with the same
+/// key, stays quiet. A window that simply ran out, or that its device withdrew, quiets nobody (the
+/// security review, 2026-09-27): its person, tapping again, gets a fresh code, as the device's
+/// words say, and `maxWindows` still bounds how often a device can put one up. One window at a
+/// time is the ask rule's own step 3.
 /// Pure (no clock: `now` is passed in; the caller uses a monotonic one, so a clock change moves
 /// nothing), checked on its own with swiftc. RemoteAccess owns one on the main actor.
 struct AskLimits {
@@ -188,13 +191,25 @@ struct AskLimits {
 
     /// When each device-opened window within `spanSeconds` opened.
     private var openedAt: [Double] = []
-    /// When a device-opened window last closed unused, by the asking key and by its address.
+    /// When a device-opened window last closed unused, by the asking key and by its address's
+    /// `quietKey`.
     private var quietKeys: [Data: Double] = [:]
     private var quietSources: [String: Double] = [:]
 
     init(seconds: Double? = nil) {
         quietSeconds = seconds ?? Self.quietFor
         spanSeconds = seconds ?? Self.span
+    }
+
+    /// The address an asker's quiet is kept under: an IPv4 address itself, an IPv6 one's /64 (with
+    /// its interface when it is link-local: "fe80::/64%en0"), since SLAAC and privacy addresses give
+    /// one host any number of addresses in its prefix (DoorPolicy.source, the door's own groups; the
+    /// security scan of 2026-10-18, finding 9). `source` is the address as the log names it, with
+    /// its interface after "%" when it has one; text that is no address is kept as it is.
+    static func quietKey(_ source: String) -> String {
+        guard let bytes = IPBytes.parse(source) else { return source }
+        let zone = source.firstIndex(of: "%").map { String(source[source.index(after: $0)...]) }
+        return DoorPolicy.source(bytes, scope: zone).group
     }
 
     /// Whether this key or this address may not open a window now.
@@ -205,7 +220,7 @@ struct AskLimits {
     /// When the window that keeps this key or this address quiet closed (the later of the two),
     /// for the log's "its last window was closed 3 minutes ago"; nil when neither is quiet.
     func quietSince(fingerprint: Data, source: String, now: Double) -> Double? {
-        [quietKeys[fingerprint], quietSources[source]].compactMap { $0 }.filter { now - $0 < quietSeconds }.max()
+        [quietKeys[fingerprint], quietSources[Self.quietKey(source)]].compactMap { $0 }.filter { now - $0 < quietSeconds }.max()
     }
 
     /// Device-opened windows in the last `spanSeconds`.
@@ -223,7 +238,7 @@ struct AskLimits {
         quietKeys = quietKeys.filter { now - $0.value < quietSeconds }
         quietSources = quietSources.filter { now - $0.value < quietSeconds }
         quietKeys[fingerprint] = now
-        quietSources[source] = now
+        quietSources[Self.quietKey(source)] = now
     }
 
     /// Whether a device-opened window that closed this way quiets its asker: cancelled on the Mac
