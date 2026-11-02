@@ -17,9 +17,10 @@ enum Stage {
     static let height = 1080
     static let size = CGSize(width: 1920, height: 1080)
     static let fps = 60
-    /// v3.1: 83.2 s, 4,992 frames (52 bars at 150 BPM; v2 was 47 bars, 75.2 s). 0.6.0: 80.0 s, 4,800 frames (50 bars).
-    static var frames: Int { ReelCut.current == .r060 ? 4800 : 4992 }
-    static var duration: Double { ReelCut.current == .r060 ? 80.0 : 83.2 }
+    /// v3.1: 83.2 s, 4,992 frames (52 bars at 150 BPM; v2 was 47 bars, 75.2 s). 0.6 (v4.1): 139.2 s, 8,352 frames (87 bars;
+    /// v4 was 80.0 s, 4,800 frames, 50 bars: Retime060.swift).
+    static var frames: Int { ReelCut.current == .r060 ? Retime060.frames : 4992 }
+    static var duration: Double { ReelCut.current == .r060 ? Retime060.duration : 83.2 }
 }
 
 // MARK: - Easing (CSS cubic-bézier, solved per frame)

@@ -1,7 +1,7 @@
-// Shots060Mac.swift — Act IV's first part: S18 (62.4–65.6), Sill for Mac on Intel, and the one cutaway, S19–S20
-// (65.6–72.0), "Fixed in 0.6.0." (storyboard §3, Assets060Fixes.swift). The cutaway's type is drawn here as glyph
-// outlines on its exact scroll path (GlyphCanvas), so typecheck measures every line of it; the bug, its touch dot and
-// the line it becomes are Assets060Fixes.swift's.
+// Shots060Mac.swift — Act IV's first part: S18 (v4's 62.4–65.6; film 105.6–112.0), Sill for Mac on Intel, and the one
+// cutaway, S19–S20 (film 112.0–123.2, timed natively), "Fixed in 0.6." (storyboard §3, Assets060Fixes.swift). The
+// cutaway's type is drawn here as glyph outlines on its exact scroll path (GlyphCanvas), so typecheck measures every line
+// of it; the bug, its touch dot, its splat and the line it becomes are Assets060Fixes.swift's.
 import SwiftUI
 
 // MARK: S18 · Intel
@@ -19,7 +19,7 @@ enum Intel060 {
     lines.append(LineSpec(Copy060.intelFoot, .T3, baseline: 266, snap: i.foot, holdEnd: i.end, cascade: false))
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: CGPoint(x: 960, y: 660))
-        IntelIMac060(t: t, k: 1.06, center: CGPoint(x: 960, y: 668))
+        IntelIMac060(t: t, k: 1.06, center: CGPoint(x: 960, y: 668), progress: e.glide(t, i.start, i.end))
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v), vignette: false)
@@ -45,8 +45,9 @@ struct FixesType060: View {
     var body: some View {
         let F = Fixes060.self
         let scroll = CGAffineTransform(translationX: 0, y: -CGFloat(F.scroll(t)))
+        // The title snaps on v4's recipe played 1.25× slower: its own clock (F.titleClock) at v4's snap time.
         var title = LineSpec(words: F.title, .T1s, x: F.columnX, baseline: F.titleBaseline, align: .leading,
-                             snap: F.titleSnap, holdEnd: F.titleSnap)
+                             snap: F.titleSnapV4, holdEnd: F.titleSnapV4)
         title.holdScale = false
         var nodes: [TypeNode] = []
         for p in F.placed {
@@ -60,7 +61,7 @@ struct FixesType060: View {
         }
         let alpha = F.columnOpacity(t)
         return ZStack {
-            if F.screenY(0, t) > -60, let n = TypeLine.node(title, t) {
+            if F.screenY(0, t) > -60, let n = TypeLine.node(title, F.titleClock(t)) {
                 GlyphCanvas(nodes: [n], transform: scroll, covered: FixesType060.bands)
             }
             if alpha > 0.002 {

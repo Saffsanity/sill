@@ -162,7 +162,8 @@ struct MacLockScreen060 {
         return CGRect(x: rect.midX - w / 2, y: rect.minY + fieldY * H - h / 2, width: w, height: h)
     }
 
-    func draw(_ ctx: inout GraphicsContext, rect: CGRect, dots: Int = 0, verifying: Double = 0, t: Double = 0, opacity: Double = 1) {
+    func draw(_ ctx: inout GraphicsContext, rect: CGRect, dots: Int = 0, verifying: Double = 0, t: Double = 0, opacity: Double = 1,
+              spin: Double? = nil) {
         guard opacity > 0.002 else { return }
         var c = ctx
         c.opacity = opacity
@@ -221,7 +222,7 @@ struct MacLockScreen060 {
             if verifying > 0.001 {
                 var sp = c
                 sp.opacity = verifying
-                Spinner060.draw(&sp, center: CGPoint(x: b.midX, y: b.midY), radius: 0.46 * bd, t: t, color: .white)
+                Spinner060.draw(&sp, center: CGPoint(x: b.midX, y: b.midY), radius: 0.46 * bd, t: spin ?? t, color: .white)
             }
         }
     }
@@ -383,8 +384,8 @@ struct LockSequence060 {
 
     /// The stream picture's overlay at `t`: the lock screen (with the field's dots) and, after Return, the
     /// app's cover. `rect`: the Mac's picture on the canvas; `pt`: screen px per iPad point (for the cover).
-    func drawPicture(_ ctx: inout GraphicsContext, rect: CGRect, pt: CGFloat, t: Double) {
-        screen.draw(&ctx, rect: rect, dots: dots(t), verifying: verifying(t), t: t, opacity: lockOpacity(t))
+    func drawPicture(_ ctx: inout GraphicsContext, rect: CGRect, pt: CGFloat, t: Double, spin: Double? = nil) {
+        screen.draw(&ctx, rect: rect, dots: dots(t), verifying: verifying(t), t: t, opacity: lockOpacity(t), spin: spin)
         UnlockingCover060.draw(&ctx, rect: rect, pt: pt, t: t, opacity: coverOpacity(t))
     }
 }
@@ -554,8 +555,10 @@ struct IntelIMac060: View {
     var glint = 63.2
     var glintDuration = 0.9
     var push: CGFloat = 0.03
+    /// The push's progress (0 … 1) when the shot glides it on film time; else `t` from `start` to `end`.
+    var progress: Double? = nil
     var body: some View {
-        let s = 1 + push * CGFloat(ramp(t, start, end))
+        let s = 1 + push * CGFloat(progress ?? ramp(t, start, end))
         // The push is about the body's centre: k grows and the centre stays.
         DrawnIMac060(style: .solid, k: k * s, center: center, sheen: (glint, glintDuration), t: t)
     }

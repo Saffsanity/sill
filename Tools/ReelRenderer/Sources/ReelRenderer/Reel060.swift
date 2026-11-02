@@ -1,6 +1,7 @@
 // Reel060.swift — the 0.6.0 update video (REEL=060): its inputs, the stills it derives from them, its copy, and its
 // timeline. The storyboard is ~/Downloads/sill-handoff/release-060/reel-0.6.0-storyboard.md (approved 2026-11-02);
-// the shot list with the as-built numbers is design/reel/v4/SHOTLIST-0.6.0.md. 80.0 s, 50 bars at 150 BPM, 23 shots.
+// the shot list with the as-built numbers is design/reel/v4.1/SHOTLIST-0.6.md (v4's: design/reel/v4/SHOTLIST-0.6.0.md).
+// v4.1 (Noah's notes of 2026-11-02): 139.2 s, 87 bars at 150 BPM, 23 shots, v4's builders through Retime060's maps.
 //
 // Inputs, under `reelDir` (REEL_DIR; the assemble step's `.build/reel060/input`):
 // - `stills/`: harness screenshots of Sill 0.6.0 (origin/main c4a331f) on private simulators: the iPad mini's
@@ -17,13 +18,17 @@ import SwiftUI
 
 enum Copy060 {
     static let whatsNew = "What\u{2019}s new."
-    static let version = "0.6.0"
+    /// v4.1, Noah: "when showing the version number, go with 0.6 not 0.6.0 for aesthetic": the lockup, the end card, the
+    /// footnotes and the cutaway's title say 0.6 (no line names the app's own version string).
+    static let version = "0.6"
     // S04–S05
     static let copyMac = "Copy on your Mac.", pasteIPad = "Paste on your iPad."
-    static let needsMac = "Needs Sill for Mac 0.6.0."
+    static let needsMac = "Needs Sill for Mac 0.6."
     static let copyIPad = "Copy on your iPad.", pasteMac = "Paste on your Mac."
     static let pasteSub = "Tap Paste in Sill. It lands where the cursor is."
-    static let pasteFoot = "Text, up to 256 KB. Share Clipboard turns it off and on."
+    /// v4.1, Noah: "last line of text should read - Text only, Shared Clipboard in settings turns it on or off": the
+    /// setting's name in the app is Share Clipboard (whats-new-0.6.0.txt; the iPad's Settings panel and the Mac's General).
+    static let pasteFoot = "Text only. Share Clipboard, in Settings, turns it on or off."
     // S06
     static let sound = "Sound from your Mac."
     static let soundSub = "The window you\u{2019}re using, a moment behind the picture."
@@ -64,7 +69,7 @@ enum Copy060 {
     // S15
     static let aaOff = "Aa starts at Off."
     static let aaSub = "Slide back to Off, and the window goes back to its own size."
-    static let aaFoot = "With Sill for Mac 0.6.0."
+    static let aaFoot = "With Sill for Mac 0.6."
     // S16
     static let hold = "Hold a thumbnail.", halfSecond = "Controls in half a second."
     static let holdFoot = "Hold to Show Window Controls sets 0.2 to 2 seconds."
@@ -427,45 +432,65 @@ struct CanvasDot: View {
     }
 }
 
-// MARK: - The timeline (80.0 s, 50 bars; acts on bar lines at 0, 6.4, 28.8 and 62.4)
+// MARK: - The timeline (v4.1: 139.2 s, 87 bars; acts on bar lines at 0, 11.2, 46.4 and 105.6)
+
+/// A v4 builder played through its scene's time map (Retime060.swift): handed v4's time for film time `T`, with the clock
+/// set so its continuous motion runs on film time.
+func timed(_ map: SceneMap060, _ build: @escaping @MainActor (Double, Env) throws -> FrameLayers) -> @MainActor (Double, Env) throws -> FrameLayers {
+    { T, e in
+        var e2 = e
+        e2.clock = ShotClock(T: T, map: map)
+        return try build(map.old(T), e2)
+    }
+}
 
 @MainActor
 enum Timeline060 {
-    static let shots: [Shot] = [
-        // Act I · the open (0–6.4, 4 bars)
-        Shot(id: "S01", start: 0.0, end: 2.4, source: "drawn (v3's close: glint, sill line, the lit icon)", clip: nil, build: s060_01),
-        Shot(id: "S02", start: 2.4, end: 4.8, source: "drawn (v3's lockup)", clip: nil, build: s060_02),
-        Shot(id: "S03", start: 4.8, end: 6.4, source: "type", clip: nil, build: s060_03),
-        // Act II · the big three (6.4–28.8, 14 bars)
-        Shot(id: "S04", start: 6.4, end: 10.4, source: "stand-in for take A part 1: stills A1, drawn notes; drawn keycaps", clip: nil, build: s060_04),
-        Shot(id: "S05", start: 10.4, end: 14.4, source: "stand-in for take A part 2: drawn notes, stills A2, A3p, A4", clip: nil, build: s060_05),
-        Shot(id: "S06", start: 14.4, end: 19.2, source: "stand-in for take B: still B1 + v3.1 1.6–6.4, B4, B5; drawn arcs", clip: nil, build: s060_06),
-        Shot(id: "S07", start: 19.2, end: 24.0, source: "stills L0w, L1x; drawn lock screen", clip: nil, build: s060_07),
-        Shot(id: "S08", start: 24.0, end: 28.8, source: "drawn lock screen and keyboard; stills L1x, L0w", clip: nil, build: s060_08),
-        // Act III · on iPhone and iPad (28.8–62.4, 21 bars)
-        Shot(id: "S09", start: 28.8, end: 32.8, source: "stand-in for take C: still C0, picture sheet zoomed", clip: nil, build: s060_09),
-        Shot(id: "S10", start: 32.8, end: 36.8, source: "stand-in for take D: stills D1, D4, D5, D2, D3", clip: nil, build: s060_10),
-        Shot(id: "S11", start: 36.8, end: 40.8, source: "stand-in for take E part 1: stills E0, E1, E2; drawn keyboard", clip: nil, build: s060_11),
-        Shot(id: "S12", start: 40.8, end: 44.0, source: "stand-in for take E part 2: still E3, picture longdoc-page; stills E6, E7", clip: nil, build: s060_12),
-        Shot(id: "S13", start: 44.0, end: 48.8, source: "stand-in for take F: stills F0–F4", clip: nil, build: s060_13),
-        Shot(id: "S14", start: 48.8, end: 52.8, source: "stills N1, N2", clip: nil, build: s060_14),
-        Shot(id: "S15", start: 52.8, end: 56.0, source: "stills H1, H2; drawn Mac (v3)", clip: nil, build: s060_15),
-        Shot(id: "S16", start: 56.0, end: 59.2, source: "stills L0w, J1, J2; drawn hold ring", clip: nil, build: s060_16),
-        Shot(id: "S17", start: 59.2, end: 62.4, source: "still K1", clip: nil, build: s060_17),
-        // Act IV · the Mac, the fixes, the close (62.4–80.0, 11 bars)
-        Shot(id: "S18", start: 62.4, end: 65.6, source: "drawn (the icon's iMac)", clip: nil, build: s060_18),
-        Shot(id: "S19", start: 65.6, end: 70.4, source: "type (the fixes' column)", clip: nil, build: s060_19),
-        Shot(id: "S20", start: 70.4, end: 72.0, source: "drawn (the bug) + type", clip: nil, build: s060_19),
-        Shot(id: "S21", start: 72.0, end: 74.4, source: "drawn + type", clip: nil, build: s060_21),
-        Shot(id: "S22", start: 74.4, end: 77.6, source: "type", clip: nil, build: s060_21),
-        Shot(id: "S23", start: 77.6, end: 80.0, source: "—", clip: nil, build: s060_21),
-    ]
+    static let shots: [Shot] = {
+        let R = Retime060.self
+        return [
+            // Act I · the open (0–11.2, 7 bars)
+            Shot(id: "S01", start: 0.0, end: 3.2, source: "drawn (v3's close: glint, sill line, the lit icon)", clip: nil, build: timed(R.open, s060_01)),
+            Shot(id: "S02", start: 3.2, end: 8.0, source: "drawn (v3's lockup)", clip: nil, build: timed(R.open, s060_02)),
+            Shot(id: "S03", start: 8.0, end: 11.2, source: "type", clip: nil, build: timed(R.s03, s060_03)),
+            // Act II · the big three (11.2–46.4, 22 bars)
+            Shot(id: "S04", start: 11.2, end: 17.2, source: "stand-in for take A part 1: stills A1, drawn notes; drawn keycaps", clip: nil, build: timed(R.s04, s060_04)),
+            Shot(id: "S05", start: 17.2, end: 24.4, source: "stand-in for take A part 2: drawn notes, stills A2, A3p, A4", clip: nil, build: timed(R.s05, s060_05)),
+            Shot(id: "S06", start: 24.4, end: 32.8, source: "stand-in for take B: still B1 + v3.1 1.6–6.4, B4, B5; drawn arcs", clip: nil, build: timed(R.s06, s060_06)),
+            Shot(id: "S07", start: 32.8, end: 39.6, source: "stills L0w, L1x; drawn lock screen", clip: nil, build: timed(R.s07, s060_07)),
+            Shot(id: "S08", start: 39.6, end: 46.4, source: "drawn lock screen and keyboard; stills L1x, L0w", clip: nil, build: timed(R.s08, s060_08)),
+            // Act III · on iPhone and iPad (46.4–105.6, 37 bars)
+            Shot(id: "S09", start: 46.4, end: 52.8, source: "stand-in for take C: still C0, picture sheet zoomed", clip: nil, build: timed(R.s09, s060_09)),
+            Shot(id: "S10", start: 52.8, end: 59.6, source: "stand-in for take D: stills D1, D4, D5, D2, D3", clip: nil, build: timed(R.s10, s060_10)),
+            Shot(id: "S11", start: 59.6, end: 66.0, source: "stand-in for take E part 1: stills E0, E1, E2; drawn keyboard", clip: nil, build: timed(R.s11, s060_11)),
+            Shot(id: "S12", start: 66.0, end: 71.6, source: "stand-in for take E part 2: still E3, picture longdoc-page; stills E6, E7", clip: nil, build: timed(R.s12, s060_12)),
+            Shot(id: "S13", start: 71.6, end: 79.6, source: "stand-in for take F: stills F0–F4", clip: nil, build: timed(R.s13, s060_13)),
+            Shot(id: "S14", start: 79.6, end: 86.8, source: "stills N1, N2", clip: nil, build: timed(R.s14, s060_14)),
+            Shot(id: "S15", start: 86.8, end: 93.2, source: "stills H1, H2; drawn Mac (v3)", clip: nil, build: timed(R.s15, s060_15)),
+            Shot(id: "S16", start: 93.2, end: 99.6, source: "stills L0w, J1, J2; drawn hold ring", clip: nil, build: timed(R.s16, s060_16)),
+            Shot(id: "S17", start: 99.6, end: 105.6, source: "still K1", clip: nil, build: timed(R.s17, s060_17)),
+            // Act IV · the Mac, the fixes, the close (105.6–139.2, 21 bars)
+            Shot(id: "S18", start: 105.6, end: 112.0, source: "drawn (the icon's iMac)", clip: nil, build: timed(R.s18, s060_18)),
+            // The cutaway runs on film time (Fixes060's beats are this cut's).
+            Shot(id: "S19", start: 112.0, end: 120.8, source: "type (the fixes' column)", clip: nil, build: s060_19),
+            Shot(id: "S20", start: 120.8, end: 123.2, source: "drawn (the bug, its splat) + type", clip: nil, build: s060_19),
+            Shot(id: "S21", start: 123.2, end: 126.8, source: "drawn + type", clip: nil, build: timed(R.close, s060_21)),
+            Shot(id: "S22", start: 126.8, end: 136.4, source: "type", clip: nil, build: timed(R.close, s060_21)),
+            Shot(id: "S23", start: 136.4, end: 139.2, source: "—", clip: nil, build: timed(R.close, s060_21)),
+        ]
+    }()
 }
 
-/// The contact sheet's tiles: one frame per shot that shows its point.
-let sheetTimes060: [(String, Double)] = [
-    ("S01", 1.9), ("S02", 4.2), ("S03", 5.6), ("S04", 8.9), ("S05", 13.3), ("S06", 17.9),
-    ("S07", 22.4), ("S08", 25.05), ("S09", 30.2), ("S10", 35.9), ("S11", 39.35), ("S12", 42.95),
-    ("S13", 47.9), ("S14", 50.0), ("S15", 54.9), ("S16", 58.6), ("S17", 61.6), ("S18", 63.7),
-    ("S19", 68.0), ("S20", 71.25), ("S21", 73.7), ("S22", 77.2), ("S23", 79.2),
-]
+/// The contact sheet's tiles: one frame per shot that shows its point (v4's choices, through the time map; the cutaway's
+/// mid-scroll and the splat a frame after the hit).
+let sheetTimes060: [(String, Double)] = {
+    let v4: [(String, Double)] = [
+        ("S01", 1.9), ("S02", 4.2), ("S03", 5.6), ("S04", 8.9), ("S05", 13.3), ("S06", 17.9),
+        ("S07", 22.4), ("S08", 25.05), ("S09", 30.2), ("S10", 35.9), ("S11", 39.35), ("S12", 42.95),
+        ("S13", 47.9), ("S14", 50.0), ("S15", 54.9), ("S16", 58.6), ("S17", 61.6), ("S18", 63.7)]
+    var out = v4.map { ($0.0, (Retime060.film($0.1) * 60).rounded() / 60) }
+    out.append(("S19", 118.4))
+    out.append(("S20", Fixes060.tap + 0.05))
+    out += [("S21", 73.7), ("S22", 77.2), ("S23", 79.2)].map { ($0.0, (Retime060.film($0.1) * 60).rounded() / 60) }
+    return out
+}()

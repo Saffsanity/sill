@@ -9,6 +9,8 @@ struct Env {
     // v2: the Mac pane and HT-S left with the shared-settings shots (note 13).
     /// 0.6.0: its stills, pictures and the v3.1 film it quotes (Reel060.swift); nil for v3.1.
     var f: Footage060! = nil
+    /// v4.1: film time and the shot's time map (Retime060.swift), set for each frame of a mapped 0.6 shot; nil otherwise.
+    var clock: ShotClock? = nil
 }
 
 /// Positive yaw brings the device's right side toward the lens; positive pitch its top edge.
@@ -88,6 +90,13 @@ struct TypeLayer: View {
     var covered: [CGRect] = []
     /// False for type that belongs to a picture (GlyphCanvas's `checked`).
     var checked = true
+
+    init(lines: [LineSpec], t: Double, transform: CGAffineTransform = .identity, covered: [CGRect] = [], checked: Bool = true) {
+        self.lines = lines; self.t = t; self.transform = transform; self.covered = covered; self.checked = checked
+        // v4.1's `holds`: every line a shot builds, as it builds it (no rendering needed).
+        if TypeRecorder.active && checked { TypeRecorder.layers.append((lines, t, TypeRecorder.opacity)) }
+    }
+
     var body: some View {
         let nodes = lines.compactMap { TypeLine.node($0, t) }
         if TypeProbe.legacy {
@@ -107,3 +116,11 @@ struct TypeLayer: View {
 }
 
 func any<V: View>(_ v: V) -> AnyView { AnyView(v) }
+
+/// v4.1's `holds` command (Holds060.swift): the type layers a frame's builder makes, recorded as it makes them, with the
+/// opacity the shot fades them by from outside (S21–S23's card fade: `opacity`, set by the builder around its layer).
+enum TypeRecorder {
+    nonisolated(unsafe) static var active = false
+    nonisolated(unsafe) static var layers: [(lines: [LineSpec], t: Double, opacity: Double)] = []
+    nonisolated(unsafe) static var opacity = 1.0
+}

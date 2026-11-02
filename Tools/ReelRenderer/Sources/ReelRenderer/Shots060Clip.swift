@@ -1,5 +1,6 @@
-// Shots060Clip.swift — Act II, the big three (6.4–28.8): the clipboard both ways (S04–S05), sound (S06), a locked
-// Mac and unlocking it (S07–S08). The iPad mini's screens are harness stills and drawn pictures (Reel060.swift),
+// Shots060Clip.swift — Act II, the big three (v4's 6.4–28.8; film 11.2–46.4): the clipboard both ways (S04–S05), sound
+// (S06), a locked Mac and unlocking it (S07–S08). The times here are v4's; the film plays them through Retime060's maps,
+// and the devices' drifts, S06's movie and arcs and S08's spinner run on film time (`Env.glide`, `Env.filmTime`). The iPad mini's screens are harness stills and drawn pictures (Reel060.swift),
 // stand-ins for Noah's takes A and B (swap-in points in SHOTLIST-0.6.0.md); what the stills cannot show is drawn:
 // touch dots, the iPadOS app switch and edit menus, the app's own transitions (the chip's and the Settings panel's), the
 // movie QuickTime plays (v3.1's own frames) and its window, the sound arcs, the lock screen, the keyboard and the dots
@@ -153,6 +154,8 @@ enum Clip060 {
 // place of the MiniScreen layers (A1, notes-plain, the drawn edit menu, ipad-notes-pasted). Marks to align the take to: ⌘C
 // pressed at the Mac 7.20 (the drawn keycaps stay and press then), Notes on the iPad 7.6, the touch and hold 7.95,
 // Paste 8.32, the line landing in Notes 8.40 (the A5 pluck). SHOTLIST-0.6.0.md §7 has the steps.
+// v4.1: the marks above are v4's (this builder's own) times; the film plays the scene through its time map, so a take
+// runs on film time (`e.filmTime(t)`), its marks at the film times in design/reel/v4.1/SHOTLIST-0.6.md §7.
 @MainActor func s060_04(_ t: Double, _ e: Env) throws -> FrameLayers {
     let c = Clip060.self
     var layers = appSwitch(t, at: c.toNotes, from: "stills/A1-te-select", to: "derived/notes-plain")
@@ -172,7 +175,7 @@ enum Clip060 {
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: Pad060.centre)
         // Drifting: a 2 % push about the iPad's left edge (a render transform, so it glides), away from the words.
-        device.canvas().scaled(1 + 0.02 * CGFloat(ramp(t, 6.4, 10.4)), about: Pad060.leftEdge)
+        device.canvas().scaled(1 + 0.02 * CGFloat(e.glide(t, 6.4, 10.4)), about: Pad060.leftEdge)
         keys.opacity(rise)
         TypeLayer(lines: lines, t: t)
     }.canvas()
@@ -231,6 +234,8 @@ struct ChipInset060: View {
 // touch and hold on the reply 10.55, Copy 11.05, back in Sill 11.2, the chip risen 11.55 (E5), Paste on the chip 12.0
 // (C♯6), the note "Pasted on Noah’s MacBook Pro." from 12.15. The push (11.6–12.15, to 1.14 on the chip) stays a render
 // move over the take, and so does the inset (`ChipInset060`: crop it from the take's frames, at the chip's place).
+// v4.1: the marks above are v4's (this builder's own) times; the film plays the scene through its time map, so a take
+// runs on film time (`e.filmTime(t)`), its marks at the film times in design/reel/v4.1/SHOTLIST-0.6.md §7.
 @MainActor func s060_05(_ t: Double, _ e: Env) throws -> FrameLayers {
     let c = Clip060.self
     var layers: [MiniLayer]
@@ -257,7 +262,7 @@ struct ChipInset060: View {
     let s = 1 + (c.pushTo - 1) * p
     let from = Pad060.canvas(CGPoint(x: (193 + 2235) / 2, y: 330))
     let to = CGPoint(x: lerp(from.x, 1490, Double(p)), y: lerp(from.y, 430, Double(p)))
-    let drift = 1 + 0.012 * CGFloat(ramp(t, c.pushEnd, 14.4))
+    let drift = 1 + 0.012 * CGFloat(e.glide(t, c.pushEnd, 14.4))
     let edge = LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .clear, location: c.fadeFrom / 1920),
                                       .init(color: .white, location: c.fadeTo / 1920), .init(color: .white, location: 1)],
                               startPoint: .leading, endPoint: .trailing).canvas()
@@ -283,9 +288,10 @@ enum Sound060 {
     static let spec = DeviceSpec.miniM
     static let centre = CGPoint(x: 960, y: 654)
     static var k: CGFloat { spec.interior.width / Mini060.source.width }
-    /// The movie: v3.1's own opening, 1.6–6.4 s (the icon assembling, the dolly into the Mac), 1:1 in time: the one
-    /// 4.8 s of v3.1 with no type in it, so no line of the old reel competes with this one's.
-    static func movieTime(_ t: Double) -> Double { 1.6 + (t - 14.4) }
+    /// The movie: v3.1's own opening, 1.6–6.4 s (the icon assembling, the dolly into the Mac): the one 4.8 s of v3.1 with
+    /// no type in it, so no line of the old reel competes with this one's. v4 played it 1:1 in its 4.8 s; the film's S06
+    /// is 8.4 s, so it plays evenly over the shot on film time, `p` 0 … 1 (0.57×: slow, never stopping at a dwell).
+    static func movieTime(progress p: Double) -> Double { 1.6 + 4.8 * p }
     /// QuickTime's picture (2880×1800) in the still's picture rect: the film letterboxed at y 90–1710, its title bar
     /// (y 0–104) and its controls drawn over it (QuickTime060, as tools/draw.swift drew them, titled "Sill.mp4").
     static let qt = QuickTime060.size
@@ -307,6 +313,8 @@ func qtToStill(_ r: CGRect) -> CGRect {
 // B1x with v3.1's film and QuickTime's drawn window, the lit Settings button and the B4/B5 panel. Marks: Settings opened
 // 16.8, Mute on 17.6, Mute off 18.4 (the score cuts the Mac's sound between them). The take's own audio is never used;
 // the arcs stay drawn.
+// v4.1: the marks above are v4's (this builder's own) times; the film plays the scene through its time map, so a take
+// runs on film time (`e.filmTime(t)`), its marks at the film times in design/reel/v4.1/SHOTLIST-0.6.md §7.
 @MainActor func s060_06(_ t: Double, _ e: Env) throws -> FrameLayers {
     let S = Sound060.self
     let k = S.k
@@ -314,7 +322,7 @@ func qtToStill(_ r: CGRect) -> CGRect {
     // The movie playing: v3.1's frame, with QuickTime's title bar and controls drawn over it (its time and progress the
     // movie's own).
     let movieRect = scaledRect(qtToStill(S.movie), k)
-    let mt = S.movieTime(t)
+    let mt = S.movieTime(progress: e.glide(t, 14.4, 19.2))
     let film = try e.f.film(mt, scale: movieRect.width / 1920)
     let qs = Mini060.picture.width / S.qt.width * k
     let chrome = Canvas { ctx, _ in
@@ -358,11 +366,12 @@ func qtToStill(_ r: CGRect) -> CGRect {
     var lines = [LineSpec(Copy060.sound, .T1s, baseline: 150, snap: 14.45, holdEnd: 19.2)]
     lines += capped([LineSpec(Copy060.soundSub, .T2, baseline: 214, snap: 15.25, holdEnd: 19.2)])
     lines.append(LineSpec(Copy060.soundFoot, .T3, baseline: 258, snap: 17.65, holdEnd: 19.2, cascade: false))
-    let arcs = SoundArcs060(origin: SoundArcs060.origin(beside: S.spec, center: S.centre), t: t,
-                            beats: SoundArcs060.beats(from: 14.4, to: 19.2), muted: [S.mute...S.unmute])
+    // The arcs keep the score's beat (film time): every beat of the shot, folded from Mute to its end.
+    let arcs = SoundArcs060(origin: SoundArcs060.origin(beside: S.spec, center: S.centre), t: e.filmTime(t),
+                            beats: SoundArcs060.beats(from: e.film(14.4), to: e.film(19.2)), muted: [e.film(S.mute)...e.film(S.unmute)])
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: S.centre)
-        device.canvas().scaled(1 + 0.02 * CGFloat(ramp(t, 14.4, 19.2)), about: S.centre)
+        device.canvas().scaled(1 + 0.02 * CGFloat(e.glide(t, 14.4, 19.2)), about: S.centre)
         arcs
         TypeLayer(lines: lines, t: t)
     }.canvas()
@@ -414,11 +423,13 @@ enum Lock060 {
 struct LockPicture060: View {
     let t: Double
     var keyboard = false
+    /// The field's spinner's clock (film time: it spins on through S08's held moment).
+    var spin: Double? = nil
     var body: some View {
         Canvas { ctx, _ in
             let pic = Lock060.picture
             // The stream panel around the picture is black, as on L0 (the cover L1 shows is not 0.6.0's here).
-            Lock060.seq.drawPicture(&ctx, rect: pic, pt: Lock060.spec.interior.width / Device060.miniPoints.width, t: t)
+            Lock060.seq.drawPicture(&ctx, rect: pic, pt: Lock060.spec.interior.width / Device060.miniPoints.width, t: t, spin: spin)
             if keyboard {
                 let kb = Lock060.keyboard
                 let drop = SoftKeyboard060.offset(t, height: kb.height, rise: Lock060.seq.keyboardRise, lower: Lock060.seq.keyboardLower)
@@ -437,7 +448,7 @@ struct LockPicture060: View {
     let locked = t >= seq.lock && t < seq.unlock
     let base = locked ? "derived/L1x" : "derived/L0w"
     return try padDevice(e, spec: Lock060.spec, centre: Lock060.centre, yaw: yaw, t: t, fetch: fetch,
-                         layers: [MiniLayer(name: base)], dots: dots, overlay: any(LockPicture060(t: t, keyboard: keyboard)))
+                         layers: [MiniLayer(name: base)], dots: dots, overlay: any(LockPicture060(t: t, keyboard: keyboard, spin: e.filmTime(t))))
 }
 
 @MainActor func s060_07(_ t: Double, _ e: Env) throws -> FrameLayers {
@@ -450,7 +461,7 @@ struct LockPicture060: View {
                      leftLine(Copy060.lockSub[1], .T2, baseline: 644, snap: 21.10, end: 24.0)])
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: Lock060.centre)
-        device.canvas().scaled(1 + 0.04 * CGFloat(ramp(t, 19.2, 24.0)), about: about)
+        device.canvas().scaled(1 + 0.04 * CGFloat(e.glide(t, 19.2, 24.0)), about: about)
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v))
@@ -464,8 +475,8 @@ struct LockPicture060: View {
     // The camera: close from the cut (1.40 → 1.44), back to the iPad from 25.6 (inOut), then a slow push to 1.01, all
     // about the iPad's lower left corner.
     let back = CubicBezier.inOut(ramp(t, L.pullBack, L.pullBackEnd))
-    let closeScale = L.close + 0.04 * CGFloat(ramp(t, 24.0, L.pullBack))
-    let s = lerp(closeScale, 1.0, back) * (1 + 0.01 * CGFloat(ramp(t, L.pullBackEnd, 28.8)))
+    let closeScale = L.close + 0.04 * CGFloat(e.glide(t, 24.0, L.pullBack))
+    let s = lerp(closeScale, 1.0, back) * (1 + 0.01 * CGFloat(e.glide(t, L.pullBackEnd, 28.8)))
     var lines = [leftLine(Copy060.unlock, .T1c, baseline: 430, snap: 24.05, end: 28.8)]
     lines += capped([leftLine(Copy060.unlockSub, .T2, baseline: 512, snap: 26.05, end: 28.8)])
     lines.append(leftLine(Copy060.unlockFoot, .T3, baseline: 562, snap: 24.10, end: 28.8, cascade: false))

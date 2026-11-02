@@ -1,6 +1,8 @@
-// Shots060Open.swift — the 0.6.0 reel's open (S01–S03, 0.0–6.4) and close (S21–S23, 72.0–80.0): the lit icon on
-// the sill line, the lockup with the version, "What’s new.", and the end card. v3's close, reused (ShotsI.swift):
-// the glint round the icon's iPad, the icon's rise, the wordmark landing on the sill line, the +1.2 % card hold.
+// Shots060Open.swift — the 0.6 video's open (S01–S03; v4's 0.0–6.4, film 0.0–11.2) and close (S21–S23; v4's 72.0–80.0,
+// film 123.2–139.2): the lit icon on the sill line, the lockup with the version, "What’s new.", and the end card. v3's
+// close, reused (ShotsI.swift): the glint round the icon's iPad, the icon's rise, the wordmark landing on the sill line,
+// the +1.2 % card hold. The times here are v4's; the film plays them through Retime060's maps (1.25× slower, the
+// lockup and the card held longer), the icon's push and the card's hold on film time (`Env.glide`).
 import SwiftUI
 
 extension TypeStyle {
@@ -12,7 +14,8 @@ enum Open060 {
     /// S01: the icon lit at (960, 420), 460 px, sitting on the sill line (y 666) with 16 px under its tile, pushing in 3 %.
     static let centre = CGPoint(x: 960, y: 420)
     static let size: CGFloat = 460
-    static func iconSize(_ t: Double) -> CGFloat { size * (1 + 0.03 * CGFloat(ramp(t, 0, rise))) }
+    /// The icon's size, `p` (0 … 1) through its push (v4: 0 to the rise; the film glides it on film time).
+    static func iconSize(progress p: Double) -> CGFloat { size * (1 + 0.03 * CGFloat(p)) }
     /// The glint sweeps the icon's iPad in the dark, the sill line draws, the icon fades up (storyboard S01).
     static let glint = 0.35, glintDuration = 1.0
     static let sillDraw = 1.15, fadeIn = 0.95
@@ -45,7 +48,7 @@ enum Close060 {
 @MainActor func s060_01(_ t: Double, _ e: Env) throws -> FrameLayers {
     var st = IconState()
     st.opacity = ease(t, Open060.fadeIn, 0.5, .appleOut)
-    let cam = IconCamera.resting(size: Open060.iconSize(t), centre: Open060.centre)
+    let cam = IconCamera.resting(size: Open060.iconSize(progress: e.glide(t, 0, Open060.rise)), centre: Open060.centre)
     st.camera = cam
     let v = ZStack {
         Backdrop(glow: 0.06 * st.opacity, glowCenter: Open060.centre)
@@ -56,15 +59,15 @@ enum Close060 {
     return FrameLayers(base: any(v), vignette: false)
 }
 
-// MARK: S02 · the lockup: "Sill" / "0.6.0"
+// MARK: S02 · the lockup: "Sill" / "0.6"
 
 @MainActor func s060_02(_ t: Double, _ e: Env) throws -> FrameLayers {
     let rise = ease(t, Open060.rise, 0.6, .appleOut)
-    let size = lerp(Open060.iconSize(Open060.rise), Close060.iconSize, rise)
+    let size = lerp(Open060.iconSize(progress: 1), Close060.iconSize, rise)
     let centre = CGPoint(x: 960, y: lerp(Open060.centre.y, Close060.iconCentre.y, rise))
     var st = IconState()
     st.camera = IconCamera.resting(size: size, centre: centre)
-    let hold = 1 + 0.012 * CGFloat(ramp(t, Open060.version + 0.30, Open060.cut))
+    let hold = 1 + 0.012 * CGFloat(e.glide(t, Open060.version + 0.30, Open060.cut))
     var lines = [LineSpec(Copy060.wordmark, .W, baseline: Close060.baselines.wordmark, snap: Open060.wordmark, holdEnd: Open060.wordmark, cascade: false),
                  LineSpec(Copy060.version, .T4g, baseline: Close060.baselines.version, snap: Open060.version, holdEnd: Open060.version, cascade: false)]
     for i in lines.indices { lines[i].holdScale = false }
@@ -103,7 +106,7 @@ enum Close060 {
     st.opacity = iconIn * fade
     let cam = IconCamera.resting(size: c.iconSize, centre: CGPoint(x: c.iconCentre.x, y: c.iconCentre.y + 12 * CGFloat(1 - iconIn)))
     st.camera = cam
-    let hold = 1 + 0.012 * CGFloat(ramp(t, c.holdFrom, c.fade))
+    let hold = 1 + 0.012 * CGFloat(e.glide(t, c.holdFrom, c.fade))
     let b = c.baselines
     var lines = [LineSpec(Copy060.wordmark, .W, baseline: b.wordmark, snap: c.wordmark, holdEnd: c.wordmark, cascade: false),
                  LineSpec(Copy060.version, .T4g, baseline: b.version, snap: c.version, holdEnd: c.version, cascade: false)]
@@ -119,6 +122,8 @@ enum Close060 {
     for i in lines.indices { lines[i].holdScale = false }
     let card = CGAffineTransform.scaling(hold, about: CGPoint(x: 960, y: 540))
     let length = c.sillLength * CGFloat(1 - CubicBezier.inOut(ramp(t, c.retract, c.retractEnd)))
+    TypeRecorder.opacity = fade
+    defer { TypeRecorder.opacity = 1 }
     let v = ZStack {
         ZStack {
             Backdrop(glow: 0.06 * iconIn * fade, glowCenter: c.iconCentre)

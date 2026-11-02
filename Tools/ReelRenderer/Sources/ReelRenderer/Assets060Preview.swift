@@ -322,21 +322,24 @@ import SwiftUI
                 })
         }
 
-        // S19–S20: the cutaway, beat by beat.
+        // S19–S20: the cutaway, beat by beat (v4.1's film times: the squash at 122.0).
+        let H = Fixes060.tap
         let beats: [(Double, String)] = [
-            (65.70, "1 the title snapping"), (66.20, "1 the title alone"), (66.80, "2 the scroll under way"), (67.34, "2 the first line on the middle"),
-            (68.00, "2 the Mac's group"), (69.00, "2 the Mac's group, the security header"), (69.80, "2 the security group; the bug below"),
-            (70.40, "3 the brake: 450 → 25 px/s"), (70.80, "3 the bug riding in"), (71.10, "3 the bug, walking"), (71.14, "4 the touch dot appears"),
-            (71.18, "5 stretched tall"), (71.2167, "6 the squash, frame 4273"), (71.25, "6 squashing, the dot flaring"),
-            (71.30, "7 flat, buzzing; the lines back to 45 %"), (71.36, "7 the settle's overshoot"), (71.42, "8 turning accent"),
-            (71.50, "8 the stretch"), (71.60, "8 the stretch, the glow"), (71.85, "8 the line at 520 px"), (71.90, "9 black and the sill line alone"),
+            (112.20, "1 the title snapping"), (113.60, "1 the title alone"), (115.40, "2 the scroll under way"), (117.00, "2 the first line on the middle"),
+            (118.00, "2 the Mac's group"), (119.20, "2 the Mac's group, the security header"), (120.40, "2 the security group; the bug below"),
+            (Fixes060.brakeStart, "3 the brake from 300 px/s"), (H - 0.5, "3 the bug riding in"), (H - 0.15, "3 the bug, walking"),
+            (H - 0.08, "4 the touch dot appears"), (H - 0.03, "5 stretched tall"), (H, "6 the squash, frame 7320: the flash, the specks"),
+            (H + 2.0 / 60, "6 the specks smeared, the puddle spreading"), (H + 0.1, "7 the puddle, buzzing; the lines back to 45 %"),
+            (H + 0.2, "7 the puddle settling, the specks at rest"), (H + 0.3, "7 settled"), (H + 0.42, "8 turning accent, thinning"),
+            (H + 0.55, "8 the stretch"), (H + 0.75, "8 the stretch, the glow"), (Fixes060.lineAlone, "8 the line at 520 px"),
+            (H + 1.1, "9 black and the sill line alone"),
         ]
         for (t, note) in beats {
             out.append(Still(name: String(format: "fixes-%05.0f", t * 100), t: t, layers: Fixes060.frame(t), note: "S19–S20 " + note))
         }
 
         // The bug, close: its gait and its squash at 3×.
-        out.append(Still(name: "bug-sheet", t: 70.0, layers: FrameLayers(base: any(BugSheet060()), grain: false, vignette: false), note: "the bug at 3×"))
+        out.append(Still(name: "bug-sheet", t: 120.0, layers: FrameLayers(base: any(BugSheet060()), grain: false, vignette: false), note: "the bug at 3×"))
         return out
     }
 
@@ -345,6 +348,7 @@ import SwiftUI
     static func run(args: [String]) throws {
         if args.first == "--report" { report(); return }
         if args.first == "--motion" { try motion(); return }
+        if args.first == "--splat" { try splat(dir: URL(fileURLWithPath: args.count > 1 ? args[1] : ".", isDirectory: true)); return }
         guard let dirArg = args.first else { print("usage: ReelRenderer assets <dir> [name-prefix …] | assets --report"); return }
         let dir = URL(fileURLWithPath: dirArg, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -363,45 +367,91 @@ import SwiftUI
         if filters.isEmpty, let sheet = indexSheet(made) { writePNG(sheet, to: dir.appendingPathComponent("index.png")); print("index.png") }
     }
 
-    /// The cutaway's numbers, for the shot list and the score: the scroll, where the bug is, the ticks.
+    /// v4.1, for the review of Noah's third note: `splat.png`, the film's frame 3 frames after the hit, whole; and
+    /// `splat-strip.png`, 12 consecutive frames from 2 before the hit (frame 7318) to 9 after (7329), each cropped about the
+    /// bug (x 580–1340, y 560–700) and shown at 1.5×, labelled. The frames are the film's own (s060_19, finished as the
+    /// film's: grain, dither).
+    static func splat(dir: URL) throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let comp = Compositor()
+        ShadowCache.shared.ci = comp.ci
+        IconShadows.shared.build(ci: comp.ci)
+        let env = Env(clips: ClipLibrary(ci: comp.ci), portrait: nil, v3: nil)
+        let H = Int((Fixes060.tap * 60).rounded())
+        func frame(_ f: Int) throws -> CGImage { comp.still(try s060_19(Double(f) / 60, env), frame: f) }
+        writePNG(try frame(H + 3), to: dir.appendingPathComponent("splat.png"))
+        print("splat.png  frame \(H + 3) (\(String(format: "%.4f", Double(H + 3) / 60)) s)")
+        let crop = CGRect(x: 580, y: 560, width: 760, height: 140), k: CGFloat = 1.5
+        let cw = Int(crop.width * k), ch = Int(crop.height * k), label = 34, pad = 10, cols = 3
+        let frames = Array((H - 2)...(H + 9))
+        let rows = (frames.count + cols - 1) / cols
+        let W = cols * cw + (cols + 1) * pad, Ht = rows * (ch + label) + (rows + 1) * pad
+        guard let ctx = CGContext(data: nil, width: W, height: Ht, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+        ctx.setFillColor(CGColor(gray: 0.12, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: W, height: Ht))
+        ctx.interpolationQuality = .high
+        for (i, f) in frames.enumerated() {
+            let img = try frame(f)
+            guard let part = img.cropping(to: crop) else { continue }
+            let c = i % cols, r = i / cols
+            let x = pad + c * (cw + pad), y = Ht - pad - (r + 1) * (ch + label + pad) + pad
+            ctx.draw(part, in: CGRect(x: x, y: y, width: cw, height: ch))
+            let u = Double(f) / 60 - Fixes060.tap
+            let text = f == H ? "frame \(f) · the beat (the squash, the flash)" : String(format: "frame %d · %@%.3f s", f, u < 0 ? "−" : "+", abs(u))
+            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 20, weight: f == H ? .semibold : .regular),
+                                                        .foregroundColor: NSColor(white: f == H ? 0.95 : 0.7, alpha: 1)]
+            ctx.textPosition = CGPoint(x: CGFloat(x), y: CGFloat(y + ch + 9))
+            CTLineDraw(CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attrs)), ctx)
+            print("  strip: frame \(f)")
+        }
+        if let strip = ctx.makeImage() { writePNG(strip, to: dir.appendingPathComponent("splat-strip.png")); print("splat-strip.png") }
+    }
+
+    /// The cutaway's numbers, for the shot list and the score: the scroll, where the bug is, the ticks, the splat.
     static func report() {
         let F = Fixes060.self
-        print("Fixes060 (S19–S20, 65.6–72.0): column x \(F.columnX), title baseline \(F.titleBaseline), line pitch \(F.linePitch), header→line \(F.headerToLine), group step \(F.groupStep)")
+        let H = F.tap
+        print("Fixes060 (S19–S20, \(F.start)–\(F.end)): column x \(F.columnX), title baseline \(F.titleBaseline), line pitch \(F.linePitch), header→line \(F.headerToLine), group step \(F.groupStep)")
         print(String(format: "  first line %.1f px under the title's baseline; bug base %.1f px; last line → bug base %.1f px",
                      F.firstLine, F.bugBase, F.bugBase - (F.placed.last?.y ?? 0)))
-        for t in [66.4, 66.7, 68.0, 70.4, 71.12, 71.2, 71.35, 71.5] {
-            let b = F.bugState(t)
-            print(String(format: "  t %.3f  scroll %8.2f px  bug base y %7.2f  centre y %7.2f  speed %6.1f px/s", t, F.scroll(t), b.base.y,
-                         b.base.y - Bug060.footprint.height * b.sy / 2, (F.scroll(t + 0.0005) - F.scroll(t - 0.0005)) / 0.001))
-        }
-        // The review's settle: at rest exactly at the tap (6 px past where it settles), then back, at rest at both ends.
         func v(_ t: Double) -> Double { (F.scroll(t + 0.0005) - F.scroll(t - 0.0005)) / 0.001 }
-        print(String(format: "  slowing from %.4f s; speed %.1f px/s at 70.40, %.1f at 71.12, %.2f at the tap; overshoot %.2f px, back by %.2f s",
-                     F.brakeStart, v(70.4), v(71.12), v(F.tap - 0.0006), F.scroll(F.tap) - F.scroll(F.settleEnd), F.settleEnd))
+        for t in [F.scrollStart, F.accelEnd, 118.0, F.brakeStart, H - 0.1, H, H + 0.15, F.settleEnd] {
+            let b = F.bugState(t)
+            print(String(format: "  t %.3f  scroll %8.2f px  bug base y %7.2f  speed %6.1f px/s", t, F.scroll(t), b.base.y, v(t)))
+        }
+        print(String(format: "  slowing from %.4f s (%.4f s, appleOut from %.0f px/s); %.1f px/s 0.1 s before the tap, %.2f at it; overshoot %.2f px, back by %.3f s",
+                     F.brakeStart, F.brakeDuration, F.speed, v(H - 0.1), v(H - 0.0006), F.scroll(H) - F.scroll(F.settleEnd), F.settleEnd))
         var worstStep = 0.0
-        for f in 4224...4320 {
+        for f in Int((F.brakeStart - 0.5) * 60)...Int(F.end * 60) {
             let a = F.scroll(Double(f - 1) / 60), b = F.scroll(Double(f) / 60), c = F.scroll(Double(f + 1) / 60)
             worstStep = max(worstStep, abs((c - b) - (b - a)))
         }
-        print(String(format: "  the column's largest change of step from one frame to the next, 70.4–72.0: %.3f px", worstStep))
-        let b4272 = F.bugState(4272.0 / 60)
-        print(String(format: "  frame 4272 (the beat): the bug's height %.3f of its own (flat %.0f %%), flare %.2f; frame 4273 flare %.2f",
-                     b4272.sy, 100 * Double(b4272.squash), b4272.flare, F.bugState(4273.0 / 60).flare))
-        print(String(format: "  the line: %.1f px at 71.52, %.1f px a frame later (%.2f px grown), %.1f px at 71.85",
-                     F.bugState(71.52).length, F.bugState(71.52 + 1.0 / 60).length, F.bugState(71.52 + 1.0 / 60).length - F.bugState(71.52).length,
-                     F.bugState(71.85).length))
-        print(String(format: "  line: %.1f px at %.2f, %.1f px at %.2f; resting at y %.1f (the lockup's line: %.0f px at y %.0f)",
-                     F.bugState(F.morph).length, F.morph, F.bugState(F.lineAlone).length, F.lineAlone, F.bugState(F.end).base.y - 1,
-                     Open060.sillLength, Open060.sillY))
+        print(String(format: "  the column's largest change of step from one frame to the next, from the slowing to the end: %.3f px", worstStep))
+        let fH = Int((H * 60).rounded())
+        let bH = F.bugState(Double(fH) / 60)
+        print(String(format: "  frame %d (the beat): the squash %.0f %%, the puddle %.1f × %.1f px; flare %.2f; frame %d flare %.2f",
+                     fH, 100 * Double(bH.squash), Double(bH.puddleWidth), Double(bH.puddleHeight), bH.flare, fH + 1, F.bugState(Double(fH + 1) / 60).flare))
+        for u in [0.0, 0.06, 0.12, 0.18, 0.24, 0.30, 0.35] {
+            let b = F.bugState(H + u)
+            print(String(format: "  puddle at +%.2f s: %.1f × %.2f px, edge ±%.2f px", u, Double(b.puddleWidth), Double(b.puddleHeight), Double(b.wobble)))
+        }
+        let reach = Splat060.specks.map { $0.reach }
+        print(String(format: "  specks: %d (%d accent), reach %.0f–%.0f px, radius %.1f–%.1f px; launched %.4f; at rest (99 %%) by +%.2f s",
+                     Splat060.specks.count, Splat060.specks.filter(\.accent).count, reach.min() ?? 0, reach.max() ?? 0,
+                     Double(Splat060.specks.map(\.radius).min() ?? 0), Double(Splat060.specks.map(\.radius).max() ?? 0), Splat060.launch,
+                     Splat060.launch + Splat060.tau * log(100) - H))
+        print(String(format: "  the line: %.1f px at %.3f, %.1f px a frame later, %.1f px at %.4f; resting at y %.1f (the lockup's: %.0f px at y %.0f)",
+                     F.bugState(F.morph + F.morphDuration).length, F.morph + F.morphDuration, F.bugState(F.morph + F.morphDuration + 1.0 / 60).length,
+                     F.bugState(F.lineAlone).length, F.lineAlone, F.bugState(F.end).base.y - 1, Open060.sillLength, Open060.sillY))
         let ticks = F.crossings
         print("  ticks (each line crossing y 540, its x-height's middle): " + ticks.map { String(format: "%.3f", $0) }.joined(separator: " "))
-        print("  on the 7.5/s grid from 66.4 (steps): " + ticks.map { String(format: "%.3f", ($0 - F.scrollStart) * 7.5) }.joined(separator: " "))
-        print(String(format: "  in view (y 0–1080) per line at 450 px/s: %.2f s", 1080 / F.speed))
+        print("  on the eighths' grid from the scroll's start (steps): " + ticks.map { String(format: "%.3f", ($0 - F.scrollStart) * 5) }.joined(separator: " "))
+        print(String(format: "  in view (y 0–1080) per line at %.0f px/s: %.2f s", F.speed, 1080 / F.speed))
     }
 
     /// The cutaway's type in motion, measured: frames rendered without grain, dither or vignette at 60 fps through
-    /// the cruise (68.0–68.5), the brightness-weighted centroid of one line followed frame to frame. A line drawn on
-    /// whole pixels would move 7 or 8 px a frame (and hold its shape between); on outlines it moves 7.5 every frame.
+    /// the cruise (118.0–118.5), the brightness-weighted centroid of one line followed frame to frame. On outlines it
+    /// moves exactly 5 px every frame (300 px/s).
     static func motion() throws {
         let comp = Compositor()
         comp.dither = false
@@ -410,7 +460,7 @@ import SwiftUI
         var worst = 0.0
         let F = Fixes060.self
         guard let line = F.placed.first(where: { if case .line = $0.item { return true }; return false }) else { return }
-        for f in 4080...4110 {
+        for f in 7080...7110 {
             let t = Double(f) / 60
             var l = Fixes060.frame(t)
             l.grain = false; l.vignette = false
@@ -425,12 +475,12 @@ import SwiftUI
             let cy = wy / max(sum, 1)
             if let last {
                 let d = last - cy
-                worst = max(worst, abs(d - 7.5))
+                worst = max(worst, abs(d - F.speed / 60))
                 print(String(format: "  frame %d  t %.4f  centroid %.3f  moved %.3f px", f, t, cy, d))
             }
             last = cy
         }
-        print(String(format: "worst departure from 7.5 px a frame: %.3f px", worst))
+        print(String(format: "worst departure from %.1f px a frame: %.3f px", F.speed / 60, worst))
     }
 
     /// Every still at 384×216 with its name and note under it, six across.
@@ -466,13 +516,15 @@ struct BugSheet060: View {
             let F = Fixes060.self
             var rows: [(String, [(Double, Fixes060.BugState)])] = []
             let gait = (0..<6).map { i -> (Double, Fixes060.BugState) in
-                let t = 70.0 + Double(i) / 36
-                var s = F.bugState(70.0)
+                let t = 120.0 + Double(i) / 36
+                var s = F.bugState(120.0)
                 s.gaitTime = t
                 return (t, s)
             }
             rows.append(("gait, a sixth of a cycle apart (6 Hz)", gait))
-            rows.append(("71.14 · 71.18 · 71.21 · 71.23 · 71.26 · 71.30", [71.14, 71.18, 71.21, 71.23, 71.26, 71.30].map { ($0, F.bugState($0)) }))
+            let H = F.tap
+            let times = [H - 0.08, H - 0.03, H, H + 0.03, H + 0.12, H + 0.30]
+            rows.append(("the tap −0.08 · −0.03 · the beat · +0.03 · +0.12 · +0.30 s", times.map { ($0, F.bugState($0)) }))
             for (r, row) in rows.enumerated() {
                 let y = CGFloat(430 + 470 * r)
                 Outline060.draw(row.0, in: &ctx, size: 26, weight: .regular, x: 80, baseline: y - 360, leading: true, color: Color(hex: Palette.text2))

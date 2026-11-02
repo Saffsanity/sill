@@ -1,8 +1,10 @@
-// Shots060Device.swift — Act III, on iPhone and iPad (28.8–62.4): pinch to zoom (S09), Larger Picture (S10), a
-// keyboard and scrolling (S11–S12), composing in Chinese, Japanese and Korean (S13), tiles (S14), Aa at Off (S15),
-// the thumbnail hold (S16), the tour (S17). Harness stills of Sill 0.6.0 and the drawn Mac pictures they show; what a
-// still cannot show is drawn: fingers, the zoom, the Mac's reactions (typing, the Save sheet, a scroll, a selected
-// cell), the Settings panel's own transition, the hold ring. S09–S13 stand in for Noah's takes C–F.
+// Shots060Device.swift — Act III, on iPhone and iPad (v4's 28.8–62.4; film 46.4–105.6): pinch to zoom (S09), Larger
+// Picture (S10), a keyboard and scrolling (S11–S12), composing in Chinese, Japanese and Korean (S13), tiles (S14), Aa at
+// Off (S15), the thumbnail hold (S16), the tour (S17). Harness stills of Sill 0.6.0 and the drawn Mac pictures they
+// show; what a still cannot show is drawn: fingers, the zoom, the Mac's reactions (typing, the Save sheet, a scroll, a
+// selected cell), the Settings panel's own transition, the hold ring. S09–S13 stand in for Noah's takes C–F. The times
+// here are v4's (S15's Off and S16's hold moved for the film's beats); the film plays them through Retime060's maps,
+// the drifts and pushes on film time (`Env.glide`).
 import AppKit
 import CoreText
 import SwiftUI
@@ -114,6 +116,8 @@ struct ZoomedSheet060: View {
 // SWAP-IN (S09, take C): replace with Noah's clip C if provided at /Users/noah/Downloads/sill-handoff/release-060/captures/take-C.mov, inside Large060's iPad in place of
 // C0 and the drawn zoom (Pinch060). Marks: the spread 29.25–29.9 (to about 3×), the two-finger move 30.3–30.9, the
 // tap 31.1, the pinch all the way out 31.55–32.25. Keep or drop the drawn touch dots to match the take's fingers.
+// v4.1: the marks above are v4's (this builder's own) times; the film plays the scene through its time map, so a take
+// runs on film time (`e.filmTime(t)`), its marks at the film times in design/reel/v4.1/SHOTLIST-0.6.md §7.
 @MainActor func s060_09(_ t: Double, _ e: Env) throws -> FrameLayers {
     let L = Large060.self
     let sheet = try e.f.image("pictures/sheet")
@@ -125,7 +129,7 @@ struct ZoomedSheet060: View {
                  leftLine(Copy060.pinchSub, .T2, baseline: 612, snap: 30.85, end: 32.8)]
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: CGPoint(x: 1440, y: 560))
-        device.canvas().scaled(1 + 0.02 * CGFloat(ramp(t, 28.8, 32.8)), about: CGPoint(x: 1482, y: 565))
+        device.canvas().scaled(1 + 0.02 * CGFloat(e.glide(t, 28.8, 32.8)), about: CGPoint(x: 1482, y: 565))
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v))
@@ -206,6 +210,8 @@ struct PhoneLayers060: View {
 // PhoneLayers060 in place of D1, D4/D5, D2 and D3. Marks: Settings tapped 33.15, the Larger Picture switch 33.75, Done
 // 34.15, the larger layout 34.3 (A5), the Mac's fit 35.3 (C♯6). Mask the take's status strip black, as the phone's
 // stills are.
+// v4.1: the marks above are v4's (this builder's own) times; the film plays the scene through its time map, so a take
+// runs on film time (`e.filmTime(t)`), its marks at the film times in design/reel/v4.1/SHOTLIST-0.6.md §7.
 @MainActor func s060_10(_ t: Double, _ e: Env) throws -> FrameLayers {
     let L = Larger060.self
     let w = L.spec.interior.width * 1.03
@@ -232,7 +238,7 @@ struct PhoneLayers060: View {
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: L.centre)
         SillLine(y: 1036, length: 900, centerX: L.centre.x)
-        phone.canvas().scaled(1 + 0.02 * CGFloat(ramp(t, 32.8, 36.8)), about: CGPoint(x: L.centre.x, y: 1036))
+        phone.canvas().scaled(1 + 0.02 * CGFloat(e.glide(t, 32.8, 36.8)), about: CGPoint(x: L.centre.x, y: 1036))
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v))
@@ -339,6 +345,8 @@ struct Typing060: View {
 // place of E0, the typing reveal over E1 and the E2 sheet. Marks: the first keystroke 37.2 (the picture must show by
 // then), "Typing right away." typed by 38.33, ⌘S 38.35, the sheet 38.40, Esc 39.2 (the drawn slab's esc lights and
 // "Esc" buzzes 39.30). Retime Keys060.strokes to the take's keystrokes so the slab and the clicks keep with it.
+// v4.1: the marks above are v4's (this builder's own) times; the film plays the scene through its time map, so a take
+// runs on film time (`e.filmTime(t)`), its marks at the film times in design/reel/v4.1/SHOTLIST-0.6.md §7.
 @MainActor func s060_11(_ t: Double, _ e: Env) throws -> FrameLayers {
     let K = Keys060.self
     let size = K.spec.interior
@@ -361,7 +369,7 @@ struct Typing060: View {
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: CGPoint(x: 1450, y: 520))
         group.scaled(0.92, about: CGPoint(x: 1517, y: 520))
-            .scaled(1 + 0.02 * CGFloat(ramp(t, 36.8, 40.8)), about: CGPoint(x: 1030, y: 520))
+            .scaled(1 + 0.02 * CGFloat(e.glide(t, 36.8, 40.8)), about: CGPoint(x: 1030, y: 520))
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v))
@@ -449,6 +457,8 @@ struct ScrollDoc060: View {
 // Settings panel (E6, then E7 at 42.8, Done at 43.05) stays the harness's stills; then a finger dragged up over the
 // picture (43.30–43.82) with Reverse Scrolling on, the document going down: the take's, if it has one, else keep the
 // drawn drag over the take's last frame.
+// v4.1: the marks above are v4's (this builder's own) times; the film plays the scene through its time map, so a take
+// runs on film time (`e.filmTime(t)`), its marks at the film times in design/reel/v4.1/SHOTLIST-0.6.md §7.
 @MainActor func s060_12(_ t: Double, _ e: Env) throws -> FrameLayers {
     let K = Keys060.self, S = Scroll060.self
     let k = K.k * 1.25
@@ -487,7 +497,7 @@ struct ScrollDoc060: View {
         .modifier(Tilt(yaw: 0, pitch: 58)).offset(x: K.slabOffset.width, y: K.slabOffset.height)
     // Closer than S11: the iPad's screen fills the right half, the Settings panel whole inside the frame (its Done and its
     // switch are tapped), its left edge fading out 80 px or more from the words.
-    let camera = 1.15 + 0.02 * CGFloat(ramp(t, 40.8, 44.0))
+    let camera = 1.15 + 0.02 * CGFloat(e.glide(t, 40.8, 44.0))
     let edge = LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .clear, location: 945 / 1920),
                                       .init(color: .white, location: 1025 / 1920), .init(color: .white, location: 1)],
                               startPoint: .leading, endPoint: .trailing).canvas()
@@ -602,6 +612,8 @@ struct ComposeStrip060: View {
 // SWAP-IN (S13, take F): replace with Noah's clip F if provided at /Users/noah/Downloads/sill-handoff/release-060/captures/take-F.mov, inside the iPad in place of F0–F4
 // and ComposeStrip060. Marks: 你好 arriving on the Mac 44.40, こんにちは 45.20, 안녕하세요 46.00, the dictated sentence
 // 47.30 (each a pluck; the greetings snap 0.05 s after). Drop the drawn composition strip: the take shows iPadOS's own.
+// v4.1: the marks above are v4's (this builder's own) times; the film plays the scene through its time map, so a take
+// runs on film time (`e.filmTime(t)`), its marks at the film times in design/reel/v4.1/SHOTLIST-0.6.md §7.
 @MainActor func s060_13(_ t: Double, _ e: Env) throws -> FrameLayers {
     let L = Large060.self, C = Compose060.self
     var layers = [MiniLayer(name: "stills/F0-cjk0")]
@@ -623,7 +635,7 @@ struct ComposeStrip060: View {
     let about = onCanvas(L.spec, center: L.centre, CGPoint(x: 240 * L.k, y: 480 * L.k))
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: CGPoint(x: 1400, y: 560))
-        device.canvas().scaled(1 + 0.07 * CGFloat(CubicBezier.inOut(ramp(t, 44.0, 48.8))), about: about)
+        device.canvas().scaled(1 + 0.07 * CGFloat(CubicBezier.inOut(e.glide(t, 44.0, 48.8))), about: about)
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v))
@@ -652,12 +664,13 @@ enum Tiles060 {
     lines += capped([leftLine(Copy060.tilesSub[0], .T2, baseline: 512, snap: 49.65, end: 52.8),
                      leftLine(Copy060.tilesSub[1], .T2, baseline: 554, snap: 49.90, end: 52.8)])
     lines.append(leftLine(Copy060.tilesFoot, .T3, baseline: 610, snap: 51.25, end: 52.8, cascade: false))
-    // The drift (6 px a second to the left) is a render transform, so it glides (a macro's place is rounded to whole px).
+    // The drift (v4's 24 px to the left over the shot, on film time) is a render transform, so it glides (a macro's place is
+    // rounded to whole px).
     let v = ZStack {
         Backdrop(glow: 0.05, glowCenter: T.centre)
         MacroView(spec: m, image: img) { EmptyView() }
-            .transformEffect(CGAffineTransform(translationX: -6 * CGFloat(t - 48.8), y: 0))
-            .scaled(1 + 0.02 * CGFloat(ramp(t, 48.8, 52.8)), about: T.centre)
+            .transformEffect(CGAffineTransform(translationX: -24 * CGFloat(e.glide(t, 48.8, 52.8)), y: 0))
+            .scaled(1 + 0.02 * CGFloat(e.glide(t, 48.8, 52.8)), about: T.centre)
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v), vignette: false)
@@ -666,7 +679,9 @@ enum Tiles060 {
 // MARK: S15 · Aa starts at Off (52.8–56.0)
 
 enum Aa060 {
-    static let off = 54.4
+    /// v4's 54.4, moved 0.24 s later (v4 time) so that, played 1.25× slower, Off lands on a beat (film 89.2) a breath
+    /// after the subline that says what it does.
+    static let off = 54.64
     /// The bar's Aa ruler (H1 at 1.25×, H2 at Off), cropped close.
     static let crop = CGRect(x: 1380, y: 0, width: 640, height: 172)
     static let scale: CGFloat = 1.32
@@ -686,7 +701,7 @@ enum Aa060 {
         Backdrop(glow: 0.05, glowCenter: CGPoint(x: 960, y: 600))
         AaMac060(k: 0.86, center: CGPoint(x: 520, y: 640), t: t, shrink: A.off)
         MacroView(spec: m, image: img) { EmptyView() }
-            .scaled(1 + 0.015 * CGFloat(ramp(t, 52.8, 56.0)), about: A.centre)
+            .scaled(1 + 0.015 * CGFloat(e.glide(t, 52.8, 56.0)), about: A.centre)
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v), vignette: false)
@@ -695,7 +710,9 @@ enum Aa060 {
 // MARK: S16 · Hold a thumbnail (56.0–59.2)
 
 enum Hold060 {
-    static let down = 56.4, open = 56.9, lift = 57.3, row = 58.0
+    /// v4's 56.4, 56.9, 57.3 and 58.0, each 0.24 s later (v4 time) so the touch and the row land on the film's beats; the
+    /// ring from down to open is exactly 0.5 s, and the film plays it in real time (Retime060.s16).
+    static let down = 56.64, open = 57.14, lift = 57.54, row = 58.24
     /// The bar, close: the first thumbnails and the lights under the first (J1), 1.32 px per still px.
     static let crop = CGRect(x: 0, y: 0, width: 600, height: 330)
     static let scale: CGFloat = 1.32
@@ -714,7 +731,7 @@ enum Hold060 {
     let thumb = CGPoint(x: o.x + (Device060.miniFirstThumbnail.x - m.crop.minX) * m.scale, y: o.y + (Device060.miniFirstThumbnail.y - m.crop.minY) * m.scale)
     // v3's touch dot, 64 pt on the iPad (128 still px), at the macro's scale.
     let ring = HoldRing060(center: thumb, diameter: 128 * m.scale, down: H.down, duration: 0.5, lift: H.lift, t: t)
-    // The Settings row slides in under the bar at 58.0 (0.35 s appleOut, 40 px up, fading in).
+    // The Settings row slides in under the bar at `row` (0.35 s appleOut, 40 px up, fading in).
     let row = try e.f.crop("stills/J2-hold-row", H.rowRect, scale: 1.0)
     let p = ease(t, H.row, 0.35, .appleOut)
     let rowView = ZStack(alignment: .topLeading) {
@@ -727,8 +744,8 @@ enum Hold060 {
                                                y: H.rowCentre.y - H.rowRect.height / 2 + 40 * CGFloat(1 - p)))
     }.frame(width: Stage.size.width, height: Stage.size.height, alignment: .topLeading)
     let lines = [LineSpec(Copy060.hold, .T1c, x: 1060, baseline: 470, align: .leading, snap: 56.05, holdEnd: 59.2),
-                 LineSpec(Copy060.halfSecond, .T4, x: 1060, baseline: 556, align: .leading, snap: 56.95, holdEnd: 59.2),
-                 LineSpec(Copy060.holdFoot, .T3, x: 1060, baseline: 616, align: .leading, snap: 58.05, holdEnd: 59.2, cascade: false)]
+                 LineSpec(Copy060.halfSecond, .T4, x: 1060, baseline: 556, align: .leading, snap: H.open + 0.05, holdEnd: 59.2),
+                 LineSpec(Copy060.holdFoot, .T3, x: 1060, baseline: 616, align: .leading, snap: H.row + 0.05, holdEnd: 59.2, cascade: false)]
     let v = ZStack {
         Backdrop(glow: 0.05, glowCenter: H.centre)
         ZStack {
@@ -736,7 +753,7 @@ enum Hold060 {
             ring
         }
         .canvas()
-        .scaled(1 + 0.02 * CGFloat(ramp(t, 56.0, 59.2)), about: thumb)
+        .scaled(1 + 0.02 * CGFloat(e.glide(t, 56.0, 59.2)), about: thumb)
         if t >= H.row { rowView }
         TypeLayer(lines: lines, t: t)
     }.canvas()
@@ -761,7 +778,7 @@ enum Tour060 {
     let T = Tour060.self
     let device = try padDevice(e, spec: T.spec, centre: T.centre, yaw: 0, t: t, fetch: T.to,
                                layers: [MiniLayer(name: "stills/K1-tour-touch")])
-    let p = CGFloat(CubicBezier.inOut(ramp(t, T.push.0, T.push.1)))
+    let p = CGFloat(CubicBezier.inOut(e.glide(t, T.push.0, T.push.1)))
     let s = 1 + (T.to - 1) * p
     let from = onCanvas(T.spec, center: T.centre, CGPoint(x: T.row.x * T.k, y: T.row.y * T.k))
     let to = CGPoint(x: lerp(from.x, 1380, Double(p)), y: lerp(from.y, 560, Double(p)))

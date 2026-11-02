@@ -15,6 +15,8 @@
 //                                                  every glyph against its path (TypeCheck.swift); exit 1 if one strays
 //   ReelRenderer typetest [--out f.mp4] [--seconds 3] [--typecheck] [--frames dir] [--no-video]   two moving lines
 //   render … --typecheck [n]                       the same check on every n-th frame of a render (exit 1 if it fails)
+//   ReelRenderer retime                            (REEL=060) each scene's time map and where its beats land (Retime060.swift)
+//   ReelRenderer holds [--from s] [--to s] [--every n]   (REEL=060) every line's hold against the reading rule (Holds060.swift)
 import AppKit
 import AVFoundation
 import CoreImage
@@ -197,6 +199,12 @@ do {
     case "typecheck": try MainActor.assumeIsolated { try typecheckCommand(args: Array(args.dropFirst())) }
     case "typetest": try MainActor.assumeIsolated { try typetestCommand(args: Array(args.dropFirst())) }
     case "clearance": try MainActor.assumeIsolated { try clearanceCommand(args: Array(args.dropFirst())) }
+    // v4.1: the time maps scene by scene (Retime060.swift), and the reading rule measured on the film's frames (Holds060.swift).
+    case "retime":
+        // retime [t …]: the maps, or the film time of each v4 time given.
+        let ts = args.dropFirst().compactMap(Double.init)
+        if ts.isEmpty { Retime060.report() } else { for t in ts { print(String(format: "v4 %.3f → film %.4f", t, Retime060.film(t))) } }
+    case "holds": try MainActor.assumeIsolated { try Holds060.run(args: Array(args.dropFirst())) }
     case "derived":
         // derived <out-dir> <name>… : 0.6.0's derived stills (Reel060.swift, Retouch060.swift) as PNG, to look at them.
         try MainActor.assumeIsolated {
