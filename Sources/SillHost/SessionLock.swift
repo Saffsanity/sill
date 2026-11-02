@@ -107,6 +107,14 @@ package final class SessionLock: @unchecked Sendable {
         }
     }
 
+    /// A look at once, from a sign of a change outside the witnesses: the capture losing its display is what
+    /// a user switch does first, up to 0.2 s before the notifications and the console's user say so, and a
+    /// device's next pick must meet the new reading. Nothing before `start`. On `queue`.
+    package func lookNow(cause: String) {
+        guard state.withLockUnchecked({ $0.started }) else { return }
+        queue.async { [self] in look(cause: cause) }
+    }
+
     /// The connected devices: once a second's look while there are any; a device's arrival looks at once.
     package func devices(_ count: Int) {
         queue.async { [self] in

@@ -644,6 +644,10 @@ package final class StreamCoordinator {
         }
         capture.onStopped = { [weak self] error in
             print("Capture stopped: \(error.localizedDescription)")
+            // A user switch takes this session's displays away before its notifications arrive (0.12 s on
+            // 2026-11-01), and a device asks for the Desktop again the moment nothing streams: the lock is
+            // read again first, so that pick meets the new reading (LockPolicy; the placeholder off console).
+            SessionLock.shared.lookNow(cause: "the capture stopped")
             Task { @MainActor in await self?.select(.none) }
         }
         // Status for the menu bar app. The server's callbacks hop here from its network queue; the

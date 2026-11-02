@@ -180,13 +180,16 @@ for the two cases (`LockedMac`, StreamProtocol, checked with the host's rule):
 - locked: "‹Mac› is locked", and "To unlock it from here, type its password and press Return. Its
   windows come back once it is unlocked." for a paired session, "Its windows come back once it is
   unlocked." for any other;
-- switched to another user: "‹Mac› is switched to another user", "Its windows come back when you switch
-  back to your account on the Mac. Nothing typed here reaches it meanwhile.";
+- at the login window or switched to another user: "‹Mac› is at its login window", "Sill can’t show or type
+  into the login window, or another user’s session. Log in on the Mac itself; your windows come back once
+  your account is back on its screen." (Noah, 2026-11-01: with his own account chosen at the login window
+  the cover said "switched to another user" and stayed until he logged in on the Mac, which is right but
+  read as a bug: the login window is another session's, so Sill can neither show it nor type into it);
 - after the unlock, "Unlocking…" until the first keyframe after it, 4 s at most.
 
 The Apps drawer and the Settings panel's header show the one line ("‹Mac› is locked. Unlock it to see
-its windows." or "‹Mac› is switched to another user. Its windows come back when you switch back on the
-Mac."). VoiceOver reads the cover as one element. The cover takes no touch: a paired device's keys and
+its windows." or "‹Mac› is at its login window or switched to another user. Log in on the Mac to see its
+windows again."). VoiceOver reads the cover as one element. The cover takes no touch: a paired device's keys and
 taps still go to a locked screen, where the Mac takes them. DEBUG `-SillMacLocked 1|2|unlocking`.
 
 ## TEST ONLY
@@ -365,7 +368,7 @@ unlock:
    Magic Keyboard or the on-screen keyboard and press Return. If the Mac unlocks: "Unlocked:", then
    "Unlocking…" briefly and the window back by itself. If nothing types, note it (and which keyboard):
    macOS's secure input may refuse posted keys, and the cover's words change then.
-3. **Another user at the login screen** (fast user switching): "‹Mac› is switched to another user" on the
+3. **Another user at the login screen** (fast user switching): "‹Mac› is at its login window" on the
    iPad, a black picture, nothing of your session, no app opens from the Apps button (there is no list),
    taps and keys do nothing; Sill.log "Locked: another user…". Switch back and log in: macOS locks again
    about a second later (its own), and the cover stays "locked" until you unlock; then your windows.
