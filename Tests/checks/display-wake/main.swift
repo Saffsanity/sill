@@ -7,7 +7,7 @@
 //   Tests/checks/display-wake/run.sh   (build.sh compiles the three files with this one)
 //
 // What it checks: the constants; which of a device's messages are a person at it, every kind there
-// is (a connect, kinds 7, 8, 15, 25, 28; never 6, 9, 17, 21, 27, 32, 44, nor any other, nor input that
+// is (a connect, kinds 7, 8, 15, 25, 28, 45; never 6, 9, 17, 21, 27, 32, 44, 46, nor any other, nor input that
 // does not decode), every input event; the device's own move to a new frame's middle (a bare pointer
 // move under 2 s after the host's stream restart or new frame size; at 2 s a person's again), the
 // latest change counting, a clock set back ending the window; the interval (a connect every time,
@@ -92,7 +92,7 @@ eq(W.userActiveVariable, "SILL_TEST_USER_ACTIVE", "the TEST ONLY variable's name
 // MARK: - Whose each message is: every kind there is
 
 /// The kinds that are a person at the device, written out: the rule's table must be exactly this.
-let personKinds: [UInt8: W.Activity] = [7: .launch, 8: .input, 15: .windowButton, 25: .menuItem, 28: .gesture]
+let personKinds: [UInt8: W.Activity] = [7: .launch, 8: .input, 15: .windowButton, 25: .menuItem, 28: .gesture, 45: .input]
 var kinds = 0
 let fresh = W(testHost: false)
 for raw in 0...255 {
@@ -101,10 +101,11 @@ for raw in 0...255 {
     eq(fresh.activity(msg(kind, kind == .input ? tap : nil), at: 100), personKinds[UInt8(raw)], "kind \(raw) (\(kind))")
 }
 // A kind added to the wire fails this until it is decided here (and in the rule).
-eq(kinds, 33, "every kind there is decided (a new kind: say here whether it is a person at the device)")
+eq(kinds, 35, "every kind there is decided (a new kind: say here whether it is a person at the device)")
 for (raw, what) in [(6, "a pick, the device's own Desktop request among them"), (9, "the viewport"), (17, "a settings change"),
                     (21, "show your pairing code"), (27, "a menu fetched"), (32, "the clipboard"),
-                    (43, "the Mac's sound, which only a host sends"), (44, "a keyframe request")] as [(UInt8, String)] {
+                    (43, "the Mac's sound, which only a host sends"), (44, "a keyframe request"),
+                    (46, "the cursor's kind, which only a host sends")] as [(UInt8, String)] {
     let kind = Kind(rawValue: raw)!
     eq(fresh.activity(msg(kind), at: 100), nil, "never kind \(raw), \(what)")
     eq(fresh.activity(msg(kind, tap), at: 100), nil, "never kind \(raw), whatever input rides with it")
@@ -402,7 +403,7 @@ func isPerson(_ event: W.Event, now: TimeInterval, lastChange: TimeInterval?) ->
     case .connect: return true
     case .message(let kind, let input):
         switch kind.rawValue {
-        case 7, 15, 25, 28: return true
+        case 7, 15, 25, 28, 45: return true   // 45: an Apple Pencil on the stream
         case 8:
             guard let input else { return false }
             if case .pointer(.move, _, _) = input, let c = lastChange, now >= c, now - c < two { return false }
@@ -411,7 +412,7 @@ func isPerson(_ event: W.Event, now: TimeInterval, lastChange: TimeInterval?) ->
         }
     }
 }
-let otherKinds: [Kind] = (0...255).compactMap { Kind(rawValue: UInt8($0)) }.filter { ![7, 8, 15, 25, 28].contains($0.rawValue) }
+let otherKinds: [Kind] = (0...255).compactMap { Kind(rawValue: UInt8($0)) }.filter { ![7, 8, 15, 25, 28, 45].contains($0.rawValue) }
 var steps = 0, declared = 0, counted = 0, heldOff = 0, clockBacks = 0, streamed = 0, own = 0, ownMoves = 0, changes = 0
 for session in 0..<20_000 {
     let testHost = rng.below(4) == 0

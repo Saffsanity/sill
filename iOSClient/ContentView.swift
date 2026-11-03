@@ -204,6 +204,8 @@ struct ContentView: View {
 ///   `-SillSettingsScroll hold` at its Hold to Show Window Controls stepper.
 ///   `-SillSettingsScroll clipboard` at the clipboard's Paste row (it and the group's footnote, which
 ///   a short screen's `gestures` leaves under the two switches above them).
+///   `-SillSettingsScroll pencil` at an iPad's Pencil Pressure row (`-Sill.pencilPressure 0` shows it
+///   off; the `legacy` case, a Mac that takes no pen).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
@@ -316,7 +318,8 @@ struct ContentView: View {
 ///   (the mock never streams): `mac@0.40,0.30` (the Mac has the pointer, over the stream: its arrow
 ///   in every layout), `device@0.62,0.55` (this device's trackpad: its arrow in portrait only),
 ///   `hidden` (the Mac has it, off the stream: none) or `pencil@0.50,0.50` (this device's Pencil:
-///   none, unless `-SillPencilPointer 1`, Q2's flip, draws it in every layout). Ignored with
+///   none, unless `-SillPencilPointer 1`, Q2's flip, draws it in every layout), or `pen@0.50,0.50`
+///   (the Pencil hovering as a pen: its arrow in every layout). Ignored with
 ///   `-SillLive 1`, whose session shows the real thing.
 /// * `-SillZoom 'S@X,Y[; T S@X,Y …]'` — the picture's pinch zoom (StreamZoom, issue #65), in the mock
 ///   and live, and in the normal app: at T seconds (1 without one) one pinch step of factor S about that
@@ -329,7 +332,8 @@ struct ContentView: View {
 ///   X,Y` (a frame fraction) or `drag DX,DY` on the stream, `key USAGE` (a hardware key), `type TEXT`
 ///   (the on-screen keyboard's typing) or `row USAGE` (a key of the portrait key row), `esc [MODS]`,
 ///   `scroll DX,DY`, `wheel DX,DY`, `keyboard
-///   attach|detach` or `orient landscape|portrait` (InputScript has them all). The console says
+///   attach|detach`, `orient landscape|portrait`, or `pen hover|down|move|up,X,Y[,P[,ALT,AZ]]` and
+///   `pen away` (an Apple Pencil over the stream; InputScript has them all). The console says
 ///   "input script: …" at each.
 ///   It runs only when the session was dialled by `-SillConnect` to a loopback address and the
 ///   host's first window list has no version
@@ -765,7 +769,13 @@ struct LayoutHarness: View {
 /// * `wheel DX,DY` — a mouse's wheel: the same steps as plain deltas, no gesture, no coast (and, as a
 ///   trackpad's, never turned around);
 /// * `keyboard attach|detach` — a hardware keyboard attaching or going, as GameController says it;
-/// * `orient landscape|portrait` — the scene asked for that orientation (an iPhone's).
+/// * `orient landscape|portrait` — the scene asked for that orientation (an iPhone's);
+/// * `pen hover|down|move|up,X,Y[,P[,ALT,AZ]]` and `pen away` — an Apple Pencil over the stream at
+///   that fraction of the frame, with a pressure (0…1) and its altitude and azimuth in radians,
+///   through the overlay's own Pencil path under its touch callbacks (docs/pencil-pressure-plan.md
+///   §5.2): as a pen's (kind 45) or, with the switch off or a Mac that takes no pen, as the mouse
+///   events those callbacks send; `away` ends its hover. The console says which ("input script:
+///   t=… pen down,0.3,0.5,0.2: a pen's").
 /// The pad and the overlay register themselves as they join a window, and each step calls their
 /// own methods, so the feed, the anchor and the sprite get what a finger would give them. The
 /// console prints "input script: t=… <step>" as each runs. Once per launch.
@@ -784,6 +794,8 @@ enum InputScript {
         case gesture(TrackpadGestures.Gesture, fingers: Int)
         case esc(modifiers: String), scroll(dx: Double, dy: Double), wheel(dx: Double, dy: Double)
         case keyboard(attached: Bool), orient(String)
+        /// hover, down, move, up or away, then X, Y and optionally P, ALT, AZ.
+        case pen(String, [Double])
 
         var description: String {
             switch self {
@@ -805,6 +817,7 @@ enum InputScript {
             case .wheel(let dx, let dy): return "wheel \(dx),\(dy)"
             case .keyboard(let attached): return "keyboard \(attached ? "attach" : "detach")"
             case .orient(let orientation): return "orient \(orientation)"
+            case .pen(let what, let values): return "pen \(([what] + values.map { "\($0)" }).joined(separator: ","))"
             }
         }
 
@@ -868,6 +881,12 @@ enum InputScript {
             case ("wheel", 3) where pair.count == 2: step = .wheel(dx: pair[0], dy: pair[1])
             case ("keyboard", 3) where words[2] == "attach" || words[2] == "detach": step = .keyboard(attached: words[2] == "attach")
             case ("orient", 3) where words[2] == "landscape" || words[2] == "portrait": step = .orient(words[2])
+            case ("pen", 3):
+                let parts = words[2].split(separator: ",").map(String.init)
+                let values = parts.dropFirst().compactMap { Double($0) }
+                guard let what = parts.first, ["hover", "down", "move", "up", "away"].contains(what), values.count == parts.count - 1,
+                      what == "away" ? values.isEmpty : [2, 3, 5].contains(values.count), values.allSatisfy(\.isFinite) else { return nil }
+                step = .pen(what, values)
             default: return nil
             }
             steps.append((at, step))
@@ -951,6 +970,12 @@ enum InputScript {
         case .row(let usage):
             client.sendFromKeyRow(.key(hidUsage: usage, down: true, modifiers: 0))
             client.sendFromKeyRow(.key(hidUsage: usage, down: false, modifiers: 0))
+        case .pen(let what, let v):
+            guard let overlay else { done = false; break }
+            let went = overlay.scriptPen(what, x: v.count > 1 ? v[0] : 0, y: v.count > 1 ? v[1] : 0, pressure: v.count > 2 ? v[2] : nil,
+                                         altitude: v.count > 4 ? v[3] : nil, azimuth: v.count > 4 ? v[4] : nil)
+            print(String(format: "input script: t=%.2f ", at) + "\(step): \(went)")
+            return
         case .gesture(let g, let fingers):
             let went = client.sendGesture(g, fingers: fingers)
             print(String(format: "input script: t=%.2f ", at) + "\(step): " + (went ? "sent" : "not sent (the switch is off, or the Mac takes none)"))

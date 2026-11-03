@@ -91,6 +91,15 @@ public enum StreamMessageKind: UInt8 {
                              // From the device once per interruption while its keyframe is due, again when it
                              // has not come in 4 s (or four round trips), 2 s apart at least (KeyframeRecovery);
                              // at most one a second per connection on the host
+    // Apple Pencil pressure and tilt (Pen.swift; issue #81), after the sound's 43 and the picture's recovery's 44.
+    // Older hosts map it to `.unknown` and skip it.
+    case pen = 45            // device → host: JSON PenInput — an Apple Pencil on the stream as a pen: one phase of a
+                             // stroke with its samples (position, pressure, tilt), which the Mac posts as the mouse
+                             // events of kind 8 carrying a tablet pen's fields. Only to a host whose window list says
+                             // `pencil` 1 or more; any other host gets the Pencil as kind 8
+    // A hovering Pencil's pointer over an app's own cursor (Viewport.swift's CursorKind), after the pen's 45.
+    case cursorKind = 46     // host → client: JSON CursorKind — whether the cursor of the kind 14 that follows it is one
+                             // of macOS's standard ones or an app's own (a brush outline). Older devices skip it
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

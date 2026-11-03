@@ -1468,24 +1468,33 @@ final class StreamServer {
                 if client.revoked {
                     // The Mac no longer serves it (`closeSessions`): until its connection closes, only a
                     // key's or a button's up goes on, which the coordinator posts only if it lets go of
-                    // something this device holds down (RevokedInput). No pong, no stats line, no
-                    // pointer handed to it; the rest of its input is counted (`in.revoked`).
+                    // something this device holds down (RevokedInput), and an Apple Pencil's up, cancel or
+                    // leave, which it posts only while that device's pen has its tip down or is in range
+                    // (PenTablet.stillGoes). No pong, no stats line, no pointer handed to it; the rest of
+                    // its input is counted (`in.revoked`).
                     if header.kind == .input, let event = Wire.decode(InputEvent.self, from: payload), RevokedInput.mayLetGo(event) {
                         self.onMessage?(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), c, arrived)
-                    } else if header.kind == .input || header.kind == .gesture {
+                    } else if header.kind == .pen, let pen = Wire.decode(PenInput.self, from: payload)?.checked(),
+                              PenTablet.mayLetGo(pen) {
+                        self.onMessage?(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), c, arrived)
+                    } else if header.kind == .input || header.kind == .gesture || header.kind == .pen {
                         Stats.shared.bump("in.revoked")
                     }
                     self.receiveLoop(client)
                     return
                 }
-                if header.kind == .input {
+                // An Apple Pencil's message (kind 45) is input as kind 8 is: the ticks, the count
+                // kind 26's `seen` carries (the device counts both, SessionLink) and the pointer.
+                if header.kind == .input || header.kind == .pen {
                     self.lastInputAt = Date().timeIntervalSince1970
                     if self.tickTimer == nil { self.updateTicking() }
                     // This device moves the Mac's pointer now. The count and the controller change
                     // in the same queue turn as every sample, so no kind 26 carries the new count
                     // with the old controller (docs/pointer-visibility-plan.md §3.3).
                     client.inputsRead += 1
-                    self.pointerWatch?.inputArrived(from: ObjectIdentifier(c), movesPointer: PointerControl.movesPointer(payload: payload))
+                    let moves = header.kind == .pen ? PenTablet.movesPointer(payload: payload)
+                                                    : PointerControl.movesPointer(payload: payload)
+                    self.pointerWatch?.inputArrived(from: ObjectIdentifier(c), movesPointer: moves)
                 }
                 if header.kind == .ping {
                     // Echo straight back from the network queue: the round trip should measure the

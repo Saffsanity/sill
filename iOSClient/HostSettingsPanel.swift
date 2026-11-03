@@ -21,17 +21,14 @@ import StreamProtocol
 /// default, `StreamClient.soundMuted`, while the Mac has sound, on or off; Noah, 2026-10-27). Errors show
 /// inline, never in alerts. After the Mac's settings come the device's own groups: This iPad (or
 /// iPhone), whose switches are preferences here and send nothing to the Mac (Larger Picture,
-/// `StreamClient.largerPictureKey`,
-/// on an iPhone without a hinge whose picture it makes larger, `largerPictureOffered`; Share Clipboard,
-/// `StreamClient.clipboardKey`, while the Mac shares its clipboard, with the system's Paste for this
-/// device's text; Reverse Scrolling, `StreamClient.reverseScrollKey`; Hold to Show Window Controls, a
-/// stepper, `ThumbnailHold.key`; Three-Finger Gestures, `StreamClient.gesturesKey`), and whose gesture
-/// rows, as accessibility actions, do their gestures
-/// `StreamClient.clipboardKey`, while the Mac shares its clipboard, with Paste on ‹Mac› Right Away,
-/// `StreamClient.pasteRightAwayKey`, and the system's Paste for this device's text; Reverse
-/// Scrolling, `StreamClient.reverseScrollKey`; Three-Finger Gestures, `StreamClient.gesturesKey`),
-/// and whose gesture rows, as accessibility actions, do their gestures
-/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour.
+/// `StreamClient.largerPictureKey`, on an iPhone without a hinge whose picture it makes larger,
+/// `largerPictureOffered`; Share Clipboard, `StreamClient.clipboardKey`, while the Mac shares its
+/// clipboard, with Paste on ‹Mac› Right Away, `StreamClient.pasteRightAwayKey`, and the system's Paste
+/// for this device's text; Reverse Scrolling, `StreamClient.reverseScrollKey`; Hold to Show Window
+/// Controls, a stepper, `ThumbnailHold.key`; Three-Finger Gestures, `StreamClient.gesturesKey`; on an
+/// iPad, Pencil Pressure, `StreamClient.pencilKey`), and whose gesture rows, as accessibility actions,
+/// do their gestures (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take
+/// the Tour.
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
@@ -63,6 +60,9 @@ struct HostSettingsPanel: View {
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
+    /// This device's switch for the Apple Pencil as a pen (docs/pencil-pressure-plan.md §5.4): on
+    /// unless turned off, read as each stroke begins (`StreamClient.pencilAsPen`), never sent.
+    @AppStorage(StreamClient.pencilKey) private var pencilOn = true
     /// This device's hold before a thumbnail's lights (issue #113, ThumbnailHold): 0.5 s unless changed,
     /// read by every bar's thumbnails at once, never sent. Read for its changes; the length through
     /// `ThumbnailHold.seconds(stored:)`, which takes `-Sill.thumbnailHold 0.3`'s string too.
@@ -96,7 +96,8 @@ struct HostSettingsPanel: View {
     /// it and its footnote, which the clipboard's rows above it push out of `gestures`' view there;
     /// `hold`, to Hold to Show Window Controls, the same for its row and footnote.
     /// `clipboard`, to the clipboard's Paste row, so that photo shows it and the group's footnote under
-    /// it (the review of #242: `gestures` shows only the two switches above them there).
+    /// it (the review of #242: `gestures` shows only the two switches above them there); `pencil`, to
+    /// the iPad's Pencil Pressure row.
     private static var startsAt: String? {
         #if DEBUG
         switch UserDefaults.standard.string(forKey: "SillSettingsScroll") {
@@ -106,6 +107,7 @@ struct HostSettingsPanel: View {
         case "reverse"?: return reverseScrollRowID
         case "hold"?: return thumbnailHoldRowID
         case "clipboard"?: return clipboardRowsID
+        case "pencil"?: return pencilRowID
         default: return nil
         }
         #else
@@ -113,6 +115,7 @@ struct HostSettingsPanel: View {
         #endif
     }
     private static let gesturesGroupID = "thisDevice"
+    private static let pencilRowID = "pencil"
     private static let sendAudioID = "sendAudio"
     private static let muteID = "mute"
     private static let reverseScrollRowID = "reverseScroll"
@@ -427,16 +430,18 @@ struct HostSettingsPanel: View {
                 .padding(.horizontal, 4)
             }
             // After everything of the Mac's, whatever state its settings are in: while they load, and
-            // for a Mac without them too. Both are this device's own: its gestures, then the tour.
+            // for a Mac without them too. All are this device's own: its gestures, its Pencil (an
+            // iPad's), then the tour.
             thisDevice
+            pencil
             tour
         }
     }
 
     /// The last group: this device's, not the Mac's, so after everything about the Mac, and there
     /// whatever the Mac is (while settings load, and for a Mac without them). It sends nothing. It
-    /// comes after This iPad's gestures, under their footnote, so it needs no space of its own above
-    /// it even while the Mac's settings load.
+    /// comes after This iPad's gestures and Pencil, under their footnote, so it needs no space of
+    /// its own above it even while the Mac's settings load.
     @ViewBuilder private var tour: some View {
         Rows {
             Button(action: takeTour) {
@@ -685,6 +690,30 @@ struct HostSettingsPanel: View {
     /// once Aa sets its text size (or on the virtual display), and that a change applies as the panel
     /// closes (StreamScreen's `largerPictureHeld`).
     static let largerPictureFooter = "Held upright, a window’s picture takes the place of the window thumbnails and reaches down to where the keyboard comes up. The Desktop keeps the thumbnails. Switch windows with Apps: tap an open app again for its next window. To fill the taller picture with a window, set its text size with Aa. A change applies when you close Settings."
+
+    /// This iPad's switch for the Apple Pencil as a pen, under the gestures' footnote and in the same
+    /// group (an iPhone has no Pencil, so none there). Off, a Pencil is the mouse, as on a Mac that
+    /// does not take a pen; the switch reaches nothing on the Mac, and a stroke under way keeps the
+    /// way it began (PenStrokes).
+    @ViewBuilder private var pencil: some View {
+        if device == "iPad" {
+            Rows {
+                Toggle(isOn: $pencilOn) {
+                    Text("Pencil Pressure").foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+            }
+            .id(Self.pencilRowID)
+            Footnote(text: pencilFooter)
+        }
+    }
+
+    /// Under the Pencil's switch: what it does, or why a Pencil is the mouse.
+    private var pencilFooter: String {
+        guard pencilOn else { return "Apple Pencil works as a mouse while this is off." }
+        guard (client.hostPencil ?? 0) >= PenInput.generation else { return "Update Sill on \(mac) to use this." }
+        return "Apple Pencil pressure and tilt reach Mac apps that support drawing tablets."
+    }
 
     /// What each gesture does on the Mac, and what the row does as an accessibility action: its one
     /// gesture, or, for the Spaces, one action each way (natural direction: a swipe left brings the

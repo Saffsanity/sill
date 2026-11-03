@@ -342,7 +342,7 @@ for rd in readings { for paired in [false, true] {
 // MARK: - The server's gate
 
 let gateKinds: [StreamMessageKind] = [.parameterSets, .frame, .windowList, .thumbnail, .appIcon, .appList, .pong, .tick, .cursorShape,
-                                      .hostSettings, .macInfo, .goodbye, .macMenu, .macPointer, .clipboard, .audio]
+                                      .cursorKind, .hostSettings, .macInfo, .goodbye, .macMenu, .macPointer, .clipboard, .audio]
 let pictures: [P.Picture?] = [nil, .placeholder, .display, .window]
 for rd in readings { for kind in gateKinds { for picture in pictures {
     let got = P.withheld(kind, picture: picture, reading: rd)
@@ -351,7 +351,7 @@ for rd in readings { for kind in gateKinds { for picture in pictures {
         switch kind {
         // A window's frames always; the display's where the rule does not let it stream (a locked screen does, off console never).
         case .frame, .parameterSets: want = (picture ?? .window) == .window || (picture == .display && !P.allowed(rd).display)
-        case .thumbnail, .appIcon, .appList, .audio, .clipboard, .cursorShape, .macPointer: want = true
+        case .thumbnail, .appIcon, .appList, .audio, .clipboard, .cursorShape, .cursorKind, .macPointer: want = true
         default: want = false
         }
     }

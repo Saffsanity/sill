@@ -470,6 +470,7 @@ struct PortraitStreamScreen: View {
                          latchedModifiers: latched,
                          onModifiersConsumed: { latched = [] },
                          sendGesture: { client.sendGesture($0, fingers: $1) },
+                         pen: client.penLink,
                          macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
                          readZoom: { [zoom] in zoom.zoom },
                          writeZoom: { [zoom] in zoom.set($0) })
@@ -509,7 +510,8 @@ struct PortraitStreamScreen: View {
                  latched: latched,
                  onModifiersConsumed: { latched = [] },
                  verticalSpan: verticalSpan,
-                 sendGesture: { client.sendGesture($0, fingers: $1) })
+                 sendGesture: { client.sendGesture($0, fingers: $1) },
+                 fingersSilent: { client.fingersSilent(strokeBeganAt: $0) })
             .tourTarget(.trackpad)
     }
 

@@ -94,9 +94,9 @@ final class SessionLink {
         return inputs
     }
 
-    /// A serialized message's first byte is its kind; 8 is `.input` (StreamMessageKind, which this file
-    /// does not import).
-    private static func isInput(_ data: Data) -> Bool { data.first == 8 }
+    /// A serialized message's first byte is its kind; 8 is `.input` and 45 `.pen`, an Apple Pencil's
+    /// message, which the Mac counts as input too (StreamMessageKind, which this file does not import).
+    private static func isInput(_ data: Data) -> Bool { data.first == 8 || data.first == 45 }
 
     /// The input messages among those waiting. Under the lock.
     private var waitingInputs: Int { waiting.reduce(0) { $0 + (Self.isInput($1) ? 1 : 0) } }

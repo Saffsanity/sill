@@ -241,7 +241,7 @@ final class Stub {
         guard !closed.contains(i), !muted.contains(i) else { return }
         switch h.kind {
         case .ping: c.send(content: message(.pong, payload), completion: .contentProcessed { _ in })
-        case .input:
+        case .input, .pen:   // an Apple Pencil's message is input too: the Mac counts both (StreamServer)
             arrived.append(payload.withUnsafeBytes { UInt32(bigEndian: $0.loadUnaligned(as: UInt32.self)) })
             inputsOn[i, default: 0] += 1
         default: break
@@ -357,7 +357,8 @@ func countMode(_ c0: NWConnection) -> Never {
         print("count: \(what): \(got)\(got == want ? "" : ", want \(want)")")
         if got != want { bad += 1 }
     }
-    func inputs(_ n: Int) { for _ in 0..<n { seq += 1; link.send(message(.input, be32(seq))) } }
+    // Every third as an Apple Pencil's message (kind 45), which counts as input as kind 8 does.
+    func inputs(_ n: Int) { for _ in 0..<n { seq += 1; link.send(message(seq % 3 == 0 ? .pen : .input, be32(seq))) } }
     func notInput() { link.send(message(.viewport, Data(#"{"width":1,"height":1}"#.utf8))) }
     func fence(_ from: NWConnection, _ to: NWConnection) -> Data {
         let nonce = randomNonce()
@@ -462,7 +463,7 @@ let slowLine = stub.line(0)
 func sendNext() -> Bool {
     stateLock.lock(); defer { stateLock.unlock() }
     guard nextSeq <= total, nextSeq <= budget else { return false }
-    link.send(message(.input, be32(nextSeq)))
+    link.send(message(nextSeq % 3 == 0 ? .pen : .input, be32(nextSeq)))   // every third a Pencil's (kind 45): input too
     nextSeq += 1
     return true
 }

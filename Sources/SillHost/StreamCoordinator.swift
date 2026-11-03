@@ -617,9 +617,12 @@ package final class StreamCoordinator {
                 }
             }
         }
-        cursorShapes.onChange = { [weak self] blob in
-            self?.server.broadcast(StreamMessage(kind: .cursorShape, timestamp: Date().timeIntervalSince1970,
-                                                 isKeyframe: false, payload: blob))
+        cursorShapes.onChange = { [weak self] blob, standard in
+            // Whether it is a standard cursor goes first (kind 46), so a device applies both together.
+            let now = Date().timeIntervalSince1970
+            self?.server.broadcast(StreamMessage(kind: .cursorKind, timestamp: now, isKeyframe: false,
+                                                 payload: Wire.encode(CursorKind(standard: standard))))
+            self?.server.broadcast(StreamMessage(kind: .cursorShape, timestamp: now, isKeyframe: false, payload: blob))
         }
         catalog.onInstalledAppsReady = { [weak self] apps in
             guard let self else { return }
@@ -1111,6 +1114,9 @@ package final class StreamCoordinator {
     private func handle(_ message: StreamMessage, from connection: NWConnection, arrived: LockPolicy.Reading) async {
         // Input decoded once, for the display's rule and for its case below.
         let input = message.kind == .input ? Wire.decode(InputEvent.self, from: message.payload) : nil
+        // An Apple Pencil's message (kind 45), decoded once too: the lock and a revoked device judge it
+        // as they do kind 8, by what of it still lets its pen go (PenTablet.stillGoes).
+        let pen = message.kind == .pen ? Wire.decode(PenInput.self, from: message.payload)?.checked() : nil
         // A device the Mac no longer serves (`revoked`): only the up of a key or a button it holds down
         // on the Mac still goes, where the pointer is; nothing else of it acts, wakes the display or
         // raises a window. Its connection closes within 0.25 s.
@@ -1118,7 +1124,9 @@ package final class StreamCoordinator {
         if revoked.contains(sender) {
             if let input, injector.releasesWhatItHolds(input, from: sender) {
                 deliver(input, in: .null, from: sender)
-            } else if message.kind == .input || message.kind == .gesture {
+            } else if let pen, injector.penStillGoes(pen) {
+                deliver(pen: pen, in: .null, from: sender)
+            } else if message.kind == .input || message.kind == .gesture || message.kind == .pen {
                 Stats.shared.bump("in.revoked")
             }
             return
@@ -1130,11 +1138,12 @@ package final class StreamCoordinator {
         // paired session at a locked screen, nobody off console), and from any other only the up of what
         // it holds down, where the pointer is. What the lock refuses wakes nothing either.
         let reading = LockPolicy.restrictive(arrived, lockReading)
-        switch lockDecision(message, input: input, from: sender, reading: reading) {
+        switch lockDecision(message, input: input, pen: pen, from: sender, reading: reading) {
         case .take:
             break
         case .letGo:
             if let input { deliver(input, in: .null, from: sender) }
+            if let pen { deliver(pen: pen, in: .null, from: sender) }
             return
         case .refuse(let why):
             refusedWhileLocked(why, message, from: connection)
@@ -1201,6 +1210,26 @@ package final class StreamCoordinator {
             if !synthetic { raiseIfInteracting(event) }
             deliver(event, in: rect, from: device)
             desktopInputMayActivate(event)
+        case .pen:
+            // An Apple Pencil as a pen (docs/pencil-pressure-plan.md §4.3): the mouse events of kind
+            // 8 with a tablet pen's pressure and tilt, so it goes through kind 8's rules as the
+            // pointer event it amounts to (PenTablet.pointerEvent): a down closes a gesture's view
+            // and brings the window forward, as a click does.
+            guard let pen else { return }
+            let device = ObjectIdentifier(connection)
+            guard let rect = currentSourceRect() else {
+                // Nowhere to land: the up of a button the Mac has down still goes, where the pointer
+                // is, and the pen's leave (PenTablet.stillGoes), as kind 8's ups do above.
+                if injector.penStillGoes(pen) { deliver(pen: pen, in: .null, from: device) }
+                return
+            }
+            let event = PenTablet.pointerEvent(for: pen)
+            if let event {
+                gestureChords.input(Self.gestureInput(event))
+                if !synthetic { raiseIfInteracting(event) }
+            }
+            deliver(pen: pen, in: rect, from: device)
+            if let event { desktopInputMayActivate(event) }
         case .gesture:
             // A three- or four-finger gesture (docs/trackpad-gestures-plan.md §7.4), which the Mac
             // turns into its own shortcut. At most `gesturesPerSecond` a second per connection: a
@@ -1524,7 +1553,7 @@ package final class StreamCoordinator {
     /// What the lock makes of a device's message at `reading` (LockPolicy.decide). Unlocked, nothing is
     /// decoded or looked up; locked, whether the session is paired is (input comes up to 120 times a
     /// second, and only while locked does it matter).
-    private func lockDecision(_ message: StreamMessage, input: InputEvent?, from id: ObjectIdentifier,
+    private func lockDecision(_ message: StreamMessage, input: InputEvent?, pen: PenInput?, from id: ObjectIdentifier,
                               reading: LockPolicy.Reading) -> LockPolicy.Decision {
         guard reading.locked else { return .take }
         let request: LockPolicy.Request
@@ -1532,6 +1561,11 @@ package final class StreamCoordinator {
         case .input:
             guard let input else { return .take }    // one that does not decode is dropped below
             request = .input(letsGo: injector.releasesWhatItHolds(input, from: id))
+        case .pen:
+            // An Apple Pencil is input as kind 8 is: a paired session at a locked screen draws (taps),
+            // anyone else only lets its pen go.
+            guard let pen else { return .take }      // one that does not decode is dropped below
+            request = .input(letsGo: injector.penStillGoes(pen))
         case .selectSource:
             request = .pick(Wire.decode(StreamSource.self, from: message.payload) ?? .none)
         case .launchApp:
@@ -1837,6 +1871,8 @@ package final class StreamCoordinator {
                 if gone(device) { Stats.shared.bump("in.revoked"); continue }
                 if !LockPolicy.allowed(lockReading).gestures { Stats.shared.bump("in.locked"); continue }
                 injector.chord(keyCode: keyCode, flags: flags)
+            case .pen(let pen, _, let device):
+                if injector.penStillGoes(pen) { injector.pen(pen, in: .null, from: device) }
             }
         }
         releaseKeysOfDevicesThatLeft()
@@ -2254,8 +2290,11 @@ package final class StreamCoordinator {
     /// sent it (its keys are its own, KeyStrokes); a gesture's chord that arrives meanwhile waits
     /// behind it, so a click just before the gesture lands first. A device the Mac no longer serves, or
     /// one that left while it waited (`gone`), gets only the up of what it holds down (RevokedInput)
-    /// and none of its chords.
-    private enum Held { case input(InputEvent, CGRect, KeyStrokes.Device), chord(keyCode: UInt16, flags: UInt64, device: KeyStrokes.Device) }
+    /// and none of its chords; of an Apple Pencil's, only what lets its pen go (PenTablet.stillGoes).
+    private enum Held {
+        case input(InputEvent, CGRect, KeyStrokes.Device), chord(keyCode: UInt16, flags: UInt64, device: KeyStrokes.Device)
+        case pen(PenInput, CGRect, KeyStrokes.Device)
+    }
     private var heldInput: [Held] = []
     private var holdUntil: CFAbsoluteTime = 0
     /// Devices that left while input was held: their keys go up after it (`releaseKeys`), and the
@@ -2269,6 +2308,13 @@ package final class StreamCoordinator {
         if !heldInput.isEmpty || CFAbsoluteTimeGetCurrent() < holdUntil { heldInput.append(.input(event, rect, device)); return }
         logClick(event, in: rect)
         injector.apply(event, in: rect, from: device)
+    }
+
+    /// The same for an Apple Pencil's message: held in order with the input around it.
+    private func deliver(pen: PenInput, in rect: CGRect, from device: KeyStrokes.Device) {
+        if !heldInput.isEmpty || CFAbsoluteTimeGetCurrent() < holdUntil { heldInput.append(.pen(pen, rect, device)); return }
+        if let event = PenTablet.pointerEvent(for: pen) { logClick(event, in: rect) }
+        injector.pen(pen, in: rect, from: device)
     }
 
     private func releaseHeldInput() {
@@ -2290,6 +2336,15 @@ package final class StreamCoordinator {
                 if gone(device) { Stats.shared.bump("in.revoked"); continue }
                 if !LockPolicy.allowed(lockReading).gestures { Stats.shared.bump("in.locked"); continue }   // no gesture at a locked Mac
                 injector.chord(keyCode: keyCode, flags: flags)
+            case .pen(let pen, let rect, let device):
+                // As kind 8's above: only what lets its pen go, where the pointer is.
+                if gone(device) || lockReading.locked {
+                    if injector.penStillGoes(pen) { injector.pen(pen, in: .null, from: device) }
+                    else { Stats.shared.bump(gone(device) ? "in.revoked" : "in.locked") }
+                    continue
+                }
+                if let event = PenTablet.pointerEvent(for: pen) { logClick(event, in: rect) }
+                injector.pen(pen, in: rect, from: device)
             }
         }
         releaseKeysOfDevicesThatLeft()
@@ -3323,7 +3378,8 @@ package final class StreamCoordinator {
     private func listMessage() -> StreamMessage {
         var list = WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
                               hostVersion: hostVersion, protocol: SillProtocol.current,
-                              gestures: TrackpadGesture.generation, clipboard: clipboard.advertised)
+                              gestures: TrackpadGesture.generation, clipboard: clipboard.advertised,
+                              pencil: PenInput.generation)
         // This host repeats a device's held key (KeyRepeat), so a device sends it a hardware keyboard's
         // characters as keys.
         list.keyRepeat = KeyRepeat.generation
@@ -3372,8 +3428,11 @@ package final class StreamCoordinator {
             server.send(StreamMessage(kind: .appList, timestamp: now, isKeyframe: false,
                                       payload: Wire.encode(catalog.installedApps)), to: connection)
         }
-        // The cursor's shape says what is under it: none while locked (the gate withholds it too).
+        // The cursor's shape says what is under it: none while locked (the gate withholds it too), and
+        // whether it is a standard one (kind 46) just before it.
         if shows, let shape = cursorShapes.current {
+            server.send(StreamMessage(kind: .cursorKind, timestamp: now, isKeyframe: false,
+                                      payload: Wire.encode(CursorKind(standard: cursorShapes.currentIsStandard))), to: connection)
             server.send(StreamMessage(kind: .cursorShape, timestamp: now, isKeyframe: false, payload: shape), to: connection)
         }
     }

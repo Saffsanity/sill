@@ -347,7 +347,7 @@ enum LockPolicy {
             case .display: return !allowed(r).display
             case .window: return true
             }
-        case .thumbnail, .appIcon, .appList, .audio, .clipboard, .cursorShape, .macPointer:
+        case .thumbnail, .appIcon, .appList, .audio, .clipboard, .cursorShape, .cursorKind, .macPointer:
             return true
         default:
             return false

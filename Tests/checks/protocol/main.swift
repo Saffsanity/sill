@@ -370,6 +370,8 @@ check("kind 28 is gesture (trackpad gestures), 29 unknown (#66's, skipped), 43 a
       header(28)?.kind == .gesture && header(29)?.kind == .unknown && header(43)?.kind == .audio && header(44)?.kind == .keyframeRequest)
 check("kind 32 is the clipboard; 29, 30, 31 and 33 unknown (skipped)",
       header(32)?.kind == .clipboard && [29, 30, 31, 33].allSatisfy { header(UInt8($0))?.kind == .unknown })
+check("kind 45 is pen (the Pencil), 46 cursorKind, 47 unknown (skipped)",
+      header(45)?.kind == .pen && header(46)?.kind == .cursorKind && header(47)?.kind == .unknown)
 check("kinds 16 and 17 unchanged", header(16)?.kind == .hostSettings && header(17)?.kind == .changeSettings)
 check("caps: 1 MiB client, 4 KiB pairing, 32 MiB frames, 4 MiB other",
       StreamMessage.maxClientPayload == 1_048_576 && StreamMessage.maxPairingPayload == 4096

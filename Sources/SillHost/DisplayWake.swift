@@ -115,6 +115,7 @@ struct DisplayWake {
                     return nil                           // the device's own move to the new frame's middle
                 }
                 return .input
+            case .pen: return .input                     // an Apple Pencil on the stream (kind 45): a person, as kind 8
             case .windowCommand: return .windowButton
             case .pressMenuItem: return .menuItem
             case .gesture: return .gesture

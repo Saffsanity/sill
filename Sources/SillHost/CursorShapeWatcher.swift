@@ -12,12 +12,16 @@ import StreamProtocol
 /// 280×400) at ~1.4 ms per poll, about as much CPU as the whole streaming pipeline. Now the
 /// fingerprint is the hotspot, the point size and the pixels of the smallest bitmap (a few KB);
 /// the PNG is only made when the shape actually changes, from the representation nearest 2×.
+///
+/// Each shape also says whether it is one of macOS's standard cursors or an app's own (kind 46,
+/// CursorClass), sent just before it.
 @MainActor
 final class CursorShapeWatcher {
-    /// A new shape, already encoded. Main thread.
-    var onChange: ((Data) -> Void)?
-    /// The last blob sent, for a client that just connected.
+    /// A new shape, already encoded, and whether it is a standard cursor. Main thread.
+    var onChange: ((Data, Bool) -> Void)?
+    /// The last blob sent, for a client that just connected, and whether it is a standard cursor.
     private(set) var current: Data?
+    private(set) var currentIsStandard = true
 
     var running = false {
         didSet {
@@ -54,10 +58,31 @@ final class CursorShapeWatcher {
               let png = Self.png(of: rep) else { return }
         lastHash = hash   // only once the PNG exists, so a failed encode is retried next poll
         let blob = CursorShapeBlob.encode(hotspot: cursor.hotSpot, size: image.size, png: png)
+        let widths = image.representations.compactMap { ($0 as? NSBitmapImageRep)?.pixelsWide }
+        let standard = CursorClass.isStandard(fingerprint: hash, standards: Self.standards, bitmapWidths: widths,
+                                              pointWidth: Double(image.size.width))
         current = blob
-        onChange?(blob)
+        currentIsStandard = standard
+        onChange?(blob, standard)
         Stats.shared.bump("cursor.shape")
     }
+
+    /// AppKit's standard cursors, fingerprinted once in this process (CursorClass).
+    private static let standards: Set<Int> = {
+        var cursors: [NSCursor] = [.arrow, .iBeam, .iBeamCursorForVerticalLayout, .pointingHand, .closedHand, .openHand, .crosshair,
+                                   .resizeLeft, .resizeRight, .resizeLeftRight, .resizeUp, .resizeDown, .resizeUpDown,
+                                   .disappearingItem, .operationNotAllowed, .dragLink, .dragCopy, .contextualMenu]
+        if #available(macOS 15.0, *) {
+            cursors += [.columnResize, .rowResize, .zoomIn, .zoomOut]
+            let positions: [NSCursor.FrameResizePosition] = [.top, .left, .bottom, .right, .topLeft, .topRight, .bottomLeft, .bottomRight]
+            for position in positions {
+                for directions in [NSCursor.FrameResizeDirection.Set.all, .inward, .outward] {
+                    cursors.append(.frameResize(position: position, directions: directions))
+                }
+            }
+        }
+        return Set(cursors.map { fingerprint(of: $0.image, hotspot: $0.hotSpot) })
+    }()
 
     private static func fingerprint(of image: NSImage, hotspot: NSPoint) -> Int {
         var hasher = Hasher()
