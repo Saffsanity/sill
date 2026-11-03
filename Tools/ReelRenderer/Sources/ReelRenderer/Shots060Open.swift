@@ -43,9 +43,11 @@ enum Close060 {
     // lower than v4.2's 978 and 1008, for the contribute line under the row; as far as title-safe allows with 3 px to spare).
     static let baselines = (wordmark: CGFloat(650), version: CGFloat(736), freeOpen: CGFloat(812), appStore: CGFloat(866),
                             download: CGFloat(900), legal0: CGFloat(984), legal1: CGFloat(1014))
-    /// v5: the contribute line's baseline, centred on x 960 under the row, 34 px under the row's baseline: the pitch of the
-    /// row's two T5 lines when they were stacked (v4.2's 866 and 900, above).
-    static let contributeBaseline: CGFloat = Row.baseline + 34
+    /// v5: the contribute line's baseline, centred on x 960 under the row, 41 px under the row's baseline (926). The line
+    /// first sat 34 px under it (919, the pitch of the row's two T5 lines when they were stacked, v4.2's 866 and 900), where
+    /// its ink (y 900–923) ran under the GitHub mark's column 10 px below the mark (the review of v5, 2026-11-03); 7 px lower
+    /// it is 17 px below the mark's ink and 39 px above the legal lines' (970).
+    static let contributeBaseline: CGFloat = Row.baseline + 41
 
     // MARK: v5: the end card's row (Noah on v4.2 at 1:13: "Add the Download on the App Store icon and the GitHub logo and
     // Homebrew logo and make it look aesthetic")
