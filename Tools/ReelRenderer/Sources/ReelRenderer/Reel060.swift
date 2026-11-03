@@ -56,10 +56,11 @@ enum Copy060 {
     static let attach = "Attach a keyboard.", justType = "Just type."
     static let esc = ["Esc", "included."]
     static let escFoot = "No Keyboard button needed."
-    // S12
-    static let scroll = "Two-finger scroll.", wheel = "Or a mouse wheel."
-    static let reverseSub = "Or the other way, with Reverse Scrolling."
-    static let reverseFoot = "A trackpad or mouse keeps its own Natural Scrolling."
+    // S12, v5 (Noah's three lines, verbatim): "Two-finger scroll. Or use a mouse wheel." on two lines; the hardware line on two
+    // lines; Reverse Scrolling.
+    static let scroll = "Two-finger scroll.", wheel = "Or use a mouse wheel."
+    static let hardware = ["Hardware mouse and trackpad support", "including Magic Keyboard for iPad."]
+    static let reverse = "And choose your direction with Reverse Scrolling."
     // S13
     static let greetings = ["\u{4F60}\u{597D}", "\u{3053}\u{3093}\u{306B}\u{3061}\u{306F}", "\u{C548}\u{B155}\u{D558}\u{C138}\u{C694}"]
     static let greetingLanguages = ["zh-Hans", "ja", "ko"]
@@ -130,6 +131,7 @@ enum Mini060 {
         "stills/D2k-iphone-larger-1610-kbbutton", "stills/D3k-iphone-larger-fitted-kbbutton",
         "stills/E0-te-empty", "stills/E1-te-typed", "stills/E2-te-save", "stills/E3-longdoc0", "pictures/longdoc-page",
         "stills/E6-reverse-off", "stills/E7-reverse-on",
+        "stills/E3u-longdoc0-upright", "stills/E6u-reverse-off-upright", "stills/E7u-reverse-on-upright",
         "stills/F0-cjk0", "stills/F1-cjk1", "stills/F2-cjk2", "stills/F3-cjk3", "stills/F4-cjk4",
         "stills/N1-tiles", "stills/N2-list", "stills/H1-scale125-open", "stills/H2-scaleoff-open",
         "stills/J1-windowmenu", "stills/J2-hold-row",

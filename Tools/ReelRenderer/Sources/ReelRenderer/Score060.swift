@@ -84,8 +84,9 @@ enum Cues060 {
     static var taps: [Double] {
         [Clip060.hold4.0, Clip060.pasteTap, Clip060.hold5.0, Clip060.copyTap, Clip060.pasteChipTap,
          Sound060.settingsTap, Sound060.mute, Sound060.unmute, Pinch060.spread.0, Pinch060.move.0, Pinch060.tap, Pinch060.pinchIn.0,
-         Larger060.settingsTap, Larger060.switchTap, Larger060.doneTap, Larger060.keyboardTap, Scroll060.panel, Scroll060.flip, Scroll060.done,
-         Scroll060.drag.0, Cut060.film(Hold060.down, .s16)]
+         Larger060.settingsTap, Larger060.switchTap, Larger060.doneTap, Larger060.keyboardTap,
+         Scroll060.flingA.start, Scroll060.flingB1.start, Scroll060.flingB2.start, Scroll060.settingsTap, Scroll060.flip, Scroll060.done,
+         Scroll060.flingC.start, Cut060.film(Hold060.down, .s16)]
     }
     /// Plucks (sine + its 2nd harmonic, 250 ms) on landings.
     static var plucks: [(Double, Double)] {
@@ -96,6 +97,7 @@ enum Cues060 {
          (Lock060.seq.unlock, 83), (Lock060.seq.unlock + 0.04, 88),   // unlocked: B5, E6
          (Pinch060.tap + 0.02, 81),                             // the tap selects a cell
          (Larger060.larger, 81), (Larger060.fitted, 85),        // Larger Picture, then the Mac fits the window
+         (Scroll060.highlight, 81),                             // the keyboard's trackpad lights
          (Scroll060.flip + 0.02, 88),                           // Reverse Scrolling on
          (Cut060.film(Compose060.arrive[0], .s13), 81), (Cut060.film(Compose060.arrive[1], .s13), 85),
          (Cut060.film(Compose060.arrive[2], .s13), 88), (Cut060.film(Compose060.arrive[3], .s13), 93),

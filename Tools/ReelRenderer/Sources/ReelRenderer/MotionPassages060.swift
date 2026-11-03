@@ -69,7 +69,13 @@ import Foundation
 
     // MARK: S12's camera, S11's push
 
-    static func s12Scale(_ t: Double) -> Double { 1.15 + 0.02 * ramp(t, 40.8, 44.0) }
+    /// v5's S12, the iPad upright: a still px (y) → the canvas, under its push about its left edge.
+    static func s12Y(_ yStill: Double, _ t: Double) -> Double {
+        let S = Scroll060.self
+        let top = Double(S.uprightCentre.y - S.upright.interior.height / 2)
+        return Double(S.uprightAbout.y) + (top + yStill * Double(S.ku) - Double(S.uprightAbout.y)) * Double(S.uprightPush(t))
+    }
+    static func s12Push(_ t: Double) -> Double { Double(Scroll060.uprightPush(t)) }
     static var s13About: CGPoint { onCanvas(Large060.spec, center: Large060.centre, CGPoint(x: 240 * Large060.k, y: 480 * Large060.k)) }
     static func s13Scale(_ t: Double) -> Double { 1 + 0.07 * CubicBezier.inOut(ramp(t, 44.0, 48.8)) }
 
@@ -138,6 +144,16 @@ import Foundation
                             guess: { t in 1036 + (705.91 + s10Keyboard(t) - 1036) * p10(t) / p10(36.0) },
                             path: { t in [p10(t), p10(t) * s10Keyboard(t)] }, window: 6),
             ], note: "v5: iOS's keyboard rising inside the turned iPhone onto the trackpad's footprint (0.30 s appleOut), with its 2 % push; read on its first row's sixth key (the keyboard's own top edge crosses the trackpad's), from 23 px a frame (its first three frames, 75, 51 and 35 px a frame, measure within 0.6 px)"),
+            MotionPassage(name: "S12-fingers", from: 41.05, to: 41.3, probes: [
+                MotionProbe(name: "a finger's dot", axis: .y, across: 1474...1498,
+                            guess: { t in s12Y(Double(Scroll060.fingersFrom[0].y - Scroll060.fingerTravel(t, Scroll060.flingA)), t) },
+                            path: { t in [s12Push(t), s12Push(t) * Double(Scroll060.fingerTravel(t, Scroll060.flingA))] }, window: 34, centroid: true, tolerance: 0.25),
+            ], note: "v5: two fingers on the upright iPad's trackpad, scrolling (smoothstep in over 0.1 s, then steady), with its push; a touch dot is a dim disc between a dark and a bright ring, whose centroid reads within 0.25 px at 4.6 px a frame (it moves by a render transform, exact in `motion primitives`)"),
+            MotionPassage(name: "S12-scroll", from: 41.05, to: 41.3, probes: [
+                MotionProbe(name: "the scroller's top", axis: .y, across: 1807...1807,
+                            guess: { t in s12Y(112 + (208 + Scroll060.uprightOffset(t) / 4200 * 1612) * 0.505556, t) },
+                            path: { t in [s12Push(t), s12Push(t) * Scroll060.uprightOffset(t)] }, window: 5, tolerance: 0.12),
+            ], note: "v5: the document scrolled by the fingers, read on its scroller (a shape on the page's offset) while they are down; the scroller is 2.8 px wide and drifts right with the push across the probe's column, its rounded top read within 0.12 px"),
             MotionPassage(name: "S11-push", from: 36.85, to: 40.8, probes: [
                 MotionProbe(name: "screen right edge", axis: .x, across: 250...400, guess: scaled(1815.0, at: 37.0, about: 1030, p11), path: basis(p11), window: 4),
                 MotionProbe(name: "iPad top rim", axis: .y, across: 1500...1700, guess: scaled(129.0, at: 37.0, about: 520, p11), path: basis(p11), window: 7, centroid: true),

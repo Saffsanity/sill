@@ -399,142 +399,247 @@ struct Typing060: View {
 }
 
 enum Scroll060 {
-    /// One scroll on the trackpad, in the document's px: the two fingers' speed rises over 0.1 s (smoothstep) to `v0` and
-    /// holds until they lift; the content then coasts, its speed falling by e every 0.12 s, and stops once it is under
-    /// the cutoff (20 px/s on the canvas), with no sub-pixel creep (the review: the first cut started at full speed in one
-    /// frame and stair-stepped at its ends).
-    struct Fling { let start: Double; let lift: Double; let v0: Double }
+    /// One scroll, in the document's px: the two fingers' speed rises over 0.1 s (smoothstep) to `v0` and holds until they
+    /// lift; the content then coasts, its speed falling by e every 0.12 s, and stops once it is under `cutoff` (20 px/s on
+    /// the canvas, in document px), with no sub-pixel creep.
+    struct Fling { let start: Double; let lift: Double; let v0: Double; let cutoff: Double }
     static let rise = 0.1, tau = 0.12
-    /// 20 canvas px/s in document px: a document px is 0.713 still px × 0.362 interior px × the camera's 1.15.
-    static let cutoff = 20 / (0.7132 * 0.3619 * 1.15)
+    /// While the fingers are down: how far the content has gone.
+    static func fingers(_ f: Fling, _ t: Double) -> Double {
+        let u = min(max(t, f.start), f.lift) - f.start
+        if u < rise { let x = u / rise; return f.v0 * rise * (x * x * x - x * x * x * x / 2) }
+        return f.v0 * (rise / 2 + (u - rise))
+    }
     static func distance(_ f: Fling, _ t: Double) -> Double {
         guard t > f.start else { return 0 }
-        func fingers(_ u: Double) -> Double {
-            if u < rise { let x = u / rise; return f.v0 * rise * (x * x * x - x * x * x * x / 2) }
-            return f.v0 * (rise / 2 + (u - rise))
-        }
-        if t <= f.lift { return fingers(t - f.start) }
-        let atLift = fingers(f.lift - f.start)
-        let stop = tau * log(f.v0 / cutoff)
+        if t <= f.lift { return fingers(f, t) }
+        let stop = tau * log(f.v0 / f.cutoff)
         let u = min(t - f.lift, stop)
-        return atLift + f.v0 * tau * (1 - exp(-u / tau))
+        return fingers(f, f.lift) + f.v0 * tau * (1 - exp(-u / tau))
     }
-    /// Down 520 px (40.95–41.55), then back up 200 (41.56–42.04): v0 2,110 and 902 px/s.
-    static let down = Fling(start: 40.95, lift: 41.13, v0: 2110), up = Fling(start: 41.56, lift: 41.72, v0: 902)
-    /// After Reverse Scrolling, a finger on the picture: up 180 still px (43.30–43.82, inOut), and the document goes the
-    /// other way, down by as much (252 document px).
-    static let drag = (43.30, 43.82)
-    static let dragFrom = CGPoint(x: 1000, y: 1120), dragUp: CGFloat = 180
-    static func dragProgress(_ t: Double) -> CGFloat { CGFloat(CubicBezier.inOut(ramp(t, drag.0, drag.1))) }
-    static func offset(_ t: Double) -> CGFloat {
-        CGFloat(distance(down, t) - distance(up, t)) - dragUp / 0.7132 * dragProgress(t)
+
+    // v5, Noah on v4.2 at 0:41: "Needs to be reshot with the scrolling happening on the trackpad in portrait mode. The text
+    // should read - "Two-finger scroll. Or use a mouse wheel." as the trackpad is touched to show scrolling. Next line -
+    // "Hardware mouse and trackpad support including Magic Keyboard for iPad." cutting to a magic keyboard like object and
+    // highlighting the trackpad, with 2 finger indicators to show the scrolling motion. Next line - "And choose your
+    // direction with Reverse Scrolling."" Three parts, two cuts on beats: the iPad upright (40.8–42.4), the keyboard (42.4–44.4),
+    // the iPad upright again with Reverse Scrolling (44.4–47.2).
+    static let partB = 42.4, partC = 44.4, end = 47.2
+
+    // MARK: The iPad upright (A, C): the footage's E3u–E7u (1488×2266 px, the portrait halves, `-SillLayout 744x1133`)
+
+    static let upright = DeviceSpec.miniM45.turnedUpright
+    /// Its centre: its outer left edge at x 1194.5, 83 px or more from "Or use a mouse wheel." (T1c, x 128).
+    static let uprightCentre = CGPoint(x: 1520, y: 540)
+    static let uprightSource = CGSize(width: 1488, height: 2266)
+    static var ku: CGFloat { upright.interior.width / uprightSource.width }
+    /// The streamed window (2880×1800) in the still: (16, 112, 1456, 910), 0.505556 still px a picture px.
+    static let uprightPicture = CGRect(x: 16, y: 112, width: 1456, height: 910)
+    /// 20 canvas px/s in document px (0.505556 still px × ku a document px).
+    static var uprightCutoff: Double { 20 / Double(0.505556 * ku) }
+    /// Two fingers on the on-screen trackpad (x 28–1459, y 1450–2221), 170 px apart: up, the content up with them
+    /// (natural, as Sill's trackpad scrolls by default), 518 px of the document with its coast.
+    static var flingA: Fling { Fling(start: 41.0, lift: 41.3, v0: 1400, cutoff: uprightCutoff) }
+    /// After Reverse Scrolling: the same stroke, the content the other way, 380 px back.
+    static var flingC: Fling { Fling(start: 45.9, lift: 46.15, v0: 1150, cutoff: uprightCutoff) }
+    static func uprightOffset(_ t: Double) -> Double { distance(flingA, t) - distance(flingC, t) }
+    static let fingersFrom = [CGPoint(x: 659, y: 1960), CGPoint(x: 829, y: 1960)]
+    /// The fingers move as far on the pad as the content does in the picture, up, both strokes.
+    static func fingerTravel(_ t: Double, _ f: Fling) -> CGFloat { CGFloat(fingers(f, t)) * 0.505556 }
+    /// Sill's own pointer: the trackpad's scroll shows this device's arrow where its cursor is (the footage's E3u-pointer: the
+    /// frame's middle, its tip at (744, 567)); it comes with the first touch and stays.
+    static let arrowTip = CGPoint(x: 744, y: 567)
+    static func arrowAlpha(_ t: Double) -> Double { ramp(t, flingA.start - 0.06, flingA.start) }
+    /// Settings, Reverse Scrolling and Done (C): the bar's Settings button (x 1342–1449, y 1178–1293), the panel (E6u, E7u:
+    /// (740, 1334, 720, 888)), the switch (centre (1344.5, 1572.5)), Done (1382, 1380).
+    static let settingsTap = 44.55, panel = 44.6, flip = 45.05, done = 45.45
+    static let settingsButton = CGRect(x: 1338, y: 1174, width: 116, height: 124)
+    static let uprightPanel = CGRect(x: 740, y: 1334, width: 720, height: 888)
+    static let settingsPoint = CGPoint(x: 1395.5, y: 1235.5), flipPoint = CGPoint(x: 1344.5, y: 1572.5), donePoint = CGPoint(x: 1382, y: 1380)
+    /// The iPad's push in each part, 2 % about its left edge, so it grows away from the words.
+    static func uprightPush(_ t: Double) -> CGFloat {
+        t < partB ? 1 + 0.02 * CGFloat(ramp(t, 40.8, partB)) : 1 + 0.02 * CGFloat(ramp(t, partC, end))
     }
-    /// iPadOS's round pointer: it comes to rest over the text by 40.95 and stays there while two fingers scroll (a
-    /// trackpad's scroll moves no pointer); it fades as a finger touches the screen (42.0), as iPadOS hides it.
-    static func pointer(_ t: Double) -> CGPoint {
-        let p = CGFloat(CubicBezier.inOut(ramp(t, 40.8, 40.95)))
-        return CGPoint(x: 1180 + 80 * p, y: 900 - 80 * p)
+    static let uprightAbout = CGPoint(x: 1194.5, y: 540)
+
+    // MARK: The keyboard (B): the iPad (landscape, E3 over longdoc-page) standing behind the slab, its trackpad lit
+
+    /// The group drawn as S11's (Keys060), at 0.70 about its middle and 120 px right, so it stays clear of the words.
+    static let keysRest = CGAffineTransform.scaling(0.70, about: CGPoint(x: 1430, y: 540)).concatenating(CGAffineTransform(translationX: 122, y: 18))
+    static let keysPitch = 50.0
+    /// The trackpad lights from 42.5 (0.2 s); two fingers land at 42.75 and scroll up (the document up with them: a
+    /// trackpad's own Natural Scrolling), lift, land again and scroll back down.
+    static let highlight = 42.5
+    static var flingB1: Fling { Fling(start: 42.8, lift: 43.05, v0: 1500, cutoff: 20 / Double(0.7132 * Keys060.k * 0.70)) }
+    static var flingB2: Fling { Fling(start: 43.45, lift: 43.65, v0: 900, cutoff: 20 / Double(0.7132 * Keys060.k * 0.70)) }
+    static func keysOffset(_ t: Double) -> Double { distance(flingB1, t) - distance(flingB2, t) }
+    /// The fingers on the trackpad (its unit square): 0.36 apart, from 0.72 down; up by a fifth of the content's travel
+    /// over the trackpad's height of 1,000 document px, down again.
+    static func keysFingers(_ t: Double) -> [(point: CGPoint, opacity: Double, scale: CGFloat)] {
+        func finger(_ f: Fling, _ y0: CGFloat, _ sign: CGFloat) -> CGFloat { y0 - sign * CGFloat(fingers(f, t)) / 1000 * 0.62 }
+        var out: [(point: CGPoint, opacity: Double, scale: CGFloat)] = []
+        for (f, y0, sign) in [(flingB1, CGFloat(0.74), CGFloat(1)), (flingB2, CGFloat(0.30), CGFloat(-1))] {
+            let appear = f.start - 0.08
+            guard t >= appear, t < f.lift + 0.25 else { continue }
+            let a = t <= f.lift ? ramp(t, appear, appear + 0.12) : 1 - ramp(t, f.lift, f.lift + 0.25)
+            let s = 0.7 + 0.3 * CGFloat(ease(t, appear, 0.12, .appleOut))
+            let y = finger(f, y0, sign)
+            out.append((CGPoint(x: 0.32, y: y), a, s)); out.append((CGPoint(x: 0.68, y: y), a, s))
+        }
+        return out
     }
-    static func pointerAlpha(_ t: Double) -> Double { 1 - ramp(t, panel, panel + 0.15) }
-    /// Settings in at 42.0 (a beat before the subline), Reverse Scrolling on at 42.8, Done at 43.05 (the panel out by 43.25).
-    static let panel = 42.0, flip = 42.8, done = 43.05
-    static let flipPoint = CGPoint(x: 2106, y: 431), donePoint = CGPoint(x: 2143, y: 237)
+    /// iPadOS's round pointer over the text: a trackpad's two-finger scroll moves no pointer.
+    static let roundPointer = CGPoint(x: 1260, y: 820)
 }
 
-/// The long document scrolled in TextEdit (E3's chrome over longdoc-page), its scroller, and the pointer, in the
-/// iPad's interior px. The page moves by a render transform, on its exact fractional offset.
+/// The upright stills' px for a rect of the streamed window (2880×1800).
+func uprightPicRect(_ r: CGRect) -> CGRect {
+    let s = Scroll060.uprightPicture.width / 2880, o = Scroll060.uprightPicture.origin
+    return CGRect(x: o.x + r.minX * s, y: o.y + r.minY * s, width: r.width * s, height: r.height * s)
+}
+
+/// The long document scrolled in TextEdit (its chrome is the still's; the page, longdoc-page, drawn over the document's
+/// area), its scroller, and a pointer, in a screen's interior px: `pic` maps the window's px to the still's, `k` is
+/// interior px per still px, `off` the document's offset (document px). The page moves on its exact path (ExactPicture060).
 struct ScrollDoc060: View {
+    enum Pointer { case none, round(CGPoint, Double), arrow(CGPoint, Double) }
     let page: CGImage
     let k: CGFloat
-    let t: Double
+    let off: Double
+    var pic: (CGRect) -> CGRect = picRect
+    var pointer: Pointer = .none
     var body: some View {
-        let off = Scroll060.offset(t)
+        let off = CGFloat(self.off)
         // The document's area in the picture: below the format bar (y 188), the page drawn from y 188 − off.
-        let doc = scaledRect(picRect(CGRect(x: 0, y: 188, width: 2880, height: 1612)), k)
+        let doc = scaledRect(pic(CGRect(x: 0, y: 188, width: 2880, height: 1612)), k)
         let s = doc.width / 2880
         let pageH = CGFloat(page.height) * s
-        let bar = scaledRect(picRect(CGRect(x: 2880 - 26, y: 188 + 20 + off / 4200 * 1612, width: 14, height: 1612 * 1612 / 4200)), k)
-        let p = Scroll060.pointer(t)
-        let pc = scaledRect(picRect(CGRect(x: p.x, y: p.y, width: 0, height: 0)), k).origin
-        let d = 38 * k * 1.4
+        let bar = scaledRect(pic(CGRect(x: 2880 - 26, y: 188 + 20 + off / 4200 * 1612, width: 14, height: 1612 * 1612 / 4200)), k)
         return ZStack(alignment: .topLeading) {
-            // The page on its exact path (ExactPicture060).
             ExactPicture060(image: page, transform: CGAffineTransform(scaleX: doc.width / CGFloat(page.width), y: pageH / CGFloat(page.height))
                 .concatenating(CGAffineTransform(translationX: doc.minX, y: doc.minY - off * s)), size: CGSize(width: doc.maxX, height: doc.maxY + 40), extend: true)
                 .mask(Path(doc).fill(Color.white))
             Path(roundedRect: bar, cornerRadius: bar.width / 2).fill(Color.black.opacity(0.35))
-            if Scroll060.pointerAlpha(t) > 0.002 {
+            switch pointer {
+            case .none: EmptyView()
+            case .round(let p, let alpha) where alpha > 0.002:
+                let pc = scaledRect(pic(CGRect(x: p.x, y: p.y, width: 0, height: 0)), k).origin
+                let d = 38 * k * 1.4
                 Circle().fill(Color(white: 0.32, opacity: 0.55))
                     .overlay(Circle().strokeBorder(Color.white.opacity(0.5), lineWidth: max(1, 0.6 * k * 1.4)))
                     .frame(width: d, height: d)
-                    .opacity(Scroll060.pointerAlpha(t))
+                    .opacity(alpha)
                     .transformEffect(CGAffineTransform(translationX: pc.x - d / 2, y: pc.y - d / 2))
+            case .arrow(let tip, let alpha) where alpha > 0.002:
+                SillArrow060(tip: CGPoint(x: tip.x * k, y: tip.y * k), height: 44 * k).opacity(alpha)
+            default: EmptyView()
             }
         }
         .frame(width: doc.maxX, height: doc.maxY + 40, alignment: .topLeading)
     }
 }
 
-// SWAP-IN (S12, take E part 2): replace with Noah's clip E if provided at /Users/noah/Downloads/sill-handoff/release-060/captures/take-E.mov (its scrolling part), inside
-// the iPad in place of ScrollDoc060 (E3 and longdoc-page). Marks: the scroll down 40.95–41.55, back up 41.56–42.04; the
-// Settings panel (E6, then E7 at 42.8, Done at 43.05) stays the harness's stills; then a finger dragged up over the
-// picture (43.30–43.82) with Reverse Scrolling on, the document going down: the take's, if it has one, else keep the
-// drawn drag over the take's last frame.
-@MainActor func s060_12(_ t: Double, _ e: Env) throws -> FrameLayers {
-    let K = Keys060.self, S = Scroll060.self
-    let k = K.k * 1.25
-    let page = try e.f.image("pictures/longdoc-page")
-    // The Settings panel: E6's (Reverse Scrolling off), then E7's (on), in with the app's transition, out after Done.
-    let panelRect = scaledRect(Sound060.panel, K.k)
-    let off = try e.f.crop("stills/E6-reverse-off", Sound060.panel, scale: k), on = try e.f.crop("stills/E7-reverse-on", Sound060.panel, scale: k)
-    let button = try e.f.crop("stills/E6-reverse-off", Sound060.settingsButton, scale: k)
-    let panelIn = ease(t, S.panel, 0.25, .appleOut) * (1 - ease(t, S.done + 0.02, 0.2, .appleIn))
-    let size = K.spec.interior
-    let screen = ZStack(alignment: .topLeading) {
-        ScrollDoc060(page: page, k: K.k, t: t)
-        if t >= S.panel && panelIn > 0.002 {
-            image(button, in: scaledRect(Sound060.settingsButton, K.k))
-            // The panel's transition on its exact path (ExactPicture060).
-            let move = CGAffineTransform.scaling(0.94 + 0.06 * CGFloat(panelIn), about: CGPoint(x: panelRect.maxX, y: panelRect.minY))
-            ZStack(alignment: .topLeading) {
-                ExactPicture060(image: off, transform: placing(off, in: panelRect).concatenating(move), size: size)
-                ExactPicture060(image: on, transform: placing(on, in: panelRect).concatenating(move), size: size).opacity(ramp(t, S.flip + 0.03, S.flip + 0.15))
+/// Sill's own pointer, as the upright layouts draw it over the picture for the trackpad (the footage's E3u-pointer: the
+/// Mac's arrow, white with a dark edge): a shape, at its exact place.
+struct SillArrow060: View {
+    let tip: CGPoint
+    let height: CGFloat
+    var body: some View {
+        Canvas { ctx, size in
+            let u = height / 25
+            var p = Path()
+            let pts: [(CGFloat, CGFloat)] = [(0, 0), (0, 20.2), (4.6, 15.8), (7.6, 22.8), (10.6, 21.5), (7.7, 14.7), (14.2, 14.7)]
+            for (i, q) in pts.enumerated() {
+                let pt = CGPoint(x: tip.x + q.0 * u, y: tip.y + q.1 * u)
+                if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
             }
-            .frame(width: size.width, height: size.height, alignment: .topLeading)
-            .opacity(panelIn)
+            p.closeSubpath()
+            ctx.stroke(p, with: .color(Color.black.opacity(0.92)), style: StrokeStyle(lineWidth: 2.4 * u, lineJoin: .round))
+            ctx.fill(p, with: .color(.white))
         }
     }
-    .frame(width: size.width, height: size.height, alignment: .topLeading)
-    let finger = TouchDotSpec(at: S.drag.0, point: .zero, interiorWidth: Mini060.source.width, drag: (S.drag.0, S.drag.1, { t in
-        CGPoint(x: S.dragFrom.x, y: S.dragFrom.y - S.dragUp * S.dragProgress(t))
-    }))
-    let dots = [Device060.dot(at: S.panel, Sound060.settingsPoint), Device060.dot(at: S.flip, S.flipPoint),
-                Device060.dot(at: S.done, S.donePoint), finger]
-    let base = try e.f.scaled("stills/E3-longdoc0", width: size.width * 1.3)
-    let device = PlacedDevice(spec: K.spec, center: K.centre, yaw: 0) {
-        MiniScreen(size: size, layers: [(base, MiniLayer(name: "stills/E3-longdoc0"))], dots: dots, t: t) { screen }
+}
+
+// SWAP-IN (S12, take E part 2): replace with Noah's clip E if provided at /Users/noah/Downloads/sill-handoff/release-060/captures/take-E.mov (its scrolling parts), in place of the
+// upright iPad's ScrollDoc060 (E3u and longdoc-page) and the keyboard's iPad. Marks: two fingers on the on-screen trackpad
+// 41.0–41.3 (the document up 518 px with its coast); the keyboard 42.4–44.4, fingers 42.8–43.05 and 43.45–43.65; Settings
+// 44.55, Reverse Scrolling on 45.05, Done 45.45; the fingers again 45.9–46.15, the document the other way.
+@MainActor func s060_12(_ t: Double, _ e: Env) throws -> FrameLayers {
+    let S = Scroll060.self
+    let page = try e.f.image("pictures/longdoc-page")
+    var lines = [leftLine(Copy060.scroll, .T1c, baseline: 400, snap: 40.85, end: S.end),
+                 leftLine(Copy060.wheel, .T1c, baseline: 504, snap: 41.25, end: S.end)]
+    lines += capped([leftLine(Copy060.hardware[0], .T2, baseline: 578, snap: 42.45, end: S.end),
+                     leftLine(Copy060.hardware[1], .T2, baseline: 620, snap: 42.70, end: S.end)])
+    lines.append(leftLine(Copy060.reverse, .T2, baseline: 688, snap: 44.45, end: S.end))
+    let picture: AnyView
+    var glow = CGPoint(x: 1520, y: 540)
+    if t < S.partB || t >= S.partC {
+        // The iPad upright: E3u's chrome, the document scrolled over its picture, Sill's arrow, the fingers on the trackpad;
+        // Settings over the key row and trackpad in C.
+        let spec = S.upright, size = spec.interior, k = S.ku
+        let off = S.uprightOffset(t)
+        var screen = AnyView(ScrollDoc060(page: page, k: k, off: off, pic: uprightPicRect, pointer: .arrow(S.arrowTip, S.arrowAlpha(t))))
+        if t >= S.partC {
+            let panelIn = ease(t, S.panel, 0.25, .appleOut) * (1 - ease(t, S.done + 0.02, 0.2, .appleIn))
+            let panelRect = scaledRect(S.uprightPanel, k)
+            let off6 = try e.f.crop("stills/E6u-reverse-off-upright", S.uprightPanel, scale: k * 1.03)
+            let on7 = try e.f.crop("stills/E7u-reverse-on-upright", S.uprightPanel, scale: k * 1.03)
+            let button = try e.f.crop("stills/E6u-reverse-off-upright", S.settingsButton, scale: k * 1.03)
+            let move = CGAffineTransform.scaling(0.94 + 0.06 * CGFloat(panelIn), about: CGPoint(x: panelRect.maxX, y: panelRect.minY))
+            screen = AnyView(ZStack(alignment: .topLeading) {
+                screen
+                if t >= S.settingsTap && panelIn > 0.002 {
+                    image(button, in: scaledRect(S.settingsButton, k)).opacity(min(1, 4 * panelIn))
+                    ZStack(alignment: .topLeading) {
+                        ExactPicture060(image: off6, transform: placing(off6, in: panelRect).concatenating(move), size: size)
+                        ExactPicture060(image: on7, transform: placing(on7, in: panelRect).concatenating(move), size: size)
+                            .opacity(ramp(t, S.flip + 0.03, S.flip + 0.15))
+                    }
+                    .frame(width: size.width, height: size.height, alignment: .topLeading)
+                    .opacity(panelIn)
+                }
+            }
+            .frame(width: size.width, height: size.height, alignment: .topLeading))
+        }
+        // The two fingers on the on-screen trackpad (touch dots in the still's px), up with each stroke.
+        let fling = t < S.partB ? S.flingA : S.flingC
+        var dots = (0..<2).map { i in
+            TouchDotSpec(at: fling.start, point: .zero, interiorWidth: S.uprightSource.width, drag: (fling.start, fling.lift, { t in
+                CGPoint(x: S.fingersFrom[i].x, y: S.fingersFrom[i].y - S.fingerTravel(t, fling))
+            }))
+        }
+        if t >= S.partC {
+            dots += [Device060.dot(at: S.settingsTap, S.settingsPoint, source: S.uprightSource), Device060.dot(at: S.flip, S.flipPoint, source: S.uprightSource),
+                     Device060.dot(at: S.done, S.donePoint, source: S.uprightSource)]
+        }
+        let base = try e.f.scaled("stills/E3u-longdoc0-upright", width: size.width * 1.03)
+        let device = PlacedDevice(spec: spec, center: S.uprightCentre, yaw: 0) {
+            MiniScreen(size: size, layers: [(base, MiniLayer(name: "stills/E3u-longdoc0-upright"))], dots: dots, t: t) { screen }
+        }
+        picture = Flat060.moving(device, .push(S.uprightPush(t), about: S.uprightAbout), region: Flat060.region(spec, center: S.uprightCentre))
+    } else {
+        // The keyboard: S11's iPad (E3 over longdoc-page, iPadOS's round pointer over the text) standing behind the slab, now
+        // with its palm rest and trackpad, lit in the accent; two fingers scroll on it, the document with them.
+        let K = Keys060.self
+        let size = K.spec.interior
+        let screen = ScrollDoc060(page: page, k: K.k, off: S.keysOffset(t), pointer: .round(S.roundPointer, 1))
+        let base = try e.f.scaled("stills/E3-longdoc0", width: size.width * 1.3)
+        let device = PlacedDevice(spec: K.spec, center: K.centre, yaw: 0) {
+            MiniScreen(size: size, layers: [(base, MiniLayer(name: "stills/E3-longdoc0"))], t: t) { screen }
+        }
+        let h = KeyboardSlab060.height(width: K.slabWidth, trackpad: true)
+        let slab = KeyboardSlab060(width: K.slabWidth, origin: CGPoint(x: 960 - K.slabWidth / 2, y: 540 - h / 2), t: t,
+                                   trackpad: SlabTrackpad060(highlight: ease(t, S.highlight, 0.2, .appleOut), fingers: S.keysFingers(t)))
+            .modifier(Tilt(yaw: 0, pitch: S.keysPitch)).offset(x: K.slabOffset.width, y: K.slabOffset.height + 60)
+        let group = ZStack { slab; device }.canvas()
+        let push = CGAffineTransform.scaling(1 + 0.02 * CGFloat(ramp(t, S.partB, S.partC)), about: CGPoint(x: 1240, y: 540))
+        picture = Flat060.moving(group, rest: S.keysRest, S.keysRest.concatenating(push), region: CGRect(x: 700, y: -160, width: 1460, height: 1400))
+        glow = CGPoint(x: 1545, y: 520)
     }
-    let h = KeyboardSlab060.height(width: K.slabWidth)
-    let slab = KeyboardSlab060(width: K.slabWidth, origin: CGPoint(x: 960 - K.slabWidth / 2, y: 540 - h / 2), t: t)
-        .modifier(Tilt(yaw: 0, pitch: 58)).offset(x: K.slabOffset.width, y: K.slabOffset.height)
-    let group = ZStack { slab; device }.canvas()
-    // Closer than S11: the iPad's screen fills the right half, the Settings panel whole inside the frame (its Done and its
-    // switch are tapped), its left edge fading out 80 px or more from the words.
-    let camera = 1.15 + 0.02 * CGFloat(ramp(t, 40.8, 44.0))
-    let edge = LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .clear, location: 945 / 1920),
-                                      .init(color: .white, location: 1025 / 1920), .init(color: .white, location: 1)],
-                              startPoint: .leading, endPoint: .trailing).canvas()
-    // The footnote with the first statement; the subline whole, a beat before Reverse Scrolling flips on (the review:
-    // they had been readable for about 0.7 s).
-    let lines = [leftLine(Copy060.scroll, .T1c, baseline: 400, snap: 40.85, end: 44.0),
-                 leftLine(Copy060.wheel, .T4, baseline: 486, snap: 41.25, end: 44.0),
-                 leftLine(Copy060.reverseSub, .T2, baseline: 566, snap: 42.45, end: 44.0, cascade: false),
-                 leftLine(Copy060.reverseFoot, .T3, baseline: 616, snap: 40.90, end: 44.0, cascade: false)]
     let v = ZStack {
-        Backdrop(glow: 0.06, glowCenter: CGPoint(x: 1490, y: 520))
-        Flat060.moving(group, rest: .camera(1.15, from: K.centre, to: CGPoint(x: 1435, y: 470)),
-                       .camera(camera, from: K.centre, to: CGPoint(x: 1435, y: 470)), region: Keys060.region)
-            .mask(edge)
+        Backdrop(glow: 0.06, glowCenter: glow)
+        picture
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v))

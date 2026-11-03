@@ -220,6 +220,10 @@ struct KeyboardSlab060: View {
     /// Other keys pressed (the 0.6.0 timeline's typing and ⌘S): a key's row and index in `rows`, and when it goes down
     /// (0.07 s down, then up).
     var pressed: [(row: Int, key: Int, at: Double)] = []
+    /// v5 (S12): a palm rest with a trackpad under the keys, as a keyboard for iPad has (the Magic Keyboard's place, drawn
+    /// plain: no logo, no Apple artwork), its edge lit in the accent by `trackpad.highlight` (0…1), and the fingers on it
+    /// (each a touch dot in the trackpad's unit square, with its opacity), drawn in the slab's own plane so they tilt with it.
+    var trackpad: SlabTrackpad060? = nil
 
     /// The rows, each key's width in units of the key pitch (every row 14.5u). Row 0 is the function row, 0.6u
     /// tall; the last row ends in the arrows: ← and → half height, ↑ over ↓ in one key's place.
@@ -234,6 +238,13 @@ struct KeyboardSlab060: View {
     static func margin(_ w: CGFloat) -> CGFloat { 0.032 * w }
     static func pitch(_ w: CGFloat) -> CGFloat { (w - 2 * margin(w)) / 14.5 }
     static func height(width w: CGFloat) -> CGFloat { 2 * margin(w) + 5.6 * pitch(w) }
+    /// v5: the palm rest under the keys (3.6 key pitches) and the trackpad in it, 6.4 by 2.7 pitches, centred, half a pitch
+    /// under the keys' last row.
+    static func height(width w: CGFloat, trackpad: Bool) -> CGFloat { height(width: w) + (trackpad ? 3.6 * pitch(w) : 0) }
+    static func trackpadRect(width w: CGFloat, origin: CGPoint) -> CGRect {
+        let u = pitch(w)
+        return CGRect(x: origin.x + w / 2 - 3.2 * u, y: origin.y + margin(w) + 5.6 * u + 0.5 * u, width: 6.4 * u, height: 2.7 * u)
+    }
     /// The esc key's rect on the canvas (for a touch, a glow or a callout).
     static func escRect(width w: CGFloat, origin: CGPoint) -> CGRect {
         let m = margin(w), u = pitch(w), g = 0.12 * u
@@ -242,7 +253,7 @@ struct KeyboardSlab060: View {
 
     var body: some View {
         Canvas { ctx, _ in
-            let w = width, h = KeyboardSlab060.height(width: w)
+            let w = width, h = KeyboardSlab060.height(width: w, trackpad: trackpad != nil)
             let m = KeyboardSlab060.margin(w), u = KeyboardSlab060.pitch(w), g = 0.12 * u
             let slab = CGRect(x: origin.x, y: origin.y, width: w, height: h)
             let shape = Path(roundedRect: slab, cornerRadius: 0.028 * w, style: .continuous)
@@ -280,6 +291,33 @@ struct KeyboardSlab060: View {
                 }
                 y += rowH
             }
+            if let pad = trackpad {
+                let r = KeyboardSlab060.trackpadRect(width: w, origin: origin)
+                let shape = Path(roundedRect: r, cornerRadius: 0.32 * u, style: .continuous)
+                ctx.fill(shape, with: .color(Color(hex: 0x15171B)))
+                ctx.stroke(shape, with: .linearGradient(Gradient(colors: [Color(hex: Palette.rimDark), Color(hex: Palette.rimLight, alpha: 0.6)]),
+                                                        startPoint: CGPoint(x: r.minX, y: r.minY), endPoint: CGPoint(x: r.maxX, y: r.maxY)),
+                           lineWidth: 1.2)
+                if pad.highlight > 0.001 {
+                    // The accent marks the trackpad: a soft glow inside its edge and the edge itself.
+                    var glow = ctx
+                    glow.clip(to: shape)
+                    glow.addFilter(.blur(radius: 0.35 * u))
+                    glow.stroke(shape, with: .color(Color(hex: Palette.accent, alpha: 0.55 * pad.highlight)), lineWidth: 0.5 * u)
+                    ctx.stroke(shape, with: .color(Color(hex: Palette.accent, alpha: 0.95 * pad.highlight)), lineWidth: max(2, 0.05 * u))
+                }
+                // The fingers: v3's touch dot (a white disc at 18 % and its 45 % ring), 0.8 of a key pitch across.
+                for f in pad.fingers where f.opacity > 0.001 {
+                    let d = 0.8 * u * f.scale
+                    let c = CGPoint(x: r.minX + f.point.x * r.width, y: r.minY + f.point.y * r.height)
+                    let dot = Path(ellipseIn: CGRect(x: c.x - d / 2, y: c.y - d / 2, width: d, height: d))
+                    var g = ctx
+                    g.opacity = f.opacity
+                    g.fill(dot, with: .color(Color.white.opacity(0.18)))
+                    g.stroke(Path(ellipseIn: CGRect(x: c.x - d / 2 + 0.75, y: c.y - d / 2 + 0.75, width: d - 1.5, height: d - 1.5)),
+                             with: .color(Color.white.opacity(0.45)), lineWidth: 1.5)
+                }
+            }
             ctx.stroke(Path(roundedRect: slab.insetBy(dx: 0.75, dy: 0.75), cornerRadius: 0.028 * w - 0.75, style: .continuous),
                        with: .linearGradient(Gradient(colors: [Color(hex: Palette.rimLight), Color(hex: Palette.rimDark)]),
                                              startPoint: CGPoint(x: slab.minX, y: slab.minY), endPoint: CGPoint(x: slab.maxX, y: slab.maxY)),
@@ -287,6 +325,12 @@ struct KeyboardSlab060: View {
         }
         .canvas()
     }
+}
+
+/// v5 (S12): the slab's trackpad and the fingers on it (KeyboardSlab060.trackpad).
+struct SlabTrackpad060 {
+    var highlight: Double
+    var fingers: [(point: CGPoint, opacity: Double, scale: CGFloat)]
 }
 
 // MARK: - A stand-in stream screen, for the asset previews only
