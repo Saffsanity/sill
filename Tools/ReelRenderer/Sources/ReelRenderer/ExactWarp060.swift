@@ -109,12 +109,24 @@ struct ExactPicture060: View {
         let b = ExactWarp060.bounds(CGSize(width: image.width, height: image.height), transform, in: size)
         ZStack(alignment: .topLeading) {
             Color.clear.frame(width: size.width, height: size.height)
-            if !b.isEmpty, b.width >= 1, b.height >= 1, let warped = ExactWarp060.warp(image, transform, bounds: b, extend: extend) {
-                Image(decorative: warped, scale: 1)
+            if !b.isEmpty, b.width >= 1, b.height >= 1, let warped = ExactPicture060.warped(image, transform, bounds: b, extend: extend) {
+                // At an output scale the bitmap is in output px (`Stage.scale` a point), placed on whole points (whole px).
+                Image(decorative: warped, scale: Stage.scale)
                     .frame(width: b.width, height: b.height)
                     .transformEffect(CGAffineTransform(translationX: b.minX, y: b.minY))
             }
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+
+    /// The picture resampled into the region `b` (whole points of its parent): at scale 1 into `b`'s px, as before; at an
+    /// output scale (the 4K pass) into `b` × scale px, through the transform to the parent's points then × scale, so the
+    /// picture's own pixels are resampled once, at the output resolution (a still twice the 1080p's drawing size keeps its
+    /// detail; a smaller one is enlarged by the same cubic).
+    static func warped(_ image: CGImage, _ transform: CGAffineTransform, bounds b: CGRect, extend: Bool) -> CGImage? {
+        guard Stage.scaled else { return ExactWarp060.warp(image, transform, bounds: b, extend: extend) }
+        let k = Stage.scale
+        return ExactWarp060.warp(image, transform.concatenating(CGAffineTransform(scaleX: k, y: k)),
+                                 bounds: CGRect(x: b.minX * k, y: b.minY * k, width: b.width * k, height: b.height * k), extend: extend)
     }
 }

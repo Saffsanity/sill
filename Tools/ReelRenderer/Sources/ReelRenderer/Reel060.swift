@@ -181,16 +181,19 @@ enum Mini060 {
         return img
     }
 
-    /// `name` Lanczos-scaled to `width` px (its aspect kept), cached.
+    /// `name` Lanczos-scaled to `width` px (its aspect kept), cached. `width` is in the drawing's points: at an output scale
+    /// (the 4K pass) the picture is `width` × scale px, so drawn into its frame it is 1:1 at the output resolution.
     func scaled(_ name: String, width: CGFloat) throws -> CGImage {
         let src = try image(name)
-        let w = width.rounded()
+        let w = (width * Stage.scale).rounded()
         return try remember("\(name)|w\(Int(w))") { scale(src, CGFloat(w) / CGFloat(src.width)) }
     }
 
-    /// The region `r` (top-left origin, in `name`'s px) Lanczos-scaled by `scale`, cached.
+    /// The region `r` (top-left origin, in `name`'s px) Lanczos-scaled by `scale`, cached. `scale` is the drawing's points per
+    /// still px: at an output scale (the 4K pass) the crop is scaled by `scale` × the output scale, its px output px.
     func crop(_ name: String, _ r: CGRect, scale: CGFloat) throws -> CGImage {
         let src = try image(name)
+        let scale = scale * Stage.scale
         return try remember("\(name)|\(r)|\(String(format: "%.5f", scale))") {
             guard let c = src.cropping(to: r.integral) else { throw NSError(domain: "Reel060", code: 2) }
             return self.scale(c, scale)
@@ -205,7 +208,8 @@ enum Mini060 {
         return ci.createCGImage(out, from: CGRect(x: 0, y: 0, width: w, height: h), format: .BGRA8, colorSpace: srgb)!
     }
 
-    /// v3.1's film at reel time `t` (its latest sample at or before), the whole 1920×1080 frame, scaled by `scale`.
+    /// v3.1's film at reel time `t` (its latest sample at or before), the whole 1920×1080 frame, scaled by `scale` (in its own
+    /// px: the derived stills crop it there; a shot drawing it on screen asks for its points' scale × `Stage.scale`).
     func film(_ t: Double, scale: CGFloat = 1) throws -> CGImage {
         try clips.image(.v31film, at: t, treatment: .none, scale: scale, crop: CGRect(x: 0, y: 0, width: 1920, height: 1080)).image
     }

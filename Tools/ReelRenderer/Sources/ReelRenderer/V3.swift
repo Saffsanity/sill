@@ -219,7 +219,7 @@ enum Pairing {
     func window(_ img: CGImage) -> some View {
         let size = CGSize(width: img.width, height: img.height)
         return ZStack(alignment: .topLeading) {
-            Image(decorative: ShadowCache.shared.image(outer: size, radius: 24 * Pairing.winScale, opacity: 0.55, blurRadius: 60), scale: 1)
+            Image(decorative: ShadowCache.shared.image(outer: size, radius: 24 * Pairing.winScale, opacity: 0.55, blurRadius: 60), scale: Stage.scale)
                 .frame(width: size.width + 2 * shadowPad, height: size.height + 2 * shadowPad)
                 .offset(x: -shadowPad, y: -shadowPad + 30)
             Image(decorative: img, scale: 1).frame(width: size.width, height: size.height)

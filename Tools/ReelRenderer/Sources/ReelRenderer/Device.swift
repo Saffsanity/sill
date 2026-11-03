@@ -31,22 +31,25 @@ final class ShadowCache {
     private var cache: [String: CGImage] = [:]
     static let pad: CGFloat = 200
 
-    /// A blurred rounded rect the size of `outer`, padded by `pad` on every side (offset not applied).
+    /// A blurred rounded rect the size of `outer`, padded by `pad` on every side (offset not applied). At an output scale
+    /// (the 4K pass) `Stage.scale` px a point: draw it with `Image(decorative:scale: Stage.scale)`.
     func image(outer: CGSize, radius: CGFloat, opacity: CGFloat = 0.6, blurRadius: CGFloat = 70) -> CGImage {
         let key = "\(outer)|\(radius)|\(opacity)|\(blurRadius)"
         if let c = cache[key] { return c }
         let pad = ShadowCache.pad
-        let w = Int(outer.width + 2 * pad), h = Int(outer.height + 2 * pad)
+        let k = Stage.scale
+        let w = Int(outer.width + 2 * pad) * Int(k), h = Int(outer.height + 2 * pad) * Int(k)
         let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
                             space: CGColorSpace(name: CGColorSpace.sRGB)!,
                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        if Stage.scaled { ctx.scaleBy(x: k, y: k) }
         let rect = CGRect(x: pad, y: pad, width: outer.width, height: outer.height)
         ctx.addPath(Path(roundedRect: rect, cornerRadius: radius, style: .continuous).cgPath)
         ctx.setFillColor(CGColor(gray: 0, alpha: opacity))
         ctx.fillPath()
         let img = CIImage(cgImage: ctx.makeImage()!)
-        // A layer shadow's radius is about 2σ.
-        let blurred = img.clampedToExtent().applyingGaussianBlur(sigma: Double(blurRadius) / 2)
+        // A layer shadow's radius is about 2σ (in output px: × scale).
+        let blurred = img.clampedToExtent().applyingGaussianBlur(sigma: Double(blurRadius) / 2 * Double(k))
             .cropped(to: CGRect(x: 0, y: 0, width: w, height: h))
         let cg = ci.createCGImage(blurred, from: blurred.extent, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)!
         cache[key] = cg
@@ -65,7 +68,7 @@ struct DeviceView<Content: View>: View {
         let o = spec.outer
         ZStack(alignment: .topLeading) {
             if shadow {
-                Image(decorative: ShadowCache.shared.image(outer: o, radius: spec.outerRadius), scale: 1)
+                Image(decorative: ShadowCache.shared.image(outer: o, radius: spec.outerRadius), scale: Stage.scale)
                     .frame(width: o.width + 2 * ShadowCache.pad, height: o.height + 2 * ShadowCache.pad)
                     .offset(x: -ShadowCache.pad, y: -ShadowCache.pad + 48)
             }

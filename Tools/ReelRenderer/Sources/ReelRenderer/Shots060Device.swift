@@ -161,8 +161,9 @@ enum Larger060 {
 }
 
 extension Footage060 {
-    /// `larger(on:)` scaled to `width` px, cached.
+    /// `larger(on:)` scaled to `width` px, cached; `width` in the drawing's points (× the output scale in px, the 4K pass).
     func larger(on: Bool, width: CGFloat) throws -> CGImage {
+        let width = width * Stage.scale
         let key = "\(on)|\(Int(width.rounded()))"
         if let hit = derivedLarger[key] { return hit }
         let img = scale(try larger(on: on), width.rounded() / Larger060.source.width)
@@ -397,8 +398,10 @@ struct Typing060: View {
     // corner on the frame's edge at 36.8 and about 18 px past it by 40.8).
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: CGPoint(x: 1450, y: 520))
+        // The 4K pass: the laid-back keyboard is all vectors, so its rest picture is rasterised by the context (`Flat060.Raster`):
+        // it turns exactly as at 1080p.
         Flat060.moving(group, rest: .scaling(0.92, about: CGPoint(x: 1517, y: 520)), CGAffineTransform.scaling(0.92, about: CGPoint(x: 1517, y: 520))
-            .concatenating(.push(1 + 0.02 * CGFloat(ramp(t, 36.8, 40.8)), about: CGPoint(x: 1030, y: 520))), region: Keys060.region)
+            .concatenating(.push(1 + 0.02 * CGFloat(ramp(t, 36.8, 40.8)), about: CGPoint(x: 1030, y: 520))), region: Keys060.region, raster: .context)
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v))
@@ -640,7 +643,9 @@ struct SillArrow060: View {
             .modifier(Tilt(yaw: 0, pitch: S.keysPitch)).offset(x: K.slabOffset.width, y: K.slabOffset.height + 60)
         let group = ZStack { slab; device }.canvas()
         let push = CGAffineTransform.scaling(1 + 0.02 * CGFloat(ramp(t, S.partB, S.partC)), about: CGPoint(x: 1240, y: 540))
-        picture = Flat060.moving(group, rest: S.keysRest, S.keysRest.concatenating(push), region: CGRect(x: 700, y: -160, width: 1460, height: 1400))
+        // The 4K pass: as S11's group, the laid-back slab rasterised by the context (`Flat060.Raster`).
+        picture = Flat060.moving(group, rest: S.keysRest, S.keysRest.concatenating(push), region: CGRect(x: 700, y: -160, width: 1460, height: 1400),
+                                 raster: .context)
         glow = CGPoint(x: 1545, y: 520)
     }
     let v = ZStack {

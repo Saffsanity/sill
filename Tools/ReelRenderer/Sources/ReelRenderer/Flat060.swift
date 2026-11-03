@@ -17,17 +17,38 @@ import SwiftUI
     private static let renderer: ImageRenderer<AnyView> = {
         let r = ImageRenderer(content: AnyView(EmptyView()))
         r.scale = 1
+        r.proposedSize = ProposedViewSize(Stage.scaled ? Stage.pixelSize : Stage.size)
+        return r
+    }()
+    /// The 4K pass's `.context` rasteriser: the drawing at its own size, into a context scaled to the output.
+    private static let contextRenderer: ImageRenderer<AnyView> = {
+        let r = ImageRenderer(content: AnyView(EmptyView()))
+        r.scale = 1
         r.proposedSize = ProposedViewSize(Stage.size)
         return r
     }()
     private static var context: CGContext?
 
+    /// How a layer's rest picture is rasterised at an output scale (the 4K pass; at scale 1 there is one way).
+    /// - `view` (the default): as the compositor draws a frame there, the drawing scaled by the view (`Stage.rasterised`):
+    ///   every picture and blur at the output resolution, a 3D-turned layer's included, its turn within about 0.6 px of the
+    ///   1080p's (SwiftUI rasterises a turned picture, at either scale, up to 0.75 px off its exact projection: measured,
+    ///   S04's turned screen 0.58 px wider each side at 4K).
+    /// - `context`: the drawing at its own size into a context scaled to the output: SwiftUI turns a layer's vectors exactly
+    ///   as at 1080p (within 0.16 px, against 0.6–0.84 px for `view` on S12's keyboard laid back 50°), but rasterises a
+    ///   turned layer's pictures at the drawing's 1 px a point and enlarges them, so only for a turned layer that is all
+    ///   vectors (S11–S12's keyboard; the iPad standing behind it is unturned, and its pictures are drawn at the output's).
+    enum Raster { case view, context }
+
     /// `view` (a canvas-sized layer) drawn at rest, as the compositor draws a frame (Render.swift: the whole canvas, 1 px
     /// a point, high interpolation, glyphs at their fractional places), and the part of it in `region` (within the canvas).
     /// Only the whole canvas at 1 px a point keeps SwiftUI's turn as the film's (measured: drawn at 2 px a point, or offset
     /// into a frame of another size, the turned iPad's perspective changes and it moves by up to 5 px).
-    static func atRest<V: View>(_ view: V, region: CGRect) -> CGImage? {
-        let w = Stage.width, h = Stage.height
+    /// The 4K pass: at an output scale, the whole canvas as the compositor draws it there (`Stage.rasterised`: the drawing
+    /// at its points, scaled by the view, which keeps the turn within 0.5 px of the 1080p's, its pictures at the output
+    /// resolution), and the region in output pixels: the picture is `region` × scale px.
+    static func atRest<V: View>(_ view: V, region: CGRect, raster: Raster = .view) -> CGImage? {
+        let w = Stage.pixelWidth, h = Stage.pixelHeight
         if context == nil {
             context = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: ExactWarp060.srgb,
                                 bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
@@ -40,13 +61,22 @@ import SwiftUI
         ctx.setShouldSubpixelPositionFonts(true)
         ctx.setAllowsFontSubpixelQuantization(false)
         ctx.setShouldSubpixelQuantizeFonts(false)
-        renderer.content = AnyView(view.frame(width: Stage.size.width, height: Stage.size.height))
-        renderer.render { _, render in render(ctx) }
+        let canvasSized = view.frame(width: Stage.size.width, height: Stage.size.height)
+        if Stage.scaled && raster == .context {
+            ctx.scaleBy(x: Stage.scale, y: Stage.scale)
+            contextRenderer.content = AnyView(canvasSized)
+            contextRenderer.render { _, render in render(ctx) }
+        } else {
+            renderer.content = Stage.scaled ? AnyView(Stage.rasterised(canvasSized)) : AnyView(canvasSized)
+            renderer.render { _, render in render(ctx) }
+        }
         ctx.restoreGState()
-        // The bitmap's rows run top to bottom, as the canvas's y: the region crops as it is.
-        let r = region.integral.intersection(CGRect(x: 0, y: 0, width: w, height: h))
+        // The bitmap's rows run top to bottom, as the canvas's y: the region crops as it is (in output px).
+        let r = region.integral.intersection(CGRect(x: 0, y: 0, width: Stage.width, height: Stage.height))
         guard !r.isEmpty, let full = ctx.makeImage() else { return nil }
-        return full.cropping(to: r)
+        if !Stage.scaled { return full.cropping(to: r) }
+        let k = Stage.scale
+        return full.cropping(to: CGRect(x: r.minX * k, y: r.minY * k, width: r.width * k, height: r.height * k))
     }
 
     /// `view` (a canvas-sized layer, all of it inside `region` when unmoved) moved by `transform` (canvas → canvas) on its
@@ -57,13 +87,18 @@ import SwiftUI
     /// - Keep a turned layer's `rest` the same through its shot: SwiftUI draws a turned layer under another scale up to
     ///   0.7 px elsewhere (S05's push, drawn at rest at 1.14 from its start, hopped 0.68 px on that frame). A flat layer's
     ///   `rest` may change where the move is fast (S08's pull-back, at its fastest).
-    static func moving<V: View>(_ view: V, rest: CGAffineTransform = .identity, _ transform: CGAffineTransform, region: CGRect) -> AnyView {
+    /// `raster`: how the rest picture is rasterised at an output scale (the 4K pass; `Raster`).
+    static func moving<V: View>(_ view: V, rest: CGAffineTransform = .identity, _ transform: CGAffineTransform, region: CGRect,
+                                raster: Raster = .view) -> AnyView {
         let canvas = CGRect(origin: .zero, size: Stage.size)
         let r = region.applying(rest).integral.intersection(canvas)
         let drawn = rest.isIdentity ? AnyView(view) : AnyView(view.frame(width: Stage.size.width, height: Stage.size.height).transformEffect(rest))
-        guard let picture = atRest(drawn, region: r) else { return AnyView(view.transformEffect(transform)) }
-        // The picture's px → the canvas at rest → undo the still part → the whole move.
-        let t = CGAffineTransform(translationX: r.minX, y: r.minY).concatenating(rest.inverted()).concatenating(transform)
+        guard let picture = atRest(drawn, region: r, raster: raster) else { return AnyView(view.transformEffect(transform)) }
+        // The picture's px → the canvas at rest → undo the still part → the whole move. At an output scale the picture's
+        // px are output px: 1/scale of a point each first.
+        let place = Stage.scaled ? CGAffineTransform(scaleX: 1 / Stage.scale, y: 1 / Stage.scale).concatenating(CGAffineTransform(translationX: r.minX, y: r.minY))
+                                 : CGAffineTransform(translationX: r.minX, y: r.minY)
+        let t = place.concatenating(rest.inverted()).concatenating(transform)
         return AnyView(ExactPicture060(image: picture, transform: t))
     }
 

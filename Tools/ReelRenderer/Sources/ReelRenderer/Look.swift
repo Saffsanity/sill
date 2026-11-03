@@ -13,10 +13,40 @@ enum ReelCut: String {
 }
 
 enum Stage {
+    /// The drawing space, in points: every layout number, path, crop and probe of the film is in it, at every output scale.
     static let width = 1920
     static let height = 1080
     static let size = CGSize(width: 1920, height: 1080)
     static let fps = 60
+
+    /// The output scale (the 4K pass, 2026-11-03): output pixels per point of the drawing. 1 (the default) rasterises the
+    /// 1920×1080 drawing at 1920×1080, exactly as before; `REEL_SCALE=2` at 3840×2160 (the 4K film), every command with it
+    /// (render, stills, typecheck, motion, clearance, assets). Only the raster changes: the drawing space, the layout, the
+    /// time map, the copy and the score are the same. Whole numbers only, so a point on a whole point is on a whole pixel.
+    static let scale: CGFloat = {
+        guard let v = ProcessInfo.processInfo.environment["REEL_SCALE"], !v.trimmingCharacters(in: .whitespaces).isEmpty else { return 1 }
+        guard let n = Int(v.trimmingCharacters(in: .whitespaces)), (1...4).contains(n) else {
+            FileHandle.standardError.write(Data("REEL_SCALE must be a whole number from 1 to 4 (2 for 3840×2160), not \"\(v)\"\n".utf8))
+            exit(2)
+        }
+        return CGFloat(n)
+    }()
+    /// Whether the raster is larger than the drawing (`scale` > 1).
+    static var scaled: Bool { scale != 1 }
+    /// The output frame in pixels: 1920×1080 at scale 1, 3840×2160 at 2.
+    static var pixelWidth: Int { width * Int(scale) }
+    static var pixelHeight: Int { height * Int(scale) }
+    static var pixelSize: CGSize { CGSize(width: pixelWidth, height: pixelHeight) }
+    /// A canvas-sized view (the drawing, in points) laid out as at scale 1 and rasterised at `scale`: proposed 1920×1080 and
+    /// scaled about its top-left corner into the pixel frame. A view's own scale, not the context's: drawn this way SwiftUI
+    /// rasterises what it cannot draw as vectors (a blur, a 3D-turned layer's pictures) at the output scale, where a context
+    /// scaled by 2 has it rasterise them at 1 and enlarge them (a turned device's screen at the 1080p's resolution), and
+    /// `rasterizationScale: 2` moves a turned layer by up to 21 px (measured: the 4K pass in the shot list, §13).
+    static func rasterised<V: View>(_ view: V) -> some View {
+        view.frame(width: size.width, height: size.height, alignment: .topLeading)
+            .scaleEffect(scale, anchor: .topLeading)
+            .frame(width: CGFloat(pixelWidth), height: CGFloat(pixelHeight), alignment: .topLeading)
+    }
     /// v3.1: 83.2 s, 4,992 frames (52 bars at 150 BPM; v2 was 47 bars, 75.2 s). 0.6 (v5, Noah's notes on v4.2): 84.8 s, 5,088
     /// frames (53 bars; v4.2 was 76.8 s, 4,608 frames, 48 bars; v4 80.0 s, 50 bars).
     static var frames: Int { ReelCut.current == .r060 ? 5088 : 4992 }

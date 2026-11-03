@@ -58,7 +58,9 @@ final class Compositor {
             .cacheIntermediates: false,
         ])
         renderer.scale = 1
-        renderer.proposedSize = ProposedViewSize(Stage.size)
+        // The 4K pass: at an output scale the content is `Stage.rasterised`, laid out in the drawing's 1920×1080 and drawn
+        // into the pixel frame.
+        renderer.proposedSize = ProposedViewSize(Stage.scaled ? Stage.pixelSize : Stage.size)
         bufA = makeBuffer(); bufB = makeBuffer(); bufC = makeBuffer()
         buildVignette()
         buildGrain()
@@ -66,16 +68,17 @@ final class Compositor {
 
     private func makeBuffer() -> CVPixelBuffer {
         var pb: CVPixelBuffer?
-        CVPixelBufferCreate(nil, Stage.width, Stage.height, kCVPixelFormatType_32BGRA, [
+        CVPixelBufferCreate(nil, Stage.pixelWidth, Stage.pixelHeight, kCVPixelFormatType_32BGRA, [
             kCVPixelBufferIOSurfacePropertiesKey as String: [:],
             kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
         ] as CFDictionary, &pb)
         return pb!
     }
 
-    /// Radial darkening, 0 % at the centre to 18 % at the corners (quadratic).
+    /// Radial darkening, 0 % at the centre to 18 % at the corners (quadratic), over the output frame (the same fall-off, in
+    /// fractions of the frame's half-diagonal, at every output scale).
     private func buildVignette() {
-        let w = Stage.width, h = Stage.height
+        let w = Stage.pixelWidth, h = Stage.pixelHeight
         var px = [UInt8](repeating: 0, count: w * h * 4)
         let cx = Double(w) / 2, cy = Double(h) / 2, R = (cx * cx + cy * cy).squareRoot()
         for y in 0..<h {
@@ -95,9 +98,12 @@ final class Compositor {
 
     /// Eight 512×512 monochrome noise tiles around mid-grey (triangular distribution, ±amplitude/255),
     /// and eight RGB dither tiles (±1.5/255, triangular) stored in float so no step is lost.
+    /// The 4K pass: at an output scale `k` each tile is the same 512×512 values, each a k×k block of pixels (512k px a
+    /// side), so the grain and the dither keep the 1080p's cell size on the drawing (2×2 output px at 4K), not finer.
     private func buildGrain() {
         grainTiles = []
         ditherTiles = []
+        let k = Int(Stage.scale), side = 512 * k
         var drng = SplitMix64(seed: 0xD17E)
         for _ in 0..<8 {
             var px = [Float](repeating: 1, count: 512 * 512 * 4)
@@ -107,8 +113,9 @@ final class Compositor {
                     px[i * 4 + c] = Float(0.5 + (u + v - 1) * 1.5 / 255)
                 }
             }
+            if k > 1 { px = Compositor.blocks(px, side: 512, k: k) }
             let data = Data(bytes: px, count: px.count * 4)
-            ditherTiles.append(CIImage(bitmapData: data, bytesPerRow: 512 * 16, size: CGSize(width: 512, height: 512),
+            ditherTiles.append(CIImage(bitmapData: data, bytesPerRow: side * 16, size: CGSize(width: side, height: side),
                                        format: .RGBAf, colorSpace: nil))
         }
         var rng = SplitMix64(seed: 0x5111)
@@ -120,25 +127,41 @@ final class Compositor {
                 let g = UInt8(max(0, min(255, (128 + n).rounded())))
                 px[i * 4] = g; px[i * 4 + 1] = g; px[i * 4 + 2] = g
             }
+            if k > 1 { px = Compositor.blocks(px, side: 512, k: k) }
             let provider = CGDataProvider(data: Data(px) as CFData)!
-            let cg = CGImage(width: 512, height: 512, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 512 * 4, space: sRGB,
+            let cg = CGImage(width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: side * 4, space: sRGB,
                              bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
                              provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
             grainTiles.append(CIImage(cgImage: cg))
         }
     }
 
-    /// Renders a SwiftUI view into a buffer (cleared to transparent, or black when `opaque`).
+    /// A square RGBA tile of `side` px, each pixel made a k×k block (`side`·k px a side).
+    private static func blocks<T>(_ px: [T], side: Int, k: Int) -> [T] {
+        let out = side * k
+        var big = [T](repeating: px[0], count: out * out * 4)
+        for y in 0..<out {
+            let sy = y / k
+            for x in 0..<out {
+                let s = (sy * side + x / k) * 4, d = (y * out + x) * 4
+                big[d] = px[s]; big[d + 1] = px[s + 1]; big[d + 2] = px[s + 2]; big[d + 3] = px[s + 3]
+            }
+        }
+        return big
+    }
+
+    /// Renders a SwiftUI view into a buffer (cleared to transparent, or black when `opaque`). At an output scale the view is
+    /// `Stage.rasterised` (the drawing at its 1920×1080 points, scaled into the pixel frame).
     func draw(_ view: AnyView, into pb: CVPixelBuffer, opaque: Bool) {
         CVPixelBufferLockBaseAddress(pb, [])
-        let ctx = CGContext(data: CVPixelBufferGetBaseAddress(pb), width: Stage.width, height: Stage.height,
+        let ctx = CGContext(data: CVPixelBufferGetBaseAddress(pb), width: Stage.pixelWidth, height: Stage.pixelHeight,
                             bitsPerComponent: 8, bytesPerRow: CVPixelBufferGetBytesPerRow(pb), space: sRGB,
                             bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)!
         if opaque {
             ctx.setFillColor(CGColor(gray: 0, alpha: 1))
-            ctx.fill(CGRect(origin: .zero, size: Stage.size))
+            ctx.fill(CGRect(origin: .zero, size: Stage.pixelSize))
         } else {
-            ctx.clear(CGRect(origin: .zero, size: Stage.size))
+            ctx.clear(CGRect(origin: .zero, size: Stage.pixelSize))
         }
         ctx.interpolationQuality = .high
         // 0.6.0: glyphs at their exact fractional positions wherever Core Graphics draws text (the reel's type is
@@ -147,7 +170,7 @@ final class Compositor {
         ctx.setShouldSubpixelPositionFonts(true)
         ctx.setAllowsFontSubpixelQuantization(false)
         ctx.setShouldSubpixelQuantizeFonts(false)
-        renderer.content = view
+        renderer.content = Stage.scaled ? AnyView(Stage.rasterised(view)) : view
         renderer.render { _, render in render(ctx) }
         CVPixelBufferUnlockBaseAddress(pb, [])
     }
@@ -155,7 +178,7 @@ final class Compositor {
     /// Composes one frame into `out` (a writer pool buffer).
     func compose(_ layers: FrameLayers, frame index: Int, into out: CVPixelBuffer) {
         let img = composeImage(layers, frame: index)
-        let canvas = CGRect(origin: .zero, size: Stage.size)
+        let canvas = CGRect(origin: .zero, size: Stage.pixelSize)
         ci.render(img, to: out, bounds: canvas, colorSpace: sRGB)
     }
 
@@ -164,7 +187,9 @@ final class Compositor {
         TypeProbe.shared.set { $0.layer = .base }              // typecheck: which layer each glyph is drawn in
         draw(layers.base, into: bufA, opaque: true)
         var img = CIImage(cvPixelBuffer: bufA, options: [.colorSpace: sRGB])
-        let canvas = CGRect(origin: .zero, size: Stage.size)
+        // Core Image works in output pixels: the canvas, the rack's centre and every blur's sigma are the drawing's × scale.
+        let canvas = CGRect(origin: .zero, size: Stage.pixelSize)
+        let k = Stage.scale
         if let (other, w) = layers.mix, w > 0.001 {
             TypeProbe.shared.set { $0.layer = .mix }
             draw(other, into: bufC, opaque: true)
@@ -173,16 +198,17 @@ final class Compositor {
                                                                       kCIInputTimeKey: w])!.outputImage!.cropped(to: canvas)
         }
         if layers.baseBlur > 0.05 {
-            img = img.clampedToExtent().applyingGaussianBlur(sigma: layers.baseBlur).cropped(to: canvas)
+            img = img.clampedToExtent().applyingGaussianBlur(sigma: layers.baseBlur * Double(k)).cropped(to: canvas)
         }
         if let r = layers.rack, r.blur > 0.01 || r.scale < 0.9999 || r.brightness < 0.9999 {
             if abs(r.scale - 1) > 1e-5 {
                 let s = CGFloat(r.scale)
-                img = img.transformed(by: CGAffineTransform(translationX: 960, y: 540).scaledBy(x: s, y: s).translatedBy(x: -960, y: -540))
+                let cx = 960 * k, cy = 540 * k
+                img = img.transformed(by: CGAffineTransform(translationX: cx, y: cy).scaledBy(x: s, y: s).translatedBy(x: -cx, y: -cy))
                     .composited(over: CIImage(color: .black).cropped(to: canvas))
             }
             if r.blur > 0.01 {
-                img = img.clampedToExtent().applyingGaussianBlur(sigma: r.blur).cropped(to: canvas)
+                img = img.clampedToExtent().applyingGaussianBlur(sigma: r.blur * Double(k)).cropped(to: canvas)
             }
             let b = CGFloat(r.brightness)
             img = img.applyingFilter("CIColorMatrix", parameters: [
@@ -198,36 +224,36 @@ final class Compositor {
         if layers.vignette { img = vignette.composited(over: img) }
         if layers.grain {
             var rng = SplitMix64(seed: UInt64(index) &* 0x9E3779B97F4A7C15 &+ 7)
-            let ox = CGFloat(rng.next() % 512), oy = CGFloat(rng.next() % 512)
+            let ox = CGFloat(rng.next() % 512) * k, oy = CGFloat(rng.next() % 512) * k
             let tile = grainTiles[index % 8]
-            // Tile the 512² noise across the canvas from a random offset.
+            // Tile the 512² noise across the canvas from a random offset (in its cells: k px each at an output scale).
             var tiled = CIImage.empty()
             var ty: CGFloat = -oy
-            while ty < CGFloat(Stage.height) {
+            while ty < CGFloat(Stage.pixelHeight) {
                 var tx: CGFloat = -ox
-                while tx < CGFloat(Stage.width) {
+                while tx < CGFloat(Stage.pixelWidth) {
                     tiled = tile.transformed(by: CGAffineTransform(translationX: tx, y: ty)).composited(over: tiled)
-                    tx += 512
+                    tx += 512 * k
                 }
-                ty += 512
+                ty += 512 * k
             }
             tiled = tiled.cropped(to: canvas)
             img = tiled.applyingFilter("CISoftLightBlendMode", parameters: [kCIInputBackgroundImageKey: img]).cropped(to: canvas)
         }
-        if dither, let k = ditherKernel {
+        if dither, let kernel = ditherKernel {
             var rng = SplitMix64(seed: UInt64(index) &* 0xA24BAED4963EE407 &+ 3)
-            let ox = CGFloat(rng.next() % 512), oy = CGFloat(rng.next() % 512)
+            let ox = CGFloat(rng.next() % 512) * k, oy = CGFloat(rng.next() % 512) * k
             var noise = CIImage.empty()
             var ty: CGFloat = -oy
-            while ty < CGFloat(Stage.height) {
+            while ty < CGFloat(Stage.pixelHeight) {
                 var tx: CGFloat = -ox
-                while tx < CGFloat(Stage.width) {
+                while tx < CGFloat(Stage.pixelWidth) {
                     noise = ditherTiles[(index + 3) % 8].transformed(by: CGAffineTransform(translationX: tx, y: ty)).composited(over: noise)
-                    tx += 512
+                    tx += 512 * k
                 }
-                ty += 512
+                ty += 512 * k
             }
-            if let d = k.apply(extent: canvas, arguments: [img, noise.cropped(to: canvas)]) { img = d }
+            if let d = kernel.apply(extent: canvas, arguments: [img, noise.cropped(to: canvas)]) { img = d }
         }
         return img.cropped(to: canvas)
     }
@@ -235,7 +261,7 @@ final class Compositor {
     /// Renders layers to a CGImage (for stills and checks), with the same finish.
     func still(_ layers: FrameLayers, frame index: Int) -> CGImage {
         let img = composeImage(layers, frame: index)
-        return ci.createCGImage(img, from: CGRect(origin: .zero, size: Stage.size), format: .RGBA8, colorSpace: sRGB)!
+        return ci.createCGImage(img, from: CGRect(origin: .zero, size: Stage.pixelSize), format: .RGBA8, colorSpace: sRGB)!
     }
 }
 
@@ -292,8 +318,8 @@ final class VideoWriter {
         if keyframes.isEmpty && !useSession {
             var settings: [String: Any] = [
                 AVVideoCodecKey: AVVideoCodecType.h264,
-                AVVideoWidthKey: Stage.width,
-                AVVideoHeightKey: Stage.height,
+                AVVideoWidthKey: Stage.pixelWidth,
+                AVVideoHeightKey: Stage.pixelHeight,
                 AVVideoColorPropertiesKey: [
                     AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
                     AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
@@ -318,8 +344,8 @@ final class VideoWriter {
             input.expectsMediaDataInRealTime = false
             adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
                 kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-                kCVPixelBufferWidthKey as String: Stage.width,
-                kCVPixelBufferHeightKey as String: Stage.height,
+                kCVPixelBufferWidthKey as String: Stage.pixelWidth,
+                kCVPixelBufferHeightKey as String: Stage.pixelHeight,
                 kCVPixelBufferIOSurfacePropertiesKey as String: [:],
             ])
             writer.add(input)
@@ -334,12 +360,12 @@ final class VideoWriter {
         ] : [:]
         let attributes: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-            kCVPixelBufferWidthKey as String: Stage.width,
-            kCVPixelBufferHeightKey as String: Stage.height,
+            kCVPixelBufferWidthKey as String: Stage.pixelWidth,
+            kCVPixelBufferHeightKey as String: Stage.pixelHeight,
             kCVPixelBufferIOSurfacePropertiesKey as String: [:],
         ]
         var s: VTCompressionSession?
-        let created = VTCompressionSessionCreate(allocator: nil, width: Int32(Stage.width), height: Int32(Stage.height),
+        let created = VTCompressionSessionCreate(allocator: nil, width: Int32(Stage.pixelWidth), height: Int32(Stage.pixelHeight),
                                                  codecType: kCMVideoCodecType_H264, encoderSpecification: spec as CFDictionary,
                                                  imageBufferAttributes: attributes as CFDictionary, compressedDataAllocator: nil,
                                                  outputCallback: nil, refcon: nil, compressionSessionOut: &s)
