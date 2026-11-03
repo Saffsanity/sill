@@ -217,6 +217,21 @@ final class WindowCatalog {
     /// The displays macOS has active now (connected, awake, drawable; Sill's own virtual display too
     /// while it exists), by ID: what the last look's display is judged against before a capture is
     /// built from it (CatalogLook). No ScreenCaptureKit call. Empty when the call fails.
+    /// The displays as `LockPolicy.displaysLine` counts them, read now.
+    nonisolated static func displaysLine() -> String {
+        var count: UInt32 = 0
+        var online: [CGDirectDisplayID] = []
+        if CGGetOnlineDisplayList(0, nil, &count) == .success, count > 0 {
+            online = [CGDirectDisplayID](repeating: 0, count: Int(count))
+            if CGGetOnlineDisplayList(count, &online, &count) != .success { online = [] }
+            online = Array(online.prefix(Int(count)))
+        }
+        let kinds = online.map { StreamCoordinator.displayKind($0) }
+        return LockPolicy.displaysLine(online: online.count, active: activeDisplayIDs().count,
+                                       asleep: online.filter { CGDisplayIsAsleep($0) != 0 }.count,
+                                       sills: kinds.filter { $0 == .sills }.count, standIn: kinds.filter { $0 == .standIn }.count)
+    }
+
     nonisolated static func activeDisplayIDs() -> [UInt32] {
         var count: UInt32 = 0
         guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }

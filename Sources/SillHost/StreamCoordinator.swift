@@ -1052,12 +1052,12 @@ package final class StreamCoordinator {
     }
 
     /// Whether `id` is a Sill virtual display, which the app keeps its own windows off.
-    package static func isSillVirtualDisplay(_ id: CGDirectDisplayID) -> Bool {
+    package nonisolated static func isSillVirtualDisplay(_ id: CGDirectDisplayID) -> Bool {
         CGDisplayVendorNumber(id) == VirtualStage.vendorID
     }
 
     /// A real display, Sill's own virtual one, or macOS's 1x stand-in (HeadlessDesktopPolicy.isStandIn).
-    static func displayKind(_ id: CGDirectDisplayID) -> HeadlessDesktopPolicy.Kind {
+    nonisolated static func displayKind(_ id: CGDirectDisplayID) -> HeadlessDesktopPolicy.Kind {
         if isSillVirtualDisplay(id) { return .sills }
         return HeadlessDesktopPolicy.isStandIn(vendor: CGDisplayVendorNumber(id), model: CGDisplayModelNumber(id)) ? .standIn : .real
     }
