@@ -818,10 +818,13 @@ enum Tiles060 {
     return FrameLayers(base: any(v), vignette: false)
 }
 
-// MARK: S15 · Aa starts at Off (52.8–56.0)
+// MARK: S15 · Use windows without resizing (its builder's 52.8–57.6: v4.2's 52.8–56.0 and a bar; the film's 57.6–62.4)
 
 enum Aa060 {
     static let off = 54.4
+    /// v5: a bar longer; the subline a beat after the statement (53.65, before Off), the footnote after the window is back
+    /// (54.85, 2.75 s before the cut).
+    static let end = 57.6, sub = 53.65, foot = 54.85
     /// The bar's Aa ruler (H1 at 1.25×, H2 at Off), cropped close.
     static let crop = CGRect(x: 1380, y: 0, width: 640, height: 172)
     static let scale: CGFloat = 1.32
@@ -833,14 +836,15 @@ enum Aa060 {
     let name = t >= A.off ? "stills/H2-scaleoff-open" : "stills/H1-scale125-open"
     let m = macro(crop: A.crop, scale: A.scale, center: A.centre, snap: 40, feather: 60, interior: Mini060.source)
     let img = try e.f.crop(name, m.fetchRect, scale: m.scale)
-    // The subline a beat before Aa goes to Off (it says what that does), the footnote with the first statement.
-    var lines = [LineSpec(Copy060.aaOff, .T1s, baseline: 150, snap: 52.85, holdEnd: 56.0)]
-    lines += capped([LineSpec(Copy060.aaSub, .T2, baseline: 214, snap: 54.05, holdEnd: 56.0)])
-    lines.append(LineSpec(Copy060.aaFoot, .T3, baseline: 258, snap: 52.90, holdEnd: 56.0, cascade: false))
+    // v5: the statement, the subline (it says what Off does) before Aa goes to Off, the footnote last.
+    var lines = [LineSpec(Copy060.aaOff, .T1s, baseline: 150, snap: 52.85, holdEnd: A.end)]
+    lines += capped([LineSpec(Copy060.aaSub, .T2, baseline: 214, snap: A.sub, holdEnd: A.end)])
+    lines.append(LineSpec(Copy060.aaFoot, .T3, baseline: 258, snap: A.foot, holdEnd: A.end, cascade: false))
     let v = ZStack {
         Backdrop(glow: 0.05, glowCenter: CGPoint(x: 960, y: 600))
         AaMac060(k: 0.86, center: CGPoint(x: 520, y: 640), t: t, shrink: A.off)
-        Flat060.moving(MacroView(spec: m, image: img) { EmptyView() }, .push(1 + 0.015 * CGFloat(ramp(t, 52.8, 56.0)), about: A.centre),
+        // The push at v4.2's rate (1.5 % in 3.2 s) on to the scene's new end.
+        Flat060.moving(MacroView(spec: m, image: img) { EmptyView() }, .push(1 + 0.0225 * CGFloat(ramp(t, 52.8, A.end)), about: A.centre),
                        region: Flat060.region(m))
         TypeLayer(lines: lines, t: t)
     }.canvas()

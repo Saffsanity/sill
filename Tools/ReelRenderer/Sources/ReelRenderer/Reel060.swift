@@ -74,10 +74,12 @@ enum Copy060 {
     /// don't switch back from list view to tile view." "or list." is written on under the first half, as S10's second half.
     static let tiles = "Every Mac, a tile", orList = "or list."
     static let tilesSub = "Each as you last left it, with support for groups."
-    // S15
-    static let aaOff = "Aa starts at Off."
-    static let aaSub = "Slide back to Off, and the window goes back to its own size."
-    static let aaFoot = "With Sill for Mac 0.6."
+    // S15, v5, Noah: ""Use windows without resizing" then subtext "Enter window mode and slide back to Off with Virtual Desktop
+    // off" then "With Sill for Mac 0.6"": his words and punctuation, but the setting's name, which the app calls Virtual
+    // Display (Settings › Virtual Display on the Mac, its menu item), never "Virtual Desktop".
+    static let aaOff = "Use windows without resizing"
+    static let aaSub = "Enter window mode and slide back to Off with Virtual Display off"
+    static let aaFoot = "With Sill for Mac 0.6"
     // S16
     static let hold = "Hold a thumbnail.", halfSecond = "Controls in half a second."
     static let holdFoot = "Hold to Show Window Controls sets 0.2 to 2 seconds."
