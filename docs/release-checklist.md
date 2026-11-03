@@ -470,6 +470,10 @@ comes later, when the cask qualifies (below).
       with it. The published pages are the newest release's `site/` (0.6.0's since
       2026-11-02, with its markers' words in and the privacy page dated November 2, 2026);
       words marked for a release not out yet stay out of them (part 1 §3).
+- [ ] `site/contribute.html` with it: refresh its "As of" month, its sponsors (the public ones on
+      github.com/sponsors/Saffsanity as a visitor sees them, by the name shown there; the private
+      ones only as "N more who sponsor privately") and its contributors (merged pull requests by
+      others, each with what it brought).
 
 ### The pairing release: Sill for Mac 0.4.0 with Sill for iPhone and iPad 0.5 (2)
 

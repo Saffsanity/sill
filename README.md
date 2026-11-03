@@ -189,7 +189,8 @@ from a nightly Sill for Mac to the release keeps its settings and paired devices
 Sill is free, with no ads, no tracking and no subscription. If it is useful to
 you, a tip through [GitHub Sponsors](https://github.com/sponsors/Saffsanity)
 helps pay for the developer account. A tip unlocks nothing: every feature is
-free.
+free. Who sponsors Sill, who has contributed, and how to join
+them: [getsill.app/contribute](https://getsill.app/contribute).
 
 ## Building from source
 
@@ -245,7 +246,8 @@ Before a pull request, `Tests/checks/run-all.sh` runs the same pure checks as
 CI, in about five minutes and with no device.
 Contributions are accepted under the project's license. Please report a
 security problem privately, as [SECURITY.md](SECURITY.md) says, not in a
-public issue.
+public issue. These rules, with the sponsors and the contributors, are at
+[getsill.app/contribute](https://getsill.app/contribute).
 
 ## License
 

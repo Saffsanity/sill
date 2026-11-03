@@ -7716,7 +7716,10 @@ good.
 - `site/` — the website, for GitHub Pages at the domain in `site/CNAME`:
   `index.html`, `download.html` (links the newest GitHub Release's `Sill.dmg`
   and `Sill.dmg.sha256`; never edited per release), `privacy.html` (the policy
-  App Store Connect and the app link to), `support.html`, `terms.html` (the terms of service: the
+  App Store Connect and the app link to), `support.html`, `contribute.html` (how to sponsor,
+  the public sponsors and the contributors by name, the rules for a pull request; linked from
+  every page's header and footer, README's Tips and Contributing, FUNDING.yml's custom link and
+  the issue chooser; its names refreshed with each release, docs/release-checklist.md), `terms.html` (the terms of service: the
   Apache license, Apple's EULA for the App Store copy, no warranty, no fees;
   linked in every footer), `style.css` (system
   fonts, light and dark) `icon.svg` (a copy of design/AppIcon.svg) and `preview.jpg` (the
