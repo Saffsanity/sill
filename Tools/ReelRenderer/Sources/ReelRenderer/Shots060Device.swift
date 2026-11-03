@@ -645,9 +645,12 @@ struct SillArrow060: View {
     return FrameLayers(base: any(v))
 }
 
-// MARK: S13 · Chinese, Japanese, Korean, dictation (44.0–48.8)
+// MARK: S13 · Chinese, Japanese, Korean, dictation (its builder's 44.0–50.4: v4.2's 44.0–48.8 and a bar; the film's 47.2–53.6)
 
 enum Compose060 {
+    /// v5: the scene runs a bar longer, to 50.4 (its own time), for "Dictation" (46.85, as the dictation listens) and the
+    /// subline after it (47.65).
+    static let end = 50.4, dictationLine = 46.85, sub = 47.65
     /// Each greeting arrives on the Mac 0.05 s before its line snaps; the dictated sentence at 47.3.
     static let arrive = [44.40, 45.20, 46.00, 47.30]
     static let stills = ["stills/F1-cjk1", "stills/F2-cjk2", "stills/F3-cjk3", "stills/F4-cjk4"]
@@ -751,17 +754,18 @@ struct ComposeStrip060: View {
                                overlay: any(ComposeStrip060(size: L.spec.interior, t: t)))
     var lines: [LineSpec] = []
     for i in 0..<3 {
-        var l = leftLine(Copy060.greetings[i], .T1c, baseline: CGFloat(330 + 108 * i), snap: [44.45, 45.25, 46.05][i], end: 48.8)
+        var l = leftLine(Copy060.greetings[i], .T1c, baseline: CGFloat(330 + 108 * i), snap: [44.45, 45.25, 46.05][i], end: C.end)
         l.language = Copy060.greetingLanguages[i]
         lines.append(l)
     }
-    lines.append(leftLine(Copy060.composeSub, .T2, baseline: 638, snap: 46.85, end: 48.8))
-    lines.append(leftLine(Copy060.composeFoot, .T3, baseline: 688, snap: 44.50, end: 48.8, cascade: false))
+    // v5: the three greetings, then "Dictation" under them as the dictation listens, then the subline.
+    lines.append(leftLine(Copy060.dictation, .T1c, baseline: 654, snap: C.dictationLine, end: C.end))
+    lines.append(leftLine(Copy060.composeSub, .T2, baseline: 736, snap: C.sub, end: C.end))
     // A slow push on TextEdit's lines, where the words arrive.
     let about = onCanvas(L.spec, center: L.centre, CGPoint(x: 240 * L.k, y: 480 * L.k))
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: CGPoint(x: 1400, y: 560))
-        Flat060.moving(device, .push(1 + 0.07 * CGFloat(CubicBezier.inOut(ramp(t, 44.0, 48.8))), about: about), region: Flat060.region(L.spec, center: L.centre))
+        Flat060.moving(device, .push(1 + 0.07 * CGFloat(CubicBezier.inOut(ramp(t, 44.0, C.end))), about: about), region: Flat060.region(L.spec, center: L.centre))
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v))

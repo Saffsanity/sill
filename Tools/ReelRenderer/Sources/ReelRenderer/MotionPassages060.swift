@@ -77,7 +77,7 @@ import Foundation
     }
     static func s12Push(_ t: Double) -> Double { Double(Scroll060.uprightPush(t)) }
     static var s13About: CGPoint { onCanvas(Large060.spec, center: Large060.centre, CGPoint(x: 240 * Large060.k, y: 480 * Large060.k)) }
-    static func s13Scale(_ t: Double) -> Double { 1 + 0.07 * CubicBezier.inOut(ramp(t, 44.0, 48.8)) }
+    static func s13Scale(_ t: Double) -> Double { 1 + 0.07 * CubicBezier.inOut(ramp(t, 44.0, Compose060.end)) }
 
     static var all: [MotionPassage] {
         let k = { (t: Double) in openK(t) }
@@ -158,7 +158,7 @@ import Foundation
                 MotionProbe(name: "screen right edge", axis: .x, across: 250...400, guess: scaled(1815.0, at: 37.0, about: 1030, p11), path: basis(p11), window: 4),
                 MotionProbe(name: "iPad top rim", axis: .y, across: 1500...1700, guess: scaled(129.0, at: 37.0, about: 520, p11), path: basis(p11), window: 7, centroid: true),
             ], note: "the iPad and its keyboard (laid back 58°), a 2 % push"),
-            MotionPassage(name: "S13-push", from: Cut060.film(44.05, .s13), to: Cut060.film(48.8, .s13), probes: [
+            MotionPassage(name: "S13-push", from: Cut060.film(44.05, .s13), to: Cut060.film(Compose060.end, .s13), probes: [
                 MotionProbe(name: "iPad top rim", axis: .y, across: 1000...1400, guess: inScene(scaled(102.6, at: 44.0, about: Double(s13About.y), s13Scale)), path: inScene(basis(s13Scale)), window: 7, centroid: true),
                 MotionProbe(name: "iPad left rim", axis: .x, across: 400...700, guess: inScene(scaled(862.6, at: 44.0, about: Double(s13About.x), s13Scale)), path: inScene(basis(s13Scale)), window: 7, centroid: true),
             ], note: "the frontal iPad, a 7 % push (inOut)"),

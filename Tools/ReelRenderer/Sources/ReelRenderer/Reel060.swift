@@ -64,8 +64,10 @@ enum Copy060 {
     // S13
     static let greetings = ["\u{4F60}\u{597D}", "\u{3053}\u{3093}\u{306B}\u{3061}\u{306F}", "\u{C548}\u{B155}\u{D558}\u{C138}\u{C694}"]
     static let greetingLanguages = ["zh-Hans", "ja", "ko"]
+    /// v5, Noah: "It should have the 3 different languages, then "Dictation" and then the subtext of "Compose here. It types
+    /// on your Mac."" (v4.2's footnote, "Chinese, Japanese, Korean and more. Dictation too.", goes).
+    static let dictation = "Dictation"
     static let composeSub = "Compose here. It types on your Mac."
-    static let composeFoot = "Chinese, Japanese, Korean and more. Dictation too."
     // S14
     static let tiles = "Every Mac, a tile."
     /// "Each as you last left it, in groups like Home and Work." on two lines.
