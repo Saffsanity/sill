@@ -162,11 +162,16 @@ import Foundation
                 MotionProbe(name: "iPad top rim", axis: .y, across: 1000...1400, guess: inScene(scaled(102.6, at: 44.0, about: Double(s13About.y), s13Scale)), path: inScene(basis(s13Scale)), window: 7, centroid: true),
                 MotionProbe(name: "iPad left rim", axis: .x, across: 400...700, guess: inScene(scaled(862.6, at: 44.0, about: Double(s13About.x), s13Scale)), path: inScene(basis(s13Scale)), window: 7, centroid: true),
             ], note: "the frontal iPad, a 7 % push (inOut)"),
-            MotionPassage(name: "S14-drift", from: Cut060.film(48.85, .s14s15), to: Cut060.film(50.35, .s14s15), probes: [
-                MotionProbe(name: "tile's edge", axis: .x, across: 290...310,
-                            guess: inScene { t in 1400 + (1404.5 + 6 * 0.2 - 1400 - 6 * (t - 48.8)) * (1 + 0.02 * ramp(t, 48.8, 52.8)) },
+            MotionPassage(name: "S14-drift", from: Cut060.film(48.85, .s14s15), to: Cut060.film(49.55, .s14s15), probes: [
+                MotionProbe(name: "a tile's picture's edge", axis: .x, across: 250...300,
+                            guess: inScene { t in 1400 + (1183.75 - 1400 - 6 * (t - 48.8)) * (1 + 0.02 * ramp(t, 48.8, 52.8)) },
                             path: inScene { t in let s = 1 + 0.02 * ramp(t, 48.8, 52.8); return [s, s * (t - 48.8)] }, window: 6),
-            ], note: "the tiles drifting 6 px a second and pushing in 2 %"),
+            ], note: "the tiles drifting 6 px a second and pushing in 2 % (v5: the column from higher up, at 0.60)"),
+            MotionPassage(name: "S14-list", from: Cut060.film(49.65, .s14s15), to: Cut060.film(52.8, .s14s15), probes: [
+                MotionProbe(name: "a row's icon's edge", axis: .x, across: 240...255,
+                            guess: inScene { t in 1400 + (1183.75 - 1400 - 6 * (t - 48.8)) * (1 + 0.02 * ramp(t, 48.8, 52.8)) },
+                            path: inScene { t in let s = 1 + 0.02 * ramp(t, 48.8, 52.8); return [s, s * (t - 48.8)] }, window: 3),
+            ], note: "v5: the list, after the tap, on the same drift and push to the cut; the icon's flat face is 4 px wide between its edge and its inner rim, so the window is 3 px"),
             MotionPassage(name: "S16-push", from: Cut060.film(57.6, .s16), to: Cut060.film(59.2, .s16), probes: [
                 MotionProbe(name: "thumbnail's edge", axis: .x, across: 380...390, guess: inScene(scaled(670.6, at: 57.5, about: 525.7, p16)), path: inScene(basis(p16)), window: 3),
             ], note: "the bar's thumbnails, a 2 % push"),

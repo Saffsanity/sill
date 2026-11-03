@@ -775,30 +775,44 @@ struct ComposeStrip060: View {
 
 enum Tiles060 {
     /// The connect screen's column on the upright iPad's still (1488×2266 px), shown as v3 showed its connect screen:
-    /// a hard-edged crop on black, drifting.
-    static let crop = CGRect(x: 370, y: 360, width: 750, height: 1530)
-    static let scale: CGFloat = 0.64
+    /// a crop on black, drifting. v5: wider and from higher up, so the tiles-or-list button beside "Connect to a Mac" (its
+    /// glyph's centre (1079.5, 388.5) in N1) is 71 px inside the soft top edge and 70 px inside the right one.
+    static let crop = CGRect(x: 310, y: 270, width: 870, height: 1600)
+    static let scale: CGFloat = 0.60
     static let centre = CGPoint(x: 1400, y: 548)
-    static let toList = 50.4, toTiles = 51.2
+    /// N2 is N1 after one tap of that button (the footage: `-SillStyleToggleAt 2`); the app re-centres the shorter column, 259
+    /// px lower, so the list's crop is 259 px lower too: the title row and the button stay where the finger is.
+    static let listShift: CGFloat = 259
+    static let button = CGPoint(x: 1079.5, y: 388.5)
+    /// v5: the finger taps the button (49.5), the list comes in on the beat (49.6), "or list." 0.05 s after it; the list
+    /// stays to the cut (Noah: "don't switch back from list view to tile view").
+    static let tap = 49.5, toList = 49.6
+    static let orList = 49.65, sub = 50.45
 }
 
 @MainActor func s060_14(_ t: Double, _ e: Env) throws -> FrameLayers {
     let T = Tiles060.self
     // N1x: N1 with Noah’s MacBook Pro’s tile showing QuickTime as S06 left it (Reel060.swift; the review: its picture
     // had been v3.1's Weather frame, with Noah's saved places).
-    let name = t >= T.toList && t < T.toTiles ? "stills/N2-list" : "derived/N1x"
+    let list = t >= T.toList
     // Soft edges all round: the stills' background is the connect screen's near-black, which a hard edge would show.
-    let m = MacroSpec(crop: T.crop, scale: T.scale, center: T.centre, feather: 50, hardEdges: [], interior: CGSize(width: 1488, height: 2266))
-    let img = try e.f.crop(name, m.fetchRect, scale: m.scale)
-    var lines = [leftLine(Copy060.tiles, .T1c, baseline: 430, snap: 48.85, end: 52.8)]
-    lines += capped([leftLine(Copy060.tilesSub[0], .T2, baseline: 512, snap: 49.65, end: 52.8),
-                     leftLine(Copy060.tilesSub[1], .T2, baseline: 554, snap: 49.90, end: 52.8)])
-    lines.append(leftLine(Copy060.tilesFoot, .T3, baseline: 610, snap: 51.25, end: 52.8, cascade: false))
-    // The drift (6 px a second to the left) is a render transform, so it glides (a macro's place is rounded to whole px).
+    let crop = list ? T.crop.offsetBy(dx: 0, dy: T.listShift) : T.crop
+    let m = MacroSpec(crop: crop, scale: T.scale, center: T.centre, feather: 50, hardEdges: [], interior: CGSize(width: 1488, height: 2266))
+    let img = try e.f.crop(list ? "stills/N2-list" : "derived/N1x", m.fetchRect, scale: m.scale)
+    var lines = [leftLine(Copy060.tiles, .T1c, baseline: 420, snap: 48.85, end: 52.8),
+                 leftLine(Copy060.orList, .T1c, baseline: 524, snap: T.orList, end: 52.8)]
+    lines += capped([leftLine(Copy060.tilesSub, .T2, baseline: 606, snap: T.sub, end: 52.8)])
+    // The drift (6 px a second to the left) and the push are render transforms, so they glide (a macro's place is rounded to
+    // whole px); the finger's dot rides with them on the button.
+    let move = CGAffineTransform(translationX: -6 * CGFloat(t - 48.8), y: 0).concatenating(.push(1 + 0.02 * CGFloat(ramp(t, 48.8, 52.8)), about: T.centre))
+    let o = MacroSpec(crop: T.crop, scale: T.scale, center: T.centre, interior: CGSize(width: 1488, height: 2266)).screenOrigin
+    let button = CGPoint(x: o.x + (T.button.x - T.crop.minX) * T.scale, y: o.y + (T.button.y - T.crop.minY) * T.scale).applying(move)
     let v = ZStack {
         Backdrop(glow: 0.05, glowCenter: T.centre)
-        Flat060.moving(MacroView(spec: m, image: img) { EmptyView() }, CGAffineTransform(translationX: -6 * CGFloat(t - 48.8), y: 0)
-            .concatenating(.push(1 + 0.02 * CGFloat(ramp(t, 48.8, 52.8)), about: T.centre)), region: Flat060.region(m))
+        Flat060.moving(MacroView(spec: m, image: img) { EmptyView() }, move, region: Flat060.region(m))
+        if t >= T.tap - 0.08 && t < T.tap + 0.45 {
+            CanvasDot(at: T.tap, point: button, d: 128 * T.scale * CGFloat(1 + 0.02 * ramp(t, 48.8, 52.8)), t: t)
+        }
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v), vignette: false)

@@ -69,10 +69,11 @@ enum Copy060 {
     static let dictation = "Dictation"
     static let composeSub = "Compose here. It types on your Mac."
     // S14
-    static let tiles = "Every Mac, a tile."
-    /// "Each as you last left it, in groups like Home and Work." on two lines.
-    static let tilesSub = ["Each as you last left it,", "in groups like Home and Work."]
-    static let tilesFoot = "Prefer a list? Tap beside Connect to a Mac."
+    /// v5, Noah: ""Every Mac, a tile" then it clicks the list button to switch to the list view "or list." then after the
+    /// the subtext "Each as you last left it, with support for groups." remove the text about "Prefer a list ...", also,
+    /// don't switch back from list view to tile view." "or list." is written on under the first half, as S10's second half.
+    static let tiles = "Every Mac, a tile", orList = "or list."
+    static let tilesSub = "Each as you last left it, with support for groups."
     // S15
     static let aaOff = "Aa starts at Off."
     static let aaSub = "Slide back to Off, and the window goes back to its own size."

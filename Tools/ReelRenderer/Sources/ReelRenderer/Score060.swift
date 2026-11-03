@@ -86,7 +86,7 @@ enum Cues060 {
          Sound060.settingsTap, Sound060.mute, Sound060.unmute, Pinch060.spread.0, Pinch060.move.0, Pinch060.tap, Pinch060.pinchIn.0,
          Larger060.settingsTap, Larger060.switchTap, Larger060.doneTap, Larger060.keyboardTap,
          Scroll060.flingA.start, Scroll060.flingB1.start, Scroll060.flingB2.start, Scroll060.settingsTap, Scroll060.flip, Scroll060.done,
-         Scroll060.flingC.start, Cut060.film(Hold060.down, .s16)]
+         Scroll060.flingC.start, Cut060.film(Tiles060.tap, .s14s15), Cut060.film(Hold060.down, .s16)]
     }
     /// Plucks (sine + its 2nd harmonic, 250 ms) on landings.
     static var plucks: [(Double, Double)] {
@@ -101,7 +101,7 @@ enum Cues060 {
          (Scroll060.flip + 0.02, 88),                           // Reverse Scrolling on
          (Cut060.film(Compose060.arrive[0], .s13), 81), (Cut060.film(Compose060.arrive[1], .s13), 85),
          (Cut060.film(Compose060.arrive[2], .s13), 88), (Cut060.film(Compose060.arrive[3], .s13), 93),
-         (Cut060.film(Tiles060.toList, .s14s15), 88), (Cut060.film(Tiles060.toTiles, .s14s15), 81),
+         (Cut060.film(Tiles060.toList, .s14s15), 88),           // the list (v5: it stays)
          (Cut060.film(Aa060.off, .s14s15), 76),                 // back to Off: the window goes back
          (Cut060.film(Hold060.row, .s16), 81)]
     }
