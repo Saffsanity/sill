@@ -63,6 +63,8 @@ struct HostSettingsPanel: View {
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
+    /// This device's touch mode on the stream picture (`TouchMode`, issue #178): Direct Touch by default.
+    @AppStorage(TouchMode.defaultsKey) private var touchModeRaw = TouchMode.direct.rawValue
     /// This device's hold before a thumbnail's lights (issue #113, ThumbnailHold): 0.5 s unless changed,
     /// read by every bar's thumbnails at once, never sent. Read for its changes; the length through
     /// `ThumbnailHold.seconds(stored:)`, which takes `-Sill.thumbnailHold 0.3`'s string too.
@@ -589,6 +591,18 @@ struct HostSettingsPanel: View {
             }
             Footnote(text: Self.largerPictureFooter)
         }
+        Rows {
+            AdaptiveRow(title: "Touch Mode", since: nil) {
+                Picker("Touch Mode", selection: $touchModeRaw) {
+                    ForEach(TouchMode.allCases, id: \.rawValue) { mode in
+                        Text(mode.title).tag(mode.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+        }
+        Footnote(text: TouchMode.footnote)
         // The clipboard (docs/clipboard-plan.md): only while the Mac says it shares it.
         if ClipboardPolicy.hostTakes(client.hostClipboard) {
             Rows {

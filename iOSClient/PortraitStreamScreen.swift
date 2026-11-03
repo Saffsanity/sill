@@ -168,6 +168,8 @@ struct PortraitStreamScreen: View {
     /// switch on: `PhonePortraitLayout.largerPicture(switchOn:streaming:)`); nil for the phone's usual
     /// arrangement (the switch off, the Desktop or nothing streaming), and in the halves.
     var largerKeyboard: CGFloat? = nil
+    /// This device's touch mode on the stream picture (`TouchMode`, issue #178).
+    @AppStorage(TouchMode.defaultsKey) private var touchModeRaw = TouchMode.direct.rawValue
     /// The picture's pinch zoom (StreamScreen's; StreamZoom): not watched here, only by the picture's
     /// own view, so a pinch redraws nothing else.
     let zoom: StreamZoomModel
@@ -473,6 +475,16 @@ struct PortraitStreamScreen: View {
                          macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
                          readZoom: { [zoom] in zoom.zoom },
                          writeZoom: { [zoom] in zoom.set($0) })
+            if TouchMode.stored(touchModeRaw) == .trackpad {
+                TrackpadView(send: { client.sendInput($0) },
+                             setPointer: { client.setOwnPointer($0, from: .trackpad) },
+                             feed: { let f = client.pointerFeedState; return (f.anchor, f.reseeds) },
+                             onFingers: { client.trackpadFingers($0) },
+                             latched: latched,
+                             onModifiersConsumed: { latched = [] },
+                             verticalSpan: nil,
+                             sendGesture: { client.sendGesture($0, fingers: $1) })
+            }
         }
         .background(Palette.panel)
         // A locked Mac: its cover over the picture (LockedMac), under the link's line.
