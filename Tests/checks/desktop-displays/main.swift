@@ -169,5 +169,22 @@ for _ in 0..<5_000 {
 check(stepped > 1000, "the random arrangements stepped through \(stepped) with two displays or more")
 check(failures == 0, "5,000 random arrangements: P1 to P4 held")
 
+// MARK: The list by name (#273): a hold on the Desktop button lists the displays, and a choice is kind 47
+// with its number. Without one, kind 47 is the next display, as before.
+let three = D.candidates(listed)
+eq(D.chosen(number: 2, current: builtIn.id, in: three)?.id, right.id, "number 2 of three: the right monitor")
+eq(D.chosen(number: 1, current: builtIn.id, in: three)?.id, left.id, "number 1: the left monitor")
+eq(D.chosen(number: nil, current: builtIn.id, in: three)?.id, left.id, "no number: the next display, as the tap (wrapping round)")
+eq(D.chosen(number: 3, current: builtIn.id, in: three)?.id, builtIn.id, "the one it streams: itself")
+check(D.chosen(number: 0, current: builtIn.id, in: three) == nil && D.chosen(number: 4, current: builtIn.id, in: three) == nil
+      && D.chosen(number: -1, current: nil, in: three) == nil, "a number out of range: nothing (the displays changed since the list)")
+check(D.chosen(number: 1, current: builtIn.id, in: [builtIn]) == nil, "with one display: nothing to choose")
+eq(D.menu(names: ["Built-in Retina Display", "DELL U2723QE", "DELL U2723QE"], displays: 3) ?? [],
+   ["Desktop 1: Built-in Retina Display", "Desktop 2: DELL U2723QE", "Desktop 3: DELL U2723QE"],
+   "the hold's items: numbered as the button, so two of one model are told apart")
+check(D.menu(names: ["A", "B"], displays: 3) == nil && D.menu(names: nil, displays: 2) == nil && D.menu(names: ["A"], displays: 1) == nil,
+      "no list: names not one a display, a host without them, one display")
+eq(D.menu(names: ["", "  "], displays: 2) ?? [], ["Desktop 1", "Desktop 2"], "a display without a name: its number alone")
+
 print("\(passes) passed, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

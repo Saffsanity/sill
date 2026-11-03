@@ -51,6 +51,25 @@ public enum DesktopDisplays {
         streamed ? stepped : previous
     }
 
+    /// The display a kind 47 asks for: its `number` from the hold's list (counting from 1), or with
+    /// none, the next after `current` (the tap). Nil for a number out of range (the displays changed
+    /// since the list went out) and with fewer than two.
+    public static func chosen(number: Int?, current: UInt32?, in candidates: [Display]) -> Display? {
+        guard let number else { return next(after: current, in: candidates) }
+        guard candidates.count > 1, (1...candidates.count).contains(number) else { return nil }
+        return candidates[number - 1]
+    }
+
+    /// The hold's items, "Desktop 2: DELL U2723QE", numbered as the button reads so two of one model
+    /// are told apart; nil without a name for each of two displays or more.
+    public static func menu(names: [String]?, displays: Int?) -> [String]? {
+        guard let names, let displays, displays > 1, names.count == displays else { return nil }
+        return names.enumerated().map { i, name in
+            let trimmed = name.trimmingCharacters(in: .whitespaces)
+            return trimmed.isEmpty ? "Desktop \(i + 1)" : "Desktop \(i + 1): \(trimmed)"
+        }
+    }
+
     /// `current`'s place among the candidates, counting from 1.
     public static func number(of current: UInt32?, in candidates: [Display]) -> Int? {
         candidates.firstIndex { $0.id == current }.map { $0 + 1 }

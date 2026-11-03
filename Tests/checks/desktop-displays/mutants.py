@@ -57,6 +57,22 @@ MUTANTS = [
     ("D25 the pointer always moved", ON, ""),
     ("D26 the pointer never moved", ON, "        return nil\n"),
     ("D27 the display's origin, not its centre", "        return CGPoint(x: frame.midX, y: frame.midY)\n", "        return frame.origin\n"),
+    # The hold's list (#273).
+    ("L1 no number: nothing (the tap stops stepping)", "        guard let number else { return next(after: current, in: candidates) }\n",
+     "        guard let number else { return nil }\n"),
+    ("L2 a number past the last taken", "        guard candidates.count > 1, (1...candidates.count).contains(number) else { return nil }\n",
+     "        guard candidates.count > 1, number >= 1 else { return nil }\n"),
+    ("L3 one display chosen", "        guard candidates.count > 1, (1...candidates.count).contains(number) else { return nil }\n",
+     "        guard !candidates.isEmpty, (1...candidates.count).contains(number) else { return nil }\n"),
+    ("L4 counted from 0", "        return candidates[number - 1]\n", "        return candidates[min(number, candidates.count - 1)]\n"),
+    ("L5 names not one a display", "        guard let names, let displays, displays > 1, names.count == displays else { return nil }\n",
+     "        guard let names, let displays, displays > 1 else { return nil }\n"),
+    ("L6 a list for one display", "        guard let names, let displays, displays > 1, names.count == displays else { return nil }\n",
+     "        guard let names, let displays, names.count == displays else { return nil }\n"),
+    ("L7 no number in the item", "            return trimmed.isEmpty ? \"Desktop \\(i + 1)\" : \"Desktop \\(i + 1): \\(trimmed)\"\n",
+     "            return trimmed.isEmpty ? \"Desktop \\(i + 1)\" : trimmed\n"),
+    ("L8 an empty name shown", "            return trimmed.isEmpty ? \"Desktop \\(i + 1)\" : \"Desktop \\(i + 1): \\(trimmed)\"\n",
+     "            return \"Desktop \\(i + 1): \\(trimmed)\"\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

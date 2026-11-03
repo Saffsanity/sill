@@ -420,6 +420,7 @@ var full = WindowList(macName: "Noah’s MacBook Pro", windows: windows, active:
 full.keyRepeat = 1
 full.desktopDisplays = 2
 full.desktopDisplay = 1
+full.desktopDisplayNames = ["Built-in Retina Display", "DELL U2723QE"]
 let unlockedList = P.list(full, reading: .unlocked)
 check(sortedJSON(unlockedList) == sortedJSON(full) && Wire.encode(unlockedList).count == Wire.encode(full).count,
       "unlocked: the list as it is, byte for byte: \(sortedJSON(unlockedList))")

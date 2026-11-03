@@ -75,6 +75,10 @@ public struct WindowList: Codable {
     /// display. Set after the initializer, as `keyRepeat`.
     public var desktopDisplays: Int?
     public var desktopDisplay: Int?
+    /// Their names in that order (NSScreen's, "Built-in Retina Display"), for the Desktop button's hold
+    /// (#273): a choice is kind 47 with its number (DisplayChoice). Nil from hosts before, whose devices
+    /// hold nothing.
+    public var desktopDisplayNames: [String]?
     /// This Mac shows nothing of itself to devices (the host's LockPolicy, docs/locked-mac-plan.md): its
     /// screen is locked, or another user, the login window or nobody is on its console. True, with no
     /// windows and no `clipboard` in the list, while the host streams a placeholder (a black frame) and
@@ -223,5 +227,17 @@ public enum ImageBlob {
         let idStart = d.startIndex + 2
         guard let id = String(data: d.subdata(in: idStart..<(idStart + len)), encoding: .utf8) else { return nil }
         return (id, d.subdata(in: (idStart + len)..<d.endIndex))
+    }
+}
+
+/// Kind 47's payload from the Desktop button's hold (#273): the display's number in the list's
+/// `desktopDisplayNames`. Empty (the tap, and every device before) is the next display.
+public struct DisplayChoice: Codable, Equatable {
+    public var number: Int
+    public init(number: Int) { self.number = number }
+
+    /// The number a kind 47 carries; nil for the next display.
+    public static func number(in payload: Data) -> Int? {
+        payload.isEmpty ? nil : Wire.decode(DisplayChoice.self, from: payload)?.number
     }
 }

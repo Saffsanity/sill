@@ -1170,7 +1170,7 @@ package final class StreamCoordinator {
             // The Desktop button tapped while the Desktop streams (DesktopDisplays). A synthetic host's
             // Desktop is the test pattern, which has no displays.
             guard !synthetic else { return }
-            await nextDesktopDisplay(askedBy: deviceName(connection))
+            await nextDesktopDisplay(askedBy: deviceName(connection), number: DisplayChoice.number(in: message.payload))
         case .windowCommand:
             // The bar's long-press menu: the window's own traffic lights, pressed through
             // Accessibility. The staged window's element is already matched; others are looked up.
@@ -2113,15 +2113,19 @@ package final class StreamCoordinator {
     }
 
     /// Kind 47: the Desktop on the Mac's next display, worked out from a look no older than a pick's, then
-    /// the Mac's pointer to its centre so the device's arrow shows at once. Ignored unless the Desktop
-    /// streams, and mid-switch, so a second quick tap never skips a display.
-    private func nextDesktopDisplay(askedBy who: String) async {
-        guard active == .desktop, !switching else { return }
+    /// the Mac's pointer to its centre so the device's arrow shows at once. Ignored mid-switch, so a
+    /// second quick tap never skips a display, and, for the tap, unless the Desktop streams. A display
+    /// chosen by `number` from the hold's list (#273) shows from a window or nothing streaming too.
+    private func nextDesktopDisplay(askedBy who: String, number: Int? = nil) async {
+        guard number != nil || active == .desktop, !switching else { return }
         await lookAgainIfStale()
         let previous = catalog.desktopDisplayChoice
+        // The one the Desktop already streams on: nothing to restart.
+        if number != nil, active == .desktop,
+           DesktopDisplays.chosen(number: number, current: nil, in: catalog.desktopCandidates)?.id == catalog.display?.displayID { return }
         // Locked during that look (LockPolicy refused kind 47 only as it was read on arrival): no step.
-        guard active == .desktop, !switching, !shuttingDown, !lockReading.locked,
-              let next = catalog.chooseNextDesktopDisplay() else { return }
+        guard number != nil || active == .desktop, !switching, !shuttingDown, !lockReading.locked,
+              let next = catalog.chooseNextDesktopDisplay(number: number) else { return }
         let candidates = catalog.desktopCandidates
         let name = VirtualStage.screen(for: next.id)?.localizedName ?? "display \(next.id)"
         print("Desktop: display \(DesktopDisplays.number(of: next.id, in: candidates) ?? 0) of \(candidates.count) (\(name)), asked by \(who).")
@@ -3390,6 +3394,11 @@ package final class StreamCoordinator {
         if !synthetic, !catalog.desktopCandidates.isEmpty {
             list.desktopDisplays = catalog.desktopCandidates.count
             list.desktopDisplay = DesktopDisplays.number(of: catalog.display?.displayID, in: catalog.desktopCandidates)
+            if catalog.desktopCandidates.count > 1 {
+                list.desktopDisplayNames = catalog.desktopCandidates.map {
+                    SafeText.label(VirtualStage.screen(for: $0.id)?.localizedName ?? "", limit: 64)
+                }
+            }
         }
         // A locked Mac's list: no windows, no clipboard, `locked`, and off console `offConsole`
         // (LockPolicy); unlocked, as it is, byte for byte. Which went last, for `lockChanged`.

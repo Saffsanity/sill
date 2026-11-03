@@ -330,6 +330,19 @@ check(Wire.decode(ReaderBefore.self, from: Wire.encode(displays)).map { $0.macNa
 check(StreamMessageKind.nextDisplay.rawValue == 47 && StreamMessageKind(rawValue: 47) == .nextDisplay, "kind 47 is the next display")
 check(StreamMessageKind(rawValue: 45) == nil && StreamMessageKind(rawValue: 46) == nil,
       "45 and 46 not this build's (open pull requests' microphone, pen and camera)")
+// #273: the displays' names beside them, and kind 47 with a display's number (the hold's list). Additive: a
+// list without names leaves the key out, and kind 47 empty (or from an older device) is the next display.
+var named = displays
+named.desktopDisplayNames = ["Built-in Retina Display", "DELL U2723QE"]
+check(json(named).contains(#""desktopDisplayNames":["Built-in Retina Display","DELL U2723QE"]"#) && !json(displays).contains("Names"),
+      "desktopDisplayNames in the list, and left out when nil: \(json(named))")
+check(Wire.decode(WindowList.self, from: Wire.encode(named))?.desktopDisplayNames == ["Built-in Retina Display", "DELL U2723QE"]
+      && decodedOld?.desktopDisplayNames == nil, "desktopDisplayNames round-trips; an older host's list has none")
+check(String(decoding: Wire.encode(DisplayChoice(number: 2)), as: UTF8.self) == #"{"number":2}"#
+      && Wire.decode(DisplayChoice.self, from: Data(#"{"number":2}"#.utf8))?.number == 2,
+      "kind 47's choice is {\"number\":2}")
+check(DisplayChoice.number(in: Data()) == nil && DisplayChoice.number(in: Data("x".utf8)) == nil
+      && DisplayChoice.number(in: Data(#"{"number":3}"#.utf8)) == 3, "an empty or unreadable kind 47 is the next display")
 let nextMessage = StreamMessage(kind: .nextDisplay, timestamp: 1, isKeyframe: false, payload: Data()).serialized()
 check(StreamMessage.parseHeader(nextMessage).map { $0.kind == .nextDisplay && $0.payloadLength == 0 } == true
       && nextMessage[nextMessage.startIndex] == 47, "kind 47's header parses, its payload empty")

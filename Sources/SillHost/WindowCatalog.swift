@@ -341,10 +341,11 @@ final class WindowCatalog {
         }
     }
 
-    /// Steps the Desktop to the display after the one it streams (kind 47), from the last look: kept by
-    /// its UUID, and `display` at once. Nil with fewer than two displays.
-    func chooseNextDesktopDisplay() -> DesktopDisplays.Display? {
-        guard let next = DesktopDisplays.next(after: display?.displayID, in: desktopCandidates) else { return nil }
+    /// Moves the Desktop to the display kind 47 asks for, from the last look: its `number` in the hold's
+    /// list (#273), or the one after the one it streams: kept by its UUID, and `display` at once. Nil
+    /// with fewer than two displays, or a number out of range.
+    func chooseNextDesktopDisplay(number: Int? = nil) -> DesktopDisplays.Display? {
+        guard let next = DesktopDisplays.chosen(number: number, current: display?.displayID, in: desktopCandidates) else { return nil }
         chooseDesktopDisplay(next.uuid)
         return next
     }

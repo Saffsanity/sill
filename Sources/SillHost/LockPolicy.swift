@@ -418,7 +418,7 @@ enum LockPolicy {
     // MARK: What the devices are shown
 
     /// The window list a device is sent: locked, no windows, no `clipboard` (a device sends no kind 32
-    /// then, and offers no Paste), no `desktopDisplays` or `desktopDisplay` (no kind 47, and nothing of the
+    /// then, and offers no Paste), no `desktopDisplays`, `desktopDisplay` or their names (no kind 47, and nothing of the
     /// Mac's screens), `locked` true and, off console, `offConsole` true; unlocked, `list` as it is, both
     /// left out, so the bytes are what they were before this change.
     static func list(_ list: WindowList, reading r: Reading) -> WindowList {
@@ -428,6 +428,7 @@ enum LockPolicy {
         l.clipboard = nil
         l.desktopDisplays = nil
         l.desktopDisplay = nil
+        l.desktopDisplayNames = nil
         l.locked = true
         l.offConsole = r == .offConsole ? true : nil
         return l

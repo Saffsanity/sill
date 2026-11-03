@@ -629,6 +629,8 @@ struct LayoutHarness: View {
         if let count = parts.first {
             client.hostDesktopDisplays = count
             client.hostDesktopDisplay = parts.count > 1 ? parts[1] : 1
+            client.hostDesktopDisplayNames = Array(["Built-in Retina Display", "DELL U2723QE", "LG HDR 4K", "Sidecar Display"]
+                .prefix(count))
         }
         return client
     }

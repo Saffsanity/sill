@@ -894,6 +894,8 @@ final class StreamClient: ObservableObject {
     /// and its tap's kind 47. Nil from a Mac before them. Cleared with the session.
     @Published var hostDesktopDisplays: Int?
     @Published var hostDesktopDisplay: Int?
+    /// Their names, for the Desktop button's hold (#273); nil from a host before.
+    @Published var hostDesktopDisplayNames: [String]?
     /// The clipboard (kind 32, StreamClient+Clipboard, docs/clipboard-plan.md): what this session's
     /// Mac takes and sends (`WindowList.clipboard`, 1 for text), nil from a Mac before it or with Share
     /// clipboard with devices off. Cleared with the session.
@@ -3558,6 +3560,7 @@ final class StreamClient: ObservableObject {
         hostKeyRepeat = nil
         hostDesktopDisplays = nil
         hostDesktopDisplay = nil
+        hostDesktopDisplayNames = nil
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -3666,6 +3669,14 @@ final class StreamClient: ObservableObject {
         noteAction()
         choicesSent += 1
         sendAfterInput(.nextDisplay, Data())
+    }
+
+    /// The Desktop button's hold (#273): the Desktop on the Mac's display `number` (counting from 1, as
+    /// the list names them), from whatever streams.
+    func chooseDesktopDisplay(_ number: Int) {
+        noteAction()
+        choicesSent += 1
+        sendAfterInput(.nextDisplay, Wire.encode(DisplayChoice(number: number)))
     }
 
     /// Asks the host to stream this source: the person's pick (`select`), or this device's own
@@ -4213,6 +4224,7 @@ final class StreamClient: ObservableObject {
                 self.hostKeyRepeat = list.keyRepeat
                 if self.hostDesktopDisplays != list.desktopDisplays { self.hostDesktopDisplays = list.desktopDisplays }
                 if self.hostDesktopDisplay != list.desktopDisplay { self.hostDesktopDisplay = list.desktopDisplay }
+                if self.hostDesktopDisplayNames != list.desktopDisplayNames { self.hostDesktopDisplayNames = list.desktopDisplayNames }
                 // A locked Mac's list has no windows: the drawer and the panel say why, the cover over the
                 // stream too (LockedMac).
                 if self.lockWhy != why { self.lockWhy = why }
