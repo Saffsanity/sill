@@ -285,8 +285,10 @@ before the lock (19.5).
 `REEL=060` selects the 0.6 update video (v5: 84.8 s, 5,088 frames, 22 shots on 53 bars) in place of v3.1, which stays the
 default and renders as before (`ReelCut`, `Look.swift`). `Stage`, `Timeline.shots`, the score (`Score060.swift`), the
 sheet's tiles and title, `verify`'s silence window (76.20–76.80) and true-black frame (5078), the writer's key frame on the
-first true-black frame (5069, `Cut060.keyframes`), the poster (82.0 s) and the movie's title follow it. Its shot list is
-`design/reel/v5/SHOTLIST-0.6.0.md`.
+first true-black frame (5069, `Cut060.keyframes`), the writer's rate (`Cut060.rate`: since v5's review 40 Mbps asked,
+H.264 High at level 4.2, through the compression session in a part's render too; Apple's software encoder codes at its own
+quality limit below that, about 17.4 Mbps on average, the same pictures as at v3.1's 24 Mbps asked), the poster (82.0 s) and
+the movie's title follow it. Its shot list is `design/reel/v5/SHOTLIST-0.6.0.md`.
 
 This branch (`reel-0-6-0-v5`, from v4.2's 702b585a) is v5: v4.2 with Noah's notes on it (2026-11-03), on the motion
 work's exact paths (The motion). v4.2 was v4 (80.0 s, `design/reel/v4/`) without its tour (S17), with "0.6" for the

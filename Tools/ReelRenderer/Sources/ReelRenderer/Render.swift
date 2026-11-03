@@ -251,7 +251,7 @@ struct SplitMix64 {
     }
 }
 
-// MARK: - Writer (§1: H.264 High, 24 Mbps, keyframe every 120, no reordering, BT.709)
+// MARK: - Writer (§1: H.264 High, 24 Mbps asked, keyframe every 120, no reordering, BT.709; the 0.6 film's rate: Cut060.rate)
 
 final class VideoWriter {
     let writer: AVAssetWriter
@@ -277,11 +277,19 @@ final class VideoWriter {
     private var encodeError: OSStatus = noErr
     private var passthrough: AVAssetWriterInput?
 
-    init(url: URL, keyframes: Set<Int> = []) throws {
+    /// The encoder's rate and level: v3.1's (24 Mbps asked, the level the encoder picks) unless a cut says otherwise.
+    struct Rate {
+        var averageBitRate = 24_000_000
+        var profileLevel: CFString = kVTProfileLevel_H264_High_AutoLevel
+    }
+
+    /// `keyframes` given, or `session` (the 0.6 film, whose `rate` is its own), the compression session's path; else
+    /// v3.1's AVAssetWriter path, at v3.1's rate.
+    init(url: URL, keyframes: Set<Int> = [], session useSession: Bool = false, rate: Rate = Rate()) throws {
         try? FileManager.default.removeItem(at: url)
         writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         print("video encoder: \(VideoWriter.software ? "software H.264 (\(VideoWriter.softwareEncoderID))" : "VideoToolbox default (hardware H.264)")")
-        if keyframes.isEmpty {
+        if keyframes.isEmpty && !useSession {
             var settings: [String: Any] = [
                 AVVideoCodecKey: AVVideoCodecType.h264,
                 AVVideoWidthKey: Stage.width,
@@ -340,9 +348,9 @@ final class VideoWriter {
         }
         let properties: [CFString: Any] = [
             kVTCompressionPropertyKey_RealTime: false,
-            kVTCompressionPropertyKey_ProfileLevel: kVTProfileLevel_H264_High_AutoLevel,
+            kVTCompressionPropertyKey_ProfileLevel: rate.profileLevel,
             kVTCompressionPropertyKey_H264EntropyMode: kVTH264EntropyMode_CABAC,
-            kVTCompressionPropertyKey_AverageBitRate: 24_000_000,
+            kVTCompressionPropertyKey_AverageBitRate: rate.averageBitRate,
             kVTCompressionPropertyKey_MaxKeyFrameInterval: 120,
             kVTCompressionPropertyKey_ExpectedFrameRate: 60,
             kVTCompressionPropertyKey_AllowFrameReordering: false,
@@ -356,7 +364,8 @@ final class VideoWriter {
         }
         VTCompressionSessionPrepareToEncodeFrames(session)
         self.session = session
-        print("video encoder: through a compression session, key frames forced at \(keyframes.sorted().map(String.init).joined(separator: ", "))")
+        print("video encoder: through a compression session, \(rate.averageBitRate / 1_000_000) Mbps asked, \(rate.profileLevel), key frames forced at "
+              + (keyframes.isEmpty ? "none" : keyframes.sorted().map(String.init).joined(separator: ", ")))
     }
 
     func append(frame index: Int, fill: (CVPixelBuffer) -> Void) throws {

@@ -15,6 +15,7 @@
 import AppKit
 import CoreImage
 import SwiftUI
+import VideoToolbox
 
 // MARK: - Copy (storyboard §2–§4; every line traced in its §7)
 
@@ -571,6 +572,14 @@ enum Cut060 {
     /// 84.467 s; frame 5069 and every one after it are pure black), so the encoder leaves no near-black block of the line
     /// behind (VideoWriter; v4.1's adf3f784).
     static let keyframes: [Int] = [5069]
+    /// The encoder's rate. The review of v5 (2026-11-03) asked for 40 Mbps (v4.1–v5 asked 24 and got 17.4 on average), as the
+    /// decoded film moves slow sub-pixel motion in steps of 0.12–0.22 px every 3–4 frames where the rendered frames glide
+    /// (11 of `motion --mp4`'s probes failed). So 40 Mbps asked, at level 4.2 (the encoder fails at 60 and 100 Mbps there,
+    /// error −10380), the key frame interval as before (120). It changes no picture: Apple's software encoder codes at its
+    /// own quality limit before it reaches the rate asked (S04 alone: 4 Mbps asked gives 4.6; 12 gives 12.9; 24 and 40
+    /// give 12.9 and the same bytes but the buffering SEI's two, and 60 and 100, the level left to the encoder, 12.9), so
+    /// the film is still about 17.4 Mbps on average.
+    static let rate = VideoWriter.Rate(averageBitRate: 40_000_000, profileLevel: kVTProfileLevel_H264_High_4_2)
 }
 
 @MainActor

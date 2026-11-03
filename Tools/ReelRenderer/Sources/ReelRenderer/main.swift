@@ -86,7 +86,9 @@ func render(args: [String]) throws {
     // black is exact (the encoder otherwise may leave the glow's last near-black blocks skipped); v3.1 keeps AVAssetWriter's
     // own compression.
     let keyframes = ReelCut.current == .r060 ? Set(Cut060.keyframes.filter { $0 >= first && $0 <= last }.map { $0 - first }) : []
-    let writer = video ? try VideoWriter(url: out, keyframes: keyframes) : nil
+    // v5's review: the 0.6 film through the compression session always (a part of it too), at its own rate (Cut060.rate).
+    let writer = video ? try (ReelCut.current == .r060 ? VideoWriter(url: out, keyframes: keyframes, session: true, rate: Cut060.rate)
+                                                        : VideoWriter(url: out, keyframes: keyframes)) : nil
     // The check draws each frame on compositors of its own: on the film's, which has just drawn the same frame, SwiftUI
     // may reuse a subtree's drawing without running its canvases, and the probe would record none of its glyphs.
     let checker = typecheckEvery.map { _ in TypeChecker(with: Compositor()) }
