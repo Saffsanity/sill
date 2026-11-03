@@ -438,9 +438,9 @@ enum Scroll060 {
     /// 20 canvas px/s in document px (0.505556 still px × ku a document px).
     static var uprightCutoff: Double { 20 / Double(0.505556 * ku) }
     /// Two fingers on the on-screen trackpad (x 28–1459, y 1450–2221), 170 px apart: up, the content up with them
-    /// (natural, as Sill's trackpad scrolls by default), 518 px of the document with its coast.
+    /// (natural, as Sill's trackpad scrolls by default), 506 px of the document with its coast.
     static var flingA: Fling { Fling(start: 41.0, lift: 41.3, v0: 1400, cutoff: uprightCutoff) }
-    /// After Reverse Scrolling: the same stroke, the content the other way, 380 px back.
+    /// After Reverse Scrolling: the same stroke, the content the other way, 356 px back.
     static var flingC: Fling { Fling(start: 45.9, lift: 46.15, v0: 1150, cutoff: uprightCutoff) }
     static func uprightOffset(_ t: Double) -> Double { distance(flingA, t) - distance(flingC, t) }
     static let fingersFrom = [CGPoint(x: 659, y: 1960), CGPoint(x: 829, y: 1960)]
@@ -562,7 +562,7 @@ struct SillArrow060: View {
 
 // SWAP-IN (S12, take E part 2): replace with Noah's clip E if provided at /Users/noah/Downloads/sill-handoff/release-060/captures/take-E.mov (its scrolling parts), in place of the
 // upright iPad's ScrollDoc060 (E3u and longdoc-page) and the keyboard's iPad. Marks: two fingers on the on-screen trackpad
-// 41.0–41.3 (the document up 518 px with its coast); the keyboard 42.4–44.4, fingers 42.8–43.05 and 43.45–43.65; Settings
+// 41.0–41.3 (the document up 506 px with its coast); the keyboard 42.4–44.4, fingers 42.8–43.05 and 43.45–43.65; Settings
 // 44.55, Reverse Scrolling on 45.05, Done 45.45; the fingers again 45.9–46.15, the document the other way.
 @MainActor func s060_12(_ t: Double, _ e: Env) throws -> FrameLayers {
     let S = Scroll060.self
