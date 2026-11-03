@@ -92,10 +92,9 @@ enum Copy060 {
     static let wordmark = "Sill"
     static let freeOpen = "Free. Open source."
     static let appStore = "For iPhone and iPad on the App Store."
-    // NOAH, 2026-11-03 03:15, for v5's end card (S22): add a third line, "getsill.app/contribute", under the
-    // "For iPhone and iPad on the App Store." and "For Mac at getsill.app/download" lines, in their type (T5),
-    // the same spacing, snapping after them (the legal line moves down to make room). Keep it in every build from now on.
     static let download = "For Mac at getsill.app/download"
+    /// v5 (Noah, 2026-11-03): the end card's third line, under the row, in its type (T5), snapping after it.
+    static let contribute = "getsill.app/contribute"
     /// v5: with the App Store badge (Apple's own artwork), the GitHub mark, the Homebrew logo and S18's Intel glyph on screen,
     /// the legal lines credit the Apple logo (Apple's marketing guidelines ask it), Intel Inside, GitHub and Homebrew.
     static let legal = ["Apple, the Apple logo, Mac, iPad and iPhone are trademarks of Apple Inc., registered in the U.S. and other countries. App Store is a service mark of Apple Inc.",

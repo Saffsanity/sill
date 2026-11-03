@@ -31,15 +31,21 @@ enum Close060 {
     /// then the lockup's words.
     static let iconIn = 72.0, glint = 72.1, glintDuration = 0.9
     static let wordmark = 72.65, version = 73.05
-    static let freeOpen = 74.45, appStore = 75.25, download = 75.65, legal = 76.05
+    /// v5: "getsill.app/contribute" 0.4 s after the Mac line, and the legal line 0.4 s after it (it was at 76.05), so the
+    /// card's lines arrive top to bottom on the row's 0.4 s (film 79.25, 80.05, 80.45, 80.85, 81.25).
+    static let freeOpen = 74.45, appStore = 75.25, download = 75.65, contribute = 76.05, legal = 76.45
     /// The card holds +1.2 % from the version's landing to the fade; everything but the line fades 78.8–79.4, the line
     /// retracts by 79.7, then black to 80.0.
     static let holdFrom = 73.35, fade = 78.8, fadeEnd = 79.4, retract = 79.1, retractEnd = 79.7
     static let sillLength: CGFloat = Open060.sillLength
     static let iconCentre = CGPoint(x: 960, y: 340), iconSize: CGFloat = 300
-    // Baselines: the wordmark on the line (650/666), the version, the lines under it, the legal line in title-safe.
+    // Baselines: the wordmark on the line (650/666), the version, the lines under it, the legal line in title-safe (v5: 6 px
+    // lower than v4.2's 978 and 1008, for the contribute line under the row; as far as title-safe allows with 3 px to spare).
     static let baselines = (wordmark: CGFloat(650), version: CGFloat(736), freeOpen: CGFloat(812), appStore: CGFloat(866),
-                            download: CGFloat(900), legal0: CGFloat(978), legal1: CGFloat(1008))
+                            download: CGFloat(900), legal0: CGFloat(984), legal1: CGFloat(1014))
+    /// v5: the contribute line's baseline, centred on x 960 under the row, 34 px under the row's baseline: the pitch of the
+    /// row's two T5 lines when they were stacked (v4.2's 866 and 900, above).
+    static let contributeBaseline: CGFloat = Row.baseline + 34
 
     // MARK: v5: the end card's row (Noah on v4.2 at 1:13: "Add the Download on the App Store icon and the GitHub logo and
     // Homebrew logo and make it look aesthetic")
@@ -181,10 +187,14 @@ struct EndCardMarks060: View {
     if t >= c.download - 1e-6 {
         row.append(LineSpec(Copy060.download, .T5, x: c.row.downloadX, baseline: Close060.Row.baseline, align: .leading, snap: c.download, holdEnd: c.download, cascade: false))
     }
+    // v5: "getsill.app/contribute", centred under the row, with it outside the hold.
+    if t >= c.contribute - 1e-6 {
+        row.append(LineSpec(Copy060.contribute, .T5, baseline: c.contributeBaseline, snap: c.contribute, holdEnd: c.contribute, cascade: false))
+    }
     for i in row.indices { row[i].holdScale = false }
     if t >= c.legal - 1e-6 {
-        // Two lines at 24 px. With the card's +1.2 % hold about y 540 the lower baseline ends at 1013.6 and its
-        // descenders at 1019, inside title-safe (y 1026), as v3's.
+        // Two lines at 24 px. With the card's +1.2 % hold about y 540 the lower baseline ends at 1019.7 and its
+        // descenders at 1023, inside title-safe (y 1026) (v5, for the contribute line: 6 px lower than v4.2's 1013.6 and 1019).
         lines.append(LineSpec(Copy060.legal[0], .T6, baseline: b.legal0, snap: c.legal, holdEnd: c.legal, cascade: false))
         lines.append(LineSpec(Copy060.legal[1], .T6, baseline: b.legal1, snap: c.legal, holdEnd: c.legal, cascade: false))
     }
