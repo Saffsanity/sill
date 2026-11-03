@@ -4,6 +4,9 @@
 # list), the checks and the contact sheet, into $REEL_DIR/v31/out (REEL_DIR defaults to work/ here).
 # REEL=060 makes the 0.6 update video instead (Reel060.swift; v5, Noah's notes on v4.2:
 # design/reel/v5/SHOTLIST-0.6.0.md), into $REEL_DIR/060/out, its poster the end card at 82.0 s (v4.2's 74.0).
+# REEL_SCALE=2 (the 4K pass, 2026-11-03) rasterises the same drawing at 3840×2160 (Look.swift's `Stage.scale`), into
+# $REEL_DIR/060/out-4k (v3.1's into v31/out-4k), at the cut's 4K rate (Cut060.rate: 68 Mbps asked, H.264 High 5.2); the
+# type check measures the 4K frames themselves (its tolerance 0.2 output px, the drawing's 0.1).
 #
 # Everything runs at utility priority with the renderer's software H.264 encoder: Sill.app may be streaming, and
 # it shares the Mac's one hardware video encoder. The script refuses the hardware encoder and the test switches,
@@ -18,6 +21,12 @@ if [ "$REEL" = "060" ]; then
 else
     OUT=$REEL_DIR/v31/out; POSTER_T=75.2; POSTER_PNG=poster/still-S32-75.200.png
 fi
+# The output scale (Look.swift): 1 (1920×1080) unless REEL_SCALE says otherwise; any other scale gets an out dir of its own.
+case "${REEL_SCALE:-1}" in
+    ""|1) ;;
+    2) OUT=$OUT-4k ;;
+    *) OUT=$OUT-x$REEL_SCALE ;;
+esac
 RR=$HERE/.build/release/ReelRenderer
 NO_DEVICE=${NO_DEVICE:-$HERE/../../Scripts/encoder-check/no-device.sh}
 # The renderer takes the hardware encoder whenever SILL_HW_ENCODER is set, to any value (Render.swift), empty included.

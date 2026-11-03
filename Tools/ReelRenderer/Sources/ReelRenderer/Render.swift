@@ -390,8 +390,14 @@ final class VideoWriter {
         }
         VTCompressionSessionPrepareToEncodeFrames(session)
         self.session = session
+        // The 4K pass: the encoder the session itself reports (Apple's software one names itself; never the hardware one).
+        var encoderID: CFString?
+        let idStatus = withUnsafeMutablePointer(to: &encoderID) {
+            VTSessionCopyProperty(session, key: kVTCompressionPropertyKey_EncoderID, allocator: nil, valueOut: $0)
+        }
         print("video encoder: through a compression session, \(rate.averageBitRate / 1_000_000) Mbps asked, \(rate.profileLevel), key frames forced at "
-              + (keyframes.isEmpty ? "none" : keyframes.sorted().map(String.init).joined(separator: ", ")))
+              + (keyframes.isEmpty ? "none" : keyframes.sorted().map(String.init).joined(separator: ", "))
+              + ", \(Stage.pixelWidth)×\(Stage.pixelHeight), the session's encoder: \(idStatus == noErr ? (encoderID.map { $0 as String } ?? "none") : "unknown (\(idStatus))")")
     }
 
     func append(frame index: Int, fill: (CVPixelBuffer) -> Void) throws {

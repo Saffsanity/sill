@@ -596,7 +596,12 @@ enum Cut060 {
     /// own quality limit before it reaches the rate asked (S04 alone: 4 Mbps asked gives 4.6; 12 gives 12.9; 24 and 40
     /// give 12.9 and the same bytes but the buffering SEI's two, and 60 and 100, the level left to the encoder, 12.9), so
     /// the film is still about 17.4 Mbps on average.
-    static let rate = VideoWriter.Rate(averageBitRate: 40_000_000, profileLevel: kVTProfileLevel_H264_High_4_2)
+    static let rate1080 = VideoWriter.Rate(averageBitRate: 40_000_000, profileLevel: kVTProfileLevel_H264_High_4_2)
+    /// The 4K pass (2026-11-03, `REEL_SCALE=2`, 3840×2160): 68 Mbps asked (YouTube's recommendation for 4K at 60 fps) at
+    /// H.264 High level 5.2, the level 3840×2160 at 60 fps needs (5.1 carries it to 30 fps: the session fails every frame at
+    /// 5.1), through the same software encoder and key frames as the 1080p's.
+    static let rate2160 = VideoWriter.Rate(averageBitRate: 68_000_000, profileLevel: kVTProfileLevel_H264_High_5_2)
+    static var rate: VideoWriter.Rate { Stage.scale == 2 ? rate2160 : rate1080 }
 }
 
 @MainActor
