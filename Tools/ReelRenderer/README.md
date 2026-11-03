@@ -4,7 +4,9 @@ The renderer of Sill's sizzle reel. It draws every frame of the film in code (de
 sill line, the glow, a drawn pointer and touch dots) around clips and stills of the real app, writes a 1080p60
 H.264 MP4 with Apple's software encoder, synthesises the score, and checks what it delivers. Apple frameworks
 only: SwiftUI's `ImageRenderer`, Core Graphics, Core Image, AVFoundation and AVAudioEngine. No ffmpeg, no
-Homebrew, no downloaded music or artwork.
+Homebrew, no downloaded music or artwork, but the marks a logo has to be its owner's own drawing of (the 0.6 video's end
+card, v5: Apple's App Store badge from the site's `site/app-store-badge.svg`, the GitHub mark from primer/octicons, MIT,
+and the Homebrew logo from brew.sh, BSD-2-Clause, their paths in `Assets060Marks.swift`; never animated, only faded).
 
 Its last render is v3.1 (2026-09-27): `design/reel/v3/Sill-sizzle-v3.1.mp4`, 83.2 s, 35 shots on a 150 BPM grid.
 `design/reel/` is not in git; its shot lists are the reel's design documents (below).
@@ -69,6 +71,8 @@ The commands (`main.swift` has them all):
 | `render … --typecheck [n]` | the same check on every n-th frame of a render, which then fails (exit 1) if it fails |
 | `typetest [--out f.mp4] [--seconds 3] [--typecheck] [--frames dir] [--no-video]` | two moving lines on the reel's stage, rendered and checked |
 | `assets <dir> [prefix …]`, `assets --report`, `assets --motion` | the 0.6.0 drawn assets as PNG stills at their key times (with `index.png`), the cutaway's numbers, its motion check |
+| `holds [--from s] [--to s] [--every n]` | the reading room of every line, from the builders' own type (v5's rules gated, v4.1's printed beside them); exit 1 if a scene v5 changed misses one |
+| `blacks <movie> <from> <to>` | per frame (60 fps numbers), whether it is a key frame and its luma samples that are not 16 (the black tail) |
 | `motion [--only S04,S07…] [--tsv dir] [--mp4 f.mp4 [--mp4-from s]]` | every moving layer's probes followed frame by frame against its path (The motion); exit 1 if one strays |
 | `motion primitives [name]`, `motion seal [--from s] [--to s]`, `motion profile <t> x\|y <a-b> <a-b>` | how the compositor places each kind of moving layer; S07–S08's lock screen sealed; one frame's luma profile |
 | `clearance [--from s] [--to s] [--every n] [--min px]` | how close each line of type comes to what is drawn beside it (a device, a macro), per shot; exit 1 under `--min` (80 px, v2 S23's rule) |
@@ -274,30 +278,36 @@ brightest pixel within 4 px of it over both sides' levels.
 
 ## The 0.6 update video (`REEL=060`)
 
-`REEL=060` selects the 0.6 update video (76.8 s, 4,608 frames, 22 shots on 48 bars) in place of v3.1, which stays the
+`REEL=060` selects the 0.6 update video (v5: 84.8 s, 5,088 frames, 22 shots on 53 bars) in place of v3.1, which stays the
 default and renders as before (`ReelCut`, `Look.swift`). `Stage`, `Timeline.shots`, the score (`Score060.swift`), the
-sheet's tiles and title, `verify`'s silence window (68.20–68.80) and true-black frame (4598), and the movie's title
-follow it. Its shot list is `design/reel/v4.2/SHOTLIST-0.6.0.md`.
+sheet's tiles and title, `verify`'s silence window (76.20–76.80) and true-black frame (5078), the writer's key frame on the
+first true-black frame (5069, `Cut060.keyframes`), the poster (82.0 s) and the movie's title follow it. Its shot list is
+`design/reel/v5/SHOTLIST-0.6.0.md`.
 
-This branch (`reel-0-6-0-cut`, from v4's ed9c4aca) is v4.2: v4 (80.0 s, 23 shots on 50 bars, `design/reel/v4/`)
-without its tour (S17, 59.2–62.4, "The tour marks what’s new."), Noah's pick of v4 over v4.1 with only the tour gone,
-and two of v4.1's words, also his: the version reads "0.6" (the lockup, the end card, "Needs Sill for Mac 0.6.", "With
-Sill for Mac 0.6.", the cutaway's "Fixed in 0.6.", the movie's title), and S05's footnote reads "Text only. Share
-Clipboard, in Settings, turns it on or off." (at v4's place, size and time). Everything before 59.2 is v4's; S18–S23
-play 3.2 s (two bars) earlier, at 59.2–76.8, their builders handed v4's time and the finish (grain, dither) v4's frame
-index (`Cut060`, `finishFrame`), so every frame from 59.2 on is v4's frame 192 later; the shot builders, their
-constants and `assets` keep v4's times. The score's cues follow the same rule (under 59.2 kept, the tour's gone, from
-v4's 62.4 3.2 s earlier). The `reel-0-6-0` branch's head is the slower v4.1 cut (144.0 s, `design/reel/v4.1/`).
+This branch (`reel-0-6-0-v5`, from v4.2's 702b585a) is v5: v4.2 with Noah's notes on it (2026-11-03), on the motion
+work's exact paths (The motion). v4.2 was v4 (80.0 s, `design/reel/v4/`) without its tour (S17), with "0.6" for the
+version and S05's footnote from v4.1; v4.2's S18–S23 played v4's frames 3.2 s earlier. v5 grows four scenes by whole bars
+where the notes need room, and shifts every scene after each by as much: S12 by two bars (40.8–47.2, reshot upright), S13
+by one (47.2–53.6, "Dictation"), S15 by one (57.6–62.4) and S16 by one (62.4–67.2); Act IV from 67.2. `Cut060` is a table
+of segments: each builder keeps its own time (v4.2's for S01–S16, v4's for S18–S23) and is handed it exactly on frames, and
+the finish (grain, dither) its old frame index, so a scene v5 did not change draws the frame it drew (`finishFrame`); a
+grown builder runs on past its old end, S12 takes the film's time. The score's cues follow their pictures through
+`Cut060.film(_:_:)`, and the chords keep each scene's (the inserted bars hold the chord their scene was under). `holds`
+measures the reading room with v5's rules (a scene's last line at least 2.0 s before its cut, a statement 0.8 s before the
+next, a T2 or T3 line 2.0 s in view; gated for the scenes v5 changed) and prints v4.1's slower rule beside them; `blacks`
+checks the black tail. The `reel-0-6-0` branch's head is the slower v4.1 cut (144.0 s, `design/reel/v4.1/`);
+`reel-0-6-0-cut` is v4.2 (`design/reel/v4.2/`).
 
 | File | What it holds |
 |---|---|
 | `Reel060.swift` | the inputs (`Footage060`: stills, pictures and the stills derived from them), the copy (`Copy060`), the timeline (`Timeline060`) and the sheet's times |
 | `Shots060Open.swift` | S01–S03, the open, and S21–S23, the close |
 | `Shots060Clip.swift` | S04–S08: the clipboard both ways, sound, a locked Mac and unlocking it |
-| `Shots060Device.swift` | S09–S16: pinch, Larger Picture, a keyboard, scrolling, composition, tiles, Aa, the hold (v4's tour, S17, cut) |
+| `Shots060Device.swift` | S09–S16: pinch, Larger Picture (v5: the iPhone's keyboard rising), a keyboard, scrolling (v5: upright, a keyboard's trackpad, Reverse Scrolling), composition, tiles and the list, Aa, the hold (v4's tour, S17, cut) |
+| `Holds060.swift` | `holds`: the reading room, measured |
 | `Shots060Mac.swift` | S18, Intel, and the cutaway, S19–S20, its type on `GlyphCanvas` |
 | `Score060.swift` | the cue sheet and the voices, on v3's engine |
-| `Assets060*.swift` | the drawn assets (the bug, the lock screen, the keyboards, the arcs, the iPhone, the iMac) and `assets` |
+| `Assets060*.swift` | the drawn assets (the bug, the lock screen, the keyboards, the arcs, the iPhone, the iMac) and `assets`; `Assets060Marks.swift` the end card's badge, GitHub mark and Homebrew logo, and S18's Intel glyph (v5) |
 | `Retouch060.swift` | the stills' retouches (Weather's places, the iPhone's "This iPhone" and Aa "1×") and QuickTime Player's window, drawn |
 | `Clearance060.swift` | `clearance`: the words' distance from the devices beside them |
 | `Flat060.swift`, `ExactWarp060.swift` | moving layers and pictures on their exact paths (The motion) |
@@ -333,7 +343,9 @@ A shot list (`design/reel/v3/SHOTLIST-v3.md` is the model) has:
 ## The rules every cut keeps
 
 - **Plain bezels.** No camera, lens, notch or sensor on any drawn device, the app icon's iPad included (Noah,
-  2026-09-26). The devices are drawn, never Apple's artwork.
+  2026-09-26). The devices are drawn, never Apple's artwork (v5's keyboard for iPad is the drawn slab with a trackpad, no
+  logo). The one exception is a mark used as its owner says: Apple's "Download on the App Store" badge, as Apple supplies
+  it, unmodified and unanimated (Assets060Marks.swift, S22).
 - **The type is glyph outlines on its path** (The type): drawn by `GlyphText.swift`, moved only by its layer's
   `transform:`, and checked by `typecheck` (`pipeline.sh` renders with `--typecheck`).
 - **Motion is on its path** (The motion): a shape by a render transform, a picture through `ExactPicture060`, a layer
