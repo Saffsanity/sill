@@ -65,6 +65,35 @@ struct KeyModifiers: OptionSet {
     }
 }
 
+/// The key row's modifier caps (#268). A tap latches a modifier for the next key, character or click,
+/// and that use spends it, as a sticky key does; a finger held on the cap for `holdSeconds` locks it
+/// instead, and a locked modifier stays on through every use until its cap is tapped again, so ⌘ then Z
+/// three times is three undos. `latched` is everything the key row, the keyboard and the pad send with,
+/// locked or not (what every sender already reads); `locked` is the part of it a use does not spend,
+/// always within `latched`. Nothing here is held down on the Mac: a modifier goes out around the key or
+/// click that uses it (`KeyChord`), so a lock left on when the stream ends leaves no key down there.
+enum ModifierLock {
+    /// How long a finger stays on a modifier's cap before it locks ("about one second", #268).
+    static let holdSeconds = 1.0
+
+    /// A tap on `flag`'s cap: a locked modifier is let go; any other latches, or unlatches.
+    static func tapped(_ flag: KeyModifiers, latched: KeyModifiers, locked: KeyModifiers)
+        -> (latched: KeyModifiers, locked: KeyModifiers) {
+        if locked.contains(flag) { return (latched.subtracting(flag), locked.subtracting(flag)) }
+        return (latched.symmetricDifference(flag), locked)
+    }
+
+    /// A finger has stayed on `flag`'s cap for `holdSeconds`: it is locked, latched or not, and a lock
+    /// held again stays one.
+    static func held(_ flag: KeyModifiers, latched: KeyModifiers, locked: KeyModifiers)
+        -> (latched: KeyModifiers, locked: KeyModifiers) {
+        (latched.union(flag), locked.union(flag))
+    }
+
+    /// What is latched once a key, character or click has used it: what is locked.
+    static func spent(locked: KeyModifiers) -> KeyModifiers { locked }
+}
+
 enum KeyChord {
     /// One key with `modifiers`, as a keyboard sends it: each modifier's own key down, the key down
     /// and up carrying them all, each modifier's key up (`modifiersDown`, `modifiersUp`). With nothing

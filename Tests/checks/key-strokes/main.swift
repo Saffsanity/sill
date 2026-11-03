@@ -2639,5 +2639,98 @@ do {
     print("device: \(sessions) sessions (the Mac typing in \(macTyped), \(switched) keyboard switches); checks reported in \(reported[.modifierUps] ?? 0) of 500 on a Mac ignoring modifier keys' ups and \(reported[.keyUps] ?? 0) of 500 ignoring other keys' ups")
 }
 
+// MARK: The key row's modifier caps: a tap latches, a hold locks (ModifierLock, #268)
+//
+// A tap on ⌘, ⇧, ⌃ or ⌥ latches it for the next key, character or click, and that use spends it. A
+// finger held on the cap for a second locks it: every use after carries it, until the cap is tapped
+// again. `latched` is what every sender reads; `locked` is the part a use leaves.
+
+do {
+    let cmd = KeyModifiers.command, sft = KeyModifiers.shift, opt = KeyModifiers.option, ctl = KeyModifiers.control
+    typealias State = (latched: KeyModifiers, locked: KeyModifiers)
+    func tap(_ f: KeyModifiers, _ s: State) -> State { ModifierLock.tapped(f, latched: s.latched, locked: s.locked) }
+    func hold(_ f: KeyModifiers, _ s: State) -> State { ModifierLock.held(f, latched: s.latched, locked: s.locked) }
+    func use(_ s: State) -> State { (ModifierLock.spent(locked: s.locked), s.locked) }
+    func same(_ a: State, _ l: KeyModifiers, _ k: KeyModifiers) -> Bool { a.latched == l && a.locked == k }
+    let none: State = ([], [])
+
+    check(ModifierLock.holdSeconds == 1.0, "a lock takes a finger held for about a second")
+
+    // A tap, as before: latched for the next use, spent by it, and a second tap unlatches.
+    let tapped = tap(cmd, none)
+    check(same(tapped, cmd, []), "a tap on ⌘ latches it, locks nothing: \(tapped)")
+    check(same(use(tapped), [], []), "a use spends a tapped ⌘")
+    check(same(tap(cmd, tapped), [], []), "a second tap on ⌘ unlatches it")
+    check(same(tap(sft, tapped), [cmd, sft], []), "⇧ tapped beside a latched ⌘: both latched, neither locked")
+    check(same(use(tap(sft, tapped)), [], []), "a use spends both")
+
+    // A hold: locked, latched with it, and a use leaves it.
+    let locked = hold(cmd, none)
+    check(same(locked, cmd, cmd), "a hold on ⌘ latches and locks it: \(locked)")
+    check(same(use(locked), cmd, cmd), "a use leaves a locked ⌘ latched")
+    check(same(use(use(use(locked))), cmd, cmd), "three uses (⌘Z three times): still locked")
+    check(same(hold(cmd, locked), cmd, cmd), "a hold on a locked ⌘ keeps it locked")
+    check(same(hold(cmd, tapped), cmd, cmd), "a hold on a ⌘ already latched locks it")
+    check(same(hold(cmd, tap(sft, none)), [cmd, sft], cmd), "a hold on ⌘ beside a latched ⇧ locks the ⌘ alone")
+
+    // A tap on a locked modifier lets it go, whole: not latched for one more use.
+    check(same(tap(cmd, locked), [], []), "a tap on a locked ⌘ lets it go: \(tap(cmd, locked))")
+    check(same(use(tap(cmd, locked)), [], []), "and nothing waits for the next use")
+
+    // Locked and latched modifiers together.
+    let both = tap(sft, locked)
+    check(same(both, [cmd, sft], cmd), "⇧ tapped over a locked ⌘: both latched, only ⌘ locked: \(both)")
+    check(same(use(both), cmd, cmd), "a use spends ⇧ and leaves ⌘ locked")
+    check(same(tap(cmd, both), sft, []), "a tap on the locked ⌘ leaves the latched ⇧")
+    check(same(tap(sft, hold(opt, hold(cmd, none))), [cmd, opt, sft], [cmd, opt]), "two locked, one latched")
+    check(same(use(hold(ctl, hold(sft, hold(opt, hold(cmd, none))))), [cmd, sft, opt, ctl], [cmd, sft, opt, ctl]), "all four locked, a use spends none")
+
+    // What goes out: ⌘Z three times from one hold, each ⌘Z whole; from one tap, the first alone.
+    var s = locked
+    var undone = 0
+    for _ in 0..<3 {
+        if KeyChord.press(uZ, with: s.latched) == KeyChord.press(uZ, with: [.command]) { undone += 1 }
+        s = use(s)
+    }
+    check(undone == 3, "⌘ locked: \(undone) of 3 presses of Z carried ⌘")
+    s = tapped
+    var carried: [Bool] = []
+    for _ in 0..<3 {
+        carried.append(KeyChord.press(uZ, with: s.latched) == KeyChord.press(uZ, with: [.command]))
+        s = use(s)
+    }
+    check(carried == [true, false, false], "⌘ tapped: only the first press of Z carried it: \(carried)")
+
+    // Random sessions: whatever the order of taps, holds and uses, what is locked stays latched, a use
+    // leaves exactly what is locked, and a cap tapped while locked is let go of whole.
+    var rng = Rng(state: 0x10C4_ED01)
+    let flags: [KeyModifiers] = [.shift, .control, .option, .command]
+    var broke = 0, locks = 0, releases = 0, spends = 0
+    for _ in 0..<2000 {
+        var st = none
+        for step in 0..<rng.below(40) + 1 {
+            let f = rng.pick(flags)
+            switch rng.below(3) {
+            case 0:
+                let was = st.locked.contains(f)
+                st = tap(f, st)
+                if was { releases += 1; if st.latched.contains(f) || st.locked.contains(f) { broke += 1 } }
+            case 1:
+                st = hold(f, st)
+                locks += 1
+                if !st.locked.contains(f) || !st.latched.contains(f) { broke += 1 }
+            default:
+                let before = st.locked
+                st = use(st)
+                spends += 1
+                if st.latched != before || st.locked != before { broke += 1 }
+            }
+            if !st.locked.isSubset(of: st.latched) { broke += 1; print("FAIL: step \(step): \(st)") }
+        }
+    }
+    check(broke == 0, "random sessions: \(broke) steps broke a rule")
+    check(locks > 5000 && releases > 1000 && spends > 5000, "the sessions locked \(locks), released \(releases), spent \(spends) times")
+}
+
 print(failures == 0 ? "ok: \(checks) checks" : "FAILED: \(failures) of \(checks) checks")
 exit(failures == 0 ? 0 : 1)

@@ -839,6 +839,18 @@ line in a chat box that sends on Return, and Shift-Tab moves focus back
 as every typed character does. The key row's shift, latched, does the same for
 the on-screen keyboard's return and tab.
 
+The key row's ctrl, opt, cmd and shift latch for the next key, character or
+click, and the use spends them. A finger held on one for a second
+(`ModifierLock.holdSeconds`, #268) locks it instead: it stays on through every
+use until its cap is tapped again, so ⌘ locked and Z typed three times is three
+undos. A small lock marks the cap; where a long press shows a cap large (the
+accessibility text sizes) the lock is VoiceOver's "Lock until released" action
+instead. `latched` is still what every sender reads; `locked` (StreamScreen
+keeps both, so a turn of the device drops neither) is the part of it a use
+leaves, and a spent latch goes back to it. Nothing is held down on the Mac
+meanwhile, since a modifier goes out around the key or click that uses it, so
+a lock left on when the stream ends leaves nothing set there.
+
 A key held down repeats on the Mac as a key of the Mac's own keyboard does
 (#162). Sill for Mac repeats it: an event it posts never repeats by itself (the
 HID system repeats only the keyboards it reads), so a held arrow, Forward Delete
