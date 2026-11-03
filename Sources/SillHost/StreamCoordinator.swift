@@ -193,6 +193,10 @@ package final class StreamCoordinator {
     /// Desktop request can land then (StreamClient's window list handling) and must not override
     /// the user's pick.
     private var pickArrivedWhileSwitching: StreamSource?
+    /// The display the Desktop's capture was built on (`desktopCapture`). When the catalog's Desktop
+    /// display moves off it (the display a device stepped to plugged in again, a new ID after a sleep),
+    /// the Desktop restarts there, so input never lands on a display the devices are not shown.
+    private var desktopStreamDisplay: UInt32?
     /// The client's last stream panel size and text scale. One stream, so with several clients
     /// the last one to report wins. Only ever one a host takes (ViewportBounds); a refused one
     /// leaves it as it was.
@@ -633,6 +637,15 @@ package final class StreamCoordinator {
         }
         catalog.onWindowsChanged = { [weak self] infos in
             Task { @MainActor in await self?.windowsChanged(infos) }
+        }
+        catalog.onDesktopDisplaysChanged = { [weak self] in
+            guard let self else { return }
+            self.broadcastList()
+            // Not the placeholder: a locked Mac's Desktop captures no display (LockPolicy's own path).
+            if self.active == .desktop, !self.switching, !self.synthetic, !self.placeholderStreams,
+               let streams = self.desktopStreamDisplay, streams != self.catalog.display?.displayID {
+                Task { @MainActor in await self.select(.desktop) }
+            }
         }
         catalog.onThumbnail = { [weak self] id, jpeg in
             self?.server.broadcast(StreamMessage(kind: .thumbnail, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
@@ -1153,6 +1166,11 @@ package final class StreamCoordinator {
             // list: the Desktop at a connection's start or once the Mac stopped it, and after a move
             // what it watched, the Desktop or a window).
             await handlePick(source)
+        case .nextDisplay:
+            // The Desktop button tapped while the Desktop streams (DesktopDisplays). A synthetic host's
+            // Desktop is the test pattern, which has no displays.
+            guard !synthetic else { return }
+            await nextDesktopDisplay(askedBy: deviceName(connection), number: DisplayChoice.number(in: message.payload))
         case .windowCommand:
             // The bar's long-press menu: the window's own traffic lights, pressed through
             // Accessibility. The staged window's element is already matched; others are looked up.
@@ -1534,6 +1552,8 @@ package final class StreamCoordinator {
             request = .input(letsGo: injector.releasesWhatItHolds(input, from: id))
         case .selectSource:
             request = .pick(Wire.decode(StreamSource.self, from: message.payload) ?? .none)
+        case .nextDisplay:
+            request = .nextDisplay
         case .launchApp:
             request = .launch
         case .windowCommand:
@@ -1586,7 +1606,7 @@ package final class StreamCoordinator {
             // The test pattern with the TEST ONLY scripted pointer: its own space, where a test
             // client's input moves that pointer (a synthetic host posts nothing).
             if synthetic, pointer.hasTestPointer { return Self.testPatternRect }
-            return catalog.display?.frame
+            return desktopFrame
         case .window(let id):
             // On the virtual display the video is the captured crop, not the whole window: an app
             // that took a larger size than asked overhangs the display and the overhang is not shown.
@@ -1599,6 +1619,12 @@ package final class StreamCoordinator {
             rectCache = (id, rect, now)
             return rect
         }
+    }
+
+    /// The Desktop's rectangle: the display its capture runs on (DesktopDisplays.landing), else the
+    /// catalog's.
+    private var desktopFrame: CGRect? {
+        DesktopDisplays.landing(streaming: desktopStreamDisplay, among: catalog.desktopCandidates) ?? catalog.display?.frame
     }
 
     private static func liveBounds(of id: CGWindowID) -> CGRect? {
@@ -1631,7 +1657,7 @@ package final class StreamCoordinator {
             return nil
         case .desktop:
             if synthetic { return pointer.hasTestPointer ? .rect(Self.testPatternRect) : nil }
-            return catalog.display.map { .rect($0.frame) }
+            return desktopFrame.map { .rect($0) }
         case .window(let id):
             guard !synthetic else { return nil }
             if virtualDisplay, stage.isStaged, let onScreen = stage.captureRectOnScreen { return .rect(onScreen) }
@@ -2086,6 +2112,41 @@ package final class StreamCoordinator {
         // Mid-switch requests (a viewport, the last client leaving) are applied by the defer.
     }
 
+    /// Kind 47: the Desktop on the Mac's next display, worked out from a look no older than a pick's, then
+    /// the Mac's pointer to its centre so the device's arrow shows at once. Ignored mid-switch, so a
+    /// second quick tap never skips a display, and, for the tap, unless the Desktop streams. A display
+    /// chosen by `number` from the hold's list (#273) shows from a window or nothing streaming too.
+    private func nextDesktopDisplay(askedBy who: String, number: Int? = nil) async {
+        guard number != nil || active == .desktop, !switching else { return }
+        await lookAgainIfStale()
+        let previous = catalog.desktopDisplayChoice
+        // The one the Desktop already streams on: nothing to restart.
+        if number != nil, active == .desktop,
+           DesktopDisplays.chosen(number: number, current: nil, in: catalog.desktopCandidates)?.id == catalog.display?.displayID { return }
+        // Locked during that look (LockPolicy refused kind 47 only as it was read on arrival): no step.
+        guard number != nil || active == .desktop, !switching, !shuttingDown, !lockReading.locked,
+              let next = catalog.chooseNextDesktopDisplay(number: number) else { return }
+        let candidates = catalog.desktopCandidates
+        let name = VirtualStage.screen(for: next.id)?.localizedName ?? "display \(next.id)"
+        print("Desktop: display \(DesktopDisplays.number(of: next.id, in: candidates) ?? 0) of \(candidates.count) (\(name)), asked by \(who).")
+        Stats.shared.bump("desk.next")
+        await select(.desktop)
+        guard !shuttingDown else { return }
+        let streamed = active == .desktop
+        catalog.chooseDesktopDisplay(DesktopDisplays.afterStep(stepped: next.uuid, previous: previous, streamed: streamed))
+        if !streamed {
+            // Its start and the one more try failed: the Desktop goes back to the display it was on,
+            // rather than staying black where the button can no longer step from.
+            print("Desktop: \(name) did not stream; back to the display it was on.")
+            await select(.desktop)
+            return
+        }
+        guard catalog.display?.displayID == next.id, !lockReading.locked,
+              let to = DesktopDisplays.pointerTarget(pointer: CGEvent(source: nil)?.location, on: next.frame) else { return }
+        pointer.sillMoved()
+        CGWarpMouseCursorPosition(to)
+    }
+
     /// The catalog's look, before a capture is built from it (CatalogLook): looked at once more when it
     /// is old (the first pick after a spell with no device), there was none, or its display is no
     /// longer among the active ones. Nil when the last look will do, else why it looked again. One
@@ -2125,6 +2186,7 @@ package final class StreamCoordinator {
         // buffer (5120×2880 for a 1x 2560×1440 display: four times the pixels to encode).
         let scale = Self.displayScale(of: displayFilter)
         let pixelScale = CaptureScale.effective(knob: captureScale, displayScale: scale)
+        desktopStreamDisplay = d.displayID
         return (displayFilter, d.displayID, scale, evenPixels(CGFloat(d.width) * pixelScale), evenPixels(CGFloat(d.height) * pixelScale))
     }
 
@@ -3327,6 +3389,17 @@ package final class StreamCoordinator {
         // This host repeats a device's held key (KeyRepeat), so a device sends it a hardware keyboard's
         // characters as keys.
         list.keyRepeat = KeyRepeat.generation
+        // The Desktop's displays (DesktopDisplays): a device's button reads "Desktop 2" and steps with
+        // kind 47. None from a synthetic host, whose Desktop is the test pattern.
+        if !synthetic, !catalog.desktopCandidates.isEmpty {
+            list.desktopDisplays = catalog.desktopCandidates.count
+            list.desktopDisplay = DesktopDisplays.number(of: catalog.display?.displayID, in: catalog.desktopCandidates)
+            if catalog.desktopCandidates.count > 1 {
+                list.desktopDisplayNames = catalog.desktopCandidates.map {
+                    SafeText.label(VirtualStage.screen(for: $0.id)?.localizedName ?? "", limit: 64)
+                }
+            }
+        }
         // A locked Mac's list: no windows, no clipboard, `locked`, and off console `offConsole`
         // (LockPolicy); unlocked, as it is, byte for byte. Which went last, for `lockChanged`.
         let reading = lockReading

@@ -224,5 +224,9 @@ M = [
     ("LockedMac: the line's words", S, "is locked. Unlock it to see its windows.\"", "is locked.\""),
     ("LockedMac: no name for an empty one", S, '    private static func name(_ mac: String) -> String { mac.isEmpty ? "The Mac" : mac }',
      "    private static func name(_ mac: String) -> String { mac }"),
+    # The Desktop's displays (issue #91).
+    ("decide: the next display taken while locked", F, "        case .nextDisplay: return .refuse(.pick)", "        case .nextDisplay: return .take"),
+    ("list: a locked list keeps the displays", F, "        l.desktopDisplays = nil\n", ""),
+    ("list: a locked list keeps which display", F, "        l.desktopDisplay = nil\n", ""),
 ]
 sys.exit(0 if module.mutate("lock-policy", M, sys.argv[1]) else 1)
