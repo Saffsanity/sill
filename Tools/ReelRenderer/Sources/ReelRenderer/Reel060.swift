@@ -299,6 +299,14 @@ enum Mini060 {
                 Footage060.put(c, p, in: CGRect(x: 0, y: 0, width: p.width, height: p.height))
                 c.setFillColor(CGColor(gray: 1, alpha: 1)); c.fill(CGRect(x: 150, y: 214, width: 196, height: 112))
             }
+        case "E2sheet":
+            // v5 (S11): the Save sheet and its shadow alone, from E2 over E1 (the same picture outside Keys060.sheetRegion):
+            // inside the sheet's rounded rect its own pixels, opaque; outside it the shadow, black at the alpha that darkens E1
+            // to E2; on its anti-aliased rim the two, by the rim's coverage. So the sheet slides with its shadow and nothing of
+            // the window behind it (v4's rectangular crop slid a box of the window with it, which its 10 % dim hid).
+            return Footage060.matte(over: try image("stills/E1-te-typed"), composite: try image("stills/E2-te-save"),
+                                    region: Keys060.sheetRegion, box: picRect(Keys060.sheetBox),
+                                    radius: 28 * Mini060.picture.width / 2880, srgb: srgb)
         case "D1x", "D2x", "D3x", "D2kx", "D3kx":
             // S10's iPhone stills with Aa at 1× (Retouch060.iphone); v5's D2k and D3k with row 1's Keyboard button lit.
             let src = ["D1x": "stills/D1-iphone-standard", "D2x": "stills/D2-iphone-larger-1610", "D3x": "stills/D3-iphone-larger-fitted",
@@ -367,6 +375,57 @@ enum Mini060 {
         default:
             throw NSError(domain: "Reel060", code: 3, userInfo: [NSLocalizedDescriptionKey: "no derived still \(name)"])
         }
+    }
+
+    /// An overlay (an opaque rounded box and its black shadow) cut out of `composite` where it differs from `under`, in
+    /// `region` (px of both): premultiplied RGBA of `region`'s size. In `box` (corners `radius`) the composite's own colour;
+    /// outside it black at the alpha that darkens `under` to `composite` (by luminance); on the box's rim, its coverage (4×4
+    /// samples) of the box's colour and the rest of the shadow.
+    static func matte(over under: CGImage, composite: CGImage, region: CGRect, box: CGRect, radius: CGFloat, srgb: CGColorSpace) -> CGImage {
+        let W = under.width, H = under.height
+        func pixels(_ img: CGImage) -> [UInt8] {
+            var buf = [UInt8](repeating: 0, count: W * H * 4)
+            let c = CGContext(data: &buf, width: W, height: H, bitsPerComponent: 8, bytesPerRow: W * 4, space: srgb,
+                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            c.draw(img, in: CGRect(x: 0, y: 0, width: W, height: H))
+            return buf
+        }
+        let a = pixels(under), b = pixels(composite)
+        let r = region.integral
+        let w = Int(r.width), h = Int(r.height), x0 = Int(r.minX), y0 = Int(r.minY)
+        func lum(_ p: [UInt8], _ o: Int) -> Double { (0.2126 * Double(p[o]) + 0.7152 * Double(p[o + 1]) + 0.0722 * Double(p[o + 2])) / 255 }
+        func inside(_ x: Double, _ y: Double) -> Bool {
+            let rx = Double(radius), bx = box
+            guard x >= Double(bx.minX), x <= Double(bx.maxX), y >= Double(bx.minY), y <= Double(bx.maxY) else { return false }
+            let cx = min(max(x, Double(bx.minX) + rx), Double(bx.maxX) - rx), cy = min(max(y, Double(bx.minY) + rx), Double(bx.maxY) - rx)
+            return (x - cx) * (x - cx) + (y - cy) * (y - cy) <= rx * rx
+        }
+        // The box's own colour: the median luminance pixel of a patch inside it, away from its controls.
+        let patch = (0..<25).map { i -> Int in ((Int(box.minY) + 30 + i / 5) * W + Int(box.minX) + 30 + i % 5) * 4 }
+        let s = patch.sorted { lum(b, $0) < lum(b, $1) }[12]
+        let sheet = (Double(b[s]), Double(b[s + 1]), Double(b[s + 2])), sheetLum = lum(b, s)
+        var out = [UInt8](repeating: 0, count: w * h * 4)
+        for y in 0..<h {
+            for x in 0..<w {
+                let X = x0 + x, Y = y0 + y, o = (Y * W + X) * 4, q = (y * w + x) * 4
+                var cov = 0.0
+                for j in 0..<4 { for i in 0..<4 where inside(Double(X) + (Double(i) + 0.5) / 4, Double(Y) + (Double(j) + 0.5) / 4) { cov += 1 / 16 } }
+                if cov >= 1 {
+                    out[q] = b[o]; out[q + 1] = b[o + 1]; out[q + 2] = b[o + 2]; out[q + 3] = 255
+                    continue
+                }
+                let lu = max(lum(a, o), 1e-3), lc = lum(b, o)
+                // What of the shadow's darkening is left once the box's share is taken out.
+                let keep = cov > 0 ? (lc - cov * sheetLum) / ((1 - cov) * lu) : lc / lu
+                let shadow = min(max(1 - keep, 0), 1)
+                let alpha = cov + (1 - cov) * shadow
+                out[q] = UInt8((cov * sheet.0).rounded()); out[q + 1] = UInt8((cov * sheet.1).rounded()); out[q + 2] = UInt8((cov * sheet.2).rounded())
+                out[q + 3] = UInt8((alpha * 255).rounded())
+            }
+        }
+        let ctx = CGContext(data: &out, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: srgb,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        return ctx.makeImage()!
     }
 
     /// B5-muted's patch: B3's rows moved down by `b5Shift` into the panel's scrolling part below B4's Mute row.

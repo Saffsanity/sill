@@ -293,8 +293,13 @@ enum Keys060 {
         return (0...typed.count).map { 120 + CTLineGetOffsetForStringIndex(line, $0, nil) }
     }()
     static func typedCount(_ t: Double) -> Int { strokes.filter { t >= $0 + 0.03 }.count }
-    /// The Save sheet in the picture's px (tools/draw.swift: 1120×560 at (880, 110), its shadow under it).
-    static let sheet = CGRect(x: 850, y: 110, width: 1180, height: 620)
+    /// The Save sheet in the picture's px: v5's te-save (tools/draw.swift, redrawn for Noah's note on v4.2 at 0:39, "The save
+    /// as dialog is cut off on the right side"): 1120×560 at (880, 104), centred on the window and hanging from the bottom of
+    /// its title bar, its corners 28 px, its shadow under it; the window behind it not dimmed.
+    static let sheetBox = CGRect(x: 880, y: 104, width: 1120, height: 560)
+    /// Where E2 differs from E1 (the sheet and its shadow), in the still's px: x 705–1560, y 262–697 (the footage's
+    /// measurement), the matte `derived/E2sheet` covers.
+    static let sheetRegion = CGRect(x: 705, y: 262, width: 856, height: 436)
     static func sheetDown(_ t: Double) -> Double {
         if t < sheetIn { return 0 }
         if t < esc { return ease(t, sheetIn, 0.25, .appleOut) }
@@ -324,7 +329,7 @@ struct Typing060: View {
         let caret = scaledRect(picRect(CGRect(x: edge + 4, y: 256, width: 4, height: 82)), k)
         let down = Keys060.sheetDown(t)
         let content = scaledRect(picRect(CGRect(x: 0, y: 104, width: 2880, height: 1696)), k)
-        let s = scaledRect(picRect(Keys060.sheet), k)
+        let s = scaledRect(Keys060.sheetRegion, k)
         return ZStack(alignment: .topLeading) {
             if n > 0 {
                 Image(decorative: e1, scale: 1).resizable().interpolation(.high).frame(width: size.width, height: size.height)
@@ -334,8 +339,9 @@ struct Typing060: View {
                 Path(caret).fill(Color(hex: 0x1D1D1F))
             }
             if down > 0.001 {
-                Path(content).fill(Color.black.opacity(0.10 * down))
-                // The sheet sliding down on its exact path (ExactPicture060).
+                // v5: the sheet and its shadow alone (the matte), sliding down from under the title bar on its exact path
+                // (ExactPicture060), the window behind it as it is (macOS dims nothing behind a sheet; v4's 10 % dim and
+                // its crop's box are gone with the new E2).
                 ExactPicture060(image: sheet, transform: placing(sheet, in: s).concatenating(CGAffineTransform(translationX: 0, y: -s.height * CGFloat(1 - down))), size: size)
                     .mask(Path(content).fill(Color.white).frame(width: size.width, height: size.height))
             }
@@ -369,7 +375,7 @@ struct Typing060: View {
     let size = K.spec.interior
     let w = size.width * 1.03
     let screen = Typing060(e0: try e.f.scaled("stills/E0-te-empty", width: w), e1: try e.f.scaled("stills/E1-te-typed", width: w),
-                           sheet: try e.f.crop("stills/E2-te-save", picRect(K.sheet), scale: K.k * 1.03), size: size, t: t)
+                           sheet: try e.f.crop("derived/E2sheet", CGRect(origin: .zero, size: K.sheetRegion.size), scale: K.k * 1.03), size: size, t: t)
     let group = try keysGroup(e, t: t, screen: any(screen), base: "stills/E0-te-empty", fetch: 1.03,
                               escPress: KeyPress060(down: K.esc, up: K.esc + 0.3), pressed: K.pressed)
     var esc = LineSpec(words: Copy060.esc, .T4, x: 128, baseline: 588, align: .leading, snap: 39.25, holdEnd: 40.8)
