@@ -29,7 +29,9 @@ final class TypeChecker {
         let fit: Double                 // residual energy over the glyph's own, after the fit
     }
 
-    var threshold = 0.1
+    /// The tolerance in output px: 0.1 px of the drawing, so 0.2 at an output scale of 2 (the 4K pass measures the 4K
+    /// frames themselves, in their own pixels).
+    var threshold = 0.1 * Double(Stage.scale)
     var verbose = false
     /// Every measurement, one per line (frame, glyph, dx, dy, gain, fit), when set (`--dump`).
     var dump: FileHandle?
@@ -55,7 +57,9 @@ final class TypeChecker {
         self.without = Compositor()
     }
 
-    private static let W = Stage.width, H = Stage.height
+    /// The frames are measured at the output resolution (the 4K pass: 3840×2160), the glyphs' paths taken there.
+    private static let W = Stage.pixelWidth, H = Stage.pixelHeight
+    private static let k = Stage.scale
 
     /// Luma (Rec. 709 weights on the encoded sRGB values, 0…1) of a frame rendered without its finish, top row
     /// first. Compositing happens on encoded values in both Core Graphics and Core Image here, so a glyph of
@@ -122,6 +126,7 @@ final class TypeChecker {
         // the clear ones are judged. A blurred glyph can't be modelled: its halo is fenced off instead.
         var targets: [Target] = []
         var halos: [CGRect] = []
+        let k = TypeChecker.k
         for g in glyphs {
             var t = g.transform
             var blur = Double(g.blur)
@@ -132,10 +137,12 @@ final class TypeChecker {
                 }
                 if layers.baseBlur > 0.05 { blur = (blur * blur + layers.baseBlur * layers.baseBlur).squareRoot() }
             }
+            // The drawing's points → the output px it is measured in (× scale; blurs stay in the drawing's points).
+            if Stage.scaled { t = t.concatenating(CGAffineTransform(scaleX: k, y: k)) }
             let b = g.outline.boundingBoxOfPath.applying(t)
             if blur > 0.5 {
                 skipped["blurred more than 0.5 px", default: 0] += 1
-                halos.append(b.insetBy(dx: -CGFloat(3 * blur) - 2, dy: -CGFloat(3 * blur) - 2))
+                halos.append(b.insetBy(dx: (-CGFloat(3 * blur) - 2) * k, dy: (-CGFloat(3 * blur) - 2) * k))
                 continue
             }
             let x0 = Int(floor(b.minX)) - 4, y0 = Int(floor(b.minY)) - 4
@@ -358,8 +365,8 @@ final class TypeChecker {
                 guard g > 0.2 else { done[k] = true; targets[i].unmeasured = "faint in the frame (a parent's opacity, a mask, a cover)"; continue }
                 let ddx = x[K * k + 3] / g, ddy = x[K * k + 4] / g
                 let step = (ddx * ddx + ddy * ddy).squareRoot()
-                // A step over 1.5 px means the fit has lost the glyph.
-                if step > 1.5 { done[k] = true; targets[i].unmeasured = "the fit lost it (a step over 1.5 px)"; continue }
+                // A step over 1.5 px (of the drawing: × scale in output px) means the fit has lost the glyph.
+                if step > 1.5 * Double(TypeChecker.k) { done[k] = true; targets[i].unmeasured = "the fit lost it (a step over 1.5 px)"; continue }
                 targets[i].shift.dx += CGFloat(ddx)
                 targets[i].shift.dy += CGFloat(ddy)
                 targets[i].gain = g
@@ -446,6 +453,10 @@ final class TypeChecker {
         let sorted = offs.sorted()
         func pct(_ q: Double) -> Double { sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count - 1) * q))] }
         out += String(format: "typecheck: %d frames, %d glyph measurements, threshold %.2f px\n", frames, measured, threshold)
+        if Stage.scaled {
+            out += String(format: "  measured at the output scale %.0f (%d×%d): every px here is an output pixel; the threshold is the drawing's 0.10 px × %.0f\n",
+                          Stage.scale, Stage.pixelWidth, Stage.pixelHeight, Stage.scale)
+        }
         if !sorted.isEmpty {
             out += String(format: "  offset from the path: median %.4f px, 99th percentile %.4f px, worst %.4f px", pct(0.5), pct(0.99), sorted.last!)
             if let w = worst { out += String(format: " (frame %d, %@, glyph %d: dx %+.3f dy %+.3f)", w.frame, w.tag, w.order, w.dx, w.dy) }

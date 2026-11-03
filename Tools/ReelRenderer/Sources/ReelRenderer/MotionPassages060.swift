@@ -234,6 +234,9 @@ import Foundation
     var worst: [Side: Double] = [:], sum: [Side: Double] = [:], count: [Side: Int] = [:], over3: [Side: Int] = [:]
     var worstFrame: [Side: Int] = [:]
     print("seal: \(movie.map { "decoded from \($0.lastPathComponent)" } ?? "rendered without the finish"), \(String(format: "%.2f–%.2f s", from, to))")
+    // The 4K pass: at an output scale every place, window and band below is read in output px (the drawing's × k).
+    let k = Double(Stage.scale), ki = Int(Stage.scale)
+    if Stage.scaled { print(String(format: "seal at the output scale %.0f: places, windows and bands × %.0f (output px)", k, k)) }
     for f in stride(from: f0, through: f1, by: every) {
         let t = Double(f) / 60
         let lum = try frames.luma(f)
@@ -241,7 +244,7 @@ import Foundation
         let s07 = CGAffineTransform.scaling(1 + 0.04 * CGFloat(ramp(t, 19.2, 24.0)), about: MotionPassages060.s07About)
         let s08 = CGAffineTransform.scaling(CGFloat(MotionPassages060.s08Scale(t)), about: Lock060.anchor)
         let m = t < 24.0 ? s07 : s08
-        let a = tl.applying(m), b = br.applying(m)
+        let a = tl.applying(m).applying(CGAffineTransform(scaleX: k, y: k)), b = br.applying(m).applying(CGAffineTransform(scaleX: k, y: k))
         let mid = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2), half = CGSize(width: (b.x - a.x) / 2, height: (b.y - a.y) / 2)
         for side in Side.allCases {
             let horizontal = side == .right || side == .left            // the edge runs down: rows across it
@@ -261,28 +264,30 @@ import Foundation
                 return horizontal ? lum.at(x, along) : lum.at(along, x)
             }
             var prof: [Double] = []
-            let start = guess - 16 * sign
-            for k in 0..<33 { let c = start + Double(k) * sign; prof.append(lines.map { P($0, c) }.reduce(0, +) / Double(lines.count)) }
+            let start = guess - 16 * k * sign
+            let n = 32 * ki + 1, ends = 3 * ki
+            for j in 0..<n { let c = start + Double(j) * sign; prof.append(lines.map { P($0, c) }.reduce(0, +) / Double(lines.count)) }
             guard !prof.contains(where: { $0.isNaN }) else { continue }
-            let inside = (prof[0] + prof[1] + prof[2]) / 3, outside = (prof[30] + prof[31] + prof[32]) / 3
+            let inside = prof[0..<ends].reduce(0, +) / Double(ends), outside = prof[(n - ends)..<n].reduce(0, +) / Double(ends)
             // Where the two levels are too close to find the edge by them (the top: the lock screen's dark blue against the
             // bar's grey), it is where the iPad's move puts it, and the band round it is wider.
-            var edge = guess, band = 6
+            var edge = guess, band = 6 * ki
             if abs(inside - outside) > 3 {
                 var e = 0.0
                 for v in prof { e += 1 - (v - inside) / (outside - inside) }       // area: px from the start to the edge
                 edge = start + sign * (e - 0.5)
                 pos[side] = edge
-                band = 4
+                band = 4 * ki
             }
             // Across the edge, line by line: the brightest pixel within 4 px of it, over both sides' levels there.
             var excessMax = 0.0, excessSum = 0.0
             for l in lines {
-                let d = Double(band + 5)
-                let inner = (P(l, edge - d * sign) + P(l, edge - (d + 1) * sign) + P(l, edge - (d + 2) * sign)) / 3
-                let outer = (P(l, edge + d * sign) + P(l, edge + (d + 1) * sign) + P(l, edge + (d + 2) * sign)) / 3
+                let d = Double(band + 5 * ki)
+                var inner = 0.0, outer = 0.0
+                for j in 0..<ends { inner += P(l, edge - (d + Double(j)) * sign); outer += P(l, edge + (d + Double(j)) * sign) }
+                inner /= Double(ends); outer /= Double(ends)
                 var peak = -Double.infinity
-                for k in -band...band { peak = max(peak, P(l, edge + Double(k))) }
+                for j in -band...band { peak = max(peak, P(l, edge + Double(j))) }
                 let ex = max(0, peak - max(inner, outer))
                 excessMax = max(excessMax, ex); excessSum += ex
             }

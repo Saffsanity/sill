@@ -20,9 +20,11 @@ enum Stage {
     static let fps = 60
 
     /// The output scale (the 4K pass, 2026-11-03): output pixels per point of the drawing. 1 (the default) rasterises the
-    /// 1920×1080 drawing at 1920×1080, exactly as before; `REEL_SCALE=2` at 3840×2160 (the 4K film), every command with it
-    /// (render, stills, typecheck, motion, clearance, assets). Only the raster changes: the drawing space, the layout, the
-    /// time map, the copy and the score are the same. Whole numbers only, so a point on a whole point is on a whole pixel.
+    /// 1920×1080 drawing at 1920×1080, exactly as before; `REEL_SCALE=2` at 3840×2160 (the 4K film). Every command reads it:
+    /// render and stills draw at it, and the checks that read pixels (typecheck, motion and its seal, clearance) measure the
+    /// output's own (`assets`' measurements, which read the 1080p's pixel places, are 1080p's only). Only the raster changes:
+    /// the drawing space, the layout, the time map, the copy and the score are the same. Whole numbers only, so a point on a
+    /// whole point is on a whole pixel.
     static let scale: CGFloat = {
         guard let v = ProcessInfo.processInfo.environment["REEL_SCALE"], !v.trimmingCharacters(in: .whitespaces).isEmpty else { return 1 }
         guard let n = Int(v.trimmingCharacters(in: .whitespaces)), (1...4).contains(n) else {

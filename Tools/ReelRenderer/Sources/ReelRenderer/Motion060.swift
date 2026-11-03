@@ -131,7 +131,9 @@ struct ProbeVerdict {
     let meanStep: Double
 }
 
-func judge(_ tr: ProbeTrack, exact: Bool) -> ProbeVerdict? {
+/// `scale`: the output px per drawing px the track was measured in (the 4K pass: 2), so the thresholds below, the drawing's
+/// px, are taken in the track's own.
+func judge(_ tr: ProbeTrack, exact: Bool, scale: Double = 1) -> ProbeVerdict? {
     let idx = tr.measured.indices.filter { tr.measured[$0] != nil }
     guard idx.count >= 3, tr.path.first != nil else { return nil }
     // The least-squares fit of the measured places on [1, path…] (on [1] for an exact path, after taking the path away):
@@ -159,12 +161,12 @@ func judge(_ tr: ProbeTrack, exact: Bool) -> ProbeVerdict? {
     for k in 1..<tr.frames.count {
         guard let m1 = tr.measured[k], let m0 = tr.measured[k - 1] else { continue }
         let dm = m1 - m0, dp = fitted[k] - fitted[k - 1]
-        if abs(dp) >= 0.01 { moving += 1; stepSum += abs(dp) }
-        if abs(dm - dp) >= 0.5 { jumps += 1 }
+        if abs(dp) >= 0.01 * scale { moving += 1; stepSum += abs(dp) }
+        if abs(dm - dp) >= 0.5 * scale { jumps += 1 }
         worst = max(worst, abs(dm - dp))
         if k >= 3, let m3 = tr.measured[k - 3] {
             let dp3 = fitted[k] - fitted[k - 3], dm3 = m1 - m3
-            if abs(dp3) >= 0.1 && abs(dm3) < abs(dp3) / 3 { plateaus += 1 }
+            if abs(dp3) >= 0.1 * scale && abs(dm3) < abs(dp3) / 3 { plateaus += 1 }
         }
     }
     return ProbeVerdict(fitted: fitted, coefficients: [], maxResidual: maxR, rmsResidual: (sumR2 / Double(idx.count)).squareRoot(),
@@ -265,6 +267,13 @@ func judge(_ tr: ProbeTrack, exact: Bool) -> ProbeVerdict? {
     if let tsvDir { try FileManager.default.createDirectory(at: tsvDir, withIntermediateDirectories: true) }
     var failed = 0
     print("motion: \(movie.map { "decoded from \($0.lastPathComponent)" } ?? "rendered without the finish"); a probe passes within its tolerance of its path (0.1 px unless noted) and with no jump (a step ≥ 0.5 px off its path's); a plateau is a frame that has moved less than a third of its path over the last three (where that is ≥ 0.1 px)")
+    // The 4K pass: at an output scale the probes are read in the frame's own pixels, their places, windows, rows and
+    // tolerances × scale (and their paths, so an exact path's offset is in the same px); every number printed is in output px.
+    let k = Double(Stage.scale), ki = Int(Stage.scale)
+    if Stage.scaled {
+        print(String(format: "motion at the output scale %.0f (%d×%d): each probe's place, window, rows, path and tolerance × %.0f; every px below is an output px (÷ %.0f for the drawing's)",
+                     k, Stage.pixelWidth, Stage.pixelHeight, k, k))
+    }
     for passage in MotionPassages060.all where only == nil || only!.contains(passage.name) || only!.contains(where: { passage.name.hasPrefix($0) }) {
         // The passage's frames, up to the one before `to` (a cut).
         let f0 = Int((passage.from * 60).rounded()), f1 = Int((passage.to * 60).rounded()) - 1
@@ -274,29 +283,31 @@ func judge(_ tr: ProbeTrack, exact: Bool) -> ProbeVerdict? {
         // the window's ends, where the two levels are read, never move across the picture); one that travels further,
         // through a window centred on where its path puts it on each frame.
         let fixedWindows: [ClosedRange<Int>?] = passage.probes.map { probe in
-            let g = stride(from: f0, through: f1, by: every).map { probe.guess(Double($0) / 60) }
-            guard let lo = g.min(), let hi = g.max(), hi - lo < 6 else { return nil }
-            return (Int(lo.rounded(.down)) - probe.window)...(Int(hi.rounded(.up)) + probe.window)
+            let g = stride(from: f0, through: f1, by: every).map { probe.guess(Double($0) / 60) * k }
+            guard let lo = g.min(), let hi = g.max(), hi - lo < 6 * k else { return nil }
+            return (Int(lo.rounded(.down)) - probe.window * ki)...(Int(hi.rounded(.up)) + probe.window * ki)
         }
+        // The rows (or columns) averaged across, in output px: each drawing px's k.
+        let acrosses: [ClosedRange<Int>] = passage.probes.map { (($0.across.lowerBound * ki)...($0.across.upperBound * ki + ki - 1)) }
         let started = Date()
         for f in stride(from: f0, through: f1, by: every) {
             let t = Double(f) / 60
             let lum = try frames.luma(f)
             for (j, probe) in passage.probes.enumerated() {
                 let along = fixedWindows[j] ?? {
-                    let a = Int(probe.guess(t).rounded(.down)) - probe.window
-                    return a...(a + 2 * probe.window + 1)
+                    let a = Int((probe.guess(t) * k).rounded(.down)) - probe.window * ki
+                    return a...(a + 2 * probe.window * ki + 1)
                 }()
                 let a = along.lowerBound
                 var m: Double? = nil
                 let lim = probe.axis == .x ? lum.width : lum.height
                 if along.lowerBound >= 0, along.upperBound < lim {
-                    let prof = lum.profile(probe.axis, across: probe.across, along: along)
+                    let prof = lum.profile(probe.axis, across: Stage.scaled ? acrosses[j] : probe.across, along: along)
                     m = probe.centroid ? brightCentroid(prof, from: a) : areaEdge(prof, from: a)
                 }
                 tracks[j].frames.append(f)
                 tracks[j].measured.append(m)
-                tracks[j].path.append(probe.path(t))
+                tracks[j].path.append(Stage.scaled ? probe.path(t).map { $0 * k } : probe.path(t))
             }
         }
         let secs = Date().timeIntervalSince(started)
@@ -305,7 +316,7 @@ func judge(_ tr: ProbeTrack, exact: Bool) -> ProbeVerdict? {
         var rows: [String] = ["probe\tframe\tt\tpath\tfitted\tmeasured\tresidual\tstep\tpathStep"]
         for (j, probe) in passage.probes.enumerated() {
             let tr = tracks[j]
-            guard let v = judge(tr, exact: probe.exact) else {
+            guard let v = judge(tr, exact: probe.exact, scale: k) else {
                 print("  \(probe.name): no edge found (\(tr.measured.compactMap { $0 }.count) of \(tr.frames.count) frames)")
                 failed += 1
                 continue
@@ -314,7 +325,7 @@ func judge(_ tr: ProbeTrack, exact: Bool) -> ProbeVerdict? {
             // On its path (within the probe's tolerance) and never a step half a pixel off. Plateaus are counted, not judged:
             // a layer that holds strays from its path (a quarter-pixel grid at 0.07 px a frame: 0.19 px), and a probe's
             // window moving a whole pixel can read as one.
-            let ok = v.maxResidual <= probe.tolerance && v.jumps == 0
+            let ok = v.maxResidual <= probe.tolerance * k && v.jumps == 0
             if !ok { failed += 1 }
             print(String(format: "  %@ %@  %@%.2f → %.2f px (%.3f px a moving frame, %d of %d frames moving)  residual max %.3f rms %.3f px  plateaus %d  jumps %d  worst step error %.3f px%@",
                          ok ? "ok  " : "FAIL", probe.name.padding(toLength: 22, withPad: " ", startingAt: 0), probe.axis.rawValue == "x" ? "x " : "y ",

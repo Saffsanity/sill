@@ -17,6 +17,7 @@ final class ClearanceChecker {
     struct Gap { let frame: Int; let shot: String; let line: String; let right: Double?; let left: Double? }
 
     var level: Float = 30.0 / 255
+    /// The rows above and below a line that count (the drawing's px; × the output scale where it is measured).
     var band = 24
     private let with = Compositor()
     private let without = Compositor()
@@ -29,7 +30,8 @@ final class ClearanceChecker {
         comp.dither = false
         defer { comp.dither = dither }
         let img = comp.composeImage(l, frame: frame)
-        let W = Stage.width, H = Stage.height
+        // The 4K pass: measured at the output resolution, in its pixels.
+        let W = Stage.pixelWidth, H = Stage.pixelHeight
         var px = [UInt8](repeating: 0, count: W * H * 4)
         comp.ci.render(img, toBitmap: &px, rowBytes: W * 4, bounds: CGRect(x: 0, y: 0, width: W, height: H),
                        format: .RGBA8, colorSpace: comp.sRGB)
@@ -51,13 +53,17 @@ final class ClearanceChecker {
         probe.set { $0.hidden = false }
         // Lines: a TypeLine's words are tagged "line#word", a StaticLine's by its text.
         var boxes: [String: CGRect] = [:]
+        let k = Stage.scale
         for g in glyphs where g.opacity >= 0.5 && !g.picture {
             let name = g.tag.split(separator: "#").first.map(String.init) ?? g.tag
-            let b = g.outline.boundingBoxOfPath.applying(g.transform)
-            guard b.width > 0.5, b.height > 0.5 else { continue }
+            // The glyph's box in output px (its path is in the drawing's points).
+            let b = Stage.scaled ? g.outline.boundingBoxOfPath.applying(g.transform.concatenating(CGAffineTransform(scaleX: k, y: k)))
+                                 : g.outline.boundingBoxOfPath.applying(g.transform)
+            guard b.width > 0.5 * k, b.height > 0.5 * k else { continue }
             boxes[name] = boxes[name].map { $0.union(b) } ?? b
         }
-        let W = Stage.width, H = Stage.height
+        let W = Stage.pixelWidth, H = Stage.pixelHeight
+        let band = self.band * Int(k)
         for (name, b) in boxes.sorted(by: { $0.key < $1.key }) {
             let y0 = max(0, Int(b.minY.rounded(.down)) - band), y1 = min(H - 1, Int(b.maxY.rounded(.up)) + band)
             // A line wholly off the frame (v5's cutaway title rising from under it) has nothing beside it.
@@ -130,6 +136,12 @@ func clearanceCommand(args: [String]) throws {
     let first = Int((from * 60).rounded()), last = min(Stage.frames, Int((to * 60).rounded())) - 1
     for f in stride(from: first, through: last, by: every) {
         try checker.check(frame: f, shot: Timeline.shot(at: f).id) { try layers(frame: f, env: env) }
+    }
+    // The 4K pass: the gaps are in output px, so the rule's 80 px of the drawing is 80 × scale.
+    if Stage.scaled {
+        print(String(format: "clearance at the output scale %.0f (%d×%d): gaps in output px, the minimum the drawing's %.0f px × %.0f = %.0f px",
+                     Stage.scale, Stage.pixelWidth, Stage.pixelHeight, minGap, Stage.scale, minGap * Double(Stage.scale)))
+        minGap *= Double(Stage.scale)
     }
     let (text, ok) = checker.summary(min: minGap)
     print(text, terminator: "")
