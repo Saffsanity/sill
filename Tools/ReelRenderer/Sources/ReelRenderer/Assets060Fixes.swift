@@ -15,9 +15,12 @@ enum Fixes060 {
     // MARK: The beats (reel s)
 
     static let start = 65.6, end = 72.0
-    /// 1. The title snaps (T1s) on the hard cut to black.
+    /// 1. v4.2: the title snapped (T1s) on the hard cut to black. v5 (Noah on v4.2 at 1:03: "Change the title to "Issues Fixed
+    /// in 0.6." and have it come up from the bottom with the rest of the text instead of fading in"): the column is already
+    /// moving at the cut, at the cruise's speed, and the title leads it up from under the frame (`titleOffset`).
     static let titleSnap = 65.65
-    /// 2. The scroll: up to speed over 0.3 s, then 450 px/s.
+    /// 2. The scroll: v4.2 waited for 66.4 and came up to speed over 0.3 s; v5 runs at 450 px/s from the cut, its cruise
+    /// carried back to it, so from 66.7 on every place, crossing and the tap are v4.2's.
     static let scrollStart = 66.4, accelEnd = 66.7
     /// 3. The bug rides in: the scroll slows (appleOut) to rest at the tap. The review: the first cut slowed to 25 px/s by
     /// 71.12 and then lurched into its 18 px settle at about 256 px/s; now the slowing itself carries the last 18 px and the
@@ -44,8 +47,12 @@ enum Fixes060 {
     // MARK: The column
 
     static let columnX: CGFloat = 480
-    /// The title's baseline while it is alone (v3's T1s statement line, as "Latency you don’t notice.").
+    /// The column's origin: v4.2's title's baseline while it was alone (v3's T1s statement line); every place down the column
+    /// is measured from it.
     static let titleBaseline: CGFloat = 540
+    /// v5: the title's place down the column, 192 px under the origin, so at the cut (the scroll at −427.5 px) its capitals'
+    /// top is the frame's bottom edge and it rises from there, 348 px over the first header.
+    static let titleOffset: CGFloat = 192
     static let linePitch: CGFloat = 60
     /// Open in the storyboard: a header 64 px over its group's first line, and 180 px (three line pitches, a beat at
     /// 450 px/s) from a group's last line to the next group's first, so every line crosses the middle on the
@@ -85,7 +92,7 @@ enum Fixes060 {
         ]),
     ]
     /// v4.1 (carried into v4.2): "0.6", not "0.6.0" (Noah).
-    static let title = ["Fixed", "in", "0.6."]
+    static let title = ["Issues", "Fixed", "in", "0.6."]
 
     // MARK: The sill line it ends on (the lockup's, S21)
 
@@ -124,13 +131,10 @@ enum Fixes060 {
     /// How far the column has scrolled up at `t`, in px. Smooth (continuous speed) from rest through the cruise and the
     /// slowing, at rest at the tap 6 px past where it settles, then back by those 6 px (71.2–71.5), at rest at both ends.
     static func scroll(_ t: Double) -> Double {
-        if t <= scrollStart { return 0 }
         let a = accelEnd - scrollStart
-        if t < accelEnd {
-            let u = (t - scrollStart) / a          // speed × smoothstep(u), integrated
-            return speed * a * (u * u * u - u * u * u * u / 2)
-        }
         let s0 = speed * a / 2
+        // v5: the cruise from the cut (it was still until 66.4 and came up to speed by 66.7), so the title rises with the column.
+        if t < accelEnd { return s0 + speed * (t - accelEnd) }
         let b = brakeStart
         if t < b { return s0 + speed * (t - accelEnd) }
         let s1 = s0 + speed * (b - accelEnd)
@@ -293,12 +297,11 @@ struct FixesColumn060: View {
     var body: some View {
         Canvas { ctx, _ in
             let F = Fixes060.self
-            // The title: v3's snap, word by word, then it scrolls with the column.
-            let ty = F.screenY(0, t)
-            if drawsType && ty > -60 {
-                Outline060.snapLine(F.title, in: &ctx, t: t, snap: F.titleSnap, size: TypeStyle.T1s.size, weight: .bold,
-                                    tracking: TypeStyle.T1s.tracking, color: Color(hex: Palette.text1),
-                                    x: F.columnX, baseline: ty, leading: true)
+            // The title: v5, the column's first line, rising with it from under the frame.
+            let ty = F.screenY(F.titleOffset, t)
+            if drawsType && ty > -60 && ty < Stage.size.height + 120 {
+                Outline060.draw(F.title.joined(separator: " "), in: &ctx, size: TypeStyle.T1s.size, weight: .bold,
+                                tracking: TypeStyle.T1s.tracking, x: F.columnX, baseline: ty, leading: true, color: Color(hex: Palette.text1))
             }
             let alpha = F.columnOpacity(t)
             if drawsType && alpha > 0.002 {

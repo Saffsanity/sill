@@ -47,9 +47,6 @@ struct FixesType060: View {
     var body: some View {
         let F = Fixes060.self
         let scroll = CGAffineTransform(translationX: 0, y: -CGFloat(F.scroll(t)))
-        var title = LineSpec(words: F.title, .T1s, x: F.columnX, baseline: F.titleBaseline, align: .leading,
-                             snap: F.titleSnap, holdEnd: F.titleSnap)
-        title.holdScale = false
         var nodes: [TypeNode] = []
         for p in F.placed {
             let y = F.titleBaseline + p.y
@@ -61,9 +58,13 @@ struct FixesType060: View {
             }
         }
         let alpha = F.columnOpacity(t)
+        // v5: the title is the column's first line, static in it (no snap, no fade in), rising with the scroll from under the
+        // frame (Noah: "have it come up from the bottom with the rest of the text instead of fading in").
+        let ty = F.screenY(F.titleOffset, t)
+        let title = StaticLine.node(F.title.joined(separator: " "), .T1s, x: F.columnX, baseline: F.titleBaseline + F.titleOffset, align: .leading)
         return ZStack {
-            if F.screenY(0, t) > -60, let n = TypeLine.node(title, t) {
-                GlyphCanvas(nodes: [n], transform: scroll, covered: FixesType060.bands)
+            if ty > -60, ty < Stage.size.height + 120 {
+                GlyphCanvas(nodes: [title], transform: scroll, covered: FixesType060.bands)
             }
             if alpha > 0.002 {
                 GlyphCanvas(nodes: nodes, transform: scroll, opacity: alpha, covered: FixesType060.bands)
