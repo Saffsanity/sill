@@ -136,7 +136,13 @@ enum Larger060 {
     static let spec = DeviceSpec.phoneH
     static let centre = CGPoint(x: 1390, y: 556)
     static let source = CGSize(width: 786, height: 1704)
-    static let settingsTap = 33.15, panel = 33.2, switchTap = 33.75, doneTap = 34.15, larger = 34.3, fitted = 35.3
+    /// The review of v5 (2026-11-03): the keyboard rose almost as soon as the larger layout was in (its crossfade ended at
+    /// 34.58, the keyboard came in from 34.62), so the bare layout was never seen. Settings closes 0.2 s earlier (Done 33.95,
+    /// was 34.15; the larger layout from 34.1, in by 34.38, was 34.3), and the switch with it (33.58, was 33.75: a tap's dot
+    /// shows from 0.08 s before it to 0.29 s after, so the switch's is gone when Done's appears, 33.87, and no frame shows
+    /// two fingers), so the layout stands alone for about 0.4 s before the keyboard comes up; the keyboard's tap and rise stay
+    /// where they were, with the subline's second half (34.70).
+    static let settingsTap = 33.15, panel = 33.2, switchTap = 33.58, doneTap = 33.95, larger = 34.1, fitted = 35.3
     static let settingsPoint = CGPoint(x: 685, y: 700), switchPoint = CGPoint(x: 643, y: 997), donePoint = CGPoint(x: 680, y: 817)
     /// v5, Noah: the line about the keyboard "should trigger the virtual keyboard coming up showing how it perfectly covers the
     /// trackpad". As its second half is written, row 1's Keyboard button is tapped (its centre in D2, x 401–508, y 862–961),
@@ -224,8 +230,8 @@ struct PhoneLayers060: View {
 }
 
 // SWAP-IN (S10, take D): replace with Noah's clip D if provided at /Users/noah/Downloads/sill-handoff/release-060/captures/take-D.mov (the iPhone, upright), inside
-// PhoneLayers060 in place of D1, D4/D5, D2 and D3. Marks: Settings tapped 33.15, the Larger Picture switch 33.75, Done
-// 34.15, the larger layout 34.3 (A5), the Mac's fit 35.3 (C♯6). Mask the take's status strip black, as the phone's
+// PhoneLayers060 in place of D1, D4/D5, D2 and D3. Marks: Settings tapped 33.15, the Larger Picture switch 33.58, Done
+// 33.95, the larger layout 34.1 (A5), the Keyboard button 34.55, the Mac's fit 35.3 (C♯6). Mask the take's status strip black, as the phone's
 // stills are.
 @MainActor func s060_10(_ t: Double, _ e: Env) throws -> FrameLayers {
     let L = Larger060.self
