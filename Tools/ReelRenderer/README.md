@@ -272,9 +272,13 @@ resampled with the screen (2266 px → 830 → 790) and is 0.23 px taller than t
 spreads a pixel or two past its rect; the lock screen's own anti-aliased edge lets a quarter of what is under it through.
 v4.2 showed it round the lock screen as the iPad pushed in (Noah: "from most exposed to least, bottom, left, right,
 top"). Now the still under the lock screen has no picture while it is up (`L1b`/`L0b`: the picture rect the panel's
-black), and Weather alone (`L1p`/`L0p`) fades from under it over the dissolve's last 15 % (and back over the unlock's
-first 15 %), when the lock screen hides all but 2–4 % of it. The check follows each edge and measures, line by line, the
-brightest pixel within 4 px of it over both sides' levels.
+black), and Weather alone (`L1p`/`L0p`) fades from under it over the whole dissolve, as the lock screen comes in (and
+back over the whole of the unlock's, as it goes). (v5 faded it over the dissolve's last 15 % only, and its review found the
+bottom edge bright in the dissolve's middle frames: the picture's and the lock screen's edges are anti-aliased over the
+same 3 px, and a pixel the lock screen covers only partly lets more of the picture through than the screen's middle does.)
+The check follows each edge and measures, line by line, the brightest pixel within 4 px of it over both sides' levels;
+from 19.6 (`--from 19.6`) it reads the dissolve too, where the first frames' numbers are the Weather's own edges, as
+before the lock (19.5).
 
 ## The 0.6 update video (`REEL=060`)
 

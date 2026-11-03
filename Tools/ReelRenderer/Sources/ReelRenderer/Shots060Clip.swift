@@ -448,10 +448,19 @@ struct LockPicture060: View {
     // than the lock screen's: 0.23 px at the bottom) and spreads a pixel or two past its rect, and the lock screen's own
     // anti-aliased edge lets a quarter of what is under it through: so where the lock screen is up, the still under it has
     // no picture (L0b/L1b, its picture rect the panel's black), and nothing of the Weather is left to peek out. The
-    // Weather (L0p/L1p: the picture alone, 8 px of the panel round it) fades from under it over the dissolve's last 15 %
-    // (and back over the unlock's first 15 %), when the lock screen hides all but 2–4 % of it, so the dissolve is as it
-    // was; the screen's own edges are drawn once, by the still under it.
-    let w = 1 - ramp(seq.lockOpacity(t), 0.85, 1.0)
+    // Weather (L0p/L1p: the picture alone, 8 px of the panel round it) fades from under it over the whole dissolve, as
+    // the lock screen comes in (and back over the whole of the unlock's, as it goes); the screen's own edges are drawn
+    // once, by the still under it. The review of v5 (2026-11-03): faded over the dissolve's last 15 % only, it showed at
+    // the bottom edge in the dissolve's middle frames (19.683–19.800, a 2-row line 11 levels over both sides averaged
+    // along the edge, single lines to 82): the two edges, the picture's and the lock screen's, are anti-aliased over the
+    // same 3 px, and where the lock screen covers a pixel only partly, that pixel lets through more of the picture than
+    // the middle of the screen does (1 − α·c of it against 1 − α), which against the darkening middle reads as a bright
+    // line. Rendered, averaged along the bottom edge (x 1300–1700), the brightest of its rows stood up to 17.0 levels over
+    // the screen just inside it (19.75), where the Weather's own bottom rows stand 8.6 over it before the lock; faded with
+    // the dissolve (1 − α), 8.7 at most and falling with the picture (4.5 at 19.70, 1.4 at 19.733, 0.3 at 19.75, none after).
+    // The middle goes from the picture to the lock screen sooner: at 19.717 its mean is 27 where it was 43 (the lock
+    // screen's own is 28, and it dips to 26 at 19.733).
+    let w = 1 - seq.lockOpacity(t)
     var layers = [MiniLayer(name: base)]
     if w < 0.999 {
         layers = [MiniLayer(name: locked ? "derived/L1b" : "derived/L0b")]
