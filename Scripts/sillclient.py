@@ -90,6 +90,8 @@ The Mac's pointer (kind 26; docs/pointer-visibility-plan.md):
                      else exits 2
 The clipboard (kind 32; docs/clipboard-plan.md). Each kind 32 received is printed on one line,
 "clipboard at 1.234s: 12 bytes 'text…'", and the window list's clipboard= when the host says it:
+  --clipboard-images the same subscription saying it takes images ({"accepts":2}); each image received is
+                     printed with its size and type, its first bytes checked
   --clipboard        a kind 32 {} right after the select: the subscription (the host sends this client
                      what is copied on its pasteboard from then on; a --synthetic host's is a pasteboard of
                      its own, SILL_TEST_PASTEBOARD's name, never this Mac's clipboard)
@@ -532,7 +534,7 @@ try:
             if not body: raise ValueError(f"--{name} needs a value")
             if name in ("big-payload", "flood") and number(body, f"--{name}") < 1: raise ValueError(f"--{name} must be at least 1")
         elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--menus", "--pointer", "--audio", "--no-select", "--pair-ask",
-                       "--clipboard", "--pair-ask=cable", "--pair-cancel") and not a.startswith(("--fps=", "--expect=")):
+                       "--clipboard", "--clipboard-images", "--pair-ask=cable", "--pair-cancel") and not a.startswith(("--fps=", "--expect=")):
             raise ValueError(f"unknown flag {a!r}")
     events.sort(key=lambda e: (e[0], e[1]))
     expect = next((pairs(a[9:], EXPECT_KEYS, "--expect") for a in flags if a.startswith("--expect=")), None)
@@ -697,6 +699,8 @@ try:
     if "--clipboard" in flags:
         # The clipboard's subscription (kind 32 {}), as a device whose Share Clipboard is on sends it.
         s.sendall(msg(32, b"{}")); print("  sent clipboard subscription")
+    if "--clipboard-images" in flags:
+        s.sendall(msg(32, b'{"accepts":2}')); print("  sent clipboard subscription, taking images")
 except (OSError, ssl.SSLError) as e:
     print(f"TLS refused: {e}"); sys.exit(0 if expect_tls_fail else 1)
 if big_payload:
@@ -911,6 +915,10 @@ while time.time() - t0 < dur:
             except ValueError:
                 print(f"  clipboard at {time.time()-t0:.3f}s: undecodable {payload[:80]!r}"); continue
             t = d.get("text")
+            if t is None and "image" in d:
+                img = base64.b64decode(d["image"])
+                kind_name = "PNG" if img[:8] == b"\x89PNG\r\n\x1a\n" else "JPEG" if img[:3] == b"\xff\xd8\xff" else "neither PNG nor JPEG"
+                print(f"  clipboard at {time.time()-t0:.3f}s: an image, {len(img)} bytes, {kind_name}"); continue
             clipboards.append(t)
             shown = "no text" if t is None else f"{len(t.encode())} bytes {t[:60]!r}" + ("…" if len(t) > 60 else "")
             print(f"  clipboard at {time.time()-t0:.3f}s: {shown}" + (f" keys={sorted(d)}" if set(d) - {"text"} else ""))

@@ -164,8 +164,8 @@ Sill has layouts of its own.
 Good to know: Sill shows one window, or the whole desktop, at a time, and it
 plays your Mac's sound on your device as a beta, on by default. While the
 virtual display is on, the window your device shows isn't on your Mac's screen
-until you stop. The clipboard carries text only, up to 256 KB at a time, and
-only between apps that both have it. Your Mac needs to be awake, with Sill
+until you stop. The clipboard carries text up to 256 KB and images up to 8 MB (a bigger one
+is re-encoded to fit), and only between apps that both have it. Your Mac needs to be awake, with Sill
 open. Sill may not be able to wake it. After a restart Sill opens only once
 someone logs in, with Launch at Login on.
 Only the iPhones and iPads you paired can connect, unless you turn off Require

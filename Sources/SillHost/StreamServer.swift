@@ -1158,7 +1158,7 @@ final class StreamServer {
             // An older device's viewport, pick or ping, a header no Sill sends, or the end: refused
             // at once, its payload unread.
             guard let data, let header = StreamMessage.parseHeader(data), header.kind == .hello,
-                  header.payloadLength <= StreamMessage.maxClientPayload else {
+                  header.payloadLength <= StreamMessage.maxClientPayload(for: header.kind) else {
                 deadline.cancel()
                 refuse(nil)
                 return
@@ -1456,7 +1456,7 @@ final class StreamServer {
             if self.clients[ObjectIdentifier(c)] === client { self.heard(ObjectIdentifier(c)) }
             // A header can announce up to 4 GiB and the read below would wait for all of it. No
             // client message comes near a megabyte, so a bigger one is a broken or hostile peer.
-            if header.payloadLength > StreamMessage.maxClientPayload {
+            if header.payloadLength > StreamMessage.maxClientPayload(for: header.kind) {
                 print("Closing \(c.endpoint): it announced a \(header.payloadLength)-byte message (the limit is 1 MB).")
                 c.cancel()
                 return

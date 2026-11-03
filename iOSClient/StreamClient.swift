@@ -2395,7 +2395,7 @@ final class StreamClient: ObservableObject {
             // The session reader's caps (docs/remote-access-plan.md §3.7): nothing a Sill host sends
             // is bigger, and waiting for what such a header announces would hold whatever follows
             // until the move's 5 s run out.
-            let cap = header.kind == .frame ? StreamMessage.maxFramePayload : StreamMessage.maxOtherHostPayload
+            let cap = StreamMessage.maxHostPayload(for: header.kind)
             guard header.payloadLength <= cap else {
                 print("move to the network: closing, the host announced a \(header.payloadLength)-byte message (kind \(header.kind.rawValue))")
                 c.cancel()

@@ -1,5 +1,6 @@
 import SwiftUI
 import StreamProtocol
+import UniformTypeIdentifiers
 
 /// The clipboard's chip over the stream (docs/clipboard-plan.md): "Paste on ‹Mac›", where the text goes
 /// with Paste on ‹Mac› Right Away on ("Where the cursor is.": the Paste presses ⌘V there too),
@@ -101,14 +102,46 @@ struct ClipboardPasteButton: View {
     @AppStorage(StreamClient.pasteRightAwayKey) private var pasteRightAway = true
 
     var body: some View {
-        PasteButton(payloadType: String.self) { strings in
-            // On the main thread whatever queue the system hands it on.
-            DispatchQueue.main.async { client.sendClipboard(strings) }
+        let images = ClipboardPolicy.hostTakesImages(client.hostClipboard)
+        PasteButton(supportedContentTypes: images ? [.plainText, .image] : [.plainText]) { providers in
+            Self.read(providers, images: images) { strings, image in
+                // On the main thread whatever queue the system hands it on.
+                DispatchQueue.main.async {
+                    if let strings { client.sendClipboard(strings) } else { client.sendClipboardImage(image) }
+                }
+            }
         }
         .buttonBorderShape(.capsule)
         .labelStyle(.titleAndIcon)
         .tint(Palette.accent)
         .accessibilityHint(ClipboardPolicy.Copy.pasteHint(mac: client.macName.isEmpty ? "the Mac" : client.macName,
-                                                          device: StreamClient.deviceWord, rightAway: pasteRightAway))
+                                                          device: StreamClient.deviceWord, rightAway: pasteRightAway, images: images))
+    }
+
+    /// What the Paste control gave: its text when any item has some (as before), else its first image,
+    /// fitted to the cap off the main thread (nil: none would fit).
+    private static func read(_ providers: [NSItemProvider], images: Bool, done: @escaping @Sendable ([String]?, Data?) -> Void) {
+        let texts = providers.filter { $0.canLoadObject(ofClass: String.self) }
+        if !texts.isEmpty || !images {
+            let group = DispatchGroup(), lock = NSLock()
+            var strings = [String?](repeating: nil, count: texts.count)
+            for (i, p) in texts.enumerated() {
+                group.enter()
+                _ = p.loadObject(ofClass: String.self) { s, _ in
+                    lock.lock(); strings[i] = s; lock.unlock()
+                    group.leave()
+                }
+            }
+            group.notify(queue: .global()) { done(strings.compactMap { $0 }, nil) }
+            return
+        }
+        guard let p = providers.first(where: { $0.hasItemConformingToTypeIdentifier(UTType.image.identifier) }),
+              let type = p.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) else {
+            done([], nil)
+            return
+        }
+        _ = p.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
+            done(nil, data.flatMap { ClipboardImage.fitted($0) })
+        }
     }
 }

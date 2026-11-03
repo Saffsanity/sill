@@ -83,7 +83,7 @@ final class MessageReader {
             // Nothing a Sill host sends is bigger than these (docs/remote-access-plan.md §3.7). A
             // reader that waited for whatever a header announces could be held for ever, or read
             // an SSH banner as a 1.7 GB payload.
-            let cap = header.kind == .frame ? StreamMessage.maxFramePayload : StreamMessage.maxOtherHostPayload
+            let cap = StreamMessage.maxHostPayload(for: header.kind)
             guard header.payloadLength <= cap else {
                 onEnd(.tooBig(header))
                 return
