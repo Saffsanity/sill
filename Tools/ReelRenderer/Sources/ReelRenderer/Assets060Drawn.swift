@@ -435,6 +435,10 @@ struct DrawnIMac060: View {
     var edgeGlint: (start: Double, duration: Double)? = nil
     var t: Double = 0
     var opacity: Double = 1
+    /// v5 (S18): a glyph on the glass in icon units (Marks060.IntelOnGlass), dark until the sheen passes over it and reveals
+    /// it as chrome, kept at `intelLit` after (Marks060.IntelGlyph.drawLit, its light the sheen's own band).
+    var intel: CGRect? = nil
+    var intelLit: CGFloat = 0.5
 
     func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: center.x + (x - 512) * k, y: center.y + (y - 404) * k) }
     func r(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CGRect { let o = p(x, y); return CGRect(x: o.x, y: o.y, width: w * k, height: h * k) }
@@ -474,6 +478,15 @@ struct DrawnIMac060: View {
                 var glass = c
                 glass.clip(to: screen)
                 if let window { MacWindow060.draw(&glass, onScreen(window), k: k, opacity: windowOpacity) }
+                if let intel, let sheen {
+                    let rect = r(intel.minX, intel.minY, intel.width, intel.height)
+                    let light = Marks060.IntelGlyph.Light.glass(screen: screenRect, u: (t - sheen.start) / sheen.duration)
+                    glass.withCGContext { cg in
+                        // Unlit, a faint dark imprint (10 %), so the light reveals it rather than lights what was there.
+                        Marks060.IntelGlyph.drawLit(cg, at: rect.origin, height: rect.height, light: light,
+                                                    unlit: Marks060.color(0x000000, 0.10), lit: intelLit)
+                    }
+                }
                 if let sheen { drawSheen(&glass, sheen) }
             }
             .canvas()
@@ -581,10 +594,13 @@ struct IntelIMac060: View {
     var glint = 63.2
     var glintDuration = 0.9
     var push: CGFloat = 0.03
+    /// v5, Noah on v4.2 at 1:00: "Reveal a glyph of the Intel Inside logo on the Mac as you pan the light across it".
+    var intel = true
     var body: some View {
         let s = 1 + push * CGFloat(ramp(t, start, end))
         // The push is about the body's centre: k grows and the centre stays.
-        DrawnIMac060(style: .solid, k: k * s, center: center, sheen: (glint, glintDuration), t: t)
+        DrawnIMac060(style: .solid, k: k * s, center: center, sheen: (glint, glintDuration), t: t,
+                     intel: intel ? Marks060.IntelOnGlass.unitRect : nil)
     }
 }
 
