@@ -173,8 +173,9 @@ struct PhonePortraitLayout: Equatable {
     }
 
     /// `keyboard`: Larger Picture above a software keyboard this tall (`PhonePortraitLayout.keyboard(for:…)`),
-    /// or nil for the standard arrangement.
-    init(size: CGSize, keyboard: CGFloat? = nil) {
+    /// or nil for the standard arrangement. `trackpadHidden` (HiddenControls, #280): the picture takes the
+    /// trackpad's room, the rows under it as they were; nothing changes over a keyboard, which has it.
+    init(size: CGSize, keyboard: CGFloat? = nil, trackpadHidden: Bool = false) {
         self.size = size
         self.keyboard = keyboard
         let width = size.width, height = size.height
@@ -183,7 +184,8 @@ struct PhonePortraitLayout: Equatable {
         // its least height; then the picture gives way (to nothing, at worst).
         let pictureWidth = max(0, width - 2 * Self.margin)
         let natural = (pictureWidth / Self.aspect).rounded(.down)
-        let pictureHeight = min(natural, max(0, height - Self.fixedHeight - Self.minTrackpad))
+        let pictureHeight = trackpadHidden ? max(0, height - Self.fixedHeight)
+            : min(natural, max(0, height - Self.fixedHeight - Self.minTrackpad))
         // Larger Picture: every point above the keyboard but the rows', in whole points; the
         // keyboard's footprint is never less than the least trackpad and its margin.
         let footprint = keyboard.map { max($0, Self.minTrackpad + Self.bottom) }
@@ -365,5 +367,29 @@ struct PhonePortraitLayout: Equatable {
         return (0..<count).map { i in
             CGRect(x: row.minX + CGFloat(i) * (each + gap), y: row.minY, width: each, height: row.height)
         }
+    }
+}
+
+/// How much of Sill's controls a swipe has put away (#279, #280). Sideways one swipe hides the bar
+/// (`all`); upright the first hides the trackpad, whose room the picture takes, and the second the rest.
+/// A swipe in from the controls' edge, the grabber, or VoiceOver's action shows them all again.
+enum HiddenControls: Equatable {
+    case shown, trackpad, all
+
+    static func hide(_ now: HiddenControls, upright: Bool) -> HiddenControls {
+        upright && now == .shown ? .trackpad : .all
+    }
+
+    /// Turned sideways: the bar has no trackpad, so one hidden alone shows it.
+    static func sideways(_ now: HiddenControls) -> HiddenControls { now == .trackpad ? .shown : now }
+
+    var trackpadShown: Bool { self == .shown }
+    var rowsShown: Bool { self != .all }
+
+    /// A drag on the controls as a swipe: up (-1) or down (1) when it went at least 40 points, at least
+    /// twice as far up or down as across (a thumbnail strip's scroll, a slider's slide, are neither).
+    static func swipe(dx: CGFloat, dy: CGFloat) -> Int? {
+        guard abs(dy) >= 40, abs(dy) >= 2 * abs(dx) else { return nil }
+        return dy < 0 ? -1 : 1
     }
 }

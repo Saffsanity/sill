@@ -141,6 +141,9 @@ struct StreamScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The stream panel's size in points, reported by whichever layout is showing.
     @State private var panelSize: CGSize = .zero
+    /// What a swipe has put away (#279, #280), and whether the grabber shows (2 s after hiding).
+    @State private var hidden: HiddenControls = .shown
+    @State private var grabber = false
     /// The picture's pinch zoom (StreamZoom, issue #65): one per stream screen, so a turn keeps it and
     /// the next session starts at 1×. Held, not watched (`@State`, as `overlay` is; a `@StateObject`
     /// would redraw this whole screen at every step of a pinch): only the picture's own view watches it
@@ -242,17 +245,24 @@ struct StreamScreen: View {
                 && PhonePortraitLayout.offersLargerPicture(screen: geo.size)
             ZStack {
                 Group {
-                    switch duo {
-                    case .innerLandscape:
-                        landscape(bar: .regular, width: geo.size.width, fold: posture.info(in: geo.size))
-                    case .outerLandscape:
-                        landscape(bar: .compact, width: geo.size.width, fold: posture.info(in: geo.size))
-                    case .innerPortrait:
-                        portrait(metrics: .regular)
-                    case .outerPortrait:
-                        portrait(metrics: DuoLayout.phoneArrangement ? .phone : .compact, largerKeyboard: largerKeyboard)
+                    if hidden == .all {
+                        // Swiped away (#279): the picture alone, back with a swipe in from the controls' edge.
+                        controlsHidden(upright: duo.isPortrait)
+                    } else {
+                        switch duo {
+                        case .innerLandscape:
+                            landscape(bar: .regular, width: geo.size.width, fold: posture.info(in: geo.size))
+                        case .outerLandscape:
+                            landscape(bar: .compact, width: geo.size.width, fold: posture.info(in: geo.size))
+                        case .innerPortrait:
+                            portrait(metrics: .regular)
+                        case .outerPortrait:
+                            portrait(metrics: DuoLayout.phoneArrangement ? .phone : .compact, largerKeyboard: largerKeyboard)
+                        }
                     }
                 }
+                // Sideways the bar has no trackpad: one hidden alone shows it (HiddenControls.sideways).
+                .onChange(of: duo.isPortrait) { _, upright in if !upright { hidden = HiddenControls.sideways(hidden) } }
                 // Under the pairing overlay and the tour nothing takes a touch: not the bar, and
                 // not the stream's UIKit input view (nor, so, the Pencil, a hover or a key).
                 .allowsHitTesting(!overlayShown && tour == nil)
@@ -540,6 +550,8 @@ struct StreamScreen: View {
         func after(_ seconds: Double, _ step: @escaping () -> Void) {
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: step)
         }
+        // `-SillHideControls trackpad|all`: as the swipes would leave them (#279, #280).
+        if let spec = defaults.string(forKey: "SillHideControls") { hidden = spec == "all" ? .all : spec == "trackpad" ? .trackpad : .shown }
         if defaults.bool(forKey: "SillKeyboard"), live {
             after(0.5) {
                 print("keyboard: -SillKeyboard 1, the input view takes first responder")
@@ -1180,8 +1192,57 @@ struct StreamScreen: View {
                    toggleKeyboard: { overlay.toggleKeyboard() },
                    setSettings: { setSettings($0, restoreKeyboard: $1) },
                    menusOpened: menusOpened, menusClosed: menusClosed)
+                .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded { v in
+                    if HiddenControls.swipe(dx: v.translation.width, dy: v.translation.height) == -1 { hideControls(upright: false) }
+                })
+                .accessibilityAction(named: "Hide Sill’s controls") { hideControls(upright: false) }
             contentArea(bar: bar)
         }
+    }
+
+    /// A swipe on the controls toward their edge (#279): one more step away, the grabber for 2 s.
+    private func hideControls(upright: Bool) {
+        guard !drawerOpen, !settingsOpen, !scaleOpen else { return }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) { hidden = HiddenControls.hide(hidden, upright: upright) }
+        guard hidden == .all else { return }
+        grabber = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            withAnimation(.easeOut(duration: 0.3)) { grabber = false }
+        }
+    }
+
+    private func showControls() {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) { hidden = .shown }
+        grabber = false
+    }
+
+    /// Everything swiped away: the picture fills the screen. The edge the controls left (the top
+    /// sideways, the bottom upright) takes a swipe in that brings them back, ahead of iOS's own edge
+    /// swipe; the grabber shows there for 2 s and is a button; VoiceOver has an action on the picture.
+    private func controlsHidden(upright: Bool) -> some View {
+        contentArea(bar: .regular)
+            .accessibilityAction(named: "Show Sill’s controls") { showControls() }
+            .overlay(alignment: upright ? .bottom : .top) {
+                ZStack {
+                    Color.clear.contentShape(Rectangle())
+                    if grabber {
+                        Button(action: showControls) {
+                            Capsule().fill(Color.white.opacity(0.55)).frame(width: 44, height: 5)
+                                .frame(width: 88, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Show Sill’s controls")
+                        .transition(.opacity)
+                    }
+                }
+                .frame(height: 28)
+                .gesture(DragGesture(minimumDistance: 12).onEnded { v in
+                    if HiddenControls.swipe(dx: v.translation.width, dy: v.translation.height) == (upright ? -1 : 1) { showControls() }
+                })
+            }
+            .defersSystemGestures(on: upright ? .bottom : .top)
     }
 
     /// `largerKeyboard`: Larger Picture's keyboard on a phone (see `body`), nil otherwise.
@@ -1199,7 +1260,9 @@ struct StreamScreen: View {
                              linkLine: shownLinkLine,
                              takeTour: takeTour,
                              largerKeyboard: largerKeyboard,
-                             zoom: zoom)
+                             zoom: zoom,
+                             trackpadHidden: !hidden.trackpadShown,
+                             swiped: { $0 == 1 ? hideControls(upright: true) : showControls() })
     }
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
