@@ -138,6 +138,8 @@ struct PortraitMetrics {
 /// in both; each arrangement places them.
 struct PortraitStreamScreen: View {
     @ObservedObject var client: StreamClient
+    /// A monitor on this device (ExternalDisplay): the picture is there, and the pane stays black.
+    @ObservedObject private var external = ExternalDisplay.shared
     var metrics: PortraitMetrics = .regular
     @Binding var drawerOpen: Bool
     @Binding var keyboardShown: Bool
@@ -460,8 +462,16 @@ struct PortraitStreamScreen: View {
     /// the room this pane sits at the top of.
     private func picturePane(measured: Bool) -> some View {
         ZStack {
-            // Scaled and moved by the picture's zoom, inside the clip below.
-            ZoomedStreamView(client: client, zoom: zoom)
+            // Scaled and moved by the picture's zoom, inside the clip below. On a monitor, not here.
+            if external.shows(client) {
+                Color.black.overlay {
+                    Text("The Mac is on the external display.")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Palette.muted)
+                }
+            } else {
+                ZoomedStreamView(client: client, zoom: zoom)
+            }
             InputOverlay(videoSize: client.videoSize,
                          send: { client.sendInput($0) },
                          setOwnPointer: { client.setOwnPointer($0, from: $1) },

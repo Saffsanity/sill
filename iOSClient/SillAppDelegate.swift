@@ -10,6 +10,17 @@ import UIKit
 /// nothing says which window's session the bar's choices would reach), or when the window's session
 /// has no menus.
 final class SillAppDelegate: UIResponder, UIApplicationDelegate {
+    /// An external display's scene (a monitor on the iPad's USB-C, with Stage Manager off, or AirPlay):
+    /// the stream goes there (ExternalDisplay). Every other scene is SwiftUI's, as before.
+    func application(_ application: UIApplication, configurationForConnecting session: UISceneSession,
+                     options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        // Unnamed, SwiftUI's own (the session's `configuration` left the app with no window at all).
+        guard session.role == .windowExternalDisplayNonInteractive else { return UISceneConfiguration(name: nil, sessionRole: session.role) }
+        let config = UISceneConfiguration(name: "External display", sessionRole: session.role)
+        config.delegateClass = ExternalDisplaySceneDelegate.self
+        return config
+    }
+
     override func buildMenu(with builder: UIMenuBuilder) {
         super.buildMenu(with: builder)
         guard builder.system == .main else { return }
@@ -146,4 +157,75 @@ enum MacMenuBar {
         print("menubar: dump ends")
     }
     #endif
+}
+
+/// The stream on an external display, with this device as its controller: while a monitor's scene is
+/// up, the picture of the stream screen last shown (`show`) moves to it, the device's screen becomes a
+/// trackpad (StreamScreen, PortraitStreamScreen), and the viewport is the monitor's size, so the Mac
+/// sizes the window to it. The client's one display view lives in one window at a time; it comes back
+/// to the device's screen as the monitor goes. Main thread.
+final class ExternalDisplay: ObservableObject {
+    static let shared = ExternalDisplay()
+    /// The monitor's size in points while its scene is up; nil without one.
+    @Published private(set) var size: CGSize?
+    private(set) weak var client: StreamClient?
+    /// Moves on each `show`, so a window whose picture the monitor gave up draws it again.
+    @Published private var shown = 0
+    private var window: UIWindow?
+
+    /// Whether `client`'s picture is on the monitor now.
+    func shows(_ client: StreamClient) -> Bool { size != nil && self.client === client }
+
+    /// The stream screen of `client` came forward: its picture is the one the monitor shows.
+    func show(_ client: StreamClient) {
+        guard self.client !== client else { return }
+        self.client?.homeScene = nil
+        self.client = client
+        shown += 1
+        attach()
+    }
+
+    fileprivate func connected(_ scene: UIWindowScene) {
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIViewController()
+        window.rootViewController?.view.backgroundColor = .black
+        window.isHidden = false
+        self.window = window
+        size = scene.screen.bounds.size
+        // After the stream screen has let go of the view (it hosts none while the monitor shows it).
+        DispatchQueue.main.async { self.attach() }
+    }
+
+    #if DEBUG
+    /// `-SillExternalDisplay WxH` (StreamScreen): a monitor's size with no scene, so nothing moves.
+    func pretend(_ size: CGSize) {
+        print("external: pretending a monitor of \(Int(size.width))×\(Int(size.height)) pt")
+        self.size = size
+    }
+    #endif
+
+    fileprivate func disconnected() {
+        client?.homeScene = nil
+        window = nil
+        size = nil
+    }
+
+    private func attach() {
+        guard size != nil, let client, let root = window?.rootViewController?.view else { return }
+        let view = client.displayView
+        if view.window?.windowScene !== window?.windowScene { client.homeScene = view.window?.windowScene ?? client.homeScene }
+        view.removeFromSuperview()
+        view.frame = root.bounds
+        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        root.addSubview(view)
+    }
+}
+
+final class ExternalDisplaySceneDelegate: NSObject, UIWindowSceneDelegate {
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
+        guard let scene = scene as? UIWindowScene else { return }
+        ExternalDisplay.shared.connected(scene)
+    }
+
+    func sceneDidDisconnect(_ scene: UIScene) { ExternalDisplay.shared.disconnected() }
 }
