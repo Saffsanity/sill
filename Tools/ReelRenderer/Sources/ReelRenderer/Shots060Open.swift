@@ -40,6 +40,69 @@ enum Close060 {
     // Baselines: the wordmark on the line (650/666), the version, the lines under it, the legal line in title-safe.
     static let baselines = (wordmark: CGFloat(650), version: CGFloat(736), freeOpen: CGFloat(812), appStore: CGFloat(866),
                             download: CGFloat(900), legal0: CGFloat(978), legal1: CGFloat(1008))
+
+    // MARK: v5: the end card's row (Noah on v4.2 at 1:13: "Add the Download on the App Store icon and the GitHub logo and
+    // Homebrew logo and make it look aesthetic")
+
+    /// Apple's own "Download on the App Store" badge (black, US), as the site uses it: site/app-store-badge.svg, drawn as its
+    /// paths (Marks060.AppStoreBadge.artwork; the marks work measured it identical to the file), never modified, angled or
+    /// animated: it only fades in with its line and out with the card.
+    static let badgeURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("site/app-store-badge.svg")
+    static let badgeArtwork = Marks060.AppStoreBadge.artwork(badgeURL)
+    /// One row under "Free. Open source." (the marks work's proposal, Marks060.EndCardRow): the badge (44 px tall, the
+    /// guidelines' 40 px and more, a quarter of its height clear round it), "For iPhone and iPad on the App Store.", then the
+    /// GitHub mark (30 px, white) and the Homebrew logo (36 px, its own colours), "For Mac at getsill.app/download"; 18, 64,
+    /// 12 and 18 px apart by ink, the row centred on x 960 by its ink as TypeLine lays the lines out, the marks centred on
+    /// y 876, the lines' baselines at 885. The row is not in the card's hold, so the badge never moves.
+    struct Row {
+        let badge: CGRect, gitHub: CGRect, homebrew: CGRect
+        let appStoreX: CGFloat, downloadX: CGFloat
+        static let baseline: CGFloat = 885, centreY: CGFloat = 876
+    }
+    static let row: Row = {
+        func ink(_ text: String) -> (left: CGFloat, right: CGFloat) {
+            let words = text.split(separator: " ").map(String.init)
+            var x: CGFloat = 0, left = CGFloat.infinity, right = -CGFloat.infinity
+            for (i, w) in words.enumerated() {
+                let s = ShapedText.shape(w + (i < words.count - 1 ? " " : ""), .T5, language: nil)
+                for g in s.glyphs { if let o = g.outline { let b = o.boundingBox; left = min(left, x + g.position.x + b.minX); right = max(right, x + g.position.x + b.maxX) } }
+                x += s.frameWidth
+            }
+            return (left, right)
+        }
+        let i1 = ink(Copy060.appStore), i2 = ink(Copy060.download)
+        let bw = Marks060.AppStoreBadge.width(height: 44), gw = Marks060.GitHubMark.width(height: 30), hw = Marks060.Homebrew.width(height: 36)
+        let total = bw + 18 + (i1.right - i1.left) + 64 + gw + 12 + hw + 18 + (i2.right - i2.left)
+        let left = 960 - total / 2
+        let x1 = (left + bw + 18 - i1.left).rounded()
+        let gx = x1 + i1.right + 64, hx = gx + gw + 12
+        let x2 = (hx + hw + 18 - i2.left).rounded()
+        let c = Row.centreY
+        return Row(badge: CGRect(x: left, y: c - 22, width: bw, height: 44), gitHub: CGRect(x: gx, y: c - 15, width: gw, height: 30),
+                   homebrew: CGRect(x: hx, y: c - 18, width: hw, height: 36), appStoreX: x1, downloadX: x2)
+    }()
+}
+
+/// v5: the end card's marks, at their places in the row (Close060.row), faded by their lines' snaps and the card's fade.
+struct EndCardMarks060: View {
+    let badge: Double, marks: Double
+    var body: some View {
+        Canvas { ctx, _ in
+            let r = Close060.row
+            ctx.withCGContext { cg in
+                if badge > 0.001, let art = Close060.badgeArtwork {
+                    Marks060.AppStoreBadge.drawArtwork(cg, art, at: r.badge.origin, height: r.badge.height, opacity: CGFloat(badge))
+                }
+                if marks > 0.001 {
+                    cg.saveGState(); cg.setAlpha(CGFloat(marks)); cg.beginTransparencyLayer(auxiliaryInfo: nil)
+                    Marks060.GitHubMark.draw(cg, at: r.gitHub.origin, height: r.gitHub.height, color: Marks060.color(0xFFFFFF))
+                    Marks060.Homebrew.draw(cg, at: r.homebrew.origin, height: r.homebrew.height, style: .color)
+                    cg.endTransparencyLayer(); cg.restoreGState()
+                }
+            }
+        }
+    }
 }
 
 // MARK: S01 · black, the glint, the sill line, the icon lit
@@ -110,8 +173,15 @@ enum Close060 {
     var lines = [LineSpec(Copy060.wordmark, .W, baseline: b.wordmark, snap: c.wordmark, holdEnd: c.wordmark, cascade: false),
                  LineSpec(Copy060.version, .T4g, baseline: b.version, snap: c.version, holdEnd: c.version, cascade: false)]
     if t >= c.freeOpen - 1e-6 { lines.append(LineSpec(Copy060.freeOpen, .T4, baseline: b.freeOpen, snap: c.freeOpen, holdEnd: c.freeOpen)) }
-    if t >= c.appStore - 1e-6 { lines.append(LineSpec(Copy060.appStore, .T5, baseline: b.appStore, snap: c.appStore, holdEnd: c.appStore, cascade: false)) }
-    if t >= c.download - 1e-6 { lines.append(LineSpec(Copy060.download, .T5, baseline: b.download, snap: c.download, holdEnd: c.download, cascade: false)) }
+    // v5: the two small lines in the row with the marks, outside the card's hold.
+    var row: [LineSpec] = []
+    if t >= c.appStore - 1e-6 {
+        row.append(LineSpec(Copy060.appStore, .T5, x: c.row.appStoreX, baseline: Close060.Row.baseline, align: .leading, snap: c.appStore, holdEnd: c.appStore, cascade: false))
+    }
+    if t >= c.download - 1e-6 {
+        row.append(LineSpec(Copy060.download, .T5, x: c.row.downloadX, baseline: Close060.Row.baseline, align: .leading, snap: c.download, holdEnd: c.download, cascade: false))
+    }
+    for i in row.indices { row[i].holdScale = false }
     if t >= c.legal - 1e-6 {
         // Two lines at 24 px. With the card's +1.2 % hold about y 540 the lower baseline ends at 1013.6 and its
         // descenders at 1019, inside title-safe (y 1026), as v3's.
@@ -132,6 +202,9 @@ enum Close060 {
         // The line is not in the card's hold, so it does not move when the hold starts (v3's lockup).
         SillLine(y: Open060.sillY, length: length)
         TypeLayer(lines: lines, t: t, transform: card).opacity(fade)
+        // v5: the row (the badge, its line, the GitHub mark and the Homebrew logo, their line), not in the hold either.
+        EndCardMarks060(badge: ramp(t, c.appStore, c.appStore + 0.12) * fade, marks: ramp(t, c.download, c.download + 0.12) * fade)
+        TypeLayer(lines: row, t: t).opacity(fade)
     }.canvas()
     return FrameLayers(base: any(v), vignette: false)
 }

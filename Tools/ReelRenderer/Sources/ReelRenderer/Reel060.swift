@@ -96,8 +96,10 @@ enum Copy060 {
     // "For iPhone and iPad on the App Store." and "For Mac at getsill.app/download" lines, in their type (T5),
     // the same spacing, snapping after them (the legal line moves down to make room). Keep it in every build from now on.
     static let download = "For Mac at getsill.app/download"
-    static let legal = ["Mac, iPad and iPhone are trademarks of Apple Inc., registered in the U.S. and other countries. App Store is a service mark of Apple Inc.",
-                        "Intel is a trademark of Intel Corporation. Other names and apps shown belong to their owners."]
+    /// v5: with the App Store badge (Apple's own artwork), the GitHub mark, the Homebrew logo and S18's Intel glyph on screen,
+    /// the legal lines credit the Apple logo (Apple's marketing guidelines ask it), Intel Inside, GitHub and Homebrew.
+    static let legal = ["Apple, the Apple logo, Mac, iPad and iPhone are trademarks of Apple Inc., registered in the U.S. and other countries. App Store is a service mark of Apple Inc.",
+                        "Intel and Intel Inside are trademarks of Intel Corporation. GitHub is a trademark of GitHub, Inc. Homebrew and other names and apps shown belong to their owners."]
 }
 
 // MARK: - The inputs
@@ -147,6 +149,10 @@ enum Mini060 {
         self.ci = ci
         self.clips = clips
         for name in Footage060.required { _ = try image(name) }
+        // v5: the end card's App Store badge is Apple's own artwork, from the site (site/app-store-badge.svg).
+        guard Close060.badgeArtwork != nil else {
+            throw NSError(domain: "Reel060", code: 4, userInfo: [NSLocalizedDescriptionKey: "missing \(Close060.badgeURL.path)"])
+        }
     }
 
     private func remember(_ key: String, _ make: () throws -> CGImage) rethrows -> CGImage {
