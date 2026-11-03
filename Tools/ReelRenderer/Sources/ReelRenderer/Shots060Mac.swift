@@ -1,7 +1,9 @@
 // Shots060Mac.swift — Act IV's first part: S18 (62.4–65.6), Sill for Mac on Intel, and the one cutaway, S19–S20
-// (65.6–72.0), "Fixed in 0.6.0." (storyboard §3, Assets060Fixes.swift). The cutaway's type is drawn here as glyph
+// (65.6–72.0), "Fixed in 0.6." (storyboard §3, Assets060Fixes.swift). The cutaway's type is drawn here as glyph
 // outlines on its exact scroll path (GlyphCanvas), so typecheck measures every line of it; the bug, its touch dot and
 // the line it becomes are Assets060Fixes.swift's.
+// Every time here is v4's: v4.2 (v4 without the tour) plays S18–S20 3.2 s earlier, handing these builders v4's time
+// (Timeline060, Cut060).
 import SwiftUI
 
 // MARK: S18 · Intel

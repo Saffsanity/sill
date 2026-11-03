@@ -44,6 +44,11 @@ func layers(frame i: Int, env: Env) throws -> FrameLayers {
     return try shot.build(t, env)
 }
 
+/// The frame index the finish (the grain and the dither, seeded by frame: Render.swift) is drawn with: the film's own,
+/// but in the 0.6.0 cut (v4.2) v4's, so every frame after the cut is v4's frame 192 later, grain and all (Cut060).
+@MainActor
+func finishFrame(_ i: Int) -> Int { ReelCut.current == .r060 ? Cut060.v4Frame(i) : i }
+
 @MainActor
 func render(args: [String]) throws {
     // v3: never the delivered files in design/reel (first cut, v2-preview, v2 or v3); the working copy is W/v3/out.
@@ -86,11 +91,11 @@ func render(args: [String]) throws {
         var l = try layers(frame: f, env: env)
         if PointerArrow.noGrain { l.grain = false }
         if let writer {
-            try writer.append(frame: f - first) { pb in comp.compose(l, frame: f, into: pb) }
+            try writer.append(frame: f - first) { pb in comp.compose(l, frame: finishFrame(f), into: pb) }
         }
         if let framesDir, (f - first) % every == 0 || !video {
             if !video && (f - first) % every != 0 { continue }
-            let img = comp.still(l, frame: f)
+            let img = comp.still(l, frame: finishFrame(f))
             writePNG(img, to: framesDir.appendingPathComponent(String(format: "f%04d-%@-%06.3f.png", f, Timeline.shot(at: f).id, Double(f) / 60)))
         }
         if let checker, let n = typecheckEvery, (f - first) % n == 0 {
@@ -133,7 +138,7 @@ func stills(args: [String]) throws {
         let started = Date()
         var l = try layers(frame: f, env: env)
         if raw { l.grain = false; l.vignette = false }
-        let img = comp.still(l, frame: f)
+        let img = comp.still(l, frame: finishFrame(f))
         let url = dir.appendingPathComponent(String(format: "still-%@-%06.3f.png", Timeline.shot(at: f).id, Double(f) / 60))
         writePNG(img, to: url)
         print(String(format: "%@ %.0f ms", url.lastPathComponent, Date().timeIntervalSince(started) * 1000))

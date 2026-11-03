@@ -1,6 +1,6 @@
-// Shots060Device.swift — Act III, on iPhone and iPad (28.8–62.4): pinch to zoom (S09), Larger Picture (S10), a
+// Shots060Device.swift — Act III, on iPhone and iPad (28.8–59.2): pinch to zoom (S09), Larger Picture (S10), a
 // keyboard and scrolling (S11–S12), composing in Chinese, Japanese and Korean (S13), tiles (S14), Aa at Off (S15),
-// the thumbnail hold (S16), the tour (S17). Harness stills of Sill 0.6.0 and the drawn Mac pictures they show; what a
+// the thumbnail hold (S16); v4's tour (S17) is cut in v4.2 (Cut060). Harness stills of Sill 0.6.0 and the drawn Mac pictures they show; what a
 // still cannot show is drawn: fingers, the zoom, the Mac's reactions (typing, the Save sheet, a scroll, a selected
 // cell), the Settings panel's own transition, the hold ring. S09–S13 stand in for Noah's takes C–F.
 import AppKit
@@ -741,48 +741,4 @@ enum Hold060 {
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v), vignette: false)
-}
-
-// MARK: S17 · The tour (59.2–62.4)
-
-enum Tour060 {
-    /// S17's iPad: the first cut's (Pad060 became S04–S08's smaller one), its push onto the card's row 101 px clear of the
-    /// words (`clearance`).
-    static let spec = DeviceSpec(interior: CGSize(width: 820, height: 538), bezel: 28, innerRadius: 22, outerRadius: 50)
-    static let centre = CGPoint(x: 1426, y: 560)
-    static var k: CGFloat { spec.interior.width / Mini060.source.width }
-    /// The tour's card on K1; its row "New: Pinch to zoom the picture here, up to 5×…" (x 809–1461, y 800–950).
-    static let row = CGPoint(x: 1050, y: 836)
-    static let push: (Double, Double) = (59.6, 62.4)
-    static let to: CGFloat = 1.6
-}
-
-@MainActor func s060_17(_ t: Double, _ e: Env) throws -> FrameLayers {
-    let T = Tour060.self
-    let device = try padDevice(e, spec: T.spec, centre: T.centre, yaw: 0, t: t, fetch: T.to,
-                               layers: [MiniLayer(name: "stills/K1-tour-touch")])
-    let p = CGFloat(CubicBezier.inOut(ramp(t, T.push.0, T.push.1)))
-    let s = 1 + (T.to - 1) * p
-    let from = onCanvas(T.spec, center: T.centre, CGPoint(x: T.row.x * T.k, y: T.row.y * T.k))
-    let to = CGPoint(x: lerp(from.x, 1380, Double(p)), y: lerp(from.y, 560, Double(p)))
-    let edge = LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .clear, location: 880 / 1920),
-                                      .init(color: .white, location: 960 / 1920), .init(color: .white, location: 1)],
-                              startPoint: .leading, endPoint: .trailing).canvas()
-    var lines = [leftLine(Copy060.tourLines[0], .T1c, baseline: 400, snap: 59.25, end: 62.4),
-                 leftLine(Copy060.tourLines[1], .T1c, baseline: 504, snap: 59.40, end: 62.4)]
-    lines += capped([leftLine(Copy060.tourSubLines[0], .T2, baseline: 588, snap: 60.45, end: 62.4),
-                     leftLine(Copy060.tourSubLines[1], .T2, baseline: 630, snap: 60.75, end: 62.4)])
-    let v = ZStack {
-        Backdrop(glow: 0.06, glowCenter: T.centre)
-        device.canvas().camera(s, from: from, to: to).mask(edge)
-        TypeLayer(lines: lines, t: t)
-    }.canvas()
-    return FrameLayers(base: any(v))
-}
-
-extension Copy060 {
-    /// "The tour marks what’s new." on two lines beside the iPad (T1c: one line would be 1,170 px).
-    static let tourLines = ["The tour marks", "what\u{2019}s new."]
-    /// "It shows once after the update, and any time from Settings." on two lines.
-    static let tourSubLines = ["It shows once after the update,", "and any time from Settings."]
 }

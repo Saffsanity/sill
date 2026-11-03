@@ -73,12 +73,12 @@ The commands (`main.swift` has them all):
 | `derived <dir> <name>…` | 0.6.0's derived stills (`L0w`, `N1x`, `D1x`, `qtv`, …: Reel060.swift, Retouch060.swift) as PNG |
 
 `Scripts/pipeline.sh` runs the delivery steps v3.1 ran (score, render, mux, the poster still at 75.2 s, finalize,
-verify, sheet) into `work/v31/out/` (with `REEL=060`, the 0.6.0 video into `work/060/out/`, its poster at 77.2 s),
+verify, sheet) into `work/v31/out/` (with `REEL=060`, the 0.6.0 video into `work/060/out/`, its poster at 74.0 s),
 under `taskpolicy -c utility`, encoding only while no device is connected to Sill.app (the repository's
 `Scripts/encoder-check/no-device.sh`: it waits for one to leave, and pauses a running step while one connects), and
 since 0.6.0 its render type-checks every frame (The type). A whole v3.1 render takes about 4 minutes on an M2 Pro
 (20.9 fps for 4,992 frames), and the check about 7 minutes more (11.9 frames/s); the 0.6.0 film with its check takes
-about 650 s (646 s at 7.4 fps for 4,800 frames in its last delivery run).
+about 620 s (606 s at 7.6 fps for 4,608 frames in v4.2's delivery run; v4's 646 s for 4,800).
 
 ### Inputs
 
@@ -213,19 +213,29 @@ leaves that type alone (it is in both of its renders), and `assets --motion` che
 draws its fix lines with `FixesType060` (`Shots060Mac.swift`) on `GlyphCanvas`, so `typecheck` measures them; the
 previews' `FixesColumn060` still draws them itself.
 
-## The 0.6.0 update video (`REEL=060`)
+## The 0.6 update video (`REEL=060`)
 
-`REEL=060` selects the 0.6.0 update video (80.0 s, 4,800 frames, 23 shots on 50 bars) in place of v3.1, which stays
-the default and renders as before (`ReelCut`, `Look.swift`). `Stage`, `Timeline.shots`, the score (`Score060.swift`),
-the sheet's tiles and title, `verify`'s silence window (71.40–72.00) and true-black frame (4790), and the movie's
-title follow it. Its shot list is `design/reel/v4/SHOTLIST-0.6.0.md`.
+`REEL=060` selects the 0.6 update video (76.8 s, 4,608 frames, 22 shots on 48 bars) in place of v3.1, which stays the
+default and renders as before (`ReelCut`, `Look.swift`). `Stage`, `Timeline.shots`, the score (`Score060.swift`), the
+sheet's tiles and title, `verify`'s silence window (68.20–68.80) and true-black frame (4598), and the movie's title
+follow it. Its shot list is `design/reel/v4.2/SHOTLIST-0.6.0.md`.
+
+This branch (`reel-0-6-0-cut`, from v4's ed9c4aca) is v4.2: v4 (80.0 s, 23 shots on 50 bars, `design/reel/v4/`)
+without its tour (S17, 59.2–62.4, "The tour marks what’s new."), Noah's pick of v4 over v4.1 with only the tour gone,
+and two of v4.1's words, also his: the version reads "0.6" (the lockup, the end card, "Needs Sill for Mac 0.6.", "With
+Sill for Mac 0.6.", the cutaway's "Fixed in 0.6.", the movie's title), and S05's footnote reads "Text only. Share
+Clipboard, in Settings, turns it on or off." (at v4's place, size and time). Everything before 59.2 is v4's; S18–S23
+play 3.2 s (two bars) earlier, at 59.2–76.8, their builders handed v4's time and the finish (grain, dither) v4's frame
+index (`Cut060`, `finishFrame`), so every frame from 59.2 on is v4's frame 192 later; the shot builders, their
+constants and `assets` keep v4's times. The score's cues follow the same rule (under 59.2 kept, the tour's gone, from
+v4's 62.4 3.2 s earlier). The `reel-0-6-0` branch's head is the slower v4.1 cut (144.0 s, `design/reel/v4.1/`).
 
 | File | What it holds |
 |---|---|
 | `Reel060.swift` | the inputs (`Footage060`: stills, pictures and the stills derived from them), the copy (`Copy060`), the timeline (`Timeline060`) and the sheet's times |
 | `Shots060Open.swift` | S01–S03, the open, and S21–S23, the close |
 | `Shots060Clip.swift` | S04–S08: the clipboard both ways, sound, a locked Mac and unlocking it |
-| `Shots060Device.swift` | S09–S17: pinch, Larger Picture, a keyboard, scrolling, composition, tiles, Aa, the hold, the tour |
+| `Shots060Device.swift` | S09–S16: pinch, Larger Picture, a keyboard, scrolling, composition, tiles, Aa, the hold (v4's tour, S17, cut) |
 | `Shots060Mac.swift` | S18, Intel, and the cutaway, S19–S20, its type on `GlyphCanvas` |
 | `Score060.swift` | the cue sheet and the voices, on v3's engine |
 | `Assets060*.swift` | the drawn assets (the bug, the lock screen, the keyboards, the arcs, the iPhone, the iMac) and `assets` |

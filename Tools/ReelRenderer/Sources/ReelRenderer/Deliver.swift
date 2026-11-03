@@ -126,7 +126,7 @@ func contactSheet(args: [String]) throws {
         ctx.textPosition = CGPoint(x: x, y: y)
         CTLineDraw(CTLineCreateWithAttributedString(a), ctx)
     }
-    text(ReelCut.current == .r060 ? "Sill 0.6.0 update · contact sheet · one frame per shot (from the MP4) · S04–S17: the new features, S19–S20: the fixes"
+    text(ReelCut.current == .r060 ? "Sill 0.6 update · contact sheet · one frame per shot (from the MP4) · S04–S16: the new features, S19–S20: the fixes"
                                   : "Sill sizzle reel v3.1 · contact sheet · one frame per shot (from the MP4) · S24–S27: Wi‑Fi, Wired, Direct, Remote",
          gutter, H - 36, 18, .semibold, 0.85)
     for (k, (id, t)) in sheetTimes.enumerated() {
@@ -224,7 +224,7 @@ func verify(args: [String]) throws {
                 let idStr = String(bytes: [24, 16, 8, 0].map { UInt8((id >> $0) & 0xFF) }, encoding: .ascii) ?? "?"
                 print("  audio: \(idStr) \(Int(asbd.mSampleRate)) Hz, \(asbd.mChannelsPerFrame) ch, range \(String(format: "%.4f+%.4f", arange.start.seconds, arange.duration.seconds))")
             }
-            // Levels: overall peak, RMS, and the silence (v2's 57.60–58.00; v3's 65.60–66.00; 0.6.0's 71.40–72.00, after the
+            // Levels: overall peak, RMS, and the silence (v2's 57.60–58.00; v3's 65.60–66.00; 0.6.0's 68.20–68.80, after the
             // thud at the squash).
             let ar = try AVAssetReader(asset: asset)
             let ao = AVAssetReaderTrackOutput(track: a, outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 32,
@@ -232,8 +232,8 @@ func verify(args: [String]) throws {
                                                                          AVSampleRateKey: 48_000, AVNumberOfChannelsKey: 2])
             ar.add(ao); ar.startReading()
             var peak: Float = 0, sumSq = 0.0, n = 0.0, silPeak: Float = 0, idx = 0, innerPeak: Float = 0
-            // v3: the silence moved with Act IV (65.60–66.00). 0.6.0: 71.40–72.00.
-            let sil: (Double, Double) = ReelCut.current == .r060 ? (71.40, 72.00) : (65.60, 66.00)
+            // v3: the silence moved with Act IV (65.60–66.00). 0.6.0: 68.20–68.80 (v4's 71.40–72.00, 3.2 s earlier without the tour).
+            let sil: (Double, Double) = ReelCut.current == .r060 ? (68.20, 68.80) : (65.60, 66.00)
             let silA = Int(sil.0 * 48_000), silB = Int(sil.1 * 48_000)
             let inA = Int((sil.0 + 0.05) * 48_000), inB = Int((sil.1 - 0.05) * 48_000)
             var nonzero = 0
@@ -259,9 +259,9 @@ func verify(args: [String]) throws {
                          sil.0 + 0.05, sil.1 - 0.05,
                          innerPeak == 0 ? "digital silence (0)" : String(format: "%.1f dBFS", db(Double(innerPeak)))))
         }
-        // Blacks: frame 3951 (65.85 s, inside the 0.4 s of true black; v2's 3471) must decode to Y 16. 0.6.0: frame 4790
-        // (79.83 s, after the sill line has retracted).
-        let blackFrame = ReelCut.current == .r060 ? 4790 : 3951
+        // Blacks: frame 3951 (65.85 s, inside the 0.4 s of true black; v2's 3471) must decode to Y 16. 0.6.0: frame 4598
+        // (76.63 s, after the sill line has retracted; v4's 4790, 192 frames earlier without the tour).
+        let blackFrame = ReelCut.current == .r060 ? 4598 : 3951
         let yr = try AVAssetReader(asset: asset)
         yr.timeRange = CMTimeRange(start: CMTime(value: CMTimeValue(blackFrame), timescale: 60), duration: CMTime(value: 1, timescale: 60))
         let yo = AVAssetReaderTrackOutput(track: v, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange])
@@ -447,7 +447,7 @@ private func shiftChunkOffsets(_ b: Box, by delta: Int) -> Box {
 }
 
 /// The title written as iTunes `©nam` (fourth cut: the files had cover art but no title).
-var movieTitle: String { ReelCut.current == .r060 ? "What’s new in Sill 0.6.0" : "Sill sizzle reel v3.1" }
+var movieTitle: String { ReelCut.current == .r060 ? "What’s new in Sill 0.6" : "Sill sizzle reel v3.1" }
 
 private func coverArt(_ jpeg: Data) -> Box {
     // hdlr: version/flags 0, pre_defined 0, handler 'mdir', reserved 'appl' 0 0, empty name.

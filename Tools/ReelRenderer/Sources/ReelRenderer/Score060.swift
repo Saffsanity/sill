@@ -8,22 +8,24 @@
 // filter, panned to the iPad), cut dead at Mute and back after it; F♯m9 darkened and low-passed while the Mac is
 // locked; key ticks for the password; Act III's arpeggio and off-beat ticks; typing clicks and a haptic buzz under
 // "Esc"; the lights' bells; the cutaway's E6/9 with the riser, a quiet tick on every line crossing the middle, the
-// pulse doubling from 69.6 and the hard stop at the squash (71.20) into digital silence but for the thud; the final
-// chord from 72.0, the end card's tones, the release and the master's last 150 ms to zero.
+// pulse doubling from 66.4 and the hard stop at the squash (68.00) into digital silence but for the thud; the final
+// chord from 68.8, the end card's tones, the release and the master's last 150 ms to zero.
+// v4.2 (v4 without the tour, S17): every cue under 59.2 is v4's; the tour's (59.2–62.4) are gone; every cue from v4's
+// 62.4 is 3.2 s earlier (Cut060), the cues the pictures share (the close, the cutaway's crossings) mapped by Cut060.film.
 import AudioToolbox
 import AVFoundation
 import Foundation
 
 private let SR = 48_000.0
-private let END = 80.0
+private let END = 76.8
 private let TOTAL = Int(END * SR)
-private let CRESC = 65.6                // the cutaway: the pad opens, the riser rises
-private let DOUBLE = 69.6               // the pulse doubles
-private let STOP = 71.2                 // the squash: everything stops dead but the thud
-private let SILENT = 71.4               // digital silence from here (the thud's tail is −50 dB by then)…
-private let RESUME = 72.0               // …until the final chord blooms
-private let FINAL = 72.0
-private let RELEASE = 78.8              // the chord releases with the picture's fade
+private let CRESC = 62.4                // the cutaway: the pad opens, the riser rises
+private let DOUBLE = 66.4               // the pulse doubles
+private let STOP = 68.0                 // the squash: everything stops dead but the thud
+private let SILENT = 68.2               // digital silence from here (the thud's tail is −50 dB by then)…
+private let RESUME = 68.8               // …until the final chord blooms
+private let FINAL = 68.8
+private let RELEASE = 75.6              // the chord releases with the picture's fade
 private let TAIL = 0.15
 
 @inline(__always) private func db(_ d: Double) -> Double { pow(10, d / 20) }
@@ -63,11 +65,13 @@ enum Cues060 {
     static let dMaj9: [Double] = [38, 45, 49, 52, 54]
     static let e69: [Double] = [40, 47, 49, 54, 56]
     /// The pad's chords, on bar lines: the open and S04 on A add9, then F♯m9 (S05), D maj9 (S06), F♯m9 darkened while the
-    /// Mac is locked (S07–S08), A add9 again at the unlock; Act III round the cycle; E6/9 under the cutaway.
+    /// Mac is locked (S07–S08), A add9 again at the unlock; Act III round the cycle; E6/9 under the cutaway. v4.2: v4's
+    /// E6/9 of 54.4–60.8 ends at the cut (59.2), and v4's D maj9 of 60.8–65.6 keeps its part after the tour, 59.2–62.4
+    /// (S18, as in v4), so the change from E6/9 to D maj9 falls on the cut's bar line.
     static let chords: [(Double, Double, [Double])] = [
         (0.0, 9.6, aAdd9), (9.6, 14.4, fsm9), (14.4, 19.2, dMaj9), (19.2, 25.6, fsm9), (25.6, 28.8, aAdd9),
-        (28.8, 35.2, e69), (35.2, 41.6, aAdd9), (41.6, 48.0, fsm9), (48.0, 54.4, dMaj9), (54.4, 60.8, e69),
-        (60.8, 65.6, dMaj9), (65.6, STOP, e69),
+        (28.8, 35.2, e69), (35.2, 41.6, aAdd9), (41.6, 48.0, fsm9), (48.0, 54.4, dMaj9), (54.4, 59.2, e69),
+        (59.2, 62.4, dMaj9), (62.4, STOP, e69),
     ]
     static let finalChord: [Double] = [45, 52, 57, 59, 61, 64, 69]
 
@@ -104,18 +108,19 @@ enum Cues060 {
     /// The detent click when Aa lands on Off.
     static let detents: [Double] = [Aa060.off]
     /// Glint shimmers: the open's glint, S18's glint across the iMac, the close's glint round the icon.
-    static let shimmers: [Double] = [Open060.glint + 0.1, 63.2, Close060.glint]
+    static let shimmers: [Double] = [Open060.glint + 0.1, 60.0, Cut060.film(Close060.glint)]
     /// Tones (sine + 2nd harmonic at −14 dB, 1.1 s): the lockup's words, open and close, and "Free. Open source."
     static let tones: [(Double, Double)] = [(Open060.wordmark, 76), (Open060.version, 81),
-                                            (Close060.wordmark, 76), (Close060.version, 81), (Close060.freeOpen, 85)]
+                                            (Cut060.film(Close060.wordmark), 76), (Cut060.film(Close060.version), 81),
+                                            (Cut060.film(Close060.freeOpen), 85)]
     /// Hits (v3's: sine 90 → 58 Hz and a 3 kHz click): the cut to "What’s new." and Act II's first frame.
     static let hits: [(Double, Double)] = [(Open060.cut, -18), (6.4, -14)]
     /// Statement snaps (the pulse is +3 dB on them).
     static let statementSnaps: [Double] = [6.45, 8.45, 10.45, 12.05, 14.45, 19.25, 19.65, 24.05, 28.85, 29.65, 32.85, 33.65,
                                            36.85, 37.65, 39.25, 40.85, 41.25, 44.45, 45.25, 46.05, 48.85, 52.85, 56.05, 56.95,
-                                           59.25, 62.45, 65.65]
+                                           59.25, 62.45]
     /// The cutaway's quiet ticks: each fix line crossing the middle (Fixes060.crossings, on the 7.5/s grid).
-    static var crossings: [Double] { Fixes060.crossings }
+    static var crossings: [Double] { Fixes060.crossings.map(Cut060.film) }
     /// S06: the Mac's sound plays from 14.4, Mute cuts it dead at 17.6, it is back at 18.4, and S06 ends at 19.2.
     static let macSound = (14.4, 19.2), mute = (Sound060.mute, Sound060.unmute)
     /// "Esc" buzzes (v3's haptic, C19) as the key goes down.
@@ -126,7 +131,7 @@ enum Cues060 {
 
 /// The pad: per note two sines at ±4 cents and a triangle at −12 dB; equal-power crossfades 0.8 s wide on each bar
 /// line; 0.2 Hz tremolo at 8 %. It swells from silence over the open (2.0 s), builds through the cutaway, stops dead at
-/// the squash; the final chord from 72.0, released to silence at the end.
+/// the squash; the final chord from 68.8, released to silence at the end.
 private final class PadVoice060 {
     var n = 0
     var phases = [Double](repeating: 0, count: 256)
@@ -482,7 +487,7 @@ enum Score060 {
             R.append(contentsOf: UnsafeBufferPointer(start: ch[1], count: Int(buffer.frameLength)))
         }
         engine.stop()
-        // 71.4–72.0: digital silence (the thud's tail is under −50 dB at 71.4), black and the sill line alone.
+        // 68.2–68.8: digital silence (the thud's tail is under −50 dB at 68.2), black and the sill line alone.
         for i in Int(SILENT * SR)..<min(Int(RESUME * SR), L.count) { L[i] = 0; R[i] = 0 }
         let n = L.count, fade = Int(TAIL * SR)
         for j in 0..<min(fade, n) {
@@ -510,13 +515,13 @@ enum Score060 {
         if let i = args.firstIndex(of: "--wav"), i + 1 < args.count { wav = URL(fileURLWithPath: args[i + 1]) }
         let (l1, r1) = try renderPCM(gain: 1)
         let s1 = stats(l1, r1)
-        print(String(format: "score (0.6.0) pass 1: peak %.2f dBFS, RMS %.2f dBFS", s1.peak, s1.rms))
+        print(String(format: "score (0.6) pass 1: peak %.2f dBFS, RMS %.2f dBFS", s1.peak, s1.rms))
         let gain = pow(10, (-20 + 1.5 - s1.rms) / 20)
         var (L, R) = try renderPCM(gain: gain)
         let post = Float(db(-1.5))
         for i in 0..<L.count { L[i] *= post; R[i] *= post }
         let s2 = stats(L, R)
-        print(String(format: "score (0.6.0) pass 2 (gain %.2f dB): peak %.2f dBFS, RMS %.2f dBFS", 20 * log10(gain), s2.peak, s2.rms))
+        print(String(format: "score (0.6) pass 2 (gain %.2f dB): peak %.2f dBFS, RMS %.2f dBFS", 20 * log10(gain), s2.peak, s2.rms))
         let format = AVAudioFormat(standardFormatWithSampleRate: SR, channels: 2)!
         let pcm = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(L.count))!
         pcm.frameLength = AVAudioFrameCount(L.count)
@@ -533,6 +538,6 @@ enum Score060 {
                                                              AVNumberOfChannelsKey: 2, AVEncoderBitRateKey: 256_000],
                                  commonFormat: .pcmFormatFloat32, interleaved: false)
         try af.write(from: pcm)
-        print("score (0.6.0): \(String(format: "%.2f", Double(L.count) / SR)) s → \(wav.path) and \(m4a.path)")
+        print("score (0.6): \(String(format: "%.2f", Double(L.count) / SR)) s → \(wav.path) and \(m4a.path)")
     }
 }

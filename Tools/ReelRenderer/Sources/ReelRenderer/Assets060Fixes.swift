@@ -1,4 +1,4 @@
-// Assets060Fixes.swift — S19–S20 (65.6–72.0), the one cutaway, "Fixed in 0.6.0." (storyboard §3): the fixes
+// Assets060Fixes.swift — S19–S20 (65.6–72.0), the one cutaway, "Fixed in 0.6." (storyboard §3): the fixes
 // scroll up in a column, the last thing in it is a bug drawn like the reel's devices, a touch squashes it on the
 // beat at 71.20 (frame 4272), and it flattens into the 2 px accent sill line the close stands on (y 666).
 //
@@ -6,6 +6,8 @@
 // reason. The column's type is drawn as glyph outlines at its exact scroll position (Assets060Text.swift), so it
 // glides at 7.5 px a frame without a whole-pixel step. `Fixes060.frame(t)` is the whole shot; the column, the bug
 // and the line are separate views for a timeline that composes them otherwise.
+// These are v4's times: v4.2 (v4 without the tour) plays the cutaway 3.2 s earlier (62.4–68.8, the squash at 68.00,
+// frame 4080), handing it v4's time (Timeline060, Cut060); the score maps its crossings with Cut060.film.
 import AppKit
 import SwiftUI
 
@@ -82,7 +84,8 @@ enum Fixes060 {
             "Reconnecting to a Mac you never paired accepts only the key it saw.",
         ]),
     ]
-    static let title = ["Fixed", "in", "0.6.0."]
+    /// v4.1 (carried into v4.2): "0.6", not "0.6.0" (Noah).
+    static let title = ["Fixed", "in", "0.6."]
 
     // MARK: The sill line it ends on (the lockup's, S21)
 

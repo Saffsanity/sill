@@ -1,6 +1,8 @@
 // Reel060.swift — the 0.6.0 update video (REEL=060): its inputs, the stills it derives from them, its copy, and its
 // timeline. The storyboard is ~/Downloads/sill-handoff/release-060/reel-0.6.0-storyboard.md (approved 2026-11-02);
-// the shot list with the as-built numbers is design/reel/v4/SHOTLIST-0.6.0.md. 80.0 s, 50 bars at 150 BPM, 23 shots.
+// the shot list with the as-built numbers is design/reel/v4/SHOTLIST-0.6.0.md. v4.2 (design/reel/v4.2/) is v4 without the
+// tour (S17, 59.2–62.4): 76.8 s, 48 bars at 150 BPM, 22 shots; S18–S23 play v4's frames 3.2 s earlier (`Cut060`). Two
+// of v4.1's words come with it (Noah): "0.6" for the version, and S05's footnote (Copy060.version, pasteFoot).
 //
 // Inputs, under `reelDir` (REEL_DIR; the assemble step's `.build/reel060/input`):
 // - `stills/`: harness screenshots of Sill 0.6.0 (origin/main c4a331f) on private simulators: the iPad mini's
@@ -17,13 +19,18 @@ import SwiftUI
 
 enum Copy060 {
     static let whatsNew = "What\u{2019}s new."
-    static let version = "0.6.0"
+    /// v4.1 (carried into v4.2), Noah: "when showing the version number, go with 0.6 not 0.6.0 for aesthetic": the lockup,
+    /// the end card, the footnotes and the cutaway's title say 0.6 (no line names the app's own version string).
+    static let version = "0.6"
     // S04–S05
     static let copyMac = "Copy on your Mac.", pasteIPad = "Paste on your iPad."
-    static let needsMac = "Needs Sill for Mac 0.6.0."
+    static let needsMac = "Needs Sill for Mac 0.6."
     static let copyIPad = "Copy on your iPad.", pasteMac = "Paste on your Mac."
     static let pasteSub = "Tap Paste in Sill. It lands where the cursor is."
-    static let pasteFoot = "Text, up to 256 KB. Share Clipboard turns it off and on."
+    /// v4.1 (carried into v4.2), Noah: "last line of text should read - Text only, Shared Clipboard in settings turns it on
+    /// or off": the setting's name in the app is Share Clipboard (whats-new-0.6.0.txt; the iPad's Settings panel and the
+    /// Mac's General).
+    static let pasteFoot = "Text only. Share Clipboard, in Settings, turns it on or off."
     // S06
     static let sound = "Sound from your Mac."
     static let soundSub = "The window you\u{2019}re using, a moment behind the picture."
@@ -64,13 +71,10 @@ enum Copy060 {
     // S15
     static let aaOff = "Aa starts at Off."
     static let aaSub = "Slide back to Off, and the window goes back to its own size."
-    static let aaFoot = "With Sill for Mac 0.6.0."
+    static let aaFoot = "With Sill for Mac 0.6."
     // S16
     static let hold = "Hold a thumbnail.", halfSecond = "Controls in half a second."
     static let holdFoot = "Hold to Show Window Controls sets 0.2 to 2 seconds."
-    // S17
-    static let tour = "The tour marks what\u{2019}s new."
-    static let tourSub = "It shows once after the update, and any time from Settings."
     // S18
     static let intel = "Sill for Mac now runs on Intel."
     static let intelSub = "Apple silicon or an Intel processor, macOS 14 or later."
@@ -122,7 +126,7 @@ enum Mini060 {
         "stills/E6-reverse-off", "stills/E7-reverse-on",
         "stills/F0-cjk0", "stills/F1-cjk1", "stills/F2-cjk2", "stills/F3-cjk3", "stills/F4-cjk4",
         "stills/N1-tiles", "stills/N2-list", "stills/H1-scale125-open", "stills/H2-scaleoff-open",
-        "stills/J1-windowmenu", "stills/J2-hold-row", "stills/K1-tour-touch",
+        "stills/J1-windowmenu", "stills/J2-hold-row",
     ]
 
     init(ci: CIContext, clips: ClipLibrary) throws {
@@ -427,7 +431,30 @@ struct CanvasDot: View {
     }
 }
 
-// MARK: - The timeline (80.0 s, 50 bars; acts on bar lines at 0, 6.4, 28.8 and 62.4)
+// MARK: - The timeline (76.8 s, 48 bars; acts on bar lines at 0, 6.4, 28.8 and 59.2)
+
+/// v4.2: v4 without its tour (S17, 59.2–62.4, two bars). Everything from v4's 62.4 plays 3.2 s earlier: S18–S23's
+/// builders are v4's own, handed v4's time (as v3's Act IV is handed v2's: `ActIV.shift`), and the finish (the grain and
+/// the dither, seeded by the frame) v4's frame index, so every frame from 59.2 on is v4's frame 192 later.
+enum Cut060 {
+    /// Where the tour was in v4 (59.2–62.4), and how much later in v4 everything after it is.
+    static let at = 59.2, length = 3.2
+    static let frames = 192
+    /// The film's time → v4's time. On a frame (as the timeline hands it a time, frame ÷ 60), exactly v4's time of the
+    /// frame 192 later, (f + 192) ÷ 60: t + 3.2 can differ from it in its last bit, and a builder's `t >= …` with it.
+    static func v4(_ t: Double) -> Double {
+        guard t >= at else { return t }
+        let f = (t * 60).rounded()
+        return abs(t * 60 - f) < 1e-6 ? (f + Double(frames)) / 60 : t + length
+    }
+    /// v4's time → the film's (v4's tour, 59.2–62.4, has none).
+    static func film(_ t: Double) -> Double {
+        precondition(t < at || t >= at + length, "v4's \(t) s was the tour's, which v4.2 cuts")
+        return t >= at ? t - length : t
+    }
+    /// The film's frame → v4's frame (what the finish is seeded with).
+    static func v4Frame(_ f: Int) -> Int { f >= Int((at * 60).rounded()) ? f + frames : f }
+}
 
 @MainActor
 enum Timeline060 {
@@ -442,7 +469,7 @@ enum Timeline060 {
         Shot(id: "S06", start: 14.4, end: 19.2, source: "stand-in for take B: still B1 + v3.1 1.6–6.4, B4, B5; drawn arcs", clip: nil, build: s060_06),
         Shot(id: "S07", start: 19.2, end: 24.0, source: "stills L0w, L1x; drawn lock screen", clip: nil, build: s060_07),
         Shot(id: "S08", start: 24.0, end: 28.8, source: "drawn lock screen and keyboard; stills L1x, L0w", clip: nil, build: s060_08),
-        // Act III · on iPhone and iPad (28.8–62.4, 21 bars)
+        // Act III · on iPhone and iPad (28.8–59.2, 19 bars; v4's tour, S17, cut)
         Shot(id: "S09", start: 28.8, end: 32.8, source: "stand-in for take C: still C0, picture sheet zoomed", clip: nil, build: s060_09),
         Shot(id: "S10", start: 32.8, end: 36.8, source: "stand-in for take D: stills D1, D4, D5, D2, D3", clip: nil, build: s060_10),
         Shot(id: "S11", start: 36.8, end: 40.8, source: "stand-in for take E part 1: stills E0, E1, E2; drawn keyboard", clip: nil, build: s060_11),
@@ -451,14 +478,13 @@ enum Timeline060 {
         Shot(id: "S14", start: 48.8, end: 52.8, source: "stills N1, N2", clip: nil, build: s060_14),
         Shot(id: "S15", start: 52.8, end: 56.0, source: "stills H1, H2; drawn Mac (v3)", clip: nil, build: s060_15),
         Shot(id: "S16", start: 56.0, end: 59.2, source: "stills L0w, J1, J2; drawn hold ring", clip: nil, build: s060_16),
-        Shot(id: "S17", start: 59.2, end: 62.4, source: "still K1", clip: nil, build: s060_17),
-        // Act IV · the Mac, the fixes, the close (62.4–80.0, 11 bars)
-        Shot(id: "S18", start: 62.4, end: 65.6, source: "drawn (the icon's iMac)", clip: nil, build: s060_18),
-        Shot(id: "S19", start: 65.6, end: 70.4, source: "type (the fixes' column)", clip: nil, build: s060_19),
-        Shot(id: "S20", start: 70.4, end: 72.0, source: "drawn (the bug) + type", clip: nil, build: s060_19),
-        Shot(id: "S21", start: 72.0, end: 74.4, source: "drawn + type", clip: nil, build: s060_21),
-        Shot(id: "S22", start: 74.4, end: 77.6, source: "type", clip: nil, build: s060_21),
-        Shot(id: "S23", start: 77.6, end: 80.0, source: "—", clip: nil, build: s060_21),
+        // Act IV · the Mac, the fixes, the close (59.2–76.8, 11 bars): v4's 62.4–80.0, each builder handed v4's time.
+        Shot(id: "S18", start: 59.2, end: 62.4, source: "drawn (the icon's iMac)", clip: nil, build: { t, e in try s060_18(Cut060.v4(t), e) }),
+        Shot(id: "S19", start: 62.4, end: 67.2, source: "type (the fixes' column)", clip: nil, build: { t, e in try s060_19(Cut060.v4(t), e) }),
+        Shot(id: "S20", start: 67.2, end: 68.8, source: "drawn (the bug) + type", clip: nil, build: { t, e in try s060_19(Cut060.v4(t), e) }),
+        Shot(id: "S21", start: 68.8, end: 71.2, source: "drawn + type", clip: nil, build: { t, e in try s060_21(Cut060.v4(t), e) }),
+        Shot(id: "S22", start: 71.2, end: 74.4, source: "type", clip: nil, build: { t, e in try s060_21(Cut060.v4(t), e) }),
+        Shot(id: "S23", start: 74.4, end: 76.8, source: "—", clip: nil, build: { t, e in try s060_21(Cut060.v4(t), e) }),
     ]
 }
 
@@ -466,6 +492,6 @@ enum Timeline060 {
 let sheetTimes060: [(String, Double)] = [
     ("S01", 1.9), ("S02", 4.2), ("S03", 5.6), ("S04", 8.9), ("S05", 13.3), ("S06", 17.9),
     ("S07", 22.4), ("S08", 25.05), ("S09", 30.2), ("S10", 35.9), ("S11", 39.35), ("S12", 42.95),
-    ("S13", 47.9), ("S14", 50.0), ("S15", 54.9), ("S16", 58.6), ("S17", 61.6), ("S18", 63.7),
-    ("S19", 68.0), ("S20", 71.25), ("S21", 73.7), ("S22", 77.2), ("S23", 79.2),
+    ("S13", 47.9), ("S14", 50.0), ("S15", 54.9), ("S16", 58.6), ("S18", 60.5),
+    ("S19", 64.8), ("S20", 68.05), ("S21", 70.5), ("S22", 74.0), ("S23", 76.0),
 ]

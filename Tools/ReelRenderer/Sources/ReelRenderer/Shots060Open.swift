@@ -1,6 +1,8 @@
 // Shots060Open.swift — the 0.6.0 reel's open (S01–S03, 0.0–6.4) and close (S21–S23, 72.0–80.0): the lit icon on
 // the sill line, the lockup with the version, "What’s new.", and the end card. v3's close, reused (ShotsI.swift):
 // the glint round the icon's iPad, the icon's rise, the wordmark landing on the sill line, the +1.2 % card hold.
+// The close's times are v4's: v4.2 (v4 without the tour) plays S21–S23 3.2 s earlier, handing s060_21 v4's time
+// (Timeline060, Cut060), and the score maps the close's cues with Cut060.film.
 import SwiftUI
 
 extension TypeStyle {
@@ -56,7 +58,7 @@ enum Close060 {
     return FrameLayers(base: any(v), vignette: false)
 }
 
-// MARK: S02 · the lockup: "Sill" / "0.6.0"
+// MARK: S02 · the lockup: "Sill" / "0.6"
 
 @MainActor func s060_02(_ t: Double, _ e: Env) throws -> FrameLayers {
     let rise = ease(t, Open060.rise, 0.6, .appleOut)
