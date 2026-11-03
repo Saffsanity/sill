@@ -83,7 +83,7 @@ import Foundation
         let k = { (t: Double) in openK(t) }
         let p04 = pushScale(6.4, 10.4, 0.02), p06 = pushScale(14.4, 19.2, 0.02), p07 = pushScale(19.2, 24.0, 0.04)
         let p09 = pushScale(28.8, 32.8, 0.02), p10 = pushScale(32.8, 36.8, 0.02), p11 = pushScale(36.8, 40.8, 0.02)
-        let p16 = pushScale(56.0, 59.2, 0.02)
+        let p16 = pushScale(56.0, Hold060.end, 0.03)
         let a07 = s07About
         let w15 = { (t: Double) in ease(t, 54.4, 0.3, .appleOut) }
         return [
@@ -172,10 +172,10 @@ import Foundation
                             guess: inScene { t in 1400 + (1183.75 - 1400 - 6 * (t - 48.8)) * (1 + 0.02 * ramp(t, 48.8, 52.8)) },
                             path: inScene { t in let s = 1 + 0.02 * ramp(t, 48.8, 52.8); return [s, s * (t - 48.8)] }, window: 3),
             ], note: "v5: the list, after the tap, on the same drift and push to the cut; the icon's flat face is 4 px wide between its edge and its inner rim, so the window is 3 px"),
-            MotionPassage(name: "S16-push", from: Cut060.film(57.6, .s16), to: Cut060.film(59.2, .s16), probes: [
+            MotionPassage(name: "S16-push", from: Cut060.film(57.6, .s16), to: Cut060.film(Hold060.end, .s16), probes: [
                 MotionProbe(name: "thumbnail's edge", axis: .x, across: 380...390, guess: inScene(scaled(670.6, at: 57.5, about: 525.7, p16)), path: inScene(basis(p16)), window: 3),
             ], note: "the bar's thumbnails, a 2 % push"),
-            MotionPassage(name: "S16-row", from: Cut060.film(58.05, .s16), to: Cut060.film(59.2, .s16), probes: [
+            MotionPassage(name: "S16-row", from: Cut060.film(58.05, .s16), to: Cut060.film(59.0, .s16), probes: [
                 MotionProbe(name: "row's bottom edge", axis: .y, across: 300...700,
                             guess: inScene { t in 873 + 40 * (1 - ease(t, Hold060.row, 0.35, .appleOut)) },
                             path: inScene { t in [ease(t, Hold060.row, 0.35, .appleOut)] }, window: 5),

@@ -80,9 +80,10 @@ enum Copy060 {
     static let aaOff = "Use windows without resizing"
     static let aaSub = "Enter window mode and slide back to Off with Virtual Display off"
     static let aaFoot = "With Sill for Mac 0.6"
-    // S16
-    static let hold = "Hold a thumbnail.", halfSecond = "Controls in half a second."
-    static let holdFoot = "Hold to Show Window Controls sets 0.2 to 2 seconds."
+    // S16, v5, Noah: ""Hold a thumbnail" then "as long as you like" then "from 0.2 to 2 seconds"" (verbatim, one sentence on
+    // three lines; the Settings row "Hold to Show Window Controls" sets it).
+    static let hold = "Hold a thumbnail", asLong = "as long as you like"
+    static let holdRange = "from 0.2 to 2 seconds"
     // S18
     static let intel = "Sill for Mac now runs on Intel."
     static let intelSub = "Apple silicon or an Intel processor, macOS 14 or later."

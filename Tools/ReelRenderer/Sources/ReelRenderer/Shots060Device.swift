@@ -851,10 +851,13 @@ enum Aa060 {
     return FrameLayers(base: any(v), vignette: false)
 }
 
-// MARK: S16 · Hold a thumbnail (56.0–59.2)
+// MARK: S16 · Hold a thumbnail (its builder's 56.0–60.8: v4.2's 56.0–59.2 and a bar; the film's 62.4–67.2)
 
 enum Hold060 {
     static let down = 56.4, open = 56.9, lift = 57.3, row = 58.0
+    /// v5: a bar longer; "as long as you like" as the controls open (56.85), "from 0.2 to 2 seconds" with the Settings row
+    /// (58.05, 2.75 s before the cut).
+    static let end = 60.8, asLong = 56.85, range = 58.05
     /// The bar, close: the first thumbnails and the lights under the first (J1), 1.32 px per still px.
     static let crop = CGRect(x: 0, y: 0, width: 600, height: 330)
     static let scale: CGFloat = 1.32
@@ -882,10 +885,11 @@ enum Hold060 {
     let rowView = ExactPicture060(image: row, transform: placing(row, in: rowRect), extend: true)
         .mask(Path(roundedRect: rowRect, cornerRadius: 22, style: .continuous).fill(Color.white).canvas())
         .opacity(p)
-    let push = 1 + 0.02 * CGFloat(ramp(t, 56.0, 59.2))
-    let lines = [LineSpec(Copy060.hold, .T1c, x: 1060, baseline: 470, align: .leading, snap: 56.05, holdEnd: 59.2),
-                 LineSpec(Copy060.halfSecond, .T4, x: 1060, baseline: 556, align: .leading, snap: 56.95, holdEnd: 59.2),
-                 LineSpec(Copy060.holdFoot, .T3, x: 1060, baseline: 616, align: .leading, snap: 58.05, holdEnd: 59.2, cascade: false)]
+    // The push at v4.2's rate (2 % in 3.2 s) on to the scene's new end.
+    let push = 1 + 0.03 * CGFloat(ramp(t, 56.0, H.end))
+    let lines = [LineSpec(Copy060.hold, .T1c, x: 1060, baseline: 470, align: .leading, snap: 56.05, holdEnd: H.end),
+                 LineSpec(Copy060.asLong, .T4, x: 1060, baseline: 556, align: .leading, snap: H.asLong, holdEnd: H.end),
+                 LineSpec(Copy060.holdRange, .T3, x: 1060, baseline: 616, align: .leading, snap: H.range, holdEnd: H.end)]
     let v = ZStack {
         Backdrop(glow: 0.05, glowCenter: H.centre)
         // The macro on its exact path (Flat060); the ring, a shape, under the same push.
