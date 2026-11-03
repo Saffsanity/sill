@@ -291,23 +291,26 @@ func judge(_ tr: ProbeTrack, exact: Bool, scale: Double = 1) -> ProbeVerdict? {
         let acrosses: [ClosedRange<Int>] = passage.probes.map { (($0.across.lowerBound * ki)...($0.across.upperBound * ki + ki - 1)) }
         let started = Date()
         for f in stride(from: f0, through: f1, by: every) {
-            let t = Double(f) / 60
-            let lum = try frames.luma(f)
-            for (j, probe) in passage.probes.enumerated() {
-                let along = fixedWindows[j] ?? {
-                    let a = Int((probe.guess(t) * k).rounded(.down)) - probe.window * ki
-                    return a...(a + 2 * probe.window * ki + 1)
-                }()
-                let a = along.lowerBound
-                var m: Double? = nil
-                let lim = probe.axis == .x ? lum.width : lum.height
-                if along.lowerBound >= 0, along.upperBound < lim {
-                    let prof = lum.profile(probe.axis, across: Stage.scaled ? acrosses[j] : probe.across, along: along)
-                    m = probe.centroid ? brightCentroid(prof, from: a) : areaEdge(prof, from: a)
+            // Each frame's autoreleased objects go with it (main.swift's render loop says why).
+            try autoreleasepool {
+                let t = Double(f) / 60
+                let lum = try frames.luma(f)
+                for (j, probe) in passage.probes.enumerated() {
+                    let along = fixedWindows[j] ?? {
+                        let a = Int((probe.guess(t) * k).rounded(.down)) - probe.window * ki
+                        return a...(a + 2 * probe.window * ki + 1)
+                    }()
+                    let a = along.lowerBound
+                    var m: Double? = nil
+                    let lim = probe.axis == .x ? lum.width : lum.height
+                    if along.lowerBound >= 0, along.upperBound < lim {
+                        let prof = lum.profile(probe.axis, across: Stage.scaled ? acrosses[j] : probe.across, along: along)
+                        m = probe.centroid ? brightCentroid(prof, from: a) : areaEdge(prof, from: a)
+                    }
+                    tracks[j].frames.append(f)
+                    tracks[j].measured.append(m)
+                    tracks[j].path.append(Stage.scaled ? probe.path(t).map { $0 * k } : probe.path(t))
                 }
-                tracks[j].frames.append(f)
-                tracks[j].measured.append(m)
-                tracks[j].path.append(Stage.scaled ? probe.path(t).map { $0 * k } : probe.path(t))
             }
         }
         let secs = Date().timeIntervalSince(started)

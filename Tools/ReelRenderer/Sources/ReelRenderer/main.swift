@@ -95,19 +95,26 @@ func render(args: [String]) throws {
     let started = Date()
     var lastReport = Date()
     for f in first...last {
-        var l = try layers(frame: f, env: env)
-        if PointerArrow.noGrain { l.grain = false }
-        if let writer {
-            try writer.append(frame: f - first) { pb in comp.compose(l, frame: finishFrame(f), into: pb) }
+        // Each frame's autoreleased objects go with it: without a pool drained per frame they were kept until the render
+        // ended (no run loop drains one here), about one frame's pixels a frame (2026-11-03: 8.4 MB a frame at 1080p,
+        // 32 MB at 4K, a 4K film's footprint 212 GB at its end).
+        let skipped: Bool = try autoreleasepool {
+            var l = try layers(frame: f, env: env)
+            if PointerArrow.noGrain { l.grain = false }
+            if let writer {
+                try writer.append(frame: f - first) { pb in comp.compose(l, frame: finishFrame(f), into: pb) }
+            }
+            if let framesDir, (f - first) % every == 0 || !video {
+                if !video && (f - first) % every != 0 { return true }
+                let img = comp.still(l, frame: finishFrame(f))
+                writePNG(img, to: framesDir.appendingPathComponent(String(format: "f%04d-%@-%06.3f.png", f, Timeline.shot(at: f).id, Double(f) / 60)))
+            }
+            if let checker, let n = typecheckEvery, (f - first) % n == 0 {
+                try checker.check(frame: f, shot: Timeline.shot(at: f).id) { try layers(frame: f, env: env) }
+            }
+            return false
         }
-        if let framesDir, (f - first) % every == 0 || !video {
-            if !video && (f - first) % every != 0 { continue }
-            let img = comp.still(l, frame: finishFrame(f))
-            writePNG(img, to: framesDir.appendingPathComponent(String(format: "f%04d-%@-%06.3f.png", f, Timeline.shot(at: f).id, Double(f) / 60)))
-        }
-        if let checker, let n = typecheckEvery, (f - first) % n == 0 {
-            try checker.check(frame: f, shot: Timeline.shot(at: f).id) { try layers(frame: f, env: env) }
-        }
+        if skipped { continue }
         if Date().timeIntervalSince(lastReport) > 10 {
             lastReport = Date()
             let done = f - first + 1
@@ -143,12 +150,14 @@ func stills(args: [String]) throws {
         guard let t = Double(a) else { continue }
         let f = min(Stage.frames - 1, Int((t * 60).rounded()))
         let started = Date()
-        var l = try layers(frame: f, env: env)
-        if raw { l.grain = false; l.vignette = false }
-        let img = comp.still(l, frame: finishFrame(f))
-        let url = dir.appendingPathComponent(String(format: "still-%@-%06.3f.png", Timeline.shot(at: f).id, Double(f) / 60))
-        writePNG(img, to: url)
-        print(String(format: "%@ %.0f ms", url.lastPathComponent, Date().timeIntervalSince(started) * 1000))
+        try autoreleasepool {                                   // each still's autoreleased objects go with it, as a render's frame's
+            var l = try layers(frame: f, env: env)
+            if raw { l.grain = false; l.vignette = false }
+            let img = comp.still(l, frame: finishFrame(f))
+            let url = dir.appendingPathComponent(String(format: "still-%@-%06.3f.png", Timeline.shot(at: f).id, Double(f) / 60))
+            writePNG(img, to: url)
+            print(String(format: "%@ %.0f ms", url.lastPathComponent, Date().timeIntervalSince(started) * 1000))
+        }
     }
 }
 

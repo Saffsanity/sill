@@ -135,7 +135,8 @@ func clearanceCommand(args: [String]) throws {
     let env = try makeEnv(comp)
     let first = Int((from * 60).rounded()), last = min(Stage.frames, Int((to * 60).rounded())) - 1
     for f in stride(from: first, through: last, by: every) {
-        try checker.check(frame: f, shot: Timeline.shot(at: f).id) { try layers(frame: f, env: env) }
+        // Each frame's autoreleased objects go with it (main.swift's render loop says why).
+        try autoreleasepool { try checker.check(frame: f, shot: Timeline.shot(at: f).id) { try layers(frame: f, env: env) } }
     }
     // The 4K pass: the gaps are in output px, so the rule's 80 px of the drawing is 80 × scale.
     if Stage.scaled {

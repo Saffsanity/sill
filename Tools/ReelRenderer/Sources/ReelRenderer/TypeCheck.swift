@@ -531,7 +531,8 @@ func typecheckCommand(args: [String]) throws {
     var lastReport = Date()
     for f in stride(from: first, through: last, by: every) {
         let shot = Timeline.shot(at: f).id
-        try checker.check(frame: f, shot: shot) { try layers(frame: f, env: env) }
+        // Each frame's autoreleased objects go with it (main.swift's render loop says why).
+        try autoreleasepool { _ = try checker.check(frame: f, shot: shot) { try layers(frame: f, env: env) } }
         if Date().timeIntervalSince(lastReport) > 10 {
             lastReport = Date()
             print(String(format: "  frame %d/%d (%@) · %.1f frames/s", f, last, shot, Double(f - first + 1) / Double(every) / Date().timeIntervalSince(started)))
