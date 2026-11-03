@@ -19,7 +19,8 @@ import SwiftUI
 // MARK: - Copy (storyboard §2–§4; every line traced in its §7)
 
 enum Copy060 {
-    static let whatsNew = "What\u{2019}s new."
+    /// v5, Noah: "What's new (no period)".
+    static let whatsNew = "What\u{2019}s new"
     /// v4.1 (carried into v4.2), Noah: "when showing the version number, go with 0.6 not 0.6.0 for aesthetic": the lockup,
     /// the end card, the footnotes and the cutaway's title say 0.6 (no line names the app's own version string).
     static let version = "0.6"
