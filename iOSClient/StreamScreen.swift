@@ -377,6 +377,8 @@ struct StreamScreen: View {
             runLaunchArguments()
             #endif
         }
+        // Trackpad mode lies over the picture, so no pinch could undo a zoom made before it (#178).
+        .onChange(of: touchModeRaw) { _, _ in zoom.reset() }
         .onChange(of: client.active) { _, source in
             // Another source, whoever picked it: the whole picture again (a new frame size of the same
             // source keeps the zoom where it is on the pane).
@@ -924,7 +926,7 @@ struct StreamScreen: View {
         func has(_ on: Bool, _ name: String) -> String { on ? name : "no " + name }
         let what = [has(f.menus, "Menus button"), has(f.gestures, "gestures"), has(f.virtualDisplay, "Virtual Display"),
                     has(f.clipboard, "clipboard"), has(f.pasteRightAway, "paste right away"), has(f.sound, "sound"),
-                    has(f.largerPicture, "Larger Picture")]
+                    has(f.largerPicture, "Larger Picture"), has(f.trackpadMode, "Trackpad mode")]
         return "tour: card \(run.at.rawValue) (\(copy.title)): \(copy.rows.count) rows, \(copy.rows.filter(\.isNew).count) New; "
             + what.joined(separator: ", ")
     }

@@ -445,6 +445,13 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
             onEnd: { send(.scrollGesture(.momentumEnded, x: at.x, y: at.y)) })
     }
 
+    /// The iPad's own pointer hovers and scrolls with events this surface has no recognizer for: they fall
+    /// through to what lies under it, the picture's input view in Trackpad mode (#178).
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        if event?.type == .hover || event?.type == .scroll { return false }
+        return super.point(inside: point, with: event)
+    }
+
     /// Two fingers resting on the pad stop a coasting scroll, as on a Mac trackpad, before the pan
     /// has even recognized. One finger does not: that is the pointer, and it may move freely
     /// while the content coasts.
