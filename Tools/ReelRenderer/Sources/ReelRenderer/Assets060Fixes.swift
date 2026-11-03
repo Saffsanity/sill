@@ -365,7 +365,7 @@ struct SillLineGlow060: View {
             if length > 0.5, opacity > 0.002 {
                 Rectangle().fill(LinearGradient(stops: stops, startPoint: .leading, endPoint: .trailing))
                     .frame(width: length, height: 6).blur(radius: 14).opacity(0.12 * opacity)
-                    .offset(x: centerX - length / 2, y: y - 3)
+                    .linePlaced(x: centerX - length / 2, y: y - 3)
             }
         }
         .frame(width: Stage.size.width, height: Stage.size.height, alignment: .topLeading)

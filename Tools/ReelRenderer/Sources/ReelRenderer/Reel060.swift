@@ -321,6 +321,23 @@ enum Mini060 {
                 Footage060.put(c, l1, in: CGRect(x: 0, y: 0, width: l1.width, height: l1.height))
                 c.restoreGState()
             }
+        case "L0p", "L1p":
+            // L0w's and L1x's picture alone, with 8 px of the panel's black round it, transparent elsewhere (S07–S08's Weather
+            // fading from under the lock screen over L0b/L1b: Shots060Clip.lockDevice).
+            let src = try image(name == "L0p" ? "derived/L0w" : "derived/L1x")
+            return try canvas(src.width, src.height) { c in
+                c.clip(to: Mini060.picture.insetBy(dx: -8, dy: -8))
+                Footage060.put(c, src, in: CGRect(x: 0, y: 0, width: src.width, height: src.height))
+            }
+        case "L0b", "L1b":
+            // L0w and L1x with no picture: the stream panel's black where the Mac's picture was (under S07–S08's lock screen,
+            // so none of the Weather can show round it: Shots060Clip.lockDevice).
+            let src = try image(name == "L0b" ? "derived/L0w" : "derived/L1x")
+            let black = sample(try image("stills/L0-unlocked"), 60, 800)
+            return try canvas(src.width, src.height) { c in
+                Footage060.put(c, src, in: CGRect(x: 0, y: 0, width: src.width, height: src.height))
+                c.setFillColor(black); c.fill(Mini060.picture)
+            }
         case "notes-plain":
             // The iPad's note before the Mac's line is pasted: "Sounds good, see you then." alone.
             let p = try image("pictures/ipad-notes-pasted")
@@ -382,10 +399,17 @@ struct MiniScreen<Overlay: View>: View {
             ForEach(0..<layers.count, id: \.self) { i in
                 let (img, l) = layers[i]
                 if l.opacity > 0.001 {
-                    Image(decorative: img, scale: 1).resizable().interpolation(.high)
-                        .frame(width: size.width, height: size.height)
-                        .offset(x: l.slide * size.width)
-                        .opacity(l.opacity)
+                    if l.slide == 0 {
+                        Image(decorative: img, scale: 1).resizable().interpolation(.high)
+                            .frame(width: size.width, height: size.height)
+                            .opacity(l.opacity)
+                    } else {
+                        // Sliding (an app switch): on its exact path (ExactPicture060; an offset is rounded to whole px, and a
+                        // picture under any transform to a quarter of one).
+                        ExactPicture060(image: img, transform: CGAffineTransform(scaleX: size.width / CGFloat(img.width), y: size.height / CGFloat(img.height))
+                            .concatenating(CGAffineTransform(translationX: l.slide * size.width, y: 0)), size: size)
+                            .opacity(l.opacity)
+                    }
                 }
             }
             overlay()

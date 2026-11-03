@@ -97,11 +97,10 @@ struct ZoomedSheet060: View {
         let cell = Pinch060.cell
         let sel = CGRect(x: x + cell.minX / 2880 * w, y: y + cell.minY / 1800 * h, width: cell.width / 2880 * w, height: cell.height / 1800 * h)
         return ZStack(alignment: .topLeading) {
-            // The picture scaled and moved by one render transform, so the zoom glides (a frame and an offset are rounded
-            // to whole pixels).
-            Image(decorative: sheet, scale: 1).resizable().interpolation(.high)
-                .frame(width: P.width, height: P.height)
-                .transformEffect(CGAffineTransform(a: z, b: 0, c: 0, d: z, tx: x, ty: y))
+            // The picture scaled and moved on its exact path (ExactPicture060: a picture under a render transform is placed on
+            // a quarter-pixel grid).
+            ExactPicture060(image: sheet, transform: CGAffineTransform(scaleX: P.width / CGFloat(sheet.width), y: P.height / CGFloat(sheet.height))
+                .concatenating(CGAffineTransform(a: z, b: 0, c: 0, d: z, tx: x, ty: y)), size: CGSize(width: P.maxX, height: P.maxY), extend: true)
             if t >= Pinch060.tap + 0.05 {
                 Path(roundedRect: sel, cornerRadius: 2 * z * k).stroke(Color(hex: 0x007AFF), lineWidth: 3 * z * k * 1.4)
             }
@@ -125,7 +124,7 @@ struct ZoomedSheet060: View {
                  leftLine(Copy060.pinchSub, .T2, baseline: 612, snap: 30.85, end: 32.8)]
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: CGPoint(x: 1440, y: 560))
-        device.canvas().scaled(1 + 0.02 * CGFloat(ramp(t, 28.8, 32.8)), about: CGPoint(x: 1482, y: 565))
+        Flat060.moving(device, .push(1 + 0.02 * CGFloat(ramp(t, 28.8, 32.8)), about: CGPoint(x: 1482, y: 565)), region: Flat060.region(L.spec, center: L.centre))
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v))
@@ -232,7 +231,7 @@ struct PhoneLayers060: View {
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: L.centre)
         SillLine(y: 1036, length: 900, centerX: L.centre.x)
-        phone.canvas().scaled(1 + 0.02 * CGFloat(ramp(t, 32.8, 36.8)), about: CGPoint(x: L.centre.x, y: 1036))
+        Flat060.moving(phone, .push(1 + 0.02 * CGFloat(ramp(t, 32.8, 36.8)), about: CGPoint(x: L.centre.x, y: 1036)), region: Flat060.region(L.spec, center: L.centre))
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v))
@@ -246,6 +245,8 @@ enum Keys060 {
     static var k: CGFloat { spec.interior.width / Mini060.source.width }
     static let slabWidth: CGFloat = 960
     static let slabOffset = CGSize(width: 1430 - 960, height: 238)
+    /// What the iPad (its shadow included) and the laid-back slab cover on the canvas at rest (Flat060's picture).
+    static let region = CGRect(x: 700, y: -160, width: 1460, height: 1280)
     static let typed = "Typing right away."
     /// The keystrokes: a quick typist (about 15 a second), the times varying a little, from 37.2.
     static let strokes: [Double] = {
@@ -309,9 +310,8 @@ struct Typing060: View {
             }
             if down > 0.001 {
                 Path(content).fill(Color.black.opacity(0.10 * down))
-                Image(decorative: sheet, scale: 1).resizable().interpolation(.high)
-                    .frame(width: s.width, height: s.height)
-                    .transformEffect(CGAffineTransform(translationX: s.minX, y: s.minY - s.height * CGFloat(1 - down)))
+                // The sheet sliding down on its exact path (ExactPicture060).
+                ExactPicture060(image: sheet, transform: placing(sheet, in: s).concatenating(CGAffineTransform(translationX: 0, y: -s.height * CGFloat(1 - down))), size: size)
                     .mask(Path(content).fill(Color.white).frame(width: size.width, height: size.height))
             }
         }
@@ -321,7 +321,7 @@ struct Typing060: View {
 
 /// The iPad over the drawn keyboard (S11, and S12 closer): the slab laid back 58° in front, the iPad standing behind it.
 @MainActor func keysGroup(_ e: Env, t: Double, screen: AnyView, base: String, fetch: CGFloat, escPress: KeyPress060? = nil,
-                          pressed: [(row: Int, key: Int, at: Double)] = []) throws -> some View {
+                          pressed: [(row: Int, key: Int, at: Double)] = []) throws -> AnyView {
     let K = Keys060.self
     let h = KeyboardSlab060.height(width: K.slabWidth)
     let slab = KeyboardSlab060(width: K.slabWidth, origin: CGPoint(x: 960 - K.slabWidth / 2, y: 540 - h / 2), t: t, esc: escPress, pressed: pressed)
@@ -329,10 +329,10 @@ struct Typing060: View {
         .offset(x: K.slabOffset.width, y: K.slabOffset.height)
     let device = try padDevice(e, spec: K.spec, centre: K.centre, yaw: 0, t: t, fetch: fetch,
                                layers: [MiniLayer(name: base)], overlay: screen)
-    return ZStack {
+    return AnyView(ZStack {
         slab
         device
-    }.canvas()
+    }.canvas())
 }
 
 // SWAP-IN (S11, take E part 1): replace with Noah's clip E if provided at /Users/noah/Downloads/sill-handoff/release-060/captures/take-E.mov, inside Keys060's iPad in
@@ -360,8 +360,8 @@ struct Typing060: View {
     // corner on the frame's edge at 36.8 and about 18 px past it by 40.8).
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: CGPoint(x: 1450, y: 520))
-        group.scaled(0.92, about: CGPoint(x: 1517, y: 520))
-            .scaled(1 + 0.02 * CGFloat(ramp(t, 36.8, 40.8)), about: CGPoint(x: 1030, y: 520))
+        Flat060.moving(group, rest: .scaling(0.92, about: CGPoint(x: 1517, y: 520)), CGAffineTransform.scaling(0.92, about: CGPoint(x: 1517, y: 520))
+            .concatenating(.push(1 + 0.02 * CGFloat(ramp(t, 36.8, 40.8)), about: CGPoint(x: 1030, y: 520))), region: Keys060.region)
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v))
@@ -427,9 +427,9 @@ struct ScrollDoc060: View {
         let pc = scaledRect(picRect(CGRect(x: p.x, y: p.y, width: 0, height: 0)), k).origin
         let d = 38 * k * 1.4
         return ZStack(alignment: .topLeading) {
-            Image(decorative: page, scale: 1).resizable().interpolation(.high)
-                .frame(width: doc.width, height: pageH)
-                .transformEffect(CGAffineTransform(translationX: doc.minX, y: doc.minY - off * s))
+            // The page on its exact path (ExactPicture060).
+            ExactPicture060(image: page, transform: CGAffineTransform(scaleX: doc.width / CGFloat(page.width), y: pageH / CGFloat(page.height))
+                .concatenating(CGAffineTransform(translationX: doc.minX, y: doc.minY - off * s)), size: CGSize(width: doc.maxX, height: doc.maxY + 40), extend: true)
                 .mask(Path(doc).fill(Color.white))
             Path(roundedRect: bar, cornerRadius: bar.width / 2).fill(Color.black.opacity(0.35))
             if Scroll060.pointerAlpha(t) > 0.002 {
@@ -463,12 +463,13 @@ struct ScrollDoc060: View {
         ScrollDoc060(page: page, k: K.k, t: t)
         if t >= S.panel && panelIn > 0.002 {
             image(button, in: scaledRect(Sound060.settingsButton, K.k))
+            // The panel's transition on its exact path (ExactPicture060).
+            let move = CGAffineTransform.scaling(0.94 + 0.06 * CGFloat(panelIn), about: CGPoint(x: panelRect.maxX, y: panelRect.minY))
             ZStack(alignment: .topLeading) {
-                image(off, in: panelRect)
-                image(on, in: panelRect).opacity(ramp(t, S.flip + 0.03, S.flip + 0.15))
+                ExactPicture060(image: off, transform: placing(off, in: panelRect).concatenating(move), size: size)
+                ExactPicture060(image: on, transform: placing(on, in: panelRect).concatenating(move), size: size).opacity(ramp(t, S.flip + 0.03, S.flip + 0.15))
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
-            .scaleEffect(0.94 + 0.06 * CGFloat(panelIn), anchor: UnitPoint(x: panelRect.maxX / size.width, y: panelRect.minY / size.height))
             .opacity(panelIn)
         }
     }
@@ -485,6 +486,7 @@ struct ScrollDoc060: View {
     let h = KeyboardSlab060.height(width: K.slabWidth)
     let slab = KeyboardSlab060(width: K.slabWidth, origin: CGPoint(x: 960 - K.slabWidth / 2, y: 540 - h / 2), t: t)
         .modifier(Tilt(yaw: 0, pitch: 58)).offset(x: K.slabOffset.width, y: K.slabOffset.height)
+    let group = ZStack { slab; device }.canvas()
     // Closer than S11: the iPad's screen fills the right half, the Settings panel whole inside the frame (its Done and its
     // switch are tapped), its left edge fading out 80 px or more from the words.
     let camera = 1.15 + 0.02 * CGFloat(ramp(t, 40.8, 44.0))
@@ -499,8 +501,8 @@ struct ScrollDoc060: View {
                  leftLine(Copy060.reverseFoot, .T3, baseline: 616, snap: 40.90, end: 44.0, cascade: false)]
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: CGPoint(x: 1490, y: 520))
-        ZStack { slab; device }.canvas()
-            .camera(camera, from: K.centre, to: CGPoint(x: 1435, y: 470))
+        Flat060.moving(group, rest: .camera(1.15, from: K.centre, to: CGPoint(x: 1435, y: 470)),
+                       .camera(camera, from: K.centre, to: CGPoint(x: 1435, y: 470)), region: Keys060.region)
             .mask(edge)
         TypeLayer(lines: lines, t: t)
     }.canvas()
@@ -623,7 +625,7 @@ struct ComposeStrip060: View {
     let about = onCanvas(L.spec, center: L.centre, CGPoint(x: 240 * L.k, y: 480 * L.k))
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: CGPoint(x: 1400, y: 560))
-        device.canvas().scaled(1 + 0.07 * CGFloat(CubicBezier.inOut(ramp(t, 44.0, 48.8))), about: about)
+        Flat060.moving(device, .push(1 + 0.07 * CGFloat(CubicBezier.inOut(ramp(t, 44.0, 48.8))), about: about), region: Flat060.region(L.spec, center: L.centre))
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v))
@@ -655,9 +657,8 @@ enum Tiles060 {
     // The drift (6 px a second to the left) is a render transform, so it glides (a macro's place is rounded to whole px).
     let v = ZStack {
         Backdrop(glow: 0.05, glowCenter: T.centre)
-        MacroView(spec: m, image: img) { EmptyView() }
-            .transformEffect(CGAffineTransform(translationX: -6 * CGFloat(t - 48.8), y: 0))
-            .scaled(1 + 0.02 * CGFloat(ramp(t, 48.8, 52.8)), about: T.centre)
+        Flat060.moving(MacroView(spec: m, image: img) { EmptyView() }, CGAffineTransform(translationX: -6 * CGFloat(t - 48.8), y: 0)
+            .concatenating(.push(1 + 0.02 * CGFloat(ramp(t, 48.8, 52.8)), about: T.centre)), region: Flat060.region(m))
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v), vignette: false)
@@ -685,8 +686,8 @@ enum Aa060 {
     let v = ZStack {
         Backdrop(glow: 0.05, glowCenter: CGPoint(x: 960, y: 600))
         AaMac060(k: 0.86, center: CGPoint(x: 520, y: 640), t: t, shrink: A.off)
-        MacroView(spec: m, image: img) { EmptyView() }
-            .scaled(1 + 0.015 * CGFloat(ramp(t, 52.8, 56.0)), about: A.centre)
+        Flat060.moving(MacroView(spec: m, image: img) { EmptyView() }, .push(1 + 0.015 * CGFloat(ramp(t, 52.8, 56.0)), about: A.centre),
+                       region: Flat060.region(m))
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v), vignette: false)
@@ -717,26 +718,21 @@ enum Hold060 {
     // The Settings row slides in under the bar at 58.0 (0.35 s appleOut, 40 px up, fading in).
     let row = try e.f.crop("stills/J2-hold-row", H.rowRect, scale: 1.0)
     let p = ease(t, H.row, 0.35, .appleOut)
-    let rowView = ZStack(alignment: .topLeading) {
-        Color.clear.canvas()
-        Image(decorative: row, scale: 1).resizable().interpolation(.high)
-            .frame(width: H.rowRect.width, height: H.rowRect.height)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .opacity(p)
-            .transformEffect(CGAffineTransform(translationX: H.rowCentre.x - H.rowRect.width / 2,
-                                               y: H.rowCentre.y - H.rowRect.height / 2 + 40 * CGFloat(1 - p)))
-    }.frame(width: Stage.size.width, height: Stage.size.height, alignment: .topLeading)
+    // The row on its exact path (ExactPicture060), inside its corners (a shape at its fractional place).
+    let rowRect = CGRect(x: H.rowCentre.x - H.rowRect.width / 2, y: H.rowCentre.y - H.rowRect.height / 2 + 40 * CGFloat(1 - p),
+                         width: H.rowRect.width, height: H.rowRect.height)
+    let rowView = ExactPicture060(image: row, transform: placing(row, in: rowRect), extend: true)
+        .mask(Path(roundedRect: rowRect, cornerRadius: 22, style: .continuous).fill(Color.white).canvas())
+        .opacity(p)
+    let push = 1 + 0.02 * CGFloat(ramp(t, 56.0, 59.2))
     let lines = [LineSpec(Copy060.hold, .T1c, x: 1060, baseline: 470, align: .leading, snap: 56.05, holdEnd: 59.2),
                  LineSpec(Copy060.halfSecond, .T4, x: 1060, baseline: 556, align: .leading, snap: 56.95, holdEnd: 59.2),
                  LineSpec(Copy060.holdFoot, .T3, x: 1060, baseline: 616, align: .leading, snap: 58.05, holdEnd: 59.2, cascade: false)]
     let v = ZStack {
         Backdrop(glow: 0.05, glowCenter: H.centre)
-        ZStack {
-            MacroView(spec: m, image: img) { EmptyView() }
-            ring
-        }
-        .canvas()
-        .scaled(1 + 0.02 * CGFloat(ramp(t, 56.0, 59.2)), about: thumb)
+        // The macro on its exact path (Flat060); the ring, a shape, under the same push.
+        Flat060.moving(MacroView(spec: m, image: img) { EmptyView() }, .push(push, about: thumb), region: Flat060.region(m))
+        ring.canvas().scaled(push, about: thumb)
         if t >= H.row { rowView }
         TypeLayer(lines: lines, t: t)
     }.canvas()

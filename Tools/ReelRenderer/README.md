@@ -69,6 +69,8 @@ The commands (`main.swift` has them all):
 | `render … --typecheck [n]` | the same check on every n-th frame of a render, which then fails (exit 1) if it fails |
 | `typetest [--out f.mp4] [--seconds 3] [--typecheck] [--frames dir] [--no-video]` | two moving lines on the reel's stage, rendered and checked |
 | `assets <dir> [prefix …]`, `assets --report`, `assets --motion` | the 0.6.0 drawn assets as PNG stills at their key times (with `index.png`), the cutaway's numbers, its motion check |
+| `motion [--only S04,S07…] [--tsv dir] [--mp4 f.mp4 [--mp4-from s]]` | every moving layer's probes followed frame by frame against its path (The motion); exit 1 if one strays |
+| `motion primitives [name]`, `motion seal [--from s] [--to s]`, `motion profile <t> x\|y <a-b> <a-b>` | how the compositor places each kind of moving layer; S07–S08's lock screen sealed; one frame's luma profile |
 | `clearance [--from s] [--to s] [--every n] [--min px]` | how close each line of type comes to what is drawn beside it (a device, a macro), per shot; exit 1 under `--min` (80 px, v2 S23's rule) |
 | `derived <dir> <name>…` | 0.6.0's derived stills (`L0w`, `N1x`, `D1x`, `qtv`, …: Reel060.swift, Retouch060.swift) as PNG |
 
@@ -213,6 +215,63 @@ leaves that type alone (it is in both of its renders), and `assets --motion` che
 draws its fix lines with `FixesType060` (`Shots060Mac.swift`) on `GlyphCanvas`, so `typecheck` measures them; the
 previews' `FixesColumn060` still draws them itself.
 
+## The motion
+
+v5 fixed what Noah saw in v4.2 (2026-11-03): "Many of the moving objects don't seem like they move uniformly, in the same
+way that the text used to as well." The type was already on its path (The type); the pictures, the devices and two shapes
+were not. `motion primitives` moves a white 400×300 rectangle on black 0.07 px a frame (or scales it 0.04 % a frame) for
+48 frames through each way the compositor (ImageRenderer into the frame's CGContext) can move a layer, and measures its
+edge; what it found, and what the film now does:
+
+| How a layer moves | Measured | 0.6's layers | Now |
+|---|---|---|---|
+| `.offset`, `.position` (a shape or a picture) | whole pixels: holds 44 frames of 47, jumps 1 px, 0.5 px off its path | the app switch's slide (MiniScreen), the sill line's ends (S01's draw, S20's stretch, S23's retract) | a render transform (`linePlaced`), `ExactPicture060` |
+| a shape's outline under `transformEffect`, `scaleEffect`, a `.frame` of any size, a mask or clip, a Canvas | exact, 0.003 px | type, icon, bug, drawn Mac, dots, rings, arcs, keyboards | as they were |
+| a picture's own outline, the same ways | exact, 0.003 px | — | — |
+| an edge **inside** a picture, under any transform, any interpolation quality, a SwiftUI `Image` or a CGContext's `draw` | a quarter-pixel grid: holds 28 frames of 47, jumps 0.25 px, 0.19 px off | every still and crop in a pushed device, macro, inset or row | `Flat060.moving`, `ExactPicture060` |
+| a 3D-turned layer (`rotation3DEffect`, `Tilt`) moved or scaled from outside | placed on whole pixels, the fraction applied through its perspective: steps 0.20–0.34 px for 0.24, a sawtooth of 0.11 px a pixel; a flat layer grouped with one too | S04–S07's iPad, S10's iPhone, S11–S12's laid-back keyboard (and S11's iPad beside it) | `Flat060.moving` |
+| the same picture resampled by Core Image through the exact transform (`ExactWarp060`, Catmull–Rom) | exact: 0.04 px at most (the cubic's overshoot clipped at white) | — | the resampler of both |
+
+vImage's affine warp strays ±0.09 px with each pixel, and Core Image's high-quality downsampling holds frames too: neither
+is used.
+
+So, for anything that moves:
+- **A shape or type** moves by a render transform (`transformEffect`, `scaleEffect`, `.scaled`, `.camera`) or in a Canvas
+  through its context's transform; never by `.offset` or `.position` (a still one may sit on whole pixels).
+- **A picture** (a still, a crop, a film frame) moves only through `ExactPicture060(image:transform:size:extend:)`: the
+  picture resampled by `ExactWarp060` into a bitmap on whole pixels, drawn unscaled. `transform` is its pixels to its
+  parent's (`placing(img, in: rect)` is `image(_:in:)`'s), `size` the parent's; `extend: true` where a shape clips the
+  picture at its own edge (S09's sheet, S12's page, S16's row), so the shape's edge is the only one there. A picture
+  shrunk below 0.9 is scaled by Core Image's Lanczos first (it filters what it drops), then moved by the cubic.
+- **A layer that moves as a whole** (a device pushed or under a camera, a macro drifting) is `Flat060.moving(view, rest:,
+  transform, region:)`: drawn at rest exactly as the compositor draws a frame (the whole canvas, 1 px a point; drawn at
+  2 px a point or into a frame of another size, SwiftUI changes a turned layer's perspective, by up to 5 px), then
+  resampled once through the move. Never a `.scaled` or `.camera` on a layer holding a picture or a 3D turn. `rest` is a
+  still part of the move SwiftUI draws as before (S11's 0.92, S12's camera at 1.15, S08's close-up at 1.40), so the
+  resampling only enlarges by what is left; keep that a scale of at least 1 about a point in the frame (the picture is
+  the canvas: nothing beyond it at rest is in it), and keep a turned layer's `rest` the same through its shot (drawn
+  under another scale, SwiftUI puts a turned layer up to 0.7 px elsewhere). At the move's start the resampling copies the
+  picture: a shot's first frame is the frame it was (S04, S07 and S10 at rest: within 2 levels of v4.2's, mean 0.001).
+- Inside a flattened layer, a picture that moves on its own (an app switch, the sheet's zoom, a panel's transition) is
+  `ExactPicture060` too; shapes and type are exact as they are.
+
+`motion` is the check, in `MotionPassages060.swift`: for each passage it renders the frames without the finish (or decodes
+them from a movie, `--mp4`), follows one edge per probe to a hundredth of a pixel (the area under its luma profile between
+the two sides' levels; a rim or a dot by its centroid over each side's level), fits it to the path the shot's own code
+gives it (the functions of time its place is a sum of), and fails a probe off its path by more than 0.1 px, holding (a
+plateau: under a third of its path's move over three frames, where that is 0.1 px or more) or jumping (a step half a pixel
+off). A new move gets a passage: its probe on a clean edge (flat levels a few pixels each side, nothing else moving
+through the window), its path from the shot's functions.
+
+`motion seal` checks S07–S08's lock screen: the drawn lock screen covers the stream's picture (Weather), whose still is
+resampled with the screen (2266 px → 830 → 790) and is 0.23 px taller than the lock screen's rect at the bottom, and
+spreads a pixel or two past its rect; the lock screen's own anti-aliased edge lets a quarter of what is under it through.
+v4.2 showed it round the lock screen as the iPad pushed in (Noah: "from most exposed to least, bottom, left, right,
+top"). Now the still under the lock screen has no picture while it is up (`L1b`/`L0b`: the picture rect the panel's
+black), and Weather alone (`L1p`/`L0p`) fades from under it over the dissolve's last 15 % (and back over the unlock's
+first 15 %), when the lock screen hides all but 2–4 % of it. The check follows each edge and measures, line by line, the
+brightest pixel within 4 px of it over both sides' levels.
+
 ## The 0.6 update video (`REEL=060`)
 
 `REEL=060` selects the 0.6 update video (76.8 s, 4,608 frames, 22 shots on 48 bars) in place of v3.1, which stays the
@@ -241,6 +300,8 @@ v4's 62.4 3.2 s earlier). The `reel-0-6-0` branch's head is the slower v4.1 cut 
 | `Assets060*.swift` | the drawn assets (the bug, the lock screen, the keyboards, the arcs, the iPhone, the iMac) and `assets` |
 | `Retouch060.swift` | the stills' retouches (Weather's places, the iPhone's "This iPhone" and Aa "1×") and QuickTime Player's window, drawn |
 | `Clearance060.swift` | `clearance`: the words' distance from the devices beside them |
+| `Flat060.swift`, `ExactWarp060.swift` | moving layers and pictures on their exact paths (The motion) |
+| `Motion060.swift`, `MotionPassages060.swift`, `MotionPrimitives060.swift` | `motion`: the check, its passages, and the compositor's primitives |
 
 Its inputs under `reelDir` are `stills/`, `pictures/` and `thumbs/`, the footage stand-ins (harness screenshots and
 drawn Mac pictures, each made as their own README says), and `v31film/Sill-sizzle-v3.1-silent.mp4`, the delivered
@@ -275,6 +336,9 @@ A shot list (`design/reel/v3/SHOTLIST-v3.md` is the model) has:
   2026-09-26). The devices are drawn, never Apple's artwork.
 - **The type is glyph outlines on its path** (The type): drawn by `GlyphText.swift`, moved only by its layer's
   `transform:`, and checked by `typecheck` (`pipeline.sh` renders with `--typecheck`).
+- **Motion is on its path** (The motion): a shape by a render transform, a picture through `ExactPicture060`, a layer
+  that moves as a whole through `Flat060.moving`; never an `.offset` or `.position` that moves, nor a scale or camera
+  modifier on a layer holding a picture or a 3D turn. `motion` checks it.
 - **The pointer is drawn.** A cursor or pointer in motion is drawn by the renderer on an eased path at
   sub-pixel positions, never taken from a recording (v3.1, after a recorded one stuttered: a simulator
   recording writes a sample only when the screen changes, with holes and jitter). Its motion must be even at

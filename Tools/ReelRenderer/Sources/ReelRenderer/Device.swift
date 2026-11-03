@@ -204,6 +204,15 @@ extension View {
     }
 }
 
+extension View {
+    /// Places the sill line. v3.1 used `.offset`, which SwiftUI rounds to whole pixels, so the line's ends stepped as it drew
+    /// (S01's draw, S20's stretch from the bug, S23's retract); 0.6.0 places it by a render transform, on its exact path.
+    /// v3.1 as it was.
+    @ViewBuilder func linePlaced(x: CGFloat, y: CGFloat) -> some View {
+        if ReelCut.current == .r060 { transformEffect(CGAffineTransform(translationX: x, y: y)) } else { offset(x: x, y: y) }
+    }
+}
+
 // MARK: - Glow and the sill line
 
 struct Glow: View {
@@ -236,9 +245,9 @@ struct SillLine: View {
             Color.clear.frame(width: Stage.size.width, height: Stage.size.height)
             if length > 0.5 {
                 Rectangle().fill(grad).frame(width: length, height: 6).blur(radius: 14).opacity(0.12)
-                    .offset(x: centerX - length / 2, y: y - 3)
+                    .linePlaced(x: centerX - length / 2, y: y - 3)
                 Rectangle().fill(grad).frame(width: length, height: 2).opacity(0.35)
-                    .offset(x: centerX - length / 2, y: y - 1)
+                    .linePlaced(x: centerX - length / 2, y: y - 1)
             }
         }
         .opacity(opacity)

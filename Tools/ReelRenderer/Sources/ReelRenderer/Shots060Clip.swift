@@ -54,13 +54,14 @@ func capped(_ lines: [LineSpec], span: Double = 0.25) -> [LineSpec] {
 }
 
 /// An iPad mini showing `layers` (stills by name, faded and slid), an overlay in its interior's px, and touch dots
-/// (in the stills' px), placed at `centre` and turned by `yaw`.
+/// (in the stills' px), placed at `centre` and turned by `yaw`. A shot moves it with `Flat060.moving` (never a scale or
+/// camera modifier: its pictures, and its turn, would step).
 @MainActor func padDevice(_ e: Env, spec: DeviceSpec, centre: CGPoint, yaw: Double, t: Double, fetch: CGFloat = 1,
-                          layers: [MiniLayer], dots: [TouchDotSpec] = [], overlay: AnyView? = nil) throws -> some View {
+                          layers: [MiniLayer], dots: [TouchDotSpec] = [], overlay: AnyView? = nil) throws -> AnyView {
     let imgs = try layers.map { (try e.f.screen($0.name, width: spec.interior.width, fetch: fetch), $0) }
-    return PlacedDevice(spec: spec, center: centre, yaw: yaw) {
+    return AnyView(PlacedDevice(spec: spec, center: centre, yaw: yaw) {
         MiniScreen(size: spec.interior, layers: imgs, dots: dots, t: t) { overlay ?? AnyView(Color.clear) }
-    }
+    })
 }
 
 /// An app switch on the iPad: the screen `from` slides out and `to` slides in (from the right, or the left), 0.32 s.
@@ -171,8 +172,8 @@ enum Clip060 {
                  leftLine(Copy060.needsMac, .T3, baseline: 726, snap: 6.50, end: 10.4, cascade: false)]
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: Pad060.centre)
-        // Drifting: a 2 % push about the iPad's left edge (a render transform, so it glides), away from the words.
-        device.canvas().scaled(1 + 0.02 * CGFloat(ramp(t, 6.4, 10.4)), about: Pad060.leftEdge)
+        // Drifting: a 2 % push about the iPad's left edge, away from the words, on its exact path (Flat060).
+        Flat060.moving(device, .push(1 + 0.02 * CGFloat(ramp(t, 6.4, 10.4)), about: Pad060.leftEdge), region: Flat060.region(Pad060.spec, center: Pad060.centre))
         keys.opacity(rise)
         TypeLayer(lines: lines, t: t)
     }.canvas()
@@ -202,14 +203,13 @@ struct ChipInset060: View {
         let s = ChipInset060.scale
         let f = ChipInset060.fetch(r)
         let origin = CGPoint(x: ChipInset060.right - (r.maxX - f.minX) * s, y: ChipInset060.top - (r.minY - f.minY) * s + rise)
-        let shape = RoundedRectangle(cornerRadius: r.height * s / 2, style: .continuous)
-            .frame(width: r.width * s, height: r.height * s)
-            .offset(x: (r.minX - f.minX) * s, y: (r.minY - f.minY) * s)
-        return Image(decorative: img, scale: 1).resizable().interpolation(.high)
-            .frame(width: f.width * s, height: f.height * s)
-            .mask(shape.frame(width: f.width * s, height: f.height * s, alignment: .topLeading))
+        // The capsule and its picture on their exact path (ExactPicture060; the capsule a shape at its fractional place).
+        let shape = Path(roundedRect: CGRect(x: origin.x + (r.minX - f.minX) * s, y: origin.y + (r.minY - f.minY) * s, width: r.width * s, height: r.height * s),
+                         cornerRadius: r.height * s / 2, style: .continuous)
+        return ExactPicture060(image: img, transform: CGAffineTransform(scaleX: f.width * s / CGFloat(img.width), y: f.height * s / CGFloat(img.height))
+            .concatenating(CGAffineTransform(translationX: origin.x, y: origin.y)))
+            .mask(shape.fill(Color.white).canvas())
             .opacity(alpha)
-            .transformEffect(CGAffineTransform(translationX: origin.x, y: origin.y))
     }
 
     var body: some View {
@@ -270,7 +270,9 @@ struct ChipInset060: View {
                              t: t)
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: Pad060.centre)
-        device.canvas().camera(s * drift, from: from, to: to).mask(edge)
+        // On its exact path (Flat060), drawn at rest as it is before the push (a turned layer's drawing at another scale lands
+        // up to 0.7 px elsewhere, so the drawing never changes in the shot).
+        Flat060.moving(device, .camera(s * drift, from: from, to: to), region: Flat060.region(Pad060.spec, center: Pad060.centre)).mask(edge)
         inset
         TypeLayer(lines: lines, t: t)
     }.canvas()
@@ -342,12 +344,10 @@ func qtToStill(_ r: CGRect) -> CGRect {
         chrome
         if t >= S.settingsTap {
             image(button, in: buttonRect)
-            ZStack(alignment: .topLeading) {
-                image(panelImage, in: panelRect)
-            }
-            .frame(width: size.width, height: size.height, alignment: .topLeading)
-            .scaleEffect(pScale, anchor: UnitPoint(x: panelRect.maxX / size.width, y: panelRect.minY / size.height))
-            .opacity(panelIn)
+            // The panel's transition (0.94 → 1 about its top-trailing corner) on its exact path (ExactPicture060).
+            ExactPicture060(image: panelImage, transform: placing(panelImage, in: panelRect)
+                .concatenating(.scaling(pScale, about: CGPoint(x: panelRect.maxX, y: panelRect.minY))), size: size)
+                .opacity(panelIn)
         }
     }
     .frame(width: size.width, height: size.height, alignment: .topLeading)
@@ -362,11 +362,16 @@ func qtToStill(_ r: CGRect) -> CGRect {
                             beats: SoundArcs060.beats(from: 14.4, to: 19.2), muted: [S.mute...S.unmute])
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: S.centre)
-        device.canvas().scaled(1 + 0.02 * CGFloat(ramp(t, 14.4, 19.2)), about: S.centre)
+        Flat060.moving(device, .push(1 + 0.02 * CGFloat(ramp(t, 14.4, 19.2)), about: S.centre), region: Flat060.region(S.spec, center: S.centre))
         arcs
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v))
+}
+
+/// The transform that draws `img` into `r` (its px → `r`'s parent's px), as `image(_:in:)` places it.
+func placing(_ img: CGImage, in r: CGRect) -> CGAffineTransform {
+    CGAffineTransform(scaleX: r.width / CGFloat(img.width), y: r.height / CGFloat(img.height)).concatenating(CGAffineTransform(translationX: r.minX, y: r.minY))
 }
 
 /// A CGImage drawn into `r` (interior px, top-left origin).
@@ -431,13 +436,27 @@ struct LockPicture060: View {
     }
 }
 
-@MainActor func lockDevice(_ e: Env, t: Double, yaw: Double, fetch: CGFloat, keyboard: Bool = false, dots: [TouchDotSpec] = []) throws -> some View {
+@MainActor func lockDevice(_ e: Env, t: Double, yaw: Double, fetch: CGFloat, keyboard: Bool = false, dots: [TouchDotSpec] = []) throws -> AnyView {
     let seq = Lock060.seq
     // The bar: L0w's thumbnails until the lock, L1x's (none) while locked, L0w's again from the unlock.
     let locked = t >= seq.lock && t < seq.unlock
     let base = locked ? "derived/L1x" : "derived/L0w"
+    // The seal (Noah's note on v4.2: the picture peeked out round the lock screen as the iPad pushed in, most at the
+    // bottom). The still's Weather is resampled with it (2266 px → 830, then into the 790 px screen, its y a hair taller
+    // than the lock screen's: 0.23 px at the bottom) and spreads a pixel or two past its rect, and the lock screen's own
+    // anti-aliased edge lets a quarter of what is under it through: so where the lock screen is up, the still under it has
+    // no picture (L0b/L1b, its picture rect the panel's black), and nothing of the Weather is left to peek out. The
+    // Weather (L0p/L1p: the picture alone, 8 px of the panel round it) fades from under it over the dissolve's last 15 %
+    // (and back over the unlock's first 15 %), when the lock screen hides all but 2–4 % of it, so the dissolve is as it
+    // was; the screen's own edges are drawn once, by the still under it.
+    let w = 1 - ramp(seq.lockOpacity(t), 0.85, 1.0)
+    var layers = [MiniLayer(name: base)]
+    if w < 0.999 {
+        layers = [MiniLayer(name: locked ? "derived/L1b" : "derived/L0b")]
+        if w > 0.001 { layers.append(MiniLayer(name: locked ? "derived/L1p" : "derived/L0p", opacity: w)) }
+    }
     return try padDevice(e, spec: Lock060.spec, centre: Lock060.centre, yaw: yaw, t: t, fetch: fetch,
-                         layers: [MiniLayer(name: base)], dots: dots, overlay: any(LockPicture060(t: t, keyboard: keyboard)))
+                         layers: layers, dots: dots, overlay: any(LockPicture060(t: t, keyboard: keyboard)))
 }
 
 @MainActor func s060_07(_ t: Double, _ e: Env) throws -> FrameLayers {
@@ -450,7 +469,7 @@ struct LockPicture060: View {
                      leftLine(Copy060.lockSub[1], .T2, baseline: 644, snap: 21.10, end: 24.0)])
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: Lock060.centre)
-        device.canvas().scaled(1 + 0.04 * CGFloat(ramp(t, 19.2, 24.0)), about: about)
+        Flat060.moving(device, .push(1 + 0.04 * CGFloat(ramp(t, 19.2, 24.0)), about: about), region: Flat060.region(Lock060.spec, center: Lock060.centre))
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v))
@@ -471,7 +490,10 @@ struct LockPicture060: View {
     lines.append(leftLine(Copy060.unlockFoot, .T3, baseline: 562, snap: 24.10, end: 28.8, cascade: false))
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: Lock060.centre)
-        device.canvas().camera(s, from: L.anchor, to: L.anchor)
+        // On its exact path (Flat060), drawn at rest at the close-up's 1.40 until the pull-back's fastest moment, then at 1, so
+        // what is left of the move enlarges the picture by 3 % at most where it is slow.
+        Flat060.moving(device, rest: t < (L.pullBack + L.pullBackEnd) / 2 ? .push(L.close, about: L.anchor) : .identity,
+                       .camera(s, from: L.anchor, to: L.anchor), region: Flat060.region(L.spec, center: L.centre))
         TypeLayer(lines: lines, t: t)
     }.canvas()
     return FrameLayers(base: any(v))

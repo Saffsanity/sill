@@ -202,6 +202,7 @@ do {
     case "typecheck": try MainActor.assumeIsolated { try typecheckCommand(args: Array(args.dropFirst())) }
     case "typetest": try MainActor.assumeIsolated { try typetestCommand(args: Array(args.dropFirst())) }
     case "clearance": try MainActor.assumeIsolated { try clearanceCommand(args: Array(args.dropFirst())) }
+    case "motion": try MainActor.assumeIsolated { try motionCommand(args: Array(args.dropFirst())) }
     case "derived":
         // derived <out-dir> <name>… : 0.6.0's derived stills (Reel060.swift, Retouch060.swift) as PNG, to look at them.
         try MainActor.assumeIsolated {
