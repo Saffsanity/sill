@@ -7,7 +7,8 @@ BASE is the surfaces before the gestures, NEW this branch's with the device's sw
 with it off. A run's events are compared with their times left out; runs of pointer moves and of
 scroll deltas are compared by their count and their last move or their sum, and a coast's steps
 (between momentumBegan and momentumEnded, paced by the display) only as being there.
-  - One- and two-finger strokes, and a third finger that joins a scroll late: NEW's events are BASE's.
+  - One- and two-finger strokes, and a third finger that joins a scroll late: NEW's events are BASE's
+    (but the picture's hold, which drags since #178).
   - Every other stroke of three to five fingers (placed slowly, beside a resting thumb, led by the
     thumb, with a brief extra contact): from three fingers down, nothing but its one gesture (and a
     scroll it had begun, closed at once without a coast), and the gesture expected, or nothing.
@@ -131,6 +132,8 @@ def main():
         print(("ok   " if ok else "FAIL ") + what)
     for surface in ("TRACKPAD", "OVERLAY"):
         for s in UNCHANGED:
+            # The picture's hold drags since #178 (TouchHold; RIG_ONLY=hold): only the trackpad's is as before.
+            if surface == "OVERLAY" and s.startswith("1-finger hold"): continue
             t = f"{surface} {s}"
             a, b = sends(base.get(t, [])), sends(new.get(t, []))
             # The overlay has no two-finger tap: nothing, before and now.

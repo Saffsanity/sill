@@ -314,6 +314,21 @@ func reviewScenarios(_ c: CGPoint, nudge: [Step]) -> [(String, [Step])] {
     return out
 }
 
+/// The picture's touch and hold (#178, TouchHold), the overlay only: lifted where it was pressed, moved a
+/// little, moved on, cancelled mid-move, and the tap and drag beside it.
+func holdScenarios(_ c: CGPoint) -> [(String, [Step])] {
+    var cancelled = Array(Gesture.swipe(1, at: c, dx: 60, dy: 30, frames: 10, hold: 36).dropLast())
+    cancelled.append(.cancel)
+    return [
+        ("1-finger tap", Gesture.tap(1, at: c)),
+        ("1-finger drag right 120", Gesture.swipe(1, at: c, dx: 120, dy: 0, frames: 12)),
+        ("1-finger hold 0.6 s, then lift", Gesture.tap(1, at: c, holdFrames: 36)),
+        ("1-finger hold 0.6 s, then move 5 and lift", Gesture.swipe(1, at: c, dx: 4, dy: 3, frames: 5, hold: 36)),
+        ("1-finger hold 0.6 s, then move 60 and lift", Gesture.swipe(1, at: c, dx: 60, dy: 30, frames: 10, hold: 36)),
+        ("1-finger hold 0.6 s, move 60, then cancelled", cancelled),
+    ]
+}
+
 // MARK: - The runner
 
 final class Runner {
@@ -461,14 +476,20 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         self.runner = runner
         let tc = CGPoint(x: root.trackpad.bounds.midX, y: root.trackpad.bounds.midY + 60)
         let oc = CGPoint(x: root.overlay.bounds.midX, y: root.overlay.bounds.midY + 60)
-        // RIG_ONLY=zoom: the overlay's zoom strokes alone (#65), a minute instead of five.
-        let onlyZoom = ProcessInfo.processInfo.environment["RIG_ONLY"] == "zoom"
-        if !onlyZoom {
+        // RIG_ONLY=zoom: the overlay's zoom strokes alone (#65), a minute instead of five; RIG_ONLY=hold: its
+        // touch and hold alone (#178).
+        let only = ProcessInfo.processInfo.environment["RIG_ONLY"] ?? ""
+        if only.isEmpty {
             for (title, steps) in scenarios(tc) { runner.add("TRACKPAD \(title)", root.trackpad, steps) }
             for (title, steps) in scenarios(oc) { runner.add("OVERLAY \(title)", root.overlay, steps) }
         }
+        if only == "hold" {
+            for (title, steps) in holdScenarios(oc) { runner.add("OVERLAY HOLD \(title)", root.overlay, steps) }
+        }
         #if ZOOM
-        for (title, steps) in zoomScenarios(oc) { runner.add("OVERLAY ZOOM \(title)", root.overlay, steps) }
+        if only.isEmpty || only == "zoom" {
+            for (title, steps) in zoomScenarios(oc) { runner.add("OVERLAY ZOOM \(title)", root.overlay, steps) }
+        }
         #endif
         runner.start { print("RIG done"); exit(0) }
     }
