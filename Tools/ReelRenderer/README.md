@@ -1,12 +1,13 @@
 # ReelRenderer
 
-The renderer of Sill's sizzle reel. It draws every frame of the film in code (devices, type, the app icon, the
-sill line, the glow, a drawn pointer and touch dots) around clips and stills of the real app, writes a 1080p60
-H.264 MP4 with Apple's software encoder, synthesises the score, and checks what it delivers. Apple frameworks
-only: SwiftUI's `ImageRenderer`, Core Graphics, Core Image, AVFoundation and AVAudioEngine. No ffmpeg, no
-Homebrew, no downloaded music or artwork, but the marks a logo has to be its owner's own drawing of (the 0.6 video's end
-card, v5: Apple's App Store badge from the site's `site/app-store-badge.svg`, the GitHub mark from primer/octicons, MIT,
-and the Homebrew logo from brew.sh, BSD-2-Clause, their paths in `Assets060Marks.swift`; never animated, only faded).
+The renderer of Sill's sizzle reel. It draws every frame of the film in code (devices, type, the app icon, the sill
+line, the glow, a drawn pointer and touch dots) around clips and stills of the real app, writes a 1080p60 H.264 MP4 (or,
+with `REEL_SCALE=2`, a 2160p60 one: The output scale) with Apple's software encoder, synthesises the score, and checks
+what it delivers. Apple frameworks only: SwiftUI's `ImageRenderer`, Core Graphics, Core Image, AVFoundation and
+AVAudioEngine. No ffmpeg, no Homebrew, no downloaded music or artwork, but the marks a logo has to be its owner's own
+drawing of (the 0.6 video's end card, v5: Apple's App Store badge from the site's `site/app-store-badge.svg`, the GitHub
+mark from primer/octicons, MIT, and the Homebrew logo from brew.sh, BSD-2-Clause, their paths in `Assets060Marks.swift`;
+never animated, only faded).
 
 Its last render is v3.1 (2026-09-27): `design/reel/v3/Sill-sizzle-v3.1.mp4`, 83.2 s, 35 shots on a 150 BPM grid.
 `design/reel/` is not in git; its shot lists are the reel's design documents (below).
@@ -280,6 +281,64 @@ The check follows each edge and measures, line by line, the brightest pixel with
 from 19.6 (`--from 19.6`) it reads the dissolve too, where the first frames' numbers are the Weather's own edges, as
 before the lock (19.5).
 
+## The output scale (the 4K pass)
+
+Noah (2026-11-03), on the 1080p 0.6 film: "Is there a reason you went with 1080p instead of 4K?", then "Yes, do the 4K
+pass". `REEL_SCALE=2` renders the same film at 3840×2160 (`Stage.scale`, Look.swift; every command reads it, as `REEL`):
+the film is drawn in its 1920×1080 point space as before (every layout number, path, crop and probe, the time map, the copy
+and the score), and only the raster is `scale` px a point. Scale 1, the default, is the 1080p exactly: with the 4K pass's
+last commit, 76 stills over every scene (the end card and the black tail included) byte for byte eca29249's, S04's 240
+frames through the encoder to the same compressed samples (sha-256 406c766b…), and v3.1's six stills the same.
+
+- **The compositor** (Render.swift) draws each layer through `Stage.rasterised`: the view laid out at 1920×1080 and scaled
+  by a SwiftUI `scaleEffect` into the pixel frame (the renderer proposed 3840×2160, the context unscaled), so SwiftUI
+  rasterises what it cannot draw as vectors (a blur, a 3D-turned layer's pictures) at the output resolution. Measured on
+  test layers: a context scaled by 2 draws flat layers the same, but rasterises a turned layer's pictures at 1 px a point and
+  enlarges them (a stripe chart's contrast 12 where it should be 206) and its blurs at 1x; `rasterizationScale: 2` moves a
+  turned layer by up to 21 px and bends its edges, and changes `.shadow`; `ImageRenderer.scale = 2` moves flat layers by half
+  a point. SwiftUI's layout rounds to whole points at every scale (an `.offset` of 100.3 lands on 100 in all of them). Core
+  Image's canvas, the rack's centre, every blur's sigma (x 2), the vignette (the same fall-off over the pixel frame) and the
+  writer follow the pixel size.
+- **The grain and the dither** keep their apparent size: the same 512×512 tiles of the same values, each a 2×2 block of
+  pixels, at the same random offsets x 2. Measured on the stills: on S11's white page (38.8) a 4K pixel equals its block
+  neighbour 98.4 % of the time across and 99.8 % down (a 1080p pixel its neighbour 8 %), and the high-pass σ is 0.505 levels
+  at 1080p, 0.500 for the 4K box-averaged to 1080p; on S18's iMac screen (68.6) 0.733 and 0.684 (a grain of 4K pixels would
+  average to half). Near black the dither fades out (its kernel) and what is left is Core Graphics' own gradient dither,
+  2×1 px at either scale.
+- **Pictures** are resampled once, at the output resolution. `ExactPicture060` resamples through its transform to the parent's
+  points x 2 into a bitmap of `bounds` x 2 px, drawn at `Image(scale:)` 2 on whole points (1:1 on the output's pixels).
+  `Flat060` draws its rest picture at 3840×2160 and crops `region` x 2. A picture pre-sized for the screen (`Footage060.scaled`
+  and `crop`, S06's film frame, S10's `larger`) is the 1080p's image with twice the pixels each way: Lanczos-scaled by 2s into
+  twice the 1080p's rounded size, so it fills its frame exactly as the 1080p's does (re-rounding it at 4K had put the
+  pictures up to 0.68 px elsewhere: Core Image cuts the extent at the rounded size, from the bottom). The devices' shadows
+  (`ShadowCache`) are drawn at 2x. The marks (the badge, GitHub, Homebrew, Intel), the icon, the type and every drawn device
+  and asset are vectors: they need nothing. The footage stills are 2x screenshots, drawn at 0.20–0.61 of their pixels at
+  1080p, so most of them carry real detail at 4K; S05's chip and note insets, S15's and S16's close-ups are enlarged at
+  either scale (the 4K pass's notes in the shot list, §13, have the table).
+- **A 3D-turned layer** is SwiftUI's own rasterisation at each scale. Its pictures (S04–S07's iPad, S10's iPhone, turned 4°)
+  SwiftUI insets by about one raster pixel each side against their exact projection (`_Rotation3DEffect`'s matrix; S04 at
+  8.4, the screen's left and right edges: 1.09 and 1.03 px inside it at 1080p, 0.51 and 0.45 at 4K), so the 4K's turned
+  screens sit up to 0.76 px outside the 1080p's (the decoded films' 48×48 blocks, box-averaged). A turned layer that is all
+  vectors, S11–S12's keyboard laid back, is drawn by `Flat060.Raster.context` (the drawing at its size into a context scaled
+  by 2), where SwiftUI turns it exactly as at 1080p (S12's slab within 0.03–0.26 px; scaled by the view it came out
+  0.60–0.84 px larger); the iPad standing behind it is flat, and its pictures are drawn at 4K.
+- **The checks** measure the 4K frames in their own pixels: `typecheck` (each glyph's path x 2, the tolerance 0.2 output px,
+  the drawing's 0.1; blurs still judged in the drawing's px), `motion` and `motion seal` (each probe's place, window, rows and
+  path x 2, the tolerance x 2, every number in output px), `clearance` (the gaps in output px, its minimum x 2). `holds`
+  reads no pixels and gives the same answer at both scales.
+- **The encoder** at 4K: `Cut060.rate` asks 68 Mbps (YouTube's recommendation for 4K at 60 fps) at H.264 High level 5.2, the
+  level 3840×2160 at 60 fps needs (Apple's software encoder fails every frame at 5.1, which carries 4K to 30 fps), the key
+  frames as the 1080p's (at least every 120 frames, one forced on frame 5069). The session's own encoder ID is printed with
+  the render (`com.apple.videotoolbox.videoencoder.h264`). The 0.6 film came out at 58.4 Mbps.
+- **Memory.** Every command that draws frames (render, stills, typecheck, clearance, motion, seal) drains an autorelease
+  pool per frame: without one each frame's autoreleased objects stayed until the command ended, about one frame's pixels a
+  frame (8.4 MB at 1080p, 32 MB at 4K: the first 4K film's render ended at a 212 GB footprint). With it a 240-frame render
+  peaks at 0.66 GB at 1080p and 1.70 GB at 4K, and what it makes is the same, sample for sample.
+
+```
+REEL=060 REEL_SCALE=2 REEL_DIR=<inputs> Scripts/pipeline.sh     # into <inputs>/060/out-4k (33 min here)
+```
+
 ## The 0.6 update video (`REEL=060`)
 
 `REEL=060` selects the 0.6 update video (v5: 84.8 s, 5,088 frames, 22 shots on 53 bars) in place of v3.1, which stays the
@@ -287,8 +346,9 @@ default and renders as before (`ReelCut`, `Look.swift`). `Stage`, `Timeline.shot
 sheet's tiles and title, `verify`'s silence window (76.20–76.80) and true-black frame (5078), the writer's key frame on the
 first true-black frame (5069, `Cut060.keyframes`), the writer's rate (`Cut060.rate`: since v5's review 40 Mbps asked,
 H.264 High at level 4.2, through the compression session in a part's render too; Apple's software encoder codes at its own
-quality limit below that, about 17.4 Mbps on average, the same pictures as at v3.1's 24 Mbps asked), the poster (82.0 s) and
-the movie's title follow it. Its shot list is `design/reel/v5/SHOTLIST-0.6.0.md`.
+quality limit below that, about 17.4 Mbps on average, the same pictures as at v3.1's 24 Mbps asked; at `REEL_SCALE=2`, 68 Mbps
+asked at level 5.2: The output scale), the poster (82.0 s) and the movie's title follow it. Its shot list is
+`design/reel/v5/SHOTLIST-0.6.0.md`.
 
 This branch (`reel-0-6-0-v5`, from v4.2's 702b585a) is v5: v4.2 with Noah's notes on it (2026-11-03), on the motion
 work's exact paths (The motion). v4.2 was v4 (80.0 s, `design/reel/v4/`) without its tour (S17), with "0.6" for the
