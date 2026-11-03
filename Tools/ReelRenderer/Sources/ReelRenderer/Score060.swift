@@ -84,7 +84,7 @@ enum Cues060 {
     static var taps: [Double] {
         [Clip060.hold4.0, Clip060.pasteTap, Clip060.hold5.0, Clip060.copyTap, Clip060.pasteChipTap,
          Sound060.settingsTap, Sound060.mute, Sound060.unmute, Pinch060.spread.0, Pinch060.move.0, Pinch060.tap, Pinch060.pinchIn.0,
-         Larger060.settingsTap, Larger060.switchTap, Larger060.doneTap, Scroll060.panel, Scroll060.flip, Scroll060.done,
+         Larger060.settingsTap, Larger060.switchTap, Larger060.doneTap, Larger060.keyboardTap, Scroll060.panel, Scroll060.flip, Scroll060.done,
          Scroll060.drag.0, Cut060.film(Hold060.down, .s16)]
     }
     /// Plucks (sine + its 2nd harmonic, 250 ms) on landings.

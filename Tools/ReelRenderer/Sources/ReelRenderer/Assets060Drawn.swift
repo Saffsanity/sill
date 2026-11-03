@@ -327,6 +327,33 @@ enum SoftKeyboard060 {
         }
     }
 
+    /// v5 (S10): the iPhone's keyboard, in S08's style (no legible keys) on the iPhone 15 Pro's own layout, measured on iOS
+    /// 27's keyboard in the footage (D8, 786×602 px at 2×: its rows' keys 65 px on a 77 px pitch, 86 px tall on a 108 px
+    /// pitch from y 50; shift and delete 87 px, 123 and return 179, the space bar 372; the bottom 142 px holding only the
+    /// emoji and dictation keys' glyphs, left empty here; the top corners 55 px round). `rect` is the keyboard's whole rect.
+    static func drawPhone(_ ctx: inout GraphicsContext, rect: CGRect) {
+        let u = rect.width / 786
+        func r(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CGRect {
+            CGRect(x: rect.minX + x * u, y: rect.minY + y * u, width: w * u, height: h * u)
+        }
+        let shape = UnevenRoundedRectangle(topLeadingRadius: 55 * u, bottomLeadingRadius: 0, bottomTrailingRadius: 0,
+                                           topTrailingRadius: 55 * u, style: .continuous).path(in: rect)
+        ctx.fill(shape, with: .color(Color(hex: 0x1F1F21)))
+        var keys: [(CGRect, Bool)] = []
+        for i in 0..<10 { keys.append((r(14 + 77 * CGFloat(i), 50, 65, 86), false)) }
+        for i in 0..<9 { keys.append((r(52.5 + 77 * CGFloat(i), 158, 65, 86), false)) }
+        keys.append((r(14, 266, 87, 86), true))
+        for i in 0..<7 { keys.append((r(129 + 77 * CGFloat(i), 266, 65, 86), false)) }
+        keys.append((r(685, 266, 87, 86), true))
+        keys.append((r(14, 374, 179, 86), true)); keys.append((r(207, 374, 372, 86), false)); keys.append((r(593, 374, 179, 86), true))
+        for (k, special) in keys {
+            let radius = 0.13 * k.height
+            ctx.fill(Path(roundedRect: k.offsetBy(dx: 0, dy: max(0.5, 0.035 * k.height)), cornerRadius: radius, style: .continuous),
+                     with: .color(Color.black.opacity(0.55)))
+            ctx.fill(Path(roundedRect: k, cornerRadius: radius, style: .continuous), with: .color(Color(hex: special ? 0x3A3A3D : 0x5A5A5E)))
+        }
+    }
+
     /// The keyboard's offset below its place while it rises (0.30 s appleOut from `rise`) and after `lower`
     /// (0.30 s appleIn): 0 in place, `height + 24` gone.
     static func offset(_ t: Double, height: CGFloat, rise: Double, lower: Double? = nil) -> CGFloat {

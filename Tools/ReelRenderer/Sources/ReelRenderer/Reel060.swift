@@ -127,6 +127,7 @@ enum Mini060 {
         "stills/L0-unlocked", "stills/L1-locked", "stills/C0-sheet", "pictures/sheet",
         "stills/D1-iphone-standard", "stills/D4-iphone-settings-off", "stills/D5-iphone-settings-on",
         "stills/D2-iphone-larger-1610", "stills/D3-iphone-larger-fitted",
+        "stills/D2k-iphone-larger-1610-kbbutton", "stills/D3k-iphone-larger-fitted-kbbutton",
         "stills/E0-te-empty", "stills/E1-te-typed", "stills/E2-te-save", "stills/E3-longdoc0", "pictures/longdoc-page",
         "stills/E6-reverse-off", "stills/E7-reverse-on",
         "stills/F0-cjk0", "stills/F1-cjk1", "stills/F2-cjk2", "stills/F3-cjk3", "stills/F4-cjk4",
@@ -298,9 +299,10 @@ enum Mini060 {
                 Footage060.put(c, p, in: CGRect(x: 0, y: 0, width: p.width, height: p.height))
                 c.setFillColor(CGColor(gray: 1, alpha: 1)); c.fill(CGRect(x: 150, y: 214, width: 196, height: 112))
             }
-        case "D1x", "D2x", "D3x":
-            // S10's iPhone stills with Aa at 1× (Retouch060.iphone).
-            let src = ["D1x": "stills/D1-iphone-standard", "D2x": "stills/D2-iphone-larger-1610", "D3x": "stills/D3-iphone-larger-fitted"][name]!
+        case "D1x", "D2x", "D3x", "D2kx", "D3kx":
+            // S10's iPhone stills with Aa at 1× (Retouch060.iphone); v5's D2k and D3k with row 1's Keyboard button lit.
+            let src = ["D1x": "stills/D1-iphone-standard", "D2x": "stills/D2-iphone-larger-1610", "D3x": "stills/D3-iphone-larger-fitted",
+                       "D2kx": "stills/D2k-iphone-larger-1610-kbbutton", "D3kx": "stills/D3k-iphone-larger-fitted-kbbutton"][name]!
             return Retouch060.iphone(try image(src), larger: name != "D1x", header: false)
         case "L0w":
             // L0 (the stream screen, unlocked) with Weather in the picture and on the first thumbnail, badge "We", and its

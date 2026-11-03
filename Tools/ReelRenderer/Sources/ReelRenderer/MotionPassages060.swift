@@ -61,6 +61,12 @@ import Foundation
         return lerp(close, 1.0, back) * (1 + 0.01 * ramp(t, L.pullBackEnd, 28.8))
     }
 
+    /// S10's keyboard: its offset below its place (interior px; the phone's interior is about the canvas's size).
+    static func s10Keyboard(_ t: Double) -> Double {
+        Double(SoftKeyboard060.offset(t, height: Larger060.keyboard.height * Larger060.spec.interior.width / Larger060.source.width,
+                                      rise: Larger060.keyboardRise))
+    }
+
     // MARK: S12's camera, S11's push
 
     static func s12Scale(_ t: Double) -> Double { 1.15 + 0.02 * ramp(t, 40.8, 44.0) }
@@ -127,6 +133,11 @@ import Foundation
                 MotionProbe(name: "phone right rim", axis: .x, across: 400...700, guess: scaled(1609.0, at: 36.0, about: 1390, p10), path: basis(p10), window: 7, centroid: true),
                 MotionProbe(name: "phone left rim", axis: .x, across: 400...700, guess: scaled(1167.0, at: 36.0, about: 1390, p10), path: basis(p10), window: 7, centroid: true),
             ], note: "the turned iPhone, a 2 % push"),
+            MotionPassage(name: "S10-keyboard", from: 34.68, to: 35.25, probes: [
+                MotionProbe(name: "a key's top edge", axis: .y, across: 1400...1418,
+                            guess: { t in 1036 + (705.91 + s10Keyboard(t) - 1036) * p10(t) / p10(36.0) },
+                            path: { t in [p10(t), p10(t) * s10Keyboard(t)] }, window: 6),
+            ], note: "v5: iOS's keyboard rising inside the turned iPhone onto the trackpad's footprint (0.30 s appleOut), with its 2 % push; read on its first row's sixth key (the keyboard's own top edge crosses the trackpad's), from 23 px a frame (its first three frames, 75, 51 and 35 px a frame, measure within 0.6 px)"),
             MotionPassage(name: "S11-push", from: 36.85, to: 40.8, probes: [
                 MotionProbe(name: "screen right edge", axis: .x, across: 250...400, guess: scaled(1815.0, at: 37.0, about: 1030, p11), path: basis(p11), window: 4),
                 MotionProbe(name: "iPad top rim", axis: .y, across: 1500...1700, guess: scaled(129.0, at: 37.0, about: 520, p11), path: basis(p11), window: 7, centroid: true),

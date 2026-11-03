@@ -138,6 +138,15 @@ enum Larger060 {
     static let source = CGSize(width: 786, height: 1704)
     static let settingsTap = 33.15, panel = 33.2, switchTap = 33.75, doneTap = 34.15, larger = 34.3, fitted = 35.3
     static let settingsPoint = CGPoint(x: 685, y: 700), switchPoint = CGPoint(x: 643, y: 997), donePoint = CGPoint(x: 680, y: 817)
+    /// v5, Noah: the line about the keyboard "should trigger the virtual keyboard coming up showing how it perfectly covers the
+    /// trackpad". As its second half is written, row 1's Keyboard button is tapped (its centre in D2, x 401–508, y 862–961),
+    /// lights (D2k, D3k), and iOS's keyboard rises inside the screen to rest on the trackpad's footprint exactly: its top
+    /// edge on the trackpad's top edge (y 1102 of 1704 px, 551 pt: the footage's own iPhone said "keyboard: up, 301 pt
+    /// tall, its top at 492 pt in the stream screen; the key row ends 10 pt above it"), the key row and the picture above it
+    /// unmoved; it stays up to the cut.
+    static let keyboardTap = 34.55, keyboardRise = 34.6
+    static let keyboardPoint = CGPoint(x: 454.5, y: 911.5)
+    static let keyboard = CGRect(x: 0, y: 1102, width: 786, height: 602)
     /// D4's switch box and D5's (on), and the "This iPad" header the harness's iPad simulator printed (patched: an iPhone
     /// says "This iPhone").
     static let switchOff = CGRect(x: 578, y: 966, width: 132, height: 62)
@@ -175,12 +184,14 @@ extension Footage060 {
 }
 @MainActor private var derivedLarger: [String: CGImage] = [:]
 
-/// The iPhone's screen: `layers` (each an image and its opacity) filling it, the status strip masked, touch dots.
+/// The iPhone's screen: `layers` (each an image and its opacity) filling it, iOS's keyboard rising from `keyboardRise` (v5),
+/// the status strip masked, touch dots.
 struct PhoneLayers060: View {
     let spec: DeviceSpec
     let layers: [(CGImage, Double)]
     var dots: [TouchDotSpec] = []
     var t: Double
+    var keyboardRise: Double? = nil
     var body: some View {
         let size = spec.interior
         let k = size.width / Device060.phonePoints.width
@@ -191,6 +202,17 @@ struct PhoneLayers060: View {
                     Image(decorative: layers[i].0, scale: 1).resizable().interpolation(.high)
                         .frame(width: size.width, height: size.height).opacity(layers[i].1)
                 }
+            }
+            if let rise = keyboardRise, t >= rise {
+                // The keyboard slides up inside the screen (a shape at its exact place: SoftKeyboard060.offset's 0.30 s
+                // appleOut from below the screen's bottom edge), to rest on the trackpad's footprint.
+                Canvas { ctx, _ in
+                    let k = size.width / Larger060.source.width
+                    let h = Larger060.keyboard.height * k
+                    let y = Larger060.keyboard.minY * k + SoftKeyboard060.offset(t, height: h, rise: rise)
+                    SoftKeyboard060.drawPhone(&ctx, rect: CGRect(x: 0, y: y, width: size.width, height: h))
+                }
+                .frame(width: size.width, height: size.height)
             }
             ForEach(0..<dots.count, id: \.self) { i in
                 TouchDot(spec: dots[i], t: t, clipScale: size.width / dots[i].interiorWidth)
@@ -215,18 +237,21 @@ struct PhoneLayers060: View {
     layers.append((d4p, ramp(t, L.panel, L.panel + 0.2)))
     layers.append((d4on, ramp(t, L.switchTap + 0.04, L.switchTap + 0.16)))
     layers.append((try still("derived/D2x"), CubicBezier.inOut(ramp(t, L.larger, L.larger + 0.28))))
-    layers.append((try still("derived/D3x"), CubicBezier.inOut(ramp(t, L.fitted, L.fitted + 0.22))))
+    // The Keyboard button lit from the tap (D2k), and the Mac's fit with it lit (D3k).
+    layers.append((try still("derived/D2kx"), ramp(t, L.keyboardTap + 0.04, L.keyboardTap + 0.12)))
+    layers.append((try still("derived/D3kx"), CubicBezier.inOut(ramp(t, L.fitted, L.fitted + 0.22))))
     // Drop the layers a later one covers whole.
     if let top = layers.lastIndex(where: { $0.1 >= 0.999 }) { layers = Array(layers[top...]) }
     let dots = [Device060.dot(at: L.settingsTap, L.settingsPoint, source: L.source), Device060.dot(at: L.switchTap, L.switchPoint, source: L.source),
-                Device060.dot(at: L.doneTap, L.donePoint, source: L.source)]
+                Device060.dot(at: L.doneTap, L.donePoint, source: L.source), Device060.dot(at: L.keyboardTap, L.keyboardPoint, source: L.source)]
     let phone = PlacedDevice(spec: L.spec, center: L.centre, yaw: -4) {
-        PhoneLayers060(spec: L.spec, layers: layers, dots: dots, t: t)
+        PhoneLayers060(spec: L.spec, layers: layers, dots: dots, t: t, keyboardRise: L.keyboardRise)
     }
     var lines = [leftLine(Copy060.larger, .T1c, baseline: 400, snap: 32.85, end: 36.8),
                  leftLine(Copy060.upright, .T4, baseline: 486, snap: 33.65, end: 36.8)]
-    lines += capped([leftLine(Copy060.largerSub[0], .T2, baseline: 566, snap: 34.85, end: 36.8),
-                     leftLine(Copy060.largerSub[1], .T2, baseline: 608, snap: 35.10, end: 36.8)])
+    // v5: the subline a beat earlier (34.45, 2.35 s before the cut), its second half written as the keyboard rises.
+    lines += capped([leftLine(Copy060.largerSub[0], .T2, baseline: 566, snap: 34.45, end: 36.8),
+                     leftLine(Copy060.largerSub[1], .T2, baseline: 608, snap: 34.70, end: 36.8)])
     lines.append(leftLine(Copy060.largerFoot, .T3, baseline: 660, snap: 32.90, end: 36.8, cascade: false))
     let v = ZStack {
         Backdrop(glow: 0.06, glowCenter: L.centre)
