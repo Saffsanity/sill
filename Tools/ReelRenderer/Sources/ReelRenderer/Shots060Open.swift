@@ -191,6 +191,9 @@ struct EndCardMarks060: View {
     for i in lines.indices { lines[i].holdScale = false }
     let card = CGAffineTransform.scaling(hold, about: CGPoint(x: 960, y: 540))
     let length = c.sillLength * CGFloat(1 - CubicBezier.inOut(ramp(t, c.retract, c.retractEnd)))
+    // `holds`: the card's lines fade with it.
+    TypeRecorder.opacity = fade
+    defer { TypeRecorder.opacity = 1 }
     let v = ZStack {
         ZStack {
             Backdrop(glow: 0.06 * iconIn * fade, glowCenter: c.iconCentre)

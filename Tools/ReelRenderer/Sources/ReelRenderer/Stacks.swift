@@ -88,6 +88,13 @@ struct TypeLayer: View {
     var covered: [CGRect] = []
     /// False for type that belongs to a picture (GlyphCanvas's `checked`).
     var checked = true
+
+    init(lines: [LineSpec], t: Double, transform: CGAffineTransform = .identity, covered: [CGRect] = [], checked: Bool = true) {
+        self.lines = lines; self.t = t; self.transform = transform; self.covered = covered; self.checked = checked
+        // `holds` (v4.1's, v5's rules): every line a shot builds, as it builds it (no rendering needed).
+        if TypeRecorder.active && checked { TypeRecorder.layers.append((lines, t, TypeRecorder.opacity)) }
+    }
+
     var body: some View {
         let nodes = lines.compactMap { TypeLine.node($0, t) }
         if TypeProbe.legacy {
@@ -107,3 +114,11 @@ struct TypeLayer: View {
 }
 
 func any<V: View>(_ v: V) -> AnyView { AnyView(v) }
+
+/// `holds` (Holds060.swift, v4.1's command): the type layers a frame's builder makes, recorded as it makes them, with the
+/// opacity the shot fades them by from outside (S21–S23's card fade: `opacity`, set by the builder around its layers).
+enum TypeRecorder {
+    nonisolated(unsafe) static var active = false
+    nonisolated(unsafe) static var layers: [(lines: [LineSpec], t: Double, opacity: Double)] = []
+    nonisolated(unsafe) static var opacity = 1.0
+}

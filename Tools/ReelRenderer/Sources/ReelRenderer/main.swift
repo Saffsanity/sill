@@ -205,6 +205,7 @@ do {
     case "sheet": try contactSheet(args: Array(args.dropFirst()))
     case "verify": try verify(args: Array(args.dropFirst()))
     case "blacks": try blacks(args: Array(args.dropFirst()))
+    case "holds": try MainActor.assumeIsolated { try Holds060.run(args: Array(args.dropFirst())) }
     case "typecheck": try MainActor.assumeIsolated { try typecheckCommand(args: Array(args.dropFirst())) }
     case "typetest": try MainActor.assumeIsolated { try typetestCommand(args: Array(args.dropFirst())) }
     case "clearance": try MainActor.assumeIsolated { try clearanceCommand(args: Array(args.dropFirst())) }
