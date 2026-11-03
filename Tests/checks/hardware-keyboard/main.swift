@@ -12,7 +12,10 @@
 //      taker closing, the button);
 //   I5 another responder's keyboard is not fought until the next moment;
 //   I6 the rule never takes the person's own away (a keyboard coming or going, a taker opening).
+// And PointerScroll (#130, PR #217): a trackpad's or a wheel's scroll, every event of it at the pointer, its
+// readings added up, as measured in the simulator, then 10,000 random scrolls in that model.
 //   swiftc -O iOSClient/HardwareKeyboardPolicy.swift Tests/checks/hardware-keyboard/main.swift -o check && ./check
+import CoreGraphics
 import Foundation
 
 typealias P = HardwareKeyboardPolicy
@@ -450,6 +453,93 @@ for (what, count) in violations.sorted(by: { $0.key < $1.key }) {
 }
 check("20,000 random sessions, \(events) events (\(automaticHolds) after-states with the keyboard's hold, \(ownHolds) with the person's): every invariant",
       violations.isEmpty && automaticHolds > 10_000 && ownHolds > 10_000)
+
+// MARK: - PointerScroll (#130, PR #217): a trackpad's or a wheel's scroll goes where the pointer was
+
+func near(_ a: CGPoint, _ b: CGPoint, _ tolerance: CGFloat = 0.000_1) -> Bool {
+    abs(a.x - b.x) <= tolerance && abs(a.y - b.y) <= tolerance
+}
+/// What the scroll path sends for a run of totals (InputOverlayView's `scrolled(to:at:)`, which diffs each
+/// against the last one it sent, starting from nothing as a pan begins): one delta per total.
+func sent(_ totals: [CGPoint]) -> [CGPoint] {
+    var last = CGPoint.zero
+    return totals.map { t in defer { last = t }; return CGPoint(x: t.x - last.x, y: t.y - last.y) }
+}
+/// A scroll through the rule: the pan's first location and reading, then the later readings. The place
+/// after each event, and the totals.
+func run(_ location: CGPoint, _ first: CGPoint, _ later: [CGPoint], into scroll: inout PointerScroll) -> (places: [CGPoint], totals: [CGPoint]) {
+    scroll.began(at: location, reading: first)
+    var places = [scroll.at], totals = [scroll.total]
+    for r in later { scroll.moved(r); places.append(scroll.at); totals.append(scroll.total) }
+    return (places, totals)
+}
+do {
+    // The simulator (iOS 27.0, keyrig): three notches of a wheel over a pointer at 458.79,308.79. UIKit's
+    // pan began at y 311.79 with 3 pt in its translation, then changed at 314.79 and 317.79 (6 and 9 pt), and
+    // ended 0.2 s later where it was; zeroed after every reading, its readings were 3, 3, 3 and 0.
+    var s = PointerScroll()
+    let (places, totals) = run(CGPoint(x: 458.79, y: 311.79), CGPoint(x: 0, y: 3), [CGPoint(x: 0, y: 3), CGPoint(x: 0, y: 3), .zero], into: &s)
+    check("three notches: every event at the pointer (458.79,308.79), not where the pan ran to",
+          places.allSatisfy { near($0, CGPoint(x: 458.79, y: 308.79)) })
+    check("three notches: 3, 6, 9 and 9 pt so far", zip(totals, [3.0, 6, 9, 9]).allSatisfy { near($0, CGPoint(x: 0, y: $1)) })
+    check("three notches: the scroll path sends 3, 3, 3 pt and nothing at the end",
+          zip(sent(totals), [3.0, 3, 3, 0]).allSatisfy { near($0, CGPoint(x: 0, y: $1)) })
+}
+do {
+    // A lone notch: the pan began with the notch already in it and ended with no change (the plan's
+    // lone-notch fix): the notch goes out, at the pointer.
+    var s = PointerScroll()
+    let (places, totals) = run(CGPoint(x: 200, y: 103), CGPoint(x: 0, y: 3), [.zero], into: &s)
+    check("a lone notch: 3 pt, at the pointer", near(totals.last!, CGPoint(x: 0, y: 3)) && places.allSatisfy { near($0, CGPoint(x: 200, y: 100)) })
+}
+do {
+    // Phased scroll events through the same pan in the simulator, zeroed after each reading: 7.10, 7.90,
+    // 10.00, 5.88, 7.09, 7.03 and 0 (UIKit's own translation 7.10, 15.00, 25.00, 30.88, 37.97, 45.00, 45.00),
+    // the pan beginning at y 315.89 over the pointer at 308.79.
+    var s = PointerScroll()
+    let readings: [CGFloat] = [7.90, 10.00, 5.88, 7.09, 7.03, 0]
+    let (places, totals) = run(CGPoint(x: 458.79, y: 315.89), CGPoint(x: 0, y: 7.10), readings.map { CGPoint(x: 0, y: $0) }, into: &s)
+    check("a phased scroll: at the pointer throughout", places.allSatisfy { near($0, CGPoint(x: 458.79, y: 308.79)) })
+    check("a phased scroll: 45 pt in all, as UIKit's own translation had it", near(totals.last!, CGPoint(x: 0, y: 45), 0.001))
+    check("a phased scroll: the scroll path sends each reading as it came",
+          zip(sent(totals), [7.10] + readings).allSatisfy { near($0, CGPoint(x: 0, y: $1), 0.001) })
+}
+do {
+    // Both ways at once, and a second scroll: it starts afresh from where the pointer is then.
+    var s = PointerScroll()
+    let first = run(CGPoint(x: 100, y: 200), CGPoint(x: -4, y: 2), [CGPoint(x: -6, y: 3), CGPoint(x: -1, y: -0.5)], into: &s)
+    check("a diagonal scroll: at 104,198 throughout", first.places.allSatisfy { near($0, CGPoint(x: 104, y: 198)) })
+    check("a diagonal scroll: -11, 4.5 in all", near(first.totals.last!, CGPoint(x: -11, y: 4.5)))
+    let second = run(CGPoint(x: 300, y: 50), CGPoint(x: 0, y: -5), [CGPoint(x: 0, y: -5)], into: &s)
+    check("the next scroll: from its own pointer (300,55) with nothing of the last one",
+          second.places.allSatisfy { near($0, CGPoint(x: 300, y: 55)) } && near(second.totals.last!, CGPoint(x: 0, y: -10)))
+}
+do {
+    // 10,000 random scrolls in the simulator's model (the pan's location = the pointer + UIKit's own running
+    // translation; the readings, zeroed each time, whatever moved since the last): the place is the pointer
+    // throughout, the total UIKit's own translation, and what the scroll path sends is each reading.
+    var rng = SystemRandomNumberGenerator()
+    var s = PointerScroll()
+    var bad = 0, events = 0
+    for _ in 0..<10_000 {
+        let pointer = CGPoint(x: CGFloat.random(in: 0...1400, using: &rng), y: CGFloat.random(in: 0...1000, using: &rng))
+        let n = Int.random(in: 1...40, using: &rng)
+        let readings = (0..<n).map { _ in CGPoint(x: CGFloat.random(in: -30...30, using: &rng), y: CGFloat.random(in: -60...60, using: &rng)) }
+        var uikit = readings[0]
+        s.began(at: CGPoint(x: pointer.x + uikit.x, y: pointer.y + uikit.y), reading: readings[0])
+        var totals = [s.total]
+        if !near(s.at, pointer, 0.001) { bad += 1 }
+        for r in readings.dropFirst() {
+            uikit = CGPoint(x: uikit.x + r.x, y: uikit.y + r.y)
+            s.moved(r)
+            events += 1
+            totals.append(s.total)
+            if !near(s.at, pointer, 0.001) || !near(s.total, uikit, 0.001) { bad += 1 }
+        }
+        if !zip(sent(totals), readings).allSatisfy({ near($0, $1, 0.001) }) { bad += 1 }
+    }
+    check("10,000 random scrolls (\(events) later events): at the pointer, UIKit's own total, each reading sent as it came", bad == 0)
+}
 
 print(fails == 0 ? "ok: \(passes) checks" : "FAILED: \(fails) of \(passes + fails) checks")
 exit(fails == 0 ? 0 : 1)

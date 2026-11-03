@@ -156,5 +156,37 @@ if let keyM = RemoteKey.generate(), let mac = HostIdentity(privateKey: keyM, rec
     check("require pairing: two P-256 keys and their identities", false)
 }
 
+// MARK: #140: a record paired at the home door keeps the scanned code's addresses and port until a kind 18
+
+// As savePairedAtHome makes it: no addresses, the default port, no kind 18 taken yet.
+var homeOnly = macs[0]
+homeOnly.addresses = []
+homeOnly.remotePort = 7455
+homeOnly.infoIssuedAt = 0
+let linkAddrs = [MacAddress(host: "100.64.1.2", kind: MacAddress.vpn, via: "Tailscale"),
+                 MacAddress(host: "169.254.1.1", kind: MacAddress.lan, via: "en0")]
+let withLink = SavedMacs.applyingLink(linkAddrs, port: 8455, to: homeOnly, allowLoopback: false)
+check("applyingLink: a record paired at home takes the link's addresses, link-local ones left out, and its port (#140)",
+      withLink.addresses == [MacAddress(host: "100.64.1.2", kind: MacAddress.vpn, via: "Tailscale")]
+      && withLink.remotePort == 8455)
+check("applyingLink: everything else on the record is as it was", { var w = withLink; w.addresses = []; w.remotePort = 7455; return w == homeOnly }())
+let portOnly = SavedMacs.applyingLink([MacAddress(host: "fe80::1", kind: MacAddress.lan, via: "en0")], port: 8455, to: homeOnly, allowLoopback: false)
+check("applyingLink: a link whose addresses are all left out still gives its port (a window a device's ask opened lists none)",
+      portOnly.addresses.isEmpty && portOnly.remotePort == 8455)
+var keptHome = homeOnly
+keptHome.addresses = [MacAddress(host: "192.168.1.20", kind: MacAddress.lan, via: "Wi-Fi")]
+check("applyingLink: a link with no address worth keeping leaves the record's own", SavedMacs.applyingLink(
+      [MacAddress(host: "fe80::1", kind: MacAddress.lan, via: "en0")], port: 8455, to: keptHome, allowLoopback: false).addresses == keptHome.addresses)
+check("applyingLink: a port out of range is not taken",
+      SavedMacs.applyingLink(linkAddrs, port: 0, to: homeOnly, allowLoopback: false).remotePort == 7455
+      && SavedMacs.applyingLink(linkAddrs, port: 65536, to: homeOnly, allowLoopback: false).remotePort == 7455)
+let keptKind18 = SavedMacs.applyingLink(linkAddrs, port: 8455, to: macs[0], allowLoopback: false)
+check("applyingLink: a record a verified kind 18 refreshed keeps the Mac's addresses and port (#140)",
+      keptKind18 == macs[0] && macs[0].remotePort != 8455)
+var refreshedEmpty = macs[0]
+refreshedEmpty.addresses = []
+check("applyingLink: also when that kind 18 listed no addresses (Remote Access off): the Mac's word stands",
+      SavedMacs.applyingLink(linkAddrs, port: 8455, to: refreshedEmpty, allowLoopback: false) == refreshedEmpty)
+
 print(fails == 0 ? "ALL PASS (\(passes))" : "\(fails) FAIL, \(passes) pass")
 if fails > 0 { exit(1) }

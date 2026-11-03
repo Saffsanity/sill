@@ -21,7 +21,15 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     /// the display's own coordinate system (origin at its top-left, SCStream.h), i.e. exactly the
     /// staged window's rectangle, so the device gets the window and nothing else. Nil (the default,
     /// and the whole default path) leaves the configuration exactly as it was.
-    func start(filter: SCContentFilter, width: Int, height: Int, fps: Int, showsCursor: Bool, sourceRect: CGRect? = nil) async throws {
+    ///
+    /// `width` and `height` are the caller's: the content's points at the knob held to the display's
+    /// own pixel scale (CaptureScale), since ScreenCaptureKit draws a window at its display's scale
+    /// and never scales it up (`scalesToFit` is left false: a window is only ever scaled down). So a
+    /// window asked a pixel larger than it is, an odd side rounded up to even, is drawn 1:1 at the
+    /// buffer's top-left with one black column or row past it (`CaptureScale.windowPixels`).
+    /// `scaleWords` end the line ("capturing at 1x, the display's own (2x asked)").
+    func start(filter: SCContentFilter, width: Int, height: Int, fps: Int, showsCursor: Bool, sourceRect: CGRect? = nil,
+               scaleWords: String? = nil) async throws {
         let config = SCStreamConfiguration()
         config.width = width
         config.height = height
@@ -49,7 +57,8 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             throw error
         }
         let crop = sourceRect.map { String(format: " sourceRect (%.0f,%.0f,%.0f,%.0f)", $0.minX, $0.minY, $0.width, $0.height) } ?? ""
-        print("Capture started: \(width)×\(height) @\(fps) fps, cursor \(showsCursor ? "in" : "out"), filter \(filter.contentRect.size) scale \(filter.pointPixelScale)" + crop)
+        print("Capture started: \(width)×\(height) @\(fps) fps, cursor \(showsCursor ? "in" : "out"), filter \(filter.contentRect.size) scale \(filter.pointPixelScale)"
+              + crop + (scaleWords.map { ", " + $0 } ?? ""))
     }
 
     private var framesSeen = 0
@@ -89,6 +98,3 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         onStopped?(error)
     }
 }
-
-/// HEVC wants even dimensions.
-func evenPixels(_ v: CGFloat) -> Int { Int(v.rounded(.down)) & ~1 }

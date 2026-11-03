@@ -19,8 +19,15 @@ import ImageIO
 /// filling the frame and cropped to its shape, in place of the grey ground and its bar: a Desktop
 /// that looks like one, for photographs of the device (docs/iphone-duo-plan.md). A picture that does
 /// not load gives the pattern, with one line.
+///
+/// TEST ONLY: `SILL_TEST_STILL_AFTER=<s>` delivers no frame from s seconds after a capture starts, as
+/// a window that stopped changing (ScreenCaptureKit sends a frame only when it repaints): what a
+/// device got last is all it gets until a keyframe is asked for, which the encoder makes from the
+/// last frame (HEVCEncoder.requestKeyframe). For the picture's recovery (issue #101, kind 44).
 final class SyntheticCapture: @unchecked Sendable {   // state is confined to `queue` (see above)
     static let noise: Bool = ProcessInfo.processInfo.environment["SILL_TEST_PATTERN"] == "noise"
+    /// `SILL_TEST_STILL_AFTER`'s seconds.
+    static let stillAfter: Double? = ProcessInfo.processInfo.environment["SILL_TEST_STILL_AFTER"].flatMap(Double.init).flatMap { $0 >= 0 ? $0 : nil }
     /// `SILL_TEST_PATTERN=picture:<path>`'s path.
     static let picturePath: String? = {
         guard let raw = ProcessInfo.processInfo.environment["SILL_TEST_PATTERN"], raw.hasPrefix("picture:") else { return nil }
@@ -32,6 +39,7 @@ final class SyntheticCapture: @unchecked Sendable {   // state is confined to `q
     private var pool: CVPixelBufferPool?
     private var frameIndex = 0
     private var fps = 60
+    private var startedAt: TimeInterval = 0
     /// The picture's planes at the frame's size (`SILL_TEST_PATTERN=picture:`), nil for the pattern.
     private var picture: SyntheticPicture?
 
@@ -44,14 +52,18 @@ final class SyntheticCapture: @unchecked Sendable {   // state is confined to `q
         CVPixelBufferPoolCreate(nil, nil, attrs as CFDictionary, &pool)
         let picture = Self.picturePath.flatMap { SyntheticPicture(path: $0, width: width, height: height) }
         if let path = Self.picturePath, picture == nil { print("Synthetic capture: \(path) did not load; the pattern instead (SILL_TEST_PATTERN)") }
-        queue.async { [weak self] in self?.pool = pool; self?.frameIndex = 0; self?.fps = fps; self?.picture = picture }   // ordered before the timer's first tick
+        queue.async { [weak self] in
+            self?.pool = pool; self?.frameIndex = 0; self?.fps = fps; self?.picture = picture
+            self?.startedAt = ProcessInfo.processInfo.systemUptime
+        }   // ordered before the timer's first tick
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now(), repeating: 1.0 / Double(fps), leeway: .milliseconds(1))
         timer.setEventHandler { [weak self] in self?.tick() }
         timer.resume()
         self.timer = timer
         print("Synthetic capture: \(width)×\(height) @\(fps) fps" + (Self.noise ? ", a square of noise (SILL_TEST_PATTERN)" : "")
-              + (picture != nil ? ", a picture (SILL_TEST_PATTERN)" : ""))
+              + (picture != nil ? ", a picture (SILL_TEST_PATTERN)" : "")
+              + (Self.stillAfter.map { ", still from \($0) s on (SILL_TEST_STILL_AFTER)" } ?? ""))
     }
 
     /// Returns once no tick is running any more, so no late frame reaches the next encoder.
@@ -64,6 +76,7 @@ final class SyntheticCapture: @unchecked Sendable {   // state is confined to `q
 
     private func tick() {
         guard let pool else { return }
+        if let still = Self.stillAfter, ProcessInfo.processInfo.systemUptime - startedAt >= still { return }
         var pb: CVPixelBuffer?
         CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pb)
         guard let pb else { Stats.shared.bump("syn.noBuffer"); return }
@@ -100,6 +113,63 @@ final class SyntheticCapture: @unchecked Sendable {   // state is confined to `q
         CVPixelBufferUnlockBaseAddress(pb, [])
         Stats.shared.bump("cap.complete")
         onFrame?(pb, CMClockGetTime(CMClockGetHostTimeClock()))
+    }
+}
+
+/// A locked Mac's placeholder (LockPolicy, docs/locked-mac-plan.md): one black frame, made here and given
+/// to the encoder at the start and once more half a second later, then nothing. No ScreenCaptureKit and
+/// nothing of the Mac: the frame is zeros. Its keyframe replaces every device's last picture, an older
+/// device's too; a device that connects later gets it from the encoder's keyframe request, which encodes
+/// the last frame again. `onFrame` is set by the main actor while stopped; the rest lives on `queue`.
+final class StillCapture: @unchecked Sendable {
+    var onFrame: ((CVPixelBuffer, CMTime) -> Void)?
+    private let queue = DispatchQueue(label: "sill.still", qos: .userInitiated)
+    /// Bumped by each start and stop, so a late second delivery of an older one does nothing.
+    private var generation = 0
+
+    func start(width: Int, height: Int) {
+        queue.async { [self] in
+            generation += 1
+            let mine = generation
+            guard let frame = Self.black(width: width, height: height) else {
+                print("Placeholder: could not make a \(width)×\(height) frame")
+                return
+            }
+            deliver(frame)
+            queue.asyncAfter(deadline: .now() + 0.5) { [self] in if generation == mine { deliver(frame) } }
+        }
+    }
+
+    /// Returns once nothing more is delivered, so no late frame reaches the next encoder.
+    func stop() async {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            queue.async { [self] in
+                generation += 1
+                c.resume()
+            }
+        }
+    }
+
+    private func deliver(_ frame: CVPixelBuffer) {
+        Stats.shared.bump("cap.placeholder")
+        onFrame?(frame, CMClockGetTime(CMClockGetHostTimeClock()))
+    }
+
+    /// Full-range 4:2:0, the test pattern's format: luma 0, chroma 128 (black).
+    private static func black(width: Int, height: Int) -> CVPixelBuffer? {
+        let attrs: [CFString: Any] = [kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary]
+        var pb: CVPixelBuffer?
+        guard CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, attrs as CFDictionary, &pb) == kCVReturnSuccess,
+              let pb else { return nil }
+        CVPixelBufferLockBaseAddress(pb, [])
+        if let y = CVPixelBufferGetBaseAddressOfPlane(pb, 0) {
+            memset(y, 0, CVPixelBufferGetBytesPerRowOfPlane(pb, 0) * CVPixelBufferGetHeightOfPlane(pb, 0))
+        }
+        if let uv = CVPixelBufferGetBaseAddressOfPlane(pb, 1) {
+            memset(uv, 128, CVPixelBufferGetBytesPerRowOfPlane(pb, 1) * CVPixelBufferGetHeightOfPlane(pb, 1))
+        }
+        CVPixelBufferUnlockBaseAddress(pb, [])
+        return pb
     }
 }
 

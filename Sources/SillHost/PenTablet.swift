@@ -221,4 +221,10 @@ package struct PenTablet: Sendable {
         default: return false
         }
     }
+
+    /// What a revoked session's receive loop still hands on (StreamServer, on its network queue,
+    /// which knows nothing of the tablet), as RevokedInput.mayLetGo does for kind 8: an up, a cancel
+    /// and a leave, which the coordinator then posts only as `stillGoes` says and the tablet takes
+    /// only from the device whose pen it is. A hover, a down and a move go no further.
+    package static func mayLetGo(_ input: PenInput) -> Bool { stillGoes(input, tipDown: true) }
 }

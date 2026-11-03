@@ -85,7 +85,16 @@ no drops; approved on the App Store.
 In: single-window capture + HEVC; touch/keyboard/Pencil input; live-preview
 bar; full-desktop button; Duo inner + outer layouts; iCloud pairing + add by
 address.
-Out: hole punching, multi-window, layout customization, audio, AV1.
+Out: hole punching, multi-window, layout customization, AV1. Audio moved in on
+2026-09-27 (Noah: "Audio: the plan is done and parked as a v2 feature by your
+earlier decision", first in what he wanted worked on): the sound of what
+streams (Send Audio: off by default until 2026-10-27, on by default in Sill.app
+since, Noah: "Send Audio should be on by default, and mute should be off by
+default"; the CLI's `--audio` still opts in), per docs/audio-plan.md. In, as a beta,
+since 2026-10-20 (Noah, about PR #94: "merge as beta support"): Send Audio says
+beta until the plan's device tests pass. Since 2026-10-27 (Noah: "Sound should be
+a toggle in the settings menu") a device's Settings panel turns it on and off for
+every device, and mutes it for itself; no Sound button in the bar.
 
 Milestones (solo, ~10 hrs/week; halve at 20):
 1. Latency spike, capture→encode→decode — done 2026-09-22 (streams to iPad Mini; latency number still to record)

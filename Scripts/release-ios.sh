@@ -18,6 +18,13 @@
 #   Scripts/release-ios.sh --unsigned         archive without signing, zip the app and check it: no
 #                                             Apple Account, no certificate, nothing to install or
 #                                             upload (the TestFlight workflow without its key)
+#   Scripts/release-ios.sh --build-number N   any of the above with build number N for this run only,
+#                                             given to xcodebuild, never written to the project: the
+#                                             nightly's and the TestFlight workflow's commit count
+#   Scripts/release-ios.sh --upload --api-key … --whats-new FILE
+#                                             after the upload, waits for App Store Connect to process
+#                                             the build and gives it FILE as What to Test
+#                                             (Scripts/asc.swift)
 #   Scripts/release-ios.sh --print-version    the version and build the next archive gets: 0.5 (1)
 #   Scripts/release-ios.sh --privacy-report [archive]
 #                                             what an archive's privacy manifests declare and which
@@ -51,6 +58,18 @@
 #   app built with the 27.0 SDK runs on the Duo in a compatibility window (871×669, sideways only;
 #   docs/iphone-duo-plan.md). The .ipa's app must say it was built with that SDK (DTPlatformVersion).
 #   Raise `xcode_major` and `xcode_minimum` with them.
+# - --build-number N goes to xcodebuild as CURRENT_PROJECT_VERSION=N, a build setting given on the
+#   command line, which outranks the project's for that one run, so the archive, its app and the
+#   .ipa say N while iOSClient/Sill.xcodeproj keeps its own number untouched. The nightly workflow
+#   (.github/workflows/nightly.yml) and the TestFlight workflow pass the commit count (git rev-list
+#   --count HEAD), as make-app.sh stamps Sill for Mac's build: it grows with every commit on main, so
+#   no two builds of a version share it and nothing has to be committed (docs/release-checklist.md,
+#   "Nightlies"). It doesn't go with --bump, which commits a number.
+# - --whats-new FILE needs --upload and --api-key: App Store Connect's API, which sets What to Test,
+#   takes the key, not the Apple Account in Xcode. The file is checked before anything is built (not
+#   empty; App Store Connect keeps 4,000 characters, and Scripts/asc.swift cuts a longer one at a
+#   line), and after the upload Scripts/asc.swift waits for the build to be processed (90 minutes at
+#   most) and sets it.
 # - --bump and --upload refuse a working tree with changes (a build that stays on this Mac only
 #   gets a warning): --bump commits the new number alone, and an uploaded build then names exactly
 #   one commit. New files count where the build takes files the project doesn't list: the asset
@@ -76,9 +95,9 @@ set -euo pipefail
 
 usage() {
     cat <<'USAGE'
-usage: Scripts/release-ios.sh [--bump] [--upload] [--sign-at-export] [--api-key PATH --api-issuer ID [--api-key-id ID]] [-v]
-       Scripts/release-ios.sh --unsigned
-       Scripts/release-ios.sh --print-version
+usage: Scripts/release-ios.sh [--bump | --build-number N] [--upload] [--sign-at-export] [--api-key PATH --api-issuer ID [--api-key-id ID]] [--whats-new FILE] [-v]
+       Scripts/release-ios.sh --unsigned [--build-number N]
+       Scripts/release-ios.sh --print-version [--build-number N]
        Scripts/release-ios.sh --privacy-report [ARCHIVE]
 
   (no option)
@@ -106,6 +125,14 @@ usage: Scripts/release-ios.sh [--bump] [--upload] [--sign-at-export] [--api-key 
       archives without signing and zips the app as .build/ios/export/Sill-unsigned.ipa, then
       checks it: no Apple Account or certificate needed, and the result can be neither installed
       nor uploaded. For CI without the API key.
+  --build-number N
+      builds with build number N (a whole number) for this run only: xcodebuild gets
+      CURRENT_PROJECT_VERSION=N, and iOSClient/Sill.xcodeproj is never changed. The nightly and
+      TestFlight workflows give the commit count (git rev-list --count HEAD). Not with --bump.
+  --whats-new FILE
+      with --upload and --api-key: once App Store Connect has processed the upload (Scripts/asc.swift
+      waits up to 90 minutes), FILE becomes the build's What to Test in TestFlight. Checked before
+      anything is built.
   --print-version
       prints the version and build the next archive gets, such as 0.5 (1), and exits.
   --privacy-report [ARCHIVE]
@@ -135,6 +162,8 @@ export_dir="$out/export"
 
 verbose=0
 auth=()          # xcodebuild's -authenticationKey* arguments, when an API key is given
+overrides=()     # build settings given on xcodebuild's command line: CURRENT_PROJECT_VERSION with --build-number
+build_given=""   # --build-number's N, for the messages
 signer="the Apple Account in Xcode"   # who Xcode signs and uploads through, for the step lines
 unpacked=""      # an .ipa's copy being checked; removed on exit
 bumped=""        # the build --bump committed, for a failure's last line
@@ -322,7 +351,11 @@ explain_failure() {
             echo "App Store Connect has no app with the bundle ID $bundle_id yet: create its record (docs/release-checklist.md, TestFlight, step 1), then run this again."
         fi
         if grep -q -i -E 'Redundant Binary Upload|must be higher than the previously uploaded|already uploaded a build' "$log"; then
-            echo "App Store Connect already has this build number for this version: run again with --bump."
+            if [ -n "$build_given" ]; then
+                echo "App Store Connect already has build $build_given of this version: --build-number gave it, and a nightly's is the commit count, so this commit was uploaded before. Build a later commit, or give another number."
+            else
+                echo "App Store Connect already has this build number for this version: run again with --bump."
+            fi
         elif [ -n "$bumped" ]; then
             echo "--bump already committed build $bumped: once this is fixed, run this again without --bump."
         fi
@@ -565,11 +598,12 @@ make_archive() {
         say "Archiving (Release, generic/platform=iOS) into $archive with automatic signing through $signer (log: $out/archive.log)"
         run_logged "$out/archive.log" xcodebuild -project "$project" -scheme "$scheme" -destination 'generic/platform=iOS' \
             -configuration Release -archivePath "$archive" archive -allowProvisioningUpdates ${auth[@]+"${auth[@]}"} \
+            ${overrides[@]+"${overrides[@]}"} \
             || { explain_failure "$out/archive.log" "The archive"; exit 1; }
     else
         say "Archiving without signing (Release, generic/platform=iOS) into $archive (log: $out/archive.log)"
         run_logged "$out/archive.log" xcodebuild -project "$project" -scheme "$scheme" -destination 'generic/platform=iOS' \
-            -configuration Release -archivePath "$archive" archive CODE_SIGNING_ALLOWED=NO \
+            -configuration Release -archivePath "$archive" archive CODE_SIGNING_ALLOWED=NO ${overrides[@]+"${overrides[@]}"} \
             || { explain_failure "$out/archive.log" "The archive"; exit 1; }
     fi
     archived_version="$(plist_value ApplicationProperties:CFBundleShortVersionString "$archive/Info.plist")" || archived_version="?"
@@ -604,6 +638,7 @@ check_app_store_address() {
 
 main() {
     local bump=0 upload=0 unsigned=0 sign_at_export=0 print_version=0 report=0 report_archive="" api_key="" api_issuer="" api_key_id=""
+    local build_number="" whats_new=""
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --bump) bump=1 ;;
@@ -620,6 +655,10 @@ main() {
             --api-issuer=*) api_issuer="${1#*=}" ;;
             --api-key-id) [ "$#" -gt 1 ] || { usage >&2; exit 2; }; api_key_id="$2"; shift ;;
             --api-key-id=*) api_key_id="${1#*=}" ;;
+            --build-number) [ "$#" -gt 1 ] || { usage >&2; exit 2; }; build_number="$2"; shift ;;
+            --build-number=*) build_number="${1#*=}" ;;
+            --whats-new) [ "$#" -gt 1 ] || { usage >&2; exit 2; }; whats_new="$2"; shift ;;
+            --whats-new=*) whats_new="${1#*=}" ;;
             -v|--verbose) verbose=1 ;;
             -h|--help) usage; exit 0 ;;
             *) usage >&2; exit 2 ;;
@@ -629,6 +668,7 @@ main() {
     # A path given relative to where this runs from, before moving to the repository's root.
     case "$api_key" in ""|/*) ;; *) api_key="$PWD/$api_key" ;; esac
     case "$report_archive" in ""|/*) ;; *) report_archive="$PWD/$report_archive" ;; esac
+    case "$whats_new" in ""|/*) ;; *) whats_new="$PWD/$whats_new" ;; esac
     cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
     if [ "$unsigned" = 1 ] && { [ "$upload" = 1 ] || [ "$bump" = 1 ] || [ "$sign_at_export" = 1 ] || [ -n "$api_key" ]; }; then
@@ -639,10 +679,36 @@ main() {
         echo "error: --api-issuer and --api-key-id go with --api-key." >&2
         exit 2
     fi
+    if [ -n "$build_number" ]; then
+        if ! [[ "$build_number" =~ ^[1-9][0-9]{0,8}$ ]]; then
+            echo "error: --build-number takes a whole number from 1 (a nightly's is the commit count, git rev-list --count HEAD), not '$build_number'." >&2
+            exit 2
+        fi
+        if [ "$bump" = 1 ]; then
+            echo "error: --bump commits the next build number and --build-number gives one for this run only: not both." >&2
+            exit 2
+        fi
+    fi
+    if [ -n "$whats_new" ]; then
+        if [ "$upload" = 0 ] || [ -z "$api_key" ]; then
+            echo "error: --whats-new goes with --upload and --api-key: App Store Connect's API, which sets What to Test, takes the key." >&2
+            exit 2
+        fi
+        if [ ! -f "$whats_new" ] || [ ! -r "$whats_new" ] || ! grep -q '[^[:space:]]' "$whats_new"; then
+            echo "error: --whats-new: $whats_new is not a readable file with text in it." >&2
+            exit 2
+        fi
+    fi
 
     local version build problem
     version="$(project_setting MARKETING_VERSION)" || exit 2
     build="$(project_setting CURRENT_PROJECT_VERSION)" || exit 2
+    local project_build="$build"
+    if [ -n "$build_number" ]; then
+        build="$build_number"
+        build_given="$build_number"
+        overrides=(CURRENT_PROJECT_VERSION="$build_number")
+    fi
     if [ "$print_version" = 1 ]; then
         echo "$version ($build)"
         exit 0
@@ -675,7 +741,7 @@ main() {
 
     local info
     info="$(xcode_version)"
-    say "Sill for iPhone and iPad $version ($build), $bundle_id, team $team, Xcode ${info%% *} (${info#* })"
+    say "Sill for iPhone and iPad $version ($build), $bundle_id, team $team, Xcode ${info%% *} (${info#* })${build_given:+; build $build_given given with --build-number, for this run only (the project says $project_build)}"
     mkdir -p "$out"
     rm -rf "$archive"
 
@@ -729,11 +795,39 @@ NEXT
         -exportOptionsPlist "$options" -allowProvisioningUpdates ${auth[@]+"${auth[@]}"} \
         || { explain_failure "$out/upload.log" "The upload"; exit 1; }
     say "Uploaded Sill $version ($build). App Store Connect processes it (usually 5 to 30 minutes, then an email), and it shows under TestFlight"
-    cat <<NEXT
+    if [ -n "$whats_new" ]; then
+        set_whats_new "$version" "$build" "$whats_new"
+    fi
+    if [ -n "$build_given" ]; then
+        cat <<NEXT
+
+Next (docs/release-checklist.md, TestFlight and Nightlies): internal testers get it once processed; an
+external group's first build goes through Beta App Review. Build $build_given came from --build-number
+for this run only: the project still says $project_build.
+NEXT
+    else
+        cat <<NEXT
 
 Next (docs/release-checklist.md, TestFlight): internal testers get it once processed; an external
 group's first build goes through Beta App Review. The next upload of $version needs --bump.
 NEXT
+    fi
+}
+
+# --whats-new: Scripts/asc.swift, compiled once into .build/asc (again when the source is newer),
+# waits for App Store Connect to process the upload and sets its What to Test, through the same key
+# as the upload (auth: -authenticationKeyPath P -authenticationKeyID K -authenticationKeyIssuerID I).
+set_whats_new() {
+    local version="$1" build="$2" file="$3" tool=.build/asc/asc
+    if [ ! -x "$tool" ] || [ Scripts/asc.swift -nt "$tool" ]; then
+        mkdir -p .build/asc
+        xcrun swiftc -O -o "$tool" Scripts/asc.swift >"$out/asc-build.log" 2>&1 \
+            || { tail -n 20 "$out/asc-build.log" >&2; fail "uploaded, but Scripts/asc.swift didn't compile, so What to Test was not set: give it in TestFlight › the build › Test Details."; }
+    fi
+    say "Waiting for App Store Connect to process $version ($build), then setting What to Test from $file (Scripts/asc.swift)"
+    "$tool" whats-new --key-file "${auth[1]}" --key-id "${auth[3]}" --issuer "${auth[5]}" \
+        --version "$version" --build "$build" --whats-new "$file" \
+        || fail "uploaded, but What to Test was not set (Scripts/asc.swift's message is above): give it in TestFlight › the build › Test Details."
 }
 
 # Sourced (to test its functions), the script only defines them.
