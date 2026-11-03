@@ -40,6 +40,8 @@ final class AudioOutput {
     var onRouteMuted: (() -> Void)?
 
     // On `queue`.
+    /// The stream's recording (#284): the sound as it is played, also while this device is muted.
+    var recorder: StreamRecorder?
     private var model = AudioPlayout()
     private var decoder: AudioDecoder?
     /// The epoch playing: its format, and whether this device plays its codec.
@@ -325,7 +327,7 @@ final class AudioOutput {
     private func schedule(_ s: AudioPlayout.Schedule) {
         guard let pcm = kept[s.id] else { return }
         defer { if s.part == .tail { kept[s.id] = nil } }
-        guard let engine else { return }
+        guard engine != nil || recorder != nil else { return }
         let end = min(s.offset + s.count, pcm.left.count)
         guard s.offset < end else { return }
         var l = Array(pcm.left[s.offset..<end])
@@ -333,6 +335,8 @@ final class AudioOutput {
         if s.change != 0 { AudioPlayout.change(&l, &r, by: s.change) }
         if s.fadeIn { AudioPlayout.fade(&l, in: true); AudioPlayout.fade(&r, in: true) }
         if s.fadeOut { AudioPlayout.fade(&l, in: false); AudioPlayout.fade(&r, in: false) }
+        recorder?.sound(left: l, right: r)
+        guard let engine else { return }
         engine.schedule(left: l, right: r, at: s.at)
         #if DEBUG
         clicks.scheduled(start: s.start, frames: l.count, stamp: s.stamp + Double(s.offset) / AudioPlayout.rate)
