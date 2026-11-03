@@ -116,8 +116,8 @@ import Foundation
             ], note: "the chip's inset rising 12 px"),
             MotionPassage(name: "S06-push", from: 14.45, to: 17.55, probes: [
                 MotionProbe(name: "iPad left rim", axis: .x, across: 500...700, guess: scaled(430.4, at: 14.5, about: 960, p06), path: basis(p06), window: 7, centroid: true),
-                MotionProbe(name: "iPad top rim", axis: .y, across: 800...1100, guess: scaled(296.6, at: 14.5, about: 654, p06), path: basis(p06), window: 7, centroid: true),
-            ], note: "the frontal iPad, a 2 % push"),
+                MotionProbe(name: "iPad top rim", axis: .y, across: 1380...1420, guess: scaled(296.6, at: 14.5, about: 654, p06), path: basis(p06), window: 7, centroid: true),
+            ], note: "the frontal iPad, a 2 % push; its top rim read right of the footnote (v5 snaps it at 16.45, inside the passage: its snap's blur reached the rim's window over x 800–1100)"),
             MotionPassage(name: "S07-push", from: 19.65, to: 24.0, probes: [
                 MotionProbe(name: "iPad left rim", axis: .x, across: 450...650, guess: scaled(1051.6, at: 19.65, about: Double(a07.x), p07), path: basis(p07), window: 7, centroid: true),
                 MotionProbe(name: "screen top edge", axis: .y, across: 1300...1500, guess: scaled(296.0, at: 21.0, about: Double(a07.y), p07), path: basis(p07)),
