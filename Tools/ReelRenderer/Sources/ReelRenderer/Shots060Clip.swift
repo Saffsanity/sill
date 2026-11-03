@@ -357,7 +357,9 @@ func qtToStill(_ r: CGRect) -> CGRect {
                                layers: [MiniLayer(name: "derived/B1x")], dots: dots, overlay: any(overlay))
     var lines = [LineSpec(Copy060.sound, .T1s, baseline: 150, snap: 14.45, holdEnd: 19.2)]
     lines += capped([LineSpec(Copy060.soundSub, .T2, baseline: 214, snap: 15.25, holdEnd: 19.2)])
-    lines.append(LineSpec(Copy060.soundFoot, .T3, baseline: 258, snap: 17.65, holdEnd: 19.2, cascade: false))
+    // v5, Noah: "the last line comes too late, show it earlier so it can be read more easily": three beats after the
+    // subline (16.45, 2.75 s before the cut; it was 17.65, 1.55 s), so Settings (16.8) and Mute (17.6) play under it.
+    lines.append(LineSpec(Copy060.soundFoot, .T3, baseline: 258, snap: 16.45, holdEnd: 19.2, cascade: false))
     let arcs = SoundArcs060(origin: SoundArcs060.origin(beside: S.spec, center: S.centre), t: t,
                             beats: SoundArcs060.beats(from: 14.4, to: 19.2), muted: [S.mute...S.unmute])
     let v = ZStack {
