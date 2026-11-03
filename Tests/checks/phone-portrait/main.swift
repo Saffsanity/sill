@@ -758,5 +758,34 @@ for rule in largerRules {
     check("Larger Picture grid (\(largerSizes) layouts): \(rule.name)" + (rule.firstFailure.map { " — first failure at \($0)" } ?? ""), rule.firstFailure == nil)
 }
 
+// #279 and #280 (2026-11-02): swiping the controls away. Sideways one swipe hides the bar; upright the
+// first hides the trackpad (the picture takes its room), the second the rest; the way back shows all.
+typealias H = HiddenControls
+check("sideways: one swipe hides all", H.hide(.shown, upright: false) == .all && H.hide(.all, upright: false) == .all)
+check("upright: the trackpad, then the rest", H.hide(.shown, upright: true) == .trackpad && H.hide(.trackpad, upright: true) == .all
+      && H.hide(.all, upright: true) == .all)
+check("the way back shows everything", H.shown.trackpadShown && H.shown.rowsShown && !H.trackpad.trackpadShown && H.trackpad.rowsShown
+      && !H.all.trackpadShown && !H.all.rowsShown)
+check("turned sideways with the trackpad hidden: the bar shows (it has no trackpad)", H.sideways(.trackpad) == .shown && H.sideways(.all) == .all
+      && H.sideways(.shown) == .shown)
+check("a swipe: 40 points up or down, twice as far as across", H.swipe(dx: 0, dy: -40) == -1 && H.swipe(dx: 10, dy: 60) == 1
+      && H.swipe(dx: 0, dy: 39) == nil && H.swipe(dx: 30, dy: 50) == nil && H.swipe(dx: -200, dy: 10) == nil && H.swipe(dx: 25, dy: -50) == -1)
+var hiddenWrong: [String] = []
+for w in stride(from: 320.0, through: 440, by: 10) {
+    for h in stride(from: 560.0, through: 960, by: 20) {
+        let plain = PhonePortraitLayout(size: CGSize(width: w, height: h))
+        let roomy = PhonePortraitLayout(size: CGSize(width: w, height: h), trackpadHidden: true)
+        let want = max(0, h - PhonePortraitLayout.fixedHeight)
+        if roomy.picture.height != want || roomy.trackpad.height != 0 || roomy.picture.height < plain.picture.height
+            || roomy.keys.maxY + PhonePortraitLayout.rowGap + PhonePortraitLayout.bottom > h + 0.5
+            || roomy.row1.height != plain.row1.height || roomy.keys.height != plain.keys.height { hiddenWrong.append("\(w)×\(h)") }
+    }
+}
+check("the trackpad hidden: the picture takes all its room, the rows as they were, nothing off the screen (\(hiddenWrong.prefix(3)))",
+      hiddenWrong.isEmpty)
+let withKeyboard = PhonePortraitLayout(size: CGSize(width: 393, height: 852), keyboard: 301, trackpadHidden: true)
+check("Larger Picture over a keyboard: as it was (the keyboard has the trackpad's room)",
+      withKeyboard == PhonePortraitLayout(size: CGSize(width: 393, height: 852), keyboard: 301))
+
 print("\(passes) passed, \(fails) failed")
 exit(fails == 0 ? 0 : 1)

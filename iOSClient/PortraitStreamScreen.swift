@@ -171,6 +171,10 @@ struct PortraitStreamScreen: View {
     /// The picture's pinch zoom (StreamScreen's; StreamZoom): not watched here, only by the picture's
     /// own view, so a pinch redraws nothing else.
     let zoom: StreamZoomModel
+    /// The trackpad swiped away (HiddenControls, #280): the picture takes its room.
+    var trackpadHidden = false
+    /// A swipe on the rows (HiddenControls.swipe): 1 down, one more step away; -1 up, everything back.
+    var swiped: (Int) -> Void = { _ in }
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
     /// The Duo's fold across this screen (StreamScreen, iOS 27.1): where the halves split.
@@ -179,7 +183,8 @@ struct PortraitStreamScreen: View {
     var body: some View {
         GeometryReader { geo in
             if metrics.phone {
-                phone(PhonePortraitLayout(size: geo.size, keyboard: largerKeyboard), origin: geo.frame(in: .global).origin)
+                phone(PhonePortraitLayout(size: geo.size, keyboard: largerKeyboard, trackpadHidden: trackpadHidden),
+                      origin: geo.frame(in: .global).origin)
             } else {
                 halves(geo.size)
             }
@@ -193,13 +198,15 @@ struct PortraitStreamScreen: View {
         // open flat at the picture's own shape (docs/iphone-duo-plan.md, (b1) and (b2)).
         let split = DuoPosture.portraitSplit(size, duoFold, aspect: client.duoPaneAspect(textScale: textScale),
                                              controls: metrics.controlsHeight)
-        let half = split.picture
+        // The trackpad swiped away: the picture to the rows, which keep their height (`controlsHeight`
+        // is theirs and their gaps; the trackpad had the rest).
+        let half = trackpadHidden ? max(0, size.height - metrics.controlsHeight + metrics.rowGap) : split.picture
         return ZStack(alignment: .topLeading) {
             Color.black
 
-            VStack(spacing: split.controls - half) {
+            VStack(spacing: trackpadHidden ? 0 : split.controls - half) {
                 picturePane(measured: true).padding(8).frame(height: half)
-                controls(width: size.width).frame(height: size.height - split.controls)
+                controls(width: size.width).frame(height: trackpadHidden ? size.height - half : size.height - split.controls)
             }
 
             // Same order as landscape: the dim goes over the stream so a tap with the drawer
@@ -243,9 +250,12 @@ struct PortraitStreamScreen: View {
 
     private func controls(width: CGFloat) -> some View {
         VStack(spacing: metrics.rowGap) {
-            windowBar(width: width - 2 * metrics.padSide)
-            keyRow(.full)
-            trackpad(verticalSpan: nil)
+            Group {
+                windowBar(width: width - 2 * metrics.padSide)
+                keyRow(.full)
+            }
+            .modifier(SwipesAway(swiped: swiped, trackpadHidden: trackpadHidden))
+            if !trackpadHidden { trackpad(verticalSpan: nil) }
         }
         .padding(.top, metrics.padTop)
         .padding(.horizontal, metrics.padSide)
@@ -344,14 +354,14 @@ struct PortraitStreamScreen: View {
             // beside them.
             PhoneRows(size: layout.size, rects: rects) {
                 picturePane(measured: false).accessibilityHidden(drawerOpen)
-                phoneRow1(layout, menus: larger && client.menus.hasMenus)
+                phoneRow1(layout, menus: larger && client.menus.hasMenus).modifier(SwipesAway(swiped: swiped, trackpadHidden: trackpadHidden))
                 if !larger {
                     phoneRow2(layout)
                         .opacity(drawerOpen || settingsOpen ? 0 : 1)
                         .accessibilityHidden(drawerOpen)
                 }
-                keyRow(.phone).accessibilityHidden(drawerOpen)
-                trackpad(verticalSpan: span).accessibilityHidden(drawerOpen)
+                keyRow(.phone).accessibilityHidden(drawerOpen).modifier(SwipesAway(swiped: swiped, trackpadHidden: trackpadHidden))
+                trackpad(verticalSpan: span).accessibilityHidden(drawerOpen || trackpadHidden).opacity(trackpadHidden ? 0 : 1)
             }
 
             if drawerOpen {
@@ -967,4 +977,22 @@ private struct KeyRow: View {
         }
     }
     #endif
+}
+
+/// The rows' swipes (#279): down hides one more step, up shows everything (HiddenControls.swipe), beside
+/// their buttons' own taps; and VoiceOver's actions for the same.
+private struct SwipesAway: ViewModifier {
+    let swiped: (Int) -> Void
+    let trackpadHidden: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded { v in
+                if let way = HiddenControls.swipe(dx: v.translation.width, dy: v.translation.height) { swiped(way) }
+            })
+            .accessibilityActions {
+                Button("Hide Sill’s controls") { swiped(1) }
+                if trackpadHidden { Button("Show the trackpad") { swiped(-1) } }
+            }
+    }
 }

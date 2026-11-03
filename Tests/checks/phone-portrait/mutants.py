@@ -10,8 +10,8 @@ orig = open(SRC).read()
 MUTANTS = {
     "M1 16:9 for 16:10": ("static let aspect: CGFloat = 1.6", "static let aspect: CGFloat = 16.0 / 9.0"),
     "M2 the picture's height rounded up": ("(pictureWidth / Self.aspect).rounded(.down)", "(pictureWidth / Self.aspect).rounded(.up)"),
-    "M3 no minimum trackpad": ("let pictureHeight = min(natural, max(0, height - Self.fixedHeight - Self.minTrackpad))",
-                               "let pictureHeight = natural"),
+    "M3 no minimum trackpad": ("            : min(natural, max(0, height - Self.fixedHeight - Self.minTrackpad))",
+                                 "            : min(natural, max(0, height - Self.fixedHeight))"),
     "M4 the margin under the picture dropped": ("y: picture.maxY + Self.margin + Self.underPicture", "y: picture.maxY + Self.underPicture"),
     "M5 the strip above row 1": ("strip = CGRect(x: Self.side - Self.stripInset, y: row1.maxY + Self.band + Self.rowGap,",
                                  "strip = CGRect(x: Self.side - Self.stripInset, y: row1.minY - Self.rowGap - Self.stripHeight,"),
@@ -103,6 +103,12 @@ MUTANTS = {
     "S3 what streams ignored (the Desktop and nothing with Larger Picture, as before 2026-10-15)": ("switchOn && streaming == .window", "switchOn"),
     "S4 the switch ignored while a window streams": ("switchOn && streaming == .window", "streaming == .window"),
     "S5 the rule turned around (the Desktop larger, a window not)": ("switchOn && streaming == .window", "switchOn && streaming != .window"),
+    "H1 sideways in two steps": ("upright && now == .shown ? .trackpad : .all", "now == .shown ? .trackpad : .all"),
+    "H2 upright all at once": ("upright && now == .shown ? .trackpad : .all", "upright && now == .trackpad ? .trackpad : .all"),
+    "H3 the trackpad kept sideways": ("static func sideways(_ now: HiddenControls) -> HiddenControls { now == .trackpad ? .shown : now }", "static func sideways(_ now: HiddenControls) -> HiddenControls { now }"),
+    "H4 the picture keeps 16:10 with the trackpad hidden": ("trackpadHidden ? max(0, height - Self.fixedHeight)", "trackpadHidden ? min(natural, max(0, height - Self.fixedHeight))"),
+    "H6 a slide across taken as a swipe": ("guard abs(dy) >= 40, abs(dy) >= 2 * abs(dx) else { return nil }", "guard abs(dy) >= 40 else { return nil }"),
+    "H7 a short drag taken": ("guard abs(dy) >= 40, abs(dy) >= 2 * abs(dx) else { return nil }", "guard abs(dy) >= 2 * abs(dx) else { return nil }"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():
