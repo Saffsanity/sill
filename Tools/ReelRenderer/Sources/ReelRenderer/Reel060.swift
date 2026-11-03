@@ -568,6 +568,10 @@ enum Cut060 {
     static func film(_ t: Double, _ scene: Scene) -> Double { t + (segments.first { $0.scene == scene }?.shift ?? 0) }
     /// The film's frame → the frame the finish is seeded with: the old one.
     static func finish(_ f: Int) -> Int { f - segment(Double(f) / 60).frames }
+    /// The writer forces a key frame on the first frame of the true-black tail (the sill line's last pixels are frame 5068,
+    /// 84.467 s; frame 5069 and every one after it are pure black), so the encoder leaves no near-black block of the line
+    /// behind (VideoWriter; v4.1's adf3f784).
+    static let keyframes: [Int] = [5069]
 }
 
 @MainActor

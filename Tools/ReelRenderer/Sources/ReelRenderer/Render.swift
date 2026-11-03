@@ -255,72 +255,184 @@ struct SplitMix64 {
 
 final class VideoWriter {
     let writer: AVAssetWriter
-    let input: AVAssetWriterInput
-    let adaptor: AVAssetWriterInputPixelBufferAdaptor
     /// v2 final: Apple's software H.264 encoder by default, so a render never competes with Sill.app (which
     /// shares the Mac's hardware encoder, and whose hardware session hung twice during the captures).
     /// `SILL_HW_ENCODER=1` goes back to VideoToolbox's default (hardware) choice.
     static let software = ProcessInfo.processInfo.environment["SILL_HW_ENCODER"] == nil
     static let softwareEncoderID = "com.apple.videotoolbox.videoencoder.h264"
 
-    init(url: URL) throws {
+    // v3.1's path: AVAssetWriter compresses (no way to ask for a key frame on a given frame).
+    private var input: AVAssetWriterInput!
+    private var adaptor: AVAssetWriterInputPixelBufferAdaptor!
+
+    // v4.1's path (`keyframes` given): the same software encoder through a VTCompressionSession, with the same settings,
+    // its samples written as they are; a key frame is forced on each frame in `keyframes`. The 0.6 film ends on 0.47 s of
+    // true black after the sill line retracts: with AVAssetWriter the encoder left the faint glow's last near-black
+    // blocks skipped there (luma 15 and 17 where 16 is wanted), and v4 was clean only because a key frame fell in its
+    // tail by chance; a key frame on the first all-black frame makes the black exact.
+    private var session: VTCompressionSession?
+    private var forced: Set<Int> = []
+    private let lock = NSLock()
+    private var encoded: [CMSampleBuffer] = []
+    private var encodeError: OSStatus = noErr
+    private var passthrough: AVAssetWriterInput?
+
+    init(url: URL, keyframes: Set<Int> = []) throws {
         try? FileManager.default.removeItem(at: url)
         writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
-        var settings: [String: Any] = [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: Stage.width,
-            AVVideoHeightKey: Stage.height,
-            AVVideoColorPropertiesKey: [
-                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
-                AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
-                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
-            ],
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: 24_000_000,
-                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
-                AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
-                AVVideoMaxKeyFrameIntervalKey: 120,
-                AVVideoExpectedSourceFrameRateKey: 60,
-                AVVideoAllowFrameReorderingKey: false,
-            ],
-        ]
-        if VideoWriter.software {
-            settings[AVVideoEncoderSpecificationKey] = [
-                kVTVideoEncoderSpecification_EncoderID as String: VideoWriter.softwareEncoderID,
-                kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder as String: false,
-            ] as [String: Any]
-        }
         print("video encoder: \(VideoWriter.software ? "software H.264 (\(VideoWriter.softwareEncoderID))" : "VideoToolbox default (hardware H.264)")")
-        input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
-        input.expectsMediaDataInRealTime = false
-        adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+        if keyframes.isEmpty {
+            var settings: [String: Any] = [
+                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoWidthKey: Stage.width,
+                AVVideoHeightKey: Stage.height,
+                AVVideoColorPropertiesKey: [
+                    AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                    AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                    AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
+                ],
+                AVVideoCompressionPropertiesKey: [
+                    AVVideoAverageBitRateKey: 24_000_000,
+                    AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+                    AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
+                    AVVideoMaxKeyFrameIntervalKey: 120,
+                    AVVideoExpectedSourceFrameRateKey: 60,
+                    AVVideoAllowFrameReorderingKey: false,
+                ],
+            ]
+            if VideoWriter.software {
+                settings[AVVideoEncoderSpecificationKey] = [
+                    kVTVideoEncoderSpecification_EncoderID as String: VideoWriter.softwareEncoderID,
+                    kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder as String: false,
+                ] as [String: Any]
+            }
+            input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
+            input.expectsMediaDataInRealTime = false
+            adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: Stage.width,
+                kCVPixelBufferHeightKey as String: Stage.height,
+                kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+            ])
+            writer.add(input)
+            guard writer.startWriting() else { throw writer.error ?? NSError(domain: "Writer", code: 1) }
+            writer.startSession(atSourceTime: .zero)
+            return
+        }
+        forced = keyframes
+        let spec: [String: Any] = VideoWriter.software ? [
+            kVTVideoEncoderSpecification_EncoderID as String: VideoWriter.softwareEncoderID,
+            kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder as String: false,
+        ] : [:]
+        let attributes: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
             kCVPixelBufferWidthKey as String: Stage.width,
             kCVPixelBufferHeightKey as String: Stage.height,
             kCVPixelBufferIOSurfacePropertiesKey as String: [:],
-        ])
-        writer.add(input)
-        guard writer.startWriting() else { throw writer.error ?? NSError(domain: "Writer", code: 1) }
-        writer.startSession(atSourceTime: .zero)
+        ]
+        var s: VTCompressionSession?
+        let created = VTCompressionSessionCreate(allocator: nil, width: Int32(Stage.width), height: Int32(Stage.height),
+                                                 codecType: kCMVideoCodecType_H264, encoderSpecification: spec as CFDictionary,
+                                                 imageBufferAttributes: attributes as CFDictionary, compressedDataAllocator: nil,
+                                                 outputCallback: nil, refcon: nil, compressionSessionOut: &s)
+        guard created == noErr, let session = s else {
+            throw NSError(domain: "Writer", code: 5, userInfo: [NSLocalizedDescriptionKey: "VTCompressionSessionCreate \(created)"])
+        }
+        let properties: [CFString: Any] = [
+            kVTCompressionPropertyKey_RealTime: false,
+            kVTCompressionPropertyKey_ProfileLevel: kVTProfileLevel_H264_High_AutoLevel,
+            kVTCompressionPropertyKey_H264EntropyMode: kVTH264EntropyMode_CABAC,
+            kVTCompressionPropertyKey_AverageBitRate: 24_000_000,
+            kVTCompressionPropertyKey_MaxKeyFrameInterval: 120,
+            kVTCompressionPropertyKey_ExpectedFrameRate: 60,
+            kVTCompressionPropertyKey_AllowFrameReordering: false,
+            kVTCompressionPropertyKey_ColorPrimaries: kCVImageBufferColorPrimaries_ITU_R_709_2,
+            kVTCompressionPropertyKey_TransferFunction: kCVImageBufferTransferFunction_ITU_R_709_2,
+            kVTCompressionPropertyKey_YCbCrMatrix: kCVImageBufferYCbCrMatrix_ITU_R_709_2,
+        ]
+        for (k, v) in properties {
+            let st = VTSessionSetProperty(session, key: k, value: v as CFTypeRef)
+            guard st == noErr else { throw NSError(domain: "Writer", code: 6, userInfo: [NSLocalizedDescriptionKey: "VTSessionSetProperty \(k) \(st)"]) }
+        }
+        VTCompressionSessionPrepareToEncodeFrames(session)
+        self.session = session
+        print("video encoder: through a compression session, key frames forced at \(keyframes.sorted().map(String.init).joined(separator: ", "))")
     }
 
     func append(frame index: Int, fill: (CVPixelBuffer) -> Void) throws {
+        if let session {
+            guard let pool = VTCompressionSessionGetPixelBufferPool(session) else {
+                throw NSError(domain: "Writer", code: 2, userInfo: [NSLocalizedDescriptionKey: "no pixel buffer pool"])
+            }
+            var pb: CVPixelBuffer?
+            guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pb) == kCVReturnSuccess, let buffer = pb else {
+                throw NSError(domain: "Writer", code: 2, userInfo: [NSLocalizedDescriptionKey: "no pixel buffer"])
+            }
+            VideoWriter.tag(buffer)
+            fill(buffer)
+            let options: CFDictionary? = forced.contains(index) ? [kVTEncodeFrameOptionKey_ForceKeyFrame: kCFBooleanTrue] as CFDictionary : nil
+            let st = VTCompressionSessionEncodeFrame(session, imageBuffer: buffer, presentationTimeStamp: CMTime(value: CMTimeValue(index), timescale: 60),
+                                                     duration: CMTime(value: 1, timescale: 60), frameProperties: options, infoFlagsOut: nil) { [weak self] status, _, sample in
+                guard let self else { return }
+                self.lock.lock()
+                if status != noErr { self.encodeError = status } else if let sample { self.encoded.append(sample) }
+                self.lock.unlock()
+            }
+            guard st == noErr else { throw NSError(domain: "Writer", code: 3, userInfo: [NSLocalizedDescriptionKey: "VTCompressionSessionEncodeFrame \(st)"]) }
+            try drain()
+            return
+        }
         while !input.isReadyForMoreMediaData { Thread.sleep(forTimeInterval: 0.001) }
         var pb: CVPixelBuffer?
         guard let pool = adaptor.pixelBufferPool, CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pb) == kCVReturnSuccess, let buffer = pb else {
             throw NSError(domain: "Writer", code: 2, userInfo: [NSLocalizedDescriptionKey: "no pixel buffer"])
         }
-        CVBufferSetAttachment(buffer, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
-        CVBufferSetAttachment(buffer, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
-        CVBufferSetAttachment(buffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
+        VideoWriter.tag(buffer)
         fill(buffer)
         guard adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(index), timescale: 60)) else {
             throw writer.error ?? NSError(domain: "Writer", code: 3)
         }
     }
 
+    private static func tag(_ buffer: CVPixelBuffer) {
+        CVBufferSetAttachment(buffer, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
+        CVBufferSetAttachment(buffer, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
+        CVBufferSetAttachment(buffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
+    }
+
+    /// The compression session's path: writes every sample the encoder has finished, in order (it reorders nothing),
+    /// starting the file with the first one's format.
+    private func drain() throws {
+        lock.lock()
+        let ready = encoded
+        encoded.removeAll(keepingCapacity: true)
+        let err = encodeError
+        lock.unlock()
+        if err != noErr { throw NSError(domain: "Writer", code: 7, userInfo: [NSLocalizedDescriptionKey: "encoder \(err)"]) }
+        for sample in ready {
+            if passthrough == nil {
+                let i = AVAssetWriterInput(mediaType: .video, outputSettings: nil, sourceFormatHint: CMSampleBufferGetFormatDescription(sample))
+                i.expectsMediaDataInRealTime = false
+                writer.add(i)
+                guard writer.startWriting() else { throw writer.error ?? NSError(domain: "Writer", code: 1) }
+                writer.startSession(atSourceTime: .zero)
+                passthrough = i
+            }
+            while !passthrough!.isReadyForMoreMediaData { Thread.sleep(forTimeInterval: 0.001) }
+            guard passthrough!.append(sample) else { throw writer.error ?? NSError(domain: "Writer", code: 3) }
+        }
+    }
+
     func finish() throws {
-        input.markAsFinished()
+        if let session {
+            VTCompressionSessionCompleteFrames(session, untilPresentationTimeStamp: .invalid)
+            try drain()
+            VTCompressionSessionInvalidate(session)
+            self.session = nil
+            passthrough?.markAsFinished()
+        } else {
+            input.markAsFinished()
+        }
         let sem = DispatchSemaphore(value: 0)
         writer.finishWriting { sem.signal() }
         sem.wait()

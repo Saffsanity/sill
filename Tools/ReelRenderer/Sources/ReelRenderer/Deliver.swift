@@ -171,6 +171,48 @@ func mp4Boxes(_ url: URL) throws -> [String] {
     return found
 }
 
+/// `blacks <movie> <from> <to>` (v4.1): for each frame in `from…to` (60 fps frame numbers), whether it is a key frame,
+/// how many luma samples are not 16 (video-range black) and how far the farthest is; the film's last frames should all
+/// be exactly 16.
+func blacks(args: [String]) throws {
+    let asset = AVURLAsset(url: URL(fileURLWithPath: args[0]))
+    let f0 = Int(args[1]) ?? 0, f1 = Int(args[2]) ?? Int.max
+    let tracks = try loadSync { try await asset.loadTracks(withMediaType: .video) }
+    guard let v = tracks.first else { print("no video track"); return }
+    var keys = Set<Int>()
+    let kr = try AVAssetReader(asset: asset)
+    let ko = AVAssetReaderTrackOutput(track: v, outputSettings: nil)
+    kr.add(ko); kr.startReading()
+    while let s = ko.copyNextSampleBuffer() {
+        let pts = CMSampleBufferGetPresentationTimeStamp(s)
+        guard pts.isValid, CMSampleBufferGetNumSamples(s) > 0 else { continue }
+        let f = Int((pts.seconds * 60).rounded())
+        let att = CMSampleBufferGetSampleAttachmentsArray(s, createIfNecessary: false) as? [[CFString: Any]]
+        if !((att?.first?[kCMSampleAttachmentKey_NotSync] as? Bool) ?? false) { keys.insert(f) }
+    }
+    let yr = try AVAssetReader(asset: asset)
+    yr.timeRange = CMTimeRange(start: CMTime(value: CMTimeValue(f0), timescale: 60), duration: CMTime(value: CMTimeValue(max(1, f1 - f0 + 1)), timescale: 60))
+    let yo = AVAssetReaderTrackOutput(track: v, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange])
+    yr.add(yo); yr.startReading()
+    var clean = 0, total = 0
+    while let s = yo.copyNextSampleBuffer() {
+        let pts = CMSampleBufferGetPresentationTimeStamp(s)
+        guard pts.isValid, let pb = CMSampleBufferGetImageBuffer(s) else { continue }
+        let f = Int((pts.seconds * 60).rounded())
+        guard f >= f0 && f <= f1 else { continue }
+        CVPixelBufferLockBaseAddress(pb, .readOnly)
+        let base = CVPixelBufferGetBaseAddressOfPlane(pb, 0)!.assumingMemoryBound(to: UInt8.self)
+        let bpr = CVPixelBufferGetBytesPerRowOfPlane(pb, 0), w = CVPixelBufferGetWidthOfPlane(pb, 0), h = CVPixelBufferGetHeightOfPlane(pb, 0)
+        var n = 0, far = 0
+        for y in 0..<h { for x in 0..<w { let d = abs(Int(base[y * bpr + x]) - 16); if d != 0 { n += 1; far = max(far, d) } } }
+        CVPixelBufferUnlockBaseAddress(pb, .readOnly)
+        total += 1; if n == 0 { clean += 1 }
+        print(String(format: "  frame %d (%.3f s)%@: %d luma samples not 16%@", f, Double(f) / 60, keys.contains(f) ? " [key]" : "", n,
+                     n > 0 ? String(format: ", at most %d off", far) : ""))
+    }
+    print("blacks: \(clean) of \(total) frames all 16; key frames in the film: \(keys.count), the last ones \(keys.sorted().suffix(4).map(String.init).joined(separator: " "))")
+}
+
 func verify(args: [String]) throws {
     for path in args {
         let url = URL(fileURLWithPath: path)
