@@ -115,6 +115,22 @@ public struct StreamMessage {
     public static let maxFramePayload = 32 << 20
     /// Any other host → device message (window lists, icons, thumbnails, the app list).
     public static let maxOtherHostPayload = 4 << 20
+    /// Kind 32 either way: an 8 MiB image (Clipboard.maxImageBytes) as base64 JSON, with room.
+    public static let maxClipboardPayload = 12 << 20
+
+    /// What a host takes from a device in one message of `kind`.
+    public static func maxClientPayload(for kind: StreamMessageKind) -> Int {
+        kind == .clipboard ? maxClipboardPayload : maxClientPayload
+    }
+
+    /// What a device takes from a host in one message of `kind`.
+    public static func maxHostPayload(for kind: StreamMessageKind) -> Int {
+        switch kind {
+        case .frame: return maxFramePayload
+        case .clipboard: return maxClipboardPayload
+        default: return maxOtherHostPayload
+        }
+    }
 
     public var kind: StreamMessageKind
     public var timestamp: Double

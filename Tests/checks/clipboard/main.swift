@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 
 // The clipboard's wire and rules (docs/clipboard-plan.md), against Sources/StreamProtocol compiled
 // into this binary:
@@ -32,13 +33,13 @@ check([29, 30, 31, 33].allSatisfy { StreamMessageKind(rawValue: $0) == nil && he
       "29, 30 and 31 (#66's side streams) and 33 are not this build's (the sound, once planned at 29, is 43)")
 check(StreamMessageKind(rawValue: 28) == .gesture, "28 is still the gesture")
 let message = StreamMessage(kind: .clipboard, timestamp: 1, isKeyframe: false, payload: P.subscription).serialized()
-check(message.first == 32 && StreamMessage.parseHeader(message)?.kind == .clipboard && message.count == StreamMessage.headerLength + 2,
-      "a subscription is a header and {}")
+check(message.first == 32 && StreamMessage.parseHeader(message)?.kind == .clipboard && message.count == StreamMessage.headerLength + 13,
+      "a subscription is a header and {\"accepts\":2}")
 
 let takes = WindowList(macName: "Mac mini", windows: [], active: .desktop, launchID: "L", hostVersion: "0.6", protocol: 1,
                        gestures: TrackpadGesture.generation, clipboard: P.generation)
-check(json(takes).contains(#""clipboard":1"#), "a list from a host that shares the clipboard says clipboard 1: \(json(takes))")
-check(Wire.decode(WindowList.self, from: Wire.encode(takes))?.clipboard == 1, "clipboard round-trips")
+check(json(takes).contains(#""clipboard":2"#), "a list from a host that shares the clipboard says clipboard 2: \(json(takes))")
+check(Wire.decode(WindowList.self, from: Wire.encode(takes))?.clipboard == 2, "clipboard round-trips")
 let off = WindowList(macName: "Mac mini", windows: [], active: .desktop, launchID: "L", gestures: 1)
 check(!json(off).contains("clipboard"), "a host with it off leaves the key out: \(json(off))")
 let older = #"{"macName":"Mac mini","windows":[],"active":{"desktop":{}},"launchID":"L","gestures":1}"#
@@ -47,12 +48,12 @@ check(Wire.decode(WindowList.self, from: data(#"{"macName":"M","windows":[],"act
       "a later generation decodes")
 check(Wire.decode(WindowList.self, from: data(#"{"macName":"M","windows":[],"active":{"none":{}},"clipboard":true}"#)) == nil,
       "#66's Bool does not decode as this Int (why #66 changes it as it rebases)")
-check(P.generation == 1, "generation 1: text")
+check(P.generation == 2, "generation 2: text and images")
 
 // MARK: - Clipboard's JSON
 
 check(json(Clipboard()) == "{}", "an empty Clipboard is {}: \(json(Clipboard()))")
-check(String(decoding: P.subscription, as: UTF8.self) == "{}", "the subscription is {}")
+check(String(decoding: P.subscription, as: UTF8.self) == #"{"accepts":2}"#, "the subscription says it takes images: {\"accepts\":2}")
 check(String(decoding: P.stopping, as: UTF8.self) == #"{"stop":true}"#, "stopping is {\"stop\":true}")
 check(json(Clipboard(text: "hi")) == #"{"text":"hi"}"#, "text alone: \(json(Clipboard(text: "hi")))")
 check(json(Clipboard(text: "a", image: Data([1, 2, 3]))) == #"{"image":"AQID","text":"a"}"#, "an image is base64, as #66 sends it")
@@ -85,6 +86,89 @@ let fits = String(repeating: "\u{1}", count: (P.maxPayload - 11) / 6)
 check(Wire.encode(Clipboard(text: fits)).count <= P.maxPayload && text(of: P.payload(text: fits)) == fits, "its largest that fits goes")
 let oneOver = String(repeating: "\u{1}", count: (P.maxPayload - 11) / 6 + 1)
 check(oneOver.utf8.count <= Clipboard.maxTextBytes && P.payload(text: oneOver) == nil, "one control character more does not")
+
+// MARK: - Images (generation 2, 2026-11-02): up to 8 MB as they are, bigger ones re-encoded to fit
+
+func picture(_ w: Int, _ h: Int, noise: Bool, type: String) -> Data {
+    let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    if noise, let p = ctx.data?.assumingMemoryBound(to: UInt32.self) {
+        var seed: UInt32 = 0x5111
+        for i in 0..<(ctx.bytesPerRow / 4 * h) { seed = seed &* 1_664_525 &+ 1_013_904_223; p[i] = seed | 0xFF00_0000 }
+    } else {
+        ctx.setFillColor(red: 0.2, green: 0.5, blue: 0.9, alpha: 1); ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+    }
+    let out = NSMutableData()
+    let dest = CGImageDestinationCreateWithData(out, type as CFString, 1, nil)!
+    CGImageDestinationAddImage(dest, ctx.makeImage()!, nil)
+    _ = CGImageDestinationFinalize(dest)
+    return out as Data
+}
+let png = picture(64, 48, noise: false, type: "public.png"), jpeg = picture(64, 48, noise: false, type: "public.jpeg")
+let tiff = picture(64, 48, noise: false, type: "public.tiff"), bigPNG = picture(2400, 1600, noise: true, type: "public.png")
+check(bigPNG.count > Clipboard.maxImageBytes, "the test's noise PNG is over 8 MB: \(bigPNG.count)")
+check(Clipboard.maxImageBytes == 8 << 20, "the image cap: 8 MiB")
+check(Clipboard.imageType(png) == "public.png" && Clipboard.imageType(jpeg) == "public.jpeg" && Clipboard.imageType(tiff) == nil
+      && Clipboard.imageType(Data([1, 2, 3])) == nil && Clipboard.imageType(Data()) == nil, "PNG and JPEG told by their first bytes; nothing else")
+check(StreamMessage.maxClipboardPayload == 12 << 20 && StreamMessage.maxClientPayload(for: .clipboard) == 12 << 20
+      && StreamMessage.maxClientPayload(for: .viewport) == StreamMessage.maxClientPayload
+      && StreamMessage.maxHostPayload(for: .clipboard) == 12 << 20 && StreamMessage.maxHostPayload(for: .frame) == StreamMessage.maxFramePayload
+      && StreamMessage.maxHostPayload(for: .windowList) == StreamMessage.maxOtherHostPayload,
+      "kind 32 alone may be 12 MiB either way; every other kind's cap as before")
+let atImageCap = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + Data(count: Clipboard.maxImageBytes - 8)
+check(P.payload(image: atImageCap).map { $0.count <= StreamMessage.maxClipboardPayload } == true, "8 MiB of PNG goes, within 12 MiB as base64 JSON")
+check(P.payload(image: atImageCap + Data([0])) == nil && P.payload(image: tiff) == nil && P.payload(image: Data()) == nil,
+      "a byte more, a TIFF, nothing: not sent")
+check(Wire.decode(Clipboard.self, from: P.payload(image: png)!)?.image == png, "an image round-trips")
+
+// ClipboardImage.fitted: what goes from a pasteboard's image.
+check(ClipboardImage.fitted(png) == png && ClipboardImage.fitted(jpeg) == jpeg, "a PNG or JPEG within 8 MB: as it is, byte for byte")
+let fromTIFF = ClipboardImage.fitted(tiff)
+check(fromTIFF.map { Clipboard.imageType($0) == "public.png" } == true, "a TIFF (macOS's own copies): PNG")
+let fromBig = ClipboardImage.fitted(bigPNG)
+check(fromBig.map { Clipboard.imageType($0) == "public.jpeg" && $0.count <= Clipboard.maxImageBytes } == true,
+      "a PNG over 8 MB: JPEG within it (\(fromBig?.count ?? -1) bytes)")
+check(ClipboardImage.fitted(Data([1, 2, 3])) == nil && ClipboardImage.fitted(Data()) == nil, "not an image: nothing")
+check(ClipboardImage.fitted(bigPNG, max: 20_000).map { $0.count <= 20_000 && Clipboard.imageType($0) == "public.jpeg" } == true,
+      "a tight cap: scaled down until it fits")
+
+// The host's look at a copy without text.
+var imageReads = 0
+func decideImage(_ types: [String], image: Data?) -> P.HostDecision {
+    P.hostDecides(types: types, changeCount: 3, ownChangeCount: nil, launchID: "L", ownMarker: { nil }, text: { nil },
+                  image: { imageReads += 1; return image })
+}
+check(decideImage(["public.png"], image: png) == .sendImage(P.payload(image: png)!), "a copied image, no text: sent to the subscribers that take images")
+imageReads = 0
+check(decideImage(["public.file-url", "public.tiff"], image: png) == .skip(.noText) && imageReads == 0,
+      "a copy of files in the Finder: not sent, its icon never read")
+check(decideImage(["public.tiff"], image: nil) == .skip(.noText), "an image that cannot be made to fit: nothing")
+
+// The wire's rules for images.
+check(P.fromDevice(P.payload(image: png)!) == .setImage(png), "a device's PNG: set on the Mac")
+check(P.fromDevice(P.payload(image: jpeg)!) == .setImage(jpeg), "a JPEG too")
+check(P.fromDevice(Wire.encode(Clipboard(image: atImageCap + Data([0])))) == .refuse(.tooLong), "over 8 MB: refused")
+check(P.fromDevice(Wire.encode(Clipboard(text: "t", image: png))) == .set("t"), "text and an image: the text, as before")
+check(P.countsAgainstRate(.setImage(png)), "an image counts against the rate, as text")
+check(P.takesImages(P.subscription) && P.takesImages(data(#"{"accepts":3}"#)) && !P.takesImages(data("{}"))
+      && !P.takesImages(data(#"{"text":"a"}"#)) && !P.takesImages(data("x")), "a subscription takes images when it says accepts 2 or more")
+check(!P.hostTakesImages(nil) && !P.hostTakesImages(1) && P.hostTakesImages(2) && P.hostTakes(1),
+      "a device sends images to a host of generation 2; text to one of 1, as before")
+check(P.forwardImage(to: [(1, true), (2, false), (3, true)], from: 3) == [1], "a device's image: to the other subscribers that take images")
+check(P.deviceWritesImage(P.payload(image: png)!, switchOn: true, hostClipboard: 2) == png, "the Mac's PNG written on the device")
+check(P.deviceWritesImage(P.payload(image: png)!, switchOn: false, hostClipboard: 2) == nil
+      && P.deviceWritesImage(P.payload(image: png)!, switchOn: true, hostClipboard: 1) == nil
+      && P.deviceWritesImage(Wire.encode(Clipboard(image: tiff)), switchOn: true, hostClipboard: 2) == nil
+      && P.deviceWritesImage(Wire.encode(Clipboard(text: "a")), switchOn: true, hostClipboard: 2) == nil,
+      "nothing with the switch off, from a host of generation 1, a TIFF, or text")
+check(P.deviceSendsImage(png, connected: true, hostClipboard: 2, switchOn: true) == .send(P.payload(image: png)!),
+      "a pasted image goes to a host of generation 2")
+check(P.deviceSendsImage(png, connected: true, hostClipboard: 1, switchOn: true) == .nothing
+      && P.deviceSendsImage(png, connected: false, hostClipboard: 2, switchOn: true) == .nothing
+      && P.deviceSendsImage(png, connected: true, hostClipboard: 2, switchOn: false) == .nothing,
+      "to no host of generation 1, not while disconnected, not with the switch off")
+check(P.deviceSendsImage(atImageCap + Data([0]), connected: true, hostClipboard: 2, switchOn: true) == .tooLong,
+      "over 8 MB after fitting: too long")
 
 // MARK: - The host: a change of its pasteboard
 
@@ -163,7 +247,7 @@ check(C.macAccessHint(.notAsked)!.hasPrefix("Click Allow in System Settings: mac
       && C.macAccessHint(.asks) == C.macAccessHint(.denied) && C.macAccessHint(.asks)!.contains("Paste from Other Apps"),
       "the way to allow it: asked once first while macOS has not asked about Sill (it is not listed until then)")
 check(C.macAccessButton == "Allow in System Settings…", "the button")
-check(C.macFootnote == "Text you copy here can be pasted on a connected iPhone or iPad, and text sent from one with Paste becomes this Mac’s.",
+check(C.macFootnote == "Text and images you copy here can be pasted on a connected iPhone or iPad, and what one sends with Paste becomes this Mac’s.",
       "Settings › General's footnote: the Mac's copies go, a device's text comes with Paste, nothing excepted")
 check(C.macAccessLine(.allowed).hasPrefix("Clipboard: macOS lets Sill read the clipboard again")
       && C.macAccessLine(.asks).hasPrefix("Clipboard: macOS asks before Sill reads the clipboard")
@@ -178,7 +262,7 @@ check(P.fromDevice(data(#"{"text":""}"#)) == .subscribe, "empty text: subscribes
 check(P.fromDevice(data(#"{"stop":true}"#)) == .stop, "stop")
 check(P.fromDevice(data(#"{"stop":true,"text":"abc"}"#)) == .stop, "stop wins over text")
 check(P.fromDevice(data(#"{"stop":false}"#)) == .subscribe, "stop false is no stop")
-check(P.fromDevice(data(#"{"image":"AQID"}"#)) == .subscribe, "an image alone: subscribes, this generation takes none")
+check(P.fromDevice(data(#"{"image":"AQID"}"#)) == .refuse(.undecodable), "an image that is neither PNG nor JPEG: refused")
 check(P.fromDevice(data(#"{"text":"t","image":"AQID"}"#)) == .set("t"), "text and an image: the text")
 check(P.fromDevice(Wire.encode(Clipboard(text: atCap))) == .set(atCap), "at the cap: set")
 check(P.fromDevice(Wire.encode(Clipboard(text: atCap + "a"))) == .refuse(.tooLong), "over it: refused, nothing subscribed")
@@ -430,7 +514,7 @@ for _ in 0..<5_000 {
             if !hostOn { modelFailures += 1; break }    // a kind 32 to a host that did not say it takes it
             let payload = step.send == .subscribe ? P.subscription : P.stopping
             switch P.fromDevice(payload) {
-            case .subscribe, .set: hostSubscribed = true
+            case .subscribe, .set, .setImage: hostSubscribed = true
             case .stop: hostSubscribed = false
             case .refuse: modelFailures += 1
             }
@@ -475,7 +559,7 @@ for _ in 0..<5_000 {
             let got = P.hostReceives(payload, arrivals: arrivals, now: now)
             arrivals = got.kept
             switch got.ask {
-            case .subscribe, .set: hostSubscribed = true
+            case .subscribe, .set, .setImage: hostSubscribed = true
             case .stop: hostSubscribed = false
             case .refuse(.rate): if step.send == .subscribe { refusedSubscriptions += 1 }
             case .refuse: quickFailures += 1
