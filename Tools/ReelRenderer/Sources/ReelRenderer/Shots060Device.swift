@@ -161,12 +161,11 @@ enum Larger060 {
 }
 
 extension Footage060 {
-    /// `larger(on:)` scaled to `width` px, cached; `width` in the drawing's points (× the output scale in px, the 4K pass).
+    /// `larger(on:)` scaled to `width` px, cached; at an output scale (the 4K pass) with `Stage.scale` × the pixels each way.
     func larger(on: Bool, width: CGFloat) throws -> CGImage {
-        let width = width * Stage.scale
-        let key = "\(on)|\(Int(width.rounded()))"
+        let key = "\(on)|\(Int(width.rounded()))" + (Stage.scaled ? "|x\(Int(Stage.scale))" : "")
         if let hit = derivedLarger[key] { return hit }
-        let img = scale(try larger(on: on), width.rounded() / Larger060.source.width)
+        let img = scale(try larger(on: on), width.rounded() / Larger060.source.width, pixels: Stage.scale)
         derivedLarger[key] = img
         return img
     }

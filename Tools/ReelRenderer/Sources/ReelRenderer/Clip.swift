@@ -252,11 +252,13 @@ final class ClipLibrary {
 
     /// The treated interior of `id` at clip time `t`, scaled by `scale` (Lanczos) and rendered to pixels.
     /// Cached per source sample, treatment and scale, so VFR holds cost nothing.
+    /// `pixels` (the 4K pass, Footage060.scale's): the image of `scale`, with `pixels` × its rounded size each way.
     func image(_ id: ClipID, at t: Double, treatment: Treatment = .none, scale: CGFloat = 1,
-               crop: CGRect = interiorRect, sub: CGRect? = nil) throws -> (image: CGImage, pts: Double) {
+               crop: CGRect = interiorRect, sub: CGRect? = nil, pixels: CGFloat = 1) throws -> (image: CGImage, pts: Double) {
         let s = try source(id).sample(at: t)
         reads[id, default: []].append(t)
         let key = "\(id.rawValue)@\(String(format: "%.4f", s.pts))|\(treatment.key)|\(String(format: "%.4f", scale))|\(crop)|\(String(describing: sub))"
+            + (pixels == 1 ? "" : "|x\(pixels)")
         if let hit = cache[key] { return (hit, s.pts) }
         var img = treat(s.buffer, crop: crop, treatment: treatment)
         var outSize = crop.size
@@ -266,10 +268,12 @@ final class ClipLibrary {
             img = img.cropped(to: r).transformed(by: CGAffineTransform(translationX: -r.minX, y: -r.minY))
             outSize = sub.size
         }
-        if abs(scale - 1) > 1e-4 {
+        if pixels != 1 {
+            img = img.applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: (abs(scale - 1) > 1e-4 ? scale : 1) * pixels, kCIInputAspectRatioKey: 1])
+        } else if abs(scale - 1) > 1e-4 {
             img = img.applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: scale, kCIInputAspectRatioKey: 1])
         }
-        let extent = CGRect(x: 0, y: 0, width: (outSize.width * scale).rounded(), height: (outSize.height * scale).rounded())
+        let extent = CGRect(x: 0, y: 0, width: (outSize.width * scale).rounded() * pixels, height: (outSize.height * scale).rounded() * pixels)
         guard let cg = ci.createCGImage(img, from: extent, format: .BGRA8, colorSpace: srgb) else {
             throw NSError(domain: "Clip", code: 4, userInfo: [NSLocalizedDescriptionKey: "render failed \(id) \(t)"])
         }

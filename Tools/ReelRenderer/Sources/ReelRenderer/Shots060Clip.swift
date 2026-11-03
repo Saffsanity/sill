@@ -318,7 +318,7 @@ func qtToStill(_ r: CGRect) -> CGRect {
     let movieRect = scaledRect(qtToStill(S.movie), k)
     let mt = S.movieTime(t)
     // At an output scale (the 4K pass) the frame at the output resolution: drawn into `movieRect` (points) it is 1:1 there.
-    let film = try e.f.film(mt, scale: movieRect.width / 1920 * Stage.scale)
+    let film = try e.f.film(mt, scale: movieRect.width / 1920, pixels: Stage.scale)
     let qs = Mini060.picture.width / S.qt.width * k
     let chrome = Canvas { ctx, _ in
         ctx.withCGContext { cg in

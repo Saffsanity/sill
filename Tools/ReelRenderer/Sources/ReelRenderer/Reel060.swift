@@ -181,37 +181,50 @@ enum Mini060 {
         return img
     }
 
-    /// `name` Lanczos-scaled to `width` px (its aspect kept), cached. `width` is in the drawing's points: at an output scale
-    /// (the 4K pass) the picture is `width` × scale px, so drawn into its frame it is 1:1 at the output resolution.
+    /// `name` Lanczos-scaled to `width` px (its aspect kept), cached. `width` is in the drawing's points; at an output scale
+    /// (the 4K pass) the picture has `Stage.scale` × the pixels each way (`scale(_:_:pixels:)`), so drawn into its frame its
+    /// content lands where the 1080p's does, at the output resolution.
     func scaled(_ name: String, width: CGFloat) throws -> CGImage {
         let src = try image(name)
-        let w = (width * Stage.scale).rounded()
-        return try remember("\(name)|w\(Int(w))") { scale(src, CGFloat(w) / CGFloat(src.width)) }
+        let w = width.rounded()
+        let key = Stage.scaled ? "\(name)|w\(Int(w))|x\(Int(Stage.scale))" : "\(name)|w\(Int(w))"
+        return try remember(key) { scale(src, CGFloat(w) / CGFloat(src.width), pixels: Stage.scale) }
     }
 
     /// The region `r` (top-left origin, in `name`'s px) Lanczos-scaled by `scale`, cached. `scale` is the drawing's points per
-    /// still px: at an output scale (the 4K pass) the crop is scaled by `scale` × the output scale, its px output px.
+    /// still px; at an output scale (the 4K pass) the crop has `Stage.scale` × the pixels each way (`scale(_:_:pixels:)`).
     func crop(_ name: String, _ r: CGRect, scale: CGFloat) throws -> CGImage {
         let src = try image(name)
-        let scale = scale * Stage.scale
-        return try remember("\(name)|\(r)|\(String(format: "%.5f", scale))") {
+        let key = "\(name)|\(r)|\(String(format: "%.5f", scale))" + (Stage.scaled ? "|x\(Int(Stage.scale))" : "")
+        return try remember(key) {
             guard let c = src.cropping(to: r.integral) else { throw NSError(domain: "Reel060", code: 2) }
-            return self.scale(c, scale)
+            return self.scale(c, scale, pixels: Stage.scale)
         }
     }
 
-    /// A CGImage Lanczos-scaled by `s` (sRGB), as V3Stills does.
-    func scale(_ img: CGImage, _ s: CGFloat) -> CGImage {
-        if abs(s - 1) < 1e-4 { return img }
-        let w = (CGFloat(img.width) * s).rounded(), h = (CGFloat(img.height) * s).rounded()
-        let out = CIImage(cgImage: img).applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: s, kCIInputAspectRatioKey: 1])
-        return ci.createCGImage(out, from: CGRect(x: 0, y: 0, width: w, height: h), format: .BGRA8, colorSpace: srgb)!
+    /// A CGImage Lanczos-scaled by `s` (sRGB), as V3Stills does: `s` × its size, rounded (whole px).
+    /// `pixels` (the 4K pass): the image the scale of 1 makes, with `pixels` × as many px each way: scaled by `s` × `pixels`
+    /// into `pixels` × that rounded size. Its picture fills it as the 1080p's fills its own, the size's rounding included
+    /// (re-rounding at 4K put a still's content up to 0.5 px of the 1080p elsewhere: Core Image's extent is cut at the rounded
+    /// size, from the bottom), so a picture drawn into a frame lands exactly where the 1080p's does.
+    func scale(_ img: CGImage, _ s: CGFloat, pixels k: CGFloat = 1) -> CGImage {
+        if k == 1 {
+            if abs(s - 1) < 1e-4 { return img }
+            let w = (CGFloat(img.width) * s).rounded(), h = (CGFloat(img.height) * s).rounded()
+            let out = CIImage(cgImage: img).applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: s, kCIInputAspectRatioKey: 1])
+            return ci.createCGImage(out, from: CGRect(x: 0, y: 0, width: w, height: h), format: .BGRA8, colorSpace: srgb)!
+        }
+        let w = abs(s - 1) < 1e-4 ? CGFloat(img.width) : (CGFloat(img.width) * s).rounded()
+        let h = abs(s - 1) < 1e-4 ? CGFloat(img.height) : (CGFloat(img.height) * s).rounded()
+        let ks = abs(s - 1) < 1e-4 ? k : s * k
+        let out = CIImage(cgImage: img).applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: ks, kCIInputAspectRatioKey: 1])
+        return ci.createCGImage(out, from: CGRect(x: 0, y: 0, width: w * k, height: h * k), format: .BGRA8, colorSpace: srgb)!
     }
 
     /// v3.1's film at reel time `t` (its latest sample at or before), the whole 1920×1080 frame, scaled by `scale` (in its own
-    /// px: the derived stills crop it there; a shot drawing it on screen asks for its points' scale × `Stage.scale`).
-    func film(_ t: Double, scale: CGFloat = 1) throws -> CGImage {
-        try clips.image(.v31film, at: t, treatment: .none, scale: scale, crop: CGRect(x: 0, y: 0, width: 1920, height: 1080)).image
+    /// px: the derived stills crop it there). `pixels` (the 4K pass): as `scale(_:_:pixels:)`, for a frame drawn on screen.
+    func film(_ t: Double, scale: CGFloat = 1, pixels: CGFloat = 1) throws -> CGImage {
+        try clips.image(.v31film, at: t, treatment: .none, scale: scale, crop: CGRect(x: 0, y: 0, width: 1920, height: 1080), pixels: pixels).image
     }
 
     // MARK: Derived stills (composed once, at full size)
