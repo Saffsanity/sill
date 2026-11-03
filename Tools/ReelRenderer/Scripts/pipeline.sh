@@ -2,8 +2,8 @@
 # The reel's delivery steps, as v3.1 ran them (design/reel/v3/SHOTLIST-v3.md §8.2 and §11): the score, the silent
 # film, the film with its score, the poster frame, the finished MP4s (cover art, `moov` first, no video edit
 # list), the checks and the contact sheet, into $REEL_DIR/v31/out (REEL_DIR defaults to work/ here).
-# REEL=060 makes the 0.6.0 update video instead (Reel060.swift; v4.2, v4 without the tour:
-# design/reel/v4.2/SHOTLIST-0.6.0.md), into $REEL_DIR/060/out, its poster the end card at 74.0 s (v4's 77.2).
+# REEL=060 makes the 0.6 update video instead (Reel060.swift; v5, Noah's notes on v4.2:
+# design/reel/v5/SHOTLIST-0.6.0.md), into $REEL_DIR/060/out, its poster the end card at 82.0 s (v4.2's 74.0).
 #
 # Everything runs at utility priority with the renderer's software H.264 encoder: Sill.app may be streaming, and
 # it shares the Mac's one hardware video encoder. The script refuses the hardware encoder and the test switches,
@@ -14,7 +14,7 @@ HERE=$(cd "$(dirname "$0")/.." && pwd)
 export REEL_DIR=${REEL_DIR:-$HERE/work}
 export REEL=${REEL:-v31}
 if [ "$REEL" = "060" ]; then
-    OUT=$REEL_DIR/060/out; POSTER_T=74.0; POSTER_PNG=poster/still-S22-74.000.png
+    OUT=$REEL_DIR/060/out; POSTER_T=82.0; POSTER_PNG=poster/still-S22-82.000.png
 else
     OUT=$REEL_DIR/v31/out; POSTER_T=75.2; POSTER_PNG=poster/still-S32-75.200.png
 fi

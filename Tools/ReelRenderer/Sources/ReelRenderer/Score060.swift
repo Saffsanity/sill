@@ -8,24 +8,26 @@
 // filter, panned to the iPad), cut dead at Mute and back after it; F♯m9 darkened and low-passed while the Mac is
 // locked; key ticks for the password; Act III's arpeggio and off-beat ticks; typing clicks and a haptic buzz under
 // "Esc"; the lights' bells; the cutaway's E6/9 with the riser, a quiet tick on every line crossing the middle, the
-// pulse doubling from 66.4 and the hard stop at the squash (68.00) into digital silence but for the thud; the final
-// chord from 68.8, the end card's tones, the release and the master's last 150 ms to zero.
+// pulse doubling from 74.4 and the hard stop at the squash (76.00) into digital silence but for the thud; the final
+// chord from 76.8, the end card's tones, the release and the master's last 150 ms to zero (v5's times).
 // v4.2 (v4 without the tour, S17): every cue under 59.2 is v4's; the tour's (59.2–62.4) are gone; every cue from v4's
-// 62.4 is 3.2 s earlier (Cut060), the cues the pictures share (the close, the cutaway's crossings) mapped by Cut060.film.
+// 62.4 is 3.2 s earlier. v5 (Noah's notes on v4.2): every cue follows its picture through Cut060 (S13's 3.2 s later, S14's and
+// S15's 4.8, S16's 6.4, Act IV's 8.0 later than v4.2's), each grown scene's new cues at its own new times, and the chords
+// keep each scene's: the inserted bars hold the chord their scene was under (`chords`).
 import AudioToolbox
 import AVFoundation
 import Foundation
 
 private let SR = 48_000.0
-private let END = 76.8
+private let END = 84.8
 private let TOTAL = Int(END * SR)
-private let CRESC = 62.4                // the cutaway: the pad opens, the riser rises
-private let DOUBLE = 66.4               // the pulse doubles
-private let STOP = 68.0                 // the squash: everything stops dead but the thud
-private let SILENT = 68.2               // digital silence from here (the thud's tail is −50 dB by then)…
-private let RESUME = 68.8               // …until the final chord blooms
-private let FINAL = 68.8
-private let RELEASE = 75.6              // the chord releases with the picture's fade
+private let CRESC = 70.4                // the cutaway: the pad opens, the riser rises
+private let DOUBLE = 74.4               // the pulse doubles
+private let STOP = 76.0                 // the squash: everything stops dead but the thud
+private let SILENT = 76.2               // digital silence from here (the thud's tail is −50 dB by then)…
+private let RESUME = 76.8               // …until the final chord blooms
+private let FINAL = 76.8
+private let RELEASE = 83.6              // the chord releases with the picture's fade
 private let TAIL = 0.15
 
 @inline(__always) private func db(_ d: Double) -> Double { pow(10, d / 20) }
@@ -67,11 +69,14 @@ enum Cues060 {
     /// The pad's chords, on bar lines: the open and S04 on A add9, then F♯m9 (S05), D maj9 (S06), F♯m9 darkened while the
     /// Mac is locked (S07–S08), A add9 again at the unlock; Act III round the cycle; E6/9 under the cutaway. v4.2: v4's
     /// E6/9 of 54.4–60.8 ends at the cut (59.2), and v4's D maj9 of 60.8–65.6 keeps its part after the tour, 59.2–62.4
-    /// (S18, as in v4), so the change from E6/9 to D maj9 falls on the cut's bar line.
+    /// (S18, as in v4). v5: every scene keeps the chord it was under, its inserted bars holding it: F♯m9 from S12's second
+    /// bar through S13 (41.6–52.8, v4.2's 41.6–48.0), D maj9 from S13's last bar to Aa's Off (52.8–59.2: S15's Off lands on
+    /// the change, as in v4.2), E6/9 under S15's rest and S16 (59.2–67.2), D maj9 under S18 (67.2–70.4), E6/9 under the
+    /// cutaway.
     static let chords: [(Double, Double, [Double])] = [
         (0.0, 9.6, aAdd9), (9.6, 14.4, fsm9), (14.4, 19.2, dMaj9), (19.2, 25.6, fsm9), (25.6, 28.8, aAdd9),
-        (28.8, 35.2, e69), (35.2, 41.6, aAdd9), (41.6, 48.0, fsm9), (48.0, 54.4, dMaj9), (54.4, 59.2, e69),
-        (59.2, 62.4, dMaj9), (62.4, STOP, e69),
+        (28.8, 35.2, e69), (35.2, 41.6, aAdd9), (41.6, 52.8, fsm9), (52.8, 59.2, dMaj9), (59.2, 67.2, e69),
+        (67.2, 70.4, dMaj9), (70.4, STOP, e69),
     ]
     static let finalChord: [Double] = [45, 52, 57, 59, 61, 64, 69]
 
@@ -80,7 +85,7 @@ enum Cues060 {
         [Clip060.hold4.0, Clip060.pasteTap, Clip060.hold5.0, Clip060.copyTap, Clip060.pasteChipTap,
          Sound060.settingsTap, Sound060.mute, Sound060.unmute, Pinch060.spread.0, Pinch060.move.0, Pinch060.tap, Pinch060.pinchIn.0,
          Larger060.settingsTap, Larger060.switchTap, Larger060.doneTap, Scroll060.panel, Scroll060.flip, Scroll060.done,
-         Scroll060.drag.0, Hold060.down]
+         Scroll060.drag.0, Cut060.film(Hold060.down, .s16)]
     }
     /// Plucks (sine + its 2nd harmonic, 250 ms) on landings.
     static var plucks: [(Double, Double)] {
@@ -92,13 +97,14 @@ enum Cues060 {
          (Pinch060.tap + 0.02, 81),                             // the tap selects a cell
          (Larger060.larger, 81), (Larger060.fitted, 85),        // Larger Picture, then the Mac fits the window
          (Scroll060.flip + 0.02, 88),                           // Reverse Scrolling on
-         (Compose060.arrive[0], 81), (Compose060.arrive[1], 85), (Compose060.arrive[2], 88), (Compose060.arrive[3], 93),
-         (Tiles060.toList, 88), (Tiles060.toTiles, 81),
-         (Aa060.off, 76),                                       // back to Off: the window goes back
-         (Hold060.row, 81)]
+         (Cut060.film(Compose060.arrive[0], .s13), 81), (Cut060.film(Compose060.arrive[1], .s13), 85),
+         (Cut060.film(Compose060.arrive[2], .s13), 88), (Cut060.film(Compose060.arrive[3], .s13), 93),
+         (Cut060.film(Tiles060.toList, .s14s15), 88), (Cut060.film(Tiles060.toTiles, .s14s15), 81),
+         (Cut060.film(Aa060.off, .s14s15), 76),                 // back to Off: the window goes back
+         (Cut060.film(Hold060.row, .s16), 81)]
     }
     /// The lights open on the held thumbnail: v3's bells, C♯7, A6, E6, 40 ms apart.
-    static var bells: [(Double, Double)] { let t = Hold060.open; return [(t, 97), (t + 0.04, 93), (t + 0.08, 88)] }
+    static var bells: [(Double, Double)] { let t = Cut060.film(Hold060.open, .s16); return [(t, 97), (t + 0.04, 93), (t + 0.08, 88)] }
     /// Soft clicks (2.5 kHz, 8 ms): ⌘C, the typing, ⌘S, Esc.
     static var softClicks: [Double] {
         [Clip060.cmdDown, Clip060.cDown] + Keys060.strokes + [Keys060.cmdS - 0.05, Keys060.cmdS, Keys060.esc]
@@ -106,21 +112,22 @@ enum Cues060 {
     /// Key ticks for the password (soft, 3.2 kHz, 6 ms): eight taps and Return.
     static var keyTicks: [Double] { Lock060.seq.taps + [Lock060.seq.returnAt] }
     /// The detent click when Aa lands on Off.
-    static let detents: [Double] = [Aa060.off]
-    /// Glint shimmers: the open's glint, S18's glint across the iMac, the close's glint round the icon.
-    static let shimmers: [Double] = [Open060.glint + 0.1, 60.0, Cut060.film(Close060.glint)]
+    static let detents: [Double] = [Cut060.film(Aa060.off, .s14s15)]
+    /// Glint shimmers: the open's glint, S18's glint across the iMac (v4's 63.2), the close's glint round the icon.
+    static let shimmers: [Double] = [Open060.glint + 0.1, Cut060.film(63.2, .close), Cut060.film(Close060.glint, .close)]
     /// Tones (sine + 2nd harmonic at −14 dB, 1.1 s): the lockup's words, open and close, and "Free. Open source."
     static let tones: [(Double, Double)] = [(Open060.wordmark, 76), (Open060.version, 81),
-                                            (Cut060.film(Close060.wordmark), 76), (Cut060.film(Close060.version), 81),
-                                            (Cut060.film(Close060.freeOpen), 85)]
+                                            (Cut060.film(Close060.wordmark, .close), 76), (Cut060.film(Close060.version, .close), 81),
+                                            (Cut060.film(Close060.freeOpen, .close), 85)]
     /// Hits (v3's: sine 90 → 58 Hz and a 3 kHz click): the cut to "What’s new." and Act II's first frame.
     static let hits: [(Double, Double)] = [(Open060.cut, -18), (6.4, -14)]
-    /// Statement snaps (the pulse is +3 dB on them).
+    /// Statement snaps (the pulse is +3 dB on them). v5: S12's two halves of its first statement, S13's greetings and
+    /// "Dictation", S14's "Every Mac, a tile" and "or list.", S15's, S16's two, S18's and the cutaway's cut.
     static let statementSnaps: [Double] = [6.45, 8.45, 10.45, 12.05, 14.45, 19.25, 19.65, 24.05, 28.85, 29.65, 32.85, 33.65,
-                                           36.85, 37.65, 39.25, 40.85, 41.25, 44.45, 45.25, 46.05, 48.85, 52.85, 56.05, 56.95,
-                                           59.25, 62.45]
+                                           36.85, 37.65, 39.25, 40.85, 41.25, 47.65, 48.45, 49.25, 50.05, 53.65, 54.45, 57.65,
+                                           62.45, 63.25, 67.25, 70.45]
     /// The cutaway's quiet ticks: each fix line crossing the middle (Fixes060.crossings, on the 7.5/s grid).
-    static var crossings: [Double] { Fixes060.crossings.map(Cut060.film) }
+    static var crossings: [Double] { Fixes060.crossings.map { Cut060.film($0, .close) } }
     /// S06: the Mac's sound plays from 14.4, Mute cuts it dead at 17.6, it is back at 18.4, and S06 ends at 19.2.
     static let macSound = (14.4, 19.2), mute = (Sound060.mute, Sound060.unmute)
     /// "Esc" buzzes (v3's haptic, C19) as the key goes down.
@@ -131,7 +138,7 @@ enum Cues060 {
 
 /// The pad: per note two sines at ±4 cents and a triangle at −12 dB; equal-power crossfades 0.8 s wide on each bar
 /// line; 0.2 Hz tremolo at 8 %. It swells from silence over the open (2.0 s), builds through the cutaway, stops dead at
-/// the squash; the final chord from 68.8, released to silence at the end.
+/// the squash; the final chord from 76.8, released to silence at the end.
 private final class PadVoice060 {
     var n = 0
     var phases = [Double](repeating: 0, count: 256)
@@ -487,7 +494,7 @@ enum Score060 {
             R.append(contentsOf: UnsafeBufferPointer(start: ch[1], count: Int(buffer.frameLength)))
         }
         engine.stop()
-        // 68.2–68.8: digital silence (the thud's tail is under −50 dB at 68.2), black and the sill line alone.
+        // 76.2–76.8: digital silence (the thud's tail is under −50 dB at 76.2), black and the sill line alone.
         for i in Int(SILENT * SR)..<min(Int(RESUME * SR), L.count) { L[i] = 0; R[i] = 0 }
         let n = L.count, fade = Int(TAIL * SR)
         for j in 0..<min(fade, n) {

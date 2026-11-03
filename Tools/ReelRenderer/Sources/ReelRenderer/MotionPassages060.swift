@@ -1,6 +1,7 @@
 // MotionPassages060.swift — the passages `motion` measures (Motion060.swift): each probe's edge, where to look for it
 // (from the shot's own geometry and one measured place), and its path (the functions of time its place is a sum of,
-// from the shot's own code). Times are the film's; the close's builders take v4's (Cut060.v4).
+// from the shot's own code). Times are the film's; a shifted scene's paths read its builder's own time through the time map
+// (`inScene`, Cut060.builder: S13's, S14–S16's and the close's, v4's).
 import Foundation
 
 @MainActor enum MotionPassages060 {
@@ -17,13 +18,16 @@ import Foundation
     }
     static func openHold(_ t: Double) -> Double { 1 + 0.012 * ramp(t, Open060.version + 0.30, Open060.cut) }
     /// S21–S22: the icon's rise as it fades in, and the card's hold (v4's times).
-    static func closeIn(_ t: Double) -> Double { ease(Cut060.v4(t), Close060.iconIn, 0.5, .appleOut) }
-    static func closeHold(_ t: Double) -> Double { 1 + 0.012 * ramp(Cut060.v4(t), Close060.holdFrom, Close060.fade) }
+    static func closeIn(_ t: Double) -> Double { ease(Cut060.builder(t), Close060.iconIn, 0.5, .appleOut) }
+    static func closeHold(_ t: Double) -> Double { 1 + 0.012 * ramp(Cut060.builder(t), Close060.holdFrom, Close060.fade) }
     static let lockupK = Double(Close060.iconSize) / 1024
 
     /// A push: 1 + amount · ramp(t, a, b).
     static func pushScale(_ a: Double, _ b: Double, _ amount: Double) -> (Double) -> Double { { t in 1 + amount * ramp(t, a, b) } }
     static func basis(_ f: @escaping (Double) -> Double) -> (Double) -> [Double] { { [f($0)] } }
+    /// A path in a builder's own time, read at the film's (Cut060.builder).
+    static func inScene(_ f: @escaping (Double) -> Double) -> (Double) -> Double { { f(Cut060.builder($0)) } }
+    static func inScene(_ f: @escaping (Double) -> [Double]) -> (Double) -> [Double] { { f(Cut060.builder($0)) } }
     /// Where a point measured at `x0` at `t0` is at t under a scale `s(t)` about `c`.
     static func scaled(_ x0: Double, at t0: Double, about c: Double, _ s: @escaping (Double) -> Double) -> (Double) -> Double {
         { t in c + (x0 - c) * s(t) / s(t0) }
@@ -127,37 +131,37 @@ import Foundation
                 MotionProbe(name: "screen right edge", axis: .x, across: 250...400, guess: scaled(1815.0, at: 37.0, about: 1030, p11), path: basis(p11), window: 4),
                 MotionProbe(name: "iPad top rim", axis: .y, across: 1500...1700, guess: scaled(129.0, at: 37.0, about: 520, p11), path: basis(p11), window: 7, centroid: true),
             ], note: "the iPad and its keyboard (laid back 58°), a 2 % push"),
-            MotionPassage(name: "S13-push", from: 44.05, to: 48.8, probes: [
-                MotionProbe(name: "iPad top rim", axis: .y, across: 1000...1400, guess: scaled(102.6, at: 44.0, about: Double(s13About.y), s13Scale), path: basis(s13Scale), window: 7, centroid: true),
-                MotionProbe(name: "iPad left rim", axis: .x, across: 400...700, guess: scaled(862.6, at: 44.0, about: Double(s13About.x), s13Scale), path: basis(s13Scale), window: 7, centroid: true),
+            MotionPassage(name: "S13-push", from: Cut060.film(44.05, .s13), to: Cut060.film(48.8, .s13), probes: [
+                MotionProbe(name: "iPad top rim", axis: .y, across: 1000...1400, guess: inScene(scaled(102.6, at: 44.0, about: Double(s13About.y), s13Scale)), path: inScene(basis(s13Scale)), window: 7, centroid: true),
+                MotionProbe(name: "iPad left rim", axis: .x, across: 400...700, guess: inScene(scaled(862.6, at: 44.0, about: Double(s13About.x), s13Scale)), path: inScene(basis(s13Scale)), window: 7, centroid: true),
             ], note: "the frontal iPad, a 7 % push (inOut)"),
-            MotionPassage(name: "S14-drift", from: 48.85, to: 50.35, probes: [
+            MotionPassage(name: "S14-drift", from: Cut060.film(48.85, .s14s15), to: Cut060.film(50.35, .s14s15), probes: [
                 MotionProbe(name: "tile's edge", axis: .x, across: 290...310,
-                            guess: { t in 1400 + (1404.5 + 6 * 0.2 - 1400 - 6 * (t - 48.8)) * (1 + 0.02 * ramp(t, 48.8, 52.8)) },
-                            path: { t in let s = 1 + 0.02 * ramp(t, 48.8, 52.8); return [s, s * (t - 48.8)] }, window: 6),
+                            guess: inScene { t in 1400 + (1404.5 + 6 * 0.2 - 1400 - 6 * (t - 48.8)) * (1 + 0.02 * ramp(t, 48.8, 52.8)) },
+                            path: inScene { t in let s = 1 + 0.02 * ramp(t, 48.8, 52.8); return [s, s * (t - 48.8)] }, window: 6),
             ], note: "the tiles drifting 6 px a second and pushing in 2 %"),
-            MotionPassage(name: "S16-push", from: 57.6, to: 59.2, probes: [
-                MotionProbe(name: "thumbnail's edge", axis: .x, across: 380...390, guess: scaled(670.6, at: 57.5, about: 525.7, p16), path: basis(p16), window: 3),
+            MotionPassage(name: "S16-push", from: Cut060.film(57.6, .s16), to: Cut060.film(59.2, .s16), probes: [
+                MotionProbe(name: "thumbnail's edge", axis: .x, across: 380...390, guess: inScene(scaled(670.6, at: 57.5, about: 525.7, p16)), path: inScene(basis(p16)), window: 3),
             ], note: "the bar's thumbnails, a 2 % push"),
-            MotionPassage(name: "S16-row", from: 58.05, to: 59.2, probes: [
+            MotionPassage(name: "S16-row", from: Cut060.film(58.05, .s16), to: Cut060.film(59.2, .s16), probes: [
                 MotionProbe(name: "row's bottom edge", axis: .y, across: 300...700,
-                            guess: { t in 873 + 40 * (1 - ease(t, Hold060.row, 0.35, .appleOut)) },
-                            path: { t in [ease(t, Hold060.row, 0.35, .appleOut)] }, window: 5),
+                            guess: inScene { t in 873 + 40 * (1 - ease(t, Hold060.row, 0.35, .appleOut)) },
+                            path: inScene { t in [ease(t, Hold060.row, 0.35, .appleOut)] }, window: 5),
             ], note: "the Settings row sliding in 40 px"),
-            MotionPassage(name: "S15-window", from: 54.4, to: 56.0, probes: [
-                MotionProbe(name: "window left edge", axis: .x, across: 560...650, guess: { 294.66 + 49.88 * w15($0) }, path: basis(w15), window: 6),
-                MotionProbe(name: "window top edge", axis: .y, across: 420...540, guess: { 490.36 + 37.84 * w15($0) }, path: basis(w15), window: 6, tolerance: 0.25),
+            MotionPassage(name: "S15-window", from: Cut060.film(54.4, .s14s15), to: Cut060.film(56.0, .s14s15), probes: [
+                MotionProbe(name: "window left edge", axis: .x, across: 560...650, guess: inScene { 294.66 + 49.88 * w15($0) }, path: inScene(basis(w15)), window: 6),
+                MotionProbe(name: "window top edge", axis: .y, across: 420...540, guess: inScene { 490.36 + 37.84 * w15($0) }, path: inScene(basis(w15)), window: 6, tolerance: 0.25),
             ], note: "the Mac's window shrinking back to its own size; its top edge is two shapes' (the strip over the body), whose anti-aliasing adds up differently at each phase (0.25 px), its left edge one's"),
-            MotionPassage(name: "S20-bug", from: 67.2, to: 67.9, probes: [
+            MotionPassage(name: "S20-bug", from: Cut060.film(70.4, .close), to: Cut060.film(71.1, .close), probes: [
                 MotionProbe(name: "bug's dot", axis: .y, across: 955...965,
-                            guess: { Double(Fixes060.screenY(Fixes060.bugBase, Cut060.v4($0))) - 54 },
-                            path: { [Fixes060.scroll(Cut060.v4($0))] }, window: 5, centroid: true),
+                            guess: { Double(Fixes060.screenY(Fixes060.bugBase, Cut060.builder($0))) - 54 },
+                            path: { [Fixes060.scroll(Cut060.builder($0))] }, window: 5, centroid: true),
             ], note: "the bug riding in with the column"),
-            MotionPassage(name: "S21-icon", from: 68.85, to: 69.5, probes: [
+            MotionPassage(name: "S21-icon", from: Cut060.film(72.05, .close), to: Cut060.film(72.7, .close), probes: [
                 MotionProbe(name: "foot bottom edge", axis: .y, across: 925...995, guess: { 340 + 12 * (1 - closeIn($0)) + 256 * lockupK },
                             path: basis(closeIn), window: 6),
             ], note: "the icon rising 12 px as it fades in"),
-            MotionPassage(name: "S22-hold", from: 70.2, to: 74.4, probes: [
+            MotionPassage(name: "S22-hold", from: Cut060.film(73.4, .close), to: Cut060.film(77.6, .close), probes: [
                 MotionProbe(name: "foot left edge", axis: .x, across: 405...412, guess: { 960 - 40.94 * closeHold($0) }, path: basis(closeHold), window: 6),
                 MotionProbe(name: "foot bottom edge", axis: .y, across: 925...995, guess: { 540 + (340 + 256 * lockupK - 540) * closeHold($0) }, path: basis(closeHold), window: 6),
             ], note: "the end card's +1.2 % hold"),

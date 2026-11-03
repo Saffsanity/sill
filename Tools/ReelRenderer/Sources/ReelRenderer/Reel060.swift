@@ -1,8 +1,9 @@
 // Reel060.swift — the 0.6.0 update video (REEL=060): its inputs, the stills it derives from them, its copy, and its
 // timeline. The storyboard is ~/Downloads/sill-handoff/release-060/reel-0.6.0-storyboard.md (approved 2026-11-02);
-// the shot list with the as-built numbers is design/reel/v4/SHOTLIST-0.6.0.md. v4.2 (design/reel/v4.2/) is v4 without the
-// tour (S17, 59.2–62.4): 76.8 s, 48 bars at 150 BPM, 22 shots; S18–S23 play v4's frames 3.2 s earlier (`Cut060`). Two
-// of v4.1's words come with it (Noah): "0.6" for the version, and S05's footnote (Copy060.version, pasteFoot).
+// the shot list with the as-built numbers is design/reel/v5/SHOTLIST-0.6.0.md. v4.2 (design/reel/v4.2/) is v4 without the
+// tour (S17, 59.2–62.4): 76.8 s, 48 bars at 150 BPM, 22 shots; S18–S23 play v4's frames 3.2 s earlier. Two of v4.1's words
+// come with it (Noah): "0.6" for the version, and S05's footnote (Copy060.version, pasteFoot). v5 is v4.2 with Noah's notes
+// on it (2026-11-03): 84.8 s, 53 bars, 22 shots, S12, S13, S15 and S16 grown by whole bars (`Cut060`).
 //
 // Inputs, under `reelDir` (REEL_DIR; the assemble step's `.build/reel060/input`):
 // - `stills/`: harness screenshots of Sill 0.6.0 (origin/main c4a331f) on private simulators: the iPad mini's
@@ -83,6 +84,9 @@ enum Copy060 {
     static let wordmark = "Sill"
     static let freeOpen = "Free. Open source."
     static let appStore = "For iPhone and iPad on the App Store."
+    // NOAH, 2026-11-03 03:15, for v5's end card (S22): add a third line, "getsill.app/contribute", under the
+    // "For iPhone and iPad on the App Store." and "For Mac at getsill.app/download" lines, in their type (T5),
+    // the same spacing, snapping after them (the legal line moves down to make room). Keep it in every build from now on.
     static let download = "For Mac at getsill.app/download"
     static let legal = ["Mac, iPad and iPhone are trademarks of Apple Inc., registered in the U.S. and other countries. App Store is a service mark of Apple Inc.",
                         "Intel is a trademark of Intel Corporation. Other names and apps shown belong to their owners."]
@@ -455,33 +459,47 @@ struct CanvasDot: View {
     }
 }
 
-// MARK: - The timeline (76.8 s, 48 bars; acts on bar lines at 0, 6.4, 28.8 and 59.2)
+// MARK: - The timeline (v5: 84.8 s, 53 bars; acts on bar lines at 0, 6.4, 28.8 and 67.2)
 
-/// v4.2: v4 without its tour (S17, 59.2–62.4, two bars). Everything from v4's 62.4 plays 3.2 s earlier: S18–S23's
-/// builders are v4's own, handed v4's time (as v3's Act IV is handed v2's: `ActIV.shift`), and the finish (the grain and
-/// the dither, seeded by the frame) v4's frame index, so every frame from 59.2 on is v4's frame 192 later.
+/// v5 (Noah's notes on v4.2, 2026-11-03): four scenes grown by whole bars where his new lines need room, and every scene after
+/// each shifted by as much: S12 by two bars (40.8–47.2), S13 by one (47.2–53.6), S15 by one (57.6–62.4), S16 by one
+/// (62.4–67.2). Every builder keeps its own time, as v4.2 handed them theirs (v4.2's for S01–S16, v4's for S18–S23, where v4.2
+/// was v4 without its tour): a grown builder runs on past its old end, a shifted one is handed its old time, and the finish
+/// (the grain and the dither, seeded by the frame) its old frame index, so every frame of a scene that did not change is the
+/// frame it was. S12 (reshot) takes the film's time.
 enum Cut060 {
-    /// Where the tour was in v4 (59.2–62.4), and how much later in v4 everything after it is.
-    static let at = 59.2, length = 3.2
-    static let frames = 192
-    /// The film's time → v4's time. On a frame (as the timeline hands it a time, frame ÷ 60), exactly v4's time of the
-    /// frame 192 later, (f + 192) ÷ 60: t + 3.2 can differ from it in its last bit, and a builder's `t >= …` with it.
-    static func v4(_ t: Double) -> Double {
-        guard t >= at else { return t }
+    /// Where a stretch of the film comes from: its builders are handed the film's time less `shift` (and the finish the frame
+    /// less `shift` × 60).
+    enum Scene { case early, s13, s14s15, s16, close }
+    struct Segment { let from: Double, to: Double, shift: Double, scene: Scene; var frames: Int { Int((shift * 60).rounded()) } }
+    static let segments: [Segment] = [
+        Segment(from: 0, to: 47.2, shift: 0, scene: .early),           // S01–S12 (S12 grown, 40.8–47.2, on the film's time)
+        Segment(from: 47.2, to: 53.6, shift: 3.2, scene: .s13),        // S13: its builder's 44.0–50.4 (v4.2's 44.0–48.8 and a bar)
+        Segment(from: 53.6, to: 62.4, shift: 4.8, scene: .s14s15),     // S14, 48.8–52.8; S15, 52.8–57.6 (v4.2's 52.8–56.0 and a bar)
+        Segment(from: 62.4, to: 67.2, shift: 6.4, scene: .s16),        // S16: 56.0–60.8 (v4.2's 56.0–59.2 and a bar)
+        Segment(from: 67.2, to: 84.8, shift: 4.8, scene: .close),      // S18–S23: v4's 62.4–80.0
+    ]
+    static func segment(_ t: Double) -> Segment { segments.last { t >= $0.from - 1e-9 } ?? segments[0] }
+    /// The film's time → its builder's. On a frame (as the timeline hands it a time, frame ÷ 60), exactly the builder's time of
+    /// the old frame, (f − shift × 60) ÷ 60: t − shift can differ from it in its last bit, and a builder's `t >= …` with it.
+    static func builder(_ t: Double) -> Double {
+        let s = segment(t)
+        guard s.shift != 0 else { return t }
         let f = (t * 60).rounded()
-        return abs(t * 60 - f) < 1e-6 ? (f + Double(frames)) / 60 : t + length
+        return abs(t * 60 - f) < 1e-6 ? (f - Double(s.frames)) / 60 : t - s.shift
     }
-    /// v4's time → the film's (v4's tour, 59.2–62.4, has none).
-    static func film(_ t: Double) -> Double {
-        precondition(t < at || t >= at + length, "v4's \(t) s was the tour's, which v4.2 cuts")
-        return t >= at ? t - length : t
-    }
-    /// The film's frame → v4's frame (what the finish is seeded with).
-    static func v4Frame(_ f: Int) -> Int { f >= Int((at * 60).rounded()) ? f + frames : f }
+    /// A builder's time in `scene` → the film's (the score's cues, the motion check's paths, `holds`).
+    static func film(_ t: Double, _ scene: Scene) -> Double { t + (segments.first { $0.scene == scene }?.shift ?? 0) }
+    /// The film's frame → the frame the finish is seeded with: the old one.
+    static func finish(_ f: Int) -> Int { f - segment(Double(f) / 60).frames }
 }
 
 @MainActor
 enum Timeline060 {
+    /// A builder handed its own time (Cut060).
+    private static func held(_ b: @escaping @MainActor (Double, Env) throws -> FrameLayers) -> @MainActor (Double, Env) throws -> FrameLayers {
+        { t, e in try b(Cut060.builder(t), e) }
+    }
     static let shots: [Shot] = [
         // Act I · the open (0–6.4, 4 bars)
         Shot(id: "S01", start: 0.0, end: 2.4, source: "drawn (v3's close: glint, sill line, the lit icon)", clip: nil, build: s060_01),
@@ -493,29 +511,29 @@ enum Timeline060 {
         Shot(id: "S06", start: 14.4, end: 19.2, source: "stand-in for take B: still B1 + v3.1 1.6–6.4, B4, B5; drawn arcs", clip: nil, build: s060_06),
         Shot(id: "S07", start: 19.2, end: 24.0, source: "stills L0w, L1x; drawn lock screen", clip: nil, build: s060_07),
         Shot(id: "S08", start: 24.0, end: 28.8, source: "drawn lock screen and keyboard; stills L1x, L0w", clip: nil, build: s060_08),
-        // Act III · on iPhone and iPad (28.8–59.2, 19 bars; v4's tour, S17, cut)
+        // Act III · on iPhone and iPad (28.8–67.2, 24 bars; v4's tour, S17, cut in v4.2)
         Shot(id: "S09", start: 28.8, end: 32.8, source: "stand-in for take C: still C0, picture sheet zoomed", clip: nil, build: s060_09),
         Shot(id: "S10", start: 32.8, end: 36.8, source: "stand-in for take D: stills D1, D4, D5, D2, D3", clip: nil, build: s060_10),
         Shot(id: "S11", start: 36.8, end: 40.8, source: "stand-in for take E part 1: stills E0, E1, E2; drawn keyboard", clip: nil, build: s060_11),
-        Shot(id: "S12", start: 40.8, end: 44.0, source: "stand-in for take E part 2: still E3, picture longdoc-page; stills E6, E7", clip: nil, build: s060_12),
-        Shot(id: "S13", start: 44.0, end: 48.8, source: "stand-in for take F: stills F0–F4", clip: nil, build: s060_13),
-        Shot(id: "S14", start: 48.8, end: 52.8, source: "stills N1, N2", clip: nil, build: s060_14),
-        Shot(id: "S15", start: 52.8, end: 56.0, source: "stills H1, H2; drawn Mac (v3)", clip: nil, build: s060_15),
-        Shot(id: "S16", start: 56.0, end: 59.2, source: "stills L0w, J1, J2; drawn hold ring", clip: nil, build: s060_16),
-        // Act IV · the Mac, the fixes, the close (59.2–76.8, 11 bars): v4's 62.4–80.0, each builder handed v4's time.
-        Shot(id: "S18", start: 59.2, end: 62.4, source: "drawn (the icon's iMac)", clip: nil, build: { t, e in try s060_18(Cut060.v4(t), e) }),
-        Shot(id: "S19", start: 62.4, end: 67.2, source: "type (the fixes' column)", clip: nil, build: { t, e in try s060_19(Cut060.v4(t), e) }),
-        Shot(id: "S20", start: 67.2, end: 68.8, source: "drawn (the bug) + type", clip: nil, build: { t, e in try s060_19(Cut060.v4(t), e) }),
-        Shot(id: "S21", start: 68.8, end: 71.2, source: "drawn + type", clip: nil, build: { t, e in try s060_21(Cut060.v4(t), e) }),
-        Shot(id: "S22", start: 71.2, end: 74.4, source: "type", clip: nil, build: { t, e in try s060_21(Cut060.v4(t), e) }),
-        Shot(id: "S23", start: 74.4, end: 76.8, source: "—", clip: nil, build: { t, e in try s060_21(Cut060.v4(t), e) }),
+        Shot(id: "S12", start: 40.8, end: 47.2, source: "stand-in for take E part 2: still E3, picture longdoc-page; stills E6, E7", clip: nil, build: s060_12),
+        Shot(id: "S13", start: 47.2, end: 53.6, source: "stand-in for take F: stills F0–F4", clip: nil, build: held(s060_13)),
+        Shot(id: "S14", start: 53.6, end: 57.6, source: "stills N1, N2", clip: nil, build: held(s060_14)),
+        Shot(id: "S15", start: 57.6, end: 62.4, source: "stills H1, H2; drawn Mac (v3)", clip: nil, build: held(s060_15)),
+        Shot(id: "S16", start: 62.4, end: 67.2, source: "stills L0w, J1, J2; drawn hold ring", clip: nil, build: held(s060_16)),
+        // Act IV · the Mac, the fixes, the close (67.2–84.8, 11 bars): v4's 62.4–80.0, each builder handed v4's time.
+        Shot(id: "S18", start: 67.2, end: 70.4, source: "drawn (the icon's iMac)", clip: nil, build: held(s060_18)),
+        Shot(id: "S19", start: 70.4, end: 75.2, source: "type (the fixes' column)", clip: nil, build: held(s060_19)),
+        Shot(id: "S20", start: 75.2, end: 76.8, source: "drawn (the bug) + type", clip: nil, build: held(s060_19)),
+        Shot(id: "S21", start: 76.8, end: 79.2, source: "drawn + type", clip: nil, build: held(s060_21)),
+        Shot(id: "S22", start: 79.2, end: 82.4, source: "type", clip: nil, build: held(s060_21)),
+        Shot(id: "S23", start: 82.4, end: 84.8, source: "—", clip: nil, build: held(s060_21)),
     ]
 }
 
 /// The contact sheet's tiles: one frame per shot that shows its point.
 let sheetTimes060: [(String, Double)] = [
     ("S01", 1.9), ("S02", 4.2), ("S03", 5.6), ("S04", 8.9), ("S05", 13.3), ("S06", 17.9),
-    ("S07", 22.4), ("S08", 25.05), ("S09", 30.2), ("S10", 35.9), ("S11", 39.35), ("S12", 42.95),
-    ("S13", 47.9), ("S14", 50.0), ("S15", 54.9), ("S16", 58.6), ("S18", 60.5),
-    ("S19", 64.8), ("S20", 68.05), ("S21", 70.5), ("S22", 74.0), ("S23", 76.0),
+    ("S07", 22.4), ("S08", 25.05), ("S09", 30.2), ("S10", 35.9), ("S11", 39.35), ("S12", 43.4),
+    ("S13", 51.1), ("S14", 55.5), ("S15", 60.6), ("S16", 65.0), ("S18", 68.5),
+    ("S19", 72.8), ("S20", 76.05), ("S21", 78.5), ("S22", 82.0), ("S23", 84.0),
 ]

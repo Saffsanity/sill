@@ -45,9 +45,10 @@ func layers(frame i: Int, env: Env) throws -> FrameLayers {
 }
 
 /// The frame index the finish (the grain and the dither, seeded by frame: Render.swift) is drawn with: the film's own,
-/// but in the 0.6.0 cut (v4.2) v4's, so every frame after the cut is v4's frame 192 later, grain and all (Cut060).
+/// but in the 0.6 cut (v5) each scene's old one, so every frame of a scene that did not change is the frame it was, grain and
+/// all (Cut060).
 @MainActor
-func finishFrame(_ i: Int) -> Int { ReelCut.current == .r060 ? Cut060.v4Frame(i) : i }
+func finishFrame(_ i: Int) -> Int { ReelCut.current == .r060 ? Cut060.finish(i) : i }
 
 @MainActor
 func render(args: [String]) throws {
