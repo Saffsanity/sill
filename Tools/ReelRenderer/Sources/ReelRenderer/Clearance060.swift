@@ -60,6 +60,8 @@ final class ClearanceChecker {
         let W = Stage.width, H = Stage.height
         for (name, b) in boxes.sorted(by: { $0.key < $1.key }) {
             let y0 = max(0, Int(b.minY.rounded(.down)) - band), y1 = min(H - 1, Int(b.maxY.rounded(.up)) + band)
+            // A line wholly off the frame (v5's cutaway title rising from under it) has nothing beside it.
+            guard y0 <= y1 else { continue }
             let x1 = Int(b.maxX.rounded(.up)), x0 = Int(b.minX.rounded(.down))
             var right: Double?, left: Double?
             if x1 + 1 < W {
