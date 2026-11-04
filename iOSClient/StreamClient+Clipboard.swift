@@ -231,7 +231,7 @@ extension StreamClient {
         clipboardChipOnScreen = onScreen
         if onScreen, clipboardChip, !clipboardChipAnnounced {
             clipboardChipAnnounced = true
-            let mac = macName.isEmpty ? "the Mac" : macName
+            let mac = macName.isEmpty ? String(localized: "the Mac") : macName
             UIAccessibility.post(notification: .announcement, argument: ClipboardPolicy.Copy.chipAnnouncement(mac: mac))
             #if DEBUG
             print("clipboard: the chip shows; VoiceOver told")
@@ -292,7 +292,7 @@ extension StreamClient {
     /// What the system's Paste control read on the person's tap (the chip's, or the Settings group's):
     /// sent to the Mac, with its receipt to wait for, or "too long".
     func sendClipboard(_ strings: [String]) {
-        let mac = macName.isEmpty ? "the Mac" : macName
+        let mac = macName.isEmpty ? String(localized: "the Mac") : macName
         switch ClipboardPolicy.deviceSends(strings, connected: connected, hostClipboard: hostClipboard, switchOn: Self.clipboardOn) {
         case .send(let payload):
             send(.clipboard, payload: payload)
@@ -382,7 +382,7 @@ extension StreamClient {
 
     /// A receipt's note and, on an iPhone, the success haptic.
     private func receiptNoted(pasted: Bool) {
-        let note = ClipboardPolicy.receiptNote(pasted: pasted, mac: macName.isEmpty ? "the Mac" : macName)
+        let note = ClipboardPolicy.receiptNote(pasted: pasted, mac: macName.isEmpty ? String(localized: "the Mac") : macName)
         showClipboardNote(note.text, spoken: note.spoken, warning: false)
         if UIDevice.current.userInterfaceIdiom == .phone { UINotificationFeedbackGenerator().notificationOccurred(.success) }
     }
@@ -394,7 +394,7 @@ extension StreamClient {
         guard var receipt = clipboardReceipt, !receipt.late else { return }
         receipt.late = true
         clipboardReceipt = receipt
-        let mac = macName.isEmpty ? "the Mac" : macName
+        let mac = macName.isEmpty ? String(localized: "the Mac") : macName
         showClipboardNote(ClipboardPolicy.Copy.notSent(mac: mac), spoken: ClipboardPolicy.Copy.notSent(mac: mac), warning: true)
         if UIDevice.current.userInterfaceIdiom == .phone { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
         #if DEBUG

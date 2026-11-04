@@ -217,12 +217,12 @@ M = [
     ("LockedMac.shade: a keyframe ends the locked cover", S, "        was == .unlocking && frameIsKeyframe ? nil : was", "        frameIsKeyframe ? nil : was"),
     ("LockedMac.shade: any frame ends Unlocking", S, "        was == .unlocking && frameIsKeyframe ? nil : was", "        was == .unlocking ? nil : was"),
     ("LockedMac: unlocking's timeout", S, "    public static let unlockingTimeout: Double = 4", "    public static let unlockingTimeout: Double = 40"),
-    ("LockedMac: the password offered unpaired", S, '            return paired == true ? "To unlock it from here',
-     '            return paired != false ? "To unlock it from here'),
-    ("LockedMac: the other user's words", S, '            return "Log in to your account to reactivate screen sharing with Sill."',
-     '            return "Log in on the Mac."'),
-    ("LockedMac: the line's words", S, "is locked. Unlock it to see its windows.\"", "is locked.\""),
-    ("LockedMac: no name for an empty one", S, '    private static func name(_ mac: String) -> String { mac.isEmpty ? "The Mac" : mac }',
+    ("LockedMac: the password offered unpaired", S, '            return paired == true ? String(localized: "To unlock it from here',
+     '            return paired != false ? String(localized: "To unlock it from here'),
+    ("LockedMac: the other user's words", S, '            return String(localized: "Log in to your account to reactivate screen sharing with Sill.")',
+     '            return String(localized: "Log in on the Mac.")'),
+    ("LockedMac: the line's words", S, "is locked. Unlock it to see its windows.\")", "is locked.\")"),
+    ("LockedMac: no name for an empty one", S, '    private static func name(_ mac: String) -> String { mac.isEmpty ? String(localized: "The Mac") : mac }',
      "    private static func name(_ mac: String) -> String { mac }"),
 ]
 sys.exit(0 if module.mutate("lock-policy", M, sys.argv[1]) else 1)

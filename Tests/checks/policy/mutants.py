@@ -196,9 +196,9 @@ MUTANTS = {
     "N19 a later bound (30 dials)": ("    static let reconnectDials = 12", "    static let reconnectDials = 30"),
     "N20 the quiet line after the first dial": ("    static let reconnectQuietAfter = 3", "    static let reconnectQuietAfter = 1"),
     "N21 the quiet line never": ("        if failed >= reconnectQuietAfter {", "        if failed >= reconnectQuietAfter && false {"),
-    "N22 the stopped line never": ("        if failed >= reconnectDials { return \"Stopped trying to reach \\(mac). Tap it to try again.\" }\n", ""),
-    "N23 the Direct row's line lost": ("        return direct ? \"Reconnecting to \\(mac) directly\\u{2026}\" : \"Reconnecting to \\(mac)\\u{2026}\"",
-                                       "        return \"Reconnecting to \\(mac)\\u{2026}\""),
+    "N22 the stopped line never": ("        if failed >= reconnectDials { return String(localized: \"Stopped trying to reach \\(mac). Tap it to try again.\") }\n", ""),
+    "N23 the Direct row's line lost": ("        return direct ? String(localized: \"Reconnecting to \\(mac) directly\\u{2026}\") : String(localized: \"Reconnecting to \\(mac)\\u{2026}\")",
+                                       "        return String(localized: \"Reconnecting to \\(mac)\\u{2026}\")"),
     "N24 a stopped Desktop left stopped (the rule before)": ("        case .nothing, .desktop:\n            if spaced { return .ask }",
                                                              "        case .desktop: return .leave\n        case .nothing:\n            if spaced { return .ask }"),
     "N25 a failed pick retried": ("            return listed ? .leave : .askAfterWait", "            return listed ? .ask : .askAfterWait"),
@@ -253,8 +253,8 @@ MUTANTS = {
     "S4 linkRows: the asked key goes to every row": ("        if let askedKey, askedKey == linkKey { return nil }\n", ""),
     "S4 linkRows: plain doors dialed": ("        return rows.filter { $0.door != .plain && !(askedKey != nil && $0.id == askedRow) }.map(\\.id)", "        return rows.filter { !(askedKey != nil && $0.id == askedRow) }.map(\\.id)"),
     "S4 linkRows: the asked row not left out": ("        return rows.filter { $0.door != .plain && !(askedKey != nil && $0.id == askedRow) }.map(\\.id)", "        return rows.filter { $0.door != .plain }.map(\\.id)"),
-    "S4 copy: over the cable dropped": ("            cable ? \"Pairing with \\(mac) over the cable\\u{2026}\" : \"Pairing with \\(mac)\\u{2026}\"", "            \"Pairing with \\(mac)\\u{2026}\""),
-    "S4 copy: removed says the old remote words": ("        static func removed(mac: String, device: String) -> String { \"\\(mac) removed this \\(device). Tap it to pair again.\" }", "        static func removed(mac: String, device: String) -> String { \"\\(mac) removed this \\(device). To use it again, pair it again.\" }"),
+    "S4 copy: over the cable dropped": ("            cable ? String(localized: \"Pairing with \\(mac) over the cable\\u{2026}\") : String(localized: \"Pairing with \\(mac)\\u{2026}\")", "            String(localized: \"Pairing with \\(mac)\\u{2026}\")"),
+    "S4 copy: removed says the old remote words": ("        static func removed(mac: String, device: String) -> String { String(localized: \"\\(mac) removed this \\(device). Tap it to pair again.\") }", "        static func removed(mac: String, device: String) -> String { String(localized: \"\\(mac) removed this \\(device). To use it again, pair it again.\") }"),
     "S4 copy: openOnMac names no menu": ("\"\\(mac) didn\\u{2019}t show a code. On the Mac, choose Pair iPhone or iPad\\u{2026} in the Sill menu, then tap \\(mac) again.\"", "\"\\(mac) didn\\u{2019}t show a code.\""),
     # The reconnect of an unsaved Mac on an open door pinned to the key its lost session saw (home.swift: the
     # security scan's finding 3, 2026-10-29), with the model of the glue.

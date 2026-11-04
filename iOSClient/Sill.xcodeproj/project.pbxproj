@@ -13,6 +13,8 @@
 		A1000001000000000000A004 /* HEVCDisplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F004 /* HEVCDisplayView.swift */; };
 		A1000001000000000000A005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F005 /* Assets.xcassets */; };
 		A1000001000000000000A101 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F101 /* PrivacyInfo.xcprivacy */; };
+		A1000001000000000000A1A1 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F1A1 /* Localizable.xcstrings */; };
+		A1000001000000000000A1A2 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F1A2 /* InfoPlist.xcstrings */; };
 		A1000001000000000000A007 /* StreamScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F008 /* StreamScreen.swift */; };
 		A1000001000000000000A008 /* InputOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F009 /* InputOverlay.swift */; };
 		A1000001000000000000A009 /* PortraitStreamScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F00A /* PortraitStreamScreen.swift */; };
@@ -73,6 +75,8 @@
 		A1000001000000000000F004 /* HEVCDisplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HEVCDisplayView.swift; sourceTree = "<group>"; };
 		A1000001000000000000F005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000001000000000000F101 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A1000001000000000000F1A1 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		A1000001000000000000F1A2 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; };
 		A1000001000000000000F006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A1000001000000000000F00D /* Info-Debug.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info-Debug.plist"; sourceTree = "<group>"; };
 		A1000001000000000000F007 /* Sill.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sill.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -199,6 +203,8 @@
 				A1000001000000000000F044 /* MacMenuButton.swift */,
 				A1000001000000000000F005 /* Assets.xcassets */,
 				A1000001000000000000F101 /* PrivacyInfo.xcprivacy */,
+				A1000001000000000000F1A1 /* Localizable.xcstrings */,
+				A1000001000000000000F1A2 /* InfoPlist.xcstrings */,
 				A1000001000000000000F006 /* Info.plist */,
 				A1000001000000000000F00D /* Info-Debug.plist */,
 				A1000001000000000000C002 /* Frameworks */,
@@ -266,6 +272,7 @@
 			knownRegions = (
 				en,
 				Base,
+				"zh-Hans",
 			);
 			mainGroup = A1000001000000000000C001;
 			packageReferences = (
@@ -287,6 +294,8 @@
 			files = (
 				A1000001000000000000A005 /* Assets.xcassets in Resources */,
 				A1000001000000000000A101 /* PrivacyInfo.xcprivacy in Resources */,
+				A1000001000000000000A1A1 /* Localizable.xcstrings in Resources */,
+				A1000001000000000000A1A2 /* InfoPlist.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

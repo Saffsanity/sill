@@ -78,7 +78,7 @@ struct HostSettingsPanel: View {
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
 
-    private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
+    private var mac: String { client.macName.isEmpty ? String(localized: "the Mac") : client.macName }
     private static let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
     /// DEBUG `-SillSettingsEnd 1`: the rows start scrolled to their end, so a photo of a short
     /// screen shows the last groups (Direct Wireless, Away from home, This iPad, Take the Tour).
@@ -163,7 +163,7 @@ struct HostSettingsPanel: View {
         // is in the footer or the note. The haptic is a no-op on an iPad.
         .sensoryFeedback(.warning, trigger: client.settingsRefusals)
         .onChange(of: client.settingsRefusals) { _, _ in
-            AccessibilityNotification.Announcement("\(mac) kept its setting").post()
+            AccessibilityNotification.Announcement(String(localized: "\(mac) kept its setting")).post()
         }
         .onChange(of: client.settingsProblem) { _, problem in
             if let problem { AccessibilityNotification.Announcement(problem).post() }
@@ -278,7 +278,7 @@ struct HostSettingsPanel: View {
         .buttonStyle(.plain)
         .foregroundStyle(Palette.accent)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Palette.control))
-        .accessibilityLabel("Disconnect from \(mac)")
+        .accessibilityLabel(String(localized: "Disconnect from \(mac)"))
         .padding(.top, 10)
     }
 
@@ -290,7 +290,7 @@ struct HostSettingsPanel: View {
                 if state.softwareEncoder {
                     // Neither a restart nor a return is promised: hosts before 2026-09-25 keep the
                     // software encoder until they relaunch, newer ones go back by themselves.
-                    Callout(text: "\(mac)’s hardware encoder is busy or not responding, so for now streams run at up to 60 fps at Standard.")
+                    Callout(text: String(localized: "\(mac)’s hardware encoder is busy or not responding, so for now streams run at up to 60 fps at Standard."))
                 }
                 if let problem = client.settingsProblem {
                     Callout(text: problem)
@@ -303,7 +303,7 @@ struct HostSettingsPanel: View {
                         Callout.Action(title: b.title, spoken: b.spoken) { client.changeSettings(b.change) }
                     })
                 } else if AwayCopy.showsRttCallout(away: state.away, remote: remoteRoute != nil, slowLink: client.slowLink) {
-                    Callout(text: "The picture is arriving slowly from \(mac). Choose Low quality or Standard resolution.")
+                    Callout(text: String(localized: "The picture is arriving slowly from \(mac). Choose Low quality or Standard resolution."))
                 }
                 streamRows(shown)
                 Footnote(text: streamFooter)
@@ -315,15 +315,15 @@ struct HostSettingsPanel: View {
                 // what it trades away.
                 Rows {
                     Toggle(isOn: binding(shown.prioritizeSpeed) { HostSettingsChange(prioritizeSpeed: $0) }) {
-                        RowTitle(title: "Prioritize Encoding Speed", since: client.settings.pendingSince(.prioritizeSpeed))
+                        RowTitle(title: String(localized: "Prioritize Encoding Speed"), since: client.settings.pendingSince(.prioritizeSpeed))
                     }
                     .rowFrame()
                 }
-                Footnote(text: "Lower latency when \(mac) is busy, at a softer picture.")
+                Footnote(text: String(localized: "Lower latency when \(mac) is busy, at a softer picture."))
                 Rows {
                     let unavailable = !state.virtualDisplayAvailable && !shown.virtualDisplay
                     Toggle(isOn: binding(shown.virtualDisplay) { HostSettingsChange(virtualDisplay: $0) }) {
-                        RowTitle(title: "Virtual Display", since: client.settings.pendingSince(.virtualDisplay))
+                        RowTitle(title: String(localized: "Virtual Display"), since: client.settings.pendingSince(.virtualDisplay))
                     }
                     // Off and impossible on this host: disabled, the reason under it. On, it can
                     // always be turned off, as from the Mac's own menu.
@@ -334,9 +334,9 @@ struct HostSettingsPanel: View {
                 if let note = state.virtualDisplayNote {
                     Footnote(text: note, warning: true)
                 } else {
-                    Footnote(text: "The window you pick moves onto an invisible display on \(mac) while it streams, so it keeps updating when covered.")
+                    Footnote(text: String(localized: "The window you pick moves onto an invisible display on \(mac) while it streams, so it keeps updating when covered."))
                 }
-                Footnote(text: "Applies to every device streaming from \(mac). The stream restarts for a moment.")
+                Footnote(text: String(localized: "Applies to every device streaming from \(mac). The stream restarts for a moment."))
                 // Send Audio (docs/audio-plan.md §7.7): after the closing footer, whose "the stream restarts"
                 // is not true of it (the sound has a stream of its own), like Direct Wireless after it. Set
                 // from here for every device, as Quality is (Noah, 2026-10-27: the plan's Q8 revised): the
@@ -356,9 +356,9 @@ struct HostSettingsPanel: View {
                         }
                     }
                     .disabled(send == nil)
-                    .accessibilityLabel("Send Audio, beta")
-                    .accessibilityInputLabels(["Send Audio"])
-                    .accessibilityHint(send == nil ? "Update Sill on \(mac) to use this." : "")
+                    .accessibilityLabel(String(localized: "Send Audio, beta"))
+                    .accessibilityInputLabels([String(localized: "Send Audio")])
+                    .accessibilityHint(send == nil ? String(localized: "Update Sill on \(mac) to use this.") : "")
                     .rowFrame()
                     // Mute, right under Send Audio (Noah, 2026-10-27): this device's own (`soundMuted`,
                     // off by default, remembered, never sent), the only control of the Mac's sound on the
@@ -371,8 +371,8 @@ struct HostSettingsPanel: View {
                         Toggle(isOn: Binding(get: { client.soundMuted }, set: { client.setSoundMuted($0) })) {
                             Text("Mute").foregroundStyle(Palette.text)
                         }
-                        .accessibilityLabel("Mute sound from \(mac)")
-                        .accessibilityInputLabels(["Mute", "Mute sound from \(mac)"])
+                        .accessibilityLabel(String(localized: "Mute sound from \(mac)"))
+                        .accessibilityInputLabels([String(localized: "Mute"), String(localized: "Mute sound from \(mac)")])
                         .rowFrame()
                         .id(Self.muteID)
                     }
@@ -394,10 +394,10 @@ struct HostSettingsPanel: View {
                     let locked = Self.directWirelessLock(remote: remoteRoute != nil, takes: state.takesDirectWireless, mac: mac)
                     Rows {
                         Toggle(isOn: binding(direct) { HostSettingsChange(directWireless: $0) }) {
-                            RowTitle(title: "Direct Wireless Connection", since: client.settings.pendingSince(.directWireless))
+                            RowTitle(title: String(localized: "Direct Wireless Connection"), since: client.settings.pendingSince(.directWireless))
                         }
                         // A warning about turning it off, so only while the switch shows on and works.
-                        .accessibilityHint(locked == nil && client.connectedDirectly && direct ? "Turning this off disconnects this \(device)." : "")
+                        .accessibilityHint(locked == nil && client.connectedDirectly && direct ? String(localized: "Turning this off disconnects this \(device).") : "")
                         // From afar, or unpaired, the Mac refuses it anyway: how devices near the Mac
                         // reach it is the Mac's and its paired devices' to change.
                         .disabled(locked != nil)
@@ -406,7 +406,7 @@ struct HostSettingsPanel: View {
                     Footnote(text: locked ?? directFooter(on: direct))
                 }
                 if !state.persistent {
-                    Footnote(text: "SillHost keeps these until it quits.")
+                    Footnote(text: String(localized: "SillHost keeps these until it quits."))
                 }
                 awayFromHome
             } else if olderMac {
@@ -456,7 +456,7 @@ struct HostSettingsPanel: View {
     /// before anything scrolls.
     private func streamRows(_ shown: StreamSettings) -> some View {
         Rows {
-            AdaptiveRow(title: "Quality", since: client.settings.pendingSince(.bitrate)) {
+            AdaptiveRow(title: String(localized: "Quality"), since: client.settings.pendingSince(.bitrate)) {
                 Picker("Quality", selection: binding(shown.bitrate) { HostSettingsChange(bitrate: $0) }) {
                     ForEach(QualityPreset.allCases) { Text($0.title).tag($0.rawValue) }
                     if QualityPreset(rawValue: shown.bitrate) == nil {
@@ -468,7 +468,7 @@ struct HostSettingsPanel: View {
                 .fixedSize()     // one line; the row stacks instead when it does not fit beside the title
             }
             RowDivider()
-            AdaptiveRow(title: "Resolution", since: client.settings.pendingSince(.captureScale)) {
+            AdaptiveRow(title: String(localized: "Resolution"), since: client.settings.pendingSince(.captureScale)) {
                 Picker("Resolution", selection: binding(shown.captureScale) { HostSettingsChange(captureScale: $0) }) {
                     Text("Retina").tag(2.0)
                     Text("Standard").tag(1.0)
@@ -477,7 +477,7 @@ struct HostSettingsPanel: View {
                 .fixedSize()
             }
             RowDivider()
-            AdaptiveRow(title: "Frame Rate", since: client.settings.pendingSince(.maxFPS)) {
+            AdaptiveRow(title: String(localized: "Frame Rate"), since: client.settings.pendingSince(.maxFPS)) {
                 // A Mac-held value such as 90 selects no segment, as on the Mac.
                 Picker("Frame Rate", selection: binding(shown.maxFPS) { HostSettingsChange(maxFPS: $0) }) {
                     Text("60 fps").tag(60)
@@ -526,9 +526,9 @@ struct HostSettingsPanel: View {
                 }
                 switch reach {
                 case .connected:
-                    if let r = remoteRoute { Footnote(text: "Connected \(r.phrase).") }
+                    if let r = remoteRoute { Footnote(text: String(localized: "Connected \(r.phrase).")) }
                 case .reaches:
-                    Footnote(text: "Away from home, Sill reaches \(mac) \(Self.reach(info)).")
+                    Footnote(text: Self.reach(info, mac: mac))
                 case .turnOnRemoteAccess:
                     Footnote(text: Self.turnOnRemoteAccess(mac))
                 }
@@ -544,7 +544,7 @@ struct HostSettingsPanel: View {
                     .rowFrame()
                 }
                 Footnote(text: atHome ? DiscoveryPolicy.HomeCopy.pairThisDeviceAtHome(mac: mac, device: device)
-                                      : "Pair once to reach \(mac) through your VPN or the internet. \(mac) shows a code; scan it with this \(device).")
+                                      : String(localized: "Pair once to reach \(mac) through your VPN or the internet. \(mac) shows a code; scan it with this \(device)."))
             case .turnOnRemoteAccess:
                 Footnote(text: Self.turnOnRemoteAccess(mac))
             }
@@ -553,7 +553,7 @@ struct HostSettingsPanel: View {
 
     /// With Remote Access off on the Mac: how to reach it away from home.
     static func turnOnRemoteAccess(_ mac: String) -> String {
-        "To reach \(mac) away from home, turn on Remote Access in Sill’s Settings on the Mac."
+        String(localized: "To reach \(mac) away from home, turn on Remote Access in Sill’s Settings on the Mac.")
     }
 
     // MARK: This device
@@ -654,15 +654,15 @@ struct HostSettingsPanel: View {
     /// the same; either way, that this device is muted while it is; for a Mac without sound (nil), what
     /// to update (no Mute row then). Each starts with "Beta.".
     static func sendAudioFooter(_ send: Bool?, muted: Bool, mac: String, device: String) -> String {
-        let mute = " Mute silences it on this \(device) alone; \(mac) keeps sending and playing it."
-            + (muted ? " This \(device) is muted." : "")
+        let mute = sentenceGap + String(localized: "Mute silences it on this \(device) alone; \(mac) keeps sending and playing it.")
+            + (muted ? sentenceGap + String(localized: "This \(device) is muted.") : "")
         switch send {
         case true?:
-            return "Beta. Every connected device hears what streams, and \(mac) keeps playing it too." + mute
+            return String(localized: "Beta. Every connected device hears what streams, and \(mac) keeps playing it too.") + mute
         case false?:
-            return "Beta. Turn this on to hear what streams on every connected device; \(mac) keeps playing it too." + mute
+            return String(localized: "Beta. Turn this on to hear what streams on every connected device; \(mac) keeps playing it too.") + mute
         case nil:
-            return "Beta. Update Sill on \(mac) to hear its sound on this \(device)."
+            return String(localized: "Beta. Update Sill on \(mac) to hear its sound on this \(device).")
         }
     }
 
@@ -672,8 +672,8 @@ struct HostSettingsPanel: View {
     /// (with the trackpad's and the mouse's settings, under Settings › General), which the switch
     /// leaves alone.
     static func reverseScrollFooter(device: String) -> String {
-        "Turns a finger’s drag and the trackpad’s two-finger scroll around."
-            + (device == "iPad" ? " A trackpad or mouse connected to the iPad follows its own Natural Scrolling setting." : "")
+        String(localized: "Turns a finger’s drag and the trackpad’s two-finger scroll around.")
+            + (device == "iPad" ? sentenceGap + String(localized: "A trackpad or mouse connected to the iPad follows its own Natural Scrolling setting.") : "")
     }
 
     /// The Mac's window list said it takes the gestures (`WindowList.gestures`).
@@ -684,41 +684,42 @@ struct HostSettingsPanel: View {
     /// it gives up, where windows come from instead, that the Mac fits a window to the taller picture
     /// once Aa sets its text size (or on the virtual display), and that a change applies as the panel
     /// closes (StreamScreen's `largerPictureHeld`).
-    static let largerPictureFooter = "Held upright, a window’s picture takes the place of the window thumbnails and reaches down to where the keyboard comes up. The Desktop keeps the thumbnails. Switch windows with Apps: tap an open app again for its next window. To fill the taller picture with a window, set its text size with Aa. A change applies when you close Settings."
+    static var largerPictureFooter: String { String(localized: "Held upright, a window’s picture takes the place of the window thumbnails and reaches down to where the keyboard comes up. The Desktop keeps the thumbnails. Switch windows with Apps: tap an open app again for its next window. To fill the taller picture with a window, set its text size with Aa. A change applies when you close Settings.") }
 
     /// What each gesture does on the Mac, and what the row does as an accessibility action: its one
     /// gesture, or, for the Spaces, one action each way (natural direction: a swipe left brings the
     /// Space on the right). The pinch opens Launchpad on macOS 14 and 15, from the same key.
-    private static let gestureRows: [(symbol: String, gesture: String, action: String, does: [GestureRow.Action])] = [
-        ("arrow.up", "Swipe Up", "Mission Control", [GestureRow.Action(name: "Mission Control", gesture: .swipeUp)]),
-        ("arrow.down", "Swipe Down", "App Exposé", [GestureRow.Action(name: "App Exposé", gesture: .swipeDown)]),
-        ("arrow.left.and.right", "Swipe Left or Right", "Spaces", [GestureRow.Action(name: "Space on the Right", gesture: .swipeLeft),
-                                                                   GestureRow.Action(name: "Space on the Left", gesture: .swipeRight)]),
-        ("arrow.down.right.and.arrow.up.left", "Pinch", "Apps", [GestureRow.Action(name: "Apps", gesture: .pinch)]),
-        ("arrow.up.left.and.arrow.down.right", "Spread", "Show Desktop", [GestureRow.Action(name: "Show Desktop", gesture: .spread)]),
-    ]
+    private static var gestureRows: [(symbol: String, gesture: String, action: String, does: [GestureRow.Action])] { [
+        ("arrow.up", String(localized: "Swipe Up"), String(localized: "Mission Control"), [GestureRow.Action(name: String(localized: "Mission Control"), gesture: .swipeUp)]),
+        ("arrow.down", String(localized: "Swipe Down"), String(localized: "App Exposé"), [GestureRow.Action(name: String(localized: "App Exposé"), gesture: .swipeDown)]),
+        ("arrow.left.and.right", String(localized: "Swipe Left or Right"), String(localized: "Spaces"), [GestureRow.Action(name: String(localized: "Space on the Right"), gesture: .swipeLeft),
+                                                                   GestureRow.Action(name: String(localized: "Space on the Left"), gesture: .swipeRight)]),
+        ("arrow.down.right.and.arrow.up.left", String(localized: "Pinch"), String(localized: "Apps"), [GestureRow.Action(name: String(localized: "Apps"), gesture: .pinch)]),
+        ("arrow.up.left.and.arrow.down.right", String(localized: "Spread"), String(localized: "Show Desktop"), [GestureRow.Action(name: String(localized: "Show Desktop"), gesture: .spread)]),
+    ] }
 
     /// Under the switch: where the gestures go and what they do, or why nothing happens.
     private var gesturesFooter: String {
-        guard gesturesOn else { return "Three-finger strokes do nothing while this is off." }
-        guard macTakesGestures else { return "Update Sill on \(mac) to use these." }
+        guard gesturesOn else { return String(localized: "Three-finger strokes do nothing while this is off.") }
+        guard macTakesGestures else { return String(localized: "Update Sill on \(mac) to use these.") }
         // VoiceOver keeps three-finger swipes and taps for itself, and no touch of them reaches Sill.
-        var text = voiceOver ? "VoiceOver keeps three-finger gestures for itself, so the rows above do them on \(mac) instead."
-            : "Three fingers on the trackpad or over the stream."
-        text += " While a window streams, a gesture shows the Desktop first, and the opposite gesture closes what one opened. \(mac) does these with its own keyboard shortcuts: one turned off in its Keyboard settings does nothing."
-        if device == "iPad" { text += " Four-finger swipes and a Magic Keyboard trackpad’s gestures stay with iPadOS." }
+        var text = voiceOver ? String(localized: "VoiceOver keeps three-finger gestures for itself, so the rows above do them on \(mac) instead.")
+            : String(localized: "Three fingers on the trackpad or over the stream.")
+        text += sentenceGap + String(localized: "While a window streams, a gesture shows the Desktop first, and the opposite gesture closes what one opened. \(mac) does these with its own keyboard shortcuts: one turned off in its Keyboard settings does nothing.")
+        if device == "iPad" { text += sentenceGap + String(localized: "Four-finger swipes and a Magic Keyboard trackpad’s gestures stay with iPadOS.") }
         return text
     }
 
-    /// "through Tailscale (mac-mini.tail1234.ts.net)": the first VPN or internet address the Mac
-    /// gave; otherwise "through your VPN or the internet".
-    static func reach(_ info: MacInfo) -> String {
+    /// "Away from home, Sill reaches Mac mini through Tailscale (mac-mini.tail1234.ts.net).": the first
+    /// VPN or internet address the Mac gave; otherwise "… through your VPN or the internet.". Whole
+    /// sentences, one per way, so each can be translated.
+    static func reach(_ info: MacInfo, mac: String) -> String {
         guard let a = info.addresses.first(where: { $0.kind == MacAddress.vpn || $0.kind == MacAddress.internet }) else {
-            return "through your VPN or the internet"
+            return String(localized: "Away from home, Sill reaches \(mac) through your VPN or the internet.")
         }
-        if a.kind == MacAddress.internet { return "over the internet (\(a.host))" }
-        let name = a.via.isEmpty || a.via.hasPrefix("VPN (") ? "your VPN" : a.via
-        return "through \(name) (\(a.host))"
+        if a.kind == MacAddress.internet { return String(localized: "Away from home, Sill reaches \(mac) over the internet (\(a.host)).") }
+        if a.via.isEmpty || a.via.hasPrefix("VPN (") { return String(localized: "Away from home, Sill reaches \(mac) through your VPN (\(a.host)).") }
+        return String(localized: "Away from home, Sill reaches \(mac) through \(a.via) (\(a.host)).")
     }
 
     // MARK: Copy
@@ -730,7 +731,7 @@ struct HostSettingsPanel: View {
     /// own (see `header`). A no-break space before each "·" keeps it with the value before it, so a
     /// wrap at larger text never starts a line with one.
     static func readout(_ stream: RunningStream?, route: DiscoveryPolicy.Method? = nil) -> String {
-        let values = stream.map { ["\($0.width)×\($0.height)", "\($0.fps)\u{00A0}fps", "\($0.mbps)\u{00A0}Mbps"] } ?? ["Not streaming"]
+        let values = stream.map { ["\($0.width)×\($0.height)", "\($0.fps)\u{00A0}fps", "\($0.mbps)\u{00A0}Mbps"] } ?? [String(localized: "Not streaming")]
         return (values + [route?.word].compactMap { $0 }).joined(separator: "\u{00A0}· ")
     }
 
@@ -744,21 +745,25 @@ struct HostSettingsPanel: View {
     /// word; see `header`).
     static func spokenReadout(_ stream: RunningStream?, route: DiscoveryPolicy.Method? = nil, remote: RemoteRoute? = nil,
                               rttMs: Int? = nil) -> String {
-        var link = route.map { ", " + spoken($0) } ?? ""
+        var link = route.map { spoken($0) } ?? ""
         if let remote {
-            link = ", connected \(remote.phrase)" + (rttMs.map { ", \($0) millisecond round trip" } ?? "")
+            link = rttMs.map { String(localized: ", connected \(remote.phrase), \($0) millisecond round trip") }
+                ?? String(localized: ", connected \(remote.phrase)")
         }
-        guard let s = stream else { return "Not streaming" + link }
-        return "Streaming \(s.width) by \(s.height), \(s.fps) frames per second, \(s.mbps) megabits per second"
-            + (s.onVirtualDisplay ? ", on the virtual display" : "") + link
+        guard let s = stream else { return String(localized: "Not streaming") + link }
+        return (s.onVirtualDisplay
+                ? String(localized: "Streaming \(s.width) by \(s.height), \(s.fps) frames per second, \(s.mbps) megabits per second, on the virtual display")
+                : String(localized: "Streaming \(s.width) by \(s.height), \(s.fps) frames per second, \(s.mbps) megabits per second"))
+            + link
     }
 
-    /// The route as VoiceOver says it: a sentence's end rather than the bare word.
+    /// The route as VoiceOver says it: a sentence's end rather than the bare word, with its leading
+    /// comma (", connected by cable").
     private static func spoken(_ route: DiscoveryPolicy.Method) -> String {
         switch route {
-        case .wired: return "connected by cable"
-        case .wifi: return "connected over Wi-Fi"
-        case .direct: return "connected directly"
+        case .wired: return String(localized: ", connected by cable")
+        case .wifi: return String(localized: ", connected over Wi-Fi")
+        case .direct: return String(localized: ", connected directly")
         }
     }
 
@@ -770,8 +775,8 @@ struct HostSettingsPanel: View {
     /// connection, and on a session it says is not paired (`takes` false:
     /// `HostSettingsState.takesDirectWireless`) from any device it did not pair.
     static func directWirelessLock(remote: Bool, takes: Bool, mac: String) -> String? {
-        if remote { return "Change this on \(mac), or from a device near it." }
-        if !takes { return "Change this on \(mac), or from a device paired with it." }
+        if remote { return String(localized: "Change this on \(mac), or from a device near it.") }
+        if !takes { return String(localized: "Change this on \(mac), or from a device paired with it.") }
         return nil
     }
 
@@ -782,8 +787,8 @@ struct HostSettingsPanel: View {
     /// to it by itself), so it cannot come back until it does. Once the switch shows off (turned
     /// off here or on the Mac, with this connection still up for that moment) the warning is moot.
     private func directFooter(on: Bool) -> String {
-        var text = "Lets devices reach \(mac) without a shared Wi\u{2011}Fi network, the way AirDrop does. While it’s on, streaming over Wi\u{2011}Fi can stutter."
-        if on, client.connectedDirectly { text += " This \(device) is connected directly: turning this off disconnects it." }
+        var text = String(localized: "Lets devices reach \(mac) without a shared Wi\u{2011}Fi network, the way AirDrop does. While it’s on, streaming over Wi\u{2011}Fi can stutter.")
+        if on, client.connectedDirectly { text += sentenceGap + String(localized: "This \(device) is connected directly: turning this off disconnects it.") }
         return text
     }
 
@@ -793,16 +798,16 @@ struct HostSettingsPanel: View {
     /// for 60 fps.
     private var streamFooter: String {
         _ = powerState
-        var text = "Quality is per 60 fps; a 120 fps stream gets twice as much. " + QualityPreset.fastLinkNote
+        var text = String(localized: "Quality is per 60 fps; a 120 fps stream gets twice as much.") + sentenceGap + QualityPreset.fastLinkNote
         let away = client.awayCapsFrameRate
         let wanted = StreamClient.wantedFPS(remote: away)
         guard wanted < 120 else { return text }
         if away, StreamClient.wantedFPS() > wanted {
-            text += " Away from home, this \(device) asks for \(wanted) fps, which halves the data your Mac sends."
+            text += sentenceGap + String(localized: "Away from home, this \(device) asks for \(wanted) fps, which halves the data your Mac sends.")
         } else if ProcessInfo.processInfo.isLowPowerModeEnabled, StreamClient.screenMaximumFPS() >= 120 {
-            text += " Low Power Mode holds this \(device) to \(wanted) fps."
+            text += sentenceGap + String(localized: "Low Power Mode holds this \(device) to \(wanted) fps.")
         } else {
-            text += " This \(device) shows up to \(wanted) fps."
+            text += sentenceGap + String(localized: "This \(device) shows up to \(wanted) fps.")
         }
         return text
     }
@@ -1167,4 +1172,9 @@ extension EnvironmentValues {
         get { self[LargerPictureOfferedKey.self] }
         set { self[LargerPictureOfferedKey.self] = newValue }
     }
+}
+
+/// Between two sentences joined into one footnote: a space in English, none in Chinese.
+fileprivate var sentenceGap: String {
+    String(localized: "SentenceGap", defaultValue: " ", comment: "Between two sentences joined into one footnote: a space in English; empty in Chinese.")
 }

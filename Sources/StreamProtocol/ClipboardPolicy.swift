@@ -390,25 +390,25 @@ public enum ClipboardPolicy {
         public static var cap: String { "\(Clipboard.maxTextBytes / 1024) KB" }
 
         // The chip.
-        public static func chipTitle(mac: String) -> String { "Paste on \(mac)" }
-        public static let chipSubtitle = "Then press ⌘V there."
+        public static func chipTitle(mac: String) -> String { String(localized: "Paste on \(mac)") }
+        public static var chipSubtitle: String { String(localized: "Then press ⌘V there.") }
         /// The chip's words for VoiceOver, one element; its Paste button and Dismiss are their own.
         public static func chipSpoken(mac: String, device: String) -> String {
-            "Paste on \(mac). Sends the text you copied on this \(device) to \(mac)’s clipboard. Then press Command-V there."
+            String(localized: "Paste on \(mac). Sends the text you copied on this \(device) to \(mac)’s clipboard. Then press Command-V there.")
         }
-        public static let dismiss = "Dismiss"
+        public static var dismiss: String { String(localized: "Dismiss") }
         /// Told to VoiceOver when the chip first shows for a copy (found in review: it came unannounced).
-        public static func chipAnnouncement(mac: String) -> String { "Paste on \(mac) is available, near the bar." }
+        public static func chipAnnouncement(mac: String) -> String { String(localized: "Paste on \(mac) is available, near the bar.") }
         /// The Paste button's hint, on the chip and in Settings.
         public static func pasteHint(mac: String, device: String) -> String {
-            "Sends the text you copied on this \(device) to \(mac)’s clipboard."
+            String(localized: "Sends the text you copied on this \(device) to \(mac)’s clipboard.")
         }
-        public static func sent(mac: String) -> String { "Sent to \(mac)’s clipboard. Press ⌘V there." }
-        public static func sentSpoken(mac: String) -> String { "Sent to \(mac)’s clipboard. Press Command-V there." }
-        public static func tooLong(mac: String) -> String { "Too long to send: \(mac) takes up to \(cap) of text." }
+        public static func sent(mac: String) -> String { String(localized: "Sent to \(mac)’s clipboard. Press ⌘V there.") }
+        public static func sentSpoken(mac: String) -> String { String(localized: "Sent to \(mac)’s clipboard. Press Command-V there.") }
+        public static func tooLong(mac: String) -> String { String(localized: "Too long to send: \(mac) takes up to \(cap) of text.") }
         /// No receipt in time (`receiptWait`): the copy is not counted as dealt with, so the chip offers
         /// it again.
-        public static func notSent(mac: String) -> String { "Didn’t reach \(mac). Try Paste again." }
+        public static func notSent(mac: String) -> String { String(localized: "Didn’t reach \(mac). Try Paste again.") }
 
         // Paste right away (`pastesOnReceipt`): with the switch on, the words say where the text goes;
         // with it off, the words above (the chip's subtitle, its spoken label and the Paste button's
@@ -416,33 +416,33 @@ public enum ClipboardPolicy {
         /// The chip's subtitle: under "Paste on ‹Mac›", where it goes. No longer than today's "Then press
         /// ⌘V there.", which the chip holds on a 375 pt iPhone at xLarge text, where "It goes where the
         /// cursor is." was cut short ("It goes where the cur…", found in review; at 393 pt "…the curso…").
-        public static func chipSubtitle(rightAway: Bool) -> String { rightAway ? "Where the cursor is." : chipSubtitle }
+        public static func chipSubtitle(rightAway: Bool) -> String { rightAway ? String(localized: "Where the cursor is.") : chipSubtitle }
         /// The chip's words for VoiceOver.
         public static func chipSpoken(mac: String, device: String, rightAway: Bool) -> String {
-            rightAway ? "Paste on \(mac). Pastes the text you copied on this \(device) where \(mac)’s cursor is."
+            rightAway ? String(localized: "Paste on \(mac). Pastes the text you copied on this \(device) where \(mac)’s cursor is.")
                       : chipSpoken(mac: mac, device: device)
         }
         /// The Paste button's hint, on the chip and in Settings.
         public static func pasteHint(mac: String, device: String, rightAway: Bool) -> String {
-            rightAway ? "Pastes the text you copied on this \(device) where \(mac)’s cursor is." : pasteHint(mac: mac, device: device)
+            rightAway ? String(localized: "Pastes the text you copied on this \(device) where \(mac)’s cursor is.") : pasteHint(mac: mac, device: device)
         }
         /// A receipt with ⌘V (`receiptNote`), written and spoken alike.
-        public static func pasted(mac: String) -> String { "Pasted on \(mac)." }
+        public static func pasted(mac: String) -> String { String(localized: "Pasted on \(mac).") }
 
         // The Settings panel's This iPad group.
-        public static let switchTitle = "Share Clipboard"
-        public static func rowTitle(mac: String) -> String { "Paste on \(mac)" }
+        public static var switchTitle: String { String(localized: "Share Clipboard") }
+        public static func rowTitle(mac: String) -> String { String(localized: "Paste on \(mac)") }
         /// The switch under Share Clipboard, shown while it is on.
-        public static func rightAwayTitle(mac: String) -> String { "Paste on \(mac) Right Away" }
+        public static func rightAwayTitle(mac: String) -> String { String(localized: "Paste on \(mac) Right Away") }
         /// The group's footnote with that switch: on, where Paste's text goes and what turning the switch
         /// off leaves; off (or Share Clipboard off), the footnote as it was.
         public static func footnote(on: Bool, rightAway: Bool, mac: String, device: String) -> String {
             guard on, rightAway else { return footnote(on: on, mac: mac, device: device) }
-            return "Text you copy on \(mac) is ready to paste on this \(device). To paste on \(mac), copy text here and tap Paste: it goes where \(mac)’s cursor is. With Paste on \(mac) Right Away off, Paste only puts it on \(mac)’s clipboard."
+            return String(localized: "Text you copy on \(mac) is ready to paste on this \(device). To paste on \(mac), copy text here and tap Paste: it goes where \(mac)’s cursor is. With Paste on \(mac) Right Away off, Paste only puts it on \(mac)’s clipboard.")
         }
         public static func footnote(on: Bool, mac: String, device: String) -> String {
-            on ? "Text you copy on \(mac) is ready to paste on this \(device). To paste on \(mac), copy text here, tap Paste, then press ⌘V there."
-               : "Nothing you copy goes between this \(device) and \(mac) while this is off."
+            on ? String(localized: "Text you copy on \(mac) is ready to paste on this \(device). To paste on \(mac), copy text here, tap Paste, then press ⌘V there.")
+               : String(localized: "Nothing you copy goes between this \(device) and \(mac) while this is off.")
         }
 
         // Sill for Mac's Settings › General, under Share clipboard with devices.

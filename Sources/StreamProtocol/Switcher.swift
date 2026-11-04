@@ -130,8 +130,8 @@ public enum LockedMac {
     /// is the cover's title and line together, in Noah's words (2026-11-02), with no Mac's name in them.
     public static func line(mac: String, why: Why) -> String {
         switch why {
-        case .screenLocked: return "\(name(mac)) is locked. Unlock it to see its windows."
-        case .otherUser: return "Another user started controlling this Mac. Log in to your account to reactivate screen sharing with Sill."
+        case .screenLocked: return String(localized: "\(name(mac)) is locked. Unlock it to see its windows.")
+        case .otherUser: return String(localized: "Another user started controlling this Mac. Log in to your account to reactivate screen sharing with Sill.")
         }
     }
 
@@ -139,9 +139,9 @@ public enum LockedMac {
     /// text to …"), with no Mac's name in them.
     public static func title(mac: String, shade: Shade) -> String {
         switch shade {
-        case .locked(.screenLocked): return "\(name(mac)) is locked"
-        case .locked(.otherUser): return "Another user started controlling this Mac."
-        case .unlocking: return "Unlocking…"
+        case .locked(.screenLocked): return String(localized: "\(name(mac)) is locked")
+        case .locked(.otherUser): return String(localized: "Another user started controlling this Mac.")
+        case .unlocking: return String(localized: "Unlocking…")
         }
     }
 
@@ -151,16 +151,16 @@ public enum LockedMac {
     public static func detail(shade: Shade, paired: Bool?) -> String? {
         switch shade {
         case .locked(.screenLocked):
-            return paired == true ? "To unlock it from here, type its password and press Return. Its windows come back once it is unlocked."
-                                  : "Its windows come back once it is unlocked."
+            return paired == true ? String(localized: "To unlock it from here, type its password and press Return. Its windows come back once it is unlocked.")
+                                  : String(localized: "Its windows come back once it is unlocked.")
         case .locked(.otherUser):
-            return "Log in to your account to reactivate screen sharing with Sill."
+            return String(localized: "Log in to your account to reactivate screen sharing with Sill.")
         case .unlocking:
             return nil
         }
     }
 
-    private static func name(_ mac: String) -> String { mac.isEmpty ? "The Mac" : mac }
+    private static func name(_ mac: String) -> String { mac.isEmpty ? String(localized: "The Mac") : mac }
 }
 
 public struct LaunchApp: Codable {

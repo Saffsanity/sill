@@ -10,18 +10,18 @@ MUTANTS = [
     ("an empty message shown", "GoodbyePolicy.swift", "return text.isEmpty ? nil : text", "return text"),
     ("no length limit", "GoodbyePolicy.swift", "static let messageLimit = 300", "static let messageLimit = 1000"),
     ("removed reconnects", "GoodbyePolicy.swift", "reconnect: false, remoteAllowed: false, isNotice: false)\n        case Goodbye.remoteOff:", "reconnect: true, remoteAllowed: false, isNotice: false)\n        case Goodbye.remoteOff:"),
-    ("remoteOff allows the remote door", "GoodbyePolicy.swift", "return Outcome(text: \"\\(mac) turned off Remote Access.\", reconnect: true, remoteAllowed: false, isNotice: false)", "return Outcome(text: \"\\(mac) turned off Remote Access.\", reconnect: true, remoteAllowed: saved, isNotice: false)"),
+    ("remoteOff allows the remote door", "GoodbyePolicy.swift", "return Outcome(text: String(localized: \"\\(mac) turned off Remote Access.\"), reconnect: true, remoteAllowed: false, isNotice: false)", "return Outcome(text: String(localized: \"\\(mac) turned off Remote Access.\"), reconnect: true, remoteAllowed: saved, isNotice: false)"),
     ("an unreadable goodbye is not a notice", "GoodbyePolicy.swift", "Goodbye.busy,\n                                            Goodbye.pairingRequired]", "Goodbye.busy,\n                                            Goodbye.pairingRequired, \"\"]"),
     ("pairingRequired is a notice", "GoodbyePolicy.swift", "Goodbye.busy,\n                                            Goodbye.pairingRequired]", "Goodbye.busy]"),
-    ("pairingRequired reconnects", "GoodbyePolicy.swift", "Tap it to pair this \\(device).\",\n                           reconnect: false", "Tap it to pair this \\(device).\",\n                           reconnect: true"),
+    ("pairingRequired reconnects", "GoodbyePolicy.swift", "Tap it to pair this \\(device).\"),\n                           reconnect: false", "Tap it to pair this \\(device).\"),\n                           reconnect: true"),
     ("notices inverted", "GoodbyePolicy.swift", "!knownReasons.contains(goodbye.reason)", "knownReasons.contains(goodbye.reason)"),
     ("quit allows the remote door for an unsaved Mac", "GoodbyePolicy.swift", "reconnect: true, remoteAllowed: saved, isNotice: false)\n        case Goodbye.removed:", "reconnect: true, remoteAllowed: true, isNotice: false)\n        case Goodbye.removed:"),
-    ("saved and unsaved words swapped", "GoodbyePolicy.swift", "return Outcome(text: saved ? \"\\(mac) disconnected. Sill will reconnect when it can reach it.\"", "return Outcome(text: !saved ? \"\\(mac) disconnected. Sill will reconnect when it can reach it.\""),
+    ("saved and unsaved words swapped", "GoodbyePolicy.swift", "return Outcome(text: saved ? String(localized: \"\\(mac) disconnected. Sill will reconnect when it can reach it.\")", "return Outcome(text: !saved ? String(localized: \"\\(mac) disconnected. Sill will reconnect when it can reach it.\")"),
     ("update reconnects unless told not to", "GoodbyePolicy.swift", "reconnect: goodbye.reconnect == true, remoteAllowed: saved,\n                           storeLink: true, isNotice: true)", "reconnect: goodbye.reconnect != false, remoteAllowed: saved,\n                           storeLink: true, isNotice: true)"),
     ("update without the App Store link", "GoodbyePolicy.swift", "reconnect: goodbye.reconnect == true, remoteAllowed: saved,\n                           storeLink: true, isNotice: true)", "reconnect: goodbye.reconnect == true, remoteAllowed: saved,\n                           storeLink: false, isNotice: true)"),
-    ("minimumVersion shown as sent", "GoodbyePolicy.swift", "if let floor = goodbye.minimumVersion.flatMap({ SillVersion($0) }) { own += \" It needs version \\(floor) or later.\" }", "if let floor = goodbye.minimumVersion { own += \" It needs version \\(floor) or later.\" }"),
+    ("minimumVersion shown as sent", "GoodbyePolicy.swift", "let floor = goodbye.minimumVersion.flatMap({ SillVersion($0) })", "let floor = goodbye.minimumVersion"),
     ("update ignores the host's message", "GoodbyePolicy.swift", "return Outcome(text: message(goodbye) ?? own, reconnect: goodbye.reconnect == true", "return Outcome(text: own, reconnect: goodbye.reconnect == true"),
-    ("update's own words without the device", "GoodbyePolicy.swift", "var own = \"Update Sill on this \\(device) to keep using \\(mac).\"", "var own = \"Update Sill to keep using \\(mac).\""),
+    ("update's own words without the device", "GoodbyePolicy.swift", "?? String(localized: \"Update Sill on this \\(device) to keep using \\(mac).\")", "?? String(localized: \"Update Sill to keep using \\(mac).\")"),
 ]
 caught = 0
 for name, _, old, new in MUTANTS:

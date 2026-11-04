@@ -37,13 +37,13 @@ MUTANTS = [
     # The words.
     ("W1 the value with two decimals (0.50 s)", "String(format: \"%.1f s\", seconds(value))", "String(format: \"%.2f s\", seconds(value))"),
     ("W2 the value without a tenth's digit for whole seconds (1 s)", "String(format: \"%.1f s\", seconds(value))", "String(format: \"%g s\", seconds(value))"),
-    ("W3 spoken always \"seconds\" (1 seconds)", "\"\\(number) \\(t == 10 ? \"second\" : \"seconds\")\"", "\"\\(number) seconds\""),
+    ("W3 spoken always \"seconds\" (1 seconds)", "return t == 10 ? String(localized: \"\\(number) second\") : String(localized: \"\\(number) seconds\")", "return String(localized: \"\\(number) seconds\")"),
     ("W4 spoken with \"point zero\" (1.0 second)", "let number = t % 10 == 0 ? String(t / 10) : String(format: \"%.1f\", seconds(tenths: t))",
      "let number = String(format: \"%.1f\", seconds(tenths: t))"),
     ("W5 spoken from the value as it came, not its length (9 s spoken as \"9 seconds\"; nan traps)", "        let t = tenths(value)\n        let number",
      "        let t = Int((value * 10).rounded())\n        let number"),
-    ("W6 the title in sentence case", "static let title = \"Hold to Show Window Controls\"", "static let title = \"Hold to show window controls\""),
-    ("W7 VoiceOver's label in title case", "static let spokenTitle = \"Hold to show window controls\"", "static let spokenTitle = \"Hold to Show Window Controls\""),
+    ("W6 the title in sentence case", "static var title: String { String(localized: \"Hold to Show Window Controls\") }", "static var title: String { String(localized: \"Hold to show window controls\") }"),
+    ("W7 VoiceOver's label in title case", "static var spokenTitle: String { String(localized: \"Hold to show window controls\") }", "static var spokenTitle: String { String(localized: \"Hold to Show Window Controls\") }"),
     ("W8 the footnote without the drag", ", and before it can be dragged to another place.", "."),
     ("W9 the console's line without its prefix", "\"thumbnails: hold \\(valueText(value))\"", "\"hold \\(valueText(value))\""),
     # The title's lines beside the stepper (the review, 2026-10-29).
