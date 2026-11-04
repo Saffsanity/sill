@@ -20,6 +20,9 @@ final class WindowCatalog {
     private(set) var windows: [SCWindow] = []
     private(set) var infos: [WindowInfo] = []
     private(set) var display: SCDisplay?
+    /// Sill's fallback display is kept while devices work with the lid shut (HeadlessDesktopPolicy.releases): the
+    /// Desktop's display is it, before a real one (the coordinator's).
+    var keepsSills = false
     private(set) var installedApps: [AppInfo] = []
     /// This process as ScreenCaptureKit lists it, from the last look: the Desktop stream leaves it
     /// out, so Sill's own windows (the pairing code above all) never reach a device. Nil when it
@@ -131,6 +134,19 @@ final class WindowCatalog {
         (w.title ?? "").lowercased().contains("layerprobe")
     }
 
+    /// The MacBook's own screen in points, as the last look that saw it had it: the size of Sill's Retina
+    /// display with the lid closed (HeadlessDesktopPolicy). Kept in the preferences, so a relaunch with the
+    /// lid already closed still knows it.
+    static var lastBuiltIn: (widthPt: Int, heightPt: Int)? {
+        guard let a = UserDefaults.standard.array(forKey: builtInKey) as? [Int], a.count == 2 else { return nil }
+        return (a[0], a[1])
+    }
+    private static let builtInKey = "lastBuiltInDisplayPoints"
+    private static func rememberBuiltIn(widthPt: Int, heightPt: Int) {
+        guard widthPt > 0, heightPt > 0, lastBuiltIn.map({ $0 == (widthPt, heightPt) }) != true else { return }
+        UserDefaults.standard.set([widthPt, heightPt], forKey: builtInKey)
+    }
+
     /// Window list and thumbnails, while a client is connected.
     static let pollInterval: Duration = .seconds(2)
     /// A window whose `WindowInfo` (title, app, size) has not changed since its last thumbnail,
@@ -204,6 +220,21 @@ final class WindowCatalog {
     /// The displays macOS has active now (connected, awake, drawable; Sill's own virtual display too
     /// while it exists), by ID: what the last look's display is judged against before a capture is
     /// built from it (CatalogLook). No ScreenCaptureKit call. Empty when the call fails.
+    /// The displays as `LockPolicy.displaysLine` counts them, read now.
+    nonisolated static func displaysLine() -> String {
+        var count: UInt32 = 0
+        var online: [CGDirectDisplayID] = []
+        if CGGetOnlineDisplayList(0, nil, &count) == .success, count > 0 {
+            online = [CGDirectDisplayID](repeating: 0, count: Int(count))
+            if CGGetOnlineDisplayList(count, &online, &count) != .success { online = [] }
+            online = Array(online.prefix(Int(count)))
+        }
+        let kinds = online.map { StreamCoordinator.displayKind($0) }
+        return LockPolicy.displaysLine(online: online.count, active: activeDisplayIDs().count,
+                                       asleep: online.filter { CGDisplayIsAsleep($0) != 0 }.count,
+                                       sills: kinds.filter { $0 == .sills }.count, standIn: kinds.filter { $0 == .standIn }.count)
+    }
+
     nonisolated static func activeDisplayIDs() -> [UInt32] {
         var count: UInt32 = 0
         guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
@@ -298,9 +329,11 @@ final class WindowCatalog {
         appliedSeq = seq
         lookedAt = .now
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
+        let pool = HeadlessDesktopPolicy.pool(content.displays, kind: { StreamCoordinator.displayKind($0.displayID) }, sillsFirst: keepsSills)
+        if let b = content.displays.first(where: { CGDisplayIsBuiltin($0.displayID) != 0 }) { Self.rememberBuiltIn(widthPt: b.width, heightPt: b.height) }
         display = preferMainDisplay
-            ? (content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first)
-            : content.displays.first
+            ? (pool.first { $0.displayID == CGMainDisplayID() } ?? pool.first)
+            : pool.first
         var visible = content.windows.filter { w in
             guard let app = w.owningApplication, !app.applicationName.isEmpty else { return false }
             return w.windowLayer == 0                                  // drops widgets, wallpaper, backstop

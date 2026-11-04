@@ -219,7 +219,7 @@ package final class SessionLock: @unchecked Sendable {
 
     /// A change of the gate: its line now, then the coordinator.
     private func changed(_ change: LockPolicy.Change) {
-        if let line = LockPolicy.line(change) { print(line) }
+        if let line = LockPolicy.line(change) { print(line); print(WindowCatalog.displaysLine()) }
         onChange?()
     }
 

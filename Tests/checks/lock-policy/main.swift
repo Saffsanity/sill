@@ -541,6 +541,14 @@ check(P.line(P.Change(from: .screenLocked, to: .offConsole)) == "Locked: another
 check(P.line(P.Change(from: .offConsole, to: .unlocked)) == P.unlockedLine
       && P.unlockedLine == "Unlocked: this Mac's screen is unlocked; devices see its windows again.", "the unlock's line")
 check(P.menuNote == "The Mac is locked.", "the menus' note")
+// The displays as a lock or an unlock finds them (#298: a Mac with no active display turns its password away).
+check(P.displaysLine(online: 2, active: 0, asleep: 2, sills: 0, standIn: 0) == "Displays: 2 online, 0 active, 2 asleep, 0 Sill's, 0 macOS's stand-in.",
+      "the displays' line: a closed lid, its two monitors asleep")
+check(P.displaysLine(online: 1, active: 1, asleep: 0, sills: 1, standIn: 0) == "Displays: 1 online, 1 active, 0 asleep, 1 Sill's, 0 macOS's stand-in.",
+      "the displays' line: Sill's own display alone")
+check(P.displaysLine(online: 0, active: 0, asleep: 0, sills: 0, standIn: 0) == "Displays: 0 online, 0 active, 0 asleep, 0 Sill's, 0 macOS's stand-in.",
+      "the displays' line: none")
+check(P.displaysLine(online: 1, active: 1, asleep: 0, sills: 0, standIn: 1).hasSuffix("1 macOS's stand-in."), "the displays' line: macOS's stand-in counted")
 let words: [(P.Refusal, String, String)] = [
     (.pick, "Locked: refused a window pick; devices see none of this Mac until it is unlocked.",
      "Locked: refused 3 window picks; devices see none of this Mac until it is unlocked."),

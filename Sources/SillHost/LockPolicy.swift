@@ -571,6 +571,12 @@ enum LockPolicy {
 
     static let unlockedLine = "Unlocked: this Mac's screen is unlocked; devices see its windows again."
 
+    /// The displays as a lock or an unlock finds them, the line after it (#298: a Mac with no active display
+    /// turns its password away, and one whose display changes may lock again).
+    static func displaysLine(online: Int, active: Int, asleep: Int, sills: Int, standIn: Int) -> String {
+        "Displays: \(online) online, \(active) active, \(asleep) asleep, \(sills) Sill's, \(standIn) macOS's stand-in."
+    }
+
     /// The menus' note for a fetch or a choice refused while locked.
     static let menuNote = "The Mac is locked."
 
