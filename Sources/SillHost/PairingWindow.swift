@@ -31,7 +31,7 @@ struct PairingWindow {
         /// AskLimits keeps the quiet under its `quietKey`.
         let source: String
         /// "on this network", "nearby" (peer-to-peer Wi-Fi) or "on this Mac".
-        var from: String = "on this network"
+        var from: String = String(localized: "on this network")
     }
 
     struct Open {

@@ -169,7 +169,7 @@ package final class RemoteAccess {
             let key = try store.loadOrCreateKey()
             let recognition = try store.loadOrCreateRecognitionKey()
             guard let id = HostIdentity(privateKey: key, recognitionKey: recognition) else {
-                throw IdentityStoreError("the key could not make a TLS identity")
+                throw IdentityStoreError(String(localized: "the key could not make a TLS identity"))
             }
             paired = try store.loadPaired()
             identity = id
@@ -307,10 +307,10 @@ package final class RemoteAccess {
     /// Saves Require pairing with the trust list, off signed by this Mac's key. Nil when saved;
     /// otherwise why not, and the caller keeps it as it was.
     package func saveRequirePairing(_ on: Bool) -> String? {
-        guard let store, let identity else { return identityProblem ?? "no identity" }
+        guard let store, let identity else { return identityProblem ?? String(localized: "no identity") }
         guard let record = RequirePairingValue.encode(on, macID: identity.macID, sign: { identity.signRecord($0) }) else {
             print("Require pairing: couldn’t sign it with this Mac’s key \(keyPlace).")
-            return "this Mac’s key couldn’t sign it"
+            return String(localized: "this Mac’s key couldn’t sign it")
         }
         do { try store.saveRequirePairing(record); return nil } catch {
             print("Require pairing: couldn’t save it \(keyPlace) (\(error)).")
@@ -627,7 +627,7 @@ package final class RemoteAccess {
     /// An ask at the home door: "pair me, now if you can, else show me your code".
     private func ask(_ a: Door.PairAttempt, _ identity: HostIdentity) -> PairResult {
         let name = Self.displayName(a.request)
-        let from = a.origin == .direct ? "nearby" : (a.fromThisMac || a.origin == .loopback ? "on this Mac" : "on this network")
+        let from = a.origin == .direct ? String(localized: "nearby") : (a.fromThisMac || a.origin == .loopback ? String(localized: "on this Mac") : String(localized: "on this network"))
         let asker = PairingWindow.DeviceAsk(fingerprint: a.deviceFingerprint, source: a.display, from: from)
         let verdict = decideAsk(name: name, display: a.display, asker: asker, fromThisMac: a.fromThisMac,
                                 cable: a.cable, cableClaimed: a.request.cable == true)

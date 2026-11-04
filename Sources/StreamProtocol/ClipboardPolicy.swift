@@ -448,24 +448,24 @@ public enum ClipboardPolicy {
         // Sill for Mac's Settings › General, under Share clipboard with devices.
         /// Its footnote ("theirs here" read as if a device's copies came by themselves, so it names Paste;
         /// a password manager's copies go like any other since 2026-10-29, so it no longer excepts them).
-        public static let macFootnote = "Text you copy here can be pasted on a connected iPhone or iPad, and text sent from one with Paste becomes this Mac’s."
+        public static let macFootnote = String(localized: "Text you copy here can be pasted on a connected iPhone or iPad, and text sent from one with Paste becomes this Mac’s.")
         /// Under it while macOS does not allow every read (MacAccess): why what is copied here stays.
         public static func macAccessWarning(_ access: MacAccess) -> String? {
             switch access {
             case .allowed: return nil
-            case .notAsked, .asks: return "macOS asks before Sill reads the clipboard, so what you copy here stays on this Mac."
-            case .denied: return "macOS doesn’t let Sill read the clipboard, so what you copy here stays on this Mac."
+            case .notAsked, .asks: return String(localized: "macOS asks before Sill reads the clipboard, so what you copy here stays on this Mac.")
+            case .denied: return String(localized: "macOS doesn’t let Sill read the clipboard, so what you copy here stays on this Mac.")
             }
         }
         /// …what to do about it, beside `macAccessButton`.
         public static func macAccessHint(_ access: MacAccess) -> String? {
             switch access {
             case .allowed: return nil
-            case .notAsked: return "Click Allow in System Settings: macOS asks about Sill once, then Privacy & Security opens, where you set Sill to Allow under Paste from Other Apps. Text a device sends with Paste still arrives."
-            case .asks, .denied: return "Set Sill to Allow under Paste from Other Apps in Privacy & Security. Text a device sends with Paste still arrives."
+            case .notAsked: return String(localized: "Click Allow in System Settings: macOS asks about Sill once, then Privacy & Security opens, where you set Sill to Allow under Paste from Other Apps. Text a device sends with Paste still arrives.")
+            case .asks, .denied: return String(localized: "Set Sill to Allow under Paste from Other Apps in Privacy & Security. Text a device sends with Paste still arrives.")
             }
         }
-        public static let macAccessButton = "Allow in System Settings…"
+        public static let macAccessButton = String(localized: "Allow in System Settings…")
         /// The host's line when macOS's answer changes while a device shares the clipboard (`accessLine`).
         public static func macAccessLine(_ access: MacAccess) -> String {
             switch access {

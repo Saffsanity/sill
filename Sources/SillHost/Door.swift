@@ -347,7 +347,7 @@ final class Door {
             switch self.kind {
             case .remote:
                 guard let paired = snapshot.paired[fp] else { c.cancel(); return }
-                let label = OriginPolicy.label(origin, interface: p.interface, serviceName: p.interface.flatMap { snapshot.serviceNames[$0] }) ?? "by address"
+                let label = OriginPolicy.label(origin, interface: p.interface, serviceName: p.interface.flatMap { snapshot.serviceNames[$0] }) ?? String(localized: "by address")
                 server.serve(c, route: .remote(origin: origin, label: label, fingerprint: fp, name: paired), hello: hello,
                              admitted: { print("Remote client connected: \(paired) \(label) (\(endpoint))") })
             case .home:

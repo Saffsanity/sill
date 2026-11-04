@@ -104,6 +104,16 @@ build_number="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" "$stage/Contents/Info.plist"
 printf 'APPL????' > "$stage/Contents/PkgInfo"
 
+# The translations: Packaging/Localizable.xcstrings (the String Catalog the source's String(localized:)
+# and SwiftUI literals look up in Bundle.main) compiled into one .lproj per language, and each
+# language's InfoPlist.strings (the Local Network prompt) beside it.
+xcrun xcstringstool compile Packaging/Localizable.xcstrings --output-directory "$stage/Contents/Resources"
+for lproj in Packaging/*.lproj; do
+    [ -d "$lproj" ] || continue
+    mkdir -p "$stage/Contents/Resources/$(basename "$lproj")"
+    cp "$lproj"/* "$stage/Contents/Resources/$(basename "$lproj")/"
+done
+
 # The icon. design/AppIcon.svg is the iOS art, a full-bleed square. macOS 26+ masks and lights a
 # full-bleed icon itself when it comes from an asset catalog, but shows a legacy .icns shrunk
 # inside a grey tile (seen on macOS 27). So Quick Look renders the SVG (design/README.md's own

@@ -37,7 +37,7 @@ final class PairDeviceWindowController: NSWindowController, NSWindowDelegate {
         self.model = model
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 600), styleMask: [.titled, .closable],
                               backing: .buffered, defer: true)
-        window.title = "Pair iPhone or iPad"
+        window.title = String(localized: "Pair iPhone or iPad")
         window.isReleasedWhenClosed = false
         window.collectionBehavior.insert([.moveToActiveSpace, .fullScreenAuxiliary])
         // Before the window is ever on screen (`show` sets it again with its offer).
@@ -157,8 +157,8 @@ struct PairDeviceView: View {
             // A device-opened window is the home door's: the remote door's state is not its own.
             if offer.byDevice { return .waiting(triesLeft: triesLeft, wrongFrom: wrongFrom) }
             switch status.listener {
-            case .portInUse(let p): return .doorDown("Can’t pair while port \(p) is in use.")
-            case .failed: return .doorDown("Can’t pair: remote access couldn’t start. Sill tries again every 30 seconds.")
+            case .portInUse(let p): return .doorDown(String(localized: "Can’t pair while port \(String(p)) is in use."))
+            case .failed: return .doorDown(String(localized: "Can’t pair: remote access couldn’t start. Sill tries again every 30 seconds."))
             case .off, .listening: return .waiting(triesLeft: triesLeft, wrongFrom: wrongFrom)
             }
         case .paired(let name): return .paired(name)
@@ -236,7 +236,7 @@ struct PairDeviceView: View {
                 }
                 countdown
                 if let wrongFrom {
-                    Label("A wrong code came from \(wrongFrom). \(triesLeft) tr\(triesLeft == 1 ? "y" : "ies") left.",
+                    Label(Self.wrongCodeLine(from: wrongFrom, triesLeft: triesLeft),
                           systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                 }
@@ -274,7 +274,7 @@ struct PairDeviceView: View {
                 }
                 countdown
                 if let wrongFrom {
-                    Label("A wrong code came from \(wrongFrom). \(triesLeft) tr\(triesLeft == 1 ? "y" : "ies") left.",
+                    Label(Self.wrongCodeLine(from: wrongFrom, triesLeft: triesLeft),
                           systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                 }
@@ -310,12 +310,22 @@ struct PairDeviceView: View {
     /// A window a device opened: its first line, "iPad (iPad14,1) on this network asked to pair.",
     /// which VoiceOver also announces as it comes up (PairDeviceWindowController.show).
     static func askedLine(_ offer: RemoteAccess.PairingOffer) -> String {
-        "\(offer.requestedBy ?? "A device") \(offer.askedFrom ?? "on this network") asked to pair."
+        let who = offer.requestedBy ?? String(localized: "A device")
+        let from = offer.askedFrom ?? String(localized: "on this network")
+        return String(localized: "\(who) \(from) asked to pair.")
+    }
+
+    /// "A wrong code came from ‹address›. 2 tries left.": one whole sentence for one try, another
+    /// for more.
+    static func wrongCodeLine(from: String, triesLeft: Int) -> String {
+        triesLeft == 1
+            ? String(localized: "A wrong code came from \(from). 1 try left.")
+            : String(localized: "A wrong code came from \(from). \(triesLeft) tries left.")
     }
 
     static func countdown(until end: Date, now: Date) -> String {
         let left = max(0, Int(end.timeIntervalSince(now).rounded(.up)))
-        return "Works once, for the next \(left / 60):\(String(format: "%02d", left % 60))."
+        return String(localized: "Works once, for the next \(left / 60):\(String(format: "%02d", left % 60)).")
     }
 
     /// What to type on the device: Tailscale's name with its IPv4 under it, else a Tailscale IP,
@@ -389,7 +399,7 @@ final class CableNoticeWindowController: NSWindowController, NSWindowDelegate {
         self.model = model
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 160), styleMask: [.titled, .closable],
                               backing: .buffered, defer: true)
-        window.title = "Paired over the USB Cable"
+        window.title = String(localized: "Paired over the USB Cable")
         window.isReleasedWhenClosed = false
         window.collectionBehavior.insert([.moveToActiveSpace, .fullScreenAuxiliary])
         super.init(window: window)
@@ -453,7 +463,7 @@ struct CableNoticeView: View {
 
     static let showsFor: Duration = .seconds(10)
 
-    static func firstLine(_ name: String) -> String { "\(name) is paired with this Mac." }
+    static func firstLine(_ name: String) -> String { String(localized: "\(name) is paired with this Mac.") }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -470,7 +480,7 @@ struct CableNoticeView: View {
                 Text("It paired by itself over the USB cable, and can connect over Wi\u{2011}Fi and nearby from now on too.")
                     .fixedSize(horizontal: false, vertical: true)
                 if let removeProblem {
-                    Warning("\(name) is still paired: Sill couldn’t update the keychain (\(withoutFullStop(removeProblem))). Try again.")
+                    Warning(String(localized: "\(name) is still paired: Sill couldn’t update the keychain (\(withoutFullStop(removeProblem))). Try again."))
                 }
             }
             HStack {

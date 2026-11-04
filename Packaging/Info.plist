@@ -34,6 +34,11 @@
 	<array>
 		<string>_sill._tcp</string>
 	</array>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>zh-Hans</string>
+	</array>
 	<key>NSHumanReadableCopyright</key>
 	<string>Sill is free and open source.</string>
 	<key>NSLocalNetworkUsageDescription</key>

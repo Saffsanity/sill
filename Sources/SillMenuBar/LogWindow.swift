@@ -29,11 +29,11 @@ final class LogWindowController: NSWindowController, NSWindowDelegate {
         self.settings = settings
         scrollView = NSTextView.scrollableTextView()
         textView = scrollView.documentView as! NSTextView   // scrollableTextView() always makes one
-        statsBox = NSButton(checkboxWithTitle: "Show per-second stats", target: nil, action: nil)
+        statsBox = NSButton(checkboxWithTitle: String(localized: "Show per-second stats"), target: nil, action: nil)
 
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 520),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: true)
-        window.title = "Sill Log"
+        window.title = String(localized: "Sill Log")
         window.isReleasedWhenClosed = false
         window.collectionBehavior.insert(.moveToActiveSpace)
         window.minSize = NSSize(width: 480, height: 240)
@@ -52,8 +52,8 @@ final class LogWindowController: NSWindowController, NSWindowDelegate {
         statsBox.target = self
         statsBox.action = #selector(toggleStats(_:))
         statsBox.state = settings.logShowsStats ? .on : .off
-        let clear = NSButton(title: "Clear", target: self, action: #selector(clear(_:)))
-        let reveal = NSButton(title: "Reveal Log File", target: self, action: #selector(revealFile(_:)))
+        let clear = NSButton(title: String(localized: "Clear"), target: self, action: #selector(clear(_:)))
+        let reveal = NSButton(title: String(localized: "Reveal Log File"), target: self, action: #selector(revealFile(_:)))
         reveal.isEnabled = HostLog.shared.fileURL != nil
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
