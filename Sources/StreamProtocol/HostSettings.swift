@@ -316,41 +316,41 @@ public enum QualityPreset: Int, CaseIterable, Identifiable, Sendable {
 
     public var name: String {
         switch self {
-        case .low: "Low"
-        case .efficient: "Efficient"
-        case .balanced: "Balanced"
-        case .high: "High"
-        case .pro: "Pro"
-        case .ultra: "Ultra"
-        case .extreme: "Extreme"
+        case .low: String(localized: "Low")
+        case .efficient: String(localized: "Efficient")
+        case .balanced: String(localized: "Balanced")
+        case .high: String(localized: "High")
+        case .pro: String(localized: "Pro")
+        case .ultra: String(localized: "Ultra")
+        case .extreme: String(localized: "Extreme")
         }
     }
 
     /// "Balanced — 15 Mbps".
-    public var title: String { "\(name) — \(rawValue / 1_000_000) Mbps" }
+    public var title: String { String(localized: "\(name) — \(rawValue / 1_000_000) Mbps") }
 
     /// The one sentence, in the Mac's Settings › Streaming footer and the device's Quality footer,
     /// on what the top presets need.
     public static var fastLinkNote: String {
-        "\(ultra.name) and \(extreme.name) need the USB cable or very fast Wi\u{2011}Fi; if the picture lags, step down."
+        String(localized: "\(ultra.name) and \(extreme.name) need the USB cable or very fast Wi\u{2011}Fi; if the picture lags, step down.")
     }
 
     /// The label for any stored bitrate: a preset's title, or "Custom — 12 Mbps" for one set by
     /// hand (`defaults write`, a launch argument).
     public static func title(forBitrate bitrate: Int) -> String {
-        QualityPreset(rawValue: bitrate)?.title ?? "Custom — \(mbps(bitrate)) Mbps"
+        QualityPreset(rawValue: bitrate)?.title ?? String(localized: "Custom — \(mbps(bitrate)) Mbps")
     }
 
     /// A quality in a sentence: a preset's name ("Pro"), or "12 Mbps" for a bitrate set by hand
     /// (docs/remote-bundle-plan.md §4.1: the host's log, the Mac's card and the device's callouts).
     public static func name(forBitrate bitrate: Int) -> String {
-        QualityPreset(rawValue: bitrate)?.name ?? "\(mbps(bitrate)) Mbps"
+        QualityPreset(rawValue: bitrate)?.name ?? String(localized: "\(mbps(bitrate)) Mbps")
     }
 
     /// A quality with its resolution: "Low · Standard", "Pro · Retina", "12 Mbps · Retina". Plain
     /// spaces: a view that must keep it whole on one line spells them no-break itself.
     public static func shortTitle(bitrate: Int, captureScale: Double) -> String {
-        "\(name(forBitrate: bitrate)) · \(captureScale >= 1.5 ? "Retina" : "Standard")"
+        "\(name(forBitrate: bitrate)) · \(captureScale >= 1.5 ? "Retina" : String(localized: "Standard"))"
     }
 
     /// "15", or "8.5" for a bitrate that is not whole megabits. The same text as `HostConfig.mbps`

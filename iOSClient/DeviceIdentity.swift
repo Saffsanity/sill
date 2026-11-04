@@ -55,7 +55,7 @@ enum DeviceIdentity {
         let key: SecKey
         switch DeviceKeyPolicy.load(answer) {
         case .use:
-            guard let stored else { throw IdentityError("the Keychain gave back no key") }
+            guard let stored else { throw IdentityError(String(localized: "the Keychain gave back no key")) }
             key = stored
         case .make:
             key = try makeKey()
@@ -66,9 +66,9 @@ enum DeviceIdentity {
             #if DEBUG
             print("device key: the Keychain didn’t answer (\(status)); no new key made")
             #endif
-            throw IdentityError("the Keychain didn’t answer: \(status)")
+            throw IdentityError(String(localized: "the Keychain didn’t answer: \(Int(status))"))
         }
-        guard let id = RemoteIdentity(privateKey: key) else { throw IdentityError("the key couldn’t make a certificate") }
+        guard let id = RemoteIdentity(privateKey: key) else { throw IdentityError(String(localized: "the key couldn’t make a certificate")) }
         cached = id
         return id
     }
@@ -176,7 +176,7 @@ enum DeviceIdentity {
         #if DEBUG
         if usesSecureEnclave {
             guard let access = SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, .privateKeyUsage, nil) else {
-                throw IdentityError("no Secure Enclave access control")
+                throw IdentityError(String(localized: "no Secure Enclave access control"))
             }
             privateAttributes.removeValue(forKey: kSecAttrAccessible as String)
             privateAttributes[kSecAttrAccessControl as String] = access
@@ -186,7 +186,8 @@ enum DeviceIdentity {
         attributes[kSecPrivateKeyAttrs as String] = privateAttributes
         var error: Unmanaged<CFError>?
         guard let key = SecKeyCreateRandomKey(attributes as CFDictionary, &error) else {
-            throw IdentityError("no key could be made (\(error.map { "\($0.takeRetainedValue())" } ?? "no reason given"))")
+            let reason = error.map { "\($0.takeRetainedValue())" } ?? String(localized: "no reason given")
+            throw IdentityError(String(localized: "no key could be made (\(reason))"))
         }
         var added: Int32?
         for _ in 0..<2 {      // DeviceKeyPolicy.made: the read-back, at most one add, the read-back again
@@ -204,9 +205,9 @@ enum DeviceIdentity {
                 // Deleted again by its reference where it was kept after all, so it never turns up
                 // beside a key a pairing used.
                 SecItemDelete([kSecClass as String: kSecClassKey, kSecValueRef as String: key] as CFDictionary)
-                throw IdentityError("the Keychain didn’t keep it: \(status)")
+                throw IdentityError(String(localized: "the Keychain didn’t keep it: \(Int(status))"))
             }
         }
-        throw IdentityError("the Keychain didn’t keep it")
+        throw IdentityError(String(localized: "the Keychain didn’t keep it"))
     }
 }

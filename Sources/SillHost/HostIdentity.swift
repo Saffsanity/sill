@@ -35,9 +35,9 @@ package struct PairedDevice: Codable, Hashable, Sendable {
     /// The words for a stored method (`displayMethod`; the pane's summaries use it too).
     package static func displayMethod(_ method: String) -> String? {
         switch method {
-        case PairRequest.qr: return "with the QR code"
-        case PairRequest.code: return "with a code"
-        case PairResult.cable: return "over the USB cable"
+        case PairRequest.qr: return String(localized: "with the QR code")
+        case PairRequest.code: return String(localized: "with a code")
+        case PairResult.cable: return String(localized: "over the USB cable")
         default: return nil
         }
     }

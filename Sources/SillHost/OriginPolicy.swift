@@ -108,10 +108,10 @@ enum OriginPolicy {
     static func label(_ o: Origin, interface: String?, serviceName: String?) -> String? {
         switch o {
         case .vpn:
-            if let serviceName, !serviceName.isEmpty { return "through \(serviceName)" }
-            return "through your VPN"
-        case .internet: return "over the internet"
-        case .lan, .loopback: return "by address"
+            if let serviceName, !serviceName.isEmpty { return String(localized: "through \(serviceName)") }
+            return String(localized: "through your VPN")
+        case .internet: return String(localized: "over the internet")
+        case .lan, .loopback: return String(localized: "by address")
         case .direct: return nil
         }
     }

@@ -1,0 +1,3966 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%@ %@ asked to pair." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$@的 %1$@ 请求配对。"
+          }
+        }
+      }
+    },
+    "%@ Connected" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 已连接"
+          }
+        }
+      }
+    },
+    "%@ Mbps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ Mbps"
+          }
+        }
+      }
+    },
+    "%@ Wants to Pair" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 请求配对"
+          }
+        }
+      }
+    },
+    "%@ and %@" : {
+      "comment" : "The last two items of a list",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@和%2$@"
+          }
+        }
+      }
+    },
+    "%@ and %@ need the USB cable or very fast Wi‑Fi; if the picture lags, step down." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@和%2$@需要 USB 线或非常快的 Wi‑Fi；如果画面卡顿，请调低一档。"
+          }
+        }
+      }
+    },
+    "%@ and its executable" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 及其可执行文件"
+          }
+        }
+      }
+    },
+    "%@ asked to pair." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 请求配对。"
+          }
+        }
+      }
+    },
+    "%@ can no longer connect." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 已无法再连接。"
+          }
+        }
+      }
+    },
+    "%@ can no longer connect. To use it again, pair it again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 已无法再连接。要再次使用，请重新配对。"
+          }
+        }
+      }
+    },
+    "%@ couldn’t be read" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取%@"
+          }
+        }
+      }
+    },
+    "%@ couldn’t be saved" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法保存%@"
+          }
+        }
+      }
+    },
+    "%@ is locked" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 已锁定"
+          }
+        }
+      }
+    },
+    "%@ is locked. Unlock it to see its windows." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 已锁定。解锁后才能看到它的窗口。"
+          }
+        }
+      }
+    },
+    "%@ is paired with this Mac." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 已与这台 Mac 配对。"
+          }
+        }
+      }
+    },
+    "%@ is still paired: Sill couldn’t update the keychain (%@). Try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 仍处于配对状态：Sill 无法更新钥匙串（%2$@）。请再试一次。"
+          }
+        }
+      }
+    },
+    "%@ times" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 倍"
+          }
+        }
+      }
+    },
+    "%@ — %lld Mbps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ — %2$lld Mbps"
+          }
+        }
+      }
+    },
+    "%@ — Not connected" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — 未连接"
+          }
+        }
+      }
+    },
+    "%@. Quit and reopen Sill to try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@。退出并重新打开 Sill 后再试。"
+          }
+        }
+      }
+    },
+    "%@×%@ · %@ · %lld Mbps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@×%2$@ · %3$@ · %4$lld Mbps"
+          }
+        }
+      }
+    },
+    "%lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld"
+          }
+        }
+      }
+    },
+    "%lld Devices" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 台设备"
+          }
+        }
+      }
+    },
+    "%lld fps · frame age %@ · RTT %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld fps · 帧延迟 %2$@ · RTT %3$@"
+          }
+        }
+      }
+    },
+    "%lld fps, still" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld fps，画面静止"
+          }
+        }
+      }
+    },
+    "%lld fps, the link can’t carry %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld fps，当前链路带不动“%2$@”"
+          }
+        }
+      }
+    },
+    "%lld ms" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 毫秒"
+          }
+        }
+      }
+    },
+    "%lld of %lld fps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld / %2$lld fps"
+          }
+        }
+      }
+    },
+    ", " : {
+      "comment" : "Between the items of a list but the last two",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "、"
+          }
+        }
+      }
+    },
+    "120 fps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "120 fps"
+          }
+        }
+      }
+    },
+    "60 fps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "60 fps"
+          }
+        }
+      }
+    },
+    "A code is showing." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在显示配对码。"
+          }
+        }
+      }
+    },
+    "A device" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一台设备"
+          }
+        }
+      }
+    },
+    "A paired device can see and control this Mac on your network, nearby, and from afar while Remote Access is on. If one is lost, remove it here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已配对的设备可以在你的网络中、在附近，以及在远程访问打开时从远处查看并控制这台 Mac。如果设备丢失，请在这里移除它。"
+          }
+        }
+      }
+    },
+    "A paired device can see and control this Mac." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已配对的设备可以查看并控制这台 Mac。"
+          }
+        }
+      }
+    },
+    "A wrong code came from %@. %lld tries left." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 输入了错误的配对码。还剩 %2$lld 次机会。"
+          }
+        }
+      }
+    },
+    "A wrong code came from %@. 1 try left." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 输入了错误的配对码。还剩 1 次机会。"
+          }
+        }
+      }
+    },
+    "About Sill" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关于 Sill"
+          }
+        }
+      }
+    },
+    "Access belongs to Sill itself. Access you gave Terminal for the SillHost command-line tool doesn’t carry over." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "权限属于 Sill 本身。你为 SillHost 命令行工具授予“终端”的权限不会沿用到这里。"
+          }
+        }
+      }
+    },
+    "Accessibility" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "辅助功能"
+          }
+        }
+      }
+    },
+    "Accessibility: Allowed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "辅助功能：已允许"
+          }
+        }
+      }
+    },
+    "Accessibility: Not Allowed…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "辅助功能：未允许…"
+          }
+        }
+      }
+    },
+    "Address" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "地址"
+          }
+        }
+      }
+    },
+    "Address name" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "地址名称"
+          }
+        }
+      }
+    },
+    "Address name (optional)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "地址名称（可选）"
+          }
+        }
+      }
+    },
+    "Addresses" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "地址"
+          }
+        }
+      }
+    },
+    "Allow Accessibility…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许辅助功能…"
+          }
+        }
+      }
+    },
+    "Allow Screen Recording…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许屏幕录制…"
+          }
+        }
+      }
+    },
+    "Allow connections from the internet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许来自互联网的连接"
+          }
+        }
+      }
+    },
+    "Allow in System Settings…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在系统设置中允许…"
+          }
+        }
+      }
+    },
+    "Allowed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已允许"
+          }
+        }
+      }
+    },
+    "Allow…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许…"
+          }
+        }
+      }
+    },
+    "An iPhone or iPad Needs Sill Updated" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有 iPhone 或 iPad 需要更新 Sill"
+          }
+        }
+      }
+    },
+    "Another user started controlling this Mac." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "另一位用户开始控制这台 Mac。"
+          }
+        }
+      }
+    },
+    "Another user started controlling this Mac. Log in to your account to reactivate screen sharing with Sill." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "另一位用户开始控制这台 Mac。请登录你的账户以重新启用 Sill 屏幕共享。"
+          }
+        }
+      }
+    },
+    "Any device on your network (or nearby, with Direct Wireless Connection on) and any app on this Mac can see and control it without pairing. Connections are still encrypted." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你网络中的任何设备（或打开无线直连时附近的任何设备）以及这台 Mac 上的任何 App 都无需配对即可查看并控制它。连接仍然是加密的。"
+          }
+        }
+      }
+    },
+    "Anyone on the internet can now reach port %@ and try to connect. Sill turns away every device you haven’t paired. Turning this off doesn’t close the port on your router: remove the forward there too." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "现在互联网上的任何人都能访问端口 %@ 并尝试连接。Sill 会拒绝所有你未配对的设备。关闭此项不会关闭路由器上的端口：请同时在路由器上删除端口转发。"
+          }
+        }
+      }
+    },
+    "Approve Sill in System Settings › Login Items" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在“系统设置 › 登录项”中批准 Sill"
+          }
+        }
+      }
+    },
+    "Approve in System Settings…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在系统设置中批准…"
+          }
+        }
+      }
+    },
+    "Asking your router…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在询问路由器…"
+          }
+        }
+      }
+    },
+    "Available" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可用"
+          }
+        }
+      }
+    },
+    "Available for a window." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅适用于窗口。"
+          }
+        }
+      }
+    },
+    "Available when Sill runs from its app bundle" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill 以 App 包形式运行时可用"
+          }
+        }
+      }
+    },
+    "Available when Sill runs from its app bundle." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill 以 App 包形式运行时可用。"
+          }
+        }
+      }
+    },
+    "Away from home" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不在家时"
+          }
+        }
+      }
+    },
+    "Away from home now: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前不在家：%@"
+          }
+        }
+      }
+    },
+    "Balanced" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "均衡"
+          }
+        }
+      }
+    },
+    "Beta. Devices play the sound of what you stream: all of the streamed window’s app, or every app for the Desktop. The Mac keeps playing it too. A connected iPhone or iPad can also turn this on or off from Sill’s settings there, and mute it for itself alone. Nothing is recorded." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "测试版。设备会播放所串流内容的声音：串流窗口所属 App 的全部声音，或串流桌面时所有 App 的声音。Mac 也会继续播放。已连接的 iPhone 或 iPad 也可以在其 Sill 设置中打开或关闭此项，并单独为自己静音。不会录制任何内容。"
+          }
+        }
+      }
+    },
+    "Cancel" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消"
+          }
+        }
+      }
+    },
+    "Can’t pair while port %@ is in use." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "端口 %@ 被占用时无法配对。"
+          }
+        }
+      }
+    },
+    "Can’t pair: remote access couldn’t start. Sill tries again every 30 seconds." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法配对：远程访问无法启动。Sill 每 30 秒重试一次。"
+          }
+        }
+      }
+    },
+    "Can’t scan? Tap Enter Code Instead, and type:" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法扫描？轻点“改为输入配对码”，然后输入："
+          }
+        }
+      }
+    },
+    "Change It in Sharing Settings…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在共享设置中更改…"
+          }
+        }
+      }
+    },
+    "Change Port…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改端口…"
+          }
+        }
+      }
+    },
+    "Change…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改…"
+          }
+        }
+      }
+    },
+    "Check Now" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "立即检查"
+          }
+        }
+      }
+    },
+    "Check for updates automatically" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动检查更新"
+          }
+        }
+      }
+    },
+    "Checking…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在检查…"
+          }
+        }
+      }
+    },
+    "Choose a port from 1024 to 65535." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请选择 1024 到 65535 之间的端口。"
+          }
+        }
+      }
+    },
+    "Clear" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除"
+          }
+        }
+      }
+    },
+    "Click Allow in System Settings: macOS asks about Sill once, then Privacy & Security opens, where you set Sill to Allow under Paste from Other Apps. Text a device sends with Paste still arrives." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点按“在系统设置中允许”：macOS 会就 Sill 询问一次，然后打开“隐私与安全性”，请在“从其他 App 粘贴”中将 Sill 设为“允许”。设备通过“粘贴”发送的文本仍会送达。"
+          }
+        }
+      }
+    },
+    "Click to show a code." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点按以显示配对码。"
+          }
+        }
+      }
+    },
+    "Close" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭"
+          }
+        }
+      }
+    },
+    "Code" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配对码"
+          }
+        }
+      }
+    },
+    "Copied" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已复制"
+          }
+        }
+      }
+    },
+    "Copies the command, to paste into Terminal" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复制命令，以便粘贴到“终端”"
+          }
+        }
+      }
+    },
+    "Copy" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拷贝"
+          }
+        }
+      }
+    },
+    "Copy the %@ address" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拷贝 %@ 地址"
+          }
+        }
+      }
+    },
+    "Copy the IPv6 address" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拷贝 IPv6 地址"
+          }
+        }
+      }
+    },
+    "Copy the router’s internet address" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拷贝路由器的互联网地址"
+          }
+        }
+      }
+    },
+    "Copy this Mac’s address" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拷贝这台 Mac 的地址"
+          }
+        }
+      }
+    },
+    "Couldn’t check: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法检查：%@"
+          }
+        }
+      }
+    },
+    "Couldn’t check: GitHub answered with an error (HTTP %lld)." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法检查：GitHub 返回了错误（HTTP %lld）。"
+          }
+        }
+      }
+    },
+    "Couldn’t check: GitHub didn’t answer within %lld seconds." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法检查：GitHub 在 %lld 秒内没有响应。"
+          }
+        }
+      }
+    },
+    "Couldn’t check: GitHub has no release of Sill yet." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法检查：GitHub 上还没有 Sill 的发布版本。"
+          }
+        }
+      }
+    },
+    "Couldn’t check: GitHub is limiting requests from this network. Try again after %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法检查：GitHub 正在限制来自此网络的请求。请在 %@ 之后再试。"
+          }
+        }
+      }
+    },
+    "Couldn’t check: GitHub is limiting requests from this network. Try again in an hour." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法检查：GitHub 正在限制来自此网络的请求。请一小时后再试。"
+          }
+        }
+      }
+    },
+    "Couldn’t check: GitHub’s answer wasn’t a release Sill understands." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法检查：GitHub 返回的不是 Sill 能识别的发布版本。"
+          }
+        }
+      }
+    },
+    "Couldn’t check: this Mac isn’t connected to the internet." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法检查：这台 Mac 未连接到互联网。"
+          }
+        }
+      }
+    },
+    "Couldn’t start; trying again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法启动，正在重试"
+          }
+        }
+      }
+    },
+    "Custom — %@ Mbps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义 — %@ Mbps"
+          }
+        }
+      }
+    },
+    "Cut" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "剪切"
+          }
+        }
+      }
+    },
+    "Device" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设备"
+          }
+        }
+      }
+    },
+    "Devices" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设备"
+          }
+        }
+      }
+    },
+    "Devices Can’t Connect" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设备无法连接"
+          }
+        }
+      }
+    },
+    "Devices can connect but can’t see any windows." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设备可以连接，但看不到任何窗口。"
+          }
+        }
+      }
+    },
+    "Devices can watch but not click or type." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设备可以观看，但无法点按或输入。"
+          }
+        }
+      }
+    },
+    "Devices can’t connect: Sill couldn’t use its key in your keychain (%@). Quit Sill and open it again, and choose Always Allow if the keychain asks." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设备无法连接：Sill 无法使用钥匙串中的密钥（%@）。请退出 Sill 后重新打开；如果钥匙串询问，请选择“始终允许”。"
+          }
+        }
+      }
+    },
+    "Didn’t ask for this? Click Cancel." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不是你发起的？请点按“取消”。"
+          }
+        }
+      }
+    },
+    "Didn’t reach %@. Try Paste again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有送达 %@。请再试一次“粘贴”。"
+          }
+        }
+      }
+    },
+    "Direct" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "直连"
+          }
+        }
+      }
+    },
+    "Direct Wireless Connection" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无线直连"
+          }
+        }
+      }
+    },
+    "Direct wireless connection" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无线直连"
+          }
+        }
+      }
+    },
+    "Dismiss" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "忽略"
+          }
+        }
+      }
+    },
+    "Done" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完成"
+          }
+        }
+      }
+    },
+    "Each device asks for its own screen’s rate, up to this limit. Quality is per 60 fps; a 120 fps stream gets twice as much. %@ Changes apply at once: the current stream restarts for a moment." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每台设备会按自己屏幕的刷新率请求，但不超过此上限。画质以 60 fps 为基准；120 fps 的串流会得到两倍码率。%@ 更改会立即生效：当前串流会短暂重启。"
+          }
+        }
+      }
+    },
+    "Each iPhone or iPad pairs once: over the USB cable by itself, or on Wi‑Fi with a code this Mac shows when the device asks. Everything devices send and receive is encrypted." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每台 iPhone 或 iPad 只需配对一次：通过 USB 线自动配对，或在 Wi‑Fi 下由设备请求后输入这台 Mac 显示的配对码。设备收发的所有内容都经过加密。"
+          }
+        }
+      }
+    },
+    "Edit" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "编辑"
+          }
+        }
+      }
+    },
+    "Efficient" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "高效"
+          }
+        }
+      }
+    },
+    "Extreme" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "极致"
+          }
+        }
+      }
+    },
+    "Find" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查找"
+          }
+        }
+      }
+    },
+    "Find Next" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查找下一个"
+          }
+        }
+      }
+    },
+    "Find Previous" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查找上一个"
+          }
+        }
+      }
+    },
+    "Find…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查找…"
+          }
+        }
+      }
+    },
+    "Firewall" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "防火墙"
+          }
+        }
+      }
+    },
+    "Forward TCP port %@ on your router to this Mac (%@), and reserve that address for this Mac in the router’s settings." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在路由器上将 TCP 端口 %1$@ 转发到这台 Mac（%2$@），并在路由器设置中为这台 Mac 保留该地址。"
+          }
+        }
+      }
+    },
+    "Frame Rate" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帧率"
+          }
+        }
+      }
+    },
+    "Frame rate limit" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帧率上限"
+          }
+        }
+      }
+    },
+    "General" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通用"
+          }
+        }
+      }
+    },
+    "Hardware Encoder Busy" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "硬件编码器繁忙"
+          }
+        }
+      }
+    },
+    "Hardware Encoder Stuck" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "硬件编码器卡住"
+          }
+        }
+      }
+    },
+    "High" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "高"
+          }
+        }
+      }
+    },
+    "IPv6" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IPv6"
+          }
+        }
+      }
+    },
+    "If your iPhone or iPad can’t find this Mac, allow Sill in Privacy & Security › Local Network." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "如果 iPhone 或 iPad 找不到这台 Mac，请在“隐私与安全性 › 本地网络”中允许 Sill。"
+          }
+        }
+      }
+    },
+    "If your router has a dynamic DNS name, enter it so your devices keep finding this Mac when your internet address changes. Add :port if the router forwards a different outside port." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "如果你的路由器有动态 DNS 域名，请在此输入，这样互联网地址变化后设备仍能找到这台 Mac。如果路由器转发的外部端口不同，请加上“:端口”。"
+          }
+        }
+      }
+    },
+    "In Sill on your iPhone or iPad, tap this Mac, or tap Add a Mac… when you’re away, then point it at this code." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 iPhone 或 iPad 上的 Sill 中轻点这台 Mac（不在家时轻点“添加 Mac…”），然后对准这个配对码。"
+          }
+        }
+      }
+    },
+    "Internet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "互联网"
+          }
+        }
+      }
+    },
+    "It paired by itself over the USB cable, and can connect over Wi‑Fi and nearby from now on too." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它已通过 USB 线自动配对，今后也可以通过 Wi‑Fi 和在附近连接。"
+          }
+        }
+      }
+    },
+    "It tried to connect with an older Sill." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它尝试用旧版 Sill 连接。"
+          }
+        }
+      }
+    },
+    "Its windows come back once it is unlocked." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解锁后它的窗口就会回来。"
+          }
+        }
+      }
+    },
+    "Last checked %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上次检查：%@。"
+          }
+        }
+      }
+    },
+    "Last window" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上一个窗口"
+          }
+        }
+      }
+    },
+    "Launch at Login" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录时启动"
+          }
+        }
+      }
+    },
+    "Launch at login" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录时启动"
+          }
+        }
+      }
+    },
+    "Lets Sill capture the windows you pick on your iPhone or iPad, and their sound when Send Audio is on. Nothing is recorded or saved; frames and sound go straight to your devices." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让 Sill 捕获你在 iPhone 或 iPad 上选择的窗口，并在打开“传送声音”时捕获其声音。不会录制或保存任何内容；画面和声音直接发送到你的设备。"
+          }
+        }
+      }
+    },
+    "Lets the iPhone and iPad you pair connect to this Mac from other networks: through a VPN such as Tailscale, or through a port you forward on your router. Sill turns away every device you haven’t paired, and encrypts everything the paired ones send and receive." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让你配对的 iPhone 和 iPad 从其他网络连接到这台 Mac：通过 Tailscale 等 VPN，或通过你在路由器上转发的端口。Sill 会拒绝所有未配对的设备，并加密已配对设备收发的所有内容。"
+          }
+        }
+      }
+    },
+    "Lets your iPhone and iPad connect when they’re near this Mac, even without a shared Wi‑Fi network, the way AirDrop does. While it’s on, this Mac’s Wi‑Fi keeps stepping away from your network, so streaming over Wi‑Fi can stutter. Anyone nearby with Sill can find this Mac; only devices you paired can connect, unless Require pairing is off." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "像隔空投送一样，即使没有共同的 Wi‑Fi 网络，iPhone 和 iPad 在这台 Mac 附近时也能连接。打开期间，这台 Mac 的 Wi‑Fi 会不断短暂离开你的网络，因此通过 Wi‑Fi 串流可能会卡顿。附近任何装有 Sill 的人都能发现这台 Mac；除非关闭了“需要配对”，否则只有你配对过的设备才能连接。"
+          }
+        }
+      }
+    },
+    "Lets your iPhone or iPad click, scroll and type on this Mac, and lets Sill move and size the window it streams." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让 iPhone 或 iPad 可以在这台 Mac 上点按、滚动和输入，并让 Sill 移动和调整所串流窗口的大小。"
+          }
+        }
+      }
+    },
+    "Local Network" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本地网络"
+          }
+        }
+      }
+    },
+    "Log in to your account to reactivate screen sharing with Sill." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请登录你的账户以重新启用 Sill 屏幕共享。"
+          }
+        }
+      }
+    },
+    "Low" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "低"
+          }
+        }
+      }
+    },
+    "Lower latency when the Mac is busy, at a softer picture." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac 繁忙时延迟更低，但画面会稍软。"
+          }
+        }
+      }
+    },
+    "Minimize" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最小化"
+          }
+        }
+      }
+    },
+    "Name" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "名称"
+          }
+        }
+      }
+    },
+    "Needed to show your windows on your devices." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在设备上显示你的窗口需要此权限。"
+          }
+        }
+      }
+    },
+    "Needs Accessibility" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要辅助功能权限"
+          }
+        }
+      }
+    },
+    "Needs Screen Recording" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要屏幕录制权限"
+          }
+        }
+      }
+    },
+    "Needs Screen Recording and Accessibility" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要屏幕录制和辅助功能权限"
+          }
+        }
+      }
+    },
+    "Needs attention" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要处理"
+          }
+        }
+      }
+    },
+    "New Code" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新配对码"
+          }
+        }
+      }
+    },
+    "No VPN is running on this Mac. Install one such as Tailscale on this Mac and on your iPhone or iPad, or allow connections from the internet below." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac 上没有运行 VPN。请在这台 Mac 和你的 iPhone 或 iPad 上安装 Tailscale 之类的 VPN，或在下方允许来自互联网的连接。"
+          }
+        }
+      }
+    },
+    "No paired devices yet." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有已配对的设备。"
+          }
+        }
+      }
+    },
+    "No shared network needed; Wi‑Fi streams can stutter" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无需共同网络；Wi‑Fi 串流可能会卡顿"
+          }
+        }
+      }
+    },
+    "None" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无"
+          }
+        }
+      }
+    },
+    "Not Visible on the Network" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在网络上不可见"
+          }
+        }
+      }
+    },
+    "Not advertised (test pattern mode)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未广播（测试图案模式）"
+          }
+        }
+      }
+    },
+    "Not advertised; test clients connect to port %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未广播；测试客户端连接到端口 %@。"
+          }
+        }
+      }
+    },
+    "Not available on this version of macOS: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此版本 macOS 不可用：%@"
+          }
+        }
+      }
+    },
+    "Not checked yet." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未检查。"
+          }
+        }
+      }
+    },
+    "Not visible (the listener failed)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不可见（监听失败）"
+          }
+        }
+      }
+    },
+    "Not yet (waiting for the network)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未（正在等待网络）"
+          }
+        }
+      }
+    },
+    "Nothing is getting through" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "数据无法送达"
+          }
+        }
+      }
+    },
+    "Nothing you copy goes between this %@ and %@ while this is off." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Nothing you copy goes between this %1$@ and %2$@ while this is off."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭时，这台 %1$@ 和 %2$@ 之间不会互通任何拷贝的内容。"
+          }
+        }
+      }
+    },
+    "OK" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "好"
+          }
+        }
+      }
+    },
+    "Off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关"
+          }
+        }
+      }
+    },
+    "Off for this session: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本次运行已关闭：%@"
+          }
+        }
+      }
+    },
+    "On a Retina display, a quarter of the pixels to encode" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Retina 显示器上，只需编码四分之一的像素"
+          }
+        }
+      }
+    },
+    "On · %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开 · %@"
+          }
+        }
+      }
+    },
+    "On · no VPN on this Mac" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开 · 这台 Mac 上没有 VPN"
+          }
+        }
+      }
+    },
+    "Once a day, Sill asks GitHub whether a newer version is out. GitHub sees this Mac’s IP address and which version of Sill it has; nothing else is sent. Sill never downloads or installs anything by itself: a new version opens its page on GitHub, where you download it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill 每天询问一次 GitHub 是否有新版本。GitHub 会看到这台 Mac 的 IP 地址和 Sill 的版本号，不会发送其他任何信息。Sill 从不自行下载或安装任何东西：有新版本时会打开它在 GitHub 上的页面，由你自己下载。"
+          }
+        }
+      }
+    },
+    "Only needed for a port forward on your router. A VPN is simpler and keeps this Mac off the open internet." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅在路由器上做端口转发时需要。使用 VPN 更简单，也能让这台 Mac 不暴露在公共互联网上。"
+          }
+        }
+      }
+    },
+    "Open Energy Settings…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开节能设置…"
+          }
+        }
+      }
+    },
+    "Open Local Network…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开本地网络设置…"
+          }
+        }
+      }
+    },
+    "Open Privacy & Security…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开隐私与安全性…"
+          }
+        }
+      }
+    },
+    "Open Release Page…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开发布页面…"
+          }
+        }
+      }
+    },
+    "Open Sill on your iPhone or iPad. This Mac appears as “%@”." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 iPhone 或 iPad 上打开 Sill。这台 Mac 显示为“%@”。"
+          }
+        }
+      }
+    },
+    "Open System Settings…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开系统设置…"
+          }
+        }
+      }
+    },
+    "Pair iPhone or iPad" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配对 iPhone 或 iPad"
+          }
+        }
+      }
+    },
+    "Pair iPhone or iPad…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配对 iPhone 或 iPad…"
+          }
+        }
+      }
+    },
+    "Paired %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 配对"
+          }
+        }
+      }
+    },
+    "Paired %@ %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ %2$@配对"
+          }
+        }
+      }
+    },
+    "Paired Devices" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已配对设备"
+          }
+        }
+      }
+    },
+    "Paired devices" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已配对设备"
+          }
+        }
+      }
+    },
+    "Paired devices learn the new port the next time they connect at home." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已配对设备下次在家中连接时会获知新端口。"
+          }
+        }
+      }
+    },
+    "Paired over the USB Cable" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已通过 USB 线配对"
+          }
+        }
+      }
+    },
+    "Paired with %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已与 %@ 配对。"
+          }
+        }
+      }
+    },
+    "Pairing code image" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配对码图像"
+          }
+        }
+      }
+    },
+    "Pairing is required until Sill quits: Sill couldn’t update the keychain (%@). Try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Sill 退出前仍需配对：Sill 无法更新钥匙串（%@）。请再试一次。"
+          }
+        }
+      }
+    },
+    "Pairing is still required: Sill couldn’t update the keychain (%@). Try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仍需配对：Sill 无法更新钥匙串（%@）。请再试一次。"
+          }
+        }
+      }
+    },
+    "Pairing stopped after %lld wrong codes." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入错误配对码 %lld 次后，配对已停止。"
+          }
+        }
+      }
+    },
+    "Paste" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "粘贴"
+          }
+        }
+      }
+    },
+    "Paste on %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 %@ 上粘贴"
+          }
+        }
+      }
+    },
+    "Paste on %@ Right Away" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "立即在 %@ 上粘贴"
+          }
+        }
+      }
+    },
+    "Paste on %@ is available, near the bar." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可以在 %@ 上粘贴了，就在栏旁边。"
+          }
+        }
+      }
+    },
+    "Paste on %@. Pastes the text you copied on this %@ where %@’s cursor is." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Paste on %1$@. Pastes the text you copied on this %2$@ where %3$@’s cursor is."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 %1$@ 上粘贴。把你在这台 %2$@ 上拷贝的文本粘贴到 %3$@ 的光标处。"
+          }
+        }
+      }
+    },
+    "Paste on %@. Sends the text you copied on this %@ to %@’s clipboard. Then press Command-V there." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Paste on %1$@. Sends the text you copied on this %2$@ to %3$@’s clipboard. Then press Command-V there."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 %1$@ 上粘贴。把你在这台 %2$@ 上拷贝的文本发送到 %3$@ 的剪贴板，然后在那里按 Command-V。"
+          }
+        }
+      }
+    },
+    "Pasted on %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已在 %@ 上粘贴。"
+          }
+        }
+      }
+    },
+    "Pastes the text you copied on this %@ where %@’s cursor is." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Pastes the text you copied on this %1$@ where %2$@’s cursor is."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把你在这台 %1$@ 上拷贝的文本粘贴到 %2$@ 的光标处。"
+          }
+        }
+      }
+    },
+    "Per 60 fps; a 120 fps stream gets twice as much" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以 60 fps 为基准；120 fps 串流会得到两倍码率"
+          }
+        }
+      }
+    },
+    "Permissions" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "权限"
+          }
+        }
+      }
+    },
+    "Pick a window on the device to start streaming." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在设备上选择一个窗口即可开始串流。"
+          }
+        }
+      }
+    },
+    "Picked windows leave this screen while they stream" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所选窗口串流期间会离开这块屏幕"
+          }
+        }
+      }
+    },
+    "Plugged in, it pairs again by itself when it asks. Unplug it to keep it out." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "插着线时，它请求后会自动重新配对。拔掉线即可阻止它。"
+          }
+        }
+      }
+    },
+    "Point it at this code, or tap Enter Code Instead and type the code." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "对准这个配对码，或轻点“改为输入配对码”并输入配对码。"
+          }
+        }
+      }
+    },
+    "Port" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "端口"
+          }
+        }
+      }
+    },
+    "Port %@ belongs to AirPlay Receiver. Choose another." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "端口 %@ 属于隔空播放接收器。请选择其他端口。"
+          }
+        }
+      }
+    },
+    "Port %@ is in use" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "端口 %@ 已被占用"
+          }
+        }
+      }
+    },
+    "Port %@ is in use by another app, so devices can’t reach this Mac remotely. Sill tries again every 30 seconds." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "端口 %@ 被其他 App 占用，因此设备无法远程访问这台 Mac。Sill 每 30 秒重试一次。"
+          }
+        }
+      }
+    },
+    "Port %@ is in use by another app." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "端口 %@ 被其他 App 占用。"
+          }
+        }
+      }
+    },
+    "Ports from 49152 up can be taken by any app at any moment." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "49152 及以上的端口随时可能被任何 App 占用。"
+          }
+        }
+      }
+    },
+    "Prioritize encoding speed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "优先编码速度"
+          }
+        }
+      }
+    },
+    "Pro" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "专业"
+          }
+        }
+      }
+    },
+    "Quality" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "画质"
+          }
+        }
+      }
+    },
+    "Quit Sill" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "退出 Sill"
+          }
+        }
+      }
+    },
+    "RTT %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RTT %@"
+          }
+        }
+      }
+    },
+    "Redo" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重做"
+          }
+        }
+      }
+    },
+    "Registering on the local network…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在本地网络上注册…"
+          }
+        }
+      }
+    },
+    "Registering…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在注册…"
+          }
+        }
+      }
+    },
+    "Relaunch Sill" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新启动 Sill"
+          }
+        }
+      }
+    },
+    "Remote Access" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程访问"
+          }
+        }
+      }
+    },
+    "Remote Access Can’t Start" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程访问无法启动"
+          }
+        }
+      }
+    },
+    "Remote Access is off. Paired devices can connect away from home once you turn it on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程访问已关闭。打开后，已配对设备在外也能连接。"
+          }
+        }
+      }
+    },
+    "Remote Access…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程访问…"
+          }
+        }
+      }
+    },
+    "Remote access" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程访问"
+          }
+        }
+      }
+    },
+    "Remote access couldn’t start (%@). Sill tries again every 30 seconds." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程访问无法启动（%@）。Sill 每 30 秒重试一次。"
+          }
+        }
+      }
+    },
+    "Remote access isn’t available: Sill couldn’t use the keychain (%@)." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程访问不可用：Sill 无法使用钥匙串（%@）。"
+          }
+        }
+      }
+    },
+    "Remove" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除"
+          }
+        }
+      }
+    },
+    "Remove the part after %: it only works on this network." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请删除 % 之后的部分：它只在此网络中有效。"
+          }
+        }
+      }
+    },
+    "Rename" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重命名"
+          }
+        }
+      }
+    },
+    "Require pairing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要配对"
+          }
+        }
+      }
+    },
+    "Resolution" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分辨率"
+          }
+        }
+      }
+    },
+    "Retina" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retina"
+          }
+        }
+      }
+    },
+    "Reveal Log File" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示日志文件"
+          }
+        }
+      }
+    },
+    "Router’s internet address" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "路由器的互联网地址"
+          }
+        }
+      }
+    },
+    "Running from" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行位置"
+          }
+        }
+      }
+    },
+    "Save" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "存储"
+          }
+        }
+      }
+    },
+    "Screen Recording" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕录制"
+          }
+        }
+      }
+    },
+    "Screen Recording Is Off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕录制已关闭"
+          }
+        }
+      }
+    },
+    "Screen Recording starts working once Sill opens again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill 重新打开后，屏幕录制才会生效。"
+          }
+        }
+      }
+    },
+    "Screen Recording: Allowed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕录制：已允许"
+          }
+        }
+      }
+    },
+    "Screen Recording: Not Allowed…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕录制：未允许…"
+          }
+        }
+      }
+    },
+    "Select All" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全选"
+          }
+        }
+      }
+    },
+    "Send Audio (Beta)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "传送声音（测试版）"
+          }
+        }
+      }
+    },
+    "Send audio (beta)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "传送声音（测试版）"
+          }
+        }
+      }
+    },
+    "Sends the text you copied on this %@ to %@’s clipboard." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Sends the text you copied on this %1$@ to %2$@’s clipboard."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把你在这台 %1$@ 上拷贝的文本发送到 %2$@ 的剪贴板。"
+          }
+        }
+      }
+    },
+    "Sent to %@’s clipboard. Press Command-V there." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已发送到 %@ 的剪贴板。请在那里按 Command-V。"
+          }
+        }
+      }
+    },
+    "Sent to %@’s clipboard. Press ⌘V there." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已发送到 %@ 的剪贴板。请在那里按 ⌘V。"
+          }
+        }
+      }
+    },
+    "Set Sill to Allow under Paste from Other Apps in Privacy & Security. Text a device sends with Paste still arrives." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在“隐私与安全性”的“从其他 App 粘贴”中将 Sill 设为“允许”。设备通过“粘贴”发送的文本仍会送达。"
+          }
+        }
+      }
+    },
+    "Settings…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设置…"
+          }
+        }
+      }
+    },
+    "Share Clipboard" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共享剪贴板"
+          }
+        }
+      }
+    },
+    "Share clipboard with devices" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "与设备共享剪贴板"
+          }
+        }
+      }
+    },
+    "Show Devices…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示设备…"
+          }
+        }
+      }
+    },
+    "Show Log…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示日志…"
+          }
+        }
+      }
+    },
+    "Show per-second stats" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示每秒统计"
+          }
+        }
+      }
+    },
+    "Show the pairing window to screen sharing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在屏幕共享中显示配对窗口"
+          }
+        }
+      }
+    },
+    "Sill %@ (%@). Free and open source." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill %1$@（%2$@）。免费开源。"
+          }
+        }
+      }
+    },
+    "Sill %@ Is Available…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill %@ 已推出…"
+          }
+        }
+      }
+    },
+    "Sill %@ is available." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill %@ 已推出。"
+          }
+        }
+      }
+    },
+    "Sill %@. The picture is unaffected." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill %@。画面不受影响。"
+          }
+        }
+      }
+    },
+    "Sill Couldn’t Start" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill 无法启动"
+          }
+        }
+      }
+    },
+    "Sill Log" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill 日志"
+          }
+        }
+      }
+    },
+    "Sill appears on your iPhone and iPad once this Mac is on Wi-Fi or Ethernet and Local Network access is allowed." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac 连上 Wi-Fi 或以太网并允许本地网络访问后，Sill 就会出现在你的 iPhone 和 iPad 上。"
+          }
+        }
+      }
+    },
+    "Sill couldn’t use its key in your keychain." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill 无法使用钥匙串中的密钥。"
+          }
+        }
+      }
+    },
+    "Sill couldn’t use its key in your keychain. Quit Sill and open it again, and choose Always Allow if the keychain asks." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill 无法使用钥匙串中的密钥。请退出 Sill 后重新打开；如果钥匙串询问，请选择“始终允许”。"
+          }
+        }
+      }
+    },
+    "Sill doesn’t check for updates in test pattern mode." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "测试图案模式下 Sill 不检查更新。"
+          }
+        }
+      }
+    },
+    "Sill is up to date." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill 已是最新版本。"
+          }
+        }
+      }
+    },
+    "Sill moves the window you pick onto an invisible display made for your device, so it keeps updating when other windows cover it and text is drawn at your device’s scale. The window leaves this screen while it streams and comes back when you stop streaming or quit Sill." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill 会把你选择的窗口移到一块为你的设备专门创建的隐形显示器上，这样即使被其他窗口遮挡它也会持续更新，文字也会按设备的缩放比例绘制。串流期间窗口会离开这块屏幕，停止串流或退出 Sill 后会回来。"
+          }
+        }
+      }
+    },
+    "Sill streams at these while every connected device is away from home, through a VPN or over the internet, so a slow connection never starts at your home quality. A device away from home changes these, and never your Quality and Resolution above." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当所有已连接设备都不在家（通过 VPN 或互联网连接）时，Sill 会按这些设置串流，避免慢速连接一开始就用家中的画质。不在家的设备只会更改这些设置，不会更改上方的画质和分辨率。"
+          }
+        }
+      }
+    },
+    "Sill streams at these while every connected device is away from home, through a VPN or over the internet, so a slow connection never starts at your home quality. A device away from home changes these, and never your Quality and Resolution above. Streaming at these now." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当所有已连接设备都不在家（通过 VPN 或互联网连接）时，Sill 会按这些设置串流，避免慢速连接一开始就用家中的画质。不在家的设备只会更改这些设置，不会更改上方的画质和分辨率。当前正按这些设置串流。"
+          }
+        }
+      }
+    },
+    "Sill — %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill — %@"
+          }
+        }
+      }
+    },
+    "Sill, %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill，%@"
+          }
+        }
+      }
+    },
+    "Sill’s executable" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill 的可执行文件"
+          }
+        }
+      }
+    },
+    "Sleep" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "睡眠"
+          }
+        }
+      }
+    },
+    "Standard" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标准"
+          }
+        }
+      }
+    },
+    "Starting…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在启动…"
+          }
+        }
+      }
+    },
+    "Status" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "状态"
+          }
+        }
+      }
+    },
+    "Stream from a virtual display" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从虚拟显示器串流"
+          }
+        }
+      }
+    },
+    "Streamed where it is: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在原位置串流：%@"
+          }
+        }
+      }
+    },
+    "Streaming" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "串流"
+          }
+        }
+      }
+    },
+    "Streaming to %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在串流到 %@"
+          }
+        }
+      }
+    },
+    "Streaming with the software encoder, up to 60 fps, until it is free again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在使用软件编码器串流（最高 60 fps），直到硬件编码器空闲。"
+          }
+        }
+      }
+    },
+    "Streaming with the software encoder, up to 60 fps. Restarting the Mac fixes this." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在使用软件编码器串流（最高 60 fps）。重新启动 Mac 即可解决。"
+          }
+        }
+      }
+    },
+    "Test Pattern" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "测试图案"
+          }
+        }
+      }
+    },
+    "Test Pattern Mode" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "测试图案模式"
+          }
+        }
+      }
+    },
+    "Text you copy here can be pasted on a connected iPhone or iPad, and text sent from one with Paste becomes this Mac’s." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在这里拷贝的文本可以粘贴到已连接的 iPhone 或 iPad 上；从设备通过“粘贴”发送的文本也会进入这台 Mac 的剪贴板。"
+          }
+        }
+      }
+    },
+    "Text you copy on %@ is ready to paste on this %@. To paste on %@, copy text here and tap Paste: it goes where %@’s cursor is. With Paste on %@ Right Away off, Paste only puts it on %@’s clipboard." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Text you copy on %1$@ is ready to paste on this %2$@. To paste on %3$@, copy text here and tap Paste: it goes where %4$@’s cursor is. With Paste on %5$@ Right Away off, Paste only puts it on %6$@’s clipboard."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你在 %1$@ 上拷贝的文本可以直接粘贴到这台 %2$@ 上。要粘贴到 %3$@，在这里拷贝文本并轻点“粘贴”：文本会出现在 %4$@ 的光标处。如果关闭“立即在 %5$@ 上粘贴”，“粘贴”只会把文本放到 %6$@ 的剪贴板。"
+          }
+        }
+      }
+    },
+    "Text you copy on %@ is ready to paste on this %@. To paste on %@, copy text here, tap Paste, then press ⌘V there." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Text you copy on %1$@ is ready to paste on this %2$@. To paste on %3$@, copy text here, tap Paste, then press ⌘V there."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你在 %1$@ 上拷贝的文本可以直接粘贴到这台 %2$@ 上。要粘贴到 %3$@，在这里拷贝文本，轻点“粘贴”，然后在那里按 ⌘V。"
+          }
+        }
+      }
+    },
+    "That doesn’t look like an address. Try home.example.net, or home.example.net:17455." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这看起来不像地址。请尝试 home.example.net 或 home.example.net:17455。"
+          }
+        }
+      }
+    },
+    "The Mac" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac"
+          }
+        }
+      }
+    },
+    "The Mac keeps playing it too" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac 也会继续播放"
+          }
+        }
+      }
+    },
+    "The devices you pair in Devices can connect from afar while Remote Access is on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程访问打开时，你在“设备”中配对的设备可以从远处连接。"
+          }
+        }
+      }
+    },
+    "The hardware encoder is busy or not answering, so streams use the software encoder: up to 60 fps at Standard resolution. Sill switches back by itself once it keeps up again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "硬件编码器繁忙或无响应，因此串流改用软件编码器：标准分辨率下最高 60 fps。硬件编码器恢复后，Sill 会自动切换回去。"
+          }
+        }
+      }
+    },
+    "The hardware encoder is stuck, so streams use the software encoder: up to 60 fps at Standard resolution. Restarting the Mac fixes this." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "硬件编码器卡住了，因此串流改用软件编码器：标准分辨率下最高 60 fps。重新启动 Mac 即可解决。"
+          }
+        }
+      }
+    },
+    "The link can’t carry %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前链路带不动“%@”"
+          }
+        }
+      }
+    },
+    "The login item and the permissions follow this copy of Sill. Keep one copy, in Applications." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录项和权限都跟随这一份 Sill。请只保留一份，并放在“应用程序”文件夹中。"
+          }
+        }
+      }
+    },
+    "The macOS firewall blocks %@, so devices on the network cannot connect. In Terminal:" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 防火墙阻止了%@，因此网络中的设备无法连接。请在“终端”中运行："
+          }
+        }
+      }
+    },
+    "The macOS firewall blocks %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 防火墙阻止了%@。"
+          }
+        }
+      }
+    },
+    "The macOS firewall blocks all incoming connections, so devices on the network cannot connect. %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 防火墙阻止了所有传入连接，因此网络中的设备无法连接。%@"
+          }
+        }
+      }
+    },
+    "The macOS firewall blocks all incoming connections." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 防火墙阻止了所有传入连接。"
+          }
+        }
+      }
+    },
+    "The streamed window is on the virtual display" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所串流的窗口在虚拟显示器上"
+          }
+        }
+      }
+    },
+    "Then press ⌘V there." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "然后在那里按 ⌘V。"
+          }
+        }
+      }
+    },
+    "This Mac can’t be reached while it’s asleep. While a device is connected from away, Sill keeps it from going to sleep by itself." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac 睡眠时无法访问。有设备从远程连接时，Sill 会阻止它自动睡眠。"
+          }
+        }
+      }
+    },
+    "This build of Sill has no version number, so it can’t check." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此版本的 Sill 没有版本号，因此无法检查。"
+          }
+        }
+      }
+    },
+    "This code expired." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此配对码已过期。"
+          }
+        }
+      }
+    },
+    "This code no longer works." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此配对码已失效。"
+          }
+        }
+      }
+    },
+    "This is the Mac’s name." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这是这台 Mac 的名称。"
+          }
+        }
+      }
+    },
+    "This network. Use it with a VPN into your home network, such as WireGuard on your router." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此网络。配合连回家庭网络的 VPN 使用，例如路由器上的 WireGuard。"
+          }
+        }
+      }
+    },
+    "To unlock it from here, type its password and press Return. Its windows come back once it is unlocked." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要从这里解锁，请输入它的密码并按 Return。解锁后它的窗口就会回来。"
+          }
+        }
+      }
+    },
+    "Too long to send: %@ takes up to %@ of text." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Too long to send: %1$@ takes up to %2$@ of text."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "太长了，无法发送：%1$@ 最多接收 %2$@ 的文本。"
+          }
+        }
+      }
+    },
+    "Try Again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重试"
+          }
+        }
+      }
+    },
+    "Turn On Remote Access" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开远程访问"
+          }
+        }
+      }
+    },
+    "Turn off Block all incoming connections in System Settings › Network › Firewall › Options." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在“系统设置 › 网络 › 防火墙 › 选项”中关闭“阻止所有传入连接”。"
+          }
+        }
+      }
+    },
+    "Turn this on to pair while you use this Mac through Screen Sharing or another remote desktop app, as you would a Mac without a display. While it’s on, anyone who can see this Mac’s screen remotely can read the code. Devices streaming this Mac never show the window." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "如果你通过屏幕共享或其他远程桌面 App 使用这台 Mac（比如没有接显示器的 Mac），打开此项即可配对。打开期间，任何能远程看到这台 Mac 屏幕的人都能读到配对码。正在串流这台 Mac 的设备永远不会显示该窗口。"
+          }
+        }
+      }
+    },
+    "Ultra" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "超高"
+          }
+        }
+      }
+    },
+    "Unavailable: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不可用：%@"
+          }
+        }
+      }
+    },
+    "Unavailable: the keychain couldn’t be used" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不可用：无法使用钥匙串"
+          }
+        }
+      }
+    },
+    "Undo" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "撤销"
+          }
+        }
+      }
+    },
+    "Unlock this Mac, then tap it on the %@ again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先解锁这台 Mac，然后在 %@ 上再轻点一次。"
+          }
+        }
+      }
+    },
+    "Unlocking…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在解锁…"
+          }
+        }
+      }
+    },
+    "Up to %lld fps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最高 %lld fps"
+          }
+        }
+      }
+    },
+    "Uses a private macOS interface (CGVirtualDisplay). If a macOS update breaks it, Sill streams the window where it is." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用了 macOS 私有接口（CGVirtualDisplay）。如果 macOS 更新导致它失效，Sill 会在窗口原位置串流。"
+          }
+        }
+      }
+    },
+    "Virtual Display" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "虚拟显示器"
+          }
+        }
+      }
+    },
+    "Visible on your network as" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在网络上显示为"
+          }
+        }
+      }
+    },
+    "Waiting for a Device" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在等待设备"
+          }
+        }
+      }
+    },
+    "Waiting for the Network" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在等待网络"
+          }
+        }
+      }
+    },
+    "Waiting for your approval" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在等待你批准"
+          }
+        }
+      }
+    },
+    "Where the cursor is." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "粘贴到光标处。"
+          }
+        }
+      }
+    },
+    "Whole Desktop" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "整个桌面"
+          }
+        }
+      }
+    },
+    "Window" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "窗口"
+          }
+        }
+      }
+    },
+    "Wired" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有线"
+          }
+        }
+      }
+    },
+    "Wi‑Fi" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wi‑Fi"
+          }
+        }
+      }
+    },
+    "Works once, for the next %lld:%@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅可使用一次，剩余 %1$lld:%2$@。"
+          }
+        }
+      }
+    },
+    "Works only if your router lets incoming IPv6 connections reach this Mac; most don’t." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅当路由器允许传入的 IPv6 连接到达这台 Mac 时才有效；大多数路由器不允许。"
+          }
+        }
+      }
+    },
+    "You have %@; opens its download page" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你当前是 %@；将打开下载页面"
+          }
+        }
+      }
+    },
+    "Your devices can’t reach this Mac through %@ until it connects." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 %@ 连接之前，你的设备无法通过它访问这台 Mac。"
+          }
+        }
+      }
+    },
+    "Your devices learn these when they pair and keep them current whenever they connect." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设备会在配对时获知这些地址，并在每次连接时保持更新。"
+          }
+        }
+      }
+    },
+    "Your internet provider shares this address among many homes (%@), so a port forward can’t reach this Mac. Use a VPN such as Tailscale instead." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的网络运营商让许多家庭共用这个地址（%@），因此端口转发无法到达这台 Mac。请改用 Tailscale 之类的 VPN。"
+          }
+        }
+      }
+    },
+    "Your paired devices show here once Sill can use its key again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill 能重新使用密钥后，已配对设备会显示在这里。"
+          }
+        }
+      }
+    },
+    "Your router didn’t say. You’ll find the address in its settings." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "路由器没有告知。你可以在路由器设置中找到该地址。"
+          }
+        }
+      }
+    },
+    "Your router sits behind another router. Forward the port on both, or use a VPN." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的路由器位于另一台路由器之后。请在两台路由器上都转发端口，或使用 VPN。"
+          }
+        }
+      }
+    },
+    "You’re all set. Open Sill on your iPhone or iPad." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一切就绪。请在 iPhone 或 iPad 上打开 Sill。"
+          }
+        }
+      }
+    },
+    "a Device" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一台设备"
+          }
+        }
+      }
+    },
+    "at home" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在家中"
+          }
+        }
+      }
+    },
+    "by address" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通过地址"
+          }
+        }
+      }
+    },
+    "directly" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "直连"
+          }
+        }
+      }
+    },
+    "error %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "错误 %@"
+          }
+        }
+      }
+    },
+    "home.example.net" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "home.example.net"
+          }
+        }
+      }
+    },
+    "just now" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刚刚"
+          }
+        }
+      }
+    },
+    "last connected %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上次连接于%@"
+          }
+        }
+      }
+    },
+    "last connected %@ %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上次连接于%1$@，%2$@"
+          }
+        }
+      }
+    },
+    "macOS asks before Sill reads the clipboard, so what you copy here stays on this Mac." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sill 读取剪贴板前 macOS 会先询问，因此你在这里拷贝的内容会留在这台 Mac 上。"
+          }
+        }
+      }
+    },
+    "macOS doesn’t let Sill read the clipboard, so what you copy here stays on this Mac." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 不允许 Sill 读取剪贴板，因此你在这里拷贝的内容会留在这台 Mac 上。"
+          }
+        }
+      }
+    },
+    "nearby" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "附近"
+          }
+        }
+      }
+    },
+    "no identity" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有身份"
+          }
+        }
+      }
+    },
+    "no key could be made in the keychain (%@)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法在钥匙串中创建密钥（%@）"
+          }
+        }
+      }
+    },
+    "no reason given" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未给出原因"
+          }
+        }
+      }
+    },
+    "not an HTTP answer" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不是 HTTP 响应"
+          }
+        }
+      }
+    },
+    "on this Mac" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac 上"
+          }
+        }
+      }
+    },
+    "on this network" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此网络中"
+          }
+        }
+      }
+    },
+    "or" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "或"
+          }
+        }
+      }
+    },
+    "over Ethernet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通过以太网"
+          }
+        }
+      }
+    },
+    "over Wi‑Fi" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通过 Wi‑Fi"
+          }
+        }
+      }
+    },
+    "over the USB cable" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通过 USB 线"
+          }
+        }
+      }
+    },
+    "over the internet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通过互联网"
+          }
+        }
+      }
+    },
+    "real window (virtual display: %@)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "真实窗口（虚拟显示器：%@）"
+          }
+        }
+      }
+    },
+    "software encoder" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "软件编码器"
+          }
+        }
+      }
+    },
+    "sound" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "声音"
+          }
+        }
+      }
+    },
+    "the internet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "互联网"
+          }
+        }
+      }
+    },
+    "the key could not make a TLS identity" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该密钥无法生成 TLS 身份"
+          }
+        }
+      }
+    },
+    "the key couldn’t be read" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取密钥"
+          }
+        }
+      }
+    },
+    "the paired devices in the keychain are damaged" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "钥匙串中的已配对设备数据已损坏"
+          }
+        }
+      }
+    },
+    "the recognition key in the keychain is damaged" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "钥匙串中的识别密钥已损坏"
+          }
+        }
+      }
+    },
+    "this Mac’s address" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac 的地址"
+          }
+        }
+      }
+    },
+    "this Mac’s key couldn’t sign it" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac 的密钥无法为其签名"
+          }
+        }
+      }
+    },
+    "through %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通过 %@"
+          }
+        }
+      }
+    },
+    "through your VPN" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通过你的 VPN"
+          }
+        }
+      }
+    },
+    "unavailable" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不可用"
+          }
+        }
+      }
+    },
+    "virtual display" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "虚拟显示器"
+          }
+        }
+      }
+    },
+    "with a code" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用配对码"
+          }
+        }
+      }
+    },
+    "with the QR code" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用二维码"
+          }
+        }
+      }
+    },
+    "“%@”" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

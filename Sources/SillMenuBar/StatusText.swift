@@ -72,45 +72,50 @@ enum StatusText {
 
         var attention: [StatusPresentation.Attention] = []
         if !permissions.screenRecording {
-            attention.append(.init(title: "Allow Screen Recording…", subtitle: "Needed to show your windows on your devices.",
+            attention.append(.init(title: String(localized: "Allow Screen Recording…"),
+                                   subtitle: String(localized: "Needed to show your windows on your devices."),
                                    action: .allowScreenRecording))
         }
         if !permissions.accessibility {
-            attention.append(.init(title: "Allow Accessibility…", subtitle: "Devices can watch but not click or type.",
+            attention.append(.init(title: String(localized: "Allow Accessibility…"),
+                                   subtitle: String(localized: "Devices can watch but not click or type."),
                                    action: .allowAccessibility))
         }
         // Kept to one line no wider than the rest of the menu: a menu item's subtitle does not wrap.
         if s.softwareEncoder, s.hardwareEncoderStuck {
-            attention.append(.init(title: "Hardware Encoder Stuck",
-                                   subtitle: "Streaming with the software encoder, up to 60 fps. Restarting the Mac fixes this.",
+            attention.append(.init(title: String(localized: "Hardware Encoder Stuck"),
+                                   subtitle: String(localized: "Streaming with the software encoder, up to 60 fps. Restarting the Mac fixes this."),
                                    action: .none))
         } else if s.softwareEncoder {
-            attention.append(.init(title: "Hardware Encoder Busy",
-                                   subtitle: "Streaming with the software encoder, up to 60 fps, until it is free again.",
+            attention.append(.init(title: String(localized: "Hardware Encoder Busy"),
+                                   subtitle: String(localized: "Streaming with the software encoder, up to 60 fps, until it is free again."),
                                    action: .none))
         }
         let remotePortTaken = remotePortInUse(s.remote)
         if let port = remotePortTaken {
-            attention.append(.init(title: "Remote Access Can’t Start", subtitle: "Port \(port) is in use by another app.",
+            attention.append(.init(title: String(localized: "Remote Access Can’t Start"),
+                                   subtitle: String(localized: "Port \(String(port)) is in use by another app."),
                                    action: .showRemoteAccess))
         }
         // Pairing at home (docs/home-pairing-plan.md §6.4).
         let request = pairingRequest(s.remote, now: now)
         if let request { attention.append(request) }
         if let at = s.remote?.olderDeviceAt, now.timeIntervalSince(at) < olderDeviceShownFor {
-            attention.append(.init(title: "An iPhone or iPad Needs Sill Updated", subtitle: "It tried to connect with an older Sill.",
+            attention.append(.init(title: String(localized: "An iPhone or iPad Needs Sill Updated"),
+                                   subtitle: String(localized: "It tried to connect with an older Sill."),
                                    action: .none))
         }
         let homeDoorClosed = homeDoorUnavailable(s.remote)
         if homeDoorClosed {
-            attention.append(.init(title: "Devices Can’t Connect", subtitle: "Sill couldn’t use its key in your keychain.",
+            attention.append(.init(title: String(localized: "Devices Can’t Connect"),
+                                   subtitle: String(localized: "Sill couldn’t use its key in your keychain."),
                                    action: .showDevices))
         }
         // The macOS firewall blocks Sill (FirewallRule): its line and command are in Settings › General.
         // Not beside the keychain's: with no home door there is nothing for the firewall to block.
         let firewallBlocks = !homeDoorClosed ? s.firewall.flatMap(FirewallRule.Copy.menuSubtitle) : nil
         if let firewallBlocks {
-            attention.append(.init(title: "Devices Can’t Connect", subtitle: firewallBlocks, action: .showGeneral))
+            attention.append(.init(title: String(localized: "Devices Can’t Connect"), subtitle: firewallBlocks, action: .showGeneral))
         }
 
         // The attention glyph means "Sill needs you". The test pattern needs no permission. A device
@@ -135,7 +140,7 @@ enum StatusText {
         return StatusPresentation(glyph: glyph, header: header, subtitle: subtitle,
                                   source: sourceRow(s), devices: s.devices.map(deviceRow), attention: attention,
                                   virtualDisplayNote: virtualDisplayNote(s),
-                                  tooltip: "Sill — \(header)", accessibilityLabel: "Sill, \(header)",
+                                  tooltip: String(localized: "Sill — \(header)"), accessibilityLabel: String(localized: "Sill, \(header)"),
                                   advertisedName: name, remoteAccessNote: remoteAccessNote(s.remote),
                                   canPair: s.remote.map { $0.identityProblem == nil } ?? false, away: s.away)
     }
@@ -150,11 +155,11 @@ enum StatusText {
         let short = shortName(request.name)
         let subtitle: String
         switch request.reason {
-        case "showing": subtitle = "A code is showing."
-        case "locked": subtitle = "Unlock this Mac, then tap it on the \(short) again."
-        default: subtitle = "Click to show a code."
+        case "showing": subtitle = String(localized: "A code is showing.")
+        case "locked": subtitle = String(localized: "Unlock this Mac, then tap it on the \(short) again.")
+        default: subtitle = String(localized: "Click to show a code.")
         }
-        return .init(title: "\(short) Wants to Pair", subtitle: subtitle,
+        return .init(title: String(localized: "\(short) Wants to Pair"), subtitle: subtitle,
                      action: .pairingRequest(name: request.name, showing: request.reason == "showing"))
     }
 
@@ -175,57 +180,59 @@ enum StatusText {
     /// couldn’t be used".
     static func remoteAccessNote(_ r: RemoteStatus?) -> String? {
         guard let r else { return nil }
-        if r.identityProblem != nil { return "Unavailable: the keychain couldn’t be used" }
-        guard r.remoteAccess else { return "Off" }
+        if r.identityProblem != nil { return String(localized: "Unavailable: the keychain couldn’t be used") }
+        guard r.remoteAccess else { return String(localized: "Off") }
         switch r.listener {
-        case .portInUse(let port): return "Port \(port) is in use"
-        case .failed: return "Couldn’t start; trying again"
+        case .portInUse(let port): return String(localized: "Port \(String(port)) is in use")
+        case .failed: return String(localized: "Couldn’t start; trying again")
         case .off, .listening: break
         }
         var ways: [String] = []
         for a in r.addresses where a.kind == MacAddress.vpn && !ways.contains(a.via) { ways.append(a.via) }
-        if r.internetAccess { ways.append("the internet") }
-        guard let last = ways.last else { return "On · no VPN on this Mac" }
-        return "On · " + (ways.count == 1 ? last : ways.dropLast().joined(separator: ", ") + " and " + last)
+        if r.internetAccess { ways.append(String(localized: "the internet")) }
+        guard let last = ways.last else { return String(localized: "On · no VPN on this Mac") }
+        let first = ways.dropLast().joined(separator: String(localized: ", ", comment: "Between the items of a list but the last two"))
+        let list = ways.count == 1 ? last : String(localized: "\(first) and \(last)", comment: "The last two items of a list")
+        return String(localized: "On · \(list)")
     }
 
     /// The header and its explanation; the first match wins.
     private static func headline(_ s: HostStatusSnapshot, _ permissions: PermissionState, _ startupError: String?,
                                  _ hasCoordinator: Bool) -> (String, String?) {
-        if let startupError { return ("Sill Couldn’t Start", startupError) }
-        if !hasCoordinator { return ("Starting…", nil) }
+        if let startupError { return (String(localized: "Sill Couldn’t Start"), startupError) }
+        if !hasCoordinator { return (String(localized: "Starting…"), nil) }
         // No listener at all (fail closed): no device can find or reach this Mac.
         if homeDoorUnavailable(s.remote) {
-            return ("Not Visible on the Network",
-                    "Sill couldn’t use its key in your keychain. Quit Sill and open it again, and choose Always Allow if the keychain asks.")
+            return (String(localized: "Not Visible on the Network"),
+                    String(localized: "Sill couldn’t use its key in your keychain. Quit Sill and open it again, and choose Always Allow if the keychain asks."))
         }
         switch s.network {
         case .starting:
-            return ("Starting…", nil)
+            return (String(localized: "Starting…"), nil)
         case .failed(let error):
-            return ("Not Visible on the Network", "\(error). Quit and reopen Sill to try again.")
+            return (String(localized: "Not Visible on the Network"), String(localized: "\(error). Quit and reopen Sill to try again."))
         case .waiting:
-            return ("Waiting for the Network",
-                    "Sill appears on your iPhone and iPad once this Mac is on Wi-Fi or Ethernet and Local Network access is allowed.")
+            return (String(localized: "Waiting for the Network"),
+                    String(localized: "Sill appears on your iPhone and iPad once this Mac is on Wi-Fi or Ethernet and Local Network access is allowed."))
         case .notAdvertised(let port):
-            return ("Test Pattern Mode", "Not advertised; test clients connect to port \(port).")
+            return (String(localized: "Test Pattern Mode"), String(localized: "Not advertised; test clients connect to port \(String(port))."))
         case .registering, .advertising:
             break
         }
         if !permissions.screenRecording {
-            return ("Screen Recording Is Off", "Devices can connect but can’t see any windows.")
+            return (String(localized: "Screen Recording Is Off"), String(localized: "Devices can connect but can’t see any windows."))
         }
         let count = s.devices.count
         if count > 0 {
-            let who = count == 1 ? (s.devices[0].name.map(shortName) ?? "a Device") : "\(count) Devices"
-            if s.stream != nil { return ("Streaming to \(who)", nil) }
-            let connected = count == 1 ? (s.devices[0].name.map(shortName) ?? "Device") : "\(count) Devices"
-            return ("\(connected) Connected", "Pick a window on the device to start streaming.")
+            let who = count == 1 ? (s.devices[0].name.map(shortName) ?? String(localized: "a Device")) : String(localized: "\(count) Devices")
+            if s.stream != nil { return (String(localized: "Streaming to \(who)"), nil) }
+            let connected = count == 1 ? (s.devices[0].name.map(shortName) ?? String(localized: "Device")) : String(localized: "\(count) Devices")
+            return (String(localized: "\(connected) Connected"), String(localized: "Pick a window on the device to start streaming."))
         }
         if case .advertising(let name) = s.network {
-            return ("Waiting for a Device", "Open Sill on your iPhone or iPad. This Mac appears as “\(name)”.")
+            return (String(localized: "Waiting for a Device"), String(localized: "Open Sill on your iPhone or iPad. This Mac appears as “\(name)”."))
         }
-        return ("Waiting for a Device", "Registering on the local network…")
+        return (String(localized: "Waiting for a Device"), String(localized: "Registering on the local network…"))
     }
 
     private static func isFailed(_ n: HostStatusSnapshot.Network) -> Bool {
@@ -248,8 +255,8 @@ enum StatusText {
         let title: String, symbol: String
         switch stream.kind {
         case .window: title = middleTruncated(stream.title, to: 44); symbol = "macwindow"
-        case .desktop: title = "Whole Desktop"; symbol = "menubar.dock.rectangle"
-        case .testPattern: title = "Test Pattern"; symbol = "checkerboard.rectangle"
+        case .desktop: title = String(localized: "Whole Desktop"); symbol = "menubar.dock.rectangle"
+        case .testPattern: title = String(localized: "Test Pattern"); symbol = "checkerboard.rectangle"
         }
         // The encoder only produces a frame when the picture changed (ScreenCaptureKit delivers
         // frames on repaint), so 0 means a still window, not a stalled stream. "120 fps, still" is
@@ -257,17 +264,19 @@ enum StatusText {
         // changing, unless the count's own digits tip it: the open menu resizes the card on every
         // change, and "nothing changing" with the route word made it jump a line each time a
         // window stopped or started changing.
-        let rate = s.encodedFPS > 0 ? "\(min(s.encodedFPS, stream.fps)) of \(stream.fps) fps" : "\(stream.fps) fps, still"
-        var detail = "\(stream.width)×\(stream.height) · \(rate) · \(stream.mbps) Mbps"
+        let rate = s.encodedFPS > 0 ? String(localized: "\(min(s.encodedFPS, stream.fps)) of \(stream.fps) fps")
+            : String(localized: "\(stream.fps) fps, still")
+        var detail = String(localized: "\(String(stream.width))×\(String(stream.height)) · \(rate) · \(stream.mbps) Mbps")
         if s.devices.count == 1, let route = routeWord(s.devices[0]) { detail += " · \(route)" }
         if stream.onVirtualDisplay {
-            detail += " · virtual display"
+            detail += " · " + String(localized: "virtual display")
         } else if s.virtualDisplayOn, stream.kind == .window {
-            detail += " · real window (virtual display: \(s.lastStageFailure ?? s.virtualDisplayProblem ?? "unavailable"))"
+            let why = s.lastStageFailure ?? s.virtualDisplayProblem ?? String(localized: "unavailable")
+            detail += " · " + String(localized: "real window (virtual display: \(why))")
         }
-        if stream.softwareEncoder { detail += " · software encoder" }
+        if stream.softwareEncoder { detail += " · " + String(localized: "software encoder") }
         // The Mac's sound goes out too, while a device gets it (docs/audio-plan.md, Q9).
-        if s.audio?.devices ?? 0 > 0 { detail += " · sound" }
+        if s.audio?.devices ?? 0 > 0 { detail += " · " + String(localized: "sound") }
         return StatusPresentation.Row(id: "source", symbol: symbol, title: title, detail: detail)
     }
 
@@ -286,7 +295,7 @@ enum StatusText {
         if let link = d.link {
             parts.append(linkWords(link, fps: d.fps, rttMs: d.rttMs))
         } else if let fps = d.fps, let age = d.frameAgeMs, let rtt = d.rttMs {
-            parts.append("\(fps) fps · frame age \(ms(age)) · RTT \(ms(rtt))")
+            parts.append(String(localized: "\(fps) fps · frame age \(ms(age)) · RTT \(ms(rtt))"))
         }
         if let route = routeWord(d) { parts.append(route) }
         return StatusPresentation.Row(id: String(describing: d.id), symbol: symbol, title: name,
@@ -299,12 +308,14 @@ enum StatusText {
     static func linkWords(_ link: HostStatusSnapshot.LinkStatus, fps: Int?, rttMs: Int?) -> String {
         switch link.state {
         case .stalled:
-            return "Nothing is getting through"
+            return String(localized: "Nothing is getting through")
         case .behind:
             let quality = QualityPreset.name(forBitrate: link.bitrate).replacingOccurrences(of: " ", with: "\u{00A0}")
-            var words = (fps.map { "\($0) fps, " } ?? "") + "the link can’t carry \(quality)"
-            if let rtt = rttMs { words += " · RTT \(ms(rtt))" }
-            return fps == nil ? words.prefix(1).uppercased() + words.dropFirst() : words
+            // Two whole sentences rather than "3 fps, " before a lowercase clause capitalised when alone.
+            var words = fps.map { String(localized: "\($0) fps, the link can’t carry \(quality)") }
+                ?? String(localized: "The link can’t carry \(quality)")
+            if let rtt = rttMs { words += " · " + String(localized: "RTT \(ms(rtt))") }
+            return words
         }
     }
 
@@ -325,20 +336,20 @@ enum StatusText {
     /// detail never splits it.
     private static func word(_ route: ClientLink.Route) -> String {
         switch route {
-        case .wired: return "Wired"
-        case .wifi: return "Wi\u{2011}Fi"
-        case .direct: return "Direct"
+        case .wired: return String(localized: "Wired")
+        case .wifi: return String(localized: "Wi\u{2011}Fi")
+        case .direct: return String(localized: "Direct")
         }
     }
 
     /// One of a device's reported times. Negative is the client's "no sample this second" (-1),
     /// never a time.
-    private static func ms(_ v: Int) -> String { v < 0 ? "–" : "\(v) ms" }
+    private static func ms(_ v: Int) -> String { v < 0 ? "–" : String(localized: "\(v) ms") }
 
     private static func virtualDisplayNote(_ s: HostStatusSnapshot) -> String {
-        if let problem = s.virtualDisplayProblem { return "Unavailable: \(problem)" }
-        if s.virtualDisplayOn, s.stream?.onVirtualDisplay == true { return "The streamed window is on the virtual display" }
-        return "Picked windows leave this screen while they stream"
+        if let problem = s.virtualDisplayProblem { return String(localized: "Unavailable: \(problem)") }
+        if s.virtualDisplayOn, s.stream?.onVirtualDisplay == true { return String(localized: "The streamed window is on the virtual display") }
+        return String(localized: "Picked windows leave this screen while they stream")
     }
 
     /// "Safari — A very long window title that goes on" → "Safari — A very long…that goes on".

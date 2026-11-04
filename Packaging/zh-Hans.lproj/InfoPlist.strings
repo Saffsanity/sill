@@ -1,0 +1,4 @@
+/* Sill 的 Info.plist 中文版 */
+"CFBundleDisplayName" = "Sill";
+"NSHumanReadableCopyright" = "Sill 是免费的开源软件。";
+"NSLocalNetworkUsageDescription" = "Sill 会让同一网络里的 iPhone 和 iPad 看到这台 Mac，以便串流它的窗口。";

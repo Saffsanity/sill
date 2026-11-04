@@ -75,14 +75,14 @@ enum ThumbnailHold {
     // MARK: Words
 
     /// The row's title in the Settings panel.
-    static let title = "Hold to Show Window Controls"
+    static var title: String { String(localized: "Hold to Show Window Controls") }
     /// The narrowest the title may be beside the length and the stepper: these three lines, its words in
     /// order, the shortest widest line of any three ("Hold to Show"). Narrower than that, a word would
     /// break ("Win-dow", "Con-trols") or the title run past three lines, so the row stacks the title over
     /// the length and the stepper instead (HostSettingsPanel's ThumbnailHoldRow; the review, 2026-10-29).
     static let titleLines = ["Hold to Show", "Window", "Controls"]
     /// The row's label for VoiceOver ("Hold to show window controls, 0.5 seconds").
-    static let spokenTitle = "Hold to show window controls"
+    static var spokenTitle: String { String(localized: "Hold to show window controls") }
 
     /// The row's value beside the title: "0.5 s", "1.0 s", "2.0 s", always a tenth's digit, so the
     /// value keeps its width as it steps.
@@ -93,12 +93,12 @@ enum ThumbnailHold {
     static func spokenValue(_ value: Double) -> String {
         let t = tenths(value)
         let number = t % 10 == 0 ? String(t / 10) : String(format: "%.1f", seconds(tenths: t))
-        return "\(number) \(t == 10 ? "second" : "seconds")"
+        return t == 10 ? String(localized: "\(number) second") : String(localized: "\(number) seconds")
     }
 
     /// Under the row: what the length is for. It agrees with the tour's words ("Touch and hold a window
     /// to close, minimize or go full screen. Keep holding and drag to move it.").
-    static let footnote = "How long to hold a window’s thumbnail before its close, minimize and full-screen controls appear, and before it can be dragged to another place."
+    static var footnote: String { String(localized: "How long to hold a window’s thumbnail before its close, minimize and full-screen controls appear, and before it can be dragged to another place.") }
 
     /// The Debug console's line when the strip reads a length it had not read before (at launch, and
     /// at each change): "thumbnails: hold 0.3 s".
