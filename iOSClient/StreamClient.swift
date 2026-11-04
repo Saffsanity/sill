@@ -3840,6 +3840,17 @@ final class StreamClient: ObservableObject {
     /// pointer, no scroll, and a latched modifier stays latched. Main thread. True when it went.
     @discardableResult
     func sendGesture(_ gesture: TrackpadGestures.Gesture, fingers: Int) -> Bool {
+        if fingers == 3, Self.gesturesOn, connected, case .window(let id) = active,
+           gesture == .swipeLeft || gesture == .swipeRight {
+            let windows = orderedWindows
+            guard let current = windows.first(where: { $0.id == id }) else { return false }
+            var seen = Set<String>()
+            let apps = windows.filter { seen.insert($0.bundleID).inserted }
+            guard apps.count > 1, let index = apps.firstIndex(where: { $0.bundleID == current.bundleID }) else { return false }
+            let offset = gesture == .swipeLeft ? 1 : apps.count - 1
+            select(.window(apps[(index + offset) % apps.count].id))
+            return true
+        }
         var windowStreams = false
         if case .window = active { windowStreams = true }
         let plan = TrackpadGestures.sending(switchOn: Self.gesturesOn, connected: connected, hostGestures: hostGestures,

@@ -638,7 +638,7 @@ struct HostSettingsPanel: View {
             }
             .rowFrame()
             if gesturesOn, macTakesGestures {
-                ForEach(Self.gestureRows, id: \.gesture) { row in
+                ForEach(gestureRows, id: \.gesture) { row in
                     RowDivider()
                     GestureRow(symbol: row.symbol, gesture: row.gesture, action: row.action, does: row.does) {
                         _ = client.sendGesture($0, fingers: 3)
@@ -689,14 +689,18 @@ struct HostSettingsPanel: View {
     /// What each gesture does on the Mac, and what the row does as an accessibility action: its one
     /// gesture, or, for the Spaces, one action each way (natural direction: a swipe left brings the
     /// Space on the right). The pinch opens Launchpad on macOS 14 and 15, from the same key.
-    private static let gestureRows: [(symbol: String, gesture: String, action: String, does: [GestureRow.Action])] = [
+    private var gestureRows: [(symbol: String, gesture: String, action: String, does: [GestureRow.Action])] {
+        let switchesApps = client.textScaleSelectable
+        return [
         ("arrow.up", "Swipe Up", "Mission Control", [GestureRow.Action(name: "Mission Control", gesture: .swipeUp)]),
         ("arrow.down", "Swipe Down", "App Exposé", [GestureRow.Action(name: "App Exposé", gesture: .swipeDown)]),
-        ("arrow.left.and.right", "Swipe Left or Right", "Spaces", [GestureRow.Action(name: "Space on the Right", gesture: .swipeLeft),
-                                                                   GestureRow.Action(name: "Space on the Left", gesture: .swipeRight)]),
+        ("arrow.left.and.right", "Swipe Left or Right", switchesApps ? "Apps" : "Spaces",
+         [GestureRow.Action(name: switchesApps ? "Next App" : "Space on the Right", gesture: .swipeLeft),
+          GestureRow.Action(name: switchesApps ? "Previous App" : "Space on the Left", gesture: .swipeRight)]),
         ("arrow.down.right.and.arrow.up.left", "Pinch", "Apps", [GestureRow.Action(name: "Apps", gesture: .pinch)]),
         ("arrow.up.left.and.arrow.down.right", "Spread", "Show Desktop", [GestureRow.Action(name: "Show Desktop", gesture: .spread)]),
     ]
+    }
 
     /// Under the switch: where the gestures go and what they do, or why nothing happens.
     private var gesturesFooter: String {
