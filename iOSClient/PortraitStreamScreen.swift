@@ -141,6 +141,7 @@ struct PortraitStreamScreen: View {
     var metrics: PortraitMetrics = .regular
     @Binding var drawerOpen: Bool
     @Binding var keyboardShown: Bool
+    @AppStorage("Sill.manualTextSize") private var manualTextSize = false
     @Binding var textScale: Double?
     @Binding var scaleOpen: Bool
     @Binding var windowMenu: UInt32?
@@ -258,7 +259,7 @@ struct PortraitStreamScreen: View {
     private func windowBar(width: CGFloat) -> some View {
         // Apps, Menus, Aa, Desktop, Settings, and the strip: Menus only where the row holds it and
         // still a whole thumbnail (not in a 320 pt Slide Over).
-        let menusFit = MacMenuButton.fits(width: width, buttons: 5, buttonWidth: metrics.buttonWidth, gap: 12,
+        let menusFit = MacMenuButton.fits(width: width, buttons: manualTextSize ? 5 : 4, buttonWidth: metrics.buttonWidth, gap: 12,
                                           thumbWidth: metrics.thumbWidth)
         return HStack(spacing: 12) {
             appsButton()
@@ -277,11 +278,13 @@ struct PortraitStreamScreen: View {
                     .transition(.opacity)
             }
 
-            TextScaleControl(scale: $textScale, open: $scaleOpen,
-                             width: metrics.buttonWidth, height: metrics.buttonHeight,
-                             radius: metrics.buttonRadius, pointsPerStep: 36,
-                             offered: client.textScaleOffersOff, available: client.textScaleSelectable)
-                .tourTarget(.textSize)
+            if manualTextSize {
+                TextScaleControl(scale: $textScale, open: $scaleOpen,
+                                 width: metrics.buttonWidth, height: metrics.buttonHeight,
+                                 radius: metrics.buttonRadius, pointsPerStep: 36,
+                                 offered: client.textScaleOffersOff, available: client.textScaleSelectable)
+                    .tourTarget(.textSize)
+            }
 
             desktopButton()
                 .opacity(scaleOpen ? 0 : 1)
@@ -384,7 +387,8 @@ struct PortraitStreamScreen: View {
     /// no touch until it folds. `menus`: Larger Picture's row 1 while the Mac sent menus, the Menus
     /// button after Apps, six to the row (`buttonsBesideMenus`), where the landscape bar has it.
     private func phoneRow1(_ layout: PhonePortraitLayout, menus: Bool) -> some View {
-        let width = (menus ? layout.buttonsBesideMenus : layout.buttons)[PhonePortraitLayout.Button.apps.rawValue].width
+        let count = CGFloat((manualTextSize ? 5 : 4) + (menus ? 1 : 0))
+        let width = (layout.row1.width - (count - 1) * PhonePortraitLayout.gap) / count
         return HStack(spacing: PhonePortraitLayout.gap) {
             appsButton(width: width)
                 .opacity(scaleOpen ? 0 : 1)
@@ -400,12 +404,14 @@ struct PortraitStreamScreen: View {
                     .transition(.opacity)
             }
 
-            TextScaleControl(scale: $textScale, open: $scaleOpen,
-                             width: width, height: layout.row1.height,
-                             radius: metrics.buttonRadius, pointsPerStep: menus ? layout.rulerStepBesideMenus : layout.rulerStep,
-                             iconBox: PortraitMetrics.phoneIconBox, iconSpacing: metrics.buttonSpacing,
-                             offered: client.textScaleOffersOff, available: client.textScaleSelectable)
-                .tourTarget(.textSize)
+            if manualTextSize {
+                TextScaleControl(scale: $textScale, open: $scaleOpen,
+                                 width: width, height: layout.row1.height,
+                                 radius: metrics.buttonRadius, pointsPerStep: menus ? layout.rulerStepBesideMenus : layout.rulerStep,
+                                 iconBox: PortraitMetrics.phoneIconBox, iconSpacing: metrics.buttonSpacing,
+                                 offered: client.textScaleOffersOff, available: client.textScaleSelectable)
+                    .tourTarget(.textSize)
+            }
 
             barButton(open: keyboardShown, symbol: "keyboard", label: "Keyboard", width: width,
                       accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
