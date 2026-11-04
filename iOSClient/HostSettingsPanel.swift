@@ -49,6 +49,7 @@ struct HostSettingsPanel: View {
     @State private var powerState = 0
     /// This device's switch for three-finger gestures (docs/trackpad-gestures-plan.md §8): on unless
     /// turned off, read by `StreamClient.sendGesture` at each gesture, never sent.
+    @AppStorage("Sill.manualTextSize") private var manualTextSize = false
     @AppStorage(StreamClient.gesturesKey) private var gesturesOn = true
     /// This device's switch for Reverse Scrolling (issue #143): off unless turned on, read by the
     /// picture's input view and the on-screen trackpad as each scroll begins (`ScrollDirection`), never
@@ -580,6 +581,14 @@ struct HostSettingsPanel: View {
             .padding(.bottom, 6)
             .accessibilityAddTraits(.isHeader)
             .id(Self.gesturesGroupID)
+        Rows {
+            Toggle(isOn: $manualTextSize) {
+                Text(Locale.current.language.languageCode?.identifier == "es" ? "Manualmente" : "Manual Text Size")
+                    .foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        Footnote(text: "Turn this on to show Aa and choose the text size yourself.")
         if offersLargerPicture {
             Rows {
                 Toggle(isOn: $largerPicture) {
