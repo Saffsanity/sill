@@ -211,6 +211,16 @@ check(HDP.pool([HDP.Kind.standIn, .sills, .real], kind: { $0 }) == [.real], "a r
 check(HDP.pool([HDP.Kind.standIn, .sills], kind: { $0 }) == [.sills], "the lid closed, Sill's Retina display made: it, not macOS's stand-in")
 check(HDP.pool([HDP.Kind.standIn], kind: { $0 }) == [.standIn], "only macOS's stand-in (before Sill's is made): the stand-in")
 check(HDP.pool([HDP.Kind](), kind: { $0 }) == [], "no display: none")
+// Kept while a device works with the lid shut (#298): a monitor Sill's wake brings back is a display change
+// macOS may lock a closed-lid Mac on, so Sill's display stays, and the Desktop stays on it.
+check(HDP.releases(realDisplays: 0, builtInActive: false, devices: 0) == false, "no real display: kept")
+check(HDP.releases(realDisplays: 1, builtInActive: false, devices: 1) == false, "the lid shut, a monitor back, a device connected: kept")
+check(HDP.releases(realDisplays: 1, builtInActive: false, devices: 0) == true, "the lid shut, a monitor back, no device: it goes")
+check(HDP.releases(realDisplays: 1, builtInActive: true, devices: 1) == true, "the lid opened with a device connected: it goes at once, as before")
+check(HDP.releases(realDisplays: 2, builtInActive: true, devices: 0) == true, "the lid opened, nobody connected: it goes")
+check(HDP.pool([HDP.Kind.standIn, .sills, .real], kind: { $0 }, sillsFirst: true) == [.sills], "kept: Sill's display before a real one")
+check(HDP.pool([HDP.Kind.real, .standIn], kind: { $0 }, sillsFirst: true) == [.real], "kept but not listed yet: the real one")
+check(HDP.pool([HDP.Kind.standIn, .sills, .real], kind: { $0 }, sillsFirst: false) == [.real], "not kept: the real one first, as before")
 // Its size: the MacBook's own screen as Sill last saw it, so windows keep their places (Noah's choice, 2026-11-02).
 check(HDP.desktopDimensions(builtIn: (1800, 1169), viewportWidth: 1366, viewportHeight: 1024) == HDP.Dimensions(widthPt: 1800, heightPt: 1168, scale: 2),
       "the built-in screen last seen at 1800×1169 pt: 1800×1168 @2× (even), not the iPad's size")

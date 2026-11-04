@@ -20,6 +20,9 @@ final class WindowCatalog {
     private(set) var windows: [SCWindow] = []
     private(set) var infos: [WindowInfo] = []
     private(set) var display: SCDisplay?
+    /// Sill's fallback display is kept while devices work with the lid shut (HeadlessDesktopPolicy.releases): the
+    /// Desktop's display is it, before a real one (the coordinator's).
+    var keepsSills = false
     private(set) var installedApps: [AppInfo] = []
     /// This process as ScreenCaptureKit lists it, from the last look: the Desktop stream leaves it
     /// out, so Sill's own windows (the pairing code above all) never reach a device. Nil when it
@@ -326,7 +329,7 @@ final class WindowCatalog {
         appliedSeq = seq
         lookedAt = .now
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
-        let pool = HeadlessDesktopPolicy.pool(content.displays) { StreamCoordinator.displayKind($0.displayID) }
+        let pool = HeadlessDesktopPolicy.pool(content.displays, kind: { StreamCoordinator.displayKind($0.displayID) }, sillsFirst: keepsSills)
         if let b = content.displays.first(where: { CGDisplayIsBuiltin($0.displayID) != 0 }) { Self.rememberBuiltIn(widthPt: b.width, heightPt: b.height) }
         display = preferMainDisplay
             ? (pool.first { $0.displayID == CGMainDisplayID() } ?? pool.first)

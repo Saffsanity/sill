@@ -505,9 +505,18 @@ enum HeadlessDesktopPolicy {
 
     enum Kind: Equatable { case real, sills, standIn }
 
-    /// The displays the Desktop may stream: the real ones, else Sill's, else macOS's stand-in.
-    static func pool<T>(_ displays: [T], kind: (T) -> Kind) -> [T] {
-        for wanted in [Kind.real, .sills] {
+    /// Whether the fallback display goes now: a real display is active and the built-in screen is among them
+    /// (the lid opened: someone is at the Mac, and the windows come back to it) or no device is connected. A
+    /// monitor that comes back while the lid stays shut and a device works leaves it (#298): its going is a
+    /// display change, which macOS may lock a closed-lid Mac on.
+    static func releases(realDisplays: Int, builtInActive: Bool, devices: Int) -> Bool {
+        realDisplays > 0 && (builtInActive || devices == 0)
+    }
+
+    /// The displays the Desktop may stream: the real ones, else Sill's, else macOS's stand-in; Sill's first while
+    /// it is kept (`releases`), so the Desktop stays where macOS moved the windows.
+    static func pool<T>(_ displays: [T], kind: (T) -> Kind, sillsFirst: Bool = false) -> [T] {
+        for wanted in sillsFirst ? [Kind.sills, .real] : [Kind.real, .sills] {
             let some = displays.filter { kind($0) == wanted }
             if !some.isEmpty { return some }
         }
