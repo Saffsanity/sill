@@ -884,7 +884,14 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     fileprivate var typingDocument: String { composition.document }
 
     fileprivate func editorChanged(_ text: String) {
-        typed(composition.replace(NSRange(location: 0, length: composition.length), with: text))
+        let outputs = composition.replace(NSRange(location: 0, length: composition.length), with: text)
+        if !outputs.isEmpty {
+            setOwnPointer(nil, .none)
+            typed(outputs)
+            consumeLatch()
+        } else {
+            keyboardProxy?.refreshEditor()
+        }
     }
 
     fileprivate func editorMayChange(_ range: NSRange, text: String) -> Bool {
