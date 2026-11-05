@@ -190,6 +190,22 @@ enum VirtualDisplaySize {
     }
 }
 
+/// The size a hardware encoder that refuses a stream's size is asked for instead (#278): on a 5K Intel
+/// iMac, VideoToolbox has no hardware HEVC session at 5120×2880 and quietly makes a software one
+/// ("HW Encoder is not available", VTEncoderXPCService at 1000 % CPU, the stream stalling; #62), while
+/// its benchmark put the hardware's limit at 4096 pixels. Pure (Tests/checks/capture-scale).
+enum EncoderLimit {
+    static let side = 4096
+
+    /// The size held to `side` pixels on its longer side, its shape kept, even sides of at least 2;
+    /// nil when both sides are within it.
+    static func held(width: Int, height: Int) -> (width: Int, height: Int)? {
+        let longer = max(width, height)
+        guard longer > side else { return nil }
+        return (max(width * side / longer & ~1, 2), max(height * side / longer & ~1, 2))
+    }
+}
+
 /// HEVC wants even sides: a capture's size in pixels rounded down to even. Every capture's rule until
 /// 2026-10-27, and still a display's, a staged window's crop's and the test pattern's; a window that
 /// ScreenCaptureKit draws 1:1 rounds up instead (`CaptureScale.windowPixels`). Here rather than in
