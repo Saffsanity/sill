@@ -1,3 +1,4 @@
+import SwiftUI
 import UIKit
 
 /// The app delegate SwiftUI gives `SillApp` (`@UIApplicationDelegateAdaptor`): it implements nothing
@@ -10,15 +11,14 @@ import UIKit
 /// nothing says which window's session the bar's choices would reach), or when the window's session
 /// has no menus.
 final class SillAppDelegate: UIResponder, UIApplicationDelegate {
-    /// An external display's scene (a monitor on the iPad's USB-C, with Stage Manager off, or AirPlay):
-    /// the stream goes there (ExternalDisplay). Every other scene is SwiftUI's, as before.
+    /// An external display's scene before iOS 27 (a monitor or XR glasses on USB-C, with Stage Manager
+    /// off on an iPad, or AirPlay): the stream goes there (ExternalDisplay). From iOS 27 that scene comes
+    /// only through a scene accessory (ExternalDisplayAccessory). Every other scene is SwiftUI's, as before.
     func application(_ application: UIApplication, configurationForConnecting session: UISceneSession,
                      options: UIScene.ConnectionOptions) -> UISceneConfiguration {
         // Unnamed, SwiftUI's own (the session's `configuration` left the app with no window at all).
         guard session.role == .windowExternalDisplayNonInteractive else { return UISceneConfiguration(name: nil, sessionRole: session.role) }
-        let config = UISceneConfiguration(name: "External display", sessionRole: session.role)
-        config.delegateClass = ExternalDisplaySceneDelegate.self
-        return config
+        return ExternalDisplay.sceneConfiguration
     }
 
     override func buildMenu(with builder: UIMenuBuilder) {
@@ -173,6 +173,13 @@ final class ExternalDisplay: ObservableObject {
     @Published private var shown = 0
     private var window: UIWindow?
 
+    /// The external display's scene, with its delegate: what both ways to that scene hand UIKit.
+    static var sceneConfiguration: UISceneConfiguration {
+        let config = UISceneConfiguration(name: "External display", sessionRole: .windowExternalDisplayNonInteractive)
+        config.delegateClass = ExternalDisplaySceneDelegate.self
+        return config
+    }
+
     /// Whether `client`'s picture is on the monitor now.
     func shows(_ client: StreamClient) -> Bool { size != nil && self.client === client }
 
@@ -183,15 +190,28 @@ final class ExternalDisplay: ObservableObject {
         self.client = client
         shown += 1
         attach()
+        keepAwake()
+    }
+
+    /// The stream screen of `client` went away: the monitor shows nothing until the next one comes.
+    func leave(_ client: StreamClient) {
+        guard self.client === client else { return }
+        client.homeScene = nil
+        if client.displayView.superview === window?.rootViewController?.view { client.displayView.removeFromSuperview() }
+        self.client = nil
+        keepAwake()
     }
 
     fileprivate func connected(_ scene: UIWindowScene) {
+        // Glasses and monitors alike take the picture edge to edge, with none of it scaled to a TV's overscan.
+        scene.screen.overscanCompensation = .none
         let window = UIWindow(windowScene: scene)
         window.rootViewController = UIViewController()
         window.rootViewController?.view.backgroundColor = .black
         window.isHidden = false
         self.window = window
         size = scene.screen.bounds.size
+        keepAwake()
         // After the stream screen has let go of the view (it hosts none while the monitor shows it).
         DispatchQueue.main.async { self.attach() }
     }
@@ -208,7 +228,12 @@ final class ExternalDisplay: ObservableObject {
         client?.homeScene = nil
         window = nil
         size = nil
+        keepAwake()
     }
+
+    /// With the picture on a monitor this screen may go untouched for a long while, and if it locks the
+    /// stream stops.
+    private func keepAwake() { UIApplication.shared.isIdleTimerDisabled = size != nil && client != nil }
 
     private func attach() {
         guard size != nil, let client, let root = window?.rootViewController?.view else { return }
@@ -218,6 +243,35 @@ final class ExternalDisplay: ObservableObject {
         view.frame = root.bounds
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         root.addSubview(view)
+    }
+}
+
+/// Asks for the external display's scene from iOS 27, which connects it only for a registered accessory,
+/// and only while this view's controller is on screen: the stream screen hosts it, so a monitor shows the
+/// device's own screen, as any app's, until a stream screen comes. Nothing before iOS 27.
+struct ExternalDisplayAccessory: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> UIViewController {
+        if #available(iOS 27.0, *) { return Registering() }
+        return UIViewController()
+    }
+
+    func updateUIViewController(_ controller: UIViewController, context: Context) {}
+
+    @available(iOS 27.0, *)
+    private final class Registering: UIViewController {
+        private var registration: UISceneAccessoryRegistration?
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            guard registration == nil else { return }
+            registration = registerSceneAccessory(.externalNonInteractive(sceneConfiguration: ExternalDisplay.sceneConfiguration))
+        }
+
+        override func viewDidDisappear(_ animated: Bool) {
+            super.viewDidDisappear(animated)
+            if let registration { unregisterSceneAccessory(registration) }
+            registration = nil
+        }
     }
 }
 
