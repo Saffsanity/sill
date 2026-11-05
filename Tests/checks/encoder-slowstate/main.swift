@@ -236,6 +236,7 @@ struct Stream {
     private(set) var replaces: [Double] = []
     private(set) var swaps: [Double] = []
     private(set) var reports: [(Double, W.Report)] = []
+    private(set) var relapsed: [(Double, Int)] = []
     private(set) var outputs: [(at: Double, session: Int)] = []
     private var readyAt: Double?
     private var inside: (out: Double, turn: Double, session: Int)?
@@ -259,6 +260,7 @@ struct Stream {
                 replaces.append(i.out)
                 if makeFails { watch.replacementFailed(at: i.out + makeDelay) } else { readyAt = i.out + makeDelay }
             case .judged(let r)?: reports.append((i.out, r))
+            case .relapsed(_, let n)?: relapsed.append((i.out, n))
             case nil: break
             }
             if waiting { waiting = false; handOver(at: i.out) }
@@ -558,6 +560,38 @@ do {
                      s.swaps.count == 2 ? s.swaps[1] - s.swaps[0] : -1, back))
         expect(back > 56, "\(back) fps at the end, not about 57")
     } else { expect(false, "no replace") }
+}
+
+scenarioName = "relapses: fast for 6 s after each swap, slow after each quiet spell"
+do {
+    // Seen on 2026-10-13: every new session fast (14 ms) for about 6 s, then slow (28 ms), with a quiet
+    // spell then a burst every 12 s. Two swaps, each slow again within 30 s: the stream keeps its
+    // session, says so once, and never replaces again however long it runs.
+    var caps: [Double] = motion(0, 4) + quiet(4, 6)
+    var t0 = 6.0
+    while t0 < 200 { caps += motion(t0, t0 + 10) + quiet(t0 + 10, t0 + 12); t0 += 12 }
+    var s = Stream(turnaround: { _, since, _ in since < 6 ? 0.014 : 0.028 })
+    s.run(caps, until: 200.5)
+    expect(s.replaces.count == 2, "\(s.replaces.count) replaces, not 2 before keeping the session")
+    expect(s.relapsed.count == 1 && s.relapsed.first?.1 == 2 && s.watch.gaveUp,
+           "relapsed \(s.relapsed.map { $0.1 }), gave up \(s.watch.gaveUp)")
+    if let r = s.relapsed.first, let last = s.replaces.last {
+        expect(r.0 - last < 30, "the relapse \(r.0 - last) s after the last replace, not within 30")
+    }
+    print("relapses: \(s.replaces.count) replaces, then kept at \(String(format: "%.1f", s.relapsed.first?.0 ?? -1)) s")
+}
+
+scenarioName = "slow again only long after each swap"
+do {
+    // The slow state comes back 40 s after each swap (past 30 s): every replacement is worth it, and
+    // the stream goes on replacing.
+    var caps: [Double] = motion(0, 4) + quiet(4, 6)
+    var t0 = 6.0
+    while t0 < 300 { caps += motion(t0, t0 + 45) + quiet(t0 + 45, t0 + 47); t0 += 47 }
+    var s = Stream(turnaround: { _, since, _ in since < 40 ? 0.014 : 0.028 })
+    s.run(caps, until: 300.5)
+    expect(s.replaces.count >= 4 && s.relapsed.isEmpty && !s.watch.gaveUp,
+           "\(s.replaces.count) replaces, relapsed \(s.relapsed.count), gave up \(s.watch.gaveUp)")
 }
 
 print(failures == 0 ? "PASS: \(checks) checks" : "FAIL: \(failures) of \(checks) checks")

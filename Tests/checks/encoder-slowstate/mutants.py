@@ -11,6 +11,14 @@ src_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(root, 'Sources', '
 out = os.path.join(root, '.build', 'checks', 'encoder-slowstate')
 src = open(src_path).read()
 mutants = [
+    ("no relapse rule: a stream replaces for ever",
+     "            if relapses >= Self.maxRelapses {\n                gaveUp = true\n                return .relapsed(slow, count: relapses)\n            }\n", ""),
+    ("relapses counted from any attempt, a failed one too",
+     "relapses = now - lastSwap < Self.relapseWithin", "relapses = now - lastAttempt < Self.relapseWithin"),
+    ("relapses never reset by a long-lived session",
+     "? relapses + 1 : 0", "? relapses + 1 : relapses + 1"),
+    ("three relapses before keeping the session",
+     "static let maxRelapses = 2", "static let maxRelapses = 3"),
     ("input counted in the window's last second only",
      "            guard Double(inputs(after: now - half, through: now)) >= need,\n                  Double(inputs(after: now - Self.window, through: now - half)) >= need,\n",
      "            guard Double(inputs(after: now - half, through: now)) >= need,\n"),
@@ -74,7 +82,7 @@ mutants = [
     ("the gap from the old session's last frame back",
      "phase = .judging(Judging(slow: slow, swapAt: now, lastOldReturn: lastReturnAt))", "phase = .judging(Judging(slow: slow, swapAt: now, lastOldReturn: now))"),
     ("the fastest frame kept across a swap",
-     "        lastAttempt = now\n        fastest = .infinity\n", "        lastAttempt = now\n"),
+     "        lastSwap = now\n        fastest = .infinity\n", "        lastSwap = now\n"),
     ("a failed new session retried at once",
      "        phase = .watching\n        lastAttempt = now\n    }", "        phase = .watching\n    }"),
     ("a swap while watching taken",
