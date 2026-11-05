@@ -259,8 +259,9 @@ struct StreamScreen: View {
                 // not the stream's UIKit input view (nor, so, the Pencil, a hover or a key).
                 .allowsHitTesting(!overlayShown && tour == nil)
                 // The pointer sprite follows the layout: the trackpad's arrow shows only in the
-                // laptop layout, and a rotation re-renders it at once; the Mac's arrow stays.
-                .onChange(of: DuoLayout.of(geo.size).isPortrait, initial: true) { _, portrait in
+                // laptop layout, and a rotation re-renders it at once; the Mac's arrow stays. With the
+                // picture on a monitor this screen is a trackpad held either way, so it shows in both.
+                .onChange(of: DuoLayout.of(geo.size).isPortrait || external.shows(client), initial: true) { _, portrait in
                     client.setPointerLayout(portrait: portrait)
                 }
                 // The clipboard's chip on screen or not: its 20 s run only while it is, and VoiceOver
@@ -432,7 +433,9 @@ struct StreamScreen: View {
         .onDisappear {
             tourWait?.cancel()
             tourWait = nil
+            ExternalDisplay.shared.leave(client)
         }
+        .background { ExternalDisplayAccessory().frame(width: 0, height: 0).accessibilityHidden(true) }
     }
 
     // MARK: The link's line
