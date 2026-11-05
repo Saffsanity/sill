@@ -155,18 +155,21 @@ struct DisplayWake {
 
     /// The display read asleep just before a declaration and on `secondLook` later: "Woke the display
     /// for iPad (iPad14,1), which connected." The device's name as the Mac's card has it (cleaned),
-    /// else its address.
-    static func wokeLine(device: String, activity: Activity) -> String {
-        "Woke the display for \(device), which \(why(activity))."
+    /// else its address. A declaration of a remote user (TEST ONLY, `UserActive`) says so.
+    static func wokeLine(device: String, activity: Activity, remote: Bool = false) -> String {
+        "Woke the display for \(device), which \(why(activity))\(remote ? remoteNote : "")."
     }
 
     /// Any other declaration that went through, at most once a minute: the display was on already, or
     /// woken for a declaration made before this one (whose line it is), or it read asleep `secondLook`
-    /// later (a closed lid, a display slow to wake).
-    static func declaredLine(device: String, activity: Activity, asleepNow: Bool) -> String {
-        "Declared activity for \(device), which \(why(activity))"
+    /// later (a closed lid, a display slow to wake, or a remote user's declaration that keeps it dark).
+    static func declaredLine(device: String, activity: Activity, asleepNow: Bool, remote: Bool = false) -> String {
+        "Declared activity for \(device), which \(why(activity))\(remote ? remoteNote : "")"
             + (asleepNow ? ", but the display read asleep \(secondLook) s later." : ".")
     }
+
+    /// What a line adds for a declaration of a remote user.
+    static let remoteNote = " (declared as a remote user)"
 
     /// IOKit refused a declaration (it needs no privilege, so this should never show).
     static func failedLine(_ result: Int32) -> String {
@@ -191,6 +194,8 @@ struct DisplayWake {
             let wasAsleep: Bool
             /// How many woke lines had been said when it was made: a wake said since is not its own.
             let wakesBefore: Int
+            /// It declared a remote user (TEST ONLY, `UserActive`): its line says so.
+            var remote = false
         }
 
         private(set) var saidFailure = false
@@ -200,14 +205,15 @@ struct DisplayWake {
 
         /// Right after the call: the refusal's line (or nothing), and for a declaration that went
         /// through, the look to take `secondLook` later.
-        mutating func declared(device: String, activity: Activity, wasAsleep: Bool, result: Int32) -> (line: String?, look: Look?) {
+        mutating func declared(device: String, activity: Activity, wasAsleep: Bool, result: Int32,
+                               remote: Bool = false) -> (line: String?, look: Look?) {
             guard result == DisplayWake.success else {
                 if saidFailure { return (nil, nil) }
                 saidFailure = true
                 return (DisplayWake.failedLine(result), nil)
             }
             saidFailure = false
-            return (nil, Look(device: device, activity: activity, wasAsleep: wasAsleep, wakesBefore: wakesSaid))
+            return (nil, Look(device: device, activity: activity, wasAsleep: wasAsleep, wakesBefore: wakesSaid, remote: remote))
         }
 
         /// The second look: whether the main display reads asleep now, at `now`.
@@ -215,37 +221,65 @@ struct DisplayWake {
             if look.wasAsleep, !asleepNow, look.wakesBefore == wakesSaid {
                 wakesSaid += 1
                 lastLineAt = now
-                return DisplayWake.wokeLine(device: look.device, activity: look.activity)
+                return DisplayWake.wokeLine(device: look.device, activity: look.activity, remote: look.remote)
             }
             if let last = lastLineAt, now >= last, now - last < DisplayWake.declaredLineInterval { return nil }
             lastLineAt = now
-            return DisplayWake.declaredLine(device: look.device, activity: look.activity, asleepNow: asleepNow)
+            return DisplayWake.declaredLine(device: look.device, activity: look.activity, asleepNow: asleepNow, remote: look.remote)
         }
     }
 
     // MARK: - TEST ONLY: the user's location
 
+    /// Where a declaration says the user is (IOPMUserActiveType): in front of the Mac
+    /// (kIOPMUserActiveLocal), or connected to it over the network (kIOPMUserActiveRemote).
+    enum UserType: Hashable { case local, remote }
+
+    /// What the TEST ONLY variable asks: `local`, every declaration local, as without it; `remote`,
+    /// every one remote; `auto`, PR #229's rule (`userType`).
+    enum UserActive: Equatable { case local, remote, auto }
+
+    /// The type one declaration uses. Under `auto` (PR #229): remote while every connected device is
+    /// away from home, or while a window is staged on Sill's own virtual display, else local, so a
+    /// panel nobody is in front of might stay dark. TEST ONLY until a Mac shows it: IOPMLib.h sends
+    /// remote clients that need the framebuffer or the GPU to a remote declaration and says only that
+    /// "various components of the system are maintained at different power levels depending on user
+    /// location"; whether a remote declaration wakes a sleeping display's picture at all is untried,
+    /// and a local one (`caffeinate -u`'s) is what users saw bring the picture back. Were remote to
+    /// leave the picture black, `auto` would bring issue #134 back for a device away from home.
+    static func userType(_ setting: UserActive, everyDeviceAway: Bool, stagedOnVirtualDisplay: Bool) -> UserType {
+        switch setting {
+        case .local: return .local
+        case .remote: return .remote
+        case .auto: return everyDeviceAway || stagedOnVirtualDisplay ? .remote : .local
+        }
+    }
+
     /// TEST ONLY: `remote` declares the user as connected over the network (kIOPMUserActiveRemote)
-    /// instead of in front of the Mac (kIOPMUserActiveLocal), for Noah to see on a real Mac whether
-    /// that also wakes the panel (IOPMLib.h: "various components of the system are maintained at
-    /// different power levels depending on user location"). Read by every real host, Sill.app
+    /// instead of in front of the Mac (kIOPMUserActiveLocal), and `auto` by PR #229's rule
+    /// (`userType`), for Noah to see on a real Mac whether that also wakes the panel, or keeps the
+    /// picture live with the panel dark (IOPMLib.h: "various components of the system are maintained
+    /// at different power levels depending on user location"). Read by every real host, Sill.app
     /// included (it lets nobody in, as the encoder's variables); a test host declares nothing.
     static let userActiveVariable = "SILL_TEST_USER_ACTIVE"
 
     /// What the variable says, and the one line it prints at start (nil when it is not set). The
     /// value is never echoed: a line of the log is not the environment's to write.
-    static func userActive(environment: [String: String], testHost: Bool) -> (remote: Bool, line: String?) {
-        guard let value = environment[userActiveVariable], !value.isEmpty else { return (false, nil) }
+    static func userActive(environment: [String: String], testHost: Bool) -> (setting: UserActive, line: String?) {
+        guard let value = environment[userActiveVariable], !value.isEmpty else { return (.local, nil) }
         guard !testHost else {
-            return (false, "\(userActiveVariable) ignored: a test host declares no user activity (it counts \(dryKey)).")
+            return (.local, "\(userActiveVariable) ignored: a test host declares no user activity (it counts \(dryKey)).")
         }
         switch value {
         case "remote":
-            return (true, "TEST: user activity is declared as remote (kIOPMUserActiveRemote), not local (\(userActiveVariable)=remote).")
+            return (.remote, "TEST: user activity is declared as remote (kIOPMUserActiveRemote), not local (\(userActiveVariable)=remote).")
         case "local":
-            return (false, "TEST: user activity is declared as local (kIOPMUserActiveLocal), as without \(userActiveVariable).")
+            return (.local, "TEST: user activity is declared as local (kIOPMUserActiveLocal), as without \(userActiveVariable).")
+        case "auto":
+            return (.auto, "TEST: user activity is declared as remote (kIOPMUserActiveRemote) while every connected device is away "
+                    + "from home or a window is staged on the virtual display, else as local (\(userActiveVariable)=auto).")
         default:
-            return (false, "\(userActiveVariable) ignored: it takes local or remote; user activity is declared as local.")
+            return (.local, "\(userActiveVariable) ignored: it takes local, remote or auto; user activity is declared as local.")
         }
     }
 }
