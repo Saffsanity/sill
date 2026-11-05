@@ -70,5 +70,24 @@ check(out(g("update", reconnect: true), saved: true).reconnect && out(g("update"
 check(out(g("update", "\u{202E}Update\nnow")).text == "Update now", "update's message cleaned too")
 check(out(g("update", " ")).storeLink && out(g("update", " ")).text.hasPrefix("Update Sill on this iPad"), "update, message empty after cleaning")
 check(!out(later).storeLink && !out(g("quit")).storeLink && !out(nil).storeLink && !out(g("")).storeLink, "only update links the App Store")
+// #105 (2026-11-02): the Mac going to sleep, and shutting down, restarting or logging out. The host's words
+// for a device that does not know the reason (it shows them and reconnects, as `reconnect` says), and this
+// build's own.
+let sleeps = Goodbye.sleeping(mac: "Mac mini"), powers = Goodbye.shuttingDown(mac: "Mac mini")
+check(sleeps.reason == "sleep" && sleeps.reconnect == true && sleeps.message == "Mac mini went to sleep. Sill reconnects when it wakes.",
+      "the host's sleep goodbye: reason, words, reconnect")
+check(powers.reason == "shutdown" && powers.reconnect == true
+      && powers.message == "Mac mini is shutting down, restarting or logging out. Sill reconnects when it’s back.",
+      "the host's power-off goodbye: reason, words, reconnect")
+let sleepOut = out(sleeps, saved: true), powerOut = out(powers)
+check(sleepOut.text == "Mac mini went to sleep. This iPad reconnects when it wakes." && sleepOut.reconnect && sleepOut.remoteAllowed
+      && !sleepOut.isNotice, "this build's words for sleep, reconnecting (the remote door too, for a saved Mac), no notice")
+check(powerOut.text == "Mac mini is shutting down, restarting or logging out. This iPad reconnects when it’s back."
+      && powerOut.reconnect && !powerOut.isNotice, "this build's words for a power-off")
+check(!GoodbyePolicy.isNotice(sleeps) && !GoodbyePolicy.isNotice(powers), "sleep and power-off are this build's own reasons, not notices")
+// A device from before: the reason unknown, so the Mac's words and its reconnect (the `default` path).
+let olderSleep = out(g("sleep-unknown-to-it", sleeps.message, reconnect: true))
+check(olderSleep.text == sleeps.message && olderSleep.reconnect, "a device without the reason shows the Mac's words and reconnects")
+
 print("\(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

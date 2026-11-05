@@ -973,6 +973,7 @@ final class StreamServer {
                 }
                 client.route = .home(origin, peer: nil)
                 let admit = { (hello: Hello?) in
+                    if let away = self.goingAway { Self.closeWithGoodbye(away, on: connection, queue: self.queue); return }
                     client.link = self.link(connection, path: connection.currentPath)
                     self.register(client)
                     print("Client connected: \(connection.endpoint)")
@@ -1027,6 +1028,7 @@ final class StreamServer {
     /// no link (its card names the route, "through Tailscale"); a home one's link is read at
     /// registration and then follows the path, as the plain door's does. On `queue`.
     func serve(_ connection: NWConnection, route: ClientRoute, hello: Hello?, admitted: () -> Void = {}) {
+        if let goingAway { Self.closeWithGoodbye(goingAway, on: connection, queue: queue); return }
         let client = Client(connection)
         client.route = route
         // As its route says: every session a Door admits is TLS (a remote one, or a home one with its
@@ -1105,22 +1107,41 @@ final class StreamServer {
     }
 
     /// Every admitted client, home and remote, gets `goodbye` (the app's Quit and the signal path:
-    /// "quit"); returns once each message was handed to the network or after `within`. Call from
-    /// any thread but the network queue.
-    func goodbyeAll(_ goodbye: Goodbye, within: TimeInterval) {
+    /// "quit"); returns once each message was handed to the network or after `within`. `closing`
+    /// (the Mac's sleep and power-off, which the process outlives) also closes each connection then,
+    /// so a session that a short sleep left standing does not keep the goodbye for a later end, and
+    /// a device redialling at once hears the same goodbye until `welcomeBack` or 30 s (a cancelled
+    /// shutdown), not a session that dies in the sleep or ends with "quit". Call from any thread but
+    /// the network queue.
+    func goodbyeAll(_ goodbye: Goodbye, within: TimeInterval, closing: Bool = false) {
         let group = DispatchGroup()
         group.enter()
         queue.async { [self] in
+            if closing {
+                goingAway = goodbye
+                queue.asyncAfter(deadline: .now() + 30) { [self] in if goingAway == goodbye { goingAway = nil } }
+            }
             let data = StreamMessage(kind: .goodbye, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                                      payload: Wire.encode(goodbye)).serialized()
             for client in clients.values where client.connection.state == .ready {
                 group.enter()
-                client.connection.send(content: data, completion: .contentProcessed { _ in group.leave() })
+                let connection = client.connection
+                connection.send(content: data, completion: .contentProcessed { _ in
+                    if closing { connection.cancel() }
+                    group.leave()
+                })
+                if closing { queue.asyncAfter(deadline: .now() + within) { connection.cancel() } }
             }
             group.leave()
         }
         _ = group.wait(timeout: .now() + within)
     }
+
+    /// Set by `goodbyeAll(closing:)`: what a session admitted meanwhile hears, never registered. On `queue`.
+    private var goingAway: Goodbye?
+
+    /// The Mac woke: sessions are served again.
+    func welcomeBack() { queue.async { [self] in goingAway = nil } }
 
     // MARK: The device gate (DeviceGate)
     //
