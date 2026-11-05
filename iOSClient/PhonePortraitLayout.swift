@@ -367,3 +367,46 @@ struct PhonePortraitLayout: Equatable {
         }
     }
 }
+
+/// Hide Top Bar in landscape + shake to restore (issue #92, Noah's decision of 2026-10-19):
+/// - Toggle in Settings › This iPad / This iPhone (`Hide Top Bar`, `Sill.hideTopBar`, off by default).
+/// - Shaking the device turns the toggle off and brings the bar back.
+/// Pure (`CoreGraphics` + `Foundation`).
+enum TopBarVisibility {
+    static let key = "Sill.hideTopBar"
+
+    static func barHidden(switchOn: Bool, isLandscape: Bool, overlayOpen: Bool) -> Bool {
+        switchOn && isLandscape && !overlayOpen
+    }
+
+    static func afterShake(switchOn: Bool) -> (switchOn: Bool, announcement: String?) {
+        guard switchOn else { return (false, nil) }
+        return (false, "Top bar shown")
+    }
+
+    /// Whether the viewport asks the Mac for a display of the device's own size (Viewport.deviceDesktop,
+    /// DeviceDesktop on the host), so the Desktop fills the screen edge to edge with no letterbox: the
+    /// Desktop streams, sideways, and the switch is on (as held while Settings is open). An overlay that
+    /// brings the bar back for a moment does not drop it, so the Mac does not tear its display down and
+    /// make it again for a drawer or a Settings visit.
+    static func wantsDeviceDesktop(switchOn: Bool, isLandscape: Bool, desktopStreaming: Bool) -> Bool {
+        switchOn && isLandscape && desktopStreaming
+    }
+
+    /// The size the viewport sends while the device desktop is wanted: the panel's own while the bar is
+    /// hidden; the last full-screen size while an overlay shows the bar over it (the panel shrinks by
+    /// the bar's height then, and a new size would make the Mac recreate its display), the panel's own
+    /// when there is none yet. Not wanted: the panel's own.
+    static func viewportSize(panel: CGSize, wanted: Bool, barHidden: Bool, lastFull: CGSize?) -> CGSize {
+        guard wanted, !barHidden, let lastFull else { return panel }
+        return lastFull
+    }
+
+    enum Copy {
+        static let toggleTitle = "Hide Top Bar"
+        static let showBarLabel = "Show Top Bar"
+        static func footnote(device: String) -> String {
+            "Hides the top bar when this \(device) is held sideways so the picture fills the screen. Shake this \(device) (or tap the top-right button, or press ⇧⌘B) to show the bar again."
+        }
+    }
+}

@@ -90,6 +90,9 @@ package final class StreamCoordinator {
     /// The virtual display needs that loop too: without it the setting is forced off.
     private let appKitLoop: Bool
     let stage: VirtualStage
+    /// The Desktop in full screen on a device: a virtual display at its size, main while it
+    /// streams (`Viewport.deviceDesktop`; DeviceDesktop.swift).
+    let deviceDesktop = DeviceDesktop()
     /// What the menu bar app shows. Written here, at the moment things happen; never read back.
     package let status: HostStatus
     /// Set by the signal handler: a select in flight when Ctrl-C lands must not stage anything new.
@@ -472,6 +475,13 @@ package final class StreamCoordinator {
         remote?.attach(server: server, status: status, macName: macName, requirePairing: config.requirePairing)
         catalog.preferMainDisplay = virtualDisplay   // the Desktop source must never capture the virtual display
         stage.onLost = { [weak self] in Task { @MainActor in await self?.stageLost() } }
+        deviceDesktop.onLost = { [weak self] in
+            Task { @MainActor in
+                guard let self, self.active == .desktop else { return }
+                print("Device desktop: the display went away; streaming the Desktop again.")
+                await self.select(.desktop)
+            }
+        }
         status.update { $0.synthetic = synthetic; $0.virtualDisplayOn = config.virtualDisplay }
         // Every change of the snapshot re-publishes the devices' settings state (deduplicated, so
         // the once-a-second stats send nothing). One before `server.start()` reaches nobody, and
@@ -1586,6 +1596,7 @@ package final class StreamCoordinator {
             // The test pattern with the TEST ONLY scripted pointer: its own space, where a test
             // client's input moves that pointer (a synthetic host posts nothing).
             if synthetic, pointer.hasTestPointer { return Self.testPatternRect }
+            if deviceDesktop.isLive, let frame = deviceDesktop.frame { return frame }
             return catalog.display?.frame
         case .window(let id):
             // On the virtual display the video is the captured crop, not the whole window: an app
@@ -1631,6 +1642,7 @@ package final class StreamCoordinator {
             return nil
         case .desktop:
             if synthetic { return pointer.hasTestPointer ? .rect(Self.testPatternRect) : nil }
+            if deviceDesktop.isLive, let frame = deviceDesktop.frame { return .rect(frame) }
             return catalog.display.map { .rect($0.frame) }
         case .window(let id):
             guard !synthetic else { return nil }
@@ -1686,6 +1698,14 @@ package final class StreamCoordinator {
         // A different rate (a ProMotion device joined, Low Power Mode toggled) needs a new capture
         // interval and encoder session: one restart, whatever the source.
         if active != .none, effectiveFPS != fps { await select(active); return }
+        // The Desktop in full screen: a display of the device's size, made, resized or removed by a
+        // restart of the Desktop (the flag or the size changed: a toggle, a rotation, an Aa step).
+        if active == .desktop, !synthetic {
+            let want = wantedDeviceDesktop
+            let unchanged = want.map { deviceDesktop.matches(size: $0, refreshHz: fps) } ?? !deviceDesktop.isLive
+            if !unchanged { await select(.desktop) }
+            return
+        }
         if virtualDisplay, stage.isStaged, case .window(let id) = active {
             // One restart: prepare re-places the window on the same display (the display is only
             // recreated if the envelope grew). The client's identical re-send after a switch is a
@@ -1703,6 +1723,13 @@ package final class StreamCoordinator {
         // A locked Mac sizes no window (LockPolicy): the one streaming at the lock gives way to the placeholder.
         guard case .window(let id) = active, !lockReading.locked, let w = catalog.window(id: id) else { return }
         if fitToViewport(w) != nil { await catalog.refreshWindows() }
+    }
+
+    /// The device desktop's size for the last viewport, or nil for the Mac's real screen: the
+    /// device did not ask, or the display cannot be made here (no AppKit loop, a synthetic host).
+    private var wantedDeviceDesktop: CGSize? {
+        guard appKitLoop, !synthetic, let v = viewport, v.deviceDesktop == true else { return nil }
+        return DeviceDesktop.wantedSize(for: v)
     }
 
     /// `--virtual-display`: how big the window should be on the virtual display and how big the
@@ -1891,6 +1918,8 @@ package final class StreamCoordinator {
                 stage.release()
             }
         }
+        // The device desktop lives only while the Desktop streams to a device that asked for it.
+        if source != .desktop || wantedDeviceDesktop == nil { deviceDesktop.release() }
         // In regular mode, every window Sill sized but the one about to stream goes back to its own
         // frame (WindowRestore, issue #57): another window or the Desktop picked, `.none` when the
         // last device leaves or the stream stops. A restart of the same window keeps it fitted.
@@ -2020,13 +2049,28 @@ package final class StreamCoordinator {
                 title = "Test Pattern"; kind = .testPattern
                 picture = .display
             } else {
-                // The display as the newest look has it, read after every await (`desktopCapture`).
-                guard let plan = await desktopCapture() else { active = .none; broadcastList(); return }
-                if let line = CatalogLook.desktopLine(was: lookBefore.display, now: plan.displayID, age: lookBefore.age) { print(line) }
+                // The device's own display when it asked for one (Viewport.deviceDesktop), else the
+                // display as the newest look has it, read after every await (`desktopCapture`).
+                var deviceDisplay: SCDisplay? = nil
+                var deviceSize: CGSize? = nil
+                if let want = wantedDeviceDesktop {
+                    do {
+                        deviceDisplay = try await deviceDesktop.ensure(size: want, refreshHz: fps)
+                        deviceSize = want
+                    } catch {
+                        print("Device desktop unavailable (\(error)); streaming the Mac's screen instead.")
+                        deviceDesktop.release()
+                    }
+                    guard !shuttingDown else { deviceDesktop.release(); active = .none; broadcastList(); return }
+                }
+                guard let plan = await desktopCapture(on: deviceDisplay) else { active = .none; broadcastList(); return }
+                if deviceDisplay == nil,
+                   let line = CatalogLook.desktopLine(was: lookBefore.display, now: plan.displayID, age: lookBefore.age) { print(line) }
                 filter = plan.filter
                 displayScale = plan.displayScale
                 width = plan.width; height = plan.height
-                describe = "the whole desktop\(useSoftwareEncoder ? " (software encoder)" : "")"
+                describe = (deviceSize.map { "the device's own desktop, \(Int($0.width))×\(Int($0.height)) pt" } ?? "the whole desktop")
+                    + (useSoftwareEncoder ? " (software encoder)" : "")
                 title = "Whole Desktop"; kind = .desktop
                 picture = .display
             }
@@ -2104,8 +2148,9 @@ package final class StreamCoordinator {
     /// function's own await, so a look that landed meanwhile is the one used: on 2026-10-28 the filter
     /// was built on a display read before an await, which the look that landed during it had replaced
     /// (CatalogLook). Nil when the catalog has no display, or the host is quitting.
-    private func desktopCapture() async -> (filter: SCContentFilter, displayID: UInt32, displayScale: CGFloat?, width: Int, height: Int)? {
-        guard catalog.display != nil else { return nil }
+    /// `display`: the device's own display (DeviceDesktop) in place of the catalog's, when it made one.
+    private func desktopCapture(on display: SCDisplay? = nil) async -> (filter: SCContentFilter, displayID: UInt32, displayScale: CGFloat?, width: Int, height: Int)? {
+        guard display != nil || catalog.display != nil else { return nil }
         // Sill's own windows (Settings, Log, the pairing window with its code) never go out
         // in a Desktop stream. Fixed here at pipeline start: a running SCStream is never
         // reconfigured, so a host that can show a pairing code (remote access) looks for
@@ -2117,7 +2162,7 @@ package final class StreamCoordinator {
             resolved = await catalog.resolveOwnApplication()
             guard !shuttingDown else { return nil }
         }
-        guard let d = catalog.display else { return nil }
+        guard let d = display ?? catalog.display else { return nil }
         let own = catalog.ownApplication ?? resolved      // the newest look's, read with its display
         let displayFilter = own.map { SCContentFilter(display: d, excludingApplications: [$0], exceptingWindows: []) }
             ?? SCContentFilter(display: d, excludingWindows: [])
@@ -2860,6 +2905,7 @@ package final class StreamCoordinator {
         audio.shutdown()   // "Audio stopped: Sill is quitting."
         restoreFits(keeping: nil)
         stage.release()
+        deviceDesktop.release()
     }
 
     /// The CLI's default path at a signal (HostShutdown.installKeyRelease), just before it dies of it:
