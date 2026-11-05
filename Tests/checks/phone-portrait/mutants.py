@@ -111,6 +111,11 @@ MUTANTS = {
                                       "guard switchOn else { return (false, nil) }\n        return (true, \"Top bar shown\")"),
     "B5 afterShake announces when already off": ("guard switchOn else { return (false, nil) }",
                                                  "if !switchOn && false { return (false, nil) }"),
+    "B6 device desktop ignores the switch": ("switchOn && isLandscape && desktopStreaming", "isLandscape && desktopStreaming"),
+    "B7 device desktop upright": ("switchOn && isLandscape && desktopStreaming", "switchOn && desktopStreaming"),
+    "B8 device desktop for a window": ("switchOn && isLandscape && desktopStreaming", "switchOn && isLandscape"),
+    "B9 overlay sends the shrunk panel": ("guard wanted, !barHidden, let lastFull else { return panel }", "guard wanted, barHidden, let lastFull else { return panel }"),
+    "B10 last full size even when not wanted": ("guard wanted, !barHidden, let lastFull else { return panel }", "guard !barHidden, let lastFull else { return panel }"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

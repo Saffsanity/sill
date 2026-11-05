@@ -189,6 +189,12 @@ struct StreamScreen: View {
     /// This device's Hide Top Bar switch in landscape (issue #92).
     @AppStorage(TopBarVisibility.key) private var hideTopBar = false
     @State private var hideTopBarHeld: Bool? = nil
+    /// Sideways now (DuoLayout), for the device desktop under a hidden bar.
+    @State private var landscapeNow = false
+    /// The landscape layout's bar hidden right now (TopBarVisibility.barHidden), and the last panel
+    /// size sent with it hidden while the device desktop was wanted (TopBarVisibility.viewportSize).
+    @State private var topBarHiddenNow = false
+    @State private var deviceDesktopFullSize: CGSize? = nil
     #if DEBUG
     /// The console says once when a decision starts to wait.
     @State private var tourWaitLogged: Double? = nil
@@ -263,6 +269,8 @@ struct StreamScreen: View {
                 // laptop layout, and a rotation re-renders it at once; the Mac's arrow stays.
                 .onChange(of: DuoLayout.of(geo.size).isPortrait, initial: true) { _, portrait in
                     client.setPointerLayout(portrait: portrait)
+                    landscapeNow = !portrait
+                    if portrait { topBarHiddenNow = false }
                 }
                 // The clipboard's chip on screen or not: its 20 s run only while it is, and VoiceOver
                 // is told when it first shows (ClipboardPolicy.chipCounts).
@@ -399,6 +407,7 @@ struct StreamScreen: View {
         .onChange(of: panelSize) { _, _ in sendViewport(after: 0.25) }
         // Same wait for Aa: cycling from Off to 0.8× passes three sizes nobody wants the Mac to try.
         .onChange(of: textScale) { _, _ in sendViewport(after: 0.25) }
+        .onChange(of: deviceDesktopWanted) { _, _ in sendViewport(after: 0.25) }
         // The stream rate follows the panel (`StreamClient.wantedFPS`): re-send when Low Power Mode
         // toggles or the screen's mode changes. Both notifications can arrive off the main thread.
         .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange).receive(on: RunLoop.main)) { _ in
@@ -493,6 +502,12 @@ struct StreamScreen: View {
     /// Tells the host the panel size and text scale, now or after `delay` seconds. A newer call
     /// replaces a pending one, so a burst of changes sends only the last. Nothing goes out until the
     /// panel has been measured, or while disconnected.
+    /// The viewport asks for a display of this device's size (TopBarVisibility.wantsDeviceDesktop).
+    private var deviceDesktopWanted: Bool {
+        TopBarVisibility.wantsDeviceDesktop(switchOn: hideTopBarHeld ?? hideTopBar, isLandscape: landscapeNow,
+                                            desktopStreaming: client.active == .desktop)
+    }
+
     private func sendViewport(after delay: Double = 0) {
         pendingViewport?.cancel()
         pendingViewport = Task { @MainActor in
@@ -502,14 +517,23 @@ struct StreamScreen: View {
             }
             guard client.connected, panelSize.width > 0, panelSize.height > 0 else { return }
             let fps = StreamClient.wantedFPS(remote: client.awayCapsFrameRate)
+            // Hide Top Bar over the Desktop: the Mac makes a display of this size (DeviceDesktop), so
+            // the Desktop fills the screen with no letterbox; an overlay showing the bar keeps the size.
+            let wanted = deviceDesktopWanted
+            if !wanted { deviceDesktopFullSize = nil }
+            let size = TopBarVisibility.viewportSize(panel: panelSize, wanted: wanted, barHidden: topBarHiddenNow,
+                                                     lastFull: deviceDesktopFullSize)
+            if wanted && topBarHiddenNow { deviceDesktopFullSize = size }
             #if DEBUG
-            print("viewport: \(Self.points(panelSize.width))×\(Self.points(panelSize.height)) pt, scale "
-                  + (textScale.map { TextScaleControl.label($0) } ?? "off") + ", \(fps) fps")
+            print("viewport: \(Self.points(size.width))×\(Self.points(size.height)) pt, scale "
+                  + (textScale.map { TextScaleControl.label($0) } ?? "off") + ", \(fps) fps"
+                  + (wanted ? ", device desktop" : ""))
             #endif
-            client.sendViewport(Viewport(width: Double(panelSize.width),
-                                         height: Double(panelSize.height),
+            client.sendViewport(Viewport(width: Double(size.width),
+                                         height: Double(size.height),
                                          scale: textScale,
-                                         fps: fps))
+                                         fps: fps,
+                                         deviceDesktop: wanted ? true : nil))
         }
     }
 
@@ -1205,6 +1229,7 @@ struct StreamScreen: View {
             }
             contentArea(bar: bar, topBarHidden: topBarHidden)
         }
+        .onChange(of: topBarHidden, initial: true) { _, hidden in topBarHiddenNow = hidden }
     }
 
     /// `largerKeyboard`: Larger Picture's keyboard on a phone (see `body`), nil otherwise.

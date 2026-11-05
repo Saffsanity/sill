@@ -384,6 +384,24 @@ enum TopBarVisibility {
         return (false, "Top bar shown")
     }
 
+    /// Whether the viewport asks the Mac for a display of the device's own size (Viewport.deviceDesktop,
+    /// DeviceDesktop on the host), so the Desktop fills the screen edge to edge with no letterbox: the
+    /// Desktop streams, sideways, and the switch is on (as held while Settings is open). An overlay that
+    /// brings the bar back for a moment does not drop it, so the Mac does not tear its display down and
+    /// make it again for a drawer or a Settings visit.
+    static func wantsDeviceDesktop(switchOn: Bool, isLandscape: Bool, desktopStreaming: Bool) -> Bool {
+        switchOn && isLandscape && desktopStreaming
+    }
+
+    /// The size the viewport sends while the device desktop is wanted: the panel's own while the bar is
+    /// hidden; the last full-screen size while an overlay shows the bar over it (the panel shrinks by
+    /// the bar's height then, and a new size would make the Mac recreate its display), the panel's own
+    /// when there is none yet. Not wanted: the panel's own.
+    static func viewportSize(panel: CGSize, wanted: Bool, barHidden: Bool, lastFull: CGSize?) -> CGSize {
+        guard wanted, !barHidden, let lastFull else { return panel }
+        return lastFull
+    }
+
     enum Copy {
         static let toggleTitle = "Hide Top Bar"
         static let showBarLabel = "Show Top Bar"
