@@ -48,38 +48,42 @@ enum GoodbyePolicy {
     /// "iPhone", `saved` whether the Mac is a saved one (its remote door may be dialled).
     static func outcome(_ goodbye: Goodbye?, mac: String, device: String, saved: Bool) -> Outcome {
         guard let goodbye else {
-            return Outcome(text: saved ? "\(mac) disconnected. Sill will reconnect when it can reach it."
-                                       : "\(mac) disconnected. It will reconnect when the Mac is back.",
+            return Outcome(text: saved ? String(localized: "\(mac) disconnected. Sill will reconnect when it can reach it.")
+                                       : String(localized: "\(mac) disconnected. It will reconnect when the Mac is back."),
                            reconnect: true, remoteAllowed: saved, isNotice: false)
         }
         switch goodbye.reason {
         case Goodbye.quit:
-            return Outcome(text: "\(mac) quit Sill. This \(device) reconnects when it’s back.",
+            return Outcome(text: String(localized: "\(mac) quit Sill. This \(device) reconnects when it’s back."),
                            reconnect: true, remoteAllowed: saved, isNotice: false)
         case Goodbye.removed:
-            return Outcome(text: "\(mac) removed this \(device). To use it again, pair it again.",
+            return Outcome(text: String(localized: "\(mac) removed this \(device). To use it again, pair it again."),
                            reconnect: false, remoteAllowed: false, isNotice: false)
         case Goodbye.remoteOff:
-            return Outcome(text: "\(mac) turned off Remote Access.", reconnect: true, remoteAllowed: false, isNotice: false)
+            return Outcome(text: String(localized: "\(mac) turned off Remote Access."), reconnect: true, remoteAllowed: false, isNotice: false)
         case Goodbye.internetOff:
-            return Outcome(text: "\(mac) stopped accepting connections from the internet. Connect through your VPN.",
+            return Outcome(text: String(localized: "\(mac) stopped accepting connections from the internet. Connect through your VPN."),
                            reconnect: true, remoteAllowed: false, isNotice: false)
         case Goodbye.busy:
-            return Outcome(text: "\(mac) is already serving 8 devices.", reconnect: true, remoteAllowed: saved, isNotice: false)
+            return Outcome(text: String(localized: "\(mac) is already serving 8 devices."), reconnect: true, remoteAllowed: saved, isNotice: false)
         case Goodbye.pairingRequired:
             // Only at a home door over TLS, to an unpaired device: a tap on its row asks to pair.
-            return Outcome(text: "\(mac) now asks devices to pair. Tap it to pair this \(device).",
+            return Outcome(text: String(localized: "\(mac) now asks devices to pair. Tap it to pair this \(device)."),
                            reconnect: false, remoteAllowed: false, isNotice: false)
         case Goodbye.update:
             // The host always sends its message; these words are for one that does not.
-            var own = "Update Sill on this \(device) to keep using \(mac)."
-            if let floor = goodbye.minimumVersion.flatMap({ SillVersion($0) }) { own += " It needs version \(floor) or later." }
+            let own: String
+            if let floor = goodbye.minimumVersion.flatMap({ SillVersion($0) }) {
+                own = String(localized: "Update Sill on this \(device) to keep using \(mac). It needs version \(floor.description) or later.")
+            } else {
+                own = String(localized: "Update Sill on this \(device) to keep using \(mac).")
+            }
             return Outcome(text: message(goodbye) ?? own, reconnect: goodbye.reconnect == true, remoteAllowed: saved,
                            storeLink: true, isNotice: true)
         default:
             let reconnect = goodbye.reconnect == true
-            let own = reconnect ? "\(mac) closed the connection. Sill will reconnect when it can."
-                                : "\(mac) closed the connection. Tap it to try again."
+            let own = reconnect ? String(localized: "\(mac) closed the connection. Sill will reconnect when it can.")
+                                : String(localized: "\(mac) closed the connection. Tap it to try again.")
             return Outcome(text: message(goodbye) ?? own, reconnect: reconnect, remoteAllowed: saved, isNotice: true)
         }
     }
