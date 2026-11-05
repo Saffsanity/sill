@@ -463,15 +463,7 @@ struct PortraitStreamScreen: View {
     private func picturePane(measured: Bool) -> some View {
         ZStack {
             // Scaled and moved by the picture's zoom, inside the clip below. On a monitor, not here.
-            if external.shows(client) {
-                Color.black.overlay {
-                    Text("The Mac is on the external display.")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Palette.muted)
-                }
-            } else {
-                ZoomedStreamView(client: client, zoom: zoom)
-            }
+            if external.shows(client) { Color.black } else { ZoomedStreamView(client: client, zoom: zoom) }
             InputOverlay(videoSize: client.videoSize,
                          send: { client.sendInput($0) },
                          setOwnPointer: { client.setOwnPointer($0, from: $1) },
@@ -483,6 +475,18 @@ struct PortraitStreamScreen: View {
                          macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
                          readZoom: { [zoom] in zoom.zoom },
                          writeZoom: { [zoom] in zoom.set($0) })
+            // The picture on a monitor: this pane is a trackpad too (a tap here would click the Mac
+            // blind), over the input view, which keeps the hardware keyboard.
+            if external.shows(client) {
+                trackpadSurface(verticalSpan: nil)
+                    .overlay(alignment: .top) {
+                        Text("The Mac is on the external display.")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Palette.muted)
+                            .padding(.top, 14)
+                            .allowsHitTesting(false)
+                    }
+            }
         }
         .background(Palette.panel)
         // A locked Mac: its cover over the picture (LockedMac), under the link's line.
@@ -512,6 +516,10 @@ struct PortraitStreamScreen: View {
     }
 
     private func trackpad(verticalSpan: CGFloat?) -> some View {
+        trackpadSurface(verticalSpan: verticalSpan).tourTarget(.trackpad)
+    }
+
+    private func trackpadSurface(verticalSpan: CGFloat?) -> some View {
         Trackpad(send: { client.sendInput($0) },
                  setPointer: { client.setOwnPointer($0, from: .trackpad) },
                  feed: { let f = client.pointerFeedState; return (f.anchor, f.reseeds) },
@@ -520,7 +528,6 @@ struct PortraitStreamScreen: View {
                  onModifiersConsumed: { latched = [] },
                  verticalSpan: verticalSpan,
                  sendGesture: { client.sendGesture($0, fingers: $1) })
-            .tourTarget(.trackpad)
     }
 
     private var drawer: some View { AppDrawer(client: client, drawerOpen: $drawerOpen) }
