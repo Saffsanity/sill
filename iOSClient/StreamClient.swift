@@ -123,13 +123,31 @@ enum RemoteRoute: Equatable {
 final class StreamClient: ObservableObject {
     // Connection. The setters of what the connect screen shows are internal: the DEBUG harness
     // seeds them.
+    enum StatusKind {
+        case searchingNetwork, searchingNearby, localNetworkPermission, homeAsk, message
+
+        var followsDiscovery: Bool {
+            self == .searchingNetwork || self == .searchingNearby || self == .localNetworkPermission
+        }
+        var isQuietSearch: Bool { self == .searchingNetwork || self == .searchingNearby }
+    }
+    // Discovery and pairing own their status lines by kind, independently of the displayed words.
+    private(set) var statusKind: StatusKind = .searchingNetwork
     @Published var status = StreamClient.lookingOnNetwork {
         didSet {
+            statusKind = .message
+            if notice != nil { notice = nil }
             #if DEBUG
             if status != oldValue { print("status: \(status)") }    // the simulator tests read the status line here
             #endif
         }
     }
+
+    func setStatus(_ text: String, kind: StatusKind) {
+        status = text
+        statusKind = kind
+    }
+
     /// The connect screen's rows (DiscoveryPolicy.rows): every Mac the network browser lists, then
     /// those seen only over peer-to-peer Wi-Fi.
     @Published var macs: [FoundMac] = []
@@ -204,7 +222,11 @@ final class StreamClient: ObservableObject {
     /// Pair This iPad…'s ask over a session at home that speaks TLS (`askOverStream`): the line the
     /// overlay shows under its title, from what the Mac answered; nil over any other session, where
     /// kind 21 asks as before (a plain door always opens a window for it).
-    @Published var overlayAskLine: String?
+    @Published var overlayAskLine: String? {
+        didSet { overlayAskIsPending = false }
+    }
+    // The initial request stays silent; an answer's words do not decide whether it is pending.
+    var overlayAskIsPending = false
     /// That ask's dial while it runs, and, once the Mac showed a code for it, where the overlay's
     /// Cancel withdraws it (`endOverlayAsk`).
     var overlayAskDialer: HomeDialer?
@@ -867,10 +889,9 @@ final class StreamClient: ObservableObject {
     /// The Mac's own words from the goodbye that ended the last session, when it was a notice
     /// ("update", or a reason this build does not know): the connect screen's status line
     /// (GoodbyePolicy), and for "update" the App Store link under it, shown while the status line
-    /// still says it: the next status (a tap, a dial, Forget) takes the link away. Cleared by the
-    /// next session's tear-down.
+    /// still says it: the next status (a tap, a dial, Forget) takes the link away via status.didSet.
+    /// Also cleared by the next session's tear-down.
     struct Notice: Equatable {
-        let text: String
         var storeLink = false
     }
     @Published var notice: Notice?
@@ -1568,10 +1589,14 @@ final class StreamClient: ObservableObject {
         if showsNearbyHint != out.showHint { showsNearbyHint = out.showHint }
         // "…and nearby" while the nearby search runs, but not under the hint: the line in Search
         // Nearby's place says it there (ConnectScreen), and the status would only repeat it.
-        if [Self.lookingOnNetwork, Self.lookingNearby, Self.allowLocalNetwork].contains(status) {
-            let idle = localNetworkDenied ? Self.allowLocalNetwork
-                : (out.browseNearby && !out.showHint ? Self.lookingNearby : Self.lookingOnNetwork)
-            if status != idle { status = idle }
+        if statusKind.followsDiscovery {
+            let kind: StatusKind = localNetworkDenied ? .localNetworkPermission
+                : (out.browseNearby && !out.showHint ? .searchingNearby : .searchingNetwork)
+            if statusKind != kind {
+                let text = kind == .localNetworkPermission ? Self.allowLocalNetwork
+                    : (kind == .searchingNearby ? Self.lookingNearby : Self.lookingOnNetwork)
+                setStatus(text, kind: kind)
+            }
         }
         discoveryRecheck?.cancel()
         discoveryRecheck = nil
@@ -3340,6 +3365,7 @@ final class StreamClient: ObservableObject {
         connection = nil
         c?.cancel()
         tearDown(status: Self.lookingOnNetwork)
+        setStatus(Self.lookingOnNetwork, kind: .searchingNetwork)
         updateDiscovery()
     }
 
