@@ -311,16 +311,6 @@ struct ReaderBefore: Decodable { var macName: String; var gestures: Int?; var cl
 check(Wire.decode(ReaderBefore.self, from: Wire.encode(repeats)).map { $0.macName == "Mac mini" && $0.clipboard == 1 } == true,
       "a reader from before it skips keyRepeat")
 
-// The window list's `fnKey` (2026-11-02, #272): a host that passes a device's fn bit (the Globe key) says 1,
-// and a device offers the Keys menu's window tiling only then. Additive, as `keyRepeat`.
-var takesFn = repeats
-takesFn.fnKey = 1
-check(json(takesFn).contains(#""fnKey":1"#) && !json(repeats).contains("fnKey") && repeats.fnKey == nil,
-      "a host that takes fn says fnKey 1; one without leaves the key out")
-check(Wire.decode(WindowList.self, from: Wire.encode(takesFn))?.fnKey == 1 && decodedOld?.fnKey == nil,
-      "fnKey round-trips, and an older host's list decodes with it nil")
-check(Wire.decode(ReaderBefore.self, from: Wire.encode(takesFn)).map { $0.macName == "Mac mini" } == true, "a reader from before it skips fnKey")
-
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil
 if let out {

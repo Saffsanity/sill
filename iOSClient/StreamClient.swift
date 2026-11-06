@@ -889,8 +889,6 @@ final class StreamClient: ObservableObject {
     /// keyboard's characters as keys only to a Mac that says so (KeyTyping); to one before it they go
     /// through iPadOS's text system, as they always did. Cleared with the session.
     var hostKeyRepeat: Int?
-    /// 1 from a Mac that takes a device's fn bit (`WindowList.fnKey`): the Keys menu's window tiling. Cleared with the session.
-    @Published var hostFnKey: Int?
     /// The clipboard (kind 32, StreamClient+Clipboard, docs/clipboard-plan.md): what this session's
     /// Mac takes and sends (`WindowList.clipboard`, 1 for text), nil from a Mac before it or with Share
     /// clipboard with devices off. Cleared with the session.
@@ -3553,7 +3551,6 @@ final class StreamClient: ObservableObject {
         hostProtocol = nil
         hostGestures = nil
         hostKeyRepeat = nil
-        hostFnKey = nil
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -4194,7 +4191,6 @@ final class StreamClient: ObservableObject {
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
                 self.hostKeyRepeat = list.keyRepeat
-                if self.hostFnKey != list.fnKey { self.hostFnKey = list.fnKey }
                 // A locked Mac's list has no windows: the drawer and the panel say why, the cover over the
                 // stream too (LockedMac).
                 if self.lockWhy != why { self.lockWhy = why }
