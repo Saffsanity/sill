@@ -1581,8 +1581,8 @@ and types, `isExpensive`). Then, at every browser change and at every due time:
 | wrong Mac | "This isn’t the Mac mini this ‹iPad› paired with. If Sill was set up again on it, forget it here and pair again." (no Connect Anyway) |
 | revoked | "Mac mini no longer accepts this ‹iPad›. Pair it again from Sill’s Settings on the Mac." |
 | refused | "Mac mini answered, but Sill isn’t accepting remote connections there. Check that Sill is open and Remote Access is on. If you changed its port, connect at home once." |
-| VPN off here | "Tailscale looks off on this ‹iPad›. Turn it on, then tap Mac mini." ("Your VPN" when the address has no service name) |
-| name not found | ".ts.net" names: "This ‹iPad› can’t look up mac-mini.tail1234.ts.net. Is Tailscale on?"; others: "This ‹iPad› can’t look up home.example.net." |
+| VPN off here or on the Mac | "Tailscale looks off on this ‹iPad› or on Mac mini. Turn it on on both, then tap Mac mini." ("Your VPN" when the address has no service name; both ends, as the device can't tell which is off: #309) |
+| name not found | ".ts.net" names: "This ‹iPad› can’t look up mac-mini.tail1234.ts.net. Is Tailscale on, here and on Mac mini?"; others: "This ‹iPad› can’t look up home.example.net." |
 | not Sill | "Something answered at 203.0.113.9, but it isn’t Sill. Your home’s internet address may have changed." |
 | didn't answer | "Mac mini didn’t answer. It may be asleep, or Tailscale may be off on the Mac." For a raw internet IP: "Mac mini didn’t answer at 203.0.113.9. If your home’s internet address changed, connect at home once to update it, or add an address name on the Mac." |
 | Local Network | "To reach 192.168.1.20, allow Local Network for Sill in Settings." |
@@ -1756,7 +1756,7 @@ and types, `isExpensive`). Then, at every browser change and at every due time:
 | Tailscale shields up, or ACLs that block 7455 | Dials time out with the "didn't answer" copy. The README's troubleshooting names both (an ACL must allow TCP 7455 to the Mac) |
 | MagicDNS off on the device | The `.ts.net` name fails at once, and the IPs beside it are tried |
 | A WireGuard VPN into the home router | The Mac lists "Wi‑Fi — 192.168.1.20" with its note. Away, the LAN address is dialled through the tunnel; the remote door classifies the routed private source as `lan` |
-| The VPN off on the device | "Tailscale looks off on this ‹iPad›…"; the Remote row stays (it is a saved Mac) |
+| The VPN off on the device or the Mac | "Tailscale looks off on this ‹iPad› or on ‹Mac›…"; the Remote row stays (it is a saved Mac) |
 | The VPN off on the Mac | The pane shows "Tailscale — Not connected". The device: "didn't answer…" |
 | The home's public IP changes | Names follow by themselves. A raw IP gets the "didn't answer at …" copy, and refreshes at the next home connection (verified kind 18) |
 | Carrier-grade NAT or double NAT | The pane says so, in orange; a VPN is the way. Sill never opens router ports |
