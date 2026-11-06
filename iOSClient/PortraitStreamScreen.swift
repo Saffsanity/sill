@@ -413,6 +413,7 @@ struct PortraitStreamScreen: View {
                           setSettings(false, false)
                           overlay.toggleKeyboard()
                       })
+                .contextMenu { KeysMenu(macTakesFn: (client.hostFnKey ?? 0) >= 1, send: { client.sendFromKeyRow($0) }) }
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
                 .tourTarget(.keyboard)
@@ -497,7 +498,7 @@ struct PortraitStreamScreen: View {
         KeyRow(metrics: metrics, keys: keys, latched: $latched, keyboardShown: keyboardShown,
                send: { client.sendFromKeyRow($0) },
                toggleKeyboard: { overlay.toggleKeyboard() },
-               showSpotlight: client.active == .desktop)
+               showSpotlight: client.active == .desktop, macTakesFn: (client.hostFnKey ?? 0) >= 1)
             .tourTarget(.keys)
     }
 
@@ -765,6 +766,8 @@ private struct KeyRow: View {
     /// Spotlight's panel is its own Mac window, so it only shows up in the stream while the whole
     /// desktop is the source. Anywhere else the key would be a cap that does something invisible.
     let showSpotlight: Bool
+    /// The Keys menu's window tiling (`WindowList.fnKey`).
+    let macTakesFn: Bool
     /// Escape, tab or an arrow held down (HeldCap): its key is down on the Mac until the finger leaves.
     @State private var heldCap = HeldCap()
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -847,6 +850,7 @@ private struct KeyRow: View {
                     .font(.system(size: 20))
                     .foregroundStyle(keyboardShown ? Palette.accent : Palette.text)
             }
+            .contextMenu { KeysMenu(macTakesFn: macTakesFn, send: send) }
         case .spotlight:
             cap(open: false, label: "Open Spotlight on the Mac", action: { tap(key) }) {
                 Image(systemName: Spotlight.symbol)
