@@ -7,14 +7,20 @@ import StreamProtocol
 /// (StreamServer's Bonjour listener in Sill.app and SillHost --pairing). Who gets in is
 /// DoorPolicy's, so a rule changes in one place; this runs it. RemoteServer's admission, moved.
 ///
-/// Before admission a connection is cheap to refuse: at most 8 pending in all and 2 per source, a
-/// source the door refused 5 times in 60 s is refused for 300 s (an attempt the device itself
-/// abandons is no refusal, nor is a plain Sill's try at the home door, and a paired key clears the
-/// count), and 10 s from accept to admission (TLS, plus the one kind 19 of a pairing connection).
-/// Sources the door does not admit are cancelled before the connection starts, so they get no
-/// byte, and judged again at `.preparing`, `.ready` and at kind 19. The verify block decides trust
-/// from the lock-protected TrustSnapshot and the negotiated ALPN (DoorPolicy.trusts). Refusals are
-/// counted and reported at most once a minute, one line per door.
+/// Before admission a connection is cheap to refuse, and waiting costs (DoorPolicy.Places, finding
+/// 9 of the security scan of 2026-10-18): 8 places for anyone and 2 more for addresses that
+/// recently proved a paired key, 2 per source (an IPv6 address answers for its /64 too), 4 s for
+/// the TLS handshake (10 s from a known address) and 4 s after it for a pairing connection's kind
+/// 19, 10 s in all. A connection that ends unadmitted, and a pairing connection when its kind 19
+/// comes, costs its address (and, from an address not known, its /64) a tenth of a failure, one
+/// more for every 2 s it waited beyond the first 2, never less than a tenth for each second it
+/// waited, and at least one when the door refused it; 5 failures within 60 s refuse the address for
+/// 300 s, 12 within 300 s its /64 (an address counting 6 at most; never the /64's known addresses),
+/// and a paired key clears its address's count. Sources the door does not admit are cancelled
+/// before the connection starts, so they get no byte, and judged again at `.preparing`, `.ready`
+/// and at kind 19. The verify block decides trust from the lock-protected TrustSnapshot and the
+/// negotiated ALPN (DoorPolicy.trusts). Refusals and backoffs are counted and reported at most once
+/// a minute, one line each per door.
 ///
 /// Admitted sessions pass the device gate here, one place for both doors (DeviceGate; with the
 /// floor above "0" the hello, the first message inside TLS, is read before anything is registered,
@@ -52,12 +58,6 @@ final class Door {
         let cable: CableLink.Ancestry?
     }
 
-    static let maxPending = 8
-    static let maxPendingPerSource = 2
-    static let admissionDeadline: TimeInterval = 10
-    static let failureWindow: TimeInterval = 60
-    static let failuresForBackoff = 5
-
     let kind: DoorPolicy.Door
     private let queue: DispatchQueue
     private let identity: HostIdentity
@@ -84,14 +84,16 @@ final class Door {
         var interface: String?
         /// Home door: the listener that accepted it included peer-to-peer Wi-Fi (Direct Wireless on).
         var peerToPeer = false
-        /// The door refused it (counted in the minute's summary already), so its end counts one
-        /// failure for its source.
+        /// The door refused it (counted in the minute's summary already), so its end costs its
+        /// source at least one failure.
         var refused = false
+        /// The Mac let it go (Direct Wireless turned off): its end costs nothing.
+        var dropped = false
         var deadline: DispatchWorkItem?
     }
     private var pending: [ObjectIdentifier: Pending] = [:]
-    private var failures: [String: [CFAbsoluteTime]] = [:]
-    private var backoffUntil: [String: CFAbsoluteTime] = [:]
+    /// Who waits in a place, and what each address and /64 owes (DoorPolicy.Places), on `clock`.
+    private var places: DoorPolicy.Places
     /// Home door: each source's plain tries within the last minute (DoorPolicy.olderSillTry).
     private var olderTries: [String: [CFAbsoluteTime]] = [:]
 
@@ -114,6 +116,26 @@ final class Door {
         }
     }()
 
+    /// The addresses and /64s backed off, one line a minute at most per door (the first at once):
+    /// "Home door backed off 10.0.0.5 for 300 s: …", or "… 4 sources for 300 s in the last minute:
+    /// a, b, c and d; …". Never a device's name: none is known before admission.
+    private lazy var backoffs: RefusalSummary = {
+        let door = kind == .home ? "Home door" : "Remote access"
+        let seconds = Int(backoff.rounded())
+        return RefusalSummary(queue: queue, categories: []) { c in
+            let keys = c.keys.sorted()
+            let n = keys.count
+            let shown = n <= 4 ? keys : Array(keys.prefix(3)) + ["\(n - 3) more"]
+            let list = shown.count == 1 ? shown[0] : shown.dropLast().joined(separator: ", ") + " and " + shown[shown.count - 1]
+            return n == 1
+                ? "\(door) backed off \(list) for \(seconds) s: its connections waited without being admitted, or were refused."
+                : "\(door) backed off \(n) sources for \(seconds) s in the last minute: \(list); their connections waited without being admitted, or were refused."
+        }
+    }()
+
+    /// The clock `places` runs on: monotonic, so a change of the Mac's clock moves nothing (RemoteAccess's).
+    private static func clock() -> Double { Double(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1_000_000_000 }
+
     init(_ kind: DoorPolicy.Door, queue: DispatchQueue, identity: HostIdentity, trust: TrustBox, testHost: Bool) {
         self.kind = kind
         self.queue = queue
@@ -121,9 +143,10 @@ final class Door {
         self.trust = trust
         self.testHost = testHost
         let environment = ProcessInfo.processInfo.environment
-        var b: TimeInterval = 300
+        var b = DoorPolicy.backoffSeconds
         if testHost, let v = environment["SILL_TEST_BACKOFF_SECONDS"], let s = Double(v), s > 0 { b = s }
         backoff = b
+        places = DoorPolicy.Places(backoff: b)
         cableStandIn = kind == .home ? CableLink.testInterface(testHost: testHost, environment: environment) : nil
     }
 
@@ -159,10 +182,13 @@ final class Door {
     /// peer-to-peer Wi-Fi (the home door with Direct Wireless on; never the remote door).
     func accept(_ c: NWConnection, peerToPeer: Bool = false) {
         guard let server else { c.cancel(); return }
-        let now = CFAbsoluteTimeGetCurrent()
+        let now = Self.clock()
         let source = sourceText(c)
+        // The places' rules know a source by its address and its group (an IPv6 address's /64).
+        let from = Self.source(of: c).map { DoorPolicy.source($0.bytes, scope: $0.scope) }
+            ?? DoorPolicy.Source(address: source, group: source)
         prune(now)
-        if let until = backoffUntil[source], now < until {
+        if places.backedOff(from, now: now) {
             c.cancel()
             refusals.count("limit")
             return
@@ -174,28 +200,50 @@ final class Door {
            let word = DoorPolicy.refusalBeforeStart(kind, origin: a.origin, internetAccess: trust.snapshot.internetAccess) {
             c.cancel()
             refusals.count(word)
-            countFailure(source, now)
+            for k in places.refusedBeforeStart(from, now: now) { backoffs.count(k) }
             return
         }
-        let fromSource = pending.values.filter { $0.source == source }.count
-        guard pending.count < Self.maxPending, fromSource < Self.maxPendingPerSource else {
+        let id = ObjectIdentifier(c)
+        guard case .taken = places.arrive(id, from, now: now) else {
             c.cancel()
             refusals.count("limit")
             return
         }
-        let id = ObjectIdentifier(c)
-        let deadline = DispatchWorkItem { [weak self] in self?.deadlinePassed(id) }
-        pending[id] = Pending(connection: c, source: source, peerToPeer: peerToPeer, deadline: deadline)
-        queue.asyncAfter(deadline: .now() + Self.admissionDeadline, execute: deadline)
+        pending[id] = Pending(connection: c, source: source, peerToPeer: peerToPeer)
+        armDeadline(id, now: now)
         c.stateUpdateHandler = { [weak self] state in self?.stateChanged(id, c, state) }
         c.start(queue: queue)
+    }
+
+    /// (Re)schedules `id`'s deadline from its place (DoorPolicy.deadline): the handshake's at
+    /// accept, the kind 19's once a pairing connection is ready.
+    private func armDeadline(_ id: ObjectIdentifier, now: Double) {
+        guard var p = pending[id], let at = places.deadline(id) else { return }
+        p.deadline?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.deadlinePassed(id) }
+        p.deadline = item
+        pending[id] = p
+        queue.asyncAfter(deadline: .now() + max(0, at - now), execute: item)
+    }
+
+    /// `id` leaves its place: removed from `pending`, its deadline cancelled, and what its end costs
+    /// its source counted (a backoff it starts is reported). On `queue`.
+    @discardableResult
+    private func take(_ id: ObjectIdentifier, _ end: DoorPolicy.Places.End) -> Pending? {
+        guard let p = pending.removeValue(forKey: id) else { return nil }
+        p.deadline?.cancel()
+        for k in places.leave(id, end, now: Self.clock()) { backoffs.count(k) }
+        return p
     }
 
     /// On `queue`: cancels every connection still waiting for admission that `match` names (Direct
     /// Wireless turned off: an ask or a proof in flight over peer-to-peer Wi-Fi). Its end is no
     /// refusal: nothing is counted.
     func cancelPending(where match: (NWConnection) -> Bool) {
-        for p in pending.values where match(p.connection) { p.connection.cancel() }
+        for (id, p) in pending where match(p.connection) {
+            pending[id]?.dropped = true
+            p.connection.cancel()
+        }
     }
 
     private func stateChanged(_ id: ObjectIdentifier, _ c: NWConnection, _ state: NWConnection.State) {
@@ -203,6 +251,7 @@ final class Door {
         case .preparing:
             _ = checkOrigin(id, c)
         case .ready:
+            places.ready(id, now: Self.clock())
             readyArrived(id, c)
         case .failed(let e):
             c.cancel()
@@ -249,14 +298,14 @@ final class Door {
             admitSession(id, c, fp, t)
         case .pairing:
             guard let fp else { refuse(id, "unpaired"); c.cancel(); return }
+            armDeadline(id, now: Self.clock())       // now the kind 19's: 4 s
             readPairRequest(id, c, fp)
         case .goodbye(let reason):
-            // A paired key the door does not serve now: it proved itself, so its source starts clean.
+            // A paired key the door does not serve now: it proved itself, so its address is known
+            // and starts clean.
             // Closed with a FIN and a drain (`closeWithGoodbye`): the device has sent its hello by
             // now, and a cancel with it unread answered with a reset that could beat the goodbye.
-            guard let p = pending.removeValue(forKey: id) else { return }
-            p.deadline?.cancel()
-            forgive(p.source)
+            guard take(id, .admitted(paired: true)) != nil else { return }
             if reason == Goodbye.busy { refusals.count("limit") }
             StreamServer.closeWithGoodbye(Goodbye(reason: reason), on: c, queue: queue)
         case .refuse(let word):
@@ -267,18 +316,16 @@ final class Door {
 
     /// `sill/1`, judged again at `.ready`: the remote door's paired session (Remote Access on,
     /// fewer than 8 sessions), or the home door's session with its key (paired, or any key while
-    /// Require pairing is off). A paired key clears its source. Then the device gate, here for both
-    /// doors (StreamServer's `gate`): with the floor at "0" (every build so far) nothing waits; above
-    /// it the session's first message inside TLS must be a hello the floor admits, and any other
-    /// device gets the update goodbye and is never registered. While the gate reads (up to 2 s) the
-    /// session is neither pending nor a client, so a change that closes sessions cannot see it: as
-    /// the gate admits it, it is judged again from the snapshot as it is then (`afterGate`).
-    /// Registered with its route (`serve`), then its line.
+    /// Require pairing is off). A paired key makes its address known and clears what it owed. Then
+    /// the device gate, here for both doors (StreamServer's `gate`): with the floor at "0" (every
+    /// build so far) nothing waits; above it the session's first message inside TLS must be a hello
+    /// the floor admits, and any other device gets the update goodbye and is never registered. While
+    /// the gate reads (up to 2 s) the session is neither pending nor a client, so a change that
+    /// closes sessions cannot see it: as the gate admits it, it is judged again from the snapshot as
+    /// it is then (`afterGate`). Registered with its route (`serve`), then its line.
     private func admitSession(_ id: ObjectIdentifier, _ c: NWConnection, _ fp: Data, _ t: TrustSnapshot) {
-        guard let server, let p = pending.removeValue(forKey: id) else { return }
-        p.deadline?.cancel()
         let name = t.paired[fp]
-        if name != nil { forgive(p.source) }
+        guard let server, let p = take(id, .admitted(paired: name != nil)) else { return }
         if kind == .remote, name == nil { c.cancel(); return }    // atReady admits only a paired key here
         let origin = p.origin ?? .loopback
         // Home: the iPhone or iPad behind the cable, read once, as the session is admitted.
@@ -328,11 +375,12 @@ final class Door {
         StreamServer.closeWithGoodbye(Goodbye(reason: reason), on: c, queue: queue)
     }
 
-    /// `sill-pair/1`: exactly one kind 19 of at most 4 KB within the admission deadline, then
-    /// DoorPolicy.pairing says how it is treated: judged on the main actor (an ask at home, or a
-    /// proof for the pairing window), or, for an ask at the remote door and for a request of a
-    /// later generation (`v` not 1) at either, answered `closed` here with no try counted. One
-    /// kind 20 back, then closed once that is sent (or after 250 ms). A
+    /// `sill-pair/1`: exactly one kind 19 of at most 4 KB within 4 s of `.ready`, which pays for the
+    /// place it held (`Places.End.request`: a tenth for a device's, which comes at once; more for one
+    /// held back toward its deadline), then DoorPolicy.pairing says how it is treated: judged on the
+    /// main actor (an ask at home, or a proof for the pairing window), or, for an ask at the remote
+    /// door and for a request of a later generation (`v` not 1) at either, answered `closed` here
+    /// with no try counted. One kind 20 back, then closed once that is sent (or after 250 ms). A
     /// device that goes away before its kind 19 is not refused, only closed. Pairing is never
     /// refused for the device's age (DeviceGate judges sessions only): a device too old for this
     /// Mac's sessions can still pair, and hears the update notice when it connects.
@@ -356,8 +404,7 @@ final class Door {
                 }
                 // The switches as they are now (the internet switch may have gone off since
                 // `.ready`). Gone from `pending`: the deadline passed while the payload came in.
-                guard self.checkOrigin(id, c), let p = self.pending.removeValue(forKey: id) else { c.cancel(); return }
-                p.deadline?.cancel()
+                guard self.checkOrigin(id, c), let p = self.take(id, .request) else { c.cancel(); return }
                 let queue = self.queue
                 let reply: @Sendable (PairResult) -> Void = { result in
                     queue.async {
@@ -425,7 +472,7 @@ final class Door {
     }
 
     /// The door refuses a pending connection: one count for the minute's summary (once per
-    /// connection), and its end then counts one failure for its source.
+    /// connection), and its end then costs its source at least one failure.
     private func refuse(_ id: ObjectIdentifier, _ category: String) {
         guard var p = pending[id], !p.refused else { return }
         p.refused = true
@@ -433,22 +480,29 @@ final class Door {
         refusals.count(category)
     }
 
+    /// Its deadline (DoorPolicy.deadline) passed while it waited: the handshake's, or once ready the
+    /// kind 19's. One that finds its place's deadline still ahead (moved at `.ready`, or a timer that
+    /// fired early) waits again for it.
     private func deadlinePassed(_ id: ObjectIdentifier) {
-        guard let p = pending[id] else { return }
+        guard let p = pending[id], let at = places.deadline(id) else { return }
+        let now = Self.clock()
+        if now < at - 0.05 { armDeadline(id, now: now); return }
         refuse(id, "unpaired")
         p.connection.cancel()        // `.cancelled` then counts the failure
     }
 
-    /// A connection that ended before it was admitted counts one failure for its source (5 in 60 s
-    /// → a backoff) only when the door refused it: marked by `refuse`, or a handshake the door
-    /// failed (DoorPolicy.handshakeRefusal, counted for the summary here). A peer that went away by
-    /// itself counts for nothing, so a device cancelling the losers of its own staggered dial, or
-    /// giving up on a Mac whose key it no longer pins, never locks its address out; nor does an
-    /// older Sill's plain try at the home door (-9836), which is counted and shown instead, so an
-    /// iPad updated after a few plain retries is not refused for 5 minutes.
+    /// A connection that ended before it was admitted costs its address and its /64
+    /// (DoorPolicy.Places): at least one failure when the door refused it (marked by `refuse`, or a
+    /// handshake the door failed, DoorPolicy.handshakeRefusal, counted for the summary here), else
+    /// a tenth of one and one more for every 2 s it waited beyond the first 2, never less than a
+    /// tenth for each second it waited (DoorPolicy.waitCost). A device that cancels the losers of
+    /// its own staggered dial within that, or gives up on a Mac whose key it no longer pins, never
+    /// adds up to a backoff, nor does an older Sill's plain try at the home door (-9836), which is
+    /// counted and shown instead and costs a tenth, so an iPad updated after a few plain retries is
+    /// not refused for 5 minutes; connections that wait for nothing do, their address refused for
+    /// 300 s. Direct Wireless turned off (`cancelPending`) costs nothing.
     private func endedBeforeAdmission(_ id: ObjectIdentifier, error: NWError?) {
-        guard let p = pending.removeValue(forKey: id) else { return }
-        p.deadline?.cancel()
+        guard let p = pending[id] else { return }
         var refused = p.refused
         if !refused, let error, let status = RemoteTLS.status(of: error) {
             switch DoorPolicy.handshakeRefusal(kind, status: status) {
@@ -464,32 +518,14 @@ final class Door {
                 break
             }
         }
-        if refused { countFailure(p.source, CFAbsoluteTimeGetCurrent()) }
-    }
-
-    /// One failure for `source`; the fifth within a minute starts its backoff.
-    private func countFailure(_ source: String, _ now: CFAbsoluteTime) {
-        var list = (failures[source] ?? []).filter { now - $0 < Self.failureWindow }
-        list.append(now)
-        if list.count >= Self.failuresForBackoff {
-            backoffUntil[source] = now + backoff
-            list = []
-        }
-        failures[source] = list
-    }
-
-    /// A source that proved itself (a paired key at `.ready`) starts clean: what its earlier
-    /// attempts cost is not held against it.
-    private func forgive(_ source: String) {
-        failures[source] = nil
-        backoffUntil[source] = nil
+        take(id, p.dropped ? .dropped : refused ? .refused : .ended)
     }
 
     /// Forgets stale per-source records, so a scan from many addresses cannot grow them for ever.
-    private func prune(_ now: CFAbsoluteTime) {
-        if failures.count > 256 { failures = failures.filter { $0.value.contains { now - $0 < Self.failureWindow } } }
-        if backoffUntil.count > 256 { backoffUntil = backoffUntil.filter { $0.value > now } }
-        if olderTries.count > 256 { olderTries = olderTries.filter { $0.value.contains { now - $0 < DoorPolicy.olderSillSpan } } }
+    private func prune(_ now: Double) {
+        places.prune(now: now)
+        let wall = CFAbsoluteTimeGetCurrent()
+        if olderTries.count > 256 { olderTries = olderTries.filter { $0.value.contains { wall - $0 < DoorPolicy.olderSillSpan } } }
     }
 }
 

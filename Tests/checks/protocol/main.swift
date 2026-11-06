@@ -366,7 +366,8 @@ check("kinds 18–22 parse as macInfo, pairRequest, pairResult, pairingWanted, g
 check("kind 23 is hello (update-notice); 24, 25 and 27 the Mac's menus; 26 the Mac's pointer",
       header(23)?.kind == .hello && header(24)?.kind == .macMenu && header(25)?.kind == .pressMenuItem
       && header(27)?.kind == .fetchMenu && header(26)?.kind == .macPointer)
-check("kind 28 is gesture (trackpad gestures), 29 unknown (skipped)", header(28)?.kind == .gesture && header(29)?.kind == .unknown)
+check("kind 28 is gesture (trackpad gestures), 29 unknown (#66's, skipped), 43 audio (the Mac's sound), 44 the keyframe request",
+      header(28)?.kind == .gesture && header(29)?.kind == .unknown && header(43)?.kind == .audio && header(44)?.kind == .keyframeRequest)
 check("kind 32 is the clipboard; 29, 30, 31 and 33 unknown (skipped)",
       header(32)?.kind == .clipboard && [29, 30, 31, 33].allSatisfy { header(UInt8($0))?.kind == .unknown })
 check("kinds 16 and 17 unchanged", header(16)?.kind == .hostSettings && header(17)?.kind == .changeSettings)
@@ -379,6 +380,95 @@ check("kind 20 JSON leaves out nil fields", String(data: Wire.encode(pr), encodi
 check("kind 19 decodes the plan's example",
       Wire.decode(PairRequest.self, from: Data(#"{"v":1,"method":"qr","proof":"AyZAJqNTU5nSKEaHx6RZOf0K5dOeygR_8JSrCV_gNOo","name":"iPad","model":"iPad14,1"}"#.utf8))?.model == "iPad14,1")
 check("kind 22 decodes an unknown reason as a string", Wire.decode(Goodbye.self, from: Data(#"{"reason":"later","x":1}"#.utf8))?.reason == "later")
+
+// MARK: - Kind 43, the Mac's sound (docs/audio-plan.md §3.2)
+
+func audioPackets(_ epoch: Int, _ seq: UInt32, _ start: Bool, _ packets: [Data]) -> Data {
+    AudioMessage.packets(AudioPackets(epoch: epoch, seq: seq, segmentStart: start, packets: packets)).serialized()
+}
+// The plan's example: the first packet of a segment, epoch 3, 162 bytes of AAC-ELD.
+let eld = Data((0..<162).map { UInt8(truncatingIfNeeded: $0 &* 7 &+ 1) })
+let audioExample = audioPackets(3, 0, true, [eld])
+check("kind 43 type 2: the plan's example is 02 0003 00000000 01 01 00A2 and 162 bytes, 173 in all",
+      hex(audioExample.prefix(11)) == "0200030000000001010" + "0a2" && audioExample.count == 173 && audioExample.suffix(162) == eld)
+check("kind 43 type 2: 187 bytes with the header", StreamMessage(kind: .audio, timestamp: 1, isKeyframe: false, payload: audioExample).serialized().count == 187)
+check("kind 43 type 2: parsed back", AudioMessage.parse(audioExample) == .packets(AudioPackets(epoch: 3, seq: 0, segmentStart: true, packets: [eld])))
+let many = (0..<255).map { i in Data(repeating: UInt8(i), count: i % 40) }
+let manyBytes = audioPackets(65_535, 4_000_000_000, false, many)
+check("kind 43 type 2: 255 packets (some empty), the top epoch and a large seq round-trip",
+      AudioMessage.parse(manyBytes) == .packets(AudioPackets(epoch: 65_535, seq: 4_000_000_000, segmentStart: false, packets: many)))
+check("kind 43 type 2: the epoch is written modulo 65,536",
+      AudioMessage.parse(audioPackets(70_000, 1, false, [eld])) == .packets(AudioPackets(epoch: 4464, seq: 1, segmentStart: false, packets: [eld])))
+check("kind 43 type 2: seq and epoch big endian", hex(audioPackets(0x0102, 0x03040506, false, [Data([9])]).prefix(9)) == "020102030405060001")
+var flagged = audioExample; flagged[7] = 0x03
+check("kind 43 type 2: flags bit 0 is the segment's start; bits 1–7 ignored",
+      AudioMessage.parse(flagged) == .packets(AudioPackets(epoch: 3, seq: 0, segmentStart: true, packets: [eld])))
+flagged[7] = 0xFE
+check("kind 43 type 2: flags 0xFE has no segment start",
+      AudioMessage.parse(flagged) == .packets(AudioPackets(epoch: 3, seq: 0, segmentStart: false, packets: [eld])))
+// Type 1, the format.
+let fmt = AudioFormat(codec: AudioCodec.aacELD, sampleRate: 48_000, channels: 2, framesPerPacket: 480, primingFrames: 240, bitrate: 128_000,
+                      epoch: 3, cookie: Data([0xF8, 0xF0, 0x21, 0x2C]), source: AudioFormat.sourceDesktop)
+let fmtBytes = AudioMessage.format(fmt).serialized()
+check("kind 43 type 1: 01 then the JSON, parsed back", fmtBytes.first == 1 && AudioMessage.parse(fmtBytes) == .format(fmt)
+      && Wire.decode(AudioFormat.self, from: fmtBytes.dropFirst()) == fmt)
+check("kind 43 type 1: {} is a format with nothing in it", AudioMessage.parse(Data([1]) + Data("{}".utf8)) == .format(AudioFormat()))
+// What a reader refuses, and never traps on.
+func refused(_ name: String, _ d: Data) { check("kind 43 refused: \(name)", AudioMessage.parse(d) == nil) }
+refused("an empty payload", Data())
+refused("an unknown type (3)", Data([3]) + audioExample.dropFirst())
+refused("type 0", Data([0]) + audioExample.dropFirst())
+refused("type 1 with no JSON", Data([1]))
+refused("type 1 that is not JSON", Data([1]) + Data("aac".utf8))
+refused("type 1 over 4 KB", Data([1]) + Data(#"{"app":""#.utf8) + Data(repeating: 0x61, count: 4100) + Data(#""}"#.utf8))
+check("kind 43 type 1: 4,096 bytes are taken", AudioMessage.parse(Data([1]) + Data(#"{"app":""#.utf8) + Data(repeating: 0x61, count: 4085) + Data(#""}"#.utf8)) != nil)
+refused("type 2 with only its type", Data([2]))
+refused("type 2 cut short in its header", audioExample.prefix(8))
+refused("type 2 with a count of 0", Data([2, 0, 3, 0, 0, 0, 0, 1, 0]))
+refused("type 2 with a count of 0 and bytes after it", Data([2, 0, 3, 0, 0, 0, 0, 1, 0, 0, 1, 7]))
+refused("type 2 with a length past the end", audioExample.dropLast())
+refused("type 2 with bytes left over", audioExample + Data([0]))
+refused("type 2 missing its second packet", audioPackets(3, 0, false, [eld, eld]).prefix(9 + 2 + 162 + 1))
+var countTooHigh = audioPackets(3, 0, false, [eld]); countTooHigh[8] = 2
+refused("type 2 counting a packet it does not carry", countTooHigh)
+let big = Data(repeating: 1, count: 16_384 - 9 - 2)
+check("kind 43 type 2: 16,384 bytes are taken", AudioMessage.parse(audioPackets(1, 1, false, [big])) != nil)
+refused("type 2 over 16 KB", audioPackets(1, 1, false, [big + Data([1])]))
+// Serialized limits: this host never reaches them, but they never produce what a reader refuses.
+check("kind 43 type 2: at most 255 packets are written", {
+    if case .packets(let p)? = AudioMessage.parse(audioPackets(1, 1, false, Array(repeating: Data([1]), count: 300))) { return p.packets.count == 255 }
+    return false
+}())
+// 1,000 random byte strings (and 1,000 random well-formed messages cut and flipped): nil or a message,
+// never a trap, and whatever parses re-serializes to the same bytes when it is type 2.
+var generator = SystemRandomNumberGenerator()
+var parsedRandom = 0, roundTripFailures = 0
+for i in 0..<2000 {
+    var d: Data
+    if i < 1000 {
+        d = Data((0..<Int.random(in: 0...40, using: &generator)).map { _ in UInt8.random(in: 0...255, using: &generator) })
+        if i % 3 == 0, !d.isEmpty { d[0] = 2 }
+        if i % 3 == 1, !d.isEmpty { d[0] = 1 }
+    } else {
+        let packets = (0..<Int.random(in: 1...4, using: &generator)).map { _ in Data((0..<Int.random(in: 0...20, using: &generator)).map { _ in UInt8.random(in: 0...255, using: &generator) }) }
+        d = audioPackets(Int.random(in: 0...65_535, using: &generator), UInt32.random(in: 0...UInt32.max, using: &generator), Bool.random(using: &generator), packets)
+        switch Int.random(in: 0...3, using: &generator) {
+        case 0: d = d.prefix(Int.random(in: 0...d.count, using: &generator))
+        case 1: d[Int.random(in: 0..<d.count, using: &generator)] ^= UInt8.random(in: 1...255, using: &generator)
+        case 2: d.append(UInt8.random(in: 0...255, using: &generator))
+        default: break
+        }
+    }
+    guard let m = AudioMessage.parse(d) else { continue }
+    parsedRandom += 1
+    if case .packets(let p) = m {
+        var again = p.serialized()
+        again[7] = d[7]   // the flags' ignored bits are not kept
+        if again != d { roundTripFailures += 1 }
+    }
+}
+check("kind 43: 2,000 random and damaged payloads never trap (\(parsedRandom) parsed), and each type 2 parsed writes the same bytes back",
+      roundTripFailures == 0)
 
 // MARK: - RemoteTLS, live on loopback: the shared builder on both ends
 
@@ -462,6 +552,101 @@ check("TLS: an ALPN the host does not offer — refused (\(r.box.lines.joined(se
 check("floor: every host offers sill/1 and sill-pair/1 (\(RemoteTLS.serverALPNs))",
       RemoteTLS.serverALPNs.contains("sill/1") && RemoteTLS.serverALPNs.contains("sill-pair/1"))
 check("floor: the two names never change", RemoteTLS.sessionALPN == "sill/1" && RemoteTLS.pairingALPN == "sill-pair/1")
+
+// MARK: - Reverse Scrolling (issue #143): fingers on the glass turn around; a connected trackpad's
+// or mouse's scroll events never do (iPadOS's own Natural Scrolling has set them)
+check("scroll direction: four sources, the finger, the on-screen pad, a trackpad and a wheel",
+      ScrollDirection.Source.allCases == [.finger, .pad, .trackpad, .wheel])
+for source in ScrollDirection.Source.allCases {
+    check("scroll direction: off, \(source) keeps the natural direction", ScrollDirection.factor(source, reversed: false) == 1)
+}
+check("scroll direction: on, a finger's drag over the picture is turned around", ScrollDirection.factor(.finger, reversed: true) == -1)
+check("scroll direction: on, two fingers on the on-screen trackpad are turned around", ScrollDirection.factor(.pad, reversed: true) == -1)
+check("scroll direction: on, a connected trackpad keeps the direction iPadOS gave it", ScrollDirection.factor(.trackpad, reversed: true) == 1)
+check("scroll direction: on, a mouse's wheel keeps the direction iPadOS gave it", ScrollDirection.factor(.wheel, reversed: true) == 1)
+check("scroll direction: the switch reaches exactly the finger and the pad",
+      ScrollDirection.Source.allCases.filter(ScrollDirection.reversible) == [.finger, .pad])
+do {
+    // A finger dragged down a quarter of the picture: the content goes down a quarter (natural), or
+    // up a quarter with the switch on; a coast's velocity the same way; nothing but the sign changes.
+    let down = 0.25, coast = 600.0
+    check("scroll direction: a drag down moves the content down while off, up while on",
+          down * ScrollDirection.factor(.finger, reversed: false) == 0.25 && down * ScrollDirection.factor(.finger, reversed: true) == -0.25)
+    check("scroll direction: the pad's coast goes the way its scroll went",
+          coast * ScrollDirection.factor(.pad, reversed: true) == -600 && coast * ScrollDirection.factor(.pad, reversed: false) == 600)
+    check("scroll direction: only the sign changes (the factor is 1 or -1 everywhere)",
+          ScrollDirection.Source.allCases.allSatisfy { s in [false, true].allSatisfy { abs(ScrollDirection.factor(s, reversed: $0)) == 1 } })
+}
+
+// MARK: - Aa's detents (issue #179): Off is a detent of its own, and leaving it for a scale or back is a fit
+check("text scale: with Off offered the ruler is Off, 0.5, 0.75, 1, 1.25, 1.5", TextScale.detents(offered: true) == [0.25, 0.5, 0.75, 1.0, 1.25, 1.5])
+check("text scale: without Off (the virtual display) it is the five scales", TextScale.detents(offered: false) == [0.5, 0.75, 1.0, 1.25, 1.5])
+check("text scale: an untouched Aa (no scale) sits on Off, so it no longer reads 1×", TextScale.position(of: nil, offered: true) == TextScale.off)
+check("text scale: an untouched Aa without Off sits on 1×", TextScale.position(of: nil, offered: false) == 1.0)
+check("text scale: a scale sits on its own detent", TextScale.position(of: 1.25, offered: true) == 1.25)
+check("text scale: Off stands for no scale; a scale for itself", TextScale.scale(at: TextScale.off) == nil && TextScale.scale(at: 1.0) == 1.0 && TextScale.scale(at: 0.5) == 0.5)
+check("text scale: 1× and Off are told apart in the title", TextScale.title(at: 1.0) == "1×" && TextScale.title(at: TextScale.off) == "Off")
+check("text scale: titles drop trailing zeros", TextScale.title(at: 0.75) == "0.75×" && TextScale.title(at: 1.5) == "1.5×" && TextScale.title(at: 0.5) == "0.5×")
+check("text scale: VoiceOver says Off, or the scale in times", TextScale.spoken(at: TextScale.off) == "Off" && TextScale.spoken(at: 1.25) == "1.25 times")
+check("text scale: a drag below 0.5 snaps to Off when offered", TextScale.snap(0.3, offered: true) == TextScale.off && TextScale.snap(0.4, offered: true) == 0.5)
+check("text scale: a drag below 0.5 stays at 0.5 without Off", TextScale.snap(0.1, offered: false) == 0.5)
+check("text scale: a drag past 1.5 stops at 1.5", TextScale.snap(9, offered: true) == 1.5)
+check("text scale: a drag snaps to the nearest detent", TextScale.snap(1.1, offered: true) == 1.0 && TextScale.snap(1.2, offered: true) == 1.25)
+check("text scale: decrement from 0.5 reaches Off, and stops there", TextScale.step(from: 0.5, up: false, offered: true) == TextScale.off && TextScale.step(from: TextScale.off, up: false, offered: true) == TextScale.off)
+check("text scale: decrement from 0.5 stops at 0.5 without Off", TextScale.step(from: 0.5, up: false, offered: false) == 0.5)
+check("text scale: increment from Off reaches 0.5, and stops at 1.5", TextScale.step(from: TextScale.off, up: true, offered: true) == 0.5 && TextScale.step(from: 1.5, up: true, offered: true) == 1.5)
+check("text scale: a scale then none ends the fit", TextScale.endsFit(from: 1.0, to: nil))
+check("text scale: none then none, a scale then a scale, and none then a scale do not", !TextScale.endsFit(from: nil, to: nil) && !TextScale.endsFit(from: 1.0, to: 0.5) && !TextScale.endsFit(from: nil, to: 1.0))
+// Every detent stands for one thing and comes back to its place; only Off stands for no scale, so no
+// scale of 0.25 (Off's place) ever reaches the Mac.
+for offered in [true, false] {
+    let detents = TextScale.detents(offered: offered)
+    check("text scale (Off \(offered ? "offered" : "not offered")): every detent comes back to its place",
+          detents.allSatisfy { TextScale.position(of: TextScale.scale(at: $0), offered: offered) == $0 })
+    check("text scale (Off \(offered ? "offered" : "not offered")): only Off is no scale, and every scale is 0.5 to 1.5",
+          detents.filter { TextScale.scale(at: $0) == nil } == (offered ? [TextScale.off] : [])
+            && detents.compactMap { TextScale.scale(at: $0) }.allSatisfy { $0 >= 0.5 && $0 <= 1.5 })
+    check("text scale (Off \(offered ? "offered" : "not offered")): each detent snaps to itself, and a step up then down comes back",
+          detents.allSatisfy { TextScale.snap($0, offered: offered) == $0 }
+            && detents.dropLast().allSatisfy { TextScale.step(from: TextScale.step(from: $0, up: true, offered: offered), up: false, offered: offered) == $0 })
+}
+check("text scale: the ruler's titles left to right", TextScale.detents(offered: true).map(TextScale.title(at:)) == ["Off", "0.5×", "0.75×", "1×", "1.25×", "1.5×"])
+// Off only where no scale leaves the window alone: not with the Mac's virtual display on, where no
+// scale is 1× (an untouched Aa there reads 1×).
+check("text scale: Off offered with the virtual display off", TextScale.offersOff(virtualDisplay: false))
+check("text scale: Off offered before the Mac said (an older Mac, the state not in yet)", TextScale.offersOff(virtualDisplay: nil))
+check("text scale: no Off with the virtual display on", !TextScale.offersOff(virtualDisplay: true)
+      && TextScale.position(of: nil, offered: TextScale.offersOff(virtualDisplay: true)) == 1.0)
+// While a window streams, where it streams decides (the review, 2026-10-29): Virtual Display on with the
+// window streaming in place (the virtual display not available on that macOS, off for the session, or a
+// staging that failed) leaves it alone with no scale, so Off is offered and an untouched Aa reads Off;
+// a window still on the virtual display after the setting went off reads 1× until it restarts.
+let aWindow = StreamSource.window(102)
+check("text scale: Off with Virtual Display on when the window streams in place", TextScale.offersOff(virtualDisplay: true, streaming: aWindow, onVirtualDisplay: false)
+      && TextScale.position(of: nil, offered: TextScale.offersOff(virtualDisplay: true, streaming: aWindow, onVirtualDisplay: false)) == TextScale.off)
+check("text scale: no Off while the window streams on the virtual display", !TextScale.offersOff(virtualDisplay: true, streaming: aWindow, onVirtualDisplay: true)
+      && !TextScale.offersOff(virtualDisplay: false, streaming: aWindow, onVirtualDisplay: true) && !TextScale.offersOff(virtualDisplay: nil, streaming: aWindow, onVirtualDisplay: true))
+check("text scale: Off while the window streams in place, whatever the setting says", TextScale.offersOff(virtualDisplay: false, streaming: aWindow, onVirtualDisplay: false)
+      && TextScale.offersOff(virtualDisplay: nil, streaming: aWindow, onVirtualDisplay: false))
+check("text scale: a window the Mac has not reported yet goes by the setting", TextScale.offersOff(virtualDisplay: false, streaming: aWindow, onVirtualDisplay: nil)
+      && !TextScale.offersOff(virtualDisplay: true, streaming: aWindow, onVirtualDisplay: nil) && TextScale.offersOff(virtualDisplay: nil, streaming: aWindow, onVirtualDisplay: nil))
+// The Desktop's running stream, or nothing's, says nothing of where a window goes (the review, 2026-10-29):
+// the setting decides there, so a dimmed Aa over the Desktop keeps the reading the next window will have:
+// 1× with Virtual Display on, though the Desktop's stream is never on the virtual display.
+check("text scale: over the Desktop or nothing the setting decides, whatever their stream says",
+      [StreamSource.desktop, .none].allSatisfy { s in
+          [Bool?.none, false, true].allSatisfy { on in
+              !TextScale.offersOff(virtualDisplay: true, streaming: s, onVirtualDisplay: on)
+                  && TextScale.offersOff(virtualDisplay: false, streaming: s, onVirtualDisplay: on)
+                  && TextScale.offersOff(virtualDisplay: nil, streaming: s, onVirtualDisplay: on) } })
+check("text scale: the Desktop with Virtual Display on reads 1× untouched, as the next window will",
+      TextScale.position(of: nil, offered: TextScale.offersOff(virtualDisplay: true, streaming: .desktop, onVirtualDisplay: false)) == 1.0)
+// Aa only while a window streams (Noah, 2026-10-29: "it should not be selectable while you are in
+// desktop mode, misleading"): the Mac sizes a window, never the Desktop.
+check("text scale: Aa can be used while a window streams", TextScale.selectable(streaming: .window(102)) && TextScale.selectable(streaming: .window(0)))
+check("text scale: not while the Desktop streams", !TextScale.selectable(streaming: .desktop))
+check("text scale: not while nothing streams", !TextScale.selectable(streaming: .none))
+check("text scale: VoiceOver hears a dimmed Aa is for a window", TextScale.unavailableHint == "Available for a window.")
 
 print(fails == 0 ? "ALL PASS (\(passes) checks)" : "\(fails) FAILED of \(passes + fails)")
 exit(Int32(min(fails, 100)))

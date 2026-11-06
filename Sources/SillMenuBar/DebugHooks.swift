@@ -15,8 +15,9 @@ import StreamProtocol
 ///                                              a control would (maxFPS, captureScale, bitrate,
 ///                                              awayBitrate, awayCaptureScale,
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
-///                                              remoteAccess, remotePort, internetAccess,
-///                                              remoteAddressName=host[:port], updateCheck,
+///                                              sendAudio, remoteAccess, remotePort, internetAccess,
+///                                              shareClipboard, remoteAddressName=host[:port],
+///                                              updateCheck, showPairingWindowToScreenSharing=0|1,
 ///                                              requirePairing=0|1). Saved like any change
 ///                                              (requirePairing in the identity store: memory, or
 ///                                              SILL_TEST_REMOTE_DIR)
@@ -36,7 +37,10 @@ import StreamProtocol
 ///     -SillMenuAfter '<s>[; <s> …]'            print the status menu as menu.txt shows it, one
 ///                                              "SillMenuAfter <s> s: " line per line, s seconds
 ///                                              after launch (the "‹device› Wants to Pair",
-///                                              older-device and "Devices Can’t Connect" items)
+///                                              older-device and "Devices Can’t Connect" items);
+///                                              the macOS firewall is asked again first, as the
+///                                              menu does when it opens, its answer shown by the
+///                                              next print
 ///     -SillQuitAfter <s>                       Quit (NSApp.terminate) s seconds after launch
 ///     -SillUpdateFeed <url>                    the update check asks this feed instead of GitHub:
 ///                                              a feed on this Mac only (http or https to
@@ -51,7 +55,8 @@ import StreamProtocol
 ///                                              s; no jitter)
 ///     -SillPrintMenuAfter <s>                  print the status menu as it would open (as menu.txt
 ///                                              draws it, "menu: " before each line) and Settings ›
-///                                              General's update line, s seconds after launch
+///                                              General's update and firewall lines, s seconds after
+///                                              launch
 ///     -SillSettingsAfter '<s> <tab>[; <s> <tab> …]'
 ///                                              open Settings on that tab s seconds after launch,
 ///                                              as the menu does, and 0.6 s later print the window's
@@ -71,17 +76,20 @@ import StreamProtocol
 ///                                              (title bar, toolbar, pane) to <dir>/settings-<s>s-<tab>.png
 ///     -SillRenderPreviews <dir>                write the Settings panes (the Devices and Remote
 ///                                              Access panes in each of their states, General's
-///                                              update section in each of its), the pairing
+///                                              update section in each of its, General with the
+///                                              macOS firewall's line and that line alone in each
+///                                              of its verdicts), the pairing
 ///                                              window's states and the cable notice,
 ///                                              status cards, glyphs and menu.txt to <dir>, then
 ///                                              exit (no Screen Recording needed: views render
 ///                                              offscreen; no identity is loaded, no listener)
 ///
 /// These are the bare SillMenuBar binary's (defaults domain "SillMenuBar"; delete it after). Sill.app
-/// itself, an app bundle's executable, ignores every `-Sill…After` hook and `-requirePairing`, each
-/// with one line (docs/home-pairing-plan.md §6.6): they open, answer or remove pairings, or change
-/// what the doors admit, and any process of this user can start Sill.app with arguments, which then
-/// runs with Sill's Screen Recording and Accessibility grants. `-SillTestScreenHeight` and
+/// itself (`AppModel.bundled`: Sill's own code wherever it runs from, AppIdentity) ignores every
+/// `-Sill…After` hook and `-requirePairing`, each with one line (docs/home-pairing-plan.md §6.6):
+/// they open, answer or remove pairings, or change what the doors admit, and any process of this
+/// user can start Sill.app, or a copy of it, with arguments, which then runs with Sill's Screen
+/// Recording and Accessibility grants. `-SillTestScreenHeight` and
 /// `-SillSettingsShot` go with `-SillSettingsAfter` and are ignored the same way: Sill.app has no
 /// use for them. `--synthetic`, `-SillLogFile`,
 /// `-SillRenderPreviews` and the update check's `-SillUpdateFeed`, `-SillUpdateNow`,
@@ -170,13 +178,16 @@ enum DebugHooks {
                     var addressName: String?
                     var requirePairing: Bool?
                     var updateCheck: Bool?
+                    var pairingSharing: Bool?
                     for change in changes {
-                        apply(change, to: &config, addressName: &addressName, requirePairing: &requirePairing, updateCheck: &updateCheck)
+                        apply(change, to: &config, addressName: &addressName, requirePairing: &requirePairing, updateCheck: &updateCheck,
+                              pairingSharing: &pairingSharing)
                     }
                     print("SillSetAfter \(parts[0]) s: \(changes.joined(separator: ", "))")
                     model.settings.config = config    // one assignment: several keys, one apply
                     if let addressName { model.settings.remoteAddressName = addressName }
                     if let updateCheck { model.settings.updateCheck = updateCheck }
+                    if let pairingSharing { model.settings.showPairingWindowToScreenSharing = pairingSharing }
                     // Through the identity store first, as the Devices pane's switch goes.
                     if let requirePairing { model.setRequirePairing(requirePairing) }
                 }
@@ -214,6 +225,7 @@ enum DebugHooks {
         for delay in times(defaults.string(forKey: "SillMenuAfter")) {
             after(delay) {
                 model.permissions.refresh()
+                model.coordinator?.checkFirewall()   // as the menu does when it opens; the answer shows at the next
                 for line in MenuBuilder.dump(MenuBuilder.entries(for: model), card: model.presentation).split(separator: "\n") {
                     print("SillMenuAfter \(delay) s: \(line)")
                 }
@@ -224,10 +236,18 @@ enum DebugHooks {
             after(printAfter) {
                 model.permissions.refresh()
                 model.loginItem.refresh()
+                model.coordinator?.checkFirewall()   // as the menu does when it opens
                 print("SillPrintMenuAfter \(printAfter) s:")
                 let text = MenuBuilder.dump(MenuBuilder.entries(for: model), card: model.presentation)
                 for line in text.split(separator: "\n", omittingEmptySubsequences: false) where !line.isEmpty { print("menu: \(line)") }
                 print("Settings › General's update line: \(model.updates.pane.line)")
+                // The macOS firewall's line as the pane shows it (FirewallRule), with its command.
+                let firewall = model.coordinator?.status.snapshot.firewall
+                if let firewall, let line = FirewallRule.Copy.paneLine(firewall) {
+                    print("Settings › General's firewall line: \(line)\(FirewallRule.Copy.command(firewall).map { " \($0)" } ?? "")")
+                } else {
+                    print("Settings › General's firewall line: none (\(firewall.map { String(describing: $0) } ?? "not asked yet"))")
+                }
             }
         }
         let shots = defaults.string(forKey: "SillSettingsShot").flatMap { $0.isEmpty ? nil : $0 }
@@ -330,7 +350,7 @@ enum DebugHooks {
     }
 
     private static func apply(_ change: String, to config: inout HostConfig, addressName: inout String?, requirePairing: inout Bool?,
-                              updateCheck: inout Bool?) {
+                              updateCheck: inout Bool?, pairingSharing: inout Bool?) {
         let kv = change.split(separator: "=", maxSplits: 1).map(String.init)
         guard kv.count == 2 else { print("SillSetAfter: can’t read “\(change)”"); return }
         let (key, value) = (kv[0], kv[1])
@@ -344,6 +364,7 @@ enum DebugHooks {
         case "prioritizeSpeed": config.prioritizeSpeed = flag
         case "virtualDisplay": config.virtualDisplay = flag
         case "directWireless": config.directWireless = flag
+        case "sendAudio": config.sendAudio = flag
         case "remoteAccess": config.remoteAccess = flag
         case "remotePort": if let v = Int(value) { config.remotePort = v }
         case "internetAccess": config.internetAccess = flag
@@ -351,6 +372,7 @@ enum DebugHooks {
         case "remoteAddressName": addressName = value
         case "requirePairing": requirePairing = flag
         case "updateCheck": updateCheck = flag
+        case "showPairingWindowToScreenSharing": pairingSharing = flag
         default: print("SillSetAfter: no setting called \(key)")
         }
     }
@@ -378,12 +400,30 @@ enum DebugHooks {
         }
         for sample in devicesPaneSamples() {
             let pane = DevicesPane(status: sample.status, requirePairing: .constant(sample.requirePairing),
+                                   showPairingWindowToScreenSharing: .constant(sample.showPairingWindowToScreenSharing),
                                    requirePairingProblem: nil, actions: DevicesPane.Actions(), now: previewNow)
                 .formStyle(.grouped)
                 .frame(width: 520)
                 .background(Color(nsColor: .windowBackgroundColor))
             for (name, appearance) in appearances {
                 render(pane, appearance: appearance, to: out.appendingPathComponent("pane-devices-\(sample.name)-\(name).png"))
+            }
+        }
+        // General while the macOS firewall blocks Sill's executable (the report's Mac), and the line alone
+        // in each verdict that shows one (FirewallRule).
+        for (name, appearance) in appearances {
+            render(SettingsPane(tab: .general, model: model, previewUpdates: neverChecked, previewClipboardAccess: .allowed,
+                                previewFirewall: firewallSamples[0].verdict)
+                    .background(Color(nsColor: .windowBackgroundColor)),
+                   appearance: appearance, to: out.appendingPathComponent("pane-general-firewall-\(name).png"))
+        }
+        for (sampleName, verdict) in firewallSamples {
+            let section = Form { FirewallSection(verdict: verdict) }
+                .formStyle(.grouped)
+                .frame(width: 520)
+                .background(Color(nsColor: .windowBackgroundColor))
+            for (name, appearance) in appearances {
+                render(section, appearance: appearance, to: out.appendingPathComponent("pane-firewall-\(sampleName)-\(name).png"))
             }
         }
         // General's clipboard section in each of macOS's answers (ClipboardPolicy.MacAccess), and with
@@ -448,7 +488,8 @@ enum DebugHooks {
                        appearance: appearance, to: out.appendingPathComponent("card-\(sample.name)-\(name).png"))
             }
             var config = model.settings.config
-            config.virtualDisplay = sample.snapshot.virtualDisplayOn     // the checkmark matches the sample
+            config.virtualDisplay = sample.snapshot.virtualDisplayOn     // the checkmarks match the sample
+            config.sendAudio = sample.snapshot.audio != nil
             let entries = MenuBuilder.entries(presentation: p, config: config, login: login, permissions: sample.permissions)
             menuText += "=== \(sample.name) (glyph: \(p.glyph), tooltip: \(p.tooltip))\n"
             menuText += MenuBuilder.dump(entries, card: p) + "\n"
@@ -564,6 +605,11 @@ enum DebugHooks {
         // The same device while the away quality runs (docs/remote-bundle-plan.md §5.7): the menu's
         // Quality subtitle says so, and the stream runs at Low · Standard.
         list.append(Sample(name: "remote-away", snapshot: remoteAway()))
+        // The same device with the Mac's sound: the widest source row there is with it, ending in
+        // "through Tailscale · virtual display · sound".
+        var remoteSound = remote
+        remoteSound.audio = HostStatusSnapshot.Audio(source: "Safari", devices: 1)
+        list.append(Sample(name: "remote-sound", snapshot: remoteSound))
         // Pairing at home (docs/home-pairing-plan.md §6.4): a device's ask while its window shows
         // the code, while the limits kept one from opening, and while this Mac was locked; an older
         // device refused at the home door; the keychain unusable, so no home door at all.
@@ -592,8 +638,31 @@ enum DebugHooks {
         closed.remote = RemoteStatus(identityProblem: keychainProblem,
                                      homeDoor: .unavailable("Sill couldn’t use its key in the keychain (\(keychainProblem))"))
         list.append(Sample(name: "devices-cant-connect", snapshot: closed))
+        // The macOS firewall blocks Sill's executable (the report's Mac), and blocks every incoming
+        // connection: "Devices Can’t Connect", which opens Settings › General.
+        var blocked = idle
+        blocked.remote = RemoteStatus(homeDoor: .pairingRequired)
+        blocked.firewall = firewallSamples[0].verdict
+        list.append(Sample(name: "firewall-blocked", snapshot: blocked))
+        var blocksAll = blocked
+        blocksAll.firewall = firewallSamples.first { $0.name == "all" }?.verdict
+        list.append(Sample(name: "firewall-blocks-all", snapshot: blocksAll))
         return list
     }
+
+    /// The macOS firewall's verdicts that Settings › General shows a line for (pane-firewall-<name>),
+    /// each FirewallRule's own verdict on the answers SILL_TEST_FIREWALL's word gives (as macOS 27
+    /// prints them) for Sill.app in Applications: the report's Mac first (its executable blocked), its
+    /// bundle, both, every incoming connection, and a copy whose path a shell needs quoted.
+    static let firewallSamples: [(name: String, verdict: FirewallRule.Verdict)] = {
+        let installed = FirewallRule.paths(executable: "/Applications/Sill.app/Contents/MacOS/Sill")
+        let spaced = FirewallRule.paths(executable: "/Applications/Sill Beta.app/Contents/MacOS/Sill")
+        func judged(_ word: String, _ paths: FirewallRule.Paths) -> FirewallRule.Verdict {
+            FirewallRule.verdict(FirewallRule.testAnswers(.word(word), fileText: nil, paths: paths), paths: paths)
+        }
+        return [("executable", judged("executable", installed)), ("bundle", judged("bundle", installed)),
+                ("both", judged("both", installed)), ("all", judged("all", installed)), ("quoted", judged("executable", spaced))]
+    }()
 
     /// The remote device of `remote-device`, every connected device away: the away quality runs.
     private static func remoteAway() -> HostStatusSnapshot {
@@ -660,6 +729,10 @@ enum DebugHooks {
         streaming.virtualDisplayOn = true
         var two = streaming
         two.devices = [ipad, iphone]
+        // The Mac's sound going to the one device (Send Audio on), on the virtual display over Wi-Fi,
+        // ending in "sound" (`remote-sound` is the same from away).
+        var sound = streaming
+        sound.audio = HostStatusSnapshot.Audio(source: "Safari", devices: 1)
         // A still window on the Mac's own screen (virtual display off) to one device, at the most the
         // menu offers (Maximum at 120 fps: 80 Mbps) over the widest word: the source row stays on one
         // line, as it does while the picture changes, so the open menu keeps its height. The device
@@ -700,6 +773,7 @@ enum DebugHooks {
             Sample(name: "streaming", snapshot: streaming),
             Sample(name: "still-window", snapshot: still),
             Sample(name: "two-devices", snapshot: two),
+            Sample(name: "sound", snapshot: sound),
             Sample(name: "software-encoder", snapshot: software),
             Sample(name: "software-encoder-stuck", snapshot: stuck),
             Sample(name: "virtual-display-fallback", snapshot: fallback),
@@ -774,12 +848,14 @@ extension DebugHooks {
         var name: String
         var status: RemoteStatus
         var requirePairing = true
+        var showPairingWindowToScreenSharing = false
     }
 
-    /// pane-devices-{required,off,empty,unavailable}: three devices, one paired over the USB cable
-    /// and seen over Wi-Fi at home, one by QR code and seen through Tailscale yesterday, one by
-    /// code and never connected; Require pairing off (its warning); nothing paired yet; the
-    /// keychain unusable (no home door).
+    /// pane-devices-{required,off,empty,screensharing,unavailable}: three devices, one paired over
+    /// the USB cable and seen over Wi-Fi at home, one by QR code and seen through Tailscale
+    /// yesterday, one by code and never connected; Require pairing off (its warning); nothing paired
+    /// yet; nothing paired yet with the pairing window shown to screen sharing (a Mac used through
+    /// Screen Sharing, issue #108); the keychain unusable (no home door).
     static func devicesPaneSamples() -> [DevicesPaneSample] {
         let now = previewNow
         let ipad = PairedDeviceSummary(id: "ipad", keyPrefix: "5KD2Q7", name: "iPad (iPad14,1)", model: "iPad14,1",
@@ -794,6 +870,8 @@ extension DebugHooks {
             DevicesPaneSample(name: "required", status: RemoteStatus(paired: [ipad, iphone, pro], homeDoor: .pairingRequired)),
             DevicesPaneSample(name: "off", status: RemoteStatus(paired: [ipad, iphone], homeDoor: .open), requirePairing: false),
             DevicesPaneSample(name: "empty", status: RemoteStatus(homeDoor: .pairingRequired)),
+            DevicesPaneSample(name: "screensharing", status: RemoteStatus(homeDoor: .pairingRequired),
+                              showPairingWindowToScreenSharing: true),
             DevicesPaneSample(name: "unavailable",
                               status: RemoteStatus(identityProblem: keychainProblem,
                                                    homeDoor: .unavailable("Sill couldn’t use its key in the keychain (\(keychainProblem))"))),

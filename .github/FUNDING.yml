@@ -1,3 +1,5 @@
 # The Sponsor button at the top of the repository page. GitHub reads this file.
 # To add Ko-fi later: a line `ko_fi: <handle>` here and a link in README.md's Tips.
 github: Saffsanity
+# getsill.app/contribute: how to sponsor, the sponsors and the contributors; shown in the Sponsor dialog too.
+custom: ["https://getsill.app/contribute"]

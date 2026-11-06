@@ -87,10 +87,20 @@ enum SavedMacs {
     /// only on the Mac itself; none is ever saved (loopback stays in DEBUG builds, for the
     /// simulator's tests against a host on the same Mac).
     static func keepable(_ host: String, allowLoopback: Bool) -> Bool {
-        let h = host.lowercased()
-        if h.isEmpty || h.contains("%") { return false }
-        if h.hasPrefix("169.254.") || h.hasPrefix("fe8") || h.hasPrefix("fe9") || h.hasPrefix("fea") || h.hasPrefix("feb") { return false }
-        if h.hasPrefix("127.") || h == "::1" || h == "localhost" { return allowLoopback }
+        // Classify the parsed host, not a prefix shared by DNS names ("fearless.ts.net").
+        // The parser also normalizes expanded and IPv4-mapped IPv6 before these checks.
+        guard case .success(let address) = AddressParser.parse(host), address.port == nil else { return false }
+        let h = address.host.lowercased()
+        switch address.kind {
+        case .ipv4:
+            if h.hasPrefix("169.254.") { return false }
+            if h.hasPrefix("127.") { return allowLoopback }
+        case .ipv6:
+            if ["fe8", "fe9", "fea", "feb"].contains(where: { h.hasPrefix($0) }) { return false }
+            if h == "::1" { return allowLoopback }
+        case .name:
+            if h == "localhost" || h == "localhost." { return allowLoopback }
+        }
         return true
     }
 
@@ -196,16 +206,23 @@ enum SavedMacs {
     /// After a dial of `old` completed its handshake with `new`'s key at `proof` ("host|port", one of
     /// `old`'s addresses; RemoteDialPolicy.successors said `new` may answer there): `old` is gone,
     /// since the Mac it named now holds `new`'s key. `new` keeps what `old` knew that it lacks: the
-    /// typed addresses, `homeTLS`, and `proof` as the address that last worked. Nothing changes
-    /// when either is not saved or they are the same record.
+    /// typed addresses (at their original effective ports), `homeTLS`, and `proof` as the address
+    /// that last worked. Nothing changes when either is not saved or they are the same record.
     static func superseding(old: String, by new: String, proof: String, in list: [SavedMac]) -> [SavedMac] {
         guard old != new, let o = list.first(where: { $0.macID == old }), list.contains(where: { $0.macID == new }) else { return list }
         return list.compactMap { mac in
             if mac.macID == old { return nil }
             guard mac.macID == new else { return mac }
             var next = mac
-            let have = Set(next.allAddresses.map { "\($0.host.lowercased())|\($0.port ?? next.remotePort)" })
-            let carried = (o.typedAddresses ?? []).filter { !have.contains("\($0.host.lowercased())|\($0.port ?? next.remotePort)") }
+            var have = Set(next.allAddresses.map { "\($0.host.lowercased())|\($0.port ?? next.remotePort)" })
+            let carried = (o.typedAddresses ?? []).compactMap { address -> MacAddress? in
+                var address = address
+                // A missing port belongs to the old record. Moving it unchanged would dial the
+                // new record's port, and could also mistake a different destination for a duplicate.
+                if address.port == nil, o.remotePort != next.remotePort { address.port = o.remotePort }
+                let key = "\(address.host.lowercased())|\(address.port ?? next.remotePort)"
+                return have.insert(key).inserted ? address : nil
+            }
             if !carried.isEmpty { next.typedAddresses = (next.typedAddresses ?? []) + carried }
             if o.homeTLS == true { next.homeTLS = true }
             next.lastWorked = proof
@@ -240,5 +257,82 @@ enum SavedMacs {
     static func recognize(tag: String?, in list: [SavedMac]) -> String? {
         guard let tag, !tag.isEmpty else { return nil }
         return list.first { mac in mac.recognitionKeyData.map { RecognitionTag.matches(tag, recognitionKey: $0) } ?? false }?.macID
+    }
+
+    /// The pairing link's addresses and port on a record just paired at the home door (#140): that
+    /// record has none until the session's first kind 18, so a person who scanned a code whose link
+    /// lists addresses (a window opened from the Mac's menu, with Remote Access on) and left before
+    /// it came had a Remote row with nothing to dial, at the default port. The link is the code the
+    /// person scanned, pinned to the key that answered, as the remote path's `paired` saves it. A
+    /// record a verified kind 18 has refreshed (`infoIssuedAt`) keeps what the Mac said.
+    static func applyingLink(_ addresses: [MacAddress], port: Int, to mac: SavedMac, allowLoopback: Bool) -> SavedMac {
+        guard mac.infoIssuedAt == 0 else { return mac }
+        var next = mac
+        let kept = filtered(addresses, allowLoopback: allowLoopback)
+        if !kept.isEmpty { next.addresses = kept }
+        if (1...65535).contains(port) { next.remotePort = port }
+        return next
+    }
+}
+
+/// The device key's rules (#140), pure (checked by Tests/checks/remote-rules, whose `launch.swift`
+/// models a launch, a pairing, a SIGKILL and the next launch with each way the Keychain and
+/// UserDefaults can fail): what the Keychain's answer about the key under a tag means at launch
+/// for the saved Macs, at a pairing or a TLS dial, and right after a key is made. DeviceIdentity
+/// asks the Keychain and carries them out. A saved Mac is only as good as this key: the Mac knows
+/// the key it paired, so a record whose key the next launch cannot find is useless, and the
+/// launch clears it.
+enum DeviceKeyPolicy {
+    /// The Keychain's answer to the key query under one tag: a key, errSecItemNotFound, or another
+    /// status (-25308 while the device is locked, -34018 when the Keychain refuses for a moment).
+    enum Answer: Equatable {
+        case found, notFound
+        case failed(Int32)
+    }
+
+    /// errSecItemNotFound, said when a key made now is not given back and the add said nothing else.
+    static let itemNotFound: Int32 = -25300
+
+    /// At launch: the saved Macs are cleared only when every tag this build uses says there is no
+    /// key (a restore from another device's backup, where the key, ThisDeviceOnly, did not travel).
+    /// Any other answer (the Keychain not readable yet, a DEBUG run whose Secure Enclave tag alone
+    /// had none) is no proof, and clearing on it would lose pairings the key still serves.
+    static func clearsSavedMacs(_ answers: [Answer]) -> Bool {
+        !answers.isEmpty && answers.allSatisfy { $0 == .notFound }
+    }
+
+    enum Load: Equatable {
+        case use, make
+        case fail(Int32)
+    }
+
+    /// At a pairing or a TLS dial (`loadOrCreate`), with no key in memory yet: the key found is
+    /// used; a key is made only when the Keychain says there is none. Any other answer fails that
+    /// pairing or dial with its status: a read that failed for a moment used to put a second key
+    /// under the tag, and a later read takes either one while the Mac knows only one.
+    static func load(_ answer: Answer) -> Load {
+        switch answer {
+        case .found: return .use
+        case .notFound: return .make
+        case .failed(let status): return .fail(status)
+        }
+    }
+
+    enum Made: Equatable {
+        case use, add
+        case fail(Int32)
+    }
+
+    /// Right after a key is made: used once the Keychain gives back this very key under the tag
+    /// (`readBack`), as the next launch looks for it; not given back, added once by itself
+    /// (`added`, nil before that add, its status after); still not given back, the pairing fails
+    /// with the Keychain's status. A key the next launch cannot find would serve this launch alone:
+    /// at the next launch the saved Mac goes (`clearsSavedMacs`), the person scans the code again, a
+    /// new key is made, and the Mac lists this device once more for every launch (#140).
+    static func made(readBack: Answer, added: Int32?) -> Made {
+        if readBack == .found { return .use }
+        guard let added else { return .add }
+        if case .failed(let status) = readBack { return .fail(status) }
+        return .fail(added != 0 ? added : itemNotFound)
     }
 }

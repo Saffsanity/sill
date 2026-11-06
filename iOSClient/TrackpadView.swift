@@ -187,6 +187,10 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// Pad velocity at the last two-finger callback. When one finger of two lifts first the scroll
     /// ends there, and the recognizer's velocity at that moment is polluted by the centroid jump.
     private var scrollVelocity: CGPoint = .zero
+    /// -1 while this device's Reverse Scrolling turns the scroll in progress around, else 1
+    /// (`ScrollDirection`, the overlay's rule for a finger's drag): read as each two-finger scroll
+    /// begins, so its deltas and the coast after its lift keep the direction it began with.
+    private var scrollFactor: CGFloat = 1
     /// The coast after a two-finger flick. Shared engine with the direct-touch overlay.
     private let momentum = ScrollMomentum()
     /// True between a long press's start and the finger lifting: the button is down and moves drag.
@@ -373,11 +377,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
             if panTouches >= 2 { scrollVelocity = gesture.velocity(in: self) }
             guard dx != 0 || dy != 0 else { return }
             if panTouches >= 2 {
-                guard bounds.width > 0, bounds.height > 0 else { return }
-                catchUp()
-                // Natural sign, same as the direct-touch overlay: fingers down, content down.
-                send(.scroll(x: cursor.x, y: cursor.y,
-                             dx: dx / bounds.width, dy: dy / ySpan))
+                scroll(dx: dx, dy: dy)
             } else if !trackerDriving {
                 moveCursor(dx: dx, dy: dy)
             }
@@ -398,6 +398,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     private func beginScroll() {
         momentum.stop()
         scrolling = true
+        scrollFactor = CGFloat(ScrollDirection.factor(.pad, reversed: StreamClient.reverseScrollOn))
         // From here the tracker must not move the pointer under the scroll, even if UIKit never
         // showed it the second finger.
         trackSuspended = true
@@ -409,9 +410,21 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         send(.scrollGesture(.began, x: cursor.x, y: cursor.y))
     }
 
+    /// Two fingers moved `dx`, `dy` points on the pad: the scroll at the cursor, as fractions of the
+    /// frame measured as the pointer's motion is (the pad's width across, `ySpan` down). Natural sign,
+    /// same as the direct-touch overlay (fingers down, content down), turned around while Reverse
+    /// Scrolling is on (`scrollFactor`).
+    private func scroll(dx: CGFloat, dy: CGFloat) {
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        catchUp()
+        send(.scroll(x: cursor.x, y: cursor.y,
+                     dx: dx / bounds.width * scrollFactor, dy: dy / ySpan * scrollFactor))
+    }
+
     /// Closes the gesture and, given a lift-off velocity fast enough to be a flick, coasts. The
     /// coast stays at the cursor where the scroll ended, even if one finger then moves the
-    /// pointer: the Mac routes a whole gesture, momentum included, to the view it began in.
+    /// pointer: the Mac routes a whole gesture, momentum included, to the view it began in. It
+    /// coasts the way the scroll went (`scrollFactor`).
     private func endScroll(momentumVelocity velocity: CGPoint?) {
         scrolling = false
         let at = cursor
@@ -421,7 +434,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         // this view is torn down mid-coast.
         let send = self.send
         momentum.start(
-            velocity: velocity,
+            velocity: CGPoint(x: velocity.x * scrollFactor, y: velocity.y * scrollFactor),
             onBegin: { send(.scrollGesture(.momentumBegan, x: at.x, y: at.y)) },
             onStep: { [weak self] step in
                 // Converted to frame fractions exactly as live two-finger deltas are.
@@ -588,6 +601,16 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
 
     /// `click`: a tap on the pad, which clicks where the cursor is.
     func scriptClick() { click(down: .leftDown, up: .leftUp) }
+
+    /// `padscroll DX,DY`: two fingers scroll DX, DY points on the pad in five steps and lift at
+    /// 600 pt/s along it, so it coasts, through the pad's own scroll path (begin, deltas, end and
+    /// coast, as `handlePan` gives them).
+    func scriptScroll(dx: CGFloat, dy: CGFloat) {
+        beginScroll()
+        for _ in 1...5 { scroll(dx: dx / 5, dy: dy / 5) }
+        let length = hypot(dx, dy)
+        endScroll(momentumVelocity: length > 0 ? CGPoint(x: dx / length * 600, y: dy / length * 600) : .zero)
+    }
     #endif
 }
 
@@ -703,7 +726,8 @@ extension TrackpadSurface {
     /// taps): a touch at the pad's centre is checked to land on the pad itself, then a stroke of 12
     /// moves (60 pt right and 40 down, through `moveCursor`, which the tracker and the pan call),
     /// a tap (`click`: the latched shift and ctrl go down around it and the latch is spent), and a
-    /// two-finger scroll of five 8 pt steps down with its begin and end, no coast.
+    /// two-finger scroll of five 8 pt steps down with its begin and end, no coast, through the pad's
+    /// own scroll path (`scroll(dx:dy:)`, so Reverse Scrolling turns it around when it is on).
     fileprivate func runInputTest() {
         guard InputTest.claim("trackpad") else { return }
         let start = DispatchTime.now()
@@ -728,11 +752,10 @@ extension TrackpadSurface {
         at(3.8) { [weak self] in
             guard let self else { return }
             self.beginScroll()
-            for _ in 0..<5 {
-                self.send(.scroll(x: self.cursor.x, y: self.cursor.y, dx: 0, dy: 8 / self.ySpan))
-            }
+            for _ in 0..<5 { self.scroll(dx: 0, dy: 8) }
             self.endScroll(momentumVelocity: nil)
-            print("input test: two-finger scroll done (5 steps of 8 pt down)")
+            print("input test: two-finger scroll done (5 steps of 8 pt down"
+                  + (self.scrollFactor < 0 ? ", turned around by Reverse Scrolling)" : ")"))
         }
     }
 }

@@ -9,7 +9,10 @@
 // per 60 fps", "away points → Retina"); `effective(away:)`; a device's state shows the pair its
 // connection controls, and a change from away lands on the away pair and never on the home one, the
 // rest as at home; the whitelist is the same from both routes; who counts as away; when the away
-// quality is the target (and that the flag stays with nobody connected); and the two lines.
+// quality is the target (and that the flag stays with nobody connected); and the two lines. Also
+// HostConfig's other defaults: Share clipboard, Send Audio, and Sill.app's `app` (the CLI's
+// `standard` with the virtual display on); and Direct Wireless, a paired device's alone at home
+// (`accepted`'s `paired`, and `DeviceSettings.paired`: the security scan's finding 8, 2026-10-29).
 import CoreGraphics
 import Foundation
 
@@ -91,13 +94,30 @@ do {
     check(!off.validated().shareClipboard && standard.validated().shareClipboard, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: false)
+                          requirePairing: true, shareClipboard: false, sendAudio: false)
     check(!made.shareClipboard, "a HostConfig made with it off has it off (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
     check(!off.applying(all).shareClipboard && !off.applyingAway(all).shareClipboard
           && standard.applying(all).shareClipboard && standard.applyingAway(all).shareClipboard,
           "a device's change never moves it, at home or away")
+}
+
+// Sill.app's defaults (HostConfig.app, which its HostSettings registers): the CLI's with the virtual
+// display and Send Audio on (Noah, 2026-10-27); the CLI keeps both off unless --virtual-display and
+// --audio.
+do {
+    let app = HostConfig.app
+    check(!standard.virtualDisplay, "standard (the CLI): the virtual display off")
+    check(!standard.sendAudio, "standard (the CLI): Send Audio off")
+    check(app.virtualDisplay, "app (Sill.app): the virtual display on")
+    check(app.sendAudio, "app (Sill.app): Send Audio on")
+    var sameButTheTwo = app
+    sameButTheTwo.virtualDisplay = standard.virtualDisplay
+    sameButTheTwo.sendAudio = standard.sendAudio
+    check(sameButTheTwo == standard, "app is standard but for the virtual display and Send Audio")
+    check(app.validated() == app, "app is valid as it is")
+    eq(standard.changes(to: app), "virtual display off → on, send audio off → on", "changes: the two knobs that differ")
 }
 
 // MARK: DeviceSettings
@@ -153,11 +173,48 @@ do {
 do {
     // The whitelist is the same whichever pair the change lands on.
     let change = HostSettingsChange(bitrate: 12_000_000, captureScale: 1.5, directWireless: true)
-    let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: true, fromRemote: true)
+    let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: true, fromRemote: true, paired: true)
     check(ok.bitrate == nil && ok.captureScale == nil && ok.directWireless == nil, "accepted: a hand-set bitrate, 1.5 and Direct Wireless from afar are refused")
     eq(refused.count, 3, "accepted: three refusals named")
-    let (fine, none) = DeviceSettings.accepted(HostSettingsChange(bitrate: 150_000_000, captureScale: 1), virtualDisplayAvailable: false, fromRemote: true)
+    let (fine, none) = DeviceSettings.accepted(HostSettingsChange(bitrate: 150_000_000, captureScale: 1), virtualDisplayAvailable: false, fromRemote: true, paired: true)
     check(fine.bitrate == 150_000_000 && fine.captureScale == 1 && none.isEmpty, "accepted: every preset and both scales from afar")
+}
+
+do {
+    // Send Audio is a device's to set too, as Quality is (Noah, 2026-10-27: docs/audio-plan.md, Q8 as
+    // revised; the beta's hosts refused it): a device's change of it is applied on or off, at home and
+    // away, with the rest of the same change and nothing refused; it lands on the one shared value from
+    // either route (`applying`, `applyingAway`), never on a quality pair; the log names it both ways;
+    // and a device sees it, whichever pair its connection controls.
+    // At home from an unpaired session too (a door that lets any device in): only Direct Wireless is a
+    // paired device's alone (below).
+    for (remote, paired) in [(false, true), (false, false), (true, true)] {
+        for on in [false, true] {
+            let change = HostSettingsChange(token: 4, maxFPS: 60, prioritizeSpeed: true, sendAudio: on)
+            let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: true, fromRemote: remote, paired: paired)
+            check(ok.sendAudio == on && ok.maxFPS == 60 && ok.prioritizeSpeed == true,
+                  "accepted: Send Audio \(on ? "on" : "off") from \(remote ? "afar" : paired ? "home" : "home, unpaired") applied, with the rest of the change")
+            check(refused.isEmpty, "accepted: …and nothing refused (\(refused))")
+            var from = standard
+            from.sendAudio = !on
+            let landed = remote ? from.applyingAway(ok) : from.applying(ok)
+            check(landed.sendAudio == on && landed.bitrate == from.bitrate && landed.captureScale == from.captureScale
+                  && landed.awayBitrate == from.awayBitrate && landed.awayCaptureScale == from.awayCaptureScale,
+                  "\(remote ? "applyingAway" : "applying"): Send Audio \(on ? "on" : "off") lands on the shared value, neither quality pair")
+        }
+    }
+    let (alone, none) = DeviceSettings.accepted(HostSettingsChange(token: 5, sendAudio: true), virtualDisplayAvailable: false, fromRemote: true, paired: true)
+    check(alone == HostSettingsChange(sendAudio: true) && none.isEmpty, "accepted: a change of Send Audio alone is that change, without the token, from afar too")
+    var on = standard
+    on.sendAudio = true
+    check(!standard.sendAudio, "standard: Send Audio off")
+    eq(standard.changes(to: on), "send audio off → on", "changes: Send Audio's switch, as the log names it")
+    eq(on.changes(to: standard), "send audio on → off", "changes: …and off again")
+    check(standard.applying(HostSettingsChange(sendAudio: true)) == on && on.applyingAway(HostSettingsChange(sendAudio: false)) == standard,
+          "a device's Send Audio alone moves nothing else, at home or away")
+    check(on.streamSettings(away: true).sendAudio == true && on.streamSettings(away: false).sendAudio == true
+          && standard.streamSettings(away: true).sendAudio == false && standard.streamSettings(away: false).sendAudio == false,
+          "a device sees the Mac's Send Audio, at home and away")
 }
 
 // MARK: AwayPolicy
@@ -167,6 +224,37 @@ do {
         eq(AwayPolicy.isAway(remoteDoor: true, origin: origin), want, "the remote door from \(origin) is away: \(want)")
         eq(AwayPolicy.isAway(remoteDoor: false, origin: origin), false, "the home door from \(origin) is at home")
     }
+}
+
+do {
+    // Direct Wireless only from a paired session at home (2026-10-29, the security scan's finding 8):
+    // its key on the Mac's trust list (`paired`), and never from away (`fromRemote`, the reason named
+    // first). Refused on or off, named once, and the rest of the same change applied whoever sent it.
+    let fromAfar = "direct wireless (not from a remote connection)", unpaired = "direct wireless (only a paired device)"
+    for remote in [false, true] {
+        for paired in [false, true] {
+            for dw in [nil, true, false] as [Bool?] {
+                let change = HostSettingsChange(token: 7, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true,
+                                                virtualDisplay: false, directWireless: dw, sendAudio: true)
+                let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: true, fromRemote: remote, paired: paired)
+                let context = "\(remote ? "from afar" : "at home"), \(paired ? "paired" : "unpaired"), Direct Wireless \(dw.map { $0 ? "on" : "off" } ?? "absent")"
+                let takes = dw != nil && !remote && paired
+                eq(ok.directWireless, takes ? dw : nil, "accepted \(context): Direct Wireless \(takes ? "taken" : "not taken")")
+                eq(refused, dw == nil || takes ? [] : [remote ? fromAfar : unpaired], "accepted \(context): what is refused")
+                check(ok.maxFPS == 60 && ok.bitrate == 25_000_000 && ok.captureScale == 1 && ok.prioritizeSpeed == true
+                      && ok.virtualDisplay == false && ok.sendAudio == true && ok.token == nil,
+                      "accepted \(context): the rest of the change, whoever sent it")
+            }
+        }
+    }
+    // Whose session counts as paired: one with a key, the whole key, on the list now.
+    let a = Data(repeating: 0xA1, count: 32), b = Data(repeating: 0xB2, count: 32)
+    check(!DeviceSettings.paired(key: nil, trusted: [a, b]), "paired: the plain door (no key) never is")
+    check(!DeviceSettings.paired(key: a, trusted: []), "paired: no trust list (a host without an identity), no key is")
+    check(!DeviceSettings.paired(key: a, trusted: [b]), "paired: a key not on the list (an open door's unpaired device) is not")
+    check(DeviceSettings.paired(key: a, trusted: [b, a]), "paired: a key on the list is")
+    check(!DeviceSettings.paired(key: Data(a.prefix(31)), trusted: [a]) && !DeviceSettings.paired(key: a + Data([0]), trusted: [a]),
+          "paired: the whole key, not a prefix of one, nor one with a byte more")
 }
 
 do {

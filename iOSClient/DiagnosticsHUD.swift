@@ -37,7 +37,9 @@ final class ClientStatsReporter: ObservableObject {
                                 rttMs: s.rtt?.median ?? -1,
                                 device: Self.deviceName,
                                 frameAgeMaxMs: s.frameAge?.max ?? -1,
-                                rttMaxMs: s.rtt?.max ?? -1)
+                                rttMaxMs: s.rtt?.max ?? -1,
+                                audioBehindMs: s.soundBehindMs,
+                                audioLate: s.soundLate)
         client.send(.clientStats, payload: Wire.encode(stats))
     }
 
@@ -65,9 +67,10 @@ final class ClientStatsReporter: ObservableObject {
 // MARK: - HUD (DEBUG only)
 
 #if DEBUG
-/// The on-screen readout: "58 fps · age 9/24 ms · rtt 7/80 ms · 3024×1898" in a translucent
-/// capsule at the display view's top-right; each pair is the last second's median/max, "–" for a
-/// second without a sample. Only built when launched with `-SillHUD 1`; never in Release.
+/// The on-screen readout: "58 fps · age 9/24 ms · rtt 7/80 ms · 3024×1898 · sound 62" in a
+/// translucent capsule at the display view's top-right; each pair is the last second's median/max, "–"
+/// for a second without a sample, and the last is how far the Mac's sound trailed the picture, while it
+/// plays. Only built when launched with `-SillHUD 1`; never in Release.
 /// Purely visual: it never takes a touch, so input still reaches the overlay underneath the stream.
 final class DiagnosticsHUDView: UIView {
     static var isEnabled: Bool { UserDefaults.standard.bool(forKey: "SillHUD") }
@@ -94,7 +97,8 @@ final class DiagnosticsHUDView: UIView {
     /// `stats` nil: no second measured yet.
     func update(stats: StreamClient.LinkStats?, videoSize: CGSize) {
         let size = videoSize == .zero ? "no video" : "\(Int(videoSize.width))×\(Int(videoSize.height))"
-        label.text = "\(stats?.fps ?? 0) fps · age \(Self.text(stats?.frameAge)) · rtt \(Self.text(stats?.rtt)) · \(size)"
+        let sound = stats?.soundBehindMs.flatMap { $0 >= 0 ? " · sound \($0)" : nil } ?? ""
+        label.text = "\(stats?.fps ?? 0) fps · age \(Self.text(stats?.frameAge)) · rtt \(Self.text(stats?.rtt)) · \(size)\(sound)"
         superview?.setNeedsLayout()
     }
 
@@ -105,12 +109,16 @@ final class DiagnosticsHUDView: UIView {
     }
 
     /// Called from the host view's `layoutSubviews`: pin to the top-right corner of `bounds`.
-    func place(in bounds: CGRect) {
+    /// `scale`: the picture's zoom, which scales the display view this sits in; `bounds` is then the part
+    /// of it on screen (StreamZoom.visibleRect), and the readout keeps its size and its corner of the pane.
+    func place(in bounds: CGRect, scale: CGFloat = 1) {
         let text = label.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude))
         let p = Self.padding
         let size = CGSize(width: ceil(text.width) + p.left + p.right, height: ceil(text.height) + p.top + p.bottom)
-        frame = CGRect(x: bounds.maxX - Self.inset - size.width, y: bounds.minY + Self.inset,
-                       width: size.width, height: size.height)
+        let s = max(1, scale)
+        transform = s > 1 ? CGAffineTransform(scaleX: 1 / s, y: 1 / s) : .identity
+        self.bounds = CGRect(origin: .zero, size: size)
+        center = CGPoint(x: bounds.maxX - (Self.inset + size.width / 2) / s, y: bounds.minY + (Self.inset + size.height / 2) / s)
         label.frame = CGRect(x: p.left, y: p.top, width: ceil(text.width), height: ceil(text.height))
         layer.cornerRadius = size.height / 2
     }
