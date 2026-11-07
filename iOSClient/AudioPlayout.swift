@@ -585,6 +585,14 @@ struct AudioPlayout {
         return max(need(now: now), guardDelay)
     }
 
+    /// Where a picture stamped T should show for the sound of the same stamp to be heard with it:
+    /// T + this (device seconds), the sound's due time less the picture's own decode and refresh. Nil
+    /// before the floor. The full-screen Desktop's smooth presentation (PictureClock) reads it.
+    func pictureOffset(now: Double) -> Double? {
+        guard let floor else { return nil }
+        return floor + delay(now: now, lag: pictureLag(now: now)) - (Self.pictureRefreshes * refresh + Self.pictureExtra)
+    }
+
     /// A packet in hand (for the checks and the console).
     var holding: Bool { hand != nil }
 

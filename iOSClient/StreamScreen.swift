@@ -408,6 +408,8 @@ struct StreamScreen: View {
         // flag rather than `onChange(of:)`, whose two-parameter form needs iOS 17; like `onChange`, it
         // does nothing on the first appearance.
         .task(id: fullScreenShown) {
+            // In full screen the picture keeps its cadence and the sound's time (PictureClock).
+            client.displayView.smoothPresentation = fullScreenShown
             if fullScreenSeen { sendViewport(after: 0.25) } else { fullScreenSeen = true }
         }
         // A hardware keyboard (docs/hardware-keyboard-plan.md §2): the input view takes the keyboard by

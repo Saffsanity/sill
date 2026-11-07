@@ -87,6 +87,9 @@ final class AudioOutput {
 
     // The last closed second, for the client's stats (its network queue) and the HUD.
     private let statsLock = NSLock()
+    /// The playout's picture offset as last placed, and when (`pictureOffset()`).
+    private let offsetLock = NSLock()
+    private var publishedOffset: (offset: Double, at: Double)?
     private var lastSecond: AudioPlayout.Second?
     private var lateSinceTaken = 0
     private var anyPlayed = false
@@ -248,6 +251,16 @@ final class AudioOutput {
         queue.async { [self] in receive(p, stamp: stamp, came: came) }
     }
 
+    /// Where a picture stamped T shows so the sound is heard with it (T + this, device seconds), while the
+    /// sound plays: nil when no packet was placed in the last second (Send Audio off, the sound stopped).
+    /// Any thread.
+    func pictureOffset() -> Double? {
+        offsetLock.withLock {
+            guard let p = publishedOffset, CACurrentMediaTime() - p.at < 1 else { return nil }
+            return p.offset
+        }
+    }
+
     /// For the stats sent to the Mac once a second (`ClientStats.audioBehindMs`, `audioLate`): the last
     /// closed second's median of how far the sound trailed the picture (nil: none played in it) and the
     /// packets too late to play since the last call; nil before anything played this session. The two
@@ -309,6 +322,9 @@ final class AudioOutput {
                 }
             }
             apply(plan.output)
+        }
+        if let off = model.pictureOffset(now: CACurrentMediaTime()) {
+            offsetLock.withLock { publishedOffset = (off, CACurrentMediaTime()) }
         }
         armDeadline()
     }
