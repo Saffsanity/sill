@@ -111,6 +111,9 @@ final class DeviceDesktop {
             if d.bounds.width == 0 { release(); throw Failure.neverOnline }
             print("Device desktop is online but not at \(d.widthPt)×\(d.heightPt) @2×: backing \(d.pixelSize.width)×\(d.pixelSize.height) px.")
         }
+        // The windows read where they are now, in the arrangement they were placed in: once this display
+        // is main every frame moves, and the window list catches up only after a while.
+        let found = await windowsToGather(beside: d.displayID)
         makeMain(d.displayID)
 
         // ScreenCaptureKit lists new displays a little after CoreGraphics does (see VirtualStage).
@@ -124,8 +127,9 @@ final class DeviceDesktop {
         }
         guard let listed, display === d else { release(); throw Failure.notListedBySCK }
         scDisplay = listed
-        await gatherWindows(onto: d.displayID)
+        await appKitKnowsScreens(main: d.displayID)
         guard display === d else { release(); throw Failure.notListedBySCK }
+        gather(found, onto: d.displayID)
         drawCurtains(except: d.displayID)
         Stats.shared.bump("dd.created")
         print("Device desktop \(d.widthPt)×\(d.heightPt) pt @2× id \(d.displayID): main, ready after \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
@@ -137,8 +141,9 @@ final class DeviceDesktop {
         guard let d = display else { scDisplay = nil; return }
         let id = d.displayID
         liftCurtains()
-        returnWindows()
+        // The arrangement first, then each window back to the frame it was read at in it.
         if let previous = previousMain, previous != id, CGMainDisplayID() == id { makeMain(previous) }
+        returnWindows()
         previousMain = nil
         display = nil
         scDisplay = nil
@@ -168,52 +173,78 @@ final class DeviceDesktop {
         }
     }
 
-    /// Every window on another display (not Sill's window stage) onto `id`, at its size where that
-    /// fits, else fitted, at the place it had on its own display as far as that fits too. A window in
-    /// full screen stays (it refuses moves).
-    private func gatherWindows(onto id: CGDirectDisplayID) async {
-        guard let sizer, let windowsOnScreen else { print("Device desktop: no window mover; windows stay where they are."); return }
-        // AppKit learns the new screen (its menu bar) through the run loop, usually within a frame.
-        let deadline = Date().addingTimeInterval(1)
-        while VirtualStage.screen(for: id) == nil, Date() < deadline { try? await Task.sleep(for: .milliseconds(50)) }
-        let target = CGDisplayBounds(id)
-        guard let area = WindowSizer.visibleArea(around: target), area.intersects(target) else {
-            print("Device desktop: AppKit does not know its screen yet (\(NSScreen.screens.count) screens); windows stay where they are.")
-            return
-        }
-        let displays = WindowSizer.displayFrames()
-        var moved = 0, skipped = 0
+    /// A window to move, read before the arrangement changed: its way back, its frame and its display's.
+    private struct Found {
+        let placement: WindowSizer.Placement
+        let frame: CGRect
+        let home: CGRect
+    }
+
+    /// The windows on the Mac's own displays (not `id`, not Sill's window stage), matched through
+    /// Accessibility while their frames are still the window list's. A window in full screen stays (it
+    /// refuses moves).
+    private func windowsToGather(beside id: CGDirectDisplayID) async -> [Found] {
+        guard let sizer, let windowsOnScreen else { print("Device desktop: no window mover; windows stay where they are."); return [] }
+        let homes = Self.activeDisplays().filter { $0 != id && CGDisplayVendorNumber($0) != VirtualStage.vendorID }.map { CGDisplayBounds($0) }
+        var found: [Found] = [], skipped = 0
         for w in await windowsOnScreen() {
-            guard display?.displayID == id else { return }
             let frame = WindowSizer.liveBounds(of: w.windowID) ?? w.frame
             let center = CGPoint(x: frame.midX, y: frame.midY)
-            guard !target.contains(center),
-                  let home = displays.first(where: { $0.contains(center) }) ?? displays.first(where: { $0.intersects(frame) }),
-                  let source = Self.displayID(at: home), CGDisplayVendorNumber(source) != VirtualStage.vendorID,
+            guard let home = homes.first(where: { $0.contains(center) }) ?? homes.first(where: { $0.intersects(frame) }),
                   let p = sizer.placement(for: w), !WindowSizer.isFullScreen(p.element) else { skipped += 1; continue }
-            let size = CGSize(width: min(frame.width, area.width), height: min(frame.height, area.height))
-            // Its place on its own display, as a fraction of the room it had there, kept inside the area.
-            let roomX = max(1, home.width - frame.width), roomY = max(1, home.height - frame.height)
-            let fx = min(1, max(0, (frame.minX - home.minX) / roomX)), fy = min(1, max(0, (frame.minY - home.minY) / roomY))
+            found.append(Found(placement: p, frame: p.originalFrame, home: home))
+        }
+        if skipped > 0 { print("Device desktop: \(skipped) window\(skipped == 1 ? "" : "s") stay where they are (full screen, Sill's stage, or not matched).") }
+        return found
+    }
+
+    /// AppKit's screens catch up with the new arrangement (this display main) through the run loop;
+    /// a curtain placed before it would land by the old one. At most 3 s.
+    private func appKitKnowsScreens(main id: CGDirectDisplayID) async {
+        let deadline = Date().addingTimeInterval(3)
+        func caughtUp() -> Bool {
+            NSScreen.screens.count == Self.activeDisplays().count
+                && (NSScreen.screens.first?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) == id
+        }
+        while !caughtUp(), Date() < deadline { try? await Task.sleep(for: .milliseconds(50)) }
+        if !caughtUp() {
+            print("Device desktop: AppKit lists \(NSScreen.screens.count) of \(Self.activeDisplays().count) screens after 3 s; placing by CoreGraphics.")
+        }
+    }
+
+    /// Each window found onto `id`, at its size where that fits, else fitted, at the place it had on its
+    /// own display, as a fraction of the room it had there, as far as that fits too.
+    private func gather(_ found: [Found], onto id: CGDirectDisplayID) {
+        guard let sizer, !found.isEmpty else { return }
+        let target = CGDisplayBounds(id)
+        // Its menu bar off the top; AppKit's visible frame when it has it, else the bar's usual height.
+        let area: CGRect
+        if let visible = WindowSizer.visibleArea(around: target), visible.intersects(target) {
+            area = visible.intersection(target)
+        } else {
+            area = CGRect(x: target.minX, y: target.minY + 40, width: target.width, height: target.height - 40)
+        }
+        for f in found {
+            let size = CGSize(width: min(f.frame.width, area.width), height: min(f.frame.height, area.height))
+            let roomX = max(1, f.home.width - f.frame.width), roomY = max(1, f.home.height - f.frame.height)
+            let fx = min(1, max(0, (f.frame.minX - f.home.minX) / roomX)), fy = min(1, max(0, (f.frame.minY - f.home.minY) / roomY))
             let origin = CGPoint(x: (area.minX + fx * (area.width - size.width)).rounded(),
                                  y: (area.minY + fy * (area.height - size.height)).rounded())
-            sizer.move(p, to: CGRect(origin: origin, size: size))
-            gathered.append(p)
-            moved += 1
+            sizer.move(f.placement, to: CGRect(origin: origin, size: size))
+            gathered.append(f.placement)
         }
-        print("Device desktop: \(moved) window\(moved == 1 ? "" : "s") moved onto it; \(skipped) left (on it already, in full screen or not matched).")
+        print("Device desktop: moved \(found.count) window\(found.count == 1 ? "" : "s") onto it from the Mac's own screens.")
     }
 
-    /// The active display whose bounds are `rect`.
-    private static func displayID(at rect: CGRect) -> CGDirectDisplayID? {
+    private static func activeDisplays() -> [CGDirectDisplayID] {
         var count: UInt32 = 0
-        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return nil }
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
         var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-        guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return nil }
-        return ids.prefix(Int(count)).first { CGDisplayBounds($0) == rect }
+        guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
+        return Array(ids.prefix(Int(count)))
     }
 
-    /// Every window gathered back where it was. Before the main role goes back: the frames are in the
+    /// Every window gathered back where it was. After the main role went back: the frames are in the
     /// arrangement they were read in.
     private func returnWindows() {
         guard let sizer, !gathered.isEmpty else { gathered = []; return }
@@ -224,13 +255,16 @@ final class DeviceDesktop {
     }
 
     /// A black window of Sill's over each of the Mac's own displays: nothing to see, nothing to click.
+    /// Placed by CoreGraphics' bounds, turned into AppKit's coordinates (from the bottom of the primary
+    /// screen, which is this display once it is main).
     private func drawCurtains(except id: CGDirectDisplayID) {
         liftCurtains()
-        for screen in NSScreen.screens {
-            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
-                  number != id, CGDisplayVendorNumber(number) != VirtualStage.vendorID else { continue }
-            let w = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false, screen: screen)
-            w.setFrame(screen.frame, display: false)
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? CGDisplayBounds(CGMainDisplayID()).height
+        for number in Self.activeDisplays() where number != id && CGDisplayVendorNumber(number) != VirtualStage.vendorID {
+            let b = CGDisplayBounds(number)
+            let frame = NSRect(x: b.minX, y: primaryHeight - b.maxY, width: b.width, height: b.height)
+            let w = NSWindow(contentRect: frame, styleMask: .borderless, backing: .buffered, defer: false)
+            w.setFrame(frame, display: false)
             w.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
             w.backgroundColor = .black
             w.isOpaque = true
@@ -250,7 +284,6 @@ final class DeviceDesktop {
             w.orderFrontRegardless()
             curtains.append(w)
         }
-        print("Device desktop: \(NSScreen.screens.count) screens known to AppKit, \(curtains.count) covered.")
         if !curtains.isEmpty {
             print("Device desktop: the Mac's own \(curtains.count == 1 ? "screen is" : "\(curtains.count) screens are") dark while it streams.")
         }
