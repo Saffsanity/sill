@@ -93,6 +93,11 @@ package final class StreamCoordinator {
     /// The Desktop in full screen on a device: a virtual display at its size, main while it
     /// streams (`Viewport.deviceDesktop`; DeviceDesktop.swift).
     let deviceDesktop = DeviceDesktop()
+    /// The Mac's own speakers silent while a device plays its sound (MacOutputMute); none on a
+    /// synthetic host, which never touches this Mac's sound.
+    private var macMute: MacOutputMute?
+    /// The display the Desktop's sound is captured on, so a change of it starts the capture again.
+    private var audioDesktopDisplay: CGDirectDisplayID?
     /// What the menu bar app shows. Written here, at the moment things happen; never read back.
     package let status: HostStatus
     /// Set by the signal handler: a select in flight when Ctrl-C lands must not stage anything new.
@@ -437,6 +442,7 @@ package final class StreamCoordinator {
         // Direct Wireless is the listener's: built with it at start, replaced when it changes (adopt).
         server.setPeerToPeer(config.directWireless)
         stage = VirtualStage(sizer: sizer, catalog: catalog)
+        macMute = synthetic ? nil : MacOutputMute()
         // Sill's own motion is Sill's: the server counts each device's input, the injector notes
         // each post just before it (and a synthetic host posts nothing: the test pattern is not the
         // screen, docs/pointer-visibility-plan.md Q10), the stage its warp home.
@@ -475,6 +481,13 @@ package final class StreamCoordinator {
         remote?.attach(server: server, status: status, macName: macName, requirePairing: config.requirePairing)
         catalog.preferMainDisplay = virtualDisplay   // the Desktop source must never capture the virtual display
         stage.onLost = { [weak self] in Task { @MainActor in await self?.stageLost() } }
+        // The windows on the Mac's own screens go onto the device's display while it lives.
+        deviceDesktop.sizer = sizer
+        deviceDesktop.windowsOnScreen = { [weak self] in
+            guard let self else { return [] }
+            await self.catalog.refreshWindows()
+            return self.catalog.windows
+        }
         deviceDesktop.onLost = { [weak self] in
             Task { @MainActor in
                 guard let self, self.active == .desktop else { return }
@@ -2828,9 +2841,23 @@ package final class StreamCoordinator {
     /// Hands the pipeline what the sound should be of now.
     private func audioFollow() {
         let (key, reason) = audioKey()
-        audio.follow(key, reason: reason) { [weak self] key in
+        let make: @MainActor (AudioKey) async -> AudioPipeline.Made = { [weak self] key in
             await self?.makeAudioSource(key) ?? .failed("the host is shutting down")
         }
+        // The Desktop's sound is captured on its display: the device's own while it lives, whose coming
+        // and going (a mirror) can end a capture made on the other.
+        if key == .desktop, let was = audioDesktopDisplay, let now = desktopAudioDisplay?.displayID, was != now {
+            audio.renew(key, reason: "the Desktop's display changed (\(was) → \(now))", make: make)
+        } else {
+            audio.follow(key, reason: reason, make: make)
+        }
+        // Heard once, on the device: this Mac's speakers silent while a device plays the sound.
+        macMute?.set(key != .none && key != .test)
+    }
+
+    /// The display the Desktop's sound is captured on: the device's own while it lives, else the catalog's.
+    private var desktopAudioDisplay: SCDisplay? {
+        deviceDesktop.isLive ? deviceDesktop.scDisplay : catalog.display
     }
 
     /// The source for `key`: ScreenCaptureKit's sound of one app, or of every app but Sill's, on the
@@ -2843,7 +2870,8 @@ package final class StreamCoordinator {
         case .test:
             return .source(SyntheticAudio(queue: audio.queue), line: "Audio: a test tone (440 Hz at -30 dBFS, a click at each second).")
         case .desktop:
-            guard let display = catalog.display else { return .failed("no display to capture from") }
+            guard let display = desktopAudioDisplay else { return .failed("no display to capture from") }
+            audioDesktopDisplay = display.displayID
             let filter: SCContentFilter
             if let own = catalog.ownApplication {
                 filter = SCContentFilter(display: display, excludingApplications: [own], exceptingWindows: [])
@@ -2905,6 +2933,7 @@ package final class StreamCoordinator {
         server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
         shuttingDown = true
         audio.shutdown()   // "Audio stopped: Sill is quitting."
+        macMute?.release()
         restoreFits(keeping: nil)
         stage.release()
         deviceDesktop.release()
