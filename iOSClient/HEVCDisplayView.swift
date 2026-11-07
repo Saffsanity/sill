@@ -41,6 +41,27 @@ final class HEVCDisplayView: UIView {
     /// is about a frame from before the picture came back. On `renderQueue`.
     private var resumedAt: CFTimeInterval = 0
 
+    // MARK: Smooth presentation (the full-screen Desktop)
+    //
+    // Out of full screen every frame shows as it decodes (latency first). In full screen
+    // (`smoothPresentation`) each frame shows at its own time instead (PictureClock): its stamp plus the
+    // offset at which the Mac's sound of the same stamp is heard, so a video's frames keep their cadence
+    // and the picture is in step with the sound; with no sound, the stamp plus the link's own jitter.
+    // The layer runs on a timebase on the host clock (CACurrentMediaTime's), which a frame shown at
+    // once ignores.
+
+    /// Set on main (StreamScreen's full screen), read on `renderQueue`.
+    var smoothPresentation: Bool {
+        get { smoothLock.withLock { smooth } }
+        set { smoothLock.withLock { smooth = newValue } }
+    }
+    private let smoothLock = NSLock()
+    private var smooth = false
+    /// The sound's picture offset while it plays (AudioOutput.pictureOffset), any thread.
+    var soundOffset: (() -> Double?)?
+    /// On `renderQueue`.
+    private var pictureClock = PictureClock()
+
     // MARK: The pointer sprite
     //
     // The Mac's cursor is never in the video (the host captures without it), so every pointer the
@@ -94,6 +115,13 @@ final class HEVCDisplayView: UIView {
         // before the picture, UIKit's hit test on the bar's buttons found this view at 5× (-SillHitTest).
         isUserInteractionEnabled = false
         displayLayer.videoGravity = .resizeAspect
+        var timebase: CMTimebase?
+        if CMTimebaseCreateWithSourceClock(allocator: kCFAllocatorDefault, sourceClock: CMClockGetHostTimeClock(),
+                                           timebaseOut: &timebase) == noErr, let timebase {
+            CMTimebaseSetTime(timebase, time: CMTime(seconds: CACurrentMediaTime(), preferredTimescale: 1_000_000_000))
+            CMTimebaseSetRate(timebase, rate: 1)
+            displayLayer.controlTimebase = timebase
+        }
         layer.addSublayer(cursorLayer)
         observeLayer()
     }
@@ -350,8 +378,10 @@ final class HEVCDisplayView: UIView {
         }
     }
 
-    func enqueue(_ data: Data, isKeyframe: Bool) {
+    func enqueue(_ data: Data, isKeyframe: Bool, stamp: Double, arrival: Double) {
         guard let desc = formatDescription else { return }
+        // Every frame counts for the link's jitter, shown at once or not.
+        let showAt = pictureClock.time(stamp: stamp, arrival: arrival, soundOffset: soundOffset?())
         let resuming = waitingForKeyframe
         if waitingForKeyframe {
             guard isKeyframe else { return }
@@ -369,7 +399,11 @@ final class HEVCDisplayView: UIView {
         }
         guard replaced == noErr else { return }
 
-        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: .invalid, decodeTimeStamp: .invalid)
+        // A keyframe that ends a wait shows at once: nothing older is there to keep a cadence with.
+        let scheduled = smoothPresentation && !resuming && displayLayer.controlTimebase != nil
+        var timing = CMSampleTimingInfo(duration: .invalid,
+                                        presentationTimeStamp: scheduled ? CMTime(seconds: showAt, preferredTimescale: 1_000_000_000) : .invalid,
+                                        decodeTimeStamp: .invalid)
         var size = count
         var sample: CMSampleBuffer?
         guard CMSampleBufferCreateReady(allocator: nil, dataBuffer: block, formatDescription: desc, sampleCount: 1,
@@ -377,8 +411,8 @@ final class HEVCDisplayView: UIView {
                                         sampleSizeEntryCount: 1, sampleSizeArray: &size,
                                         sampleBufferOut: &sample) == noErr, let sample else { return }
 
-        // Show each frame as soon as it decodes instead of scheduling by timestamp.
-        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true) as NSArray?,
+        // Out of full screen, show each frame as soon as it decodes instead of scheduling by timestamp.
+        if !scheduled, let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true) as NSArray?,
            let first = attachments.firstObject as? NSMutableDictionary {
             first[kCMSampleAttachmentKey_DisplayImmediately as String] = true
         }
@@ -576,5 +610,44 @@ struct ZoomedStreamView: View {
             // Drawn past the pane when zoomed, and a clip does not clip hit testing: never a touch's target
             // (sideways the bar comes before the picture, and its buttons' touches must stay theirs).
             .allowsHitTesting(false)
+    }
+}
+
+
+// MARK: - PictureClock
+
+/// When a frame shows in the full-screen Desktop's smooth presentation (HEVCDisplayView), in device
+/// seconds (CACurrentMediaTime). Pure.
+///
+/// Stamps are the Mac's wall clock, arrivals the device's monotonic one; as in AudioPlayout, the two are
+/// only ever compared through the floor, the least (arrival − stamp) of the last 10 s. While the Mac's
+/// sound plays, a frame stamped T shows at T + the sound's picture offset (AudioPlayout.pictureOffset):
+/// with the sound of the same stamp, which the playout already holds back past the link's jitter.
+/// Without sound, at T + floor + the cover (the largest arrival − stamp above the floor of the last
+/// 10 s, 20 to 150 ms) + one refresh's margin. Never before it arrived, never before the frame before it.
+struct PictureClock {
+    static let window: Double = 10
+    static let cover: ClosedRange<Double> = 0.02...0.15
+    static let margin: Double = 0.008
+
+    private var raws: [(arrival: Double, raw: Double)] = []
+    private var last = -Double.infinity
+
+    mutating func time(stamp: Double, arrival: Double, soundOffset: Double?) -> Double {
+        let raw = arrival - stamp
+        if raw.isFinite { raws.append((arrival, raw)) }
+        if let first = raws.first, arrival - first.arrival > Self.window {
+            raws.removeAll { arrival - $0.arrival > Self.window }
+        }
+        var at = arrival
+        if let offset = soundOffset, offset.isFinite {
+            at = stamp + offset
+        } else if let floor = raws.map(\.raw).min(), let top = raws.map(\.raw).max() {
+            let cover = min(max(top - floor, Self.cover.lowerBound), Self.cover.upperBound)
+            at = stamp + floor + cover + Self.margin
+        }
+        at = max(at, arrival, last)
+        last = at
+        return at
     }
 }

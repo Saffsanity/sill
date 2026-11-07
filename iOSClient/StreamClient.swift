@@ -507,7 +507,8 @@ final class StreamClient: ObservableObject {
             }
         }
         onParameterSets = { ps in view.apply(ps) }
-        onFrame = { data, isKey in view.enqueue(data, isKeyframe: isKey) }
+        onFrame = { data, isKey, stamp, arrival in view.enqueue(data, isKeyframe: isKey, stamp: stamp, arrival: arrival) }
+        view.soundOffset = { [weak self] in self?.sound.pictureOffset() }
         onBlank = { view.blank() }
         return view
     }()
@@ -527,7 +528,7 @@ final class StreamClient: ObservableObject {
             }
         }
     }
-    var onFrame: ((_ data: Data, _ isKeyframe: Bool) -> Void)?
+    var onFrame: ((_ data: Data, _ isKeyframe: Bool, _ stamp: Double, _ arrival: Double) -> Void)?
 
     // Discovery (main thread). Two browsers: the network one always runs and never uses
     // peer-to-peer; the nearby one runs only when DiscoveryPolicy says, never while connected.
@@ -4154,7 +4155,7 @@ final class StreamClient: ObservableObject {
                 DispatchQueue.main.async { self.lockShadeChanged(LockedMac.shade(self.lockShade, frameIsKeyframe: true)) }
             }
             frameForSound(header)
-            onFrame?(data, header.isKeyframe)
+            onFrame?(data, header.isKeyframe, header.timestamp, CACurrentMediaTime())
         case .windowList:
             guard let list = Wire.decode(WindowList.self, from: data) else { return }
             let from = connection

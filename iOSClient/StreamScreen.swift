@@ -186,6 +186,13 @@ struct StreamScreen: View {
     /// streams changing meanwhile (a window closed on the Mac, another device's pick). It applies as
     /// the panel goes, in the same motion.
     @State private var largerPictureHeld: Bool? = nil
+    /// The Desktop in full screen (a second tap on Desktop): the picture takes the whole screen, the
+    /// bars and rows go, and the Mac gives the Desktop a display of this screen's size
+    /// (`Viewport.deviceDesktop`, as Screen Sharing's High Performance mode does). It ends with the
+    /// floating button, or when anything but the Desktop streams.
+    @State private var fullScreen = false
+    /// Set by the first run of the full-screen task, so only a change sends the viewport.
+    @State private var fullScreenSeen = false
     #if DEBUG
     /// The console says once when a decision starts to wait.
     @State private var tourWaitLogged: Double? = nil
@@ -241,21 +248,28 @@ struct StreamScreen: View {
             let offersLarger = DuoLayout.phoneArrangement && posture.hinge == .unknown
                 && PhonePortraitLayout.offersLargerPicture(screen: geo.size)
             ZStack {
+                // The layouts, or the Desktop in full screen in their place.
                 Group {
-                    switch duo {
-                    case .innerLandscape:
-                        landscape(bar: .regular, width: geo.size.width, fold: posture.info(in: geo.size))
-                    case .outerLandscape:
-                        landscape(bar: .compact, width: geo.size.width, fold: posture.info(in: geo.size))
-                    case .innerPortrait:
-                        portrait(metrics: .regular)
-                    case .outerPortrait:
-                        portrait(metrics: DuoLayout.phoneArrangement ? .phone : .compact, largerKeyboard: largerKeyboard)
+                    if fullScreenShown {
+                        fullScreenDesktop()
+                    } else {
+                        Group {
+                            switch duo {
+                            case .innerLandscape:
+                                landscape(bar: .regular, width: geo.size.width, fold: posture.info(in: geo.size))
+                            case .outerLandscape:
+                                landscape(bar: .compact, width: geo.size.width, fold: posture.info(in: geo.size))
+                            case .innerPortrait:
+                                portrait(metrics: .regular)
+                            case .outerPortrait:
+                                portrait(metrics: DuoLayout.phoneArrangement ? .phone : .compact, largerKeyboard: largerKeyboard)
+                            }
+                        }
+                        // Under the pairing overlay and the tour nothing takes a touch: not the bar, and
+                        // not the stream's UIKit input view (nor, so, the Pencil, a hover or a key).
+                        .allowsHitTesting(!overlayShown && tour == nil)
                     }
                 }
-                // Under the pairing overlay and the tour nothing takes a touch: not the bar, and
-                // not the stream's UIKit input view (nor, so, the Pencil, a hover or a key).
-                .allowsHitTesting(!overlayShown && tour == nil)
                 // The pointer sprite follows the layout: the trackpad's arrow shows only in the
                 // laptop layout, and a rotation re-renders it at once; the Mac's arrow stays.
                 .onChange(of: DuoLayout.of(geo.size).isPortrait, initial: true) { _, portrait in
@@ -381,12 +395,22 @@ struct StreamScreen: View {
             // Another source, whoever picked it: the Mac's caret is in another window (#138). A pick or a
             // launch from this device has let go of what was typed already, before it went out.
             overlay.caretMayHaveMoved()
+            // Full screen is the Desktop's: anything else streaming ends it.
+            if source != .desktop, fullScreen { fullScreen = false }
             // The host sizes a window as it selects it, from the last viewport it has; this repeat
             // is for a host that restarted, or a window that was picked from the Mac's side.
             sendViewport()
         }
         .onChange(of: client.connected) { _, up in
             if up { sendViewport() }
+        }
+        // In or out of full screen: the Mac makes or removes the device's own display. A task keyed on the
+        // flag rather than `onChange(of:)`, whose two-parameter form needs iOS 17; like `onChange`, it
+        // does nothing on the first appearance.
+        .task(id: fullScreenShown) {
+            // In full screen the picture keeps its cadence and the sound's time (PictureClock).
+            client.displayView.smoothPresentation = fullScreenShown
+            if fullScreenSeen { sendViewport(after: 0.25) } else { fullScreenSeen = true }
         }
         // A hardware keyboard (docs/hardware-keyboard-plan.md §2): the input view takes the keyboard by
         // itself while one is attached and nothing open takes it, never as the person's own.
@@ -494,7 +518,8 @@ struct StreamScreen: View {
             client.sendViewport(Viewport(width: Double(panelSize.width),
                                          height: Double(panelSize.height),
                                          scale: textScale,
-                                         fps: fps))
+                                         fps: fps,
+                                         deviceDesktop: fullScreenShown ? true : nil))
         }
     }
 
@@ -1179,7 +1204,8 @@ struct StreamScreen: View {
                                                 gap: bar.gap, thumbWidth: bar.thumbWidth),
                    toggleKeyboard: { overlay.toggleKeyboard() },
                    setSettings: { setSettings($0, restoreKeyboard: $1) },
-                   menusOpened: menusOpened, menusClosed: menusClosed)
+                   menusOpened: menusOpened, menusClosed: menusClosed,
+                   enterFullScreen: enterFullScreen)
             contentArea(bar: bar)
         }
     }
@@ -1199,10 +1225,85 @@ struct StreamScreen: View {
                              linkLine: shownLinkLine,
                              takeTour: takeTour,
                              largerKeyboard: largerKeyboard,
-                             zoom: zoom)
+                             zoom: zoom,
+                             enterFullScreen: enterFullScreen)
     }
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
+
+    // MARK: Full screen
+
+    /// Full screen while the Desktop streams and nothing (the tour, a pairing link) needs the layouts.
+    private var fullScreenShown: Bool {
+        fullScreen && client.active == .desktop && tour == nil && !overlayShown
+    }
+
+    /// From the Desktop button: everything open over the stream closes first.
+    private func enterFullScreen() {
+        guard client.active == .desktop else { return }
+        setSettings(false)
+        scaleOpen = false
+        windowMenu = nil
+        withAnimation(.easeOut(duration: 0.18)) {
+            drawerOpen = false
+            fullScreen = true
+        }
+        client.noteAction()
+    }
+
+    private func leaveFullScreen() {
+        withAnimation(.easeOut(duration: 0.18)) { fullScreen = false }
+        client.noteAction()
+    }
+
+    /// The Desktop edge to edge: the stream and its input view over the whole screen, safe areas
+    /// included, and two small buttons in the top corner (the keyboard, and back to the bars).
+    /// The panel is the screen, so the Mac sizes the device's own display to it.
+    private func fullScreenDesktop() -> some View {
+        ZStack(alignment: .trailing) {
+            Color.black
+            ZStack {
+                // Scaled and moved by the picture's zoom, as in the layouts.
+                ZoomedStreamView(client: client, zoom: zoom)
+                // Same frame as the video, so a touch maps straight onto the streamed frame (through the
+                // zoom, StreamZoom.unzoomedPoint).
+                InputOverlay(videoSize: client.videoSize,
+                             send: { client.sendInput($0) },
+                             setOwnPointer: { client.setOwnPointer($0, from: $1) },
+                             proxy: overlay,
+                             isKeyboardShown: $keyboardShown,
+                             latchedModifiers: latched,
+                             onModifiersConsumed: { latched = [] },
+                             sendGesture: { client.sendGesture($0, fingers: $1) },
+                             macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
+                             readZoom: { [zoom] in zoom.zoom },
+                             writeZoom: { [zoom] in zoom.set($0) })
+            }
+            .clipped()
+            // A locked Mac: its cover over the picture (LockedMac).
+            .overlay { LockedMacShade(client: client) }
+            .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { panelSize = $0 })
+
+            // Halfway down the trailing edge: clear of the Mac's menu bar and its Dock.
+            VStack(spacing: 8) {
+                FullScreenButton(symbol: "keyboard", active: keyboardShown,
+                                 accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
+                                 action: { overlay.toggleKeyboard() })
+                FullScreenButton(symbol: "arrow.down.right.and.arrow.up.left", active: false,
+                                 accessibilityLabel: "Leave full screen",
+                                 action: leaveFullScreen)
+            }
+            .padding(.trailing, 6)
+        }
+        .ignoresSafeArea()
+        // iPadOS's status bar (the time and date) would sit over the Mac's menu bar.
+        .statusBarHidden(true)
+        .persistentSystemOverlays(.hidden)
+        // iPadOS's own menu bar (and its other edge gestures) would come down over the Mac's menu
+        // bar at a touch near the top: the first swipe at an edge goes to the Mac, a second to iPadOS.
+        .defersSystemGestures(on: .all)
+        .transition(.opacity)
+    }
 
     private func contentArea(bar: BarMetrics) -> some View {
         ZStack(alignment: .topLeading) {
@@ -1431,6 +1532,8 @@ private struct TopBar: View {
     /// The Menus pull-down opened and went (see `StreamScreen.menusOpened`).
     let menusOpened: () -> Void
     let menusClosed: () -> Void
+    /// Desktop tapped while the Desktop already streams: show it full screen.
+    var enterFullScreen: () -> Void = {}
 
     var body: some View {
         HStack(spacing: metrics.gap) {
@@ -1479,8 +1582,8 @@ private struct TopBar: View {
                 .tourTarget(.keyboard)
 
             button(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop",
-                   accessibilityLabel: "Show the full Mac desktop",
-                   action: { client.select(.desktop) })
+                   accessibilityLabel: client.active == .desktop ? "Show the desktop full screen" : "Show the full Mac desktop",
+                   action: { client.active == .desktop ? enterFullScreen() : client.select(.desktop) })
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
 
@@ -2393,5 +2496,33 @@ extension PhonePortraitLayout.Streaming {
         case .desktop: self = .desktop
         case .window: self = .window
         }
+    }
+}
+
+
+// MARK: - Full screen's buttons
+
+/// A small round button floating over the full-screen Desktop: dim until pressed, so it hides as
+/// little of the Mac as it can, 44 pt to tap.
+private struct FullScreenButton: View {
+    let symbol: String
+    let active: Bool
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(active ? Palette.accent : Color.white)
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(Color.black.opacity(0.45)))
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(0.55)
+        .accessibilityLabel(accessibilityLabel)
     }
 }
