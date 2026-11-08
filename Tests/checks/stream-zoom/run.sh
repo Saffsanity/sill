@@ -4,6 +4,7 @@
 # anchor under the fingers, the cover of the pane, the whole picture only all the way out (and at a lift
 # within 2 % of it), a pane of another size, the mapping a touch and a scroll go through and its inverse;
 # one finger, two at 1×, two on a zoomed picture, three, and odd orders; then 20,000 random strokes.
+# Trackpad edge following: minimal shifts, frame limits, small panes, letterboxing, and a pinch or resize afterwards.
 #   Tests/checks/stream-zoom/run.sh             compile and run the check
 #   Tests/checks/stream-zoom/run.sh --mutants   one-line mutants of StreamZoom.swift; each must fail it
 here="$(cd "$(dirname "$0")" && pwd)"

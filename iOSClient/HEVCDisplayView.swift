@@ -559,6 +559,16 @@ final class StreamZoomModel: ObservableObject {
         z.resized(to: size)
         set(z)
     }
+
+    /// Only a pointer move sent by the on-screen trackpad follows the pointer, never a click,
+    /// scroll, direct touch or a pointer report from the Mac.
+    func followTrackpadPointer(_ point: CGPoint, videoSize: CGSize) {
+        var z = zoom
+        let videoRect = HEVCDisplayView.videoRect(in: CGRect(origin: .zero, size: z.pane),
+                                                videoSize: videoSize)
+        z.followTrackpadPointer(point, videoRect: videoRect)
+        set(z)
+    }
 }
 
 /// The stream's view as the picture's zoom shows it: scaled about the pane's middle and moved
