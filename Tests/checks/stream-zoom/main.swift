@@ -577,6 +577,25 @@ do {
 // MARK: - On-screen trackpad: follow only at an edge, without changing the zoom
 
 do {
+    // The pad sends frame fractions after unzooming its motion. Compare the resulting travel
+    // on the screen at several zooms, including after edge following moved the picture.
+    let size = CGSize(width: 400, height: 300)
+    let frame = CGRect(origin: .zero, size: size)
+    let padDelta = CGPoint(x: 0.0125, y: -0.025)
+    for scale: CGFloat in [1, 2, 5] {
+        var z = zoomed(scale, at: CGPoint(x: 200, y: 150), in: size)
+        z.followTrackpadPointer(CGPoint(x: 0.8, y: 0.2), videoRect: frame)
+        let step = z.unzoomedDelta(padDelta)
+        let from = z.zoomedPoint(CGPoint(x: 200, y: 150), in: size)
+        let to = z.zoomedPoint(CGPoint(x: 200 + step.x * size.width,
+                                     y: 150 + step.y * size.height), in: size)
+        check("trackpad at \(scale)×: the same on-screen travel, after following too",
+              near(to.x - from.x, padDelta.x * size.width)
+              && near(to.y - from.y, padDelta.y * size.height))
+    }
+}
+
+do {
     let size = CGSize(width: 400, height: 300)
     let video = CGRect(origin: .zero, size: size)
     let middle = CGPoint(x: 200, y: 150)
