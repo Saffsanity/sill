@@ -1123,9 +1123,9 @@ struct ConnectScreen: View {
     /// "Pair with Mac mini" over the home card; "Add a Mac" over Add a Mac and an outside link's
     /// confirmation.
     private var title: String {
-        if client.pendingLink != nil || adding { return "Add a Mac" }
+        if client.pendingLink != nil || adding { return String(localized: "Add a Mac") }
         if let mac = homeCard { return DiscoveryPolicy.HomeCopy.cardTitle(mac: mac) }
-        return "Connect to a Mac"
+        return String(localized: "Connect to a Mac")
     }
 
     private var device: String { StreamClient.deviceWord }
@@ -1380,7 +1380,7 @@ struct ConnectScreen: View {
         } else {
             ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
                 if let sectionTitle = section.title {
-                    Text(sectionTitle)
+                    Text(ConnectionList.displayName(sectionTitle))
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Palette.muted)
                         .padding(.horizontal, 10)
@@ -1422,7 +1422,7 @@ struct ConnectScreen: View {
                 Button(action: {
                     client.searchNearby()
                     // The button leaves from under VoiceOver's cursor: say what it started.
-                    AccessibilityNotification.Announcement("Also looking nearby").post()
+                    AccessibilityNotification.Announcement(String(localized: "Also looking nearby")).post()
                 }) {
                     Text("Search Nearby")
                         .font(.system(size: 15, weight: .semibold))
@@ -1466,7 +1466,7 @@ struct ConnectScreen: View {
                 Picker("Group", selection: Binding(get: { currentGroup }, set: { client.setGroup($0, for: id) })) {
                     Text("None").tag(String?.none)
                     ForEach(ConnectionList.availableGroups(in: client.macGroups), id: \.self) { group in
-                        Text(group).tag(String?.some(group))
+                        Text(ConnectionList.displayName(group)).tag(String?.some(group))
                     }
                 }
                 .pickerStyle(.inline)
@@ -1475,7 +1475,7 @@ struct ConnectScreen: View {
                     Label("New Group…", systemImage: "folder.badge.plus")
                 }
             } label: {
-                Label(currentGroup.map { "Group: \($0)" } ?? "Group", systemImage: "folder")
+                Label(currentGroup.map { String(localized: "Group: \(ConnectionList.displayName($0))") } ?? String(localized: "Group"), systemImage: "folder")
             }
             Button {
                 toggleStyle()
@@ -1522,11 +1522,11 @@ struct ConnectScreen: View {
     }
 
     private func rowLabel(_ mac: FoundMac) -> String {
-        mac.route == .remote ? "\(mac.name), Remote" : mac.homeWord.label(name: mac.name)
+        mac.route == .remote ? String(localized: "\(mac.name), Remote") : mac.homeWord.label(name: mac.name)
     }
 
     private func rowHint(_ mac: FoundMac) -> String {
-        mac.route == .remote ? "Connects through your VPN or the internet."
+        mac.route == .remote ? String(localized: "Connects through your VPN or the internet.")
             : mac.homeWord.hint(name: mac.name, device: device, direct: mac.direct)
     }
 

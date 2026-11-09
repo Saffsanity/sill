@@ -720,13 +720,13 @@ package final class StreamCoordinator {
     /// How the Devices pane says a paired device last connected at home: "over the USB cable",
     /// "on this Mac", "directly" (peer-to-peer Wi-Fi), "over Wi‑Fi", "over Ethernet", else "at home".
     static func homeRouteWords(_ route: ClientRoute, link: ClientLink.Route?) -> String {
-        if route.cableDevice != nil { return "over the USB cable" }
-        if route.origin == .loopback { return "on this Mac" }
+        if route.cableDevice != nil { return String(localized: "over the USB cable") }
+        if route.origin == .loopback { return String(localized: "on this Mac") }
         switch link {
-        case .direct?: return "directly"
-        case .wifi?: return "over Wi\u{2011}Fi"
-        case .wired?: return "over Ethernet"
-        case nil: return route.origin == .direct ? "directly" : "at home"
+        case .direct?: return String(localized: "directly")
+        case .wifi?: return String(localized: "over Wi\u{2011}Fi")
+        case .wired?: return String(localized: "over Ethernet")
+        case nil: return route.origin == .direct ? String(localized: "directly") : String(localized: "at home")
         }
     }
 
@@ -1292,7 +1292,7 @@ package final class StreamCoordinator {
                 let source: String
                 if case .hostPort(let host, _) = connection.endpoint { source = StreamServer.addressText(host).text } else { source = s.display }
                 session = (peer.fingerprint, source, s.display,
-                           origin == .direct ? "nearby" : (thisMac || origin == .loopback ? "on this Mac" : "on this network"), thisMac)
+                           origin == .direct ? String(localized: "nearby") : (thisMac || origin == .loopback ? String(localized: "on this Mac") : String(localized: "on this network")), thisMac)
             }
             remote.pairingWanted(by: deviceName(connection), session: session)
         case .changeSettings:

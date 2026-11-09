@@ -539,24 +539,24 @@ enum TourPolicy {
 
     // MARK: The words (§7)
 
-    static let skipTitle = "Skip"
-    static let nextTitle = "Next"
-    static let doneTitle = "Done"
-    static let skipHint = "Ends the tour. Take the Tour in Settings shows it again."
+    static var skipTitle: String { String(localized: "Skip") }
+    static var nextTitle: String { String(localized: "Next") }
+    static var doneTitle: String { String(localized: "Done") }
+    static var skipHint: String { String(localized: "Ends the tour. Take the Tour in Settings shows it again.") }
     /// The Settings panel's last row.
-    static let takeTourTitle = "Take the Tour"
-    static func takeTourFootnote(device: String) -> String { "A short tour of Sill’s controls on this \(device)." }
-    static func takeTourHint(device: String) -> String { "Shows how to use Sill on this \(device)." }
+    static var takeTourTitle: String { String(localized: "Take the Tour") }
+    static func takeTourFootnote(device: String) -> String { String(localized: "A short tour of Sill’s controls on this \(device).") }
+    static func takeTourHint(device: String) -> String { String(localized: "Shows how to use Sill on this \(device).") }
 
     /// The title as VoiceOver reads it: its place in the run, when the run has more than one card.
     static func spokenTitle(_ copy: TourCopy, index: Int, count: Int) -> String {
-        count > 1 ? "\(copy.title), step \(index + 1) of \(count)" : copy.title
+        count > 1 ? String(localized: "\(copy.title), step \(index + 1) of \(count)") : copy.title
     }
 
     /// What starts a row about what this version's tour adds (a row built with `new: true`): drawn
     /// semibold in the accent (TourCard.attributed), and read by VoiceOver with the row ("New: Pinch
     /// to zoom…"). Which rows carry it is this version's: the next tour version clears its marks.
-    static let newPrefix = "New:"
+    static var newPrefix: String { String(localized: "New:") }
 
     /// A step's card. ‹Mac› is the Mac's name ("your Mac" when there is none yet); ‹device› is
     /// "iPad" or "iPhone". Under VoiceOver the rows that name a gesture say VoiceOver's way instead,
@@ -578,7 +578,7 @@ enum TourPolicy {
     static func copy(_ t: TourTopic, _ layout: TourLayout, mac: String, device: String,
                      voiceOver: Bool, firstOfRun: Bool, keysOnItsSide: Bool = false, thumbnails: Bool = true,
                      features: TourFeatures) -> TourCopy {
-        let mac = mac.isEmpty ? "your Mac" : mac
+        let mac = mac.isEmpty ? String(localized: "your Mac") : mac
         let iPad = device == "iPad"
         switch t {
         case .touch:
@@ -597,11 +597,11 @@ enum TourPolicy {
             }
             let hint: String
             switch layout {
-            case .landscape: hint = "The picture of \(mac) fills the screen below the bar."
-            case .portrait: hint = "The picture of \(mac) fills the top half of the screen."
-            case .phone: hint = "The picture of \(mac) is at the top of the screen."
+            case .landscape: hint = String(localized: "The picture of \(mac) fills the screen below the bar.")
+            case .portrait: hint = String(localized: "The picture of \(mac) fills the top half of the screen.")
+            case .phone: hint = String(localized: "The picture of \(mac) is at the top of the screen.")
             }
-            return TourCopy(title: "Tap, Hold, Drag and Pinch", subtitle: "What you do here happens on \(mac).", rows: rows, hint: hint)
+            return TourCopy(title: String(localized: "Tap, Hold, Drag and Pinch"), subtitle: String(localized: "What you do here happens on \(mac)."), rows: rows, hint: hint)
         case .bar:
             var rows: [TourRow]
             if voiceOver {
@@ -640,14 +640,14 @@ enum TourPolicy {
             }
             let hint: String
             switch layout {
-            case .landscape: hint = "In the bar at the top, after Apps."
-            case .portrait: hint = "In the bar below the picture, after Apps."
-            case .phone where !thumbnails: hint = features.menus ? "Under the picture, in the row of buttons: Apps, Menus, Aa and Keyboard."
-                                                                 : "Under the picture, in the row of buttons: Apps, Aa and Keyboard."
-            case .phone: hint = features.menus ? "Under the picture: Aa and Keyboard in the first row, the windows and Menus in the second."
-                                               : "Under the picture: Aa and Keyboard in the first row, the windows in the second."
+            case .landscape: hint = String(localized: "In the bar at the top, after Apps.")
+            case .portrait: hint = String(localized: "In the bar below the picture, after Apps.")
+            case .phone where !thumbnails: hint = features.menus ? String(localized: "Under the picture, in the row of buttons: Apps, Menus, Aa and Keyboard.")
+                                                                 : String(localized: "Under the picture, in the row of buttons: Apps, Aa and Keyboard.")
+            case .phone: hint = features.menus ? String(localized: "Under the picture: Aa and Keyboard in the first row, the windows and Menus in the second.")
+                                               : String(localized: "Under the picture: Aa and Keyboard in the first row, the windows in the second.")
             }
-            let title = features.menus ? "Windows and Menus" : "Windows"
+            let title = features.menus ? String(localized: "Windows and Menus") : String(localized: "Windows")
             return TourCopy(title: title, subtitle: nil, rows: rows, hint: hint)
         case .sharing:
             // The clipboard both ways (docs/clipboard-plan.md) and the Mac's sound (docs/audio-plan.md),
@@ -667,9 +667,9 @@ enum TourPolicy {
             if !features.clipboard && !features.sound {
                 rows.append(row("arrow.down.circle", [strong("Update Sill on \(mac)"), plain(" to copy and paste between it and this \(device), and to hear its sound here.")], new: true))
             }
-            let title = features.clipboard == features.sound ? "Clipboard and Sound" : features.clipboard ? "Clipboard" : "Sound"
+            let title = features.clipboard == features.sound ? String(localized: "Clipboard and Sound") : features.clipboard ? String(localized: "Clipboard") : String(localized: "Sound")
             return TourCopy(title: title, subtitle: nil, rows: rows,
-                            hint: layout == .phone ? "In Settings, the last button in the row under the picture." : "In Settings, the last button in the bar.")
+                            hint: layout == .phone ? String(localized: "In Settings, the last button in the row under the picture.") : String(localized: "In Settings, the last button in the bar."))
         case .settings:
             var rows = [row("xmark.circle", [strong("Disconnect"), plain(" is at the bottom of Settings.")]),
                         row("questionmark.circle", [strong("Take the Tour"), plain(" is there too, to see this again.")])]
@@ -680,11 +680,11 @@ enum TourPolicy {
                 rows.append(row("timer", [strong("Hold to Show Window Controls"), plain(" sets how long you hold a window’s thumbnail before its controls show.")], new: true))
             }
             if layout == .landscape {
-                let turn = keysOnItsSide ? "Turn your \(device) on its side" : "Hold your \(device) upright"
+                let turn: String.LocalizationValue = keysOnItsSide ? "Turn your \(device) on its side" : "Hold your \(device) upright"
                 rows.append(row(iPad ? "ipad" : "iphone", [strong(turn), plain(" for a trackpad and keys.")]))
             }
-            return TourCopy(title: "Settings", subtitle: nil, rows: rows,
-                            hint: layout == .phone ? "The last button in the row under the picture." : "The last button in the bar.")
+            return TourCopy(title: String(localized: "Settings"), subtitle: nil, rows: rows,
+                            hint: layout == .phone ? String(localized: "The last button in the row under the picture.") : String(localized: "The last button in the bar."))
         case .laptop:
             var rows: [TourRow]
             if voiceOver {
@@ -709,23 +709,23 @@ enum TourPolicy {
             if layout == .phone && features.largerPicture {
                 rows.append(row("rectangle.expand.vertical", [strong("Larger Picture"), plain(", in Settings: a window’s picture takes the place of the thumbnails and reaches down to where the keyboard comes up.")], new: true))
             }
-            let subtitle = keysOnItsSide ? "On its side, Sill adds keys and a trackpad." : "Upright, Sill adds keys and a trackpad."
+            let subtitle = keysOnItsSide ? String(localized: "On its side, Sill adds keys and a trackpad.") : String(localized: "Upright, Sill adds keys and a trackpad.")
             let hint: String
             switch layout {
-            case .landscape, .portrait: hint = "Below the bar: the row of keys, then the trackpad."
-            case .phone: hint = thumbnails ? "Under the windows: the row of keys, then the trackpad." : "Under the buttons: the row of keys, then the trackpad."
+            case .landscape, .portrait: hint = String(localized: "Below the bar: the row of keys, then the trackpad.")
+            case .phone: hint = thumbnails ? String(localized: "Under the windows: the row of keys, then the trackpad.") : String(localized: "Under the buttons: the row of keys, then the trackpad.")
             }
-            return TourCopy(title: "Keys and Trackpad", subtitle: firstOfRun ? subtitle : nil, rows: rows, hint: hint)
+            return TourCopy(title: String(localized: "Keys and Trackpad"), subtitle: firstOfRun ? subtitle : nil, rows: rows, hint: hint)
         }
     }
 
-    private static func strong(_ text: String) -> TourSpan { TourSpan(text: text, strong: true) }
-    private static func plain(_ text: String) -> TourSpan { TourSpan(text: text, strong: false) }
+    private static func strong(_ text: String.LocalizationValue) -> TourSpan { TourSpan(text: String(localized: text), strong: true) }
+    private static func plain(_ text: String.LocalizationValue) -> TourSpan { TourSpan(text: String(localized: text), strong: false) }
     /// A row; `new`: about what this version adds, so "New: " goes ahead of its words, the same in
     /// what VoiceOver reads.
-    private static func row(_ symbol: String, _ spans: [TourSpan], spoken: String? = nil, new: Bool = false) -> TourRow {
+    private static func row(_ symbol: String, _ spans: [TourSpan], spoken: String.LocalizationValue? = nil, new: Bool = false) -> TourRow {
         let mark = new ? [TourSpan(text: newPrefix, strong: true, isNew: true), TourSpan(text: " ")] : []
         let all = mark + spans
-        return TourRow(symbol: symbol, spans: all, spoken: spoken.map { mark.map(\.text).joined() + $0 } ?? all.map(\.text).joined())
+        return TourRow(symbol: symbol, spans: all, spoken: spoken.map { mark.map(\.text).joined() + String(localized: $0) } ?? all.map(\.text).joined())
     }
 }

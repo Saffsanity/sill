@@ -30,7 +30,7 @@ struct PairingOverlay: View {
         _typed = State(initialValue: typed || (scannerMode == .live && !CodeScanner.isSupported))
     }
 
-    private var mac: String { client.macName.isEmpty ? "your Mac" : client.macName }
+    private var mac: String { client.macName.isEmpty ? String(localized: "your Mac") : client.macName }
     private var working: Bool { if case .working = client.pairing { return true }; return false }
 
     var body: some View {
@@ -173,7 +173,7 @@ struct PairingOverlay: View {
 
     private var codeField: some View {
         VStack(alignment: .leading, spacing: 8) {
-            PairingField(prompt: "0000 0000 0000", label: "Code", text: $code, keyboard: PairingField.codeKeyboard, submit: .go, monospaced: true)
+            PairingField(prompt: "0000 0000 0000", label: String(localized: "Code"), text: $code, keyboard: PairingField.codeKeyboard, submit: .go, monospaced: true)
                 .focused($codeFocused)
                 .onSubmit(pairTyped)
                 .onChange(of: code) { _, typed in
@@ -216,7 +216,7 @@ struct PairingOverlay: View {
             Label("Paired with \(name).", systemImage: "checkmark.circle.fill")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Palette.text)
-                .onAppear { AccessibilityNotification.Announcement("Paired with \(name).").post() }
+                .onAppear { AccessibilityNotification.Announcement(String(localized: "Paired with \(name).")).post() }
         case .failed(let p):
             ProblemLine(text: p.text)
         case .idle:

@@ -67,7 +67,7 @@ struct FoundMac: Identifiable, Hashable {
     var id: String { route == .remote ? "remote:\(macID ?? name)" : "\(route.rawValue):\(name)" }
     /// The word at the end of its row: "Remote" for a saved Mac dialed away from home, else its home
     /// word (`homeWord`): how its Mac is reachable (`method`), "Not paired" or "Update Sill", or nil.
-    var word: String? { route == .remote ? "Remote" : homeWord.word }
+    var word: String? { route == .remote ? String(localized: "Remote") : homeWord.word }
 }
 
 /// How the current connection runs (`Session.route`): set when it starts, again at `.ready` and by
@@ -100,10 +100,10 @@ enum RemoteRoute: Equatable {
     /// "through Tailscale", "through your VPN", "over the internet", "by address".
     var phrase: String {
         switch self {
-        case .vpn(let name?): return "through \(name)"
-        case .vpn(nil): return "through your VPN"
-        case .internet: return "over the internet"
-        case .address: return "by address"
+        case .vpn(let name?): return String(localized: "through \(name)")
+        case .vpn(nil): return String(localized: "through your VPN")
+        case .internet: return String(localized: "over the internet")
+        case .address: return String(localized: "by address")
         }
     }
 
@@ -222,9 +222,9 @@ final class StreamClient: ObservableObject {
 
     /// The connect screen's idle status lines: only these follow the nearby search and Local Network
     /// access (updateDiscovery); any other status (a disconnect, a failure) stays as it was set.
-    static let lookingOnNetwork = "Looking for Macs on this network"
-    static let lookingNearby = "Looking for Macs on this network and nearby"
-    static let allowLocalNetwork = "To find your Mac, allow Local Network for Sill in Settings."
+    static var lookingOnNetwork: String { String(localized: "Looking for Macs on this network") }
+    static var lookingNearby: String { String(localized: "Looking for Macs on this network and nearby") }
+    static var allowLocalNetwork: String { String(localized: "To find your Mac, allow Local Network for Sill in Settings.") }
 
     // Switcher catalog, as the host sends it. Published on main.
     @Published var macName = ""
@@ -1787,7 +1787,7 @@ final class StreamClient: ObservableObject {
         session = Session(route: peerToPeer ? .direct : .network, macID: macID, bonjourName: bonjourName, home: trust, row: row,
                           endpoint: endpoint)
         goodbye = nil
-        status = peerToPeer ? "Connecting to \(name) directly…" : "Connecting to \(name)…"
+        status = peerToPeer ? String(localized: "Connecting to \(name) directly…") : String(localized: "Connecting to \(name)…")
         #if DEBUG
         if trust.tls { print("home: dialing \(name) over TLS, \(DiscoveryPolicy.pin(trust) == .anyKey ? "any key" : "pinned")") }
         #endif
@@ -1856,7 +1856,7 @@ final class StreamClient: ObservableObject {
                 // A tap's dial says so; the automatic reconnect's keeps its own line (DiscoveryPolicy.
                 // reconnectLine), which would otherwise flip with every dial.
                 DispatchQueue.main.async {
-                    if self.connection === c, self.reconnect == nil { self.status = "Waiting for \(name)…" }
+                    if self.connection === c, self.reconnect == nil { self.status = String(localized: "Waiting for \(name)…") }
                 }
                 // A connection that never gets past waiting would block every reconnect path
                 // (they all require `connection == nil`): give it five seconds, then let it go. Its
@@ -1951,7 +1951,7 @@ final class StreamClient: ObservableObject {
         askedNearby = false
         connectedAt = Date()
         pinRefusedRows = []
-        status = "Connected to \(name)"
+        status = String(localized: "Connected to \(name)")
         updateDiscovery()   // stops the nearby browser; the network one keeps running
         #if DEBUG
         if let endpoint, let test = UserDefaults.standard.string(forKey: "SillMoveTest") {
@@ -2081,7 +2081,7 @@ final class StreamClient: ObservableObject {
         let now = ProcessInfo.processInfo.systemUptime
         lastMoveAttempt = now
         lastMoveUp = now
-        status = "Switching to Wi\u{2011}Fi…"
+        status = String(localized: "Switching to Wi\u{2011}Fi…")
         if let wired = wiredDial(for: mac) {
             #if DEBUG
             print("discovery: moving the session to the network on \(wired.via)")
@@ -2613,7 +2613,7 @@ final class StreamClient: ObservableObject {
         pathSignals = PathSignals()
         lastPongAt = ProcessInfo.processInfo.systemUptime
         setRoute(from: c.currentPath, fresh: true)   // the new connection's, which carries the session now
-        status = "Connected to \(hostName)"
+        status = String(localized: "Connected to \(hostName)")
         soundAcrossMove = macHasSound
         settings.reset()
         settingsProblem = nil
@@ -2700,7 +2700,7 @@ final class StreamClient: ObservableObject {
             endSession()
             return
         }
-        if connected { status = "Connected to \(hostName)" }
+        if connected { status = String(localized: "Connected to \(hostName)") }
         switch move.kind {
         case .fromRemote:
             // Still remote. A move that did not complete: the next try waits DiscoveryPolicy.upWait,
@@ -4595,7 +4595,8 @@ extension StreamClient {
         if mockFrozen { return }
         #endif
         if settings.expire(now: ProcessInfo.processInfo.systemUptime, timeout: settingsTimeout) {
-            settingsProblem = "\(macName.isEmpty ? "The Mac" : macName) didn’t answer. Try again."
+            settingsProblem = macName.isEmpty ? String(localized: "The Mac didn’t answer. Try again.")
+                : String(localized: "\(macName) didn’t answer. Try again.")
         }
         scheduleSettingsExpiry()   // a later pick, or a timeout that grew with the RTT
     }

@@ -17,6 +17,17 @@ enum ConnectionList {
     /// The section of the Macs with no group, once any Mac has one. Never a group's own name: a group
     /// called Other would be a second section of that title.
     static let otherTitle = "Other"
+    /// A group's name as the screen shows it: the presets and Other in this device's language, a name
+    /// the person typed as typed. The names themselves stay English: they are stored and compared.
+    static func displayName(_ group: String) -> String {
+        switch group {
+        case "Home": String(localized: "Home")
+        case "Work": String(localized: "Work")
+        case "Personal": String(localized: "Personal")
+        case otherTitle: String(localized: "Other")
+        default: group
+        }
+    }
     static let maxGroupLength = 32
     static let twoColumnMinWidth: CGFloat = 340
 

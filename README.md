@@ -57,6 +57,8 @@ Sill has layouts of its own.
 - Your Mac and your device on the same network, joined by a USB cable, or near
   each other with Direct Wireless Connection on. Away from home, your own VPN,
   such as Tailscale, with Remote Access on.
+- Both apps are in English and Simplified Chinese, following each device's
+  language.
 
 ## How it works
 

@@ -9,7 +9,7 @@ SRC = os.path.join(ROOT, "iOSClient/AwayCopy.swift")
 orig = open(SRC).read()
 MUTANTS = {
     "AC1 the header line at home too": [("guard let a = away, a.thisConnectionAway else { return nil }\n        if a.awayRunning {", "guard let a = away else { return nil }\n        if a.awayRunning {")],
-    "AC2 running and not swapped": [("        if a.awayRunning {\n            return (\"Away: ", "        if !a.awayRunning {\n            return (\"Away: ")],
+    "AC2 running and not swapped": [("        if a.awayRunning {\n            return (String(localized: \"Away: ", "        if !a.awayRunning {\n            return (String(localized: \"Away: ")],
     "AC3 the at-home footnote whatever Remote Access says": [("        guard remoteAccessOn else { return nil }\n", "")],
     "AC4 the suggestion before the home quality's callout": [("        if let a = away, a.thisConnectionAway, !a.awayRunning {\n            return Callout(", "        if let a = away, a.thisConnectionAway, !a.awayRunning, link.suggestedBitrate == nil {\n            return Callout(")],
     "AC5 stalled shown": [("        guard let link, link.isBehind else { return nil }", "        guard let link else { return nil }")],

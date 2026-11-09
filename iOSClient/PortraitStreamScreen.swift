@@ -495,8 +495,8 @@ struct PortraitStreamScreen: View {
                              offered: client.textScaleOffersOff, available: client.textScaleSelectable)
                 .tourTarget(.textSize)
 
-            barButton(open: keyboardShown, symbol: "keyboard", label: "Keyboard", width: width,
-                      accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
+            barButton(open: keyboardShown, symbol: "keyboard", label: String(localized: "Keyboard"), width: width,
+                      accessibilityLabel: keyboardShown ? String(localized: "Hide the keyboard") : String(localized: "Show the keyboard"),
                       action: {
                           setSettings(false, false)
                           overlay.toggleKeyboard()
@@ -626,8 +626,8 @@ struct PortraitStreamScreen: View {
     }
 
     private func appsButton(width: CGFloat? = nil) -> some View {
-        barButton(open: drawerOpen, symbol: "magnifyingglass", label: "Apps", width: width,
-                  accessibilityLabel: drawerOpen ? "Close the app list" : "Open the app list",
+        barButton(open: drawerOpen, symbol: "magnifyingglass", label: String(localized: "Apps"), width: width,
+                  accessibilityLabel: drawerOpen ? String(localized: "Close the app list") : String(localized: "Open the app list"),
                   action: {
                       setSettings(false, false)
                       withAnimation(.easeOut(duration: 0.18)) { drawerOpen.toggle() }
@@ -635,15 +635,16 @@ struct PortraitStreamScreen: View {
     }
 
     private func desktopButton(width: CGFloat? = nil) -> some View {
-        barButton(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop", width: width,
-                  accessibilityLabel: "Show the full Mac desktop",
+        barButton(open: client.active == .desktop, symbol: "desktopcomputer", label: String(localized: "Desktop"), width: width,
+                  accessibilityLabel: String(localized: "Show the full Mac desktop"),
                   action: { client.select(.desktop) })
     }
 
     /// Leave's old slot: Disconnect is the Settings panel's pinned last row now.
     private func settingsButton(width: CGFloat? = nil) -> some View {
-        barButton(open: settingsOpen, symbol: "gearshape", label: "Settings", width: width,
-                  accessibilityLabel: settingsOpen ? "Close settings" : "Settings for \(client.macName.isEmpty ? "the Mac" : client.macName)",
+        barButton(open: settingsOpen, symbol: "gearshape", label: String(localized: "Settings"), width: width,
+                  accessibilityLabel: settingsOpen ? String(localized: "Close settings")
+                      : client.macName.isEmpty ? String(localized: "Settings for the Mac") : String(localized: "Settings for \(client.macName)"),
                   action: { setSettings(!settingsOpen, true) })
             .tourTarget(.settings)
     }
@@ -879,23 +880,23 @@ private struct KeyRow: View {
     /// stays a look, a tap at its release as before, and never a key held down and repeating on the Mac.
     private var capsHold: Bool { !(keys == .phone && dynamicTypeSize.isAccessibilitySize) }
 
-    private static let all: [Key] = [
-        .press("esc", HIDKey.escape, "Escape"),
-        .press("tab", HIDKey.tab, "Tab"),
-        .modifier("ctrl", .control, "Control"),
-        .modifier("opt", .option, "Option"),
-        .modifier("cmd", .command, "Command"),
-        .modifier("shift", .shift, "Shift"),
-        .arrow("chevron.left", HIDKey.leftArrow, "Left arrow"),
-        .arrow("chevron.down", HIDKey.downArrow, "Down arrow"),
-        .arrow("chevron.up", HIDKey.upArrow, "Up arrow"),
-        .arrow("chevron.right", HIDKey.rightArrow, "Right arrow"),
+    private static var all: [Key] { [
+        .press("esc", HIDKey.escape, String(localized: "Escape")),
+        .press("tab", HIDKey.tab, String(localized: "Tab")),
+        .modifier("ctrl", .control, String(localized: "Control")),
+        .modifier("opt", .option, String(localized: "Option")),
+        .modifier("cmd", .command, String(localized: "Command")),
+        .modifier("shift", .shift, String(localized: "Shift")),
+        .arrow("chevron.left", HIDKey.leftArrow, String(localized: "Left arrow")),
+        .arrow("chevron.down", HIDKey.downArrow, String(localized: "Down arrow")),
+        .arrow("chevron.up", HIDKey.upArrow, String(localized: "Up arrow")),
+        .arrow("chevron.right", HIDKey.rightArrow, String(localized: "Right arrow")),
         .keyboard,
         .spotlight,
-    ]
+    ] }
 
     /// The six that name a key.
-    private static let phone = Array(all.prefix(6))
+    private static var phone: [Key] { Array(all.prefix(6)) }
 
     private var shown: [Key] {
         switch keys {
@@ -948,14 +949,14 @@ private struct KeyRow: View {
             latchKey(key, title, flag, label: label)
         case .keyboard:
             cap(open: keyboardShown,
-                label: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
+                label: keyboardShown ? String(localized: "Hide the keyboard") : String(localized: "Show the keyboard"),
                 action: { tap(key) }) {
                 Image(systemName: "keyboard")
                     .font(.system(size: 20))
                     .foregroundStyle(keyboardShown ? Palette.accent : Palette.text)
             }
         case .spotlight:
-            cap(open: false, label: "Open Spotlight on the Mac", action: { tap(key) }) {
+            cap(open: false, label: String(localized: "Open Spotlight on the Mac"), action: { tap(key) }) {
                 Image(systemName: Spotlight.symbol)
                     .font(.system(size: 19))
                     .foregroundStyle(Palette.text)
@@ -1041,7 +1042,7 @@ private struct KeyRow: View {
     private func latchKey(_ key: Key, _ title: String, _ flag: KeyModifiers, label: String) -> some View {
         let on = latched.contains(flag)
         return cap(open: on,
-                   label: on ? "\(label), held. Tap to release." : "\(label), hold for the next key",
+                   label: on ? String(localized: "\(label), held. Tap to release.") : String(localized: "\(label), hold for the next key"),
                    largeContent: title, action: { tap(key) }) {
             Text(title)
                 .font(.system(size: 13, weight: .medium))

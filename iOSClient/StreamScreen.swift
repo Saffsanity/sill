@@ -438,7 +438,7 @@ struct StreamScreen: View {
     /// What the Mac's report says for the line now: nil while the link keeps up.
     private var linkReportLine: String? {
         let host = client.settings.host
-        return AwayCopy.streamLine(link: host?.link, away: host?.away, mac: client.macName.isEmpty ? "the Mac" : client.macName)
+        return AwayCopy.streamLine(link: host?.link, away: host?.away, mac: client.macName.isEmpty ? String(localized: "the Mac") : client.macName)
     }
 
     /// Nothing open over the stream: the Settings panel (which has the callout), the drawer, the
@@ -1436,8 +1436,8 @@ private struct TopBar: View {
 
     var body: some View {
         HStack(spacing: metrics.gap) {
-            button(open: drawerOpen, symbol: "magnifyingglass", label: "Apps",
-                   accessibilityLabel: drawerOpen ? "Close the app list" : "Open the app list",
+            button(open: drawerOpen, symbol: "magnifyingglass", label: String(localized: "Apps"),
+                   accessibilityLabel: drawerOpen ? String(localized: "Close the app list") : String(localized: "Open the app list"),
                    action: {
                        setSettings(false, false)
                        withAnimation(.easeOut(duration: 0.18)) { drawerOpen.toggle() }
@@ -1473,22 +1473,23 @@ private struct TopBar: View {
                              offered: client.textScaleOffersOff, available: client.textScaleSelectable)
                 .tourTarget(.textSize)
 
-            button(open: keyboardShown, symbol: "keyboard", label: "Keyboard",
-                   accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
+            button(open: keyboardShown, symbol: "keyboard", label: String(localized: "Keyboard"),
+                   accessibilityLabel: keyboardShown ? String(localized: "Hide the keyboard") : String(localized: "Show the keyboard"),
                    action: { setSettings(false, false); toggleKeyboard() })
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
                 .tourTarget(.keyboard)
 
-            button(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop",
-                   accessibilityLabel: "Show the full Mac desktop",
+            button(open: client.active == .desktop, symbol: "desktopcomputer", label: String(localized: "Desktop"),
+                   accessibilityLabel: String(localized: "Show the full Mac desktop"),
                    action: { client.select(.desktop) })
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
 
             // Leave's old slot: Disconnect is the Settings panel's pinned last row now.
-            button(open: settingsOpen, symbol: "gearshape", label: "Settings",
-                   accessibilityLabel: settingsOpen ? "Close settings" : "Settings for \(client.macName.isEmpty ? "the Mac" : client.macName)",
+            button(open: settingsOpen, symbol: "gearshape", label: String(localized: "Settings"),
+                   accessibilityLabel: settingsOpen ? String(localized: "Close settings")
+                       : client.macName.isEmpty ? String(localized: "Settings for the Mac") : String(localized: "Settings for \(client.macName)"),
                    action: { setSettings(!settingsOpen, true) })
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
@@ -1685,7 +1686,7 @@ struct TextScaleControl: View {
         )
         .onDisappear { open = false }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Text size")
+        .accessibilityLabel(String(localized: "Text size"))
         .accessibilityValue(TextScale.spoken(at: position))
         .accessibilityHint(available ? "" : TextScale.unavailableHint)
         // Always adjustable, so Aa stays one view and one accessibility element when a window starts or
@@ -1723,7 +1724,7 @@ struct TextScaleControl: View {
                     Rectangle().fill(Palette.barLabel.opacity(0.6))
                         .frame(width: 2, height: 9)
                         .offset(x: x(value) - 1, y: midY - 4.5)
-                    Text(value == TextScale.off ? "Off" : TextScale.number(value))
+                    Text(value == TextScale.off ? String(localized: "Off") : TextScale.number(value))
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(value == live ? Palette.text : Palette.barLabel)
                         .frame(width: step, alignment: .center)
@@ -2008,9 +2009,9 @@ struct WindowLightsMenu: View {
             ZStack {
                 Color.clear.contentShape(Rectangle()).onTapGesture(perform: dismiss)
                 HStack(spacing: 6) {
-                    light(.close, Color(hex: 0xFF5F57), "xmark", "Close")
-                    light(.minimize, Color(hex: 0xFEBC2E), "minus", "Minimize")
-                    light(.fullScreen, Color(hex: 0x28C840), "arrow.up.left.and.arrow.down.right", "Full Screen")
+                    light(.close, Color(hex: 0xFF5F57), "xmark", String(localized: "Close"))
+                    light(.minimize, Color(hex: 0xFEBC2E), "minus", String(localized: "Minimize"))
+                    light(.fullScreen, Color(hex: 0x28C840), "arrow.up.left.and.arrow.down.right", String(localized: "Full Screen"))
                 }
                 .padding(.horizontal, 10)
                 .frame(width: w, height: h)
@@ -2024,7 +2025,7 @@ struct WindowLightsMenu: View {
                 .position(x: x, y: y)
                 .transition(.scale(scale: 0.8, anchor: below ? .top : .bottom).combined(with: .opacity))
             }
-            .accessibilityLabel("\(window.appName) window actions")
+            .accessibilityLabel(String(localized: "\(window.appName) window actions"))
         }
     }
 
@@ -2045,7 +2046,7 @@ struct WindowLightsMenu: View {
             .frame(width: 60)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(label) window")
+        .accessibilityLabel(String(localized: "\(label) window"))
     }
 }
 
@@ -2069,7 +2070,8 @@ private struct WindowThumbnail: View {
         // Two stages: one long chain of modifiers here is more than the type checker will take.
         card
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(window.appName) window: \(window.title)" + (isActive ? ", showing now" : ""))
+            .accessibilityLabel(isActive ? String(localized: "\(window.appName) window: \(window.title), showing now")
+                                : String(localized: "\(window.appName) window: \(window.title)"))
             .accessibilityAddTraits(.isButton)
             .accessibilityAction(.default) { onSelect() }
             .accessibilityAction(named: "Close window") { onCommand(.close) }
@@ -2188,12 +2190,12 @@ struct AppDrawer: View {
                 ScrollView {
                     VStack(spacing: 6) {
                         if !openApps.isEmpty {
-                            header("Open now")
+                            header(String(localized: "Open now"))
                             ForEach(openApps) { app in
                                 DrawerRow(height: 50,
                                           highlighted: app.bundleID == activeBundleID,
                                           title: app.name,
-                                          trailing: app.windows.count == 1 ? "1 window" : "\(app.windows.count) windows",
+                                          trailing: app.windows.count == 1 ? String(localized: "1 window") : String(localized: "\(app.windows.count) windows"),
                                           action: { show(app) }) {
                                     AppIcon(image: client.icons[app.bundleID], name: app.name,
                                             size: 32, radius: 9, fontSize: 12)
@@ -2201,7 +2203,7 @@ struct AppDrawer: View {
                             }
                         }
                         if !closedApps.isEmpty {
-                            header("All apps").padding(.top, 2)
+                            header(String(localized: "All apps")).padding(.top, 2)
                             ForEach(closedApps) { app in
                                 DrawerRow(height: 46, highlighted: false, title: app.name, trailing: nil,
                                           action: { client.launch(bundleID: app.bundleID) }) {
@@ -2253,7 +2255,7 @@ struct AppDrawer: View {
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .submitLabel(.search)
-                .accessibilityLabel("Search apps on this Mac")
+                .accessibilityLabel(String(localized: "Search apps on this Mac"))
                 .focused($searchFocused)
         }
         .frame(height: 48)

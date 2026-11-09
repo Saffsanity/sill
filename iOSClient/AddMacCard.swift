@@ -135,13 +135,13 @@ struct AddMacCard: View {
         VStack(alignment: .leading, spacing: 8) {
             // The home card dials the door its ask reached: the code alone.
             if home == nil {
-                PairingField(prompt: "100.101.102.103 or mac.example.net", label: "Address", text: $address,
+                PairingField(prompt: String(localized: "100.101.102.103 or mac.example.net"), label: String(localized: "Address"), text: $address,
                              keyboard: .URL, submit: .next)
                     .focused($focus, equals: .address)
                     .onSubmit { focus = .code }
                 if let problem, problem.field == .address { ProblemLine(text: problem.text) }
             }
-            PairingField(prompt: "0000 0000 0000", label: "Code", text: $code, keyboard: PairingField.codeKeyboard, submit: .go, monospaced: true)
+            PairingField(prompt: "0000 0000 0000", label: String(localized: "Code"), text: $code, keyboard: PairingField.codeKeyboard, submit: .go, monospaced: true)
                 .focused($focus, equals: .code)
                 .onSubmit(pair)
                 .onChange(of: code) { _, typed in
@@ -396,7 +396,7 @@ struct LinkConfirmation: View {
     let pair: () -> Void
     let cancel: () -> Void
 
-    private var at: String { link.addresses.first?.text ?? "its address" }
+    private var at: String { link.addresses.first?.text ?? String(localized: "its address") }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

@@ -1580,6 +1580,42 @@ the passwords of service `me.saffer.sill.remote`. Deleting those makes that
 build new to every device, which must pair again. On the device, a paired
 Mac's row has Forget in its menu (touch and hold).
 
+## Translations
+
+Both apps are in English and Simplified Chinese (zh-Hans), and follow the
+device's language (on the Mac, System Settings › General › Language & Region,
+or Sill alone under Applications). The English in the source is the key: a
+translation that is missing shows the English.
+
+- What gets translated: a SwiftUI literal (`Text("…")`, `Button("…")`, a
+  `Toggle`'s title) by itself; text that reaches the screen as a `String` (an
+  AppKit menu item, an alert, a status line, a sentence built in a policy)
+  only through `String(localized:)`. A sentence is one key whole, never
+  English fragments joined, so a language can order it its own way; plurals
+  are whole sentences too. An `Int` interpolated into a localized string is
+  formatted for the locale (7,455), so ports, sizes and codes go in as
+  `String(n)`.
+- What stays English: what a host sends on the wire for a device to show
+  (`virtualDisplayNote`, the sound's notes), so a device and a Mac of
+  different builds read each other as before; Sill.log; macOS's own errors.
+- Sill for Mac: `Packaging/Localizable.xcstrings`, a String Catalog, which
+  `make-app.sh` compiles into Sill.app (`xcstringstool compile`) with
+  `Packaging/<language>.lproj/InfoPlist.strings` (the Local Network prompt).
+  After changing the words the Mac shows, `Scripts/sync-strings.sh` adds the
+  new keys and marks the stale ones (it exports each module's strings with
+  `-emit-localized-strings` and runs `xcstringstool sync`); translate what it
+  added in Xcode or in the JSON.
+- Sill for iPhone and iPad: `iOSClient/Localizable.xcstrings` and
+  `InfoPlist.xcstrings`, which Xcode extracts as it builds.
+- Another language: its code in `CFBundleLocalizations` (Packaging/Info.plist)
+  and the iOS project's regions, its translations in the catalogs, and an
+  `InfoPlist.strings` beside zh-Hans's.
+- To look: Sill.app's executable with `-AppleLanguages "(zh-Hans)"`, or the
+  bare app with it and `-SillRenderPreviews DIR` for the panes and the menu
+  (the bare binary finds the catalog only beside it: copy it and a compiled
+  `zh-Hans.lproj` into one folder); on the device, the app's language in
+  Settings › Apps › Sill.
+
 ## Test tools
 
 None of these needs a device. `CLAUDE.md`, Build and run, has the complete

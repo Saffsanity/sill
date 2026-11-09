@@ -100,7 +100,7 @@ struct MacMenuState: Equatable {
         let note: String
         /// The Mac refused it (a `pressed: false` answer); false: never sent (stale here).
         let byMac: Bool
-        var announcement: String { "Couldn’t choose \(title). \(note)" }
+        var announcement: String { String(localized: "Couldn’t choose \(title). \(note)") }
     }
 
     /// What `fetch` makes of an opened menu.
@@ -129,11 +129,14 @@ struct MacMenuState: Equatable {
         var note: String?
     }
 
-    static let changedNote = "The menus changed. Open the menu again."
-    static let notConnected = "Not connected."
-    static let noItems = "No items"
-    static func noAnswer(mac: String) -> String { "\(mac.isEmpty ? "The Mac" : mac) didn’t answer. Open the menu again." }
-    static func moreOnTheMac(_ count: Int) -> String { "\(count) more on the Mac" }
+    static var changedNote: String { String(localized: "The menus changed. Open the menu again.") }
+    static var notConnected: String { String(localized: "Not connected.") }
+    static var noItems: String { String(localized: "No items") }
+    static func noAnswer(mac: String) -> String {
+        mac.isEmpty ? String(localized: "The Mac didn’t answer. Open the menu again.")
+            : String(localized: "\(mac) didn’t answer. Open the menu again.")
+    }
+    static func moreOnTheMac(_ count: Int) -> String { String(localized: "\(count) more on the Mac") }
     static let maxMenus = 32
     static let titleLimit = 100, keyLimit = 16, noteLimit = 300
     /// Choices waiting for their answer, at most (each is answered, or the connection ends).
@@ -188,7 +191,9 @@ struct MacMenuState: Equatable {
             app = Self.clean(m.app, limit: SafeText.labelLimit)
             stale = m.stale == true
             note = Self.clean(m.note, limit: Self.noteLimit)
-            if stale, note == nil { note = "\(app ?? "The app") isn’t responding." }
+            if stale, note == nil {
+                note = app.map { String(localized: "\($0) isn’t responding.") } ?? String(localized: "The app isn’t responding.")
+            }
             menus = Self.topRows(items, version: v)
             // Rule 2: what was asked of another tree is answered here.
             var done: [Done] = []

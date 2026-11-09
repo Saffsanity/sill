@@ -263,7 +263,7 @@ final class UpdateChecker {
         do {
             let (bytes, response) = try await session.bytes(for: request, delegate: guardian)
             if let host = guardian.refusedHost { return .redirected(host: host) }
-            guard let http = response as? HTTPURLResponse else { return .failed(code: 0, description: "not an HTTP answer") }
+            guard let http = response as? HTTPURLResponse else { return .failed(code: 0, description: String(localized: "not an HTTP answer")) }
             if http.expectedContentLength > Int64(UpdatePolicy.maxBody) { return .tooLarge }
             var body = Data()
             for try await byte in bytes {
