@@ -249,3 +249,47 @@ enum RemoteDialPolicy {
         }
     }
 }
+
+/// The status line's words for a remote dial that failed and for a goodbye (§7.8).
+enum RemoteCopy {
+    static func dialFailure(_ failure: RemoteDialPolicy.Failure, mac: String, candidate: RemoteDialPolicy.Candidate?,
+                            vpnName: String?, device: String) -> String {
+        let at = candidate?.display ?? "its address"
+        switch failure {
+        case .wrongMac:
+            return "This isn’t the \(mac) this \(device) paired with. If Sill was set up again on it, forget it here and pair again."
+        case .revoked:
+            return "\(mac) no longer accepts this \(device). Pair it again from Sill’s Settings on the Mac."
+        case .remoteOff:
+            return "\(mac) turned off Remote Access."
+        case .busy:
+            return "\(mac) is already serving 8 devices."
+        case .refused:
+            return "\(mac) answered, but Sill isn’t accepting remote connections there. Check that Sill is open and Remote Access is on. If you changed its port, connect at home once."
+        case .vpnOff:
+            // Either end's VPN may be the one off (#309): a lookup or a dial that fails tells the device no more.
+            let name = candidate.flatMap { vpnLabel($0) } ?? "Your VPN"
+            return "\(name) looks off on this \(device) or on \(mac). Turn it on for both, then tap \(mac)."
+        case .nameNotFound:
+            let host = candidate?.host ?? "its name"
+            return RemoteDialPolicy.isTailscaleName(host) ? "This \(device) can’t look up \(host). Is Tailscale on, here and on \(mac)?"
+                                                        : "This \(device) can’t look up \(host)."
+        case .localNetwork:
+            return "To reach \(at), allow Local Network for Sill in Settings."
+        case .notSill:
+            return "Something answered at \(at), but it isn’t Sill. Your home’s internet address may have changed."
+        case .noAnswer:
+            if let c = candidate, c.kind == MacAddress.internet, !c.isName {
+                return "\(mac) didn’t answer at \(at). If your home’s internet address changed, connect at home once to update it, or add an address name on the Mac."
+            }
+            return vpnName.map { "\(mac) didn’t answer. It may be asleep, or \($0) may be off on the Mac." } ?? "\(mac) didn’t answer. It may be asleep."
+        }
+    }
+
+    /// A VPN address's service name when it carries one ("Tailscale", "Home WireGuard").
+    static func vpnLabel(_ c: RemoteDialPolicy.Candidate) -> String? {
+        guard c.kind == MacAddress.vpn || RemoteDialPolicy.isVPNAddress(c.host) else { return nil }
+        if !c.via.isEmpty, !c.via.hasPrefix("VPN ("), !["Router", "Address name", "IPv6", "This Mac"].contains(c.via) { return c.via }
+        return RemoteDialPolicy.isVPNAddress(c.host) ? "Tailscale" : nil
+    }
+}

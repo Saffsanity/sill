@@ -1553,7 +1553,8 @@ If it doesn't connect:
   sleeping display, above), but it cannot wake a sleeping Mac:
   for a Mac that should stay reachable, prevent automatic sleeping in System
   Settings › Energy (or Battery).
-- "Tailscale looks off on this iPad": turn it on on the device.
+- "Tailscale looks off on this iPad or on ‹Mac›": turn it on for both; the device
+  can't tell which end is off (#309).
 - Tailscale's Shields Up on the Mac blocks every incoming connection, and a
   tailnet ACL must let the device reach the Mac on port 7455.
 - Testing a port forward from inside your home network can fail on routers
