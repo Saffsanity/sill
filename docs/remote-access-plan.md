@@ -1581,7 +1581,7 @@ and types, `isExpensive`). Then, at every browser change and at every due time:
 | wrong Mac | "This isn’t the Mac mini this ‹iPad› paired with. If Sill was set up again on it, forget it here and pair again." (no Connect Anyway) |
 | revoked | "Mac mini no longer accepts this ‹iPad›. Pair it again from Sill’s Settings on the Mac." |
 | refused | "Mac mini answered, but Sill isn’t accepting remote connections there. Check that Sill is open and Remote Access is on. If you changed its port, connect at home once." |
-| VPN off here or on the Mac | "Tailscale looks off on this ‹iPad› or on Mac mini. Turn it on on both, then tap Mac mini." ("Your VPN" when the address has no service name; both ends, as the device can't tell which is off: #309) |
+| VPN off here or on the Mac | "Tailscale looks off on this ‹iPad› or on Mac mini. Turn it on for both, then tap Mac mini." ("Your VPN" when the address has no service name; both ends, as the device can't tell which is off: #309) |
 | name not found | ".ts.net" names: "This ‹iPad› can’t look up mac-mini.tail1234.ts.net. Is Tailscale on, here and on Mac mini?"; others: "This ‹iPad› can’t look up home.example.net." |
 | not Sill | "Something answered at 203.0.113.9, but it isn’t Sill. Your home’s internet address may have changed." |
 | didn't answer | "Mac mini didn’t answer. It may be asleep, or Tailscale may be off on the Mac." For a raw internet IP: "Mac mini didn’t answer at 203.0.113.9. If your home’s internet address changed, connect at home once to update it, or add an address name on the Mac." |

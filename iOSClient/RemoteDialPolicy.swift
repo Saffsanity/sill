@@ -269,7 +269,7 @@ enum RemoteCopy {
         case .vpnOff:
             // Either end's VPN may be the one off (#309): a lookup or a dial that fails tells the device no more.
             let name = candidate.flatMap { vpnLabel($0) } ?? "Your VPN"
-            return "\(name) looks off on this \(device) or on \(mac). Turn it on on both, then tap \(mac)."
+            return "\(name) looks off on this \(device) or on \(mac). Turn it on for both, then tap \(mac)."
         case .nameNotFound:
             let host = candidate?.host ?? "its name"
             return RemoteDialPolicy.isTailscaleName(host) ? "This \(device) can’t look up \(host). Is Tailscale on, here and on \(mac)?"
