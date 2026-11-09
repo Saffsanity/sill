@@ -226,13 +226,29 @@ extension DuoPosture {
     /// begins at or above `controlsTop` (the fold's lower edge, where nothing of a keyboard ever is) is
     /// that page, and the glass begins its own height above the screen's foot, never above the report:
     /// `ownHeight`, the height it last went with, unless that would put the glass at or above the fold's
-    /// edge too, else `laptopKeyboardHeight`. Any other report is the glass's own top.
+    /// edge too, else `laptopKeyboardHeight`. Any other report is the glass's own top, but never under the
+    /// glass that height gives: folded from open flat with the keyboard up, iOS 27.1 goes on reporting the
+    /// open flat keyboard, (0, 640, 669×311), while the keyboard it goes with is the laptop pose's, (0, 555,
+    /// 669×396) (2026-11-09); a show begins with that report too, a moment before the page.
     static func visibleKeyboardTop(reported: CGFloat?, screenHeight: CGFloat, controlsTop: CGFloat,
                                    ownHeight: CGFloat?) -> CGFloat? {
         guard let reported, reported < screenHeight else { return nil }
-        guard reported <= controlsTop else { return reported }
         let own = ownHeight.flatMap { $0 > 0 && screenHeight - $0 > controlsTop ? $0 : nil } ?? laptopKeyboardHeight
-        return max(reported, screenHeight - own)
+        guard reported > controlsTop else { return max(reported, screenHeight - own) }
+        return min(reported, screenHeight - own)
+    }
+
+    /// The keyboard's own height to remember from a hide (KeyboardFrameMonitor's own heights), or nil. The
+    /// frame it leaves as it goes (the hide's begin frame) is its glass where it spans `screen` and reaches
+    /// its foot, and it is remembered only where UIKit had reported the keyboard from above that glass
+    /// while it was up (`shown`, the monitor's last report): the laptop pose's whole lower page. Where UIKit
+    /// reported the keyboard as itself there is nothing to learn: open flat upright the English keyboard is
+    /// (0, 640, 669×311) on the same 669 pt width, and that height, remembered, put the laptop pose's row
+    /// at 539–597 over a glass at 555 (the iOS 27.1 simulator, 2026-11-09).
+    static func keyboardHeightToLearn(leaving begin: CGRect?, shown: CGRect?, screen: CGRect?) -> CGFloat? {
+        guard let begin, begin.height > 0, let screen, begin.width == screen.width, abs(begin.maxY - screen.maxY) < 0.5,
+              let shown, shown.minY < begin.minY - 0.5 else { return nil }
+        return begin.height
     }
 
     /// The key row alone between the fold and the keyboard (Noah, 2026-10-27, "Let's start with A"): its

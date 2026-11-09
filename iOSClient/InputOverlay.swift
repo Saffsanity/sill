@@ -1540,7 +1540,9 @@ final class HardwareKeyboardMonitor: ObservableObject {
 /// fold's top edge down, the whole lower page (0, 455.5, 669×495.5 on the Duo), whatever it draws at the
 /// foot: the English keyboard 396 pt tall (its glass from 555), the Chinese (Pinyin) one 445 (from 506,
 /// its candidates' band over the same keys). Only a hide's begin frame is the glass, (0, 555, 669×396)
-/// and (0, 506, 669×445); the frame it slides to below the screen says 396 and 395. Every notification
+/// and (0, 506, 669×445); the frame it slides to below the screen says 396 and 395. It is remembered only
+/// from a keyboard UIKit reported from above its glass (DuoPosture.keyboardHeightToLearn): open flat the
+/// same width has shorter keyboards reported as themselves (the English one 311 pt from 640). Every notification
 /// counts, the will and the did: on fresh simulators a will-change went unheard now and then. A change
 /// is published inside the keyboard's own animation, so what follows its top moves with it. Started by
 /// the first stream screen (`StreamScreen`), so it outlives a rotation. Main thread.
@@ -1549,6 +1551,9 @@ final class KeyboardFrameMonitor: ObservableObject {
     @Published private(set) var frame: CGRect? = nil
     /// The keyboard's own height by its width, from the frame it left as it last went.
     private(set) var ownHeights: [CGFloat: CGFloat] = [:]
+    /// The last frame UIKit reported the keyboard at while it was up (never one at or below the screen's
+    /// foot, where a will-change sends it as it goes), forgotten once it has gone.
+    private var shownFrame: CGRect? = nil
 
     private static let hides: Set<Notification.Name> = [UIResponder.keyboardWillHideNotification, UIResponder.keyboardDidHideNotification]
 
@@ -1571,13 +1576,19 @@ final class KeyboardFrameMonitor: ObservableObject {
         let hiding = Self.hides.contains(note.name)
         let begin = info[UIResponder.keyboardFrameBeginUserInfoKey] as? CGRect
         let end = info[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+        let screen = (note.object as? UIScreen)?.bounds
         // The keyboard as itself: the frame it leaves as it goes (a hide's begin), across the screen and
-        // down to its foot (a fold's change reports frames of neither).
-        if hiding, let own = begin, own.height > 0, let screen = (note.object as? UIScreen)?.bounds,
-           own.width == screen.width, abs(own.maxY - screen.maxY) < 0.5 {
-            ownHeights[own.width] = own.height
+        // down to its foot (a fold's change reports frames of neither), where UIKit had reported it from
+        // above that (the laptop pose's lower page; open flat it reports the keyboard as itself, a shorter
+        // one at the same width): DuoPosture.keyboardHeightToLearn.
+        if hiding {
+            if let own = DuoPosture.keyboardHeightToLearn(leaving: begin, shown: shownFrame, screen: screen), let begin {
+                ownHeights[begin.width] = own
+            }
+            shownFrame = nil
         }
         let now: CGRect? = hiding ? nil : end.flatMap { $0.height > 0 && !$0.isNull ? $0 : nil }
+        if let now, now.minY < (screen?.maxY ?? .infinity) - 0.5 { shownFrame = now }
         #if DEBUG
         // `-SillKeyboardProbe 1`: every notification as UIKit sends it (how the laptop pose's numbers
         // were measured, DuoPosture.visibleKeyboardTop).

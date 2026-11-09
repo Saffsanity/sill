@@ -374,9 +374,42 @@ check(visible(deckTop, own: 454) == 497 && visible(deckTop, own: 455) == glassTo
 check(visible(500, height: 600, controls: 550) == 500 && visible(400, own: 445) == 506,
       "never above the report (a screen too short for the measured keyboard)")
 check(visible(496) == glassTop && visible(495.9) == glassTop, "a report at the fold's lower edge is the page too")
-check(visible(570) == 570 && visible(496.5) == 496.5 && visible(700, own: 100) == 700, "a report under the fold's edge: the keyboard as itself")
+check(visible(530) == 530 && visible(496.5) == 496.5 && visible(700, own: 100) == 700 && visible(554.5) == 554.5,
+      "a report under the fold's edge and over the glass its height gives: the keyboard as itself")
+check(visible(570) == glassTop && visible(555) == glassTop && visible(950) == glassTop,
+      "a report under the glass its height gives: that glass, never lower")
+check(visible(640) == glassTop && visible(640, own: 396) == glassTop && visible(640, own: 445) == 506 && visible(640, own: 311) == 640,
+      "folded from open flat with the keyboard up (640 reported, the keyboard 396): 555; a learned height's glass")
 check(visible(nil) == nil && visible(951) == nil && visible(960) == nil, "none up, or one gone below the foot: none")
 check(visible(373.5, height: 869, controls: 414) == 473, "the status bar shown (669×869): the page from 373.5, the glass at 473")
+
+// The height KeyboardFrameMonitor remembers from a hide: the frame the keyboard leaves (the hide's begin),
+// only where UIKit reported it from above that while it was up (the laptop pose's lower page). Open flat
+// upright UIKit reports the English keyboard as itself, (0, 640, 669×311): nothing to learn there, and
+// learning it put the laptop pose's row at 539–597 over a glass at 555 (the iOS 27.1 simulator, 2026-11-09).
+let page = rect(0, 455.5, 669, 495.5), screen = rect(0, 0, 669, 951)
+func learned(_ begin: CGRect?, shown: CGRect? = page, screen s: CGRect? = screen) -> CGFloat? {
+    DuoPosture.keyboardHeightToLearn(leaving: begin, shown: shown, screen: s)
+}
+check(learned(rect(0, 555, 669, 396)) == 396, "the laptop pose, the English keyboard going: 396")
+check(learned(rect(0, 506, 669, 445)) == 445, "the laptop pose, the Chinese or emoji keyboard going: 445")
+check(learned(rect(0, 640, 669, 311), shown: rect(0, 640, 669, 311)) == nil, "open flat, reported as itself: nothing")
+check(learned(rect(0, 640, 669, 311), shown: rect(0, 639.8, 669, 311.2)) == nil, "reported as itself to within half a point: nothing")
+check(learned(rect(0, 555, 669, 396), shown: rect(0, 554.5, 669, 396.5)) == nil && learned(rect(0, 555, 669, 396), shown: rect(0, 554.4, 669, 396.6)) == 396,
+      "reported from more than half a point above its glass: learned")
+check(learned(rect(0, 555, 669, 396), shown: nil) == nil, "nothing reported while it was up: nothing")
+check(learned(rect(0, 555, 669, 396), shown: rect(0, 951, 669, 396)) == nil && learned(rect(0, 555, 669, 396), shown: rect(0, 640, 669, 311)) == nil,
+      "a report under its glass (at the foot, or a shorter keyboard's): nothing")
+check(learned(rect(0, 788.9, 669, 162.1), screen: rect(0, 0, 951, 669)) == nil, "the fold to the book pose (the screen turned first): nothing")
+check(learned(rect(0, 555, 669, 396), screen: rect(0, 0, 700, 951)) == nil && learned(rect(0, 555, 600, 396)) == nil,
+      "a frame not across the screen (another width), down to its foot all the same: nothing")
+check(learned(rect(0, 500, 669, 300)) == nil && learned(rect(0, 555, 669, 395)) == nil, "not down to the foot: nothing")
+check(learned(rect(0, 951, 669, 0)) == nil && learned(nil) == nil && learned(rect(0, 555, 669, 396), screen: nil) == nil,
+      "no height, no frame, no screen: nothing")
+check(learned(rect(0, 473, 669, 396), shown: rect(0, 373.5, 669, 495.5), screen: rect(0, 0, 669, 869)) == 396, "the status bar shown: 396")
+// The chain: what open flat teaches leaves the laptop pose's row where the measured keyboard puts it.
+check(visible(deckTop, own: learned(rect(0, 640, 669, 311), shown: rect(0, 640, 669, 311))) == glassTop,
+      "open flat then the laptop pose: the glass at 555, not 640")
 
 func keyRow(_ top: CGFloat?, controls: CGFloat = 496, fold: FoldInfo = .known(laptopFold), size s: CGSize = upright,
             standard: CGFloat = 148) -> DuoPosture.KeyboardRow? {
