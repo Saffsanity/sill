@@ -221,7 +221,7 @@ struct PortraitStreamScreen: View {
                 // are (the thumbnails' scroll, the trackpad's state), out of sight, touch and VoiceOver,
                 // and come back as they were with the keyboard. Hidden from VoiceOver only then: on an iPad,
                 // an iPhone and with the keyboard down the controls are exactly main's.
-                controls(width: size.width)
+                controls(width: size.width, hidden: alone != nil)
                     .opacity(alone == nil ? 1 : 0)
                     .allowsHitTesting(alone == nil)
                     .accessibilityHidden(while: alone != nil)
@@ -328,10 +328,11 @@ struct PortraitStreamScreen: View {
     }
     #endif
 
-    private func controls(width: CGFloat) -> some View {
+    /// `hidden`: the key row alone above the software keyboard stands in for them (#215).
+    private func controls(width: CGFloat, hidden: Bool = false) -> some View {
         VStack(spacing: metrics.rowGap) {
             windowBar(width: width - 2 * metrics.padSide)
-            keyRow(.full)
+            keyRow(.full, hidden: hidden)
             trackpad(verticalSpan: nil)
         }
         .padding(.top, metrics.padTop)
@@ -580,11 +581,11 @@ struct PortraitStreamScreen: View {
     }
 
     /// A key row key keeps what the sprite shows (StreamClient.sendFromKeyRow).
-    private func keyRow(_ keys: KeyRow.Keys) -> some View {
+    private func keyRow(_ keys: KeyRow.Keys, hidden: Bool = false) -> some View {
         KeyRow(metrics: metrics, keys: keys, latched: $latched, keyboardShown: keyboardShown,
                send: { client.sendFromKeyRow($0) },
                toggleKeyboard: { overlay.toggleKeyboard() },
-               showSpotlight: client.active == .desktop)
+               showSpotlight: client.active == .desktop, hidden: hidden)
             .tourTarget(.keys)
     }
 
@@ -866,6 +867,10 @@ private struct KeyRow: View {
     /// Spotlight's panel is its own Mac window, so it only shows up in the stream while the whole
     /// desktop is the source. Anywhere else the key would be a cap that does something invisible.
     let showSpotlight: Bool
+    /// Out of sight and touch under another row (the halves' key row while the laptop pose's key row
+    /// stands alone above the software keyboard, #215): a cap held as that happens comes up at once, as
+    /// it would leaving the screen, not when the finger that held it lifts.
+    var hidden: Bool = false
     /// Escape, tab or an arrow held down (HeldCap): its key is down on the Mac until the finger leaves.
     @State private var heldCap = HeldCap()
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -920,8 +925,9 @@ private struct KeyRow: View {
         }
         .frame(height: metrics.keyBlockHeight)
         // Gone from the screen (a turn, the stream's end) with a cap held: no release comes, so it
-        // comes up here.
+        // comes up here; and hidden under the key row alone, whose caps are now the ones to touch.
         .onDisappear { heldCap.releaseAll().forEach(send) }
+        .onChange(of: hidden) { _, now in if now { heldCap.releaseAll().forEach(send) } }
         #if DEBUG
         .onAppear(perform: runInputTest)
         #endif
