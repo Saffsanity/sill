@@ -2163,6 +2163,7 @@ throttle to change. Host, device and one additive kind (44).
   0.5.1: the device sends kind 44, which 0.5.1 skips with no line and no disconnect, the console's
   asks again after 4, 8 and 16 s, then every 32 s, and the picture back only with the stream's next
   keyframe (a still window's never, as before).
+
 **The device's auto-lock while a window streams (2026-10-29, PR #230 from addhumal's
 `device-idle-timer`, finished with maintainer edits; towards #134).** Device only: no wire change,
 nothing on the Mac. The decision #151's rework left for its own PR (below: "it is its own decision").
@@ -2201,6 +2202,15 @@ nothing on the Mac. The decision #151's rework left for its own PR (below: "it i
   `-SillInputScript` taps (14.8 s, 30.8 s) and let go 10 s after each, let go as the session ended;
   with `-SillSecondWindow 1` the hold followed the windows' scenes (let go as the second came forward,
   held again as one streamed in front).
+- The verification's N1, fixed in `integration-0-6-1-fixes` (2026-11-09): what the device did by itself
+  counted as the person's use, so a link or a Mac that kept dropping held the device awake for good (the
+  automatic reconnect and a stream the device asked for again reset "began streaming", and the
+  pointer's re-centre counted as input). Now `DeviceIdlePolicy.lastUse` of `Uses` (input the person
+  sent: `StreamClient.lastPersonInputAt`, which `sendInput(_:byPerson: false)` leaves alone for the
+  re-centre; a control; `personSessionAt`, from `DeviceIdlePolicy.sessionStart` in
+  `StreamClient.sessionConnected(reconnected:)`, the tour's flag: the automatic reconnect carries the
+  session start before it; the window's coming to the front). `device-idle` 48 checks and 17 of 17
+  mutants (the rule before held the three N1 lives for good).
 - **Untested, for Noah** (the iPad, a Debug build from this branch for the console's `idle:` lines,
   Settings › Display & Brightness › Auto-Lock at 1 minute): streaming and left untouched the iPad stays
   lit, and locks about 11 minutes after the last touch (`-SillIdleLimit 60` in the scheme for 2); a

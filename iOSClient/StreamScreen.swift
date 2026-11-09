@@ -105,8 +105,9 @@ enum DuoLayout {
 /// in which UIWindow, both weak as MacMenuHub's are, so a window that closed leaves nothing, whether
 /// or not its stream screen ran its onDisappear; every look lists them afresh: whether a window's
 /// scene is foreground active now, whether its session is connected and streaming, and when the
-/// person last used it (input to the Mac, one of the stream screen's controls, the moment it began
-/// streaming or came to the front). It looks again when a scene comes, goes or changes its
+/// person last used it (DeviceIdlePolicy.lastUse: input the person sent the Mac, one of the stream
+/// screen's controls, the start of a session the person started, the moment the window came to the
+/// front; nothing the device did by itself). It looks again when a scene comes, goes or changes its
 /// activation, when a session connects, disconnects or changes its source, when the person uses a
 /// session while nothing holds, and when the hold would end. Main thread.
 final class DeviceIdleTimer {
@@ -115,8 +116,6 @@ final class DeviceIdleTimer {
     private struct Entry {
         weak var client: StreamClient?
         weak var window: UIWindow?
-        /// When its session began streaming (systemUptime); nil while it does not stream.
-        var streamingSince: Double?
         /// When its window's scene last came to the front (systemUptime); nil while it is not there.
         var frontSince: Double?
     }
@@ -142,8 +141,7 @@ final class DeviceIdleTimer {
         let kept = entries.first { $0.client === client }
         entries.removeAll { $0.client == nil || $0.client === client }
         if let window {
-            entries.append(Entry(client: client, window: window, streamingSince: kept?.streamingSince,
-                                 frontSince: kept?.window === window ? kept?.frontSince : nil))
+            entries.append(Entry(client: client, window: window, frontSince: kept?.window === window ? kept?.frontSince : nil))
         }
         update()
     }
@@ -161,9 +159,9 @@ final class DeviceIdleTimer {
             guard let client = entries[i].client, let window = entries[i].window else { continue }
             let streaming = client.connected && client.active != .none
             let front = window.windowScene?.activationState == .foregroundActive
-            if !streaming { entries[i].streamingSince = nil } else if entries[i].streamingSince == nil { entries[i].streamingSince = now }
             if !front { entries[i].frontSince = nil } else if entries[i].frontSince == nil { entries[i].frontSince = now }
-            let used = [client.lastInputAt, client.lastActionAt, entries[i].streamingSince, entries[i].frontSince].compactMap { $0 }.max()
+            let used = DeviceIdlePolicy.lastUse(.init(input: client.lastPersonInputAt, control: client.lastActionAt,
+                                                      session: client.personSessionAt, front: entries[i].frontSince))
             windows.append(DeviceIdlePolicy.Window(foregroundActive: front, streaming: streaming, lastUsedAt: used))
         }
         let ends = DeviceIdlePolicy.holdEnds(windows, now: now, limit: Self.limit)

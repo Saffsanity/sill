@@ -10,6 +10,15 @@
 //   D2 the end is the latest of those windows' last use plus the limit, and after now;
 //   D3 a window in the background, not streaming or never used changes nothing, wherever it is listed;
 //   D4 the list's order changes nothing.
+// Then what counts as the person's use (`lastUse`, `sessionStart`: the verification's N1, 2026-10-29):
+// the latest of the four, a session's start only as the person started it and carried across the
+// automatic reconnect's; the N1 cases through a model of DeviceIdleTimer's stamps (a link that keeps
+// dropping and coming back by itself, a Mac that keeps stopping its capture and the device asking
+// again, the device's own pointer re-centre, each held for good by the rule before); then 20,000
+// random lives of one window against:
+//   D5 the hold ends exactly at the person's latest use plus the limit (a session the person started,
+//      input the person sent, a control, the window coming to the front), never at anything the
+//      device did by itself, and only while the window streams in front.
 import Foundation
 
 var fails = 0, passes = 0
@@ -87,6 +96,128 @@ for set in 0..<20_000 {
 }
 for (what, n) in violations.sorted(by: { $0.key < $1.key }) { check("\(what): \(n) times; first: \(first[what] ?? "")", false) }
 check("20,000 random sets of windows (\(held) held, \(notHeld) not): every invariant", violations.isEmpty && held > 3_000 && notHeld > 3_000)
+
+// What counts as the person's use (N1).
+typealias Uses = DeviceIdlePolicy.Uses
+eq(P.lastUse(Uses(input: nil, control: nil, session: nil, front: nil)), nil, "no use at all: none")
+eq(P.lastUse(Uses(input: 5, control: nil, session: nil, front: nil)), 5, "input the person sent alone")
+eq(P.lastUse(Uses(input: nil, control: 6, session: nil, front: nil)), 6, "a stream screen's control alone")
+eq(P.lastUse(Uses(input: nil, control: nil, session: 7, front: nil)), 7, "a session's start alone")
+eq(P.lastUse(Uses(input: nil, control: nil, session: nil, front: 8)), 8, "the window coming to the front alone")
+eq(P.lastUse(Uses(input: 5, control: 9, session: 3, front: 1)), 9, "the latest of the four: a control")
+eq(P.lastUse(Uses(input: 9, control: 5, session: 3, front: 1)), 9, "the latest of the four: input")
+eq(P.lastUse(Uses(input: 1, control: 5, session: 9, front: 3)), 9, "the latest of the four: a session's start")
+eq(P.lastUse(Uses(input: 1, control: 5, session: 3, front: 9)), 9, "the latest of the four: the front")
+eq(P.sessionStart(previous: nil, reconnected: false, now: 50), 50,
+   "a session the person started (a tap, Connect Remotely, a pairing): its start counts")
+eq(P.sessionStart(previous: 10, reconnected: false, now: 50), 50, "a new one the person started counts from its own start")
+eq(P.sessionStart(previous: 10, reconnected: true, now: 50), 10,
+   "the automatic reconnect's: the start of the session it reconnects, never its own")
+eq(P.sessionStart(previous: nil, reconnected: true, now: 50), nil, "the automatic reconnect's after none: none")
+
+// A model of DeviceIdleTimer's stamps for one window in front (StreamScreen.swift), with the rule
+// before this fix beside it (`before`: the moment it began streaming, reset whenever it stopped, and
+// every input the device sent, its own re-centre too).
+struct Life {
+    var uses = Uses(input: nil, control: nil, session: nil, front: 0)
+    var connected = false, streaming = false, front = true
+    var beganStreaming: Double? = nil, anyInput: Double? = nil      // the rule before
+    var personLatest: Double? = 0                                     // the oracle: the person's latest use
+    mutating func personConnects(_ t: Double) {
+        uses.session = P.sessionStart(previous: uses.session, reconnected: false, now: t); personLatest = t
+        connected = true; streams(t)
+    }
+    mutating func reconnectsByItself(_ t: Double) {                   // the link dropped and came back
+        connected = false; streaming = false; beganStreaming = nil
+        uses.session = P.sessionStart(previous: uses.session, reconnected: true, now: t)
+        connected = true; streams(t)
+    }
+    mutating func macStopsAndDeviceAsksAgain(_ t: Double) {           // no session start: active blinks
+        streaming = false; beganStreaming = nil; streams(t)
+    }
+    mutating func streams(_ t: Double) { streaming = connected; if streaming, beganStreaming == nil { beganStreaming = t } }
+    mutating func recentres(_ t: Double) { anyInput = t }             // the device's own input: no person's stamp
+    mutating func personInput(_ t: Double) { uses.input = t; anyInput = t; personLatest = t }
+    mutating func personControl(_ t: Double) { uses.control = t; personLatest = t }
+    mutating func toBackground() { front = false; uses.front = nil }
+    mutating func toFront(_ t: Double) { front = true; uses.front = t; personLatest = t }
+    mutating func disconnects() { connected = false; streaming = false; beganStreaming = nil }
+    func ends(_ now: Double) -> Double? {
+        P.holdEnds([Win(foregroundActive: front, streaming: streaming, lastUsedAt: P.lastUse(uses))], now: now)
+    }
+    func endsBefore(_ now: Double) -> Double? {
+        let used = [anyInput, uses.control, beganStreaming, uses.front].compactMap { $0 }.max()
+        return P.holdEnds([Win(foregroundActive: front, streaming: streaming, lastUsedAt: used)], now: now)
+    }
+}
+do {
+    var l = Life(); l.personConnects(0)
+    var held = 0, heldBefore = 0
+    for k in 1...60 { let t = Double(k * 60); l.reconnectsByItself(t); if l.ends(t) != nil { held += 1 }; if l.endsBefore(t) != nil { heldBefore += 1 } }
+    eq(held, 9, "N1, a link that drops and comes back by itself every minute for an hour, nobody at it: held 9 minutes after the tap, then the device's own")
+    check("N1, the rule before held it at every reconnect: \(heldBefore) of 60", heldBefore == 60)
+    eq(l.ends(3_600), nil, "N1, an hour on: the device's own auto-lock")
+}
+do {
+    var l = Life(); l.personConnects(0)
+    var held = 0, heldBefore = 0
+    for k in 1...360 { let t = Double(k * 10); l.macStopsAndDeviceAsksAgain(t); if l.ends(t) != nil { held += 1 }; if l.endsBefore(t) != nil { heldBefore += 1 } }
+    eq(held, 59, "N1, a Mac that stops its capture every 10 s and the device asking again, nobody at it: held until 10 minutes after the tap")
+    check("N1, the rule before held it at every new stream: \(heldBefore) of 360", heldBefore == 360)
+}
+do {
+    var l = Life(); l.personConnects(0)
+    var held = 0, heldBefore = 0
+    for k in 1...60 { let t = Double(k * 60); l.recentres(t); if l.ends(t) != nil { held += 1 }; if l.endsBefore(t) != nil { heldBefore += 1 } }
+    eq(held, 9, "N1, the device's own pointer re-centre every minute (new frame sizes), nobody at it: no use")
+    check("N1, the rule before held it at every re-centre: \(heldBefore) of 60", heldBefore == 60)
+}
+do {
+    var l = Life(); l.personConnects(0)
+    l.personInput(900); eq(l.ends(900), 1_500, "a tap at 15 minutes: held until 25")
+    l.reconnectsByItself(1_000); eq(l.ends(1_000), 1_500, "the automatic reconnect at 16 minutes extends nothing")
+    l.personControl(1_400); l.disconnects(); eq(l.ends(1_400), nil, "Disconnect: nothing held while nothing streams")
+    l.personConnects(2_000); eq(l.ends(2_000), 2_600, "a tap on the Mac again: held from that session's start")
+    l.reconnectsByItself(2_100); eq(l.ends(2_100), 2_600, "the automatic reconnect carries that session's start, no more")
+    l.toBackground(); eq(l.ends(2_200), nil, "Sill in the background: the device's own")
+    l.toFront(3_000); eq(l.ends(3_000), 3_600, "back in front: the person brought it, held 10 minutes from then")
+    l.macStopsAndDeviceAsksAgain(3_500); eq(l.ends(3_500), 3_600, "the Mac's capture stopped and asked again: nothing more")
+}
+
+// D5: 20,000 random lives of one window.
+var rngLife = Rng(s: 0x230_0001)
+var lifeViolations: [String: Int] = [:], lifeFirst: [String: String] = [:]
+var lifeHeld = 0, lifeNotHeld = 0
+for life in 0..<20_000 {
+    var l = Life(); var t = 0.0
+    l.personConnects(0)
+    var log: [String] = ["connect@0"]
+    for _ in 0..<(1 + rngLife.below(30)) {
+        t += 1 + rngLife.unit() * 400
+        switch rngLife.below(9) {
+        case 0: l.personConnects(t); log.append("connect@\(Int(t))")
+        case 1: l.reconnectsByItself(t); log.append("reconnect@\(Int(t))")
+        case 2: l.macStopsAndDeviceAsksAgain(t); log.append("macStop@\(Int(t))")
+        case 3: l.recentres(t); log.append("recentre@\(Int(t))")
+        case 4: l.personInput(t); log.append("input@\(Int(t))")
+        case 5: l.personControl(t); log.append("control@\(Int(t))")
+        case 6: l.toBackground(); log.append("background@\(Int(t))")
+        case 7: if !l.front { l.toFront(t); log.append("front@\(Int(t))") }
+        default: l.disconnects(); log.append("disconnect@\(Int(t))")
+        }
+        let now = t + (rngLife.below(2) == 0 ? 0 : rngLife.unit() * 900)
+        let want: Double? = (l.front && l.streaming) ? l.personLatest.map { $0 + limit }.flatMap { $0 > now ? $0 : nil } : nil
+        let got = l.ends(now)
+        if got != want {
+            let what = "D5 the hold does not end at the person's latest use plus the limit"
+            lifeViolations[what, default: 0] += 1
+            if lifeFirst[what] == nil { lifeFirst[what] = "life \(life): \(log.joined(separator: " ")), at \(Int(now)): \(got.map { "\($0)" } ?? "nothing") (want \(want.map { "\($0)" } ?? "nothing"))" }
+        }
+        if got != nil { lifeHeld += 1 } else { lifeNotHeld += 1 }
+    }
+}
+for (what, n) in lifeViolations.sorted(by: { $0.key < $1.key }) { check("\(what): \(n) times; first: \(lifeFirst[what] ?? "")", false) }
+check("20,000 random lives of one window (\(lifeHeld) looks held, \(lifeNotHeld) not): D5", lifeViolations.isEmpty && lifeHeld > 10_000 && lifeNotHeld > 10_000)
 
 print(fails == 0 ? "ok: \(passes) checks" : "FAILED: \(fails) of \(passes + fails) checks")
 exit(fails == 0 ? 0 : 1)

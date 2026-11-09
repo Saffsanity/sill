@@ -726,8 +726,14 @@ try it, quit Sill, then `open --env SILL_TEST_USER_ACTIVE=remote
 On the device (PR #230): while one of Sill's windows the person can see (its
 scene in front) streams, the device's own auto-lock is held off
 (`UIApplication.isIdleTimerDisabled`) until 10 minutes after the person last
-used it: input sent to the Mac, one of the stream screen's controls, or the
-moment it began streaming or came to the front. A picture being read or watched
+used it: input they sent to the Mac, one of the stream screen's controls, the
+start of a session they started (a tap on the Mac, Connect Remotely, a
+pairing), or the moment the window came to the front. Nothing the device does
+by itself counts: the automatic reconnect carries the start of the session it
+reconnects, the Desktop it asks for again after the Mac stopped one starts no
+session, and its pointer's move to a new frame's middle is not the person's
+input, so a link or a Mac that keeps dropping never holds a device with nobody
+at it awake. A picture being read or watched
 does not lock under them, and a device left alone still locks by its own
 Auto-Lock setting, 10 minutes later than it would have; its session then ends as
 before, so no device left on a desk keeps the Mac streaming all night. The Mac's

@@ -18,6 +18,16 @@ MUTANTS = [
     ("M7 an end in the past still held", "guard let end = ends.max(), end > now else { return nil }", "guard let end = ends.max() else { return nil }"),
     ("M8 the limit given for one run ignored", "return used + limit", "return used + idleLimit"),
     ("M9 a window never used holds from now", GUARD, "guard w.foregroundActive, w.streaming else { return nil }; let used = w.lastUsedAt ?? .infinity"),
+    # What counts as the person's use (the verification's N1, 2026-10-29).
+    ("M10 the automatic reconnect's start counts as use", "reconnected ? previous : now", "now"),
+    ("M11 the automatic reconnect forgets the person's session start", "reconnected ? previous : now", "reconnected ? nil : now"),
+    ("M12 a session the person started keeps the last one's start", "reconnected ? previous : now", "reconnected ? previous : (previous ?? now)"),
+    ("M13 input the person sent never counts", "[uses.input, uses.control, uses.session, uses.front]", "[uses.control, uses.session, uses.front]"),
+    ("M14 a stream screen's control never counts", "[uses.input, uses.control, uses.session, uses.front]", "[uses.input, uses.session, uses.front]"),
+    ("M15 a session's start never counts", "[uses.input, uses.control, uses.session, uses.front]", "[uses.input, uses.control, uses.front]"),
+    ("M16 coming to the front never counts", "[uses.input, uses.control, uses.session, uses.front]", "[uses.input, uses.control, uses.session]"),
+    ("M17 the earliest use, not the latest", "[uses.input, uses.control, uses.session, uses.front].compactMap { $0 }.max()",
+        "[uses.input, uses.control, uses.session, uses.front].compactMap { $0 }.min()"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
