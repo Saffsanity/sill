@@ -2699,16 +2699,23 @@ package final class StreamCoordinator {
     private func releaseHeadlessDisplayIfDone() {
         guard headlessDisplay != nil, !releasingHeadless, !shuttingDown, Self.headlessReleases(devices: catalog.clientCount) else { return }
         releasingHeadless = true
-        catalog.keepsSills = false
         Task { @MainActor in
             defer { self.releasingHeadless = false; self.catalog.keepsSills = self.headlessDisplay != nil }
             // A switch under way first (a pick, a restart): `select` would return at once, and the display
             // would go from under the capture that switch starts. At most 5 s.
             for _ in 0..<100 where self.switching { try? await Task.sleep(for: .milliseconds(50)) }
+            // A device back meanwhile (a blip) keeps the display, and its Desktop stays on it.
+            guard Self.headlessReleases(devices: self.catalog.clientCount) else { return }
+            self.catalog.keepsSills = false
             // The look first: a fresh one still has the fallback display as the Desktop's (11:38:45, 2026-11-02).
             await self.catalog.refreshWindows()
             if self.active == .desktop { await self.select(.desktop) }
-            guard self.headlessDisplay != nil, Self.headlessReleases(devices: self.catalog.clientCount) else { return }
+            guard self.headlessDisplay != nil, Self.headlessReleases(devices: self.catalog.clientCount) else {
+                // A device back during the restart: the Desktop goes back to the display that stays.
+                self.catalog.keepsSills = self.headlessDisplay != nil
+                if self.active == .desktop { await self.catalog.refreshWindows(); await self.select(.desktop) }
+                return
+            }
             self.headlessDisplay = nil
             print("Headless display: a display is online again; removed the virtual Desktop display.")
         }
