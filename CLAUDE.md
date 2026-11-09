@@ -146,14 +146,14 @@ Sill's), and no helper's: LayerProbeParent (as before), macOS's own interface wh
 SystemUIServer, Notification Center, the screenshot tools: the owners ScreenCaptureKit recorders leave out of their
 pickers), and an untitled window of a process with no bundle (the PR's own rule). Not kept from the PR: its
 WindowServer clause (dead: no name) and its AppKit XPC clause (an untitled window of the open and save panel service,
-which may be a sandboxed app's Save panel, someone's work); the rule left InstalledApps (#231 edits the same files).
+which owns apps' Open and Save panels, Chrome's and Keychain Access's among them on macOS 27.0.1: someone's work); the rule left InstalledApps (#231 edits the same files).
 Sill.log names each owner left out, once ("Catalog: leaving out the windows of WindowManager
 (com.apple.WindowManager): they are macOS's own, not an app's."). Verified: the check and its mutants, `run-all.sh`
 all 57, `swift build -c release` (only the CaptureProbe warning), H2 against main (idle identical masked and sorted;
 with a client identical but for the seconds where it comes and goes, which differ run to run on either build); this
 Mac's live list judged by main's filter, the PR's and this one (the same six windows and no line; a probe's invisible
 test window of a tool with no bundle left out, with its line). Untested, for Noah and the reporter: Stage Manager on
-(no strip tiles, the WindowManager line), a border tool (JankyBorders), a sandboxed app's Save panel in regular mode
+(no strip tiles, the WindowManager line), a border tool (JankyBorders), an app's Save panel in regular mode
 (still a tile).
 
 **The door's waiting places (2026-10-29, branch `sec-door-pending` from main at 150479b5, PR #252; finding 9 of the

@@ -47,8 +47,9 @@ enum CatalogWindows {
 
     /// The owners whose windows are macOS's own interface, lowercased (bundle identifiers compare
     /// without regard to case). The same owners ScreenCaptureKit recorders leave out of their
-    /// window pickers. Not the open and save panel service (`com.apple.appkit.xpc.*`): a sandboxed
-    /// app's Open and Save panels may be its windows, and they are windows someone works in.
+    /// window pickers. Not the open and save panel service (`com.apple.appkit.xpc.*`): apps' Open and
+    /// Save panels are its windows (ordinary apps' too: Chrome's and Keychain Access's on macOS 27.0.1,
+    /// the verification of 2026-10-29), and they are windows someone works in.
     static let systemInterface: Set<String> = [
         "com.apple.windowmanager",          // Stage Manager, window tiling; the wallpaper from macOS 27
         "com.apple.dock",                   // the Dock, Mission Control, the wallpaper before macOS 27
