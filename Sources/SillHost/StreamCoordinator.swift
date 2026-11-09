@@ -609,8 +609,7 @@ package final class StreamCoordinator {
                 // Nobody is watching: stop capturing and encoding. The next client picks afresh.
                 // The fallback display stays while devices work with the lid shut: macOS locks a closed-lid Mac
                 // whose display changes (#298). It goes when a real display is back and the lid opened or the
-                // last device left.
-                if count == 0 { self.releaseHeadlessDisplayIfDone() }
+                // last device left, once `select(.none)` has stopped the capture.
                 if count == 0 { self.viewport = nil; self.clientFPS = [:]; self.fitScales = [:] }   // the next device starts from scratch
                 if count == 0 { self.gestureChords.forget() }                 // and did not open a view it could close
                 // On the software encoder, the hardware is checked only while someone watches.
@@ -621,8 +620,9 @@ package final class StreamCoordinator {
                     self.deselectWhenSettled = false
                 } else if self.switching {
                     self.deselectWhenSettled = true     // `select` would refuse it now; its tail applies it
-                } else if self.active != .none {
-                    await self.select(.none)
+                } else {
+                    if self.active != .none { await self.select(.none) }
+                    if self.catalog.clientCount == 0 { self.releaseHeadlessDisplayIfDone() }
                 }
             }
         }
@@ -1850,9 +1850,12 @@ package final class StreamCoordinator {
             // and over a queued pick: there is nobody left to fit the window to or stream to.
             if deselectWhenSettled {
                 deselectWhenSettled = false
-                if catalog.clientCount == 0, active != .none {
+                if catalog.clientCount == 0 {
                     viewportArrivedWhileSwitching = false
-                    Task { @MainActor in await self.select(.none) }
+                    Task { @MainActor in
+                        if self.active != .none { await self.select(.none) }
+                        if self.catalog.clientCount == 0 { self.releaseHeadlessDisplayIfDone() }
+                    }
                 }
             }
             if catalog.clientCount == 0 { pick = nil }
@@ -2706,13 +2709,21 @@ package final class StreamCoordinator {
             for _ in 0..<100 where self.switching { try? await Task.sleep(for: .milliseconds(50)) }
             // A device back meanwhile (a blip) keeps the display, and its Desktop stays on it.
             guard Self.headlessReleases(devices: self.catalog.clientCount) else { return }
-            self.catalog.keepsSills = false
-            // The look first: a fresh one still has the fallback display as the Desktop's (11:38:45, 2026-11-02).
-            await self.catalog.refreshWindows()
-            if self.active == .desktop { await self.select(.desktop) }
+            // Only while the Desktop streams (the lid opened with a device watching) does the capture move
+            // to the real display first; when the last device left, `select(.none)` has stopped it already.
+            if self.active == .desktop {
+                self.catalog.keepsSills = false
+                // The look first: a fresh one still has the fallback display as the Desktop's (11:38:45, 2026-11-02).
+                await self.catalog.refreshWindows()
+                for _ in 0..<100 where self.switching { try? await Task.sleep(for: .milliseconds(50)) }
+                if self.active == .desktop, Self.headlessReleases(devices: self.catalog.clientCount) {
+                    await self.select(.desktop)
+                }
+            }
             guard self.headlessDisplay != nil, Self.headlessReleases(devices: self.catalog.clientCount) else {
-                // A device back during the restart: the Desktop goes back to the display that stays.
+                // Kept after all (the lid shut again during the restart): the Desktop goes back to it.
                 self.catalog.keepsSills = self.headlessDisplay != nil
+                for _ in 0..<100 where self.switching { try? await Task.sleep(for: .milliseconds(50)) }
                 if self.active == .desktop { await self.catalog.refreshWindows(); await self.select(.desktop) }
                 return
             }
