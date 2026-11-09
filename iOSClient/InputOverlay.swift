@@ -91,6 +91,13 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// True once the hover in progress has shown itself to be a Pencil. Sticky for the session so a
     /// Pencil reading zero for a moment at the bottom of its range does not flicker the pointer.
     private var hoverIsPencil = false
+    /// A Pencil touch is on the glass, from its `touchesBegan` to its `touchesEnded` or
+    /// `touchesCancelled`. A hover update that comes meanwhile is stale and goes nowhere: as the tip
+    /// lifts, iPadOS sends one more, about 1 ms before the touch ends, carrying where the Pencil
+    /// hovered before it landed (an iPad Pro M4 with iPadOS 27.0.1, one in each of six strokes: Hunter
+    /// Ahlquist's finding, issue #81; reported again in #322). Sent as a move with the Mac's button still
+    /// down, it drew a line from the stroke's end back to where it began.
+    private var pencilTouching = false
     /// Whether the session's Mac repeats a key held down (`StreamClient.hostKeyRepeat`, the window list's
     /// `keyRepeat`): a hardware keyboard's characters go to it as keys only then (KeyTyping), as a Mac that
     /// repeats none would type each once. Asked as each key goes down.
@@ -509,7 +516,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window == nil { momentum.stop(); releaseForwardedKeys(); commitComposition("left its window") }
+        if window == nil { momentum.stop(); releaseForwardedKeys(); commitComposition("left its window"); pencilTouching = false }
         // A session's start, a rotation's other layout, a reconnect's new screen: the proxy takes the
         // keyboard for a hardware keyboard (on the next turn, once this view is settled in the window).
         if window != nil { keyboardProxy?.joined(self) } else { keyboardProxy?.left(self) }
@@ -643,6 +650,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         case .began, .changed:
             if gesture.state == .began { hoverIsPencil = false }
             if gesture.zOffset > 0 || gesture.altitudeAngle > 0 { hoverIsPencil = true }
+            guard !pencilTouching else { return }   // stale: the Pencil's tip is on the glass
             let at = sendPointer(.move, at: gesture.location(in: self), clamped: true)
             if hoverIsPencil { setOwnPointer(at, .pencil) } else { setOwnPointer(nil, .none) }
         default:
@@ -677,6 +685,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesBegan(touches, with: event); return
         }
+        if touch.type == .pencil { pencilTouching = true }
         let point = touch.location(in: self)
         guard let at = sendPointer(.move, at: point, clamped: false) else { return }
         ownPointer(at, for: touch)
@@ -698,6 +707,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesEnded(touches, with: event); return
         }
+        if touch.type == .pencil { pencilTouching = false }
         if let at = sendPointer(pointerButtonIsSecondary ? .rightUp : .leftUp, at: touch.location(in: self), clamped: true) { ownPointer(at, for: touch) }
         pointerButtonIsSecondary = false
     }
@@ -706,6 +716,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesCancelled(touches, with: event); return
         }
+        if touch.type == .pencil { pencilTouching = false }
         // Never leave the button stuck down.
         if let at = sendPointer(pointerButtonIsSecondary ? .rightUp : .leftUp, at: touch.location(in: self), clamped: true) { ownPointer(at, for: touch) }
         pointerButtonIsSecondary = false
@@ -1529,6 +1540,95 @@ final class HardwareKeyboardMonitor: ObservableObject {
         GCKeyboard.coalesced?.keyboardInput?.keyChangedHandler = { _, _, code, pressed in
             InputOverlayView.hwkey(UInt16(truncatingIfNeeded: code.rawValue), down: pressed, via: "GameController")
         }
+    }
+    #endif
+}
+
+/// Where the software keyboard is, as UIKit reports it: the end frame of its notifications, in the
+/// screen's coordinates (the stream screen's window fills its screen), nil while none is up; and the
+/// keyboard's own height at a width, from the frame it leaves as it goes. The laptop pose's key row
+/// follows its glass (#215, DuoPosture.visibleKeyboardTop): there iOS 27.1 reports a keyboard from the
+/// fold's top edge down, the whole lower page (0, 455.5, 669×495.5 on the Duo), whatever it draws at the
+/// foot: the English keyboard 396 pt tall (its glass from 555), the Chinese (Pinyin) one 445 (from 506,
+/// its candidates' band over the same keys). Only a hide's begin frame is the glass, (0, 555, 669×396)
+/// and (0, 506, 669×445); the frame it slides to below the screen says 396 and 395. It is remembered only
+/// from a keyboard UIKit reported from above its glass (DuoPosture.keyboardHeightToLearn): open flat the
+/// same width has shorter keyboards reported as themselves (the English one 311 pt from 640). Every notification
+/// counts, the will and the did: on fresh simulators a will-change went unheard now and then. A change
+/// is published inside the keyboard's own animation, so what follows its top moves with it. Started by
+/// the first stream screen (`StreamScreen`), so it outlives a rotation. Main thread.
+final class KeyboardFrameMonitor: ObservableObject {
+    static let shared = KeyboardFrameMonitor()
+    @Published private(set) var frame: CGRect? = nil
+    /// The keyboard's own height by its width, from the frame it left as it last went.
+    private(set) var ownHeights: [CGFloat: CGFloat] = [:]
+    /// The last frame UIKit reported the keyboard at while it was up (never one at or below the screen's
+    /// foot, where a will-change sends it as it goes), forgotten once it has gone.
+    private var shownFrame: CGRect? = nil
+
+    private static let hides: Set<Notification.Name> = [UIResponder.keyboardWillHideNotification, UIResponder.keyboardDidHideNotification]
+
+    private init() {
+        let center = NotificationCenter.default
+        for name in [UIResponder.keyboardWillShowNotification, UIResponder.keyboardDidShowNotification,
+                     UIResponder.keyboardWillChangeFrameNotification, UIResponder.keyboardDidChangeFrameNotification]
+                    + Array(Self.hides) {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in self?.changed(note) }
+        }
+    }
+
+    /// The keyboard's own height at `width` (a screen's), once it has gone at that width.
+    func ownHeight(width: CGFloat) -> CGFloat? { ownHeights[width] }
+
+    private func changed(_ note: Notification) {
+        let info = note.userInfo ?? [:]
+        // Another app's keyboard (beside Sill on an iPad) covers none of Sill's screen.
+        if let local = info[UIResponder.keyboardIsLocalUserInfoKey] as? Bool, !local { return }
+        let hiding = Self.hides.contains(note.name)
+        let begin = info[UIResponder.keyboardFrameBeginUserInfoKey] as? CGRect
+        let end = info[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+        let screen = (note.object as? UIScreen)?.bounds
+        // The keyboard as itself: the frame it leaves as it goes (a hide's begin), across the screen and
+        // down to its foot (a fold's change reports frames of neither), where UIKit had reported it from
+        // above that (the laptop pose's lower page; open flat it reports the keyboard as itself, a shorter
+        // one at the same width): DuoPosture.keyboardHeightToLearn.
+        if hiding {
+            if let own = DuoPosture.keyboardHeightToLearn(leaving: begin, shown: shownFrame, screen: screen), let begin {
+                ownHeights[begin.width] = own
+            }
+            shownFrame = nil
+        }
+        let now: CGRect? = hiding ? nil : end.flatMap { $0.height > 0 && !$0.isNull ? $0 : nil }
+        if let now, now.minY < (screen?.maxY ?? .infinity) - 0.5 { shownFrame = now }
+        #if DEBUG
+        // `-SillKeyboardProbe 1`: every notification as UIKit sends it (how the laptop pose's numbers
+        // were measured, DuoPosture.visibleKeyboardTop).
+        if UserDefaults.standard.bool(forKey: "SillKeyboardProbe") {
+            print("keyboard probe: \(note.name.rawValue): begin \(Self.describe(begin)), end \(Self.describe(end)); "
+                  + "own heights " + ownHeights.sorted { $0.key < $1.key }.map { "\(Self.points($0.value)) at \(Self.points($0.key)) wide" }
+                    .joined(separator: ", "))
+        }
+        #endif
+        guard now != frame else { return }
+        let duration = (info[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0
+        #if DEBUG
+        print("keyboard frame: " + (now.map { "top \(Self.points($0.minY)), \(Self.points($0.height)) pt tall" } ?? "none"))
+        #endif
+        if duration > 0 {
+            withAnimation(.easeOut(duration: duration)) { frame = now }
+        } else {
+            frame = now
+        }
+    }
+
+    #if DEBUG
+    private static func points(_ value: CGFloat) -> String {
+        abs(value - value.rounded()) < 0.01 ? "\(Int(value.rounded()))" : String(format: "%.1f", value)
+    }
+
+    private static func describe(_ rect: CGRect?) -> String {
+        guard let rect else { return "none" }
+        return "\(points(rect.minX)),\(points(rect.minY)) \(points(rect.width))×\(points(rect.height))"
     }
     #endif
 }
