@@ -219,11 +219,12 @@ struct PortraitStreamScreen: View {
                 picturePane(measured: true).padding(8).frame(height: half)
                 // While the key row is alone, the window bar, the key row and the trackpad stay where they
                 // are (the thumbnails' scroll, the trackpad's state), out of sight, touch and VoiceOver,
-                // and come back as they were with the keyboard.
+                // and come back as they were with the keyboard. Hidden from VoiceOver only then: on an iPad,
+                // an iPhone and with the keyboard down the controls are exactly main's.
                 controls(width: size.width)
                     .opacity(alone == nil ? 1 : 0)
                     .allowsHitTesting(alone == nil)
-                    .accessibilityHidden(alone != nil)
+                    .accessibilityHidden(while: alone != nil)
                     .frame(height: size.height - split.controls)
             }
 
@@ -787,6 +788,20 @@ private extension View {
     /// This view at exactly `rect`, in a view the size of the whole screen.
     func placed(_ rect: CGRect, in size: CGSize) -> some View {
         frame(width: rect.width, height: rect.height).placed(at: rect.origin, in: size)
+    }
+
+    /// Hidden from VoiceOver and the other assistive technologies while `hidden`, and otherwise as if the
+    /// modifier were not there: an `accessibilityHidden(false)` over the window bar shows what its views
+    /// hide themselves (MacMenuButton's drawn look, an unlabeled element beside "‹App› menus"). The same
+    /// view either way, so what it holds (the thumbnails' scroll, the trackpad) stays. Before iOS 18 (no
+    /// `isEnabled:`) nothing: what it hides for, the laptop pose's key row alone (#215), needs the iPhone
+    /// Duo's fold, which only iOS 27.1 reports.
+    @ViewBuilder func accessibilityHidden(while hidden: Bool) -> some View {
+        if #available(iOS 18.0, *) {
+            accessibilityHidden(true, isEnabled: hidden)
+        } else {
+            self
+        }
     }
 }
 
