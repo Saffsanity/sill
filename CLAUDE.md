@@ -8,6 +8,41 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**This account while another user is on the screen (2026-11-09, branch `off-console-stream` from main at
+f224323d; issue #316, junkaiman's; the rule, the open questions with the default taken for each, the gates and
+the steps for a Mac with two accounts are in `docs/off-console-plan.md`).** Noah: "For #316, do the first
+solution as you stated": an opt-in on the Mac, off by default, that brings back 0.5.5's stream of this session
+while another user holds the screen, the device saying plainly that it is not the Mac's screen.
+- The switch: Settings › Devices, "Show this account while another user is on the screen" (`HostConfig.offConsoleView`,
+  `offConsoleView` in me.saffer.sill.mac, `SillHost --off-console-view`, `-SillSetAfter '<s> offConsoleView=1'`); the
+  Mac's alone (no device sets it), applied at once by `setTarget` (the lock's gate first). Off: everything is 0.6.0's.
+- The rule (`LockPolicy`, pure, `Tests/checks/lock-policy`): the off-console view applies only with the switch on, the
+  gate's reading established and off console, and the console's own witness (SCDynamicStore: another user, loginwindow
+  or nobody; a test host's file 2) saying so (`consoleTaken`, `offConsoleView(...)`): never a notification or the
+  session dictionary, so a locked screen on the console stays 0.6.0's (the lock screen, a paired device typing). It
+  shows the display, windows (captured where they are, never on Sill's virtual display), thumbnails, icons and the
+  installed apps (`offConsoleViewAllowed`); nothing acts (`Allowed.actsOnWindows`: no raise, Aa size, window button or
+  menu; no input, launch, gesture), and nothing of the console's goes (no sound, clipboard, pointer, cursor shape,
+  virtual display or display wake). `LockGate` keeps the switch and the console's witness (SessionLock sets it at each
+  look); requests are judged at arrival and now with the view (`decide(_:arrived:now:…)`, `stricter`).
+- Wire (additive): `WindowList.offConsoleView` (with `locked` and `offConsole`) and `Hello.offConsoleView` (1 from a
+  device that shows it); the host sends the view's list (its windows) only to such a device
+  (`StreamServer.broadcastList`/`sendList`, per connection; a hello read after the first list gets it again), every
+  other device 0.6.0's locked list. The frames are one stream: a 0.6.0 device keeps them under its opaque cover.
+- Device: no cover and no blank for a view list; over the stream "Your account’s own desktop, not this Mac’s screen.
+  Taps and keys reach it once your account is back on the screen." (LinkLineView, three lines), announced once; the
+  Settings panel's header and the drawer's line (`LockedMac.viewPanelLine`), open apps only; Aa dimmed with its own
+  hint; no tour meanwhile. Harness `-SillMacLocked view`. Mac: SessionLock's line "Locked: another user, or the login
+  window, is on this Mac's screen; devices see this session's own desktop and windows instead, but nothing they send
+  reaches it until it is back." (the view starting or ending off console says one of the two lines), a start line when
+  on, the card's subtitle "Another user is on this Mac’s screen. Devices see this account, and can’t click or type in
+  it." `sillclient.py --off-console-view`.
+- Verified: see the plan's Results (filled in as the runs finish).
+- **Untested, for Noah and junkaiman (the plan's 1–5, a Mac with two accounts):** junkaiman's boot state (B takes the
+  console from an RFB login at boot; A's device sees A's desktop and windows with the line, taps do nothing; the
+  console back to A: as 0.6.0); a fast user switch mid-stream; the console's display asleep while A shows (open
+  question 4); the switch off and on while shown; a 0.6.0 device against this Sill.app.
+
 **The keyboard in the Duo's laptop pose (2026-10-27, finished 2026-11-09 for 0.6.1; PR #220 from addhumal's
 `duo-laptop-keyboard`, finished on it with maintainer edits, his commit 2e35172 kept; issue #215, matt-cahill
 and kyeschung; the measurements, the rule, the crease, the results and P14 are in docs/iphone-duo-plan.md,
@@ -8246,6 +8281,7 @@ python3 Scripts/sillclient.py PORT 6 desktop --key=80,1.2@2   # ← held 1.2 s (
 python3 Scripts/sillclient.py PORT 8 none --gesture=swipeUp@3 --gesture=swipeDown@4   # a synthetic host logs "Gesture from …: swipe up → Mission Control (shortcut 108: key 160, fn) (not posted: a test host)"
 SILL_TEST_LOOPBACK=1 SILL_TEST_HOTKEYS='108=off,173=off' .build/release/SillHost --synthetic   # TEST ONLY: the gestures read this table (over macOS 27's own; `defaults` alone) instead of this Mac's shortcuts
 swift run -c release SillHost --no-clipboard  # share nothing of the clipboard with devices (on by default, as in Sill.app)
+swift run -c release SillHost --off-console-view   # show this account while another user is on the screen (off by default, as in Sill.app's Settings › Devices): docs/off-console-plan.md
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_PASTEBOARD=me.saffer.sill.test.x SILL_TEST_CLIPBOARD_LOG=1 .build/release/SillHost --synthetic   # the clipboard on a pasteboard of its own (never this Mac's), each decision printed with sizes
 SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: ScreenCaptureKit never asked (no window list, no thumbnails), so a host an agent runs asks macOS for no screen recording
 SILL_TEST_FIREWALL=executable SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: the macOS firewall's answers canned (executable|bundle|both|all|off|allowed|unreadable, or a file holding one, read at each check): "Firewall: the macOS firewall blocks Sill’s executable, …"
@@ -8789,7 +8825,10 @@ device keeps working with Macs from the first public build on, or each says why
   another user, the login window or nobody is on its console, and `offConsole` true in that second case,
   both left out otherwise, so an unlocked list is what it was; a device that knows them says why the list
   is empty, and while locked a host sends no picture of the Mac (a placeholder frame at most), which also
-  replaces the last picture of a device from before them; the Mac's sound (kind 43, Audio.swift), once a public build ships it, a beta or not:
+  replaces the last picture of a device from before them, but off console with its user's switch on (Show this
+  account while another user is on the screen, docs/off-console-plan.md), when it streams this session's own desktop
+  and windows to every device and sends a device whose hello says `offConsoleView` 1 the list with its windows and
+  `offConsoleView` true (every other device the locked list: a later host keeps both keys' meanings); the Mac's sound (kind 43, Audio.swift), once a public build ships it, a beta or not:
   its two types (a JSON AudioFormat, then packets whose layout never changes: a new layout is a new
   type), AudioFormat's fields, the hello's `audio`, `sendAudio` and `audioNote`, kind 43 only to a
   device whose hello lists a codec the host makes, and the reader's caps, which a later host keeps
