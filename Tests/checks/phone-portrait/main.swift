@@ -758,5 +758,62 @@ for rule in largerRules {
     check("Larger Picture grid (\(largerSizes) layouts): \(rule.name)" + (rule.firstFailure.map { " — first failure at \($0)" } ?? ""), rule.firstFailure == nil)
 }
 
+// MARK: Hide Top Bar + Shake to Restore (issue #92)
+
+typealias TBV = TopBarVisibility
+check("TopBarVisibility.key", TBV.key == "Sill.hideTopBar")
+check("barHidden only when switchOn, isLandscape, and !overlayOpen",
+      TBV.barHidden(switchOn: true, isLandscape: true, overlayOpen: false) == true
+      && TBV.barHidden(switchOn: false, isLandscape: true, overlayOpen: false) == false
+      && TBV.barHidden(switchOn: true, isLandscape: false, overlayOpen: false) == false
+      && TBV.barHidden(switchOn: true, isLandscape: true, overlayOpen: true) == false)
+check("afterShake turns switch off and returns announcement only when switch was on",
+      TBV.afterShake(switchOn: true) == (false, Optional("Top bar shown"))
+      && TBV.afterShake(switchOn: false) == (false, Optional<String>.none))
+check("TopBarVisibility copy",
+      !TBV.Copy.toggleTitle.isEmpty && TBV.Copy.footnote(device: "iPad").contains("iPad"))
+
+// The device desktop under a hidden bar (Viewport.deviceDesktop).
+check("wantsDeviceDesktop only with the switch on, sideways, and the Desktop streaming",
+      TBV.wantsDeviceDesktop(switchOn: true, isLandscape: true, desktopStreaming: true)
+      && !TBV.wantsDeviceDesktop(switchOn: false, isLandscape: true, desktopStreaming: true)
+      && !TBV.wantsDeviceDesktop(switchOn: true, isLandscape: false, desktopStreaming: true)
+      && !TBV.wantsDeviceDesktop(switchOn: true, isLandscape: true, desktopStreaming: false))
+do {
+    let full = CGSize(width: 1194, height: 834), shrunk = CGSize(width: 1194, height: 780)
+    check("viewportSize: the panel's own while the bar is hidden",
+          TBV.viewportSize(panel: full, wanted: true, barHidden: true, lastFull: full) == full)
+    check("viewportSize: the last full size while an overlay shows the bar",
+          TBV.viewportSize(panel: shrunk, wanted: true, barHidden: false, lastFull: full) == full)
+    check("viewportSize: the panel's own with no full size yet",
+          TBV.viewportSize(panel: shrunk, wanted: true, barHidden: false, lastFull: nil) == shrunk)
+    check("viewportSize: the panel's own when not wanted, whatever was last",
+          TBV.viewportSize(panel: shrunk, wanted: false, barHidden: false, lastFull: full) == shrunk)
+    // Every sequence of switch, rotation, source and overlay: the size sent is the panel's, or the last
+    // size sent with the bar hidden while the device desktop is wanted, so it never changes on an
+    // overlay alone.
+    var rng = SystemRandomNumberGenerator()
+    var ok = true
+    for _ in 0..<5000 {
+        var lastFull: CGSize? = nil
+        var sent: CGSize? = nil
+        var prev: (wanted: Bool, hidden: Bool)? = nil
+        for _ in 0..<40 {
+            let on = Bool.random(using: &rng), land = Bool.random(using: &rng)
+            let desk = Bool.random(using: &rng), overlay = Bool.random(using: &rng)
+            let hidden = TBV.barHidden(switchOn: on, isLandscape: land, overlayOpen: overlay)
+            let wanted = TBV.wantsDeviceDesktop(switchOn: on, isLandscape: land, desktopStreaming: desk)
+            let panel = hidden ? CGSize(width: 1194, height: 834) : CGSize(width: 1194, height: 780)
+            if !wanted { lastFull = nil }
+            let size = TBV.viewportSize(panel: panel, wanted: wanted, barHidden: hidden, lastFull: lastFull)
+            if wanted && hidden { lastFull = size }
+            if size != panel && size != lastFull { ok = false }
+            if let p = prev, p.wanted, wanted, !hidden, p.hidden, let s = sent, s != size { ok = false }
+            prev = (wanted, hidden); sent = size
+        }
+    }
+    check("5,000 random sequences: an overlay over a hidden bar never changes the device desktop's size", ok)
+}
+
 print("\(passes) passed, \(fails) failed")
 exit(fails == 0 ? 0 : 1)
