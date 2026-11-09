@@ -1,6 +1,6 @@
 # Away from home through a relay on the Mac: the plan
 
-2026-11-09. Branch `away-through-relay` (worktree `/Users/noah/Downloads/wt-326`) from origin/main at
+2026-11-09. Branch `away-through-relay` (worktree `/Users/noah/Downloads/wt-326`, PR #339) from origin/main at
 f224323; line numbers are at f224323. Issue #326 (Ti800, Sill 0.6.0 (1276) on macOS 27.3 and an iPhone):
 "Away from home quality isn't used when a remote connection reaches Sill via loopback (userspace VPN,
 tunnels, proxies)". Host only: no wire change, nothing on the device, nothing stored.

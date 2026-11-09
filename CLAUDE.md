@@ -9,7 +9,7 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **Away from home through a relay on the Mac (2026-11-09, branch `away-through-relay` from main at f224323,
-PR #PRNUM; issue #326, Ti800; the code read, the fixes weighed, eight open questions with their defaults and
+PR #339; issue #326, Ti800; the code read, the fixes weighed, eight open questions with their defaults and
 the results are in `docs/away-through-relay-plan.md`).** A remote connection that reached Sill through
 something on the Mac that relays it locally (a userspace Tailscale or WireGuard node, a proxy or VPN app
 running one in-process, an SSH tunnel, `socat`, a reverse proxy, a Cloudflare Tunnel connector) came in from
