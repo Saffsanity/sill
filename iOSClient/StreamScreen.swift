@@ -101,6 +101,7 @@ enum DuoLayout {
 // MARK: - Screen
 
 struct StreamScreen: View {
+    @AppStorage("Sill.manualTextSize") private var manualTextSize = false
     @ObservedObject var client: StreamClient
     @State private var drawerOpen = false
     @State private var keyboardShown = false
@@ -398,6 +399,11 @@ struct StreamScreen: View {
         .onChange(of: panelSize) { _, _ in sendViewport(after: 0.25) }
         // Same wait for Aa: cycling from Off to 0.8× passes three sizes nobody wants the Mac to try.
         .onChange(of: textScale) { _, _ in sendViewport(after: 0.25) }
+        .onChange(of: manualTextSize) { _, manual in
+            scaleOpen = false
+            if !manual { textScale = nil }
+            sendViewport()
+        }
         // The stream rate follows the panel (`StreamClient.wantedFPS`): re-send when Low Power Mode
         // toggles or the screen's mode changes. Both notifications can arrive off the main thread.
         .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange).receive(on: RunLoop.main)) { _ in
@@ -1177,7 +1183,7 @@ struct StreamScreen: View {
                    settingsOpen: settingsOpen,
                    // Apps, Menus, Aa, Keyboard, Desktop, Settings, and the strip. The Mac's sound has no
                    // button: Send Audio and Mute are the Settings panel's switches (Noah, 2026-10-27).
-                   menusFit: MacMenuButton.fits(width: width - 2 * bar.padding, buttons: 6, buttonWidth: bar.buttonWidth,
+                   menusFit: MacMenuButton.fits(width: width - 2 * bar.padding, buttons: manualTextSize ? 6 : 5, buttonWidth: bar.buttonWidth,
                                                 gap: bar.gap, thumbWidth: bar.thumbWidth),
                    toggleKeyboard: { overlay.toggleKeyboard() },
                    setSettings: { setSettings($0, restoreKeyboard: $1) },
@@ -1413,6 +1419,7 @@ struct BarMetrics {
 }
 
 private struct TopBar: View {
+    @AppStorage("Sill.manualTextSize") private var manualTextSize = false
     @ObservedObject var client: StreamClient
     let metrics: BarMetrics
     /// The book pose: the strip's width, so that it ends short of the fold (BarMetrics.clearing);
@@ -1467,11 +1474,13 @@ private struct TopBar: View {
             // Text size: the host sizes the Mac window to the panel divided by this scale, so a
             // bigger number means a smaller Mac window and bigger text here. The slider unfolds to
             // the right, over the two buttons after it, which fade while it is open.
-            TextScaleControl(scale: $textScale, open: $scaleOpen,
-                             width: metrics.buttonWidth, height: metrics.buttonHeight,
-                             pointsPerStep: metrics.buttonHeight >= 60 ? 44 : 40,
-                             offered: client.textScaleOffersOff, available: client.textScaleSelectable)
-                .tourTarget(.textSize)
+            if manualTextSize {
+                TextScaleControl(scale: $textScale, open: $scaleOpen,
+                                 width: metrics.buttonWidth, height: metrics.buttonHeight,
+                                 pointsPerStep: metrics.buttonHeight >= 60 ? 44 : 40,
+                                 offered: client.textScaleOffersOff, available: client.textScaleSelectable)
+                    .tourTarget(.textSize)
+            }
 
             button(open: keyboardShown, symbol: "keyboard", label: "Keyboard",
                    accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
