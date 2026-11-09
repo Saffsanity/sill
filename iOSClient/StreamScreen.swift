@@ -271,7 +271,7 @@ struct StreamScreen: View {
                 // nothing else does (the frame around it is empty). Near the bar, off the link's line,
                 // inside the stream panel's corner; never while something is open over the stream.
                 if clipboardChipAllowed, client.clipboardChip || client.clipboardNote != nil, let panel = tourTargets[.stream] {
-                    let corner = ClipboardPolicy.chipCorner(landscape: layout == .landscape, linkLineShown: shownLinkLine != nil)
+                    let corner = ClipboardPolicy.chipCorner(landscape: layout == .landscape, linkLineShown: streamLine != nil)
                     ClipboardChip(client: client)
                         .frame(maxWidth: max(0, panel.width - 16), alignment: .trailing)
                         .padding(8)
@@ -414,6 +414,8 @@ struct StreamScreen: View {
         // drawer or the pairing overlay opening or closing over it.
         .onChange(of: linkReportLine, initial: true) { _, _ in updateLinkLine() }
         .onChange(of: linkLineAllowed) { _, _ in updateLinkLine() }
+        // The off-console view (docs/off-console-plan.md): VoiceOver hears what the picture is, once, as it comes.
+        .onChange(of: client.lockView) { _, on in if on { AccessibilityNotification.Announcement(LockedMac.viewLine).post() } }
         // The tour: the first picture starts its beat; an outside link puts it aside and back.
         .onChange(of: pictureReady, initial: true) { _, ready in if ready { pictureCame() } }
         // The bar's own controls used, by a tap or by VoiceOver, Switch Control, Voice Control or
@@ -474,6 +476,15 @@ struct StreamScreen: View {
 
     /// The line as it shows over the stream now, or nil.
     private var shownLinkLine: String? { linkLine.visible ? linkLine.text : nil }
+
+    /// The line over the stream: the off-console view's while it lasts and nothing is open over the stream
+    /// (LockedMac.viewLine; docs/off-console-plan.md), else the link's.
+    private var streamLine: String? {
+        if client.lockView { return linkLineAllowed ? LockedMac.viewLine : nil }
+        return shownLinkLine
+    }
+    /// The off-console view's line takes three lines at most, the link's two.
+    private var streamLineLines: Int { client.lockView ? 3 : 2 }
 
     // MARK: Viewport
 
@@ -851,7 +862,8 @@ struct StreamScreen: View {
     /// The picture, as the tour counts it: the Mac's first window list, a frame size and a source
     /// that streams. A Mac that refuses this device, or cannot capture, never gets here.
     private var pictureReady: Bool {
-        !client.macName.isEmpty && client.videoSize != .zero && client.active != .none
+        // Not in the off-console view: nothing the tour teaches reaches the Mac then (docs/off-console-plan.md).
+        !client.macName.isEmpty && client.videoSize != .zero && client.active != .none && !client.lockView
     }
 
     /// The tour is on screen (not put aside under the pairing overlay).
@@ -1198,7 +1210,8 @@ struct StreamScreen: View {
                              settingsTransition: { settingsTransition(anchor: $0) },
                              onPanelSize: { panelSize = $0 },
                              pairThisDevice: openPairingOverlay,
-                             linkLine: shownLinkLine,
+                             linkLine: streamLine,
+                             linkLineLines: streamLineLines,
                              takeTour: takeTour,
                              largerKeyboard: largerKeyboard,
                              zoom: zoom)
@@ -1230,7 +1243,7 @@ struct StreamScreen: View {
             .background(Palette.panel)
             // A locked Mac: its cover over the picture (LockedMac), under the link's line.
             .overlay { LockedMacShade(client: client) }
-            .overlay(alignment: .top) { LinkLineView(text: shownLinkLine) }
+            .overlay(alignment: .top) { LinkLineView(text: streamLine, lines: streamLineLines) }
             .clipShape(streamShape)
             .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
             // The panel itself, inside the padding: the size the host fits the Mac window to.
@@ -1291,6 +1304,8 @@ struct StreamScreen: View {
 /// (docs/iphone-duo-plan.md).
 struct LinkLineView: View {
     let text: String?
+    /// Two lines for the link's words; the off-console view's take three (docs/off-console-plan.md).
+    var lines = 2
     /// The Duo's hinge (iOS 27.1): with the fold, where the line goes.
     @Environment(\.duoEnvironment) private var duoEnvironment
     var body: some View {
@@ -1310,7 +1325,7 @@ struct LinkLineView: View {
                     .font(.footnote)
                     .foregroundStyle(Palette.text)
                     .multilineTextAlignment(.center)
-                    .lineLimit(2)
+                    .lineLimit(lines)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 7)
@@ -1470,7 +1485,8 @@ private struct TopBar: View {
             TextScaleControl(scale: $textScale, open: $scaleOpen,
                              width: metrics.buttonWidth, height: metrics.buttonHeight,
                              pointsPerStep: metrics.buttonHeight >= 60 ? 44 : 40,
-                             offered: client.textScaleOffersOff, available: client.textScaleSelectable)
+                             offered: client.textScaleOffersOff, available: client.textScaleSelectable,
+                             unavailableHint: client.textScaleUnavailableHint)
                 .tourTarget(.textSize)
 
             button(open: keyboardShown, symbol: "keyboard", label: "Keyboard",
@@ -1601,6 +1617,8 @@ struct TextScaleControl: View {
     /// dimmed, no ruler, a VoiceOver swipe changes nothing, and VoiceOver hears
     /// `TextScale.unavailableHint`; its value stays, for the next window.
     var available = true
+    /// What VoiceOver hears while Aa cannot be used (the off-console view's own, else `TextScale.unavailableHint`).
+    var unavailableHint = TextScale.unavailableHint
 
     var steps: [Double] { TextScale.detents(offered: offered) }
     /// Padding either side of the visible ruler; two detents show each side of the thumb.
@@ -1687,7 +1705,7 @@ struct TextScaleControl: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Text size")
         .accessibilityValue(TextScale.spoken(at: position))
-        .accessibilityHint(available ? "" : TextScale.unavailableHint)
+        .accessibilityHint(available ? "" : unavailableHint)
         // Always adjustable, so Aa stays one view and one accessibility element when a window starts or
         // stops streaming: VoiceOver keeps its place on it, and the ruler's fold above runs. Dimmed, it
         // is what a disabled slider is ("dimmed, adjustable"): a swipe changes nothing. (Adding the
@@ -2178,12 +2196,15 @@ struct AppDrawer: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            if let why = client.lockWhy {
+            if let why = client.lockWhy, !client.lockView {
                 // A locked Mac sends no windows, apps or icons (its LockPolicy, docs/locked-mac-plan.md),
                 // and launches nothing: one line where they would be.
                 lockedLine(why)
                 Spacer(minLength: 0)
             } else {
+                // The off-console view (docs/off-console-plan.md): what the picture is, above the open apps; nothing
+                // is launched then, so no All apps.
+                if client.lockView { viewLine }
                 searchField
                 ScrollView {
                     VStack(spacing: 6) {
@@ -2200,7 +2221,7 @@ struct AppDrawer: View {
                                 }
                             }
                         }
-                        if !closedApps.isEmpty {
+                        if !closedApps.isEmpty, !client.lockView {
                             header("All apps").padding(.top, 2)
                             ForEach(closedApps) { app in
                                 DrawerRow(height: 46, highlighted: false, title: app.name, trailing: nil,
@@ -2231,6 +2252,23 @@ struct AppDrawer: View {
                 .foregroundStyle(Palette.muted)
                 .accessibilityHidden(true)
             Text(LockedMac.line(mac: client.macName, why: why))
+                .font(.system(size: 15))
+                .foregroundStyle(Palette.text)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Palette.control))
+    }
+
+    /// The off-console view's line, in the locked line's look (person.2.fill), read by VoiceOver as it is.
+    private var viewLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: "person.2.fill")
+                .font(.system(size: 15))
+                .foregroundStyle(Palette.muted)
+                .accessibilityHidden(true)
+            Text(LockedMac.viewPanelLine)
                 .font(.system(size: 15))
                 .foregroundStyle(Palette.text)
                 .fixedSize(horizontal: false, vertical: true)

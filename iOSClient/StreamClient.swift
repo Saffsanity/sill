@@ -900,6 +900,11 @@ final class StreamClient: ObservableObject {
     /// session.
     @Published var lockWhy: LockedMac.Why?
     var macLocked: Bool { lockWhy != nil }
+    /// The Mac is off console and shows this session anyway, its user's switch on (`WindowList.offConsoleView`,
+    /// LockedMac.view; docs/off-console-plan.md): the picture is live and not the Mac's screen, nothing typed
+    /// here reaches it, and the stream, the drawer and the Settings panel say so (`LockedMac.viewLine`). With
+    /// `lockWhy` `.otherUser`. Cleared with the session.
+    @Published var lockView = false
     /// What covers the stream (`LockedMac.Shade`): the Mac locked, then "Unlocking…" until the first
     /// keyframe after the unlock (`unlockingTimeout` at most). The picture under it was cleared at the
     /// lock (`HEVCDisplayView.blank`), so the last frame from before the lock never shows. Cleared with
@@ -2016,7 +2021,7 @@ final class StreamClient: ObservableObject {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
         // The codecs of the Mac's sound it plays: a Mac sends kind 43 only to a device that lists one.
         return Wire.encode(Hello(appVersion: version, build: build, protocol: SillProtocol.current, device: ClientStatsReporter.deviceName,
-                                 audio: AudioCodec.devicePlays))
+                                 audio: AudioCodec.devicePlays, offConsoleView: LockedMac.viewGeneration))
     }()
 
     /// The hello, the first thing on every session connection, written straight to `c` before
@@ -3585,6 +3590,7 @@ final class StreamClient: ObservableObject {
         macName = ""
         windows = []
         lockWhy = nil
+        lockView = false
         lockShade = nil
         lockShadeExpiry?.cancel()
         lockShadeExpiry = nil
@@ -4162,10 +4168,14 @@ final class StreamClient: ObservableObject {
             // before any later frame (the Mac sends a black placeholder; an older one's last frame would stay
             // otherwise), and after the unlock the first keyframe ends the cover. This session's own screen
             // locked: the Mac streams its lock screen, so the picture stays.
+            // The off-console view (docs/off-console-plan.md): the Mac shows this session anyway, so its picture
+            // stays and nothing covers it (LockedMac.covers).
             let why = LockedMac.why(list)
+            let view = LockedMac.view(list)
             let wasOffConsole = offConsoleListed
-            if why == .otherUser, !wasOffConsole { onBlank?() }
-            offConsoleListed = why == .otherUser
+            let covered = LockedMac.covers(why, view: view)
+            if covered, !wasOffConsole { onBlank?() }
+            offConsoleListed = covered
             // The cover ends at the first keyframe after the Mac's picture comes back (LockedMac.shade): an
             // unlock, or this session back on the console with its screen locked, whose lock screen streams
             // (Noah's switch back of 2026-11-01: the list said locked, the lock screen's keyframe came, and
@@ -4194,9 +4204,10 @@ final class StreamClient: ObservableObject {
                 // A locked Mac's list has no windows: the drawer and the panel say why, the cover over the
                 // stream too (LockedMac).
                 if self.lockWhy != why { self.lockWhy = why }
-                self.lockShadeChanged(LockedMac.shade(self.lockShade, list: why))
+                if self.lockView != view { self.lockView = view }
+                self.lockShadeChanged(LockedMac.shade(self.lockShade, list: why, view: view))
                 #if DEBUG
-                print("lock: list \(list.locked == true ? "locked" : "unlocked")\(list.offConsole == true ? ", off console" : ""); cover \(self.lockShade.map { "\($0)" } ?? "none")")
+                print("lock: list \(list.locked == true ? "locked" : "unlocked")\(list.offConsole == true ? ", off console" : "")\(view ? ", the off-console view" : ""); cover \(self.lockShade.map { "\($0)" } ?? "none")")
                 #endif
                 // The clipboard: subscribe (or stop) as the Mac's word and this device's switch say.
                 self.hostClipboardChanged(list.clipboard)
