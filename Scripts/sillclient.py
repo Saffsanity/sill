@@ -51,6 +51,8 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --hello-delay=S    with --hello (or --audio): send it S seconds after the connection is up (TLS
                      included), and nothing before it: a device whose hello a host's device gate waits
                      for while the Mac changes something (its gate gives up after 2 s)
+  --off-console-view the hello (sent even without --hello) says offConsoleView 1: this client shows a Mac's
+                     off-console view (docs/off-console-plan.md); lists print offConsoleView=1 when they say it.
   --audio            the hello (sent even without --hello) lists "aac-eld": this client plays the Mac's
                      sound, so a host with Send Audio on sends it kind 43. Each format (type 1) is printed
                      on one line; the packets (type 2) are counted each second (aud=) with their seq
@@ -532,6 +534,7 @@ try:
             if not body: raise ValueError(f"--{name} needs a value")
             if name in ("big-payload", "flood") and number(body, f"--{name}") < 1: raise ValueError(f"--{name} must be at least 1")
         elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--menus", "--pointer", "--audio", "--no-select", "--pair-ask",
+                       "--off-console-view",
                        "--clipboard", "--pair-ask=cable", "--pair-cancel") and not a.startswith(("--fps=", "--expect=")):
             raise ValueError(f"unknown flag {a!r}")
     events.sort(key=lambda e: (e[0], e[1]))
@@ -622,6 +625,10 @@ elif hello_arg is not None:
 plays_audio = "--audio" in flags
 if plays_audio:
     hello = dict(hello if hello is not None else {"device": device}, audio=["aac-eld"])
+# --off-console-view: this client shows a Mac's off-console view (the hello says offConsoleView 1, as a device from
+# 0.6.1 on: docs/off-console-plan.md), so a host with the switch on sends it the view's list (windows, offConsoleView).
+if "--off-console-view" in flags:
+    hello = dict(hello if hello is not None else {"device": device}, offConsoleView=1)
 
 if flood:
     # Connections that are reset before a byte is sent: the door must not keep them (no descriptor
@@ -904,7 +911,8 @@ while time.time() - t0 < dur:
             print(f"  windowList: {len(d.get('windows', []))} windows, active={d.get('active')}"
                   + (f" clipboard={d['clipboard']}" if "clipboard" in d else "")
                   + (f" locked={1 if d['locked'] else 0}" if "locked" in d else "")
-                  + (f" offConsole={1 if d['offConsole'] else 0}" if "offConsole" in d else ""))
+                  + (f" offConsole={1 if d['offConsole'] else 0}" if "offConsole" in d else "")
+                  + (f" offConsoleView={1 if d['offConsoleView'] else 0}" if "offConsoleView" in d else ""))
         elif kind == 32:
             try:
                 d = json.loads(payload)
