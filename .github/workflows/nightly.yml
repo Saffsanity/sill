@@ -599,6 +599,7 @@ jobs:
         id: ipa
         env:
           MODE: ${{ steps.mode.outputs.mode }}
+          UPLOADED: ${{ steps.upload.outputs.uploaded }}
         run: |
           version="$(/usr/libexec/PlistBuddy -c 'Print :ApplicationProperties:CFBundleShortVersionString' .build/ios/Sill.xcarchive/Info.plist)"
           build="$(/usr/libexec/PlistBuddy -c 'Print :ApplicationProperties:CFBundleVersion' .build/ios/Sill.xcarchive/Info.plist)"
@@ -617,8 +618,10 @@ jobs:
               echo "Built without signing and checked; the artifact $(basename "$ipa") is for looking inside only. No App Store Connect API key is set."
             elif [ "$MODE" = export ]; then
               echo "Signed for App Store Connect and checked; the artifact is $(basename "$ipa"). Nothing was uploaded."
-            else
+            elif [ "$UPLOADED" = true ]; then
               echo "Uploaded to App Store Connect and given to TestFlight's groups (the step above says which). The artifact $(basename "$ipa") is the same build, exported the same way."
+            else
+              echo "App Store Connect had this build number already, so nothing was uploaded; that build was given to TestFlight's groups (the step above says which, and what became of its What to Test). The artifact $(basename "$ipa") is this run's export of the same commit."
             fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
