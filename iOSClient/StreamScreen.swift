@@ -1480,9 +1480,11 @@ private struct TopBar: View {
                 .allowsHitTesting(!scaleOpen)
                 .tourTarget(.keyboard)
 
-            button(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop",
+            button(open: client.active == .desktop, symbol: "desktopcomputer",
+                   label: DesktopDisplays.label(displays: client.hostDesktopDisplays, current: client.hostDesktopDisplay),
                    accessibilityLabel: "Show the full Mac desktop",
-                   action: { client.select(.desktop) })
+                   action: { client.tapDesktop() })
+                .desktopDisplaysAccessibility(client)
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
 
@@ -1566,6 +1568,31 @@ struct BarButton<Content: View>: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+extension View {
+    /// The Desktop button's VoiceOver words on a Mac with two displays or more (DesktopDisplays):
+    /// "Display 2 of 3", and while the Desktop streams the hint that a tap moves it on. Nothing for one
+    /// display or a Mac before it, as before. A hold lists the displays by name (#273), the one the
+    /// Desktop streams checked; empty (no menu) without names.
+    func desktopDisplaysAccessibility(_ client: StreamClient) -> some View {
+        let value = DesktopDisplays.accessibilityValue(displays: client.hostDesktopDisplays, current: client.hostDesktopDisplay)
+        let steps = DesktopDisplays.tapSendsNext(desktopStreams: client.active == .desktop, displays: client.hostDesktopDisplays)
+        let items = DesktopDisplays.menu(names: client.hostDesktopDisplayNames, displays: client.hostDesktopDisplays) ?? []
+        return accessibilityValue(value ?? "")
+            .accessibilityHint(steps ? "Shows the next display." : "")
+            .contextMenu {
+                ForEach(Array(items.enumerated()), id: \.offset) { i, title in
+                    Button { client.chooseDesktopDisplay(i + 1) } label: {
+                        if client.active == .desktop, client.hostDesktopDisplay == i + 1 {
+                            Label(title, systemImage: "checkmark")
+                        } else {
+                            Text(title)
+                        }
+                    }
+                }
+            }
     }
 }
 

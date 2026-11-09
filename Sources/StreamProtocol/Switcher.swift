@@ -4,7 +4,7 @@ import Foundation
 public enum StreamSource: Codable, Hashable {
     case none
     case window(UInt32)   // CGWindowID, stable for the life of the window
-    case desktop          // the Mac's main display
+    case desktop          // one of the Mac's displays: the main one unless a device stepped to another (kind 47)
 }
 
 /// One on-screen Mac window, as the client sees it. WindowList order is stable: first seen first.
@@ -68,6 +68,17 @@ public struct WindowList: Codable {
     /// sends them as keys only to a host that says so (the device's KeyTyping). Set after the initializer,
     /// whose parameters stay as they were: `list.keyRepeat = KeyRepeat.generation`.
     public var keyRepeat: Int?
+    /// How many displays the Desktop can stream (DesktopDisplays: never Sill's virtual display), and
+    /// which of them it streams or would, counting from 1 left to right (issue #91). A device's Desktop
+    /// button then reads "Desktop 2", and a tap while the Desktop streams sends kind 47 for the next.
+    /// Nil from every host before 2026-10-30, to which a device sends no kind 47, and from one with no
+    /// display. Set after the initializer, as `keyRepeat`.
+    public var desktopDisplays: Int?
+    public var desktopDisplay: Int?
+    /// Their names in that order (NSScreen's, "Built-in Retina Display"), for the Desktop button's hold
+    /// (#273): a choice is kind 47 with its number (DisplayChoice). Nil from hosts before, whose devices
+    /// hold nothing.
+    public var desktopDisplayNames: [String]?
     /// This Mac shows nothing of itself to devices (the host's LockPolicy, docs/locked-mac-plan.md): its
     /// screen is locked, or another user, the login window or nobody is on its console. True, with no
     /// windows and no `clipboard` in the list, while the host streams a placeholder (a black frame) and
@@ -216,5 +227,17 @@ public enum ImageBlob {
         let idStart = d.startIndex + 2
         guard let id = String(data: d.subdata(in: idStart..<(idStart + len)), encoding: .utf8) else { return nil }
         return (id, d.subdata(in: (idStart + len)..<d.endIndex))
+    }
+}
+
+/// Kind 47's payload from the Desktop button's hold (#273): the display's number in the list's
+/// `desktopDisplayNames`. Empty (the tap, and every device before) is the next display.
+public struct DisplayChoice: Codable, Equatable {
+    public var number: Int
+    public init(number: Int) { self.number = number }
+
+    /// The number a kind 47 carries; nil for the next display.
+    public static func number(in payload: Data) -> Int? {
+        payload.isEmpty ? nil : Wire.decode(DisplayChoice.self, from: payload)?.number
     }
 }

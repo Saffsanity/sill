@@ -360,6 +360,9 @@ enum LockPolicy {
     enum Request: Equatable {
         /// Kind 6: a window, the Desktop or nothing.
         case pick(StreamSource)
+        /// Kind 47: the Desktop on the Mac's next display. Refused as a window pick is: it would show
+        /// another of the Mac's screens and move its pointer.
+        case nextDisplay
         /// Kind 7.
         case launch
         /// Kind 15: a window's traffic lights.
@@ -401,6 +404,7 @@ enum LockPolicy {
         switch request {
         case .pick(.window): return .refuse(.pick)
         case .pick: return .take
+        case .nextDisplay: return .refuse(.pick)
         case .launch: return .refuse(.launch)
         case .windowCommand: return .refuse(.windowCommand)
         case .menuRequest: return .refuse(.menus)
@@ -414,13 +418,17 @@ enum LockPolicy {
     // MARK: What the devices are shown
 
     /// The window list a device is sent: locked, no windows, no `clipboard` (a device sends no kind 32
-    /// then, and offers no Paste), `locked` true and, off console, `offConsole` true; unlocked, `list`
-    /// as it is, both left out, so the bytes are what they were before this change.
+    /// then, and offers no Paste), no `desktopDisplays`, `desktopDisplay` or their names (no kind 47, and nothing of the
+    /// Mac's screens), `locked` true and, off console, `offConsole` true; unlocked, `list` as it is, both
+    /// left out, so the bytes are what they were before this change.
     static func list(_ list: WindowList, reading r: Reading) -> WindowList {
         guard r.locked else { return list }
         var l = list
         l.windows = []
         l.clipboard = nil
+        l.desktopDisplays = nil
+        l.desktopDisplay = nil
+        l.desktopDisplayNames = nil
         l.locked = true
         l.offConsole = r == .offConsole ? true : nil
         return l
