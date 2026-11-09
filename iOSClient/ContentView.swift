@@ -518,8 +518,9 @@ struct ContentView: View {
 /// above it, …` each time the software keyboard moves (PortraitStreamScreen); `keyboard frame: top
 /// 455.5, 495.5 pt tall` (or `none`) each time UIKit reports the keyboard elsewhere
 /// (KeyboardFrameMonitor); and in the Duo's laptop pose `keyboard row: the caps 500–551 (51 pt) between
-/// the fold's edge at 496 and the keyboard's glass at 555 (…)`, or `keyboard row: none`, as the key row
-/// goes alone above the keyboard and comes back (#215).
+/// the fold's edge at 496 and the keyboard's glass at 555 (…)`, under a tall keyboard `keyboard row: the
+/// caps 458.5–492.5 (34 pt) in the crease, 455.5–495.5: …`, or `keyboard row: none`, as the key row goes
+/// alone above the keyboard and comes back (#215).
 ///
 /// Launch arguments land in `NSArgumentDomain`, which is not persisted, so a normal launch is
 /// exactly the app it was before. None of this is built in Release.
