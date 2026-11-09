@@ -209,6 +209,107 @@ extension DuoPosture {
     }
 }
 
+// MARK: - The laptop pose with the software keyboard up: the key row alone (#215)
+
+extension DuoPosture {
+    /// The software keyboard's own height on the Duo's inner display held upright: the English
+    /// keyboard's glass from 555 to the foot (951), measured on the iOS 27.1 simulator (the frame it
+    /// leaves as it goes, and the glass's edge in a screenshot) and in the reporter's screenshot (#215).
+    /// Used until the keyboard has gone once at that width (KeyboardFrameMonitor's own heights): the
+    /// Chinese (Pinyin) keyboard's is 445 (its glass from 506, a band for its candidates over the same
+    /// keys).
+    static let laptopKeyboardHeight: CGFloat = 396
+
+    /// Where the software keyboard's glass begins, in the screen's space, from the top UIKit reports
+    /// (nil: none up). In the laptop pose iOS 27.1 reports a keyboard from the fold's top edge down, the
+    /// whole lower page (455.5, 495.5 pt tall on the Duo), while it draws it at the foot: a report that
+    /// begins at or above `controlsTop` (the fold's lower edge, where nothing of a keyboard ever is) is
+    /// that page, and the glass begins its own height above the screen's foot, never above the report:
+    /// `ownHeight`, the height it last went with, unless that would put the glass at or above the fold's
+    /// edge too, else `laptopKeyboardHeight`. Any other report is the glass's own top, but never under the
+    /// glass that height gives: folded from open flat with the keyboard up, iOS 27.1 goes on reporting the
+    /// open flat keyboard, (0, 640, 669×311), while the keyboard it goes with is the laptop pose's, (0, 555,
+    /// 669×396) (2026-11-09); a show begins with that report too, a moment before the page.
+    static func visibleKeyboardTop(reported: CGFloat?, screenHeight: CGFloat, controlsTop: CGFloat,
+                                   ownHeight: CGFloat?) -> CGFloat? {
+        guard let reported, reported < screenHeight else { return nil }
+        let own = ownHeight.flatMap { $0 > 0 && screenHeight - $0 > controlsTop ? $0 : nil } ?? laptopKeyboardHeight
+        guard reported > controlsTop else { return max(reported, screenHeight - own) }
+        return min(reported, screenHeight - own)
+    }
+
+    /// The keyboard's own height to remember from a hide (KeyboardFrameMonitor's own heights), or nil. The
+    /// frame it leaves as it goes (the hide's begin frame) is its glass where it spans `screen` and reaches
+    /// its foot, and it is remembered only where UIKit had reported the keyboard from above that glass
+    /// while it was up (`shown`, the monitor's last report): the laptop pose's whole lower page. Where UIKit
+    /// reported the keyboard as itself there is nothing to learn: open flat upright the English keyboard is
+    /// (0, 640, 669×311) on the same 669 pt width, and that height, remembered, put the laptop pose's row
+    /// at 539–597 over a glass at 555 (the iOS 27.1 simulator, 2026-11-09).
+    static func keyboardHeightToLearn(leaving begin: CGRect?, shown: CGRect?, screen: CGRect?) -> CGFloat? {
+        guard let begin, begin.height > 0, let screen, begin.width == screen.width, abs(begin.maxY - screen.maxY) < 0.5,
+              let shown, shown.minY < begin.minY - 0.5 else { return nil }
+        return begin.height
+    }
+
+    /// The key row alone between the fold and the keyboard (Noah, 2026-10-27, "Let's start with A"): its
+    /// caps as tall as the room allows less 8 (`keyboardRowMargins`), at most `keyboardRowMost`, with as
+    /// much black above as below; for a keyboard too tall for caps of `keyboardRowLeast` there, in the
+    /// crease instead (Noah, 2026-10-29, "Crease"), its caps `keyboardRowCrease` tall.
+    static let keyboardRowMost: CGFloat = 58
+    static let keyboardRowMargins: CGFloat = 8
+    /// The least caps between the fold and the glass: Apple's least touch target (44 pt, the Human
+    /// Interface Guidelines' "Buttons"). A room under 52 (44 and the 8 of black) puts the row in the
+    /// crease: the 445 pt keyboards (emoji, Chinese Pinyin; their glass at 506, 10 pt under the fold).
+    static let keyboardRowLeast: CGFloat = 44
+    /// The crease row's caps, centred on the fold's band (458.5–492.5 of the Duo's 455.5–495.5).
+    static let keyboardRowCrease: CGFloat = 34
+    /// Between the row's caps (twelve ≈ 48 pt wide across 641).
+    static let keyboardRowGap: CGFloat = 6
+
+    /// Where the key row stands alone while the person's software keyboard covers the laptop pose's
+    /// controls: its caps, in the screen's space, and whether that is in the fold's band.
+    struct KeyboardRow: Equatable {
+        var rect: CGRect
+        /// In the crease (a keyboard too tall for the row under the fold), not between the fold and
+        /// the keyboard's glass.
+        var inCrease: Bool
+    }
+
+    /// The laptop pose's lower half while the person's software keyboard covers its key row: the key row
+    /// alone (its Keyboard cap with it, so the keyboard can go), across the screen less `sides`; the
+    /// window bar hidden (it comes back as it was with the keyboard), the trackpad under the keyboard.
+    /// - Under the fold, in the room from `controlsTop` (the fold's lower edge, 496) down to the
+    ///   keyboard's visible top, while that room holds caps of `keyboardRowLeast` with 8 of black: the
+    ///   caps the room less 8, at most 58, the black above and below alike (whole points above, the odd
+    ///   point below): 4 + 51 + 4 under the Duo's English keyboard (59 pt), 4 + 44 + 4 at 52, 8 + 58 + 8
+    ///   at 74.
+    /// - Else in the crease, `keyboardRowCrease` caps centred on the fold's band (never taller than the
+    ///   band): the 445 pt keyboards leave 10 pt (their glass at 506), so 458.5–492.5. The picture above
+    ///   the fold is never covered.
+    /// Nil, the halves as they are, off the laptop pose, without a keyboard, and while the keyboard leaves
+    /// the window bar and the key row in view (`standardRows`, what they take from `controlsTop`).
+    static func keyboardRow(size: CGSize, fold: FoldInfo, controlsTop: CGFloat, keyboardTop: CGFloat?,
+                            standardRows: CGFloat, sides: CGFloat) -> KeyboardRow? {
+        guard let band = fold.horizontalBand, let keyboardTop, keyboardTop < size.height else { return nil }
+        let room = keyboardTop - controlsTop
+        guard room < standardRows else { return nil }
+        let width = max(0, size.width - 2 * sides)
+        if room - keyboardRowMargins >= keyboardRowLeast {
+            let caps = min(keyboardRowMost, room - keyboardRowMargins)
+            let above = ((room - caps) / 2).rounded(.down)
+            return KeyboardRow(rect: CGRect(x: sides, y: controlsTop + above, width: width, height: caps), inCrease: false)
+        }
+        let caps = min(keyboardRowCrease, band.height)
+        return KeyboardRow(rect: CGRect(x: sides, y: band.midY - caps / 2, width: width, height: caps), inCrease: true)
+    }
+
+    /// A cap's width when `count` caps share `width` with the row's gaps.
+    static func keyboardRowCap(count: Int, width: CGFloat) -> CGFloat {
+        guard count > 0 else { return 0 }
+        return (width - CGFloat(count - 1) * keyboardRowGap) / CGFloat(count)
+    }
+}
+
 // MARK: - The book pose: the fold down the middle of a screen held sideways
 
 extension DuoPosture {
