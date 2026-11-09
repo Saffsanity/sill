@@ -6,3 +6,6 @@ contact_links:
   - name: Help setting Sill up
     url: https://getsill.app/support
     about: Quick fixes for the common problems, and the support address.
+  - name: How to contribute, and the tip jar
+    url: https://getsill.app/contribute
+    about: Sponsoring Sill, the people who have, and what makes a pull request easy to merge.

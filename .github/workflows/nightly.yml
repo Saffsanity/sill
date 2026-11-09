@@ -182,7 +182,7 @@ jobs:
       SILL_NIGHTLY_DATE: ${{ needs.decide.outputs.date }}
       # Universal (Apple silicon and Intel, #62, #88), as the first nightly was (by hand, 2026-10-29) and as
       # Noah told #62 the next version's download will be: make-app.sh builds both slices with lipo, and
-      # release.sh's check_signature checks each one. A release so far is Apple silicon only.
+      # release.sh's check_signature checks each one. Releases are universal too from 0.6.0 on (release.yml).
       SILL_UNIVERSAL: '1'
     steps:
       - name: Check out tonight's commit

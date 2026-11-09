@@ -39,8 +39,18 @@ import StreamProtocol
 final class HostClipboard {
     /// Share clipboard with devices.
     private(set) var enabled: Bool
-    /// The window lists' `clipboard`: the generation while on, nil while off.
+    /// The window lists' `clipboard`: the generation while on, nil while off (and while this Mac is
+    /// locked, which the coordinator's list leaves out: LockPolicy.list).
     var advertised: Int? { enabled ? ClipboardPolicy.generation : nil }
+    /// This Mac's screen is locked (LockPolicy, docs/locked-mac-plan.md; `setLocked`): the clipboard is
+    /// paused both ways, nothing read (no look) and nothing written (a device's text dropped), while the
+    /// subscriptions stay.
+    private(set) var locked = false
+    /// The lock's gate now (SessionLock's, set on its own queue the moment a witness says locked): asked
+    /// before each look and each write, so neither happens after the lock even before `setLocked`. The
+    /// server withholds a kind 32 to a device from that moment too.
+    var isLocked: () -> Bool = { false }
+    private var paused: Bool { locked || isLocked() }
 
     private let server: StreamServer
     /// The pasteboard, on its own queue: `NSPasteboard.general`, or a synthetic host's own.
@@ -143,11 +153,23 @@ final class HostClipboard {
         return true
     }
 
+    /// This Mac's screen locked (true) or unlocked (LockPolicy, docs/locked-mac-plan.md). Locked: the
+    /// look stops, so nothing is read, and a device's text is not written; the subscriptions stay.
+    /// Unlocked: the look starts again for the subscribers, the change count as it stands taken as seen,
+    /// so what was copied while the Mac was locked is never sent.
+    func setLocked(_ on: Bool) {
+        guard on != locked else { return }
+        locked = on
+        if on { stopLooking() } else if !subscribers.isEmpty { startLooking() }
+    }
+
     // MARK: A device's message
 
-    /// A kind 32 from `connection`, named `who` for the lines.
-    func received(_ payload: Data, from connection: NWConnection, who: String) {
-        guard enabled else { return }
+    /// A kind 32 from `connection`, named `who` for the lines. False when it brought text that was
+    /// dropped because this Mac is locked (the coordinator says so, a line a minute at most).
+    @discardableResult
+    func received(_ payload: Data, from connection: NWConnection, who: String) -> Bool {
+        guard enabled else { return true }
         let id = ObjectIdentifier(connection)
         // What it asks first, then the rate, which a stop never meets (ClipboardPolicy.hostReceives).
         let got = ClipboardPolicy.hostReceives(payload, arrivals: arrivals[id] ?? [], now: ProcessInfo.processInfo.systemUptime)
@@ -157,19 +179,22 @@ final class HostClipboard {
             subscribe(connection, who: who)
         case .set(let text):
             subscribe(connection, who: who)
+            // Locked: written nowhere and sent to nobody (LockPolicy); the subscription stays.
+            guard !paused else { return false }
             board.write(text)
             Stats.shared.bump("clip.recv")
             let others = ClipboardPolicy.forward(to: order, from: id).compactMap { subscribers[$0]?.connection }
             if testLog { print("Test clipboard: \(text.utf8.count) bytes from \(who) set on the pasteboard, sent to \(others.count) other device\(others.count == 1 ? "" : "s").") }
             send(payload: ClipboardPolicy.payload(text: text), to: others)
         case .stop:
-            guard let gone = subscribers.removeValue(forKey: id) else { return }
+            guard let gone = subscribers.removeValue(forKey: id) else { return true }
             order.removeAll { $0 == id }
             print(ClipboardPolicy.Copy.stoppedLine(device: gone.who))
             if subscribers.isEmpty { stopLooking() }
         case .refuse(let why):
             ignored.count(why.rawValue)     // "rate", "tooLong", "undecodable"
         }
+        return true
     }
 
     /// The device left: forgotten without a line.
@@ -191,7 +216,7 @@ final class HostClipboard {
         subscribers[id] = (connection, who)
         order.append(id)
         print(ClipboardPolicy.Copy.sharesLine(device: who))
-        startLooking()
+        if !locked { startLooking() }      // locked: the unlock starts it (`setLocked`)
     }
 
     // MARK: The pasteboard
@@ -203,9 +228,13 @@ final class HostClipboard {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(ClipboardPolicy.lookInterval))
                 guard !Task.isCancelled, let board = self?.board else { return }
+                // A locked Mac's pasteboard is not read (LockPolicy), even before `setLocked` stops this.
+                if self?.paused == true { continue }
                 // On the board's queue; the main actor waits for nothing meanwhile.
                 let looked = await board.look()
                 guard !Task.isCancelled, let self else { return }
+                // Locked during the look: what it found goes nowhere (and its change counts as seen).
+                if self.paused { continue }
                 self.lookedAt(looked)
             }
         }

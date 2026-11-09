@@ -72,9 +72,10 @@ bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' Packaging/In
 # the Command Line Tools alone must still build this. Each architecture has its own scratch path: in
 # one shared .build, every switch of triple costs a relink (16 s measured), so no rebuild stays at
 # ~2 s. Off by default: it doubles every build (50 to 97 s cold, 21 to 42 s after a one-line change,
-# measured 2026-10-20), the x86_64 slice had not streamed on an Intel Mac by then, and releases stay
-# arm64 until #62 decides (release.sh names the architectures it built). Unset, the build is for this
-# Mac's own architecture, as it always was.
+# measured 2026-10-20), and the x86_64 slice had not streamed on an Intel Mac by then. Releases from
+# 0.6.0 on and the nightlies set it (release.yml's publish job, nightly.yml's mac job; #62), and
+# release.sh names the architectures it built. Unset, the build is for this Mac's own architecture,
+# as it always was.
 if [ "${SILL_UNIVERSAL:-}" = 1 ]; then
     bin=.build/universal
     for arch in arm64 x86_64; do
