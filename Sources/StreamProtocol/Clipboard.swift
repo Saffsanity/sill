@@ -19,16 +19,30 @@ import Foundation
 public struct Clipboard: Codable, Hashable, Sendable {
     /// The text: at most `maxTextBytes` of UTF-8, never empty when sent.
     public var text: String?
-    /// Reserved for a later generation (`clipboard` 2): an image, PNG or JPEG (#66's). A host of this
-    /// generation ignores it, and a device sends none to it; a later host sends it only to a device
-    /// whose subscription said it takes images, never to one that subscribed with `{}`.
+    /// Generation 2 (`clipboard` 2, 2026-11-02): an image, PNG or JPEG (#66's shape), at most
+    /// `maxImageBytes`. A host of generation 1 ignores it, and a device sends none to it; a host sends it
+    /// only to a device whose subscription said `accepts` 2, never to one that subscribed with `{}`.
     public var image: Data?
     /// Device → host: true, this device's Share Clipboard went off; the host sends it nothing more
     /// until its next kind 32. Never from a host.
     public var stop: Bool?
+    /// Device → host, on any kind 32: the generation this device takes, 2 for images too. Left out
+    /// (generation 1's `{}`), the host sends it text alone.
+    public var accepts: Int?
 
-    public init(text: String? = nil, image: Data? = nil, stop: Bool? = nil) {
-        self.text = text; self.image = image; self.stop = stop
+    public init(text: String? = nil, image: Data? = nil, stop: Bool? = nil, accepts: Int? = nil) {
+        self.text = text; self.image = image; self.stop = stop; self.accepts = accepts
+    }
+
+    /// The most image either way: 8 MiB of PNG or JPEG (Noah's call, 2026-11-02); a bigger copy is
+    /// re-encoded to fit (ClipboardImage.fitted). Its base64 JSON keeps to `StreamMessage.maxClipboardPayload`.
+    public static let maxImageBytes = 8 << 20
+
+    /// "public.png" or "public.jpeg" by the image's first bytes, else nil: what either side takes.
+    public static func imageType(_ data: Data) -> String? {
+        if data.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) { return "public.png" }
+        if data.starts(with: [0xFF, 0xD8, 0xFF]) { return "public.jpeg" }
+        return nil
     }
 
     /// The most text either way: 256 KB of UTF-8 (262,144 bytes). The whole message's JSON also

@@ -175,14 +175,20 @@ extension StreamClient {
     /// A kind 32 from the Mac.
     func receiveClipboard(_ payload: Data) {
         let board = UIPasteboard.general
-        guard let text = ClipboardPolicy.deviceWrites(payload, switchOn: Self.clipboardOn, hostClipboard: hostClipboard,
-                                                      lastSent: clipboardSent, changeCount: board.changeCount) else { return }
-        board.setItems([[UTType.utf8PlainText.identifier: text]],
-                       options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(ClipboardPolicy.deviceExpiry)])
+        let options: [UIPasteboard.OptionsKey: Any] = [.localOnly: true, .expirationDate: Date().addingTimeInterval(ClipboardPolicy.deviceExpiry)]
+        if let text = ClipboardPolicy.deviceWrites(payload, switchOn: Self.clipboardOn, hostClipboard: hostClipboard,
+                                                   lastSent: clipboardSent, changeCount: board.changeCount) {
+            board.setItems([[UTType.utf8PlainText.identifier: text]], options: options)
+        } else if let image = ClipboardPolicy.deviceWritesImage(payload, switchOn: Self.clipboardOn, hostClipboard: hostClipboard),
+                  let type = Clipboard.imageType(image) {
+            board.setItems([[type: image]], options: options)
+        } else {
+            return
+        }
         clipboardHandled = board.changeCount
         hideClipboardChip()
         #if DEBUG
-        print("clipboard: wrote \(text.utf8.count) bytes from the Mac (change \(board.changeCount))")
+        print("clipboard: wrote \(payload.count) bytes of JSON from the Mac (change \(board.changeCount))")
         #endif
     }
 
@@ -212,7 +218,8 @@ extension StreamClient {
         // Not while a Paste waits for its receipt: the chip comes back if it never comes.
         let waiting = clipboardReceipt.map { !$0.late } ?? false
         let offer = !waiting && ClipboardPolicy.offersChip(connected: connected, hostClipboard: hostClipboard, switchOn: Self.clipboardOn,
-                                                           hasStrings: board.hasStrings, changeCount: count, handled: clipboardHandled)
+                                                           hasStrings: board.hasStrings || (ClipboardPolicy.hostTakesImages(hostClipboard) && board.hasImages),
+                                                           changeCount: count, handled: clipboardHandled)
         #if DEBUG
         print("clipboard: \(why): change \(count), handled \(clipboardHandled.map(String.init) ?? "none")"
               + (waiting ? ", a Paste waiting for its receipt" : "") + ": \(offer ? "the chip" : "no chip")")
@@ -292,8 +299,21 @@ extension StreamClient {
     /// What the system's Paste control read on the person's tap (the chip's, or the Settings group's):
     /// sent to the Mac, with its receipt to wait for, or "too long".
     func sendClipboard(_ strings: [String]) {
+        sendClipboard(ClipboardPolicy.deviceSends(strings, connected: connected, hostClipboard: hostClipboard, switchOn: Self.clipboardOn),
+                      text: strings.first(where: { !$0.isEmpty }), tooLong: ClipboardPolicy.Copy.tooLong)
+    }
+
+    /// An image the Paste control read, as ClipboardImage.fitted made it (nil: none would fit), to a Mac
+    /// that takes images.
+    func sendClipboardImage(_ image: Data?) {
+        let send = image.map { ClipboardPolicy.deviceSendsImage($0, connected: connected, hostClipboard: hostClipboard, switchOn: Self.clipboardOn) }
+            ?? (ClipboardPolicy.hostTakesImages(hostClipboard) ? .tooLong : .nothing)
+        sendClipboard(send, text: nil, tooLong: ClipboardPolicy.Copy.imageTooBig)
+    }
+
+    private func sendClipboard(_ decision: ClipboardPolicy.DeviceSend, text: String?, tooLong: (String) -> String) {
         let mac = macName.isEmpty ? "the Mac" : macName
-        switch ClipboardPolicy.deviceSends(strings, connected: connected, hostClipboard: hostClipboard, switchOn: Self.clipboardOn) {
+        switch decision {
         case .send(let payload):
             send(.clipboard, payload: payload)
             // Its receipt: a ping after it through the same door, whose pong says the Mac has read it.
@@ -301,7 +321,7 @@ extension StreamClient {
             let nonce = Data((0..<ClipboardPolicy.receiptLength).map { _ in UInt8.random(in: .min ... .max) })
             send(.ping, payload: nonce)
             let count = UIPasteboard.general.changeCount
-            if let text = strings.first(where: { !$0.isEmpty }) { clipboardSent = ClipboardPolicy.Sent(text: text, changeCount: count) }
+            if let text { clipboardSent = ClipboardPolicy.Sent(text: text, changeCount: count) }
             clipboardReceipt = ClipboardReceipt(nonce: nonce, changeCount: count)
             hideClipboardChip()
             clipboardReceiptExpiry?.cancel()
@@ -313,7 +333,7 @@ extension StreamClient {
             print("clipboard: sent \(payload.count) bytes of JSON to the Mac (change \(count)), its receipt awaited for \(wait) s")
             #endif
         case .tooLong:
-            showClipboardNote(ClipboardPolicy.Copy.tooLong(mac: mac), spoken: ClipboardPolicy.Copy.tooLong(mac: mac), warning: true)
+            showClipboardNote(tooLong(mac), spoken: tooLong(mac), warning: true)
             if UIDevice.current.userInterfaceIdiom == .phone { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
         case .nothing:
             break
