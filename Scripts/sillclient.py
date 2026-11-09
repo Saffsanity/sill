@@ -886,7 +886,7 @@ while time.time() - t0 < dur:
             if kind == 2:
                 try:
                     d = json.loads(payload)
-                    extra = f"\twindows={len(d.get('windows', []))} locked={1 if d.get('locked') else 0} offConsole={1 if d.get('offConsole') else 0} active={json.dumps(d.get('active'))}"
+                    extra = f"\twindows={len(d.get('windows', []))} locked={1 if d.get('locked') else 0} offConsole={1 if d.get('offConsole') else 0} offConsoleView={1 if d.get('offConsoleView') else 0} active={json.dumps(d.get('active'))}"
                 except ValueError:
                     extra = "\tundecodable"
             elif kind == 0:

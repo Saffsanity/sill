@@ -9,7 +9,7 @@ the frames stop at the lock, the placeholder is black, the list says why, nothin
 requests are refused, input follows the reading, the unlock waits for its settle, the flap never unlocks.
 Each host lives under 60 s and is killed at the end.
 
-    Scripts/lock-check/live.py OUT [poll|start|notify|paired|all]
+    Scripts/lock-check/live.py OUT [poll|start|notify|paired|view|all]
 
 Needs .build/release/SillHost and .build/lock-check/frames (Scripts/lock-check/build.sh). Exits 1 when a
 verdict fails."""
@@ -376,6 +376,59 @@ def run_paired(out):
     verdict("paired=1" in pclient and "paired=0" in uclient, "the host said which session is paired (kind 16's sessionPaired: 1 and 0)")
 
 
+def run_view(out):
+    """The off-console view (docs/off-console-plan.md): with --off-console-view, off console by the file (the console's
+    witness for a test host), the pattern streams on to a client that shows the view (its lists say offConsoleView) and
+    to one that does not (the locked list); input, clipboard text and sound are not let through. Without the switch, the
+    placeholder. With the switch but off console by a notification alone, the placeholder too (no console witness)."""
+    for case in ("on", "off", "note"):
+        print(f"== view: {case}", flush=True)
+        lock = os.path.join(out, f"view-{case}.lock"); write(lock, "0")
+        env = {"SILL_TEST_PATTERN": "noise", "SILL_TEST_PASTEBOARD": f"me.saffer.sill.test.viewcheck.{os.getpid()}"}
+        if case == "note": env["SILL_TEST_LOCK_NOTE"] = "6 sessionDidResignActive; 18 sessionDidBecomeActive"
+        else: env["SILL_TEST_LOCKED_FILE"] = lock
+        h = Host(out, f"view-{case}", env, args=["--audio"] + ([] if case == "off" else ["--off-console-view"]))
+        c1 = client(h, out, f"view-{case}-c1", 26, ["desktop", "--hello=0.6.1", "--off-console-view", "--audio", "--clipboard",
+                    f"--dump={out}/view-{case}-c1", "--tap=0.5,0.5@13", "--copy=while-shown@14"], start=1.0)
+        c2 = client(h, out, f"view-{case}-c2", 26, ["desktop", "--hello=0.6.0", "--audio", f"--dump={out}/view-{case}-c2"], start=1.0)
+        if case != "note":
+            h.at(6.0); write(lock, "2")
+            h.at(18.0); write(lock, "0")
+        c1.join(); c2.join()
+        h.at(29.0); h.stop()
+        rows1, rows2 = messages(out, f"view-{case}-c1", h), messages(out, f"view-{case}-c2", h)
+        keys1 = decoded(out, f"view-{case}-c1", h)
+        L, line = h.first(r"^Locked: another user, or the login window", 5.9)
+        U, _ = h.first(r"^Unlocked:", 17.9)
+        shown = case == "on"
+        if shown:
+            verdict(h.first(r"^Off-console view: ")[0] is not None, "on: the start line says the switch is on")
+            verdict(L is not None and "own desktop and windows instead" in (line or ""), f"on: the view's line at {L} s: {line}")
+        else:
+            if case == "off": verdict(h.first(r"^Off-console view: ")[0] is None, "off: no start line")
+            verdict(L is not None and "devices see none of this session" in (line or ""), f"{case}: 0.6.0's off-console line at {L} s: {line}")
+        verdict(U is not None and 2.0 <= U - 18.0 <= 3.6, f"{case}: the unlock at {U} s (back at 18.0 s)")
+        def view_lists(rows):
+            return [(at, ex) for at, kind, _, _, ex in rows if kind == 2 and L and U and L + 0.2 <= at < U]
+        l1, l2 = view_lists(rows1), view_lists(rows2)
+        verdict(bool(l1) and all(("offConsoleView=1" in ex) == shown and "locked=1 offConsole=1" in ex for _, ex in l1),
+                f"{case}: the viewer's lists off console say locked, offConsole{' and offConsoleView' if shown else ', no offConsoleView'} ({len(l1)})")
+        verdict(bool(l2) and all("offConsoleView=1" not in ex and "locked=1 offConsole=1" in ex for _, ex in l2),
+                f"{case}: the older client's lists off console are the locked list, no offConsoleView ({len(l2)})")
+        def big(rows, a, b): return [r for r in rows if r[1] == 1 and a <= r[0] < b and r[3] > 4000]
+        if L and U:
+            b1, b2 = big(rows1, L + 0.5, U), big(rows2, L + 0.5, U)
+            verdict((len(b1) > 20 and len(b2) > 20) if shown else (not b1 and not b2),
+                    f"{case}: the pattern's frames off console: {len(b1)} and {len(b2)} large ones to the two clients ({'it streams on' if shown else 'the placeholder'})")
+            dark = [k for k in keys1 if k[0] is not None and L + 0.3 <= k[0] < U]
+            verdict(bool(dark) and all((k[1] > 30) == shown for k in dark),
+                    f"{case}: the keyframes off console decode to {'the pattern' if shown else 'black'}: lumas {[round(k[1]) for k in dark][:6]}")
+            snd = [r for r in rows1 if r[1] == 43 and L + 0.3 <= r[0] < U]
+            verdict(not snd, f"{case}: no sound off console ({len(snd)} messages; {len([r for r in rows1 if r[1] == 43 and r[0] < L])} before)")
+            dropped = h.first(r"^Locked: dropped an input event", L)[0]
+            clip = h.first(r"^Locked: dropped a device's clipboard text", L)[0]
+            verdict(dropped is not None and clip is not None, f"{case}: the tap and the clipboard text off console dropped (lines at {dropped} and {clip} s)")
+
 def main():
     if len(sys.argv) < 2: sys.exit(__doc__)
     out = os.path.abspath(sys.argv[1]); os.makedirs(out, exist_ok=True)
@@ -386,6 +439,7 @@ def main():
     if which in ("start", "all"): run_start(out)
     if which in ("notify", "all"): run_notify(out)
     if which in ("paired", "all"): run_paired(out)
+    if which in ("view", "all"): run_view(out)
     bad = [w for ok, w in verdicts if not ok]
     print(f"{len(verdicts) - len(bad)} of {len(verdicts)} verdicts passed")
     sys.exit(1 if bad else 0)
