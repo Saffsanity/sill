@@ -9,7 +9,7 @@ var fails = 0, passes = 0
 func check(_ name: String, _ ok: Bool) { if ok { passes += 1; print("ok   \(name)") } else { fails += 1; print("FAIL \(name)") }; fflush(stdout) }
 typealias D = DoorPolicy
 typealias T = DoorPolicy.Trust
-let origins: [OriginPolicy.Origin] = [.loopback, .direct, .vpn, .lan, .internet]
+let origins: [OriginPolicy.Origin] = [.loopback, .direct, .vpn, .lan, .internet, .relay]
 let session = RemoteTLS.sessionALPN, pairing = RemoteTLS.pairingALPN
 check("the ALPNs are sill/1 and sill-pair/1", session == "sill/1" && pairing == "sill-pair/1")
 
@@ -22,10 +22,15 @@ for o in origins {
         let home = D.admitsBeforeStart(.home, origin: o, internetAccess: ia)
         let remote = D.admitsBeforeStart(.remote, origin: o, internetAccess: ia)
         if home == [.loopback, .direct, .lan].contains(o) { gateOK += 1 } else { print("  home \(o) ia=\(ia): \(home)") }
-        if remote == ([.loopback, .lan, .vpn].contains(o) || (o == .internet && ia)) { gateOK += 1 } else { print("  remote \(o) ia=\(ia): \(remote)") }
+        if remote == ([.loopback, .lan, .vpn, .relay].contains(o) || (o == .internet && ia)) { gateOK += 1 } else { print("  remote \(o) ia=\(ia): \(remote)") }
     }
 }
-check("before start: \(gateOK) of \(gate) (home: loopback, direct, lan; remote: loopback, lan, vpn, internet with access)", gate == gateOK)
+check("before start: \(gateOK) of \(gate) (home: loopback, direct, lan; remote: loopback, lan, vpn, a relay on this Mac, internet with access)", gate == gateOK)
+// Issue #326: at the remote door a connection from this Mac itself is a relay on it (OriginPolicy.atRemoteDoor),
+// admitted there as loopback was, whatever the internet switch; the home door never names one.
+check("before start: a relay on this Mac at the remote door, internet access on or off, as loopback was; never at home",
+      D.admitsBeforeStart(.remote, origin: .relay, internetAccess: false) && D.admitsBeforeStart(.remote, origin: .relay, internetAccess: true)
+      && !D.admitsBeforeStart(.home, origin: .relay, internetAccess: true) && D.refusalBeforeStart(.remote, origin: .relay, internetAccess: false) == nil)
 check("before start: home refuses a VPN and the internet whatever the switch",
       !D.admitsBeforeStart(.home, origin: .vpn, internetAccess: true) && !D.admitsBeforeStart(.home, origin: .internet, internetAccess: true))
 check("before start: home takes peer-to-peer Wi-Fi (Direct Wireless), the remote door never",
@@ -152,14 +157,14 @@ for door in [D.Door.home, .remote] { for w in [false, true] { for o in origins {
 check("after the gate: \(agOK) of \(ag) combinations (both doors, paired at `.ready` or not, every origin, 0, 7, 8, 9 remote sessions) match", ag == agOK)
 let full = T(paired: true, requirePairing: true, remoteAccess: true, internetAccess: true)
 check("after the gate, remote: nothing changed → admitted, from every origin the door takes",
-      [OriginPolicy.Origin.loopback, .lan, .vpn, .internet].allSatisfy { D.afterGate(.remote, wasPaired: true, origin: $0, full, remoteSessions: 0) == nil })
+      [OriginPolicy.Origin.loopback, .lan, .vpn, .internet, .relay].allSatisfy { D.afterGate(.remote, wasPaired: true, origin: $0, full, remoteSessions: 0) == nil })
 check("after the gate, remote: removed meanwhile → removed, before any other change",
       D.afterGate(.remote, wasPaired: true, origin: .internet, T(paired: false, remoteAccess: false), remoteSessions: 9) == Goodbye.removed)
 check("after the gate, remote: Remote Access off meanwhile → remoteOff, before the internet switch and the limit",
       D.afterGate(.remote, wasPaired: true, origin: .internet, T(paired: true, remoteAccess: false, internetAccess: false), remoteSessions: 9) == Goodbye.remoteOff)
 check("after the gate, remote: internet access off meanwhile → internetOff for an internet origin only, before the limit",
       D.afterGate(.remote, wasPaired: true, origin: .internet, T(paired: true, remoteAccess: true, internetAccess: false), remoteSessions: 9) == Goodbye.internetOff
-      && [OriginPolicy.Origin.loopback, .lan, .vpn].allSatisfy { D.afterGate(.remote, wasPaired: true, origin: $0, T(paired: true, remoteAccess: true, internetAccess: false), remoteSessions: 0) == nil })
+      && [OriginPolicy.Origin.loopback, .lan, .vpn, .relay].allSatisfy { D.afterGate(.remote, wasPaired: true, origin: $0, T(paired: true, remoteAccess: true, internetAccess: false), remoteSessions: 0) == nil })
 check("after the gate, remote: the limit reached meanwhile → busy at 8 sessions, the 8th served",
       D.afterGate(.remote, wasPaired: true, origin: .lan, full, remoteSessions: 8) == Goodbye.busy
       && D.afterGate(.remote, wasPaired: true, origin: .lan, full, remoteSessions: 7) == nil)
@@ -214,7 +219,7 @@ check("still served: Remove, Remote Access off and internet access off at the re
       !D.stillServes(.remote, encrypted: true, wasPaired: true, origin: .vpn, T(paired: false, remoteAccess: true))
       && !D.stillServes(.remote, encrypted: true, wasPaired: true, origin: .vpn, T(paired: true, remoteAccess: false))
       && !D.stillServes(.remote, encrypted: true, wasPaired: true, origin: .internet, T(paired: true, remoteAccess: true, internetAccess: false))
-      && [OriginPolicy.Origin.loopback, .lan, .vpn].allSatisfy { D.stillServes(.remote, encrypted: true, wasPaired: true, origin: $0, T(paired: true, remoteAccess: true, internetAccess: false)) })
+      && [OriginPolicy.Origin.loopback, .lan, .vpn, .relay].allSatisfy { D.stillServes(.remote, encrypted: true, wasPaired: true, origin: $0, T(paired: true, remoteAccess: true, internetAccess: false)) })
 check("still served: nothing changed, at either door, and the remote door's limit is no cut",
       D.stillServes(.remote, encrypted: true, wasPaired: true, origin: .internet, full)
       && D.stillServes(.home, encrypted: true, wasPaired: true, origin: .lan, full))

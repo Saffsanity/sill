@@ -522,8 +522,9 @@ package final class StreamCoordinator {
                     self.remote?.sessionStarted(fingerprint: fp, route: words, cableDevice: route.cableDevice)
                 }
                 // A device got in from the network while the firewall's verdict said none could:
-                // that verdict is stale (FirewallRule.asksAgain).
-                if FirewallRule.asksAgain(after: self.status.snapshot.firewall, fromLoopback: route.origin == .loopback) {
+                // that verdict is stale (FirewallRule.asksAgain). One through a relay on this Mac came
+                // from this Mac itself, as one over loopback does, which says nothing of the firewall.
+                if FirewallRule.asksAgain(after: self.status.snapshot.firewall, fromLoopback: route.origin == .loopback || route.origin == .relay) {
                     self.checkFirewall()
                 }
                 // Home or away before its catalog: its settings state says which quality it sets.
@@ -3474,9 +3475,9 @@ package final class StreamCoordinator {
 }
 
 extension ClientRoute {
-    /// Away from home: the remote door from a VPN or the internet (AwayPolicy.isAway). Its Quality and
-    /// Resolution picks set the away quality, which runs while every connected device is away. Here,
-    /// not beside ClientRoute in StreamServer.swift, which the pacing harness compiles without the
-    /// coordinator's files.
+    /// Away from home: the remote door from a VPN, the internet or a relay on this Mac
+    /// (AwayPolicy.isAway). Its Quality and Resolution picks set the away quality, which runs while
+    /// every connected device is away. Here, not beside ClientRoute in StreamServer.swift, which the
+    /// pacing harness compiles without the coordinator's files.
     var isAway: Bool { AwayPolicy.isAway(remoteDoor: isRemote, origin: origin) }
 }
