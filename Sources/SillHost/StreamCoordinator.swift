@@ -2735,8 +2735,15 @@ package final class StreamCoordinator {
         }
     }
 
+    /// No real display, as `HeadlessDesktopPolicy.realDisplays` counts them: none online (a Mac with no monitor, a
+    /// closed lid with nothing attached; macOS's 1x stand-in and Sill's own are none), or with the lid closed none
+    /// awake (#298). A display only asleep, with the lid open or on a Mac with no lid, counts: DisplayWake turns it on.
     private static func headlessDisplayNeeded() -> Bool {
-        HeadlessDesktopPolicy.stillNeeded(physicalDisplays: WindowCatalog.activeDisplayIDs().filter { displayKind($0) == .real }.count)
+        let real = { (ids: [UInt32]) in ids.filter { displayKind($0) == .real }.count }
+        let active = real(WindowCatalog.activeDisplayIDs())
+        guard active == 0 else { return false }       // a display awake, the usual case: nothing more is read
+        return HeadlessDesktopPolicy.stillNeeded(physicalDisplays: HeadlessDesktopPolicy.realDisplays(
+            active: active, online: real(WindowCatalog.onlineDisplayIDs()), lidClosed: WindowCatalog.lidClosed()))
     }
 
     private static func headlessReleases(devices: Int) -> Bool {

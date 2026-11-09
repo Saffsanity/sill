@@ -494,9 +494,17 @@ enum HeadlessDesktopPolicy {
         !hasDisplay && clientCount > 0 && appKitLoop && !synthetic && apiAvailable
     }
 
-    /// Whether the fallback display stays: only while no real display is online. Once one is back (the
-    /// lid opened, a monitor plugged in) it goes at once, so the windows macOS moved onto it come back.
+    /// Whether the Desktop needs Sill's display: no real display, as `realDisplays` counts them (macOS's stand-in
+    /// and Sill's own are none). When it goes once made is `releases`.
     static func stillNeeded(physicalDisplays: Int) -> Bool { physicalDisplays == 0 }
+
+    /// The real displays that keep Sill's display from being made. The online ones, a display asleep among them: it
+    /// keeps its windows, and 0.6.0's display wake (#151) turns it on as a device connects, while the Desktop starts
+    /// within about a third of a second of the connect; Sill's display made in that moment would show none of those
+    /// windows, and on a Mac without a built-in screen stay for the session (`releases`). With the lid
+    /// closed, the active ones alone: a monitor asleep there counts as none (#298, a closed-lid Mac whose only
+    /// monitor is off or asleep).
+    static func realDisplays(active: Int, online: Int, lidClosed: Bool) -> Int { lidClosed ? active : online }
 
     /// macOS's own stand-in display, a 1x 1920×1080 "Display" (vendor 'unkn', model 'virt') that it makes when a
     /// Mac has no screen at all (the lid closed and nothing attached, seen on macOS 27). Not a real display:

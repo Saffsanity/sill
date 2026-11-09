@@ -221,6 +221,20 @@ check(HDP.releases(realDisplays: 2, builtInActive: true, devices: 0) == true, "t
 check(HDP.pool([HDP.Kind.standIn, .sills, .real], kind: { $0 }, sillsFirst: true) == [.sills], "kept: Sill's display before a real one")
 check(HDP.pool([HDP.Kind.real, .standIn], kind: { $0 }, sillsFirst: true) == [.real], "kept but not listed yet: the real one")
 check(HDP.pool([HDP.Kind.standIn, .sills, .real], kind: { $0 }, sillsFirst: false) == [.real], "not kept: the real one first, as before")
+// Which real displays keep Sill's display from being made (the review of 2026-11-09): a display only asleep is
+// online and keeps its windows, and 0.6.0's display wake (#151) turns it on as a device connects, so it counts; with
+// the lid closed only the active ones count, a monitor asleep there being none (#298).
+check(HDP.realDisplays(active: 0, online: 1, lidClosed: false) == 1, "the lid open, its screen asleep: counted (the wake turns it on)")
+check(HDP.realDisplays(active: 0, online: 2, lidClosed: false) == 2, "a Mac mini, its two monitors asleep: counted")
+check(HDP.realDisplays(active: 1, online: 1, lidClosed: false) == 1, "a monitor awake: counted")
+check(HDP.realDisplays(active: 0, online: 0, lidClosed: false) == 0, "a Mac with no monitor: none")
+check(HDP.realDisplays(active: 0, online: 2, lidClosed: true) == 0, "the lid closed, its monitors asleep: none (#298)")
+check(HDP.realDisplays(active: 1, online: 2, lidClosed: true) == 1, "the lid closed, a monitor awake: counted")
+check(HDP.realDisplays(active: 0, online: 0, lidClosed: true) == 0, "the lid closed, nothing attached: none")
+check(!HDP.stillNeeded(physicalDisplays: HDP.realDisplays(active: 0, online: 1, lidClosed: false)),
+      "a screen asleep with the lid open, or a Mac mini's monitor asleep: no display made")
+check(HDP.stillNeeded(physicalDisplays: HDP.realDisplays(active: 0, online: 1, lidClosed: true)),
+      "a monitor asleep with the lid closed: Sill's display made (#298)")
 // Its size: the MacBook's own screen as Sill last saw it, so windows keep their places (Noah's choice, 2026-11-02).
 check(HDP.desktopDimensions(builtIn: (1800, 1169), viewportWidth: 1366, viewportHeight: 1024) == HDP.Dimensions(widthPt: 1800, heightPt: 1168, scale: 2),
       "the built-in screen last seen at 1800×1169 pt: 1800×1168 @2× (even), not the iPad's size")
