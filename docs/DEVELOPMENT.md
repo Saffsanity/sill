@@ -1528,10 +1528,14 @@ If it doesn't connect:
   Devices); pair it again.
 
 Away from home has its own quality (docs/remote-bundle-plan.md). While every
-connected device is away, through a VPN or over the internet, the Mac streams
-at the away quality, Low at Standard resolution until you change it, and its
-log says "Away from home: …"; a device at home connected at the same time
-brings the home quality back for every device ("Home quality again: …"). A
+connected device is away, through a VPN, over the internet or through a relay
+on the Mac itself (a userspace Tailscale or WireGuard node, an SSH tunnel, a
+proxy: the remote door sees it come from this Mac, loopback or one of the Mac's
+own addresses, and the log says "Remote client connected: … through a relay on
+this Mac (127.0.0.1:…)"; issue #326, docs/away-through-relay-plan.md), the Mac
+streams at the away quality, Low at Standard resolution until you change it,
+and its log says "Away from home: …"; a device at home connected at the same
+time brings the home quality back for every device ("Home quality again: …"). A
 device away that picks a Quality or Resolution sets the away pair, never the
 home one; Sill.app saves both (`awayBitrate` and `awayCaptureScale` beside
 `bitrate` and `captureScale`), Settings › Streaming shows both, and the menu's
