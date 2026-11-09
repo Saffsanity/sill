@@ -1474,7 +1474,7 @@ private struct TopBar: View {
             button(open: keyboardShown, symbol: "keyboard", label: "Keyboard",
                    accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
                    action: { setSettings(false, false); toggleKeyboard() })
-                .contextMenu { KeysMenu(macTakesFn: (client.hostFnKey ?? 0) >= 1, send: { client.sendFromKeyRow($0) }) }
+                .contextMenu { KeysMenu(macTakesFn: client.macTakesFn, send: { client.sendFromKeyRow($0) }) }
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
                 .tourTarget(.keyboard)

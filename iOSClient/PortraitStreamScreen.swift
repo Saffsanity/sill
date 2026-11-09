@@ -413,7 +413,7 @@ struct PortraitStreamScreen: View {
                           setSettings(false, false)
                           overlay.toggleKeyboard()
                       })
-                .contextMenu { KeysMenu(macTakesFn: (client.hostFnKey ?? 0) >= 1, send: { client.sendFromKeyRow($0) }) }
+                .contextMenu { KeysMenu(macTakesFn: client.macTakesFn, send: { client.sendFromKeyRow($0) }) }
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
                 .tourTarget(.keyboard)
@@ -498,7 +498,7 @@ struct PortraitStreamScreen: View {
         KeyRow(metrics: metrics, keys: keys, latched: $latched, keyboardShown: keyboardShown,
                send: { client.sendFromKeyRow($0) },
                toggleKeyboard: { overlay.toggleKeyboard() },
-               showSpotlight: client.active == .desktop, macTakesFn: (client.hostFnKey ?? 0) >= 1)
+               showSpotlight: client.active == .desktop, macTakesFn: client.macTakesFn)
             .tourTarget(.keys)
     }
 

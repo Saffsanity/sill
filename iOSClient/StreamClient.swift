@@ -891,6 +891,8 @@ final class StreamClient: ObservableObject {
     var hostKeyRepeat: Int?
     /// 1 from a Mac that takes a device's fn bit (`WindowList.fnKey`): the Keys menu's window tiling. Cleared with the session.
     @Published var hostFnKey: Int?
+    /// The Mac takes the fn bit, so the Keys menu offers its window tiling.
+    var macTakesFn: Bool { (hostFnKey ?? 0) >= 1 }
     /// The clipboard (kind 32, StreamClient+Clipboard, docs/clipboard-plan.md): what this session's
     /// Mac takes and sends (`WindowList.clipboard`, 1 for text), nil from a Mac before it or with Share
     /// clipboard with devices off. Cleared with the session.
