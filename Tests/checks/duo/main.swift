@@ -379,55 +379,86 @@ check(visible(nil) == nil && visible(951) == nil && visible(960) == nil, "none u
 check(visible(373.5, height: 869, controls: 414) == 473, "the status bar shown (669×869): the page from 373.5, the glass at 473")
 
 func keyRow(_ top: CGFloat?, controls: CGFloat = 496, fold: FoldInfo = .known(laptopFold), size s: CGSize = upright,
-            standard: CGFloat = 148) -> CGRect? {
+            standard: CGFloat = 148) -> DuoPosture.KeyboardRow? {
     DuoPosture.keyboardRow(size: s, fold: fold, controlsTop: controls, keyboardTop: top, standardRows: standard, sides: 14)
 }
-// Noah's numbers: the caps the room less 8, at most 58, the black above and below alike.
-check(keyRow(glassTop) == rect(14, 500, 641, 51), "the Duo's keyboard: 4 + 51 + 4, \(String(describing: keyRow(glassTop)))")
-check(keyRow(570) == rect(14, 504, 641, 58), "a 381 pt keyboard: 8 + 58 + 8")
-check(keyRow(571) == rect(14, 504, 641, 58), "75 pt: 58 caps, 8 above and 9 below (within a point)")
-check(keyRow(552) == rect(14, 500, 641, 48), "56 pt: the halves' own 48 pt caps")
-check(keyRow(524) == rect(14, 500, 641, 20), "28 pt: the least caps, 4 and 4")
-check(keyRow(523) == rect(14, 499, 641, 20), "27 pt: the least caps, 3 above")
-check(keyRow(506) == rect(14, 496, 641, 20) && keyRow(480) == rect(14, 496, 641, 20),
-      "a keyboard over the fold's edge: the least caps from the fold's edge, never onto the fold")
-check(keyRow(643) == rect(14, 540, 641, 58), "147 pt: 58 caps in the middle")
+func under(_ y: CGFloat, _ caps: CGFloat) -> DuoPosture.KeyboardRow { .init(rect: rect(14, y, 641, caps), inCrease: false) }
+func crease(_ y: CGFloat, _ caps: CGFloat = 34) -> DuoPosture.KeyboardRow { .init(rect: rect(14, y, 641, caps), inCrease: true) }
+// Noah's numbers (2026-10-27, "A"): under the fold the caps the room less 8, at most 58, the black above
+// and below alike.
+check(keyRow(glassTop) == under(500, 51), "the Duo's keyboard: 4 + 51 + 4, \(String(describing: keyRow(glassTop)))")
+check(keyRow(570) == under(504, 58), "a 381 pt keyboard: 8 + 58 + 8")
+check(keyRow(571) == under(504, 58), "75 pt: 58 caps, 8 above and 9 below (within a point)")
+check(keyRow(552) == under(500, 48), "56 pt: the halves' own 48 pt caps")
+check(keyRow(643) == under(540, 58), "147 pt: 58 caps in the middle")
 check(keyRow(644) == nil && keyRow(700) == nil, "148 pt and more: the window bar and the key row in view, as they are")
 check(keyRow(nil) == nil && keyRow(951) == nil && keyRow(1000) == nil, "no keyboard: as they are")
 check(keyRow(951, standard: 1000) == nil && keyRow(960, standard: 1000) == nil, "a keyboard at or below the foot is none, whatever the rows take")
-check(keyRow(glassTop, fold: .inferred) == nil && keyRow(glassTop, fold: .known(nil)) == nil && keyRow(glassTop, fold: .known(bookFold)) == nil,
-      "off the laptop pose (before iOS 27.1, open flat, the book pose's fold): as they are")
-check(keyRow(473, controls: 414, size: size(669, 869)) == rect(14, 418, 641, 51), "the status bar shown: 4 + 51 + 4 from 414")
+check(keyRow(glassTop, fold: .inferred) == nil && keyRow(glassTop, fold: .known(nil)) == nil && keyRow(glassTop, fold: .known(bookFold)) == nil
+      && keyRow(506, fold: .inferred) == nil && keyRow(506, fold: .known(nil)) == nil && keyRow(506, fold: .known(bookFold)) == nil,
+      "off the laptop pose (before iOS 27.1, an iPad, open flat, the book pose's fold): as they are")
+// The threshold (Noah, 2026-10-29, "Crease", for the keyboards that leave too little room): under the fold
+// while the room holds caps of 44 pt, Apple's least touch target, with the 8 of black (52 pt), else in the
+// crease, 34 pt caps centred on the fold's band (458.5–492.5 of 455.5–495.5).
+check(DuoPosture.keyboardRowLeast == 44 && DuoPosture.keyboardRowCrease == 34, "the least caps under the fold 44, the crease's 34")
+check(keyRow(548) == under(500, 44), "52 pt: the least caps under the fold, 4 + 44 + 4")
+check(keyRow(548.5) == under(500, 44.5), "52.5 pt: 44.5 pt caps, 4 + 44.5 + 4")
+check(keyRow(547.5) == crease(458.5) && keyRow(547) == crease(458.5), "under 52 pt: the crease")
+check(keyRow(524) == crease(458.5) && keyRow(523) == crease(458.5), "28 pt (once the least 20 pt caps under the fold): the crease")
+check(keyRow(506) == crease(458.5), "the 445 pt keyboards (emoji, Chinese; the glass at 506, 10 pt): the crease, 458.5–492.5")
+check(keyRow(496.5) == crease(458.5) && keyRow(496) == crease(458.5) && keyRow(480) == crease(458.5),
+      "a keyboard at or over the fold's edge: the crease")
+check(keyRow(506)!.rect.minY - laptopFold.minY == laptopFold.maxY - keyRow(506)!.rect.maxY, "the crease row centred on the fold: 3 above, 3 below")
+check(keyRow(506, fold: .known(rect(0, 470, 669, 20))) == crease(470, 20), "a band thinner than 34 pt: the caps the band's, never onto either page")
+// The status bar shown (669×869): the fold 82 pt higher, the controls from 414.
+let shownBand = rect(0, 373.5, 669, 40)
+check(keyRow(473, controls: 414, fold: .known(shownBand), size: size(669, 869)) == under(418, 51), "the status bar shown: 4 + 51 + 4 from 414")
+check(keyRow(424, controls: 414, fold: .known(shownBand), size: size(669, 869)) == crease(376.5), "the status bar shown: the crease, 376.5–410.5")
 // The whole chain, as the device reports it.
-check(keyRow(visible(deckTop)) == rect(14, 500, 641, 51), "the lower page reported: the row 500–551 over the glass at 555")
-check(keyRow(visible(deckTop, own: 445)) == rect(14, 496, 641, 20),
-      "the Chinese keyboard: 10 pt, the least caps from the fold's edge, 496–506 above its glass")
+check(keyRow(visible(deckTop)) == under(500, 51), "the lower page reported: the row 500–551 over the glass at 555")
+check(keyRow(visible(deckTop, own: 396)) == under(500, 51), "the English keyboard, once it has gone: the same")
+check(keyRow(visible(deckTop, own: 445)) == crease(458.5), "the Chinese keyboard, once it has gone (its glass at 506): the crease")
+check(keyRow(visible(deckTop, own: 403)) == under(500, 44) && keyRow(visible(deckTop, own: 403.5)) == crease(458.5),
+      "a keyboard 403 pt tall: the least row under the fold; 403.5: the crease")
+check(keyRow(visible(deckTop, own: 445))!.rect.minY > 447.5, "the crease row under the picture (8 pt inside the pane's 455)")
 // Twelve caps (the Desktop: Spotlight's too) and eleven across the row.
 check(abs(DuoPosture.keyboardRowCap(count: 12, width: 641) - 47.917) < 0.001, "twelve caps ≈ 48 pt wide")
 check(abs(DuoPosture.keyboardRowCap(count: 11, width: 641) - 52.818) < 0.001 && DuoPosture.keyboardRowCap(count: 0, width: 641) == 0,
       "eleven caps (a window: no Spotlight) ≈ 53; none: none")
-check(DuoPosture.keyboardRowGap == 6 && DuoPosture.keyboardRowMost == 58 && DuoPosture.keyboardRowMargins == 8 && DuoPosture.keyboardRowLeast == 20,
+check(DuoPosture.keyboardRowGap == 6 && DuoPosture.keyboardRowMost == 58 && DuoPosture.keyboardRowMargins == 8,
       "the row's numbers")
-// Every keyboard top, every controls' top: the row's rules hold.
+// Every keyboard top, every controls' top (the fold's band 40 pt above it, as on the Duo): the rules hold.
 for controls in [CGFloat(414), 496, 500.5, 600] {
+    let band = rect(0, controls - 40.5, 669, 40)
     for top in stride(from: controls - 60, through: 960, by: 0.5) {
-        let row = keyRow(top, controls: controls)
+        let row = keyRow(top, controls: controls, fold: .known(band))
         let room = top - controls
         check((row == nil) == (top >= 951 || room >= 148), "\(controls) \(top): a row exactly while the keyboard covers the key row")
         guard let row else { continue }
-        let caps = max(20, min(58, room - 8))
-        check(row.height == caps, "\(controls) \(top): the caps the room less 8, 20 to 58")
-        check(row.minY >= controls, "\(controls) \(top): never onto the fold")
-        check(row.minX == 14 && row.width == 641, "\(controls) \(top): the row's sides")
-        if room >= caps {
-            let above = row.minY - controls, below = top - row.maxY
+        check(row.rect.minX == 14 && row.rect.width == 641, "\(controls) \(top): the row's sides")
+        check(row.inCrease == (room < 52), "\(controls) \(top): under the fold exactly while 44 pt caps fit with their black")
+        if row.inCrease {
+            check(row.rect == rect(14, band.midY - 17, 641, 34), "\(controls) \(top): the crease's 34 pt caps on the fold's middle")
+            check(row.rect.minY >= band.minY && row.rect.maxY <= band.maxY, "\(controls) \(top): the crease row inside the fold's band")
+        } else {
+            let caps = min(58, room - 8)
+            check(row.rect.height == caps && caps >= 44, "\(controls) \(top): the caps the room less 8, 44 to 58")
+            check(row.rect.minY >= controls, "\(controls) \(top): never onto the fold")
+            let above = row.rect.minY - controls, below = top - row.rect.maxY
             check(above == above.rounded() && below - above >= 0 && below - above < 2 && (room != room.rounded() || below - above <= 1),
                   "\(controls) \(top): the black above and below alike, the odd point below (\(above), \(below))")
-            if room - 8 <= 58 && room >= 28 { check(above == 4, "\(controls) \(top): 4 above while the caps fill") }
-        } else {
-            check(row.minY == controls, "\(controls) \(top): a keyboard too tall for the least caps: from the fold's edge")
+            check(above >= 4, "\(controls) \(top): 4 of black at least above, and so below")
+            if room <= 66 { check(above == 4, "\(controls) \(top): 4 above while the caps fill") }
         }
     }
+}
+// Every keyboard height the monitor can learn (and none): the row, wherever it is, is never under the
+// keyboard's glass and never over the picture.
+for own in [nil] + stride(from: CGFloat(0), through: 960, by: 0.5).map(Optional.some) {
+    let glass = visible(deckTop, own: own)
+    guard let glass, let row = keyRow(glass) else { continue }
+    check(row.rect.maxY <= glass, "\(String(describing: own)): the row \(row.rect.minY)–\(row.rect.maxY) above the glass at \(glass)")
+    check(row.rect.minY >= laptopFold.minY, "\(String(describing: own)): the row never over the picture")
 }
 
 print(failures == 0 ? "ok: \(checks) checks" : "FAILED: \(failures) of \(checks) checks")

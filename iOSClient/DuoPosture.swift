@@ -236,32 +236,55 @@ extension DuoPosture {
     }
 
     /// The key row alone between the fold and the keyboard (Noah, 2026-10-27, "Let's start with A"): its
-    /// caps as tall as the room allows less 8 (`keyboardRowMargins`), at most `keyboardRowMost`, never
-    /// under `keyboardRowLeast`, with as much black above as below.
+    /// caps as tall as the room allows less 8 (`keyboardRowMargins`), at most `keyboardRowMost`, with as
+    /// much black above as below; for a keyboard too tall for caps of `keyboardRowLeast` there, in the
+    /// crease instead (Noah, 2026-10-29, "Crease"), its caps `keyboardRowCrease` tall.
     static let keyboardRowMost: CGFloat = 58
     static let keyboardRowMargins: CGFloat = 8
-    static let keyboardRowLeast: CGFloat = 20
+    /// The least caps between the fold and the glass: Apple's least touch target (44 pt, the Human
+    /// Interface Guidelines' "Buttons"). A room under 52 (44 and the 8 of black) puts the row in the
+    /// crease: the 445 pt keyboards (emoji, Chinese Pinyin; their glass at 506, 10 pt under the fold).
+    static let keyboardRowLeast: CGFloat = 44
+    /// The crease row's caps, centred on the fold's band (458.5–492.5 of the Duo's 455.5–495.5).
+    static let keyboardRowCrease: CGFloat = 34
     /// Between the row's caps (twelve ≈ 48 pt wide across 641).
     static let keyboardRowGap: CGFloat = 6
 
+    /// Where the key row stands alone while the person's software keyboard covers the laptop pose's
+    /// controls: its caps, in the screen's space, and whether that is in the fold's band.
+    struct KeyboardRow: Equatable {
+        var rect: CGRect
+        /// In the crease (a keyboard too tall for the row under the fold), not between the fold and
+        /// the keyboard's glass.
+        var inCrease: Bool
+    }
+
     /// The laptop pose's lower half while the person's software keyboard covers its key row: the key row
-    /// alone (its Keyboard cap with it, so the keyboard can go), in the room from `controlsTop` (the
-    /// fold's lower edge, 496) down to the keyboard's visible top, across the screen less `sides`; the
+    /// alone (its Keyboard cap with it, so the keyboard can go), across the screen less `sides`; the
     /// window bar hidden (it comes back as it was with the keyboard), the trackpad under the keyboard.
-    /// The caps take the room less 8, at most 58, with the black above and below alike (whole points
-    /// above, the odd point below): 4 + 51 + 4 under the Duo's English keyboard (59 pt), 8 + 58 + 8 at
-    /// 74. A keyboard that leaves less than 28 pt gets `keyboardRowLeast` caps from the fold's edge, the
-    /// rest under its glass: the Chinese keyboard's 445 pt leaves 10 (its glass at 506), so 496–516. Nil,
-    /// the halves as they are, off the laptop pose, without a keyboard, and while the keyboard leaves the
-    /// window bar and the key row in view (`standardRows`, what they take from `controlsTop`).
+    /// - Under the fold, in the room from `controlsTop` (the fold's lower edge, 496) down to the
+    ///   keyboard's visible top, while that room holds caps of `keyboardRowLeast` with 8 of black: the
+    ///   caps the room less 8, at most 58, the black above and below alike (whole points above, the odd
+    ///   point below): 4 + 51 + 4 under the Duo's English keyboard (59 pt), 4 + 44 + 4 at 52, 8 + 58 + 8
+    ///   at 74.
+    /// - Else in the crease, `keyboardRowCrease` caps centred on the fold's band (never taller than the
+    ///   band): the 445 pt keyboards leave 10 pt (their glass at 506), so 458.5–492.5. The picture above
+    ///   the fold is never covered.
+    /// Nil, the halves as they are, off the laptop pose, without a keyboard, and while the keyboard leaves
+    /// the window bar and the key row in view (`standardRows`, what they take from `controlsTop`).
     static func keyboardRow(size: CGSize, fold: FoldInfo, controlsTop: CGFloat, keyboardTop: CGFloat?,
-                            standardRows: CGFloat, sides: CGFloat) -> CGRect? {
-        guard fold.horizontalBand != nil, let keyboardTop, keyboardTop < size.height else { return nil }
+                            standardRows: CGFloat, sides: CGFloat) -> KeyboardRow? {
+        guard let band = fold.horizontalBand, let keyboardTop, keyboardTop < size.height else { return nil }
         let room = keyboardTop - controlsTop
         guard room < standardRows else { return nil }
-        let caps = max(keyboardRowLeast, min(keyboardRowMost, room - keyboardRowMargins))
-        let above = max(0, ((room - caps) / 2).rounded(.down))
-        return CGRect(x: sides, y: controlsTop + above, width: max(0, size.width - 2 * sides), height: caps)
+        let width = max(0, size.width - 2 * sides)
+        if room - keyboardRowMargins >= keyboardRowLeast {
+            let caps = min(keyboardRowMost, room - keyboardRowMargins)
+            let above = ((room - caps) / 2).rounded(.down)
+            return KeyboardRow(rect: CGRect(x: sides, y: controlsTop + above, width: width, height: caps), inCrease: false)
+        }
+        let caps = min(keyboardRowCrease, band.height)
+        return KeyboardRow(rect: CGRect(x: sides, y: band.midY - caps / 2, width: width, height: caps), inCrease: true)
     }
 
     /// A cap's width when `count` caps share `width` with the row's gaps.

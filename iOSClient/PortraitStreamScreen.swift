@@ -210,7 +210,7 @@ struct PortraitStreamScreen: View {
                                              controls: metrics.controlsHeight)
         let half = split.picture
         // The laptop pose with the person's software keyboard over the key row: the key row alone above
-        // the keyboard's glass (#215).
+        // the keyboard's glass, or in the crease for a keyboard too tall for that (#215).
         let alone = keyboardRow(size, origin: origin, split: split)
         return ZStack(alignment: .topLeading) {
             Color.black
@@ -228,8 +228,8 @@ struct PortraitStreamScreen: View {
             }
 
             if let alone {
-                rowAlone(alone)
-                    .placed(alone, in: size)
+                rowAlone(alone.rect)
+                    .placed(alone.rect, in: size)
                     .transition(.opacity)
             }
 
@@ -281,8 +281,9 @@ struct PortraitStreamScreen: View {
 
     /// The key row alone, or nil (the controls as they are): the laptop pose while the person's software
     /// keyboard is up and its glass (`DuoPosture.visibleKeyboardTop`, from `KeyboardFrameMonitor`, in this
-    /// screen's space) leaves the window bar and the key row no room (`DuoPosture.keyboardRow`).
-    private func keyboardRow(_ size: CGSize, origin: CGPoint, split: DuoPosture.PortraitSplit) -> CGRect? {
+    /// screen's space) leaves the window bar and the key row no room (`DuoPosture.keyboardRow`): under the
+    /// fold while 44 pt caps fit above the glass, else in the crease.
+    private func keyboardRow(_ size: CGSize, origin: CGPoint, split: DuoPosture.PortraitSplit) -> DuoPosture.KeyboardRow? {
         guard keyboardShown else { return nil }
         let glass = DuoPosture.visibleKeyboardTop(reported: keyboardFrame.frame.map { $0.minY - origin.y },
                                                   screenHeight: size.height, controlsTop: split.controls,
@@ -304,16 +305,24 @@ struct PortraitStreamScreen: View {
 
     #if DEBUG
     /// The console's line for the gates: `keyboard row: the caps 500–551 (51 pt) between the fold's edge
-    /// at 496 and the keyboard's glass at 555 (reported from 455.5; the keyboard 396 pt)`, or `keyboard
-    /// row: none` once it goes.
-    private func keyboardRowLine(_ row: CGRect?, size: CGSize, origin: CGPoint, split: DuoPosture.PortraitSplit) -> String {
+    /// at 496 and the keyboard's glass at 555 (reported from 455.5; the keyboard 396 pt, as measured)`, or
+    /// for a tall keyboard `keyboard row: the caps 458.5–492.5 (34 pt) in the crease, 455.5–495.5: the
+    /// keyboard's glass at 506 leaves 10 pt under the fold (…)`, or `keyboard row: none` once it goes.
+    private func keyboardRowLine(_ row: DuoPosture.KeyboardRow?, size: CGSize, origin: CGPoint, split: DuoPosture.PortraitSplit) -> String {
         func n(_ v: CGFloat) -> String { abs(v - v.rounded()) < 0.01 ? "\(Int(v.rounded()))" : String(format: "%.1f", v) }
         guard let row else { return "keyboard row: none (the controls as they are)" }
         let reported = keyboardFrame.frame.map { $0.minY - origin.y }
         let glass = DuoPosture.visibleKeyboardTop(reported: reported, screenHeight: size.height, controlsTop: split.controls,
                                                   ownHeight: keyboardFrame.ownHeight(width: size.width))
-        return "keyboard row: the caps \(n(row.minY))–\(n(row.maxY)) (\(n(row.height)) pt) between the fold's edge at "
-            + "\(n(split.controls)) and the keyboard's glass at \(glass.map(n) ?? "?") (reported from \(reported.map(n) ?? "?"); "
+        let caps = "keyboard row: the caps \(n(row.rect.minY))–\(n(row.rect.maxY)) (\(n(row.rect.height)) pt) "
+        let place: String
+        if row.inCrease, let band = duoFold.horizontalBand {
+            place = "in the crease, \(n(band.minY))–\(n(band.maxY)): the keyboard's glass at \(glass.map(n) ?? "?") leaves "
+                + "\(glass.map { n($0 - split.controls) } ?? "?") pt under the fold"
+        } else {
+            place = "between the fold's edge at \(n(split.controls)) and the keyboard's glass at \(glass.map(n) ?? "?")"
+        }
+        return caps + place + " (reported from \(reported.map(n) ?? "?"); "
             + "the keyboard \(keyboardFrame.ownHeight(width: size.width).map { n($0) + " pt, as it last went" } ?? "396 pt, as measured"))"
     }
     #endif
