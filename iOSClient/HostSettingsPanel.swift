@@ -57,6 +57,8 @@ struct HostSettingsPanel: View {
     /// This device's switch for Larger Picture (docs/larger-picture-plan.md): off unless turned on,
     /// read by the stream screen, never sent.
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
+    /// Record Sound (#284): the Mac's sound in the next recording, while it sends it.
+    @AppStorage("Sill.recordSound") private var recordSound = true
     /// Whether the switch is offered here, the stream screen's say (`largerPictureOffered`): only on an
     /// iPhone without a hinge whose picture it makes larger.
     @Environment(\.largerPictureOffered) private var offersLargerPicture
@@ -382,6 +384,31 @@ struct HostSettingsPanel: View {
                     Footnote(text: note, warning: true)
                 }
                 Footnote(text: Self.sendAudioFooter(send, muted: client.soundMuted, mac: mac, device: device))
+                // The stream recorded on this device (#284, StreamRecorder): started here after a count
+                // over the picture (the panel closes for it), stopped here; with the sound while the Mac
+                // sends it.
+                Rows {
+                    Toggle(isOn: $recordSound) { Text("Record Sound").foregroundStyle(Palette.text) }
+                        .disabled(send != true)
+                        .accessibilityHint(send == true ? "" : "Turn on Send Audio to record the sound.")
+                        .rowFrame()
+                    RowDivider()
+                    Button {
+                        if client.recordingSince != nil || client.recordingCount != nil {
+                            client.stopRecording()
+                        } else {
+                            client.startRecording(withSound: recordSound)
+                            close()
+                        }
+                    } label: {
+                        Text(client.recordingSince != nil || client.recordingCount != nil ? "Stop Recording" : "Start Recording")
+                            .foregroundStyle(client.recordingSince != nil ? Color.red : Palette.accent)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .rowFrame()
+                }
+                Footnote(text: "Saves the stream as a movie in Files › On My \(device) › Sill › Sill Recordings: what \(mac) shows, the lock screen and typed passwords included.")
                 // Direct Wireless Connection: how devices reach the Mac, not how it streams; after the
                 // closing footer, whose "the stream restarts" is not true of it, and last, the least
                 // changed row with the longest footer (the compact halves' 259 pt shows the rest

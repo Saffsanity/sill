@@ -912,6 +912,11 @@ final class StreamClient: ObservableObject {
     @Published var clipboardChip = false
     /// "Sent to ‹Mac›’s clipboard…" or "Too long to send…", for a moment after a Paste.
     @Published var clipboardNote: ClipboardNote?
+    /// The stream's recording (#284, StreamRecorder): the count before it (3, 2, 1), and since when it runs.
+    @Published var recordingCount: Int?
+    @Published var recordingSince: Date?
+    var recorder: StreamRecorder?
+    var recordingBackground: NSObjectProtocol?
     /// This connection sent its subscription and no stop since (ClipboardPolicy.deviceSubscription).
     var clipboardSubscribed = false
     /// When Sill last became active: a session that starts soon after gets the chip's look too.
@@ -3512,6 +3517,7 @@ final class StreamClient: ObservableObject {
     /// never delivered its window list: the connect screen never left, and its Remote rows must not
     /// vanish for another 3 s. Main thread.
     func tearDown(status: String, restartSearch: Bool = true) {
+        stopRecording()
         abandonMove()
         resetPath()
         lastMoveAttempt = nil
