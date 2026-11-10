@@ -397,6 +397,8 @@ check(glass(640) == sure(glassTop) && glass(640, letters: 445) == sure(506) && g
 check(glass(nil) == nil && glass(951) == nil && glass(960) == nil && glass(nil, laptop: false) == nil && glass(951, laptop: false) == nil,
       "none up, or one gone below the foot: none")
 check(glass(373.5, height: 869, controls: 414) == sure(473), "the status bar shown (669×869): the page from 373.5, the glass at 473")
+check(glass(640, letters: nil) == assumed(glassTop) && glass(530, letters: nil) == assumed(530),
+      "folded from open flat, an input mode not measured: the glass assumed, not sure")
 // Another keyboard of the mode in the laptop pose: its glass is never reported there.
 check(glass(deckTop, plane: .other) == Glass(top: nil, sure: false) && glass(640, plane: .other) == Glass(top: nil, sure: false)
       && glass(deckTop, letters: nil, plane: .other) == Glass(top: nil, sure: false),
@@ -459,7 +461,8 @@ check(plane(shown: flatEmoji, begin: flatEmoji, end: rect(0, 640.4, 669, 310.6),
       && plane(shown: flatEmoji, begin: flatEmoji, end: rect(0, 641, 669, 310), lettersShown: 311) == .other,
       "open flat: the letters keyboard's height to within half a point")
 check(plane(shown: flatEmoji, begin: flatEmoji, end: flatEnglish, lettersShown: nil) == .other, "open flat, no letters height seen: another")
-check(plane(shown: rect(0, 554.6, 669, 396.4), begin: english, end: page, lettersShown: 311) == .other,
+check(plane(shown: rect(0, 554.6, 669, 396.4), begin: english, end: page, lettersShown: 311) == .other
+      && plane(shown: rect(0, 554.6, 669, 396.4), begin: english, end: page, letters: 300, lettersShown: 311) == .other,
       "reported from within half a point of the glass left: as itself, and the page is not the letters keyboard's height")
 // A fold from open flat with the emoji keyboard up, then ABC in the laptop pose: the report still the open flat
 // keyboard's (553) when the switch comes would be read as itself; after the page has come, as the page.
