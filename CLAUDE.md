@@ -39,7 +39,7 @@ your phone off for five minutes." Host only, no wire change.
   `door.stalled` in the `[1s]` lines. No notice in Sill.app (open question 3).
 - Verified (the plan's Results): `door-policy` 288 checks (261 on main; the reporter's phone never backed
   off where the rule before backed it off at 16.64 s, every finding 9 case as before) and 131 mutants
-  (MUTANTS314); `run-all.sh`, all 63; `swift build -c release`, only the CaptureProbe warning; live on
+  (each pattern applying once; not run yet: `run-all.sh --mutants door-policy`); `run-all.sh`, all 63; `swift build -c release`, only the CaptureProbe warning; live on
   loopback against main's build, both doors: a client that sends nothing gets the new line and
   `door.stalled` (main: "unpaired"), a reset after 3 s "closed by the other end", garbage, an HTTP request
   and a real unpaired key as before; 20 stalls, one address keeping two places 120 s, or three addresses

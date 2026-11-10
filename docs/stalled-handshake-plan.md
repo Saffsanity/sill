@@ -155,7 +155,7 @@ reproduced: a client that connects and sends nothing is what Sill saw of it.
   own two places: never backed off), by three addresses at once (never), four devices stalling together
   (they fill the places: backed off at 13.0 s), and every finding 9 case: the scan's attack and its
   variants backed off as before (the four within 13 s), the reworked trade-offs above. Mutants: 131 (113 on
-  main), each pattern applying once; MUTANTS314. `run-all.sh`, all 63 passed.
+  main), each pattern applying once; their run did not happen here (the shared build lock was held by other agents' long jobs until this session had to stop): `Tests/checks/run-all.sh --mutants door-policy` runs them. `run-all.sh`, all 63 passed.
 - **Build.** `swift build -c release`, everything: 47.8 s, only the CaptureProbe warning.
 - **Loopback runs** (`--synthetic --remote --pairing`, a fresh host for each, both doors on 127.0.0.1):
 
