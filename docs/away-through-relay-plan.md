@@ -195,7 +195,7 @@ sill-handoff's `triage/2026-11-09/doors/evidence-326/`.
   access off, the home door admitting a relay, a relay labelled "by address"); `away-quality` 145 (143)
   and 41 of 41 mutants (AQ11 and AQ12's patterns follow the new line; AQ40, a relay at home, the rule
   before #326; AQ41, loopback away too); `door-policy` 264 (261) and 113 of 113 mutants (2,047 s);
-  `run-all.sh`, all 64 passed.
+  `run-all.sh`, all 63 passed.
 - **Build.** `swift build -c release`, everything: 45.6 s, only the CaptureProbe warning.
 - **Loopback runs** (`--synthetic --remote --pairing`, two test devices paired once at the remote door
   with the link, the same test identity for both builds):

@@ -35,7 +35,7 @@ trips of 2 to 4 s, then a drop). Host only: no wire change, no device change, no
   address", as every one was before); without a hook a loopback test client at the remote door is a relay,
   away (the simulator's remote dials on loopback too).
 - Verified (the plan's Results): `origin` 95 checks and 19 of 19 mutants, `away-quality` 145 and 41 of 41,
-  `door-policy` 264 and 113 of 113; `run-all.sh`, all 64; `swift build -c release`, only the
+  `door-policy` 264 and 113 of 113; `run-all.sh`, all 63; `swift build -c release`, only the
   CaptureProbe warning; live on loopback against main's build: a relayed device away (the stream at 4 Mbps,
   "through a relay on this Mac"; main: at home, 15 Mbps, "by address"), the same from this Mac's own en0
   address, `lan` at home, `vpn` the same on both, a relayed device and one at the home door (home quality,
