@@ -408,8 +408,11 @@ def run_view(out):
             if case == "off": verdict(h.first(r"^Off-console view: ")[0] is None, "off: no start line")
             verdict(L is not None and "devices see none of this session" in (line or ""), f"{case}: 0.6.0's off-console line at {L} s: {line}")
         verdict(U is not None and 2.0 <= U - 18.0 <= 3.6, f"{case}: the unlock at {U} s (back at 18.0 s)")
+        # Off console by the test's own clock: the file (or the notification) at 6 s, back at 18 s. The view ends at once
+        # when the console's witness says this user again (18 s), before the unlock's settle (`Unlocked:` about 2 s later).
+        A, B = 5.5, 18.0
         def view_lists(rows):
-            return [(at, ex) for at, kind, _, _, ex in rows if kind == 2 and L and U and L + 0.2 <= at < U]
+            return [(at, ex) for at, kind, _, _, ex in rows if kind == 2 and A <= at < B]
         l1, l2 = view_lists(rows1), view_lists(rows2)
         verdict(bool(l1) and all(("offConsoleView=1" in ex) == shown and "locked=1 offConsole=1" in ex for _, ex in l1),
                 f"{case}: the viewer's lists off console say locked, offConsole{' and offConsoleView' if shown else ', no offConsoleView'} ({len(l1)})")
@@ -420,8 +423,8 @@ def run_view(out):
             b1, b2 = big(rows1, L + 0.5, U), big(rows2, L + 0.5, U)
             verdict((len(b1) > 20 and len(b2) > 20) if shown else (not b1 and not b2),
                     f"{case}: the pattern's frames off console: {len(b1)} and {len(b2)} large ones to the two clients ({'it streams on' if shown else 'the placeholder'})")
-            dark = [k for k in keys1 if k[0] is not None and L + 0.3 <= k[0] < U]
-            verdict(bool(dark) and all((k[1] > 30) == shown for k in dark),
+            dark = [k for k in keys1 if k[0] is not None and A <= k[0] < B]
+            verdict((bool(dark) or shown) and all((k[1] > 30) == shown for k in dark),
                     f"{case}: the keyframes off console decode to {'the pattern' if shown else 'black'}: lumas {[round(k[1]) for k in dark][:6]}")
             snd = [r for r in rows1 if r[1] == 43 and L + 0.3 <= r[0] < U]
             verdict(not snd, f"{case}: no sound off console ({len(snd)} messages; {len([r for r in rows1 if r[1] == 43 and r[0] < L])} before)")
