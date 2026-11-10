@@ -181,6 +181,33 @@ Input still goes (the host drops it, one line a minute), as under 0.6.0's off-co
   console (test hosts never ask ScreenCaptureKit).
 - Photos from the harness (`-SillMacLocked view`) at an iPad's and an iPhone's size and a large text size.
 
+## Results (2026-11-09)
+
+- `Tests/checks/lock-policy`: 1,360 of 1,360 (532 on main): the view against every reading with the switch on and
+  off, `consoleTaken` over the 1,920 witness combinations (taken only by the console's user or a test host's 2, and
+  only where the reading is off console; a notification or the session dictionary never), the gate, every request at
+  arrival and now (with the switch off, 0.6.0's answer at the more restrictive reading, for every request, reading and
+  pairing), the lists both ways, `reconciles`, `Restore`, the lines, the device's words and cover (2,000 random
+  sessions with the view), and the coordinator's glue: V1–V6 and 5,000 random sessions with the switch toggling (732
+  settled in the view, none with the placeholder or on the virtual display). Mutants: 184 written (46 new), each
+  pattern applying exactly once; **not run here** (the shared build lock was busy for hours; CI's mutants matrix runs
+  them by hand). `away-quality`: the knob (off in `standard` and `app`, its line, never moved by a device), 3 mutants.
+- CI's Build and check on the pull request (run 42729884659): green: `swift build -c release`, `run-all.sh` "All
+  passed." (lock-policy 1360 of 1360, away-quality all passed), the iOS app for the simulator (only the known
+  CaptureProbe and StreamClient capture warnings), the CLI's paths. Here: `swift build -c release`, 45.8 s, only the
+  CaptureProbe warning.
+- Live (`Scripts/lock-check/live.py OUT view`, three synthetic hosts on loopback, each about 30 s, the file 2 from 6 to
+  18 s): 26 of 26 verdicts. With `--off-console-view`: the start line; the view's line; 162 large frames of the test
+  pattern to each of two clients off console; the client whose hello says `offConsoleView` got the list with it, the
+  older client the locked list; no sound off console (474 messages before); a tap and a clipboard text dropped with
+  their lines; at 18 s the view ended at once (the plain locked list) and the unlock came 2.6 s later. Without the
+  switch, and with the switch but off console by a notification alone (`SILL_TEST_LOCK_NOTE`): 0.6.0's line, no
+  large frame off console, the placeholder's keyframe black (luma 0).
+- Previews from the bare binary: the Devices pane with the new section (`pane-devices-offconsoleview-*`), the card's
+  `off-console-view` sample; the toggle on one line at 520 pt.
+- **Not run** (the shared lock and the usage cap): H2 against main, the harness photos of the device, the iOS
+  Release and device builds, the mutants. Nothing here ran a real second account.
+
 ## Untested, for Noah and junkaiman
 
 On a Mac with two accounts, Sill.app from this branch with the switch on, an iPad or iPhone from this branch:

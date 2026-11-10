@@ -37,7 +37,11 @@ while another user holds the screen, the device saying plainly that it is not th
   reaches it until it is back." (the view starting or ending off console says one of the two lines), a start line when
   on, the card's subtitle "Another user is on this Mac’s screen. Devices see this account, and can’t click or type in
   it." `sillclient.py --off-console-view`.
-- Verified: see the plan's Results (filled in as the runs finish).
+- Verified (the plan's Results): `lock-policy` 1,360 of 1,360 (184 mutants written, not run here); CI's Build and check
+  green on the pull request (#340); `live.py view` 26 of 26 on loopback test hosts (the pattern streams on in the view to
+  both clients, the viewer's list says `offConsoleView`, the older client's is the locked list, no sound, input and
+  clipboard dropped; without the switch or by a notification alone, the placeholder). Not run: H2, the device's photos,
+  the iOS Release and device builds, the mutants.
 - **Untested, for Noah and junkaiman (the plan's 1–5, a Mac with two accounts):** junkaiman's boot state (B takes the
   console from an RFB login at boot; A's device sees A's desktop and windows with the line, taps do nothing; the
   console back to A: as 0.6.0); a fast user switch mid-stream; the console's display asleep while A shows (open
