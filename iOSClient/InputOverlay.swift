@@ -919,6 +919,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
                            + "; a hardware keyboard's characters: " + typingNote(keyTyping))
             #endif
             keyboardProxy?.became(self, automatic: askedAutomatic)
+            KeyboardFrameMonitor.shared.modeChanged(to: textInputMode?.primaryLanguage)
         } else {
             applyInputViews(automatic: before)
         }
@@ -1345,6 +1346,9 @@ extension InputOverlayView {
     /// The keyboard just switched (⌃Space, the Globe key): its name, for a second. Not Emoji's or
     /// dictation's, which are no keyboard typed with (TextInputRules.isKeyboard).
     @objc func inputModeChanged() {
+        // A switch while the keyboard is up, the emoji key's too (its input mode unchanged): the laptop pose
+        // reports no keyboard as it comes (KeyboardFrameMonitor, DuoPosture.planeAfterSwitch).
+        if isFirstResponder { KeyboardFrameMonitor.shared.modeChanged(to: textInputMode?.primaryLanguage) }
         Self.textinput("the keyboard is now " + (textInputMode?.primaryLanguage ?? "unknown") + (isFirstResponder ? "" : " (not first responder)")
                        + "; a hardware keyboard's characters: " + typingNote(keyTyping))
         guard isFirstResponder, !composition.isComposing, let language = textInputMode?.primaryLanguage,
@@ -1545,26 +1549,46 @@ final class HardwareKeyboardMonitor: ObservableObject {
 }
 
 /// Where the software keyboard is, as UIKit reports it: the end frame of its notifications, in the
-/// screen's coordinates (the stream screen's window fills its screen), nil while none is up; and the
-/// keyboard's own height at a width, from the frame it leaves as it goes. The laptop pose's key row
-/// follows its glass (#215, DuoPosture.visibleKeyboardTop): there iOS 27.1 reports a keyboard from the
-/// fold's top edge down, the whole lower page (0, 455.5, 669×495.5 on the Duo), whatever it draws at the
-/// foot: the English keyboard 396 pt tall (its glass from 555), the Chinese (Pinyin) one 445 (from 506,
-/// its candidates' band over the same keys). Only a hide's begin frame is the glass, (0, 555, 669×396)
-/// and (0, 506, 669×445); the frame it slides to below the screen says 396 and 395. It is remembered only
-/// from a keyboard UIKit reported from above its glass (DuoPosture.keyboardHeightToLearn): open flat the
-/// same width has shorter keyboards reported as themselves (the English one 311 pt from 640). Every notification
-/// counts, the will and the did: on fresh simulators a will-change went unheard now and then. A change
-/// is published inside the keyboard's own animation, so what follows its top moves with it. Started by
-/// the first stream screen (`StreamScreen`), so it outlives a rotation. Main thread.
+/// screen's coordinates (the stream screen's window fills its screen), nil while none is up; which of
+/// the input mode's keyboards is up (`plane`); and the letters keyboard's own height at a width, from the
+/// frame it leaves as it goes. The inner display's stand-in for the rows follows the glass (#215,
+/// DuoPosture.keyboardStandIn): in the laptop pose iOS 27.1 reports every keyboard from the fold's top
+/// edge down, the whole lower page (0, 455.5, 669×495.5 on the Duo), whatever it draws at the foot: the
+/// English keyboard 396 pt tall (its glass from 555), the Chinese (Pinyin) one and the emoji keyboard 445
+/// (from 506). Only the frame a keyboard leaves is ever its glass: a hide's begin frame, and a switch's
+/// (the emoji key, ABC, the Globe key: UITextInputMode's notification, then this one's with the keyboard
+/// left as its begin and the lower page again as its end, at once). The height is remembered only from a
+/// letters keyboard UIKit reported from above its glass (DuoPosture.keyboardHeightToLearn): open flat the
+/// same width has shorter keyboards reported as themselves (the English one 311 pt from 640, the emoji
+/// keyboard 398 from 553). Every notification counts, the will and the did: on fresh simulators a
+/// will-change went unheard now and then. A change of frame is published inside the keyboard's own
+/// animation, so what follows its top moves with it. Started by the first stream screen
+/// (`StreamScreen`), so it outlives a rotation. Main thread.
 final class KeyboardFrameMonitor: ObservableObject {
     static let shared = KeyboardFrameMonitor()
     @Published private(set) var frame: CGRect? = nil
-    /// The keyboard's own height by its width, from the frame it left as it last went.
-    private(set) var ownHeights: [CGFloat: CGFloat] = [:]
+    /// Which of the input mode's keyboards is up (DuoPosture.planeAfterSwitch): the letters keyboard from
+    /// each show and each language switch, another after the emoji key until a switch says the letters
+    /// keyboard is back.
+    @Published private(set) var plane: DuoPosture.KeyboardPlane = .letters
+    /// The stream input view's input mode (`modeChanged`), "en-US", "zh-Hans": the emoji keyboard keeps
+    /// the mode's.
+    private(set) var mode: String? = nil
+    /// The letters keyboard's own height by the screen's width and the input mode, from the frame it left
+    /// as it last went.
+    private var ownHeights: [Key: CGFloat] = [:]
+    private struct Key: Hashable { var width: CGFloat; var mode: String }
     /// The last frame UIKit reported the keyboard at while it was up (never one at or below the screen's
     /// foot, where a will-change sends it as it goes), forgotten once it has gone.
     private var shownFrame: CGRect? = nil
+    /// The input mode the plane was decided for (the show, the last switch).
+    private var planeMode: String? = nil
+    /// The letters keyboard's height as UIKit last reported it while it was up (open flat: itself).
+    private var lettersShown: CGFloat? = nil
+    /// A switch UITextInputMode announced, settled by the keyboard notification that follows at once, or
+    /// as another keyboard after `switchWait` (the emoji search back to the emoji keyboard sends none).
+    private var pendingSwitch: (modeChanged: Bool, timeout: DispatchWorkItem)? = nil
+    private static let switchWait: TimeInterval = 0.4
 
     private static let hides: Set<Notification.Name> = [UIResponder.keyboardWillHideNotification, UIResponder.keyboardDidHideNotification]
 
@@ -1577,8 +1601,46 @@ final class KeyboardFrameMonitor: ObservableObject {
         }
     }
 
-    /// The keyboard's own height at `width` (a screen's), once it has gone at that width.
-    func ownHeight(width: CGFloat) -> CGFloat? { ownHeights[width] }
+    /// The letters keyboard's own height in the laptop pose at `width` (a screen's) for the input mode now:
+    /// learned when it last went, else measured (DuoPosture.measuredLaptopKeyboard), else nil (not known).
+    func lettersHeight(width: CGFloat) -> CGFloat? {
+        ownHeights[Key(width: width, mode: mode ?? "")] ?? DuoPosture.measuredLaptopKeyboard(mode: mode)
+    }
+
+    /// The stream's input view, first responder, tells its input mode: as it becomes first responder, and at
+    /// every switch (UITextInputMode.currentInputModeDidChangeNotification, which the emoji key sends too, its
+    /// mode unchanged). While a keyboard is up that is a switch, which the keyboard notification right after
+    /// settles (`settle`).
+    func modeChanged(to newMode: String?) {
+        mode = newMode
+        guard frame != nil else { planeMode = newMode; return }
+        pendingSwitch?.timeout.cancel()
+        let timeout = DispatchWorkItem { [weak self] in self?.settle(begin: nil, end: nil, screen: nil) }
+        pendingSwitch = (newMode != planeMode, timeout)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.switchWait, execute: timeout)
+    }
+
+    /// A switch: the keyboard left (`begin`; nil when no keyboard notification came), remembered where it
+    /// was the letters keyboard reported from above its glass, and the plane after it.
+    private func settle(begin: CGRect?, end: CGRect?, screen: CGRect?) {
+        guard let pending = pendingSwitch else { return }
+        pending.timeout.cancel()
+        pendingSwitch = nil
+        if plane == .letters, let left = DuoPosture.keyboardHeightToLearn(leaving: begin, shown: shownFrame, screen: screen), let begin {
+            ownHeights[Key(width: begin.width, mode: planeMode ?? "")] = left
+        }
+        let letters = (begin ?? screen).map { lettersHeight(width: $0.width) } ?? nil
+        let after = DuoPosture.planeAfterSwitch(modeChanged: pending.modeChanged, shown: shownFrame, begin: begin, end: end,
+                                                letters: letters, lettersShown: lettersShown)
+        #if DEBUG
+        print("keyboard plane: \(after == .letters ? "the letters keyboard" : "another keyboard") of \(mode ?? "no input mode") after a switch "
+              + (begin.map { "from a keyboard \(Self.points($0.height)) pt tall" } ?? "with no keyboard reported")
+              + (pending.modeChanged ? " (another input mode)" : ""))
+        #endif
+        planeMode = mode
+        if after == .letters, let end { lettersShown = end.height }
+        if after != plane { plane = after }
+    }
 
     private func changed(_ note: Notification) {
         let info = note.userInfo ?? [:]
@@ -1588,27 +1650,44 @@ final class KeyboardFrameMonitor: ObservableObject {
         let begin = info[UIResponder.keyboardFrameBeginUserInfoKey] as? CGRect
         let end = info[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
         let screen = (note.object as? UIScreen)?.bounds
-        // The keyboard as itself: the frame it leaves as it goes (a hide's begin), across the screen and
-        // down to its foot (a fold's change reports frames of neither), where UIKit had reported it from
-        // above that (the laptop pose's lower page; open flat it reports the keyboard as itself, a shorter
-        // one at the same width): DuoPosture.keyboardHeightToLearn.
-        if hiding {
-            if let own = DuoPosture.keyboardHeightToLearn(leaving: begin, shown: shownFrame, screen: screen), let begin {
-                ownHeights[begin.width] = own
-            }
-            shownFrame = nil
-        }
         let now: CGRect? = hiding ? nil : end.flatMap { $0.height > 0 && !$0.isNull ? $0 : nil }
-        if let now, now.minY < (screen?.maxY ?? .infinity) - 0.5 { shownFrame = now }
         #if DEBUG
-        // `-SillKeyboardProbe 1`: every notification as UIKit sends it (how the laptop pose's numbers
-        // were measured, DuoPosture.visibleKeyboardTop).
+        // `-SillKeyboardProbe 1`: every notification as UIKit sends it (how the inner display's numbers
+        // were measured, DuoPosture.keyboardGlass).
         if UserDefaults.standard.bool(forKey: "SillKeyboardProbe") {
-            print("keyboard probe: \(note.name.rawValue): begin \(Self.describe(begin)), end \(Self.describe(end)); "
-                  + "own heights " + ownHeights.sorted { $0.key < $1.key }.map { "\(Self.points($0.value)) at \(Self.points($0.key)) wide" }
-                    .joined(separator: ", "))
+            print(String(format: "keyboard probe %.3f: ", CACurrentMediaTime()) + "\(note.name.rawValue): begin \(Self.describe(begin)), "
+                  + "end \(Self.describe(end)); \(mode ?? "no input mode"), \(plane == .letters ? "letters" : "another keyboard"); own heights "
+                  + ownHeights.sorted { ($0.key.mode, $0.key.width) < ($1.key.mode, $1.key.width) }
+                    .map { "\(Self.points($0.value)) for \($0.key.mode) at \(Self.points($0.key.width)) wide" }.joined(separator: ", "))
         }
         #endif
+        if hiding {
+            // The keyboard as itself: the frame it leaves as it goes (a hide's begin), across the screen and
+            // down to its foot (a fold's change reports frames of neither), where UIKit had reported it from
+            // above that (the laptop pose's lower page; open flat it reports the keyboard as itself, a shorter
+            // one at the same width): DuoPosture.keyboardHeightToLearn. Only the letters keyboard's.
+            if plane == .letters, let own = DuoPosture.keyboardHeightToLearn(leaving: begin, shown: shownFrame, screen: screen), let begin {
+                ownHeights[Key(width: begin.width, mode: planeMode ?? mode ?? "")] = own
+            }
+            pendingSwitch?.timeout.cancel()
+            pendingSwitch = nil
+            shownFrame = nil
+            lettersShown = nil
+            planeMode = mode
+            if plane != .letters { plane = .letters }
+        } else if let now {
+            if frame == nil {
+                // A show: the letters keyboard (the next show after the emoji keyboard went is the letters one).
+                pendingSwitch?.timeout.cancel()
+                pendingSwitch = nil
+                planeMode = mode
+                if plane != .letters { plane = .letters }
+            } else if pendingSwitch != nil {
+                settle(begin: begin, end: now, screen: screen)
+            }
+            if plane == .letters, pendingSwitch == nil { lettersShown = now.height }
+        }
+        if let now, now.minY < (screen?.maxY ?? .infinity) - 0.5 { shownFrame = now }
         guard now != frame else { return }
         let duration = (info[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0
         #if DEBUG

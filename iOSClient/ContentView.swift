@@ -122,9 +122,10 @@ struct ContentView: View {
 ///   the fake screen is the simulator's own: `-SillLayout 669x951 -SillHinge half` on the iPhone Duo
 ///   simulator folded into the laptop pose draws the key row above the real keyboard, #215).
 /// * `-SillKeyboardProbe 1` — every software keyboard notification on the console ("keyboard probe:
-///   UIKeyboardWillChangeFrameNotification: begin 0,0 0×0, end 0,455.5 669×495.5; own heights …"),
-///   beside the `keyboard frame: top 455.5, 495.5 pt tall` line each change prints: how the laptop
-///   pose's numbers were measured (DuoPosture.visibleKeyboardTop). In the normal app too.
+///   UIKeyboardWillChangeFrameNotification: begin 0,0 0×0, end 0,455.5 669×495.5; en-US, letters; own
+///   heights …"), beside the `keyboard frame: top 455.5, 495.5 pt tall` line each change prints and the
+///   `keyboard plane: …` line each switch: how the inner display's numbers were measured
+///   (DuoPosture.keyboardGlass). In the normal app too.
 /// * `-SillHardwareKeyboard 1|0` — a hardware keyboard is attached, or not, for this run, whatever
 ///   GameController says (HardwareKeyboardMonitor; docs/hardware-keyboard-plan.md). A simulator's
 ///   GameController always counts the simulator's own keyboard, so without it the stream's input view
@@ -517,10 +518,10 @@ struct ContentView: View {
 /// and `keyboard: up, 320 pt tall, its top at 574 pt in the stream screen; the key row ends 10 pt
 /// above it, …` each time the software keyboard moves (PortraitStreamScreen); `keyboard frame: top
 /// 455.5, 495.5 pt tall` (or `none`) each time UIKit reports the keyboard elsewhere
-/// (KeyboardFrameMonitor); and in the Duo's laptop pose `keyboard row: the caps 500–551 (51 pt) between
-/// the fold's edge at 496 and the keyboard's glass at 555 (…)`, under a tall keyboard `keyboard row: the
-/// caps 458.5–492.5 (34 pt) in the crease, 455.5–495.5: …`, or `keyboard row: none`, as the key row goes
-/// alone above the keyboard and comes back (#215).
+/// (KeyboardFrameMonitor); and on the Duo's inner display upright `keyboard: the row 500–551 (51 pt):
+/// between the fold's edge at 496 and the glass at 555 (…)`, under a tall keyboard or another keyboard of
+/// the input mode `keyboard: the toggle at 611,395 (44 pt): …`, or `keyboard: none`, as the key row or the
+/// toggle stands in for the rows and goes (#215).
 ///
 /// Launch arguments land in `NSArgumentDomain`, which is not persisted, so a normal launch is
 /// exactly the app it was before. None of this is built in Release.

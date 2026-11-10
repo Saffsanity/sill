@@ -351,41 +351,65 @@ for (hinge, s, info) in [(DuoPosture.Hinge.partiallyOpen, book, FoldInfo.known(b
     check(DuoPosture(hinge: hinge, fold: DuoPosture.standInFold(s)).info(in: s) == info, "the stand-in, \(hinge) \(s)")
 }
 
-// MARK: - The laptop pose with the software keyboard up: the key row alone (#215)
+// MARK: - The inner display upright with the software keyboard up: the key row alone, or the toggle (#215)
 
 // What UIKit reported on the iOS 27.1 simulator's Duo in the laptop pose, the dark keyboard with no
 // predictive bar (the reporter's): shown, the whole lower page from the fold's top edge (0, 455.5,
 // 669×495.5); going, its own frame (0, 555, 669×396), whose top is the glass's edge in a screenshot (the
-// reporter's too: the glass at 555, the keys from 568). The Chinese (Pinyin) keyboard: shown, the same
-// page; going, (0, 506, 669×445), its glass at 506 in a screenshot, a band for its candidates over the
-// same keys.
+// reporter's too: the glass at 555, the keys from 568). The Chinese (Pinyin) and emoji keyboards: shown, the
+// same page; going, (0, 506, 669×445). A switch while it is up (2026-11-10): UITextInputMode's notification,
+// then the keyboard's, its begin the keyboard left (0, 555, 669×396 or 0, 506, 669×445), its end the page
+// again. Open flat upright every keyboard is reported as itself: English (0, 640, 669×311), emoji (0, 553,
+// 669×398), Pinyin (0, 600, 669×351).
 let deckTop: CGFloat = 455.5, glassTop: CGFloat = 555
-func visible(_ reported: CGFloat?, own: CGFloat? = nil, height: CGFloat = 951, controls: CGFloat = 496) -> CGFloat? {
-    DuoPosture.visibleKeyboardTop(reported: reported, screenHeight: height, controlsTop: controls, ownHeight: own)
+typealias Glass = DuoPosture.KeyboardGlass
+func glass(_ reported: CGFloat?, letters: CGFloat? = 396, plane: DuoPosture.KeyboardPlane = .letters, laptop: Bool = true,
+           height: CGFloat = 951, controls: CGFloat = 496) -> Glass? {
+    DuoPosture.keyboardGlass(reported: reported, screenHeight: height, controlsTop: controls, laptop: laptop, plane: plane, letters: letters)
 }
+func sure(_ top: CGFloat) -> Glass { Glass(top: top, sure: true) }
+func assumed(_ top: CGFloat) -> Glass { Glass(top: top, sure: false) }
 check(DuoPosture.laptopKeyboardHeight == 396, "the Duo's keyboard upright: 396 pt, the glass from 555")
-check(visible(deckTop) == glassTop, "the lower page reported: the glass 396 above the foot, 555")
-check(visible(deckTop, own: 396) == glassTop, "the same with the height the keyboard showed going")
-check(visible(deckTop, own: 420) == 531, "a taller keyboard's own height, once it has gone: its glass")
-check(visible(deckTop, own: 445) == 506, "the Chinese keyboard, once it has gone: its glass at 506")
-check(visible(deckTop, own: 454) == 497 && visible(deckTop, own: 455) == glassTop && visible(deckTop, own: 495.5) == glassTop
-      && visible(deckTop, own: 600) == glassTop && visible(deckTop, own: 0) == glassTop && visible(deckTop, own: -10) == glassTop,
-      "a height that would put the glass at or above the fold's edge is none: the measured 396")
-check(visible(500, height: 600, controls: 550) == 500 && visible(400, own: 445) == 506,
+check(DuoPosture.measuredLaptopKeyboard(mode: "en-US") == 396 && DuoPosture.measuredLaptopKeyboard(mode: "en-GB") == 396
+      && DuoPosture.measuredLaptopKeyboard(mode: "en") == 396, "the English keyboards measured: 396")
+check(DuoPosture.measuredLaptopKeyboard(mode: "zh-Hans") == 445, "Pinyin measured: 445")
+check(DuoPosture.measuredLaptopKeyboard(mode: "ja-JP") == nil && DuoPosture.measuredLaptopKeyboard(mode: "fr-FR") == nil
+      && DuoPosture.measuredLaptopKeyboard(mode: "zh-Hant") == nil && DuoPosture.measuredLaptopKeyboard(mode: nil) == nil
+      && DuoPosture.measuredLaptopKeyboard(mode: "eng") == nil && DuoPosture.measuredLaptopKeyboard(mode: "emoji") == nil,
+      "any other input mode: not measured")
+check(glass(deckTop) == sure(glassTop), "the lower page reported, the English keyboard: the glass 396 above the foot, 555, sure")
+check(glass(deckTop, letters: 420) == sure(531), "a taller letters keyboard learned: its glass")
+check(glass(deckTop, letters: 445) == sure(506), "Pinyin (measured or learned): its glass at 506")
+check(glass(deckTop, letters: nil) == assumed(glassTop), "an input mode not measured: the glass assumed at 555, not sure")
+check(glass(deckTop, letters: 454) == sure(497) && glass(deckTop, letters: 455) == assumed(glassTop) && glass(deckTop, letters: 495.5) == assumed(glassTop)
+      && glass(deckTop, letters: 600) == assumed(glassTop) && glass(deckTop, letters: 0) == assumed(glassTop) && glass(deckTop, letters: -10) == assumed(glassTop),
+      "a height that would put the glass at or above the fold's edge is none: 396 assumed")
+check(glass(500, height: 600, controls: 550) == assumed(500) || glass(500, height: 600, controls: 550) == sure(500),
       "never above the report (a screen too short for the measured keyboard)")
-check(visible(496) == glassTop && visible(495.9) == glassTop, "a report at the fold's lower edge is the page too")
-check(visible(530) == 530 && visible(496.5) == 496.5 && visible(700, own: 100) == 700 && visible(554.5) == 554.5,
+check(glass(400, letters: 445) == sure(506), "a report over the page: the glass its height gives")
+check(glass(496) == sure(glassTop) && glass(495.9) == sure(glassTop), "a report at the fold's lower edge is the page too")
+check(glass(530) == sure(530) && glass(496.5) == sure(496.5) && glass(700, letters: 100) == sure(700) && glass(554.5) == sure(554.5),
       "a report under the fold's edge and over the glass its height gives: the keyboard as itself")
-check(visible(570) == glassTop && visible(555) == glassTop && visible(950) == glassTop,
+check(glass(570) == sure(glassTop) && glass(555) == sure(glassTop) && glass(950) == sure(glassTop),
       "a report under the glass its height gives: that glass, never lower")
-check(visible(640) == glassTop && visible(640, own: 396) == glassTop && visible(640, own: 445) == 506 && visible(640, own: 311) == 640,
-      "folded from open flat with the keyboard up (640 reported, the keyboard 396): 555; a learned height's glass")
-check(visible(nil) == nil && visible(951) == nil && visible(960) == nil, "none up, or one gone below the foot: none")
-check(visible(373.5, height: 869, controls: 414) == 473, "the status bar shown (669×869): the page from 373.5, the glass at 473")
+check(glass(640) == sure(glassTop) && glass(640, letters: 445) == sure(506) && glass(640, letters: 311) == sure(640),
+      "folded from open flat with the keyboard up (640 reported, the keyboard 396): 555")
+check(glass(nil) == nil && glass(951) == nil && glass(960) == nil && glass(nil, laptop: false) == nil && glass(951, laptop: false) == nil,
+      "none up, or one gone below the foot: none")
+check(glass(373.5, height: 869, controls: 414) == sure(473), "the status bar shown (669×869): the page from 373.5, the glass at 473")
+// Another keyboard of the mode in the laptop pose: its glass is never reported there.
+check(glass(deckTop, plane: .other) == Glass(top: nil, sure: false) && glass(640, plane: .other) == Glass(top: nil, sure: false)
+      && glass(deckTop, letters: nil, plane: .other) == Glass(top: nil, sure: false),
+      "the emoji keyboard (another of the mode) in the laptop pose: no glass known")
+check(glass(nil, plane: .other) == nil && glass(951, plane: .other) == nil, "another of the mode gone: none")
+// Open flat: the report is the glass, whatever the plane and the learned heights.
+check(glass(640, laptop: false, controls: 424) == sure(640) && glass(553, laptop: false, controls: 424) == sure(553)
+      && glass(600, letters: nil, plane: .other, laptop: false, controls: 424) == sure(600) && glass(300, laptop: false, controls: 424) == sure(300),
+      "open flat: the keyboard as reported (English 640, emoji 553, Pinyin 600), live")
 
-// The height KeyboardFrameMonitor remembers from a hide: the frame the keyboard leaves (the hide's begin),
-// only where UIKit reported it from above that while it was up (the laptop pose's lower page). Open flat
-// upright UIKit reports the English keyboard as itself, (0, 640, 669×311): nothing to learn there, and
+// The height KeyboardFrameMonitor remembers from a hide or a switch: the frame the keyboard leaves (the
+// begin), only where UIKit reported it from above that while it was up (the laptop pose's lower page). Open
+// flat upright UIKit reports the English keyboard as itself, (0, 640, 669×311): nothing to learn there, and
 // learning it put the laptop pose's row at 539–597 over a glass at 555 (the iOS 27.1 simulator, 2026-11-09).
 let page = rect(0, 455.5, 669, 495.5), screen = rect(0, 0, 669, 951)
 func learned(_ begin: CGRect?, shown: CGRect? = page, screen s: CGRect? = screen) -> CGFloat? {
@@ -407,91 +431,156 @@ check(learned(rect(0, 500, 669, 300)) == nil && learned(rect(0, 555, 669, 395)) 
 check(learned(rect(0, 951, 669, 0)) == nil && learned(nil) == nil && learned(rect(0, 555, 669, 396), screen: nil) == nil,
       "no height, no frame, no screen: nothing")
 check(learned(rect(0, 473, 669, 396), shown: rect(0, 373.5, 669, 495.5), screen: rect(0, 0, 669, 869)) == 396, "the status bar shown: 396")
-// The chain: what open flat teaches leaves the laptop pose's row where the measured keyboard puts it.
-check(visible(deckTop, own: learned(rect(0, 640, 669, 311), shown: rect(0, 640, 669, 311))) == glassTop,
-      "open flat then the laptop pose: the glass at 555, not 640")
+check(glass(deckTop, letters: learned(rect(0, 640, 669, 311), shown: rect(0, 640, 669, 311))) == assumed(glassTop),
+      "open flat then the laptop pose: the glass at 555, not 640 (assumed: nothing learned, no input mode measured)")
 
-func keyRow(_ top: CGFloat?, controls: CGFloat = 496, fold: FoldInfo = .known(laptopFold), size s: CGSize = upright,
-            standard: CGFloat = 148) -> DuoPosture.KeyboardRow? {
-    DuoPosture.keyboardRow(size: s, fold: fold, controlsTop: controls, keyboardTop: top, standardRows: standard, sides: 14)
+// The plane after a switch while the keyboard is up (2026-11-10, the iOS 27.1 simulator).
+func plane(modeChanged: Bool = false, shown: CGRect? = page, begin: CGRect?, end: CGRect? = page, letters: CGFloat? = 396,
+           lettersShown: CGFloat? = nil) -> DuoPosture.KeyboardPlane {
+    DuoPosture.planeAfterSwitch(modeChanged: modeChanged, shown: shown, begin: begin, end: end, letters: letters, lettersShown: lettersShown)
 }
-func under(_ y: CGFloat, _ caps: CGFloat) -> DuoPosture.KeyboardRow { .init(rect: rect(14, y, 641, caps), inCrease: false) }
-func crease(_ y: CGFloat, _ caps: CGFloat = 34) -> DuoPosture.KeyboardRow { .init(rect: rect(14, y, 641, caps), inCrease: true) }
+let english = rect(0, 555, 669, 396), emoji = rect(0, 506, 669, 445)
+check(plane(begin: english) == .other, "the laptop pose, 😀 from the English keyboard (the 396 left): another")
+check(plane(begin: emoji) == .letters, "the laptop pose, ABC from the emoji keyboard (the 445 left): the letters keyboard again")
+check(plane(begin: english, end: page) == .other, "the laptop pose, the emoji search from the emoji keyboard (reported as the 396 left): another")
+check(plane(begin: emoji, letters: 445) == .other && plane(begin: emoji, letters: 444) == .other && plane(begin: emoji, letters: 443.9) == .letters,
+      "the one left must be more than a point taller than the letters keyboard: Pinyin's 445 and its emoji keyboard's: another")
+check(plane(begin: emoji, letters: nil) == .other, "an input mode not measured: never the letters keyboard by a switch")
+check(plane(modeChanged: true, begin: english) == .letters && plane(modeChanged: true, begin: nil, end: nil) == .letters,
+      "another input mode (the Globe key): its letters keyboard")
+check(plane(begin: nil, end: nil) == .other && plane(begin: emoji, end: nil) == .other && plane(begin: nil) == .other,
+      "no keyboard notification after the input mode's (the emoji search back to the emoji keyboard): another")
+check(plane(begin: rect(0, 951, 669, 0)) == .other && plane(begin: emoji, end: rect(0, 951, 669, 0)) == .other, "frames of no height: another")
+// Open flat: reported as itself.
+let flatEnglish = rect(0, 640, 669, 311), flatEmoji = rect(0, 553, 669, 398)
+check(plane(shown: flatEnglish, begin: flatEnglish, end: flatEmoji, lettersShown: 311) == .other, "open flat, 😀: the emoji keyboard, another")
+check(plane(shown: flatEmoji, begin: flatEmoji, end: flatEnglish, lettersShown: 311) == .letters, "open flat, ABC: the letters keyboard, at its 311 again")
+check(plane(shown: flatEmoji, begin: flatEmoji, end: rect(0, 640.4, 669, 310.6), lettersShown: 311) == .letters
+      && plane(shown: flatEmoji, begin: flatEmoji, end: rect(0, 641, 669, 310), lettersShown: 311) == .other,
+      "open flat: the letters keyboard's height to within half a point")
+check(plane(shown: flatEmoji, begin: flatEmoji, end: flatEnglish, lettersShown: nil) == .other, "open flat, no letters height seen: another")
+check(plane(shown: rect(0, 554.6, 669, 396.4), begin: english, end: page, lettersShown: 311) == .other,
+      "reported from within half a point of the glass left: as itself, and the page is not the letters keyboard's height")
+// A fold from open flat with the emoji keyboard up, then ABC in the laptop pose: the report still the open flat
+// keyboard's (553) when the switch comes would be read as itself; after the page has come, as the page.
+check(plane(shown: page, begin: rect(0, 504, 669, 447), lettersShown: 495.5) == .letters, "the page shown, the 447 left: the letters keyboard")
+
+func standIn(_ g: Glass?, controls: CGFloat = 496, fold: FoldInfo = .known(laptopFold), size s: CGSize = upright,
+             standard: CGFloat = 148) -> DuoPosture.KeyboardStandIn? {
+    DuoPosture.keyboardStandIn(size: s, fold: fold, controlsTop: controls, glass: g, standardRows: standard, sides: 14)
+}
+func row(_ y: CGFloat, _ caps: CGFloat) -> DuoPosture.KeyboardStandIn { .init(row: rect(14, y, 641, caps), toggle: false) }
+func rowAndToggle(_ y: CGFloat, _ caps: CGFloat) -> DuoPosture.KeyboardStandIn { .init(row: rect(14, y, 641, caps), toggle: true) }
+let toggleAlone = DuoPosture.KeyboardStandIn(row: nil, toggle: true)
 // Noah's numbers (2026-10-27, "A"): under the fold the caps the room less 8, at most 58, the black above
 // and below alike.
-check(keyRow(glassTop) == under(500, 51), "the Duo's keyboard: 4 + 51 + 4, \(String(describing: keyRow(glassTop)))")
-check(keyRow(570) == under(504, 58), "a 381 pt keyboard: 8 + 58 + 8")
-check(keyRow(571) == under(504, 58), "75 pt: 58 caps, 8 above and 9 below (within a point)")
-check(keyRow(552) == under(500, 48), "56 pt: the halves' own 48 pt caps")
-check(keyRow(643) == under(540, 58), "147 pt: 58 caps in the middle")
-check(keyRow(644) == nil && keyRow(700) == nil, "148 pt and more: the window bar and the key row in view, as they are")
-check(keyRow(nil) == nil && keyRow(951) == nil && keyRow(1000) == nil, "no keyboard: as they are")
-check(keyRow(951, standard: 1000) == nil && keyRow(960, standard: 1000) == nil, "a keyboard at or below the foot is none, whatever the rows take")
-check(keyRow(glassTop, fold: .inferred) == nil && keyRow(glassTop, fold: .known(nil)) == nil && keyRow(glassTop, fold: .known(bookFold)) == nil
-      && keyRow(506, fold: .inferred) == nil && keyRow(506, fold: .known(nil)) == nil && keyRow(506, fold: .known(bookFold)) == nil,
-      "off the laptop pose (before iOS 27.1, an iPad, open flat, the book pose's fold): as they are")
-// The threshold (Noah, 2026-10-29, "Crease", for the keyboards that leave too little room): under the fold
-// while the room holds caps of 44 pt, Apple's least touch target, with the 8 of black (52 pt), else in the
-// crease, 34 pt caps centred on the fold's band (458.5–492.5 of 455.5–495.5).
-check(DuoPosture.keyboardRowLeast == 44 && DuoPosture.keyboardRowCrease == 34, "the least caps under the fold 44, the crease's 34")
-check(keyRow(548) == under(500, 44), "52 pt: the least caps under the fold, 4 + 44 + 4")
-check(keyRow(548.5) == under(500, 44.5), "52.5 pt: 44.5 pt caps, 4 + 44.5 + 4")
-check(keyRow(547.5) == crease(458.5) && keyRow(547) == crease(458.5), "under 52 pt: the crease")
-check(keyRow(524) == crease(458.5) && keyRow(523) == crease(458.5), "28 pt (once the least 20 pt caps under the fold): the crease")
-check(keyRow(506) == crease(458.5), "the 445 pt keyboards (emoji, Chinese; the glass at 506, 10 pt): the crease, 458.5–492.5")
-check(keyRow(496.5) == crease(458.5) && keyRow(496) == crease(458.5) && keyRow(480) == crease(458.5),
-      "a keyboard at or over the fold's edge: the crease")
-check(keyRow(506)!.rect.minY - laptopFold.minY == laptopFold.maxY - keyRow(506)!.rect.maxY, "the crease row centred on the fold: 3 above, 3 below")
-check(keyRow(506, fold: .known(rect(0, 470, 669, 20))) == crease(470, 20), "a band thinner than 34 pt: the caps the band's, never onto either page")
+check(standIn(sure(glassTop)) == row(500, 51), "the Duo's keyboard: 4 + 51 + 4, \(String(describing: standIn(sure(glassTop))))")
+check(standIn(sure(570)) == row(504, 58), "a 381 pt keyboard: 8 + 58 + 8")
+check(standIn(sure(571)) == row(504, 58), "75 pt: 58 caps, 8 above and 9 below (within a point)")
+check(standIn(sure(552)) == row(500, 48), "56 pt: the halves' own 48 pt caps")
+check(standIn(sure(643)) == row(540, 58), "147 pt: 58 caps in the middle")
+check(standIn(sure(644)) == nil && standIn(sure(700)) == nil, "148 pt and more: the window bar and the key row in view, as they are")
+check(standIn(nil) == nil && standIn(sure(951)) == nil && standIn(sure(1000)) == nil, "no keyboard: as they are")
+check(standIn(sure(951), standard: 1000) == nil && standIn(sure(960), standard: 1000) == nil, "a keyboard at or below the foot is none, whatever the rows take")
+check(standIn(sure(glassTop), fold: .inferred) == nil && standIn(sure(glassTop), fold: .known(bookFold)) == nil
+      && standIn(Glass(top: nil, sure: false), fold: .inferred) == nil && standIn(sure(506), fold: .inferred) == nil,
+      "off the inner display upright's known fold (before iOS 27.1, an iPad): as they are")
+check(standIn(sure(300), fold: .known(bookFold), size: book) == nil && standIn(Glass(top: nil, sure: false), fold: .known(bookFold), size: book) == nil
+      && standIn(sure(300), fold: .known(nil), size: book) == nil && standIn(sure(300), fold: .known(nil), size: size(669, 669)) == nil,
+      "sideways (the book pose, open flat sideways) and square: as they are")
+// The tall keyboards (Noah, 2026-11-10: "If for some reason that would be covered up (i.e. emoji keyboard)
+// surface a small toggle on the top screen for the keyboard, and thats it. No full row."): under the fold
+// while the room holds caps of 44 pt with the 8 of black (52 pt), else the toggle alone.
+check(DuoPosture.keyboardRowLeast == 44 && DuoPosture.keyboardToggleSize == 44 && DuoPosture.keyboardToggleInset == 8,
+      "the least caps 44, the toggle 44 and 8 above the pane's foot")
+check(standIn(sure(548)) == row(500, 44), "52 pt: the least caps under the fold, 4 + 44 + 4")
+check(standIn(sure(548.5)) == row(500, 44.5), "52.5 pt: 44.5 pt caps, 4 + 44.5 + 4")
+check(standIn(sure(547.5)) == toggleAlone && standIn(sure(547)) == toggleAlone, "under 52 pt: the toggle, no row")
+check(standIn(sure(506)) == toggleAlone, "the 445 pt keyboards (Pinyin; the glass at 506, 10 pt): the toggle")
+check(standIn(sure(496.5)) == toggleAlone && standIn(sure(496)) == toggleAlone && standIn(sure(480)) == toggleAlone,
+      "a keyboard at or over the fold's edge: the toggle")
+check(standIn(Glass(top: nil, sure: false)) == toggleAlone, "another keyboard of the mode (the emoji keyboard): the toggle at once")
+check(standIn(assumed(glassTop)) == rowAndToggle(500, 51), "an input mode not measured: the row where 396 leaves it, and the toggle")
+check(standIn(assumed(506)) == toggleAlone, "assumed and no room: the toggle alone")
 // The status bar shown (669×869): the fold 82 pt higher, the controls from 414.
 let shownBand = rect(0, 373.5, 669, 40)
-check(keyRow(473, controls: 414, fold: .known(shownBand), size: size(669, 869)) == under(418, 51), "the status bar shown: 4 + 51 + 4 from 414")
-check(keyRow(424, controls: 414, fold: .known(shownBand), size: size(669, 869)) == crease(376.5), "the status bar shown: the crease, 376.5–410.5")
-// The whole chain, as the device reports it.
-check(keyRow(visible(deckTop)) == under(500, 51), "the lower page reported: the row 500–551 over the glass at 555")
-check(keyRow(visible(deckTop, own: 396)) == under(500, 51), "the English keyboard, once it has gone: the same")
-check(keyRow(visible(deckTop, own: 445)) == crease(458.5), "the Chinese keyboard, once it has gone (its glass at 506): the crease")
-check(keyRow(visible(deckTop, own: 403)) == under(500, 44) && keyRow(visible(deckTop, own: 403.5)) == crease(458.5),
-      "a keyboard 403 pt tall: the least row under the fold; 403.5: the crease")
-check(keyRow(visible(deckTop, own: 445))!.rect.minY > 447.5, "the crease row under the picture (8 pt inside the pane's 455)")
+check(standIn(sure(473), controls: 414, fold: .known(shownBand), size: size(669, 869)) == row(418, 51), "the status bar shown: 4 + 51 + 4 from 414")
+check(standIn(sure(424), controls: 414, fold: .known(shownBand), size: size(669, 869)) == toggleAlone, "the status bar shown, a tall keyboard: the toggle")
+// The whole chain in the laptop pose, as the device reports it.
+check(standIn(glass(deckTop)) == row(500, 51), "the English keyboard: the row 500–551 over the glass at 555")
+check(standIn(glass(deckTop, letters: 445)) == toggleAlone, "Pinyin: the toggle")
+check(standIn(glass(deckTop, plane: .other)) == toggleAlone, "the emoji keyboard: the toggle")
+check(standIn(glass(deckTop, letters: 403)) == row(500, 44) && standIn(glass(deckTop, letters: 403.5)) == toggleAlone,
+      "a keyboard 403 pt tall: the least row under the fold; 403.5: the toggle")
+check(standIn(glass(640)) == row(500, 51) && standIn(glass(640, plane: .other)) == toggleAlone,
+      "folded from open flat with the keyboard up: the row over the laptop pose's glass, or for the emoji keyboard the toggle")
+// Open flat (no fold across; the controls from the picture pane's foot): the row 4 pt above the glass, 51 pt.
+check(DuoPosture.keyboardRowFlat == 51 && DuoPosture.keyboardRowGlassGap == 4, "open flat: 51 pt caps, 4 above the glass")
+let flat = FoldInfo.known(nil)
+check(standIn(sure(640), controls: 424, fold: flat) == nil, "open flat, the English keyboard at 640 under 16:10's controls (424 + 148): as they are")
+check(standIn(sure(553), controls: 424, fold: flat) == row(498, 51), "open flat, the emoji keyboard at 553: the row 498–549")
+check(standIn(sure(600), controls: 506, fold: flat) == row(545, 51), "open flat, Pinyin at 600 under a 4:3 picture's controls (506): the row 545–596")
+check(standIn(sure(571.9), controls: 424, fold: flat) == row(516.9, 51) && standIn(sure(572), controls: 424, fold: flat) == nil,
+      "open flat: a row exactly while the keyboard covers some of the rows")
+check(standIn(sure(479), controls: 424, fold: flat) == row(424, 51) && standIn(sure(478), controls: 424, fold: flat) == row(424, 50),
+      "open flat: never above the controls' top (the picture's pane), the caps shorter down to 44")
+check(standIn(sure(472), controls: 424, fold: flat) == row(424, 44) && standIn(sure(471.9), controls: 424, fold: flat) == toggleAlone,
+      "open flat: 48 pt over the controls' top holds 44 pt caps; less, the toggle")
+check(standIn(sure(300), controls: 424, fold: flat) == toggleAlone, "open flat, a keyboard over the picture's foot: the toggle")
+// The toggle's place: inside the pane (its foot at 447 in the laptop pose), its trailing edge on the row's.
+check(DuoPosture.keyboardToggle(paneBottom: 447, width: 669, sides: 14) == rect(611, 395, 44, 44), "the toggle at 611,395, 44 pt")
+check(DuoPosture.keyboardToggle(paneBottom: 365, width: 669, sides: 14) == rect(611, 313, 44, 44), "the status bar shown: 8 above the pane's foot at 365")
 // Twelve caps (the Desktop: Spotlight's too) and eleven across the row.
 check(abs(DuoPosture.keyboardRowCap(count: 12, width: 641) - 47.917) < 0.001, "twelve caps ≈ 48 pt wide")
 check(abs(DuoPosture.keyboardRowCap(count: 11, width: 641) - 52.818) < 0.001 && DuoPosture.keyboardRowCap(count: 0, width: 641) == 0,
       "eleven caps (a window: no Spotlight) ≈ 53; none: none")
 check(DuoPosture.keyboardRowGap == 6 && DuoPosture.keyboardRowMost == 58 && DuoPosture.keyboardRowMargins == 8,
       "the row's numbers")
-// Every keyboard top, every controls' top (the fold's band 40 pt above it, as on the Duo): the rules hold.
+// Every keyboard top, every controls' top (the fold's band 40 pt above it, as on the Duo), sure or not: the rules hold.
 for controls in [CGFloat(414), 496, 500.5, 600] {
     let band = rect(0, controls - 40.5, 669, 40)
     for top in stride(from: controls - 60, through: 960, by: 0.5) {
-        let row = keyRow(top, controls: controls, fold: .known(band))
-        let room = top - controls
-        check((row == nil) == (top >= 951 || room >= 148), "\(controls) \(top): a row exactly while the keyboard covers the key row")
-        guard let row else { continue }
-        check(row.rect.minX == 14 && row.rect.width == 641, "\(controls) \(top): the row's sides")
-        check(row.inCrease == (room < 52), "\(controls) \(top): under the fold exactly while 44 pt caps fit with their black")
-        if row.inCrease {
-            check(row.rect == rect(14, band.midY - 17, 641, 34), "\(controls) \(top): the crease's 34 pt caps on the fold's middle")
-            check(row.rect.minY >= band.minY && row.rect.maxY <= band.maxY, "\(controls) \(top): the crease row inside the fold's band")
-        } else {
+        for isSure in [true, false] {
+            let s = standIn(Glass(top: top, sure: isSure), controls: controls, fold: .known(band))
+            let room = top - controls
+            check((s == nil) == (top >= 951 || room >= 148), "\(controls) \(top): a stand-in exactly while the keyboard covers the key row")
+            guard let s else { continue }
+            check((s.row == nil) == (room < 52), "\(controls) \(top): the row exactly while 44 pt caps fit with their black")
+            check(s.toggle == (!isSure || room < 52), "\(controls) \(top) \(isSure): the toggle exactly while the row is not known to be in view")
+            guard let r = s.row else { continue }
+            check(r.minX == 14 && r.width == 641, "\(controls) \(top): the row's sides")
             let caps = min(58, room - 8)
-            check(row.rect.height == caps && caps >= 44, "\(controls) \(top): the caps the room less 8, 44 to 58")
-            check(row.rect.minY >= controls, "\(controls) \(top): never onto the fold")
-            let above = row.rect.minY - controls, below = top - row.rect.maxY
+            check(r.height == caps && caps >= 44, "\(controls) \(top): the caps the room less 8, 44 to 58")
+            check(r.minY >= controls, "\(controls) \(top): never onto the fold")
+            let above = r.minY - controls, below = top - r.maxY
             check(above == above.rounded() && below - above >= 0 && below - above < 2 && (room != room.rounded() || below - above <= 1),
                   "\(controls) \(top): the black above and below alike, the odd point below (\(above), \(below))")
             check(above >= 4, "\(controls) \(top): 4 of black at least above, and so below")
             if room <= 66 { check(above == 4, "\(controls) \(top): 4 above while the caps fill") }
         }
+        check(standIn(Glass(top: nil, sure: false), controls: controls, fold: .known(band)) == toggleAlone, "\(controls): another keyboard: the toggle")
+    }
+    // Open flat: the row hugs the glass, never above the controls' top.
+    for top in stride(from: controls - 60, through: 960, by: 0.5) {
+        let s = standIn(sure(top), controls: controls, fold: flat)
+        let room = top - controls
+        check((s == nil) == (top >= 951 || room >= 148), "flat \(controls) \(top): a stand-in exactly while the keyboard covers the rows")
+        guard let s else { continue }
+        check((s.row == nil) == (room < 48) && s.toggle == (room < 48), "flat \(controls) \(top): the row while 44 pt caps fit 4 above the glass, else the toggle")
+        guard let r = s.row else { continue }
+        check(r.maxY == top - 4 && r.minY >= controls && r.height == min(51, room - 4) && r.minX == 14 && r.width == 641,
+              "flat \(controls) \(top): 4 above the glass, under the pane, 44 to 51 pt")
     }
 }
 // Every keyboard height the monitor can learn (and none): the row, wherever it is, is never under the
-// keyboard's glass and never over the picture.
+// keyboard's glass and never over the picture; a row under a glass that is only assumed comes with the toggle.
 for own in [nil] + stride(from: CGFloat(0), through: 960, by: 0.5).map(Optional.some) {
-    let glass = visible(deckTop, own: own)
-    guard let glass, let row = keyRow(glass) else { continue }
-    check(row.rect.maxY <= glass, "\(String(describing: own)): the row \(row.rect.minY)–\(row.rect.maxY) above the glass at \(glass)")
-    check(row.rect.minY >= laptopFold.minY, "\(String(describing: own)): the row never over the picture")
+    guard let g = glass(deckTop, letters: own), let s = standIn(g) else { continue }
+    if let r = s.row, let top = g.top {
+        check(r.maxY <= top, "\(String(describing: own)): the row \(r.minY)–\(r.maxY) above the glass at \(top)")
+        check(r.minY >= laptopFold.minY, "\(String(describing: own)): the row never over the picture")
+    }
+    check(s.row != nil || s.toggle, "\(String(describing: own)): the row or the toggle, never neither")
 }
 
 print(failures == 0 ? "ok: \(checks) checks" : "FAILED: \(failures) of \(checks) checks")
