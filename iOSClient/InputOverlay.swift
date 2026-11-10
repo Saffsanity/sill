@@ -1585,10 +1585,11 @@ final class KeyboardFrameMonitor: ObservableObject {
     private var planeMode: String? = nil
     /// The letters keyboard's height as UIKit last reported it while it was up (open flat: itself).
     private var lettersShown: CGFloat? = nil
-    /// A switch UITextInputMode announced, settled by the keyboard notification that follows at once, or
-    /// as another keyboard after `switchWait` (the emoji search back to the emoji keyboard sends none).
+    /// A switch UITextInputMode announced, settled by the keyboard notification that follows (about 0.1 s
+    /// later on the simulator), or as another keyboard after `switchWait` (the emoji search back to the
+    /// emoji keyboard sends none): a second, so a busy device's late notification still settles it.
     private var pendingSwitch: (modeChanged: Bool, timeout: DispatchWorkItem)? = nil
-    private static let switchWait: TimeInterval = 0.4
+    private static let switchWait: TimeInterval = 1
 
     private static let hides: Set<Notification.Name> = [UIResponder.keyboardWillHideNotification, UIResponder.keyboardDidHideNotification]
 
