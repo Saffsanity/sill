@@ -1,6 +1,6 @@
 # A connection that ends before its TLS handshake: the plan
 
-2026-11-09. Branch `stalled-handshake` (worktree `/Users/noah/Downloads/wt-314`) from origin/main at f224323;
+2026-11-09. Branch `stalled-handshake` (worktree `/Users/noah/Downloads/wt-314`, PR #342) from origin/main at f224323;
 line numbers are at f224323. Issue #314 (oliverames, Sill 0.6.0 (1276) on macOS 27.3 beta 26C5035r and an
 iPhone on iOS 27.3 beta 1): "Connections to Sill stall for 4 s and reset when the macOS firewall is on". Noah
 to the reporter (2026-11-09): "a connection that never sends a TLS hello shouldn't be counted as an unpaired

@@ -9,7 +9,7 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **A connection that ends before its TLS handshake is not an unpaired refusal (2026-11-09, branch
-`stalled-handshake` from main at f224323, PR #PRNUM; issue #314, oliverames; addhumal's comment on it; the
+`stalled-handshake` from main at f224323, PR #342; issue #314, oliverames; addhumal's comment on it; the
 code read, the rule, six open questions with their defaults and the results are in
 `docs/stalled-handshake-plan.md`).** On a macOS 27.3 beta with the firewall on, every connection to Sill's
 doors over the Mac's LAN address was accepted at TCP and held until the door's 4 s handshake deadline cut it
