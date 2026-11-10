@@ -2168,6 +2168,21 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
   (`pane-firewall-*`) and the menu's `firewall-blocked` and
   `firewall-blocks-all` samples; `-SillPrintMenuAfter <s>` prints General's
   firewall line with the menu.
+- Connections that never finish their TLS handshake (issue #314,
+  docs/stalled-handshake-plan.md): "Home door: 5 connections in the last minute
+  never finished their TLS handshake (4 timed out, 1 closed by the other end
+  after waiting), so no key was checked and none counts as a refusal. A firewall
+  or a content filter on this Mac may be holding them." ("Remote access: …" at
+  the remote door), at most once a minute, and `door.stalled` in the `[1s]`
+  lines. Something accepted the connection and held it before Sill saw a TLS
+  hello: a macOS 27.3 beta's firewall did, with Sill allowed in its rules, every
+  connection over the Mac's LAN address stalling 4 s and then reset, and
+  `openssl s_client -connect <the Mac's LAN address>:<port> -brief` from the Mac
+  itself shows it (`write:errno=54` after about 4 s; against 127.0.0.1 the
+  handshake completes at once). Such a connection is no refusal and costs its
+  address only a tenth of a failure while the door has a place for everyone,
+  so a device whose dials stall is not backed off for 5 minutes; while every
+  shared waiting place is held it pays its hold, as since finding 9.
 
 ### What to try if it's slow
 
