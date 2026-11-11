@@ -484,14 +484,20 @@ enum HeadlessDesktopPolicy {
         }
     }
 
+    /// Whether the Desktop gets Sill's display now. `screenRecording`: this process may capture the screen
+    /// (CGPreflightScreenCaptureAccess). Without it no display is made, as VirtualStage.prepare refuses to make
+    /// one: measured 2026-09-22, SCShareableContent never returns in a process without Screen Recording once a
+    /// virtual display exists, and the catalog's look (`WindowCatalog.refreshWindows`, no timeout) right after
+    /// the display is made would hold the Desktop's select, and every select after it, for good.
     static func needsVirtualDesktop(
         hasDisplay: Bool,
         clientCount: Int,
         appKitLoop: Bool,
         synthetic: Bool,
-        apiAvailable: Bool
+        apiAvailable: Bool,
+        screenRecording: Bool
     ) -> Bool {
-        !hasDisplay && clientCount > 0 && appKitLoop && !synthetic && apiAvailable
+        !hasDisplay && clientCount > 0 && appKitLoop && !synthetic && apiAvailable && screenRecording
     }
 
     /// Whether the Desktop needs Sill's display: no real display, as `realDisplays` counts them (macOS's stand-in
