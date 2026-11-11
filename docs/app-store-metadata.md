@@ -295,7 +295,7 @@ Keep three things saying the same: this label, `PrivacyInfo.xcprivacy`
 again before adding crash reporting, analytics, a server of any kind, or
 anything that sends data somewhere other than the user's Mac.
 
-## 5. The version page (0.5, 0.5.1, then 0.6.0)
+## 5. The version page (0.5, 0.5.1, 0.6.0, then 0.6.1)
 
 ### Promotional text (170 characters at most; editable any time without review)
 
@@ -400,12 +400,12 @@ company's name.
 |---|---|
 | Support URL | `https://getsill.app/support` |
 | Marketing URL (optional) | `https://getsill.app` |
-| Version | 0.6.1 for the next version, the same number as the next Sill for Mac (main says it since App Review approved 0.6.0; docs/release-checklist.md, part 2's first item). 0.6.0 (1276) was the third, shipped, the same number as Sill for Mac 0.6.0 (main said it from 2026-10-31; 0.5.5 was its pre-release number, carried by the TestFlight builds and the nightlies before the release), created in App Store Connect on 2026-11-02. 0.5.1 was the second, the same number as Sill for Mac 0.5.1. The first was 0.5 (App Store Connect proposed 1.0 for a new app; the build said 0.5) |
+| Version | 0.6.1 for the fourth version, the same number as Sill for Mac 0.6.1 (main says it since App Review approved 0.6.0; docs/release-checklist.md, part 2's first item). App Store Connect adds it with the + beside iOS App, 0.6.0 being Ready for Distribution (live since 2026-11-02), and copies 0.6.0's description, keywords, screenshots and App Review Information into it. 0.6.0 (1276) was the third, shipped, the same number as Sill for Mac 0.6.0 (main said it from 2026-10-31; 0.5.5 was its pre-release number, carried by the TestFlight builds and the nightlies before the release), created in App Store Connect on 2026-11-02. 0.5.1 was the second, the same number as Sill for Mac 0.5.1. The first was 0.5 (App Store Connect proposed 1.0 for a new app; the build said 0.5) |
 | Copyright | `2026 Noah Saffer` (App Store Connect adds the ©) |
 | App Previews | None for the first version. They are optional, and the sizzle reel can't be one: 2.3.4 allows only captures of the app itself, and previews run 15 to 30 seconds. |
 | Screenshots | Section 9 |
 | Version Release | Manually release this version, so an approval can't go live before the Mac download and the site are up |
-| Build | 0.6.0 (1276) for 0.6.0: the commit count of the tagged merge commit a39084f4 (PR #274), uploaded by that commit's nightly (run 41419194155), never `--bump`. 0.5.1 had 0.5.1 (4), 0.5 had 0.5 (3): each the Release archive with the privacy manifest and the export compliance key |
+| Build | 0.6.1 (the commit count of its tagged merge commit, the release pull request's) for 0.6.1, uploaded by that commit's nightly before the tag, or from a clean checkout of it on this Mac with `Scripts/release-ios.sh --build-number "$(git rev-list --count HEAD)" --upload`; never `--bump`. 0.6.0 (1276) for 0.6.0: the commit count of the tagged merge commit a39084f4 (PR #274), uploaded by that commit's nightly (run 41419194155), never `--bump`. 0.5.1 had 0.5.1 (4), 0.5 had 0.5 (3): each the Release archive with the privacy manifest and the export compliance key |
 
 ### What's New
 
@@ -491,6 +491,30 @@ The tiles (PR #117, 232 characters) are the connect screen's default since 2026-
 not list the default behavior of the app"), in this draft as the default; the list is one tap away and
 a choice is kept. #117 passed Noah's iPad test that day (a tile's picture as each session ended, list and
 tiles back and forth, every tile of one Mac its one picture); a fresh install showing tiles is his to see.
+
+0.6.1's, for App Store Connect (1,544 characters): what changed since 0.6.0 (1276) that a person
+notices on the device, a paragraph a change, as the release notes say it. The waking click, macOS's own
+windows out of the bar and the other account's view come from Sill for Mac 0.6.1, which the last two
+paragraphs say. Not in it: the connections a firewall holds (#342), which change only Sill for Mac's
+waiting places and its log. The Duo's paragraph claims nothing about the emoji keyboard's search, which
+still closes as it opens in the laptop pose once the keyboard has been put away since Sill opened
+(docs/iphone-duo-plan.md, "The keyboard toggle"), and the waking click's sentence names the Desktop's
+black picture alone: a window on Sill's virtual display with the panels asleep was never tried (#228's
+step 2), so neither this text nor the support page says what a tap does there.
+
+```text
+iPhone Duo, half open: the on-screen keyboard no longer covers Sill’s keys. While it’s up, the row of keys, with a Keyboard key that puts it away, sits between the fold and the keyboard. A taller keyboard, such as emoji, leaves no room for the row, so a Keyboard button at the picture’s bottom left corner puts it away instead. Opened flat, the row moves up above a keyboard that would cover it.
+
+Fixed: lifting Apple Pencil no longer draws a line from the end of a stroke back to near its start in drawing apps on your Mac, such as Notes.
+
+While Sill shows your Mac, your iPhone or iPad no longer locks by itself until 10 minutes after you last used it. Then its own Auto-Lock setting applies.
+
+Away from home, when a connection fails because a VPN looks off, Sill now says it may be off on either end, on your iPhone or iPad or on your Mac, where it blamed your iPhone or iPad alone.
+
+While your Mac’s display sleeps, a tap on the Desktop’s black picture now only wakes it: the pointer moves there and nothing is clicked. And windows that belong to macOS itself, such as Stage Manager’s, no longer show as thumbnails in Sill’s bar. Both need Sill for Mac from this release.
+
+If another user has your Mac’s screen, your iPhone or iPad can show your own account’s desktop and windows instead, with a note that it isn’t the Mac’s screen. Turn on Show this account while another user is on the screen in Sill’s Settings › Devices on your Mac. Taps and keys reach your account once it’s back on the screen. It needs Sill for Mac from this release.
+```
 
 ## 6. Export compliance (encryption)
 
@@ -584,11 +608,13 @@ WHAT TO TRY
 - Hold the device upright for a laptop layout with a trackpad and keys.
 - Settings (gear): Quality, Resolution and Frame Rate; Disconnect at the bottom.
 
-NEW IN 0.6.0 (the first three need Sill for Mac 0.6.0)
-- Clipboard: copy text on the Mac, paste it on the device. Copy on the device, return to Sill, tap Paste on the chip, then Command-V on the Mac.
-- Sound (optional beta feature): Send Audio (Beta), in the Sill menu, is on; the device plays it. Mute is in the device's Settings.
-- Lock the Mac (Control-Command-Q): the device shows only its lock screen; tap Keyboard and type the password to unlock it.
-- Pinch to zoom the picture. Macs show as tiles on the connect screen. The tour marks what is new after an update.
+NEW IN 0.6.1 (the last two need Sill for Mac 0.6.1)
+- iPhone Duo, half open: the key row stays above the on-screen keyboard; a tall one (emoji) gets a Keyboard button instead.
+- Pencil strokes on the Mac no longer end with a line back to their start.
+- The device stays awake while streaming, until 10 minutes after the last touch.
+- A remote dial that fails with a VPN off names both ends.
+- A tap on the Desktop's black picture while the Mac's display sleeps only wakes it.
+- Mac Settings > Devices: "Show this account while another user is on the screen" (off by default).
 
 IF THE MAC DOES NOT APPEAR
 Guest or office networks can keep devices apart: use a USB-C cable, or turn on Direct Wireless Connection in the Sill menu and tap Search Nearby.
@@ -602,7 +628,14 @@ The attached screen recording, on a physical device, shows pairing, streaming a 
 
 Local-only build: delete the REMOTE ACCESS (optional) paragraph.
 
-The notes for 0.6.0 are 3,993 bytes (local-only 3,819), all ASCII, as this file's measure counts them
+The notes for 0.6.1 are 3,998 bytes with the block's last newline (3,997 without), all ASCII: 0.6.0's with
+NEW IN 0.6.0 replaced by NEW IN 0.6.1 (guideline 2.3.1(a): what is new in this version, specifically),
+the Duo's keyboard, the Pencil, the device staying awake, the VPN message, the waking click on the
+Desktop's picture and the Mac's opt-in for another user's screen; nothing else changed, Sill for Mac
+0.6.0 or later still enough for WHAT YOU NEED (the last two items name 0.6.1). App Store Connect copies
+0.6.0's notes into 0.6.1: replace them with this block.
+
+The notes for 0.6.0 were 3,993 bytes (local-only 3,819), all ASCII, as this file's measure counts them
 (the block's last newline included). App Store Connect copies 0.5.1's notes into a new version: replace
 them with this block. Against 0.5.1's they ask for Sill for Mac 0.6.0 (the clipboard, the sound and the
 locked Mac are its), say Apple silicon or Intel (the Mac download is universal from 0.6.0), and add NEW
@@ -894,6 +927,9 @@ Safe:
   with the block's last newline (local-only 3,819), 3,992 without, of 4,000, all ASCII (D6's block
   with NEW IN 0.6.0, after D1's "Apple silicon or Intel"); promotional text, keywords and subtitle
   unchanged (164, 95, 27).
+- For 0.6.1, measured by a script on each block without its last newline: What's New 1,544 of 4,000
+  characters; review notes 3,997 bytes (3,998 with the block's last newline) of 4,000, all ASCII;
+  the description, promotional text, keywords and subtitle unchanged from 0.6.0 (3,350, 164, 95, 27).
 - The encryption key, now in `iOSClient/Info.plist`: Release builds of this
   branch for the simulator and for a device each have
   `"ITSAppUsesNonExemptEncryption" => false` in the built Sill.app's
