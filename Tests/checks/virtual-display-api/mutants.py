@@ -51,6 +51,8 @@ MUTANTS = [
      "!hasDisplay && clientCount > 0 && appKitLoop && apiAvailable"),
     ("headless display created without Screen Recording (VirtualStage.prepare's rule)",
      "&& apiAvailable && screenRecording", "&& apiAvailable"),
+    ("headless display created off console (another user's displays)",
+     "&& screenRecording && onConsole", "&& screenRecording"),
     ("headless display kept after a real display is back",
      "static func stillNeeded(physicalDisplays: Int) -> Bool { physicalDisplays == 0 }",
      "static func stillNeeded(physicalDisplays: Int) -> Bool { true }"),

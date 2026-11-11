@@ -180,22 +180,25 @@ for raw in Array(arm64macOS27.values) + Array(x86RosettaMacOS27.values) {
 
 // Headless Mac / closed-lid MacBook virtual Desktop fallback (issue #61):
 typealias HDP = HeadlessDesktopPolicy
-check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true) == true,
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true) == true,
       "headless with connected client, AppKit loop and API available needs virtual Desktop")
-check(HDP.needsVirtualDesktop(hasDisplay: true, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true) == false,
+check(HDP.needsVirtualDesktop(hasDisplay: true, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true) == false,
       "Mac with a display already does not need a headless fallback display")
-check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 0, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true) == false,
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 0, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true) == false,
       "0 connected clients does not create a headless display")
-check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: false, synthetic: false, apiAvailable: true, screenRecording: true) == false,
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: false, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: true) == false,
       "without AppKit loop does not create a headless display")
-check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: true, apiAvailable: true, screenRecording: true) == false,
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: true, apiAvailable: true, screenRecording: true, onConsole: true) == false,
       "synthetic test host does not create a headless display")
-check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: false, screenRecording: true) == false,
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: false, screenRecording: true, onConsole: true) == false,
       "when CGVirtualDisplay API is unavailable does not create a headless display")
 // Without Screen Recording, never (VirtualStage.prepare's rule): SCShareableContent never returns in a process without it
 // once a virtual display exists (measured 2026-09-22), and the catalog's look right after the display is made has no timeout.
-check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: false) == false,
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: false, onConsole: true) == false,
       "without Screen Recording no headless display is made")
+// Never from a session another user has the screen from (off console): it would join their displays (#340's rule).
+check(HDP.needsVirtualDesktop(hasDisplay: false, clientCount: 1, appKitLoop: true, synthetic: false, apiAvailable: true, screenRecording: true, onConsole: false) == false,
+      "off console no headless display is made")
 
 // The lid opened (or a monitor plugged in) while the fallback display exists: macOS moved every window
 // onto it when the last real display went, so it goes at once and they come back, not when the last

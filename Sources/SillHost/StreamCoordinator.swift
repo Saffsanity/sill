@@ -1074,7 +1074,8 @@ package final class StreamCoordinator {
             appKitLoop: appKitLoop,
             synthetic: synthetic,
             apiAvailable: apiOK,
-            screenRecording: CGPreflightScreenCaptureAccess()   // never a display without it (VirtualStage.prepare's rule)
+            screenRecording: CGPreflightScreenCaptureAccess(),  // never a display without it (VirtualStage.prepare's rule)
+            onConsole: lockReading != .offConsole               // never one that would join another user's displays
         ) else { return }
         // The system removed it on its own (sleep and wake can, as VirtualStage's `onLost` knows): made again, not
         // kept as a display that is no longer there, with the Desktop on macOS's stand-in until Sill quits.

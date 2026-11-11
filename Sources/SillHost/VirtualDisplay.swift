@@ -488,16 +488,20 @@ enum HeadlessDesktopPolicy {
     /// (CGPreflightScreenCaptureAccess). Without it no display is made, as VirtualStage.prepare refuses to make
     /// one: measured 2026-09-22, SCShareableContent never returns in a process without Screen Recording once a
     /// virtual display exists, and the catalog's look (`WindowCatalog.refreshWindows`, no timeout) right after
-    /// the display is made would hold the Desktop's select, and every select after it, for good.
+    /// the display is made would hold the Desktop's select, and every select after it, for good. `onConsole`: this
+    /// session is the one on the screen (the lock's reading is not off console). A display made from a session
+    /// another user has the screen from would join that user's displays; the off-console view of #340 lets the
+    /// Desktop stream off console, and makes no virtual display there for that reason.
     static func needsVirtualDesktop(
         hasDisplay: Bool,
         clientCount: Int,
         appKitLoop: Bool,
         synthetic: Bool,
         apiAvailable: Bool,
-        screenRecording: Bool
+        screenRecording: Bool,
+        onConsole: Bool
     ) -> Bool {
-        !hasDisplay && clientCount > 0 && appKitLoop && !synthetic && apiAvailable && screenRecording
+        !hasDisplay && clientCount > 0 && appKitLoop && !synthetic && apiAvailable && screenRecording && onConsole
     }
 
     /// Whether the Desktop needs Sill's display: no real display, as `realDisplays` counts them (macOS's stand-in
