@@ -4,6 +4,8 @@ import Foundation
 #if canImport(Darwin)
 import Darwin
 #endif
+// Line by line, so a check that crashes (a mutant can make one) keeps the FAIL lines printed before it.
+setvbuf(stdout, nil, _IOLBF, 0)
 var fails = 0, passes = 0
 func check(_ name: String, _ ok: Bool) { if ok { passes += 1; print("ok   \(name)") } else { fails += 1; print("FAIL \(name)") } }
 typealias P = DiscoveryPolicy

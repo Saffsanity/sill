@@ -321,4 +321,107 @@ func vpnMemory() {
           && newerText.contains("\"rememberedAddresses\":[{\"address\":") && newerText.contains("\"addressesListedAt\":\(Int(t2))"))
     var expected = mainRecord; expected.addresses = [wifi]; expected.infoIssuedAt = t2 - 7
     check("a build from before this change reads it (the new keys ignored)", (try? dec.decode([MainSavedMac].self, from: Data(newerText.utf8))) == [expected])
+
+    vpnMemoryModel()
+}
+
+/// SplitMix64: the random model's lives are the same at every run.
+struct VPNMemoryRandom: RandomNumberGenerator {
+    var state: UInt64
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
+    }
+}
+
+/// 2,000 random lives of one saved Mac against an independent bookkeeping of when each of its VPN addresses
+/// was last listed: kind 18s with any mix of its addresses (Tailscale's, a second Tailscale set, another VPN's,
+/// a LAN and an internet one), Remote Access off, empty lists, a port change, the clock on by a minute to a
+/// season or back by an hour, and new pairings of the same Mac. After every step the rule's promises hold: at
+/// most four, only VPN addresses, none the Mac lists, each destination once, none timed after now or older than
+/// 90 days, newest first, nil rather than empty; every VPN address a list had, not listed now and last listed
+/// within 90 days, remembered unless four as new or newer are (and once dropped for the cap or its age, gone
+/// until a list has it again), with the time it was last listed; and the dial puts them after the Mac's list,
+/// each once. Written never to crash, whatever a mutant does: a crash loses the FAIL lines before it.
+func vpnMemoryModel() {
+    var random = VPNMemoryRandom(state: 2026_11_11)
+    func r(_ n: Int) -> Int { Int.random(in: 0..<n, using: &random) }
+    let fp = Data((0..<32).map { UInt8($0 &+ 77) })
+    let id = MacID.make(fingerprint: fp)
+    let pool: [MacAddress] = [
+        MacAddress(host: "mac.tail1.ts.net", kind: MacAddress.vpn, via: "Tailscale"), MacAddress(host: "100.64.0.9", kind: MacAddress.vpn, via: "Tailscale"),
+        MacAddress(host: "fd7a:115c:a1e0::9", kind: MacAddress.vpn, via: "Tailscale"), MacAddress(host: "mac2.tail1.ts.net", kind: MacAddress.vpn, via: "Tailscale"),
+        MacAddress(host: "100.64.0.10", kind: MacAddress.vpn, via: "Tailscale"), MacAddress(host: "10.8.0.6", kind: MacAddress.vpn, via: "VPN (utun6)"),
+        MacAddress(host: "192.168.1.20", kind: MacAddress.lan, via: "Wi‑Fi"), MacAddress(host: "203.0.113.9", kind: MacAddress.internet, via: "Router"),
+    ]
+    // No pool address has a port of its own, so a destination is its host whatever the Mac's port.
+    func host(_ a: MacAddress) -> String { a.host.lowercased() }
+    func record(_ addresses: [MacAddress], port: Int, at t: Double) -> SavedMac {
+        SavedMac(macID: id, fingerprint: Base64URL.encode(fp), name: "M", recognitionKey: Base64URL.encode(Data(repeating: 1, count: 32)),
+                 remotePort: port, addresses: addresses, typedAddresses: nil, infoIssuedAt: 0, bonjourName: nil, lastWorked: nil,
+                 pairedAt: Date(timeIntervalSince1970: t), method: "qr", lastConnectedAt: nil, lastRoute: nil)
+    }
+    var broken: [String] = []
+    var steps = 0, seen = 0, capped = 0, aged = 0
+    for life in 0..<2_000 {
+        var now = 1_790_000_000.0 + Double(r(1_000_000))
+        var m = record((0..<pool.count).filter { _ in r(2) == 0 }.map { pool[$0] }, port: 7455, at: now)
+        var lastListed: [String: Double] = [:]
+        for a in m.addresses where a.kind == MacAddress.vpn { lastListed[host(a)] = now }
+        var issued = 0.0
+        for _ in 0..<(5 + r(25)) {
+            steps += 1
+            now += [60.0, 3600, 86_400, 20 * 86_400, 45 * 86_400, 100 * 86_400, -3600][r(7)]
+            issued += 1
+            let list = (0..<pool.count).filter { _ in r(2) == 0 }.map { pool[$0] }
+            if r(12) == 0 {
+                let fresh = record(list, port: m.remotePort, at: now)
+                m = SavedMacs.adding(fresh, to: [m]).first { $0.macID == id } ?? fresh
+                issued = 0
+                for a in m.addresses where a.kind == MacAddress.vpn { lastListed[host(a)] = now }
+            } else {
+                let on = r(8) != 0
+                let info = MacInfo(macID: id, name: "M", issuedAt: issued, remoteAccess: on, remotePort: r(10) == 0 ? 7460 : m.remotePort,
+                                   internet: false, addresses: list)
+                guard let next = SavedMacs.refreshed(m, info: info, fingerprint: fp, allowLoopback: false, now: now) else {
+                    broken.append("life \(life): a newer kind 18 refused"); continue
+                }
+                m = next
+                if on && !list.isEmpty { for a in list where a.kind == MacAddress.vpn { lastListed[host(a)] = now } }
+            }
+            let rem = m.rememberedAddresses ?? []
+            let current = Set(m.addresses.map(host))
+            // As the rule does at every look: a time after now read as now; a listed address keeps its list's time.
+            for (k, t) in lastListed where !current.contains(k) { lastListed[k] = min(t, now) }
+            func fail(_ why: String) { broken.append("life \(life): \(why)") }
+            if rem.count > SavedMacs.rememberCap { fail("over the cap") }
+            if rem.contains(where: { $0.address.kind != MacAddress.vpn }) { fail("a LAN or internet address remembered") }
+            if rem.contains(where: { current.contains(host($0.address)) }) { fail("an address the Mac lists remembered") }
+            if Set(rem.map { host($0.address) }).count != rem.count { fail("a destination twice") }
+            if rem.contains(where: { $0.listedAt > now || now - $0.listedAt > SavedMacs.rememberFor }) { fail("a time after now or older than 90 days") }
+            if zip(rem, rem.dropFirst()).contains(where: { $0.listedAt < $1.listedAt }) { fail("not newest first") }
+            if m.rememberedAddresses == [] { fail("an empty list kept") }
+            let have = Set(rem.map { host($0.address) })
+            for (k, t) in lastListed where !current.contains(k) && !have.contains(k) {
+                if now - t > SavedMacs.rememberFor { aged += 1; lastListed[k] = nil; continue }
+                if rem.filter({ $0.listedAt >= t }).count < SavedMacs.rememberCap { fail("\(k), last listed \(Int(now - t)) s ago, forgotten with room left") }
+                capped += 1
+                lastListed[k] = nil
+            }
+            for x in rem where lastListed[host(x.address)].map({ abs($0 - x.listedAt) > 0.001 }) ?? true {
+                fail("\(x.address.host) at \(Int(x.listedAt)), last listed at \(lastListed[host(x.address)].map { Int($0) } ?? -1)")
+            }
+            let dial = RemoteDialPolicy.order(m.allAddresses, remembered: SavedMacs.remembered(m, now: now), remotePort: m.remotePort,
+                                              lastWorked: nil, localIPv4: [])
+            if let i = dial.firstIndex(where: { $0.remembered }), dial[i...].contains(where: { !$0.remembered }) { fail("a remembered address before the Mac's list") }
+            if Set(dial.map { $0.key.lowercased() }).count != dial.count || dial.filter(\.remembered).count != rem.count { fail("the dial: each once, every remembered one") }
+            seen += rem.count
+        }
+    }
+    for line in broken.prefix(5) { print("     \(line)") }
+    check("model: 2,000 random lives (\(steps) kind 18s and pairings, \(seen) remembered addresses seen, \(capped) dropped for the cap, \(aged) aged out): every promise of the rule kept",
+          broken.isEmpty && steps > 30_000 && seen > 50_000 && capped > 500 && aged > 1_000)
 }
