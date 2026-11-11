@@ -1973,21 +1973,32 @@ simulator:
   screen; the key row ends 10 pt above it, …` once the keyboard has moved.
   `keyboard frame: top 455.5, 495.5 pt tall` (or `none`) is the software
   keyboard as UIKit reports it, and on the Duo's inner display upright
-  `keyboard: the row 500–551 (51 pt): between the fold's edge at 496 and the
-  glass at 555 (…)` where the key row goes alone, `keyboard: the toggle at
-  611,395 (44 pt): …` where the Keyboard toggle stands in on the picture's
-  corner (a tall keyboard, the emoji keyboard, a keyboard not measured yet),
-  or `keyboard: none`; `keyboard plane: …` at each switch of keyboard while
-  it is up (#215, docs/iphone-duo-plan.md, "The keyboard toggle").
+  `keyboard: the row 500–551 (51 pt): the glass at 555, 59 pt under the
+  fold's edge at 496 (read: 0,555 669×396; reported 455.5)` where the key row
+  goes alone, `keyboard: the toggle at 14,395 (44 pt): …` where the Keyboard
+  toggle stands in at the picture's bottom leading corner (the left one; the
+  right one right to left) under a tall keyboard (the emoji keyboard,
+  Pinyin) or a glass not known, `keyboard: nothing yet (a reading on its
+  way)`, or `keyboard: none` (#215, docs/iphone-duo-plan.md, "The keyboard
+  toggle"). How each glass was read: `keyboard: change: …` (a show, a
+  switch, a fold), `keyboard: looked: …` (the keyboard's own views, until it
+  is first put away), `keyboard: assumed …` (the last readings, at once),
+  `keyboard: reload …` and `keyboard: read …` (a reload of the input views
+  and the report it brings), `keyboard: remembered: …` (the hints, kept as
+  `Sill.keyboardHints`; delete that key, or the app, to start with none).
   `-SillKeyboardProbe 1` prints every keyboard notification with its begin
-  and end frames, the input mode and which of its keyboards is up. On the
-  iPhone Duo simulator folded into the laptop pose (`Tests/duorig/run.sh
-  UDID pose laptop`), the mock at its own size, `-SillLayout 669x951
-  -SillHinge half -SillKeyboardToggle 1.5`, raises the real keyboard under
-  the row; the emoji key, ABC and the Globe key need a tap inside the
-  simulator (the Simulator app's window, or XCUITest), and
+  and end frames, its duration and whether it is a reading, and the
+  keyboard's views when a look tells nothing; `-SillKeyboardReadDelays
+  '0.05,0.1'` and `-SillKeyboardReloadCap N` change when and how often it
+  reloads, for tests. On the iPhone Duo simulator folded into the laptop pose
+  (`Tests/duorig/run.sh UDID pose laptop`), the mock at its own size,
+  `-SillLayout 669x951 -SillHinge half -SillKeyboardToggle 1.5`, raises the
+  real keyboard under the row; the emoji key, ABC and the Globe key need a
+  tap inside the simulator (the Simulator app's window, or XCUITest), and
   `-AppleLanguages '(zh-Hans-CN, en-US)' -AppleLocale zh_CN` gives Sill the
-  Chinese (Pinyin) keyboard beside English.
+  Chinese (Pinyin) keyboard beside English. A switch behaves differently
+  before and after the keyboard is first put away (iOS reports it only
+  before): test both.
 - Larger Picture: `-Sill.largerPicture 1` turns the device's switch on for
   one run (in the normal app too); it acts while a window streams, which the
   mock does unless `-SillActive desktop` (or `none`) says otherwise, and the

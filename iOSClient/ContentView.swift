@@ -246,7 +246,7 @@ struct ContentView: View {
 ///   Settings panel's This iPad group) off for one run, in the normal app too. The mock Mac shares its
 ///   clipboard (`WindowList.clipboard` 1) in every settings case but `legacy`, whose group then has no
 ///   clipboard rows. `-SillClipboardChip 1` offers the clipboard's chip over the mock's stream (as
-///   after a copy on this device; it stays), and `-SillClipboardNote sent|long|notsent|pasted` shows a
+///   after a copy on this device; it stays; `-SillMockMacName <name>` gives the mock Mac another name), and `-SillClipboardNote sent|long|notsent|pasted` shows a
 ///   Paste's note in its place and under the group's Paste (`pasted`: "Pasted on ‹Mac›.", the note
 ///   after ⌘V; docs/clipboard-plan.md).
 /// * `-SillMacLocked 1|2|unlocking|view` — the mock Mac's screen is locked (1) or it is switched to another
@@ -526,7 +526,7 @@ struct ContentView: View {
 /// 455.5, 495.5 pt tall` (or `none`) each time UIKit reports the keyboard elsewhere
 /// (KeyboardFrameMonitor); and on the Duo's inner display upright `keyboard: the row 500–551 (51 pt): the
 /// glass at 555, 59 pt under the fold's edge at 496 (read: 0,555 669×396; reported 455.5)`, under a tall
-/// keyboard `keyboard: the toggle at 611,395 (44 pt): …`, `keyboard: nothing yet (a reading on its way)`,
+/// keyboard `keyboard: the toggle at 14,395 (44 pt): …`, `keyboard: nothing yet (a reading on its way)`,
 /// or `keyboard: none`, as the key row or the toggle stands in for the rows and goes (#215), with the
 /// monitor's `keyboard: looked: …`, `keyboard: assumed …`, `keyboard: reload …`, `keyboard: read …` and
 /// `keyboard: remembered: …` lines that say where each reading came from.

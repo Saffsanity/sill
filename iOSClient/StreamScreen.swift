@@ -160,6 +160,8 @@ struct StreamScreen: View {
     @State private var tour: TourRun? = nil
     /// Where the tour's targets are, as the layout on screen reports them.
     @State private var tourTargets: [TourTarget: CGRect] = [:]
+    /// The Keyboard toggle on the Duo's inner display (#215), while it shows: the clipboard's chip keeps clear.
+    @State private var keyboardToggleFrame: CGRect? = nil
     /// This session's first picture (the Mac's name, a frame size, a source), systemUptime.
     @State private var pictureAt: Double? = nil
     /// The layout on screen (nil until the screen has a size), and when it began.
@@ -272,8 +274,11 @@ struct StreamScreen: View {
                 // inside the stream panel's corner; never while something is open over the stream.
                 if clipboardChipAllowed, client.clipboardChip || client.clipboardNote != nil, let panel = tourTargets[.stream] {
                     let corner = ClipboardPolicy.chipCorner(landscape: layout == .landscape, linkLineShown: streamLine != nil)
+                    // Never over the Keyboard toggle in the pane's other bottom corner (#215).
+                    let widest = corner == .bottomTrailing ? DuoPosture.clipboardChipMaxWidth(panel: panel, toggle: keyboardToggleFrame)
+                                                           : max(0, panel.width - 16)
                     ClipboardChip(client: client)
-                        .frame(maxWidth: max(0, panel.width - 16), alignment: .trailing)
+                        .frame(maxWidth: widest, alignment: .trailing)
                         .padding(8)
                         .frame(width: panel.width, height: panel.height,
                                alignment: corner == .topTrailing ? .topTrailing : .bottomTrailing)
@@ -311,6 +316,7 @@ struct StreamScreen: View {
             }
             .coordinateSpace(.named(TourSpace.name))
             .onPreferenceChange(TourTargetsKey.self) { tourTargets = $0 }
+            .onPreferenceChange(KeyboardToggleFrameKey.self) { keyboardToggleFrame = $0 }
             .onChange(of: layout, initial: true) { _, now in layoutChanged(to: now) }
             // A thumbnail's lights hang from the strip, which Larger Picture's arrangement has none
             // of: when the arrangement changes under them (what streams changed, or a turn), they

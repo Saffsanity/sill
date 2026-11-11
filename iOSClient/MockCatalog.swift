@@ -63,8 +63,10 @@ enum MockCatalog {
         // missing from a network the mock never looked at.
         client.mockDiscovery = true
         client.connected = true
-        client.status = "Connected to Mac mini"
-        client.macName = "Mac mini"
+        // `-SillMockMacName <name>`: another name for the mock Mac (a long one for the clipboard's chip, #215).
+        let macName = UserDefaults.standard.string(forKey: "SillMockMacName") ?? "Mac mini"
+        client.status = "Connected to \(macName)"
+        client.macName = macName
         client.windows = mockWindows
         client.active = active
         client.apps = mockApps
