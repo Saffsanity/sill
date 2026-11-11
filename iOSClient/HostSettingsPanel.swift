@@ -235,7 +235,8 @@ struct HostSettingsPanel: View {
                 // A locked Mac's lists have no windows while it shows nothing of itself (its LockPolicy,
                 // docs/locked-mac-plan.md): why, under the readout, its own element for VoiceOver.
                 if let why = client.lockWhy {
-                    Text(LockedMac.line(mac: client.macName, why: why))
+                    // The off-console view's own (docs/off-console-plan.md): the picture is this account's, live.
+                    Text(client.lockView ? LockedMac.viewPanelLine : LockedMac.line(mac: client.macName, why: why))
                         .font(.footnote)
                         .foregroundStyle(Palette.text)
                         .fixedSize(horizontal: false, vertical: true)

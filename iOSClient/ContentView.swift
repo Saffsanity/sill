@@ -249,13 +249,17 @@ struct ContentView: View {
 ///   after a copy on this device; it stays; `-SillMockMacName <name>` gives the mock Mac another name), and `-SillClipboardNote sent|long|notsent|pasted` shows a
 ///   Paste's note in its place and under the group's Paste (`pasted`: "Pasted on ‹Mac›.", the note
 ///   after ⌘V; docs/clipboard-plan.md).
-/// * `-SillMacLocked 1|2|unlocking` — the mock Mac's screen is locked (1) or it is switched to another
+/// * `-SillMacLocked 1|2|unlocking|view` — the mock Mac's screen is locked (1) or it is switched to another
 ///   user (2) (docs/locked-mac-plan.md): its list has no windows, apps or clipboard and says `locked` (and
 ///   `offConsole` for 2), its placeholder streams as the Desktop, the cover over the stream says why
 ///   (`LockedMac.title` and `detail`), and the Apps drawer and the Settings panel's header show the line
 ///   ("Mac mini is locked. Unlock it to see its windows."); `unlocking` shows the cover's "Unlocking…". A
 ///   live session against a locked test host (SILL_TEST_LOCKED=1, or SILL_TEST_LOCKED_FILE holding 1 or
-///   2) shows the same.
+///   2) shows the same. `view`: the off-console view (docs/off-console-plan.md): switched to another user, the
+///   Mac showing this session anyway, its user's switch on: the mock's windows and picture as they are, no
+///   cover, the line over the stream ("Your account’s own desktop, not this Mac’s screen. …"), the drawer's
+///   and the Settings panel's line, Aa dimmed, no Menus button or Paste; a live session against a test host
+///   with --off-console-view and SILL_TEST_LOCKED_FILE holding 2 shows the same.
 /// * `-Sill.pasteRightAway 0` — not a harness argument either: this device's Paste on ‹Mac› Right Away
 ///   (the This iPad group, under Share Clipboard) off for one run, in the normal app too: a Paste's
 ///   receipt then presses no ⌘V on the Mac, and the chip, the note and the group's footnote say what

@@ -141,6 +141,8 @@ serves the root or `/docs`, never `/site`. So:
   `grep -n` of a phrase from each block that nothing of it is left. Add the marker's line and its
   grep here when a pull request marks words; the release that ships them deletes its markers in
   `site/`, keeps the words, and takes its lines out of here.
+  - Off-console view (PR for #316, docs/off-console-plan.md): support.html's paragraph on Show this account
+    while another user is on the screen; `grep -n 'Show this account while another user' ../sill-site/*.html`.
 - Open now: `Display wake click` (support.html's paragraph on a black picture, PR #228, for 0.6.1).
   It changes words 0.6.0 shipped rather than adding some, so a republish before 0.6.1 puts v0.6.0's
   paragraph back in place of the block instead of deleting it: after the perl line, `git show
