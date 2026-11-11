@@ -1,4 +1,4 @@
-"""(integrate-12: follow-best-path's 61 mutants, unchanged, and R1-R9 of the merge's remote rule, against the merged file and policy-merge/main.swift.) Each mutant of DiscoveryPolicy's session route (P: route, S: sessionRoute/describesFlow), of the wired dial (D: dialInterface, W: wiredWait), of following the best path (F: pathPlan, pathGone, PathSightings, freshWifi, wifiInterface, rank) and of its review fixes (G: the reconnect over the cable, the refused listing, upWait), and of a row's kept TXT record (T: rowRecords, records.swift: the cable pulled; a browser made again starts afresh) must fail the policy check. usage: mutants.py"""
+"""(integrate-12: follow-best-path's 61 mutants, unchanged, and R1-R9 of the merge's remote rule, against the merged file and policy-merge/main.swift.) Each mutant of DiscoveryPolicy's session route (P: route, S: sessionRoute/describesFlow), of the wired dial (D: dialInterface, W: wiredWait), of following the best path (F: pathPlan, pathGone, PathSightings, freshWifi, wifiInterface, rank) and of its review fixes (G: the reconnect over the cable, the refused listing, upWait), and of a row's kept TXT record (T: rowRecords, records.swift: the cable pulled; a browser made again starts afresh), and of the reconnect of an unsaved open door pinned to the key its lost session saw (O: reconnectTrust, reconnectKey, homeEnd's otherKey, home.swift: the security scan's finding 3; O7–O8 the review of #255's plain door, O9–O11 its tap that saw no key) must fail the policy check. usage: mutants.py"""
 import os, subprocess, sys
 SP = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(SP, "..", "..", ".."))   # the repository
@@ -199,15 +199,27 @@ MUTANTS = {
     "N22 the stopped line never": ("        if failed >= reconnectDials { return \"Stopped trying to reach \\(mac). Tap it to try again.\" }\n", ""),
     "N23 the Direct row's line lost": ("        return direct ? \"Reconnecting to \\(mac) directly\\u{2026}\" : \"Reconnecting to \\(mac)\\u{2026}\"",
                                        "        return \"Reconnecting to \\(mac)\\u{2026}\""),
-    "N24 a stopped Desktop left stopped (the rule before)": ("        case .nothing, .desktop: return .ask",
-                                                             "        case .nothing: return .ask\n        case .desktop: return .leave"),
-    "N25 a failed pick retried": ("        case .window(let listed): return listed ? .leave : .askAfterWait",
-                                  "        case .window(let listed): return listed ? .ask : .askAfterWait"),
-    "N26 a closed window asked for at once": ("        case .window(let listed): return listed ? .leave : .askAfterWait",
-                                              "        case .window(let listed): return listed ? .leave : .ask"),
-    "N27 the 10 s spacing ignored": ("        guard sinceLastAuto > autoDesktopSpacing else { return .leave }\n", ""),
-    "N28 the spacing inclusive": ("        guard sinceLastAuto > autoDesktopSpacing else { return .leave }",
-                                  "        guard sinceLastAuto >= autoDesktopSpacing else { return .leave }"),
+    "N24 a stopped Desktop left stopped (the rule before)": ("        case .nothing, .desktop:\n            if spaced { return .ask }",
+                                                             "        case .desktop: return .leave\n        case .nothing:\n            if spaced { return .ask }"),
+    "N25 a failed pick retried": ("            return listed ? .leave : .askAfterWait", "            return listed ? .ask : .askAfterWait"),
+    "N26 a closed window asked for at once": ("            return listed ? .leave : .askAfterWait", "            return listed ? .leave : .ask"),
+    "N27 the 10 s spacing ignored": ("        let spaced = sinceLastAuto > autoDesktopSpacing\n", "        let spaced = true\n"),
+    "N28 the spacing inclusive": ("        let spaced = sinceLastAuto > autoDesktopSpacing\n", "        let spaced = sinceLastAuto >= autoDesktopSpacing\n"),
+    # The Desktop that did not start (2026-10-28): the re-check when the spacing ends, and when it comes due.
+    "N29 no re-check (the rule before 2026-10-28: the black screen)": ("            return choseSinceLastAuto ? .leave : .askIn(min(autoDesktopSpacing, autoDesktopSpacing - sinceLastAuto))", "            return .leave"),
+    "N30 the re-check despite the person's choice since the request": ("            return choseSinceLastAuto ? .leave : .askIn(min(autoDesktopSpacing, autoDesktopSpacing - sinceLastAuto))", "            return .askIn(min(autoDesktopSpacing, autoDesktopSpacing - sinceLastAuto))"),
+    "N31 the re-check a whole spacing after the list, not when the spacing ends": ("            return choseSinceLastAuto ? .leave : .askIn(min(autoDesktopSpacing, autoDesktopSpacing - sinceLastAuto))", "            return choseSinceLastAuto ? .leave : .askIn(autoDesktopSpacing)"),
+    "N32 the re-check at once (a loop against a Mac that cannot start it)": ("            return choseSinceLastAuto ? .leave : .askIn(min(autoDesktopSpacing, autoDesktopSpacing - sinceLastAuto))", "            return choseSinceLastAuto ? .leave : .ask"),
+    "N33 a clock set back waits longer than the spacing": ("            return choseSinceLastAuto ? .leave : .askIn(min(autoDesktopSpacing, autoDesktopSpacing - sinceLastAuto))", "            return choseSinceLastAuto ? .leave : .askIn(autoDesktopSpacing - sinceLastAuto)"),
+    "N34 a window within the spacing re-checked too": ("            guard spaced else { return .leave }\n",
+                                                       "            guard spaced else { return .askIn(autoDesktopSpacing - sinceLastAuto) }\n"),
+    "N35 the re-check only for a Desktop stopped, not one that never started": (
+        "            if spaced { return .ask }\n            return choseSinceLastAuto",
+        "            if spaced { return .ask }\n            if watched == .nothing { return .leave }\n            return choseSinceLastAuto"),
+    "N36 the re-check asks while the Desktop streams": ("        nothingStreams && !choseSince && !askedSince\n", "        !choseSince && !askedSince\n"),
+    "N37 the re-check asks after the person chose": ("        nothingStreams && !choseSince && !askedSince\n", "        nothingStreams && !askedSince\n"),
+    "N38 the re-check asks after another automatic request": ("        nothingStreams && !choseSince && !askedSince\n", "        nothingStreams && !choseSince\n"),
+    "N39 the spacing 5 s": ("    static let autoDesktopSpacing = 10.0\n", "    static let autoDesktopSpacing = 5.0\n"),
     # Pairing at home (docs/home-pairing-plan.md, step 4): sessions and pairing at home over TLS (home.swift).
     "S4 pin: an open door's first connection plain": ("        case .open(nil): return .anyKey", "        case .open(nil): return .plainTCP"),
     "S4 pin: an open session's later connections take any key": ("        case .open(let seen?): return .key(seen)", "        case .open(let seen?): return seen.isEmpty ? .key(seen) : .anyKey"),
@@ -244,6 +256,30 @@ MUTANTS = {
     "S4 copy: over the cable dropped": ("            cable ? \"Pairing with \\(mac) over the cable\\u{2026}\" : \"Pairing with \\(mac)\\u{2026}\"", "            \"Pairing with \\(mac)\\u{2026}\""),
     "S4 copy: removed says the old remote words": ("        static func removed(mac: String, device: String) -> String { \"\\(mac) removed this \\(device). Tap it to pair again.\" }", "        static func removed(mac: String, device: String) -> String { \"\\(mac) removed this \\(device). To use it again, pair it again.\" }"),
     "S4 copy: openOnMac names no menu": ("\"\\(mac) didn\\u{2019}t show a code. On the Mac, choose Pair iPhone or iPad\\u{2026} in the Sill menu, then tap \\(mac) again.\"", "\"\\(mac) didn\\u{2019}t show a code.\""),
+    # The reconnect of an unsaved Mac on an open door pinned to the key its lost session saw (home.swift: the
+    # security scan's finding 3, 2026-10-29), with the model of the glue.
+    "O1 reconnectTrust: any key again (as before the fix)": ("        if dial == .anyKey, let seen { return .open(seen: seen) }\n", ""),
+    "O2 reconnectTrust: a saved Mac's reconnect pinned to the seen key": (
+        "        if dial == .anyKey, let seen { return .open(seen: seen) }", "        if dial == .anyKey || dial == .pinned, let seen { return .open(seen: seen) }"),
+    "O3 reconnectKey: the lost session's key forgotten": ("        if case .open(let seen?) = trust { return seen }\n        return nil", "        return nil"),
+    "O4 homeEnd: another key at the pinned reconnect read as the ordinary end (dialed on)": (
+        "            if seen != nil, tls == pinRefused { return .otherKey }\n", ""),
+    "O5 homeEnd: an open session that saw no key ends otherKey too": (
+        "            if seen != nil, tls == pinRefused { return .otherKey }", "            if tls == pinRefused { return .otherKey }"),
+    "O6 homeEnd: otherKey read as pairingRequired": (
+        "            if seen != nil, tls == pinRefused { return .otherKey }", "            if seen != nil, tls == pinRefused { return .pairingRequired }"),
+    # The review of #255 (2026-10-29): a plain door under the name not dialed after a session that saw a key.
+    "O7 reconnectTrust: a plain door dialed plain after the session saw a key (DEBUG; as before the review)": (
+        "        if dial == .plain, seen != nil { return nil }\n", ""),
+    "O8 reconnectTrust: a plain door never dialed by any reconnect, a plain session's too": (
+        "        if dial == .plain, seen != nil { return nil }", "        if dial == .plain { return nil }"),
+    # The review of #255 (2026-10-29): a tap whose dial saw no key leaves the reconnect the earlier key under its name.
+    "O9 reconnectKey: a tap that saw no key drops the earlier key (any key again, as before the review)": (
+        "        if case .open(nil) = trust { return earlier }\n", ""),
+    "O10 reconnectKey: the earlier key over the key the session saw": (
+        "        if case .open(nil) = trust { return earlier }", "        if case .open = trust, let earlier { return earlier }"),
+    "O11 reconnectKey: the earlier key for a saved Mac's lost session too": (
+        "        if case .open(nil) = trust { return earlier }", "        if case .open(nil) = trust { return earlier }\n        if case .saved = trust { return earlier }"),
     # A row keeps its TXT record while its result stays listed (records.swift: the cable pulled, 2026-10-27);
     # a browser made again starts afresh (the review of #232); each result of a name keeps its own.
     "T1 rowRecords: a result without a record reads as none (the rule undone, as before the fix)": (

@@ -16,6 +16,9 @@ M = [
     (D, "sightings: a leave dated at the first sighting", "for name in previous.since.keys where !listed.contains(name) { next.leftAt[name] = now }",
         "for name in previous.since.keys where !listed.contains(name) { next.leftAt[name] = previous.since[name] }"),
     (D, "flat retries", "static let remoteRetry: [Double] = [2, 4, 8, 10]", "static let remoteRetry: [Double] = [2, 2, 2, 2]"),
+    (R, "#309: VPN off blames this device alone", 'return "\\(name) looks off on this \\(device) or on \\(mac). Turn it on for both, then tap \\(mac)."',
+        'return "\\(name) looks off on this \\(device). Turn it on, then tap \\(mac)."'),
+    (R, "#309: a Tailscale name's lookup asks about this device alone", 'Is Tailscale on, here and on \\(mac)?"', 'Is Tailscale on?"'),
     (R, "lastWorked ignored", "            ordered.insert(ordered.remove(at: i), at: 0)\n", ""),
     (R, "no dedupe", "return ordered.filter { seen.insert($0.key.lowercased()).inserted }", "return ordered"),
     (R, "shared LAN not before internet", "        ordered += lans.filter { shared($0) && !loopback($0) }\n        ordered += internet.filter(\\.isName) + internet.filter { !$0.isName }\n",
@@ -85,6 +88,20 @@ M = [
     (S, "SUP with itself", "guard old != new, let o = list.first", "guard let o = list.first"),
     (S, "SUP remote order oldest first", "            out += byDate.filter { $0.name == mac.name }.reversed()", "            out += byDate.filter { $0.name == mac.name }"),
     (S, "SUP remote order newest first overall", "        let byDate = list.sorted { ($0.pairedAt, $0.macID) < ($1.pairedAt, $1.macID) }\n        var out", "        let byDate = list.sorted { ($0.pairedAt, $0.macID) > ($1.pairedAt, $1.macID) }\n        var out"),
+    # #140: the device key's rules (DeviceKeyPolicy), through launch.swift's model.
+    (S, "K1 clearing with no tag asked", "        !answers.isEmpty && answers.allSatisfy { $0 == .notFound }", "        answers.allSatisfy { $0 == .notFound }"),
+    (S, "K2 clearing when any tag has none", "        !answers.isEmpty && answers.allSatisfy { $0 == .notFound }", "        answers.contains { $0 == .notFound }"),
+    (S, "K3 a failed read counts as no key", "        !answers.isEmpty && answers.allSatisfy { $0 == .notFound }", "        !answers.isEmpty && answers.allSatisfy { $0 != .found }"),
+    (S, "K4 a failed read makes another key (before #140's fix)", "        case .failed(let status): return .fail(status)\n        }\n    }\n\n    enum Made",
+        "        case .failed: return .make\n        }\n    }\n\n    enum Made"),
+    (S, "K5 no key made when there is none", "        case .notFound: return .make\n", "        case .notFound: return .fail(itemNotFound)\n"),
+    (S, "K6 a found key not used", "        case .found: return .use\n        case .notFound", "        case .found: return .make\n        case .notFound"),
+    (S, "K7 a made key used unread (before #140's fix)", "        if readBack == .found { return .use }\n", "        return .use\n"),
+    (S, "K8 no explicit add", "        guard let added else { return .add }\n", "        guard let added else { return .fail(itemNotFound) }\n"),
+    (S, "K9 used after the add whatever it read", "        return .fail(added != 0 ? added : itemNotFound)\n", "        return .use\n"),
+    (S, "K10 the add's status lost", "        return .fail(added != 0 ? added : itemNotFound)\n", "        return .fail(itemNotFound)\n"),
+    (S, "K11 the read-back's own failure lost", "        if case .failed(let status) = readBack { return .fail(status) }\n", ""),
+    (S, "K12 errSecItemNotFound misspelt", "    static let itemNotFound: Int32 = -25300\n", "    static let itemNotFound: Int32 = -25299\n"),
 ]
 caught = 0
 for f, name, old, new in M:

@@ -71,6 +71,7 @@ enum MenuBuilder {
             case .allowAccessibility: .allowAccessibility
             case .showRemoteAccess: .showSettingsTab(.remoteAccess)
             case .showDevices: .showSettingsTab(.devices)
+            case .showGeneral: .showSettingsTab(.general)
             case .pairingRequest(let name, let showing): .showPairingRequest(name: name, showing: showing)
             case .none: .none
             }
@@ -247,6 +248,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         model.permissions.refresh()
         model.loginItem.refresh()
+        // The macOS firewall asked again (FirewallCheck: read-only, a few ms, off the main thread), so
+        // a block that came after launch (a Deny in the firewall's own prompt, Block all incoming
+        // connections turned on) is told where the user looks when devices can't connect: the glyph at
+        // once, Devices Can’t Connect from the menu's next opening (it is built before the answer).
+        model.coordinator?.checkFirewall()
         rebuild()
     }
 

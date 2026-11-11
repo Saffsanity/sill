@@ -52,9 +52,13 @@ final class VirtualStage {
         case moveRefused(AXError)
         case notOnDisplay(CGRect)
         case windowMissing
+        /// This Mac read locked as the display was about to be made (LockPolicy: no virtual display while
+        /// locked). Never counted as a creation failure; the coordinator streams nothing of the window.
+        case locked
 
         var description: String {
             switch self {
+            case .locked: return "locked (this Mac is locked: no virtual display is made)"
             case .disabled(let why): return "virtual display disabled: \(why)"
             case .accessibilityOff: return "accessibilityOff (Accessibility permission is needed to move the window)"
             case .screenRecordingOff: return "screenRecordingOff (Screen Recording is needed to capture the display; without it ScreenCaptureKit also hangs while a virtual display exists)"
@@ -81,6 +85,7 @@ final class VirtualStage {
             case .moveRefused: return "the app refused the move"
             case .notOnDisplay: return "the window didn’t move"
             case .windowMissing: return "the window went away"
+            case .locked: return "this Mac is locked"
             }
         }
     }
@@ -141,6 +146,11 @@ final class VirtualStage {
     /// not the Mac's user taking over the pointer (PointerWatch.sillMoved). Before the warp, never
     /// after, for the reason InputInjector's `watch` gives. Main actor.
     var onWarp: (() -> Void)?
+    /// The coordinator's lock (LockPolicy, docs/locked-mac-plan.md): no display is made while it says
+    /// locked (`Failure.locked`), and the cursor is never warped while `mayWarp` says no (off console the
+    /// cursor is the console's, another user's). Unset: as ever.
+    var mayMakeDisplay: (() -> Bool)?
+    var mayWarp: (() -> Bool)?
 
     let sizer: WindowSizer
     let catalog: WindowCatalog
@@ -192,12 +202,13 @@ final class VirtualStage {
     // MARK: Geometry (pure; the numbers in CLAUDE.md come from these)
 
     /// The size the window should have on the virtual display, in Mac points: the client's panel
-    /// divided by its text scale (Aa Off or a bad scale count as 1.0), or the window's own size
-    /// when no viewport has arrived yet.
+    /// divided by its text scale (Aa Off or a bad scale count as 1.0), each side held to 1…65536, the
+    /// most a host takes, so a full-screen window's crop keeps the panel's shape (VirtualDisplaySize,
+    /// pure, where the rule and its reasons are), or the window's own size when no viewport has
+    /// arrived yet. The placement fits it to the display (`dest` in `prepare`).
     static func windowSize(for v: Viewport?, own: CGSize) -> CGSize {
-        guard let v, v.width > 0, v.height > 0 else { return own }
-        let s = (v.scale ?? 1) > 0 ? (v.scale ?? 1) : 1
-        return CGSize(width: (v.width / s).rounded(), height: (v.height / s).rounded())
+        VirtualDisplaySize.windowSize(panel: v.map { CGSize(width: $0.width, height: $0.height) },
+                                      scale: v?.scale.map { CGFloat($0) }, own: own)
     }
 
     /// The display size (without the menu bar) that fits this panel at every Aa scale and in both
@@ -438,7 +449,7 @@ final class VirtualStage {
             if oversized, attempt == 0 {
                 // The app took a bigger size than asked (its minimum). Grow the display to it once;
                 // the window lands on a real display for a moment while the display is recreated.
-                print("\(p.appName) insists on \(Int(live.width))×\(Int(live.height)) pt (asked \(Int(wanted.width))×\(Int(wanted.height))); growing the virtual display.")
+                print("\(p.appName) insists on \(ViewportBounds.whole(live.size)) pt (asked \(ViewportBounds.whole(wanted))); growing the virtual display.")
                 do {
                     try await ensureDisplay(atLeast: live.size)
                 } catch {
@@ -515,6 +526,8 @@ final class VirtualStage {
         if placement != nil { releaseWindow() }
         destroyDisplay()
 
+        // A locked Mac makes no display: off console one joined the console's display set (2026-10-31).
+        if let may = mayMakeDisplay, !may() { throw Failure.locked }
         let t0 = Date()
         let d: VirtualDisplay
         do {
@@ -655,7 +668,7 @@ final class VirtualStage {
         }
         // The Mac cursor followed the device onto the virtual display: bring it back where it was
         // (or to the middle of the main display) so it is not stranded on a screen about to vanish.
-        if let d = display, d.isAlive, let here = CGEvent(source: nil)?.location, CGDisplayBounds(d.displayID).contains(here) {
+        if mayWarp?() ?? true, let d = display, d.isAlive, let here = CGEvent(source: nil)?.location, CGDisplayBounds(d.displayID).contains(here) {
             let main = CGDisplayBounds(CGMainDisplayID())
             onWarp?()
             CGWarpMouseCursorPosition(cursorBefore ?? CGPoint(x: main.midX, y: main.midY))

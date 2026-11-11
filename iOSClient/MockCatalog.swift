@@ -63,8 +63,10 @@ enum MockCatalog {
         // missing from a network the mock never looked at.
         client.mockDiscovery = true
         client.connected = true
-        client.status = "Connected to Mac mini"
-        client.macName = "Mac mini"
+        // `-SillMockMacName <name>`: another name for the mock Mac (a long one for the clipboard's chip, #215).
+        let macName = UserDefaults.standard.string(forKey: "SillMockMacName") ?? "Mac mini"
+        client.status = "Connected to \(macName)"
+        client.macName = macName
         client.windows = mockWindows
         client.active = active
         client.apps = mockApps
@@ -93,6 +95,25 @@ enum MockCatalog {
         client.thumbnails = thumbnails
 
         seed(client, settings: settings)
+        // `-SillMacLocked 1|2|unlocking` (docs/locked-mac-plan.md): the mock Mac's screen is locked (1), it is
+        // switched to another user (2), as its LockPolicy sends it (no windows, thumbnails, apps or clipboard,
+        // its placeholder streaming as the Desktop, the cover over it), or it was just unlocked and its
+        // picture is not back yet ("Unlocking…").
+        switch UserDefaults.standard.string(forKey: "SillMacLocked") {
+        case let value? where value == "1" || value == "2":
+            let why: LockedMac.Why = value == "2" ? .otherUser : .screenLocked
+            client.lockWhy = why
+            client.lockShade = .locked(why)
+            client.windows = []
+            client.thumbnails = [:]
+            client.apps = []
+            client.hostClipboard = nil
+            client.active = .desktop
+        case "unlocking"?:
+            client.lockShade = .unlocking
+        default:
+            break
+        }
         // `-SillOverlayLine asking|shown|openonmac|locked|noanswer`: Pair This iPad…'s line over a
         // session at home that speaks TLS, as the Mac's answer to its ask sets it (the mock never
         // asks: over it the overlay reads "…is showing a code now." as over a plain door).
@@ -108,8 +129,9 @@ enum MockCatalog {
             }
         }
         // The clipboard (docs/clipboard-plan.md): `-SillClipboardChip 1` offers the chip over the
-        // stream (as after a copy on this device), and `-SillClipboardNote sent|long|notsent` shows a Paste's
-        // note in its place and under the Settings group's Paste; neither goes away by itself here.
+        // stream (as after a copy on this device), and `-SillClipboardNote sent|long|notsent|pasted` shows a
+        // Paste's note in its place and under the Settings group's Paste (`pasted`: with ⌘V, paste right
+        // away); neither goes away by itself here.
         if ClipboardPolicy.hostTakes(client.hostClipboard) {
             if UserDefaults.standard.bool(forKey: "SillClipboardChip") { client.clipboardChip = true }
             switch UserDefaults.standard.string(forKey: "SillClipboardNote") {
@@ -122,12 +144,16 @@ enum MockCatalog {
             case "notsent":
                 client.clipboardNote = ClipboardNote(text: ClipboardPolicy.Copy.notSent(mac: "Mac mini"), spoken: ClipboardPolicy.Copy.notSent(mac: "Mac mini"),
                                                      warning: true, at: 0)
+            case "pasted":
+                let note = ClipboardPolicy.receiptNote(pasted: true, mac: "Mac mini")
+                client.clipboardNote = ClipboardNote(text: note.text, spoken: note.spoken, warning: false, at: 0)
             default:
                 break
             }
         }
-        // nil under `-SillLive 1`: the mock is never shown then, and must say nothing on the console.
-        if let menus { client.showMockMenus(macMenus(menus)) }
+        // nil under `-SillLive 1`: the mock is never shown then, and must say nothing on the console. A
+        // locked mock Mac has no app's menus (`-SillMacLocked 1`: an empty top level, no Menus button).
+        if let menus { client.showMockMenus(macMenus(client.macLocked ? MenuCase.none : menus)) }
         if let pointer { seedPointer(client, pointer, pencilPointer: pencilPointer) }
         return client
     }
@@ -292,7 +318,8 @@ enum MockCatalog {
     /// 2880×1800 · 60 fps · 15 Mbps over Wi-Fi unless a case says otherwise.
     enum SettingsCase: String {
         case `default`   // Sill.app: saved, the virtual display available and off, Send Audio off (Mute under it shows)
-        case cli         // SillHost without --virtual-display: kept until it quits, the switch off and disabled
+        case cli         // SillHost without --virtual-display: kept until it quits, the switch off and disabled; its
+                         // plain door is no paired session, so Direct Wireless is disabled too (2026-10-29)
         case software    // the hardware encoder is down: the callout, a 1440×900 stream under Retina / 120 fps targets
         case custom      // a bitrate set by hand on the Mac: "Custom — 12 Mbps"
         case vdproblem   // the virtual display on, but off for this session after repeated losses
@@ -314,7 +341,8 @@ enum MockCatalog {
         // Pairing at home (docs/home-pairing-plan.md §7.6, §7.9): a session at home over TLS.
         case paired          // a saved Mac, Remote Access on: Paired, and how Sill reaches it from afar
         case pairedoff       // a saved Mac, Remote Access off: Paired, and how to turn it on
-        case openpair        // not saved, on a Mac that lets any device in (Require pairing off), Remote Access off: Pair This iPad…
+        case openpair        // not saved, on a Mac that lets any device in (Require pairing off), Remote Access off: Pair This iPad…,
+                             // and Direct Wireless disabled, the session not paired (2026-10-29)
         // Away from home and the link (docs/remote-bundle-plan.md §5.8, §6.7), through Tailscale:
         case away            // the away quality runs (Low · Standard; home Pro · Retina): "Away: Low · Standard"
         case awaymixed       // away, while a device at home is connected: "Home quality: Pro · Retina (…)"
@@ -409,16 +437,19 @@ enum MockCatalog {
         guard c != .legacy else { return }
         var state = HostSettingsState(
             // A Mac with sound, Send Audio off, as Sill for Mac has it since the sound came: the panel's
-            // Send Audio switch and Mute under it show. `nosound` and `nodirect` are older Macs.
+            // Send Audio switch and Mute under it show. `nosound` and `nodirect` are older Macs. A
+            // paired session (`sessionPaired`, 2026-10-29), whose Direct Wireless switch works.
             settings: StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
                                      directWireless: false, sendAudio: false),
             persistent: true, virtualDisplayAvailable: true, softwareEncoder: false,
-            stream: RunningStream(width: 2880, height: 1800, fps: 60, mbps: 15, onVirtualDisplay: false))
+            stream: RunningStream(width: 2880, height: 1800, fps: 60, mbps: 15, onVirtualDisplay: false),
+            sessionPaired: true)
         switch c {
         case .cli:
             state.persistent = false
             state.virtualDisplayAvailable = false
             state.virtualDisplayNote = "Start SillHost with --virtual-display to use it."
+            state.sessionPaired = false   // the plain door sees no key
         case .software:
             state.softwareEncoder = true
             state.stream = RunningStream(width: 1440, height: 900, fps: 60, mbps: 15, onVirtualDisplay: false)
@@ -440,6 +471,7 @@ enum MockCatalog {
         case .nodirect:
             state.settings.directWireless = nil
             state.settings.sendAudio = nil
+            state.sessionPaired = nil
         case .remote, .remoteslow:
             client.remoteRoute = .vpn("Tailscale")
             client.macInfo = macInfo()
@@ -453,8 +485,10 @@ enum MockCatalog {
             client.showMockLinkStats(linkStats(rtt: 120))
         case .remotepair:
             client.macInfo = macInfo()
+            state.sessionPaired = nil   // a Mac with a plain door, from before 2026-10-29
         case .remoteoff:
             client.macInfo = macInfo(remoteAccess: false)
+            state.sessionPaired = nil
         case .paired, .pairedoff:
             client.macInfo = macInfo(remoteAccess: c == .paired)
             client.macInfoSaved = true
@@ -462,6 +496,7 @@ enum MockCatalog {
         case .openpair:
             client.macInfo = macInfo(remoteAccess: false)
             client.mockHomeTLS = true
+            state.sessionPaired = false
         case .away, .awaymixed, .awayhome, .linkbehind, .linkmixed, .linklow, .linkstalled:
             seedAway(client, &state, c)
         case .sound:
@@ -474,7 +509,9 @@ enum MockCatalog {
             state.audioNote = "Couldn’t capture the sound of Safari: the stream did not start within 2 s."
         case .nosound:
             state.settings.sendAudio = nil
-        case .default, .legacy, .pending, .timeout, .wired, .noroute, .noremote:
+        case .noremote:
+            state.sessionPaired = nil   // an older Mac
+        case .default, .legacy, .pending, .timeout, .wired, .noroute:
             break
         }
         // `-SillSound on|muted`: the Mac sends its sound (Send Audio on), and this device plays it or has it

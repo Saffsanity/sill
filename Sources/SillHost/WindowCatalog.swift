@@ -12,7 +12,9 @@ import StreamProtocol
 /// Idle means idle: with no client connected nothing here runs on a timer. The window list is
 /// read once at startup (the coordinator's `refreshWindows()`, so the CLI can print a count) and
 /// then only while at least one client is connected, every `pollInterval`, together with the
-/// thumbnails. The installed-app scan runs once at startup, off the main thread.
+/// thumbnails. The installed-app scan runs once at startup, off the main thread. So after a spell
+/// with no client the last look can be hours old and its display gone: the coordinator looks again
+/// before it builds a capture from it (CatalogLook, `lookAge`).
 @MainActor
 final class WindowCatalog {
     private(set) var windows: [SCWindow] = []
@@ -23,6 +25,13 @@ final class WindowCatalog {
     /// out, so Sill's own windows (the pairing code above all) never reach a device. Nil when it
     /// is not listed (the CLI has no windows; see `resolveOwnApplication`).
     private(set) var ownApplication: SCRunningApplication?
+    /// When the last look (`refreshWindows`) landed, on the clock that keeps counting while the Mac
+    /// sleeps. Nil before the first. A capture is built from the look only while it will do
+    /// (CatalogLook, the coordinator's `lookAgainIfStale`): after a spell with no device it can be a
+    /// day old, its display gone (the black screen of 2026-10-28).
+    private(set) var lookedAt: ContinuousClock.Instant?
+    /// Seconds since the last look, nil before the first.
+    var lookAge: TimeInterval? { lookedAt.map { CatalogLook.seconds(ContinuousClock.now - $0) } }
 
     /// Fires when the window list changes (new, closed, retitled, resized, reordered).
     var onWindowsChanged: (([WindowInfo]) -> Void)?
@@ -47,6 +56,31 @@ final class WindowCatalog {
     /// catalog, so the new client gets the list and icons first and then every thumbnail.
     var thumbnailsWanted = false {
         didSet { if thumbnailsWanted && clientCount > 0 { resendAllThumbnails() } }
+    }
+
+    /// This Mac's screen is locked (the coordinator's reading; LockPolicy, docs/locked-mac-plan.md): no
+    /// thumbnail is taken, and none that a capture under way brings back is sent, no new icon goes out
+    /// and the installed apps are not sent when their scan ends (`allIcons` and `installedApps` keep
+    /// them for the unlock, which the coordinator sends). The window list is still read, so the unlock
+    /// finds the windows as they are. Unlocked again: every thumbnail is taken and sent afresh.
+    var locked = false {
+        didSet { if oldValue && !locked { resendAllThumbnails() } }
+    }
+    /// The lock's gate now (SessionLock's, set on its own queue the moment a witness says locked): asked
+    /// before each thumbnail, so none is taken after the lock even before the coordinator has set `locked`.
+    var isLocked: () -> Bool = { false }
+    /// Locked by either: what this catalog withholds by.
+    private var withholding: Bool { locked || isLocked() }
+    /// What `locked` withheld from the devices that were connected: the icons announced meanwhile, and
+    /// whether the installed apps' scan ended meanwhile (`takeWithheld`).
+    private var withheldIcons: [String] = []
+    private var appsWithheld = false
+
+    /// What was withheld while locked, once: the coordinator sends it at the unlock to the devices that
+    /// were connected before the lock (one that connected while locked gets every icon and the apps).
+    func takeWithheld() -> (icons: [(bundleID: String, png: Data)], apps: Bool) {
+        defer { withheldIcons = []; appsWithheld = false }
+        return (withheldIcons.compactMap { id in icons[id].map { (id, $0) } }, appsWithheld)
     }
 
     /// Connected clients, from the server. 0→N starts polling (with an immediate pass); N→0 stops
@@ -89,13 +123,16 @@ final class WindowCatalog {
     /// the client's bar and the coordinator can still find it.
     var stagedWindowID: CGWindowID?
 
-    /// Windows AppKit and SwiftUI make for themselves when a display appears ("LayerProbeParent":
-    /// an off-screen window that probes layer backing on the new screen). They carry the app's
-    /// name and no content, showed up as duplicate tiles with blank thumbnails, and the window
-    /// server drops them onto a real display when a virtual display goes away.
-    static func isSystemHelperWindow(_ w: SCWindow) -> Bool {
-        (w.title ?? "").lowercased().contains("layerprobe")
+    /// A window in the plain values CatalogWindows judges it by.
+    static func plain(_ w: SCWindow) -> CatalogWindows.Window {
+        CatalogWindows.Window(title: w.title, appName: w.owningApplication?.applicationName,
+                              bundleID: w.owningApplication?.bundleIdentifier,
+                              pid: w.owningApplication?.processID ?? -1, layer: w.windowLayer,
+                              width: Double(w.frame.width), height: Double(w.frame.height))
     }
+
+    /// The owners whose left-out windows Sill.log has named (CatalogWindows.leftOutLines): once each.
+    private var leftOutNamed: Set<String> = []
 
     /// Window list and thumbnails, while a client is connected.
     static let pollInterval: Duration = .seconds(2)
@@ -167,6 +204,17 @@ final class WindowCatalog {
     /// One of this process's own windows (Settings, the log, the pairing window with its code).
     static func isOwn(_ w: SCWindow) -> Bool { w.owningApplication?.processID == ownPID }
 
+    /// The displays macOS has active now (connected, awake, drawable; Sill's own virtual display too
+    /// while it exists), by ID: what the last look's display is judged against before a capture is
+    /// built from it (CatalogLook). No ScreenCaptureKit call. Empty when the call fails.
+    nonisolated static func activeDisplayIDs() -> [UInt32] {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
+        return Array(ids.prefix(Int(count)))
+    }
+
     /// `SCShareableContent`, but never for longer than `timeout`. Measured 2026-09-22: in a process
     /// without Screen Recording the call never returned once a virtual display existed (it returns
     /// promptly, with no windows, without one). The virtual-display paths use this so a hang there
@@ -215,7 +263,7 @@ final class WindowCatalog {
             await refreshWindows()
             if Task.isCancelled { break }
             onPolled?()
-            if thumbnailsWanted { await refreshThumbnails() }
+            if thumbnailsWanted && !withholding { await refreshThumbnails() }
             if Task.isCancelled { break }
             if passOwed { continue }
             let nap = Task { _ = try? await Task.sleep(for: Self.pollInterval) }
@@ -251,17 +299,16 @@ final class WindowCatalog {
         }
         guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
         appliedSeq = seq
+        lookedAt = .now
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
         display = preferMainDisplay
             ? (content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first)
             : content.displays.first
-        var visible = content.windows.filter { w in
-            guard let app = w.owningApplication, !app.applicationName.isEmpty else { return false }
-            return w.windowLayer == 0                                  // drops widgets, wallpaper, backstop
-                && w.frame.width > 100 && w.frame.height > 100
-                && app.processID != Self.ownPID
-                && !Self.isSystemHelperWindow(w)
-        }
+        // An app's own windows only (CatalogWindows): no widgets, wallpaper or backstop, nothing of
+        // Sill's, and no helper's window (LayerProbeParent, macOS's own interface, a tool's overlay).
+        let plain = content.windows.map(Self.plain)
+        var visible = zip(content.windows, plain).filter { CatalogWindows.lists($1, ownPID: Self.ownPID) }.map(\.0)
+        for line in CatalogWindows.leftOutLines(plain, ownPID: Self.ownPID, named: &leftOutNamed) { print(line) }
         if let pinned, !visible.contains(where: { $0.windowID == pinned.windowID }) { visible.append(pinned) }
         // The system's order is not front-to-back and shuffles between polls. The brief wants a
         // fixed order in the bar, so keep first-seen order and append newcomers.
@@ -296,7 +343,7 @@ final class WindowCatalog {
         let infoByID = Dictionary(uniqueKeysWithValues: infos.map { ($0.id, $0) })
         thumbStamps = thumbStamps.filter { infoByID[$0.key] != nil }      // forget closed windows
         for w in windows {
-            if Task.isCancelled { return }
+            if Task.isCancelled || withholding { return }   // locked meanwhile: no more captures
             guard let info = infoByID[w.windowID] else { continue }
             if let stamp = thumbStamps[w.windowID], stamp.info == info, w.windowID != activeWindowID,
                now - stamp.at < Self.staticThumbnailInterval { continue }
@@ -309,6 +356,8 @@ final class WindowCatalog {
             let filter = SCContentFilter(desktopIndependentWindow: w)
             guard let image = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config),
                   let jpeg = Self.jpeg(image, quality: 0.6) else { continue }
+            // Locked while it was taken: dropped (the unlock takes every thumbnail afresh).
+            if withholding { return }
             onThumbnail?(w.windowID, jpeg)
         }
     }
@@ -329,7 +378,8 @@ final class WindowCatalog {
         icons[bundleID] = png
         announcedIcons.insert(bundleID)
         // With nobody connected a broadcast reaches no one; `allIcons` carries it to the next client.
-        if clientCount > 0 { onNewIcon?(bundleID, png) }
+        // While locked it waits for the unlock (`takeWithheld`).
+        if clientCount > 0 && !withholding { onNewIcon?(bundleID, png) } else if withholding { withheldIcons.append(bundleID) }
     }
 
     // MARK: Installed apps
@@ -356,7 +406,7 @@ final class WindowCatalog {
         installedApps = apps
         // A running app's icon, announced by a window refresh meanwhile, wins over the file icon.
         for (id, png) in rendered where !announcedIcons.contains(id) { announce(bundleID: id, png: png) }
-        if clientCount > 0 { onInstalledAppsReady?(apps) }
+        if clientCount > 0 && !withholding { onInstalledAppsReady?(apps) } else if withholding { appsWithheld = true }   // the unlock sends them
     }
 
     /// Sorted by display name, first bundle ID wins. Thread-safe (FileManager + Bundle only).

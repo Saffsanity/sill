@@ -280,5 +280,32 @@ check("remote order: distinct names keep the pairing date's order", SavedMacs.re
 // Pairing at home (docs/home-pairing-plan.md): the home model and the saved Macs' home fields, in home.swift.
 homeRemote()
 
+// #309: where the device can't tell which end's VPN is off, the words name both, never only this device.
+let wgC = R.Candidate(host: "10.8.0.2", port: 7455, kind: "vpn", via: "")
+check("#309: Tailscale off, words for both ends",
+      RemoteCopy.dialFailure(.vpnOff, mac: "Mac mini", candidate: vpnC, vpnName: "Tailscale", device: "iPhone")
+        == "Tailscale looks off on this iPhone or on Mac mini. Turn it on for both, then tap Mac mini.")
+check("#309: a Tailscale name: the same words",
+      RemoteCopy.dialFailure(.vpnOff, mac: "Mac mini", candidate: tsName, vpnName: "Tailscale", device: "iPad")
+        == "Tailscale looks off on this iPad or on Mac mini. Turn it on for both, then tap Mac mini.")
+check("#309: a VPN with no service name",
+      RemoteCopy.dialFailure(.vpnOff, mac: "Studio", candidate: wgC, vpnName: nil, device: "iPhone")
+        == "Your VPN looks off on this iPhone or on Studio. Turn it on for both, then tap Studio.")
+check("#309: no candidate known",
+      RemoteCopy.dialFailure(.vpnOff, mac: "Studio", candidate: nil, vpnName: nil, device: "iPhone")
+        == "Your VPN looks off on this iPhone or on Studio. Turn it on for both, then tap Studio.")
+check("#309: a Tailscale name not found asks about both ends",
+      RemoteCopy.dialFailure(.nameNotFound, mac: "Mac mini", candidate: tsName, vpnName: "Tailscale", device: "iPhone")
+        == "This iPhone can’t look up mac.tail1.ts.net. Is Tailscale on, here and on Mac mini?")
+check("#309: another name not found: as before",
+      RemoteCopy.dialFailure(.nameNotFound, mac: "Mac mini", candidate: nameC, vpnName: nil, device: "iPhone")
+        == "This iPhone can’t look up home.example.net.")
+check("#309: no answer over Tailscale: the Mac's end, as before",
+      RemoteCopy.dialFailure(.noAnswer, mac: "Mac mini", candidate: vpnC, vpnName: "Tailscale", device: "iPhone")
+        == "Mac mini didn’t answer. It may be asleep, or Tailscale may be off on the Mac.")
+
+// #140: the launch, a pairing, a SIGKILL and the next launch with each Keychain and UserDefaults fault, in launch.swift.
+launchModel()
+
 print("\(passes) passed, \(fails) failed")
 exit(fails == 0 ? 0 : 1)

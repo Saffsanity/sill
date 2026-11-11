@@ -1,4 +1,4 @@
-"""Each mutant changes DisplayWake.swift (issue #134, PR #151) in one place, is compiled with the check by
+"""Each mutant changes DisplayWake.swift (issue #134, PRs #151 and #228) in one place, is compiled with the check by
 build.sh and must make it fail (main.swift). usage: mutants.py WORKTREE"""
 import os, subprocess, sys
 WT = sys.argv[1]; HERE = os.path.dirname(os.path.abspath(__file__))
@@ -6,7 +6,7 @@ OUT = os.path.join(WT, ".build", "checks", "display-wake")   # the mutants' sour
 os.makedirs(OUT, exist_ok=True)
 SRC = os.path.join(WT, "Sources/SillHost/DisplayWake.swift")
 orig = open(SRC).read()
-HELD = "if activity != .connect, let last = lastDeclared, now >= last, now - last < Self.interval {"
+HELD = "if activity != .connect, activity != .wakingPress, let last = lastDeclared, now >= last, now - last < Self.interval {"
 WINDOW = "if case .pointer(.move, _, _) = input, let changed = streamChangedAt, now >= changed,\n                   now - changed < Self.recentre {"
 LAUNCH = "            case .launchApp: return .launch\n"
 WOKE = "if look.wasAsleep, !asleepNow, look.wakesBefore == wakesSaid {"
@@ -87,6 +87,27 @@ MUTANTS = {
     "M59 another value echoed": ('return (false, "\\(userActiveVariable) ignored: it takes local or remote; user activity is declared as local.")',
                                  'return (false, "\\(userActiveVariable)=\\(value) ignored: it takes local or remote; user activity is declared as local.")'),
     "M60 the variable's name": ('static let userActiveVariable = "SILL_TEST_USER_ACTIVE"', 'static let userActiveVariable = "SILL_TEST_USERACTIVE"'),
+    # The waking click (PR #228)
+    "M61 a press on a sleeping display goes on": ("        if asleep() {\n", "        if false {\n"),
+    "M62 a held-back press's release goes on": ("guard heldBack[device]?.contains(button) == true else {", "guard false else {"),
+    "M63 a held-back press not waking": ("return Passed(event: .pointer(.move, x: x, y: y), waking: true)", "return Passed(event: .pointer(.move, x: x, y: y), waking: false)"),
+    "M64 a held-back press dropped, no move to its spot": ("return Passed(event: .pointer(.move, x: x, y: y), waking: true)", "return Passed(event: nil, waking: true)"),
+    "M65 one device's held press takes another's release": ("guard heldBack[device]?.contains(button) == true else {", "guard heldBack.values.contains(where: { $0.contains(button) }) else {"),
+    "M66 the button ignored": ("let button: Button = action == .leftDown || action == .leftUp ? .left : .right", "let button: Button = .left"),
+    "M67 the grace never ends": ("            if now - run.first < Self.wakeGrace {\n", "            if true {\n"),
+    "M68 the grace 10 s": ("static let wakeGrace: TimeInterval = 5", "static let wakeGrace: TimeInterval = 10"),
+    "M69 no fresh start after a gap": ("if now < run.last || now - run.last >= Self.wakeGrace { run = (now, now) }", "if now < run.last { run = (now, now) }"),
+    "M70 no fresh start after a clock set back": ("if now < run.last || now - run.last >= Self.wakeGrace { run = (now, now) }", "if now - run.last >= Self.wakeGrace { run = (now, now) }"),
+    "M71 an awake press does not end the run": ("        } else {\n            asleepPresses = nil\n        }\n", "        }\n"),
+    "M72 a press that goes on keeps an older hold": ("        letGo(button, of: device)            // this press goes on", "        // this press goes on"),
+    "M73 a device that left keeps its holds": ("mutating func forget(_ device: ObjectIdentifier) { heldBack[device] = nil }", "mutating func forget(_ device: ObjectIdentifier) { }"),
+    "M74 a press held back said as input": ("        case .wakingPress:\n            return .wakingPress\n", "        case .wakingPress:\n            return .input\n"),
+    "M75 the display read for a move": ("guard case .pointer(let action, let x, let y) = event, action != .move else {", "guard case .pointer(let action, let x, let y) = event else {"),
+    "M76 the TEST ONLY display taken by a real host": ("guard testHost else { return (nil, \"\\(displayAsleepVariable) ignored: only a --synthetic host takes it.\") }",
+                                                     "guard testHost || true else { return (nil, \"\\(displayAsleepVariable) ignored: only a --synthetic host takes it.\") }"),
+    "M77 the TEST ONLY display's file echoed": ("return (value, \"Test display: the test pattern's display reads asleep while the file \\(displayAsleepVariable) names exists.\")",
+                                               "return (value, \"Test display: the test pattern's display reads asleep while \\(value) exists.\")"),
+    "M78 the TEST ONLY display's name": ('static let displayAsleepVariable = "SILL_TEST_DISPLAY_ASLEEP"', 'static let displayAsleepVariable = "SILL_TEST_DISPLAY_SLEEP"'),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

@@ -36,11 +36,18 @@ final class AppModel {
         var reason: String
     }
 
-    /// Sill.app itself, not the bare SillMenuBar binary: an app bundle's executable, which runs with
-    /// Sill's Screen Recording and Accessibility grants. It honours no TEST ONLY variable or `-Sill…After`
-    /// hook that bears on who gets in or what pairing needs (docs/home-pairing-plan.md §4.3, §6.6):
-    /// any process of this user can start it with an environment and arguments.
-    nonisolated static let bundled = Bundle.main.bundleURL.pathExtension == "app"
+    /// What this process is, read once at launch: its signing identifier as the kernel holds it, how
+    /// it is signed, its bundle's identifier and folder (AppIdentity).
+    nonisolated static let launchIdentity = AppIdentity.Facts.current()
+    /// Sill.app itself, not the bare SillMenuBar binary: Sill's own code, which runs with Sill's
+    /// Screen Recording and Accessibility grants wherever it runs from, decided by what the code is
+    /// (signed as Sill or with any certificate, or a bundle that says it is Sill, or a `.app`), never
+    /// by its folder's name alone (the security scan of 2026-10-18, finding 1, fixed 2026-10-29: a
+    /// copy renamed Sill.bin, or a link to Sill.app's executable, read as the bare binary). It
+    /// honours no TEST ONLY variable or `-Sill…After` hook that bears on who gets in or what pairing
+    /// needs (docs/home-pairing-plan.md §4.3, §6.6): any process of this user can start it with an
+    /// environment and arguments.
+    nonisolated static let bundled = AppIdentity.isSillApp(launchIdentity)
 
     /// Wired by the app delegate: the status item's glyph and tooltip, and the windows.
     @ObservationIgnored var onPresentation: ((StatusPresentation) -> Void)?
@@ -87,6 +94,9 @@ final class AppModel {
     /// Starts the host: the same coordinator as the CLI, under the AppKit loop that is already
     /// running, asking for no permission at launch. Never exits on an error.
     func start() {
+        // Sill.app's code in a folder that is not a .app (a renamed copy, a link to its executable):
+        // one line on why it takes no test hook. Nothing for Sill.app where it belongs, or the bare binary.
+        if let note = AppIdentity.note(Self.launchIdentity) { print(note) }
         observePresentation()
         // The lock notifications: the ask rule's second witness that this Mac is locked
         // (SessionLock), beside the session dictionary the CLI has alone.

@@ -243,6 +243,25 @@ check(Wire.decode(HostSettingsState.self, from: Wire.encode(noted))?.audioNote =
       "kind 16's audio note round-trips")
 check(!json(HostSettingsState(settings: withSound, persistent: true, virtualDisplayAvailable: true, softwareEncoder: false)).contains("audioNote"),
       "no note, no key")
+// Kind 16's sessionPaired (2026-10-29, the security scan's finding 8): whether this session's key is on
+// the Mac's trust list, the one kind of session a host takes Direct Wireless from. Optional both ways:
+// an older host leaves it out (nil: the device's switch works as before), an older device skips it.
+struct OldState: Codable, Equatable { var settings: OldStreamSettings; var persistent: Bool; var virtualDisplayAvailable: Bool; var softwareEncoder: Bool }
+for paired in [false, true] {
+    let state = HostSettingsState(settings: withSound, persistent: true, virtualDisplayAvailable: true, softwareEncoder: false,
+                                  sessionPaired: paired)
+    check(json(state).contains(#""sessionPaired":\#(paired)"#) && Wire.decode(HostSettingsState.self, from: Wire.encode(state)) == state,
+          "kind 16 carries sessionPaired \(paired) and round-trips")
+    check(Wire.decode(OldState.self, from: Wire.encode(state))
+          == OldState(settings: OldStreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
+                                                  directWireless: false),
+                      persistent: true, virtualDisplayAvailable: true, softwareEncoder: false),
+          "an older device reads it and skips sessionPaired \(paired)")
+}
+check(!json(HostSettingsState(settings: withSound, persistent: true, virtualDisplayAvailable: true, softwareEncoder: false)).contains("sessionPaired"),
+      "a state without it has no sessionPaired key")
+check(Wire.decode(HostSettingsState.self, from: Data(#"{"settings":{"maxFPS":60,"bitrate":8000000,"captureScale":1,"prioritizeSpeed":true,"virtualDisplay":false,"directWireless":true},"persistent":true,"virtualDisplayAvailable":true,"softwareEncoder":false}"#.utf8))?.sessionPaired == nil,
+      "an older host's state: sessionPaired nil")
 // ClientStats' two fields.
 let heard = ClientStats(fps: 60, frameAgeMs: 9, rttMs: 7, device: "iPad", frameAgeMaxMs: 20, rttMaxMs: 11, audioBehindMs: 42, audioLate: 3)
 check(Wire.decode(ClientStats.self, from: Wire.encode(heard)) == heard && json(heard).contains(#""audioBehindMs":42"#) && json(heard).contains(#""audioLate":3"#),
@@ -276,6 +295,22 @@ let clipboardMessage = StreamMessage(kind: .clipboard, timestamp: 1, isKeyframe:
 check(StreamMessage.parseHeader(clipboardMessage)?.kind == .clipboard && clipboardMessage.count == StreamMessage.headerLength + Wire.encode(clip).count,
       "the clipboard's header parses, then the JSON")
 
+// The window list's `keyRepeat` (#162's letters): a host that repeats a device's held key says 1 (set after
+// the initializer, whose parameters stay as they were), and a device sends it a hardware keyboard's
+// characters as keys only then. Additive: an older host's list decodes with it nil, and an older device's
+// reader skips the key.
+var repeats = shares
+repeats.keyRepeat = 1
+check(json(repeats).contains(#""keyRepeat":1"#), "a list from a host that repeats held keys says keyRepeat 1: \(json(repeats))")
+check(!json(shares).contains("keyRepeat") && !json(list).contains("keyRepeat") && shares.keyRepeat == nil,
+      "a list without it (the initializer's) leaves the key out")
+check(decodedOld != nil && decodedOld?.keyRepeat == nil, "an older host's list decodes, keyRepeat nil")
+check(Wire.decode(WindowList.self, from: Wire.encode(repeats)).map { $0.keyRepeat == 1 && $0.clipboard == 1 && $0.gestures == 1 } == true,
+      "keyRepeat round-trips beside clipboard and gestures")
+struct ReaderBefore: Decodable { var macName: String; var gestures: Int?; var clipboard: Int? }
+check(Wire.decode(ReaderBefore.self, from: Wire.encode(repeats)).map { $0.macName == "Mac mini" && $0.clipboard == 1 } == true,
+      "a reader from before it skips keyRepeat")
+
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil
 if let out {
@@ -287,6 +322,7 @@ if let out {
         "gestureMessage": gestureMessage.base64EncodedString(),
         "windowListGestures": String(decoding: Wire.encode(takes), as: UTF8.self),
         "windowListClipboard": String(decoding: Wire.encode(shares), as: UTF8.self),
+        "windowListKeyRepeat": String(decoding: Wire.encode(repeats), as: UTF8.self),
         "clipboardMessage": clipboardMessage.base64EncodedString(),
     ]
     try! JSONSerialization.data(withJSONObject: payloads, options: [.sortedKeys, .prettyPrinted]).write(to: URL(fileURLWithPath: out))

@@ -76,6 +76,9 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
 
     /// Pan translation already turned into scroll, so each callback sends only the new delta.
     private var lastPanTranslation: CGPoint = .zero
+    /// The iPad's trackpad's or a wheel's scroll in progress: where the pointer was as it began, where all
+    /// of it goes, and its readings added up (PointerScroll).
+    private var pointerScroll = PointerScroll()
     /// True between the `.scrollGesture(.began)` this view sent and its `.ended`, so an end is
     /// never sent for a pan that could not begin (no video yet).
     private var scrollGestureOpen = false
@@ -88,6 +91,17 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// True once the hover in progress has shown itself to be a Pencil. Sticky for the session so a
     /// Pencil reading zero for a moment at the bottom of its range does not flicker the pointer.
     private var hoverIsPencil = false
+    /// A Pencil touch is on the glass, from its `touchesBegan` to its `touchesEnded` or
+    /// `touchesCancelled`. A hover update that comes meanwhile is stale and goes nowhere: as the tip
+    /// lifts, iPadOS sends one more, about 1 ms before the touch ends, carrying where the Pencil
+    /// hovered before it landed (an iPad Pro M4 with iPadOS 27.0.1, one in each of six strokes: Hunter
+    /// Ahlquist's finding, issue #81; reported again in #322). Sent as a move with the Mac's button still
+    /// down, it drew a line from the stroke's end back to where it began.
+    private var pencilTouching = false
+    /// Whether the session's Mac repeats a key held down (`StreamClient.hostKeyRepeat`, the window list's
+    /// `keyRepeat`): a hardware keyboard's characters go to it as keys only then (KeyTyping), as a Mac that
+    /// repeats none would type each once. Asked as each key goes down.
+    var macRepeatsKeys: () -> Bool = { false }
     /// A three- or four-finger gesture this view decided, for the Mac (`StreamClient.sendGesture`,
     /// which checks this device's switch and the Mac's `gestures`, and shows the Desktop first while
     /// a window streams). True when it went.
@@ -352,8 +366,34 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     }
 
     private func scroll(_ gesture: UIPanGestureRecognizer, _ source: ScrollSource) {
-        scroll(gesture.state, at: gesture.location(in: self), translation: gesture.translation(in: self),
-               velocity: gesture.state == .ended ? gesture.velocity(in: self) : .zero, from: source)
+        let velocity = gesture.state == .ended ? gesture.velocity(in: self) : .zero
+        guard source != .finger else {
+            scroll(gesture.state, at: gesture.location(in: self), translation: gesture.translation(in: self),
+                   velocity: velocity, from: source)
+            return
+        }
+        // The iPad's trackpad or a wheel: no finger moves, and the pan's location runs on with its
+        // translation while the pointer stays put, so the whole scroll goes where the pointer was as it
+        // began; each reading is taken and the translation zeroed, so it is what moved since the last
+        // one however UIKit counts (PointerScroll, #130).
+        let reading = gesture.translation(in: self)
+        gesture.setTranslation(.zero, in: self)
+        if gesture.state == .began {
+            pointerScroll.began(at: gesture.location(in: self), reading: reading)
+        } else {
+            pointerScroll.moved(reading)
+        }
+        #if DEBUG
+        if gesture.state == .ended || gesture.state == .cancelled {
+            // One line a scroll (a trackpad's gesture, a wheel's notches): how far, where, and how far UIKit's
+            // own location for the pan had run from there, for a device to show what the simulator did.
+            let own = gesture.location(in: self), at = pointerScroll.at, total = pointerScroll.total
+            print(String(format: "scroll: %@ %@ by %.1f,%.1f pt at %.1f,%.1f; the pan's own location ended %.1f,%.1f pt from it",
+                         source.rawValue, gesture.state == .ended ? "ended" : "cancelled", total.x, total.y,
+                         at.x, at.y, own.x - at.x, own.y - at.y))
+        }
+        #endif
+        scroll(gesture.state, at: pointerScroll.at, translation: pointerScroll.total, velocity: velocity, from: source)
     }
 
     /// Every scroll on the picture, finger, trackpad or wheel: `state`, where it is (the finger, or the
@@ -476,7 +516,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window == nil { momentum.stop(); releaseForwardedKeys(); commitComposition("left its window") }
+        if window == nil { momentum.stop(); releaseForwardedKeys(); commitComposition("left its window"); pencilTouching = false }
         // A session's start, a rotation's other layout, a reconnect's new screen: the proxy takes the
         // keyboard for a hardware keyboard (on the next turn, once this view is settled in the window).
         if window != nil { keyboardProxy?.joined(self) } else { keyboardProxy?.left(self) }
@@ -537,6 +577,12 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         setOwnPointer(nil, .none)
         send(.key(hidUsage: usage, down: true, modifiers: 0))
         send(.key(hidUsage: usage, down: false, modifiers: 0))
+    }
+
+    /// `type TEXT`: the on-screen keyboard's typing, as it hands this view its text (`insertText`): typed
+    /// text for the Mac whoever types a hardware keyboard's characters (KeyTyping is for presses only).
+    func scriptType(_ text: String) {
+        insertText(text)
     }
 
     /// `esc [MODS]`: Esc as its key command reaches this view, only while it takes Esc (it holds the
@@ -604,6 +650,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         case .began, .changed:
             if gesture.state == .began { hoverIsPencil = false }
             if gesture.zOffset > 0 || gesture.altitudeAngle > 0 { hoverIsPencil = true }
+            guard !pencilTouching else { return }   // stale: the Pencil's tip is on the glass
             let at = sendPointer(.move, at: gesture.location(in: self), clamped: true)
             if hoverIsPencil { setOwnPointer(at, .pencil) } else { setOwnPointer(nil, .none) }
         default:
@@ -638,6 +685,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesBegan(touches, with: event); return
         }
+        if touch.type == .pencil { pencilTouching = true }
         let point = touch.location(in: self)
         guard let at = sendPointer(.move, at: point, clamped: false) else { return }
         ownPointer(at, for: touch)
@@ -659,6 +707,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesEnded(touches, with: event); return
         }
+        if touch.type == .pencil { pencilTouching = false }
         if let at = sendPointer(pointerButtonIsSecondary ? .rightUp : .leftUp, at: touch.location(in: self), clamped: true) { ownPointer(at, for: touch) }
         pointerButtonIsSecondary = false
     }
@@ -667,6 +716,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesCancelled(touches, with: event); return
         }
+        if touch.type == .pencil { pencilTouching = false }
         // Never leave the button stuck down.
         if let at = sendPointer(pointerButtonIsSecondary ? .rightUp : .leftUp, at: touch.location(in: self), clamped: true) { ownPointer(at, for: touch) }
         pointerButtonIsSecondary = false
@@ -865,9 +915,12 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
             #if DEBUG
             Self.textinput("first responder; the keyboards set up: "
                            + UITextInputMode.activeInputModes.compactMap(\.primaryLanguage).joined(separator: ", ")
-                           + "; this one " + (textInputMode?.primaryLanguage ?? "unknown"))
+                           + "; this one " + (textInputMode?.primaryLanguage ?? "unknown")
+                           + "; a hardware keyboard's characters: " + typingNote(keyTyping))
             #endif
             keyboardProxy?.became(self, automatic: askedAutomatic)
+            KeyboardFrameMonitor.shared.holds(self, true)
+            KeyboardFrameMonitor.shared.modeChanged(to: textInputMode?.primaryLanguage)
         } else {
             applyInputViews(automatic: before)
         }
@@ -880,6 +933,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
             releaseForwardedKeys()
             commitComposition("resigned")
             keyboardProxy?.resigned(self)
+            KeyboardFrameMonitor.shared.holds(self, false)
         }
         return resigned
     }
@@ -888,6 +942,11 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// shows no software keyboard, even for a keyboard it counts as gone a moment before GameController
     /// does) and no assistant groups; the system keyboard and its groups for the person's own.
     override var inputView: UIView? { holdsForHardwareKeyboard ? emptyInputView : nil }
+
+    /// An input method is composing here (marked text): KeyboardFrameMonitor reloads no input views then.
+    var isComposingText: Bool { composition.isComposing }
+
+
 
     private func applyInputViews(automatic: Bool) {
         holdsForHardwareKeyboard = automatic
@@ -953,12 +1012,15 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     }
 
     /// DEBUG: every hardware key this view sees, and which way it went ("hwkey: usage 41 down via
-    /// keyCommand (shift): to the Mac"), so a device shows which channel delivered Esc.
-    static func hwkey(_ usage: UInt16, down: Bool, via channel: String, modifiers: UInt64? = nil, to outcome: String? = nil) {
+    /// keyCommand (shift): to the Mac"), so a device shows which channel delivered Esc; `note`, what more
+    /// the line says (who types, the keys a switch let go), is made only in a Debug build.
+    static func hwkey(_ usage: UInt16, down: Bool, via channel: String, modifiers: UInt64? = nil, to outcome: String? = nil,
+                      note: @autoclosure () -> String? = nil) {
         #if DEBUG
         var line = "hwkey: usage \(usage) \(down ? "down" : "up") via \(channel)"
         if let modifiers { line += " (" + InputOverlayView.modifierNames(modifiers) + ")" }
         if let outcome { line += ": " + outcome }
+        if let note = note() { line += "; " + note }
         print(line)
         #endif
     }
@@ -974,7 +1036,8 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
 
     #if DEBUG
     static func modifierNames(_ modifiers: UInt64) -> String {
-        let names = [(KeyModifiers.control, "control"), (.option, "option"), (.shift, "shift"), (.command, "command")]
+        let names = [(KeyModifiers.capsLock, "caps lock"), (.control, "control"), (.option, "option"), (.shift, "shift"),
+                     (.command, "command")]
             .filter { modifiers & $0.0.rawValue != 0 }.map(\.1)
         return names.isEmpty ? "none" : names.joined(separator: "+")
     }
@@ -984,29 +1047,44 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
 
     // The split between the two keyboard paths, which must not overlap or everything is typed twice:
     //
+    //   • Raw path (`.key`): the keys go to the Mac as keys, down and up, as from a keyboard plugged
+    //     into it, so it repeats a held one at its own Delay Until Repeat and Key Repeat Rate (KeyRepeat,
+    //     on the host) and its own layout and dead keys make the characters. Always: what the text path
+    //     never delivers, the arrows, escape, the function keys, home/end/page up/down, forward delete, ⌘,
+    //     ⌃ and ⌥ themselves, *any* key while command, control or option is held, because those
+    //     combinations are shortcuts (⌘S, ⌃A, ⌥←) and never reach `insertText`, and return and tab with
+    //     shift, which the text path would hand over as a bare "\n" and "\t" (⇧Return a plain Return on
+    //     the Mac). And while the Mac types the characters (`KeyTyping.keys`: it says it repeats held keys,
+    //     the keyboard selected on the iPad types the Latin alphabet directly, nothing is composed and no
+    //     modifier is latched), every key that types one too: the letters, digits, punctuation, Space,
+    //     Delete, Return, Tab and Shift (ForwardedKeys.characterUsages), which iPadOS's text system then
+    //     never sees (#162: it typed a held letter once and gave it its accent popover, and repeated Delete
+    //     and Space at its own timing, each repeat a separate press on the Mac).
+    //
     //   • Text path (`insertText` / `deleteBackward`, and an input method's and dictation's marked text
-    //     and corrections: `TextComposition`) owns every key that produces characters: letters, digits,
-    //     punctuation, space and backspace, with or without shift, and return and tab without it.
-    //     Those arrive already composed — shifted, dead-keyed, chosen from an input method's
-    //     candidates, dictated — which is exactly what we want to send as `.text`. While an input method
-    //     composes, every key is the text path's (`pressesBegan`).
+    //     and corrections: `TextComposition`) owns the rest: every key that produces characters while
+    //     iPadOS's text system types them (`KeyTyping.text`: a Mac from before key repeat, a keyboard in
+    //     another script, an input method's, while the key row has a modifier latched), with or without
+    //     shift, and return and tab without it, and the few character keys no Sill for Mac has (the
+    //     keypad, the ISO keyboards' extra keys) and Caps Lock whoever types. Those arrive already
+    //     composed — shifted, dead-keyed, chosen from an input method's candidates, dictated — which is
+    //     exactly what we want to send as `.text`, as iPadOS types it: the Mac never repeats a key the
+    //     text system takes (iPadOS types a held letter once, and repeats Delete and Space itself). While
+    //     an input method composes, every key is the text path's (`KeyTyping.composing`, `pressesBegan`).
     //
-    //   • Raw path (`.key`) owns only what the text path never delivers: the arrows, escape, the
-    //     function keys, home/end/page up/down, forward delete, ⌘, ⌃ and ⌥ themselves, *any* key
-    //     while command, control or option is held, because those combinations are shortcuts (⌘S,
-    //     ⌃A, ⌥←) and never reach `insertText`, and return and tab with shift, which the text path
-    //     would hand over as a bare "\n" and "\t" (⇧Return a plain Return on the Mac). Shift alone
-    //     is not otherwise in that list: shift makes characters. (ForwardedKeys.goesAsKey.)
-    //
-    // Which path a key takes is decided when it goes down, and its up takes the same one whatever the
-    // flags say by then (ForwardedKeys): ⌘'s own release and a key let go after ⌘ reach the Mac, and
-    // a key the text system took never sends a stray up. Presses we do not take are handed to super
+    // Which path a key takes is decided when it goes down (ForwardedKeys.goesAsKey), and its up takes the
+    // same one whatever the flags or the keyboard say by then (ForwardedKeys): ⌘'s own release and a key
+    // let go after ⌘ reach the Mac, a letter held while the keyboard switches comes up where it went down,
+    // and a key the text system took never sends a stray up. Presses we do not take are handed to super
     // so the text input system still sees them.
 
     /// The hardware keys down on the Mac, so each one's up follows its down.
     private var forwarded = ForwardedKeys()
 
-    private func forward(_ presses: Set<UIPress>, down: Bool, via channel: String) -> Set<UIPress> {
+    /// Each press to the Mac as a key (`send`) or back to the text system (returned, for super), by
+    /// ForwardedKeys: a key going down by `typing` (who types the characters now), a key coming up the way
+    /// its down went.
+    private func forward(_ presses: Set<UIPress>, down: Bool, via channel: String, typing: KeyTyping = .text) -> Set<UIPress> {
         var unhandled: Set<UIPress> = []
         for press in presses {
             guard let key = press.key else { unhandled.insert(press); continue }
@@ -1024,22 +1102,32 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
             // ⌃Space with keyboards in two languages or more set up in iOS Settings: iPadOS's switch
             // between them (to Zhuyin, say), never the Mac's; with one, the Mac's shortcut, as before
             // (TextInputRules.isKeyboardSwitch, #138). At the press only: its release follows it, to the
-            // text system unless the press went to the Mac (`forwarded`).
+            // text system unless the press went to the Mac (`forwarded`). The Mac never hears this Space go
+            // down, which on a Mac stops the key repeating before it: the keys held down on the Mac but
+            // the modifiers come up now (ForwardedKeys.keyboardSwitch), or a letter held across the switch
+            // went on repeating there, as ⌃P while ⌃ was down.
             if down, TextInputRules.isKeyboardSwitch(usage: usage, modifiers: modifiers,
                                                      keyboards: UITextInputMode.activeInputModes.compactMap(\.primaryLanguage)) {
-                Self.hwkey(usage, down: down, via: channel, modifiers: modifiers, to: "iPadOS's keyboard switch")
+                let ups = forwarded.keyboardSwitch()
+                ups.forEach(send)
+                Self.hwkey(usage, down: down, via: channel, modifiers: modifiers, to: "iPadOS's keyboard switch",
+                           note: ups.isEmpty ? nil : "let go on the Mac: " + ups.map { event -> String in
+                               if case .key(let u, _, _) = event { return "usage \(u)" } else { return "\(event)" } }.joined(separator: ", "))
                 unhandled.insert(press)
                 continue
             }
-            let outcome = down ? forwarded.pressed(usage, modifiers: modifiers, at: press.timestamp) : forwarded.released(usage)
+            let outcome = down ? forwarded.pressed(usage, modifiers: modifiers, at: press.timestamp, typing: typing)
+                               : forwarded.released(usage)
             switch outcome {
             case .send(let event):
                 if down { forgetTyped() }
                 send(event)
-                Self.hwkey(usage, down: down, via: channel, modifiers: modifiers, to: "to the Mac")
+                Self.hwkey(usage, down: down, via: channel, modifiers: modifiers, to: "to the Mac",
+                           note: down ? typingNote(typing) : nil)
             case .text:
                 unhandled.insert(press)
-                Self.hwkey(usage, down: down, via: channel, modifiers: modifiers, to: "the text system's")
+                Self.hwkey(usage, down: down, via: channel, modifiers: modifiers, to: "the text system's",
+                           note: down ? typingNote(typing) : nil)
             case .swallow:
                 Self.hwkey(usage, down: down, via: channel, modifiers: modifiers, to: "the key command sent it")
             }
@@ -1054,16 +1142,50 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         // A hardware key hides this device's pointer, as typing does (`setOwnPointer`).
         if presses.contains(where: { $0.key != nil }) { setOwnPointer(nil, .none) }
-        // While an input method composes, every key is its own: the arrows move through its
-        // candidates, Return chooses, Esc does what that input method does with it. None reaches the
-        // Mac until the composition is chosen.
-        if composition.isComposing {
+        // Who types the characters, as these keys go down (KeyTyping). While an input method composes,
+        // every key is its own: the arrows move through its candidates, Return chooses, Esc does what that
+        // input method does with it. None reaches the Mac until the composition is chosen.
+        let typing = keyTyping
+        if typing == .composing {
+            #if DEBUG
+            for press in presses {
+                guard let key = press.key else { continue }
+                Self.hwkey(UInt16(key.keyCode.rawValue), down: true, via: "pressesBegan", modifiers: UInt64(key.modifierFlags.rawValue),
+                           to: "the text system's", note: typingNote(typing))
+            }
+            #endif
             super.pressesBegan(presses, with: event)
             return
         }
-        let unhandled = forward(presses, down: true, via: "pressesBegan")
+        let unhandled = forward(presses, down: true, via: "pressesBegan", typing: typing)
         if !unhandled.isEmpty { super.pressesBegan(unhandled, with: event) }
     }
+
+    /// Who types a hardware keyboard's characters as a key goes down now (KeyTyping): the Mac, as keys,
+    /// while it repeats held keys, the keyboard selected on the iPad types the Latin alphabet directly and
+    /// nothing is composed or latched on the key row; else iPadOS's text system, or the input method
+    /// composing.
+    private var keyTyping: KeyTyping {
+        KeyTyping.of(inputMode: textInputMode?.primaryLanguage,
+                     keyboards: UITextInputMode.activeInputModes.compactMap(\.primaryLanguage),
+                     composing: composition.isComposing, latched: !latchedModifiers.isEmpty, macRepeats: macRepeatsKeys())
+    }
+
+    #if DEBUG
+    /// DEBUG: who types and why, for the hwkey line of a key going down ("the Mac types: en-US").
+    private func typingNote(_ typing: KeyTyping) -> String {
+        let keyboard = textInputMode?.primaryLanguage ?? "no keyboard selected"
+        switch typing {
+        case .keys: return "the Mac types: " + keyboard
+        case .text:
+            if !macRepeatsKeys() { return "iPadOS types: the Mac repeats no key (a Sill for Mac before key repeat)" }
+            return "iPadOS types: " + (latchedModifiers.isEmpty ? keyboard : "a modifier latched on the key row")
+        case .composing: return "the input method composes"
+        }
+    }
+    #else
+    private func typingNote(_ typing: KeyTyping) -> String { "" }
+    #endif
 
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         let unhandled = forward(presses, down: false, via: "pressesEnded")
@@ -1231,7 +1353,11 @@ extension InputOverlayView {
     /// The keyboard just switched (⌃Space, the Globe key): its name, for a second. Not Emoji's or
     /// dictation's, which are no keyboard typed with (TextInputRules.isKeyboard).
     @objc func inputModeChanged() {
-        Self.textinput("the keyboard is now " + (textInputMode?.primaryLanguage ?? "unknown") + (isFirstResponder ? "" : " (not first responder)"))
+        // A switch while the keyboard is up, the emoji key's too (its input mode unchanged): the keyboard is
+        // read again (KeyboardFrameMonitor).
+        if isFirstResponder { KeyboardFrameMonitor.shared.modeChanged(to: textInputMode?.primaryLanguage) }
+        Self.textinput("the keyboard is now " + (textInputMode?.primaryLanguage ?? "unknown") + (isFirstResponder ? "" : " (not first responder)")
+                       + "; a hardware keyboard's characters: " + typingNote(keyTyping))
         guard isFirstResponder, !composition.isComposing, let language = textInputMode?.primaryLanguage,
               TextInputRules.isKeyboard(language) else { return }
         place(Locale.current.localizedString(forIdentifier: language) ?? language)
@@ -1429,6 +1555,455 @@ final class HardwareKeyboardMonitor: ObservableObject {
     #endif
 }
 
+/// Where the software keyboard is: as UIKit reports it (`frame`, the end frame of its notifications, in
+/// the screen's coordinates, the stream screen's window filling its screen; nil while none is up), and as
+/// Sill read it (`read`). The inner display's stand-in for the rows follows the glass (#215,
+/// DuoPosture.keyboardStandIn). In the laptop pose iOS 27.1 reports every keyboard as the whole lower page
+/// (0, 455.5, 669×495.5 on the Duo), whatever it draws at the foot (English from 555, emoji and Pinyin from
+/// 506). Two ways to read where it is drawn (the iOS 27.1 simulator, 2026-11-11):
+/// - A look (DuoPosture.keyboardLook): the keyboard's own views in the scene's other window (a container
+///   and the remote keyboard's placeholder, found by geometry, never by class) sit where the keyboard is,
+///   updated as UIKit posts each show and switch, so a look inside that report decides as fast as the report
+///   (a show inside its own animation; a switch 55–190 ms after UITextInputMode's notification). It costs
+///   nothing and changes nothing, so the emoji search stays open. Undocumented structure: checked for
+///   geometry, and replaced by a reload where it tells nothing or is off.
+/// - A reload (`reloadInputViews`, nothing else changed): UIKit then reports the keyboard up as its begin
+///   frame, exactly, with no animation and no hide (DuoPosture.keyboardReportIsReading). But it closes the
+///   emoji search if that is open, and from then on UIKit posts no report of its own at a switch and the
+///   keyboard's views are the page too (looks tell nothing until the keyboard goes): so only when a look
+///   tells nothing (something else reloaded the input views: Sill's own hold for a hardware keyboard, say),
+///   when a switch brings no report within DuoPosture.keyboardSwitchReportWait (the emoji search left, two
+///   keyboards of one height), or when looks are off (a switch's report put the keyboard left elsewhere than
+///   the last look did: around the emoji search; or the screen folded) and the look leaves the row room,
+///   which the emoji search never does. Reloads follow DuoPosture.keyboardReadDelays.
+/// Until the keyboard is first put away after Sill opens, looks tell; after that (and after any reload) iOS
+/// posts no report of its own at a switch and the views are the page, and only reloads tell (the iOS 27.1
+/// simulator, 2026-11-11: this is what left the toggle over the English keyboard in 4e9f412, which waited
+/// for that report). So Sill also assumes at once what its last readings say (DuoPosture.KeyboardHints,
+/// kept across launches, filled only by readings): at a show the mode's letters keyboard; at a switch to
+/// another input mode its letters keyboard; within one mode the other keyboard from the letters one and the
+/// letters keyboard from anything else; and the reloads that follow correct it. After a fold the reload's
+/// report goes on giving the other pose's keyboard for about a second (DuoPosture.keyboardReadingIsStale):
+/// those readings are skipped, and nothing stands in until a true one.
+/// The reading is kept until another differs (a reading equal to what is on screen changes nothing on
+/// screen); it is forgotten only when the keyboard goes. Only while the stream screen wants readings
+/// (`setWantsReadings`: the Duo's inner display in the laptop pose with the person's keyboard up), never a
+/// reload while an input method composes, at most `reloadsPer10s` reloads; off the Duo nothing changes.
+/// Every notification counts, the will and the did: on fresh simulators a will-change went unheard now and
+/// then. A change of `frame`, and a look made with it, are published inside the keyboard's own animation,
+/// so what follows them moves with it. Started by the first stream screen (`StreamScreen`), so it outlives a
+/// rotation. Main thread.
+final class KeyboardFrameMonitor: ObservableObject {
+    static let shared = KeyboardFrameMonitor()
+    @Published private(set) var frame: CGRect? = nil
+    /// The keyboard as Sill last read it (a look or a reload's report), until the keyboard goes.
+    @Published private(set) var read: CGRect? = nil
+    /// No reading yet and one on its way (a reload, after a show where looks tell nothing): from the change
+    /// until the reading or DuoPosture.keyboardSettle, nothing stands in, so the toggle does not flash.
+    @Published private(set) var settling = false
+    /// Readings are wanted (the laptop pose with the person's keyboard up), as the stream screen last said:
+    /// until it says so, its first render there counts as settling.
+    @Published private(set) var readingsWanted = false
+    /// After a fold: the frame UIKit reported before it, which its reports go on giving for a while.
+    private var staleFrame: CGRect? = nil
+    private var staleUntil: Double = 0
+    /// The stream's input view while it holds the keyboard (first responder): the one a reload reloads.
+    private weak var holder: InputOverlayView?
+    private var wantsReadings = false
+    /// Where the stream screen's controls begin on the screen: whether a look leaves the row room.
+    private var controlsTop: CGFloat = 0
+    /// What is scheduled after the last change: looks, reloads, the wait for a switch's own report.
+    private var scheduled: [DispatchWorkItem] = []
+    private var reloadsStarted = false
+    /// The reload readings since the last change (one per reload answered), and the reading before it.
+    private var readings: [CGRect] = []
+    private var before: CGRect? = nil
+    private var reloadedAt: Double? = nil
+    private var reloadAnswered = false
+    private var settleEnd: DispatchWorkItem? = nil
+    /// The last look that told where the keyboard is, and whether looks are off this time the keyboard is up.
+    private var lastLook: CGRect? = nil
+    private var looksOff = false
+    /// UITextInputMode's notification came, and no report of the switch yet.
+    private var switchAwaitingReport = false
+    /// The input mode, and what came before the next reading (what it teaches, what to assume): a show, a
+    /// switch to another mode or within it; with the height read before it.
+    private var mode: String? = nil
+    private var cause: DuoPosture.KeyboardCause = .other
+    private var causeBefore: Double? = nil
+    /// The last readings of each keyboard (DuoPosture.KeyboardHints), kept across launches.
+    private var hints: DuoPosture.KeyboardHints = KeyboardFrameMonitor.loadHints()
+    private static let hintsKey = "Sill.keyboardHints"
+    /// The reading on screen is an assumption from the hints, until a reading replaces it.
+    private var predicted = false
+    private var changedAt: Double = 0
+    private var changeWhy = ""
+    /// The reloads of the last ten seconds: never more than `reloadsPer10s`, whatever the reports do (a
+    /// switch while only reloads tell makes up to eight).
+    private var recentReloads: [Double] = []
+    private static let reloadsPer10s = 40
+    /// `reloadsPer10s`; DEBUG `-SillKeyboardReloadCap N` another for a test (dense reloads under typing).
+    private static let reloadCap: Int = {
+        #if DEBUG
+        let cap = UserDefaults.standard.integer(forKey: "SillKeyboardReloadCap")
+        if cap > 0 { return cap }
+        #endif
+        return reloadsPer10s
+    }()
+
+    private static let hides: Set<Notification.Name> = [UIResponder.keyboardWillHideNotification, UIResponder.keyboardDidHideNotification]
+
+    private init() {
+        let center = NotificationCenter.default
+        for name in [UIResponder.keyboardWillShowNotification, UIResponder.keyboardDidShowNotification,
+                     UIResponder.keyboardWillChangeFrameNotification, UIResponder.keyboardDidChangeFrameNotification]
+                    + Array(Self.hides) {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in self?.changed(note) }
+        }
+        center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.change("back to the front")
+        }
+    }
+
+    private static func now() -> Double { CACurrentMediaTime() }
+
+    /// The stream's input view took the keyboard (first responder) or let it go.
+    func holds(_ view: InputOverlayView, _ holding: Bool) {
+        if holding { holder = view } else if holder === view { holder = nil }
+    }
+
+    /// The stream screen wants readings (the Duo's inner display in the laptop pose, the person's keyboard
+    /// up), with its controls' top on the screen, or no longer does.
+    func setWantsReadings(_ wants: Bool, controlsTop: CGFloat) {
+        self.controlsTop = controlsTop
+        guard wants != wantsReadings else { return }
+        wantsReadings = wants
+        if readingsWanted != wants { readingsWanted = wants }
+        if wants { change("the laptop pose with the keyboard up") } else { forget() }
+    }
+
+    /// The stream screen's fold changed while it shows (a fold or an unfold): looks may be stale.
+    func poseChanged() {
+        if read != nil { looksOff = true }
+        staleFrame = frame
+        staleUntil = Self.now() + 2
+        change("a fold", kind: .fold)
+    }
+
+    /// UITextInputMode's notification: a switch while the keyboard is up (the 😀 key, ABC, the Globe key, the
+    /// emoji search), its input mode the same or not; also as the input view becomes first responder.
+    func modeChanged(to newMode: String?) {
+        if frame != nil {
+            cause = newMode != mode ? .modeChange : .sameMode
+            causeBefore = read.map { Double($0.height) }
+        }
+        mode = newMode
+        switchAwaitingReport = frame != nil
+        change("a switch (\(newMode ?? "no input mode"))", predict: frame != nil)
+    }
+
+    /// After a change: look now and a few times after; reload where looks cannot tell.
+    private func change(_ why: String, up: Bool? = nil, kind: DuoPosture.KeyboardChange = .other, predict: Bool = false) {
+        scheduled.forEach { $0.cancel() }
+        scheduled = []
+        reloadsStarted = false
+        readings = []
+        // The glass before the change: the last reading, never an assumption on screen.
+        if !predicted { before = read }
+        reloadedAt = nil
+        changeWhy = why
+        changedAt = Self.now()
+        guard wantsReadings, up ?? (frame != nil) else { stopSettling(); return }
+        let told = look()
+        if !told {
+            // Nothing to look at: assume at once what the last readings say (a show, a switch), and read.
+            if predict { assume(why) }
+            startReloads(kind)
+        }
+        for delay in DuoPosture.keyboardLookDelays {
+            let item = DispatchWorkItem { [weak self] in
+                guard let self, !self.look() else { return }
+                self.startReloads(.other)
+            }
+            scheduled.append(item)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+        }
+        if switchAwaitingReport {
+            let wait = DispatchWorkItem { [weak self] in
+                guard let self, self.switchAwaitingReport else { return }
+                self.switchAwaitingReport = false
+                #if DEBUG
+                print("keyboard: no report of the switch in \(DuoPosture.keyboardSwitchReportWait) s: reading by reloads")
+                #endif
+                self.startReloads(.other, now: true)
+            }
+            scheduled.append(wait)
+            DispatchQueue.main.asyncAfter(deadline: .now() + DuoPosture.keyboardSwitchReportWait, execute: wait)
+        }
+        #if DEBUG
+        print("keyboard: change: \(why)")
+        #endif
+    }
+
+    /// The keyboard's own views (DuoPosture.keyboardLook): true when they tell where it is; published unless
+    /// looks are off and this one leaves the row room (then reloads check it).
+    @discardableResult
+    private func look() -> Bool {
+        guard wantsReadings, frame != nil else { return false }
+        guard let screen = holder?.window?.screen.bounds,
+              let look = DuoPosture.keyboardLook(Self.keyboardViewFrames(holder?.window), reported: frame, screen: screen.size) else {
+            #if DEBUG
+            if UserDefaults.standard.bool(forKey: "SillKeyboardProbe"), let screen = holder?.window?.screen.bounds {
+                let wide = Self.keyboardViewFrames(holder?.window).filter { abs($0.width - screen.width) <= 1 && $0.height > 1 }
+                print("keyboard probe: a look told nothing; the views as wide as the screen: " + wide.map { Self.describe($0) }.joined(separator: "; "))
+            }
+            #endif
+            return false
+        }
+        if looksOff, DuoPosture.keyboardRowFits(glassTop: look.minY, controlsTop: controlsTop) {
+            if !reloadsStarted {
+                #if DEBUG
+                print("keyboard: a look \(Self.describe(look)) leaves the row room but looks are off: reading by reloads")
+                #endif
+                startReloads(.other, now: true)
+            }
+            return true
+        }
+        lastLook = look
+        learn(look)
+        if read != look {
+            read = look
+            #if DEBUG
+            print(String(format: "keyboard: looked: %@ (%.3f s after %@)", Self.describe(look), Self.now() - changedAt, changeWhy))
+            #endif
+        }
+        stopSettling()
+        return true
+    }
+
+    /// The keyboard the hints say a show or a switch brings, on screen at once until it is read
+    /// (DuoPosture.keyboardPrediction).
+    private func assume(_ why: String) {
+        guard let screen = holder?.window?.screen.bounds,
+              let height = DuoPosture.keyboardPrediction(cause: cause, current: read.map { Double($0.height) }, hints: hints,
+                                                          key: DuoPosture.keyboardHintKey(mode: mode, width: screen.width),
+                                                          widthKey: DuoPosture.keyboardWidthKey(screen.width)) else { return }
+        let assumed = CGRect(x: 0, y: screen.height - CGFloat(height), width: screen.width, height: CGFloat(height))
+        predicted = true
+        if read != assumed { read = assumed }
+        stopSettling()
+        #if DEBUG
+        print("keyboard: assumed \(Self.describe(assumed)) from the last readings (\(why))")
+        #endif
+    }
+
+    /// A reading (a look or a reload's report) teaches the hints what the keyboard after `cause` is.
+    private func learn(_ reading: CGRect) {
+        predicted = false
+        guard let width = holder?.window?.screen.bounds.width, cause != .other else { return }
+        let learned = DuoPosture.keyboardHints(hints, after: Double(reading.height), cause: cause, before: causeBefore,
+                                               key: DuoPosture.keyboardHintKey(mode: mode, width: width),
+                                               widthKey: DuoPosture.keyboardWidthKey(width))
+        if cause != .sameMode || !DuoPosture.sameKeyboard(Double(reading.height), causeBefore) { cause = .other }
+        guard learned != hints else { return }
+        hints = learned
+        if let data = try? JSONEncoder().encode(hints) { UserDefaults.standard.set(data, forKey: Self.hintsKey) }
+        #if DEBUG
+        print("keyboard: remembered: letters \(hints.letters), other \(hints.other)")
+        #endif
+    }
+
+    private static func loadHints() -> DuoPosture.KeyboardHints {
+        guard let data = UserDefaults.standard.data(forKey: hintsKey),
+              let hints = try? JSONDecoder().decode(DuoPosture.KeyboardHints.self, from: data) else { return DuoPosture.KeyboardHints() }
+        return hints
+    }
+
+    /// The frames, on the screen, of the views of the scene's windows other than `window` (the keyboard's),
+    /// outermost first; public properties only.
+    private static func keyboardViewFrames(_ window: UIWindow?) -> [CGRect] {
+        guard let window, let scene = window.windowScene else { return [] }
+        var frames: [CGRect] = []
+        for other in scene.windows where other !== window && !other.isHidden {
+            var level: [UIView] = other.subviews
+            for _ in 0..<6 {
+                var next: [UIView] = []
+                for view in level where !view.isHidden && view.alpha > 0 {
+                    frames.append(view.convert(view.bounds, to: nil))
+                    next.append(contentsOf: view.subviews)
+                }
+                level = next
+            }
+        }
+        return frames
+    }
+
+    private func startReloads(_ kind: DuoPosture.KeyboardChange, now: Bool = false) {
+        guard !reloadsStarted, wantsReadings, frame != nil else { return }
+        reloadsStarted = true
+        if read == nil, !settling {
+            settling = true
+            let end = DispatchWorkItem { [weak self] in self?.stopSettling() }
+            settleEnd = end
+            DispatchQueue.main.asyncAfter(deadline: .now() + DuoPosture.keyboardSettle(after: kind), execute: end)
+        }
+        let delays = Self.readDelays(kind)
+        let offset = now ? (delays.first ?? 0) : 0
+        for delay in delays {
+            let item = DispatchWorkItem { [weak self] in self?.reload(late: delay >= DuoPosture.keyboardLateRead) }
+            scheduled.append(item)
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(0, delay - offset), execute: item)
+        }
+    }
+
+    private func forget() {
+        scheduled.forEach { $0.cancel() }
+        scheduled = []
+        reloadsStarted = false
+        readings = []
+        reloadedAt = nil
+        lastLook = nil
+        looksOff = false
+        switchAwaitingReport = false
+        predicted = false
+        before = nil
+        if read != nil { read = nil }
+        stopSettling()
+    }
+
+    private func stopSettling() {
+        settleEnd?.cancel()
+        settleEnd = nil
+        if settling { settling = false }
+    }
+
+    /// A reading by reload: UIKit reports the keyboard up now (`changed`). Early ones until a reading differs
+    /// from the glass before the change and one more confirms it (DuoPosture.keyboardReadsAgain); late ones
+    /// always.
+    private func reload(late: Bool) {
+        guard wantsReadings, frame != nil, let holder, holder.isFirstResponder else { return }
+        guard late || DuoPosture.keyboardReadsAgain(readings, before: before) else { return }
+        if holder.isComposingText {
+            #if DEBUG
+            print("keyboard: not reading while an input method composes")
+            #endif
+            return
+        }
+        let now = Self.now()
+        recentReloads = recentReloads.filter { now - $0 < 10 }
+        guard recentReloads.count < Self.reloadCap else {
+            #if DEBUG
+            print("keyboard: not reading: \(Self.reloadCap) reloads in ten seconds already")
+            #endif
+            return
+        }
+        recentReloads.append(now)
+        reloadedAt = now
+        reloadAnswered = false
+        #if DEBUG
+        print(String(format: "keyboard: reload %.3f s after %@", now - changedAt, changeWhy))
+        #endif
+        holder.reloadInputViews()
+    }
+
+    /// DuoPosture.keyboardReadDelays; DEBUG `-SillKeyboardReadDelays '1.5,3'` sets others for a test.
+    private static func readDelays(_ change: DuoPosture.KeyboardChange) -> [Double] {
+        #if DEBUG
+        if let list = UserDefaults.standard.string(forKey: "SillKeyboardReadDelays") {
+            return list.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        }
+        #endif
+        return DuoPosture.keyboardReadDelays(after: change)
+    }
+
+    private func changed(_ note: Notification) {
+        let info = note.userInfo ?? [:]
+        // Another app's keyboard (beside Sill on an iPad) covers none of Sill's screen.
+        if let local = info[UIResponder.keyboardIsLocalUserInfoKey] as? Bool, !local { return }
+        let hiding = Self.hides.contains(note.name)
+        let begin = info[UIResponder.keyboardFrameBeginUserInfoKey] as? CGRect
+        let end = info[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+        let now: CGRect? = hiding ? nil : end.flatMap { $0.height > 0 && !$0.isNull ? $0 : nil }
+        let at = Self.now()
+        let duration = (info[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0
+        let reading = DuoPosture.keyboardReportIsReading(at: at, reloadedAt: reloadedAt, hiding: hiding, animated: duration > 0,
+                                                         begin: begin)
+        #if DEBUG
+        // `-SillKeyboardProbe 1`: every notification as UIKit sends it (how the inner display's numbers
+        // were measured).
+        if UserDefaults.standard.bool(forKey: "SillKeyboardProbe") {
+            print(String(format: "keyboard probe %.3f: ", at) + "\(note.name.rawValue): begin \(Self.describe(begin)), "
+                  + "end \(Self.describe(end)); " + (reading ? "a reading" : "a change"))
+        }
+        #endif
+        if reading {
+            guard let begin, wantsReadings else { return }
+            if DuoPosture.keyboardReadingIsStale(begin, staleFrame: staleFrame, at: at, staleUntil: staleUntil) {
+                #if DEBUG
+                if !reloadAnswered { print("keyboard: a stale reading \(Self.describe(begin)) (the pose before the fold): reading on") }
+                #endif
+                reloadAnswered = true
+                return
+            }
+            if !reloadAnswered {
+                reloadAnswered = true
+                readings.append(begin)
+                #if DEBUG
+                print(String(format: "keyboard: read %@ (%.3f s after %@, %.0f ms after the reload)", Self.describe(begin),
+                             at - changedAt, changeWhy, (at - (reloadedAt ?? at)) * 1000))
+                #endif
+            }
+            learn(begin)
+            if read != begin { read = begin }
+            stopSettling()
+            return
+        }
+        if hiding {
+            forget()
+        } else if switchAwaitingReport {
+            switchAwaitingReport = false
+            if DuoPosture.keyboardLookIsOff(lastLook: lastLook, begin: begin) {
+                looksOff = true
+                #if DEBUG
+                print("keyboard: looks are off: UIKit put the keyboard left at \(Self.describe(begin)), the last look at \(Self.describe(lastLook))")
+                #endif
+            }
+        }
+        let wasUp = frame != nil
+        let update = {
+            if now != self.frame { self.frame = now }
+            if !hiding {
+                let did = note.name == UIResponder.keyboardDidShowNotification || note.name == UIResponder.keyboardDidChangeFrameNotification
+                let kind: DuoPosture.KeyboardChange = duration > 0 ? (did ? .animated : .animating(duration)) : .other
+                let coming = !wasUp
+                if coming { self.cause = .show; self.causeBefore = nil }
+                self.change(coming ? "the keyboard coming" : "a report Sill did not provoke", up: now != nil, kind: kind,
+                            predict: coming)
+            }
+        }
+        #if DEBUG
+        if now != frame { print("keyboard frame: " + (now.map { "top \(Self.points($0.minY)), \(Self.points($0.height)) pt tall" } ?? "none")) }
+        #endif
+        // Inside the keyboard's own animation: its frame, and a look made with it (the row comes with the keyboard).
+        if duration > 0 {
+            withAnimation(.easeOut(duration: duration)) { update() }
+        } else {
+            update()
+        }
+    }
+
+    #if DEBUG
+    private static func points(_ value: CGFloat) -> String {
+        abs(value - value.rounded()) < 0.01 ? "\(Int(value.rounded()))" : String(format: "%.1f", value)
+    }
+
+    static func describe(_ rect: CGRect?) -> String {
+        guard let rect else { return "none" }
+        return "\(points(rect.minX)),\(points(rect.minY)) \(points(rect.width))×\(points(rect.height))"
+    }
+    #endif
+}
+
 struct InputOverlay: UIViewRepresentable {
     let videoSize: CGSize
     let send: (InputEvent) -> Void
@@ -1441,6 +2016,9 @@ struct InputOverlay: UIViewRepresentable {
     var onModifiersConsumed: () -> Void = {}
     /// `StreamClient.sendGesture`; see `InputOverlayView.sendGesture`.
     var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
+    /// Whether the session's Mac repeats a held key (`StreamClient.hostKeyRepeat`); see
+    /// `InputOverlayView.macRepeatsKeys`.
+    var macRepeatsKeys: () -> Bool = { false }
     /// The picture's zoom, kept by the stream screen (its StreamZoomModel, which ZoomedStreamView draws):
     /// read for every touch, written while two fingers pinch or move the picture. Nil keeps it in the
     /// view.
@@ -1460,6 +2038,7 @@ struct InputOverlay: UIViewRepresentable {
         uiView.setOwnPointer = setOwnPointer
         uiView.latchedModifiers = latchedModifiers
         uiView.sendGesture = sendGesture
+        uiView.macRepeatsKeys = macRepeatsKeys
         uiView.readZoom = readZoom
         uiView.writeZoom = writeZoom
         // Called straight from a UIKit text-input callback, never from inside a SwiftUI update,
