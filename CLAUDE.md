@@ -9,7 +9,7 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **Release 0.6.1 (2026-11-11, branch `release-0.6.1` from main at d04eecd (count 1351), main merged in since
-(2a3b720, #340), its pull request "Release 0.6.1: Sill for Mac and Sill for iPhone and iPad"; Noah: "Once all
+(2a3b720, #340), PR #348 "Release 0.6.1: Sill for Mac and Sill for iPhone and iPad"; Noah: "Once all
 of this is completed, I want to push 0.6.1 to the App Store and release tomorrow"; the day's steps, the
 decisions, the texts and the rehearsals are in sill-handoff's `release-061/` (STATUS.md, notes-0.6.1.md,
 fill-notes.sh, whats-new-0.6.1.txt, testflight-0.6.1.md)).** One version for both apps, as since 0.5.1: Sill for

@@ -134,7 +134,7 @@ serves the root or `/docs`, never `/site`. So:
   Virtual Display, Aa Off, Thumbnail hold, Firewall, Tour 0.6, Locked Mac and Pinch zoom markers,
   and its words commit (7871d5c) took their marker lines out of `site/` and kept the words; 0.6.1
   shipped `Display wake click` (PR #228, without its tap sentence: below) and `Off-console view`
-  (PR #340) the same way, in its release pull request. A republish before a release whose words
+  (PR #340) the same way, in its release pull request (#348). A republish before a release whose words
   are marked (for words that hold for the builds already out, such as support.html's on a Mac
   asleep or restarted, or on a black picture) deletes each such block in the sill-site copy after
   the rsync below, one line a marker,
