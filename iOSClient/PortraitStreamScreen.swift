@@ -240,6 +240,7 @@ struct PortraitStreamScreen: View {
             if standIn?.toggle == true {
                 let rect = DuoPosture.keyboardToggle(paneBottom: half - DuoPosture.paneInset, sides: metrics.padSide)
                 keyboardToggle
+                    .background { KeyboardToggleFrame() }      // the toggle's own 44 pt, before it is placed
                     .placed(rect, in: size)
                     .transition(.opacity)
             }
@@ -1128,4 +1129,17 @@ private struct KeyRow: View {
         }
     }
     #endif
+}
+
+/// Where the Keyboard toggle is, in the stream screen's space (TourSpace), for the clipboard's chip to keep
+/// clear of it (DuoPosture.clipboardChipMaxWidth); nil while it is not shown.
+struct KeyboardToggleFrameKey: PreferenceKey {
+    static let defaultValue: CGRect? = nil
+    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) { value = nextValue() ?? value }
+}
+
+private struct KeyboardToggleFrame: View {
+    var body: some View {
+        GeometryReader { g in Color.clear.preference(key: KeyboardToggleFrameKey.self, value: g.frame(in: .named(TourSpace.name))) }
+    }
 }

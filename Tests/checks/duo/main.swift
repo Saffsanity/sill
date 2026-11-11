@@ -602,6 +602,31 @@ for paneBottom in stride(from: CGFloat(300), through: 700, by: 0.5) {
     check(t.maxY == paneBottom - 8 && t.minX == 14 && t.width == 44 && t.height == 44 && t.maxX < 669 / 2,
           "\(paneBottom): 8 above the pane's foot, in the leading half, 44 pt")
 }
+// The clipboard's chip never over the toggle (Noah, 2026-11-11: the two must never overlap): while the toggle
+// shows in the pane's bottom band, the chip (in the other bottom corner) at most as wide as the room beside the
+// toggle on its side, 8 clear of the toggle and 8 from the pane's edge; else the pane less 16, as before.
+let chipPane = rect(8, 8, 653, 439)     // the laptop pose's stream pane, its drawn foot at 447
+func chipMost(_ toggle: CGRect?, panel: CGRect = chipPane) -> CGFloat { DuoPosture.clipboardChipMaxWidth(panel: panel, toggle: toggle) }
+check(chipMost(nil) == 637, "no toggle: the pane less 16, as before")
+check(chipMost(DuoPosture.keyboardToggle(paneBottom: 447, sides: 14)) == 587, "the toggle at the left: 661 − 8 − (58 + 8) = 587")
+check(chipMost(rect(611, 395, 44, 44)) == 587, "right to left (the toggle at the right, the chip at the left): the same 587")
+check(chipMost(rect(14, 100, 44, 44)) == 637 && chipMost(rect(14, 600, 44, 44)) == 637,
+      "a toggle high in the pane, or outside it: the chip as before")
+check(chipMost(rect(300, 395, 44, 44)) == 301 && chipMost(rect(0, 395, 60, 44), panel: rect(0, 0, 70, 439)) == 0,
+      "the wider side beside the toggle (661 − 344 − 16); never below nothing")
+for x in stride(from: CGFloat(8), through: 617, by: 1) {
+    for y in stride(from: CGFloat(330), through: 403, by: 3) {
+        let toggle = rect(x, y, 44, 44), most = chipMost(toggle)
+        check(most >= 0 && most <= 637, "\(x),\(y): within the pane")
+        // The chip takes the side with more room, against that side's edge: never within 8 of the toggle.
+        if chipPane.maxX - toggle.maxX >= toggle.minX - chipPane.minX {
+            check(chipPane.maxX - 8 - most >= toggle.maxX + 8, "\(x),\(y): the chip at the right ends 8 or more short of the toggle")
+        } else {
+            check(chipPane.minX + 8 + most <= toggle.minX - 8, "\(x),\(y): the chip at the left ends 8 or more short of the toggle")
+        }
+    }
+}
+
 // Twelve caps (the Desktop: Spotlight's too) and eleven across the row.
 check(abs(DuoPosture.keyboardRowCap(count: 12, width: 641) - 47.917) < 0.001, "twelve caps ≈ 48 pt wide")
 check(abs(DuoPosture.keyboardRowCap(count: 11, width: 641) - 52.818) < 0.001 && DuoPosture.keyboardRowCap(count: 0, width: 641) == 0,

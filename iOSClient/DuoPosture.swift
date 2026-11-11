@@ -497,6 +497,19 @@ extension DuoPosture {
                width: keyboardToggleSize, height: keyboardToggleSize)
     }
 
+    /// The clipboard chip's widest in the stream's pane (`panel`, in the stream screen's space), so that it never
+    /// covers the Keyboard toggle (Noah, 2026-11-11: the two must never overlap). The pane less 8 on each side,
+    /// as always; while the toggle shows in the pane's bottom band (`toggle`, in the same space; the chip's own
+    /// corner is the other bottom one), at most the room beside the toggle on the chip's side (the wider side,
+    /// whichever way the layout runs) less 8 at the pane's edge and 8 clear of the toggle. The chip's title
+    /// truncates in the middle on its one line, so a long Mac name only shortens.
+    static func clipboardChipMaxWidth(panel: CGRect, toggle: CGRect?) -> CGFloat {
+        let most = max(0, panel.width - 16)
+        guard let toggle, toggle.intersects(panel), toggle.maxY > panel.maxY - 120 else { return most }
+        let beside = max(panel.maxX - toggle.maxX, toggle.minX - panel.minX)
+        return min(most, max(0, beside - 16))
+    }
+
     /// A cap's width when `count` caps share `width` with the row's gaps.
     static func keyboardRowCap(count: Int, width: CGFloat) -> CGFloat {
         guard count > 0 else { return 0 }

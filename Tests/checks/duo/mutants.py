@@ -241,6 +241,18 @@ MUTANTS = {
     "T2 the toggle on the pane's foot": ("y: paneBottom - keyboardToggleInset - keyboardToggleSize,", "y: paneBottom - keyboardToggleSize,"),
     "T3 a 40 pt toggle": ("static let keyboardToggleSize: CGFloat = 44", "static let keyboardToggleSize: CGFloat = 40"),
     "T4 the toggle 16 above the pane's foot": ("static let keyboardToggleInset: CGFloat = 8", "static let keyboardToggleInset: CGFloat = 16"),
+    # The clipboard's chip never over the toggle.
+    "W1 the chip at its old width": ("return min(most, max(0, beside - 16))", "return most"),
+    "W2 the chip against the toggle": ("return min(most, max(0, beside - 16))", "return min(most, max(0, beside - 8))"),
+    "W3 the toggle's narrow side": ("let beside = max(panel.maxX - toggle.maxX, toggle.minX - panel.minX)",
+                                    "let beside = min(panel.maxX - toggle.maxX, toggle.minX - panel.minX)"),
+    "W4 left to right only": ("let beside = max(panel.maxX - toggle.maxX, toggle.minX - panel.minX)", "let beside = panel.maxX - toggle.maxX"),
+    "W5 a toggle outside the pane caps the chip": ("guard let toggle, toggle.intersects(panel), toggle.maxY > panel.maxY - 120 else { return most }",
+                                                   "guard let toggle, toggle.maxY > panel.maxY - 120 else { return most }"),
+    "W6 a toggle high in the pane caps the chip": ("guard let toggle, toggle.intersects(panel), toggle.maxY > panel.maxY - 120 else { return most }",
+                                                   "guard let toggle, toggle.intersects(panel) else { return most }"),
+    "W7 below nothing": ("return min(most, max(0, beside - 16))", "return min(most, beside - 16)"),
+    "W8 the pane's whole width": ("let most = max(0, panel.width - 16)", "let most = max(0, panel.width)"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

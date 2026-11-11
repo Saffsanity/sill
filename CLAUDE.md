@@ -72,11 +72,11 @@ Device only, no wire change; every Duo build and photo on the iOS 27.1 runtime.
   44×44 at (14, 395) in the laptop pose, its leading edge on the key row's; placed from the leading edge, so the
   right corner in a right-to-left layout, always opposite the chip's bottom trailing corner. Same size, inset,
   action, label. Nothing else of Sill's sits there (the link's line hangs from the pane's top; the tour,
-  Settings, the drawer and pairing take the keyboard down first); the chip would reach it only past 587 pt wide
-  (a Mac name of some 45 characters, estimated). The duo mutants for the merged code (G the glass, K looks, F the
+  Settings, the drawer and pairing take the keyboard down first); while it shows the chip is at most as wide as
+  the room beside it, 8 pt clear (`clipboardChipMaxWidth`, 587 pt), so a long Mac name truncates. The duo mutants for the merged code (G the glass, K looks, F the
   row's fit, H hints, Q what is assumed, R readings, S the stand-in, T the toggle, its corner among them) and the
-  checks they needed; these docs. Verified (the plan's "The toggle at the left corner"): `duo` 301,811 checks and
-  162 of 162 mutants; the iOS app Debug for the simulator, only the StreamClient warning; harness photos with the
+  checks they needed; these docs. Verified (the plan's "The toggle at the left corner"): `duo` 332,316 checks and
+  170 of 170 mutants; the iOS app Debug for the simulator, only the StreamClient warning; harness photos with the
   real keyboard on "Sill 215c duo": the emoji keyboard, the toggle bottom left and the chip bottom right apart,
   right to left the other way round, `-SillAXDump` one element "Hide the keyboard" (14,395 44×44); main's build
   against this one pixel for pixel the same with the English row and open flat; Noah's sequence once in a later

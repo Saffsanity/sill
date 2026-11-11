@@ -790,10 +790,10 @@ What else can sit at that corner of the pane: nothing of Sill's own. The link's 
 toggle, the tour, the Settings panel, the Apps drawer and Pair This iPad… take the keyboard down first (no
 toggle then), the window lights hang below the strip under the fold, and the chip's note ("Sent to ‹Mac›’s
 clipboard") is the chip's corner. Only the Mac's picture and its pointer pass under it, as they did at the
-other corner. The chip itself is as wide as its words: with the mock's "Mac mini" it spans 352–653 pt, 294 pt
-clear of the toggle's trailing edge at 58; it would reach the toggle only past 587 pt wide, which by that width
-(estimated, not photographed) takes a Mac name of some 45 characters at the default text size and fewer at the
-larger ones the chip allows (it truncates the name only past the pane's width).
+other corner. The chip is as wide as its words, and while the toggle shows at most as wide as the room beside
+it on the chip's side, 8 pt clear of it (`clipboardChipMaxWidth`: 587 pt in the laptop pose), so a long Mac name
+truncates in the middle instead of reaching the toggle: a 65-character name at the default text size and at
+xxLarge, left to right and right to left, ends short of it (photos 11–14), and "Mac mini" draws as before.
 
 Results (the iOS 27.1 simulator "Sill 215c duo" folded by duorig, the harness's mock with the real keyboard,
 `-SillLayout 669x951 -SillHinge half|flat -SillKeyboardToggle 1.5`, no host and no taps; the emoji keyboard
@@ -806,7 +806,7 @@ photos with an INDEX in sill-handoff's device-tests/2026-11-10/215-toggle-v2/lef
   (14,395 44×44); right to left with the chip: "Hide the keyboard" (611,395 44×44), then the chip's three.
 - Main's build (baf0901) against this one, the same arguments: the laptop pose with the English keyboard (the
   row 500–551), and open flat with the English and the emoji keyboard, pixel for pixel the same.
-- `Tests/checks/duo` 301,811 checks; its mutants 162 of 162 caught; the iOS app Debug for the simulator,
+- `Tests/checks/duo` 332,316 checks; its mutants 170 of 170 caught; the iOS app Debug for the simulator,
   the known `StreamClient` capture warning alone.
 - Noah's sequence once on the final build, once no-device.sh opened (02:10), in a later keyboard session
   (the keyboard put away and brought back first), against `SillHost --synthetic` on loopback with XCUITest
