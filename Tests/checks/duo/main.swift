@@ -378,6 +378,7 @@ check(plausible(rect(0, 555, 600, 396)) == nil && plausible(rect(0, 555, 668, 39
 check(plausible(rect(0, 555, 669, 394.9)) == nil && plausible(rect(0, 555, 669, 395)) == 555 && plausible(rect(0, 555, 669, 397.1)) == nil,
       "down to the foot, within a point")
 check(plausible(nil) == nil && plausible(rect(0, 951, 669, 0)) == nil && plausible(rect(0, 951, 669, 1)) == nil, "nothing, or nothing above the foot: none")
+check(plausible(rect(0, 950.5, 669, 0)) == nil, "a frame of no height, even at the foot: none")
 check(plausible(english, controls: 600) == nil && plausible(english, controls: 554) == 555, "under the controls' top given")
 
 // The glass: open flat as reported; in the laptop pose as read.
@@ -458,6 +459,9 @@ check(!DuoPosture.keyboardReadingIsStale(english, staleFrame: flatEnglish, at: 1
       "the laptop pose's own keyboard is no stale reading")
 check(!DuoPosture.keyboardReadingIsStale(flatEnglish, staleFrame: flatEnglish, at: 12, staleUntil: 12)
       && !DuoPosture.keyboardReadingIsStale(flatEnglish, staleFrame: nil, at: 10, staleUntil: 12), "after two seconds, or with no fold: never stale")
+check(!DuoPosture.keyboardReadingIsStale(rect(0, 640, 669, 300), staleFrame: flatEnglish, at: 10.1, staleUntil: 12)
+      && !DuoPosture.keyboardReadingIsStale(rect(0, 641, 669, 311), staleFrame: flatEnglish, at: 10.1, staleUntil: 12),
+      "stale only within half a point, top and height")
 for change in [DuoPosture.KeyboardChange.animating(0.38), .animated, .other, .fold] {
     let delays = DuoPosture.keyboardReadDelays(after: change)
     check(delays == delays.sorted() && delays.filter { $0 >= DuoPosture.keyboardLateRead }.count >= 2,
@@ -468,6 +472,7 @@ check(DuoPosture.keyboardReadsAgain([], before: english), "nothing read yet: aga
 check(DuoPosture.keyboardReadsAgain([english], before: english) && DuoPosture.keyboardReadsAgain([english, english, english], before: english),
       "only the glass before the change: again (a reading equal to the glass on screen changes nothing)")
 check(DuoPosture.keyboardReadsAgain([rect(0, 555.4, 669, 395.6)], before: english), "within half a point is the same glass")
+check(!DuoPosture.keyboardReadsAgain([rect(0, 556, 669, 396), rect(0, 556, 669, 396)], before: english), "a point away is another glass, confirmed")
 check(DuoPosture.keyboardReadsAgain([emoji], before: english) && DuoPosture.keyboardReadsAgain([english, emoji], before: english),
       "the new keyboard once: again, to confirm it")
 check(!DuoPosture.keyboardReadsAgain([emoji, emoji], before: english) && !DuoPosture.keyboardReadsAgain([english, emoji, emoji], before: english)
@@ -481,6 +486,7 @@ let enKey = DuoPosture.keyboardHintKey(mode: "en-US", width: 669), zhKey = DuoPo
 let wKey = DuoPosture.keyboardWidthKey(669)
 check(enKey == "en-US@669" && zhKey == "zh-Hans@669" && wKey == "@669" && DuoPosture.keyboardHintKey(mode: nil, width: 668.6) == "@669",
       "keys: the mode and the width")
+check(DuoPosture.keyboardWidthKey(668.6) == "@669" && DuoPosture.keyboardWidthKey(669.4) == "@669", "the width key rounded")
 check(DuoPosture.sameKeyboard(444, 445) && DuoPosture.sameKeyboard(396, 397.4) && !DuoPosture.sameKeyboard(396, 397.5)
       && !DuoPosture.sameKeyboard(nil, 396) && !DuoPosture.sameKeyboard(396, nil), "one keyboard within 1.5 pt")
 func taught(_ h: Hints, _ height: Double, _ cause: DuoPosture.KeyboardCause, before: Double? = nil, key: String = enKey) -> Hints {
@@ -496,6 +502,10 @@ check(taught(learnedEnglish, 396, .sameMode, before: 396) == learnedEnglish && t
 check(taught(learnedBoth, 435, .sameMode, before: 445) == Hints(letters: [enKey: 396], other: [wKey: 435]), "the search after the emoji keyboard: the other one, as read")
 check(taught(learnedBoth, 445, .show) == learnedBoth, "a show that brings back the other keyboard: the letters keyboard kept")
 check(taught(learnedBoth, 400, .show) == Hints(letters: [enKey: 400], other: [wKey: 445]), "a show's new letters height replaces the old")
+check(taught(Hints(letters: [zhKey: 444], other: [wKey: 445]), 445, .show, key: zhKey) == Hints(letters: [zhKey: 445], other: [wKey: 445]),
+      "a mode whose letters keyboard is as tall as the other one (Pinyin's 445): a show still teaches it")
+check(taught(Hints(letters: [enKey: 396], other: [wKey: 435]), 445, .sameMode, before: 445) == Hints(letters: [enKey: 396], other: [wKey: 435]),
+      "a switch read still as the keyboard before it (the emoji keyboard, the search not up yet): nothing taught")
 check(taught(learnedBoth, 300, .other) == learnedBoth && taught(none, 300, .other) == none, "after a fold or coming back: nothing")
 func assumed(_ cause: DuoPosture.KeyboardCause, current: Double?, _ h: Hints = learnedBoth, key: String = enKey) -> Double? {
     DuoPosture.keyboardPrediction(cause: cause, current: current, hints: h, key: key, widthKey: wKey)
@@ -507,6 +517,7 @@ check(assumed(.sameMode, current: 396) == 445 && assumed(.sameMode, current: 395
 check(assumed(.sameMode, current: 445) == 396 && assumed(.sameMode, current: 435) == 396 && assumed(.sameMode, current: nil) == 396,
       "ABC (or the search) from another keyboard: the letters keyboard")
 check(assumed(.sameMode, current: 396, learnedEnglish) == nil && assumed(.sameMode, current: 445, none) == nil, "no hint: nothing assumed")
+check(assumed(.sameMode, current: 445, Hints(other: [wKey: 445])) == nil, "a switch with no letters keyboard known: nothing assumed, whatever else is")
 check(assumed(.other, current: 396) == nil, "a fold or coming back: nothing assumed")
 
 func standIn(_ g: Glass?, controls: CGFloat = 496, fold: FoldInfo = .known(laptopFold), size s: CGSize = upright,
