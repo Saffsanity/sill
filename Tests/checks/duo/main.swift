@@ -378,6 +378,7 @@ check(plausible(rect(0, 555, 600, 396)) == nil && plausible(rect(0, 555, 668, 39
 check(plausible(rect(0, 555, 669, 394.9)) == nil && plausible(rect(0, 555, 669, 395)) == 555 && plausible(rect(0, 555, 669, 397.1)) == nil,
       "down to the foot, within a point")
 check(plausible(nil) == nil && plausible(rect(0, 951, 669, 0)) == nil && plausible(rect(0, 951, 669, 1)) == nil, "nothing, or nothing above the foot: none")
+check(plausible(rect(0, 950.5, 669, 0)) == nil, "a frame of no height, even at the foot: none")
 check(plausible(english, controls: 600) == nil && plausible(english, controls: 554) == 555, "under the controls' top given")
 
 // The glass: open flat as reported; in the laptop pose as read.
@@ -458,6 +459,9 @@ check(!DuoPosture.keyboardReadingIsStale(english, staleFrame: flatEnglish, at: 1
       "the laptop pose's own keyboard is no stale reading")
 check(!DuoPosture.keyboardReadingIsStale(flatEnglish, staleFrame: flatEnglish, at: 12, staleUntil: 12)
       && !DuoPosture.keyboardReadingIsStale(flatEnglish, staleFrame: nil, at: 10, staleUntil: 12), "after two seconds, or with no fold: never stale")
+check(!DuoPosture.keyboardReadingIsStale(rect(0, 640, 669, 300), staleFrame: flatEnglish, at: 10.1, staleUntil: 12)
+      && !DuoPosture.keyboardReadingIsStale(rect(0, 641, 669, 311), staleFrame: flatEnglish, at: 10.1, staleUntil: 12),
+      "stale only within half a point, top and height")
 for change in [DuoPosture.KeyboardChange.animating(0.38), .animated, .other, .fold] {
     let delays = DuoPosture.keyboardReadDelays(after: change)
     check(delays == delays.sorted() && delays.filter { $0 >= DuoPosture.keyboardLateRead }.count >= 2,
@@ -468,6 +472,7 @@ check(DuoPosture.keyboardReadsAgain([], before: english), "nothing read yet: aga
 check(DuoPosture.keyboardReadsAgain([english], before: english) && DuoPosture.keyboardReadsAgain([english, english, english], before: english),
       "only the glass before the change: again (a reading equal to the glass on screen changes nothing)")
 check(DuoPosture.keyboardReadsAgain([rect(0, 555.4, 669, 395.6)], before: english), "within half a point is the same glass")
+check(!DuoPosture.keyboardReadsAgain([rect(0, 556, 669, 396), rect(0, 556, 669, 396)], before: english), "a point away is another glass, confirmed")
 check(DuoPosture.keyboardReadsAgain([emoji], before: english) && DuoPosture.keyboardReadsAgain([english, emoji], before: english),
       "the new keyboard once: again, to confirm it")
 check(!DuoPosture.keyboardReadsAgain([emoji, emoji], before: english) && !DuoPosture.keyboardReadsAgain([english, emoji, emoji], before: english)
@@ -481,6 +486,7 @@ let enKey = DuoPosture.keyboardHintKey(mode: "en-US", width: 669), zhKey = DuoPo
 let wKey = DuoPosture.keyboardWidthKey(669)
 check(enKey == "en-US@669" && zhKey == "zh-Hans@669" && wKey == "@669" && DuoPosture.keyboardHintKey(mode: nil, width: 668.6) == "@669",
       "keys: the mode and the width")
+check(DuoPosture.keyboardWidthKey(668.6) == "@669" && DuoPosture.keyboardWidthKey(669.4) == "@669", "the width key rounded")
 check(DuoPosture.sameKeyboard(444, 445) && DuoPosture.sameKeyboard(396, 397.4) && !DuoPosture.sameKeyboard(396, 397.5)
       && !DuoPosture.sameKeyboard(nil, 396) && !DuoPosture.sameKeyboard(396, nil), "one keyboard within 1.5 pt")
 func taught(_ h: Hints, _ height: Double, _ cause: DuoPosture.KeyboardCause, before: Double? = nil, key: String = enKey) -> Hints {
@@ -496,6 +502,10 @@ check(taught(learnedEnglish, 396, .sameMode, before: 396) == learnedEnglish && t
 check(taught(learnedBoth, 435, .sameMode, before: 445) == Hints(letters: [enKey: 396], other: [wKey: 435]), "the search after the emoji keyboard: the other one, as read")
 check(taught(learnedBoth, 445, .show) == learnedBoth, "a show that brings back the other keyboard: the letters keyboard kept")
 check(taught(learnedBoth, 400, .show) == Hints(letters: [enKey: 400], other: [wKey: 445]), "a show's new letters height replaces the old")
+check(taught(Hints(letters: [zhKey: 444], other: [wKey: 445]), 445, .show, key: zhKey) == Hints(letters: [zhKey: 445], other: [wKey: 445]),
+      "a mode whose letters keyboard is as tall as the other one (Pinyin's 445): a show still teaches it")
+check(taught(Hints(letters: [enKey: 396], other: [wKey: 435]), 445, .sameMode, before: 445) == Hints(letters: [enKey: 396], other: [wKey: 435]),
+      "a switch read still as the keyboard before it (the emoji keyboard, the search not up yet): nothing taught")
 check(taught(learnedBoth, 300, .other) == learnedBoth && taught(none, 300, .other) == none, "after a fold or coming back: nothing")
 func assumed(_ cause: DuoPosture.KeyboardCause, current: Double?, _ h: Hints = learnedBoth, key: String = enKey) -> Double? {
     DuoPosture.keyboardPrediction(cause: cause, current: current, hints: h, key: key, widthKey: wKey)
@@ -507,6 +517,7 @@ check(assumed(.sameMode, current: 396) == 445 && assumed(.sameMode, current: 395
 check(assumed(.sameMode, current: 445) == 396 && assumed(.sameMode, current: 435) == 396 && assumed(.sameMode, current: nil) == 396,
       "ABC (or the search) from another keyboard: the letters keyboard")
 check(assumed(.sameMode, current: 396, learnedEnglish) == nil && assumed(.sameMode, current: 445, none) == nil, "no hint: nothing assumed")
+check(assumed(.sameMode, current: 445, Hints(other: [wKey: 445])) == nil, "a switch with no letters keyboard known: nothing assumed, whatever else is")
 check(assumed(.other, current: 396) == nil, "a fold or coming back: nothing assumed")
 
 func standIn(_ g: Glass?, controls: CGFloat = 496, fold: FoldInfo = .known(laptopFold), size s: CGSize = upright,
@@ -579,9 +590,43 @@ check(standIn(at(479), controls: 424, fold: flat) == row(424, 51) && standIn(at(
 check(standIn(at(472), controls: 424, fold: flat) == row(424, 44) && standIn(at(471.9), controls: 424, fold: flat) == toggleAlone,
       "open flat: 48 pt over the controls' top holds 44 pt caps; less, the toggle")
 check(standIn(at(300), controls: 424, fold: flat) == toggleAlone, "open flat, a keyboard over the picture's foot: the toggle")
-// The toggle's place: inside the pane (its foot at 447 in the laptop pose), its trailing edge on the row's.
-check(DuoPosture.keyboardToggle(paneBottom: 447, width: 669, sides: 14) == rect(611, 395, 44, 44), "the toggle at 611,395, 44 pt")
-check(DuoPosture.keyboardToggle(paneBottom: 365, width: 669, sides: 14) == rect(611, 313, 44, 44), "the status bar shown: 8 above the pane's foot at 365")
+// The toggle's place (Noah, 2026-11-11: "Move the keyboard icon to the left corner instead"): inside the pane
+// (its foot at 447 in the laptop pose) at its bottom leading corner, its leading edge on the row's, opposite the
+// clipboard chip's bottom trailing corner; from the leading edge, so the right corner in a right-to-left layout.
+check(DuoPosture.keyboardToggle(paneBottom: 447, sides: 14) == rect(14, 395, 44, 44), "the toggle at 14,395, 44 pt: the bottom left corner")
+check(DuoPosture.keyboardToggle(paneBottom: 365, sides: 14) == rect(14, 313, 44, 44), "the status bar shown: 8 above the pane's foot at 365")
+check(DuoPosture.keyboardToggle(paneBottom: 447, sides: 14).maxX == 58 && DuoPosture.keyboardToggle(paneBottom: 447, sides: 20).minX == 20,
+      "its leading edge on the row's, whatever the sides: the chip's corner (the trailing one) holds a chip up to 587 pt wide clear of it")
+for paneBottom in stride(from: CGFloat(300), through: 700, by: 0.5) {
+    let t = DuoPosture.keyboardToggle(paneBottom: paneBottom, sides: 14)
+    check(t.maxY == paneBottom - 8 && t.minX == 14 && t.width == 44 && t.height == 44 && t.maxX < 669 / 2,
+          "\(paneBottom): 8 above the pane's foot, in the leading half, 44 pt")
+}
+// The clipboard's chip never over the toggle (Noah, 2026-11-11: the two must never overlap): while the toggle
+// shows in the pane's bottom band, the chip (in the other bottom corner) at most as wide as the room beside the
+// toggle on its side, 8 clear of the toggle and 8 from the pane's edge; else the pane less 16, as before.
+let chipPane = rect(8, 8, 653, 439)     // the laptop pose's stream pane, its drawn foot at 447
+func chipMost(_ toggle: CGRect?, panel: CGRect = chipPane) -> CGFloat { DuoPosture.clipboardChipMaxWidth(panel: panel, toggle: toggle) }
+check(chipMost(nil) == 637, "no toggle: the pane less 16, as before")
+check(chipMost(DuoPosture.keyboardToggle(paneBottom: 447, sides: 14)) == 587, "the toggle at the left: 661 − 8 − (58 + 8) = 587")
+check(chipMost(rect(611, 395, 44, 44)) == 587, "right to left (the toggle at the right, the chip at the left): the same 587")
+check(chipMost(rect(14, 100, 44, 44)) == 637 && chipMost(rect(14, 600, 44, 44)) == 637,
+      "a toggle high in the pane, or outside it: the chip as before")
+check(chipMost(rect(300, 395, 44, 44)) == 301 && chipMost(rect(0, 395, 60, 44), panel: rect(0, 0, 70, 439)) == 0,
+      "the wider side beside the toggle (661 − 344 − 16); never below nothing")
+for x in stride(from: CGFloat(8), through: 617, by: 1) {
+    for y in stride(from: CGFloat(330), through: 403, by: 3) {
+        let toggle = rect(x, y, 44, 44), most = chipMost(toggle)
+        check(most >= 0 && most <= 637, "\(x),\(y): within the pane")
+        // The chip takes the side with more room, against that side's edge: never within 8 of the toggle.
+        if chipPane.maxX - toggle.maxX >= toggle.minX - chipPane.minX {
+            check(chipPane.maxX - 8 - most >= toggle.maxX + 8, "\(x),\(y): the chip at the right ends 8 or more short of the toggle")
+        } else {
+            check(chipPane.minX + 8 + most <= toggle.minX - 8, "\(x),\(y): the chip at the left ends 8 or more short of the toggle")
+        }
+    }
+}
+
 // Twelve caps (the Desktop: Spotlight's too) and eleven across the row.
 check(abs(DuoPosture.keyboardRowCap(count: 12, width: 641) - 47.917) < 0.001, "twelve caps ≈ 48 pt wide")
 check(abs(DuoPosture.keyboardRowCap(count: 11, width: 641) - 52.818) < 0.001 && DuoPosture.keyboardRowCap(count: 0, width: 641) == 0,
