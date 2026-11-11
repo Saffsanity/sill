@@ -8,6 +8,37 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**The 0.6.1 fixes in one pull request (2026-11-09, branch `integration-0-6-1-fixes` from main at f224323d,
+its own pull request, "0.6.1 fixes: …"; the resolutions, the verification of #320 and every number are in
+sill-handoff's `triage/2026-11-09/int/REPORT.md`).** Noah's decisions of 2026-11-09: #228 yes; #230 yes ("keep
+the iPad awake when streaming"); "Work on #114 (#223)"; "Implement #309/#320"; #229 closed. The four, each
+merged with a merge commit in this order with the contributors' commits as they are, so merging this pull
+request with a merge commit marks them merged: #228 (the waking click; its entry is a bullet of "A sleeping
+display wakes for a device"), #230 (the device's auto-lock while a window streams), #223 (blank tiles in the
+window strip, towards #114: the cause still unconfirmed) and #320 (a remote dial's failure names both ends,
+#309; no entry of its own: docs/remote-access-plan.md's tables).
+- Resolved against main: `StreamCoordinator.handle` (main's lock gate first, then #228's `DisplayWake.pass`,
+  then `deviceActive` at the lock's reading: what the lock refuses is never held back and wakes nothing);
+  `site/support.html` (#228's tap sentence on 0.6.0's shipped paragraph, in a `Display wake click` marker
+  whose republish before 0.6.1 puts v0.6.0's paragraph back: docs/release-checklist.md); ci.yml's mutants
+  matrix and the checks README (both sides' rows); CLAUDE.md (each side's entries).
+- Maintainer commits: #230's N1 (what the device does by itself, the automatic reconnect, a stream it asked
+  for again, its pointer's re-centre, no longer holds it awake: the entry below); the checklist's open
+  marker; #223's panel service wording (the verification's nit 3); these docs.
+- Verified: `swift build -c release` (only the CaptureProbe warning); the iOS app Debug for the simulator and for the iPad
+  (signed), Release for the simulator, Xcode 27.1, only the known StreamClient capture warning; `run-all.sh`, all 65
+  (display-wake 265, device-idle 48, catalog-windows 75, remote-rules 179); mutants display-wake 80 of 80 and device-idle
+  17 of 17 (the rest, run after this was written, in the report); the CLI against main's (f224323d), masked and sorted:
+  idle identical, with a Desktop client identical but the second the client left (as main against itself); the bare
+  app's 162 previews identical to main's from one path; live on a loopback synthetic host: a tap with the display
+  "asleep" held back (`disp.heldPress 1`, its release silent), the same tap at a "locked" Mac refused by the lock
+  (`in.locked 3`, no hold, no wake), awake it clicked.
+- **Untested, for Noah:** each PR's own list (#228's steps 1 and 2 with the display asleep, the virtual
+  display's case deciding the support page's sentence; #230's on the iPad: its Auto-Lock read as Never all
+  through 2026-11-09 17:37–18:17, so the run here was skipped, and this branch's Debug build, 0.6.1 (4), is
+  installed on it; #223's Stage Manager probe; #320 with Tailscale off on the Mac only, and which failure the
+  device's console names).
+
 **The keyboard toggle on the Duo's inner display (2026-11-10 and 11, branch `duo-keyboard-toggle` from main at
 f224323, PR #343, merged at baf0901 (c1e612a) on 2026-11-11; then `duo-keyboard-followup` from c1e612a, the
 toggle at the left corner with these docs and the mutants; issue #215 after matt-cahill's device test of 0.6.1
@@ -214,6 +245,30 @@ take the once-more only with `-SillTourState saved`.
   Audio and Mute, Reverse Scrolling, the hold, a Magic Keyboard's keys and Esc); the iPhone's five and
   four, clear of the Dynamic Island; against Sill for Mac 0.5.1 the update row; VoiceOver; the largest
   text size; a hardware keyboard's Return and Esc; Skip, Take the Tour; the Duo's poses.
+
+**Blank tiles in the window strip (2026-10-29, addhumal's PR #223 with maintainer edits; issue #114).** The reporter
+(a Mac Studio, macOS 27.0.1, an iPad Pro) saw a tile with macOS's generic app icon and a blank white picture for each
+window or app, which nothing could bring forward. Not reproduced: this Mac (27.0.1, Stage Manager off) lists only
+apps' titled windows. A read-only probe of ScreenCaptureKit's list (as the catalog reads it) found: the device shows
+the generic icon only for an owner whose app has none of its own (WindowManager, SystemUIServer, Notification Center,
+the screenshot tools) and two letters for an owner with no bundle; macOS 27 lists the window server's windows under an
+owner with no name, which the catalog left out already; a tool with no bundle is listed under its executable's name
+with an empty bundle identifier. `CatalogWindows` (pure, `Tests/checks/catalog-windows`, 75 checks, 29 mutants) holds
+the catalog's whole filter: an app's window as before (an owner with a name, layer 0, over 100 × 100 points, not
+Sill's), and no helper's: LayerProbeParent (as before), macOS's own interface whatever the title
+(com.apple.WindowManager: Stage Manager's strip, the wallpaper from macOS 27; the Dock, Control Center,
+SystemUIServer, Notification Center, the screenshot tools: the owners ScreenCaptureKit recorders leave out of their
+pickers), and an untitled window of a process with no bundle (the PR's own rule). Not kept from the PR: its
+WindowServer clause (dead: no name) and its AppKit XPC clause (an untitled window of the open and save panel service,
+which owns apps' Open and Save panels, Chrome's and Keychain Access's among them on macOS 27.0.1: someone's work); the rule left InstalledApps (#231 edits the same files).
+Sill.log names each owner left out, once ("Catalog: leaving out the windows of WindowManager
+(com.apple.WindowManager): they are macOS's own, not an app's."). Verified: the check and its mutants, `run-all.sh`
+all 57, `swift build -c release` (only the CaptureProbe warning), H2 against main (idle identical masked and sorted;
+with a client identical but for the seconds where it comes and goes, which differ run to run on either build); this
+Mac's live list judged by main's filter, the PR's and this one (the same six windows and no line; a probe's invisible
+test window of a tool with no bundle left out, with its line). Untested, for Noah and the reporter: Stage Manager on
+(no strip tiles, the WindowManager line), a border tool (JankyBorders), an app's Save panel in regular mode
+(still a tile).
 
 **The door's waiting places (2026-10-29, branch `sec-door-pending` from main at 150479b5, PR #252; finding 9 of the
 security scan of 2026-10-18, Low; Noah's go of 2026-10-29).** A TLS door (the remote one, and the home one of
@@ -2222,6 +2277,62 @@ throttle to change. Host, device and one additive kind (44).
   0.5.1: the device sends kind 44, which 0.5.1 skips with no line and no disconnect, the console's
   asks again after 4, 8 and 16 s, then every 32 s, and the picture back only with the stream's next
   keyframe (a still window's never, as before).
+
+**The device's auto-lock while a window streams (2026-10-29, PR #230 from addhumal's
+`device-idle-timer`, finished with maintainer edits; towards #134).** Device only: no wire change,
+nothing on the Mac. The decision #151's rework left for its own PR (below: "it is its own decision").
+- The rule (`DeviceIdlePolicy`, pure, `iOSClient/DeviceIdlePolicy.swift` (pbxproj AE30/FE30);
+  `Tests/checks/device-idle`, 19 checks and 9 of 9 mutants, in CI's matrix): Sill holds the device's
+  own auto-lock off (`UIApplication.isIdleTimerDisabled`) while one of its windows the person can see
+  (its scene foreground active) streams (connected, a source streaming), until `idleLimit`, 10
+  minutes (a product default), after the person last used it: input sent to the Mac, one of the
+  stream screen's controls (`noteAction`), the moment it began streaming or came to the front. A
+  picture being read or watched does not lock; a device left alone still locks by its own Auto-Lock
+  setting, 10 minutes later than it would have, and its session ends as before.
+- `DeviceIdleTimer` (StreamScreen.swift, main thread): each window's `WindowSessionObserver`
+  (MacMenuHub.swift) gives its session and its UIWindow, both weak, so a window that closed leaves
+  nothing, whether or not its stream screen ran its onDisappear; every look lists the windows afresh
+  (each scene's activationState read then); it looks again at the scene notifications, a session's
+  `connected` and `active` changes, the person's use while nothing holds (`used`), and when the hold
+  would end (a timer). DEBUG: the console's `idle:` lines, `-SillIdleLimit <s>`.
+- Changed from the PR as opened: its policy lived in HardwareKeyboardPolicy.swift with its cases in
+  `hardware-keyboard` (both back as main has them); it kept an entry per client, updated from the
+  stream screen's `onChange`s, so a window closed mid-session while another was in front kept its
+  entry holding (pruned only once no scene was in front), and its `UIScene.didDisconnectNotification`
+  observer removed only clients that no longer streamed, never the one it was for; it held auto-lock
+  off for as long as a window streamed, so a device left alone never locked and kept the Mac
+  streaming, lit and black once the Mac's display slept by its own setting (Noah's objection in the
+  #151 rework); and its body's "the Mac's display sleeps and stops capture" does not hold (issue
+  #134's black windows stream on, and a stopped capture is followed by the device's own Desktop
+  request).
+- Known: the Mac's display can still sleep before the 10 minutes are up (its own setting, counted
+  from the same input): the device then shows black, lit, until a tap (with PR #228 on the Mac, one
+  that clicks nothing). The device cannot tell; the host saying so would be a wire change.
+- Verified (2026-10-29, on addhumal's head, which contains main at 6c5b5d24): the check and its mutants;
+  `run-all.sh`, all 56; the iOS app Debug and Release for the simulator and Debug for a device, only
+  the known `StreamClient` capture warning; live on a private iPad simulator (iOS 27.0, deleted
+  after) against a loopback synthetic host on the software encoder, `-SillIdleLimit 10`: held 1.2 s
+  in as the Desktop streamed, the device's own again at 11.2 s, held again at each of two
+  `-SillInputScript` taps (14.8 s, 30.8 s) and let go 10 s after each, let go as the session ended;
+  with `-SillSecondWindow 1` the hold followed the windows' scenes (let go as the second came forward,
+  held again as one streamed in front).
+- The verification's N1, fixed in `integration-0-6-1-fixes` (2026-11-09): what the device did by itself
+  counted as the person's use, so a link or a Mac that kept dropping held the device awake for good (the
+  automatic reconnect and a stream the device asked for again reset "began streaming", and the
+  pointer's re-centre counted as input). Now `DeviceIdlePolicy.lastUse` of `Uses` (input the person
+  sent: `StreamClient.lastPersonInputAt`, which `sendInput(_:byPerson: false)` leaves alone for the
+  re-centre; a control; `personSessionAt`, from `DeviceIdlePolicy.sessionStart` in
+  `StreamClient.sessionConnected(reconnected:)`, the tour's flag: the automatic reconnect carries the
+  session start before it; the window's coming to the front). `device-idle` 48 checks and 17 of 17
+  mutants (the rule before held the three N1 lives for good).
+- **Untested, for Noah** (the iPad, a Debug build from this branch for the console's `idle:` lines,
+  Settings › Display & Brightness › Auto-Lock at 1 minute): streaming and left untouched the iPad stays
+  lit, and locks about 11 minutes after the last touch (`-SillIdleLimit 60` in the scheme for 2); a
+  touch or a key re-arms it; Sill in the background, or another app in front in Split View, lets the
+  iPad lock by its own setting; two Sill windows side by side, one streaming: lit, and closing the
+  streaming one lets it lock; Low Power Mode (its 30 s Auto-Lock) the same; whether staying lit is
+  wanted at all (Noah's call; the limit is one constant).
+
 **A sleeping display wakes for a device (2026-10-19, PR #151 from acalatrava's
 `fix/keep-display-awake`, reworked on top of its 2b8be47; issue #134).** Noah: "Modify the black
 windows pull request to implement it properly (user activity when a device connects as you said)."
@@ -2288,6 +2399,37 @@ test is Noah's.
   more than 2 s after the new stream's first parameter sets left (a slow remote link): either can wake
   a sleeping display once with nobody at the device (docs/DEVELOPMENT.md, A sleeping display). Telling
   them apart would need the device to say so, a wire change.
+- The waking click (2026-10-29, PR #228 from addhumal's `swallow-wake-click`, finished with maintainer
+  edits): a left or right press whose spot is on a display that reads asleep is held back
+  (`DisplayWake.pass`; the coordinator's `pressLandsAsleep`: `CGDisplayIsAsleep` of the display under
+  the press in the source, the virtual display for a window staged there, the main display when
+  nothing streams): the pointer moves there instead, the press declares at once whatever the 5 s
+  (`Event.wakingPress`; "Woke the display for iPad (iPad14,1), which clicked while the display was
+  asleep; the click was held back."), and its release is held back too, whenever it comes; each
+  device's and each button's own; a display that keeps reading asleep has its presses held back for
+  5 s from the first (`wakeGrace`), then they go on (a display a press does not wake, or one whose
+  picture is live while macOS reads it asleep), and a gap of 5 s or a clock set back starts afresh; a
+  device that leaves is forgotten; `disp.heldPress` in the stats line; TEST ONLY
+  `SILL_TEST_DISPLAY_ASLEEP=<file>` (a --synthetic host's display reads asleep while the file
+  exists). Keys, text and scrolls go on as before. `Tests/checks/display-wake`: 265 checks (P1–P6 for
+  the click, I7 for its declaration) and 80 of 80 mutants. Changed from the PR as opened: it kept one
+  flag for every device, so another device's release could be held back for this one's press and its
+  button stay down on the Mac (every later move a drag); it read the main display on the main actor
+  for every input event; it never held back a press on a window staged on the virtual display, on by
+  default since #236, where it now judges that display; a press within 5 s of the last declaration
+  was held back and woke nothing; a display that kept reading asleep lost every click for good; a
+  test host could not show it. Verified: `swift build -c release`, only the CaptureProbe warning;
+  `run-all.sh`, all 55; H2 against main at 6c5b5d24 (idle and with a test client, masked and sorted:
+  identical); live on a loopback synthetic host with the dry run's input log and a scripted pointer:
+  under the TEST ONLY file a press became "pointer move" with `disp.heldPress 1` and `disp.wakeDry 1`
+  2 s after the connect's, its release 3 s later (the file gone at 4.5 s) printed nothing, and a tap
+  after posted "left mouse down/up"; main's host and this one without the file posted the press and
+  its release. **Untested, for Noah:** a Calculator window streaming, `pmset displaysleepnow` on the
+  Mac, then a tap on the black picture where its 7 is: the picture comes back and the display reads 0
+  (main's build types 7), Sill.log's "Woke the display for …, which clicked while the display was
+  asleep; the click was held back."; the same with Virtual Display on (whether a staged window's
+  picture is black while the panel sleeps, and whether that tap was held back: `disp.heldPress` in
+  the log's `[1s]` lines); a long press (right click) and the trackpad's tap the same.
 - **Untested, for Noah,** with Sill.app from this branch (release-signed with the embedded profile):
   `pmset displaysleepnow`, then connect the iPad at home and through Tailscale: the picture, not black
   windows, and Sill.log's "Woke the display for …, which connected."; `pmset -g assertions` lists
@@ -7369,7 +7511,13 @@ good.
   landed, `lookAge`), `CatalogLook` (whether a capture may be built from that
   look or the catalog looks again first: its display no longer active, none, no
   look, or older than two polls; the Desktop's lines and its one more try's;
-  pure, `Tests/checks/catalog-look`; the black screen of 2026-10-28), `InstalledApps`
+  pure, `Tests/checks/catalog-look`; the black screen of 2026-10-28),
+  `CatalogWindows` (which of ScreenCaptureKit's on-screen windows it lists: an
+  app's own, by owner, layer, size and process, and no helper's:
+  LayerProbeParent, macOS's own interface (Stage Manager's WindowManager, the
+  Dock, Control Center, SystemUIServer, Notification Center, the screenshot
+  tools), a tool's untitled window; one log line per owner it leaves out, #114;
+  pure, `Tests/checks/catalog-windows`), `InstalledApps`
   (where those are found: each applications folder and the folders inside it,
   at any depth (#135's), never inside a bundle, another package or a
   framework, and never through a link inside a scanned folder (one given that
@@ -7967,7 +8115,11 @@ good.
   view holds the keyboard for a hardware keyboard and when it is the person's
   own; and `PointerScroll`, where a trackpad's or a wheel's scroll goes, the
   pointer's place as it began, and its readings added up; pure,
-  `Tests/checks/hardware-keyboard`; pbxproj AC01/FC01), `KeyChords`
+  `Tests/checks/hardware-keyboard`; pbxproj AC01/FC01), `DeviceIdlePolicy` (when Sill
+  holds the device's own auto-lock off: while a window the person can see streams,
+  until 10 minutes after the person last used it, and what counts as the person's
+  use; pure, `Tests/checks/device-idle`; pbxproj AE30/FE30; StreamScreen's
+  `DeviceIdleTimer` carries it out, PR #230), `KeyChords`
   (`KeyModifiers`; a
   shortcut with its modifiers' own keys pressed around it, the Spotlight key's
   ⌘Space, the trackpad's modifier keys around a click; `ForwardedKeys`, a
@@ -8224,9 +8376,10 @@ good.
   `addresses`, `ask-limits`, `audio-codec` (the host's AAC-ELD encoder,
   packetizer and tone with the device's decoder, in memory; AudioToolbox only),
   `audio-packetizer`, `audio-playout` (iOSClient's AudioPlayout on a simulated
-  clock), `away-copy`, `away-quality`, `away-wire`, `cable-link`, `capture-scale`, `catalog-look`, `clientlink`,
+  clock), `away-copy`, `away-quality`, `away-wire`, `cable-link`, `capture-scale`, `catalog-look`,
+  `catalog-windows` (the host's CatalogWindows), `clientlink`,
   `clipboard`, `compatibility`,
-  `connection-list`, `device-gate`, `display-wake`, `dmg-layout` (Scripts/dmg-layout's `.DS_Store` and alias
+  `connection-list`, `device-gate`, `device-idle` (iOSClient's DeviceIdlePolicy), `display-wake`, `dmg-layout` (Scripts/dmg-layout's `.DS_Store` and alias
   writer, against Finder's own layout of the file, make-dmg.sh's layout
   arguments and the SVG's size and edge), `door-policy`, `duo` (DuoPosture;
   `tour` and `phone-portrait` take the Duo's real sizes too), `encoder-mailbox`,
