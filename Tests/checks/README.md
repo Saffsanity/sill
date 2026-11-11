@@ -51,6 +51,7 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 | Check | Compiles | What it checks | Cases | Mutants |
 |---|---|---|---|---|
 | `addresses` | `Sources/SillHost/AddressList.swift`, `PairingWindow.swift`, `OriginPolicy.swift` and `DoorPolicy.swift` with `Sources/StreamProtocol` (`build.sh`) | the addresses the Mac offers for remote access, from its services and tunnels; the pairing window's proofs, tries and back-off | 42 | 16 |
+| `asc` | `Scripts/asc.swift` whole (a script: no `main.swift`), run against `standin.py`, a stand-in App Store Connect on 127.0.0.1 that verifies every token's ES256 signature with openssl; throwaway P-256 keys made for each run; every run of asc under `sandbox-exec` with only loopback allowed, which the check tries first (a connection elsewhere refused) | the nightly's TestFlight tool: the token's header, claims and lifetime, never printed; groups; build-state; the wait for processing; What to Test (a build that has its own, in any language, keeps it unless `distribute --replace-whats-new`: the night of 2026-11-09 replaced 0.6.1 (1304)'s; `whats-new` always replaces; cut at 4,000); the internal groups, automatic distribution; the public beta's two locks and Beta App Review; retries, pages, redirects, another API host, usage | 167 | 36 |
 | `ask-limits` | `Sources/SillHost/PairingWindow.swift`, `OriginPolicy.swift` and `DoorPolicy.swift` with `Sources/StreamProtocol` (`module.txt`) | the limits on a device's asks to pair at home: 10 minutes of quiet by key and by address, an IPv6 one by its /64 (after the Mac's Cancel or a stop, never an expiry or the device's own Cancel), 3 device-opened windows in any 10 minutes, the reason a proof turned away closed hears, the test override | 43 | 24 |
 | `audio-codec` | `Sources/SillHost/AudioEncoder.swift`, `AudioPacketizer.swift` and `TestTone.swift` with `iOSClient/AudioDecoder.swift`; a binary that links a media framework but AudioToolbox is refused | the Mac's sound through AAC-ELD in memory (docs/audio-plan.md H4): the test tone through the packetizer, the encoder and the decoder, every decoded sample placed by its packet's stamp, each click at its whole second at 480 and 512 frames a packet and across gaps; a segment starting clean on both ends; a late join; one packet a block; the bitrate | 21 | 9 |
 | `audio-packetizer` | `Sources/SillHost/AudioPacketizer.swift` | how the Mac's sound becomes packet-sized blocks (docs/audio-plan.md §4.3): the packet size from the first chunk, the stamps against each chunk's anchor (a jitter oracle), the continuity tolerance, gaps that end a segment with nothing flushed or filled, a format change; `AudioSourceRule`'s table; `PCMLayout`'s conversions; the first minute's tally | 89 | 27 |
@@ -222,7 +223,12 @@ expectations are those of a Finder-made image's `.DS_Store` (an installer image 
 not in the repository), and its run reads make-dmg.sh's layout by sourcing the script, which then
 only defines its functions. `menus` and `menu-state` were written for `menu-bar-mirror` (the plan's
 H3); the menu reader and mirror, which need Accessibility and an app to read, are checked against a
-fixture app by `Scripts/menu-check/run.sh`, outside CI.
+fixture app by `Scripts/menu-check/run.sh`, outside CI. `asc` came from the nightly's harness of
+2026-10-29 (PR #246, kept outside the repository until the What to Test fix of 2026-11-09): its 114
+checks and 23 mutants as they were but for paths, the review's extra checks, What to Test's cases and
+13 mutants, the sandbox, and a stand-in that no longer looks up 127.0.0.1's name when it binds (35 s on
+a Mac whose DNS was slow that day). Its real-time wait for Beta App Review's state (about 15 minutes)
+stays out.
 
 Pairing at home's came with the `home-pairing` branch, from its own scratch folder, at its merge
 with main: `door`, `cable`, `asklimits`, `records`, `device`, `hometxt` and `home` there are

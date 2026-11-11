@@ -907,6 +907,15 @@ What a nightly is:
   the build (a look a minute, 90 minutes at most), gives it What to Test, and gives it to TestFlight's
   groups (below). A night run again by hand finds its build in App Store Connect and only gives it its
   groups again.
+- What to Test: the night's notes replace what a build has only when that night's run uploaded it
+  (the upload step's `uploaded=true`, then `asc.swift distribute --replace-whats-new`). A build App
+  Store Connect has already, from a night run again or uploaded by hand from main's head (as 0.6.1
+  (1304) was on 2026-11-09, with its own words for the reporters, which that night's nightly then
+  replaced with its notes: the reason for this rule), keeps its What to Test, in any language, and
+  gets the notes only if it has none; the job's notice and summary say which. To change a build's
+  words afterwards: `asc.swift whats-new` (it always replaces) or TestFlight › the build › Test
+  Details. `asc.swift distribute` by hand keeps a build's words too unless given
+  `--replace-whats-new` (docs/nightly-whats-new-plan.md).
 - Versions: what main says (0.6.1 since App Review approved 0.6.0, part 2's first item; 0.6.0 from 2026-10-31 until then, its release builds 0.6.0 (1276), and 0.5.5 the pre-release number from 2026-10-29), with the commit count as
   the build number on both apps, as in "Sill 0.6.1 (1280)". The store release's own build is uploaded with the same number
   (`Scripts/release-ios.sh --build-number "$(git rev-list --count HEAD)" --upload`), never `--bump`: App Store Connect wants a
@@ -1037,7 +1046,7 @@ The first run, for Noah:
    Mac job's log ("Identity keychain: data-protection", twice "Notarized Developer ID"), the disk image
    on a second Mac (downloaded, so quarantined: it opens, the drag, Sill opens, the iPad still
    paired), the iOS job's last step ("Assigned build … to: no group; by automatic distribution: Internal.",
-   "Public beta: not given") and
+   "What to Test set (English (U.S.), … characters)", "Public beta: not given") and
    TestFlight on the iPad (the build with its What to Test).
 8. `gh variable set SILL_NIGHTLY --body true`: every night from the next 09:17 UTC on.
 9. Once a nightly has worked in 'Internal': `gh variable set SILL_NIGHTLY_PUBLIC_BETA --body true`

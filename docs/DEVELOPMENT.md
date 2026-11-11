@@ -2513,7 +2513,13 @@ rolling pre-release `nightly` (the seven newest kept, never "latest");
 `Scripts/asc.swift` (App Store Connect's API: an ES256 token from the .p8 key
 with CryptoKit, Foundation only) waits for App Store Connect to process it,
 sets What to Test and gives it to every internal TestFlight group, and to the
-public beta group only while `SILL_NIGHTLY_PUBLIC_BETA` is `true`.
+public beta group only while `SILL_NIGHTLY_PUBLIC_BETA` is `true`. The night's
+notes replace a build's What to Test only when that run uploaded it (`asc.swift
+distribute --replace-whats-new`): a build App Store Connect had already, uploaded
+by hand from main's head or by an earlier run, keeps its own and gets the notes
+only if it has none; `asc.swift whats-new` always replaces.
+`Tests/checks/asc` runs asc.swift against a stand-in App Store Connect on
+127.0.0.1 (throwaway keys, every run sandboxed to loopback).
 `Scripts/nightly-notes.sh` writes both apps' words from the pull requests
 merged since the last release tag. A nightly says the version main says, the
 version of main's next release (0.6.1 since App Review approved 0.6.0; 0.6.0
