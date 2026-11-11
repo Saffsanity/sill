@@ -184,6 +184,9 @@ package final class StreamCoordinator {
     private var rectCache: (id: CGWindowID, rect: CGRect, at: CFAbsoluteTime)?
     private var pendingLaunch: String?
     private var switching = false
+    /// The stage generation whose latest catalog look still needs judging. Kept across a switch,
+    /// but discarded when that stage is released or replaced.
+    private var pendingStageCaptureRefresh: Int?
     /// A restart of the active source is in flight (a settings change, a resize, a rate change,
     /// the encoder fallback, a lost display): the source being restarted. Nil during a switch to
     /// another source.
@@ -1889,6 +1892,10 @@ package final class StreamCoordinator {
             // the display): the placeholder now (LockPolicy). The gate withheld its frames meanwhile.
             // The off-console view: the placeholder that started meanwhile gives way to this session's picture.
             if lockReading.locked, active != .none, !placeholderStreams || lockGate.offConsoleView { Task { @MainActor in await self.enforceLock() } }
+            if !stage.isStaged { pendingStageCaptureRefresh = nil }
+            if pendingStageCaptureRefresh != nil {
+                Task { @MainActor in await self.refreshStageCaptureIfNeeded() }
+            }
         }
 
         await capture.stop()
@@ -2698,12 +2705,31 @@ package final class StreamCoordinator {
     /// before a fit landed can still give at its old value; a resize is `windowsChanged`'s.
     private func catalogPolled() {
         menusPolled()
+        if virtualDisplay, stage.isStaged {
+            pendingStageCaptureRefresh = stage.captureGeneration
+            Task { @MainActor in await self.refreshStageCaptureIfNeeded() }
+            return
+        }
+        pendingStageCaptureRefresh = nil
         guard !switching, !shuttingDown, case .window(let id) = active, !(virtualDisplay && stage.isStaged),
               let w = catalog.window(id: id), capturePixelScale(of: w) != streamPixelScale else { return }
         Task { @MainActor in
             guard !self.switching, self.active == .window(id) else { return }
             await self.select(.window(id))
         }
+    }
+
+    /// A changed allowlist goes through select's stop/start, never a running SCStream update.
+    /// Nothing suspends between judging the active stage and entering that serialized path.
+    private func refreshStageCaptureIfNeeded() async {
+        guard !switching else { return }             // select's defer drains the latest look
+        guard let epoch = pendingStageCaptureRefresh else { return }
+        pendingStageCaptureRefresh = nil
+        guard !shuttingDown, catalog.clientCount > 0, lockAllowed.virtualDisplay,
+              virtualDisplay, stage.isStaged, stage.captureGeneration == epoch,
+              case .window(let id) = active, stage.placement?.windowID == id,
+              stage.captureMembershipChanged else { return }
+        await select(.window(id))
     }
 
     /// Every catalog poll (2 s) while a device is connected.
@@ -2945,6 +2971,7 @@ package final class StreamCoordinator {
         injector.releaseAll()
         server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
         shuttingDown = true
+        pendingStageCaptureRefresh = nil
         audio.shutdown()   // "Audio stopped: Sill is quitting."
         restoreFits(keeping: nil)
         stage.release()
