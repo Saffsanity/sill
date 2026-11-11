@@ -13,8 +13,11 @@ Formerly winstream; the folder still carries the old name.
 of this is completed, I want to push 0.6.1 to the App Store and release tomorrow"; the day's steps, the
 decisions, the texts and the rehearsals are in sill-handoff's `release-061/` (STATUS.md, notes-0.6.1.md,
 fill-notes.sh, whats-new-0.6.1.txt, testflight-0.6.1.md)).** One version for both apps, as since 0.5.1: Sill for
-Mac 0.6.1 with Sill for iPhone and iPad 0.6.1, both from this pull request's merge commit, whose commit count is
-both builds' number (never committed, never `--bump`). Both apps have said 0.6.1 since PR #286.
+Mac 0.6.1 from this pull request's merge commit (its commit count the build number, never committed, never
+`--bump`), with Sill for iPhone and iPad 0.6.1 of the same app code: Noah's pick between the nightly build 1366
+(from 2a3b720, given to the public beta on 2026-11-11 on his "Beta"; `git diff --quiet 2a3b720 <the merge> --
+iOSClient Sources/StreamProtocol Package.swift` proves the code the same) and a fresh upload of the merge commit.
+Both apps have said 0.6.1 since PR #286.
 - In it since v0.6.0 (Noah's choice, 2026-11-11): #335 (Apple Pencil's closing stroke, #322); #220, #343 and #347
   (the Duo's keyboard in the laptop pose: the key row above a regular keyboard, the Keyboard toggle at the
   picture's bottom left for a tall one, #215); #341 (#228 the waking click, #230 the device awake while it
