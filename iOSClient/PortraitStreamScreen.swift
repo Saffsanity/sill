@@ -282,6 +282,13 @@ struct PortraitStreamScreen: View {
                                                              y: top / max(size.height, 1))))
             }
         }
+        // The laptop pose with the person's keyboard up: KeyboardFrameMonitor reads where its glass is after
+        // each change (a fold among them); nowhere else does it reload anything.
+        .onChange(of: KeyboardReadings(wanted: wantsKeyboardReadings(size), controlsTop: origin.y + split.controls), initial: true) { _, now in
+            KeyboardFrameMonitor.shared.setWantsReadings(now.wanted, controlsTop: now.controlsTop)
+        }
+        .onChange(of: duoFold) { _, _ in KeyboardFrameMonitor.shared.poseChanged() }
+        .onDisappear { KeyboardFrameMonitor.shared.setWantsReadings(false, controlsTop: 0) }
         #if DEBUG
         .onChange(of: standIn, initial: true) { old, now in
             if now != nil || old != nil { print(keyboardStandInLine(now, size: size, origin: origin, split: split)) }
@@ -301,13 +308,27 @@ struct PortraitStreamScreen: View {
         let standard = metrics.padTop + metrics.barHeight + metrics.rowGap + metrics.keyBlockHeight
         return DuoPosture.keyboardStandIn(size: size, fold: duoFold, controlsTop: split.controls,
                                           glass: keyboardGlass(size, origin: origin, split: split),
-                                          standardRows: standard, sides: metrics.padSide)
+                                          standardRows: standard, sides: metrics.padSide,
+                                          settling: keyboardFrame.settling || (wantsKeyboardReadings(size) && !keyboardFrame.readingsWanted))
     }
 
+    /// The glass in this screen's space: open flat as UIKit reports it, in the laptop pose as Sill read it.
     private func keyboardGlass(_ size: CGSize, origin: CGPoint, split: DuoPosture.PortraitSplit) -> DuoPosture.KeyboardGlass? {
-        DuoPosture.keyboardGlass(reported: keyboardFrame.frame.map { $0.minY - origin.y }, screenHeight: size.height,
-                                 controlsTop: split.controls, laptop: duoFold.horizontalBand != nil,
-                                 plane: keyboardFrame.plane, letters: keyboardFrame.lettersHeight(width: size.width))
+        DuoPosture.keyboardGlass(reported: keyboardFrame.frame.map { $0.minY - origin.y },
+                                 read: keyboardFrame.read.map { $0.offsetBy(dx: -origin.x, dy: -origin.y) }, size: size,
+                                 controlsTop: split.controls, laptop: duoFold.horizontalBand != nil)
+    }
+
+    /// The Duo's inner display upright in the laptop pose with the person's keyboard up: where a reading
+    /// of the keyboard is needed (DuoPosture.keyboardGlass).
+    private func wantsKeyboardReadings(_ size: CGSize) -> Bool {
+        keyboardShown && duoFold.horizontalBand != nil && size.height > size.width
+    }
+
+    /// What KeyboardFrameMonitor is told: readings wanted, and where the controls begin on the screen.
+    private struct KeyboardReadings: Equatable {
+        var wanted: Bool
+        var controlsTop: CGFloat
     }
 
     /// The key row's caps as they are, the Keyboard cap among them (lit while the keyboard is up, a tap
@@ -333,37 +354,31 @@ struct PortraitStreamScreen: View {
     }
 
     #if DEBUG
-    /// The console's line for the gates: `keyboard: the row 500–551 (51 pt): between the fold's edge at 496
-    /// and the glass at 555 (reported from 455.5; the letters keyboard of en-US, 396 pt as measured or
-    /// learned)`, `keyboard: the toggle at 611,395 (44 pt): another keyboard of en-US is up (the emoji
-    /// keyboard, its search): its glass is not reported in the laptop pose`, open flat `keyboard: the row
-    /// 498–549 (51 pt): the glass at 553, 129 pt under the picture's pane (reported from 553; reported as
-    /// itself)`, or `keyboard: none` once it goes.
+    /// The console's line for the gates: `keyboard: the row 500–551 (51 pt): the glass at 555, 59 pt under
+    /// the fold's edge at 496 (read: 0,555 669×396; reported 455.5)`, `keyboard: the toggle at 611,395
+    /// (44 pt): the glass at 506, 10 pt under …`, `keyboard: nothing yet (a reading on its way)`, `keyboard:
+    /// the toggle …: the glass not known (no reading since the last change)`, open flat `keyboard: the row
+    /// 498–549 (51 pt): the glass at 553, 129 pt under the picture's pane (reported)`, or `keyboard: none`.
     private func keyboardStandInLine(_ standIn: DuoPosture.KeyboardStandIn?, size: CGSize, origin: CGPoint,
                                      split: DuoPosture.PortraitSplit) -> String {
         func n(_ v: CGFloat) -> String { abs(v - v.rounded()) < 0.01 ? "\(Int(v.rounded()))" : String(format: "%.1f", v) }
         guard let standIn else { return "keyboard: none (the controls as they are)" }
-        let reported = keyboardFrame.frame.map { $0.minY - origin.y }
-        let glass = keyboardGlass(size, origin: origin, split: split)
-        let mode = keyboardFrame.mode ?? "no input mode"
         let laptop = duoFold.horizontalBand != nil
+        let reported = keyboardFrame.frame.map { n($0.minY - origin.y) } ?? "none"
+        let read = keyboardFrame.read.map { KeyboardFrameMonitor.describe($0.offsetBy(dx: -origin.x, dy: -origin.y)) } ?? "none"
         var parts: [String] = []
         if let row = standIn.row { parts.append("the row \(n(row.minY))–\(n(row.maxY)) (\(n(row.height)) pt)") }
         if standIn.toggle {
             let rect = DuoPosture.keyboardToggle(paneBottom: split.picture - DuoPosture.paneInset, width: size.width, sides: metrics.padSide)
             parts.append("the toggle at \(n(rect.minX)),\(n(rect.minY)) (\(n(rect.width)) pt)")
         }
-        guard let glass, let top = glass.top else {
-            return "keyboard: " + parts.joined(separator: " and ")
-                + ": another keyboard of \(mode) is up (the emoji keyboard, its search): its glass is not reported in the laptop pose"
+        let what = parts.isEmpty ? "nothing yet (a reading on its way)" : parts.joined(separator: " and ")
+        guard let top = keyboardGlass(size, origin: origin, split: split)?.top else {
+            return "keyboard: \(what): the glass not known (read: \(read); reported \(reported))"
         }
-        let letters = keyboardFrame.lettersHeight(width: size.width)
-        let place = laptop ? "between the fold's edge at \(n(split.controls)) and the glass at \(n(top))"
+        let place = laptop ? "the glass at \(n(top)), \(n(top - split.controls)) pt under the fold's edge at \(n(split.controls))"
                            : "the glass at \(n(top)), \(n(top - split.controls)) pt under the picture's pane"
-        let source = !laptop ? "reported as itself"
-            : glass.sure ? "the letters keyboard of \(mode), \(letters.map(n) ?? "?") pt as measured or learned"
-            : "\(mode) not measured yet: \(n(DuoPosture.laptopKeyboardHeight)) pt assumed, so not sure"
-        return "keyboard: " + parts.joined(separator: " and ") + ": " + place + " (reported from \(reported.map(n) ?? "?"); \(source))"
+        return "keyboard: \(what): \(place) (" + (laptop ? "read: \(read); reported \(reported)" : "reported") + ")"
     }
     #endif
 
