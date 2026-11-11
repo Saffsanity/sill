@@ -1338,6 +1338,10 @@ An `NSWindowController` hosting a SwiftUI `PairDeviceView`.
       var method: String           // "qr" | "code"
       var lastConnectedAt: Date?
       var lastRoute: String?       // "Tailscale", "your VPN", "the internet", "by address"
+      // Since 2026-11-11 (below, "Remembered VPN addresses"); optional, so older records decode
+      // and an older build reads newer ones:
+      var addressesListedAt: Double?                  // when the Mac last listed `addresses` (this device's clock)
+      var rememberedAddresses: [RememberedAddress]?   // VPN addresses an earlier list had, each with its time
   }
   ```
 
@@ -1349,7 +1353,32 @@ An `NSWindowController` hosting a SwiftUI `PairDeviceView`.
   - `issuedAt` is newer.
 
   Refreshed: name, port and the Mac's addresses. Typed addresses and `lastWorked` are kept. The
-  `bonjourName` is learned from the connection's `.service` endpoint.
+  `bonjourName` is learned from the connection's `.service` endpoint. An empty list, or one from a
+  Mac with Remote Access off, leaves the saved addresses alone.
+- **Remembered VPN addresses** (2026-11-11, branch `keep-vpn-addresses`; `SavedMacs.remembering`,
+  pure). Noah's night: Tailscale was off on his Mac for about ten minutes while his iPad connected
+  at home; that session's kind 18 listed the Wi‑Fi address alone, the refresh replaced the saved
+  list with it, and away on a hotspot the iPad had nothing it could reach, Tailscale on again or not
+  ("‹Mac› didn’t answer. It may be asleep.", without #309's hint, which needs a VPN address). Now a
+  list that replaces the saved one keeps the VPN addresses the old one had and it lacks:
+  - only kind "vpn", the Mac's own word (Tailscale's name and addresses, another VPN's address);
+    never a LAN, router or internet address, which a new list is right to drop;
+  - each with when the Mac last listed it, by this device's clock: the time the kind 18 that set
+    the old list was taken (`addressesListedAt`); for a record no kind 18 has set yet (one from
+    before this change, or just paired, its addresses from the link), the later of its newest
+    kind 18's time and its pairing's; a time after now is read as now;
+  - for 90 days after the Mac last listed it (`rememberFor`), a season: a VPN keeps a machine's
+    addresses while it stays in it (Tailscale keeps its IP addresses and its name), so a VPN off on
+    the Mac between trips still finds it, and an address of a VPN the Mac left, or a name it no
+    longer has, stops being dialed within a season;
+  - at most four (`rememberCap`), newest first: Tailscale lists three (a name, an IPv4 and an IPv6
+    address), so four keep one VPN's set and one more;
+  - a list that has one again takes it back into `addresses` (its time refreshed);
+  - a list kept as it is (empty, Remote Access off) changes nothing but their age;
+  - a new pairing of the same Mac ID (one key) keeps what the old record had and the new one's
+    list lacks, as a kind 18 would (`adding`, aged against the pairing's time); a record retired
+    for another key (`superseding`, `replacingNewKey`) takes them with it, and so does Forget.
+  Nothing is trusted for being remembered: the dial is pinned to the record's key (§7.5).
 - **An unpaired device** decodes kind 18 without verifying it, for display only (the Away from home
   group). Nothing is saved.
 - **Never saved:** link-local, zone-scoped and (in Release) loopback addresses. DEBUG builds keep
@@ -1439,7 +1468,21 @@ and types, `isExpensive`). Then, at every browser change and at every due time:
   4. internet names, internet IPs;
   5. the other LAN addresses (a VPN into the home network).
 
-  The port is `address.port ?? remotePort`.
+  The port is `address.port ?? remotePort`. That is the first group: the Mac's list and the typed
+  addresses. The remembered VPN addresses (§7.2) are a second group after it, in the same order
+  among themselves (the address that last worked first among them), never before the Mac's own
+  list, an address in both dialed once in the first (2026-11-11). What that order costs: a
+  remembered address starts a stagger (1 s) after each address of the Mac's list that neither
+  answers nor fails at once (Noah's case: the Wi‑Fi address, then the Tailscale name 1 s later); when
+  the Mac's list answers, none starts; when nothing answers (the Mac asleep), each adds about a
+  second before the dial gives up, never past `wholeDial`.
+- **At a remembered address** (`Candidate.remembered`), which the Mac no longer lists and may be
+  another machine's by now, only the Mac's own answers (our key refused after the pin, a goodbye, a
+  refusal by its door) and silence (no answer; this device's VPN off) count. Another key (-9808), a
+  TLS that is not Sill's, and a name that no longer resolves count for nothing, as another machine
+  at a LAN address: they say nothing about the Mac, and the wrong-Mac verdict would also stop the
+  automatic redials. No other saved Mac's key is taken there either (`successors`), so a stale
+  address never retires a record.
 - **Timing:**
   - attempts start 1 s apart, or at once when the previous one fails;
   - each has TCP `connectionTimeout` 10 s;
@@ -1584,7 +1627,7 @@ and types, `isExpensive`). Then, at every browser change and at every due time:
 | VPN off here or on the Mac | "Tailscale looks off on this ‹iPad› or on Mac mini. Turn it on for both, then tap Mac mini." ("Your VPN" when the address has no service name; both ends, as the device can't tell which is off: #309) |
 | name not found | ".ts.net" names: "This ‹iPad› can’t look up mac-mini.tail1234.ts.net. Is Tailscale on, here and on Mac mini?"; others: "This ‹iPad› can’t look up home.example.net." |
 | not Sill | "Something answered at 203.0.113.9, but it isn’t Sill. Your home’s internet address may have changed." |
-| didn't answer | "Mac mini didn’t answer. It may be asleep, or Tailscale may be off on the Mac." For a raw internet IP: "Mac mini didn’t answer at 203.0.113.9. If your home’s internet address changed, connect at home once to update it, or add an address name on the Mac." |
+| didn't answer | "Mac mini didn’t answer. It may be asleep, or Tailscale may be off on the Mac." (the VPN named by any address the dial had, a remembered one too, §7.2; without one, "Mac mini didn’t answer. It may be asleep.") For a raw internet IP: "Mac mini didn’t answer at 203.0.113.9. If your home’s internet address changed, connect at home once to update it, or add an address name on the Mac." |
 | Local Network | "To reach 192.168.1.20, allow Local Network for Sill in Settings." |
 
 #### 7.9 The address parser (`Sources/StreamProtocol/AddressParser.swift`, pure; Foundation and `inet_pton`)
@@ -1758,6 +1801,8 @@ and types, `isExpensive`). Then, at every browser change and at every due time:
 | A WireGuard VPN into the home router | The Mac lists "Wi‑Fi — 192.168.1.20" with its note. Away, the LAN address is dialled through the tunnel; the remote door classifies the routed private source as `lan` |
 | The VPN off on the device or the Mac | "Tailscale looks off on this ‹iPad› or on ‹Mac›…"; the Remote row stays (it is a saved Mac) |
 | The VPN off on the Mac | The pane shows "Tailscale — Not connected". The device: "didn't answer…" |
+| The VPN off on the Mac while a device connects at home | That session's kind 18 lacks the VPN's addresses; the device keeps them remembered (§7.2) and dials them after the Mac's list, so once the VPN is on again the device reaches the Mac from away without another session at home |
+| The Mac's VPN address changes (it rejoined the tailnet, it was renamed) | The new one is in the Mac's list and dialed first; the old one is remembered for up to 90 days, dialed only after the list, and counts for nothing if a name no longer resolves or another key answers there |
 | The home's public IP changes | Names follow by themselves. A raw IP gets the "didn't answer at …" copy, and refreshes at the next home connection (verified kind 18) |
 | Carrier-grade NAT or double NAT | The pane says so, in orange; a VPN is the way. Sill never opens router ports |
 | The router forwards another outside port (17455 → 7455) | The Mac's address name `home.example.net:17455`, or typed on the device; the saved address keeps its own port |

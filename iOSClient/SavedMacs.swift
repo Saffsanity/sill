@@ -50,12 +50,34 @@ struct SavedMac: Codable, Hashable, Identifiable {
     /// asks with any key, the Mac proving itself with its code; the pairing that follows replaces
     /// this record (`replacingNewKey`). Optional, so a record from before it decodes.
     var newKey: Bool?
+    /// When the Mac last listed `addresses`, by this device's clock (seconds since 1970): set by each
+    /// kind 18 that replaces them (`SavedMacs.refreshed`), and what a VPN address of them carries into
+    /// `rememberedAddresses` once a later list lacks it. Nil on a record from before 2026-11-11 and on
+    /// one no kind 18 has replaced the addresses of yet (`SavedMacs.listedAt` reads its kind 18's time
+    /// or its pairing's). Optional, so a record from before it decodes, and an older build reads a
+    /// record with it (the key is ignored, and dropped if that build writes the list again).
+    var addressesListedAt: Double?
+    /// The VPN addresses an earlier list of the Mac's had and its latest one lacks (its VPN was off
+    /// while this device connected at home), each with when the Mac last listed it, newest first:
+    /// dialed after `addresses` and the typed ones (RemoteDialPolicy.order), for `SavedMacs.rememberFor`
+    /// after the Mac last listed them, at most `SavedMacs.rememberCap`. A list that has one again takes
+    /// it back into `addresses`. Never trusted for being remembered: the dial is pinned to this record's
+    /// key, and goes with the record (Forget, a pairing with another key in its place). Optional.
+    var rememberedAddresses: [RememberedAddress]?
 
     var id: String { macID }
     var fingerprintData: Data? { Base64URL.decode(fingerprint).flatMap { $0.count == 32 ? $0 : nil } }
     var recognitionKeyData: Data? { Base64URL.decode(recognitionKey).flatMap { $0.count == 32 ? $0 : nil } }
-    /// Every address to dial: the Mac's, then the typed ones.
+    /// The Mac's addresses and the typed ones: the first group a dial tries (the remembered ones,
+    /// SavedMacs.remembered, come after it).
     var allAddresses: [MacAddress] { addresses + (typedAddresses ?? []) }
+}
+
+/// A VPN address the Mac listed once and no longer lists (SavedMac.rememberedAddresses), with when it
+/// last listed it, by this device's clock (seconds since 1970).
+struct RememberedAddress: Codable, Hashable {
+    var address: MacAddress
+    var listedAt: Double
 }
 
 /// The saved Macs' rules, pure (checked on their own with swiftc): storage, merging, refresh,
@@ -65,6 +87,17 @@ enum SavedMacs {
     /// never written); `'[]'` empties it.
     static let defaultsKey = "Sill.savedMacs"
     static let cap = 16
+    /// How long a VPN address the Mac no longer lists is still dialed, from when the Mac last listed
+    /// it: 90 days, a season. A VPN keeps a machine's addresses while the machine stays in it
+    /// (Tailscale keeps a machine's IP addresses and its name), so an address remembered from a VPN
+    /// that was off on the Mac for a while is still the Mac's; one from a VPN the Mac has left, or a
+    /// name it no longer has, stops being dialed within a season. Dialed after the Mac's own list,
+    /// one that no longer answers holds back nothing of that list, and costs a failing dial at most
+    /// one stagger (a second) before any address after it.
+    static let rememberFor: Double = 90 * 24 * 3600
+    /// At most this many remembered addresses per Mac, those the Mac listed last first: Tailscale
+    /// lists three (its name, an IPv4 and an IPv6 address), so four keep one VPN's set and one more.
+    static let rememberCap = 4
 
     static func decode(_ text: String?) -> [SavedMac] {
         guard let text, let data = text.data(using: .utf8) else { return [] }
@@ -112,10 +145,19 @@ enum SavedMacs {
     /// dropping the one used longest ago (`lastConnectedAt ?? pairedAt`). The record it replaces
     /// is the same Mac (the Mac ID is its key's), so what this device has seen of its home door
     /// stays (`homeTLS`): a pairing from away after a removal must not let a plain row of that Mac
-    /// be dialed again. `revoked` goes with the old record.
+    /// be dialed again. So do the VPN addresses the old record had that the new one's list lacks
+    /// (`remembering`, as a kind 18 lacking them would leave them: a pairing made while the Mac's VPN
+    /// is off), aged against the new pairing's time. `revoked` goes with the old record.
     static func adding(_ mac: SavedMac, to list: [SavedMac]) -> [SavedMac] {
         var mac = mac
         if list.contains(where: { $0.macID == mac.macID && $0.homeTLS == true }) { mac.homeTLS = true }
+        if let old = list.first(where: { $0.macID == mac.macID }) {
+            let at = mac.pairedAt.timeIntervalSince1970
+            let kept = remembering(outgoing: old.addresses, outgoingAt: listedAt(old),
+                                   kept: (old.rememberedAddresses ?? []) + (mac.rememberedAddresses ?? []),
+                                   current: mac.addresses, remotePort: mac.remotePort, now: at)
+            mac.rememberedAddresses = kept.isEmpty ? nil : kept
+        }
         var next = list.filter { $0.macID != mac.macID }
         next.append(mac)
         while next.count > cap {
@@ -126,22 +168,83 @@ enum SavedMacs {
         return next
     }
 
-    /// A verified kind 18 laid over `mac`: nil unless the signing key is the pin, the Mac ID is the
-    /// saved one and it is newer than the last taken. Refreshes the name, the port and the Mac's
-    /// addresses; typed addresses and the one that last worked stay. An empty list, or one from a
-    /// Mac with Remote Access off, leaves the saved addresses alone: the Mac sends none while off
-    /// (and none before its first look at its networks), and a device that took that at home had
-    /// nothing to dial once away, after Remote Access came back on.
-    static func refreshed(_ mac: SavedMac, info: MacInfo, fingerprint: Data, allowLoopback: Bool) -> SavedMac? {
+    /// A verified kind 18 laid over `mac` at `now` (this device's clock, seconds since 1970): nil
+    /// unless the signing key is the pin, the Mac ID is the saved one and it is newer than the last
+    /// taken. Refreshes the name, the port and the Mac's addresses; typed addresses and the one that
+    /// last worked stay. An empty list, or one from a Mac with Remote Access off, leaves the saved
+    /// addresses alone: the Mac sends none while off (and none before its first look at its
+    /// networks), and a device that took that at home had nothing to dial once away, after Remote
+    /// Access came back on. A list that replaces them keeps the VPN addresses the old one had and it
+    /// lacks (`remembering`): Noah's iPad, 2026-11-11, connected at home while Tailscale was off on the
+    /// Mac for ten minutes, took a list of the Mac's Wi‑Fi address alone, and away from home had
+    /// nothing it could reach, Tailscale on again or not.
+    static func refreshed(_ mac: SavedMac, info: MacInfo, fingerprint: Data, allowLoopback: Bool, now: Double) -> SavedMac? {
         guard mac.fingerprintData == fingerprint, info.macID == mac.macID, info.issuedAt > mac.infoIssuedAt else { return nil }
         var next = mac
         let clean = SafeText.label(info.name)
         if !clean.isEmpty { next.name = clean }
         if (1...65535).contains(info.remotePort) { next.remotePort = info.remotePort }
         let addresses = filtered(info.addresses, allowLoopback: allowLoopback)
-        if info.remoteAccess, !addresses.isEmpty { next.addresses = addresses }
+        let replace = info.remoteAccess && !addresses.isEmpty
+        // A list kept as it is still ages what is remembered (nothing outgoing).
+        let kept = remembering(outgoing: replace ? mac.addresses : [], outgoingAt: listedAt(mac),
+                               kept: mac.rememberedAddresses, current: replace ? addresses : mac.addresses,
+                               remotePort: next.remotePort, now: now)
+        next.rememberedAddresses = kept.isEmpty ? nil : kept
+        if replace {
+            next.addresses = addresses
+            next.addressesListedAt = now
+        }
         next.infoIssuedAt = info.issuedAt
         return next
+    }
+
+    /// When the Mac last listed `mac.addresses`: the time the kind 18 that set them was taken, by this
+    /// device's clock (`addressesListedAt`); for a record whose addresses no kind 18 has replaced yet
+    /// (one from before 2026-11-11, or one just paired, whose addresses came with its link), the later
+    /// of its newest kind 18's time (the Mac's clock) and its pairing's. `remembering` reads a time
+    /// after its `now` as `now`.
+    static func listedAt(_ mac: SavedMac) -> Double {
+        mac.addressesListedAt ?? max(mac.infoIssuedAt, mac.pairedAt.timeIntervalSince1970)
+    }
+
+    /// The remembered addresses once the Mac's list `current` replaces `outgoing`, which it last listed
+    /// at `outgoingAt`, over those remembered before (`kept`): the VPN addresses (kind "vpn", the Mac's
+    /// own word: Tailscale's name and addresses, another VPN's address; never a LAN, router or
+    /// internet address, which a list replacing them is right to drop) of `outgoing` and `kept` that
+    /// `current` lacks. One destination (host and effective port) once, with its newest time; none
+    /// last listed more than `rememberFor` before `now` (a time after `now` read as `now`); the newest
+    /// first, ties in the order given (`outgoing` in the Mac's order, then `kept`); at most
+    /// `rememberCap`.
+    static func remembering(outgoing: [MacAddress], outgoingAt: Double, kept: [RememberedAddress]?, current: [MacAddress],
+                            remotePort: Int, now: Double) -> [RememberedAddress] {
+        func destination(_ a: MacAddress) -> String { "\(a.host.lowercased())|\(a.port ?? remotePort)" }
+        let listed = Set(current.map(destination))
+        let offered = outgoing.map { RememberedAddress(address: $0, listedAt: outgoingAt) } + (kept ?? [])
+        var newest: [String: RememberedAddress] = [:]
+        var order: [String] = []
+        for item in offered where item.address.kind == MacAddress.vpn {
+            let key = destination(item.address)
+            let at = min(item.listedAt, now)
+            guard !listed.contains(key), now - at <= rememberFor else { continue }
+            if let have = newest[key] {
+                if at > have.listedAt { newest[key] = RememberedAddress(address: item.address, listedAt: at) }
+            } else {
+                newest[key] = RememberedAddress(address: item.address, listedAt: at)
+                order.append(key)
+            }
+        }
+        // Newest first, ties kept in their order (a sort by time and position: Swift's sort is not stable).
+        let byTime = order.enumerated().compactMap { i, key in newest[key].map { (i, $0) } }
+            .sorted { ($0.1.listedAt, -$0.0) > ($1.1.listedAt, -$1.0) }
+        return Array(byTime.map(\.1).prefix(rememberCap))
+    }
+
+    /// The remembered addresses a dial of `mac` tries after its own list and the typed ones
+    /// (RemoteDialPolicy.order): those the Mac last listed no more than `rememberFor` before `now`
+    /// (this device's clock, seconds since 1970).
+    static func remembered(_ mac: SavedMac, now: Double) -> [MacAddress] {
+        (mac.rememberedAddresses ?? []).filter { now - $0.listedAt <= rememberFor }.map(\.address)
     }
 
     /// What each row calls its Mac: the saved name, and "Mac mini (2)" for the second one of that
@@ -196,7 +299,7 @@ enum SavedMacs {
     /// `newKey`): `old` is gone once the Mac it paired with is saved as `new`, another Mac ID (its
     /// new key), since the person paired that Mac, by its code, in its place. Nothing changes when
     /// `old` is not marked or is `new` itself (the same key answered after all: `adding` replaced
-    /// it already).
+    /// it already). `old`'s remembered addresses go with it: they were another key's.
     static func replacingNewKey(old: String, new: String, in list: [SavedMac]) -> [SavedMac] {
         guard old != new, list.contains(where: { $0.macID == new }),
               list.contains(where: { $0.macID == old && $0.newKey == true }) else { return list }
@@ -207,7 +310,8 @@ enum SavedMacs {
     /// `old`'s addresses; RemoteDialPolicy.successors said `new` may answer there): `old` is gone,
     /// since the Mac it named now holds `new`'s key. `new` keeps what `old` knew that it lacks: the
     /// typed addresses (at their original effective ports), `homeTLS`, and `proof` as the address
-    /// that last worked. Nothing changes when either is not saved or they are the same record.
+    /// that last worked; never `old`'s remembered addresses, another key's lists (`new` remembers
+    /// from its own). Nothing changes when either is not saved or they are the same record.
     static func superseding(old: String, by new: String, proof: String, in list: [SavedMac]) -> [SavedMac] {
         guard old != new, let o = list.first(where: { $0.macID == old }), list.contains(where: { $0.macID == new }) else { return list }
         return list.compactMap { mac in

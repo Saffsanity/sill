@@ -153,35 +153,35 @@ check("a saved host must parse without a port",
       && !SavedMacs.keepable("mac.example.net:7460", allowLoopback: true))
 let info = MacInfo(macID: m1.macID, name: "Studio\u{202E}", issuedAt: 60, remoteAccess: true, remotePort: 7460, internet: false,
                    addresses: [a("mac.tail1.ts.net", "vpn", "Tailscale"), a("fe80::1", "lan", "Wi-Fi"), a("127.0.0.1", "lan", "This Mac"), a("192.168.1.5", "lan", "Wi-Fi")])
-let r1 = SavedMacs.refreshed(m1, info: info, fingerprint: key(1), allowLoopback: false)
+let r1 = SavedMacs.refreshed(m1, info: info, fingerprint: key(1), allowLoopback: false, now: 2_000)
 check("refresh: name (clean), port and the Mac's addresses; typed and lastWorked kept; link-local and loopback dropped",
       r1?.name == "Studio" && r1?.remotePort == 7460 && r1?.addresses.map(\.host) == ["mac.tail1.ts.net", "192.168.1.5"]
       && r1?.typedAddresses == m1.typedAddresses && r1?.lastWorked == m1.lastWorked && r1?.infoIssuedAt == 60)
-check("refresh: loopback kept when allowed (DEBUG)", SavedMacs.refreshed(m1, info: info, fingerprint: key(1), allowLoopback: true)?.addresses.map(\.host).contains("127.0.0.1") == true)
+check("refresh: loopback kept when allowed (DEBUG)", SavedMacs.refreshed(m1, info: info, fingerprint: key(1), allowLoopback: true, now: 2_000)?.addresses.map(\.host).contains("127.0.0.1") == true)
 check("refresh: another key, another Mac ID, or not newer: nothing",
-      SavedMacs.refreshed(m1, info: info, fingerprint: key(2), allowLoopback: false) == nil
-      && SavedMacs.refreshed(m1, info: { var i = info; i.macID = savedMac(2).macID; return i }(), fingerprint: key(1), allowLoopback: false) == nil
-      && SavedMacs.refreshed(m1, info: { var i = info; i.issuedAt = 50; return i }(), fingerprint: key(1), allowLoopback: false) == nil)
+      SavedMacs.refreshed(m1, info: info, fingerprint: key(2), allowLoopback: false, now: 2_000) == nil
+      && SavedMacs.refreshed(m1, info: { var i = info; i.macID = savedMac(2).macID; return i }(), fingerprint: key(1), allowLoopback: false, now: 2_000) == nil
+      && SavedMacs.refreshed(m1, info: { var i = info; i.issuedAt = 50; return i }(), fingerprint: key(1), allowLoopback: false, now: 2_000) == nil)
 // Review fixes: a kind 18 with no addresses (Remote Access off, or before the Mac's first look at
 // its networks) keeps the saved ones; the name, the port and issuedAt still refresh.
 let empty18 = { () -> MacInfo in var i = info; i.addresses = []; i.issuedAt = 70; return i }()
-let rEmpty = SavedMacs.refreshed(m1, info: empty18, fingerprint: key(1), allowLoopback: false)
+let rEmpty = SavedMacs.refreshed(m1, info: empty18, fingerprint: key(1), allowLoopback: false, now: 2_000)
 check("refresh: an empty list keeps the saved addresses (name, port and issuedAt still refresh)",
       rEmpty?.addresses == m1.addresses && rEmpty?.name == "Studio" && rEmpty?.remotePort == 7460 && rEmpty?.infoIssuedAt == 70
       && rEmpty?.typedAddresses == m1.typedAddresses)
 let off18 = { () -> MacInfo in var i = info; i.remoteAccess = false; i.issuedAt = 71; return i }()
-let rOff = SavedMacs.refreshed(m1, info: off18, fingerprint: key(1), allowLoopback: false)
+let rOff = SavedMacs.refreshed(m1, info: off18, fingerprint: key(1), allowLoopback: false, now: 2_000)
 check("refresh: a list from a Mac with Remote Access off keeps the saved addresses", rOff?.addresses == m1.addresses && rOff?.infoIssuedAt == 71)
 let onlyLocal18 = { () -> MacInfo in var i = info; i.addresses = [a("fe80::1", "lan", "Wi-Fi"), a("127.0.0.1", "lan", "This Mac")]; i.issuedAt = 72; return i }()
 check("refresh: a list with nothing keepable (link-local, loopback in Release) keeps the saved addresses",
-      SavedMacs.refreshed(m1, info: onlyLocal18, fingerprint: key(1), allowLoopback: false)?.addresses == m1.addresses)
+      SavedMacs.refreshed(m1, info: onlyLocal18, fingerprint: key(1), allowLoopback: false, now: 2_000)?.addresses == m1.addresses)
 check("refresh: a list with something in it replaces the saved one (Remote Access on)",
       SavedMacs.refreshed(m1, info: { var i = info; i.addresses = [a("100.101.102.103", "vpn", "Tailscale")]; i.issuedAt = 73; return i }(),
-                          fingerprint: key(1), allowLoopback: false)?.addresses.map(\.host) == ["100.101.102.103"])
+                          fingerprint: key(1), allowLoopback: false, now: 2_000)?.addresses.map(\.host) == ["100.101.102.103"])
 // Then a pairing made over the overlay's typed path (no addresses but the typed one), refreshed by
 // this session's kind 18: the Mac's own list, the typed one kept.
 var typedOnly = savedMac(1); typedOnly.addresses = []; typedOnly.infoIssuedAt = 0
-check("refresh: a typed pairing takes the session's kind 18 list", SavedMacs.refreshed(typedOnly, info: info, fingerprint: key(1), allowLoopback: false)?.allAddresses.map(\.host)
+check("refresh: a typed pairing takes the session's kind 18 list", SavedMacs.refreshed(typedOnly, info: info, fingerprint: key(1), allowLoopback: false, now: 2_000)?.allAddresses.map(\.host)
       == ["mac.tail1.ts.net", "192.168.1.5", "home.example.net"])
 
 // MARK: The scanner's gate (RemoteDialPolicy.scanStartsPairing)
@@ -306,6 +306,9 @@ check("#309: no answer over Tailscale: the Mac's end, as before",
 
 // #140: the launch, a pairing, a SIGKILL and the next launch with each Keychain and UserDefaults fault, in launch.swift.
 launchModel()
+
+// A Mac's VPN addresses kept when a later list from it lacks them (2026-11-11), in vpnmemory.swift.
+vpnMemory()
 
 print("\(passes) passed, \(fails) failed")
 exit(fails == 0 ? 0 : 1)

@@ -1534,6 +1534,15 @@ connect (TLS 1.3, each end pinned to the other's key).
    device's Settings panel says how it is connected ("Connected through
    Tailscale · 48 ms"), and the Mac's menu shows the route of each device.
 
+The device learns the Mac's addresses for afar at every session (home or away),
+from the list the Mac sends, and keeps the VPN ones (Tailscale's name and
+addresses, another VPN's) for 90 days after the Mac last listed them: a Mac
+whose VPN was off while the device connected at home is still reached through
+it away from home once the VPN is on again. Those remembered addresses are
+dialed after the Mac's current ones, pinned to the Mac's key like every remote
+dial, at most four of them; Forget on the device forgets them with the Mac
+(docs/remote-access-plan.md §7.2).
+
 The ways in:
 
 - **Tailscale** (the easy one): install it on the Mac and on the device, signed
