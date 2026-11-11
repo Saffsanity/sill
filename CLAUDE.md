@@ -21,7 +21,8 @@ both builds' number (never committed, never `--bump`). Both apps have said 0.6.1
   streams, #223 macOS's own windows out of the strip towards #114, #320 a VPN failure naming both ends, #309);
   #342 (a handshake that never finishes is no refusal, for #314, which stays open); #340 (the off-console view,
   opt-in, #316); #337 (the nightly's What to Test, nothing for users). Out, for the next 0.6.x: #339, #200,
-  #245, the VPN-address fix (`keep-vpn-addresses`). No 0.6.1 text promises #298's login-screen fix.
+  #245 (the reel's renderer) and the VPN-address fix (`keep-vpn-addresses`). No 0.6.1 text promises #298's
+  login-screen fix.
 - The release's words (this pull request): support.html's display-wake paragraph ships without #228's tap
   sentence, whose claim covers a window on Sill's virtual display with the panels asleep, never reached in a
   test (the checklist's part 1 §3 keeps the sentence and its test); #340's paragraph ships; no site marker is
