@@ -47,7 +47,59 @@ while another user holds the screen, the device saying plainly that it is not th
   console back to A: as 0.6.0); a fast user switch mid-stream; the console's display asleep while A shows (open
   question 4); the switch off and on while shown; a 0.6.0 device against this Sill.app.
 
-**The keyboard in the Duo's laptop pose (2026-10-27, finished 2026-11-09 for 0.6.1; PR #220 from addhumal's
+**The keyboard toggle on the Duo's inner display (2026-11-10, branch `duo-keyboard-toggle` from main at
+f224323, PR #343; issue #215 after matt-cahill's device test of 0.6.1 (1304); the decision in Noah's words,
+the measurements, the rule and the results are in docs/iphone-duo-plan.md, "The keyboard toggle").** On a real
+Duo the emoji keyboard covered the row until it had gone once (the glass was learned only at a hide, one height
+per width), taps in the crease were hard to hit and a miss clicked the Mac, and open flat the emoji keyboard
+covered the rows. Noah (2026-11-10): "read the keyboard's height while it is up. If the keyboard is regular as
+we have done, we keep the compact view. If for some reason that would be covered up (i.e. emoji keyboard)
+surface a small toggle on the top screen for the keyboard, and thats it. No full row." Device only, no wire
+change; every Duo build and photo on the iOS 27.1 runtime.
+- Measured (a probe build, since removed): in the laptop pose nothing reports the glass of the keyboard a
+  switch brings: an input accessory sits at the reported page's top (454.5), the input view's
+  keyboardLayoutGuide stops at its own foot (447), `primaryLanguage` stays "en-US" with emoji up; at each
+  switch UITextInputMode's notification comes, then (about 0.1 s later) the keyboard's with the keyboard LEFT
+  as its begin (English (0, 555, 669×396), emoji and Pinyin (0, 506, 669×445)) and the page as its end. Open
+  flat every keyboard is itself, live: English (0, 640, 669×311), emoji (0, 553, 669×398), Pinyin (0, 600,
+  669×351). So the fallback: which of the mode's keyboards is up, and the letters keyboard's height by mode.
+- The rule (DuoPosture, pure; `Tests/checks/duo` 289,966 checks, 137 of 137 mutants): `planeAfterSwitch`
+  (each show and language switch is the letters keyboard; a switch within the mode is another keyboard unless
+  the one left is more than a point taller than the letters one (ABC from emoji) or, open flat, the one brought
+  is the letters keyboard's height; no keyboard notification within a second: another); `measuredLaptopKeyboard`
+  (English 396, `zh-Hans` 445, else learned from a hide or switch, by width and mode); `keyboardGlass` (open
+  flat the report; laptop: another keyboard unknown, the letters keyboard's glass from its height, not sure
+  when only assumed); `keyboardStandIn` (laptop: the compact row as before while 44 pt caps fit with 8 of
+  black (4 + 51 + 4 under English), else, and whenever the glass is unknown or assumed, the toggle; open flat:
+  the row 4 pt above the glass, 51 pt, never above the pane's foot, whenever the glass covers the rows, else
+  the toggle); `keyboardToggle` (44×44 at 611,395: 8 above the pane's foot, its trailing edge on the row's).
+  KeyboardFrameMonitor tracks the plane (`modeChanged` from the input view at first responder and at
+  UITextInputMode's notification) and learns by mode. PortraitStreamScreen: the toggle a lit BarButton with
+  the Keyboard symbol, "Hide the keyboard", Large Content Viewer, over the picture (never the Mac's touch);
+  the controls hidden from sight, touch and VoiceOver while the row or the toggle stands in; DEBUG
+  `keyboard: …` and `keyboard plane: …` lines. The crease row is gone (its constants, checks, mutants).
+- Verified (the plan's Results): `duo` 289,966 checks, its 69 new mutants and the whole 137 caught; `tour`
+  (compiles DuoPosture.swift) 732,447 and 126 of 126; `run-all.sh` all 63; the iOS app Debug and Release for
+  the simulator and Debug for a device, only the StreamClient warning; live on "Sill 215b duo" against a
+  synthetic host (XCUITest taps inside the simulator, Noah's Sill.log untouched): the English row, 😀 the
+  toggle at once on a fresh install, ABC the row, twice over, the toggle's tap (keyboard away, nothing posted),
+  esc ← ↑ from the row, Pinyin the toggle, open flat English and Pinyin the rows in view and emoji the row
+  498–549 over 553, folds both ways with emoji up, `-SillAXDump` with emoji up: "Hide the keyboard" alone; ten
+  harness layouts (laptop with a window, the Desktop and the English row, the drawer; book; open flat both
+  ways; an iPad's and an iPhone's size; the cover both ways) pixel for pixel main's (f224323). Photos in
+  sill-handoff's device-tests/2026-11-10/215-toggle/ (INDEX.md).
+- **Untested, for Noah / for a Duo:** the plan's P14 as rewritten: on a Duo with this build, the English
+  keyboard (the row), 😀 (the toggle at once), ABC (the row again, the keyboard still up), a tap on the toggle
+  (the keyboard away, nothing clicked on the Mac), Pinyin or Japanese (the toggle), whether the device sends
+  the simulator's notifications at a switch (the console's `keyboard plane:` lines), predictive text on (Sill's
+  input view turns autocorrection off, so no predictive bar is expected, as in the reporter's screenshot), a third-party keyboard, the
+  toggle under a finger and at an accessibility text size (a long press shows it large), VoiceOver (the toggle
+  right after the picture, "Hide the keyboard"), open flat with the emoji keyboard (the row just above its
+  glass) and a tall window's picture with the English keyboard, folds both ways with the emoji keyboard up,
+  and a hardware keyboard (nothing changes).
+
+**The keyboard in the Duo's laptop pose (2026-10-27, finished 2026-11-09 for 0.6.1; its crease row replaced by
+the toggle on 2026-11-10, the entry above; PR #220 from addhumal's
 `duo-laptop-keyboard`, finished on it with maintainer edits, his commit 2e35172 kept; issue #215, matt-cahill
 and kyeschung; the measurements, the rule, the crease, the results and P14 are in docs/iphone-duo-plan.md,
 "The software keyboard in the laptop pose").** The software keyboard covered the laptop pose's key row, its
