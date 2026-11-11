@@ -81,7 +81,8 @@ struct RememberedAddress: Codable, Hashable {
 }
 
 /// The saved Macs' rules, pure (checked on their own with swiftc): storage, merging, refresh,
-/// the cap, what is never saved, names for display, and recognising a TXT tag.
+/// the cap, what is never saved, the VPN addresses a later list lacks, names for display, and
+/// recognising a TXT tag.
 enum SavedMacs {
     /// UserDefaults key, JSON text. `-Sill.savedMacs '<JSON>'` seeds a run (the argument domain is
     /// never written); `'[]'` empties it.

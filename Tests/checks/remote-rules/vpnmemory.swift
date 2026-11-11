@@ -345,7 +345,7 @@ struct VPNMemoryRandom: RandomNumberGenerator {
 /// 90 days, newest first, nil rather than empty; every VPN address a list had, not listed now and last listed
 /// within 90 days, remembered unless four as new or newer are (and once dropped for the cap or its age, gone
 /// until a list has it again), with the time it was last listed; and the dial puts them after the Mac's list,
-/// each once. Written never to crash, whatever a mutant does: a crash loses the FAIL lines before it.
+/// each once. Written never to crash, whatever a mutant does: its verdict is one check, printed at its end.
 func vpnMemoryModel() {
     var random = VPNMemoryRandom(state: 2026_11_11)
     func r(_ n: Int) -> Int { Int.random(in: 0..<n, using: &random) }
