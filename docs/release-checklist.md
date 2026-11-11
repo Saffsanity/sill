@@ -960,7 +960,7 @@ For a nightly tester:
 - The update check never offers a nightly: it reads only
   `https://api.github.com/repos/Saffsanity/sill/releases/latest`, which never lists a pre-release
   (`UpdatePolicy.feed`), refuses an answer that says `prerelease` anyway (`UpdatePolicy.release`), and
-  "nightly" is no version. A nightly Sill.app says main's version with its build number (0.5.5 until 2026-10-31, 0.6.0 until App Review approved 0.6.0, 0.6.1 since), so the update check offered it the 0.6.0 release once that was published, like everyone else's, and the nightlies after the release, saying 0.6.1, are offered the 0.6.1 release in turn.
+  "nightly" is no version. A nightly Sill.app says main's version with its build number (0.5.5 until 2026-10-31, 0.6.0 until App Review approved 0.6.0, 0.6.1 since), so the update check offered a nightly that said 0.5.5 the 0.6.0 release once that was published, like everyone else's. A nightly is never offered the release of the version it says: the check offers only a higher version and build numbers don't count (`UpdatePolicy`: `version > running`), so the nightlies saying 0.6.1 are not offered the 0.6.1 release, and whoever runs one swaps it for the download by hand (settings, permissions and pairings carry over); the next release they are offered is 0.6.2's. Say so wherever a nightly is offered to someone (found 2026-11-11, while writing to reporters).
 - Going back: on the Mac, quit Sill, download the release from https://getsill.app/download and
   replace Sill in Applications; nothing to set up again. On a device, TestFlight › Sill › Previous
   Builds installs an earlier build, and the App Store installs the release over a TestFlight build
