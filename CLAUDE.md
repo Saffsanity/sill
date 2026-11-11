@@ -34,6 +34,89 @@ night's notes (put back by hand with `asc.swift whats-new`). No app code, no wir
   you uploaded by hand: "This run did not upload build N" and "What to Test left as it is". `asc.swift
   distribute` by hand keeps a build's words unless given `--replace-whats-new`.
 
+**This account while another user is on the screen (2026-11-09, branch `off-console-stream` from main at
+f224323d; issue #316, junkaiman's; the rule, the open questions with the default taken for each, the gates and
+the steps for a Mac with two accounts are in `docs/off-console-plan.md`).** Noah: "For #316, do the first
+solution as you stated": an opt-in on the Mac, off by default, that brings back 0.5.5's stream of this session
+while another user holds the screen, the device saying plainly that it is not the Mac's screen.
+- The switch: Settings › Devices, "Show this account while another user is on the screen" (`HostConfig.offConsoleView`,
+  `offConsoleView` in me.saffer.sill.mac, `SillHost --off-console-view`, `-SillSetAfter '<s> offConsoleView=1'`); the
+  Mac's alone (no device sets it), applied at once by `setTarget` (the lock's gate first). Off: everything is 0.6.0's.
+- The rule (`LockPolicy`, pure, `Tests/checks/lock-policy`): the off-console view applies only with the switch on, the
+  gate's reading established and off console, and the console's own witness (SCDynamicStore: another user, loginwindow
+  or nobody; a test host's file 2) saying so (`consoleTaken`, `offConsoleView(...)`): never a notification or the
+  session dictionary, so a locked screen on the console stays 0.6.0's (the lock screen, a paired device typing). It
+  shows the display, windows (captured where they are, never on Sill's virtual display), thumbnails, icons and the
+  installed apps (`offConsoleViewAllowed`); nothing acts (`Allowed.actsOnWindows`: no raise, Aa size, window button or
+  menu; no input, launch, gesture), and nothing of the console's goes (no sound, clipboard, pointer, cursor shape,
+  virtual display or display wake). `LockGate` keeps the switch and the console's witness (SessionLock sets it at each
+  look); requests are judged at arrival and now with the view (`decide(_:arrived:now:…)`, `stricter`).
+- Wire (additive): `WindowList.offConsoleView` (with `locked` and `offConsole`) and `Hello.offConsoleView` (1 from a
+  device that shows it); the host sends the view's list (its windows) only to such a device
+  (`StreamServer.broadcastList`/`sendList`, per connection; a hello read after the first list gets it again), every
+  other device 0.6.0's locked list. The frames are one stream: a 0.6.0 device keeps them under its opaque cover.
+- Device: no cover and no blank for a view list; over the stream "Your account’s own desktop, not this Mac’s screen.
+  Taps and keys reach it once your account is back on the screen." (LinkLineView, three lines), announced once; the
+  Settings panel's header and the drawer's line (`LockedMac.viewPanelLine`), open apps only; Aa dimmed with its own
+  hint; no tour meanwhile. Harness `-SillMacLocked view`. Mac: SessionLock's line "Locked: another user, or the login
+  window, is on this Mac's screen; devices see this session's own desktop and windows instead, but nothing they send
+  reaches it until it is back." (the view starting or ending off console says one of the two lines), a start line when
+  on, the card's subtitle "Another user is on this Mac’s screen. Devices see this account, and can’t click or type in
+  it." `sillclient.py --off-console-view`.
+- Verified (the plan's Results): `lock-policy` 1,360 of 1,360 (184 mutants written, not run here); CI's Build and check
+  green on the pull request (#340); `live.py view` 26 of 26 on loopback test hosts (the pattern streams on in the view to
+  both clients, the viewer's list says `offConsoleView`, the older client's is the locked list, no sound, input and
+  clipboard dropped; without the switch or by a notification alone, the placeholder). Not run: H2, the device's photos,
+  the iOS Release and device builds, the mutants.
+- **Untested, for Noah and junkaiman (the plan's 1–5, a Mac with two accounts):** junkaiman's boot state (B takes the
+  console from an RFB login at boot; A's device sees A's desktop and windows with the line, taps do nothing; the
+  console back to A: as 0.6.0); a fast user switch mid-stream; the console's display asleep while A shows (open
+  question 4); the switch off and on while shown; a 0.6.0 device against this Sill.app.
+
+**A connection that ends before its TLS handshake is not an unpaired refusal (2026-11-09, branch
+`stalled-handshake` from main at f224323, PR #342; issue #314, oliverames; addhumal's comment on it; the
+code read, the rule, six open questions with their defaults and the results are in
+`docs/stalled-handshake-plan.md`).** On a macOS 27.3 beta with the firewall on, every connection to Sill's
+doors over the Mac's LAN address was accepted at TCP and held until the door's 4 s handshake deadline cut it
+(the client's errno 54 at 4.25 s); the door counted each "unpaired" and backed the phone's addresses off for
+300 s, so a filter on the Mac read as a pairing problem and kept the phone out after it went. Noah to the
+reporter: "a connection that never sends a TLS hello shouldn't be counted as an unpaired refusal and back
+your phone off for five minutes." Host only, no wire change.
+- The rule (DoorPolicy, pure; Door runs it): the deadline before `.ready` is `Places.End.timedOut`, never a
+  refusal (a pairing connection that reached `.ready` without its kind 19 showed a key: still refused). Every
+  end before `.ready`, timed out or gone by itself, costs `endCost` (a tenth) while the door had a place for
+  every newcomer, and its hold as since finding 9 (`charge(held:refused: false)`, 1.1 at 4 s) when every
+  shared place was held at some moment while it waited (`chargeBeforeKey`; `Places` marks every waiting
+  connection, `Entry.contended`, whenever the eighth shared place is taken or a newcomer is turned away for
+  want of one; a source's own two places mark nothing; known devices in the reserved places don't count).
+  The caps are unchanged. A phone's own stalled dials, two at a time per address, never fill the eight
+  places: 19 a minute cost 1.9, never 5. Finding 9's holders still fill them and pay as before (the model's
+  every case of the scan's attack: backed off within 13 s). Given back: an address keeps its two places for
+  good while the door has room (a tenth per connection); someone at a paired device's own address can hold
+  that address's two places then (before, both were backed off); an IPv6 churner's /64 in about 2 minutes
+  (114 s; 62 s before).
+- Its own line, a third RefusalSummary per door, at most once a minute (`DoorPolicy.stall`, `stallLine`):
+  "Home door: 5 connections in the last minute never finished their TLS handshake (4 timed out, 1 closed by
+  the other end after waiting), so no key was checked and none counts as a refusal. A firewall or a content
+  filter on this Mac may be holding them." ("Remote access: …"): every timeout, and a close by the other
+  end after 2 s or more; a quicker close (a dial's loser, a port check) counted nowhere, as before; an older
+  Sill's plain try still "older", garbage at the remote door and an unpaired key still "unpaired". And
+  `door.stalled` in the `[1s]` lines. No notice in Sill.app (open question 3).
+- Verified (the plan's Results): `door-policy` 288 checks (261 on main; the reporter's phone never backed
+  off where the rule before backed it off at 16.64 s, every finding 9 case as before) and 131 mutants
+  (each pattern applying once; not run yet: `run-all.sh --mutants door-policy`); `run-all.sh`, all 63; `swift build -c release`, only the CaptureProbe warning; live on
+  loopback against main's build, both doors: a client that sends nothing gets the new line and
+  `door.stalled` (main: "unpaired"), a reset after 3 s "closed by the other end", garbage, an HTTP request
+  and a real unpaired key as before; 20 stalls, one address keeping two places 120 s, or three addresses
+  keeping six: no backoff (main: backed off); four keeping all eight: backed off at 12–13 s on both; the CLI
+  masked and sorted as main's where nothing stalls.
+- **Untested, for Noah:** on a Mac with a macOS 27.3 beta (or whichever release brings the reporter's
+  firewall behaviour), firewall on, Sill.app from this branch: the device's dials fail as before (the
+  filter), Sill.log has the "never finished their TLS handshake … timed out" line and no "unpaired" or
+  "backed off" line for them, and the moment the firewall goes off the device connects at once (no 5-minute
+  wait). On any Mac, `nc 127.0.0.1 <home door port>` left open for 5 s (it sends nothing) gives one
+  "timed out" line and no refusal.
+
 **The 0.6.1 fixes in one pull request (2026-11-09, branch `integration-0-6-1-fixes` from main at f224323d,
 its own pull request, "0.6.1 fixes: …"; the resolutions, the verification of #320 and every number are in
 sill-handoff's `triage/2026-11-09/int/REPORT.md`).** Noah's decisions of 2026-11-09: #228 yes; #230 yes ("keep
@@ -8513,6 +8596,7 @@ python3 Scripts/sillclient.py PORT 6 desktop --key=80,1.2@2   # ← held 1.2 s (
 python3 Scripts/sillclient.py PORT 8 none --gesture=swipeUp@3 --gesture=swipeDown@4   # a synthetic host logs "Gesture from …: swipe up → Mission Control (shortcut 108: key 160, fn) (not posted: a test host)"
 SILL_TEST_LOOPBACK=1 SILL_TEST_HOTKEYS='108=off,173=off' .build/release/SillHost --synthetic   # TEST ONLY: the gestures read this table (over macOS 27's own; `defaults` alone) instead of this Mac's shortcuts
 swift run -c release SillHost --no-clipboard  # share nothing of the clipboard with devices (on by default, as in Sill.app)
+swift run -c release SillHost --off-console-view   # show this account while another user is on the screen (off by default, as in Sill.app's Settings › Devices): docs/off-console-plan.md
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_PASTEBOARD=me.saffer.sill.test.x SILL_TEST_CLIPBOARD_LOG=1 .build/release/SillHost --synthetic   # the clipboard on a pasteboard of its own (never this Mac's), each decision printed with sizes
 SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: ScreenCaptureKit never asked (no window list, no thumbnails), so a host an agent runs asks macOS for no screen recording
 SILL_TEST_FIREWALL=executable SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: the macOS firewall's answers canned (executable|bundle|both|all|off|allowed|unreadable, or a file holding one, read at each check): "Firewall: the macOS firewall blocks Sill’s executable, …"
@@ -9056,7 +9140,10 @@ device keeps working with Macs from the first public build on, or each says why
   another user, the login window or nobody is on its console, and `offConsole` true in that second case,
   both left out otherwise, so an unlocked list is what it was; a device that knows them says why the list
   is empty, and while locked a host sends no picture of the Mac (a placeholder frame at most), which also
-  replaces the last picture of a device from before them; the Mac's sound (kind 43, Audio.swift), once a public build ships it, a beta or not:
+  replaces the last picture of a device from before them, but off console with its user's switch on (Show this
+  account while another user is on the screen, docs/off-console-plan.md), when it streams this session's own desktop
+  and windows to every device and sends a device whose hello says `offConsoleView` 1 the list with its windows and
+  `offConsoleView` true (every other device the locked list: a later host keeps both keys' meanings); the Mac's sound (kind 43, Audio.swift), once a public build ships it, a beta or not:
   its two types (a JSON AudioFormat, then packets whose layout never changes: a new layout is a new
   type), AudioFormat's fields, the hello's `audio`, `sendAudio` and `audioNote`, kind 43 only to a
   device whose hello lists a codec the host makes, and the reader's caps, which a later host keeps

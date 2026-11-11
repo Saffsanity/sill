@@ -1322,6 +1322,34 @@ second after each return to the console). Sill.log says "Locked: …" and
 "Unlocked: …", and at most one line a minute for each kind of request it
 refused.
 
+### This account while another user is on the screen
+
+Show this account while another user is on the screen (Settings › Devices; off
+by default; `offConsoleView` in `me.saffer.sill.mac`; `SillHost
+--off-console-view`; docs/off-console-plan.md, issue #316) is for a Mac another
+account holds from startup, or one you switch away from, reached only through
+Sill. While it is on and the console's own user (the dynamic store, never a
+notification) is another user, loginwindow or nobody, devices see this session's
+own desktop and windows instead of the placeholder: thumbnails, icons and the
+installed apps go, a window picked streams where it is (never on Sill's virtual
+display), and the list says `offConsoleView` to a device whose hello said it
+shows it (`Hello.offConsoleView` 1; any other device gets the locked list as
+before). Nothing a device sends acts on that session: no input, launch, window
+button, menu, gesture, raise or Aa size, and no sound, clipboard, pointer,
+cursor shape, virtual display or display wake. The device keeps the picture,
+covers nothing and says over it "Your account’s own desktop, not this Mac’s
+screen. Taps and keys reach it once your account is back on the screen." This
+session's own locked screen on the console is as before. Sill.log says
+"Locked: another user, or the login window, is on this Mac's screen; devices see
+this session's own desktop and windows instead, …". To try it headless:
+`SILL_TEST_LOCK_IGNORE_MAC=1 SILL_TEST_LOCKED_FILE=$F SILL_TEST_LOOPBACK=1
+SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_NO_SCREEN=1
+.build/release/SillHost --synthetic --off-console-view`, `echo 2 > $F`, and a
+client with `--hello=0.6.1 --off-console-view` (sillclient.py): the test
+pattern goes on and its lists say `offConsoleView=1`; without the flag the
+placeholder. A real second account is the only way to see a real session off
+console (`-SillMacLocked view` draws the device's side in the harness).
+
 The host reads the lock on a queue of its own, never on the main actor: the
 console's user (the dynamic store), the screen's lock state (notify(3)'s
 `com.apple.sessionagent.screenIsLocked`), both watched, and the session
@@ -2227,6 +2255,21 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
   (`pane-firewall-*`) and the menu's `firewall-blocked` and
   `firewall-blocks-all` samples; `-SillPrintMenuAfter <s>` prints General's
   firewall line with the menu.
+- Connections that never finish their TLS handshake (issue #314,
+  docs/stalled-handshake-plan.md): "Home door: 5 connections in the last minute
+  never finished their TLS handshake (4 timed out, 1 closed by the other end
+  after waiting), so no key was checked and none counts as a refusal. A firewall
+  or a content filter on this Mac may be holding them." ("Remote access: …" at
+  the remote door), at most once a minute, and `door.stalled` in the `[1s]`
+  lines. Something accepted the connection and held it before Sill saw a TLS
+  hello: a macOS 27.3 beta's firewall did, with Sill allowed in its rules, every
+  connection over the Mac's LAN address stalling 4 s and then reset, and
+  `openssl s_client -connect <the Mac's LAN address>:<port> -brief` from the Mac
+  itself shows it (`write:errno=54` after about 4 s; against 127.0.0.1 the
+  handshake completes at once). Such a connection is no refusal and costs its
+  address only a tenth of a failure while the door has a place for everyone,
+  so a device whose dials stall is not backed off for 5 minutes; while every
+  shared waiting place is held it pays its hold, as since finding 9.
 
 ### What to try if it's slow
 
