@@ -24,7 +24,12 @@ MUTANTS = [
     ("AQ14 one device away is enough", H + "AwayPolicy.swift", "devicesAway.isEmpty ? current : devicesAway.allSatisfy { $0 }", "devicesAway.isEmpty ? current : devicesAway.contains { $0 }"),
     ("AQ15 the away line names the away pair as the home one", H + "AwayPolicy.swift", '+ "The home quality stays \\(title(c.bitrate, c.captureScale))."', '+ "The home quality stays \\(title(c.awayBitrate, c.awayCaptureScale))."'),
     ("AQ16 the home line streams the away pair", H + "AwayPolicy.swift", "streaming at \\(title(c.bitrate, c.captureScale)).\"", "streaming at \\(title(c.awayBitrate, c.awayCaptureScale)).\""),
-    ("AQ17 standard shares no clipboard", H + "HostConfig.swift", "requirePairing: true, shareClipboard: true, sendAudio: false)", "requirePairing: true, shareClipboard: false, sendAudio: false)"),
+    ("AQ-O1 standard shows this account off console", H + "HostConfig.swift", "                                             offConsoleView: false)",
+     "                                             offConsoleView: true)"),
+    ("AQ-O2 the off-console view's change unnamed", H + "HostConfig.swift",
+     '        if offConsoleView != new.offConsoleView { parts.append("off-console view \\(onOff(offConsoleView)) → \\(onOff(new.offConsoleView))") }\n', ""),
+    ("AQ-O3 the off-console view's switch never stored", H + "HostConfig.swift", "        self.offConsoleView = offConsoleView\n", "        self.offConsoleView = false\n"),
+    ("AQ17 standard shares no clipboard", H + "HostConfig.swift", "requirePairing: true, shareClipboard: true, sendAudio: false,", "requirePairing: true, shareClipboard: false, sendAudio: false,"),
     ("AQ18 the clipboard's change unnamed", H + "HostConfig.swift", '        if shareClipboard != new.shareClipboard { parts.append("share clipboard \\(onOff(shareClipboard)) → \\(onOff(new.shareClipboard))") }\n', ""),
     ("AQ19 the clipboard's switch never stored", H + "HostConfig.swift", "        self.shareClipboard = shareClipboard\n", "        self.shareClipboard = true\n"),
     # Send Audio, a device's to set too (docs/audio-plan.md, Q8 as Noah revised it on 2026-10-27).

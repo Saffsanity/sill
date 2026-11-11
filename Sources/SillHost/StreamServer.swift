@@ -148,6 +148,9 @@ final class StreamServer {
         var audioEpochSent: Int?
         /// Sound messages handed to its connection and not taken yet (`audioCap`).
         var audioUnsent = 0
+        /// Its hello said it shows a Mac's off-console view (`Hello.offConsoleView`; docs/off-console-plan.md):
+        /// it is sent the view's window list (`broadcastList`), every other device the plain one.
+        var viewsOffConsole = false
         init(_ c: NWConnection) { connection = c }
     }
 
@@ -1282,6 +1285,7 @@ final class StreamServer {
         print(DeviceGate.helloLine(hello, endpoint: "\(c.endpoint)"))
         // The Mac's sound goes only to a device that said it plays a codec this host makes.
         client.audioCodec = AudioCodec.choose(offered: hello.audio)
+        client.viewsOffConsole = (hello.offConsoleView ?? 0) >= LockedMac.viewGeneration
         updateAudioListeners()
         onClientHello?(c, hello)
     }
@@ -1441,6 +1445,30 @@ final class StreamServer {
             }
             if lockGate.withholds(kind) { withheld(kind, for: ObjectIdentifier(connection)); return }   // a locked Mac (LockPolicy)
             send(data, to: client)
+        }
+    }
+
+    /// A window list in two forms (StreamCoordinator.listMessages; docs/off-console-plan.md): the off-console
+    /// view's to each device whose hello said it shows it (`Client.viewsOffConsole`), the plain one, as Sill for
+    /// Mac 0.6.0 sends it, to every other. Thread-safe.
+    func broadcastList(view: StreamMessage, plain: StreamMessage) {
+        let viewData = view.serialized(), plainData = plain.serialized()
+        queue.async { [self] in
+            for client in clients.values where client.connection.state == .ready {
+                send(client.viewsOffConsole ? viewData : plainData, to: client)
+            }
+        }
+    }
+
+    /// The same to one device (the catalog on connect). Thread-safe.
+    func sendList(view: StreamMessage, plain: StreamMessage, to connection: NWConnection) {
+        let viewData = view.serialized(), plainData = plain.serialized()
+        queue.async { [self] in
+            guard let client = clients[ObjectIdentifier(connection)] else {
+                print("send: no client for \(connection.endpoint) (\(clients.count) known)")
+                return
+            }
+            send(client.viewsOffConsole ? viewData : plainData, to: client)
         }
     }
 

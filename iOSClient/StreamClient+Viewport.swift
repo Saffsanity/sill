@@ -58,7 +58,10 @@ extension StreamClient {
 
     /// Whether Aa can be used now: only while a window streams (`TextScale.selectable`; Noah,
     /// 2026-10-29). Every bar's Aa asks here, and the harness's `-SillScaleOpen`.
-    var textScaleSelectable: Bool { TextScale.selectable(streaming: active) }
+    var textScaleSelectable: Bool { TextScale.selectable(streaming: active) && !lockView }
+
+    /// What VoiceOver hears after a dimmed Aa: in the off-console view no window is sized (docs/off-console-plan.md).
+    var textScaleUnavailableHint: String { lockView ? LockedMac.viewTextScaleHint : TextScale.unavailableHint }
 
     /// The session ended (`tearDown`): its last viewport and a pointer re-send still waiting go with
     /// it, so neither reaches the next connection, whose stream screen sends a viewport of its own
