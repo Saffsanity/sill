@@ -173,6 +173,8 @@ struct PortraitStreamScreen: View {
     /// The line over the stream while the link cannot carry the quality, as StreamScreen shows it
     /// (docs/remote-bundle-plan.md §6.7); nil for none.
     var linkLine: String? = nil
+    /// The line's most lines: the off-console view's three, the link's two (StreamScreen).
+    var linkLineLines = 2
     /// Take the Tour in the panel (see `StreamScreen.takeTour`).
     var takeTour: () -> Void = {}
     /// Larger Picture on a phone: the software keyboard's height its rows are kept above
@@ -423,7 +425,8 @@ struct PortraitStreamScreen: View {
             TextScaleControl(scale: $textScale, open: $scaleOpen,
                              width: metrics.buttonWidth, height: metrics.buttonHeight,
                              radius: metrics.buttonRadius, pointsPerStep: 36,
-                             offered: client.textScaleOffersOff, available: client.textScaleSelectable)
+                             offered: client.textScaleOffersOff, available: client.textScaleSelectable,
+                             unavailableHint: client.textScaleUnavailableHint)
                 .tourTarget(.textSize)
 
             desktopButton()
@@ -547,7 +550,8 @@ struct PortraitStreamScreen: View {
                              width: width, height: layout.row1.height,
                              radius: metrics.buttonRadius, pointsPerStep: menus ? layout.rulerStepBesideMenus : layout.rulerStep,
                              iconBox: PortraitMetrics.phoneIconBox, iconSpacing: metrics.buttonSpacing,
-                             offered: client.textScaleOffersOff, available: client.textScaleSelectable)
+                             offered: client.textScaleOffersOff, available: client.textScaleSelectable,
+                             unavailableHint: client.textScaleUnavailableHint)
                 .tourTarget(.textSize)
 
             barButton(open: keyboardShown, symbol: "keyboard", label: "Keyboard", width: width,
@@ -620,7 +624,7 @@ struct PortraitStreamScreen: View {
         .background(Palette.panel)
         // A locked Mac: its cover over the picture (LockedMac), under the link's line.
         .overlay { LockedMacShade(client: client) }
-        .overlay(alignment: .top) { LinkLineView(text: linkLine) }
+        .overlay(alignment: .top) { LinkLineView(text: linkLine, lines: linkLineLines) }
         .clipShape(streamShape)
         .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
         .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { if measured { onPanelSize($0) } })

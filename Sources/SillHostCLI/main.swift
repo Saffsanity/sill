@@ -50,6 +50,12 @@ config.shareClipboard = !CommandLine.arguments.contains("--no-clipboard")
 let audioFlag = CommandLine.arguments.contains("--audio")
 config.sendAudio = audioFlag
 
+// `SillHost --off-console-view`: show this account while another user is on the screen, for this run
+// (docs/off-console-plan.md, issue #316): while another user's session, the login window or nobody holds
+// this Mac's console, devices see this session's own desktop and windows, to look at, and nothing they send
+// acts on it. Off by default, as in Sill.app (Settings › Devices): such a Mac shows nothing of this session.
+config.offConsoleView = CommandLine.arguments.contains("--off-console-view")
+
 // `SillHost --remote[=PORT]`: the remote door for this run (TLS 1.3, paired devices only), on
 // PORT or any free port, so it never collides with Sill.app's 7455. A new in-memory identity and
 // trust list every run. A pairing window is always open (a fresh one after each use or expiry);
