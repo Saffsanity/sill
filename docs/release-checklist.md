@@ -143,6 +143,13 @@ serves the root or `/docs`, never `/site`. So:
   `site/`, keeps the words, and takes its lines out of here.
   - Off-console view (PR for #316, docs/off-console-plan.md): support.html's paragraph on Show this account
     while another user is on the screen; `grep -n 'Show this account while another user' ../sill-site/*.html`.
+- Open now: `Display wake click` (support.html's paragraph on a black picture, PR #228, for 0.6.1).
+  It changes words 0.6.0 shipped rather than adding some, so a republish before 0.6.1 puts v0.6.0's
+  paragraph back in place of the block instead of deleting it: after the perl line, `git show
+  v0.6.0:site/support.html` has the paragraph to restore under "The picture is black" (the one that
+  says a tap "clicks your Mac where you can’t see"); `grep -n "only wakes the display"
+  ../sill-site/support.html` prints nothing. Its tap sentence also waits for Noah's #228 step 2 (a
+  window staged on the virtual display while the panels sleep).
 - Once sill is public, it can serve the site itself: `git subtree push --prefix site origin gh-pages`,
   then Settings › Pages › gh-pages, / (root). Retire sill-site then.
 

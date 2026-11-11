@@ -133,7 +133,9 @@ final class StreamClient: ObservableObject {
     /// The connect screen's rows (DiscoveryPolicy.rows): every Mac the network browser lists, then
     /// those seen only over peer-to-peer Wi-Fi.
     @Published var macs: [FoundMac] = []
-    @Published var connected = false
+    @Published var connected = false {
+        didSet { if connected != oldValue { DeviceIdleTimer.shared.update() } }   // auto-lock (PR #230)
+    }
     /// The nearby (peer-to-peer) browser runs: the status line says so, or under the hint the line
     /// in Search Nearby's place.
     @Published var searchingNearby = false
@@ -261,6 +263,7 @@ final class StreamClient: ObservableObject {
                 presence.streaming = streaming
                 renderPointer()
             }
+            if active != oldValue { DeviceIdleTimer.shared.update() }   // auto-lock (PR #230)
         }
     }
     @Published var thumbnails: [UInt32: UIImage] = [:] // by window ID
@@ -365,6 +368,14 @@ final class StreamClient: ObservableObject {
     /// When this device last sent the Mac input (`sendInput`; systemUptime). Not @Published: the
     /// tour's rule reads it when it decides. Main thread.
     var lastInputAt: Double?
+    /// When the person last sent the Mac input: every input `lastInputAt` counts but the device's own
+    /// move of its pointer to a new frame's middle (`pointerFrameChanged`), which nobody at the device
+    /// made. The device's auto-lock hold reads it (DeviceIdleTimer; DeviceIdlePolicy.Uses.input).
+    /// Main thread.
+    private(set) var lastPersonInputAt: Double?
+    /// The start of this session as the person started it, carried across the automatic reconnect's
+    /// (DeviceIdlePolicy.sessionStart; systemUptime), for the device's auto-lock hold. Main thread.
+    private(set) var personSessionAt: Double?
     /// When the person last used one of the stream screen's controls, by whatever means: a tap, or
     /// VoiceOver's double tap, Switch Control, Voice Control or Full Keyboard Access, none of which
     /// makes a touch (a pick, a launch, a window's command or place in the bar, a settings change;
@@ -372,7 +383,10 @@ final class StreamClient: ObservableObject {
     /// tour's rule reads it when it decides. The device's own requests (the Desktop at a
     /// connection's start) are not the person's and leave it alone. Main thread.
     private(set) var lastActionAt: Double?
-    func noteAction() { lastActionAt = ProcessInfo.processInfo.systemUptime }
+    func noteAction() {
+        lastActionAt = ProcessInfo.processInfo.systemUptime
+        DeviceIdleTimer.shared.used()
+    }
     /// The tour is on screen (StreamScreen): nothing this device does reaches the Mac as input
     /// meanwhile. The one input it makes on its own, the pointer's move to the middle of a new frame
     /// size (`pointerFrameChanged`), waits for the pause to end, and goes then only if this device
@@ -385,7 +399,7 @@ final class StreamClient: ObservableObject {
             pointerMoveOwed = false
             presence.follow(pointerFeed.current)
             guard presence.recentresOnNewFrame(now: ProcessInfo.processInfo.systemUptime), let p = presence.own else { return }
-            sendInput(.pointer(.move, x: Double(p.x), y: Double(p.y)))
+            sendInput(.pointer(.move, x: Double(p.x), y: Double(p.y)), byPerson: false)
         }
     }
     /// A pointer move `pointerFrameChanged` held back while input was paused.
@@ -394,6 +408,15 @@ final class StreamClient: ObservableObject {
     /// than with the stream screen, which goes with its session, so the automatic reconnect's
     /// session can go on with it. StreamScreen reads and writes it. Main thread.
     var tourSession = TourSession()
+
+    /// A session is connected (markConnected, remoteSessionReady), `reconnected` when the automatic
+    /// reconnect made it: the tour's decision and the device's auto-lock hold both carry the session
+    /// before it then, and start afresh for a session the person started. Main thread.
+    func sessionConnected(reconnected: Bool) {
+        startTourSession(reconnected: reconnected)
+        personSessionAt = DeviceIdlePolicy.sessionStart(previous: personSessionAt, reconnected: reconnected,
+                                                        now: ProcessInfo.processInfo.systemUptime)
+    }
 
     /// A session is connected: the automatic reconnect's goes on with the last one's tour decision
     /// (TourPolicy.nextSession), any other decides afresh. Main thread.
@@ -1947,7 +1970,7 @@ final class StreamClient: ObservableObject {
     /// search stops, and a session over AWDL or on Wi-Fi with the cable listed may move at once. Main
     /// thread.
     func markConnected(endpoint: NWEndpoint?, name: String) {
-        startTourSession(reconnected: reconnect != nil)
+        sessionConnected(reconnected: reconnect != nil)
         reconnect = nil
         // Connected: no ask is left waiting (a pairing through a link's addresses leaves one), so the
         // home card never comes back for it with the connect screen.
@@ -3771,10 +3794,18 @@ final class StreamClient: ObservableObject {
         link.send(message.serialized())
     }
 
-    func sendInput(_ event: InputEvent) {
+    func sendInput(_ event: InputEvent) { sendInput(event, byPerson: true) }
+
+    /// `byPerson` false: the device's own input (its pointer's move to a new frame's middle), which
+    /// the device's auto-lock hold does not count as the person's use.
+    private func sendInput(_ event: InputEvent, byPerson: Bool) {
         // Every input passes here, a hover and a flick's coast included: the tour's rule counts it
         // as something happening (StreamScreen.considerTour).
         lastInputAt = ProcessInfo.processInfo.systemUptime
+        if byPerson {
+            lastPersonInputAt = lastInputAt
+            DeviceIdleTimer.shared.used()      // the person is at the device: auto-lock held off again (PR #230)
+        }
         // A click or a key from any view: what the input view remembers of what was typed goes (#138).
         if TextInputRules.movesCaret(event) { onCaretMayMove?() }
         #if DEBUG
@@ -3962,7 +3993,7 @@ final class StreamClient: ObservableObject {
         setOwnPointer(CGPoint(x: 0.5, y: 0.5), from: presence.origin)
         // While the tour shows nothing goes to the Mac as input: its cursor follows at the end.
         if inputPaused { pointerMoveOwed = true; return }
-        sendInput(.pointer(.move, x: 0.5, y: 0.5))
+        sendInput(.pointer(.move, x: 0.5, y: 0.5), byPerson: false)
     }
 
     /// A new session, or none (a new dial, a remote dial's winner, tearDown): the Mac has the pointer
