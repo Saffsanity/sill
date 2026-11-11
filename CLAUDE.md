@@ -72,6 +72,42 @@ weakness as well." Device only, no wire change.
   answer. It may be asleep, or Tailscale may be off on the Mac."; a TestFlight build over this build's
   saved record keeps working.
 
+**Release 0.6.1 (2026-11-11, branch `release-0.6.1` from main at d04eecd (count 1351), main merged in since
+(2a3b720 with #340, c3382ee with #337), PR #348 "Release 0.6.1: Sill for Mac and Sill for iPhone and iPad"; Noah: "Once all
+of this is completed, I want to push 0.6.1 to the App Store and release tomorrow"; the day's steps, the
+decisions, the texts and the rehearsals are in sill-handoff's `release-061/` (STATUS.md, notes-0.6.1.md,
+fill-notes.sh, whats-new-0.6.1.txt, testflight-0.6.1.md)).** One version for both apps, as since 0.5.1: Sill for
+Mac 0.6.1 from this pull request's merge commit (its commit count the build number, never committed, never
+`--bump`), with Sill for iPhone and iPad 0.6.1 of the same app code: Noah's pick between the nightly build 1366
+(from 2a3b720, given to the public beta on 2026-11-11 on his "Beta"; `git diff --quiet 2a3b720 <the merge> --
+iOSClient Sources/StreamProtocol Package.swift` proves the code the same) and a fresh upload of the merge commit.
+Both apps have said 0.6.1 since PR #286.
+- In it since v0.6.0 (Noah's choice, 2026-11-11): #335 (Apple Pencil's closing stroke, #322); #220, #343 and #347
+  (the Duo's keyboard in the laptop pose: the key row above a regular keyboard, the Keyboard toggle at the
+  picture's bottom left for a tall one, #215); #341 (#228 the waking click, #230 the device awake while it
+  streams, #223 macOS's own windows out of the strip towards #114, #320 a VPN failure naming both ends, #309);
+  #342 (a handshake that never finishes is no refusal, for #314, which stays open); #340 (the off-console view,
+  opt-in, #316); #337 (the nightly's What to Test, nothing for users). Out, for the next 0.6.x: #339, #200,
+  #245 (the reel's renderer) and the VPN-address fix (`keep-vpn-addresses`). No 0.6.1 text promises #298's
+  login-screen fix.
+- The release's words (this pull request): support.html's display-wake paragraph ships without #228's tap
+  sentence, whose claim covers a window on Sill's virtual display with the panels asleep, never reached in a
+  test (the checklist's part 1 §3 keeps the sentence and its test); #340's paragraph ships; no site marker is
+  left open. privacy.html gains the Duo's keyboard heights (`Sill.keyboardHints`, #343, on the device only),
+  dated November 11, 2026 (the day the site goes out: change it if that is another day). contribute.html: the
+  sponsors as GitHub lists them (24 public, 11 private) and Aditya Dhumal's pull requests since 0.6.0. The
+  metadata: 0.6.1's What's New (1,544 characters) and review notes (NEW IN 0.6.1, 3,998 bytes of 4,000),
+  the Version and Build rows; the description, keywords, promotional text and screenshots carry over.
+- Rehearsed on d04eecd (count 1351, before #340), nothing sent anywhere: `release.sh --dry-run` with
+  `SILL_UNIVERSAL=1`, exit 0 in 142 s (Sill 0.6.1 (1351) for x86_64 arm64, the data-protection keychain, the
+  image 5.8 MB, spctl "Unnotarized Developer ID"); `release-ios.sh --build-number 1351` (no upload), exit 0 in
+  62 s (Xcode 27.1, the iOS 27.1 SDK, Sill.ipa 3.7 MB, Apple Distribution, the App Store profile, the three
+  required-reason APIs declared). No prompt either time.
+- **Known gaps, for Noah to accept at the merge:** nothing of the Duo's keyboard work has run on a real Duo;
+  in the laptop pose the emoji search closes as it opens once the keyboard has been put away since Sill opened;
+  the first keyboard after a fresh install shows its row about 0.44 s late; #314 stays open; this Mac runs the
+  unnotarized combined test build 0.6.1 (1370), which also holds #339, until the release replaces it.
+
 **The nightly leaves What to Test alone on a build it did not upload (2026-11-09, branch
 `nightly-keeps-whats-new` from main at f224323d; docs/nightly-whats-new-plan.md has the night, the cause
 with line numbers, the six open questions with their defaults and the results).** 0.6.1 (1304) was
