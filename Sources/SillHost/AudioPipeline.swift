@@ -91,6 +91,8 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
         let make: @MainActor (AudioKey) async -> Made
     }
     private var requested: Request?
+    /// The next request starts its source again even when it is the same (`renew`).
+    private var renewing = false
     private var worker: Task<Void, Never>?
     /// AAC-ELD could not be made (`encoderProblem`): no sound this run, and every source shows why.
     private var encoderGone: String?
@@ -140,6 +142,14 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
         if worker == nil { worker = Task { @MainActor in await self.run() } }
     }
 
+    /// The same key, but a new stream: what its filter was made on changed (the Desktop's display, when
+    /// the device's own display comes or goes), so the running stream may already have ended with it.
+    @MainActor
+    func renew(_ key: AudioKey, reason: String, make: @escaping @MainActor (AudioKey) async -> Made) {
+        renewing = true
+        follow(key, reason: reason, make: make)
+    }
+
     /// Sill is quitting: said now, while the process still runs (the stop itself may not come before
     /// it ends, and needs nothing: the process's end takes the capture with it).
     @MainActor
@@ -158,8 +168,11 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
     private func run() async {
         while let r = requested {
             requested = nil
-            switch AudioSourceRule.decide(current: current, phase: phase, lastStartAt: lastStartAt, wanted: r.key,
-                                          now: HostClock.now()) {
+            let renew = renewing && r.key != .none && r.key == current
+            renewing = false
+            if renew { print("Audio: capturing again: \(r.reason).") }
+            switch renew ? .start : AudioSourceRule.decide(current: current, phase: phase, lastStartAt: lastStartAt, wanted: r.key,
+                                                           now: HostClock.now()) {
             case .keep:
                 // The source there is stays (a stop asked for and taken back before it ran included).
                 if r.key != .none { status = sourceStatus }

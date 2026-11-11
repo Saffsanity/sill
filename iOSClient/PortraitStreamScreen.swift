@@ -183,6 +183,8 @@ struct PortraitStreamScreen: View {
     /// The picture's pinch zoom (StreamScreen's; StreamZoom): not watched here, only by the picture's
     /// own view, so a pinch redraws nothing else.
     let zoom: StreamZoomModel
+    /// Desktop tapped while the Desktop already streams: show it full screen (StreamScreen).
+    var enterFullScreen: () -> Void = {}
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
     /// The Duo's fold across this screen (StreamScreen, iOS 27.1): where the halves split.
@@ -690,8 +692,8 @@ struct PortraitStreamScreen: View {
 
     private func desktopButton(width: CGFloat? = nil) -> some View {
         barButton(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop", width: width,
-                  accessibilityLabel: "Show the full Mac desktop",
-                  action: { client.select(.desktop) })
+                  accessibilityLabel: client.active == .desktop ? "Show the desktop full screen" : "Show the full Mac desktop",
+                  action: { client.active == .desktop ? enterFullScreen() : client.select(.desktop) })
     }
 
     /// Leave's old slot: Disconnect is the Settings panel's pinned last row now.
