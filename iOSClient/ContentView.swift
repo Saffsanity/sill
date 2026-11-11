@@ -522,7 +522,7 @@ struct ContentView: View {
 /// 455.5, 495.5 pt tall` (or `none`) each time UIKit reports the keyboard elsewhere
 /// (KeyboardFrameMonitor); and on the Duo's inner display upright `keyboard: the row 500–551 (51 pt): the
 /// glass at 555, 59 pt under the fold's edge at 496 (read: 0,555 669×396; reported 455.5)`, under a tall
-/// keyboard `keyboard: the toggle at 611,395 (44 pt): …`, `keyboard: nothing yet (a reading on its way)`,
+/// keyboard `keyboard: the toggle at 14,395 (44 pt): …`, `keyboard: nothing yet (a reading on its way)`,
 /// or `keyboard: none`, as the key row or the toggle stands in for the rows and goes (#215), with the
 /// monitor's `keyboard: looked: …`, `keyboard: assumed …`, `keyboard: reload …`, `keyboard: read …` and
 /// `keyboard: remembered: …` lines that say where each reading came from.

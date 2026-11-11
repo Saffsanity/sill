@@ -438,7 +438,7 @@ extension DuoPosture {
     /// Between the row's caps (twelve ≈ 48 pt wide across 641; the halves' key row keeps its 8).
     static let keyboardRowGap: CGFloat = 6
     /// The toggle (Noah, 2026-11-10: "surface a small toggle on the top screen for the keyboard, and thats
-    /// it"): a 44 pt button, its bottom 8 pt above the picture pane's bottom edge.
+    /// it"): a 44 pt button, its bottom 8 pt above the picture pane's bottom edge, in its leading corner.
     static let keyboardToggleSize: CGFloat = 44
     static let keyboardToggleInset: CGFloat = 8
 
@@ -487,11 +487,13 @@ extension DuoPosture {
         return KeyboardStandIn(row: CGRect(x: sides, y: top - keyboardRowGlassGap - caps, width: width, height: caps), toggle: false)
     }
 
-    /// The toggle's place: inside the picture's pane (its drawn foot at `paneBottom`) at its bottom trailing
-    /// corner, its trailing edge on the key row's (`sides` from the screen's), right above where the row's
-    /// Keyboard cap sits.
-    static func keyboardToggle(paneBottom: CGFloat, width: CGFloat, sides: CGFloat) -> CGRect {
-        CGRect(x: width - sides - keyboardToggleSize, y: paneBottom - keyboardToggleInset - keyboardToggleSize,
+    /// The toggle's place: inside the picture's pane (its drawn foot at `paneBottom`) at its bottom leading
+    /// corner, its leading edge on the key row's (`sides` from the screen's leading edge): the left corner, and
+    /// in a right-to-left layout the right one (PortraitStreamScreen places it from the leading edge). The
+    /// clipboard's "Paste on ‹Mac›" chip takes the pane's bottom trailing corner (ClipboardPolicy.chipCorner),
+    /// so the two never meet there (Noah, 2026-11-11: "Move the keyboard icon to the left corner instead").
+    static func keyboardToggle(paneBottom: CGFloat, sides: CGFloat) -> CGRect {
+        CGRect(x: sides, y: paneBottom - keyboardToggleInset - keyboardToggleSize,
                width: keyboardToggleSize, height: keyboardToggleSize)
     }
 

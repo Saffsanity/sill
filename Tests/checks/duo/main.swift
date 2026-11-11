@@ -590,9 +590,18 @@ check(standIn(at(479), controls: 424, fold: flat) == row(424, 51) && standIn(at(
 check(standIn(at(472), controls: 424, fold: flat) == row(424, 44) && standIn(at(471.9), controls: 424, fold: flat) == toggleAlone,
       "open flat: 48 pt over the controls' top holds 44 pt caps; less, the toggle")
 check(standIn(at(300), controls: 424, fold: flat) == toggleAlone, "open flat, a keyboard over the picture's foot: the toggle")
-// The toggle's place: inside the pane (its foot at 447 in the laptop pose), its trailing edge on the row's.
-check(DuoPosture.keyboardToggle(paneBottom: 447, width: 669, sides: 14) == rect(611, 395, 44, 44), "the toggle at 611,395, 44 pt")
-check(DuoPosture.keyboardToggle(paneBottom: 365, width: 669, sides: 14) == rect(611, 313, 44, 44), "the status bar shown: 8 above the pane's foot at 365")
+// The toggle's place (Noah, 2026-11-11: "Move the keyboard icon to the left corner instead"): inside the pane
+// (its foot at 447 in the laptop pose) at its bottom leading corner, its leading edge on the row's, opposite the
+// clipboard chip's bottom trailing corner; from the leading edge, so the right corner in a right-to-left layout.
+check(DuoPosture.keyboardToggle(paneBottom: 447, sides: 14) == rect(14, 395, 44, 44), "the toggle at 14,395, 44 pt: the bottom left corner")
+check(DuoPosture.keyboardToggle(paneBottom: 365, sides: 14) == rect(14, 313, 44, 44), "the status bar shown: 8 above the pane's foot at 365")
+check(DuoPosture.keyboardToggle(paneBottom: 447, sides: 14).maxX == 58 && DuoPosture.keyboardToggle(paneBottom: 447, sides: 20).minX == 20,
+      "its leading edge on the row's, whatever the sides: the chip's corner (the trailing one) holds a chip up to 587 pt wide clear of it")
+for paneBottom in stride(from: CGFloat(300), through: 700, by: 0.5) {
+    let t = DuoPosture.keyboardToggle(paneBottom: paneBottom, sides: 14)
+    check(t.maxY == paneBottom - 8 && t.minX == 14 && t.width == 44 && t.height == 44 && t.maxX < 669 / 2,
+          "\(paneBottom): 8 above the pane's foot, in the leading half, 44 pt")
+}
 // Twelve caps (the Desktop: Spotlight's too) and eleven across the row.
 check(abs(DuoPosture.keyboardRowCap(count: 12, width: 641) - 47.917) < 0.001, "twelve caps ≈ 48 pt wide")
 check(abs(DuoPosture.keyboardRowCap(count: 11, width: 641) - 52.818) < 0.001 && DuoPosture.keyboardRowCap(count: 0, width: 641) == 0,

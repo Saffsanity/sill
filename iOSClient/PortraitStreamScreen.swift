@@ -238,8 +238,7 @@ struct PortraitStreamScreen: View {
             // Over the picture (above the input overlay, so a tap on it never reaches the Mac), right
             // after it for VoiceOver.
             if standIn?.toggle == true {
-                let rect = DuoPosture.keyboardToggle(paneBottom: half - DuoPosture.paneInset, width: size.width,
-                                                     sides: metrics.padSide)
+                let rect = DuoPosture.keyboardToggle(paneBottom: half - DuoPosture.paneInset, sides: metrics.padSide)
                 keyboardToggle
                     .placed(rect, in: size)
                     .transition(.opacity)
@@ -355,10 +354,11 @@ struct PortraitStreamScreen: View {
 
     #if DEBUG
     /// The console's line for the gates: `keyboard: the row 500–551 (51 pt): the glass at 555, 59 pt under
-    /// the fold's edge at 496 (read: 0,555 669×396; reported 455.5)`, `keyboard: the toggle at 611,395
-    /// (44 pt): the glass at 506, 10 pt under …`, `keyboard: nothing yet (a reading on its way)`, `keyboard:
-    /// the toggle …: the glass not known (no reading since the last change)`, open flat `keyboard: the row
-    /// 498–549 (51 pt): the glass at 553, 129 pt under the picture's pane (reported)`, or `keyboard: none`.
+    /// the fold's edge at 496 (read: 0,555 669×396; reported 455.5)`, `keyboard: the toggle at 14,395
+    /// (44 pt): the glass at 506, 10 pt under …` (its place from the leading edge), `keyboard: nothing yet
+    /// (a reading on its way)`, `keyboard: the toggle …: the glass not known (no reading since the last
+    /// change)`, open flat `keyboard: the row 498–549 (51 pt): the glass at 553, 129 pt under the picture's
+    /// pane (reported)`, or `keyboard: none`.
     private func keyboardStandInLine(_ standIn: DuoPosture.KeyboardStandIn?, size: CGSize, origin: CGPoint,
                                      split: DuoPosture.PortraitSplit) -> String {
         func n(_ v: CGFloat) -> String { abs(v - v.rounded()) < 0.01 ? "\(Int(v.rounded()))" : String(format: "%.1f", v) }
@@ -369,7 +369,7 @@ struct PortraitStreamScreen: View {
         var parts: [String] = []
         if let row = standIn.row { parts.append("the row \(n(row.minY))–\(n(row.maxY)) (\(n(row.height)) pt)") }
         if standIn.toggle {
-            let rect = DuoPosture.keyboardToggle(paneBottom: split.picture - DuoPosture.paneInset, width: size.width, sides: metrics.padSide)
+            let rect = DuoPosture.keyboardToggle(paneBottom: split.picture - DuoPosture.paneInset, sides: metrics.padSide)
             parts.append("the toggle at \(n(rect.minX)),\(n(rect.minY)) (\(n(rect.width)) pt)")
         }
         let what = parts.isEmpty ? "nothing yet (a reading on its way)" : parts.joined(separator: " and ")
