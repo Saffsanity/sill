@@ -129,27 +129,32 @@ serves the root or `/docs`, never `/site`. So:
       after the release whose builds the change describes (part 2, the last item):
 - Words on main for a release not out yet are marked: each block sits between `<!-- Name: …`
   and `<!-- /Name -->` (the Remote Access markers are another matter: they stay, for a build
-  without it). None is open since 0.6.0 (2026-11-02): that release shipped the words of the
-  Clipboard, Keyframe, Display wake, Other languages, Sound, Tiles, Reverse Scrolling, Pairing
-  window, Virtual Display, Aa Off, Thumbnail hold, Firewall, Tour 0.6, Locked Mac and Pinch zoom
-  markers, and its words commit (7871d5c) took their marker lines out of `site/` and kept the
-  words. A republish before a release whose words are marked (for words that hold for the builds
-  already out, such as support.html's on a Mac asleep or restarted, or on a black picture) deletes
-  each such block in the sill-site copy after the rsync below, one line a marker,
+  without it). None is open since 0.6.1: 0.6.0 (2026-11-02) shipped the words of the Clipboard,
+  Keyframe, Display wake, Other languages, Sound, Tiles, Reverse Scrolling, Pairing window,
+  Virtual Display, Aa Off, Thumbnail hold, Firewall, Tour 0.6, Locked Mac and Pinch zoom markers,
+  and its words commit (7871d5c) took their marker lines out of `site/` and kept the words; 0.6.1
+  shipped `Display wake click` (PR #228, without its tap sentence: below) and `Off-console view`
+  (PR #340) the same way, in its release pull request (#348). A republish before a release whose words
+  are marked (for words that hold for the builds already out, such as support.html's on a Mac
+  asleep or restarted, or on a black picture) deletes each such block in the sill-site copy after
+  the rsync below, one line a marker,
   `perl -0pi -e 's/[ \t]*<!-- Name:.*?<!-- \/Name -->\n//gs' ../sill-site/*.html` (a `.` in the
   name escaped), puts privacy.html's date back to the one last published, and checks with a
   `grep -n` of a phrase from each block that nothing of it is left. Add the marker's line and its
   grep here when a pull request marks words; the release that ships them deletes its markers in
   `site/`, keeps the words, and takes its lines out of here.
-  - Off-console view (PR for #316, docs/off-console-plan.md): support.html's paragraph on Show this account
-    while another user is on the screen; `grep -n 'Show this account while another user' ../sill-site/*.html`.
-- Open now: `Display wake click` (support.html's paragraph on a black picture, PR #228, for 0.6.1).
-  It changes words 0.6.0 shipped rather than adding some, so a republish before 0.6.1 puts v0.6.0's
-  paragraph back in place of the block instead of deleting it: after the perl line, `git show
-  v0.6.0:site/support.html` has the paragraph to restore under "The picture is black" (the one that
-  says a tap "clicks your Mac where you can’t see"); `grep -n "only wakes the display"
-  ../sill-site/support.html` prints nothing. Its tap sentence also waits for Noah's #228 step 2 (a
-  window staged on the virtual display while the panels sleep).
+- Held back from the support page in 0.6.1, until a test shows it true: #228's tap sentence. The
+  page says "To wake it again, move the pointer, scroll, or press the Command key on a keyboard
+  attached to your iPhone or iPad; Shift alone doesn’t reach your Mac." With the sentence it would
+  say "To wake it again, tap the picture: the tap only wakes the display and moves the pointer
+  there, so nothing you can’t see is clicked. Moving the pointer, scrolling, or pressing the Command
+  key on a keyboard attached to your iPhone or iPad wakes it too; Shift alone doesn’t reach your
+  Mac." That claim also covers a window on Sill's virtual display while the panels sleep, which no
+  test has reached: Noah's Mac locks when its display sleeps, so his test of 2026-11-11 saw the
+  click held back on the lock screen (three times), never there. His #228 step 2 decides it
+  (Virtual Display on, a window picked, `pmset displaysleepnow`: is the picture black, and is a tap
+  held back?). Until then the release notes, What's New and the review notes name only the
+  Desktop's black picture, as the page names none.
 - Once sill is public, it can serve the site itself: `git subtree push --prefix site origin gh-pages`,
   then Settings › Pages › gh-pages, / (root). Retire sill-site then.
 
@@ -955,7 +960,7 @@ For a nightly tester:
 - The update check never offers a nightly: it reads only
   `https://api.github.com/repos/Saffsanity/sill/releases/latest`, which never lists a pre-release
   (`UpdatePolicy.feed`), refuses an answer that says `prerelease` anyway (`UpdatePolicy.release`), and
-  "nightly" is no version. A nightly Sill.app says main's version with its build number (0.5.5 until 2026-10-31, 0.6.0 until App Review approved 0.6.0, 0.6.1 since), so the update check offered it the 0.6.0 release once that was published, like everyone else's, and the nightlies after the release, saying 0.6.1, are offered the 0.6.1 release in turn.
+  "nightly" is no version. A nightly Sill.app says main's version with its build number (0.5.5 until 2026-10-31, 0.6.0 until App Review approved 0.6.0, 0.6.1 since), so the update check offered a nightly that said 0.5.5 the 0.6.0 release once that was published, like everyone else's. A nightly is never offered the release of the version it says: the check offers only a higher version and build numbers don't count (`UpdatePolicy`: `version > running`), so the nightlies saying 0.6.1 are not offered the 0.6.1 release, and whoever runs one swaps it for the download by hand (settings, permissions and pairings carry over); the next release they are offered is 0.6.2's. Say so wherever a nightly is offered to someone (found 2026-11-11, while writing to reporters).
 - Going back: on the Mac, quit Sill, download the release from https://getsill.app/download and
   replace Sill in Applications; nothing to set up again. On a device, TestFlight › Sill › Previous
   Builds installs an earlier build, and the App Store installs the release over a TestFlight build
