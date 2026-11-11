@@ -95,7 +95,7 @@ enum MockCatalog {
         client.thumbnails = thumbnails
 
         seed(client, settings: settings)
-        // `-SillMacLocked 1|2|unlocking` (docs/locked-mac-plan.md): the mock Mac's screen is locked (1), it is
+        // `-SillMacLocked 1|2|unlocking|view` (docs/locked-mac-plan.md, docs/off-console-plan.md): the mock Mac's screen is locked (1), it is
         // switched to another user (2), as its LockPolicy sends it (no windows, thumbnails, apps or clipboard,
         // its placeholder streaming as the Desktop, the cover over it), or it was just unlocked and its
         // picture is not back yet ("Unlocking…").
@@ -111,6 +111,14 @@ enum MockCatalog {
             client.active = .desktop
         case "unlocking"?:
             client.lockShade = .unlocking
+        case "view"?:
+            // The off-console view (docs/off-console-plan.md): switched to another user, the Mac showing this session
+            // anyway (its user's switch): the windows, thumbnails and picture as they are, no cover, no clipboard, no
+            // menus, the line over the stream, the drawer's and the Settings panel's line.
+            client.lockWhy = .otherUser
+            client.lockView = true
+            client.lockShade = nil
+            client.hostClipboard = nil
         default:
             break
         }
@@ -153,7 +161,7 @@ enum MockCatalog {
         }
         // nil under `-SillLive 1`: the mock is never shown then, and must say nothing on the console. A
         // locked mock Mac has no app's menus (`-SillMacLocked 1`: an empty top level, no Menus button).
-        if let menus { client.showMockMenus(macMenus(client.macLocked ? MenuCase.none : menus)) }
+        if let menus { client.showMockMenus(macMenus(client.macLocked ? MenuCase.none : menus)) }   // the view too: no app's menus
         if let pointer { seedPointer(client, pointer, pencilPointer: pencilPointer) }
         return client
     }
