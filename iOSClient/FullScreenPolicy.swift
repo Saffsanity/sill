@@ -196,14 +196,26 @@ struct EdgeFlick: Equatable {
         return .notAFlick(.shortOfEdge)
     }
 
-    /// Points a second leftward over the last `speedWindow` before `last` (the whole stroke when it is
-    /// shorter): from the latest sample at least that long before it, else the first.
+    /// Points a second leftward over the last `speedWindow` before `last`: from where the finger was that long
+    /// before the lift, in proportion between the samples on either side of that moment (the whole stroke's
+    /// average when it is shorter). A still finger sends no samples, so after a rest the next sample is the
+    /// motion's first: the proportion across the rest puts the finger at most that one sample's step short of
+    /// where it set off. (From the sample before that moment instead, a flick after a rest would count the rest
+    /// and read slow: 36 pt in 37 ms after a 0.1 s rest is 250 pt/s over the whole stroke, 600 over its end.)
     static func leftSpeed(_ samples: [Sample], at last: Sample) -> Double {
-        guard var from = samples.first else { return 0 }
-        for sample in samples where sample.t <= last.t - speedWindow { from = sample }
-        let dt = last.t - from.t
-        guard dt > 0 else { return 0 }
-        return (from.x - last.x) / dt
+        guard let first = samples.first else { return 0 }
+        let since = last.t - speedWindow
+        if first.t >= since {
+            let dt = last.t - first.t
+            return dt > 0 ? (first.x - last.x) / dt : 0
+        }
+        var before = first, after = last
+        for sample in samples {
+            if sample.t <= since { before = sample } else { after = sample; break }
+        }
+        let span = after.t - before.t
+        let x = span > 0 ? before.x + (after.x - before.x) * ((since - before.t) / span) : before.x
+        return (x - last.x) / speedWindow
     }
 
     /// The console's numbers for a judged stroke: where it landed, how far left it went, how fast at the

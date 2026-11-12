@@ -89,8 +89,26 @@ check(hides(line(from: EdgeFlick.band, 300, to: 0, 300, speed: 400)), "a flick f
 check(hides(line(from: EdgeFlick.travel, 300, to: 0, 300, speed: 400)), "a flick of exactly the travel hides")
 check(hides(Stroke(points: [(30, 300, 0), (29.5, 300, 0.19), (15, 300, 0.22), (0, 300, EdgeFlick.duration)])),
       "a flick lifting exactly at the duration hides (it rested, then went fast)")
-// Exactly 300 pt/s over the last 50 ms (binary fractions of a second, so the arithmetic is exact).
-check(hides(Stroke(points: [(37.5, 300, 0), (18.75, 300, 0.0625), (0, 300, 0.125)])), "a flick at exactly the speed hides")
+// Exactly 300 pt/s over the last 50 ms: a sample exactly the window before the lift, 15 pt from it, so the
+// arithmetic is exact (15 / 0.05 is 300.0 in doubles).
+check(hides(Stroke(points: [(37.5, 300, 0), (15, 300, 0.125 - EdgeFlick.speedWindow), (0, 300, 0.125)])), "a flick at exactly the speed hides")
+check(EdgeFlick.leftSpeed([.init(x: 37.5, y: 0, t: 0), .init(x: 15, y: 0, t: 0.125 - EdgeFlick.speedWindow), .init(x: 0, y: 0, t: 0.125)],
+                          at: .init(x: 0, y: 0, t: 0.125)) == EdgeFlick.speed, "that stroke's speed is exactly the number")
+// A rest that sends no samples (a still finger sends none), then a flick: the speed is the end's, not the
+// whole stroke's. The touch rig's stroke at 60 Hz, its first move just after and just before the window's start.
+for firstMove in [0.1180, 0.1165] {
+    let s = Stroke(points: [(36, 300, 0), (24, 300, firstMove), (12, 300, 0.1333), (2, 300, 0.15), (2, 300, 0.1667)])
+    check(hides(s), "a flick after a 0.1 s rest with no samples hides (first move at \(firstMove) s; got \(verdict(s)))")
+}
+// A fast flick after a rest, its motion shorter than the window: 36 pt in 37 ms, 0.1 s after landing.
+let restThenFlick = Stroke(points: [(36, 300, 0), (28, 300, 0.108), (20, 300, 0.1163), (12, 300, 0.125), (4, 300, 0.133), (0, 300, 0.137)])
+check(hides(restThenFlick), "a fast flick after a sample-free rest hides (got \(verdict(restThenFlick)))")
+check(EdgeFlick.leftSpeed(restThenFlick.points.map { .init(x: $0.x, y: $0.y, t: $0.t) }, at: .init(x: 0, y: 300, t: 0.137)) > 500,
+      "its speed is its end's, over 500 pt/s, not the whole stroke's 263")
+// The lift's own sample, one interval after the last move at the same place, slows the measure but a
+// flick still hides: 60 Hz, 480 pt/s, then the lift where it was last seen.
+check(hides(Stroke(points: [(40, 300, 0), (32, 300, 1.0 / 60), (24, 300, 2.0 / 60), (16, 300, 3.0 / 60), (8, 300, 4.0 / 60), (8, 300, 5.0 / 60)])),
+      "a flick lifted one sample after its last move hides")
 // Lifted exactly at the reach, too slow for the projection to carry it off: the reach alone.
 check(hides(line(from: 48, 300, to: EdgeFlick.reach, 300, speed: 400)), "lifted at the reach at 400 pt/s hides")
 
@@ -181,9 +199,16 @@ func model(_ s: Stroke) -> EdgeFlick.Verdict {
         }
         if -dx < 12 { return .notAFlick(.tooShort) }
         if abs(dy) > 1.2 * -dx { return .notAFlick(.steep) }
-        var from = first
-        for earlier in p[..<i] where earlier.t <= q.t - 0.05 { from = earlier }
-        let v = q.t > from.t ? (from.x - q.x) / (q.t - from.t) : 0
+        // The speed over the last 50 ms: from where the finger was 50 ms before the lift, between the two
+        // samples that straddle that moment in proportion; the whole stroke's average when it is shorter.
+        let start = q.t - 0.05
+        var v = q.t > first.t ? (first.x - q.x) / (q.t - first.t) : 0
+        if first.t < start {
+            for k in 1...i where p[k - 1].t <= start && p[k].t > start {
+                let a = p[k - 1], b = p[k]
+                v = (a.x + (b.x - a.x) * ((start - a.t) / (b.t - a.t)) - q.x) / 0.05
+            }
+        }
         if v < 300 { return .notAFlick(.tooSlow) }
         if q.x <= 24 || q.x - v * 0.05 <= 0 { return .hide }
         return .notAFlick(.shortOfEdge)

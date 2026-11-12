@@ -27,7 +27,13 @@ MUTANTS = {
                                       "if last.x < reach || last.x - v * projection <= 0 { return .hide }"),
     "F15 no projection": ("if last.x <= reach || last.x - v * projection <= 0 { return .hide }", "if last.x <= reach { return .hide }"),
     "F16 the projection backwards": ("|| last.x - v * projection <= 0 {", "|| last.x + v * projection <= 0 {"),
-    "F17 the speed over the whole stroke": ("        for sample in samples where sample.t <= last.t - speedWindow { from = sample }\n", ""),
+    "F17 the speed over the whole stroke": ("        if first.t >= since {\n", "        if true {\n"),
+    "F17b the window from the sample before it (a rest reads slow)": (
+        "        let x = span > 0 ? before.x + (after.x - before.x) * ((since - before.t) / span) : before.x\n        return (x - last.x) / speedWindow",
+        "        return (before.x - last.x) / (last.t - before.t)"),
+    "F17c the window from the sample after it": (
+        "        let x = span > 0 ? before.x + (after.x - before.x) * ((since - before.t) / span) : before.x",
+        "        let x = after.x"),
     "F18 a second finger ignored": ("        if verdict == .undecided { verdict = .notAFlick(.secondTouch) }\n", ""),
     "F19 a cancel ignored": ("        if verdict == .undecided { verdict = .notAFlick(.cancelled) }\n", ""),
     "F20 a still finger never let go": ("if verdict == .undecided, let first = samples.first, t - first.t > Self.duration {",
