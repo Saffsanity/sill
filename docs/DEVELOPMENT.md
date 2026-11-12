@@ -5,8 +5,9 @@ Sill, see the [Support](https://getsill.app/support) page on
 [getsill.app](https://getsill.app).
 
 Until 2026-09-25 this was the README, so where a plan in `docs/` mentions "the
-README", it means a section here. `CLAUDE.md` has the rest: the work in
-progress, the decisions already made, and every test hook.
+README", it means a section here. `CLAUDE.md` has the rest: the layout, the
+decisions already made and every test hook; `docs/steps/` has what each piece of
+work did, a file each.
 
 ## Overview
 
@@ -1708,28 +1709,18 @@ tests of Direct Wireless Connection and remote access.
 
 ### The pure checks
 
-`Tests/checks/run-all.sh` compiles the files that decide things (discovery and
-the session's path, the settings ledger, the wire format, pairing, who may use
-which door, how frames go into the video encoder and when a stream gets a new
-encoder session, the device floor, how a session ends, how the device reads the
-Mac's messages, the update check, the disk image's window, where everything goes
-on a phone held upright, who moves the Mac's pointer, the Mac's menus on both
-ends, which three-finger strokes are gestures and what the Mac does with one,
-which modifiers a device's keys leave set on the Mac, what an input method or
-dictation sends the Mac and whose Control-Space it is, when a held key repeats
-on the Mac, the first-run tour,
-pairing at home (the doors, the cable, the device's rows), whether screen
-sharing shows the pairing window, which keychain Sill.app keeps its identity
-in, the away quality and the link's judgement, the iPhone Duo's layouts, what
-of the clipboard goes between the Mac and a device, which type encodings the
-virtual display's private API may report, when the Mac's display is woken for a
-device, and the picture's pinch zoom with who two fingers belong to) on their own with a check each, and
-runs them: about five minutes, no device, permission or encoder. `--mutants`
-also checks that each check fails when its file is changed in one place (well
-over an hour).
-`Tests/checks/README.md` lists them. CI (`.github/workflows/ci.yml`) runs them
-on every pull request and push to `main`, with `swift build -c release` and the
-iOS app's build for the simulator.
+`Tests/checks/run-all.sh` compiles the files that decide things (the rules, not
+the views: discovery and the session's path, the wire format, pairing and the
+doors, what a host takes of a device's input, the encoder's bookkeeping, where
+the layouts put things, and so on) on their own with a check each, and runs
+them: about five minutes, no device, permission or encoder. `--mutants` also
+checks that each check fails when its file is changed in one place (well over
+an hour). Each check says what it checks in its own folder's `README.md`, and
+`Tests/checks/list.sh` prints them all: no list of them is kept by hand, here or
+anywhere (`Tests/checks/README.md` says how to add one). CI
+(`.github/workflows/ci.yml`) runs them on every pull request and push to
+`main`, with `swift build -c release` and the iOS app's build for the simulator;
+its mutants run, by hand, reads the checks with mutants from the folders.
 
 ### The test client and the relay
 

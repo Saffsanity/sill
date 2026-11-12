@@ -1342,10 +1342,13 @@ GitHub's prices on 2026-09-25 ([runner pricing](https://docs.github.com/en/billi
   use a week's share; making the repository public ends the question. A verify-only release
   takes about the same (the disk image adds well under a minute). A signed release also waits for
   Apple's notary service twice (the zip, then the disk image), usually 15 to 30 minutes in all.
-  The mutants (CI started by hand with "mutants" ticked) run a job for each of the 32 checks with
-  mutants, about four hours of macOS time in all (their scripts took 205 minutes here on
-  2026-09-27, several at once; each job also checks out and selects Xcode, and is rounded up to
-  the minute): some 2,400 included minutes, more than Free's month, or about $15.
+  The mutants (CI started by hand with "mutants" ticked) run a job for each check with mutants,
+  read from the folders (32 checks on 2026-09-27, 66 on 2026-11-12), each job allowed 120 minutes
+  (Noah, 2026-11-12: remote-rules' 124 mutants took about 58 minutes here, and a job cut off at its
+  limit loses its results). On 2026-09-27 that was about four hours of macOS time in all (their
+  scripts took 205 minutes here, several at once; each job also checks out and selects Xcode, and
+  is rounded up to the minute): some 2,400 included minutes, more than Free's month, or about $15
+  then (not measured since).
 - Storage is small: the build cache stays within the 10 GB each repository gets for caches, and
   the artifacts (a zip and a disk image of about 3 MB each for 14 days, the notary logs for 30, a
   TestFlight .ipa of about 2 MB for 14 days) within the 500 MB of artifact storage on GitHub Free.
