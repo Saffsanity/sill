@@ -284,7 +284,12 @@ struct ContentView: View {
 ///   them to VoiceOver ("ax: 1 Open the app list (33,463 55×50)"). SwiftUI builds that tree only for
 ///   an assistive technology: on a private simulator, `xcrun simctl spawn UDID defaults write
 ///   com.apple.Accessibility ApplicationAccessibilityEnabled -bool true` first. In the mock and the
-///   normal app.
+///   normal app. Each line ends in the element's custom actions ("actions “Copy”").
+///   `-SillAXAction '<label>|<action>'`, with it: half a second after the dump, the custom action of
+///   that name on the first element whose label begins with that label, as VoiceOver's actions do
+///   it, then what the clipboard holds ("ax: performed “Copy” on “Sill version 0.6.2, build 1400”:
+///   true; the clipboard holds “Sill 0.6.2 (1400)”"): a private simulator only (it writes that
+///   simulator's clipboard, and Simulator.app, while it runs, can share it with the Mac's).
 /// * `-SillAppVersion <v>` and `-SillAppBuild <b>` — the version label at the bottom of the connect
 ///   screen and of the Settings panel (VersionLabel.shown) shows these instead of the bundle's
 ///   CFBundleShortVersionString and CFBundleVersion (an empty one: as if the bundle had none), so a
@@ -1259,9 +1264,20 @@ struct ConnectScreen: View {
             #if DEBUG
             print("connect: \(style.rawValue) (Sill.connectionStyle \(styleRaw ?? "unset"))")
             scheduleStyleToggles()
-            // `-SillAXDump <s>`: the connect screen's accessibility elements too, s seconds after it shows.
+            // `-SillAXDump <s>`: the connect screen's accessibility elements too, s seconds after it shows,
+            // and `-SillAXAction '<label>|<action>'` half a second later.
+            // Not once a session has taken the screen: the stream screen dumps itself.
             let dump = UserDefaults.standard.double(forKey: "SillAXDump")
-            if dump > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + dump) { StreamScreen.accessibilityDump() } }
+            if dump > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + dump) { [client] in
+                    if !client.connected { StreamScreen.accessibilityDump() }
+                }
+            }
+            if dump > 0, let spec = UserDefaults.standard.string(forKey: "SillAXAction") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + dump + 0.5) { [client] in
+                    if !client.connected { StreamScreen.accessibilityPerform(spec) }
+                }
+            }
             #endif
         }
         .onChange(of: client.status) { _, line in announce(line) }
@@ -1655,40 +1671,45 @@ struct ConnectScreen: View {
     /// line the footer has wherever it fits there, so the footer is no taller for it and the column
     /// never moves for it (ColumnOverFooter measures this view): after "Needs the free Sill app on your
     /// Mac." (every screen from 390 pt wide at the default text size); else a line of its own under
-    /// the links on one line; else beside Support and the privacy policy when the links take two
-    /// lines; else a line of its own under those. VoiceOver reads it last in the footer, wherever it is.
+    /// the links on one line; else, the links on two lines, beside Support and the privacy policy, or
+    /// beside the download link, the shorter; else a line of its own under those. VoiceOver reads it
+    /// last in the footer, wherever it is.
     private func footer(_ layout: ConnectLayout) -> some View {
         Group {
             if let version = VersionLabel.shown {
                 ViewThatFits(in: .horizontal) {
+                    // After the sentence; the links are on one line whenever this fits.
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .firstTextBaseline, spacing: 0) {
-                            needsMac
-                            Spacer(minLength: 0)
-                            VersionLine(label: version).padding(.leading, Self.versionGap).accessibilitySortPriority(-1)
-                        }
-                        links
+                        atLineEnd(needsMac, version)
+                        linksOnOneLine
                     }
+                    // A line of its own under the links on one line.
                     VStack(alignment: .leading, spacing: 8) {
                         needsMac
                         linksOnOneLine
-                        VersionLine(label: version).frame(maxWidth: .infinity, alignment: .trailing).accessibilitySortPriority(-1)
+                        onItsOwnLine(version)
                     }
+                    // The links on two lines: beside Support and the privacy policy, else beside the
+                    // download link, the shorter.
                     VStack(alignment: .leading, spacing: 8) {
                         needsMac
                         VStack(alignment: .leading, spacing: 2 * Self.linkReach) {
                             downloadLink
-                            HStack(alignment: .firstTextBaseline, spacing: 0) {
-                                supportAndPrivacy
-                                Spacer(minLength: 0)
-                                VersionLine(label: version).padding(.leading, Self.versionGap).accessibilitySortPriority(-1)
-                            }
+                            atLineEnd(supportAndPrivacy, version)
                         }
                     }
                     VStack(alignment: .leading, spacing: 8) {
                         needsMac
+                        VStack(alignment: .leading, spacing: 2 * Self.linkReach) {
+                            atLineEnd(downloadLink, version)
+                            supportAndPrivacy
+                        }
+                    }
+                    // A line of its own under the two lines of links.
+                    VStack(alignment: .leading, spacing: 8) {
+                        needsMac
                         linksOnTwoLines
-                        VersionLine(label: version).frame(maxWidth: .infinity, alignment: .trailing).accessibilitySortPriority(-1)
+                        onItsOwnLine(version)
                     }
                 }
             } else {
@@ -1714,10 +1735,29 @@ struct ConnectScreen: View {
         .padding(.bottom, Self.linkReach)
     }
 
-    /// The least room between the version and the words before it on their line: the version's own
-    /// padding, so it is part of the line's width when ViewThatFits asks whether the line fits (the
-    /// Spacer beside it asks for none).
+    /// The least room between the version and the words before it on their line.
     private static let versionGap: CGFloat = 12
+
+    /// The version at the end of a line of the footer, at its trailing edge. The gap is the version's
+    /// own padding, so it is part of the line's width when ViewThatFits asks whether the line fits
+    /// (the Spacer beside it asks for none). Read after the links (the footer is one container).
+    private func atLineEnd(_ words: some View, _ version: VersionLabel) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+            words
+            Spacer(minLength: 0)
+            VersionLine(label: version).padding(.leading, Self.versionGap).accessibilitySortPriority(-1)
+        }
+    }
+
+    /// The version on a line of its own under the links, at the trailing edge, and behind them: the
+    /// links' tap areas reach 14 pt below their words, into this line, as they reached below the
+    /// footer's last line before.
+    private func onItsOwnLine(_ version: VersionLabel) -> some View {
+        VersionLine(label: version)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .accessibilitySortPriority(-1)
+            .zIndex(-1)
+    }
 
     private var needsMac: some View {
         Text("Needs the free Sill app on your Mac.")

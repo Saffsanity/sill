@@ -31,15 +31,19 @@ invented, nothing hidden.
   2. else on a line of its own under the links, when they fit on one line (a 375 pt iPhone at the default
      size, larger text where the links fit);
   3. else beside "Support · Privacy Policy", when the links take two lines (a 320 pt screen; a 375 pt
-     iPhone at the largest sizes);
+     iPhone at the largest sizes), or beside "Get it at getsill.app", the shorter (the review's: a 320
+     pt screen at xLarge);
   4. else on a line of its own under the two lines of links.
-  One `ViewThatFits` over the four arrangements, in that order, inside the footer that ColumnOverFooter
+  One `ViewThatFits` over the five arrangements, in that order, inside the footer that ColumnOverFooter
   measures (its hidden copy is the same view), so the column, the title and the rows never move for it
   where it shares a line, and where the footer gains a line the column follows the rule it always had
   (it rises only to keep 24 pt clear of the footer, never closer than 16 pt to the top, and scrolls
   above it when even that does not fit). The footer stays where it was: above the home indicator (the
   safe area), under the laptop pose's fold, in the book pose's leading page (it is the column's width).
-  VoiceOver reads it last in the footer, after the links, wherever it is drawn.
+  VoiceOver reads it last in the footer, after the links, wherever it is drawn. On a line of its own it
+  lies behind the links, whose tap areas reach 14 pt below their words into its line as they did below
+  the footer's last line; beside the sentence, the links' upward reach covers its lower edge as it
+  covers the sentence's.
 - The Settings panel: the last thing in its middle, the part that scrolls, after Take the Tour's
   footnote: a line of its own at the footnotes' inset, their size and colour, with the gap between
   groups above it and below it. The header and Disconnect are pinned and do not change; where the
@@ -88,7 +92,10 @@ invented, nothing hidden.
   the Duo's four sizes with every hinge state the harness knows (none, `closed`, `half`, `flat`), an
   iPad's 1000x710 and 710x1000, iPhones from the smallest (375x667) to the largest (440x956), upright
   and sideways, at the default text size and at accessibility-extra-large. Outside the footer and the
-  panel's last lines nothing may differ; where the footer gains a line, what moved and why.
+  panel's last lines nothing may differ; where the footer gains a line, what moved and why. The panel
+  also as it opens, at the top of its rows (`-SillSettings 1`): there nothing may differ unless the whole
+  middle fits without scrolling. Scrolled to its end, the end shows one line more, so every row above it
+  sits higher by that line: there only the middle may differ, never the header or Disconnect.
 - G5 VoiceOver's order (`-SillAXDump`): one element, "Sill version 0.6.2, build 1400", last in the
   footer and last in the panel's middle.
 
