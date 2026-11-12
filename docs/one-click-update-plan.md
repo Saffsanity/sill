@@ -201,8 +201,8 @@ or opened by another app before every check has passed.
 no ditto, no shell. The programs involved are Sill itself and LaunchServices starting the new Sill. The
 staging folder is new for each attempt (`FileManager.url(for: .itemReplacementDirectory, in:
 .userDomainMask, appropriateFor: Sill.app)`: a random name in this user's temporary folder, 0700, on
-Sill.app's volume); nothing in a leftover one is ever read or reused; leftovers (`NSIRD_Sill_*`) are
-deleted once a Sill's host has started.
+Sill.app's volume); nothing in a leftover one is ever read or reused; the one an update leaves is deleted
+once the next Sill's host has started (T20).
 
 **T12. Another process of the same user.** Malware already running as this user can rewrite what this
 user owns; the updater cannot stop that and does not try. What it must not do is lend it Sill's own
@@ -289,11 +289,18 @@ host, no keychain). The old Sill waits (up to 30 s) for the new one to finish la
 Timer (the modal-loop rule: NSApp.terminate can answer `.terminateLater`). If the new Sill fails to
 launch, quits, or does not finish launching in time, the old one stops it, swaps the old copy back and
 stays, saying so. Once the new Sill's host has started, it deletes the staging folder and the old copy in
-it, never while an update of its own is under way, and never a folder marked as holding a copy that could
-not be put back (a file in it says so: the person's way back stays until they move it). If the new Sill
-fails after that, the old copy is gone; if it fails before (it crashes during its first start), the old
-copy is still in the staging folder, whose path the log gives ("Sill 0.6.1 is kept at …"), and the way back
-is §12's last paragraph.
+it, never while an update of its own is under way, and never a folder holding a copy that could not be put
+back (set aside by a rename, with a note in it: the person's way back stays until they move it). It finds
+the folder by a note the old Sill wrote right after the swap (`Update Now leftover.txt` in Sill's Caches
+folder), not by listing: macOS's System Policy denies reading the temporary-items folder to most processes,
+Sill.app among them (measured: the harness and an ad hoc app started by Launch Services both get EPERM
+listing it, "deny(1) file-read-data …/TemporaryItems" in the log). The note is this user's to write, so
+before deleting anything the new Sill checks that the folder it names still is one of its own staging
+folders that may go (directly in the item-replacement folder for Sill.app's volume, `NSIRD_Sill_…`, this
+user's, not a link, without the kept note); a forged note can name nothing else. If the new Sill fails
+after that, the old copy is gone; if it fails before (it crashes during its first start), the old copy is
+still in the staging folder, whose path the log gives ("Sill 0.6.1 is kept at …"), and the way back is §12's
+last paragraph.
 
 **T21. Hooks.** Nothing in Sill.app can loosen the pinned requirement, the update keys, the allow-list,
 the version rule or the size limits: Trust and Endpoints are immutable values made whole; the mechanism
@@ -551,8 +558,11 @@ harness. Every step returns a `Result` with a Failure; nothing throws past it.
   link), its cdhash equal to the running process's, then `renamex_np(staged, installed, RENAME_SWAP)`,
   then `check` at the installed path with the same code expected; on failure the swap is undone.
 - `putBack`: the same exchange again (the old copy back at its path, the new one in staging).
-- `cleanUpStaging(for installed:)`: removes `NSIRD_Sill_*` folders in the item-replacement directory's
-  parent folder for that volume (this user's folders, never following a link).
+- `noteLeftover`, `removeLeftover(noted:for:)`: the folder holding the replaced copy, noted after the
+  swap and removed by the next Sill once its host is up, only while it is still a staging folder that may
+  go (`isLeftover`). `cleanUpStaging(for installed:)` does the same by listing the item-replacement folder,
+  a best effort: macOS denies the listing to most processes (T20). `setAside`: a folder holding an old copy
+  not put back, renamed out of both.
 - `situation`, `runningCode`, `runningIsInstalled`, `process(_:satisfies:)`: the facts of §4.1 and T10.
 
 AppUpdater (`Sources/SillMenuBar/AppUpdater.swift`, main actor, @Observable) gathers the facts for
@@ -672,7 +682,8 @@ checklist.md part 1 §3's marker rule).
   after it, put back); a copy at the path that isn't the running one. The requests (Sill's User-Agent, no
   credential, no cookie, none to the refused hosts). The launch check against a running process. Where
   an app runs: writable, a process running from it, a folder made read-only, a link, no space, a disk
-  image writable and read-only. Staging folders made and cleaned. With the genuine v0.6.1 (downloaded
+  image writable and read-only. Staging folders made, one set aside, the noted leftover removed and five
+  forged notes refused. With the genuine v0.6.1 (downloaded
   read-only with `gh`): `Trust.release`'s every rule with the harness's key: 0.6.1 over 0.6.0 installed;
   the same version, a v0.6.2 tag, another team pinned, Apple's own requirement as the running one, a
   tampered, an ad hoc and an unstapled copy, a manifest naming other code: refused.

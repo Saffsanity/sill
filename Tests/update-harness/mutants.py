@@ -9,7 +9,7 @@ SRC = os.path.join(ROOT, "Sources/SillMenuBar")
 F = "UpdateInstaller.swift"
 MUTANTS = [
     ("any redirect followed", "guard let url = request.url, redirects <= maxRedirects, allowed(url) else {", "guard let url = request.url else {"),
-    ("no check after the swap", "        switch check(installed, manifest: manifest, running: running, runningRequirement: runningRequirement) {\n        case .success(let c) where c == expected:\n            return .success(())", "        switch Result<Policy.Checked, Failure>.success(expected) {\n        case .success(let c) where c == expected:\n            return .success(())"),
+    ("no check after the swap", "        switch check(installed, manifest: manifest, running: running, runningRequirement: runningRequirement) {\n        case .success(let c) where c == expected: return .success(())", "        switch Result<Policy.Checked, Failure>.success(expected) {\n        case .success(let c) where c == expected: return .success(())"),
     ("the copy at the path not compared with the running one", "        guard Self.cdhash(of: installed, arch: .current) == runningCDHash else { return .failure(.changedSinceStart) }\n", ""),
     ("anything in staging put back", "        guard isTheOldCopy(staged, old: old) else { return .notTheOldCopy }\n", ""),
     ("a cdhash alone taken for the old copy", "        return SecStaticCodeCheckValidityWithErrors(code, Self.strictFlags, requirement, nil) == errSecSuccess\n", "        return true\n"),

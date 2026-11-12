@@ -35,7 +35,8 @@ the menu are what they were.
   copy, by cdhash) on any failure. Relaunch without a helper: the new copy as a new instance waits for the
   old to quit (`AppUpdater.waitForOtherSill`, a contract for every later Sill); the old quits from a
   run-loop Timer once the new one's running code is the code checked; the new removes the old copy once its
-  host is up. Refusals with words (`UpdateInstallPolicy.refusal`): a build that is not a notarized release,
+  host is up, finding its folder by a note in Sill's Caches (macOS's System Policy denies listing the
+  temporary-items folder to apps, measured), and only while it still is one of Sill's staging folders. Refusals with words (`UpdateInstallPolicy.refusal`): a build that is not a notarized release,
   a test feed or version, translocated, a disk image, read-only or network volume, a link on the way, a
   folder this account can't change, a Sill.app another account owns (the last to install or update it), a
   copy changed since launch, another account's Sill or another Sill of this account, no room. A device connected asks first (by connection). Never a hook: two constants, and
