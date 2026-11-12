@@ -129,6 +129,14 @@ who waits for it; it finishes past a third of the screen's width (the lift's spe
 begun to swipe in 0.3 s after it landed (`EdgeReveal.decideWithin`: a press, a rest) is let go then, so
 nothing near the edge is held longer and a long press there (0.45 s) is never late.
 
+## The Desktop button's screens (#355)
+
+Hiding and showing the controls never picks a source and never steps the Desktop: the Desktop button, which
+on a Mac with two screens or more reads "Desktop 2" and steps to the next screen at a tap (kind 47), goes and
+comes with the bar, reading what the Mac says each time; the only message a hide or a show sends is the
+viewport, which the Mac does not apply to the Desktop. So the Desktop stays on the screen it is on, and the
+swipe in's preview shows the button as it will be ("Desktop 2", its dots).
+
 ## Where the picture goes while hidden (open question 5)
 
 The room: the screen less the safe area's top, left and right (the Dynamic Island or the notch upright, the
@@ -212,7 +220,9 @@ indicator too); DEBUG `-SillFullScreenRoom screen|housing|safe`.
   dry-run input log) and the app under `-SillLive 1` on the agents' iPad simulator, at an iPhone 15 Pro's upright
   size and an iPad mini's sideways: hidden and shown by a toggle, a shake and a played swipe in while an input
   script taps, presses keys and types around each change: the viewport one per change (the room, then the
-  pane), and every input step reaching the host.
+  pane), and every input step reaching the host. Then the Desktop on the Mac's second screen (#355; the host's
+  `SILL_TEST_DISPLAYS` with two stops): the device's own Desktop button steps to it (`-SillDesktopTapAt`), the
+  controls hide, show, hide and come back by a shake, and every stream after the step is on display 2.
 - G5 photos (Scripts/harness-photos.sh, the agents' Duo on iOS 27.1 and iPad on 27.0): every shown layout
   pixel for pixel main's; the hidden layouts, the hint, the swipe in's preview, the room's three choices with an
   iPhone's island, corners and home indicator drawn, a tall window upright on a phone and an iPad mini, the

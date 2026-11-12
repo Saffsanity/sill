@@ -369,6 +369,9 @@ struct ContentView: View {
 ///   fraction of the picture's pane (its middle without one), then the lift's settle: `2.5@0.3,0.4; 3
 ///   0.1` zooms in, then pinches all the way out. The console's "harness: -SillZoom …" line gives the
 ///   zoom.
+/// * `-SillDesktopTapAt <s>[,<s>…]` — live: the Desktop button tapped at those seconds, as a finger does (on a
+///   Mac of two stops or more, with the Desktop streaming, its next stop; full screen's gate shows a hide keeping
+///   it). The console says "harness: the Desktop button tapped at … (it read …)".
 /// * `-SillMockHardware 1` — an iPhone 15 Pro's Dynamic Island (where the fake safe area puts the sensor
 ///   housing), rounded corners and home indicator drawn over the fake screen (MockHardware), for photos of
 ///   where full screen's hidden picture goes.

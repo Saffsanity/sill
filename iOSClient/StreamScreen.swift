@@ -833,6 +833,15 @@ struct StreamScreen: View {
         if fullScreen.startHidden, fullScreen.hint == .every { showHint() }
         guard live else { return }
         client.runSoundArguments()
+        // `-SillDesktopTapAt <s>[,<s>…]` (live): the Desktop button tapped at those seconds, as a finger does
+        // (StreamClient.tapDesktop: with the Desktop streaming on a Mac of two stops or more, the next stop), so
+        // a gate can show that full screen keeps the stop the Desktop is on (docs/full-screen-plan.md).
+        for time in (defaults.string(forKey: "SillDesktopTapAt") ?? "").split(separator: ",").compactMap({ Double($0) }) {
+            after(time) {
+                print("harness: the Desktop button tapped at " + Self.points(CGFloat(time)) + " s (it read \"" + client.desktopButton.label + "\")")
+                client.tapDesktop()
+            }
+        }
         if defaults.bool(forKey: "SillDrawer") {
             after(1.5) { print("harness: the drawer opened"); withAnimation(.easeOut(duration: 0.18)) { drawerOpen = true } }
         }
