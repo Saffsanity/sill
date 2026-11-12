@@ -180,6 +180,24 @@ struct FullScreenEdges: UIViewRepresentable {
     }
 }
 
+// MARK: - The system's own overlays
+
+/// While hidden: no status bar, the home indicator fades (`persistentSystemOverlays`, UIKit's
+/// prefersHomeIndicatorAutoHidden), and iPadOS's own left-edge gesture (Stage Manager's recent apps) waits for
+/// a second swipe (`defersSystemGestures`, UIKit's preferredScreenEdgesDeferringSystemGestures), so the first is
+/// Sill's swipe in; asked for only then. The status bar's preference in a background, as `duoStatusBar` puts
+/// its own, so that hiding and showing it never rebuilds the screen's views.
+struct FullScreenSystem: ViewModifier {
+    let hidden: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .background { if hidden { Color.clear.statusBarHidden(true) } }
+            .persistentSystemOverlays(hidden ? .hidden : .automatic)
+            .defersSystemGestures(on: hidden ? .leading : [])
+    }
+}
+
 // MARK: - The shake
 
 extension Notification.Name {

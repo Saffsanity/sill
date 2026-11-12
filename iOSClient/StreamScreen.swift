@@ -476,24 +476,12 @@ struct StreamScreen: View {
             // Full screen's edges on the window: the flick off the left edge while the interface shows, the
             // swipe in from the bezel and the pointer at the edge while it is hidden, the shake, and whether
             // the window covers the screen.
-            .background(FullScreenEdges(
-                flickArmed: FullScreenPolicy.flickArmed(fullScreenSituation, level: chrome, voiceOver: voiceOverEnabled),
-                revealArmed: hidden,
-                onFlick: { hideChrome(by: "a flick off the left edge") },
-                onReveal: { state, travel, speed, width in revealMoved(state, travel: travel, speed: speed, width: width) },
-                onDwell: { showChrome(by: "the pointer at the left edge") },
-                onShake: { if chromeHidden { showChrome(by: "a shake") } },
-                onCoverage: { coversScreen = $0 },
-                onInsets: { e in if chrome == .shown { shownInsets = FullScreenPolicy.Insets(top: e.top, left: e.left, bottom: e.bottom, right: e.right) } }))
+            .background(fullScreenEdges)
             // The layouts and the overlays share this screen's space, and so its fold; the inner
             // display gives the picture the status bar's strip in every pose.
             .duoFold(posture, size: geo.size, screen: "stream screen")
             .duoStatusBar(posture, size: geo.size)
-            // While hidden: no status bar, the home indicator fades, and iPadOS's own left-edge gesture (Stage
-            // Manager's recent apps) waits for a second swipe, so the first is Sill's swipe in.
-            .background { if hidden { Color.clear.statusBarHidden(true) } }
-            .persistentSystemOverlays(hidden ? .hidden : .automatic)
-            .defersSystemGestures(on: hidden ? .leading : [])
+            .modifier(FullScreenSystem(hidden: hidden))
             .environment(\.largerPictureOffered, offersLarger)
             #if DEBUG
             // The console's line for the gates: what Larger Picture's rule made of the switch and of
@@ -1095,6 +1083,23 @@ struct StreamScreen: View {
 
     /// The interface is hidden (docs/full-screen-plan.md): the picture alone, in the screen's room.
     private var chromeHidden: Bool { chrome == .hidden }
+
+    /// Full screen's edges on the window: the flick off the left edge while the interface shows, the swipe in
+    /// from the bezel and the pointer at the edge while it is hidden, the shake, whether the window covers the
+    /// screen, and its safe area while shown.
+    private var fullScreenEdges: FullScreenEdges {
+        FullScreenEdges(
+            flickArmed: FullScreenPolicy.flickArmed(fullScreenSituation, level: chrome, voiceOver: voiceOverEnabled),
+            revealArmed: chrome != .shown,
+            onFlick: { hideChrome(by: "a flick off the left edge") },
+            onReveal: { state, travel, speed, width in revealMoved(state, travel: travel, speed: speed, width: width) },
+            onDwell: { showChrome(by: "the pointer at the left edge") },
+            onShake: { if chromeHidden { showChrome(by: "a shake") } },
+            onCoverage: { coversScreen = $0 },
+            onInsets: { e in
+                if chrome == .shown { shownInsets = FullScreenPolicy.Insets(top: e.top, left: e.left, bottom: e.bottom, right: e.right) }
+            })
+    }
 
     /// What FullScreenPolicy weighs: whether a hide may start, the flick listens, and the interface must come
     /// back by itself (the tour, a pairing, the link's line, the Mac's cover or off-console view, nothing
