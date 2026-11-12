@@ -87,7 +87,7 @@ check(hides(line(from: 40, 400, to: 0, 400, speed: 900, rest: 0.1)), "a flick af
 // At the edges of the numbers.
 check(hides(line(from: EdgeFlick.band, 300, to: 0, 300, speed: 400)), "a flick from exactly the band's edge hides")
 check(hides(line(from: EdgeFlick.travel, 300, to: 0, 300, speed: 400)), "a flick of exactly the travel hides")
-check(hides(Stroke(points: [(30, 300, 0), (29.5, 300, 0.2), (15, 300, 0.225), (0, 300, EdgeFlick.duration)])),
+check(hides(Stroke(points: [(30, 300, 0), (29.5, 300, 0.19), (15, 300, 0.22), (0, 300, EdgeFlick.duration)])),
       "a flick lifting exactly at the duration hides (it rested, then went fast)")
 // Exactly 300 pt/s over the last 50 ms (binary fractions of a second, so the arithmetic is exact).
 check(hides(Stroke(points: [(37.5, 300, 0), (18.75, 300, 0.0625), (0, 300, 0.125)])), "a flick at exactly the speed hides")
