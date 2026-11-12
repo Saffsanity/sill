@@ -1,6 +1,10 @@
 import UIKit
 import UIKit.UIGestureRecognizerSubclass
 
+/// A recognizer that only watches touches and never recognizes (the trackpad's finger counter, the stroke
+/// observer on both surfaces): it has nothing to hold back, so it never waits for the edge recognizers.
+protocol WatchesTouchesOnly: UIGestureRecognizer {}
+
 /// Full screen's two edge recognizers (docs/full-screen-plan.md), both on Sill's window: the hide's flick off
 /// the left edge while the interface shows, and the swipe in from the left bezel while it is hidden. UIKit and
 /// FullScreenPolicy.swift's rules only, so the touch rig (Tests/touchrig) compiles them with the stream's
@@ -11,15 +15,16 @@ import UIKit.UIGestureRecognizerSubclass
 /// taps, pan and long press, the bars' buttons and the strip's scroll. A touch outside the edge fails them at
 /// its landing, so nothing waits; a touch at the edge is held only until the rule has decided, and then either
 /// is the hide (or the swipe in) and nothing else, or goes on whole, the waiting recognizers recognizing it
-/// as they would have: UIKit holds their recognition back, not the touches, so no travel is lost and nothing
-/// is reordered (the touch rig's EDGE strokes show it). Recognizers that only watch (the stroke observer, the
-/// trackpad's finger counter, the tour's touch watch) never recognize, so they never wait; the Pencil's and
-/// the iPad pointer's touches never reach these two (`allowedTouchTypes`), and the pointer's own recognizers
-/// (hover, its scrolls) take no finger, so they never wait either.
-/// A recognizer that only watches touches and never recognizes (the trackpad's finger counter, the stroke
-/// observer on both surfaces): it has nothing to hold back, so it never waits for the edge recognizers.
-protocol WatchesTouchesOnly: UIGestureRecognizer {}
-
+/// as they would have, in order. UIKit holds their recognition back, not the touches; but a pan held past its
+/// own start counts its translation from where it is let go, so the trackpad's tracker starts from where the
+/// finger landed and the picture's scroll carries the held travel as an unheld pan counts it
+/// (`heldLanding`, `panHysteresis`), and a stroke held until its lift ends with its travel (`releasedAtLift`).
+/// The touch rig's EDGE strokes show each against main's surfaces. Recognizers that only watch (the stroke
+/// observer, the trackpad's finger counter: `WatchesTouchesOnly`; the tour's touch watch, on the window) never
+/// recognize, so they never wait: made to wait, UIKit never let them or the flick reset after the first stroke
+/// it held (the rig: the trackpad answered nothing more). The Pencil's and the iPad pointer's touches never
+/// reach these two (`allowedTouchTypes`), and the pointer's own recognizers (hover, its scrolls) take no
+/// finger, so they never wait either.
 enum EdgeRecognizers {
     /// Whether `other` waits for `edge` (the flick or the swipe in) to fail: it is in the same window, below
     /// the window itself (the system's own recognizers on the window are left alone), takes fingers, and is

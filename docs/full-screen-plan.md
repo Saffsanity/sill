@@ -107,20 +107,25 @@ not a flick, too slow (…)`), so Noah's first sessions measure them.
 
 How the hold works: every other recognizer in Sill's window that takes fingers (the picture's tap, long
 press and scroll, the trackpad's tracker, taps, pan and long press, the bars' buttons, the strip's scroll)
-waits for the flick's recognizer to fail (`shouldBeRequiredToFail(by:)`). UIKit holds their recognition
-back, not the touches: a touch outside the band fails the flick at its landing and nothing waits; a touch in
-the band is held only until the rule decides, and then either is the hide and nothing else (the waiting
-recognizers fail, its touch is cancelled in the views) or goes on whole, the waiting recognizers
-recognizing it as they would have, their translation counted from the touch's landing. The trackpad's
-tracker, which begins at touch-down, now starts from where the finger landed (`FingerTracker.downLocation`),
-so a stroke it waited for loses no travel. A stroke judged only at its lift (a quick drag left that stops
-short of the edge) has its waiting recognizers let go at that lift, beginning and ending at once: the
-picture's scroll and the trackpad's tracker then carry the finger's travel at their end
-(`EdgeRecognizers.releasedAtLift`, true only in that moment after an edge recognizer let a touch go at its
-lift), and the trackpad's pan leaves a held stroke's travel to its tracker (`trackerPending`), so it counts
-once. None of this is reached by a stroke away from the edge. Recognizers that only watch (the stroke observer, the finger
-counter, the tour's touch watch) never recognize, so never wait. The Pencil and the iPad's pointer never
-reach the flick (`allowedTouchTypes`), and the pointer's own recognizers take no finger.
+waits for the flick's recognizer to fail (`shouldBeRequiredToFail(by:)`). A touch outside the band fails the
+flick at its landing and nothing waits; a touch in the band is held only until the rule decides, and then
+either is the hide and nothing else (the waiting recognizers fail, its touch is cancelled in the views) or
+goes on whole, the waiting recognizers recognizing it as they would have, in order. UIKit holds their
+recognition back, not the touches, but a pan held past its own start counts its translation from where it is
+let go (the touch rig, against main's surfaces: a slow drag left near the edge scrolled 20 pt where main's
+scrolled 30). So the trackpad's tracker, which begins at touch-down, starts from where the finger landed
+(`FingerTracker.downLocation`); the flick says where the stroke it held landed (`EdgeRecognizers.heldLanding`)
+and the picture's scroll carries the held travel in its next delta as an unheld pan counts it, from 10 pt past
+the landing (`panHysteresis`: main's pans never send their first 10 pt, measured in the rig); and a stroke
+judged only at its lift (a quick drag left that stops short of the edge) has its waiting recognizers let go
+at that lift, beginning and ending at once, the scroll and the tracker carrying its travel at their end
+(`EdgeRecognizers.releasedAtLift`), the trackpad's pan leaving it to the tracker (`trackerPending`) so it counts
+once. Recognizers that only watch (the stroke observer, the trackpad's finger counter: `WatchesTouchesOnly`;
+the tour's touch watch is on the window) never recognize, so they never wait: made to wait, UIKit never reset
+them or the flick after the first stroke it held, and the trackpad answered nothing more (the rig's first run).
+Both recognizers call super in every touch override (UIKit's subclassing contract). None of this is reached by
+a stroke away from the edge. The Pencil and the iPad's pointer never reach the flick (`allowedTouchTypes`), and
+the pointer's own recognizers take no finger.
 
 The swipe in: `UIScreenEdgePanGestureRecognizer` on the left edge, only while hidden, with the same rule of
 who waits for it; it finishes past a third of the screen's width (the lift's speed carrying it on for
