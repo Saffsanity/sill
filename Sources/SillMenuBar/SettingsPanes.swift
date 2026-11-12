@@ -321,7 +321,8 @@ struct UpdatesSection: View {
             if autoSwitch.shown {
                 Toggle("Automatically update Sill", isOn: autoUpdate)
                     .disabled(!autoSwitch.enabled)
-                if let note = autoSwitch.note {
+                // Why it can't act here; said once (Update Now's row may say the same refusal under its button).
+                if let note = autoSwitch.note, note != install.note {
                     Text(note)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -384,11 +385,25 @@ struct UpdatesSection: View {
                     }
                 }
             }
+            // A copy the automatic update checked waits for its moment: its Cancel beside the note (no progress
+            // bar or question to carry it).
+            let waitingCancel = install.cancel && install.progress == nil && !install.spinning && install.question == nil
             if let note = install.note {
-                Text(note)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(note)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if waitingCancel {
+                        Spacer(minLength: 8)
+                        Button("Cancel") { actions.cancel() }
+                    }
+                }
+            } else if waitingCancel {
+                HStack {
+                    Spacer()
+                    Button("Cancel") { actions.cancel() }
+                }
             }
         } footer: {
             Footnote(installAvailable ? UpdateInstallPolicy.footnote(automatic: autoSwitch.shown && autoUpdate.wrappedValue) : UpdatePolicy.footnote)

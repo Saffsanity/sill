@@ -365,6 +365,40 @@ If someone clicks in the moment between the check and Noah's signing, the releas
 click and the answer is "Sill 0.6.2 isn’t signed with Sill’s update key yet, so it can’t be installed from
 here. Try again later, or open its release page." — nothing downloaded.
 
+**T30. Automatically update Sill: nobody is there (added in round 3, §15).** With the switch on, the two
+proofs are the whole gate, and a release that passes them installs on every such Mac within a day. So F1, F2
+and F3 were fixed first (§12c); a release installs by itself only two days after the time it was signed
+(the manifest's own line, which GitHub can't change) and only while GitHub still lists it, unchanged and not
+stopped, right before the swap; a release signed long ago, dated in the future, or below a version offered
+before never installs by itself (F7). Update Now is unchanged: the person sees the version and clicks.
+
+**T31. Who turns it on (added).** Only Settings › General's switch. The switch and what the update remembers
+live in one item of Sill's keychain group (data-protection keychain, this device only, never synced): no
+process without Sill's signature and group can read, add or change it, so `defaults write`, a launch
+argument, the CLI and a device's settings change (kind 17, `DeviceSettings`) have no path to it, and nothing
+of this user can plant an item for Sill to find. A process with Accessibility can click the switch, as it can
+click Update Now. `updateCheck` (the daily check's switch) is a default: turning it off stops automatic
+updates, a denial and nothing more.
+
+**T32. The moment (added).** "No device connected" is decided on the host's own queue, in the same step that
+holds new sessions (`StreamServer.holdNewSessions`): between the last look and the quit no session can be
+registered (each one that tries is told Sill is restarting and reconnects by itself), so none is cut off.
+A paired device that connects and leaves can delay an update or let it begin, which changes nothing it
+installs. Update Now's install holds the same way, and asks about a device that joined since its question.
+
+**T33. A copy that waits, and loops (added).** A checked copy waits in this user's temporary folder for its
+moment, up to a day: anything of this user can change it there, so the whole check runs again right before the
+swap (T12, F5), and it never outlives the launch. Attempts are bounded (two a version, a day apart), a
+refusal is looked at before any download, and every attempt's staging folder goes with it (§15.3).
+
+**T34. The watcher (added).** The one helper (T11): `/bin/sh` with a fixed script, its values as arguments,
+started by the old Sill. It stops only the process the old Sill started (and only while that process runs
+Sill's executable from Sill's path), and puts back only the old copy, valid, of the pinned requirement and
+the cdhash that ran. A process of this user can write the started note (no put-back) or stop the new Sill
+early (a put-back of the previous genuine version): neither installs anything new. Its renames in
+/Applications run as this user, responsible to the old Sill for App Management (not measured: Noah's step
+A6).
+
 ## 4. The rule (pure: `UpdateInstallPolicy.swift`, `UpdateManifest.swift`, `UpdateArchive.swift`)
 
 Foundation, CryptoKit, Compression and StreamProtocol's SillVersion only, checked on their own with
@@ -637,6 +671,11 @@ checklist.md part 1 §3's marker rule).
 | An argument, variable or default loosening any of it in Sill.app | immutable constants only; the update-install check's source rules |
 | A privileged step | none exists: no prompt, helper, package or authorization call |
 | Half an update | one atomic swap; put back on every later failure |
+| Automatically update Sill turned on by anything but Settings › General | the switch in Sill's keychain group only, set only by `setAutomaticUpdate` from `SettingsPanes`; the update-install check's source rules (T31) |
+| An automatic install over a connected device, or a device cut off by Update Now's restart | the hold and the count in one step on the host's queue (T32); Update Now asks about a device that joined |
+| An automatic install of a release signed less than two days ago, long ago, in the future, below one offered before, or stopped | `UpdateAutoPolicy.start` and `dates`, the stop read before the download, GitHub asked again before the swap (T30) |
+| An automatic retry loop | two attempts a version, a day apart, remembered in the keychain item (§15.3) |
+| A broken new version left in place with nobody there | the watcher puts the old copy back and starts it (T34) |
 
 ## 10. Open questions (each with the default this branch takes)
 
