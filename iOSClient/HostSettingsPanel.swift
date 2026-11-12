@@ -482,15 +482,7 @@ struct HostSettingsPanel: View {
     private func streamRows(_ shown: StreamSettings) -> some View {
         Rows {
             AdaptiveRow(title: "Quality", since: client.settings.pendingSince(.bitrate)) {
-                Picker("Quality", selection: binding(shown.bitrate) { HostSettingsChange(bitrate: $0) }) {
-                    ForEach(QualityPreset.allCases) { Text($0.title).tag($0.rawValue) }
-                    if QualityPreset(rawValue: shown.bitrate) == nil {
-                        // Set by hand on the Mac: shown, never offered (the Mac's menu does the same).
-                        Text(QualityPreset.title(forBitrate: shown.bitrate)).tag(shown.bitrate)
-                    }
-                }
-                .pickerStyle(.menu)
-                .fixedSize()     // one line; the row stacks instead when it does not fit beside the title
+                qualityPicker(shown)
             }
             RowDivider()
             AdaptiveRow(title: "Resolution", since: client.settings.pendingSince(.captureScale)) {
@@ -511,6 +503,36 @@ struct HostSettingsPanel: View {
                 .pickerStyle(.segmented)
                 .fixedSize()
             }
+        }
+    }
+
+    /// Quality's menu. The row shows the quality's name alone ("Extreme"; "12 Mbps" for a bitrate set by hand on
+    /// the Mac) and the menu lists each quality with its rate ("Extreme — 150 Mbps"): with the rate in the row
+    /// too, Extreme's did not fit beside the title on an iPhone on its side and the row stacked (Noah,
+    /// 2026-11-12: "just showing the Mbps in the menu itself would work to solve this"). A menu's own label can
+    /// differ from its choices from iOS 18 on; before that the row shows the whole title, as it did.
+    @ViewBuilder private func qualityPicker(_ shown: StreamSettings) -> some View {
+        let selection = binding(shown.bitrate) { HostSettingsChange(bitrate: $0) }
+        if #available(iOS 18.0, *) {
+            Picker("Quality", selection: selection) {
+                qualityChoices(shown)
+            } currentValueLabel: {
+                Text(QualityPreset.name(forBitrate: shown.bitrate))
+            }
+            .pickerStyle(.menu)
+            .fixedSize()     // one line; the row stacks instead when it does not fit beside the title
+        } else {
+            Picker("Quality", selection: selection) { qualityChoices(shown) }
+                .pickerStyle(.menu)
+                .fixedSize()
+        }
+    }
+
+    @ViewBuilder private func qualityChoices(_ shown: StreamSettings) -> some View {
+        ForEach(QualityPreset.allCases) { Text($0.title).tag($0.rawValue) }
+        if QualityPreset(rawValue: shown.bitrate) == nil {
+            // Set by hand on the Mac: shown, never offered (the Mac's menu does the same).
+            Text(QualityPreset.title(forBitrate: shown.bitrate)).tag(shown.bitrate)
         }
     }
 
