@@ -3,7 +3,7 @@
 Noah, 2026-11-11: "make a note that I want to make the Sill update checker also have a 1 click updater
 as a new feature", and the same evening: "Start working on ... one-click updater ... Use subagents."
 Branch `one-click-update` from main at dd6ea6a (0.6.1 released that day, plus #339), main at 936d627 (#349)
-merged in; draft pull request #354.
+and 57a6d86 (#351) merged in; draft pull request #354.
 
 This is the most security-sensitive code Sill for Mac has: it downloads a program and replaces the app
 that is running. It is written for a hostile reader: every claim says what enforces it, and every

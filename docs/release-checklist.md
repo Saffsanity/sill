@@ -148,6 +148,9 @@ serves the root or `/docs`, never `/site`. So:
   `grep -n 'release-assets.githubusercontent.com' ../sill-site/*.html` prints nothing. It ships with the
   first release whose Sill carries an update key (part 1 §7), not with the code alone: a release whose
   Sill has an empty key list offers no Update Now.
+- Open: `Version label` (support.html, under the lede: where each app shows its version, true from
+  Sill for iPhone and iPad 0.6.2; PR #351, docs/version-label-plan.md): `grep -n "shows its version"
+  ../sill-site/support.html` finds nothing after the cut.
 - Held back from the support page in 0.6.1, until a test shows it true: #228's tap sentence. The
   page says "To wake it again, move the pointer, scroll, or press the Command key on a keyboard
   attached to your iPhone or iPad; Shift alone doesn’t reach your Mac." With the sentence it would
