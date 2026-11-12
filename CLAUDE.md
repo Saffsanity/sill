@@ -1064,6 +1064,19 @@ Rules found in the steps that hold for all work (each where it is written):
   a key: `13:down,wait:2,13:up`), `run.sh UDID point SCRIPT`;
   only a booted simulator of your own, by UDID (its README has what it showed:
   after its keys UIKit there counts a hardware keyboard for good).
+- `Scripts/harness-photos/` — the DEBUG harness photographed on the agents' shared simulators,
+  never one an agent makes for itself: `Scripts/agent-simulators.sh create` makes them once ("Sill
+  agents Duo", iPhone Duo on iOS 27.1, and "Sill agents iPad", iPad Pro 13-inch (M5) on iOS 27.0,
+  whose 27.1 runtimes take only the Duo) and `list` shows their state and size;
+  `Scripts/harness-photos.sh CASES [--commit REV] [--baseline REV] [--device duo|ipad] [--repo DIR]`
+  builds each commit's committed tree once (cached by commit and Xcode build in
+  `~/Library/Caches/SillAgents`, one shared DerivedData), boots one of them inside the heavy lock,
+  takes a photo per case (a name and launch arguments a line, `example.cases`), compares a baseline's
+  pixel for pixel (`pixeldiff.swift`: how many pixels, by how much, where; a picture of the
+  differences) and shuts it down. It refuses another name than "Sill agents …", any other booted
+  simulator, a case without `-SillLayout` or with `-SillLive` or anything that dials or sends input,
+  a Duo size or `-SillHinge` on the iPad, and building or a first boot under 25 GB free; it never
+  taps or types and needs no `no-device.sh` (no host, no encoder, stills only).
 
 ## Build and run
 
@@ -1110,6 +1123,8 @@ Tests/checks/run-all.sh                 # every pure check, as CI runs them (~5 
 Tests/checks/list.sh                    # every check and what it checks, from each folder's README.md (no table is kept by hand)
 Scripts/steps.sh new | list | find 349  # the step files (docs/steps): this branch's, the newest first, a pull request's
 python3 Scripts/migrate-notes.py        # once, in a branch opened before 2026-11-12, right after `git merge origin/main` stops
+Scripts/agent-simulators.sh create      # once: the agents' simulators "Sill agents Duo" (iOS 27.1) and "Sill agents iPad" (iOS 27.0), shut down
+Scripts/harness-photos.sh Scripts/harness-photos/example.cases --baseline origin/main   # harness photos of HEAD (committed) on the agents' Duo, pixel for pixel against main's, in the heavy lock
 Scripts/pacing/run.sh                   # remote pacing and the link's judge, this tree against origin/main, no encoder, all on loopback (~25 min; --full ~45; --list)
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_ORIGIN=vpn SILL_TEST_PATTERN=noise .build/release/SillHost --synthetic --remote   # an away session whose stream follows its quality
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)

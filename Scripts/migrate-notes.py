@@ -27,6 +27,8 @@ leaves this machine.
 
     python3 Scripts/migrate-notes.py --ours REV --theirs REV    the same after a merge already
                                           committed (HEAD^1 and HEAD^2), or between any two commits
+    python3 Scripts/migrate-notes.py --move-entries             an entry written into CLAUDE.md after
+                                          the move (its "Steps" section), out to its own step file
     python3 Scripts/migrate-notes.py --convert                  the conversion itself, once, on the
                                           working tree (tooling-speedup used it on main at 936d627)
     python3 Scripts/migrate-notes.py --verify REV               checks that docs/steps and the check
@@ -423,6 +425,62 @@ def convert(root):
           f"CLAUDE.md {len(claude.encode())} -> {len(lean.encode())} bytes")
 
 
+def steps_entries(section, canonical):
+    """A "Steps" section's lines as (kept, [entry lines]): an entry runs from a bold, dated title to the
+    next one or to the first line of the section's own text (the pointer as main has it), which stays."""
+    sm = difflib.SequenceMatcher(None, section, canonical, autojunk=False)
+    own = set()
+    for block in sm.get_matching_blocks():
+        own.update(range(block.a, block.a + block.size))
+    kept, entries, current = [], [], None
+    for i, line in enumerate(section):
+        if i not in own and is_entry_start(section, i):
+            current = [line]
+            entries.append(current)
+        elif current is not None and i not in own:
+            current.append(line)
+        else:
+            current = None
+            if line == "" and kept and kept[-1] == "":
+                continue                # the empty line an entry leaves behind
+            kept.append(line)
+    return kept, entries
+
+
+def move_entries(root):
+    """Moves entries written into CLAUDE.md after the move (in its "Steps" section, or a "Current step"
+    or "Milestone" section put back) to step files of their own, word for word."""
+    path = os.path.join(root, CLAUDE)
+    lines = read(path).split("\n")
+    canonical = (section_text(show("origin/main", CLAUDE) or "", NEW_SECTION) or POINTER).split("\n")
+    secs = sections(lines)
+    out = list(lines[:secs[0][0]] if secs else lines)
+    entries = []
+    for s, e, heading in secs:
+        if heading == NEW_SECTION:
+            kept, ents = steps_entries(lines[s:e], canonical)
+            out.extend(kept)
+            entries += [entry_text(x) for x in ents]
+        elif heading == OLD_SECTION:
+            pre, ents = split_entries(lines[s + 1:e])
+            if any(l.strip() for l in pre):
+                raise SystemExit("CLAUDE.md: a \"Current step\" section with text before its first entry; move it by hand")
+            entries += [entry_text(x) for x in ents]
+        elif heading.startswith("## Milestone "):
+            entries.append(entry_text(lines[s:e]))
+        else:
+            out.extend(lines[s:e])
+    if not entries:
+        print("CLAUDE.md holds no step entry: nothing to move")
+        return
+    taken = {f[:-3] for f in os.listdir(os.path.join(root, STEPS))}
+    for name, text in zip(names_for(entries, taken), entries):
+        write(os.path.join(root, STEPS, name + ".md"), text)
+        print(f"{STEPS}/{name}.md: moved out of CLAUDE.md word for word")
+    write(path, "\n".join(out))
+    print("CLAUDE.md: the entries taken out; check `git diff` and commit both")
+
+
 def verify(root, rev):
     """docs/steps, the check folders' README.md and HISTORY.md against REV's files, word for word."""
     claude = show(rev, CLAUDE)
@@ -618,6 +676,9 @@ def main(argv):
     root = root_dir()
     if args[:1] == ["--convert"]:
         convert(root)
+        return 0
+    if args[:1] == ["--move-entries"]:
+        move_entries(root)
         return 0
     if args[:1] == ["--verify"]:
         return 0 if verify(root, args[1] if len(args) > 1 else "HEAD") else 1

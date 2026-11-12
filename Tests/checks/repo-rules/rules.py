@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 
+sys.dont_write_bytecode = True      # importing mutant-checks.py leaves no __pycache__ behind
 root = sys.argv[1]
 checks = os.path.join(root, "Tests/checks")
 failed = passed = 0
@@ -93,8 +94,8 @@ entry = re.compile(r"^\*\*[^*]*20\d\d-\d\d-\d\d")
 entries = [l for l in lines if entry.match(l) or l == "## Current step" or l.startswith("## Milestone ")]
 rule(not entries, "CLAUDE.md holds no step entry (each is docs/steps/<date>-<branch>.md)",
      f"{len(entries)} entry lines, first: {entries[0][:90] if entries else ''} "
-     "(move it to its own file: Scripts/steps.sh new; a branch opened before 2026-11-12: "
-     "python3 Scripts/migrate-notes.py)")
+     "(move it to its own file: python3 Scripts/migrate-notes.py --move-entries; a branch opened "
+     "before 2026-11-12 runs python3 Scripts/migrate-notes.py once, right after merging main)")
 steps = os.path.join(root, "docs/steps")
 names = sorted(f for f in os.listdir(steps) if f.endswith(".md") and f != "README.md")
 badnames = [f for f in names if not re.match(r"^\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9.-]*\.md$", f)]
