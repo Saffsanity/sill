@@ -194,9 +194,32 @@ indicator too); DEBUG `-SillFullScreenRoom screen|housing|safe`.
 12. A second level upright (the trackpad alone hidden first): parked by Noah; not built. `ChromeLevel`
     keeps a raw value for it between the two, and `afterFlick`/`afterReveal` are the only steps.
 
+## The gates
+
+- G1 the rule: `Tests/checks/full-screen` (cases at every number's edge, 30,000 random strokes against an
+  independent model) and its mutants, each caught.
+- G2 the builds: the iOS app Debug and Release for the simulator and Debug for a device, the known warnings only.
+- G3 the touch rig (Tests/touchrig, on the agents' iPad simulator): main's surfaces against this branch's, every
+  existing stroke's events identical (`compare.py --all`); the strokes at the left edge (`compare.py --edge`):
+  each flick hides and sends nothing, on the picture, the trackpad and a SwiftUI button; every other stroke
+  that lands in the band (a tap, a long press, drags right, up and down, a slow drag left, a quick drag left
+  lifted short of the edge, two fingers, a grip with a tap elsewhere, a scroll from the middle off the edge, a
+  tap on the button) sends what main's surfaces send, in order; with the controls hidden, strokes near the edge
+  and away from it as main's; UIKit's pan threshold measured.
+- G4 live on loopback: `SillHost --synthetic` (loopback only, the software encoder, no router, no screen, the
+  dry-run input log) and the app under `-SillLive 1` on the agents' iPad simulator, at an iPhone 15 Pro's upright
+  size and an iPad mini's sideways: hidden and shown by a toggle, a shake and a played swipe in while an input
+  script taps, presses keys and types around each change: the viewport one per change (the room, then the
+  pane), and every input step reaching the host.
+- G5 photos (Scripts/harness-photos.sh, the agents' Duo on iOS 27.1 and iPad on 27.0): every shown layout
+  pixel for pixel main's; the hidden layouts, the hint, the swipe in's preview, the room's three choices with an
+  iPhone's island, corners and home indicator drawn, a tall window upright on a phone and an iPad mini, the
+  Desktop upright, the Settings row, at the default and the largest text size.
+- G6 `Tests/checks/repo-rules`.
+
 ## Results
 
-(Filled in as the gates ran; see the step file docs/steps/2026-11-12-full-screen.md.)
+(Filled in as the gates ran.)
 
 ## Noah's test (the device test, short)
 
