@@ -52,6 +52,8 @@ final class EdgeFlickRecognizer: UIGestureRecognizer {
     var onFlick: (() -> Void)?
     /// Each judged stroke's verdict and numbers, for the console (Debug) and the touch rig.
     var onJudged: ((EdgeFlick.Verdict, String) -> Void)?
+    /// The touch rig's trace of each touch the recognizer sees and what it does with it (nil in the app).
+    var trace: ((String) -> Void)?
 
     private var rule = EdgeFlick()
     private weak var tracked: UITouch?
@@ -84,6 +86,7 @@ final class EdgeFlickRecognizer: UIGestureRecognizer {
     // never another, the trackpad's recognizers waiting on it for good.
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         super.touchesBegan(touches, with: event)
+        trace?("began: \(touches.count) touch(es), state \(state.rawValue), armed \(armed), tracking \(tracked != nil)")
         guard state == .possible else { return }
         guard armed else { state = .failed; return }
         if tracked != nil {
@@ -103,6 +106,7 @@ final class EdgeFlickRecognizer: UIGestureRecognizer {
         if verdict.decided { finish(verdict); return }
         // A finger that stays still sends nothing: the rule's own clock lets it go.
         clock = Timer.scheduledTimer(withTimeInterval: EdgeFlick.duration + 0.005, repeats: false) { [weak self] _ in
+            self?.trace?("clock: state \(self?.state.rawValue ?? -1), tracking \(self?.tracked != nil)")
             guard let self, self.state == .possible, self.tracked != nil else { return }
             self.finish(self.rule.tick(t: ProcessInfo.processInfo.systemUptime))
         }
@@ -120,6 +124,7 @@ final class EdgeFlickRecognizer: UIGestureRecognizer {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
         super.touchesEnded(touches, with: event)
+        trace?("ended: state \(state.rawValue), tracking \(tracked != nil), its touch \(tracked.map { touches.contains($0) } ?? false)")
         guard state == .possible else { return }
         guard let touch = tracked, touches.contains(touch) else {
             // Another touch of this event lifted while the judged one stays: not ours to judge.
@@ -161,6 +166,7 @@ final class EdgeFlickRecognizer: UIGestureRecognizer {
 
     override func reset() {
         super.reset()
+        trace?("reset")
         clock?.invalidate()
         clock = nil
         tracked = nil

@@ -597,6 +597,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         #if EDGEFLICK
         edgeFlick.armed = true
         edgeFlick.onFlick = { RigLog.log("[edge] hide") }
+        edgeFlick.trace = { RigLog.log("[edge] trace " + $0) }
         edgeFlick.onJudged = { verdict, numbers in
             if case .notAFlick(.outsideBand) = verdict { return }
             RigLog.log("[edge] \(verdict) (\(numbers))")
