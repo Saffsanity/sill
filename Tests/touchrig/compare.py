@@ -39,7 +39,7 @@ def normal(events):
     paces them)."""
     out, coasting = [], False
     for e in events:
-        if e.startswith("[touch]") or e.startswith("[edge]"): continue
+        if e.startswith("[touch]") or e.startswith("[edge]") or e.startswith("[measure]"): continue
         who, _, what = e.partition(" send ")
         who = who.strip()
         if not what:

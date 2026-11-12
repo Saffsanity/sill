@@ -71,7 +71,32 @@ enum Step {
     case arm(Bool)
     /// The swipe in from the left bezel listening (the controls hidden), or not.
     case reveal(Bool)
+    /// A measuring pan on the overlay (beside everything, taking nothing) says where UIKit lets a pan begin.
+    case measure(Bool)
 }
+
+/// UIKit's own pan threshold, measured: a pan beside every other recognizer, taking no touch, that logs its
+/// translation as it begins (full screen's flick lets a drag right go after 6 pt and a steep one after 8, which
+/// is before a pan would begin, so those drags are not even late: docs/full-screen-plan.md).
+final class PanProbe: NSObject, UIGestureRecognizerDelegate {
+    let pan = UIPanGestureRecognizer()
+    override init() {
+        super.init()
+        pan.addTarget(self, action: #selector(moved))
+        pan.cancelsTouchesInView = false
+        pan.delaysTouchesEnded = false
+        pan.delegate = self
+        pan.isEnabled = false
+    }
+    @objc func moved() {
+        if pan.state == .began {
+            let t = pan.translation(in: pan.view)
+            RigLog.log(String(format: "[measure] a pan begins at %.1f pt (%.1f, %.1f)", hypot(t.x, t.y), t.x, t.y))
+        }
+    }
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+}
+let panProbe = PanProbe()
 
 enum Gesture {
     static let spacing: CGFloat = 62
@@ -454,6 +479,8 @@ final class Runner {
             edgeReveal.isEnabled = on
             RigLog.log("[edge] reveal listening \(on)")
             #endif
+        case .measure(let on):
+            panProbe.pan.isEnabled = on
         }
     }
 }
@@ -518,6 +545,7 @@ final class Root: UIViewController {
         button.view.backgroundColor = .clear
         view.addSubview(button.view)
         button.didMove(toParent: self)
+        overlay.addGestureRecognizer(panProbe.pan)
         trackpad.send = { RigLog.log("trackpad send \(describe($0))") }
         overlay.send = { RigLog.log("overlay  send \(describe($0))") }
         overlay.videoSize = CGSize(width: 1512, height: 948)
@@ -601,6 +629,14 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             let ty = root.trackpad.bounds.midY, oy = root.overlay.bounds.midY
             for (title, steps) in edgeScenarios(ty) { runner.add("TRACKPAD \(title)", root.trackpad, [.edgeLayout(true)] + steps) }
             for (title, steps) in edgeScenarios(oy) { runner.add("OVERLAY \(title)", root.overlay, [.edgeLayout(true)] + steps) }
+            // UIKit's pan threshold, measured on the overlay's middle: one point a frame, right, left, down.
+            let mid = CGPoint(x: root.overlay.bounds.midX, y: oy)
+            for (name, dx, dy) in [("right", 1.0, 0.0), ("left", -1.0, 0.0), ("down", 0.0, 1.0)] as [(String, CGFloat, CGFloat)] {
+                var steps: [Step] = [.edgeLayout(false), .measure(true), .begin([mid])]
+                for k in 1...30 { steps.append(.move([CGPoint(x: mid.x + dx * CGFloat(k), y: mid.y + dy * CGFloat(k))])) }
+                steps += [.end([0]), .wait(30), .measure(false)]
+                runner.add("MEASURE the pan threshold, a drag \(name) one point a frame", root.overlay, steps)
+            }
             // The button: a tap presses it; a flick from it hides and presses nothing (y: the button's middle).
             let by: CGFloat = 28
             runner.add("BUTTON EDGE ON a tap on the button at the edge", root.button.view,
