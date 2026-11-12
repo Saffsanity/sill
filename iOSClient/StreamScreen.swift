@@ -1171,7 +1171,8 @@ struct StreamScreen: View {
             hintsShown += 1
             showHint()
         }
-        AccessibilityNotification.Announcement(FullScreenPolicy.Copy.announcement).post()
+        // The screen is new to VoiceOver (the picture alone): it reads it afresh, and says where the controls went.
+        UIAccessibility.post(notification: .screenChanged, argument: FullScreenPolicy.Copy.announcement)
         #if DEBUG
         print("full screen: hidden by \(how)" + (keyboardBeforeHide ? "; the keyboard comes back with the controls" : ""))
         #endif
@@ -1192,7 +1193,7 @@ struct StreamScreen: View {
         if keyboardBeforeHide { overlay.setKeyboard(shown: true) }
         keyboardBeforeHide = false
         if person { client.noteAction() }
-        if voiceOverEnabled { AccessibilityNotification.Announcement(FullScreenPolicy.Copy.shownAnnouncement).post() }
+        if voiceOverEnabled { UIAccessibility.post(notification: .screenChanged, argument: FullScreenPolicy.Copy.shownAnnouncement) }
         #if DEBUG
         print("full screen: shown by \(why)")
         #endif

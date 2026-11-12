@@ -63,7 +63,12 @@ struct FullScreenEdges: UIViewRepresentable {
         let reveal = RevealEdgePan(target: nil, action: nil)
         let hover = UIHoverGestureRecognizer(target: nil, action: nil)
         var dwellArmed = false {
-            didSet { if !dwellArmed { dwell.ended(); dwellCheck?.invalidate() } }
+            didSet {
+                guard dwellArmed != oldValue, !dwellArmed else { return }
+                dwell.ended()
+                dwellCheck?.invalidate()
+                dwellCheck = nil
+            }
         }
         var onReveal: (UIGestureRecognizer.State, CGFloat, CGFloat, CGFloat) -> Void = { _, _, _, _ in }
         var onDwell: () -> Void = {}
@@ -120,6 +125,7 @@ struct FullScreenEdges: UIViewRepresentable {
             for recognizer in [flick, reveal, hover] as [UIGestureRecognizer] { host?.removeGestureRecognizer(recognizer) }
             host = nil
             dwellCheck?.invalidate()
+            dwellCheck = nil
         }
 
         /// Whether the window covers its screen, and its safe area, each said when it changes.
