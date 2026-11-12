@@ -1,0 +1,40 @@
+"""Update Now's mechanism mutants (docs/one-click-update-plan.md §11, G2): each changes UpdateInstaller.swift in
+one place where nothing else stands behind it, in a copy of Sources/SillMenuBar; run.sh then builds and runs the
+harness on the copy (SILL_HARNESS_SOURCES), and it must fail. Several minutes a mutant: each builds the harness
+and its test apps again. usage: python3 -I mutants.py"""
+import os, shutil, subprocess, sys, tempfile
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
+SRC = os.path.join(ROOT, "Sources/SillMenuBar")
+F = "UpdateInstaller.swift"
+MUTANTS = [
+    ("any redirect followed", "guard let url = request.url, redirects <= maxRedirects, allowed(url) else {", "guard let url = request.url else {"),
+    ("no check after the swap", "        switch check(installed, manifest: manifest, running: running, runningRequirement: runningRequirement) {\n        case .success(let c) where c == expected:\n            return .success(())", "        switch Result<Policy.Checked, Failure>.success(expected) {\n        case .success(let c) where c == expected:\n            return .success(())"),
+    ("the copy at the path not compared with the running one", "        guard Self.cdhash(of: installed, arch: .current) == runningCDHash else { return .failure(.changedSinceStart) }\n", ""),
+    ("anything in staging put back", "        guard Self.isFolder(staged), Self.cdhash(of: staged, arch: .current) == old else { return false }\n", ""),
+    ("a Content-Length that disagrees taken", "            if let exactSize, length != exactSize { failure = .sizeMismatch; completionHandler(.cancel); return }\n", ""),
+    ("no process found running from the app", "            guard same || text.hasPrefix(prefix) else { continue }", "            guard false else { continue }"),
+    ("a link to the app not seen", "            if lstat(walk.path, &l) == 0, l.st_mode & S_IFMT == S_IFLNK { link = true; break }", "            if false { link = true; break }"),
+    ("a kept copy cleaned up", "            if lstat(url.appendingPathComponent(keptMarker).path, &marker) == 0 { continue }\n", ""),
+]
+caught = 0
+for name, old, new in MUTANTS:
+    src = open(os.path.join(SRC, F)).read()
+    if src.count(old) != 1:
+        print(f"{name}: NOT APPLIED (pattern found {src.count(old)} times)", flush=True); continue
+    with tempfile.TemporaryDirectory() as t:
+        copy = os.path.join(t, "SillMenuBar")
+        shutil.copytree(SRC, copy)
+        open(os.path.join(copy, F), "w").write(src.replace(old, new, 1))
+        r = subprocess.run([os.path.join(HERE, "run.sh")], capture_output=True, text=True, timeout=1800,
+                           env=dict(os.environ, SILL_HARNESS_SOURCES=copy))
+        failed = [l for l in r.stdout.splitlines() if l.startswith("FAIL")]
+        if r.returncode != 0 and failed:
+            caught += 1
+            print(f"{name}: caught ({failed[0][:110]})", flush=True)
+        elif r.returncode != 0:
+            print(f"{name}: did not run (exit {r.returncode}): {(r.stderr or r.stdout)[-300:]}", flush=True)
+        else:
+            print(f"{name}: NOT CAUGHT", flush=True)
+print(f"mutants caught: {caught} of {len(MUTANTS)}")
+sys.exit(0 if caught == len(MUTANTS) else 1)

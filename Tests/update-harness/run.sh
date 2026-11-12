@@ -8,6 +8,7 @@
 # against Sill's real signature. Everything lives in .build/update-harness and is removed at the end
 # unless --keep. Never /Applications, never a keychain, never Sill's defaults, never a launch of an app.
 #   Tests/update-harness/run.sh [--keep]
+#   Tests/update-harness/mutants.py                one-line mutants of UpdateInstaller.swift; each must fail it
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -25,8 +26,10 @@ trap cleanup EXIT
 echo "== building the harness"
 T="$out/src"; mkdir -p "$T"
 cp "$root"/Sources/StreamProtocol/*.swift "$T"/
+# SILL_HARNESS_SOURCES: a copy of Sources/SillMenuBar with one change (mutants.py); the app's own by default.
+sources="${SILL_HARNESS_SOURCES:-$root/Sources/SillMenuBar}"
 for f in UpdatePolicy UpdateInstallPolicy UpdateManifest UpdateArchive UpdateInstaller; do
-    sed '/^import StreamProtocol$/d' "$root/Sources/SillMenuBar/$f.swift" > "$T/$f.swift"
+    sed '/^import StreamProtocol$/d' "$sources/$f.swift" > "$T/$f.swift"
 done
 cp "$here/main.swift" "$T/main.swift"
 swiftc -O "$T"/*.swift -o "$out/harness"
