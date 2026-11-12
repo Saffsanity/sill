@@ -154,10 +154,26 @@ size and SHA-256), unpacks it with Sill's own zip reader into a temporary folder
 on Sill.app's volume, checks the app (Developer ID 9B2KKVM937 as
 me.saffer.sill.mac, notarized, strictly valid, this app's own designated
 requirement, the keychain entitlements, newer, every slice the code the
-manifest names), swaps it into place in one `renamex_np(RENAME_SWAP)`, checks it
-again there, launches it as a new instance and quits; the new Sill waits for the
-old to quit, and once its host is up removes the old copy. Any failure puts the
-old copy back and says why in Settings › General. It never runs for the bare
+manifest names), checks it once more right before it swaps it into place in one
+`renamex_np(RENAME_SWAP)`, checks it again there, launches it as a new instance,
+starts the watcher and quits; the new Sill waits for the old to quit, and once
+its host has been up for 30 s tells the watcher (a note with a token in Sill's
+Caches folder) and removes the old copy. If it doesn't within 150 s, the watcher
+(`/bin/sh` with `UpdateInstaller.watcherScript`) stops it, puts the old copy
+back and starts it. Any failure puts the old copy back and says why in Settings ›
+General, naming the check that failed: Apple's (the Developer ID signature and
+notarization) or Sill's update key's. A stop signed with an update key beside
+the release (`Sill.zip.stop`) ends it before anything is downloaded.
+
+Automatically update Sill (docs/one-click-update-plan.md §15), in a build with
+Update Now: a switch under "Check for updates automatically", off by default,
+kept with what it remembers in Sill's keychain group (`AutoUpdateStore`, never
+the defaults; only Settings turns it on). After a check, it runs Update Now's
+steps by itself for a release signed at least 48 hours ago (the manifest's
+`signed` date), then waits for 10 minutes without a device connected, asks
+GitHub again, holds new sessions (a device that tries is told Sill is
+restarting and reconnects by itself) and installs. Two attempts a version at
+most, a day apart. The log's lines start "Automatic update:". It never runs for the bare
 binary, a development or unnotarized build, a test feed (`-SillUpdateFeed`) or
 version (`-SillUpdateVersion`), a translocated copy, a disk image, a folder this
 account can't change, a Sill.app another account owns, or while another account's
@@ -1917,7 +1933,10 @@ hosts on 127.0.0.1, and runs every case: the installs, each refusal with the
 installed copy's tree unchanged, the requests (Sill's User-Agent, no credential or
 cookie), the launch check against a running process, where an app runs (a folder
 made read-only, a link, a disk image writable and read-only, made with hdiutil
-under `.build` and never browsable), and the staging folders. The trust, the
+under `.build` and never browsable), the staging folders, a stop beside the
+release, and the watcher (a new copy that proves itself, quits at once, never
+proves itself, writes another token; the old copy changed while it waited; a
+process that isn't the new copy, never stopped). The trust, the
 endpoints and the update key are the harness's own; nothing in Sill.app can take
 them. With the genuine v0.6.1 zip in `.build/updater-scratch/release-v0.6.1` (a
 read-only `gh release download v0.6.1 --repo Saffsanity/sill --pattern Sill.zip`),
@@ -1925,11 +1944,13 @@ it also runs `Trust.release`'s every rule, with the harness's key, against Sill'
 real signature: installed over a 0.6.0, refused for the same version, a tag that
 isn't its version, another team, a tampered, an ad hoc and an unstapled copy, and
 each slice's cdhash as codesign prints it. It never touches /Applications, a
-keychain or Sill's defaults, and launches no app (the launch check's test
-executable runs directly, never through Launch Services, and is stopped);
+keychain or Sill's defaults, and launches no app (the launch check's and the
+watcher's test executables run directly, never through Launch Services: the
+watcher's launcher there is `launch.sh`, Sill.app's is `/usr/bin/open`);
 everything is under `.build/update-harness`, removed at the end.
-`Tests/update-harness/mutants.py` changes UpdateInstaller in eight places, one at
-a time, and runs the harness on each copy (each must fail it; about 20 minutes).
+`Tests/update-harness/mutants.py [NAME…]` changes UpdateInstaller in 25 places,
+one at a time, and runs the harness on each copy (each must fail it; several
+minutes each; names pick some).
 `Tests/update-harness/sign-test.sh` runs `Scripts/sign-update.sh` against a
 stand-in `gh` (in `.build/update-sign-test`) serving the genuine v0.6.1, with a
 throwaway key file and the signer installed in a scratch folder: nothing is
@@ -2571,10 +2592,16 @@ permissions are granted once more.
 Update Now (docs/one-click-update-plan.md) installs a release only once it
 carries `Sill.zip.manifest`, signed with Noah's update key: `Scripts/sign-update.sh
 v<version>`, on his Mac, right after the release is published (never in CI). It
-checks the published zip as the checklist checks a download, signs the manifest
-(the tag, version, build, size, SHA-256 and each slice's cdhash) with the key in
-his login keychain (`--key-file PATH` for a key in a file), reads it back with the
-key the tagged source carries, asks, uploads it and reads it back.
+checks the published zip as the checklist checks a download, compares what the
+tag's source trusts (its update keys, the pinned requirement, the trust and the
+endpoints) with what the signer recorded when it was installed and stops on any
+difference, signs the manifest (the tag, version, build, size, SHA-256, each
+slice's cdhash and the time) with the key in his login keychain (`--key-file
+PATH` for a key in a file) after asking in person with the whole SHA-256 shown,
+reads it back with the key the tagged source carries, uploads it and reads it
+back. The signer is built with the hardened runtime and refused without it. A
+release no Sill may install gets a stop (`update-manifest stop`, then `gh
+release upload`: docs/one-click-update-plan.md §15.4).
 `Scripts/sign-update.sh --new-key` makes the key once (docs/release-checklist.md,
 part 1 §7); its public key goes into `UpdateManifest.releaseKeys`.
 `make-app.sh --release` embeds `Packaging/embedded.provisionprofile` (the

@@ -143,9 +143,11 @@ serves the root or `/docs`, never `/site`. So:
   `grep -n` of a phrase from each block that nothing of it is left. Add the marker's line and its
   grep here when a pull request marks words; the release that ships them deletes its markers in
   `site/`, keeps the words, and takes its lines out of here.
-- `Update Now` (privacy.html's Update check section, the one-click update, docs/one-click-update-plan.md
-  §7): `perl -0pi -e 's/[ \t]*<!-- Update Now:.*?<!-- \/Update Now -->\n//gs' ../sill-site/*.html`, then
-  `grep -n 'release-assets.githubusercontent.com' ../sill-site/*.html` prints nothing. It ships with the
+- `Update Now` (privacy.html's Update check section and support.html's "Updating Sill for Mac", the
+  one-click update and Automatically update Sill, docs/one-click-update-plan.md §7 and §15): `perl -0pi -e
+  's/[ \t]*<!-- Update Now:.*?<!-- \/Update Now -->\n//gs' ../sill-site/*.html`, then `grep -n -e
+  'release-assets.githubusercontent.com' -e 'Automatically update Sill' ../sill-site/*.html` prints nothing
+  (README.md's block, marked the same, goes out with the release that ships it). It ships with the
   first release whose Sill carries an update key (part 1 §7), not with the code alone: a release whose
   Sill has an empty key list offers no Update Now.
 - Open: `Version label` (support.html, under the lede: where each app shows its version, true from
@@ -384,7 +386,16 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       the trust then lists both); the next is signed with the new one; a later one drops the old. Lost: releases go out without a manifest (Update Now doesn't show;
       Open Release Page… as before) until one carrying a new key is installed by hand once (say so in its
       notes). Leaked: the same as lost, and the notes ask people to update by hand once; the leaked key
-      alone installs nothing (a Developer ID signed, notarized build is still needed).
+      alone installs nothing (a Developer ID signed, notarized build is still needed), and a Sill that
+      never updates by hand keeps trusting it (it can't be revoked: docs/one-click-update-plan.md T28).
+- A release no Sill may install (a bad build, one signed with a key that leaked): within two days of its
+      signing, pull it or mark it a prerelease (each Sill asks GitHub again right before it installs by
+      itself, so none does). For one that stays listed, a stop, in Terminal.app: `"$HOME/Library/Application
+      Support/Sill Update Signer/update-manifest" stop --tag v<version> --sha256 <the sha256 line of its
+      Sill.zip.manifest> --out Sill.zip.stop` (Touch ID or your password, the prompt showing the whole
+      SHA-256), then `gh release upload v<version> Sill.zip.stop --repo Saffsanity/sill`. Every Sill reads it
+      before downloading anything, by Update Now and by itself, and remembers the tag
+      (docs/one-click-update-plan.md §15.4).
 
 ## Part 2: every release
 
@@ -499,7 +510,9 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       the tag's), reads each slice's cdhash with codesign (the values Update Now reads with Security),
       prints the SHA-256 in groups of eight, and signs the manifest: Touch ID or your password, the prompt
       showing the whole SHA-256 in the same groups; allow only when every group is the SHA-256 release.sh
-      printed. It reads the manifest back with the recorded keys, shows it, asks, uploads
+      printed. The manifest carries the time it is signed: Sills with Automatically update Sill on install
+      the release by themselves two days after it (docs/one-click-update-plan.md §15), so that is the time to
+      pull it if it is wrong. It reads the manifest back with the recorded keys, shows it, asks, uploads
       `Sill.zip.manifest` and downloads it again to compare. Until it is there, Update Now does not show
       for the release (every Sill's check stores whether the release lists the manifest), and the release
       page is the way, as before Update Now. A Sill that checked before the signing shows Update Now after

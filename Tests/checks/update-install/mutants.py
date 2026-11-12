@@ -5,6 +5,7 @@ import os, shutil, subprocess, sys, tempfile
 WT = sys.argv[1]; HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(WT, "Sources/SillMenuBar")
 POL, MAN, ARC, INS, APP = "UpdateInstallPolicy.swift", "UpdateManifest.swift", "UpdateArchive.swift", "UpdateInstaller.swift", "AppUpdater.swift"
+AUTO = "UpdateAutoPolicy.swift"
 MUTANTS = [
     # The version rule and the release.
     ("the same version installed", POL, "guard version > running else { return .failure(.notNewer(versionText)) }", "guard version >= running else { return .failure(.notNewer(versionText)) }"),
@@ -43,18 +44,20 @@ MUTANTS = [
     ("a device joining never asked about", POL, "if Set(devices.map(\\.key)).isSubset(of: Set(s.consented)) { n.phase = .installing; return (n, [.install]) }", "n.phase = .installing; return (n, [.install])"),
     ("consent by name", POL, "        case (.confirming(let devices), .confirm):\n            n.consented = devices.map(\\.key)", "        case (.confirming(let devices), .confirm):\n            n.consented = devices.map(\\.name)"),
     ("the old copy deleted when not put back", POL, "return (n, f.cleanUp ? [.cleanUp] : [])", "return (n, [.cleanUp])"),
-    ("cancel while installing", POL, "case (.ready, .cancel), (.fetching, .cancel),", "case (.ready, .cancel), (.installing, .cancel), (.fetching, .cancel),"),
+    ("cancel while installing", POL, "case (.ready, .cancel), (.waiting, .cancel), (.fetching, .cancel),", "case (.ready, .cancel), (.waiting, .cancel), (.installing, .cancel), (.fetching, .cancel),"),
     ("a copy not put back cleaned up", POL, "case .checkAfterSwap(_, let putBack), .didNotStart(_, let putBack): return putBack", "case .checkAfterSwap, .didNotStart: return true"),
-    ("Update Now enabled when refused", POL, "p.updateNowEnabled = refusal == nil\n", "p.updateNowEnabled = true\n"),
+    ("Update Now enabled when refused", POL, "p.updateNowEnabled = refusal == nil\n            p.note = refusal.map(words) ??", "p.updateNowEnabled = true\n            p.note = refusal.map(words) ??"),
+    ("Install Now enabled when refused", POL, "p.updateNowEnabled = refusal == nil\n            p.updateNowTitle = \"Install Now\"", "p.updateNowEnabled = true\n            p.updateNowTitle = \"Install Now\""),
     ("the menu opens Settings when refused", POL, "if available, refusal == nil {", "if available {"),
     # The manifest.
-    ("any signature", MAN, "for candidate in candidates where candidate.key.isValidSignature(parsed.signature, for: parsed.signed) {", "for _ in candidates {"),
-    ("no key as an unknown key", MAN, "guard !keys.isEmpty else { return .failure(.noKey) }", ""),
-    ("carriage returns", MAN, "bytes.allSatisfy({ $0 == 0x0A || (0x20...0x7E).contains($0) })", "bytes.allSatisfy({ $0 == 0x0A || $0 == 0x0D || (0x20...0x7E).contains($0) })"),
+    ("any signature", MAN, "for candidate in candidates where candidate.key.isValidSignature(signature, for: signed) { return nil }", "for _ in candidates { return nil }"),
+    ("no key as an unknown key", MAN, "guard !keys.isEmpty else { return .noKey }", ""),
+    ("carriage returns", MAN, "bytes.allSatisfy({ $0 == 0x0A || (0x20...0x7E).contains($0) }) else { return .failure(.notText) }", "bytes.allSatisfy({ $0 == 0x0A || $0 == 0x0D || (0x20...0x7E).contains($0) }) else { return .failure(.notText) }"),
+    ("a stop's carriage returns", MAN, "last == 0x0A, bytes.allSatisfy({ $0 == 0x0A || (0x20...0x7E).contains($0) }) else {", "last == 0x0A, bytes.allSatisfy({ $0 == 0x0A || $0 == 0x0D || (0x20...0x7E).contains($0) }) else {"),
     ("a version that is not the tag's", MAN, "guard let versionText = field(\"version\"), versionText == String(tag.dropFirst()),", "guard let versionText = field(\"version\"),"),
     ("the key line left unsigned", MAN, "let signedEnd = lines[0..<i].reduce(0)", "let signedEnd = lines[0..<(i - 1)].reduce(0)"),
     ("small-order keys", MAN, "if smallOrder.contains(where: { Array($0[0..<31]) == Array(bytes[0..<31]) && $0[31] == bytes[31] & 0x7F }) { return nil }", ""),
-    ("non-canonical base64", MAN, "signature.base64EncodedString() == signatureText else { return .failure(.format(\"signature\")) }", "true else { return .failure(.format(\"signature\")) }"),
+    ("non-canonical base64", MAN, "signature.count == 64,\n              signature.base64EncodedString() == signatureText else { return .failure(.format(\"signature\")) }", "signature.count == 64,\n              true else { return .failure(.format(\"signature\")) }"),
     ("a shorter key ID", MAN, "SHA256.hash(data: raw).prefix(4)", "SHA256.hash(data: raw).prefix(3)"),
     # The archive.
     ("non-ASCII names", ARC, "nameBytes.allSatisfy({ (0x20...0x7E).contains($0) && $0 != 0x5C }) else {", "true else {"),
@@ -72,6 +75,24 @@ MUTANTS = [
     ("links at the signature's paths", ARC, "if lower.count >= 3, lower[1] == \"contents\", lower[2] == \"_codesignature\" || (lower.count == 3 && lower[2] == \"coderesources\") {", "if false {"),
     ("16 digits of the SHA-256 in the prompt", MAN, "        var rest = Substring(hex)\n", "        var rest = Substring(hex.prefix(16))\n"),
     ("links outside", ARC, "guard let resolved = resolve(target, from: Array(e.components.dropLast())), resolved.count > 1,", "guard let resolved = Optional(Array(e.components)), resolved.count > 1,"),
+    # Review 3: the prompt, the signed date, the stop.
+    ("the prompt's digest shortened", MAN, '"sign Sill \\(tag) for Update Now: \\(asset), \\(size) bytes, SHA-256 \\(grouped(sha256))"', '"sign Sill \\(tag) for Update Now: \\(asset), \\(size) bytes, SHA-256 \\(grouped(String(sha256.prefix(16))))"'),
+    ("any date read", MAN, "              dateText(date) == text else { return nil }", "              true else { return nil }"),
+    ("the date left unsigned", MAN, 'return text + "signed \\(dateText(signedAt))\\nkey \\(keyID)\\n"', 'return text + "key \\(keyID)\\n"'),
+    ("a stop's signature unchecked", MAN, "        if let problem = check(Data(bytes[0..<signedEnd]), signature, keyID: keyID, keys: keys) { return .failure(problem) }\n", ""),
+    # The automatic update (UpdateAutoPolicy and its mode).
+    ("no cooling-off", AUTO, "        if age < coolingOff { return .waitUntil(signedAt.addingTimeInterval(coolingOff)) }\n", ""),
+    ("no age limit", AUTO, "        if age > maxAge { return .refuse(", "        if false { return .refuse("),
+    ("a signature from the future", AUTO, "        if signedAt.timeIntervalSince(now) > clockSkew {", "        if false {"),
+    ("a rollback by itself", AUTO, "        if let highest = m.highestOffered.flatMap(UpdateInstallPolicy.strictVersion), offered < highest {\n            return .no(", "        if let highest = m.highestOffered.flatMap(UpdateInstallPolicy.strictVersion), false, offered < highest {\n            return .no("),
+    ("a third attempt", AUTO, "            if a.count >= maxAttempts { return .no(", "            if a.count > maxAttempts { return .no("),
+    ("attempts back to back", AUTO, "            if now.timeIntervalSince(a.last) < retryAfter { return .no(", "            if false { return .no("),
+    ("a stopped release by itself", AUTO, "        if m.stopped.contains(offeredTag) { return .no(", "        if false { return .no("),
+    ("without the daily check", AUTO, '        guard checkOn else { return .no("the daily check is off") }\n', ""),
+    ("without the update key", AUTO, '        guard signed else { return .no(', '        guard true else { return .no('),
+    ("installed over a device", AUTO, "        devices == 0 && !pairing && now.timeIntervalSince(quietSince) >= quietFor", "        !pairing && now.timeIntervalSince(quietSince) >= quietFor"),
+    ("installed during a pairing", AUTO, "        devices == 0 && !pairing && now.timeIntervalSince(quietSince) >= quietFor", "        devices == 0 && now.timeIntervalSince(quietSince) >= quietFor"),
+    ("the automatic update asks like Update Now", POL, "            if s.mode == .automatic { n.phase = .waiting; return (n, []) }\n", ""),
     # Sill.app's sources (T21): read by the check, not compiled by it.
     ("a default read by the installer", INS, "    let userAgent: String\n", "    let userAgent: String\n    let host = UserDefaults.standard.string(forKey: \"SillUpdateHost\")\n"),
     ("the environment read by the updater", APP, "    let available: Bool\n", "    let available: Bool\n    let override = ProcessInfo.processInfo.environment[\"SILL_UPDATE\"]\n"),

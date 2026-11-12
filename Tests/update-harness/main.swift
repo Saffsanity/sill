@@ -28,7 +28,7 @@ let testTrust = P.Trust(signer: "identifier \"me.saffer.sill.updater-test\"", no
                         runningRequirement: false, entitlements: [], updateKeys: [publicKey])
 func endpoints(asset: String) -> P.Endpoints {
     P.Endpoints(latestRelease: URL(string: base + "/repos/test/releases/latest")!, apiOrigins: [base], downloadPrefix: base + "/download/",
-                assetName: asset, manifestName: asset + ".manifest", redirectOrigins: [base], redirectPathPrefix: "/assets/",
+                assetName: asset, manifestName: asset + ".manifest", stopName: asset + ".stop", redirectOrigins: [base], redirectPathPrefix: "/assets/",
                 maxRedirects: 3, minAssetBytes: 1024, maxAssetBytes: 64 << 20)
 }
 let testEndpoints = endpoints(asset: "UpdTest.zip")
@@ -58,7 +58,11 @@ struct Release {
     var withManifest = true
     var modes: [String: String] = [:]
     var releaseStatus = 200
+    /// A stop beside the release (review 3, the automatic update's point 1): naming it, naming another
+    /// release, signed with a key the Sill doesn't know, or not a stop at all.
+    var stop: StopKind?
 }
+enum StopKind { case this, otherRelease, otherKey, garbage }
 func publish(_ r: Release) {
     let fm = FileManager.default
     let assets = out.appendingPathComponent("srv/assets")
@@ -84,6 +88,16 @@ func publish(_ r: Release) {
     if r.withManifest {
         list.append(["name": manifestName, "size": manifest.utf8.count, "state": "uploaded",
                      "browser_download_url": "\(base)/download/\(r.tag)/\(manifestName)"])
+    }
+    if let kind = r.stop {
+        let stopName = r.asset + ".stop"
+        let signer = kind == .otherKey ? otherKey : r.signer
+        let text = M.stopText(tag: kind == .otherRelease ? "v1.0.9" : tag, sha256: sha, signedAt: Date(),
+                              keyID: M.keyID(signer.publicKey.rawRepresentation))
+        let doc = kind == .garbage ? "not a stop\n" : M.document(signedText: text, signature: try! signer.signature(for: Data(text.utf8)))
+        try! Data(doc.utf8).write(to: assets.appendingPathComponent(stopName))
+        list.append(["name": stopName, "size": doc.utf8.count, "state": "uploaded",
+                     "browser_download_url": "\(base)/download/\(r.tag)/\(stopName)"])
     }
     let control: [String: Any] = ["release": ["tag_name": r.tag, "draft": false, "prerelease": false, "assets": list,
                                               "html_url": "\(base)/releases/tag/\(r.tag)"],
@@ -203,7 +217,7 @@ func update(_ name: String, using ins: UpdateInstaller = installer, installedFro
     if tamper == .hardLink {
         let other = out.appendingPathComponent("cases/\(name)/other-name")
         try? FileManager.default.removeItem(at: other)
-        precondition(link(resource(staged).path, other.path) == 0, "a hard link")
+        precondition(Darwin.link(resource(staged).path, other.path) == 0, "a hard link")
     }
     if tamper == .signatureLink {
         let resources = staged.appendingPathComponent("Contents/_CodeSignature/CodeResources")
@@ -326,6 +340,11 @@ await refused("a lower version", Release(tag: "v0.9", zip: zip("v0.9"), app: app
 await refused("the same version", Release(tag: "v1.0", zip: zip("v1.1"), app: app("v1.1"), build: "11"), offeredTag: "v1.0") { $0 == .releaseNotNewer }
 await refused("another release than offered", v11, offeredTag: "v1.2") { $0 == .releaseChanged(tag: "v1.1") }
 await refused("the release request answered 404", { var r = v11; r.releaseStatus = 404; return r }()) { $0 == .github(404) }
+// A stop (review 3): read before the download, by Update Now and the automatic update alike.
+await refused("a stop signed with the update key names the release", { var r = v11; r.stop = .this; return r }()) { $0 == .stopped(tag: "v1.1") }
+await refused("a stop signed with another key", { var r = v11; r.stop = .otherKey; return r }()) { if case .stopUnreadable(.unknownKey) = $0 { return true }; return false }
+await refused("a stop that isn't one", { var r = v11; r.stop = .garbage; return r }()) { if case .stopUnreadable = $0 { return true }; return false }
+_ = await installs("a stop for another release", { var r = v11; r.stop = .otherRelease; return r }())
 
 say("== refused: the download")
 await refused("a redirect to another host", { var r = v11; r.modes = ["UpdTest.zip": "redirect-other"]; return r }()) { $0 == .redirectRefused("http://localhost:\(port)") }
@@ -592,7 +611,10 @@ func watched(_ name: String, newCopy: [String]?, seconds: Int = 6, changeOld: Bo
         check(p.isRunning, "\(name): a process that isn't the new Sill is never stopped")
         p.terminate()
     }
-    p.waitUntilExit()
+    // Not waitUntilExit: from a task, after a hop to another thread, it can wait for good.
+    let end = Date().addingTimeInterval(10)
+    while p.isRunning, Date() < end { try? await Task.sleep(for: .milliseconds(100)) }
+    if p.isRunning { kill(p.processIdentifier, SIGKILL) }
     if let s = o.staging { UpdateInstaller.remove(s) }
     say("\(name): \(version(of: o.installed) ?? "?") at the path")
 }

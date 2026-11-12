@@ -316,6 +316,7 @@ check(stopVerdict(goodStop.replacingOccurrences(of: "tag v0.4.0", with: "tag v0.
 check(stopVerdict(goodStop.replacingOccurrences(of: signedLine, with: "signed 2026-11-12")) == .format("signed"), "a stop's date, strictly")
 check(stopVerdict(goodStop + "more\n") == .format("first"), "a stop with a line more")
 check(stopVerdict(String(goodStop.dropLast())) == .notText, "a stop without its last newline")
+check(stopVerdict(goodStop.replacingOccurrences(of: "\n", with: "\r\n")) == .notText, "a stop with carriage returns")
 check(M.stoppingReason(tag: "v0.4.0", sha256: sha).hasSuffix(M.grouped(sha) + ")"), "the stop's prompt shows the whole SHA-256")
 // One architecture alone is a manifest too (a build for one).
 check(verdictOf(signedManifest(cdhashes: ["arm64": cd["arm64"]!])) == nil, "arm64 alone")
@@ -577,7 +578,7 @@ for on in [false, true] {
 }
 check(P.footnote(automatic: false).contains("Sill downloads and installs nothing by itself."), "off: nothing by itself")
 check(P.footnote(automatic: true).contains("Automatically update Sill is on") && P.footnote(automatic: true).contains("it never disconnects anyone")
-      && P.footnote(automatic: true).contains("2 days after it is signed") && P.footnote(automatic: true).contains("10 minutes"), "on: what it does: \(P.footnote(automatic: true))")
+      && P.footnote(automatic: true).contains("two days after it is signed") && P.footnote(automatic: true).contains("10 minutes"), "on: what it does: \(P.footnote(automatic: true))")
 check(!UpdatePolicy.footnote.contains("update key") && UpdatePolicy.footnote.contains("never downloads or installs anything by itself"),
       "a build with no update key claims no check it can't make")
 
@@ -660,7 +661,7 @@ check(AP.switchState(available: true, canKeep: true, checkOn: false, refusal: ni
 check(AP.switchState(available: true, canKeep: false, checkOn: true, refusal: nil, on: false) == AP.Switch(shown: true, enabled: false, note: "This copy of Sill can’t keep this setting: it isn’t a notarized release."), "no keychain group")
 check(AP.switchState(available: true, canKeep: true, checkOn: true, refusal: .translocated, on: false) == AP.Switch(shown: true, enabled: true, note: P.words(.translocated)), "a refusal said under it")
 // Its words.
-check(AP.quietMinutes == 10 && AP.coolingOffWords == "2 days after it is signed", "the waits in words")
+check(AP.quietMinutes == 10 && AP.coolingOffWords == "two days after it is signed", "the waits in words")
 check(AP.offerNote(mem, offered: v040, offeredTag: "v0.4.0", waitUntil: nil, now: t0) == "Sill installs it by itself once no device has been connected for 10 minutes.", "the offer's note")
 check(AP.offerNote(mem, offered: v040, offeredTag: "v0.4.0", waitUntil: later(30), now: t0).hasPrefix("Sill installs it by itself tomorrow at ")
       || AP.offerNote(mem, offered: v040, offeredTag: "v0.4.0", waitUntil: later(30), now: t0).hasPrefix("Sill installs it by itself on "), "cooling off: from when")

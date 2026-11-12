@@ -27,6 +27,13 @@ Sill for Mac is a free, notarized download from
 Sill's own [tap](https://github.com/Saffsanity/homebrew-sill). Sill for iPhone
 and iPad is free on the [App Store](https://apps.apple.com/app/id6816359860),
 and you can also build it from source (below).
+<!-- Update Now: for the first release whose Sill carries an update key (docs/release-checklist.md part 1 §3). -->
+Sill for Mac updates itself from Settings › General with Update Now, or by
+itself when you turn on Automatically update Sill (off unless you do; it installs
+only while no iPhone or iPad is connected). Either way it checks a new version two
+ways before installing it: Apple's signature and notarization for Sill's
+developer, and the release signed with Sill's own update key.
+<!-- /Update Now -->
 
 To try the next version before it ships: Sill for iPhone and iPad has a
 [public beta on TestFlight](https://testflight.apple.com/join/6v7nqyn3), and Sill for Mac

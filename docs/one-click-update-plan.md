@@ -197,8 +197,11 @@ or opened by another app before every check has passed.
 - macOS itself checks a notarized app's integrity at its first launch since Ventura (WWDC22 "What's new
   in privacy"), and the kernel validates every code page as it loads.
 
-**T11. A replaced helper, a stale temporary folder.** There is no helper: no updater binary, no script,
-no ditto, no shell. The programs involved are Sill itself and LaunchServices starting the new Sill. The
+**T11. A replaced helper, a stale temporary folder.** One helper, since review 3: the watcher (§15.5),
+`/bin/sh` running a script compiled into Sill (`UpdateInstaller.watcherScript`), every path and value an
+argument and never part of its text, started by the old Sill just before it quits. No updater binary, no
+ditto. The programs involved are Sill itself, LaunchServices starting the new Sill, and the watcher with
+the system tools it calls by full path (`ps`, `kill`, `codesign`, `mv`, `open`). The
 staging folder is new for each attempt (`FileManager.url(for: .itemReplacementDirectory, in:
 .userDomainMask, appropriateFor: Sill.app)`: a random name in this user's temporary folder, 0700, on
 Sill.app's volume); nothing in a leftover one is ever read or reused; the one an update leaves is deleted
@@ -208,7 +211,9 @@ once the next Sill's host has started (T20).
 user owns; the updater cannot stop that and does not try. What it must not do is lend it Sill's own
 right to change Sill.app: since macOS 13, App Management keeps apps of other teams from modifying a
 signed app, while Sill (team 9B2KKVM937) may modify itself (NSUpdateSecurityPolicy's default: apps of the
-same Team ID may). The updater runs only Sill's own code, checks at the final path, pins the code through
+same Team ID may). The updater runs only Sill's own code, checks the staged copy again right before the
+swap (review 3, F5: a process of this user that changed it in the staging folder after the first check is
+caught there, before Sill's right to change Sill.app moves it) and at the final path, pins the code through
 the launch (T10), and on any doubt swaps the old copy back, but only the old copy: what waits in the
 staging folder after the swap (this user's, so anything of this user can change it) is put back only if it
 is still the code that was running (its cdhash), else it stays out and the checked new copy stays in place.
@@ -280,7 +285,9 @@ connected, it asks again before installing. The quit is the ordinary one (NSApp.
 applicationShouldTerminate → HostShutdown.releaseForQuit), which puts a staged window home, removes the
 virtual display and puts sized windows back, as Quit Sill does.
 
-**T20. The relaunch.** No helper is left behind because none starts. The old Sill launches the new
+**T20. The relaunch.** The one helper left behind is the watcher (§15.5): if the new Sill doesn't run for
+`provedAfter` (30 s) with its host up within `watchWait` (150 s), it puts the old copy back and starts it.
+The old Sill launches the new
 bundle as a new instance (`NSWorkspace.openApplication`, `createsNewApplicationInstance`, no prompt, not
 activated) and keeps running; the new Sill, finding another Sill of this user running, finishes launching
 and waits (a run-loop Timer, up to 30 s) for it to quit before it starts anything (no status item, no
@@ -343,15 +350,20 @@ notarization would be caught is not measured (no revoked build to try). Not
 so no release shows Update Now (Open Release Page… as today) until a release carrying a new public key is
 installed by hand once (§4.8). Leaked: the attacker still needs a Developer ID signed, notarized build
 (T4's route through CI, or Sill's Developer ID key); the answer is the same rotation, with the release
-notes asking people to update by hand once. A key compiled in that is not a usable Ed25519 public key
+notes asking people to update by hand once. A leaked key cannot be revoked (review 3, N1): every Sill not
+updated by hand keeps trusting it. What limits the damage: the attacker still needs Apple's signature and
+notarization for Sill's team (T4); the automatic update installs a release only two days after it was
+signed and asks GitHub again right before it installs, so a release Noah pulls within those days installs
+nowhere by itself (§15); and a stop signed with a key the Sills know (`Sill.zip.stop`, §15.4) names a
+release none installs, also by Update Now. A key compiled in that is not a usable Ed25519 public key
 (wrong length, not decodable, or one of the points of small order, for which a signature can be forged
 for some messages) makes every manifest fail: `UpdateManifest.usableKey`, checked for every compiled key.
 
 **T29. A release not signed yet (added).** The check stores whether the release lists `Sill.zip.manifest`
 (`updateLatestSigned`); without it Update Now does not show and the release page is the way, as today.
 If someone clicks in the moment between the check and Noah's signing, the release is read again at the
-click and the answer is "Sill 0.6.2 isn’t ready for Update Now yet. Try again later, or open its release
-page." — nothing downloaded.
+click and the answer is "Sill 0.6.2 isn’t signed with Sill’s update key yet, so it can’t be installed from
+here. Try again later, or open its release page." — nothing downloaded.
 
 ## 4. The rule (pure: `UpdateInstallPolicy.swift`, `UpdateManifest.swift`, `UpdateArchive.swift`)
 
@@ -467,9 +479,10 @@ Gathered by UpdateInstaller from Security.framework and lstat, judged here (`ver
 ### 4.6 The state machine
 
 Phases: `idle`, `confirming(devices)`, `fetching`, `downloading(received, total)`, `unpacking`,
-`checking`, `ready(devices)`, `installing`, `restarting`, `failed(Failure)`. Events: `updateNow(devices)`,
-`confirm`, `cancel`, `fetched`, `progress`, `downloaded`, `unpacked`, `checked(devices)`, `installed`,
-`launched`. `next(state, event) -> (state, [Effect])` with effects `fetch`, `download`, `unpack`, `check`,
+`checking`, `ready(devices)`, `waiting`, `installing`, `restarting`, `failed(Failure)`; the state also
+carries its `mode`, `manual` (Update Now) or `automatic` (§15.2). Events: `updateNow(devices)`,
+`automatic`, `postponed`, `quiet(Failure?)`, `confirm`, `cancel`, `fetched`, `progress`, `downloaded`,
+`unpacked`, `checked(devices)`, `installed`, `launched`. `next(state, event) -> (state, [Effect])` with effects `fetch`, `download`, `unpack`, `check`,
 `install`, `launch`, `quit`, `cleanUp`. Update Now is taken only in `idle` and `failed`; Cancel only
 before `installing`; after `installing` nothing but the launch's result moves it. The devices the person
 agreed to disconnect are kept (`consented`); after the check, a device not among them asks again. A
@@ -479,17 +492,17 @@ failure that left the old copy out of place (not put back) never cleans up: the 
 
 Settings › General's update section keeps its line, switch and Check Now. With Update Now: its button
 (disabled with the refusal's line under it when one holds) and Open Release Page…. During an update the
-line says the step ("Getting Sill 0.6.2 from GitHub…", "Downloading Sill 0.6.2… 2.1 of 5.9 MB",
-"Checking Sill 0.6.2…", "Installing Sill 0.6.2…", "Restarting Sill…") over a progress bar, with Cancel
+line says the step ("Getting Sill 0.6.2 from GitHub…", "Downloading Sill 0.6.2…" with "2.1 of 5.9 MB" on
+a line of its own under it (Noah, 2026-11-12), "Checking Sill 0.6.2…", "Installing Sill 0.6.2…",
+"Restarting Sill…") over a progress bar, with Cancel
 until installing. A failure is the orange line ("Couldn’t update: ‹why›. Sill 0.6.1 is unchanged.") with
 Try Again and Open Release Page…. The status menu's item: "Sill 0.6.2 Is Available…" with "You have
 0.6.1; update it in Settings" opens Settings › General when Update Now is offered and not refused (Q4),
 the release page otherwise (as today, "You have 0.6.1; opens its download page"); during an update,
 "Updating to Sill 0.6.2…" with the step, opening Settings. VoiceOver hears each step, the question and
-the result. The footnote, while Update Now shows: "… Sill never downloads or installs anything by itself.
-Update Now downloads the new version from GitHub, checks that it is Sill, signed by its developer and
-notarized by Apple, puts it in place of this copy and restarts Sill; Open Release Page… shows it on GitHub
-instead."
+the result. The footnote names both checks wherever Update Now exists (Noah, 2026-11-12: "Add the update key
+language when applicable as well"), and a build with no update key keeps the check's own footnote, which
+claims no check it can't make; every line that names a check names the one that failed (§15.7 lists them).
 
 ### 4.8 The update key: where it lives, the release step, rotation and loss
 
@@ -651,16 +664,46 @@ checklist.md part 1 §3's marker rule).
    release is signed with the update key).
 6. **A copy installed by Homebrew.** Default: allowed (T23).
 7. **A second Sill at launch.** Default: waits up to 30 s for the other to quit, then quits itself with a
-   line. Before this change two Sills ran side by side (two hosts, two status items).
+   line; only for a genuine Sill (one that satisfies Sill's requirement: review 3, N7). Before this change two Sills ran side by side (two hosts, two status items).
 8. **Revocation.** Default: macOS's default network behaviour (T27). Alternative: enforce it.
-9. **The old copy.** Default: kept in the staging folder until the new Sill's host has started, then
-   deleted. Alternatives: to the Trash; kept until the next launch.
+9. **The old copy.** Default: kept in the staging folder until the new Sill has run 30 s with its host up
+   (the watcher's word, §15.5), then deleted. Alternatives: to the Trash; kept until the next launch.
 10. **Quarantine on the new copy.** Default: none (the update is checked by Sill; macOS checks a
     notarized app's integrity at first launch anyway). With it, the first launch would show "Sill is an
     app downloaded from the Internet" after a one-click update.
 11. **Cancel during the download.** Default: yes, until installing begins.
 12. **Where the update key lives.** Default: his login keychain with one offline copy (§4.8).
     Alternative: a file of mode 0600 (`--key-file`), best on an encrypted disk image.
+
+Automatically update Sill (§15). Noah decided five points on 2026-11-12 (§15.1); these are what he was
+not asked, each with the default taken:
+
+13. **The cooling-off.** Default: 48 hours from the manifest's signed date before Sill installs a release by
+    itself (Update Now at once). Cost per release: none for Noah; automatic installs come two to three days
+    after he signs. Alternatives: 24 hours; none (`coolingOff = 0`).
+14. **A signed stop.** Default: built and read (`Sill.zip.stop`, §15.4). Cost per release: none until used;
+    using it, one signature in person and one upload. Alternative: none (pulling the release within the
+    cooling-off already stops the automatic update everywhere, as each Sill asks GitHub again before its
+    swap): `stopName = nil`.
+15. **The wait with no device connected.** Default: 10 minutes (longer than a reconnect or a short trip to
+    the background; any device restarts it). Alternatives: 5, 30 or 60 minutes; only at night.
+16. **How many retries.** Default: two attempts a version, at least 20 hours apart (a daily check each), then
+    Update Now only. Alternatives: three; one.
+17. **The oldest release installed by itself.** Default: one signed within 120 days and not below the
+    highest version offered before. Alternative: no age limit.
+18. **The watcher.** Default: the new Sill must run 30 s with its host up within 150 s, else the old copy is
+    put back and started, for Update Now too. Alternatives: only for the automatic update; longer times.
+19. **GitHub asked again right before the automatic swap.** Default: yes (one request and the manifest; a
+    failure that says nothing about the release waits for the next look). Alternative: no.
+20. **A device that tries to connect while Sill installs.** Default: told that Sill is restarting, and it
+    reconnects by itself. Alternative: refused without a word (it would show "disconnected").
+21. **Where the switch lives.** Default: Sill's keychain group with what it remembers, never its defaults
+    (only Settings can turn it on). Alternative: UserDefaults, as the daily check's switch (then `defaults
+    write` would turn it on).
+22. **A copy that finds no quiet moment.** Default: dropped after a day (no attempt spent; a later check
+    downloads it again, about 6 MB). Alternative: kept until the next launch.
+23. **Check Now and the automatic update.** Default: any check GitHub answers may begin it, Check Now's
+    too. Alternative: the daily check alone.
 
 ## 11. Gates (what this branch verifies without touching Noah's Sill)
 
@@ -857,6 +900,31 @@ Its verdicts on the rest: fixes 4, 7, 8, 9, 11 and 12 hold, 5 and 6 with finding
 finding 4; the owner refusal and the rounding hold; nothing in Sill.app lets an argument, a variable or a
 default loosen the trust, the hosts or the version rule.
 
+## 12c. The security review (review 3, 2026-11-12: an independent subagent, read-only, on 38385a7)
+
+`~/Downloads/sill-handoff/one-click-update/SECURITY-REVIEW.md` has every finding, its proof and the
+reviewer's fixes. Each was verified here first; what was done, and the check that fails without it:
+
+| | Finding | Done | Check that fails without it |
+|---|---|---|---|
+| F1 | HIGH. Any process of Noah's could drive the installed signer silently (DYLD_INSERT_LIBRARIES into an unhardened binary). | The signer is built with the hardened runtime (`codesign -o runtime`); `sign-update.sh` refuses a signer without it; every signature still asks in person (Touch ID or the password). | `sign-test.sh`: a signer without the runtime refused; measured: a marker library loads into the unhardened signer, not into the hardened one. |
+| F2 | HIGH. Noah's signature did not pin which keys the release trusts. | `--install-signer` records the trust anchors (the `releaseKeys` line, the pinned requirement, the `Trust` and `Endpoints` blocks, comments stripped) and shows them; signing compares the tag's own sources with the record and stops, with the difference shown, when they differ. | `sign-test.sh`: a tag whose keys or requirement changed is refused. |
+| F3 | MEDIUM. The key's backup step could leave the key readable by every process of the account. | §14's steps 1–3 rewritten: the copy goes straight into an encrypted disk image, never a plain file. | Documentation. |
+| F4 | MEDIUM. The in-person prompt showed 64 bits of the SHA-256. | The whole SHA-256, in groups of eight, in the prompt and printed before it (`UpdateManifest.signingReason`, `grouped`). | `update-install`: the prompt's exact text and its 64 digits; mutant "the prompt's digest shortened". |
+| F5 | LOW. A same-user process could leave a changed, unchecked copy at Sill's path (change it in staging, kill Sill after the swap). | The staged copy is checked once more right before the swap and must equal the first check (`UpdateInstaller.install`); the quit waits for an install step (`AppDelegate`); T12 corrected. The moment left is between that check and `renamex_np` (microseconds), and the check after the swap still covers it. | Harness: "changed after the check, before install" refused before the swap; "raced" caught after it and put back; mutant "no check right before the swap". |
+| F6 | LOW. A link through a link escaped Sill.app; Security opened links at the signature's own paths. | The link rule walks a target as the file system does and refuses a step into any link (the reviewer's patch); links at `Contents/_CodeSignature` and `Contents/CodeResources` refused; the tree check refuses anything but files, folders and links there. | `update-install`: the reviewer's three cases and two more; mutants "a walk through a link", "links at the signature's paths"; harness case "link-through-link" and "the new copy's CodeResources a link". |
+| F7 | LOW. Rollback to an older signed release; manifests never expire. | The manifest carries its signed date (`signed …Z`). The automatic update installs nothing signed more than 120 days ago or dated ahead of this Mac's clock, and never a version below the highest the check has offered (§15.3). Update Now shows the version and the person decides. | `update-install`: the date's form, a changed date, `dates`, the start rule's rollback case. |
+| N1 | A leaked key cannot be revoked. | T28 says so, and what limits the damage (§15.4: the cooling-off, the second look at GitHub, the stop). | Documentation. |
+| N2 | `refresh()` ran 10–70 ms on the main actor every second. | The look runs in a detached task; one at a time, callers queued (`AppUpdater.refresh`). | By reading (AppKit: no harness). |
+| N3 | `forceTerminate` could end the old Sill itself. | Never this process: guarded in both places (`opened`). | By reading; the reviewer's probe: the launch always returned a new process here. |
+| N4 | Hard links and open descriptors in the staged copy. | Every file of the app one name (`st_nlink == 1`), and only files, folders and links. | Harness "a hard link"; mutant "hard links taken". |
+| N5 | A crash after the swap leaked the staging folder; the kept way back can be emptied by macOS. | The leftover note is written before the swap; the words say "soon, as macOS empties that folder after a few days". | Harness "the swap fails" (the note already there); mutant "the note after the swap"; `update-install`: the line. |
+| N6 | The signer was built from 1,500 lines. | `strictVersion`, `strictTag` and `Architecture` moved beside `UpdateManifest`: the signer compiles `Compatibility.swift`, `UpdateManifest.swift` and `update-manifest.swift`. | `sign-test.sh` builds it so. |
+| N7 | Any process claiming Sill's bundle identifier made every launch wait 30 s and quit. | Only a process that satisfies Sill's requirement counts, at launch and in the refusal (`UpdateInstaller.genuine`). | Harness: `genuine` against a running process; mutant "any Sill waited for". |
+| N8 | The harness drives `UpdateInstaller` only. | Still so, plus the watcher (§15.5) now in it; the relaunch, the wait at launch, the quit and the hold remain AppKit's, covered by the pure state machine, by reading and by Noah's steps (§12, §15.8). TLS stays unexercised (the stand-in is plain HTTP). | — |
+
+The reviewer's seven points for an automatic updater are §15.6.
+
 ## 13. Progress
 
 - 2026-11-11 22:40 EST: facts gathered (below), plan written and pushed (e7de2b3); the five decisions
@@ -979,3 +1047,207 @@ Three things, at the Mac. The key list stays empty in the code until step 2's co
    that checked before you signed shows Update Now after its next daily check, or at Check Now. Someone who
    clicked Update Now in between is told "Sill 0.6.2 isn’t ready for Update Now yet. Try again later, or
    open its release page." and nothing is downloaded.
+
+## 15. Automatically update Sill (round 3, 2026-11-12)
+
+Noah, 2026-11-12: "The updater screens look good except I would like the "2.4 of 5.9 MB" text to be below
+the "Downloading Sill 0.4..." text. Also add a toggle for "Automatically update Sill" that works as
+intended." Then: "Add the update key language when applicable as well."
+
+### 15.1 Noah's decisions (2026-11-12)
+
+In his words: "Your defaults are correct for the new updater features". So these are decided:
+1. Off by default.
+2. Usable only while "Check for updates automatically" is on, and only where Update Now is available.
+3. It downloads and checks quietly, and installs only while no device is connected, never disconnecting
+   anyone.
+4. It needs the update key, and passes the same two checks as Update Now.
+5. A failed update is tried again at the next daily check, never in a loop.
+
+### 15.2 The design
+
+- **One state machine** (§4.6): the state carries a `mode`. `automatic` begins only from `idle` or
+  `failed` (never beside Update Now, a question, or a copy already waiting); its steps are Update Now's
+  (fetch, download, unpack, check), with the same refusals and the same two checks; after the check it
+  goes to `waiting`, never to `ready` (a device connected is never asked about, and never disconnected).
+  `quiet(nil)` installs a waiting copy; `quiet(failure)` ends it. Install Now (Update Now's button on a
+  waiting copy) makes it the person's from there: at once with nobody connected, else the question.
+- **The rule** (`UpdateAutoPolicy`, pure, checked): it begins after a check GitHub answered, and when the
+  switch is turned on, when the switch is on, the daily check is on, Update Now is available and not
+  refused (looked at afresh first, off the main actor), the offer is newer and signed with the update key,
+  no stop names it, it isn't below the highest version the check has offered, and it has had fewer than
+  two attempts, the last at least 20 hours ago.
+- **The signed date.** The manifest's `signed` line (UTC, by Noah's clock; GitHub's own date is not signed).
+  A release signed less than 48 hours ago waits (no attempt spent; Settings says from when); one signed
+  more than 120 days ago, or more than 10 minutes in this Mac's future, is never installed by itself
+  ("Sill didn’t install 0.4 by itself: … Update Now still can.").
+- **The quiet moment.** A checked copy waits; a run-loop Timer looks every 30 s. Any device connected
+  restarts the wait (and the host's status changes reset it at once); once none has been connected for 10
+  minutes and no pairing window is open, GitHub is asked again (the release must still be the latest, its
+  manifest the one checked, and no stop beside it; an answer that says nothing, such as no connection,
+  waits for the next look). Then, in one step on the host's queue, new sessions are held and the
+  connected ones counted (`StreamServer.holdNewSessions`): with any connected the hold is released and the
+  wait begins again; with none, the install (the staged copy checked again right before the swap), the
+  relaunch and the quit, the hold kept until the quit. A device that tries to connect meanwhile is told
+  "‹Mac› is restarting Sill to install an update. It reconnects in a moment." (goodbye `restarting`,
+  reconnect true: a device that doesn't know the reason shows the message and reconnects). A copy that
+  waited a day without a quiet moment is dropped (no attempt spent) and a later check starts afresh; a
+  waiting copy never outlives the launch.
+- **Where the switch lives.** With what the update remembers (attempts by version, the highest version
+  offered, stopped releases, the last update it made), in one item of Sill's own keychain group in the
+  data-protection keychain (`AutoUpdateStore`: service `me.saffer.sill.update`, this device only, after
+  first unlock, never synchronized). Not in Sill's defaults. Only Settings › General's switch turns it on
+  (`AppUpdater.setAutomaticUpdate`, called from `SettingsPanes` alone); no kind 17, `DeviceSettings`, launch
+  argument, `defaults write` or CLI flag names it (`update-install` reads the sources for it). A build
+  without the group (every development and ad hoc build) keeps nothing and dims the switch: "This copy of
+  Sill can’t keep this setting: it isn’t a notarized release."
+- **The watcher** (§15.5) puts the old copy back if the new one doesn't run.
+- **Words** (§15.7): the download's size on a line of its own under "Downloading …"; the switch and its
+  notes; the waiting copy ("Sill 0.4 is ready." with "Sill installs it by itself once no device has been
+  connected for 10 minutes, then restarts.", Install Now and Cancel); after a failure, "Sill tries again
+  after its next daily check." or "Sill won’t install 0.4 by itself again; Update Now still can."; after an
+  update, "Sill updated itself to 0.4 today at 03:12." for a week; the menu's "Sill 0.4 Is Ready to
+  Install…" with "Installs by itself while no device is connected".
+
+### 15.3 What Sill remembers, and the bounds on every loop (review 3's point 5)
+
+- Attempts by version: count, the last one's time, the last failure's words. Two at most, at least 20 hours
+  apart. Every failure counts, a new version that didn't run and was put back by the watcher too (so a
+  release that crashes at launch on this Mac is installed and put back at most twice, a day apart, then
+  left to Update Now). A wait (the cooling-off, a day without a quiet moment) is not an attempt.
+- A refusal is looked at before anything is downloaded: a refusal that holds most days (another account's
+  Sill, a read-only volume) downloads nothing.
+- Staging: every attempt makes one folder and its end removes it, but for a folder holding the old copy that
+  could not be put back (set aside, the person's way back); what earlier attempts left goes once the next
+  Sill's host is up (T20).
+- The highest version offered (a later, lower offer is a rollback: never by itself), and the tags a signed
+  stop named (never installed, also after the stop is gone).
+
+### 15.4 A cooling-off and a way to stop it (review 3's point 1; open questions 13 and 14)
+
+- The cooling-off: 48 hours from the manifest's signed date (`UpdateAutoPolicy.coolingOff`; 0 turns it off).
+  Cost per release: none for Noah; automatic installs come two to three days after he signs (the first daily
+  check after 48 hours), Update Now at once.
+- The stop: `Sill.zip.stop` beside a release, `Sill stop 1` with the release's tag and its zip's SHA-256,
+  signed with an update key (`UpdateManifest.Stop`; the signer's `stop` command, asked in person). Read
+  before anything is downloaded, by Update Now and the automatic update: one that names this release ends
+  the update ("Sill’s developer stopped Sill 0.4 with a stop signed with Sill’s update key, so it isn’t
+  installed."), one that doesn't verify ends it too (fail closed), one naming another release changes
+  nothing; the tag is remembered. `Endpoints.github.stopName = nil` turns the mechanism off. Cost per
+  release: none until it is used; using it: one signature in person and one upload. Pulling the release
+  (or marking it a prerelease) within the cooling-off stops the automatic update everywhere too, since
+  each Sill asks GitHub again right before its swap: the stop matters for a release that must stay listed.
+- To stop a release: `"$HOME/Library/Application Support/Sill Update Signer/update-manifest" stop --tag v0.6.3
+  --sha256 <the sha256 line of its Sill.zip.manifest> --out Sill.zip.stop`, then `gh release upload v0.6.3
+  Sill.zip.stop --repo Saffsanity/sill` (docs/release-checklist.md part 1 §7).
+
+### 15.5 The watcher (review 3's point 6)
+
+Just before the old Sill quits, once the new one has finished launching and its running code is the code
+checked, the old Sill writes a note for the new one (a random token, the new version, the mode) and starts
+`/bin/sh` with the watcher's fixed script, in a session of its own, its output to /dev/null. The new Sill,
+once its host has been up for 30 s (`provedAfter`), or when it is quit, writes the token in the started note;
+the watcher, looking once a second, then ends, and the new Sill removes the old copy 3 s later. If the new
+Sill's process is gone without the note, or there is no note after 150 s (`watchWait`): the watcher stops
+that process (only while it runs Sill's executable from Sill's path: `ps`), checks the old copy (valid with
+strict checks, the trust's requirement, the cdhash it ran with), puts it back at Sill's path (two renames;
+the new copy goes to "did not start.app" in the staging folder), writes the restored note (the token, why)
+and starts it with `open`. That Sill says what happened ("Sill 0.4 didn’t start, so Sill 0.3 is back.",
+then the automatic note) and counts the attempt. Nothing that isn't the old copy, whole, is put back; a
+process that isn't the new Sill is never stopped. A process of this user can write the started note (no
+put-back) or stop the new Sill early (a put-back of the previous genuine version, checked): neither installs
+anything new. It runs for Update Now too: one path. `Tests/update-harness`'s watcher cases run it for real,
+with the test app's own executable as the launcher in place of `open`.
+
+### 15.6 The reviewer's seven points, and how each is met
+
+1. *A cooling-off on a signed date, and a signed way to stop:* met, both switchable, both open questions for
+   Noah (13, 14) with their costs (§15.4). F1, F2, F3 and F7 are fixed first (§12c). Checked: `update-install`
+   (the date, the stop's format and signature, `dates`, the start rule, which answers end a waiting copy).
+2. *Only Settings turns it on:* met (§15.2). An attacker running as Noah cannot read, add or change the item
+   (no process without Sill's signature and keychain group can); with Accessibility granted to it, it can click
+   the switch, as it can click Update Now; `defaults write me.saffer.sill.mac updateCheck 0` turns the daily
+   check off and so stops automatic updates (a denial, nothing installed). Checked: `update-install` reads the
+   sources.
+3. *No gap between the look and the quit:* met: the hold and the count in one step on the host's queue, then
+   no session can register until the quit; a pairing window open counts as not quiet. By reading; Noah's
+   step A4.
+4. *The waiting copy checked again before the swap:* met: `install` runs the whole check on the staged copy
+   (the code signature with strict flags, the pinned requirement, notarization and the stapled ticket, the
+   identifier, team, entitlements and hardened runtime, the version, every slice's cdhash against the
+   manifest, the tree: files, folders and links only, each file one name, the signature's own files real
+   files) and requires the same result as the first check; GitHub is asked again before it. Checked: the
+   harness's staged-copy cases and mutant.
+5. *Bounded retries:* met (§15.3). Checked: `update-install`'s start rule.
+6. *A failure after the old Sill quit:* met (§15.5). Checked: the harness's six watcher cases and five
+   mutants.
+7. *One state machine; the quit from a run-loop Timer:* met (§15.2): the quit is `quitForUpdate`'s Timer, the
+   quiet looks are a run-loop Timer, and a relaunched Sill starts nothing at once (its own version is the
+   offer, and attempts are spaced). Checked: `update-install`'s state machine cases.
+
+### 15.7 The words, in one place
+
+Wherever words say what an update is checked against, they name both checks; a build without an update key
+says nothing of either (Noah: "Add the update key language when applicable as well").
+- Footnote, switch off: "Once a day, Sill asks GitHub whether a newer version is out. GitHub sees this Mac’s
+  IP address and which version of Sill it has; nothing else is sent. Sill downloads and installs nothing by
+  itself. Update Now downloads the new version from GitHub, puts it in place of this copy and restarts Sill;
+  Open Release Page… shows it on GitHub instead. Before it installs a new version, Sill checks it two ways: it
+  must carry Apple’s signature and notarization for Sill’s developer, and the release must be signed with
+  Sill’s own update key."
+- Footnote, switch on: "… nothing else is sent. Automatically update Sill is on: Sill downloads a new version
+  two days after it is signed, then installs it and restarts once no device has been connected for 10
+  minutes; it never disconnects anyone. Before it installs a new version, Sill checks it two ways: … Update
+  Now does the same at once."
+- A build without an update key: the check's own footnote, unchanged ("… Sill never downloads or installs
+  anything by itself: a new version opens its page on GitHub, where you download it.").
+- Apple's check: "Couldn’t update: the downloaded app isn’t signed with the Developer ID of Sill’s
+  developer.", "… Apple hasn’t notarized the downloaded app.", "… the downloaded app’s code signature isn’t
+  valid." (each "Sill 0.3 is unchanged." after).
+- The update key's check: "Sill 0.4 isn’t signed with Sill’s update key yet, so it can’t be installed from
+  here. Try again later, or open its release page.", "Couldn’t update: the release’s signature with Sill’s
+  update key isn’t valid.", "… the release is signed with an update key this Sill doesn’t know.", "… the
+  release’s signature with Sill’s update key can’t be read.", "… this Sill has no usable update key.", "… the
+  release on GitHub isn’t the one signed with Sill’s update key.", "… the downloaded app isn’t the one signed
+  with Sill’s update key.", "Sill’s developer stopped Sill 0.4 with a stop signed with Sill’s update key, so it
+  isn’t installed.", "… the release carries a stop that isn’t signed with Sill’s update key."
+- The switch: "Automatically update Sill"; under it when it can't act: "Works while Check for updates
+  automatically is on.", "This copy of Sill can’t keep this setting: it isn’t a notarized release.", or the
+  refusal's own line.
+- While a release is offered, under Update Now: "Sill installs it by itself once no device has been connected
+  for 10 minutes.", "Sill installs it by itself tomorrow at 03:00 or later, once no device has been connected
+  for 10 minutes.", "A stop signed with Sill’s update key names Sill 0.4, so Sill won’t install it.", "Sill
+  won’t install 0.4 by itself: 0.5 was offered before it. Update Now still can.", "Sill won’t install 0.4 by
+  itself again; Update Now still can."
+- Waiting: "Sill 0.4 is ready." / "Sill installs it by itself once no device has been connected for 10
+  minutes, then restarts." [Install Now] [Cancel]. Menu: "Sill 0.4 Is Ready to Install…" / "Installs by
+  itself while no device is connected".
+- After: "Sill didn’t install 0.4 by itself: it was signed more than 120 days ago. Update Now still can.",
+  "Sill tries again after its next daily check.", "Sill won’t install 0.4 by itself again; Update Now still
+  can.", "Sill updated itself to 0.4 today at 03:12.", "Sill 0.4 didn’t start, so Sill 0.3 is back."
+- The way back: "Sill couldn’t put 0.3 back in place. It is at ‹path›: quit Sill and move it to your
+  Applications folder soon, as macOS empties that folder after a few days."
+- To a device during the hold: "‹Mac› is restarting Sill to install an update. It reconnects in a moment."
+
+### 15.8 For Noah (with the rehearsal build of §12, its key, and a second notarized release)
+
+A1. Settings › General: "Automatically update Sill" under "Check for updates automatically", off. With the
+    daily check off it is dimmed with "Works while Check for updates automatically is on."
+A2. Turn it on; quit and relaunch Sill: still on. `defaults read me.saffer.sill.mac` names nothing of it.
+A3. For the rehearsal set `coolingOff` to 0 in that build (one line, as its key), or wait two days. With a
+    newer release published and signed: Check Now. Within seconds Settings shows "Downloading Sill …" with
+    the size under it, then "Sill … is ready." with Install Now and Cancel; the log's "Automatic update:"
+    lines.
+A4. With the iPad connected, nothing installs for as long as it stays. Disconnect it; about 10 minutes later
+    the log's "no device connected for 10 minutes; new sessions are held", the install and the restart. Try
+    to connect the iPad in that minute: its message, then it reconnects to the new Sill by itself.
+A5. Connect a device at minute 9 and leave again: the 10 minutes start over.
+A6. The watcher: a rehearsal release whose app quits at launch (a build with `exit(1)` first thing, signed
+    and notarized): within about two and a half minutes the old version is back and running, Settings: "Sill …
+    didn’t start, so Sill … is back." and "Sill tries again after its next daily check."; a day later the
+    same once more, then "won’t install … by itself again". Watch that the watcher's renames in
+    /Applications are allowed (App Management: the responsible process is the old Sill, of the same team).
+A7. A stop: sign one for the rehearsal release (§15.4), upload it, Check Now: the stop's line, nothing
+    downloaded.
+A8. Quit Sill while it installs (the second of "Installing…"): it quits once the step is done.
+A9. VoiceOver: the switch, the download's two lines read together, the waiting copy's buttons.

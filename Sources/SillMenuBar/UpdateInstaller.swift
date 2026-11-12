@@ -623,6 +623,8 @@ final class UpdateInstaller: @unchecked Sendable {
         let seconds: Int
         /// How it starts the copy it put back (Sill.app: macOS's `open`, through Launch Services).
         var launcher = "/usr/bin/open"
+        /// The slice whose cdhash `oldCDHash` is (this Mac's).
+        var arch = Policy.Architecture.current.rawValue
     }
 
     /// The watcher (review 3, the automatic update's point 6): a few lines of /bin/sh the old Sill starts just
@@ -635,7 +637,7 @@ final class UpdateInstaller: @unchecked Sendable {
     /// Sill started; it says what happened. Nothing is put back that isn't the old copy, whole. Every path and
     /// value is an argument, never part of the script's text.
     static let watcherScript = #"""
-pid=$1; app=$2; exe=$3; old=$4; cdhash=$5; req=$6; started=$7; token=$8; restored=$9; shift 9; wait=$1; launcher=$2
+pid=$1; app=$2; exe=$3; old=$4; cdhash=$5; req=$6; started=$7; token=$8; restored=$9; shift 9; wait=$1; launcher=$2; arch=$3
 proved() { [ -f "$started" ] && [ "$(/usr/bin/head -n 1 "$started" 2>/dev/null)" = "$token" ]; }
 running() { [ "$(/bin/ps -ww -p "$pid" -o comm= 2>/dev/null)" = "$app/Contents/MacOS/$exe" ]; }
 i=0
@@ -656,7 +658,7 @@ if running; then
     /bin/sleep 1
 fi
 /usr/bin/codesign --verify --deep --strict "-R=$req" "$old" >/dev/null 2>&1 || exit 3
-have=$(/usr/bin/codesign -d -v "$old" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/head -n 1)
+have=$(/usr/bin/codesign -d -vvv --arch "$arch" "$old" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/head -n 1)
 [ -n "$have" ] && [ "$have" = "$cdhash" ] || exit 4
 parked="$(/usr/bin/dirname "$old")/did not start.app"
 /bin/mv "$app" "$parked" || exit 5
@@ -672,7 +674,7 @@ exit 0
     /// when it couldn't be started.
     static func startWatcher(_ w: Watch) -> Bool {
         let args = ["/bin/sh", "-c", watcherScript, "sill-update-watcher", String(w.pid), w.installed.path, w.executable, w.oldCopy.path,
-                    w.oldCDHash, w.requirement, w.startedNote.path, w.token, w.restoredNote.path, String(w.seconds), w.launcher]
+                    w.oldCDHash, w.requirement, w.startedNote.path, w.token, w.restoredNote.path, String(w.seconds), w.launcher, w.arch]
         var attributes: posix_spawnattr_t?
         posix_spawnattr_init(&attributes)
         defer { posix_spawnattr_destroy(&attributes) }

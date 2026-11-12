@@ -43,8 +43,9 @@ enum UpdateAutoPolicy {
     static var coolingOffWords: String {
         guard coolingOff > 0 else { return "once it is out" }
         let hours = Int((coolingOff / 3600).rounded())
-        guard hours % 24 == 0 else { return "\(hours) hours after it is signed" }
-        return hours == 24 ? "a day after it is signed" : "\(hours / 24) days after it is signed"
+        let small = ["a", "two", "three", "four", "five", "six", "seven"]
+        guard hours % 24 == 0, (1...7).contains(hours / 24) else { return "\(hours) hours after it is signed" }
+        return "\(small[hours / 24 - 1]) day\(hours == 24 ? "" : "s") after it is signed"
     }
 
     // MARK: What Sill remembers

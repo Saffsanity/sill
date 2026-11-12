@@ -1,7 +1,7 @@
 """Update Now's mechanism mutants (docs/one-click-update-plan.md §11, G2): each changes UpdateInstaller.swift in
 one place where nothing else stands behind it, in a copy of Sources/SillMenuBar; run.sh then builds and runs the
 harness on the copy (SILL_HARNESS_SOURCES), and it must fail. Several minutes a mutant: each builds the harness
-and its test apps again. usage: python3 -I mutants.py"""
+and its test apps again. usage: python3 -I mutants.py [NAME…] (only the mutants named)"""
 import os, shutil, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -25,6 +25,9 @@ MUTANTS = [
     ("a link to the app not seen", "            if lstat(walk.path, &l) == 0, l.st_mode & S_IFMT == S_IFLNK { link = true; break }", "            if false { link = true; break }"),
     ("a kept copy cleaned up", "        return lstat(url.appendingPathComponent(keptMarker).path, &marker) != 0\n", "        return true\n"),
     ("a noted folder anywhere removed", "        guard url.deletingLastPathComponent().path == parent.path,\n", "        guard true,\n"),
+    # The stop (review 3, the automatic update's point 1).
+    ("a stop ignored", "                if stop.tag == release.tag, stop.sha256 == manifest.sha256 { return .failure(.stopped(tag: release.tag)) }\n", ""),
+    ("a stop taken unsigned", "            case .failure(let p):\n                return .failure(.stopUnreadable(p))\n", "            case .failure:\n                break\n"),
     # The watcher (review 3, the automatic update's point 6).
     ("the watcher puts back a changed old copy", "/usr/bin/codesign --verify --deep --strict \"-R=$req\" \"$old\" >/dev/null 2>&1 || exit 3\n", ""),
     ("the watcher ignores the started note", "proved() { [ -f \"$started\" ]", "proved() { false && [ -f \"$started\" ]"),
@@ -34,6 +37,8 @@ MUTANTS = [
     ("the watcher doesn't start the old copy", "\"$launcher\" \"$app\"\nexit 0\n", "exit 0\n"),
 ]
 caught = 0
+ONLY = sys.argv[1:]
+if ONLY: MUTANTS = [m for m in MUTANTS if m[0] in ONLY]
 for name, old, new in MUTANTS:
     src = open(os.path.join(SRC, F)).read()
     if src.count(old) != 1:

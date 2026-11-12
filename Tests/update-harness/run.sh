@@ -6,7 +6,8 @@
 # installed copy's tree unchanged. With the genuine v0.6.1 zip from a read-only `gh release download`
 # in .build/updater-scratch/release-v0.6.1, also the production trust (with this run's own update key)
 # against Sill's real signature. Everything lives in .build/update-harness and is removed at the end
-# unless --keep. Never /Applications, never a keychain, never Sill's defaults, never a launch of an app.
+# unless --keep. Never /Applications, never a keychain, never Sill's defaults, never a launch of an app
+# through Launch Services: the watcher's cases run the test app's own executable (launch.sh below).
 #   Tests/update-harness/run.sh [--keep]
 #   Tests/update-harness/mutants.py                one-line mutants of UpdateInstaller.swift; each must fail it
 set -euo pipefail
