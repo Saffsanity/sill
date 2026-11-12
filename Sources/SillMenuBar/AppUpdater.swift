@@ -35,15 +35,9 @@ final class AppUpdater {
     /// Sill.app itself, in a .app bundle, with a version: it answers an update's watcher whatever its own
     /// key list says (a later Sill without Update Now must still tell the watcher it runs, or it is put back).
     @ObservationIgnored private let isApp: Bool
-    /// What the automatic update remembers, its switch among it (AutoUpdateStore's, mirrored for Settings).
+    /// What the automatic update remembers, its switch among it (AutoUpdateStore's, mirrored for Settings):
+    /// the cooling-off's first sights among it (UpdateAutoPolicy.Memory.seen), across launches.
     private(set) var memory: Auto.Memory
-    /// The end of a cooling-off this launch learned (UpdateAutoPolicy.coolingOff), for one version.
-    private(set) var coolingOff: CoolingOff?
-
-    struct CoolingOff: Equatable {
-        let version: String
-        let until: Date
-    }
 
     /// Wired by AppModel: the release the check offers; whether the check runs on a test feed or a test
     /// version; the connected devices; whether the daily check is on; whether a pairing window is open;
@@ -88,6 +82,13 @@ final class AppUpdater {
     @ObservationIgnored private var asking = false
     @ObservationIgnored private var holding = false
     @ObservationIgnored private var loggedAutomatic: String?
+    /// The person quit Sill while an install step ran (AppDelegate): the new copy is not started then.
+    @ObservationIgnored private var quitting = false
+    /// The notes an earlier Sill left were read (`afterHostUp`, off the main actor), or there are none to read
+    /// (the host didn't start): the automatic update waits for that, so what they say (a put-back) is known
+    /// before it begins anything.
+    @ObservationIgnored private var notesSettled = false
+    @ObservationIgnored private var considerWhenSettled = false
 
     init(bundled: Bool, accessGroup: String?) {
         let trust = Policy.Trust.release
@@ -145,7 +146,7 @@ final class AppUpdater {
         let o = paneOffer
         let now = Date()
         let automatic = Auto.pane(memory, offered: o?.version, offeredTag: o?.tag, running: runningVersion,
-                                  waitUntil: o.flatMap { coolingOffUntil($0.version) }, now: now)
+                                  waitUntil: o.flatMap { Auto.waitUntil(memory, tag: $0.tag) }, now: now)
         return Policy.pane(state, offered: o?.version, running: runningVersion, available: available, refusal: refusal,
                            keptAt: keptAt, automatic: automatic)
     }
@@ -156,12 +157,8 @@ final class AppUpdater {
 
     /// Settings › General's "Automatically update Sill".
     var automaticSwitch: Auto.Switch {
-        Auto.switchState(available: available, canKeep: store.canKeep, checkOn: checkOn(), refusal: refusal, on: memory.on)
-    }
-
-    private func coolingOffUntil(_ version: SillVersion) -> Date? {
-        guard let c = coolingOff, c.version == version.description else { return nil }
-        return c.until
+        Auto.switchState(available: available, canKeep: store.canKeep, checkOn: checkOn(), refusal: refusal, on: memory.on,
+                         unreadable: store.unreadable)
     }
 
     /// Looks again at where Sill runs, off the main actor (review 3, N2: the look takes 10 to 70 ms):
@@ -264,7 +261,8 @@ final class AppUpdater {
     func setAutomaticUpdate(_ on: Bool) {
         guard available, on != memory.on else { return }
         if on, !automaticSwitch.enabled { return }
-        remember { Auto.switched($0, on: on) }
+        // Turning it on is the one write that may replace an item Sill couldn't read (A3: it starts afresh).
+        remember(replacingUnreadable: on) { Auto.switched($0, on: on) }
         if memory.on == on {
             print("Automatically update Sill: \(on ? "on" : "off").")
         } else {
@@ -283,25 +281,27 @@ final class AppUpdater {
     /// After every check that answered, and when the switch is turned on: begins the automatic update when
     /// UpdateAutoPolicy says so, with where Sill runs looked at afresh first.
     func considerAutomatic() {
+        guard notesSettled else { considerWhenSettled = true; return }
         guard available, memory.on, let offer = offer(), mayBeginAutomatic else { return }
         refresh { [weak self] r in
             guard let self, self.mayBeginAutomatic, let current = self.offer(), current == offer else { return }
             let now = Date()
             switch Auto.start(self.memory, checkOn: self.checkOn(), available: self.available, refusal: r, offered: offer.version,
                               offeredTag: offer.tag, signed: offer.signed, running: self.runningVersion, idle: self.mayBeginAutomatic,
-                              waitUntil: self.coolingOffUntil(offer.version), now: now) {
+                              waitUntil: Auto.waitUntil(self.memory, tag: offer.tag), now: now) {
             case .no(let why):
                 if why != self.loggedAutomatic {
                     self.loggedAutomatic = why
                     print("Automatic update: not now: \(why).")
                 }
             case .go:
+                // No attempt is counted yet: only once the release's manifest verified and Sill goes on to download
+                // it (`fetch`; the second security pass's A3: an offer nobody verified counts nothing).
                 self.loggedAutomatic = nil
                 self.attempt += 1
                 self.keptAt = nil
                 self.target = offer
-                self.remember { Auto.began($0, offer.version, now: now) }
-                print("Automatic update: Sill \(offer.version) is out; downloading and checking it, to install once no device has been connected for \(Auto.quietMinutes) minutes.")
+                print("Automatic update: Sill \(offer.version) is out; reading its release on GitHub.")
                 self.send(.automatic)
             }
         }
@@ -312,8 +312,10 @@ final class AppUpdater {
         if count > 0 { quietSince = Date() }
     }
 
-    private func remember(_ change: (Auto.Memory) -> Auto.Memory) {
-        store.update(change)
+    /// Every change of what the automatic update remembers, kept small (UpdateAutoPolicy.bounded, A3).
+    private func remember(replacingUnreadable: Bool = false, _ change: (Auto.Memory) -> Auto.Memory) {
+        let running = runningVersion
+        store.update({ Auto.bounded(change($0), running: running) }, replacingUnreadable: replacingUnreadable)
         if store.memory != memory { memory = store.memory }
     }
 
@@ -402,6 +404,31 @@ final class AppUpdater {
         send(.quiet(nil))
     }
 
+    /// Install Now on a waiting copy (the second security pass's G1): GitHub asked again first, as `lookForQuiet`
+    /// does before the automatic install (the release still the latest, its manifest the one checked, no stop
+    /// beside it); then the install, or the question for the devices connected at the click.
+    private func lookAgain(_ run: Int) {
+        guard let target, let prepared, let running = runningVersion else { send(.lookedAgain(.cancelled)); return }
+        let token = UpdateInstaller.Cancel()
+        cancel = token
+        let installer = self.installer
+        Task { [weak self] in
+            let result = await installer.prepare(offeredTag: target.tag, running: running, cancel: token)
+            guard let self, run == self.attempt, case .lookingAgain = self.state.phase else { return }
+            switch result {
+            case .failure(let f):
+                self.log(f)
+                self.send(.lookedAgain(f))
+            case .success(let p) where p.release.tag != prepared.release.tag || p.manifest != prepared.manifest:
+                let f = Policy.Failure.releaseChanged(tag: p.release.tag)
+                self.log(f)
+                self.send(.lookedAgain(f))
+            case .success:
+                self.send(.lookedAgain(nil))
+            }
+        }
+    }
+
     private func releaseHold() {
         guard holding else { return }
         holding = false
@@ -434,11 +461,19 @@ final class AppUpdater {
         let run = attempt
         switch effect {
         case .fetch: fetch(run)
+        case .lookAgain: lookAgain(run)
         case .download: startDownload(run)
         case .unpack: startUnpack(run)
         case .check: startCheck(run)
         case .install: startInstall(run)
-        case .launch: launchNewCopy(run)
+        case .launch:
+            // Quit while the install step ran (AppDelegate): the new copy is in place, checked twice, and starts the
+            // next time Sill is opened; Sill doesn't start it against the quit.
+            if quitting {
+                print("Update: Sill \(checked.map { "\($0.version)" } ?? "") is installed and starts the next time Sill opens (Sill is quitting).")
+                return
+            }
+            launchNewCopy(run)
         case .quit: quitForUpdate()
         case .cleanUp: cleanUp()
         }
@@ -467,19 +502,23 @@ final class AppUpdater {
                 self.send(.fetched(f))
             case .success(let p):
                 self.prepared = p
-                // A signed release read: the highest is the floor below which nothing installs by itself.
-                self.remember { Auto.signedRelease($0, p.release.version) }
                 print("Update: Sill \(p.release.version)’s release is signed with Sill’s update key \(p.manifest.keyID) at \(UpdateManifest.dateText(p.manifest.signedAt)): \(p.manifest.size) bytes, SHA-256 \(p.manifest.sha256).")
                 guard self.state.mode == .automatic else { self.send(.fetched(nil)); return }
-                switch Auto.dates(signedAt: p.manifest.signedAt, now: Date()) {
+                // The cooling-off counts from this Sill's first read of this verified manifest, kept across launches
+                // (the second security pass's A1): the signed line is whoever holds the key's to write.
+                let now = Date()
+                self.remember { Auto.sighted($0, tag: p.release.tag, sha256: p.manifest.sha256, signedAt: p.manifest.signedAt, now: now) }
+                let first = Auto.firstSeen(self.memory, tag: p.release.tag, sha256: p.manifest.sha256) ?? now
+                switch Auto.dates(signedAt: p.manifest.signedAt, firstSeen: first, now: now) {
                 case .go:
+                    // An attempt counts from here: a verified release Sill goes on to download (A3).
+                    self.remember { Auto.began($0, p.release.version, now: now) }
                     self.send(.fetched(nil))
                 case .waitUntil(let until):
-                    self.coolingOff = CoolingOff(version: p.release.version.description, until: until)
-                    self.remember { Auto.forgive($0, p.release.version) }
-                    print("Automatic update: Sill \(p.release.version) is installed by itself from \(UpdateManifest.dateText(until)), \(Auto.coolingOffWords) (Update Now can install it now).")
+                    print("Automatic update: Sill \(p.release.version) waits until \(UpdateManifest.dateText(until)) to install by itself, \(Auto.coolingOffWords) (first found \(UpdateManifest.dateText(first)); Update Now can install it now).")
                     self.send(.postponed)
                 case .refuse(let why):
+                    // Never counted (the second pass's N9: a Mac whose clock is wrong would otherwise run out of tries).
                     let f = Policy.Failure.notAutomatic(why)
                     self.log(f)
                     self.send(.fetched(f))
@@ -556,6 +595,9 @@ final class AppUpdater {
                 self.send(.checked(f, devices: []))
             case .success(let c):
                 self.checked = c
+                // The floor rises only now, on an app that passed both checks (the second security pass's A2: a
+                // manifest alone, for a made-up version, would stop every later release installing by itself).
+                self.remember { Auto.signedRelease($0, c.version) }
                 print("Update: Sill \(c.version) (\(c.build)) checked both ways: Apple’s signature for Developer ID \(installer.trust.teamID ?? "-") as \(installer.trust.identifier) and its notarization, and every slice the code the release signed with Sill’s update key \(manifest.keyID) names; newer than \(running).")
                 self.send(.checked(nil, devices: self.devices()))
             }
@@ -709,7 +751,7 @@ final class AppUpdater {
         let token = UUID().uuidString
         UpdateInstaller.writeNote(Self.pendingNote, lines: [token, checked.version.description, state.mode == .automatic ? "automatic" : "manual"])
         let w = UpdateInstaller.Watch(pid: pid, installed: bundle, executable: installer.trust.executable, oldCopy: unpacked, oldCDHash: oldCDHash,
-                                      requirement: installer.trust.signer, startedNote: Self.startedNote, token: token,
+                                      requirement: installer.trust.signer, startedNote: Self.startedNote(token), token: token,
                                       restoredNote: Self.restoredNote, seconds: Int(Policy.watchWait))
         if UpdateInstaller.startWatcher(w) {
             print("Update: if Sill \(checked.version) hasn’t run for \(Int(Policy.provedAfter)) s within \(Int(Policy.watchWait)) s, a watcher puts Sill \(running) back and starts it.")
@@ -751,11 +793,21 @@ final class AppUpdater {
     /// Once this Sill's host is up. The launch an update made (the pending note names this version): once it
     /// has run `Policy.provedAfter`, the note the watcher waits for, then the clean-up of the copy it replaced.
     /// The launch the watcher made after it put this copy back: what happened, in Settings and the log.
-    /// Otherwise: what earlier updates left goes at once.
+    /// Otherwise: what earlier updates left goes at once. The notes are read off the main actor, and only as
+    /// regular files (UpdateInstaller.readSmallFile; the second security pass's W2).
     func afterHostUp() {
-        guard isApp else { return }
-        let pending = UpdateInstaller.readNote(Self.pendingNote)
-        if let restored = UpdateInstaller.readNote(Self.restoredNote) {
+        guard isApp else { settleNotes(); return }
+        Task { [weak self] in
+            let notes = await Task.detached(priority: .utility) {
+                (UpdateInstaller.readNote(Self.pendingNote), UpdateInstaller.readNote(Self.restoredNote))
+            }.value
+            self?.afterHostUp(pending: notes.0, restored: notes.1)
+        }
+    }
+
+    private func afterHostUp(pending: [String]?, restored: [String]?) {
+        defer { settleNotes() }
+        if let restored {
             try? FileManager.default.removeItem(at: Self.restoredNote)
             try? FileManager.default.removeItem(at: Self.pendingNote)
             if let p = pending, p.count >= 3, restored.first == p[0], let failed = Policy.strictVersion(p[1]), let running = runningVersion,
@@ -771,7 +823,7 @@ final class AppUpdater {
             cleanUpAfterStart()
             return
         }
-        guard let p = pending, p.count >= 3, p[1] == runningVersion?.description else {
+        guard let p = pending, p.count >= 3, Policy.isToken(p[0]), p[1] == runningVersion?.description else {
             if pending != nil { try? FileManager.default.removeItem(at: Self.pendingNote) }
             cleanUpAfterStart()
             return
@@ -783,16 +835,30 @@ final class AppUpdater {
         RunLoop.main.add(proved, forMode: .common)
     }
 
+    /// The host didn't start (AppModel): no note is read, and the automatic update needn't wait for them.
+    func hostDidNotStart() {
+        settleNotes()
+    }
+
+    private func settleNotes() {
+        notesSettled = true
+        if considerWhenSettled {
+            considerWhenSettled = false
+            considerAutomatic()
+        }
+    }
+
     /// This launch, the update, has run long enough: the watcher's note (it ends), then the clean-up a few
     /// seconds later (the watcher looks once a second).
     private func proved(token: String, automatic: Bool) {
-        UpdateInstaller.writeNote(Self.startedNote, lines: [token])
+        guard Policy.isToken(token) else { return }
+        UpdateInstaller.writeNote(Self.startedNote(token), lines: [token])
         try? FileManager.default.removeItem(at: Self.pendingNote)
         if automatic, available, let v = runningVersion { remember { Auto.updated($0, to: v, at: Date()) } }
         print("Update: Sill \(runningVersion.map { "\($0)" } ?? "") has run for \(Int(Policy.provedAfter)) s; the copy it replaced goes.")
         let later = Timer(timeInterval: 3, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
-                try? FileManager.default.removeItem(at: Self.startedNote)
+                try? FileManager.default.removeItem(at: Self.startedNote(token))
                 self?.cleanUpAfterStart()
             }
         }
@@ -808,6 +874,12 @@ final class AppUpdater {
 
     /// The update's install step runs (AppDelegate's quit waits for it: review 3, F5).
     var installing: Bool { if case .installing = state.phase { return true }; return false }
+
+    /// The person quits while the install step runs (AppDelegate, before it waits for the step): the new copy
+    /// is then left in place, unstarted (the second pass's N9).
+    func quitRequested() {
+        quitting = true
+    }
 
     /// What earlier updates left in the temporary folder goes, the copy an update replaced among it (kept
     /// until now so it could be put back). Never while an update is under way (its own folder is spared),
@@ -826,20 +898,21 @@ final class AppUpdater {
     }
 
     /// Sill's own folder in this user's Caches, where one Sill leaves notes for the next.
-    private static var notes: URL {
+    nonisolated private static var notes: URL {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Caches")
         return caches.appendingPathComponent("me.saffer.sill.mac", isDirectory: true)
     }
 
     /// The folder that holds the copy an update replaced, for the next Sill (it can't find it by listing).
-    static var leftoverNote: URL { notes.appendingPathComponent("Update Now leftover.txt") }
+    nonisolated static var leftoverNote: URL { notes.appendingPathComponent("Update Now leftover.txt") }
     /// The update's token, the new version and the mode, for the new Sill.
-    static var pendingNote: URL { notes.appendingPathComponent("Update Now pending.txt") }
-    /// The new Sill's word to the watcher that it ran long enough (the token).
-    static var startedNote: URL { notes.appendingPathComponent("Update Now started.txt") }
+    nonisolated static var pendingNote: URL { notes.appendingPathComponent("Update Now pending.txt") }
+    /// The new Sill's word to the watcher that it ran long enough: a regular file whose name carries the token
+    /// (`Policy.isToken`), which the watcher looks for without opening (W2).
+    nonisolated static func startedNote(_ token: String) -> URL { notes.appendingPathComponent("Update Now started \(token).txt") }
     /// The watcher's word that it put the old copy back (the token, then why).
-    static var restoredNote: URL { notes.appendingPathComponent("Update Now restored.txt") }
+    nonisolated static var restoredNote: URL { notes.appendingPathComponent("Update Now restored.txt") }
 
     /// At launch: when another genuine Sill of this account is running (the one that launched this copy
     /// after an update, which quits once this one has finished launching), this one starts nothing until it

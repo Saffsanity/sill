@@ -178,6 +178,7 @@ final class AppModel {
             } catch {
                 startupError = "\(error)"
                 print("Sill couldn’t start: \(error)")
+                updater.hostDidNotStart()
             }
             // Never before the host is up, and also when it could not start: a newer Sill may be the fix.
             startUpdates()

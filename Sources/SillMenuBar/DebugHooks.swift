@@ -943,6 +943,10 @@ extension DebugHooks {
                             autoSwitch: A.switchState(available: true, canKeep: false, checkOn: true, refusal: nil, on: false)),
             UpdateNowSample(name: "auto-refused", install: pane(.idle, refusal: .translocated, automatic: auto(on)),
                             autoSwitch: A.switchState(available: true, canKeep: true, checkOn: true, refusal: .translocated, on: true), autoOn: true),
+            // The second security pass: Install Now's second look at GitHub (G1), and an item Sill couldn't read (A3).
+            UpdateNowSample(name: "auto-lookingagain", install: pane(.lookingAgain(devices: []), automatic: auto(tried)), autoOn: true),
+            UpdateNowSample(name: "auto-unreadable", install: pane(.idle),
+                            autoSwitch: A.switchState(available: true, canKeep: true, checkOn: true, refusal: nil, on: false, unreadable: true)),
         ].map { var s = $0; if s.autoSwitch == switchOn, s.autoOn { s.autoSwitch = A.switchState(available: true, canKeep: true, checkOn: s.checkOn, refusal: nil, on: true) }; return s }
     }
 }

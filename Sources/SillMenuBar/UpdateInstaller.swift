@@ -408,23 +408,28 @@ final class UpdateInstaller: @unchecked Sendable {
     /// The checked copy is checked once more right before the swap (review 3, F5): anything of this user
     /// that changed it in the staging folder since the check is caught there, before Sill's right to change
     /// Sill.app moves it; the check after the swap covers the moment between. `leftoverNote`: where the
-    /// staging folder is noted for the next Sill, before the swap, so a crash after it still leaves the note
-    /// (N5). `beforeSwap` is the harness's (the race it stages between the last check and the swap); Sill.app
-    /// never passes one.
+    /// staging folder is noted for the next Sill, before that check and the swap, so a crash after the swap
+    /// still leaves the note (N5) and the note's appearance tells nobody when the last check is over (the
+    /// second security pass's R3: written between that check and the swap, it was a precise moment for a
+    /// process of this user to change the staged copy, then stop Sill before the check after the swap; a stop
+    /// with SIGKILL in the moment between the last check and the end of the check after the swap still leaves
+    /// a changed copy in place: T12). `afterNote` and `beforeSwap` are the harness's (what it stages at the
+    /// note and between the last check and the swap); Sill.app never passes either.
     func install(staged: URL, installed: URL, runningCDHash: String, expected: Policy.Checked, manifest: UpdateManifest,
                  running: SillVersion, runningRequirement: SecRequirement?, leftoverNote: URL? = nil,
-                 beforeSwap: (() -> Void)? = nil) -> Result<Void, Failure> {
+                 afterNote: (() -> Void)? = nil, beforeSwap: (() -> Void)? = nil) -> Result<Void, Failure> {
         guard Self.isFolder(installed) else { return .failure(.changedSinceStart) }
         guard Self.cdhash(of: installed, arch: .current) == runningCDHash else { return .failure(.changedSinceStart) }
         guard Self.isFolder(staged) else { return .failure(.swapFailed("the checked copy is gone")) }
         guard let a = Self.device(of: staged.deletingLastPathComponent()), let b = Self.device(of: installed.deletingLastPathComponent()),
               a == b else { return .failure(.swapFailed("not on the same volume")) }
+        if let leftoverNote { Self.noteLeftover(staged.deletingLastPathComponent(), in: leftoverNote) }
+        afterNote?()
         switch check(staged, manifest: manifest, running: running, runningRequirement: runningRequirement) {
         case .success(let c) where c == expected: break
         case .failure(.bundle(let p)): return .failure(.bundle(p))
         default: return .failure(.bundle(.codeChanged))
         }
-        if let leftoverNote { Self.noteLeftover(staged.deletingLastPathComponent(), in: leftoverNote) }
         beforeSwap?()
         guard renamex_np(staged.path, installed.path, UInt32(RENAME_SWAP)) == 0 else { return .failure(.swapFailed(Self.errnoText())) }
         let problem: Policy.BundleProblem
@@ -580,7 +585,7 @@ final class UpdateInstaller: @unchecked Sendable {
     /// note is this user's to write, so all it can ever name for removal is one of Sill's own leftovers.
     static func removeLeftover(noted note: URL, for installed: URL, keep: URL? = nil) -> String? {
         defer { try? FileManager.default.removeItem(at: note) }
-        guard let data = try? Data(contentsOf: note), data.count <= 4096,
+        guard let data = readSmallFile(note),
               let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .newlines), text.hasPrefix("/"),
               let parent = itemReplacementParent(for: installed) else { return nil }
         let url = URL(fileURLWithPath: text).standardizedFileURL
@@ -596,11 +601,31 @@ final class UpdateInstaller: @unchecked Sendable {
         try? Data((lines.joined(separator: "\n") + "\n").utf8).write(to: url, options: .atomic)
     }
 
-    /// A note's lines; nil when there is none, or it isn't one Sill could have written.
+    /// A note's lines; nil when there is none, or it isn't one Sill could have written (`readSmallFile`).
     static func readNote(_ url: URL) -> [String]? {
-        guard let data = try? Data(contentsOf: url), data.count <= 4096, let text = String(data: data, encoding: .utf8) else { return nil }
+        guard let data = readSmallFile(url), let text = String(data: data, encoding: .utf8) else { return nil }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init).dropLast()
         return lines.isEmpty ? nil : Array(lines)
+    }
+
+    /// A regular file's bytes, at most `limit`, or nil: never a link (O_NOFOLLOW), never anything but a regular
+    /// file (fstat), and opened without waiting (O_NONBLOCK), so a FIFO or a link planted where Sill keeps its
+    /// notes can't hold up Sill's launch or its quit (the second security pass's W2).
+    static func readSmallFile(_ url: URL, limit: Int = 4096) -> Data? {
+        let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        var s = stat()
+        guard fstat(fd, &s) == 0, s.st_mode & S_IFMT == S_IFREG, s.st_size <= off_t(limit) else { return nil }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 1024)
+        while data.count <= limit {
+            let n = read(fd, &buffer, buffer.count)
+            if n < 0 { if errno == EINTR { continue }; return nil }
+            if n == 0 { break }
+            data.append(contentsOf: buffer[0..<n])
+        }
+        return data.count <= limit ? data : nil
     }
 
     /// What the watcher needs: the new Sill's process, where Sill is and what it must be put back as.
@@ -614,7 +639,8 @@ final class UpdateInstaller: @unchecked Sendable {
         let oldCDHash: String
         /// The requirement the old copy must satisfy to be put back (the trust's signer).
         let requirement: String
-        /// The note the new Sill writes, with `token`, once it has run `Policy.provedAfter`.
+        /// The file the new Sill makes once it has run `Policy.provedAfter`: its name carries `token`
+        /// (AppUpdater.startedNote), so the watcher only looks whether it is there, never opens it (W2).
         let startedNote: URL
         let token: String
         /// The note the watcher writes when it puts the old copy back (the token, then why).
@@ -628,18 +654,31 @@ final class UpdateInstaller: @unchecked Sendable {
     }
 
     /// The watcher (review 3, the automatic update's point 6): a few lines of /bin/sh the old Sill starts just
-    /// before it quits, since nothing of the old Sill runs after it. Until the new Sill writes the started note
-    /// (it does once it has run for `Policy.provedAfter` with its host up), the watcher looks once a second.
-    /// The note: it ends, and the new Sill removes the old copy. The new Sill's process gone without it, or no
-    /// note within `seconds`: the new Sill is stopped (only that process, still running Sill's executable from
-    /// Sill's path), the old copy is checked (valid, the trust's requirement, the cdhash it ran with) and put
-    /// back at Sill's path, the new copy moved to where the old one was, the restored note written, and the old
-    /// Sill started; it says what happened. Nothing is put back that isn't the old copy, whole. Every path and
-    /// value is an argument, never part of the script's text.
+    /// before it quits, since nothing of the old Sill runs after it. Until the new Sill makes the started note
+    /// (it does once it has run for `Policy.provedAfter` with its host up), the watcher looks once a second,
+    /// whether that regular file is there (its name carries the token; never opened, so a FIFO or a link
+    /// planted there holds nothing up: the second security pass's W2). The note: it ends, and the new Sill
+    /// removes the old copy. The new Sill's process gone without it, or no note within `seconds`: the new Sill
+    /// is stopped (only that process, still running Sill's executable from Sill's path), the old copy is
+    /// checked (valid, the trust's requirement, the cdhash it ran with) and put back at Sill's path, the new
+    /// copy moved to where the old one was, the restored note written (a new file renamed into place: a
+    /// rename replaces a link, never follows it, and `1<>` never waits on a FIFO), the copy at Sill's path
+    /// checked again as before the move (W1: the staging folder is this user's, and anything that changed the
+    /// copy between the first check and the move, or wrote through a link planted at the note, is caught
+    /// there and moved aside, never started), and the old Sill started; it says what happened. Nothing is put
+    /// back or started that isn't the old copy, whole: a folder, never a link to one (a link moved to Sill's
+    /// path would start whatever it points to later). Every path and value is an argument, never part of the
+    /// script's text.
     static let watcherScript = #"""
 pid=$1; app=$2; exe=$3; old=$4; cdhash=$5; req=$6; started=$7; token=$8; restored=$9; shift 9; wait=$1; launcher=$2; arch=$3
-proved() { [ -f "$started" ] && [ "$(/usr/bin/head -n 1 "$started" 2>/dev/null)" = "$token" ]; }
+proved() { [ -f "$started" ] && [ ! -L "$started" ]; }
 running() { [ "$(/bin/ps -ww -p "$pid" -o comm= 2>/dev/null)" = "$app/Contents/MacOS/$exe" ]; }
+whole() {
+    [ -d "$1" ] && [ ! -L "$1" ] || return 1
+    /usr/bin/codesign --verify --deep --strict "-R=$req" "$1" >/dev/null 2>&1 || return 1
+    have=$(/usr/bin/codesign -d -vvv --arch "$arch" "$1" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/head -n 1)
+    [ -n "$have" ] && [ "$have" = "$cdhash" ]
+}
 i=0
 while [ "$i" -lt "$wait" ]; do
     proved && exit 0
@@ -657,15 +696,18 @@ if running; then
     running && /bin/kill -KILL "$pid" 2>/dev/null
     /bin/sleep 1
 fi
-/usr/bin/codesign --verify --deep --strict "-R=$req" "$old" >/dev/null 2>&1 || exit 3
-have=$(/usr/bin/codesign -d -vvv --arch "$arch" "$old" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/head -n 1)
-[ -n "$have" ] && [ "$have" = "$cdhash" ] || exit 4
-parked="$(/usr/bin/dirname "$old")/did not start.app"
+whole "$old" || exit 3
+dir=$(/usr/bin/dirname "$old")
+parked="$dir/did not start.app"
 /bin/mv "$app" "$parked" || exit 5
 if ! /bin/mv "$old" "$app"; then /bin/mv "$parked" "$app"; exit 6; fi
-/usr/bin/printf '%s
+note=$(/usr/bin/mktemp "$restored.XXXXXX") && /usr/bin/printf '%s
 %s
-' "$token" "$why" > "$restored"
+' "$token" "$why" 1<>"$note" && /bin/mv -f -h "$note" "$restored"
+if ! whole "$app"; then
+    /bin/mv "$app" "$dir/failed its check.app"
+    exit 7
+fi
 "$launcher" "$app"
 exit 0
 """#

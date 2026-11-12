@@ -95,6 +95,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // half-done step behind (review 3, F5), at most 10 s, on a run-loop Timer.
         if model.updater.installing {
             print("Quit: waiting for the update’s install step to finish.")
+            // The new copy is then left in place, unstarted: a quit is no restart (the second security pass's N9).
+            model.updater.quitRequested()
             let deadline = Date().addingTimeInterval(10)
             let poll = Timer(timeInterval: 0.1, repeats: true) { [weak self] timer in
                 MainActor.assumeIsolated {

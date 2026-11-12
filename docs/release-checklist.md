@@ -394,13 +394,49 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       alone installs nothing (a Developer ID signed, notarized build is still needed), and a Sill that
       never updates by hand keeps trusting it (it can't be revoked: docs/one-click-update-plan.md T28).
 - A release no Sill may install (a bad build, one signed with a key that leaked): within two days of its
-      signing, pull it or mark it a prerelease (each Sill asks GitHub again right before it installs by
-      itself, so none does). For one that stays listed, a stop, in Terminal.app: `"$HOME/Library/Application
+      appearance on GitHub, pull it or mark it a prerelease (each Sill waits two days after it first finds
+      a release and asks GitHub again right before it installs by itself, so none does). For one that stays listed, a stop, in Terminal.app: `"$HOME/Library/Application
       Support/Sill Update Signer/update-manifest" stop --tag v<version> --sha256 <the sha256 line of its
       Sill.zip.manifest> --out Sill.zip.stop` (Touch ID or your password, the prompt showing the whole
       SHA-256), then `gh release upload v<version> Sill.zip.stop --repo Saffsanity/sill`. Every Sill reads it
       before downloading anything, by Update Now and by itself, and remembers the tag
       (docs/one-click-update-plan.md §15.4).
+- Noticing a release you didn't sign: every manifest `sign-update.sh` signs goes in the signing record
+      (`signed.txt` beside the signer; this Mac's: sign every release here, or the audit names one signed
+      elsewhere). `Scripts/sign-update.sh --audit` downloads every published release's
+      `Sill.zip.manifest` and compares it with the record: "Audit: all N signed releases in Saffsanity/sill
+      are in your signing record." when all is well; "NOT IN YOUR SIGNING RECORD, and it verifies with your
+      update key" names a release made with your key that you didn't sign here, which every Sill with
+      Automatically update Sill on installs two days after it first finds it: pull it or stop it (above), then
+      treat the key as leaked (rotation, above). Read-only: GitHub's public release listing and a few
+      kilobytes a release; no secret.
+- [ ] Your choice: the audit every day, notifying you only when something is wrong. `--install-signer`
+      puts a copy of `sign-update.sh` beside the signer (the one you read); this LaunchAgent runs it at 10:00
+      each day (`gh` must be on its PATH: `/opt/homebrew/bin` here). In Terminal.app:
+
+      ```
+      d="$HOME/Library/Application Support/Sill Update Signer"
+      cat > ~/Library/LaunchAgents/me.saffer.sill.update-audit.plist <<PLIST
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0"><dict>
+      <key>Label</key><string>me.saffer.sill.update-audit</string>
+      <key>ProgramArguments</key><array><string>/bin/bash</string><string>$d/sign-update.sh</string>
+        <string>--audit</string><string>--notify</string></array>
+      <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+      <key>StartCalendarInterval</key><dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
+      <key>StandardOutPath</key><string>$d/audit.log</string><key>StandardErrorPath</key><string>$d/audit.log</string>
+      </dict></plist>
+      PLIST
+      launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/me.saffer.sill.update-audit.plist
+      launchctl kickstart gui/$(id -u)/me.saffer.sill.update-audit
+      ```
+
+      The last command runs it once now: `"$d/audit.log"` then ends in "Audit: all N signed releases in
+      Saffsanity/sill are in your signing record." To stop it: `launchctl bootout
+      gui/$(id -u)/me.saffer.sill.update-audit` and delete the plist. Without it, the two days protect only
+      as well as you happen to notice; GitHub's "Watch › Custom › Releases" mail is the setup-free complement
+      (a new release, not an asset replaced on an old one).
 
 ## Part 2: every release
 
@@ -503,7 +539,10 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
 - [ ] Sign the release for Update Now, on Noah's Mac, in Terminal.app, right after it is published (never
       in CI: part 1 §7): `Scripts/sign-update.sh v<version>`. It first checks that the release's Sill
       trusts exactly what you recorded at `--install-signer` (its update keys, the pinned code
-      requirement, Trust.release and Endpoints.github), and refuses otherwise, showing the difference. It
+      requirement, Trust.release and Endpoints.github), and refuses otherwise, showing the difference; that
+      GitHub's tag names your tag's commit, and that the app in the zip was built from it (`SillCommit` in its
+      Info.plist, which `make-app.sh` writes), refusing a moved tag or a build of another commit; and shows
+      what changed in the updater's own files since the last release you signed, and asks. It
       signs only a zip you know without GitHub: by default `.build/Sill-<version>.zip` from your own
       `release.sh` run (GitHub's must be it, byte for byte), or, for a release the release workflow built
       in a run you approved, `--expect-sha256` with the SHA-256 that run's log printed for Sill.zip. A
@@ -515,9 +554,10 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       the tag's), reads each slice's cdhash with codesign (the values Update Now reads with Security),
       prints the SHA-256 in groups of eight, and signs the manifest: Touch ID or your password, the prompt
       showing the whole SHA-256 in the same groups; allow only when every group is the SHA-256 release.sh
-      printed. The manifest carries the time it is signed: Sills with Automatically update Sill on install
-      the release by themselves two days after it (docs/one-click-update-plan.md §15), so that is the time to
-      pull it if it is wrong. It reads the manifest back with the recorded keys, shows it, asks, uploads
+      printed. The manifest carries the time it is signed, and goes in the signing record. Sills with
+      Automatically update Sill on install the release by themselves two days after each first finds it
+      (docs/one-click-update-plan.md §15.4), so those two days are the time to pull it if it is wrong. It
+      reads the manifest back with the recorded keys, shows it, asks, uploads
       `Sill.zip.manifest` and downloads it again to compare. Until it is there, Update Now does not show
       for the release (every Sill's check stores whether the release lists the manifest), and the release
       page is the way, as before Update Now. A Sill that checked before the signing shows Update Now after

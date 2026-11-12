@@ -489,7 +489,8 @@ check(step(S(phase: .restarting), .cancel) == (.restarting, []), "no cancel whil
 check(step(S(phase: .failed(.hashMismatch)), .updateNow(devices: [])) == (.fetching, [.fetch]), "try again")
 check(P.next(S(phase: .failed(.hashMismatch), consented: ["iPad"]), .updateNow(devices: [])).0.consented == [], "a new attempt forgets the old consent")
 // Events a phase does not take change nothing.
-let busy: [S] = [fetching, downloading, S(phase: .unpacking), S(phase: .checking), S(phase: .installing), S(phase: .restarting)]
+let busy: [S] = [fetching, downloading, S(phase: .unpacking), S(phase: .checking), S(phase: .installing), S(phase: .restarting),
+                 S(phase: .lookingAgain(devices: []))]
 for s in busy {
     check(step(s, .updateNow(devices: [])) == (s.phase, []), "no second update while \(s.phase)")
     check(step(s, .confirm) == (s.phase, []), "no confirm while \(s.phase)")
@@ -527,10 +528,20 @@ for f in [P.Failure.stopped(tag: "v0.4.0"), .stopUnreadable(.badSignature), .rel
 check(P.provedAfter == 30 && P.watchWait >= P.launchWait + P.provedAfter + 60, "the watcher waits past the launch and the proof")
 check(step(waiting, .cancel) == (.idle, [.cleanUp]), "cancel the waiting copy")
 check(step(waiting, .confirm) == (.waiting, []), "nothing to confirm while waiting")
-check(P.next(waiting, .updateNow(devices: [])).0 == S(phase: .installing, mode: .manual) && step(waiting, .updateNow(devices: [])).1 == [.install],
-      "Install Now with nobody connected: the checked copy, at once")
-check(P.next(waiting, .updateNow(devices: [D("iPad")])).0 == S(phase: .ready(devices: [D("iPad")]), mode: .manual), "Install Now with a device: ask")
-check(P.next(P.next(waiting, .updateNow(devices: [D("iPad")])).0, .confirm).0 == S(phase: .installing, consented: ["iPad"], mode: .manual), "…and yes: install")
+// G1 (the second security pass): Install Now on a waiting copy asks GitHub again first, as the automatic install does.
+check(P.next(waiting, .updateNow(devices: [])).0 == S(phase: .lookingAgain(devices: []), mode: .manual)
+      && step(waiting, .updateNow(devices: [])).1 == [.lookAgain], "G1: Install Now asks GitHub again first")
+let lookingAgain = P.next(waiting, .updateNow(devices: [])).0
+check(step(lookingAgain, .lookedAgain(nil)) == (.installing, [.install]), "…then, with nobody connected, the checked copy")
+check(step(lookingAgain, .lookedAgain(.stopped(tag: "v0.4.0"))) == (.failed(.stopped(tag: "v0.4.0")), [.cleanUp]), "…a stop made while it waited ends it")
+check(step(lookingAgain, .lookedAgain(.releaseChanged(tag: "v0.4.1"))) == (.failed(.releaseChanged(tag: "v0.4.1")), [.cleanUp]), "…so does a pulled or replaced release")
+check(step(lookingAgain, .cancel) == (.idle, [.cleanUp]), "…and Cancel meanwhile")
+check(step(lookingAgain, .quiet(nil)) == (.lookingAgain(devices: []), []) && step(lookingAgain, .confirm) == (.lookingAgain(devices: []), []),
+      "nothing skips the look")
+check(P.Phase.lookingAgain(devices: []).busy, "busy while it looks")
+let lookingIPad = P.next(waiting, .updateNow(devices: [D("iPad")])).0
+check(step(lookingIPad, .lookedAgain(nil)) == (.ready(devices: [D("iPad")]), []), "Install Now with a device: the look, then the question")
+check(P.next(P.next(lookingIPad, .lookedAgain(nil)).0, .confirm).0 == S(phase: .installing, consented: ["iPad"], mode: .manual), "…and yes: install")
 check(step(S(phase: .installing, mode: .automatic), .installed(nil)) == (.restarting, [.launch]), "automatic: launch")
 check(step(S(phase: .restarting, mode: .automatic), .launched(nil)) == (.restarting, [.quit]), "automatic: quit")
 check(step(S(phase: .restarting, mode: .automatic), .launched(.didNotStart("x", putBack: true))) == (.failed(.didNotStart("x", putBack: true)), [.cleanUp]), "automatic: put back")
@@ -559,6 +570,9 @@ for phase in [P.Phase.idle, .fetching, .checking, .installing, .restarting, .fai
 }
 check(pane(.fetching).line == "Getting Sill 0.4 from GitHub…" && pane(.fetching).spinning, "fetching")
 check(pane(.checking).line == "Checking Sill 0.4…" && pane(.unpacking).line == "Checking Sill 0.4…", "checking")
+let lookPane = pane(.lookingAgain(devices: []))
+check(lookPane.line == "Checking Sill 0.4 with GitHub again…" && lookPane.spinning && lookPane.cancel && lookPane.busy && !lookPane.updateNow, "G1: looking again: \(lookPane)")
+check(P.menuItem(.lookingAgain(devices: []), offered: v040, running: v030, available: true, refusal: nil).subtitle == "Checking", "looking again in the menu")
 let ready = pane(.ready(devices: [D("iPad"), D("iPhone")]))
 check(ready.line == "Sill 0.4 is ready." && ready.question == "Installing it restarts Sill and disconnects iPad and iPhone." && ready.confirmTitle == "Install and Disconnect", "ready")
 check(pane(.installing).line == "Installing Sill 0.4…" && !pane(.installing).cancel, "installing: no cancel")
@@ -583,7 +597,8 @@ for on in [false, true] {
 }
 check(P.footnote(automatic: false).contains("Sill downloads and installs nothing by itself."), "off: nothing by itself")
 check(P.footnote(automatic: true).contains("Automatically update Sill is on") && P.footnote(automatic: true).contains("it never disconnects anyone")
-      && P.footnote(automatic: true).contains("two days after it is signed") && P.footnote(automatic: true).contains("once no device has been connected for 5 minutes;"), "on: what it does: \(P.footnote(automatic: true))")
+      && P.footnote(automatic: true).contains("two days after it first finds it") && P.footnote(automatic: true).contains("once no device has been connected for 5 minutes;"), "on: what it does: \(P.footnote(automatic: true))")
+check(P.footnote(automatic: true).hasSuffix("Update Now checks it the same way, at once."), "Update Now checks the same way (it does disconnect, after its question: N9)")
 check(!UpdatePolicy.footnote.contains("update key") && UpdatePolicy.footnote.contains("never downloads or installs anything by itself"),
       "a build with no update key claims no check it can't make")
 
@@ -645,13 +660,38 @@ check(AP.forgive(tried, v040).attempts["0.4"]?.count == 1, "forgiving one of two
 check(start(mem, waitUntil: later(1)) == .no("0.4 cools off until 2026-11-12T04:00:00Z") && start(mem, waitUntil: t0) == .go, "a known cooling-off")
 let done = AP.updated(AP.began(AP.began(mem, v040, now: t0), SillVersion("0.5")!, now: t0), to: v040, at: later(1))
 check(done.updatedTo == "0.4" && done.updatedAt == later(1) && done.attempts.keys.sorted() == ["0.5"], "updated: older attempts forgotten")
-// The signed date (the cooling-off, review 3's point 1; F7).
-check(AP.dates(signedAt: t0, now: later(47.9)) == .waitUntil(later(48)), "cooling off for 48 hours")
-check(AP.dates(signedAt: t0, now: later(48)) == .go, "then go")
-check(AP.dates(signedAt: t0, now: later(120 * 24 + 0.1)) == .refuse("it was signed more than 120 days ago"), "too old")
-check(AP.dates(signedAt: t0, now: later(120 * 24)) == .go, "120 days exactly")
-check(AP.dates(signedAt: later(0.2), now: t0) == .refuse("its signature is dated later than this Mac’s clock"), "from the future")
-check(AP.dates(signedAt: later(0.15), now: t0) == .waitUntil(later(48.15)), "within the clock's skew")
+// The cooling-off (review 3's point 1; the second security pass's A1): from this Sill's first sight of the verified
+// manifest, never from its signed line alone, which whoever holds the key writes. The signed date bounds the age
+// and the future (F7).
+check(AP.dates(signedAt: t0, firstSeen: t0, now: later(47.9)) == .waitUntil(later(48)), "cooling off for 48 hours")
+check(AP.dates(signedAt: t0, firstSeen: t0, now: later(48)) == .go, "then go")
+let backdated = later(-49)
+check(AP.dates(signedAt: backdated, firstSeen: t0, now: t0) == .waitUntil(later(48)), "A1: a manifest dated 49 hours back, first seen now, waits 48 hours")
+check(AP.dates(signedAt: backdated, firstSeen: t0, now: later(47.99)) == .waitUntil(later(48)) && AP.dates(signedAt: backdated, firstSeen: t0, now: later(48)) == .go,
+      "…and goes only then")
+check(AP.dates(signedAt: t0, firstSeen: later(-100), now: later(1)) == .waitUntil(later(48)), "a first sight before the signed time: from the signed time")
+check(AP.dates(signedAt: t0, firstSeen: t0, now: later(120 * 24 + 0.1)) == .refuse("it was signed more than 120 days ago"), "too old")
+check(AP.dates(signedAt: t0, firstSeen: later(120 * 24 - 49), now: later(120 * 24)) == .go, "120 days exactly")
+check(AP.dates(signedAt: later(0.2), firstSeen: t0, now: t0) == .refuse("its signature is dated later than this Mac’s clock"), "from the future")
+check(AP.dates(signedAt: later(0.15), firstSeen: t0, now: t0) == .waitUntil(later(48.15)), "within the clock's skew")
+// The first sight, kept across launches: a later read never moves it; a release whose zip changed is a new sighting.
+let sha1 = String(repeating: "a", count: 64), sha2 = String(repeating: "b", count: 64)
+var seenMem = AP.sighted(AP.switched(AP.Memory(), on: true), tag: "v0.4.0", sha256: sha1, signedAt: backdated, now: t0)
+check(AP.firstSeen(seenMem, tag: "v0.4.0", sha256: sha1) == t0, "the first sight kept")
+seenMem = AP.sighted(seenMem, tag: "v0.4.0", sha256: sha1, signedAt: backdated, now: later(30))
+check(AP.firstSeen(seenMem, tag: "v0.4.0", sha256: sha1) == t0 && seenMem.seen.count == 1, "a later read never moves it")
+check(AP.waitUntil(seenMem, tag: "v0.4.0") == later(48) && AP.waitUntil(seenMem, tag: "v0.4.1") == nil, "the wait's end, from what is remembered")
+seenMem = AP.sighted(seenMem, tag: "v0.4.0", sha256: sha2, signedAt: backdated, now: later(40))
+check(AP.firstSeen(seenMem, tag: "v0.4.0", sha256: sha2) == later(40) && AP.waitUntil(seenMem, tag: "v0.4.0") == later(88),
+      "a release whose zip changed: a new sighting, the wait from it")
+check(start(seenMem, waitUntil: AP.waitUntil(seenMem, tag: "v0.4.0"), now: later(87)) == .no("0.4 cools off until 2026-11-15T19:00:00Z")
+      && start(seenMem, waitUntil: AP.waitUntil(seenMem, tag: "v0.4.0"), now: later(88)) == .go, "the start rule waits on the remembered sight")
+if let data = try? JSONEncoder().encode(seenMem), let back = try? JSONDecoder().decode(AP.Memory.self, from: data) {
+    check(back == seenMem, "sightings survive as JSON")
+} else { check(false, "sightings encode") }
+if let old = #"{"on":true,"attempts":{},"stopped":["v0.4.0"]}"#.data(using: .utf8), let read = try? JSONDecoder().decode(AP.Memory.self, from: old) {
+    check(read.on && read.stopped == ["v0.4.0"] && read.seen.isEmpty, "an item written before sightings reads with none")
+} else { check(false, "an older item decodes") }
 // The quiet moment (review 3's point 3).
 // Noah, 2026-11-12: "can the 10 minute wait be shortened to 5 minutes?"
 check(AP.quietFor == 5 * 60 && AP.quietMinutes == 5, "the wait with no device is 5 minutes (Noah's decision)")
@@ -665,12 +705,17 @@ check(AP.switchState(available: false, canKeep: true, checkOn: true, refusal: ni
 check(AP.switchState(available: true, canKeep: true, checkOn: true, refusal: nil, on: false) == AP.Switch(shown: true, enabled: true), "usable")
 check(AP.switchState(available: true, canKeep: true, checkOn: false, refusal: nil, on: false) == AP.Switch(shown: true, enabled: false, note: "Works while Check for updates automatically is on."), "the daily check off")
 check(AP.switchState(available: true, canKeep: true, checkOn: false, refusal: nil, on: true).enabled, "on can always be turned off")
-check(AP.switchState(available: true, canKeep: false, checkOn: true, refusal: nil, on: false) == AP.Switch(shown: true, enabled: false, note: "This copy of Sill can’t keep this setting: it isn’t a notarized release."), "no keychain group")
+check(AP.switchState(available: true, canKeep: false, checkOn: true, refusal: nil, on: false) == AP.Switch(shown: true, enabled: false, note: "This copy of Sill can’t keep this setting: only Sill’s releases from GitHub can."), "no keychain group (N9: a notarized build can lack it too)")
+check(AP.switchState(available: true, canKeep: true, checkOn: true, refusal: nil, on: false, unreadable: true)
+      == AP.Switch(shown: true, enabled: true, note: "Sill couldn’t read what it keeps for this setting, so it is off. Turning it on starts it afresh."), "A3: an unreadable item, said under the switch")
 check(AP.switchState(available: true, canKeep: true, checkOn: true, refusal: .translocated, on: false) == AP.Switch(shown: true, enabled: true, note: P.words(.translocated)), "a refusal said under it")
 // Its words.
-check(AP.coolingOff == 48 * 3600 && AP.coolingOffWords == "two days after it is signed", "the cooling-off is 48 hours (Noah's decision), in words")
+check(AP.coolingOff == 48 * 3600 && AP.coolingOffWords == "two days after it first finds it", "the cooling-off is 48 hours (Noah's decision) from the first sight, in words")
 check(P.AutomaticPane().quietMinutes == AP.quietMinutes, "the pane's words take the wait from the rule")
-check(AP.offerNote(mem, offered: v040, offeredTag: "v0.4.0", waitUntil: nil, now: t0) == "Sill installs it by itself once no device has been connected for 5 minutes.", "the offer's note")
+check(AP.offerNote(mem, offered: v040, offeredTag: "v0.4.0", waitUntil: nil, now: t0)
+      == "Sill installs it by itself two days after it first finds it, once no device has been connected for 5 minutes.", "the offer's note before the first sight")
+check(AP.offerNote(mem, offered: v040, offeredTag: "v0.4.0", waitUntil: later(-1), now: t0) == "Sill installs it by itself once no device has been connected for 5 minutes.",
+      "the offer's note once the wait is over")
 check(AP.offerNote(mem, offered: v040, offeredTag: "v0.4.0", waitUntil: later(30), now: t0).hasPrefix("Sill installs it by itself tomorrow at ")
       || AP.offerNote(mem, offered: v040, offeredTag: "v0.4.0", waitUntil: later(30), now: t0).hasPrefix("Sill installs it by itself on "), "cooling off: from when")
 check(AP.offerNote(AP.stopped(mem, "v0.4.0"), offered: v040, offeredTag: "v0.4.0", waitUntil: nil, now: t0) == "A stop signed with Sill’s update key names Sill 0.4, so Sill won’t install it.", "stopped")
@@ -684,6 +729,40 @@ check(AP.updatedLine(done, running: v030, now: later(2)) == nil, "only while tha
 check(AP.updatedLine(done, running: v040, now: later(1 + 7 * 24)) == nil, "for a week")
 let paneNow = AP.pane(AP.began(mem, v040, now: t0), offered: v040, offeredTag: "v0.4.0", running: v030, waitUntil: nil, now: t0)
 check(paneNow.on && paneNow.quietMinutes == 5 && paneNow.afterFailure == "Sill tries again after its next daily check." && paneNow.updated == nil, "the pane's part")
+// What is kept stays small whatever is offered (the second security pass's A3).
+var many = mem
+for i in 1...1500 { many = AP.failed(AP.began(many, SillVersion("0.\(i)")!, now: later(Double(i))), SillVersion("0.\(i)")!, why: String(repeating: "x", count: 900)) }
+let fewer = AP.bounded(many, running: v030)
+check(fewer.attempts.count == AP.maxRemembered && fewer.attempts.keys.contains("0.1500") && !fewer.attempts.keys.contains("0.4"), "A3: attempts bounded, the newest kept")
+check(fewer.attempts["0.1500"]?.failure?.count == 200, "a failure's words cut to 200")
+check(AP.bounded(AP.began(mem, SillVersion("0.2")!, now: t0), running: v030).attempts.isEmpty, "an attempt at a version not newer than this Sill goes")
+var stops = mem
+for i in 1...100 { stops = AP.stopped(stops, "v0.\(i)") }
+let fewerStops = AP.bounded(AP.stopped(stops, "not a tag"), running: v030)
+check(fewerStops.stopped.count == AP.maxStops && fewerStops.stopped.first == "v0.100" && !fewerStops.stopped.contains("v0.3")
+      && !fewerStops.stopped.contains("not a tag"), "stops bounded, the highest kept, none at or below this Sill")
+var sights = mem
+for i in 1...50 { sights = AP.sighted(sights, tag: "v0.\(i + 3)", sha256: sha1, signedAt: t0, now: later(Double(i))) }
+check(AP.bounded(sights, running: v030).seen.count == AP.maxRemembered, "sightings bounded")
+check(AP.bounded(AP.sighted(mem, tag: "v0.4.0", sha256: "not hex", signedAt: t0, now: t0), running: v030).seen.isEmpty, "a malformed sighting goes")
+var full = AP.bounded(many, running: v030)
+full.stopped = fewerStops.stopped
+full.seen = AP.bounded(sights, running: v030).seen
+full.highestSigned = "0.1500"
+let fullBytes = (try? JSONEncoder().encode(full))?.count ?? Int.max
+check(fullBytes < AP.maxItemBytes / 8, "the fullest memory Sill writes stays far under the item's limit: \(fullBytes) bytes")
+// A3: the item as read: none, a memory, or unreadable, never "nothing remembered" for an item that is there.
+check(AP.storeRead(status: -25300, data: nil, error: "x") == .noItem, "no item: nothing remembered")
+check(AP.storeRead(status: 0, data: try? JSONEncoder().encode(seenMem), error: "x") == .memory(seenMem), "an item: what it remembers")
+check(AP.storeRead(status: 0, data: Data(count: AP.maxItemBytes + 1), error: "x") == .unreadable("the item is \(AP.maxItemBytes + 1) bytes, larger than Sill ever writes"),
+      "A3: an oversized item is unreadable, not nothing")
+check(AP.storeRead(status: 0, data: Data("garbage".utf8), error: "x") == .unreadable("the item isn’t what Sill writes"), "an item that isn't Sill's: unreadable")
+check(AP.storeRead(status: -25308, data: nil, error: "User interaction is not allowed.") == .unreadable("User interaction is not allowed."), "a keychain error: unreadable")
+check(AP.storeRead(status: 0, data: nil, error: "x") == .unreadable("x"), "no data: unreadable")
+// The watcher's token (W2): only a UUID's text names a started note.
+check(P.isToken(UUID().uuidString) && !P.isToken("not-the-token") && !P.isToken("../../Library/LaunchAgents/x.plist-0000000000000")
+      && !P.isToken(UUID().uuidString.lowercased()) && !P.isToken(UUID().uuidString + "/"), "the watcher's token: a UUID's text alone")
+
 // What Sill remembers survives as JSON, and an empty item is the switch off.
 if let data = try? JSONEncoder().encode(tried), let back = try? JSONDecoder().decode(AP.Memory.self, from: data) {
     check(back == tried, "the memory round-trips")
@@ -936,9 +1015,42 @@ check(store.contains("kSecUseDataProtectionKeychain as String: true") && store.c
 check(!store.contains("kSecAttrSynchronizable as String] = true") && !store.contains("kSecAttrAccessibleAlways"), "never synced, never readable while locked before the first unlock")
 let setters = files.filter { $0 != "AppUpdater.swift" && text($0).contains(".setAutomaticUpdate(") }
 check(setters == ["SettingsPanes.swift"], "only Settings › General turns the switch on: \(setters)")
-check(updater.contains("self.remember { Auto.signedRelease($0, p.release.version) }") && updater.components(separatedBy: "Auto.signedRelease(").count == 2,
-      "the rollback floor rises only with a release whose manifest verified, never with the check's word")
-check(!updater.contains("Auto.switched($0, on: true)") && updater.contains("remember { Auto.switched($0, on: on) }"), "the switch changes in one place")
+// A2 (the second security pass): the floor rises only once the app passed both checks, never on a manifest alone.
+func after(_ a: String, _ b: String, in s: String) -> Bool {
+    guard let ra = s.range(of: a), let rb = s.range(of: b) else { return false }
+    return ra.lowerBound < rb.lowerBound
+}
+check(updater.components(separatedBy: "Auto.signedRelease(").count == 2 && after("self.checked = c", "self.remember { Auto.signedRelease($0, c.version) }", in: updater),
+      "A2: the rollback floor rises only with an app that passed both checks")
+// A3: an attempt counts only once the release's manifest verified and its dates let it go on (in fetch), never at
+// the offer (considerAutomatic).
+check(updater.components(separatedBy: "Auto.began(").count == 2 && after("Auto.dates(signedAt:", "self.remember { Auto.began(", in: updater)
+      && after("private func fetch(", "Auto.began(", in: updater), "A3: an attempt counts only on a verified release")
+// A1: the first sight is kept before the dates are judged.
+check(after("Auto.sighted($0, tag: p.release.tag", "Auto.dates(signedAt: p.manifest.signedAt, firstSeen:", in: updater), "A1: the first sight before the dates")
+check(updater.contains("store.update({ Auto.bounded(change($0), running: running) }"), "A3: every write kept small")
+check(!updater.contains("Auto.switched($0, on: true)") && updater.contains("{ Auto.switched($0, on: on) }")
+      && updater.components(separatedBy: "replacingUnreadable: on").count == 2, "the switch changes in one place, the one write that may replace an unreadable item")
+// W2: notes read only as small regular files, never with Data(contentsOf:), and the launch's off the main actor.
+let installerText = text("UpdateInstaller.swift")
+check(!installerText.contains("Data(contentsOf:") && installerText.contains("O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC")
+      && installerText.contains("s.st_mode & S_IFMT == S_IFREG"), "W2: the notes read as regular files, without waiting")
+check(after("func afterHostUp() {", "let notes = await Task.detached(priority: .utility) {\n                (UpdateInstaller.readNote(Self.pendingNote), UpdateInstaller.readNote(Self.restoredNote))", in: updater),
+      "W2: the launch reads the notes off the main actor")
+check(updater.contains("func considerAutomatic() {\n        guard notesSettled else { considerWhenSettled = true; return }") && updater.contains("defer { settleNotes() }"),
+      "W2: with the notes read off the main actor, the automatic update waits for them (a put-back is known first)")
+// R3: the leftover note before the last check, not between it and the swap.
+check(after("Self.noteLeftover(staged.deletingLastPathComponent(), in: leftoverNote)", "switch check(staged, manifest: manifest", in: installerText),
+      "R3: the leftover note before the last check")
+// W1: the watcher checks the copy at Sill's path after its move and its note, before it starts it; the note goes in a
+// new file renamed into place (never written through a link, never waiting on a FIFO). W2: the started note is
+// looked at, never opened.
+let watcher = installerText.components(separatedBy: "static let watcherScript").last ?? ""
+check(after("/bin/mv \"$old\" \"$app\"", "if ! whole \"$app\"; then", in: watcher) && after("/bin/mv -f -h \"$note\" \"$restored\"", "if ! whole \"$app\"; then", in: watcher)
+      && after("if ! whole \"$app\"; then", "\"$launcher\" \"$app\"", in: watcher), "W1: the copy at Sill's path checked after the move and the note, before it starts")
+check(!watcher.contains("> \"$restored\"") && watcher.contains("1<>\"$note\""), "W1: the restored note never written through a link or onto a FIFO")
+check(watcher.contains("proved() { [ -f \"$started\" ] && [ ! -L \"$started\" ]; }") && watcher.contains("[ -d \"$1\" ] && [ ! -L \"$1\" ] || return 1"),
+      "W2: the started note looked at, never opened; W1: the old copy a folder, never a link")
 // The other targets' sources: argv[2] when the app's are a mutant's copy (mutants.py), else beside them.
 let elsewhere = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : sources + "/.."
 for path in ["StreamProtocol/HostSettings.swift", "StreamProtocol/StreamMessage.swift", "SillHost/DeviceSettings.swift", "SillHost/HostConfig.swift",

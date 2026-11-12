@@ -227,7 +227,12 @@ cannot be sent elsewhere between the checks and the exchange; the exchange itsel
 directory descriptors), which a process of this user that can rename folders above Sill.app could still
 race: T12's residue. Not measured here: whether App Management stops
 another process of this user from renaming the bundle's folder itself (Apple's pages don't say); nothing
-here depends on it.
+here depends on it. The second security pass (R3): the leftover note is written before the last check, so its
+appearance no longer marks the end of that check; but a process of this user that changes the staged copy
+between the last check and the swap and then stops Sill with SIGKILL before the check after the swap has
+finished leaves its changed copy at Sill's path, unchecked after the swap. That copy then runs as Sill once
+it is opened; macOS still checks its signature, so a changed executable doesn't run, and changed resources
+can't add a TCC grant or the keychain group it doesn't already have (the reviewer's reading).
 
 **T13. Another account on this Mac running the same Sill.app.** Noah's Mac has one most days (a second
 logged-in account runs /Applications/Sill.app beside his, measured 2026-11-11). The updater finds every
@@ -352,10 +357,14 @@ installed by hand once (§4.8). Leaked: the attacker still needs a Developer ID 
 (T4's route through CI, or Sill's Developer ID key); the answer is the same rotation, with the release
 notes asking people to update by hand once. A leaked key cannot be revoked (review 3, N1): every Sill not
 updated by hand keeps trusting it. What limits the damage: the attacker still needs Apple's signature and
-notarization for Sill's team (T4); the automatic update installs a release only two days after it was
-signed and asks GitHub again right before it installs, so a release Noah pulls within those days installs
-nowhere by itself (§15); and a stop signed with a key the Sills know (`Sill.zip.stop`, §15.4) names a
-release none installs, also by Update Now. A key compiled in that is not a usable Ed25519 public key
+notarization for Sill's team (T4); the automatic update installs a release only two days after this Mac
+first read its verified manifest (never counted from the manifest's own signed line, which whoever holds the
+key writes: the second security pass's A1) and asks GitHub again right before it installs, so a release Noah
+pulls within two days of its appearance installs nowhere by itself (§15.4); the signing record and
+`sign-update.sh --audit` are how he notices one he didn't sign (his choice to run it daily); and a stop
+signed with a key the Sills know (`Sill.zip.stop`, §15.4) names a release none installs, also by Update Now.
+What none of this covers: Update Now (the person installs at once), and a leaked key's release that nobody
+notices within those two days. A key compiled in that is not a usable Ed25519 public key
 (wrong length, not decodable, or one of the points of small order, for which a signature can be forged
 for some messages) makes every manifest fail: `UpdateManifest.usableKey`, checked for every compiled key.
 
@@ -367,10 +376,11 @@ here. Try again later, or open its release page." — nothing downloaded.
 
 **T30. Automatically update Sill: nobody is there (added in round 3, §15).** With the switch on, the two
 proofs are the whole gate, and a release that passes them installs on every such Mac within a day. So F1, F2
-and F3 were fixed first (§12c); a release installs by itself only two days after the time it was signed
-(the manifest's own line, which GitHub can't change) and only while GitHub still lists it, unchanged and not
-stopped, right before the swap; a release signed long ago, dated in the future, or below a version whose signed
-release it has read never installs by itself (F7). Update Now is unchanged: the person sees the version and clicks.
+and F3 were fixed first (§12c); a release installs by itself only two days after this Mac first read its
+verified manifest (the second security pass's A1: not the manifest's own signed line, which whoever holds the
+key writes) and only while GitHub still lists it, unchanged and not stopped, right before the swap; a release
+signed long ago, dated in the future, or below a version whose app passed both checks here never installs by
+itself (F7, A2). Update Now is unchanged: the person sees the version and clicks.
 
 **T31. Who turns it on (added).** Only Settings › General's switch. The switch and what the update remembers
 live in one item of Sill's keychain group (data-protection keychain, this device only, never synced): no
@@ -394,8 +404,10 @@ refusal is looked at before any download, and every attempt's staging folder goe
 **T34. The watcher (added).** The one helper (T11): `/bin/sh` with a fixed script, its values as arguments,
 started by the old Sill. It stops only the process the old Sill started (and only while that process runs
 Sill's executable from Sill's path), and puts back only the old copy, valid, of the pinned requirement and
-the cdhash that ran. A process of this user can write the started note (no put-back) or stop the new Sill
-early (a put-back of the previous genuine version): neither installs anything new. Its renames in
+the cdhash that ran, and checks the copy at Sill's path again after its moves before it starts it (the second
+security pass's W1). A process of this user can make the started note (no put-back) or stop the new Sill
+early (a put-back of the previous genuine version): neither installs anything new; a link or a FIFO planted
+where it writes or looks holds nothing up and is never written through (W1, W2). Its renames in
 /Applications run as this user, responsible to the old Sill for App Management (not measured: Noah's step
 A6).
 
@@ -645,9 +657,11 @@ checklist.md part 1 §3's marker rule).
 - Every later Sill keeps the wait at launch (§5) and finishes launching within 30 s while another Sill
   runs: the version that updates to it launches it beside itself and waits for that.
 - Every later Sill.app, with Update Now or without, answers the watcher (§15.5): once its host has been up
-  `provedAfter` (30 s), or when it is quit, it writes the pending note's token to the started note
-  (`AppUpdater.afterHostUp`, `willQuit`, from Sill's Caches folder). A later Sill that didn't would be put
-  back by the watcher of the version that updated to it, 150 s after its launch.
+  `provedAfter` (30 s), or when it is quit, it makes the started note, a regular file named
+  "Update Now started ‹token›.txt" in Sill's Caches folder (`me.saffer.sill.mac`), ‹token› the pending note's
+  first line, a UUID's text (`AppUpdater.afterHostUp`, `willQuit`). The watcher only looks whether that regular
+  file is there (the second security pass's W2: never opened). A later Sill that didn't would be put back by
+  the watcher of the version that updated to it, 150 s after its launch.
 - The manifest's signed date (`signed …Z`) and a stop (`Sill stop 1`) are part of format "1" from this
   version on: no Sill.app with an update key ever shipped before them.
 - Every release keeps T24's shape and, for Update Now, its manifest. The manifest's first line, "Sill
@@ -673,8 +687,8 @@ checklist.md part 1 §3's marker rule).
 | Half an update | one atomic swap; put back on every later failure |
 | Automatically update Sill turned on by anything but Settings › General | the switch in Sill's keychain group only, set only by `setAutomaticUpdate` from `SettingsPanes`; the update-install check's source rules (T31) |
 | An automatic install over a connected device, or a device cut off by Update Now's restart | the hold and the count in one step on the host's queue (T32); Update Now asks about a device that joined |
-| An automatic install of a release signed less than two days ago, long ago, in the future, below one signed before, or stopped | `UpdateAutoPolicy.start` and `dates`, the stop read before the download, GitHub asked again before the swap (T30) |
-| An automatic retry loop | two attempts a version, a day apart, remembered in the keychain item (§15.3) |
+| An automatic install of a release this Mac first read less than two days ago (however its manifest is dated), signed long ago or in the future, below one whose app passed both checks here, or stopped | `UpdateAutoPolicy.start`, `dates` and the first sights kept in the keychain item (§12d, A1), the stop read before the download, GitHub asked again before the swap (T30) |
+| An automatic retry loop, or a memory grown until it reads as nothing | two attempts a version, a day apart, counted only on a verified release, remembered in the keychain item, kept small (`bounded`), and an unreadable item never read as nothing (§15.3, §12d A3) |
 | A broken new version left in place with nobody there | the watcher puts the old copy back and starts it (T34) |
 
 ## 10. Open questions (each with the default this branch takes)
@@ -723,9 +737,10 @@ checklist.md part 1 §3's marker rule).
 Automatically update Sill (§15). Noah decided five points on 2026-11-12 (§15.1); these are what he was
 not asked, each with the default taken:
 
-13. **The cooling-off. Decided by Noah on 2026-11-12: "48 hour wait seems ok".** 48 hours from the
-    manifest's signed date before Sill installs a release by itself (Update Now at once; §15.1). Cost per
-    release: none for Noah; automatic installs come two to three days after he signs.
+13. **The cooling-off. Decided by Noah on 2026-11-12: "48 hour wait seems ok".** 48 hours before Sill
+    installs a release by itself, counted (since the second security pass's A1) from when that Sill first
+    read the release's verified manifest, never before its signed time (Update Now at once; §15.1, §15.4).
+    Cost per release: none for Noah; automatic installs come two to three days after he publishes.
 14. **A signed stop.** Default: built and read (`Sill.zip.stop`, §15.4). Cost per release: none until used;
     using it, one signature in person and one upload. Alternative: none (pulling the release within the
     cooling-off already stops the automatic update everywhere, as each Sill asks GitHub again before its
@@ -955,12 +970,12 @@ reviewer's fixes. Each was verified here first; what was done, and the check tha
 |---|---|---|---|
 | F1 | HIGH. Any process of Noah's could drive the installed signer silently (DYLD_INSERT_LIBRARIES into an unhardened binary). | The signer is built with the hardened runtime (`codesign -o runtime`); `sign-update.sh` refuses a signer without it; every signature still asks in person (Touch ID or the password). | `sign-test.sh`: a signer without the runtime refused; measured: a marker library loads into the unhardened signer, not into the hardened one. |
 | F2 | HIGH. Noah's signature did not pin which keys the release trusts. | `--install-signer` records the trust anchors (the `releaseKeys` line, the pinned requirement, the `Trust` and `Endpoints` blocks, comments stripped) and shows them; signing compares the tag's own sources with the record and stops, with the difference shown, when they differ. | `sign-test.sh`: a tag whose keys or requirement changed is refused. |
-| F3 | MEDIUM. The key's backup step could leave the key readable by every process of the account. | §14's steps 1–3 rewritten: the copy goes straight into an encrypted disk image, never a plain file. | Documentation. |
+| F3 | MEDIUM. The key's backup step could leave the key readable by every process of the account. | §14 1.4 rewritten: in Terminal.app, the keychain's question answered Allow, never Always Allow; the 44 characters typed into a 1Password item (or on paper), never copied and pasted; ⌘K after. (Corrected by the second pass: this row said an encrypted disk image, which §14 doesn't.) | `sign-test.sh` reads both documents for "never Always Allow" and "Terminal.app". |
 | F4 | MEDIUM. The in-person prompt showed 64 bits of the SHA-256. | The whole SHA-256, in groups of eight, in the prompt and printed before it (`UpdateManifest.signingReason`, `grouped`). | `update-install`: the prompt's exact text and its 64 digits; mutant "the prompt's digest shortened". |
 | F5 | LOW. A same-user process could leave a changed, unchecked copy at Sill's path (change it in staging, kill Sill after the swap). | The staged copy is checked once more right before the swap and must equal the first check (`UpdateInstaller.install`); the quit waits for an install step (`AppDelegate`); T12 corrected. The moment left is between that check and `renamex_np` (microseconds), and the check after the swap still covers it. | Harness: "changed after the check, before install" refused before the swap; "raced" caught after it and put back; mutant "no check right before the swap". |
 | F6 | LOW. A link through a link escaped Sill.app; Security opened links at the signature's own paths. | The link rule walks a target as the file system does and refuses a step into any link (the reviewer's patch); links at `Contents/_CodeSignature` and `Contents/CodeResources` refused; the tree check refuses anything but files, folders and links there. | `update-install`: the reviewer's three cases and two more; mutants "a walk through a link", "links at the signature's paths"; harness case "link-through-link" and "the new copy's CodeResources a link". |
 | F7 | LOW. Rollback to an older signed release; manifests never expire. | The manifest carries its signed date (`signed …Z`). The automatic update installs nothing signed more than 120 days ago or dated ahead of this Mac's clock, and never a version below the highest whose signed release it has read (§15.3). Update Now shows the version and the person decides. | `update-install`: the date's form, a changed date, `dates`, the start rule's rollback case. |
-| N1 | A leaked key cannot be revoked. | T28 says so, and what limits the damage (§15.4: the cooling-off, the second look at GitHub, the stop). | Documentation. |
+| N1 | A leaked key cannot be revoked. | T28 says so, and what limits the damage (§15.4: the second look at GitHub, the stop, and the cooling-off, which the second security pass (A1) found counted from a line the key's holder writes: now from each Mac's first read of the manifest, with the signing record and `--audit` for Noah to notice). | Documentation; `update-install`'s A1 cases. |
 | N2 | `refresh()` ran 10–70 ms on the main actor every second. | The look runs in a detached task; one at a time, callers queued (`AppUpdater.refresh`). | By reading (AppKit: no harness). |
 | N3 | `forceTerminate` could end the old Sill itself. | Never this process: guarded in both places (`opened`). | By reading; the reviewer's probe: the launch always returned a new process here. |
 | N4 | Hard links and open descriptors in the staged copy. | Every file of the app one name (`st_nlink == 1`), and only files, folders and links. | Harness "a hard link"; mutant "hard links taken". |
@@ -970,6 +985,51 @@ reviewer's fixes. Each was verified here first; what was done, and the check tha
 | N8 | The harness drives `UpdateInstaller` only. | Still so, plus the watcher (§15.5) now in it; the relaunch, the wait at launch, the quit and the hold remain AppKit's, covered by the pure state machine, by reading and by Noah's steps (§12, §15.8). TLS stays unexercised (the stand-in is plain HTTP). | — |
 
 The reviewer's seven points for an automatic updater are §15.6.
+
+## 12d. The second security pass (2026-11-12, the same reviewer, on 312b514)
+
+`SECURITY-REVIEW.md`'s second section has every finding and its proof (0 critical, 1 high, 1 medium, 5 low,
+3 notes). Its verdicts: the rehearsal can go as it is; the real update key can be made; Update Now ships after
+W1 and W2; the automatic update after A1, then A2, A3 and G1. Each was verified here first (by reading, and for
+A1, A2, A3 and W1 against the reviewer's proofs: the backdated manifest went at once, `highestSigned` rose on a
+manifest alone, the attempts grew without bound, the watcher wrote through a planted link); what was done, and
+the check that fails without it:
+
+| | Finding | Done | Check that fails without it |
+|---|---|---|---|
+| A1 | HIGH. The cooling-off counted from the manifest's `signed` line, which whoever holds the key writes: a manifest dated 49 hours back went at once. | The wait counts from the later of the signed time and this Sill's first read of that verified manifest, kept per release (tag and zip SHA-256) in the keychain memory across launches (`Memory.Sighting`, `sighted`, `dates(signedAt:firstSeen:now:)`, `waitUntil`); a release whose zip changed is a new sighting. The signed date keeps the 120 days and the future refusal. Noah's way to notice: the signing record and `sign-update.sh --audit` (§15.4), run daily if he chooses. The words: "two days after it first finds it". | `update-install`: the reviewer's backdated manifest waits 48 h from its first sight; a later read never moves it; a new zip is a new sighting; mutants "A1: …" (four). `sign-test.sh`: the record, the audit's alarm for a manifest signed outside it, its notification. |
+| R1 | MEDIUM. The trust record was compared with the local tag's sources; nothing tied the zip to that commit, and tags are unprotected. | `make-app.sh` writes `SillCommit` (the commit, "+changes" when the app's files differ from it) into the signed Info.plist; `sign-update.sh` signs only an app naming the commit of the local tag, and only while GitHub's tag (read through an annotated one) names it too. | `sign-test.sh`: an app built from another commit, an app naming none, a moved tag on GitHub: each refused before signing; an annotated tag read through. |
+| R2 | NOTE. The record pins four constants, not the code that uses them. | Before signing, `sign-update.sh` shows the updater's own files' changes since the last release in the signing record and asks. | `sign-test.sh`: the change since a recorded v0.6.0 shown. |
+| R3 | LOW. The leftover note, written between the last check and the swap, marked the moment to change the staged copy and SIGKILL Sill. | The note comes before the last check; T12 says what a SIGKILL in the moment after it still leaves. | Harness "changed when the leftover note appears" (refused before the swap); mutant "R3: the note between the last check and the swap"; `update-install`'s source rule. |
+| A2 | LOW. The floor rose on any verified manifest before the app was downloaded: one signed "v99" froze every later release. | The floor rises only once an app passed both checks (`startCheck`). | `update-install`'s source rule; mutant "A2: the floor raised on a manifest". |
+| A3 | LOW. Attempts counted on offers nobody verified (defaults any process writes); an item over 64 KiB read as nothing (the switch off, the floor and the stops forgotten). | An attempt counts only once the manifest verified and its dates let it go on (`fetch`); every write is kept small (`bounded`: versions newer than the one running, eight attempts and sightings, 32 stops, well-formed text; the fullest memory a few KiB); an item that can't be read is never "nothing remembered": the switch reads off with a note, and only the person turning it on writes over it (`storeRead`, `AutoUpdateStore.unreadable`). | `update-install`: 1,500 attempts bounded to eight, the fullest memory's size, `storeRead`'s answers, the switch's note; mutants "A3: …" (four). |
+| W1 | LOW. The watcher put back without a check after its moves, and wrote its note through a link planted in Sill's Caches folder. | After its moves and its note it checks the copy at Sill's path as it checked the old copy (a folder, not a link; valid; the cdhash that ran), and moves it aside unstarted if that fails; the note goes in a new file renamed into place (`mktemp`, `1<>`, `mv -f -h`). | Harness "a link planted at the restored note", "the note lands in the put-back copy", "the old copy replaced by a link"; mutants "W1: …" (three). |
+| W2 | LOW. The notes were read on the main actor with `Data(contentsOf:)`: a FIFO planted there hung Sill's launch or quit; the watcher's `head` could block too. | Notes are read only as small regular files (`O_NOFOLLOW`, `O_NONBLOCK`, `fstat`'s `S_ISREG`, 4 KiB), the launch's off the main actor; the started note is a file whose name carries the token (`isToken`), which the watcher looks for and never opens (§8). | Harness: a FIFO, a link and a 5,000-byte file where a note goes; "a FIFO at the started note", "a link at the started note"; mutants "W2: …" (four). |
+| G1 | NOTE. Install Now on a waiting copy skipped the second look at GitHub. | A phase of its own, `lookingAgain`: GitHub asked again (still the latest, the manifest the one checked, no stop), then the install or the question. | `update-install`'s state machine; mutant "G1: Install Now without a second look". |
+
+N9, each answered:
+- **The clock.** A refusal by the dates (a clock set back makes a fresh release "dated in the future") is no
+  longer counted as an attempt (A3): a wrong clock costs only the wait, and Sill installs by itself once the
+  clock is right.
+- **The stop.** Any garbage named `Sill.zip.stop` stops a release, by design (fail closed); whoever can put it
+  there can already pull the release.
+- **Quit during an install.** The quit waits for the step (F5) and now never starts the new copy
+  (`quitRequested`): it is in place, checked twice, and starts the next time Sill opens. No watcher runs then,
+  so a new copy that doesn't start is not put back by itself: the copy it replaced stays in the staging folder
+  until the new one's host is up, and the download page is the way back.
+- **Forged notes.** Any process of the user can write Sill's notes and make the pane say "Sill updated itself
+  to …" (the pending note naming the version that runs) or "… didn't start, so … is back" (a matching token,
+  from `ps`). Accepted: they are words about this Mac's own Sill; no note installs anything, grows the memory
+  (A3), holds Sill up (W2) or names a path outside Sill's notes (`isToken`); a process that can write them can
+  already show windows of its own.
+- **The switch's words.** "… it isn't a notarized release." was wrong for a notarized build without the keychain
+  group: now "This copy of Sill can’t keep this setting: only Sill’s releases from GitHub can." The footnote's
+  "Update Now does the same at once." read as Update Now never disconnecting: now "Update Now checks it the
+  same way, at once."
+- **§12c's F3 row** said an encrypted disk image, which §14 doesn't: corrected.
+
+R2's residue: the diff shows the updater's code; Noah still has to read it. The rest of the reviewer's reading
+holds (its "What held": the stop, the second look, the hold, the store, no way in, the watcher's spawn).
 
 ## 13. Progress
 
@@ -1094,6 +1154,10 @@ Three things, at the Mac. The key list stays empty in the code until step 2's co
    the point.
 3. It checks that v0.6.2's Sill trusts exactly what you recorded at step 1.2 (or 2.3), and refuses
    otherwise, showing the difference: another key, team or host slipped into the release is caught here.
+   It checks that GitHub's tag v0.6.2 names the same commit as your tag, and that the app in the zip was built
+   from that commit (its Info.plist says which: `make-app.sh` writes it), and refuses otherwise (the second
+   security pass's R1: a tag moved on GitHub, a build of another commit). It shows what changed in the
+   updater's own files since the last release you signed and asks whether you read it (R2).
    It checks the zip (the checklist's download checks) and prints its SHA-256 in groups of eight. Then
    Touch ID (or your password) asks you to allow "sign Sill v0.6.2 for Update Now: Sill.zip, ‹size› bytes,
    SHA-256 ‹64 hex digits in groups of eight›": compare every group with the SHA-256 `release.sh` printed
@@ -1108,6 +1172,20 @@ Three things, at the Mac. The key list stays empty in the code until step 2's co
    that checked before you signed shows Update Now after its next daily check, or at Check Now. Someone who
    clicked Update Now in between is told "Sill 0.6.2 isn’t ready for Update Now yet. Try again later, or
    open its release page." and nothing is downloaded.
+5. Every manifest you sign goes in the signing record beside the signer (`signed.txt`; one Mac's: sign on
+   that Mac, or the audit there names what you signed elsewhere).
+   `Scripts/sign-update.sh --audit` compares every release on GitHub with it and says "Audit: all N signed
+   releases in Saffsanity/sill are in your signing record." when all is well; a release whose manifest
+   verifies with your key but that you never signed here is a release you didn't make (a leaked key): pull it
+   at once (delete the release, or mark it a prerelease) or upload a stop (§15.4). Sills with "Automatically
+   update Sill" on install such a release two days after they first find it, so you have those two days.
+
+**4. Your choice: the audit every day.** Running `--audit` by hand after each release costs a few seconds. To
+have it look every day and notify you only when something is wrong, install the LaunchAgent in
+docs/release-checklist.md part 1 §7 (one command; it runs the copy of `sign-update.sh` installed beside the
+signer, makes a few requests to GitHub's public API a day, needs no secret, and shows nothing while all is
+well). Without it, the two days protect only as well as you happen to notice; GitHub's "Watch › Custom ›
+Releases" mail is the zero-setup complement (it sees a new release, not an asset replaced on an old one).
 
 ## 15. Automatically update Sill (round 3, 2026-11-12)
 
@@ -1127,7 +1205,8 @@ In his words: "Your defaults are correct for the new updater features". So these
 
 Later the same day, after reading the summary: "48 hour wait seems ok, can the 10 minute wait be shortened to
 5 minutes?" So also decided:
-6. The cooling-off is 48 hours from the manifest's signed date (`UpdateAutoPolicy.coolingOff`).
+6. The cooling-off is 48 hours (`UpdateAutoPolicy.coolingOff`), counted since the second security pass (A1)
+   from when that Sill first read the release's verified manifest, never before its signed time.
 7. The wait with no device connected is 5 minutes (`UpdateAutoPolicy.quietFor`; every word that names it is
    made from it).
 
@@ -1145,10 +1224,12 @@ Later the same day, after reading the summary: "48 hour wait seems ok, can the 1
   refused (looked at afresh first, off the main actor), the offer is newer and signed with the update key,
   no stop names it, it isn't below the highest version whose signed release this Sill has read, and it has had fewer than
   two attempts, the last at least 20 hours ago.
-- **The signed date.** The manifest's `signed` line (UTC, by Noah's clock; GitHub's own date is not signed).
-  A release signed less than 48 hours ago waits (no attempt spent; Settings says from when); one signed
-  more than 120 days ago, or more than 10 minutes in this Mac's future, is never installed by itself
-  ("Sill didn’t install 0.4 by itself: … Update Now still can.").
+- **The dates.** The manifest's `signed` line (UTC, by the signer's clock; GitHub's own date is not signed)
+  and this Sill's first read of that verified manifest (its own clock, kept in its memory across launches:
+  the second security pass's A1). A release waits until 48 hours after the later of the two (no attempt
+  spent; Settings says until when); one signed more than 120 days ago, or more than 10 minutes in this Mac's
+  future, is never installed by itself ("Sill didn’t install 0.4 by itself: … Update Now still can."), and
+  that refusal is no attempt either.
 - **The quiet moment.** A checked copy waits; a run-loop Timer looks every 30 s. Any device connected
   restarts the wait (and the host's status changes reset it at once); once none has been connected for 5
   minutes and no pairing window is open, GitHub is asked again (the release must still be the latest, its
@@ -1180,25 +1261,56 @@ Later the same day, after reading the summary: "48 hour wait seems ok, can the 1
 ### 15.3 What Sill remembers, and the bounds on every loop (review 3's point 5)
 
 - Attempts by version: count, the last one's time, the last failure's words. Two at most, at least 20 hours
-  apart. Every failure counts, a new version that didn't run and was put back by the watcher too (so a
-  release that crashes at launch on this Mac is installed and put back at most twice, a day apart, then
-  left to Update Now). A wait (the cooling-off, a day without a quiet moment) is not an attempt.
+  apart. An attempt counts only once the release's manifest verified and its dates let it go on (the second
+  security pass's A3: an offer nobody verified counts nothing). Every failure after that counts, a new
+  version that didn't run and was put back by the watcher too (so a release that crashes at launch on this
+  Mac is installed and put back at most twice, a day apart, then left to Update Now). A wait (the
+  cooling-off, a day without a quiet moment) is not an attempt.
+- What is written is kept small (`UpdateAutoPolicy.bounded`, A3): attempts, first sights and stops only for
+  versions newer than the one running, at most eight attempts and eight sights and 32 stops, only
+  well-formed text; the fullest memory is a few KiB. An item that can't be read (larger than 64 KiB, not what
+  Sill writes, a keychain error) is never taken for "nothing remembered": the switch reads off, with "Sill
+  couldn’t read what it keeps for this setting, so it is off. Turning it on starts it afresh.", and nothing
+  Sill does by itself writes over it.
 - A refusal is looked at before anything is downloaded: a refusal that holds most days (another account's
   Sill, a read-only volume) downloads nothing.
 - Staging: every attempt makes one folder and its end removes it, but for a folder holding the old copy that
   could not be put back (set aside, the person's way back); what earlier attempts left goes once the next
   Sill's host is up (T20).
-- The highest version whose release, signed with the update key, this Sill has read (a later, lower offer is
-  a rollback: never by itself; the check's offers alone don't count, as GitHub's word isn't signed and a
-  made-up "v9.9" would stop every later update), and the tags a signed
-  stop named (never installed, also after the stop is gone).
+- The highest version whose app passed both checks here (the second security pass's A2: not a manifest alone,
+  so one signed manifest for a made-up "v99" can't stop every later release; a later, lower offer is a
+  rollback: never by itself; the check's offers alone never count), and the tags a signed stop named (never
+  installed, also after the stop is gone).
 
-### 15.4 A cooling-off and a way to stop it (review 3's point 1; question 13, decided, and open question 14)
+### 15.4 A cooling-off, a way to notice, and a way to stop (review 3's point 1; the second pass's A1; questions 13 and 14)
 
-- The cooling-off: 48 hours from the manifest's signed date (`UpdateAutoPolicy.coolingOff`; 0 turns it off),
-  Noah's decision of 2026-11-12 ("48 hour wait seems ok").
-  Cost per release: none for Noah; automatic installs come two to three days after he signs (the first daily
-  check after 48 hours), Update Now at once.
+- The cooling-off: 48 hours (`UpdateAutoPolicy.coolingOff`; 0 turns it off), Noah's decision of 2026-11-12
+  ("48 hour wait seems ok"), counted from when this Sill first read the release's verified manifest (and never
+  before its signed time). Until the second security pass it counted from the manifest's own `signed` line,
+  which is written by whoever holds the key: a release signed with a leaked key and dated two days back
+  installed at once (A1). The first read is this Mac's own moment, kept per release (tag and zip SHA-256) in
+  its keychain memory across launches; a release whose zip changes is read afresh and waits again. Cost per
+  release: none for Noah; automatic installs come two to three days after he publishes, Update Now at once.
+- **What the wait protects against now.** A release signed with Noah's update key that he didn't make (a
+  leaked key, with a notarized build: T4, T28), or one he made and regrets: every Mac with the switch on
+  waits at least two days after the release appears on GitHub before it downloads it, however the manifest is
+  dated, and asks GitHub again right before the swap. If Noah pulls the release (deletes it, or marks it a
+  prerelease), publishes a newer one, or uploads a stop within those two days, it installs nowhere by itself.
+- **What it does not protect against.** Update Now (the person installs at once, after seeing the version);
+  a release nobody notices within two days (the wait buys time, not attention); a Mac whose clock is set ahead
+  by two days or more (setting the clock takes an administrator); a Mac that can't keep its memory (no
+  keychain group) restarts the wait at every launch, never shortens it. Nightlies have no cooling-off at all
+  (§16.7, T38).
+- **A way to notice (A1's second half).** Every manifest `sign-update.sh` signs goes in the signing record
+  (`signed.txt` beside the signer: the time, the tag, the manifest's SHA-256 and the zip's).
+  `Scripts/sign-update.sh --audit` downloads every published release's `Sill.zip.manifest` (read-only: the
+  public release listing and a few kilobytes each) and compares each with the record: one that verifies with
+  a recorded update key but that this signer never made is a release Noah didn't sign, and it says so and
+  exits 1 (with `--notify`, also a notification). It needs nothing from Noah to keep the record; running the
+  audit is his decision: by hand after each release (a few seconds), or daily with the LaunchAgent in
+  docs/release-checklist.md (one command once; a few requests a day to GitHub's public API, no secret). Also
+  free and without setup: GitHub's "Watch › Custom › Releases" mails him every release published in the
+  repository (a new release, not an asset replaced on an old one, which only the audit sees).
 - The stop: `Sill.zip.stop` beside a release, `Sill stop 1` with the release's tag and its zip's SHA-256,
   signed with an update key (`UpdateManifest.Stop`; the signer's `stop` command, asked in person). Read
   before anything is downloaded, by Update Now and the automatic update: one that names this release ends
@@ -1217,13 +1329,17 @@ Later the same day, after reading the summary: "48 hour wait seems ok, can the 1
 Just before the old Sill quits, once the new one has finished launching and its running code is the code
 checked, the old Sill writes a note for the new one (a random token, the new version, the mode) and starts
 `/bin/sh` with the watcher's fixed script, in a session of its own, its output to /dev/null. The new Sill,
-once its host has been up for 30 s (`provedAfter`), or when it is quit, writes the token in the started note;
-the watcher, looking once a second, then ends, and the new Sill removes the old copy 3 s later. If the new
+once its host has been up for 30 s (`provedAfter`), or when it is quit, makes the started note, a regular file
+whose name carries the token (§8); the watcher, looking once a second whether it is there (never opening it:
+the second security pass's W2), then ends, and the new Sill removes the old copy 3 s later. If the new
 Sill's process is gone without the note, or there is no note after 150 s (`watchWait`): the watcher stops
-that process (only while it runs Sill's executable from Sill's path: `ps`), checks the old copy (valid with
-strict checks, the trust's requirement, the cdhash it ran with), puts it back at Sill's path (two renames;
-the new copy goes to "did not start.app" in the staging folder), writes the restored note (the token, why)
-and starts it with `open`. That Sill says what happened ("Sill 0.4 didn’t start, so Sill 0.3 is back.",
+that process (only while it runs Sill's executable from Sill's path: `ps`), checks the old copy (a folder, not
+a link; valid with strict checks, the trust's requirement, the cdhash it ran with), puts it back at Sill's
+path (two renames; the new copy goes to "did not start.app" in the staging folder), writes the restored note
+(the token, why: a new file renamed into place, never written through a link or onto a FIFO), checks the copy
+at Sill's path again as before the move (W1: anything that changed it meanwhile, in the staging folder that
+is this user's, or wrote into it through a planted link, is moved aside to "failed its check.app" and never
+started) and starts it with `open`. That Sill says what happened ("Sill 0.4 didn’t start, so Sill 0.3 is back.",
 then the automatic note) and counts the attempt. Nothing that isn't the old copy, whole, is put back; a
 process that isn't the new Sill is never stopped. A process of this user can write the started note (no
 put-back) or stop the new Sill early (a put-back of the previous genuine version, checked): neither installs
@@ -1233,8 +1349,10 @@ with the test app's own executable as the launcher in place of `open`.
 ### 15.6 The reviewer's seven points, and how each is met
 
 1. *A cooling-off on a signed date, and a signed way to stop:* met, both switchable, with their costs (§15.4):
-   the cooling-off's 48 hours decided by Noah (13), the stop still an open question (14). F1, F2, F3 and F7 are fixed first (§12c). Checked: `update-install`
-   (the date, the stop's format and signature, `dates`, the start rule, which answers end a waiting copy).
+   the cooling-off's 48 hours decided by Noah (13), counted since the second pass (A1) from each Mac's first
+   read of the manifest, with the signing record and `--audit` for Noah to notice; the stop still an open
+   question (14). F1, F2, F3 and F7 are fixed first (§12c). Checked: `update-install` (the dates, the first
+   sight, the stop's format and signature, the start rule, which answers end a waiting copy).
 2. *Only Settings turns it on:* met (§15.2). An attacker running as Noah cannot read, add or change the item
    (no process without Sill's signature and keychain group can); with Accessibility granted to it, it can click
    the switch, as it can click Update Now; `defaults write me.saffer.sill.mac updateCheck 0` turns the daily
@@ -1269,9 +1387,9 @@ says nothing of either (Noah: "Add the update key language when applicable as we
   must carry Apple’s signature and notarization for Sill’s developer, and the release must be signed with
   Sill’s own update key."
 - Footnote, switch on: "… nothing else is sent. Automatically update Sill is on: Sill downloads a new version
-  two days after it is signed, then installs it and restarts once no device has been connected for 5
+  two days after it first finds it, then installs it and restarts once no device has been connected for 5
   minutes; it never disconnects anyone. Before it installs a new version, Sill checks it two ways: … Update
-  Now does the same at once."
+  Now checks it the same way, at once."
 - A build without an update key: the check's own footnote, unchanged ("… Sill never downloads or installs
   anything by itself: a new version opens its page on GitHub, where you download it.").
 - Apple's check: "Couldn’t update: the downloaded app isn’t signed with the Developer ID of Sill’s
@@ -1285,16 +1403,19 @@ says nothing of either (Noah: "Add the update key language when applicable as we
   with Sill’s update key.", "Sill’s developer stopped Sill 0.4 with a stop signed with Sill’s update key, so it
   isn’t installed.", "… the release carries a stop that isn’t signed with Sill’s update key."
 - The switch: "Automatically update Sill"; under it when it can't act: "Works while Check for updates
-  automatically is on.", "This copy of Sill can’t keep this setting: it isn’t a notarized release.", or the
+  automatically is on.", "This copy of Sill can’t keep this setting: only Sill’s releases from GitHub can.",
+  "Sill couldn’t read what it keeps for this setting, so it is off. Turning it on starts it afresh.", or the
   refusal's own line.
-- While a release is offered, under Update Now: "Sill installs it by itself once no device has been connected
-  for 5 minutes.", "Sill installs it by itself tomorrow at 03:00 or later, once no device has been connected
-  for 5 minutes.", "A stop signed with Sill’s update key names Sill 0.4, so Sill won’t install it.", "Sill
+- While a release is offered, under Update Now: "Sill installs it by itself two days after it first finds it,
+  once no device has been connected for 5 minutes." (before this Sill has read its manifest), "Sill installs it
+  by itself tomorrow at 03:00 or later, once no device has been connected for 5 minutes.", "Sill installs it by
+  itself once no device has been connected for 5 minutes." (the wait over), "A stop signed with Sill’s update key names Sill 0.4, so Sill won’t install it.", "Sill
   won’t install 0.4 by itself: Sill 0.5 was out before it. Update Now still can.", "Sill won’t install 0.4 by
   itself again; Update Now still can."
 - Waiting: "Sill 0.4 is ready." / "Sill installs it by itself once no device has been connected for 5
   minutes, then restarts." [Install Now] [Cancel]. Menu: "Sill 0.4 Is Ready to Install…" / "Installs by
-  itself while no device is connected".
+  itself while no device is connected". Install Now: "Checking Sill 0.4 with GitHub again…" [Cancel] (the
+  second pass's G1), then the install or the question.
 - After: "Sill didn’t install 0.4 by itself: it was signed more than 120 days ago. Update Now still can.",
   "Sill tries again after its next daily check.", "Sill won’t install 0.4 by itself again; Update Now still
   can.", "Sill updated itself to 0.4 today at 03:12.", "Sill 0.4 didn’t start, so Sill 0.3 is back."

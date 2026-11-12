@@ -96,6 +96,12 @@ enum UpdateInstallPolicy {
     /// new one's wait for it, its host's start and `provedAfter`, with room to spare.
     static let watchWait: TimeInterval = 150
 
+    /// The watcher's token (a UUID's text, AppUpdater): the only kind whose started note Sill makes or looks for,
+    /// so a token read from a note this user can write never names another path (the second security pass's W2).
+    static func isToken(_ s: String) -> Bool {
+        s.utf8.count == 36 && s.utf8.allSatisfy { ($0 >= 48 && $0 <= 57) || ($0 >= 65 && $0 <= 70) || $0 == 45 }
+    }
+
     /// "scheme://host" or "scheme://host:port", lowercased; nil for a URL with a user or password, or
     /// without a host.
     static func origin(_ url: URL) -> String? {
@@ -617,6 +623,10 @@ enum UpdateInstallPolicy {
         /// Checked by the automatic update: waits for a moment with no device connected (AppUpdater
         /// looks, holds new sessions, then sends `quiet`). Install Now (Update Now's button) takes it over.
         case waiting
+        /// Install Now on a waiting copy: GitHub asked again first, as before the automatic update's own install
+        /// (the second security pass's G1: a stop or a pull made while the copy waited, up to a day, is seen),
+        /// then the install (or the question, for the devices connected at the click).
+        case lookingAgain(devices: [Device])
         case installing
         case restarting
         case failed(Failure)
@@ -647,6 +657,9 @@ enum UpdateInstallPolicy {
         /// No device connected for the while UpdateAutoPolicy asks, GitHub asked again, new sessions held:
         /// the waiting copy is installed; or GitHub's answer ends the attempt (the release changed, a stop).
         case quiet(Failure?)
+        /// Install Now's look at GitHub (`lookingAgain`): the release still the latest, its manifest the one
+        /// checked, no stop; or why not.
+        case lookedAgain(Failure?)
         /// Right before Update Now's install, new sessions held: a device connected that the person didn't
         /// agree to disconnect (it would be cut off without the question). Update Now asks again.
         case devicesJoined([Device])
@@ -663,7 +676,7 @@ enum UpdateInstallPolicy {
     }
 
     enum Effect: Equatable, Sendable {
-        case fetch, download, unpack, check, install, launch, quit, cleanUp
+        case fetch, lookAgain, download, unpack, check, install, launch, quit, cleanUp
     }
 
     /// The next state and what to do, for an event; an event a phase does not take changes nothing.
@@ -694,12 +707,17 @@ enum UpdateInstallPolicy {
         case (.waiting, .quiet(let f?)) where s.mode == .automatic:
             return fail(f)
         case (.waiting, .updateNow(let devices)):
-            // Install Now: the person's, from here on, with the copy already checked.
+            // Install Now: the person's, from here on, with the copy already checked; GitHub is asked again first.
             n.mode = .manual
             n.consented = []
+            n.phase = .lookingAgain(devices: devices)
+            return (n, [.lookAgain])
+        case (.lookingAgain(let devices), .lookedAgain(nil)):
             if devices.isEmpty { n.phase = .installing; return (n, [.install]) }
             n.phase = .ready(devices: devices)
             return (n, [])
+        case (.lookingAgain, .lookedAgain(let f?)):
+            return fail(f)
         case (.confirming(let devices), .confirm):
             n.consented = devices.map(\.key)
             n.phase = .fetching
@@ -737,7 +755,7 @@ enum UpdateInstallPolicy {
             n.consented = devices.map(\.key)
             n.phase = .installing
             return (n, [.install])
-        case (.ready, .cancel), (.waiting, .cancel), (.fetching, .cancel), (.downloading, .cancel), (.unpacking, .cancel), (.checking, .cancel):
+        case (.ready, .cancel), (.waiting, .cancel), (.lookingAgain, .cancel), (.fetching, .cancel), (.downloading, .cancel), (.unpacking, .cancel), (.checking, .cancel):
             n.phase = .idle
             return (n, [.cleanUp])
         case (.installing, .devicesJoined(let devices)) where s.mode == .manual:
@@ -836,6 +854,10 @@ enum UpdateInstallPolicy {
             p.line = "Checking \(target)…"
             p.spinning = true
             p.cancel = true
+        case .lookingAgain:
+            p.line = "Checking \(target) with GitHub again…"
+            p.spinning = true
+            p.cancel = true
         case .ready(let devices):
             p.line = "\(target) is ready."
             p.question = "Installing it restarts Sill and disconnects \(names(devices.map(\.name)))."
@@ -895,7 +917,7 @@ enum UpdateInstallPolicy {
             switch phase {
             case .downloading(let received, let total) where total > 0: step = "Downloading, \(Int(min(1, Double(received) / Double(total)) * 100))%"
             case .fetching, .downloading: step = "Downloading"
-            case .unpacking, .checking: step = "Checking"
+            case .unpacking, .checking, .lookingAgain: step = "Checking"
             case .installing: step = "Installing"
             default: step = "Restarting"
             }
@@ -914,7 +936,7 @@ enum UpdateInstallPolicy {
         let checks = "Before it installs a new version, Sill checks it two ways: it must carry Apple’s signature and notarization for Sill’s developer, and the release must be signed with Sill’s own update key."
         let ask = "Once a day, Sill asks GitHub whether a newer version is out. GitHub sees this Mac’s IP address and which version of Sill it has; nothing else is sent."
         if automatic {
-            return "\(ask) Automatically update Sill is on: Sill downloads a new version \(UpdateAutoPolicy.coolingOffWords), then installs it and restarts once no device has been connected for \(UpdateAutoPolicy.quietMinutes) minutes; it never disconnects anyone. \(checks) Update Now does the same at once."
+            return "\(ask) Automatically update Sill is on: Sill downloads a new version \(UpdateAutoPolicy.coolingOffWords), then installs it and restarts once no device has been connected for \(UpdateAutoPolicy.quietMinutes) minutes; it never disconnects anyone. \(checks) Update Now checks it the same way, at once."
         }
         return "\(ask) Sill downloads and installs nothing by itself. Update Now downloads the new version from GitHub, puts it in place of this copy and restarts Sill; Open Release Page… shows it on GitHub instead. \(checks)"
     }

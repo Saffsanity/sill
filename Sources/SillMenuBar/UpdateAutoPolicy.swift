@@ -15,9 +15,13 @@ import StreamProtocol
 enum UpdateAutoPolicy {
     // MARK: The defaults (open questions, §10)
 
-    /// How long a release must have been signed (its manifest's own date) before Sill installs it by
-    /// itself: the time Noah has to see a release he didn't make and pull it. Update Now isn't held. Noah's
-    /// decision of 2026-11-12: "48 hour wait seems ok" (plan §15.1). Zero turns the wait off.
+    /// How long after THIS Sill first read a release's verified manifest (and after its signed time, if that
+    /// is later) before Sill installs it by itself (`Memory.Sighting`; the second security pass's A1: the
+    /// signed line is written by whoever holds the key, so it can't be what the wait counts from). Every Mac
+    /// with the switch on so waits at least this long after a release appears on GitHub, however its manifest
+    /// is dated: the time Noah has to notice a release he didn't sign (Scripts/sign-update.sh --audit) and pull
+    /// it or stop it. Update Now isn't held. Noah's decision of 2026-11-12: "48 hour wait seems ok" (plan
+    /// §15.1). Zero turns the wait off.
     static let coolingOff: TimeInterval = 48 * 3600
     /// The oldest signature Sill installs by itself: an old release offered as the latest again (a
     /// rollback through GitHub, review 3's F7) is left to Update Now and the person's eyes.
@@ -42,14 +46,24 @@ enum UpdateAutoPolicy {
     /// How long Settings says that Sill updated itself.
     static let updatedShown: TimeInterval = 7 * 24 * 3600
 
+    /// What is kept stays small whatever is offered (the second security pass's A3): at most this many
+    /// attempts and sightings, each only for a version newer than the one running, and at most `maxStops`
+    /// stops, so the keychain item never comes near `maxItemBytes`.
+    static let maxRemembered = 8
+    static let maxStops = 32
+    /// The keychain item's largest size that is read; a larger one is unreadable, never "nothing remembered".
+    static let maxItemBytes = 64 << 10
+
     /// The waits in Settings' words.
     static var quietMinutes: Int { Int((quietFor / 60).rounded()) }
+    /// "two days after it first finds it" (counted from this Sill's first read of the release's signed
+    /// manifest), or "once it finds it" when the wait is off.
     static var coolingOffWords: String {
-        guard coolingOff > 0 else { return "once it is out" }
+        guard coolingOff > 0 else { return "once it finds it" }
         let hours = Int((coolingOff / 3600).rounded())
         let small = ["a", "two", "three", "four", "five", "six", "seven"]
-        guard hours % 24 == 0, (1...7).contains(hours / 24) else { return "\(hours) hours after it is signed" }
-        return "\(small[hours / 24 - 1]) day\(hours == 24 ? "" : "s") after it is signed"
+        guard hours % 24 == 0, (1...7).contains(hours / 24) else { return "\(hours) hours after it first finds it" }
+        return "\(small[hours / 24 - 1]) day\(hours == 24 ? "" : "s") after it first finds it"
     }
 
     // MARK: What Sill remembers
@@ -72,12 +86,39 @@ enum UpdateAutoPolicy {
         /// The last update Sill installed by itself, and when, to say so afterwards.
         var updatedTo: String?
         var updatedAt: Date?
+        /// When this Sill first read each release's verified manifest (by tag and zip SHA-256): the cooling-off
+        /// counts from there (A1), across launches. A release whose zip changed is a new sighting.
+        var seen: [Sighting] = []
+
+        init() {}
+
+        /// Every field optional in what is stored: an item written before a field existed reads as its default.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            on = try c.decodeIfPresent(Bool.self, forKey: .on) ?? false
+            attempts = try c.decodeIfPresent([String: Attempt].self, forKey: .attempts) ?? [:]
+            highestSigned = try c.decodeIfPresent(String.self, forKey: .highestSigned)
+            stopped = try c.decodeIfPresent([String].self, forKey: .stopped) ?? []
+            updatedTo = try c.decodeIfPresent(String.self, forKey: .updatedTo)
+            updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt)
+            seen = try c.decodeIfPresent([Sighting].self, forKey: .seen) ?? []
+        }
 
         struct Attempt: Codable, Equatable, Sendable {
             var count: Int
             var last: Date
             /// The last failure's words for the log (nil while one runs).
             var failure: String?
+        }
+
+        struct Sighting: Codable, Equatable, Sendable {
+            let tag: String
+            /// The zip's SHA-256, as the verified manifest names it.
+            let sha256: String
+            /// When this Sill first read the verified manifest (this Mac's clock).
+            let first: Date
+            /// The manifest's own signed time.
+            let signed: Date
         }
     }
 
@@ -92,7 +133,7 @@ enum UpdateAutoPolicy {
     /// Whether Sill begins an automatic update of `offered` now: after a check offered it, and only from
     /// an idle updater (never beside Update Now, never twice). `available`: this build has Update Now;
     /// `signed`: the release lists a manifest; `refusal`: why Update Now can't run here; `waitUntil`: the
-    /// end of a cooling-off this launch already learned for this version.
+    /// end of the release's cooling-off, from what this Sill remembers (`waitUntil(_:tag:)`).
     static func start(_ m: Memory, checkOn: Bool, available: Bool, refusal: UpdateInstallPolicy.Refusal?,
                       offered: SillVersion?, offeredTag: String?, signed: Bool, running: SillVersion?, idle: Bool,
                       waitUntil: Date? = nil, now: Date) -> Start {
@@ -125,13 +166,28 @@ enum UpdateAutoPolicy {
         case refuse(String)
     }
 
-    /// The manifest's own date against now: install, wait until a moment, or never by itself.
-    static func dates(signedAt: Date, now: Date) -> DateVerdict {
+    /// The manifest's own date and this Sill's first sight of it against now: install, wait until a moment,
+    /// or never by itself. The signed date, which whoever holds the key writes, bounds only the age (120 days)
+    /// and the future; the cooling-off counts from the later of it and `firstSeen` (A1), so a manifest dated
+    /// back still waits the whole `coolingOff` on every Mac.
+    static func dates(signedAt: Date, firstSeen: Date, now: Date) -> DateVerdict {
         if signedAt.timeIntervalSince(now) > clockSkew { return .refuse("its signature is dated later than this Mac’s clock") }
         let age = now.timeIntervalSince(signedAt)
         if age > maxAge { return .refuse("it was signed more than \(Int(maxAge / 86400)) days ago") }
-        if age < coolingOff { return .waitUntil(signedAt.addingTimeInterval(coolingOff)) }
+        let until = max(signedAt, firstSeen).addingTimeInterval(coolingOff)
+        if now < until { return .waitUntil(until) }
         return .go
+    }
+
+    /// When the cooling-off of the release `tag` ends, from what this Sill remembers (every sighting of that
+    /// tag: the latest end); nil when it never read that release's manifest.
+    static func waitUntil(_ m: Memory, tag: String) -> Date? {
+        m.seen.filter { $0.tag == tag }.map { max($0.signed, $0.first).addingTimeInterval(coolingOff) }.max()
+    }
+
+    /// The first time this Sill read that release's verified manifest, if it has.
+    static func firstSeen(_ m: Memory, tag: String, sha256: String) -> Date? {
+        m.seen.first { $0.tag == tag && $0.sha256 == sha256 }?.first
     }
 
     /// Whether the moment to install has come: no device connected now, none since `quietSince` (when the
@@ -147,7 +203,18 @@ enum UpdateAutoPolicy {
 
     // MARK: Memory
 
-    /// A release's manifest, signed with the update key, verified (`version` its version): the highest is kept.
+    /// This Sill read the verified manifest of the release `tag` (its zip `sha256`) now: kept unless it was
+    /// read before (the first sight never moves), so the cooling-off counts from the first time.
+    static func sighted(_ m: Memory, tag: String, sha256: String, signedAt: Date, now: Date) -> Memory {
+        guard firstSeen(m, tag: tag, sha256: sha256) == nil else { return m }
+        var n = m
+        n.seen.append(Memory.Sighting(tag: tag, sha256: sha256, first: now, signed: signedAt))
+        return n
+    }
+
+    /// A release's app passed both checks (the second security pass's A2: never on a manifest alone, so one
+    /// signed manifest for a made-up "v99" can't stop every later release installing by itself): the highest
+    /// such version is kept.
     static func signedRelease(_ m: Memory, _ version: SillVersion) -> Memory {
         var n = m
         if let h = m.highestSigned.flatMap(UpdateInstallPolicy.strictVersion), h >= version { return n }
@@ -198,6 +265,55 @@ enum UpdateAutoPolicy {
         return n
     }
 
+    /// What is written, kept small (A3): only well-formed entries; attempts, sightings and stops only for a
+    /// version newer than `running` (an older one is never offered as an update again), at most
+    /// `maxRemembered` attempts and sightings (the newest) and `maxStops` stops (the highest versions). Applied
+    /// to every write, so no sequence of offers grows the item.
+    static func bounded(_ m: Memory, running: SillVersion?) -> Memory {
+        var n = m
+        func newer(_ text: String) -> Bool {
+            guard let v = UpdateInstallPolicy.strictVersion(text) else { return false }
+            return running.map { v > $0 } ?? true
+        }
+        func newerTag(_ tag: String) -> Bool {
+            guard let v = UpdateInstallPolicy.strictTag(tag) else { return false }
+            return running.map { v > $0 } ?? true
+        }
+        n.attempts = Dictionary(uniqueKeysWithValues: m.attempts
+            .filter { newer($0.key) }
+            .sorted { $0.value.last > $1.value.last }
+            .prefix(maxRemembered)
+            .map { ($0.key, Memory.Attempt(count: $0.value.count, last: $0.value.last, failure: $0.value.failure.map { String($0.prefix(200)) })) })
+        n.seen = Array(m.seen.filter { newerTag($0.tag) && UpdateManifest.isHex($0.sha256, count: 64) }
+            .sorted { $0.first > $1.first }
+            .prefix(maxRemembered))
+        var stops: [String] = []
+        for tag in m.stopped where newerTag(tag) && !stops.contains(tag) { stops.append(tag) }
+        n.stopped = Array(stops.sorted { UpdateInstallPolicy.strictTag($0)! > UpdateInstallPolicy.strictTag($1)! }.prefix(maxStops))
+        if let h = m.highestSigned, UpdateInstallPolicy.strictVersion(h) == nil { n.highestSigned = nil }
+        if let u = m.updatedTo, UpdateInstallPolicy.strictVersion(u) == nil { n.updatedTo = nil; n.updatedAt = nil }
+        return n
+    }
+
+    /// What Sill's keychain item says (AutoUpdateStore's read, decided here so the check can run it): no item;
+    /// what it remembers; or unreadable: too large, not what Sill writes, or the keychain's error. Unreadable is
+    /// never "nothing remembered" (A3): the switch then reads off, and Sill writes the item again only when the
+    /// person turns the switch on.
+    enum StoreRead: Equatable, Sendable {
+        case noItem
+        case memory(Memory)
+        case unreadable(String)
+    }
+
+    /// `status` is SecItemCopyMatching's (0 success, -25300 not found), `data` the item's bytes.
+    static func storeRead(status: Int32, data: Data?, error: String) -> StoreRead {
+        if status == -25300 { return .noItem }
+        guard status == 0, let data else { return .unreadable(error) }
+        guard data.count <= maxItemBytes else { return .unreadable("the item is \(data.count) bytes, larger than Sill ever writes") }
+        guard let memory = try? JSONDecoder().decode(Memory.self, from: data) else { return .unreadable("the item isn’t what Sill writes") }
+        return .memory(memory)
+    }
+
     /// The switch, turned on or off by the person (Settings › General: the only place that can).
     static func switched(_ m: Memory, on: Bool) -> Memory {
         var n = m
@@ -217,22 +333,30 @@ enum UpdateAutoPolicy {
     }
 
     /// `canKeep`: Sill's keychain item can hold the switch (a release Sill.app with its keychain group).
-    static func switchState(available: Bool, canKeep: Bool, checkOn: Bool, refusal: UpdateInstallPolicy.Refusal?, on: Bool) -> Switch {
+    /// `unreadable`: the item is there but couldn't be read (A3): the switch reads off until turned on again.
+    static func switchState(available: Bool, canKeep: Bool, checkOn: Bool, refusal: UpdateInstallPolicy.Refusal?, on: Bool,
+                            unreadable: Bool = false) -> Switch {
         var s = Switch()
         guard available else { return s }
         s.shown = true
         if !canKeep {
-            s.note = "This copy of Sill can’t keep this setting: it isn’t a notarized release."
+            s.note = canKeepNote
         } else if !checkOn {
             s.note = "Works while Check for updates automatically is on."
         } else {
-            s.note = refusal.map(UpdateInstallPolicy.words)
+            s.note = refusal.map(UpdateInstallPolicy.words) ?? (unreadable && !on ? unreadableNote : nil)
             s.enabled = true
         }
         // On can always be turned off.
         if on { s.enabled = true }
         return s
     }
+
+    /// Why a copy without Sill's keychain group can't keep the switch (the second pass's N9: a notarized build
+    /// can lack the group too).
+    static let canKeepNote = "This copy of Sill can’t keep this setting: only Sill’s releases from GitHub can."
+    /// Under the switch while Sill's keychain item couldn't be read (A3).
+    static let unreadableNote = "Sill couldn’t read what it keeps for this setting, so it is off. Turning it on starts it afresh."
 
     /// The pane's automatic part for this moment.
     static func pane(_ m: Memory, offered: SillVersion?, offeredTag: String?, running: SillVersion?, waitUntil: Date?,
@@ -259,8 +383,13 @@ enum UpdateAutoPolicy {
         if let a = m.attempts[offered.description], a.count >= maxAttempts {
             return "Sill won’t install \(offered) by itself again; Update Now still can."
         }
-        if let waitUntil, now < waitUntil {
-            return "Sill installs it by itself \(when(waitUntil, now: now, future: true)) or later, once no device has been connected for \(quietMinutes) minutes."
+        if let waitUntil {
+            if now < waitUntil {
+                return "Sill installs it by itself \(when(waitUntil, now: now, future: true)) or later, once no device has been connected for \(quietMinutes) minutes."
+            }
+        } else if coolingOff > 0 {
+            // Not read yet: the wait starts when this Sill first reads its signed release (A1).
+            return "Sill installs it by itself \(coolingOffWords), once no device has been connected for \(quietMinutes) minutes."
         }
         return "Sill installs it by itself once no device has been connected for \(quietMinutes) minutes."
     }

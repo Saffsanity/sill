@@ -179,8 +179,9 @@ Automatically update Sill (docs/one-click-update-plan.md §15), in a build with
 Update Now: a switch under "Check for updates automatically", off by default,
 kept with what it remembers in Sill's keychain group (`AutoUpdateStore`, never
 the defaults; only Settings turns it on). After a check, it runs Update Now's
-steps by itself for a release signed at least 48 hours ago (the manifest's
-`signed` date), then waits for 5 minutes without a device connected, asks
+steps by itself for a release it first found at least 48 hours ago (its own
+first read of the verified manifest, kept across launches, never before the
+manifest's `signed` date), then waits for 5 minutes without a device connected, asks
 GitHub again, holds new sessions (a device that tries is told Sill is
 restarting and reconnects by itself) and installs. Two attempts a version at
 most, a day apart. The log's lines start "Automatic update:". It never runs for the bare
@@ -2000,8 +2001,8 @@ keychain or Sill's defaults, and launches no app (the launch check's and the
 watcher's test executables run directly, never through Launch Services: the
 watcher's launcher there is `launch.sh`, Sill.app's is `/usr/bin/open`);
 everything is under `.build/update-harness`, removed at the end.
-`Tests/update-harness/mutants.py [NAME…]` changes UpdateInstaller in 25 places,
-one at a time, and runs the harness on each copy (each must fail it; several
+`Tests/update-harness/mutants.py [NAME…]` changes UpdateInstaller in one place
+at a time, and runs the harness on each copy (each must fail it; several
 minutes each; names pick some).
 `Tests/update-harness/sign-test.sh` runs `Scripts/sign-update.sh` against a
 stand-in `gh` (in `.build/update-sign-test`) serving the genuine v0.6.1, with a
@@ -2647,13 +2648,21 @@ v<version>`, on his Mac, right after the release is published (never in CI). It
 checks the published zip as the checklist checks a download, compares what the
 tag's source trusts (its update keys, the pinned requirement, the trust and the
 endpoints) with what the signer recorded when it was installed and stops on any
-difference, signs the manifest (the tag, version, build, size, SHA-256, each
+difference, requires the app to name the tag's commit (`SillCommit` in its
+Info.plist, which `make-app.sh` writes, "+changes" for a build with changes) and
+GitHub's tag to name it too, shows the updater's own changes since the last
+release it signed, signs the manifest (the tag, version, build, size, SHA-256, each
 slice's cdhash and the time) with the key in his login keychain (`--key-file
 PATH` for a key in a file) after asking in person with the whole SHA-256 shown,
 reads it back with the key the tagged source carries, uploads it and reads it
 back. The signer is built with the hardened runtime and refused without it. A
 release no Sill may install gets a stop (`update-manifest stop`, then `gh
-release upload`: docs/one-click-update-plan.md §15.4).
+release upload`: docs/one-click-update-plan.md §15.4). Every manifest it signs
+goes in the signing record beside the signer (`signed.txt`), and
+`Scripts/sign-update.sh --audit` compares every release on GitHub with it (a
+release that verifies with the key but isn't in the record is one Noah didn't
+sign; `--notify` posts a notification; its daily LaunchAgent is his choice:
+docs/release-checklist.md part 1 §7).
 `Scripts/sign-update.sh --new-key` makes the key once (docs/release-checklist.md,
 part 1 §7); its public key goes into `UpdateManifest.releaseKeys`.
 `make-app.sh --release` embeds `Packaging/embedded.provisionprofile` (the

@@ -59,8 +59,10 @@ updater features" (the plan's §15.1); the independent security review's finding
   automatically", off by default, shown only where Update Now is; kept with what it remembers in Sill's
   keychain group (`AutoUpdateStore`, data-protection, this device only), never the defaults, set only from
   Settings (`setAutomaticUpdate`). One state machine with Update Now (a `mode`, a `waiting` phase): after a
-  check GitHub answered, Update Now's steps for a release signed at least 48 h ago and at most 120 days,
-  never below the highest signed release it has read or a stopped one, two attempts a version at most, 20 h apart; then a wait
+  check GitHub answered, Update Now's steps for a release this Sill first read at least 48 h ago (its own first
+  read of the verified manifest, kept across launches, never before the signed time: the second pass's A1) and
+  signed at most 120 days ago, never below the highest release whose app passed both checks here or a stopped
+  one, two attempts a version at most (counted only once the release verified), 20 h apart; then a wait
   for 5 minutes with no device connected (Noah, 2026-11-12) and no pairing window, GitHub asked again, and in one step on the
   host's queue the hold of new sessions with the count of the connected ones
   (`StreamServer.holdNewSessions`; goodbye `restarting`, reconnect true), then the install. The download's
@@ -69,6 +71,18 @@ updater features" (the plan's §15.1); the independent security review's finding
 - Review 3 (the independent security review, `~/Downloads/sill-handoff/one-click-update/SECURITY-REVIEW.md`,
   on 38385a7; the plan's §12c): F1–F7 and N1–N8 each verified here and fixed or answered, each fix with the
   check that fails without it; the reviewer's seven points for an automatic updater met (§15.6).
+- The second security pass (the same reviewer, on 312b514; the plan's §12d): A1 (high: the cooling-off
+  counted from the manifest's own signed line, which whoever holds the key writes) now counts from this Sill's
+  first read of the verified manifest, with a signing record and `sign-update.sh --audit` for Noah to notice a
+  release he didn't sign (its daily LaunchAgent his choice); R1 (the app names its commit, `SillCommit`, and
+  signing needs it and GitHub's tag to be the local tag's), R2 (the updater's changes since the last signed
+  release shown), R3 (the leftover note before the last check), A2 (the floor only after both checks), A3
+  (attempts only on verified releases, the memory bounded, an unreadable item never "nothing remembered"),
+  W1 (the watcher checks the copy after its moves, its note a new file renamed into place), W2 (notes read as
+  small regular files without waiting, the launch's off the main actor, the started note a file named with the
+  token), G1 (Install Now on a waiting copy asks GitHub again); N9 answered (a wrong clock no longer costs
+  attempts; a quit during the install step leaves the new copy unstarted; the switch's and the footnote's
+  words). Each verified first, each fix with a check that fails without it.
 - Verified (2026-11-12, this Mac, macOS 27.2 and Xcode 27.1, no device involved, every heavy job through
   heavy.sh; the plan's Progress): `Tests/checks/update-install` 480 checks and its 60 mutants (all 60 on the
   code before the owner refusal, 60 of 60; the refusal's four again after it, 4 of 4); `update-policy` 129;
