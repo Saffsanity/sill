@@ -11,9 +11,11 @@ import UIKit
 /// Swift, AVAudioSourceNode.h).
 ///
 /// The engine runs while a format has come, sound is not muted, the app and this window's scene are
-/// in the foreground and a packet came within 10 s; the audio session (.playback, mixing with other
+/// in the foreground (or this window's picture plays in Picture in Picture: PictureInPicturePolicy.
+/// soundHeard) and a packet came within 10 s; the audio session (.playback, mixing with other
 /// audio, so it never stops the person's music and plays with the silent switch on, as a video app
-/// does) is active only while it runs, or another window's does (`SharedSession`). It stops on
+/// does) is active only while it runs, or another window's does, or Picture in Picture holds it
+/// (`SharedSession`). It stops on
 /// mute, in the background and at the session's end after a fade (the mixer's own ramp to the
 /// player's volume 0), after 10 s without a packet (rule 10's tail has faded it), and the next
 /// packet starts it again. While the sound cannot be heard (muted, in the background, the session
@@ -49,10 +51,14 @@ final class AudioOutput {
     private var engine: SoundEngine?
     private var muted = false
     /// The app in the foreground, and this window's scene not in the background (a second window
-    /// minimized or swiped away leaves the app active): heard only with both.
+    /// minimized or swiped away leaves the app active): heard with both, or while this window's picture
+    /// plays in Picture in Picture (issue #291; PictureInPicturePolicy.soundHeard).
     private var appForeground = true
     private var sceneForeground = true
-    private var foreground: Bool { appForeground && sceneForeground }
+    private var pictureInPicture = PictureInPicturePolicy.State.off
+    private var heard: Bool {
+        PictureInPicturePolicy.soundHeard(appForeground: appForeground, sceneForeground: sceneForeground, pip: pictureInPicture)
+    }
     /// The session's connection is live (between `sessionStarted` and `sessionEnded`).
     private var sessionLive = false
     /// A session activation failed (a call): no start until the interruption ends or the app comes back.
@@ -208,6 +214,43 @@ final class AudioOutput {
         }
     }
 
+    /// This window's Picture in Picture (PictureInPicture): while it plays, the sound is heard with the app
+    /// in the background; paused or stopped, it is not. Any thread.
+    func setPictureInPicture(_ state: PictureInPicturePolicy.State) {
+        queue.async { [self] in
+            guard pictureInPicture != state else { return }
+            pictureInPicture = state
+            #if DEBUG
+            print("audio: Picture in Picture \(state.active ? (state.paused ? "paused" : "playing") : "off"): sound \(heard ? "heard" : "not heard")")
+            #endif
+            foregroundChanged()
+        }
+    }
+
+    /// Picture in Picture's hold on the app's audio session (PictureInPicture): `.playback`, mixing with
+    /// other audio, active while a window's picture is offered to Picture in Picture or shows there, so iOS
+    /// finds a playback session when it decides, and never stops the person's music: one more holder beside
+    /// the engines that play (`SharedSession`). Returns whether it holds the session now. Main thread.
+    static func holdSessionForPictureInPicture(_ hold: Bool) -> Bool {
+        if hold {
+            do {
+                try SharedSession.take()
+                return true
+            } catch {
+                print("audio: Picture in Picture: the audio session: \(error.localizedDescription)")
+                return false
+            }
+        }
+        SharedSession.give()
+        return false
+    }
+
+    /// The category Picture in Picture needs (`.playback`, mixing with other audio, as every engine sets it),
+    /// without making the session active: set once a window's picture can go there. Main thread.
+    static func preparePictureInPictureCategory() {
+        SharedSession.prepareCategory()
+    }
+
     /// The session goes away from home or comes home (the cover's start and bounds). Any thread.
     func setAway(_ on: Bool) { queue.async { [self] in away = on; model.away(on) } }
 
@@ -288,7 +331,7 @@ final class AudioOutput {
         let now = CACurrentMediaTime()
         lastPacketAt = now
         startSecondTimer()
-        if !muted, foreground, !activationBlocked, engine == nil { startEngine() }
+        if !muted, heard, !activationBlocked, engine == nil { startEngine() }
         for (i, data) in p.packets.enumerated() {
             let now = CACurrentMediaTime()
             feedReading(now)
@@ -474,15 +517,15 @@ final class AudioOutput {
 
     private func foregroundChanged() {
         updateSilence()
-        if !foreground { stopEngine(reason: "in the background", fade: true) }
+        if !heard { stopEngine(reason: "in the background", fade: true) }
     }
 
-    /// Nothing is decoded while the sound cannot be heard (§7.5): muted, in the background, or with the
-    /// session refused (a call). Each packet still counts for the floor and the cover, so it comes
-    /// back quickly; and once it can be heard again, the decoder's state is stale, so the next packet
-    /// starts it afresh (a `.playback` reset, rule 9).
+    /// Nothing is decoded while the sound cannot be heard (§7.5): muted, in the background (unless Picture
+    /// in Picture plays it), or with the session refused (a call). Each packet still counts for the floor
+    /// and the cover, so it comes back quickly; and once it can be heard again, the decoder's state is stale,
+    /// so the next packet starts it afresh (a `.playback` reset, rule 9).
     private func updateSilence() {
-        let silent = muted || !foreground || activationBlocked
+        let silent = muted || !heard || activationBlocked
         guard silent != model.muted else { return }
         model.mute(silent)
         if !silent { apply(model.reset(.playback)) }
@@ -530,7 +573,7 @@ final class AudioOutput {
             // (the client keeps it). Decided from the notification, not from the engine: a configuration
             // change handled first has already let the engine go, and the next packet would start one
             // on the speaker.
-            guard sessionLive, !muted, foreground, lastPacketAt != nil, SoundEngine.sinkFromLaunchArguments == .device else { return }
+            guard sessionLive, !muted, heard, lastPacketAt != nil, SoundEngine.sinkFromLaunchArguments == .device else { return }
             muted = true
             updateSilence()
             stopEngine(reason: nil, fade: true)
@@ -774,14 +817,15 @@ private final class SoundEngine {
 }
 
 /// The app's one audio session, under every window's engine (each window's StreamClient has its own
-/// AudioOutput): active while any of them plays on the device. Deactivating it stops every engine's I/O,
-/// running or not (AVAudioSession.h), so it goes only when the last one stops. The lock is held across
-/// the session's calls, so one window's deactivation never lands after another's activation.
+/// AudioOutput) and Picture in Picture's hold (`AudioOutput.holdSessionForPictureInPicture`): active while
+/// any of them plays on the device or holds it. Deactivating it stops every engine's I/O, running or not
+/// (AVAudioSession.h), so it goes only when the last holder lets go. The lock is held across the session's
+/// calls, so one window's deactivation never lands after another's activation.
 private enum SharedSession {
     private static let lock = NSLock()
     private static var engines = 0
 
-    /// Activated (.playback, mixing with other audio) for one more engine.
+    /// Activated (.playback, mixing with other audio) for one more engine, or Picture in Picture's hold.
     static func take() throws {
         try lock.withLock {
             let session = AVAudioSession.sharedInstance()
@@ -790,6 +834,18 @@ private enum SharedSession {
             try? session.setPreferredIOBufferDuration(0.005)
             try session.setActive(true)
             engines += 1
+        }
+    }
+
+    /// The category every holder sets (`take`), set without activating anything: Picture in Picture needs a
+    /// `.playback` session (Apple: "Configuring your app for media playback").
+    static func prepareCategory() {
+        lock.withLock {
+            do {
+                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            } catch {
+                print("audio: Picture in Picture: the audio session's category: \(error.localizedDescription)")
+            }
         }
     }
 

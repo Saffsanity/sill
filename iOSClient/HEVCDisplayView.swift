@@ -10,10 +10,16 @@ import StreamProtocol
 final class HEVCDisplayView: UIView {
     override class var layerClass: AnyClass { AVSampleBufferDisplayLayer.self }
     private var displayLayer: AVSampleBufferDisplayLayer { layer as! AVSampleBufferDisplayLayer }
+    /// The video layer itself, for Picture in Picture's content source (PictureInPicture): the PiP window
+    /// shows what it decodes, never the sublayers above (the pointer sprite, the DEBUG readout).
+    var sampleBufferLayer: AVSampleBufferDisplayLayer { displayLayer }
 
     private var formatDescription: CMVideoFormatDescription?
     private var waitingForKeyframe = true
     private var lastParameterSets: Data?
+    /// Picture in Picture paused (PictureInPicturePolicy.frozen): no frame goes onto the layer, which keeps
+    /// the last one it showed, until it plays again (`setFrozen`). On `renderQueue`.
+    private var frozen = false
 
     /// The streamed frame's pixel size, reported on main whenever new parameter sets arrive.
     /// Input needs it: touches are normalized against the video, not against this view.
@@ -327,6 +333,21 @@ final class HEVCDisplayView: UIView {
         displayLayer.flushAndRemoveImage()
     }
 
+    /// Picture in Picture's pause (`on`) and play: paused, frames are dropped before they are decoded and the
+    /// layer keeps its last picture; played again, the picture waits for a keyframe, since the frames in
+    /// between were never decoded, and the client is told it needs one (`onNeedsKeyframe`: KeyframeRecovery
+    /// asks the Mac, which a still window would otherwise never send). On `renderQueue`.
+    func setFrozen(_ on: Bool) {
+        guard on != frozen else { return }
+        frozen = on
+        #if DEBUG
+        print("display: \(on ? "frozen: Picture in Picture is paused" : "frozen no more: waiting for a keyframe")")
+        #endif
+        guard !on, formatDescription != nil else { return }
+        waitingForKeyframe = true
+        onNeedsKeyframe?()
+    }
+
     /// A locked Mac (docs/locked-mac-plan.md): the picture removed at once, nothing shown until the next
     /// keyframe, the format kept. On `renderQueue` (the client's network queue), as `apply` and `enqueue`.
     func blank() {
@@ -334,11 +355,13 @@ final class HEVCDisplayView: UIView {
         displayLayer.flushAndRemoveImage()
     }
 
-    /// Session over: drop the picture and forget the format so the next Mac starts clean.
+    /// Session over: drop the picture and forget the format so the next Mac starts clean. Never frozen for
+    /// the next session either (its end stopped Picture in Picture, paused or not).
     func clear() {
         formatDescription = nil
         lastParameterSets = nil
         waitingForKeyframe = true
+        frozen = false
         #if DEBUG
         interruptedAt = nil
         #endif
@@ -351,7 +374,8 @@ final class HEVCDisplayView: UIView {
     }
 
     func enqueue(_ data: Data, isKeyframe: Bool) {
-        guard let desc = formatDescription else { return }
+        // Picture in Picture paused: nothing decoded, the last picture kept (`setFrozen`).
+        guard let desc = formatDescription, !frozen else { return }
         let resuming = waitingForKeyframe
         if waitingForKeyframe {
             guard isKeyframe else { return }
