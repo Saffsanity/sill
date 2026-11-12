@@ -365,6 +365,9 @@ def pixeldiff():
     if not os.path.exists(exe):
         os.makedirs(os.path.dirname(exe), exist_ok=True)
         run(["xcrun", "swiftc", "-O", src, "-o", exe])
+        for old in os.listdir(os.path.dirname(exe)):         # the copies of older sources
+            if old.startswith("pixeldiff-") and old != os.path.basename(exe):
+                os.remove(os.path.join(os.path.dirname(exe), old))
     return exe
 
 

@@ -92,6 +92,10 @@ Rules found in the steps that hold for all work (each where it is written):
 - ScreenCaptureKit sends frames only when a window repaints, so a covered window freezes on the
   device (docs/steps/2026-09-22-milestone-1.md, "Learned"), and AWDL takes the Mac's radio off its
   Wi-Fi channel (docs/steps/2026-09-22-trackpad-stutter.md).
+- Simulators: harness photos on the agents' own pair only, through `Scripts/harness-photos.sh`, which
+  keeps the rules itself (one booted at a time, inside the heavy lock, never one Noah made, nothing
+  that reaches a Mac); no agent makes or deletes a simulator of its own for photos
+  (docs/steps/2026-11-12-tooling-speedup.md).
 
 """
 
