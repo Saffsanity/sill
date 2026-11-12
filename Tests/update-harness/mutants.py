@@ -9,6 +9,11 @@ SRC = os.path.join(ROOT, "Sources/SillMenuBar")
 F = "UpdateInstaller.swift"
 MUTANTS = [
     ("any redirect followed", "guard let url = request.url, redirects <= maxRedirects, allowed(url) else {", "guard let url = request.url else {"),
+    ("no check right before the swap", "        switch check(staged, manifest: manifest, running: running, runningRequirement: runningRequirement) {\n        case .success(let c) where c == expected: break\n", "        switch Result<Policy.Checked, Failure>.success(expected) {\n        case .success(let c) where c == expected: break\n"),
+    ("the note after the swap", "        if let leftoverNote { Self.noteLeftover(staged.deletingLastPathComponent(), in: leftoverNote) }\n        beforeSwap?()\n        guard renamex_np(staged.path, installed.path, UInt32(RENAME_SWAP)) == 0 else { return .failure(.swapFailed(Self.errnoText())) }\n", "        beforeSwap?()\n        guard renamex_np(staged.path, installed.path, UInt32(RENAME_SWAP)) == 0 else { return .failure(.swapFailed(Self.errnoText())) }\n        if let leftoverNote { Self.noteLeftover(staged.deletingLastPathComponent(), in: leftoverNote) }\n"),
+    ("hard links taken", "            case S_IFREG: if e.st_nlink != 1 { return \"\\(rel) has another name (a hard link)\" }\n", "            case S_IFREG: break\n"),
+    ("a link for the signature's file", "            if let t = type(base + \"/\" + path), t != S_IFREG { return \"\\(path) is not a file\" }\n", ""),
+    ("any Sill waited for", "        pids.filter { process($0, satisfies: requirement) }\n", "        pids\n"),
     ("no check after the swap", "        switch check(installed, manifest: manifest, running: running, runningRequirement: runningRequirement) {\n        case .success(let c) where c == expected: return .success(())", "        switch Result<Policy.Checked, Failure>.success(expected) {\n        case .success(let c) where c == expected: return .success(())"),
     ("the copy at the path not compared with the running one", "        guard Self.cdhash(of: installed, arch: .current) == runningCDHash else { return .failure(.changedSinceStart) }\n", ""),
     ("anything in staging put back", "        guard isTheOldCopy(staged, old: old) else { return .notTheOldCopy }\n", ""),

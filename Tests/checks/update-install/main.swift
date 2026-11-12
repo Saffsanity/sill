@@ -182,23 +182,32 @@ check(failure(P.releaseToInstall(Data(count: (1 << 20) + 1), offeredTag: "v0.4.0
 
 // MARK: The manifest
 
+// The signer's in-person prompt shows the whole SHA-256, in groups of eight (review 3, F4).
+let promptSHA = "a50c5fd38958db5d3f9aea4ef569705effa3462b2d522b73c12baea0a1fc9926"
+let reason = M.signingReason(tag: "v0.6.2", asset: "Sill.zip", size: 5_920_002, sha256: promptSHA)
+check(reason == "sign Sill v0.6.2 for Update Now: Sill.zip, 5920002 bytes, SHA-256 a50c5fd3 8958db5d 3f9aea4e f569705e ffa3462b 2d522b73 c12baea0 a1fc9926",
+      "the signer's prompt: \(reason)")
+check(reason.replacingOccurrences(of: " ", with: "").hasSuffix(promptSHA), "the prompt holds all 64 digits")
+
 let testKey = Curve25519.Signing.PrivateKey()
 let otherKey = Curve25519.Signing.PrivateKey()
 let testPublic = testKey.publicKey.rawRepresentation.base64EncodedString()
 let otherPublic = otherKey.publicKey.rawRepresentation.base64EncodedString()
 let cd: [String: String] = ["arm64": String(repeating: "1", count: 40), "x86_64": String(repeating: "2", count: 40)]
+let signedDate = M.date("2026-11-12T03:00:00Z")!
 func signedManifest(tag: String = "v0.4.0", build: String = "120", asset: String = "Sill.zip", size: Int64 = 5_920_002,
-                    sha256: String = sha, cdhashes: [String: String] = cd, key: Curve25519.Signing.PrivateKey = testKey) -> String {
+                    sha256: String = sha, cdhashes: [String: String] = cd, signedAt: Date = signedDate,
+                    key: Curve25519.Signing.PrivateKey = testKey) -> String {
     let text = M.signedText(tag: tag, build: build, asset: asset, size: size, sha256: sha256, cdhashes: cdhashes,
-                            keyID: M.keyID(key.publicKey.rawRepresentation))
+                            signedAt: signedAt, keyID: M.keyID(key.publicKey.rawRepresentation))
     return M.document(signedText: text, signature: try! key.signature(for: Data(text.utf8)))
 }
 let good = signedManifest()
-check(good.hasPrefix("Sill update 1\ntag v0.4.0\nversion 0.4.0\nbuild 120\nasset Sill.zip\nsize 5920002\nsha256 \(sha)\ncdhash arm64 \(cd["arm64"]!)\ncdhash x86_64 \(cd["x86_64"]!)\nkey "), "the format: \(good)")
+check(good.hasPrefix("Sill update 1\ntag v0.4.0\nversion 0.4.0\nbuild 120\nasset Sill.zip\nsize 5920002\nsha256 \(sha)\ncdhash arm64 \(cd["arm64"]!)\ncdhash x86_64 \(cd["x86_64"]!)\nsigned 2026-11-12T03:00:00Z\nkey "), "the format: \(good)")
 switch M.verify(Data(good.utf8), keys: [testPublic]) {
 case .success(let m):
     check(m.tag == "v0.4.0" && m.version == v040 && m.build == "120" && m.asset == "Sill.zip" && m.size == 5_920_002 && m.sha256 == sha
-          && m.cdhashes == cd && m.keyID == M.keyID(testKey.publicKey.rawRepresentation), "the manifest read back: \(m)")
+          && m.cdhashes == cd && m.signedAt == signedDate && m.keyID == M.keyID(testKey.publicKey.rawRepresentation), "the manifest read back: \(m)")
 case .failure(let p): check(false, "a good manifest: \(p)")
 }
 func verdictOf(_ text: String, keys: [String] = [testPublic]) -> M.Problem? {
@@ -265,6 +274,49 @@ let formatCases: [(String, M.Problem)] = [
     (good + String(repeating: "x", count: 4096), .tooLarge),
 ]
 for (text, expected) in formatCases { check(verdictOf(text) == expected, "format: \(String(describing: verdictOf(text))) instead of \(expected)") }
+// The signed date (review 3: the automatic update's cooling-off and F7): one form only, and signed.
+let signedLine = "signed 2026-11-12T03:00:00Z"
+for bad in ["signed 2026-11-12T03:00:00.5Z", "signed 2026-11-12T03:00:00+00:00", "signed 2026-11-12 03:00:00Z", "signed 2026-02-30T03:00:00Z",
+            "signed 2026-11-12T24:00:00Z", "signed 2026-11-12T03:00:60Z", "signed 1999-12-31T23:59:59Z", "signed 2026-1-12T03:00:00Z",
+            "signed 2026-11-12T03:00:00z", "signed  2026-11-12T03:00:00Z", "signed"] {
+    check(verdictOf(good.replacingOccurrences(of: signedLine, with: bad)) == .format("signed"), "the date \(bad)")
+}
+check(verdictOf(good.replacingOccurrences(of: signedLine + "\n", with: "")) == .format("signed"), "no signed line")
+check(verdictOf(good.replacingOccurrences(of: signedLine, with: "signed 2026-11-14T03:00:00Z")) == .badSignature, "a later date than the one signed")
+for text in ["2026-11-12T03:00:00Z", "2028-02-29T23:59:59Z", "2000-01-01T00:00:00Z", "2999-12-31T23:59:59Z"] {
+    check(M.date(text).map(M.dateText) == text, "the date \(text) read and written back")
+}
+check(M.date("2027-02-29T00:00:00Z") == nil && M.date("3000-01-01T00:00:00Z") == nil, "29 February 2027 and the year 3000")
+check(M.dateText(Date(timeIntervalSince1970: 1_762_916_400.75)) == "2025-11-12T03:00:00Z", "a moment's fraction dropped")
+check(parsed(signedManifest(signedAt: M.date("2026-11-14T09:30:00Z")!)).signedAt == M.date("2026-11-14T09:30:00Z")!, "the date read back")
+
+// A stop (review 3: a signed way to stop an update).
+func stopFile(tag: String = "v0.4.0", sha256: String = sha, signedAt: Date = signedDate, key: Curve25519.Signing.PrivateKey = testKey) -> String {
+    let text = M.stopText(tag: tag, sha256: sha256, signedAt: signedAt, keyID: M.keyID(key.publicKey.rawRepresentation))
+    return M.document(signedText: text, signature: try! key.signature(for: Data(text.utf8)))
+}
+func stopVerdict(_ text: String, keys: [String] = [testPublic]) -> M.Problem? {
+    if case .failure(let p) = M.verifyStop(Data(text.utf8), keys: keys) { return p }
+    return nil
+}
+let goodStop = stopFile()
+check(goodStop.hasPrefix("Sill stop 1\ntag v0.4.0\nsha256 \(sha)\nsigned 2026-11-12T03:00:00Z\nkey "), "the stop's format: \(goodStop)")
+if case .success(let s) = M.verifyStop(Data(goodStop.utf8), keys: [testPublic]) {
+    check(s.tag == "v0.4.0" && s.sha256 == sha && s.signedAt == signedDate && s.keyID == M.keyID(testKey.publicKey.rawRepresentation), "the stop read back")
+} else {
+    check(false, "a good stop: \(String(describing: stopVerdict(goodStop)))")
+}
+check(stopVerdict(goodStop, keys: []) == .noKey, "a stop with no key compiled in")
+check(stopVerdict(stopFile(key: otherKey)) == .unknownKey(M.keyID(otherKey.publicKey.rawRepresentation)), "a stop signed with another key")
+check(stopVerdict(goodStop.replacingOccurrences(of: "tag v0.4.0", with: "tag v0.4.1")) == .badSignature, "a stop's tag changed")
+check(stopVerdict(goodStop.replacingOccurrences(of: sha, with: String(repeating: "cd", count: 32))) == .badSignature, "a stop's SHA-256 changed")
+check(stopVerdict(good) == .format("first"), "a manifest is no stop")
+check(verdictOf(goodStop) == .format("first"), "a stop is no manifest")
+check(stopVerdict(goodStop.replacingOccurrences(of: "tag v0.4.0", with: "tag v0.4")) == .format("tag"), "a stop's tag, strictly")
+check(stopVerdict(goodStop.replacingOccurrences(of: signedLine, with: "signed 2026-11-12")) == .format("signed"), "a stop's date, strictly")
+check(stopVerdict(goodStop + "more\n") == .format("first"), "a stop with a line more")
+check(stopVerdict(String(goodStop.dropLast())) == .notText, "a stop without its last newline")
+check(M.stoppingReason(tag: "v0.4.0", sha256: sha).hasSuffix(M.grouped(sha) + ")"), "the stop's prompt shows the whole SHA-256")
 // One architecture alone is a manifest too (a build for one).
 check(verdictOf(signedManifest(cdhashes: ["arm64": cd["arm64"]!])) == nil, "arm64 alone")
 // Every field of another release: the signature holds, the release does not match.
@@ -362,11 +414,27 @@ check(P.Failure.didNotStart("x", putBack: false).cleanUp == false && P.Failure.c
       "a copy not put back keeps the staging folder")
 check(P.Failure.didNotStart("x", putBack: true).cleanUp && P.Failure.hashMismatch.cleanUp && P.Failure.cancelled.cleanUp, "anything else cleans up")
 check(P.line(.hashMismatch, running: v030, offered: v040, keptAt: nil) == "Couldn’t update: the download didn’t match the release. Sill 0.3 is unchanged.", "line: hash")
-check(P.line(.bundle(.wrongSigner), running: v030, offered: v040, keptAt: nil) == "Couldn’t update: the downloaded app isn’t signed by Sill’s developer. Sill 0.3 is unchanged.", "line: signer")
+check(P.line(.bundle(.wrongSigner), running: v030, offered: v040, keptAt: nil) == "Couldn’t update: the downloaded app isn’t signed with the Developer ID of Sill’s developer. Sill 0.3 is unchanged.", "line: signer")
+// The two checks, named apart (Noah, 2026-11-12: the update key's language where it applies).
+check(P.line(.bundle(.notNotarized), running: v030, offered: v040, keptAt: nil) == "Couldn’t update: Apple hasn’t notarized the downloaded app. Sill 0.3 is unchanged.", "line: notarization")
+check(P.line(.bundle(.notManifest("code")), running: v030, offered: v040, keptAt: nil) == "Couldn’t update: the downloaded app isn’t the one signed with Sill’s update key. Sill 0.3 is unchanged.", "line: not the signed code")
+check(P.line(.manifest(.badSignature), running: v030, offered: v040, keptAt: nil) == "Couldn’t update: the release’s signature with Sill’s update key isn’t valid. Sill 0.3 is unchanged.", "line: a bad signature")
+check(P.line(.manifest(.unknownKey("1a2b3c4d")), running: v030, offered: v040, keptAt: nil) == "Couldn’t update: the release is signed with an update key this Sill doesn’t know. Sill 0.3 is unchanged.", "line: another key")
+check(P.line(.manifest(.format("key")), running: v030, offered: v040, keptAt: nil) == "Couldn’t update: the release’s signature with Sill’s update key can’t be read. Sill 0.3 is unchanged.", "line: an unreadable signature")
+check(P.line(.manifest(.noKey), running: v030, offered: v040, keptAt: nil) == "Couldn’t update: this Sill has no usable update key. Sill 0.3 is unchanged.", "line: no key")
+check(P.line(.manifestMismatch("size"), running: v030, offered: v040, keptAt: nil) == "Couldn’t update: the release on GitHub isn’t the one signed with Sill’s update key. Sill 0.3 is unchanged.", "line: a mismatch")
+check(P.line(.stopped(tag: "v0.4.0"), running: v030, offered: v040, keptAt: nil) == "Sill’s developer stopped Sill 0.4 with a stop signed with Sill’s update key, so it isn’t installed. Sill 0.3 is unchanged.", "line: stopped")
+check(P.line(.notAutomatic("it was signed more than 120 days ago"), running: v030, offered: v040, keptAt: nil) == "Sill didn’t install 0.4 by itself: it was signed more than 120 days ago. Update Now still can.", "line: not by itself")
+for f in [P.Failure.manifest(.badSignature), .manifestMismatch("tag"), .stopped(tag: "v0.4.0"), .notSigned, .bundle(.notManifest("code"))] {
+    check(P.line(f, running: v030, offered: v040, keptAt: nil).contains("update key"), "\(f) names the update key")
+}
+for f in [P.Failure.bundle(.wrongSigner), .bundle(.notNotarized), .bundle(.noStapledTicket), .bundle(.invalidSignature(-67061))] {
+    check(!P.line(f, running: v030, offered: v040, keptAt: nil).contains("update key"), "\(f) is Apple's check, not the update key's")
+}
 check(P.line(.didNotStart("x", putBack: true), running: v030, offered: v040, keptAt: nil) == "Sill 0.4 didn’t start, so Sill 0.3 is back.", "line: put back")
 check(P.line(.didNotStart("x", putBack: false), running: v030, offered: v040, keptAt: "/tmp/k/Sill.app") == "Sill couldn’t put 0.3 back in place. It is at /tmp/k/Sill.app: quit Sill and move it to your Applications folder.", "line: lost")
 check(P.line(.checkAfterSwap(.codeChanged, putBack: false), running: v030, offered: v040, keptAt: nil) == "Sill couldn’t put 0.3 back in place. Download Sill again from getsill.app and put it in your Applications folder.", "line: lost, no whole old copy")
-check(P.line(.notSigned, running: v030, offered: v040, keptAt: nil) == "Sill 0.4 isn’t ready for Update Now yet. Try again later, or open its release page.", "line: not signed")
+check(P.line(.notSigned, running: v030, offered: v040, keptAt: nil) == "Sill 0.4 isn’t signed with Sill’s update key yet, so it can’t be installed from here. Try again later, or open its release page.", "line: not signed")
 check(P.line(.cancelled, running: v030, offered: v040, keptAt: nil) == "Update cancelled. Sill 0.3 is unchanged.", "line: cancelled")
 check(P.logText(.checkAfterSwap(.codeChanged, putBack: false)).hasSuffix("NOT put back"), "the log says when nothing was put back")
 check(P.names(["iPad"]) == "iPad" && P.names(["iPad", "iPhone"]) == "iPad and iPhone" && P.names(["a", "b", "c", "d"]) == "a, b and 2 more", "names")
@@ -425,6 +493,36 @@ check(step(idle, .launched(nil)) == (.idle, []), "a late launch in idle")
 check(step(fetching, .downloaded(nil)) == (.fetching, []), "an answer of another step")
 check(!P.Phase.idle.busy && !P.Phase.failed(.cancelled).busy && !P.Phase.ready(devices: []).busy && !P.Phase.confirming(devices: []).busy
       && P.Phase.fetching.busy && P.Phase.installing.busy && P.Phase.restarting.busy, "busy")
+check(!P.Phase.waiting.busy, "a copy waiting for a quiet moment lets Check Now run")
+// The automatic update: one state machine with Update Now (review 3's point 7).
+let autoS = S(mode: .automatic)
+check(P.next(idle, .automatic).0 == S(phase: .fetching, mode: .automatic) && step(idle, .automatic).1 == [.fetch], "automatic: fetch")
+check(P.next(S(phase: .failed(.hashMismatch), consented: ["iPad"]), .automatic).0 == S(phase: .fetching, mode: .automatic), "a failed attempt: the next daily check's")
+check(P.next(S(phase: .failed(.hashMismatch), mode: .automatic), .updateNow(devices: [])).0 == S(phase: .fetching, mode: .manual), "Try Again after an automatic failure is the person's")
+for s in busy + [S(phase: .confirming(devices: [D("iPad")])), S(phase: .ready(devices: [D("iPad")])), S(phase: .waiting, mode: .automatic)] {
+    check(step(s, .automatic) == (s.phase, []), "no automatic update over \(s.phase)")
+}
+let autoFetching = S(phase: .fetching, mode: .automatic)
+check(step(autoFetching, .postponed) == (.idle, [.cleanUp]), "cooling off: idle, nothing kept")
+check(step(fetching, .postponed) == (.fetching, []), "Update Now is never postponed")
+check(step(autoFetching, .fetched(nil)) == (.downloading(received: 0, total: 0), [.download]), "automatic: download")
+check(step(autoFetching, .fetched(.stopped(tag: "v0.4.0"))) == (.failed(.stopped(tag: "v0.4.0")), [.cleanUp]), "a stop")
+check(step(S(phase: .checking, mode: .automatic), .checked(nil, devices: [])) == (.waiting, []), "automatic, checked: wait for a quiet moment")
+check(step(S(phase: .checking, consented: ["iPad"], mode: .automatic), .checked(nil, devices: [D("iPad")])) == (.waiting, []), "never over a device, even one agreed to before")
+let waiting = S(phase: .waiting, mode: .automatic)
+check(step(waiting, .quiet) == (.installing, [.install]), "quiet: install")
+check(step(S(phase: .waiting, mode: .manual), .quiet) == (.waiting, []), "a quiet moment installs only the automatic update's copy")
+check(step(S(phase: .checking, mode: .automatic), .quiet) == (.checking, []), "no quiet before the check")
+check(step(waiting, .cancel) == (.idle, [.cleanUp]), "cancel the waiting copy")
+check(step(waiting, .confirm) == (.waiting, []), "nothing to confirm while waiting")
+check(P.next(waiting, .updateNow(devices: [])).0 == S(phase: .installing, mode: .manual) && step(waiting, .updateNow(devices: [])).1 == [.install],
+      "Install Now with nobody connected: the checked copy, at once")
+check(P.next(waiting, .updateNow(devices: [D("iPad")])).0 == S(phase: .ready(devices: [D("iPad")]), mode: .manual), "Install Now with a device: ask")
+check(P.next(P.next(waiting, .updateNow(devices: [D("iPad")])).0, .confirm).0 == S(phase: .installing, consented: ["iPad"], mode: .manual), "…and yes: install")
+check(step(S(phase: .installing, mode: .automatic), .installed(nil)) == (.restarting, [.launch]), "automatic: launch")
+check(step(S(phase: .restarting, mode: .automatic), .launched(nil)) == (.restarting, [.quit]), "automatic: quit")
+check(step(S(phase: .restarting, mode: .automatic), .launched(.didNotStart("x", putBack: true))) == (.failed(.didNotStart("x", putBack: true)), [.cleanUp]), "automatic: put back")
+check(P.next(autoS, .updateNow(devices: [])).0.mode == .manual, "Update Now is the person's")
 
 // MARK: Settings and the menu
 
@@ -441,7 +539,12 @@ let asking = pane(.confirming(devices: [D("iPad")]))
 check(!asking.updateNow && asking.question == "Updating restarts Sill and disconnects iPad." && asking.confirmTitle == "Update and Disconnect" && asking.cancel, "the question")
 check(asking.announce == asking.question, "VoiceOver hears the question")
 let dl = pane(.downloading(received: 2_960_001, total: 5_920_002))
-check(dl.line == "Downloading Sill 0.4… 3.0 of 5.9 MB" && dl.progress == 0.5 && dl.cancel && dl.busy && !dl.updateNow, "downloading: \(dl)")
+check(dl.line == "Downloading Sill 0.4…" && dl.detail == "3.0 of 5.9 MB" && dl.progress == 0.5 && dl.cancel && dl.busy && !dl.updateNow, "downloading: \(dl)")
+check(dl.announce == "Downloading Sill 0.4…", "VoiceOver hears the download once, not each size")
+check(pane(.downloading(received: 0, total: 0)).detail == nil && pane(.downloading(received: 0, total: 0)).spinning, "a size not known yet")
+for phase in [P.Phase.idle, .fetching, .checking, .installing, .restarting, .failed(.hashMismatch), .ready(devices: [D("iPad")])] {
+    check(pane(phase).detail == nil, "only the download has a second line: \(phase)")
+}
 check(pane(.fetching).line == "Getting Sill 0.4 from GitHub…" && pane(.fetching).spinning, "fetching")
 check(pane(.checking).line == "Checking Sill 0.4…" && pane(.unpacking).line == "Checking Sill 0.4…", "checking")
 let ready = pane(.ready(devices: [D("iPad"), D("iPhone")]))
@@ -461,7 +564,115 @@ check(menuNew == ("Sill 0.4 Is Available…", "You have 0.3; update it in Settin
 check(P.menuItem(.idle, offered: v040, running: v030, available: true, refusal: .otherInstance).opensSettings == false, "refused: the release page")
 check(P.menuItem(.downloading(received: 1, total: 4), offered: v040, running: v030, available: true, refusal: nil) == ("Updating to Sill 0.4…", "Downloading, 25%", true), "downloading in the menu")
 check(P.menuItem(.installing, offered: v040, running: v030, available: true, refusal: nil).subtitle == "Installing", "installing in the menu")
-check(P.footnote.contains("Update Now downloads the new version from GitHub") && P.footnote.contains("notarized by Apple"), "the footnote")
+for on in [false, true] {
+    let f = P.footnote(automatic: on)
+    check(f.contains("Apple’s signature and notarization") && f.contains("signed with Sill’s own update key"), "the footnote names both checks (\(on))")
+    check(f.contains("GitHub sees this Mac’s IP address and which version of Sill it has; nothing else is sent."), "the footnote says what is sent (\(on))")
+}
+check(P.footnote(automatic: false).contains("Sill downloads and installs nothing by itself."), "off: nothing by itself")
+check(P.footnote(automatic: true).contains("Automatically update Sill is on") && P.footnote(automatic: true).contains("it never disconnects anyone")
+      && P.footnote(automatic: true).contains("2 days after it is signed") && P.footnote(automatic: true).contains("10 minutes"), "on: what it does: \(P.footnote(automatic: true))")
+check(!UpdatePolicy.footnote.contains("update key") && UpdatePolicy.footnote.contains("never downloads or installs anything by itself"),
+      "a build with no update key claims no check it can't make")
+
+check(pane(.waiting).line == "Sill 0.4 is ready." && pane(.waiting).updateNowTitle == "Install Now" && pane(.waiting).updateNow
+      && pane(.waiting).updateNowEnabled && pane(.waiting).cancel && !pane(.waiting).busy, "waiting: \(pane(.waiting))")
+check(pane(.waiting).note == "Sill installs it by itself once no device has been connected for 10 minutes, then restarts.", "waiting's note")
+check(!pane(.waiting, refusal: .otherInstance).updateNowEnabled && pane(.waiting, refusal: .otherInstance).note == P.words(.otherInstance), "waiting, refused")
+func autoPane(_ phase: P.Phase, mode: P.Mode = .automatic, offered: SillVersion? = v040, refusal: P.Refusal? = nil, a: P.AutomaticPane) -> P.Pane {
+    P.pane(S(phase: phase, mode: mode), offered: offered, running: v030, available: true, refusal: refusal, automatic: a)
+}
+let autoOn = P.AutomaticPane(on: true, offerNote: "OFFER", afterFailure: "AFTER", updated: "UPDATED")
+check(autoPane(.idle, a: autoOn).note == "OFFER", "on, a release offered: when it installs by itself")
+check(autoPane(.idle, a: P.AutomaticPane(on: false, offerNote: "OFFER")).note == nil, "off: no automatic note")
+check(autoPane(.idle, refusal: .translocated, a: autoOn).note == P.words(.translocated), "a refusal before the automatic note")
+check(autoPane(.idle, offered: nil, a: autoOn).note == "UPDATED" && autoPane(.idle, offered: nil, a: autoOn).line == nil, "after it updated itself")
+check(autoPane(.failed(.hashMismatch), a: autoOn).note == "AFTER", "an automatic failure: what's next")
+check(autoPane(.failed(.hashMismatch), mode: .manual, a: autoOn).note == nil, "a failure of Update Now: no automatic note")
+check(P.menuItem(.waiting, offered: v040, running: v030, available: true, refusal: nil) == ("Sill 0.4 Is Ready to Install…", "Installs by itself while no device is connected", true), "waiting in the menu")
+
+// MARK: The automatic update's rule (UpdateAutoPolicy)
+
+typealias AP = UpdateAutoPolicy
+let t0 = M.date("2026-11-12T03:00:00Z")!
+func later(_ hours: Double) -> Date { t0.addingTimeInterval(hours * 3600) }
+var mem = AP.Memory()
+check(mem == AP.Memory() && !mem.on, "off by default (Noah, 2026-11-12)")
+func start(_ m: AP.Memory, checkOn: Bool = true, available: Bool = true, refusal: P.Refusal? = nil, offered: SillVersion? = v040,
+           tag: String? = "v0.4.0", signed: Bool = true, running: SillVersion? = v030, idle: Bool = true, waitUntil: Date? = nil,
+           now: Date = t0) -> AP.Start {
+    AP.start(m, checkOn: checkOn, available: available, refusal: refusal, offered: offered, offeredTag: tag, signed: signed, running: running,
+             idle: idle, waitUntil: waitUntil, now: now)
+}
+check(start(mem) == .no("the switch is off"), "off: nothing")
+mem = AP.switched(mem, on: true)
+check(start(mem) == .go, "on: go")
+check(start(mem, checkOn: false) == .no("the daily check is off"), "only with the daily check on")
+check(start(mem, available: false) == .no("Update Now isn’t available in this build"), "only where Update Now is")
+check(start(mem, running: nil) == .no("Update Now isn’t available in this build"), "no version of its own")
+check(start(mem, idle: false) == .no("an update is under way or waiting"), "never beside another")
+check(start(mem, offered: nil) == .no("no release is offered"), "nothing offered")
+check(start(mem, offered: v030) == .no("the offered release isn’t newer"), "not newer")
+check(start(mem, signed: false) == .no("the release isn’t signed with Sill’s update key yet"), "needs the update key")
+check(start(mem, refusal: .otherAccount("Alex")) == .no(P.words(.otherAccount("Alex"))), "a refusal holds: nothing downloaded")
+check(start(AP.stopped(mem, "v0.4.0")) == .no("a stop signed with an update key names v0.4.0"), "a stopped release")
+check(start(AP.stopped(mem, "v0.4.1")) == .go, "another release's stop")
+check(start(AP.offered(mem, SillVersion("0.5")!)) == .no("the latest release went back from 0.5 to 0.4"), "a rollback (F7)")
+check(start(AP.offered(mem, v040)) == .go && start(AP.offered(AP.offered(mem, v040), v030)) == .go, "the highest offer kept")
+check(AP.offered(AP.offered(mem, SillVersion("0.5")!), v040).highestOffered == "0.5", "a lower offer never lowers it")
+var tried = AP.began(mem, v040, now: t0)
+check(tried.attempts["0.4"]?.count == 1, "one attempt")
+check(start(tried, now: later(19.9)) == .no("0.4 was tried at 2026-11-12T03:00:00Z"), "not again within 20 hours")
+check(start(tried, now: later(20)) == .go, "the next daily check")
+tried = AP.failed(AP.began(tried, v040, now: later(24)), v040, why: "the download stopped")
+check(tried.attempts["0.4"] == AP.Memory.Attempt(count: 2, last: later(24), failure: "the download stopped"), "two attempts: \(tried.attempts)")
+check(start(tried, now: later(100)) == .no("2 attempts at 0.4 failed; Update Now still can"), "never a third (no loop)")
+check(start(tried, offered: SillVersion("0.4.1")!, tag: "v0.4.1", now: later(100)) == .go, "a newer release starts afresh")
+check(AP.forgive(AP.began(mem, v040, now: t0), v040).attempts.isEmpty, "a wait is no attempt")
+check(AP.forgive(tried, v040).attempts["0.4"]?.count == 1, "forgiving one of two")
+check(start(mem, waitUntil: later(1)) == .no("0.4 cools off until 2026-11-12T04:00:00Z") && start(mem, waitUntil: t0) == .go, "a known cooling-off")
+let done = AP.updated(AP.began(AP.began(mem, v040, now: t0), SillVersion("0.5")!, now: t0), to: v040, at: later(1))
+check(done.updatedTo == "0.4" && done.updatedAt == later(1) && done.attempts.keys.sorted() == ["0.5"], "updated: older attempts forgotten")
+// The signed date (the cooling-off, review 3's point 1; F7).
+check(AP.dates(signedAt: t0, now: later(47.9)) == .waitUntil(later(48)), "cooling off for 48 hours")
+check(AP.dates(signedAt: t0, now: later(48)) == .go, "then go")
+check(AP.dates(signedAt: t0, now: later(120 * 24 + 0.1)) == .refuse("it was signed more than 120 days ago"), "too old")
+check(AP.dates(signedAt: t0, now: later(120 * 24)) == .go, "120 days exactly")
+check(AP.dates(signedAt: later(0.2), now: t0) == .refuse("its signature is dated later than this Mac’s clock"), "from the future")
+check(AP.dates(signedAt: later(0.15), now: t0) == .waitUntil(later(48.15)), "within the clock's skew")
+// The quiet moment (review 3's point 3).
+check(AP.quiet(devices: 0, quietSince: t0, pairing: false, now: later(10.0 / 60)), "10 minutes with no device")
+check(!AP.quiet(devices: 0, quietSince: t0, pairing: false, now: later(9.9 / 60)), "not before")
+check(!AP.quiet(devices: 1, quietSince: t0, pairing: false, now: later(5)), "never with a device connected")
+check(!AP.quiet(devices: 0, quietSince: t0, pairing: true, now: later(5)), "never with a pairing window open")
+check(AP.waitedTooLong(since: t0, now: later(24)) && !AP.waitedTooLong(since: t0, now: later(23.9)), "a copy waits a day at most")
+// The switch (requirement 2: only Settings turns it on; it is shown and usable only where it can act).
+check(AP.switchState(available: false, canKeep: true, checkOn: true, refusal: nil, on: false) == AP.Switch(), "no key: no switch")
+check(AP.switchState(available: true, canKeep: true, checkOn: true, refusal: nil, on: false) == AP.Switch(shown: true, enabled: true), "usable")
+check(AP.switchState(available: true, canKeep: true, checkOn: false, refusal: nil, on: false) == AP.Switch(shown: true, enabled: false, note: "Works while Check for updates automatically is on."), "the daily check off")
+check(AP.switchState(available: true, canKeep: true, checkOn: false, refusal: nil, on: true).enabled, "on can always be turned off")
+check(AP.switchState(available: true, canKeep: false, checkOn: true, refusal: nil, on: false) == AP.Switch(shown: true, enabled: false, note: "This copy of Sill can’t keep this setting: it isn’t a notarized release."), "no keychain group")
+check(AP.switchState(available: true, canKeep: true, checkOn: true, refusal: .translocated, on: false) == AP.Switch(shown: true, enabled: true, note: P.words(.translocated)), "a refusal said under it")
+// Its words.
+check(AP.quietMinutes == 10 && AP.coolingOffWords == "2 days after it is signed", "the waits in words")
+check(AP.offerNote(mem, offered: v040, offeredTag: "v0.4.0", waitUntil: nil, now: t0) == "Sill installs it by itself once no device has been connected for 10 minutes.", "the offer's note")
+check(AP.offerNote(mem, offered: v040, offeredTag: "v0.4.0", waitUntil: later(30), now: t0).hasPrefix("Sill installs it by itself tomorrow at ")
+      || AP.offerNote(mem, offered: v040, offeredTag: "v0.4.0", waitUntil: later(30), now: t0).hasPrefix("Sill installs it by itself on "), "cooling off: from when")
+check(AP.offerNote(AP.stopped(mem, "v0.4.0"), offered: v040, offeredTag: "v0.4.0", waitUntil: nil, now: t0) == "A stop signed with Sill’s update key names Sill 0.4, so Sill won’t install it.", "stopped")
+check(AP.offerNote(tried, offered: v040, offeredTag: "v0.4.0", waitUntil: nil, now: t0) == "Sill won’t install 0.4 by itself again; Update Now still can.", "after two attempts")
+check(AP.offerNote(AP.offered(mem, SillVersion("0.5")!), offered: v040, offeredTag: "v0.4.0", waitUntil: nil, now: t0) == "Sill won’t install 0.4 by itself: 0.5 was offered before it. Update Now still can.", "a rollback")
+check(AP.afterFailure(AP.began(mem, v040, now: t0), version: v040) == "Sill tries again after its next daily check.", "after one failure")
+check(AP.afterFailure(tried, version: v040) == "Sill won’t install 0.4 by itself again; Update Now still can.", "after two")
+check(AP.updatedLine(done, running: v040, now: later(2))?.hasPrefix("Sill updated itself to 0.4 today at ") == true
+      || AP.updatedLine(done, running: v040, now: later(2))?.hasPrefix("Sill updated itself to 0.4 yesterday at ") == true, "updated: \(String(describing: AP.updatedLine(done, running: v040, now: later(2))))")
+check(AP.updatedLine(done, running: v030, now: later(2)) == nil, "only while that version runs (not after a put-back)")
+check(AP.updatedLine(done, running: v040, now: later(1 + 7 * 24)) == nil, "for a week")
+let paneNow = AP.pane(AP.began(mem, v040, now: t0), offered: v040, offeredTag: "v0.4.0", running: v030, waitUntil: nil, now: t0)
+check(paneNow.on && paneNow.quietMinutes == 10 && paneNow.afterFailure == "Sill tries again after its next daily check." && paneNow.updated == nil, "the pane's part")
+// What Sill remembers survives as JSON, and an empty item is the switch off.
+if let data = try? JSONEncoder().encode(tried), let back = try? JSONDecoder().decode(AP.Memory.self, from: data) {
+    check(back == tried, "the memory round-trips")
+} else { check(false, "the memory encodes") }
 
 // MARK: Archives
 
@@ -606,6 +817,28 @@ let archiveCases: [(Data, A.Problem)] = [
     (zip(app([Z(name: "Sill.app/y", data: [1, 2, 3], reuse: 2)])), .localMismatch("Sill.app/y")),
 ]
 for (d, expected) in archiveCases { check(archiveProblem(d) == expected, "archive: \(String(describing: archiveProblem(d))) instead of \(expected)") }
+// Review 3, F6: a link whose target steps into another link. Lexically "D1/…/D12/B" and fourteen ".." land
+// in Sill.app (etc/hosts is there); the file system follows B (a link 13 levels up, to Sill.app/Z) and the
+// ".." then climb out of the app to /etc/hosts. Refused at the step into B.
+let deep = (1...12).map { "D\($0)" }
+var throughLinks: [Z] = [Z(name: "Sill.app/Z/", mode: 0o040755), Z(name: "Sill.app/etc/", mode: 0o040755),
+                         Z(name: "Sill.app/etc/hosts", data: [1])]
+for i in 1...12 { throughLinks.append(Z(name: "Sill.app/Contents/" + deep[0..<i].joined(separator: "/") + "/", mode: 0o040755)) }
+throughLinks.append(Z(name: "Sill.app/Contents/" + deep.joined(separator: "/") + "/B",
+                      data: Array((String(repeating: "../", count: 13) + "Z").utf8), mode: 0o120755, method: 0))
+throughLinks.append(Z(name: "Sill.app/Contents/L",
+                      data: Array((deep.joined(separator: "/") + "/B/" + String(repeating: "../", count: 14) + "etc/hosts").utf8),
+                      mode: 0o120755, method: 0))
+check(archiveProblem(zip(app(throughLinks))) == .throughLink("Sill.app/Contents/L"),
+      "a link through a link out of the app: \(String(describing: archiveProblem(zip(app(throughLinks)))))")
+check(archiveProblem(zip(app(Array(throughLinks.dropLast())))) == nil, "the same archive without L: the link B alone is fine")
+// Links at the code signature's own paths (Security opens them first): never.
+for (name, target) in [("Sill.app/Contents/_CodeSignature", "MacOS"), ("Sill.app/Contents/CodeResources", "Info.plist"),
+                       ("Sill.app/Contents/_CodeSignature/CodeResources", "../Info.plist")] {
+    let extra = name.hasSuffix("/CodeResources") && name.contains("_CodeSignature/") ? [Z(name: "Sill.app/Contents/_CodeSignature/", mode: 0o040755)] : []
+    let d = zip(app(extra + [Z(name: name, data: Array(target.utf8), mode: 0o120755, method: 0)]))
+    check(archiveProblem(d) == .badLink(name), "a link at \(name): \(String(describing: archiveProblem(d)))")
+}
 check(archiveProblem(zip(app([Z(name: "Sill.app/big", data: [UInt8](repeating: 0, count: 2_000_000))])), limits: A.Limits(totalBytes: 1_000_000)) == .tooLarge, "over the total")
 check(archiveProblem(zip(app()), limits: A.Limits(entries: 3)) == .tooManyEntries(5), "too many entries")
 // A bomb that lies: it says 100 bytes and inflates to two megabytes.

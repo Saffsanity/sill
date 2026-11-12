@@ -70,6 +70,9 @@ enum UpdateInstallPolicy {
         /// The app's zip and its signed manifest.
         let assetName: String
         let manifestName: String
+        /// A stop for the release (UpdateManifest.Stop), read when the release lists it; nil reads none
+        /// (the switch for the whole mechanism: plan §10, Q10).
+        var stopName: String? = nil
         /// Origins a download may be redirected to, and the path it must start with there.
         let redirectOrigins: [String]
         let redirectPathPrefix: String
@@ -98,7 +101,7 @@ enum UpdateInstallPolicy {
     /// An asset's URL, built by Sill from the tag (never taken from GitHub's answer, which must equal
     /// it).
     static func assetURL(tag: String, name: String, endpoints: Endpoints) -> URL? {
-        guard strictTag(tag) != nil, name == endpoints.assetName || name == endpoints.manifestName else { return nil }
+        guard strictTag(tag) != nil, name == endpoints.assetName || name == endpoints.manifestName || name == endpoints.stopName else { return nil }
         return URL(string: endpoints.downloadPrefix + tag + "/" + name)
     }
 
@@ -242,6 +245,8 @@ enum UpdateInstallPolicy {
         let version: SillVersion
         let zip: Asset
         let manifest: Asset
+        /// A stop listed beside them (read before anything is downloaded).
+        var stop: Asset? = nil
     }
 
     /// GitHub's latest release (a 200's body) as the one to install, or why not: it must be the
@@ -282,6 +287,13 @@ enum UpdateInstallPolicy {
             }
             return .success(Asset(name: name, url: url, size: size, digest: digest))
         }
+        var stop: Asset?
+        if let name = endpoints.stopName {
+            switch asset(name, sizes: 1...Int64(UpdateManifest.maxBytes)) {
+            case .failure(let f): return .failure(f)
+            case .success(let a): stop = a
+            }
+        }
         switch (asset(endpoints.assetName, sizes: endpoints.minAssetBytes...endpoints.maxAssetBytes),
                 asset(endpoints.manifestName, sizes: 1...Int64(UpdateManifest.maxBytes))) {
         case (.failure(let f), _), (_, .failure(let f)):
@@ -291,7 +303,7 @@ enum UpdateInstallPolicy {
         case (.success(_), .success(.none)):
             return .failure(.notSigned)
         case (.success(let zip?), .success(let manifest?)):
-            return .success(Release(tag: tag, version: version, zip: zip, manifest: manifest))
+            return .success(Release(tag: tag, version: version, zip: zip, manifest: manifest, stop: stop))
         }
     }
 
@@ -408,8 +420,8 @@ enum UpdateInstallPolicy {
     static func words(_ p: BundleProblem) -> String {
         switch p {
         case .notABundle: return "the download isn’t a Sill app"
-        case .invalidSignature: return "the downloaded app’s signature isn’t valid"
-        case .wrongSigner: return "the downloaded app isn’t signed by Sill’s developer"
+        case .invalidSignature: return "the downloaded app’s code signature isn’t valid"
+        case .wrongSigner: return "the downloaded app isn’t signed with the Developer ID of Sill’s developer"
         case .notNotarized, .noStapledTicket: return "Apple hasn’t notarized the downloaded app"
         case .wouldLosePermissions: return "the downloaded app wouldn’t keep Sill’s permissions"
         case .wrongIdentity: return "the downloaded app isn’t Sill"
@@ -417,7 +429,7 @@ enum UpdateInstallPolicy {
         case .entitlement: return "the downloaded app wouldn’t keep Sill’s paired devices"
         case .info: return "the downloaded app’s information isn’t Sill’s"
         case .notNewer(let v): return "the downloaded app is version \(v), not newer than this one"
-        case .notManifest: return "the downloaded app isn’t the one the release’s signature names"
+        case .notManifest: return "the downloaded app isn’t the one signed with Sill’s update key"
         case .needsNewerMacOS(let v): return "the new version needs macOS \(v) or later"
         case .noSliceForThisMac: return "the new version doesn’t run on this Mac"
         case .codeChanged: return "the app changed while Sill was installing it"
@@ -456,6 +468,10 @@ enum UpdateInstallPolicy {
         case checkAfterSwap(BundleProblem, putBack: Bool)
         /// The new copy didn't come up (why), and the old copy was put back (or not).
         case didNotStart(String, putBack: Bool)
+        /// A stop signed with an update key names this release (its tag): never installed.
+        case stopped(tag: String)
+        /// The automatic update leaves this release to Update Now (why: UpdateAutoPolicy's words).
+        case notAutomatic(String)
         case cancelled
 
         /// Whether the staging folder may be deleted: not when it holds the old copy that could not be
@@ -478,10 +494,11 @@ enum UpdateInstallPolicy {
         case .releaseChanged: return "GitHub’s latest release is no longer Sill \(offered). Check again."
         case .releaseNotNewer: return couldNot("the release isn’t newer than this Sill")
         case .releaseUnreadable: return couldNot("GitHub’s answer wasn’t a release Sill can install")
-        case .notSigned: return "Sill \(offered) isn’t ready for Update Now yet. Try again later, or open its release page."
+        case .notSigned: return "Sill \(offered) isn’t signed with Sill’s update key yet, so it can’t be installed from here. Try again later, or open its release page."
         case .noConnection: return couldNot("this Mac couldn’t reach GitHub")
         case .github(let status): return couldNot("GitHub answered with an error (HTTP \(status))")
-        case .manifest, .manifestMismatch: return couldNot("the release’s signature didn’t check out")
+        case .manifest(let p): return couldNot(updateKeyWords(p))
+        case .manifestMismatch: return couldNot("the release on GitHub isn’t the one signed with Sill’s update key")
         case .redirectRefused: return couldNot("GitHub sent the download somewhere Sill doesn’t download from")
         case .download: return couldNot("the download stopped")
         case .sizeMismatch, .tooLarge, .hashMismatch: return couldNot("the download didn’t match the release")
@@ -495,7 +512,20 @@ enum UpdateInstallPolicy {
             return putBack ? couldNot(words(p)) : lost(running: running, keptAt: keptAt)
         case .didNotStart(_, let putBack):
             return putBack ? "Sill \(offered) didn’t start, so Sill \(running) is back." : lost(running: running, keptAt: keptAt)
+        case .stopped: return "Sill’s developer stopped Sill \(offered) with a stop signed with Sill’s update key, so it isn’t installed. \(unchanged)"
+        case .notAutomatic(let why): return "Sill didn’t install \(offered) by itself: \(why). Update Now still can."
         case .cancelled: return "Update cancelled. \(unchanged)"
+        }
+    }
+
+    /// Why the release's signature with Sill's update key didn't hold, in Settings' words: kept apart from
+    /// Apple's signature and notarization (BundleProblem), which the download is checked against too.
+    static func updateKeyWords(_ p: UpdateManifest.Problem) -> String {
+        switch p {
+        case .noKey, .badKey: return "this Sill has no usable update key"
+        case .unknownKey: return "the release is signed with an update key this Sill doesn’t know"
+        case .badSignature: return "the release’s signature with Sill’s update key isn’t valid"
+        default: return "the release’s signature with Sill’s update key can’t be read"
         }
     }
 
@@ -533,6 +563,8 @@ enum UpdateInstallPolicy {
         case .swapFailed(let why): return "the swap failed (\(why)); nothing changed"
         case .checkAfterSwap(let p, let putBack): return "the check at the final path failed (\(p)); \(putBack ? "put back" : "NOT put back")"
         case .didNotStart(let why, let putBack): return "the new copy didn’t start (\(why)); \(putBack ? "put back" : "NOT put back")"
+        case .stopped(let tag): return "a stop signed with an update key names \(tag)"
+        case .notAutomatic(let why): return "not installed by itself: \(why)"
         case .cancelled: return "cancelled"
         }
     }
@@ -546,6 +578,12 @@ enum UpdateInstallPolicy {
         let name: String
     }
 
+    /// Who began the update under way: the person (Update Now), or Sill by itself (Automatically update
+    /// Sill, UpdateAutoPolicy). One state machine for both: the same steps, checks and refusals.
+    enum Mode: Equatable, Sendable {
+        case manual, automatic
+    }
+
     enum Phase: Equatable, Sendable {
         case idle
         /// The click came while devices were connected: asks first.
@@ -556,6 +594,9 @@ enum UpdateInstallPolicy {
         case checking
         /// Checked; devices connected that the person did not agree to disconnect: asks first.
         case ready(devices: [Device])
+        /// Checked by the automatic update: waits for a moment with no device connected (AppUpdater
+        /// looks, holds new sessions, then sends `quiet`). Install Now (Update Now's button) takes it over.
+        case waiting
         case installing
         case restarting
         case failed(Failure)
@@ -563,7 +604,7 @@ enum UpdateInstallPolicy {
         /// An update is under way: no other may start, Check Now waits.
         var busy: Bool {
             switch self {
-            case .idle, .confirming, .ready, .failed: return false
+            case .idle, .confirming, .ready, .waiting, .failed: return false
             default: return true
             }
         }
@@ -573,10 +614,19 @@ enum UpdateInstallPolicy {
         var phase = Phase.idle
         /// The devices the person agreed to disconnect, by key.
         var consented: [String] = []
+        var mode = Mode.manual
     }
 
     enum Event: Equatable, Sendable {
         case updateNow(devices: [Device])
+        /// The automatic update begins (UpdateAutoPolicy.start said go).
+        case automatic
+        /// The automatic update's fetch found the release still cooling off (its signed date): nothing is
+        /// downloaded, and it is no failure.
+        case postponed
+        /// No device connected for the while UpdateAutoPolicy asks, new sessions held, GitHub asked again:
+        /// the waiting copy is installed.
+        case quiet
         case confirm
         case cancel
         /// The release and its manifest, verified, or why not.
@@ -602,9 +652,28 @@ enum UpdateInstallPolicy {
         }
         switch (s.phase, e) {
         case (.idle, .updateNow(let devices)), (.failed, .updateNow(let devices)):
+            n.mode = .manual
             n.consented = []
             if devices.isEmpty { n.phase = .fetching; return (n, [.fetch]) }
             n.phase = .confirming(devices: devices)
+            return (n, [])
+        case (.idle, .automatic), (.failed, .automatic):
+            n.mode = .automatic
+            n.consented = []
+            n.phase = .fetching
+            return (n, [.fetch])
+        case (.fetching, .postponed) where s.mode == .automatic:
+            n.phase = .idle
+            return (n, [.cleanUp])
+        case (.waiting, .quiet) where s.mode == .automatic:
+            n.phase = .installing
+            return (n, [.install])
+        case (.waiting, .updateNow(let devices)):
+            // Install Now: the person's, from here on, with the copy already checked.
+            n.mode = .manual
+            n.consented = []
+            if devices.isEmpty { n.phase = .installing; return (n, [.install]) }
+            n.phase = .ready(devices: devices)
             return (n, [])
         case (.confirming(let devices), .confirm):
             n.consented = devices.map(\.key)
@@ -632,6 +701,8 @@ enum UpdateInstallPolicy {
         case (.unpacking, .unpacked(let f?)):
             return fail(f)
         case (.checking, .checked(nil, let devices)):
+            // The automatic update never installs over a connected device: it waits for a quiet moment.
+            if s.mode == .automatic { n.phase = .waiting; return (n, []) }
             if Set(devices.map(\.key)).isSubset(of: Set(s.consented)) { n.phase = .installing; return (n, [.install]) }
             n.phase = .ready(devices: devices)
             return (n, [])
@@ -641,7 +712,7 @@ enum UpdateInstallPolicy {
             n.consented = devices.map(\.key)
             n.phase = .installing
             return (n, [.install])
-        case (.ready, .cancel), (.fetching, .cancel), (.downloading, .cancel), (.unpacking, .cancel), (.checking, .cancel):
+        case (.ready, .cancel), (.waiting, .cancel), (.fetching, .cancel), (.downloading, .cancel), (.unpacking, .cancel), (.checking, .cancel):
             n.phase = .idle
             return (n, [.cleanUp])
         case (.installing, .installed(nil)):
@@ -664,6 +735,8 @@ enum UpdateInstallPolicy {
     struct Pane: Equatable {
         /// Replaces the check's line while an update runs or after one failed.
         var line: String?
+        /// A second line under it, on a line of its own (the download's size: "2.4 of 5.9 MB").
+        var detail: String?
         var failed = false
         /// Why Update Now is unavailable, under the line.
         var note: String?
@@ -684,20 +757,38 @@ enum UpdateInstallPolicy {
         var announce: String?
     }
 
+    /// What the automatic update adds to the pane: AppUpdater's, from UpdateAutoPolicy and what it
+    /// remembers (its words, already made).
+    struct AutomaticPane: Equatable, Sendable {
+        /// Automatically update Sill is on.
+        var on = false
+        /// While a signed release is offered and nothing runs: when Sill installs it by itself, or why not.
+        var offerNote: String?
+        /// After an automatic attempt failed: what happens next.
+        var afterFailure: String?
+        /// After Sill updated itself (this launch runs that version), for a few days.
+        var updated: String?
+        /// How long the install waits with no device connected.
+        var quietMinutes = 10
+    }
+
     /// The pane for `state`, when the check offers `offered` to `running`. `available`: this build has an
     /// update key (else nothing of Update Now shows). `refusal`: why it cannot run here. `keptAt`: where
     /// the old copy is when it could not be put back.
     static func pane(_ s: State, offered: SillVersion?, running: SillVersion?, available: Bool, refusal: Refusal?,
-                     keptAt: String? = nil) -> Pane {
+                     keptAt: String? = nil, automatic: AutomaticPane = AutomaticPane()) -> Pane {
         var p = Pane()
         guard available, let running else { return p }
         let target = offered.map { "Sill \($0)" } ?? "the update"
         switch s.phase {
         case .idle:
-            guard offered != nil else { return p }
+            guard offered != nil else {
+                p.note = automatic.updated
+                return p
+            }
             p.updateNow = true
             p.updateNowEnabled = refusal == nil
-            p.note = refusal.map(words)
+            p.note = refusal.map(words) ?? (automatic.on ? automatic.offerNote : nil)
         case .confirming(let devices):
             p.updateNow = false
             p.question = "Updating restarts Sill and disconnects \(names(devices.map(\.name)))."
@@ -708,7 +799,8 @@ enum UpdateInstallPolicy {
             p.spinning = true
             p.cancel = true
         case .downloading(let received, let total):
-            p.line = total > 0 ? "Downloading \(target)… \(megabytes(received)) of \(megabytes(total)) MB" : "Downloading \(target)…"
+            p.line = "Downloading \(target)…"
+            p.detail = total > 0 ? "\(megabytes(received)) of \(megabytes(total)) MB" : nil
             p.progress = total > 0 ? min(1, Double(received) / Double(total)) : nil
             p.spinning = total == 0
             p.cancel = true
@@ -720,6 +812,14 @@ enum UpdateInstallPolicy {
             p.line = "\(target) is ready."
             p.question = "Installing it restarts Sill and disconnects \(names(devices.map(\.name)))."
             p.confirmTitle = "Install and Disconnect"
+            p.cancel = true
+        case .waiting:
+            p.line = "\(target) is ready."
+            p.note = refusal.map(words)
+                ?? "Sill installs it by itself once no device has been connected for \(automatic.quietMinutes) minutes, then restarts."
+            p.updateNow = true
+            p.updateNowEnabled = refusal == nil
+            p.updateNowTitle = "Install Now"
             p.cancel = true
         case .installing:
             p.line = "Installing \(target)…"
@@ -733,7 +833,7 @@ enum UpdateInstallPolicy {
             p.updateNow = offered != nil
             p.updateNowEnabled = refusal == nil && f.cleanUp
             p.updateNowTitle = "Try Again"
-            p.note = refusal.map(words)
+            p.note = refusal.map(words) ?? (s.mode == .automatic ? automatic.afterFailure : nil)
         }
         p.busy = s.phase.busy
         p.announce = p.line ?? p.question
@@ -759,6 +859,9 @@ enum UpdateInstallPolicy {
     /// (else the release page, as before Update Now).
     static func menuItem(_ phase: Phase, offered: SillVersion, running: SillVersion, available: Bool, refusal: Refusal?)
         -> (title: String, subtitle: String, opensSettings: Bool) {
+        if case .waiting = phase {
+            return ("Sill \(offered) Is Ready to Install…", "Installs by itself while no device is connected", true)
+        }
         if phase.busy {
             let step: String
             switch phase {
@@ -776,8 +879,17 @@ enum UpdateInstallPolicy {
         return ("Sill \(offered) Is Available…", "You have \(running); opens its download page", false)
     }
 
-    /// Settings › General's footnote while Update Now is offered (UpdatePolicy.footnote otherwise).
-    static let footnote = "Once a day, Sill asks GitHub whether a newer version is out. GitHub sees this Mac’s IP address and which version of Sill it has; nothing else is sent. Sill never downloads or installs anything by itself. Update Now downloads the new version from GitHub, checks that it is Sill, signed by its developer and notarized by Apple, puts it in place of this copy and restarts Sill; Open Release Page… shows it on GitHub instead."
+    /// Settings › General's footnote in a build with an update key (UpdatePolicy.footnote otherwise, which
+    /// claims no check this build can't make). Both checks named apart: Apple's (the Developer ID signature
+    /// and notarization) and Sill's own update key's (the release's signed manifest).
+    static func footnote(automatic: Bool) -> String {
+        let checks = "Before it installs a new version, Sill checks it two ways: it must carry Apple’s signature and notarization for Sill’s developer, and the release must be signed with Sill’s own update key."
+        let ask = "Once a day, Sill asks GitHub whether a newer version is out. GitHub sees this Mac’s IP address and which version of Sill it has; nothing else is sent."
+        if automatic {
+            return "\(ask) Automatically update Sill is on: Sill downloads a new version \(UpdateAutoPolicy.coolingOffWords), then installs it and restarts once no device has been connected for \(UpdateAutoPolicy.quietMinutes) minutes; it never disconnects anyone. \(checks) Update Now does the same at once."
+        }
+        return "\(ask) Sill downloads and installs nothing by itself. Update Now downloads the new version from GitHub, puts it in place of this copy and restarts Sill; Open Release Page… shows it on GitHub instead. \(checks)"
+    }
 }
 
 extension UpdateInstallPolicy.Trust {
@@ -800,7 +912,7 @@ extension UpdateInstallPolicy.Endpoints {
         latestRelease: URL(string: "https://api.github.com/repos/Saffsanity/sill/releases/latest")!,
         apiOrigins: ["https://api.github.com"],
         downloadPrefix: "https://github.com/Saffsanity/sill/releases/download/",
-        assetName: "Sill.zip", manifestName: "Sill.zip.manifest",
+        assetName: "Sill.zip", manifestName: "Sill.zip.manifest", stopName: "Sill.zip.stop",
         redirectOrigins: ["https://release-assets.githubusercontent.com", "https://objects.githubusercontent.com"],
         redirectPathPrefix: "/github-production-release-asset",
         maxRedirects: 3, minAssetBytes: 1 << 10, maxAssetBytes: 64 << 20)

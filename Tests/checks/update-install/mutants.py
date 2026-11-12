@@ -68,6 +68,9 @@ MUTANTS = [
     ("no total", ARC, "guard totalBytes <= limits.totalBytes else { return .failure(.tooLarge) }", ""),
     ("no ratio", ARC, "if method == 8 { guard compressed > 0, size <= compressed * limits.ratio else { return .failure(.badSizes(name)) } }", ""),
     ("inflate past the size", ARC, "guard produced <= size else { return .failure(.inflate(name)) }", ""),
+    ("a walk through a link", ARC, "                if case .link? = kinds[walked.joined(separator: \"/\").lowercased()] { return .failure(.throughLink(e.path)) }\n", ""),
+    ("links at the signature's paths", ARC, "if lower.count >= 3, lower[1] == \"contents\", lower[2] == \"_codesignature\" || (lower.count == 3 && lower[2] == \"coderesources\") {", "if false {"),
+    ("16 digits of the SHA-256 in the prompt", MAN, "        var rest = Substring(hex)\n", "        var rest = Substring(hex.prefix(16))\n"),
     ("links outside", ARC, "guard let resolved = resolve(target, from: Array(e.components.dropLast())), resolved.count > 1,", "guard let resolved = Optional(Array(e.components)), resolved.count > 1,"),
     # Sill.app's sources (T21): read by the check, not compiled by it.
     ("a default read by the installer", INS, "    let userAgent: String\n", "    let userAgent: String\n    let host = UserDefaults.standard.string(forKey: \"SillUpdateHost\")\n"),

@@ -26,8 +26,17 @@ import StreamProtocol
 ///     sha256 a50c5fd38958db5d3f9aea4ef569705effa3462b2d522b73c12baea0a1fc9926
 ///     cdhash arm64 d5feca97b4d531345aefab17bb8b588358f2975f
 ///     cdhash x86_64 0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c
+///     signed 2026-11-12T03:00:00Z
 ///     key 1a2b3c4d
 ///     signature <88 characters of base64: Ed25519 over every byte before this line>
+///
+/// `signed` is when Noah signed it, UTC, by the signer's clock: a date GitHub can't change (its own
+/// published_at is not signed). The automatic update waits until a release has been signed for a while
+/// and never installs one signed long ago (UpdateAutoPolicy; review 3, the automatic update's point 1 and F7).
+///
+/// A release Noah wants no Sill to install (one signed with a key that leaked, a bad build) gets a stop
+/// beside it, `Sill.zip.stop`, signed with an update key too (`Stop`): it names the release's tag and its
+/// zip's SHA-256, and a Sill that reads it installs that release neither by Update Now nor by itself.
 struct UpdateManifest: Equatable, Sendable {
     /// The Ed25519 public keys (raw 32 bytes, base64) whose signature Update Now accepts. EMPTY ON
     /// PURPOSE: no key exists yet (Noah makes it: plan §10, Q1, and Scripts/sign-update.sh --new-key),
@@ -48,6 +57,8 @@ struct UpdateManifest: Equatable, Sendable {
     let sha256: String
     /// "arm64" and/or "x86_64" → the slice's cdhash, 40 lowercase hex digits.
     let cdhashes: [String: String]
+    /// When it was signed (whole seconds, UTC).
+    let signedAt: Date
     /// The first 8 hex digits of the SHA-256 of the signing key's raw bytes.
     let keyID: String
 
@@ -117,6 +128,7 @@ struct UpdateManifest: Equatable, Sendable {
         }
         // One or both architectures, arm64 first.
         guard !order.isEmpty, order == order.sorted() else { return .failure(.format("cdhash")) }
+        guard let signedText = field("signed"), let signedAt = date(signedText) else { return .failure(.format("signed")) }
         guard let keyID = field("key"), isHex(keyID, count: 8) else { return .failure(.format("key")) }
         let signedEnd = lines[0..<i].reduce(0) { $0 + $1.utf8.count + 1 }
         guard let signatureText = field("signature"), signatureText.count == 88,
@@ -124,40 +136,45 @@ struct UpdateManifest: Equatable, Sendable {
               signature.base64EncodedString() == signatureText else { return .failure(.format("signature")) }
         guard i == lines.count else { return .failure(.format("last")) }
         let manifest = UpdateManifest(tag: tag, version: version, build: build, asset: asset, size: size, sha256: sha256,
-                                      cdhashes: cdhashes, keyID: keyID)
+                                      cdhashes: cdhashes, signedAt: signedAt, keyID: keyID)
         return .success((manifest, Data(bytes[0..<signedEnd]), signature))
     }
 
     /// The manifest, if `data` is of the format and signed by one of `keys` (the one its key line
     /// names). Every key in the list must be usable, or none is trusted.
     static func verify(_ data: Data, keys: [String]) -> Result<UpdateManifest, Problem> {
-        guard !keys.isEmpty else { return .failure(.noKey) }
-        var publicKeys: [(id: String, key: Curve25519.Signing.PublicKey)] = []
-        for text in keys {
-            guard let raw = usableKey(text), let key = try? Curve25519.Signing.PublicKey(rawRepresentation: raw) else { return .failure(.badKey) }
-            publicKeys.append((keyID(raw), key))
-        }
         switch parse(data) {
         case .failure(let problem):
-            return .failure(problem)
+            return keys.isEmpty ? .failure(.noKey) : .failure(problem)
         case .success(let parsed):
-            let candidates = publicKeys.filter { $0.id == parsed.manifest.keyID }
-            guard !candidates.isEmpty else { return .failure(.unknownKey(parsed.manifest.keyID)) }
-            for candidate in candidates where candidate.key.isValidSignature(parsed.signature, for: parsed.signed) {
-                return .success(parsed.manifest)
-            }
-            return .failure(.badSignature)
+            if let problem = check(parsed.signed, parsed.signature, keyID: parsed.manifest.keyID, keys: keys) { return .failure(problem) }
+            return .success(parsed.manifest)
         }
+    }
+
+    /// Nil when `signature` over `signed` is one of `keys`' (the one `keyID` names); every key in the list
+    /// must be usable, or none is trusted.
+    static func check(_ signed: Data, _ signature: Data, keyID wanted: String, keys: [String]) -> Problem? {
+        guard !keys.isEmpty else { return .noKey }
+        var publicKeys: [(id: String, key: Curve25519.Signing.PublicKey)] = []
+        for text in keys {
+            guard let raw = usableKey(text), let key = try? Curve25519.Signing.PublicKey(rawRepresentation: raw) else { return .badKey }
+            publicKeys.append((keyID(raw), key))
+        }
+        let candidates = publicKeys.filter { $0.id == wanted }
+        guard !candidates.isEmpty else { return .unknownKey(wanted) }
+        for candidate in candidates where candidate.key.isValidSignature(signature, for: signed) { return nil }
+        return .badSignature
     }
 
     // MARK: Writing (the signer's)
 
     /// The lines a signature covers, as the signer writes them (each ending in "\n").
     static func signedText(tag: String, build: String, asset: String, size: Int64, sha256: String,
-                           cdhashes: [String: String], keyID: String) -> String {
+                           cdhashes: [String: String], signedAt: Date, keyID: String) -> String {
         var text = "\(firstLine)\ntag \(tag)\nversion \(tag.dropFirst())\nbuild \(build)\nasset \(asset)\nsize \(size)\nsha256 \(sha256)\n"
         for arch in cdhashes.keys.sorted() { text += "cdhash \(arch) \(cdhashes[arch]!)\n" }
-        return text + "key \(keyID)\n"
+        return text + "signed \(dateText(signedAt))\nkey \(keyID)\n"
     }
 
     /// The whole manifest: the signed lines and the signature line.
@@ -216,6 +233,101 @@ struct UpdateManifest: Equatable, Sendable {
     }
 }
 
+// MARK: Dates
+
+extension UpdateManifest {
+    /// "2026-11-12T03:00:00Z": UTC, whole seconds, exactly 20 characters, a real date of the years 2000 to
+    /// 2999; nil for anything else (another zone, fractions, a 30 February).
+    static func date(_ text: String) -> Date? {
+        let b = Array(text.utf8)
+        guard b.count == 20, b[4] == 0x2D, b[7] == 0x2D, b[10] == 0x54, b[13] == 0x3A, b[16] == 0x3A, b[19] == 0x5A else { return nil }
+        func number(_ r: Range<Int>) -> Int? {
+            b[r].allSatisfy { $0 >= 0x30 && $0 <= 0x39 } ? Int(String(decoding: b[r], as: UTF8.self)) : nil
+        }
+        guard let year = number(0..<4), let month = number(5..<7), let day = number(8..<10), let hour = number(11..<13),
+              let minute = number(14..<16), let second = number(17..<19), (2000...2999).contains(year) else { return nil }
+        guard let date = utc.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute, second: second)),
+              dateText(date) == text else { return nil }
+        return date
+    }
+
+    /// `date`'s form of a moment (its fraction of a second dropped).
+    static func dateText(_ date: Date) -> String {
+        let c = utc.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+        return String(format: "%04d-%02d-%02dT%02d:%02d:%02dZ", c.year ?? 0, c.month ?? 0, c.day ?? 0, c.hour ?? 0, c.minute ?? 0, c.second ?? 0)
+    }
+
+    private static let utc: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(secondsFromGMT: 0)!
+        return c
+    }()
+}
+
+// MARK: A stop
+
+extension UpdateManifest {
+    /// Noah's word that one release must not be installed, `Sill.zip.stop` beside it, signed as a manifest
+    /// is (its own first line, so neither can stand for the other):
+    ///
+    ///     Sill stop 1
+    ///     tag v0.6.3
+    ///     sha256 <the release's zip, as its manifest names it>
+    ///     signed 2026-11-13T09:00:00Z
+    ///     key 1a2b3c4d
+    ///     signature <88 characters of base64: Ed25519 over every byte before this line>
+    struct Stop: Equatable, Sendable {
+        static let firstLine = "Sill stop 1"
+        let tag: String
+        let sha256: String
+        let signedAt: Date
+        let keyID: String
+    }
+
+    /// The lines a stop's signature covers.
+    static func stopText(tag: String, sha256: String, signedAt: Date, keyID: String) -> String {
+        "\(Stop.firstLine)\ntag \(tag)\nsha256 \(sha256)\nsigned \(dateText(signedAt))\nkey \(keyID)\n"
+    }
+
+    /// The stop, if `data` is exactly of its form and signed by one of `keys`.
+    static func verifyStop(_ data: Data, keys: [String]) -> Result<Stop, Problem> {
+        guard data.count <= maxBytes else { return .failure(.tooLarge) }
+        let bytes = [UInt8](data)
+        guard let last = bytes.last, last == 0x0A, bytes.allSatisfy({ $0 == 0x0A || (0x20...0x7E).contains($0) }) else {
+            return .failure(.notText)
+        }
+        var lines = String(decoding: bytes, as: UTF8.self).components(separatedBy: "\n")
+        lines.removeLast()
+        guard lines.count == 6, lines[0] == Stop.firstLine else { return .failure(.format("first")) }
+        func value(_ i: Int, _ key: String) -> String? { lines[i].hasPrefix(key + " ") ? String(lines[i].dropFirst(key.count + 1)) : nil }
+        guard let tag = value(1, "tag"), strictTag(tag) != nil else { return .failure(.format("tag")) }
+        guard let sha256 = value(2, "sha256"), isHex(sha256, count: 64) else { return .failure(.format("sha256")) }
+        guard let signedText = value(3, "signed"), let signedAt = date(signedText) else { return .failure(.format("signed")) }
+        guard let keyID = value(4, "key"), isHex(keyID, count: 8) else { return .failure(.format("key")) }
+        guard let signatureText = value(5, "signature"), signatureText.count == 88, let signature = Data(base64Encoded: signatureText),
+              signature.count == 64, signature.base64EncodedString() == signatureText else { return .failure(.format("signature")) }
+        let signedEnd = lines[0..<5].reduce(0) { $0 + $1.utf8.count + 1 }
+        if let problem = check(Data(bytes[0..<signedEnd]), signature, keyID: keyID, keys: keys) { return .failure(problem) }
+        return .success(Stop(tag: tag, sha256: sha256, signedAt: signedAt, keyID: keyID))
+    }
+
+    /// What the signer asks in person before it signs a stop.
+    static func stoppingReason(tag: String, sha256: String) -> String {
+        "stop every Sill from installing Sill \(tag) (SHA-256 \(grouped(sha256)))"
+    }
+
+    /// 64 hex digits in groups of eight.
+    static func grouped(_ hex: String) -> String {
+        var groups: [String] = []
+        var rest = Substring(hex)
+        while !rest.isEmpty {
+            groups.append(String(rest.prefix(8)))
+            rest = rest.dropFirst(8)
+        }
+        return groups.joined(separator: " ")
+    }
+}
+
 // MARK: The signer's prompt
 
 extension UpdateManifest {
@@ -224,13 +336,7 @@ extension UpdateManifest {
     /// eight, to compare with what release.sh printed. The whole of it: with 16 digits a zip that looks the
     /// same was a 2^64 search away (review 3, F4).
     static func signingReason(tag: String, asset: String, size: Int64, sha256: String) -> String {
-        var groups: [String] = []
-        var rest = Substring(sha256)
-        while !rest.isEmpty {
-            groups.append(String(rest.prefix(8)))
-            rest = rest.dropFirst(8)
-        }
-        return "sign Sill \(tag) for Update Now: \(asset), \(size) bytes, SHA-256 \(groups.joined(separator: " "))"
+        "sign Sill \(tag) for Update Now: \(asset), \(size) bytes, SHA-256 \(grouped(sha256))"
     }
 }
 

@@ -18,6 +18,9 @@ import Security
 //   update-manifest sign --tag T --build B --asset NAME --size N --sha256 HEX --cdhash ARCH=HEX...
 //                        --out FILE [--key-file PATH]
 //   update-manifest verify FILE --key BASE64...   the manifest's fields, if one of the keys signed it
+//   update-manifest stop --tag T --sha256 HEX --out FILE [--key-file PATH]
+//                                                 a stop for that release (no Sill installs it)
+//   update-manifest verify-stop FILE --key BASE64...
 //
 // The private key is read from the keychain (which asks unless this binary made the item) or from the file
 // given; it is never printed, never written anywhere else, and never sent anywhere. Before the keychain's key
@@ -88,7 +91,7 @@ func describe(_ key: Curve25519.Signing.PrivateKey) -> String {
     return "public key \(pub.base64EncodedString()) (key ID \(UpdateManifest.keyID(pub)))"
 }
 
-guard let command = args.first else { fail("a command: new-key, public-key, sign or verify") }
+guard let command = args.first else { fail("a command: new-key, public-key, sign, stop, verify or verify-stop") }
 args.removeFirst()
 switch command {
 case "new-key":
@@ -129,8 +132,9 @@ case "sign":
         confirmInPerson(UpdateManifest.signingReason(tag: tag, asset: asset, size: size, sha256: sha))
     }
     let key = storedKey(file)
+    // Signed now, by this Mac's clock (the automatic update counts its waiting from it).
     let text = UpdateManifest.signedText(tag: tag, build: build, asset: asset, size: size, sha256: sha, cdhashes: cdhashes,
-                                         keyID: UpdateManifest.keyID(key.publicKey.rawRepresentation))
+                                         signedAt: Date(), keyID: UpdateManifest.keyID(key.publicKey.rawRepresentation))
     guard let signature = try? key.signature(for: Data(text.utf8)) else { fail("signing failed") }
     let document = Data(UpdateManifest.document(signedText: text, signature: signature).utf8)
     // Read back as the app reads it, with this key, before it is written.
@@ -139,6 +143,29 @@ case "sign":
     }
     guard FileManager.default.createFile(atPath: out, contents: document) else { fail("can’t write \(out)") }
     print("Signed \(tag) (\(asset), \(size) bytes) with \(describe(key)): \(out)")
+case "stop":
+    // A stop for one release (UpdateManifest.Stop): no Sill installs that tag's zip, by Update Now or by itself.
+    guard let tag = option("--tag"), let sha = option("--sha256"), let out = option("--out") else {
+        fail("stop needs --tag, --sha256 (the release's zip, as its manifest names it) and --out")
+    }
+    let file = option("--key-file")
+    if file == nil { confirmInPerson(UpdateManifest.stoppingReason(tag: tag, sha256: sha)) }
+    let key = storedKey(file)
+    let text = UpdateManifest.stopText(tag: tag, sha256: sha, signedAt: Date(), keyID: UpdateManifest.keyID(key.publicKey.rawRepresentation))
+    guard let signature = try? key.signature(for: Data(text.utf8)) else { fail("signing failed") }
+    let document = Data(UpdateManifest.document(signedText: text, signature: signature).utf8)
+    guard case .success = UpdateManifest.verifyStop(document, keys: [key.publicKey.rawRepresentation.base64EncodedString()]) else {
+        fail("the stop does not read back (a field is not of the format: \(text))")
+    }
+    guard FileManager.default.createFile(atPath: out, contents: document) else { fail("can’t write \(out)") }
+    print("Signed a stop for \(tag) with \(describe(key)): \(out)")
+case "verify-stop":
+    guard let file = args.first, let data = FileManager.default.contents(atPath: file) else { fail("verify-stop FILE --key BASE64") }
+    args.removeFirst()
+    switch UpdateManifest.verifyStop(data, keys: options("--key")) {
+    case .success(let stop): print("stop: tag \(stop.tag), SHA-256 \(stop.sha256), signed \(UpdateManifest.dateText(stop.signedAt)), key \(stop.keyID)")
+    case .failure(let p): fail("not verified: \(p.text)")
+    }
 case "verify":
     guard let file = args.first, let data = FileManager.default.contents(atPath: file) else { fail("verify FILE --key BASE64") }
     args.removeFirst()
@@ -146,6 +173,7 @@ case "verify":
     case .success(let m):
         print("tag \(m.tag), version \(m.version), build \(m.build), \(m.asset) \(m.size) bytes, SHA-256 \(m.sha256), key \(m.keyID)")
         for (arch, h) in m.cdhashes.sorted(by: { $0.key < $1.key }) { print("cdhash \(arch) \(h)") }
+        print("signed \(UpdateManifest.dateText(m.signedAt))")
     case .failure(let p):
         fail("not verified: \(p.text)")
     }

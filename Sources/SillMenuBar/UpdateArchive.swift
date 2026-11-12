@@ -271,6 +271,24 @@ enum UpdateArchive {
                 }
             }
             guard case .link(let target) = e.kind else { continue }
+            // Never at the code signature's own paths: Security opens them before it judges the rest.
+            let lower = e.components.map { $0.lowercased() }
+            if lower.count >= 3, lower[1] == "contents", lower[2] == "_codesignature" || (lower.count == 3 && lower[2] == "coderesources") {
+                return .failure(.badLink(e.path))
+            }
+            // The walk as the file system takes it: a step into a link follows that link, so ".." after it
+            // climbs from where the link leads, not from where it sits. A target that steps into a link
+            // anywhere is refused (review 3, F6: "D1/…/D12/B/../…" through a link B led out of the app
+            // while the lexical walk stayed in).
+            var walked = Array(e.components.dropLast())
+            for part in target.split(separator: "/", omittingEmptySubsequences: true) where part != "." {
+                if part == ".." {
+                    if !walked.isEmpty { walked.removeLast() }
+                    continue
+                }
+                walked.append(String(part))
+                if case .link? = kinds[walked.joined(separator: "/").lowercased()] { return .failure(.throughLink(e.path)) }
+            }
             guard let resolved = resolve(target, from: Array(e.components.dropLast())), resolved.count > 1,
                   resolved.first == top else { return .failure(.badLink(e.path)) }
             for k in 1...resolved.count {

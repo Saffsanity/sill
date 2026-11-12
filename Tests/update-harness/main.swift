@@ -53,6 +53,7 @@ struct Release {
     var manifestSize: Int64?
     var apiDigest: String??            // nil: the zip's; .some(nil): none; .some(x): x
     var signer = key
+    var signedAt = Date()
     var tamperManifest = false
     var withManifest = true
     var modes: [String: String] = [:]
@@ -68,7 +69,7 @@ func publish(_ r: Release) {
     let sha = sha256(r.zip)
     let tag = r.manifestTag ?? r.tag
     let signedText = M.signedText(tag: tag, build: r.build, asset: r.asset, size: r.manifestSize ?? size, sha256: r.manifestSHA ?? sha,
-                                  cdhashes: cdhashes(r.app), keyID: M.keyID(r.signer.publicKey.rawRepresentation))
+                                  cdhashes: cdhashes(r.app), signedAt: r.signedAt, keyID: M.keyID(r.signer.publicKey.rawRepresentation))
     var manifest = M.document(signedText: signedText, signature: try! r.signer.signature(for: Data(signedText.utf8)))
     if r.tamperManifest { manifest = manifest.replacingOccurrences(of: "build \(r.build)", with: "build 99") }
     let manifestName = r.asset + ".manifest"
@@ -137,15 +138,20 @@ struct Outcome {
     var staging: URL?
     var staged: URL?
 }
-/// stagedResource: the checked new copy changed in staging between the check and the swap. both: that, and
-/// the installed (old) copy's resource changed before the swap too, so it is not the old copy whole once it
-/// waits in staging. wrongRunningCDHash: the copy at the path is not the running one.
-enum Tamper { case none, stagedResource, both, wrongRunningCDHash }
+/// stagedResource: the checked new copy changed in staging after the check, before install (the check right
+/// before the swap refuses it). raced: changed between that last check and the swap (`beforeSwap`, the race
+/// review 3's F5 names): the check after the swap catches it and the old copy goes back. both: raced, and the
+/// installed (old) copy's resource changed before too, so it is not the old copy whole once it waits in
+/// staging. hardLink: a file of the new copy given a second name before the check (N4). signatureLink: its
+/// CodeResources made a link before the check (F6). swapFails: the swap itself fails (the folder made
+/// read-only at the last moment), the leftover note already written (N5). wrongRunningCDHash: the copy at the
+/// path is not the running one.
+enum Tamper { case none, stagedResource, raced, both, hardLink, signatureLink, swapFails, wrongRunningCDHash }
 
 /// prepare, staging, download, unpack, check, install: the first failure, or none (the new copy in place).
 func update(_ name: String, using ins: UpdateInstaller = installer, installedFrom: URL? = nil, offeredTag: String = "v1.1",
             running: SillVersion = SillVersion("1.0")!, runningRequirement: SecRequirement? = nil, tamper: Tamper = .none,
-            holdBundle: Bool = false) async -> Outcome {
+            holdBundle: Bool = false, leftoverNote: URL? = nil) async -> Outcome {
     let installed = installedCopy(name, from: installedFrom ?? out.appendingPathComponent("apps/installed/UpdTest.app"))
     var o = Outcome(failure: nil, installed: installed)
     // In Sill.app, Bundle.main is the installed copy, its Info.plist read long before the swap. With holdBundle an
@@ -187,26 +193,46 @@ func update(_ name: String, using ins: UpdateInstaller = installer, installedFro
     case .success(let a): staged = a
     }
     o.staged = staged
+    func resource(_ bundle: URL) -> URL {
+        ["Contents/Resources/note.txt", "Contents/Resources/AppIcon.icns"].map { bundle.appendingPathComponent($0) }
+            .first { FileManager.default.fileExists(atPath: $0.path) }!
+    }
+    func append(_ bundle: URL, _ text: String) {
+        let h = try! FileHandle(forWritingTo: resource(bundle)); h.seekToEndOfFile(); h.write(Data(text.utf8)); h.closeFile()
+    }
+    if tamper == .hardLink {
+        let other = out.appendingPathComponent("cases/\(name)/other-name")
+        try? FileManager.default.removeItem(at: other)
+        precondition(link(resource(staged).path, other.path) == 0, "a hard link")
+    }
+    if tamper == .signatureLink {
+        let resources = staged.appendingPathComponent("Contents/_CodeSignature/CodeResources")
+        precondition(FileManager.default.fileExists(atPath: resources.path), "the test app has a CodeResources")
+        try! FileManager.default.removeItem(at: resources)
+        try! FileManager.default.createSymbolicLink(atPath: resources.path, withDestinationPath: "../Info.plist")
+    }
     let checked: P.Checked
     switch ins.check(staged, manifest: prepared.manifest, running: running, runningRequirement: runningRequirement) {
     case .failure(let f): o.failure = f; return o
     case .success(let c): checked = c
     }
-    func append(_ bundle: URL, _ text: String) {
-        let note = ["Contents/Resources/note.txt", "Contents/Resources/AppIcon.icns"].map { bundle.appendingPathComponent($0) }
-            .first { FileManager.default.fileExists(atPath: $0.path) }!
-        let h = try! FileHandle(forWritingTo: note); h.seekToEndOfFile(); h.write(Data(text.utf8)); h.closeFile()
-    }
-    if tamper == .stagedResource || tamper == .both { append(staged, "changed between the check and the swap") }
+    if tamper == .stagedResource { append(staged, "changed after the check, before install") }
     // A resource changes nothing of the cdhash (it is read from the executable's signature): the copy at the
     // path still reads as the running code, and only validation tells it isn't whole.
     if tamper == .both { append(installed, "the old copy changed before the swap") }
+    let folder = installed.deletingLastPathComponent()
+    let race: (() -> Void)? = switch tamper {
+    case .raced, .both: { append(staged, "changed between the last check and the swap") }
+    case .swapFails: { chmod(folder.path, 0o555) }
+    default: nil
+    }
     let runningCDHash = tamper == .wrongRunningCDHash ? String(repeating: "0", count: 40) : (UpdateInstaller.cdhash(of: installed, arch: .current) ?? "")
     switch ins.install(staged: staged, installed: installed, runningCDHash: runningCDHash, expected: checked, manifest: prepared.manifest,
-                       running: running, runningRequirement: runningRequirement) {
+                       running: running, runningRequirement: runningRequirement, leftoverNote: leftoverNote, beforeSwap: race) {
     case .failure(let f): o.failure = f
     case .success: break
     }
+    if tamper == .swapFails { chmod(folder.path, 0o755) }
     return o
 }
 
@@ -340,7 +366,16 @@ await refused("a version that is not the tag's", Release(zip: zip("v1.2"), app: 
 await refused("code the manifest doesn't name", Release(zip: zip("v1.1b"), app: app("v1.1"))) { $0 == .bundle(.notManifest("code")) }
 
 say("== refused: the swap")
-await refused("changed between the check and the swap", v11, tamper: .stagedResource) {
+await refused("changed after the check, before install (the check right before the swap)", v11, tamper: .stagedResource) {
+    if case .bundle(.invalidSignature) = $0 { return true }; return false
+}
+await refused("a file of the new copy given a second name (a hard link)", v11, tamper: .hardLink) {
+    if case .bundle(.notABundle(let why)) = $0 { return why.contains("another name") }; return false
+}
+await refused("the new copy's CodeResources a link", v11, tamper: .signatureLink) {
+    if case .bundle(.notABundle(let why)) = $0 { return why.contains("_CodeSignature/CodeResources is not a file") }; return false
+}
+await refused("changed between the last check and the swap (caught after it, put back)", v11, tamper: .raced) {
     if case .checkAfterSwap(.invalidSignature, putBack: true) = $0 { return true }; return false
 }
 await refused("the copy at the path is not the running one", v11, tamper: .wrongRunningCDHash) { $0 == .changedSinceStart }
@@ -356,6 +391,19 @@ check(both.staging.map { FileManager.default.fileExists(atPath: $0.appendingPath
       "both copies changed: the failing copy moved into the staging folder")
 say("both copies changed: \(both.failure.map { P.logText($0) } ?? "installed"); the path empty, the failing copy in staging")
 if let s = both.staging { UpdateInstaller.remove(s) }
+// The leftover note is written before the swap (N5): a swap that fails at the last moment (the folder made
+// read-only) leaves the note naming the staging folder, and the copy at the path as it was.
+publish(v11)
+let noteFile = out.appendingPathComponent("cases/note/Update Now leftover.txt")
+let failedSwap = await update("the swap fails", tamper: .swapFails, leftoverNote: noteFile)
+if case .swapFailed? = failedSwap.failure { check(true, "") } else {
+    check(false, "the swap fails: \(failedSwap.failure.map { P.logText($0) } ?? "installed")")
+}
+let noted = (try? String(contentsOf: noteFile, encoding: .utf8))?.trimmingCharacters(in: .newlines)
+check(noted != nil && noted == failedSwap.staging?.path, "the note written before the swap: \(noted ?? "none")")
+check(version(of: failedSwap.installed) == "1.0", "the swap fails: the copy at the path as it was")
+say("the swap fails: \(failedSwap.failure.map { P.logText($0) } ?? "installed"); the note was written before it")
+if let s = failedSwap.staging { UpdateInstaller.remove(s) }
 
 say("== the requests GitHub would have seen")
 let log = (try? String(contentsOf: out.appendingPathComponent("srv/requests.log"), encoding: .utf8)) ?? ""
@@ -383,6 +431,10 @@ for _ in 0..<50 where !ready {
 check(ready, "the running process satisfies its identifier and cdhash")
 check(!UpdateInstaller.process(child.processIdentifier, satisfies: "identifier \"me.saffer.sill.updater-test\" and cdhash H\"\(String(repeating: "0", count: 40))\""), "another cdhash")
 check(!UpdateInstaller.process(child.processIdentifier, satisfies: P.pinnedRequirement), "the test app is not Sill")
+// A Sill worth waiting for at launch is a genuine one (N7): the test app is, for its own identifier, and is
+// not Sill for the pinned requirement.
+check(UpdateInstaller.genuine([child.processIdentifier], requirement: "identifier \"me.saffer.sill.updater-test\"") == [child.processIdentifier]
+      && UpdateInstaller.genuine([child.processIdentifier], requirement: P.pinnedRequirement).isEmpty, "genuine Sills: by the requirement")
 
 say("== where an app runs (the refusals' facts)")
 var s = UpdateInstaller.situation(bundle: running, executable: "UpdTest", runningIsRelease: true, testFeed: false, runningIsInstalled: true, neededBytes: 1 << 20)

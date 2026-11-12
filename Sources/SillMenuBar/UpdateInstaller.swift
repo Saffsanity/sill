@@ -352,6 +352,24 @@ final class UpdateInstaller: @unchecked Sendable {
         guard lstat(base + "/Contents/MacOS/" + executable, &s) == 0, s.st_mode & S_IFMT == S_IFREG, s.st_mode & 0o111 != 0 else {
             return "no executable"
         }
+        // Security opens the signature's own files before it judges the rest: they are what they should be,
+        // never a link (review 3, F6: a link there to a FIFO held the check for good).
+        if let t = type(base + "/Contents/_CodeSignature"), t != S_IFDIR { return "Contents/_CodeSignature is not a folder" }
+        for path in ["Contents/_CodeSignature/CodeResources", "Contents/CodeResources"] {
+            if let t = type(base + "/" + path), t != S_IFREG { return "\(path) is not a file" }
+        }
+        // Every entry a file, a folder or a link, and every file the app's own by one name: a hard link from
+        // anywhere this user can write could change it after the checks, outside App Management (N4).
+        guard let walker = FileManager.default.enumerator(atPath: base) else { return "the app can't be read" }
+        while let rel = walker.nextObject() as? String {
+            var e = stat()
+            guard lstat(base + "/" + rel, &e) == 0 else { return "\(rel) can't be read" }
+            switch e.st_mode & S_IFMT {
+            case S_IFREG: if e.st_nlink != 1 { return "\(rel) has another name (a hard link)" }
+            case S_IFDIR, S_IFLNK: break
+            default: return "\(rel) is not a file, a folder or a link"
+            }
+        }
         return nil
     }
 
@@ -364,13 +382,28 @@ final class UpdateInstaller: @unchecked Sendable {
     /// that failed its check is moved off Sill's path into the staging folder: nothing that failed a
     /// check is ever left where Sill (and its login item) starts from. Afterwards `staged` holds the old
     /// copy.
+    ///
+    /// The checked copy is checked once more right before the swap (review 3, F5): anything of this user
+    /// that changed it in the staging folder since the check is caught there, before Sill's right to change
+    /// Sill.app moves it; the check after the swap covers the moment between. `leftoverNote`: where the
+    /// staging folder is noted for the next Sill, before the swap, so a crash after it still leaves the note
+    /// (N5). `beforeSwap` is the harness's (the race it stages between the last check and the swap); Sill.app
+    /// never passes one.
     func install(staged: URL, installed: URL, runningCDHash: String, expected: Policy.Checked, manifest: UpdateManifest,
-                 running: SillVersion, runningRequirement: SecRequirement?) -> Result<Void, Failure> {
+                 running: SillVersion, runningRequirement: SecRequirement?, leftoverNote: URL? = nil,
+                 beforeSwap: (() -> Void)? = nil) -> Result<Void, Failure> {
         guard Self.isFolder(installed) else { return .failure(.changedSinceStart) }
         guard Self.cdhash(of: installed, arch: .current) == runningCDHash else { return .failure(.changedSinceStart) }
         guard Self.isFolder(staged) else { return .failure(.swapFailed("the checked copy is gone")) }
         guard let a = Self.device(of: staged.deletingLastPathComponent()), let b = Self.device(of: installed.deletingLastPathComponent()),
               a == b else { return .failure(.swapFailed("not on the same volume")) }
+        switch check(staged, manifest: manifest, running: running, runningRequirement: runningRequirement) {
+        case .success(let c) where c == expected: break
+        case .failure(.bundle(let p)): return .failure(.bundle(p))
+        default: return .failure(.bundle(.codeChanged))
+        }
+        if let leftoverNote { Self.noteLeftover(staged.deletingLastPathComponent(), in: leftoverNote) }
+        beforeSwap?()
         guard renamex_np(staged.path, installed.path, UInt32(RENAME_SWAP)) == 0 else { return .failure(.swapFailed(Self.errnoText())) }
         let problem: Policy.BundleProblem
         switch check(installed, manifest: manifest, running: running, runningRequirement: runningRequirement) {
@@ -577,6 +610,12 @@ final class UpdateInstaller: @unchecked Sendable {
         guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &guest) == errSecSuccess, let guest,
               SecRequirementCreateWithString(requirement as CFString, [], &req) == errSecSuccess, let req else { return false }
         return SecCodeCheckValidity(guest, [], req) == errSecSuccess
+    }
+
+    /// Of `pids`, the processes that satisfy `requirement` (a Sill worth waiting for at launch is a genuine
+    /// one: anything can claim Sill's bundle identifier; review 3, N7).
+    static func genuine(_ pids: [pid_t], requirement: String) -> [pid_t] {
+        pids.filter { process($0, satisfies: requirement) }
     }
 
     /// The requirement the launched copy must satisfy: the trust's signer and one of the checked cdhashes.
