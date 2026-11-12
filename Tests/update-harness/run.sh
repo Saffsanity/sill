@@ -71,6 +71,9 @@ make_app() {
     mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
     cp "$out/updtest-bin" "$app/Contents/MacOS/UpdTest"
     printf 'note %s\n' "$note" > "$app/Contents/Resources/note.txt"
+    # The copy installed before the update has a folder no other copy has (the watcher's W3 case: a note there lands
+    # in the put-back copy alone).
+    if [ "$1" = installed ]; then mkdir "$app/Contents/Resources/Before"; printf 'before the update\n' > "$app/Contents/Resources/Before/before.txt"; fi
     cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

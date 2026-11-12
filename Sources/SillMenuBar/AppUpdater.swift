@@ -621,19 +621,22 @@ final class AppUpdater {
                 // The cooling-off counts from this Sill's first read of this verified manifest, kept across launches
                 // (the second security pass's A1): the signed line is whoever holds the key's to write. It counts on
                 // GitHub's clock too, from the release's publication when that is later (the third pass's CL1 and
-                // AU1). A nightly waits only while `Auto.nightlyCoolingOff` says so (none today), and only then is
-                // its sight kept (by its key, "0.6.2 (1471)").
+                // AU1). The sight is kept by GitHub's release object too (the fourth pass's AU2: the same tag and zip
+                // on another, older object wait afresh). A nightly waits only while `Auto.nightlyCoolingOff` says so
+                // (none today), and only then is its sight kept (by its key, "0.6.2 (1471)").
                 let now = Date()
                 let wait = nightly ? Auto.nightlyCoolingOff : Auto.coolingOff
                 let sightTag = nightly ? Auto.key(p.release.version, build: p.release.build) : p.release.tag
                 if wait > 0 {
                     self.remember { Auto.sighted($0, tag: sightTag, sha256: p.manifest.sha256, signedAt: p.manifest.signedAt, now: now,
-                                                 github: p.release.answeredAt, published: nightly ? nil : p.release.publishedAt) }
+                                                 github: p.release.answeredAt, published: nightly ? nil : p.release.publishedAt,
+                                                 release: p.release.releaseID) }
                 }
-                let sight = Auto.sighting(self.memory, tag: sightTag, sha256: p.manifest.sha256)
+                let sight = Auto.sighting(self.memory, tag: sightTag, sha256: p.manifest.sha256, release: p.release.releaseID)
                 let first = sight?.first ?? now
                 let github = Auto.GitHubClock(firstSeen: sight?.firstGitHub ?? p.release.answeredAt, now: p.release.answeredAt,
-                                              published: nightly ? nil : (sight?.published ?? p.release.publishedAt))
+                                              published: nightly ? nil : (sight?.published ?? p.release.publishedAt),
+                                              release: p.release.releaseID)
                 switch Auto.dates(signedAt: p.manifest.signedAt, firstSeen: first, now: now, nightly: nightly, wait: wait, github: github) {
                 case .go:
                     // An attempt counts from here: a verified release Sill goes on to download (A3).
@@ -883,13 +886,16 @@ final class AppUpdater {
     }
 
     private func startWatcher() {
-        guard let pid = newPID, let unpacked, let oldCDHash, let checked, let running = runningVersion else { return }
+        // The new copy's cdhash on this Mac's slice: the code the swap checked and the new process runs (the fourth
+        // security pass's W4: the watcher moves it back to Sill's path only while it is still that code, whole).
+        guard let pid = newPID, let unpacked, let oldCDHash, let checked, let running = runningVersion,
+              let newCDHash = checked.cdhashes[Policy.Architecture.current.rawValue] else { return }
         let token = UUID().uuidString
         // The version and the build: a nightly can have this Sill's version (only the new Sill may answer the watcher).
         UpdateInstaller.writeNote(Self.pendingNote, lines: [token, "\(checked.version) (\(checked.build))", state.mode == .automatic ? "automatic" : "manual",
                                                             target?.build != nil ? UpdateManifest.nightlyTag : "release"])
         let w = UpdateInstaller.Watch(pid: pid, installed: bundle, executable: installer.trust.executable, oldCopy: unpacked, oldCDHash: oldCDHash,
-                                      requirement: installer.trust.signer, startedNote: Self.startedNote(token), token: token,
+                                      newCDHash: newCDHash, requirement: installer.trust.signer, startedNote: Self.startedNote(token), token: token,
                                       restoredNote: Self.restoredNote, seconds: Int(Policy.watchWait))
         if UpdateInstaller.startWatcher(w) {
             print("Update: if Sill \(checked.version) hasn’t run for \(Int(Policy.provedAfter)) s within \(Int(Policy.watchWait)) s, a watcher puts Sill \(running) back and starts it.")
@@ -954,6 +960,22 @@ final class AppUpdater {
                 let why = restored[1]
                 print("Update: Sill \(runningKey ?? "") didn’t start the first time (\(why)), and the copy it replaced failed the watcher’s last check, so the watcher left this one in place, not started.")
                 state = Policy.State(phase: .failed(.keptUnstarted(why)), mode: p[2] == "automatic" ? .automatic : .manual)
+                cleanUpAfterStart()
+                return
+            }
+            // Neither copy could be left whole at Sill's path (the fourth security pass's W4): the copy put back failed
+            // its last check and the new one couldn't go back whole, or the path held something else after the move.
+            // This Sill was opened since, from wherever the person got it.
+            if restored.count > 2, restored[2] == "lost", let p = pending, p.count >= 3, restored.first == p[0] {
+                let why = restored[1]
+                let automatic = p[2] == "automatic"
+                print("Update: \(p[1]) didn’t start the first time (\(why)), and the watcher couldn’t leave a whole Sill at its path; this copy, \(runningKey ?? "unknown"), was opened since.")
+                if automatic, let (failed, failedBuild) = Auto.parseKey(p[1]), let running = runningVersion,
+                   Policy.isNewer(failed, build: failedBuild, than: running, runningBuild: runningBuild, byBuild: true) {
+                    let nightly = p.count > 3 && p[3] == UpdateManifest.nightlyTag
+                    remember { Auto.failed($0, failed, why: "it didn’t run: \(why); no whole Sill was left at its path", build: nightly ? failedBuild : nil) }
+                }
+                state = Policy.State(phase: .failed(.noWholeSillLeft(why)), mode: automatic ? .automatic : .manual)
                 cleanUpAfterStart()
                 return
             }

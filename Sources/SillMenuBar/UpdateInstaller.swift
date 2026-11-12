@@ -85,7 +85,7 @@ final class UpdateInstaller: @unchecked Sendable {
                 }
                 let release = Policy.Release(tag: UpdateManifest.nightlyTag, version: n.manifest.version, zip: n.listing.zip,
                                              manifest: n.listing.manifest, stop: nil, build: offeredBuild, channel: .nightly,
-                                             answeredAt: n.answeredAt)
+                                             answeredAt: n.answeredAt, releaseID: n.listing.releaseID)
                 return .success((release, n.manifest))
             }
         }
@@ -716,19 +716,23 @@ final class UpdateInstaller: @unchecked Sendable {
         /// The old copy, in the staging folder the swap left it in, and the cdhash it ran with.
         let oldCopy: URL
         let oldCDHash: String
+        /// The new copy's cdhash on this Mac's slice, as it was checked and ran: the parked new copy goes back to
+        /// Sill's path only while it is still that code, whole (the fourth security pass's W4).
+        let newCDHash: String
         /// The requirement the old copy must satisfy to be put back (the trust's signer).
         let requirement: String
         /// The file the new Sill makes once it has run `Policy.provedAfter`: its name carries `token`
         /// (AppUpdater.startedNote), so the watcher only looks whether it is there, never opens it (W2).
         let startedNote: URL
         let token: String
-        /// The note the watcher writes when it puts the old copy back (the token, then why).
+        /// The note the watcher writes when it puts the old copy back (the token, then why; and a third line, `kept`
+        /// or `lost`, when that copy failed its last check: W3, W4).
         let restoredNote: URL
         /// How long it waits for the started note before it gives up on the new Sill.
         let seconds: Int
         /// How it starts the copy it put back (Sill.app: macOS's `open`, through Launch Services).
         var launcher = "/usr/bin/open"
-        /// The slice whose cdhash `oldCDHash` is (this Mac's).
+        /// The slice whose cdhashes `oldCDHash` and `newCDHash` are (this Mac's).
         var arch = Policy.Architecture.current.rawValue
     }
 
@@ -748,13 +752,18 @@ final class UpdateInstaller: @unchecked Sendable {
     /// back or started that isn't the old copy, whole: a folder, never a link to one (a link moved to Sill's
     /// path would start whatever it points to later), and no file of it with a second name (the third security
     /// pass's W3: a hard link made while it waited in staging would let that file change after the check, as the
-    /// installer's own tree check refuses). When that last check fails, Sill's path is never left empty (W3): the
-    /// new copy, checked whole when it was installed, goes back there, not started, and the restored note says so
-    /// with a third line, `kept` (exit 8; never into whatever stands at Sill's path, exit 7). Every path and value is an argument, never part of the script's text;
+    /// installer's own tree check refuses). When that last check fails (W3, and the fourth security pass's W4):
+    /// the copy that failed goes aside; the parked new copy is checked whole as the old one was, with the cdhash it
+    /// ran with, and only then moved back to Sill's path, not started, if nothing stands there; Sill's path is
+    /// checked whole again after that move (no exclusive rename exists in /bin/sh: `mv` moves into a folder made
+    /// at that path in the moment between, so the check after it decides), and the restored note's third line says
+    /// what is there, `kept` (exit 8) or, when anything of it failed, `lost`: no whole Sill at its path (exit 9).
+    /// The `kept` note is written before that last check, so a write through a link planted at the note (`1<>`
+    /// opens through one in the moment after `mktemp`: N11 h) lands before the check and is caught. Every path and value is an argument, never part of the script's text;
     /// the token is one too, readable with `ps` by this user's processes, accepted (N10 j: any of them can as well
     /// kill the watcher, which is all a made-up started note achieves).
     static let watcherScript = #"""
-pid=$1; app=$2; exe=$3; old=$4; cdhash=$5; req=$6; started=$7; token=$8; restored=$9; shift 9; wait=$1; launcher=$2; arch=$3
+pid=$1; app=$2; exe=$3; old=$4; cdhash=$5; req=$6; started=$7; token=$8; restored=$9; shift 9; wait=$1; launcher=$2; arch=$3; newcdhash=$4
 proved() { [ -f "$started" ] && [ ! -L "$started" ]; }
 running() { [ "$(/bin/ps -ww -p "$pid" -o comm= 2>/dev/null)" = "$app/Contents/MacOS/$exe" ]; }
 whole() {
@@ -763,7 +772,13 @@ whole() {
     [ -z "$many" ] || return 1
     /usr/bin/codesign --verify --deep --strict "-R=$req" "$1" >/dev/null 2>&1 || return 1
     have=$(/usr/bin/codesign -d -vvv --arch "$arch" "$1" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/head -n 1)
-    [ -n "$have" ] && [ "$have" = "$cdhash" ]
+    [ -n "$have" ] && [ -n "$2" ] && [ "$have" = "$2" ]
+}
+left() {
+    note=$(/usr/bin/mktemp "$restored.XXXXXX") && /usr/bin/printf '%s
+%s
+%s
+' "$token" "$why" "$1" 1<>"$note" && /bin/mv -f -h "$note" "$restored"
 }
 i=0
 while [ "$i" -lt "$wait" ]; do
@@ -782,7 +797,7 @@ if running; then
     running && /bin/kill -KILL "$pid" 2>/dev/null
     /bin/sleep 1
 fi
-whole "$old" || exit 3
+whole "$old" "$cdhash" || exit 3
 dir=$(/usr/bin/dirname "$old")
 parked="$dir/did not start.app"
 /bin/mv "$app" "$parked" || exit 5
@@ -790,14 +805,13 @@ if ! /bin/mv "$old" "$app"; then /bin/mv "$parked" "$app"; exit 6; fi
 note=$(/usr/bin/mktemp "$restored.XXXXXX") && /usr/bin/printf '%s
 %s
 ' "$token" "$why" 1<>"$note" && /bin/mv -f -h "$note" "$restored"
-if ! whole "$app"; then
-    /bin/mv "$app" "$dir/failed its check.app" || exit 7
-    if [ -e "$app" ] || [ -L "$app" ] || ! /bin/mv "$parked" "$app"; then exit 7; fi
-    note=$(/usr/bin/mktemp "$restored.XXXXXX") && /usr/bin/printf '%s
-%s
-kept
-' "$token" "$why" 1<>"$note" && /bin/mv -f -h "$note" "$restored"
-    exit 8
+if ! whole "$app" "$cdhash"; then
+    /bin/mv "$app" "$dir/failed its check.app" && [ ! -e "$app" ] && [ ! -L "$app" ] && whole "$parked" "$newcdhash" \
+        && /bin/mv "$parked" "$app" && state=kept || state=lost
+    left "$state"
+    [ "$state" = kept ] && whole "$app" "$newcdhash" && exit 8
+    [ "$state" = kept ] && left lost
+    exit 9
 fi
 "$launcher" "$app"
 exit 0
@@ -807,7 +821,8 @@ exit 0
     /// when it couldn't be started.
     static func startWatcher(_ w: Watch) -> Bool {
         let args = ["/bin/sh", "-c", watcherScript, "sill-update-watcher", String(w.pid), w.installed.path, w.executable, w.oldCopy.path,
-                    w.oldCDHash, w.requirement, w.startedNote.path, w.token, w.restoredNote.path, String(w.seconds), w.launcher, w.arch]
+                    w.oldCDHash, w.requirement, w.startedNote.path, w.token, w.restoredNote.path, String(w.seconds), w.launcher, w.arch,
+                    w.newCDHash]
         var attributes: posix_spawnattr_t?
         posix_spawnattr_init(&attributes)
         defer { posix_spawnattr_destroy(&attributes) }

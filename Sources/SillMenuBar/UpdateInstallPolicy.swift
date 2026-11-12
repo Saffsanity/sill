@@ -152,7 +152,7 @@ enum UpdateInstallPolicy {
     }
 
     /// GitHub's clock in an HTTPS answer (the third security pass's CL1): the `Date` header in RFC 9110's
-    /// IMF-fixdate form, "Wed, 12 Nov 2026 15:55:00 GMT", a real date of the years 2000 to 2999 with its right
+    /// IMF-fixdate form, "Thu, 12 Nov 2026 15:55:00 GMT", a real date of the years 2000 to 2999 with its right
     /// weekday; nil for anything else (the two obsolete forms, another zone, a 30 February), which never shortens
     /// a wait (UpdateAutoPolicy.dates waits for an answer that has one).
     static func httpDate(_ text: String) -> Date? {
@@ -190,6 +190,17 @@ enum UpdateInstallPolicy {
         let page: URL
         let zip: Asset
         let manifest: Asset
+        /// GitHub's id of the pre-release object (`releaseID`): a nightly's sighting is kept by it too, so a
+        /// pre-release made again waits afresh (the fourth security pass's AU2).
+        var releaseID: Int? = nil
+    }
+
+    /// GitHub's id of a release object (its `id`, a positive whole number GitHub never gives another release),
+    /// or nil when the answer has none. The automatic update keeps it in each sighting: the same tag and zip on
+    /// another release object, an older one edited to carry them, is a new sighting and waits afresh (the fourth
+    /// security pass's AU2).
+    static func releaseID(_ object: [String: Any]) -> Int? {
+        (object["id"] as? Int).flatMap { $0 > 0 ? $0 : nil }
     }
 
     static func nightlyListing(_ body: Data, endpoints: Endpoints) -> Result<NightlyListing, Failure> {
@@ -208,7 +219,7 @@ enum UpdateInstallPolicy {
         case .failure(let f): return .failure(f)
         case .success(let a):
             guard let manifest = a.manifest else { return .failure(.notSigned) }
-            return .success(NightlyListing(page: page, zip: a.zip, manifest: manifest))
+            return .success(NightlyListing(page: page, zip: a.zip, manifest: manifest, releaseID: releaseID(object)))
         }
     }
 
@@ -383,6 +394,9 @@ enum UpdateInstallPolicy {
         /// GitHub's clock when it answered (the HTTPS answer's `Date` header; nil when it had none Sill could
         /// read): the automatic update's wait counts on it too, never on this Mac's clock alone (CL1).
         var answeredAt: Date? = nil
+        /// GitHub's id of the release object (`releaseID`; nil when the answer has none): the automatic update's
+        /// sighting is kept by it, so the same tag and zip on another release object wait afresh (AU2).
+        var releaseID: Int? = nil
     }
 
     /// GitHub's latest release (a 200's body) as the one to install, or why not: it must be the
@@ -407,7 +421,8 @@ enum UpdateInstallPolicy {
         case .success(let a):
             guard let manifest = a.manifest else { return .failure(.notSigned) }
             return .success(Release(tag: tag, version: version, zip: a.zip, manifest: manifest, stop: a.stop,
-                                    publishedAt: (object["published_at"] as? String).flatMap(UpdateManifest.date)))
+                                    publishedAt: (object["published_at"] as? String).flatMap(UpdateManifest.date),
+                                    releaseID: releaseID(object)))
         }
     }
 
@@ -624,6 +639,10 @@ enum UpdateInstallPolicy {
         /// The new copy didn't come up (why), the copy before it failed the watcher's last check, so the watcher
         /// left the new one at Sill's path, not started (the third security pass's W3): this Sill.
         case keptUnstarted(String)
+        /// The new copy didn't come up (why), and the watcher couldn't leave a whole Sill at its path: the copy it put
+        /// back failed its last check, and the new one couldn't go back whole (the fourth security pass's W4). This
+        /// Sill was opened since, from wherever the person got it.
+        case noWholeSillLeft(String)
         /// A stop signed with an update key names this release (its tag): never installed.
         case stopped(tag: String)
         /// The release lists a stop that doesn't check out with an update key: nothing is installed.
@@ -697,6 +716,8 @@ enum UpdateInstallPolicy {
             return putBack ? couldNot(words(p)) : lost(running: running, keptAt: keptAt)
         case .didNotStart(_, let putBack):
             return putBack ? "Sill \(offered) didn’t start, so Sill \(running) is back." : lost(running: running, keptAt: keptAt)
+        case .noWholeSillLeft:
+            return "An update of Sill didn’t finish: the new version didn’t start the first time, and Sill’s watcher couldn’t leave a whole copy of Sill in its place. If this copy misbehaves, download Sill again from getsill.app."
         case .keptUnstarted:
             return "Sill \(running) didn’t start the first time, and the copy it replaced failed its last check, so Sill \(running) stayed. If it misbehaves, download Sill again from getsill.app."
         case .stopped: return "Sill’s developer stopped Sill \(offered) with a stop signed with Sill’s update key, so it isn’t installed. \(unchanged)"
@@ -753,6 +774,7 @@ enum UpdateInstallPolicy {
         case .checkAfterSwap(let p, let putBack): return "the check at the final path failed (\(p)); \(putBack ? "put back" : "NOT put back")"
         case .didNotStart(let why, let putBack): return "the new copy didn’t start (\(why)); \(putBack ? "put back" : "NOT put back")"
         case .keptUnstarted(let why): return "the new copy didn’t start (\(why)) and the old one failed the watcher's last check: the new copy left at Sill's path, not started"
+        case .noWholeSillLeft(let why): return "the new copy didn’t start (\(why)) and the watcher couldn't leave a whole Sill at Sill's path (the copy put back failed its last check, and the new one couldn't go back whole)"
         case .stopped(let tag): return "a stop signed with an update key names \(tag)"
         case .stopUnreadable(let p): return "the release’s stop: \(p.text)"
         case .notAutomatic(let why): return "not installed by itself: \(why)"

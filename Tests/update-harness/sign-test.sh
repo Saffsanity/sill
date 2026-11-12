@@ -24,13 +24,17 @@ trap '[ "$keep" = 1 ] || rm -rf "$out"' EXIT
 cp "$genuine/Sill.zip" "$genuine/Sill.zip.sha256" "$out/assets/"
 cat > "$out/bin/gh" <<'GH'
 #!/bin/bash
-# The stand-in: `api repos/R/releases/tags/T`, `api [--paginate] repos/R/releases…` (v0.6.1, of $GH_STANDIN_ASSETS,
-# and, with GH_STANDIN_EXTRA=published|prerelease|draft, a v0.7.0 carrying $GH_STANDIN_EXTRA_MANIFEST alone),
+# The stand-in: `api repos/R` (its permissions: push unless GH_STANDIN_PUSH=false), `api repos/R/releases/tags/T`,
+# `api [--paginate] repos/R/releases…` (v0.6.1, of $GH_STANDIN_ASSETS; GH_STANDIN_LISTING=empty lists none, =nomain
+# lists an old v0.5.0 carrying the same Sill.zip in its place; and, with GH_STANDIN_EXTRA=published|prerelease|draft,
+# a v0.7.0 carrying $GH_STANDIN_EXTRA_MANIFEST alone, =renamed a v0.7.0 carrying Sill.zip and that manifest renamed
+# Sill.zip.manifest.txt, =big a v0.7.0 whose Sill.zip.manifest is $GH_STANDIN_EXTRA_MANIFEST, larger than 4 KiB),
 # `api -H 'Accept: application/octet-stream' repos/R/releases/assets/ID` (an asset's bytes), `api
 # repos/R/git/ref/tags/T` (the tag in the scratch checkout $GH_STANDIN_REPO, or $GH_STANDIN_TAG_SHA; annotated
 # with GH_STANDIN_TAG_ANNOTATED=1) and `api repos/R/git/tags/SHA`, `api repos/R/actions/runs/ID` (a run of
 # $GH_STANDIN_RUN_PATH, $GH_STANDIN_RUN_CONCLUSION, $GH_STANDIN_RUN_BRANCH, $GH_STANDIN_RUN_SHA; the release
-# workflow's, successful, for v0.6.1 and its commit by default), `run download ID --repo R --name N --dir D`
+# workflow's, successful, for v0.6.1 and its commit by default; its event $GH_STANDIN_RUN_EVENT, push by default, and
+# its head repository $GH_STANDIN_RUN_REPO, R by default), `run download ID --repo R --name N --dir D`
 # ($GH_STANDIN_ARTIFACT as Sill-0.6.1.zip in the artifact sill-zip-v0.6.1), `release download T --repo R --pattern
 # P... --dir D`, `release upload T FILE --repo R [--clobber]`; GH_STANDIN_FAIL=1 answers every call as an expired
 # login does. Every call logged.
@@ -48,9 +52,13 @@ if [ "$1" = api ]; then
     tagsha="$(git -C "$GH_STANDIN_REPO" rev-parse "v0.6.1^{commit}")"
     python3 -I - "$assets" "$path" "$sha" "${GH_STANDIN_TAG_ANNOTATED:-0}" "${GH_STANDIN_EXTRA:-}" "${GH_STANDIN_EXTRA_MANIFEST:-}" \
         "${GH_STANDIN_RUN_PATH:-.github/workflows/release.yml}" "${GH_STANDIN_RUN_CONCLUSION:-success}" "${GH_STANDIN_RUN_BRANCH:-v0.6.1}" \
-        "${GH_STANDIN_RUN_SHA:-$tagsha}" <<'PY'
+        "${GH_STANDIN_RUN_SHA:-$tagsha}" "${GH_STANDIN_RUN_EVENT:-push}" "${GH_STANDIN_RUN_REPO:-Saffsanity/sill}" \
+        "${GH_STANDIN_LISTING:-}" "${GH_STANDIN_PUSH:-true}" <<'PY'
 import hashlib, json, os, sys
-assets, path, sha, annotated, extra, extra_manifest, run_path, conclusion, run_branch, run_sha = sys.argv[1:11]
+assets, path, sha, annotated, extra, extra_manifest, run_path, conclusion, run_branch, run_sha, run_event, run_repo, listing_kind, push = sys.argv[1:15]
+if path.count("/") == 2 and path.startswith("repos/"):
+    print(json.dumps({"full_name": path[len("repos/"):], "permissions": {"admin": push != "false", "push": push != "false", "pull": True}}))
+    sys.exit(0)
 if "/git/ref/tags/" in path:
     kind, target = ("tag", "a" * 40) if annotated == "1" else ("commit", sha)
     print(json.dumps({"ref": "refs/tags/" + path.rsplit("/", 1)[-1], "object": {"type": kind, "sha": target}}))
@@ -60,26 +68,32 @@ if "/git/tags/" in path:
     sys.exit(0)
 if "/actions/runs/" in path:
     print(json.dumps({"id": int(path.rsplit("/", 1)[-1]), "path": run_path, "status": "completed", "conclusion": conclusion,
-                      "head_branch": run_branch, "head_sha": run_sha}))
+                      "head_branch": run_branch, "head_sha": run_sha, "event": run_event, "head_repository": {"full_name": run_repo}}))
     sys.exit(0)
-def release(tag, files, start, draft=False, prerelease=False):
-    items = []
-    for i, (name, file) in enumerate(files):
+files = {}
+def release(tag, items, start, draft=False, prerelease=False):
+    out = []
+    for i, (name, file) in enumerate(items):
         data = open(file, "rb").read()
-        items.append({"id": start + i, "name": name, "size": len(data), "state": "uploaded", "digest": "sha256:" + hashlib.sha256(data).hexdigest(),
-                      "browser_download_url": "https://github.com/Saffsanity/sill/releases/download/%s/%s" % (tag, name)})
-    return {"tag_name": tag, "draft": draft, "prerelease": prerelease, "assets": items}
+        files[start + i] = file
+        out.append({"id": start + i, "name": name, "size": len(data), "state": "uploaded", "digest": "sha256:" + hashlib.sha256(data).hexdigest(),
+                    "browser_download_url": "https://github.com/Saffsanity/sill/releases/download/%s/%s" % (tag, name)})
+    return {"id": start * 1000, "tag_name": tag, "draft": draft, "prerelease": prerelease, "assets": out}
 main = release("v0.6.1", [(n, os.path.join(assets, n)) for n in sorted(os.listdir(assets))], 100)
 listing = [main]
-if extra in ("published", "prerelease", "draft"):
+if listing_kind == "empty":
+    listing = []
+elif listing_kind == "nomain":
+    listing = [release("v0.5.0", [("Sill.zip", os.path.join(assets, "Sill.zip"))], 500)]
+if extra in ("published", "prerelease", "draft", "big"):
     listing.append(release("v0.7.0", [("Sill.zip.manifest", extra_manifest)], 900, extra == "draft", extra == "prerelease"))
+elif extra == "renamed":
+    listing.append(release("v0.7.0", [("Sill.zip", os.path.join(assets, "Sill.zip")), ("Sill.zip.manifest.txt", extra_manifest)], 900))
 if "/releases/assets/" in path:
     wanted = int(path.rsplit("/", 1)[-1])
-    for r in listing:
-        for a, file in zip(r["assets"], [os.path.join(assets, n) for n in sorted(os.listdir(assets))] if r is main else [extra_manifest]):
-            if a["id"] == wanted:
-                sys.stdout.buffer.write(open(file, "rb").read())
-                sys.exit(0)
+    if wanted in files:
+        sys.stdout.buffer.write(open(files[wanted], "rb").read())
+        sys.exit(0)
     print("HTTP 404: Not Found", file=sys.stderr)
     sys.exit(1)
 if "/releases/tags/" in path:
@@ -240,6 +254,11 @@ grep -q "built .*, not your v0.6.1's .*: nothing signed (a tag moved for the run
 GH_STANDIN_ARTIFACT="$genuine/Sill.zip" GH_STANDIN_RUN_CONCLUSION=failure expect fail "R1′: a run that didn't succeed" signs v0.6.1 "${run[@]}"
 GH_STANDIN_ARTIFACT="$genuine/Sill.zip" GH_STANDIN_RUN_PATH=.github/workflows/nightly.yml expect fail "R1′: another workflow's run" signs v0.6.1 "${run[@]}"
 GH_STANDIN_ARTIFACT="$genuine/Sill.zip" GH_STANDIN_RUN_BRANCH=v0.6.0 expect fail "R1′: a run started for another tag" signs v0.6.1 "${run[@]}"
+GH_STANDIN_ARTIFACT="$genuine/Sill.zip" GH_STANDIN_RUN_EVENT=pull_request expect fail "N11 c: a run of another event than a push or a dispatch" signs v0.6.1 "${run[@]}"
+grep -q "was started by pull_request, not a pushed tag or Run workflow" "$out/last.log" || { echo "  FAIL: N11 c's words for the event"; cat "$out/last.log"; failures=$((failures + 1)); }
+GH_STANDIN_ARTIFACT="$genuine/Sill.zip" GH_STANDIN_RUN_REPO=someone/sill expect fail "N11 c: a run of another repository's head" signs v0.6.1 "${run[@]}"
+grep -q "built someone/sill's code, not Saffsanity/sill's" "$out/last.log" || { echo "  FAIL: N11 c's words for the repository"; cat "$out/last.log"; failures=$((failures + 1)); }
+GH_STANDIN_ARTIFACT="$genuine/Sill.zip" GH_STANDIN_RUN_EVENT=workflow_dispatch expect ok "N11 c: a run by hand (Run workflow) is one" signs v0.6.1 "${run[@]}" --replace
 GH_STANDIN_ARTIFACT="" expect fail "R1′: a run without the zip's artifact" signs v0.6.1 "${run[@]}"
 GH_STANDIN_ARTIFACT="$genuine/Sill.zip.sha256" expect fail "R1′: an artifact that isn't GitHub's zip" signs v0.6.1 "${run[@]}"
 GH_STANDIN_ARTIFACT="$genuine/Sill.zip" expect fail "R1′: --run takes no --zip" signs v0.6.1 "${run[@]}" --zip "$genuine/Sill.zip"
@@ -272,11 +291,38 @@ for state in prerelease draft published; do
 done
 before="$(notifications)"
 GH_STANDIN_FAIL=1 expect fail "AU1: gh can't list (an expired login)" "$sign" --audit --notify
-[ "$(notifications)" -gt "$before" ] && grep -q "display notification .The audit couldn't run: can't list" "$out/gh.log" \
+[ "$(notifications)" -gt "$before" ] && grep -q "display notification .The audit couldn't run: can't read Saffsanity/sill" "$out/gh.log" \
     && echo "  ok: AU1: an audit that couldn't run notifies" || { echo "  FAIL: no notification when the audit couldn't run"; tail -3 "$out/gh.log"; failures=$((failures + 1)); }
 before="$(notifications)"
 expect ok "the audit, clean, posts nothing" "$sign" --audit --notify
 [ "$(notifications)" = "$before" ] && echo "  ok: a clean audit posts no notification" || { echo "  FAIL: a clean audit notified"; failures=$((failures + 1)); }
+# AU2 and N11 b and g (the fourth security pass): a Sill.zip outside the record whatever its manifest is called; a
+# release the record names that GitHub doesn't list (an older release's Sill.zip, from before the record, never
+# named); an empty listing; a login GitHub lists no drafts to; a manifest larger than any Sill reads, never
+# downloaded; and --pulled, which marks one pulled.
+before="$(notifications)"
+GH_STANDIN_EXTRA=renamed GH_STANDIN_EXTRA_MANIFEST="$out/v070.manifest" expect fail "AU2: a Sill.zip outside the record, its manifest renamed" "$sign" --audit --notify
+grep -q "v0.7.0 (published): CARRIES A Sill.zip THAT ISN'T IN YOUR SIGNING RECORD" "$out/last.log" && [ "$(notifications)" -gt "$before" ] \
+    && echo "  ok: AU2: named, and a notification" || { echo "  FAIL: AU2's words or notification"; cat "$out/last.log"; failures=$((failures + 1)); }
+GH_STANDIN_LISTING=nomain expect fail "N11 b: a release the record names that GitHub doesn't list" "$sign" --audit
+grep -q "v0.6.1: IN YOUR SIGNING RECORD BUT NOT ON GITHUB" "$out/last.log" && ! grep -q "v0.5.0" "$out/last.log" \
+    && echo "  ok: N11 b: named; an older release's Sill.zip, from before the record, isn't" || { echo "  FAIL: N11 b's words"; cat "$out/last.log"; failures=$((failures + 1)); }
+GH_STANDIN_LISTING=empty expect fail "N11 b: an empty listing" "$sign" --audit
+grep -q "GitHub listed no release in Saffsanity/sill" "$out/last.log" || { echo "  FAIL: the empty listing's words"; cat "$out/last.log"; failures=$((failures + 1)); }
+GH_STANDIN_PUSH=false expect fail "AU2: a login GitHub lists no drafts to" "$sign" --audit
+grep -q "can't push to Saffsanity/sill, and GitHub lists drafts only to one that can" "$out/last.log" \
+    || { echo "  FAIL: the push permission's words"; cat "$out/last.log"; failures=$((failures + 1)); }
+head -c 5000 /dev/zero | tr '\0' 'x' > "$out/big.manifest"
+cp "$out/gh.log" "$out/gh.log.before"
+GH_STANDIN_EXTRA=big GH_STANDIN_EXTRA_MANIFEST="$out/big.manifest" expect fail "N11 g: a manifest larger than any Sill reads" "$sign" --audit
+grep -q "v0.7.0 (published): a Sill.zip.manifest of 5000 bytes, more than any Sill reads" "$out/last.log" \
+    && ! diff "$out/gh.log.before" "$out/gh.log" | grep -q "releases/assets/900" \
+    && echo "  ok: N11 g: named, never downloaded" || { echo "  FAIL: N11 g"; cat "$out/last.log"; failures=$((failures + 1)); }
+expect fail "--pulled: a tag the record doesn't name" with_y "$sign" --pulled v0.9.9
+expect fail "--pulled: asked, and no answer marks nothing" no_answer "$sign" --pulled v0.6.1
+GH_STANDIN_LISTING=nomain expect fail "--pulled: still asked where it went before" "$sign" --audit
+expect ok "--pulled: v0.6.1 marked pulled" with_y "$sign" --pulled v0.6.1
+GH_STANDIN_LISTING=nomain expect ok "--pulled: the audit no longer asks where it went" "$sign" --audit
 # R2: the updater's changes since the last release signed (a release v0.6.0 recorded at the commit before).
 git -C "$scratch" tag -f v0.6.0 "v0.6.1^{commit}~1" > /dev/null
 printf '%s v0.6.0 %s %s\n' 2026-11-01T00:00:00Z "$zero" "$zero" > "$out/record.tmp"; cat "$out/signer/signed.txt" >> "$out/record.tmp"

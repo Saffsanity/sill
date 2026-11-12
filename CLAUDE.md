@@ -462,13 +462,14 @@ Rules found in the steps that hold for all work (each where it is written):
   nightly builds: when it begins; the cooling-off, 48 hours from this Sill's first sight
   of the verified manifest (never from its signed line) on this Mac's clock and on GitHub's
   (the `Date` of its HTTPS answers), from the release's latest `published_at` when that is
-  later; a nightly's wait, `nightlyCoolingOff`, none today, one constant whose words follow
+  later, kept by GitHub's release object too (its `id`); a nightly's wait, `nightlyCoolingOff`, none today, one constant whose words follow
   it; the quiet moment, what it remembers and its bounds, stops by version, its words; pure;
   all four in `Tests/checks/update-install`), `UpdateInstaller` (the
   mechanism: the release, manifest and stop, GitHub's clock in each answer, the download,
   unpacking through directory descriptors, the Security checks, the atomic swap with its
   check right before and its put-back, the staging folders, where Sill runs, the notes
-  between two Sills and the watcher, which never leaves Sill's path empty; no AppKit,
+  between two Sills and the watcher, which never leaves Sill's path empty by its own choice and
+  moves nothing back that isn't whole (its note's third line, `kept` or `lost`); no AppKit,
   driven by `Tests/update-harness`), `AutoUpdateStore` (the
   switches and the memory in Sill's keychain group) and `AppUpdater` (main actor: the
   facts, the steps of both modes, the quiet wait and the hold, the relaunch, the
@@ -521,8 +522,10 @@ Rules found in the steps that hold for all work (each where it is written):
   Developer ID Application identity (`SILL_SIGN_IDENTITY`, checked against the
   keychain) or the profile, or on a HEAD without the tag v‹version› (the
   update check's), or with `SILL_RELEASE_TAG` (the release workflow sets it)
-  not `v<CFBundleShortVersionString>` or naming another commit (`--check-tag`
-  checks only that), and `--dry-run` stops before notarytool (the profile and
+  not `v<CFBundleShortVersionString>` or naming another commit, or on a HEAD
+  that isn't an ancestor of `origin/main` (a release is tagged on main's line,
+  so a nightly's build number orders it; `--check-tag` checks only these), and
+  `--dry-run` stops before notarytool (the profile and
   the tag only warned about: it sets `SILL_RELEASE_DRY_RUN=1`, with which
   `make-app.sh --release` builds an untagged commit); it refuses a build
   without Assets.car and AppIcon.icns. `--publish` makes the GitHub Release in
@@ -680,9 +683,11 @@ Rules found in the steps that hold for all work (each where it is written):
   since the last release signed and asks (whatever `--yes` says), signs `Sill.zip.manifest`
   with his update key (login keychain, or `--key-file`), reads it back with the key the
   tag's source carries, asks and uploads, and keeps a line in the signing record;
-  `--audit [--notify]` compares every release on GitHub that carries a manifest, drafts and
-  pre-releases too, with that record, and notifies when one isn't in it or the audit
-  couldn't run; `--new-key` makes the key once; `Scripts/update-manifest.swift` is its
+  `--audit [--notify]` compares every release on GitHub with that record, drafts and
+  pre-releases too (each manifest, each `Sill.zip` since the first release signed, every
+  release signed still listed, an empty listing, a login that can't see drafts), and
+  notifies when something isn't right or the audit couldn't run; `--pulled vX` marks a
+  release Noah pulled; `--new-key` makes the key once; `Scripts/update-manifest.swift` is its
   tool, compiled with the app's own UpdateManifest and UpdateInstaller.
   `Scripts/sign-nightly.sh` signs tonight's nightly for Use nightly builds in nightly.yml
   (the nightly key from the environment's secret; `--new-key` makes it in a new file).

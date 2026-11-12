@@ -183,6 +183,22 @@ updater features" (the plan's §15.1); the independent security review's finding
   with nightlies on, the footnote still said every new version waits two days and is signed with the update key;
   it now names the nightly key and the missing wait (update-install 836 of 836, the build, the harness 277 of 277;
   only the six nightly-on samples' renderings changed).
+- The fourth security pass (the same reviewer, on 3ec9e3d1; the plan's §12f; each finding confirmed against its
+  proof first, none unreal; nothing new high or medium). AU2: the automatic update keeps GitHub's release `id` in
+  each sighting, so the same tag and zip on another, older release object (whose earlier `published_at` moved
+  nothing) wait afresh, and an answer without an `id` never installs by itself (chosen over restarting on any
+  change of `published_at`: the `id` names the object, so an edit of the same release moves nothing); the audit
+  names a `Sill.zip` outside the record whatever became of its manifest, a release the record names that GitHub
+  doesn't list (`--pulled vX` marks one Noah pulled), an empty listing, a login that can't see drafts, and a
+  manifest over 4 KiB, never downloaded (N11 b, g). W4: the watcher moves the parked new copy back only when it
+  checks whole with its own cdhash (one more argument: the code the swap checked) and only to an empty path,
+  checks Sill's path again after the move (no exclusive rename in /bin/sh, so that check decides), writes the
+  `kept` note before it, and says `lost` (exit 9, and Sill's words, `.noWholeSillLeft`) when any of it fails.
+  N11: the estimate's carry-over capped at `maxAge` (a), `--run`'s event and head repository (c), `release.sh`
+  refusing a release whose commit isn't on `origin/main` (e), the comment's weekday (f); (d) and (h) said in the
+  plan. §16.10 corrected as the reviewer read it (option 1's Stops bullet and its stronger variant, option 2's
+  PUT that may not take `can_admins_bypass`, option 3's survival being the wait's only, with the notice's five
+  checks and what it can't catch, and the option Noah declined: nightlies signed on his Mac behind Touch ID).
 - Verified, round 5 (2026-11-12 11:50–13:32, this Mac, heavy jobs through heavy.sh, no device, nothing launched but
   the harness's test executables and the bare SillMenuBar for previews), on cd9eaaa3 (the worktree's run is the
   commit's; the mutants on an export of it), then f9a962d4 (two check rules and the signing test's R2 list, no app

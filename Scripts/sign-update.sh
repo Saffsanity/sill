@@ -9,9 +9,11 @@
 #   Scripts/sign-update.sh --public-key            the stored key's public key and key ID
 #   Scripts/sign-update.sh v0.6.2                  check the published release, sign it, ask, upload
 #   Scripts/sign-update.sh v0.6.2 --run 123456     the same for a release the release workflow built in run 123456
-#   Scripts/sign-update.sh --audit [--notify]      every release's manifest on GitHub, drafts and pre-releases
-#                                                  included, against what this signer signed: says, and exits 1,
-#                                                  when one isn't in the record (a release Noah didn't sign)
+#   Scripts/sign-update.sh --audit [--notify]      every release on GitHub, drafts and pre-releases included,
+#                                                  against what this signer signed: says, and exits 1, when a
+#                                                  manifest or a Sill.zip isn't in the record (a release Noah
+#                                                  didn't sign), or a release it names isn't listed
+#   Scripts/sign-update.sh --pulled v0.6.2         mark a release you pulled from GitHub in the record
 #
 # The signer is the one program that ever holds the key. --install-signer copies the three files it is
 # built from (Sources/StreamProtocol/Compatibility.swift, Sources/SillMenuBar/UpdateManifest.swift and
@@ -27,8 +29,9 @@
 # (.build/Sill-<version>.zip, which `release.sh --publish` uploaded), byte for byte; or, for a release the
 # release workflow built in a run he approved, --run with that run's number: the run's own record on GitHub
 # must name his tag's commit as the one it built (`head_sha`; the third security pass's R1′: an app's
-# SillCommit is its own build's word, so a tag moved for the run and back passes every other check), and the
-# zip is the one that run kept as its artifact. A release CI published that he did not approve (T4: the
+# SillCommit is its own build's word, so a tag moved for the run and back passes every other check), started by
+# a pushed tag or Run workflow on this repository's own code (N11 c), and the zip is the one that run kept as its
+# artifact. A release CI published that he did not approve (T4: the
 # `nightly` environment needs no approval and its token can publish) has neither, and is refused. Either way
 # the app must name, in its signed Info.plist (SillCommit, make-app.sh), the commit his own tag names, and
 # GitHub's tag must name it too (the second security pass's R1), and it must not be a nightly (SillChannel,
@@ -73,6 +76,7 @@ while [ $# -gt 0 ]; do
         --new-key) mode="new-key" ;;
         --public-key) mode="public-key" ;;
         --audit) mode="audit" ;;
+        --pulled) mode="pulled" ;;
         --notify) notify=1 ;;
         --key-file) keyfile="$2"; shift ;;
         --repo) repo="$2"; shift ;;
@@ -112,7 +116,7 @@ record="$signer_dir/signed.txt"
 keyargs=(); [ -n "$keyfile" ] && keyargs=(--key-file "$keyfile")
 
 # SILL_SIGNER_DIR is the tests' (with a key in a file): never the keychain's key.
-if [ -n "${SILL_SIGNER_DIR:-}" ] && [ -z "$keyfile" ] && [ "$mode" != install-signer ] && [ "$mode" != audit ]; then
+if [ -n "${SILL_SIGNER_DIR:-}" ] && [ -z "$keyfile" ] && [ "$mode" != install-signer ] && [ "$mode" != audit ] && [ "$mode" != pulled ]; then
     die "SILL_SIGNER_DIR is for tests, with --key-file"
 fi
 if [ -n "${SILL_SIGN_TEST_BUILT_FROM:-}" ] && [ -z "${SILL_SIGNER_DIR:-}" ]; then
@@ -221,10 +225,16 @@ if [ -n "${SILL_SIGN_TEST_BUILT_FROM:-}" ]; then
     [ -n "$test_id" ] && [ "$key_id" = "$test_id" ] || die "SILL_SIGN_TEST_BUILT_FROM is taken only with the tests' key (key ID $test_id), never another: this key is ${key_id:-unreadable}"
 fi
 
-# --audit: the manifest of every release that carries one, drafts and pre-releases included (the third security
-# pass's AU1: a release turned into either around a run, or still a draft, would otherwise never be seen), against
-# the signing record (A1). Reads only: GitHub's release listing (drafts are listed to an account with push rights,
-# as gh's is) and each Sill.zip.manifest, by its asset id (a draft's has no download address), a few KB each.
+# --audit: every release on GitHub against the signing record (A1), drafts and pre-releases included (the third
+# security pass's AU1), read with a login GitHub lists drafts to (`permissions.push`). It names:
+# - a Sill.zip.manifest not in the record (one that verifies with a recorded key is a release Noah didn't sign), and
+#   one larger than any Sill reads (4 KiB), not downloaded (the fourth security pass's N11 g);
+# - a Sill.zip not in the record, by GitHub's digest (AU2: its manifest renamed or gone hides nothing), on any release
+#   whose version is at or above the lowest the record names (older ones predate the update key);
+# - a release the record names that GitHub doesn't list, unless marked pulled (--pulled), and a listing with no
+#   release at all (N11 b: a short or empty answer passes nothing).
+# Reads only: the repository's permissions, GitHub's release listing and each Sill.zip.manifest by its asset id (a
+# draft's has no download address), a few KB each.
 if [ "$mode" = audit ]; then
     command -v gh >/dev/null || die "gh is not installed"
     keys=()
@@ -232,38 +242,90 @@ if [ "$mode" = audit ]; then
     [ -f "$record" ] || touch "$record"
     dir="$(mktemp -d)"
     cleanup+=("$dir")
+    push="$(gh api "repos/$repo" | jq -r '.permissions.push // false')" || die "can't read $repo"
+    [ "$push" = true ] || die "this gh login can't push to $repo, and GitHub lists drafts only to one that can: the audit can't see them (gh auth status)"
     gh api --paginate "repos/$repo/releases?per_page=100" > "$dir/releases.json" || die "can't list $repo's releases"
-    jq -r -s 'add // [] | .[] | . as $r | .assets[] | select(.name == "Sill.zip.manifest")
-              | [$r.tag_name, (.id | tostring), (if $r.draft then "a draft" elif $r.prerelease then "a pre-release" else "published" end)]
-              | @tsv' "$dir/releases.json" > "$dir/manifests" || die "can't read $repo's release listing"
+    # One line a release: its tag, its state, its Sill.zip's digest, its Sill.zip.manifest's asset id and size ("-": none).
+    jq -r -s 'add // [] | .[] | . as $r
+              | ([.assets[] | select(.name == "Sill.zip")] | first) as $z
+              | ([.assets[] | select(.name == "Sill.zip.manifest")] | first) as $m
+              | [$r.tag_name, (if $r.draft then "a draft" elif $r.prerelease then "a pre-release" else "published" end),
+                 (if $z then ($z.digest // "none") else "-" end), (if $m then ($m.id | tostring) else "-" end),
+                 (if $m then ($m.size | tostring) else "-" end)]
+              | @tsv' "$dir/releases.json" > "$dir/releases" || die "can't read $repo's release listing"
+    # The record: the tags signed here (a line each manifest: time, tag, the manifest's SHA-256, the zip's), the ones
+    # marked pulled (time, tag, "pulled"), and the lowest version signed.
+    awk 'NF == 4 && $2 ~ /^v[0-9]/ { print $2 }' "$record" | sort -u > "$dir/signed-tags"
+    awk 'NF == 3 && $3 == "pulled" { print $2 }' "$record" | sort -u > "$dir/pulled-tags"
+    vcmp='function vcmp(a, b,   x, y, i, n, m, p, q) { sub(/^v/, "", a); sub(/^v/, "", b); n = split(a, x, "[.]"); m = split(b, y, "[.]");
+              for (i = 1; i <= (n > m ? n : m); i++) { p = (i <= n ? x[i] + 0 : 0); q = (i <= m ? y[i] + 0 : 0); if (p < q) return -1; if (p > q) return 1 }
+              return 0 }'
+    floor="$(awk "$vcmp"' { if (low == "" || vcmp($1, low) < 0) low = $1 } END { print low }' "$dir/signed-tags")"
     alarms=0 n=0
-    while IFS=$'\t' read -r t id state; do
-        n=$((n + 1))
-        [[ "$id" =~ ^[0-9]{1,20}$ ]] || { echo "  $t ($state): an asset id that isn't one"; alarms=$((alarms + 1)); continue; }
-        f="$dir/$id.manifest"
-        gh api -H "Accept: application/octet-stream" "repos/$repo/releases/assets/$id" > "$f" || die "can't download $t's Sill.zip.manifest ($state)"
-        m="$(shasum -a 256 "$f" | cut -d' ' -f1)"
-        if awk -v t="$t" -v m="$m" '$2 == t && $3 == m { found = 1 } END { exit !found }' "$record"; then
-            echo "  $t ($state): signed here ($(awk -v t="$t" -v m="$m" '$2 == t && $3 == m { print $1; exit }' "$record"))"
-        elif [ "${#keys[@]}" -gt 0 ] && "$signer" verify "$f" "${keys[@]}" > "$f.verify" 2>&1; then
-            echo "  $t ($state): NOT IN YOUR SIGNING RECORD, and it verifies with your update key: every Sill would install it once it is the latest release. If you didn't sign it, pull it now (docs/release-checklist.md, part 1 §7)."
-            sed 's/^/    | /' "$f.verify"
-            alarms=$((alarms + 1))
-        else
-            echo "  $t ($state): NOT IN YOUR SIGNING RECORD; it doesn't verify with your update key, so no Sill installs it, but Update Now is broken for it."
-            alarms=$((alarms + 1))
+    alarm() { echo "  $*"; alarms=$((alarms + 1)); }
+    [ -s "$dir/releases" ] || alarm "GitHub listed no release in $repo: a listing that can't be right, so nothing could be checked."
+    while IFS=$'\t' read -r t state digest id size; do
+        if [ "$id" != - ]; then
+            n=$((n + 1))
+            if ! [[ "$id" =~ ^[0-9]{1,20}$ ]]; then
+                alarm "$t ($state): a Sill.zip.manifest with an asset id that isn't one"
+            elif ! [[ "$size" =~ ^[0-9]{1,9}$ ]] || [ "$size" -gt 4096 ]; then
+                alarm "$t ($state): a Sill.zip.manifest of $size bytes, more than any Sill reads (4 KiB), not downloaded. Nobody signs one so large: look at the release."
+            else
+                f="$dir/$id.manifest"
+                gh api -H "Accept: application/octet-stream" "repos/$repo/releases/assets/$id" > "$f" || die "can't download $t's Sill.zip.manifest ($state)"
+                m="$(shasum -a 256 "$f" | cut -d' ' -f1)"
+                if awk -v t="$t" -v m="$m" '$2 == t && $3 == m { found = 1 } END { exit !found }' "$record"; then
+                    echo "  $t ($state): signed here ($(awk -v t="$t" -v m="$m" '$2 == t && $3 == m { print $1; exit }' "$record"))"
+                elif [ "${#keys[@]}" -gt 0 ] && "$signer" verify "$f" "${keys[@]}" > "$f.verify" 2>&1; then
+                    alarm "$t ($state): NOT IN YOUR SIGNING RECORD, and it verifies with your update key: every Sill would install it once it is the latest release. If you didn't sign it, pull it now (docs/release-checklist.md, part 1 §7)."
+                    sed 's/^/    | /' "$f.verify"
+                else
+                    alarm "$t ($state): NOT IN YOUR SIGNING RECORD; it doesn't verify with your update key, so no Sill installs it, but Update Now is broken for it."
+                fi
+            fi
         fi
-    done < "$dir/manifests"
+        # AU2: the zip itself, whatever became of its manifest, on a release of the update key's time.
+        if [ "$digest" != - ] && [ -n "$floor" ] && [[ "$t" =~ ^v[0-9]+(\.[0-9]+){0,7}$ ]] \
+           && [ "$(awk "$vcmp"' BEGIN { print vcmp(ARGV[1], ARGV[2]) }' "$t" "$floor")" -ge 0 ]; then
+            z="${digest#sha256:}"
+            if ! [[ "$digest" == sha256:* && "$z" =~ ^[0-9a-f]{64}$ ]]; then
+                alarm "$t ($state): a Sill.zip whose digest GitHub doesn't give ($digest), so it can't be compared with your signing record."
+            elif ! awk -v t="$t" -v z="$z" '$2 == t && $4 == z { found = 1 } END { exit !found }' "$record"; then
+                alarm "$t ($state): CARRIES A Sill.zip THAT ISN'T IN YOUR SIGNING RECORD (SHA-256 $z), whatever its manifest is called. If you published it just now, sign it; if not, pull it now (docs/release-checklist.md, part 1 §7)."
+            fi
+        fi
+    done < "$dir/releases"
+    # N11 b: every release signed here is still listed (a short answer, or one deleted), unless marked pulled.
+    cut -f1 "$dir/releases" | sort -u > "$dir/listed-tags"
+    while IFS= read -r t; do
+        grep -qxF -- "$t" "$dir/listed-tags" || grep -qxF -- "$t" "$dir/pulled-tags" \
+            || alarm "$t: IN YOUR SIGNING RECORD BUT NOT ON GITHUB: deleted, or a listing that misses it. If you pulled it, mark it: Scripts/sign-update.sh --pulled $t."
+    done < "$dir/signed-tags"
     if [ "$alarms" = 0 ]; then
-        echo "Audit: all $n signed releases in $repo (drafts and pre-releases included) are in your signing record."
+        echo "Audit: all $n signed releases in $repo (drafts and pre-releases included) are in your signing record, every Sill.zip since ${floor:-the first signed release} is too, and every release you signed is listed."
         exit 0
     fi
-    echo "Audit: $alarms of $n releases in $repo aren't what this signer signed." >&2
+    echo "Audit: $alarms thing(s) in $repo aren't what this signer signed or recorded." >&2
     if [ "$notify" = 1 ]; then
-        notify_audit "$alarms release(s) in $repo weren't signed by your signer. Run Scripts/sign-update.sh --audit in Terminal."
+        notify_audit "$alarms thing(s) in $repo weren't signed or recorded by your signer. Run Scripts/sign-update.sh --audit in Terminal."
         alarm_sent=1
     fi
     exit 1
+fi
+
+# --pulled vX: a release you pulled from GitHub (deleted) stays in the signing record; this marks it, so the audit
+# no longer asks where it went. Only the record changes.
+if [ "$mode" = pulled ]; then
+    [[ "$tag" =~ ^v[0-9]+(\.[0-9]+){0,7}$ ]] || die "a tag like v0.6.2 (got '$tag')"
+    awk -v t="$tag" 'NF == 4 && $2 == t { found = 1 } END { exit !found }' "$record" 2>/dev/null || die "$tag isn't in your signing record"
+    if [ "$yes" = 0 ]; then
+        read -r -p "Mark $tag as pulled from GitHub, so the audit stops asking where it went? [y/N] " answer
+        [ "$answer" = y ] || [ "$answer" = Y ] || die "nothing marked"
+    fi
+    printf '%s %s pulled\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$tag" >> "$record"
+    echo "Marked $tag as pulled in $record."
+    exit 0
 fi
 
 [[ "$tag" =~ ^v[0-9]+(\.[0-9]+){0,7}$ ]] || die "a tag like v0.6.2 (got '$tag')"
@@ -322,6 +384,12 @@ if [ -n "$run_id" ]; then
     [ "$(jq -r '.path // empty' <<<"$run_json")" = ".github/workflows/release.yml" ] || die "run $run_id is not the release workflow's: nothing signed"
     [ "$(jq -r '.status + " " + (.conclusion // "")' <<<"$run_json")" = "completed success" ] || die "run $run_id didn't finish successfully: nothing signed"
     [ "$(jq -r '.head_branch // empty' <<<"$run_json")" = "$tag" ] || die "run $run_id wasn't started for $tag: nothing signed"
+    # The fourth security pass's N11 c: a pushed tag or Run workflow, on this repository's own code (head_sha decides;
+    # these make a mistake visible).
+    run_event="$(jq -r '.event // empty' <<<"$run_json")"
+    [ "$run_event" = push ] || [ "$run_event" = workflow_dispatch ] || die "run $run_id was started by ${run_event:-nothing it names}, not a pushed tag or Run workflow: nothing signed"
+    run_repo="$(jq -r '.head_repository.full_name // empty' <<<"$run_json")"
+    [ "$run_repo" = "$repo" ] || die "run $run_id built ${run_repo:-no repository}'s code, not $repo's: nothing signed"
     run_sha="$(jq -r '.head_sha // empty' <<<"$run_json")"
     [ "$run_sha" = "$commit" ] || die "run $run_id built ${run_sha:-no commit}, not your $tag's $commit: nothing signed (a tag moved for the run and back; docs/one-click-update-plan.md §12e, R1′)"
     echo "  it built $run_sha, your $tag's commit"

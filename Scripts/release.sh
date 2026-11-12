@@ -157,6 +157,20 @@ tag_problems() {
     fi
 }
 
+# A release is tagged on main's line (the fourth security pass's N11 e): Update Now orders a release and a nightly of
+# one version by their build numbers, commit counts, which say which is newer only while the release's commit is
+# one main carries (docs/one-click-update-plan.md §12e, N10 b). So HEAD must be an ancestor of origin/main as this
+# checkout knows it (the release workflow's checkout fetches every branch). Prints the problem, or nothing.
+main_ancestry_problem() {
+    local head
+    head="$(git rev-parse HEAD 2>/dev/null)" || return 0
+    if ! git rev-parse -q --verify refs/remotes/origin/main >/dev/null 2>&1; then
+        echo "This checkout has no origin/main, so it can't tell whether HEAD (${head:0:12}) is on main, where a release is tagged: git fetch origin, then again."
+    elif ! git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
+        echo "HEAD (${head:0:12}) isn't on origin/main as this checkout knows it. A release is tagged on main's line, so every later nightly carries it (docs/one-click-update-plan.md §12f, N11 e): merge it to main and tag main's commit, or git fetch origin if origin/main here is old."
+    fi
+}
+
 # With --publish: what would otherwise stop the run only at its end, after the build and Apple's
 # notarization (in the release workflow, up to its whole hour): gh can't reach the repository, or
 # the release already exists. Prints one problem per line, and nothing when all is well.
@@ -208,6 +222,9 @@ preflight_problems() {
     if [ "$dry_run" = 0 ] && [ "$publish" = 1 ] && [ "$nightly" = 0 ] && ! in_release_workflow \
         && version="$(plist_value CFBundleShortVersionString Packaging/Info.plist)"; then
         remote_tag_problem "$version"
+    fi
+    if [ "$dry_run" = 0 ] && [ "$nightly" = 0 ]; then
+        main_ancestry_problem
     fi
     if [ "$dry_run" = 0 ]; then
         if [ -z "$profile" ]; then
@@ -443,7 +460,7 @@ main() {
             echo "error: --check-tag checks SILL_RELEASE_TAG, which is not set (SILL_RELEASE_TAG=v0.3.0 Scripts/release.sh --check-tag)" >&2
             exit 2
         fi
-        tag_problem="$(tag_problems)"
+        tag_problem="$(tag_problems; main_ancestry_problem)"
         if [ -n "$tag_problem" ]; then
             printf '%s\n' "$tag_problem" | sed 's/^/error: /' >&2
             exit 1

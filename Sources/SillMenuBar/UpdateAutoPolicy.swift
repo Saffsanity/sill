@@ -153,6 +153,11 @@ enum UpdateAutoPolicy {
             /// The latest `published_at` GitHub gave for the release (only ever later): a release deleted and
             /// published again waits afresh (AU1).
             var published: Date?
+            /// GitHub's id of the release object the manifest was read from (the fourth security pass's AU2): the
+            /// same tag and zip on another release object (an older one edited to carry them, whose `published_at`
+            /// is earlier and so never moves this sighting) is another sighting, and waits afresh. Nil only in an
+            /// item written before it, which is another sighting too.
+            var release: Int?
         }
     }
 
@@ -251,6 +256,8 @@ enum UpdateAutoPolicy {
         var now: Date?
         /// When GitHub says the release was published, the latest it said (a release's; nil for a nightly).
         var published: Date?
+        /// GitHub's id of the release object (a release's; the automatic update never goes without it, AU2).
+        var release: Int?
     }
 
     /// The manifest's own date and this Sill's first sight of it against now: install, wait, or never by itself.
@@ -272,6 +279,7 @@ enum UpdateAutoPolicy {
         let wait = wait ?? (nightly ? nightlyCoolingOff : coolingOff)
         guard wait > 0 else { return .go }
         if !nightly, github.published == nil { return .refuse("GitHub’s answer doesn’t say when the release was published") }
+        if !nightly, github.release == nil { return .refuse("GitHub’s answer doesn’t say which release it is") }
         let localEnd = max(signedAt, firstSeen).addingTimeInterval(wait)
         guard let ghNow = github.now, let ghFirst = github.firstSeen else { return .waitUntil(now < localEnd ? localEnd : nil) }
         let ghEnd = max(ghFirst, github.published ?? ghFirst).addingTimeInterval(wait)
@@ -282,23 +290,30 @@ enum UpdateAutoPolicy {
 
     /// When the cooling-off of the release `tag` (a nightly's `key`) ends, from what this Sill remembers, by this
     /// Mac's clock: every sighting of it, the latest end, with a publication GitHub gave after the first sight
-    /// carried over by the difference between the two clocks then. Nil when it never read that manifest.
+    /// carried over by the difference between the two clocks then. Nil when it never read that manifest. Only an
+    /// estimate, for the start rule and the pane: `dates` decides, with GitHub's clock in the answer just read. So a
+    /// publication more than `maxAge` after GitHub's time at the first sight is not carried over (the fourth
+    /// security pass's N11 a): no genuine one can be (a manifest signed before the first sight is refused once it is
+    /// older than that), and a `Date` years off at the first read would otherwise hold the estimate years out, so
+    /// that `dates` were never asked. A first `Date` years ahead still makes `dates` itself wait: that fails safe.
     static func waitUntil(_ m: Memory, tag: String, wait: TimeInterval = coolingOff) -> Date? {
         m.seen.filter { $0.tag == tag }.map { s -> Date in
             var end = max(s.signed, s.first).addingTimeInterval(wait)
-            if let g = s.firstGitHub, let p = s.published, p > g { end = max(end, s.first.addingTimeInterval(p.timeIntervalSince(g) + wait)) }
+            if let g = s.firstGitHub, let p = s.published, p > g, p.timeIntervalSince(g) <= maxAge {
+                end = max(end, s.first.addingTimeInterval(p.timeIntervalSince(g) + wait))
+            }
             return end
         }.max()
     }
 
-    /// The sighting of that manifest (that tag and zip), if this Sill has read it.
-    static func sighting(_ m: Memory, tag: String, sha256: String) -> Memory.Sighting? {
-        m.seen.first { $0.tag == tag && $0.sha256 == sha256 }
+    /// The sighting of that manifest (that tag and zip, on that release object: AU2), if this Sill has read it.
+    static func sighting(_ m: Memory, tag: String, sha256: String, release: Int?) -> Memory.Sighting? {
+        m.seen.first { $0.tag == tag && $0.sha256 == sha256 && $0.release == release }
     }
 
     /// The first time this Sill read that release's verified manifest, if it has.
-    static func firstSeen(_ m: Memory, tag: String, sha256: String) -> Date? {
-        sighting(m, tag: tag, sha256: sha256)?.first
+    static func firstSeen(_ m: Memory, tag: String, sha256: String, release: Int?) -> Date? {
+        sighting(m, tag: tag, sha256: sha256, release: release)?.first
     }
 
     /// Whether the moment to install has come: no device connected now, none since `quietSince` (when the
@@ -314,15 +329,18 @@ enum UpdateAutoPolicy {
 
     // MARK: Memory
 
-    /// This Sill read the verified manifest of the release `tag` (its zip `sha256`) now, GitHub's answer saying
-    /// `github` (its clock) and `published` (when the release was published): a new sighting, or the one there with
-    /// GitHub's clock filled in when it had none and the publication moved later when GitHub says a later one. The
-    /// first sight never moves, and nothing here ever moves an end earlier.
+    /// This Sill read the verified manifest of the release `tag` (its zip `sha256`, on GitHub's release object
+    /// `release`) now, GitHub's answer saying `github` (its clock) and `published` (when the release was published):
+    /// a new sighting, or the one there with GitHub's clock filled in when it had none and the publication moved
+    /// later when GitHub says a later one. The same tag and zip on another release object is another sighting (the
+    /// fourth security pass's AU2: an older object edited to carry them has an earlier `published_at`, which would
+    /// never move this one). The first sight never moves, and nothing here ever moves an end earlier.
     static func sighted(_ m: Memory, tag: String, sha256: String, signedAt: Date, now: Date, github: Date? = nil,
-                        published: Date? = nil) -> Memory {
+                        published: Date? = nil, release: Int?) -> Memory {
         var n = m
-        guard let i = n.seen.firstIndex(where: { $0.tag == tag && $0.sha256 == sha256 }) else {
-            n.seen.append(Memory.Sighting(tag: tag, sha256: sha256, first: now, signed: signedAt, firstGitHub: github, published: published))
+        guard let i = n.seen.firstIndex(where: { $0.tag == tag && $0.sha256 == sha256 && $0.release == release }) else {
+            n.seen.append(Memory.Sighting(tag: tag, sha256: sha256, first: now, signed: signedAt, firstGitHub: github, published: published,
+                                          release: release))
             return n
         }
         if n.seen[i].firstGitHub == nil { n.seen[i].firstGitHub = github }

@@ -412,8 +412,13 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       (`signed.txt` beside the signer; this Mac's: sign every release here, or the audit names one signed
       elsewhere). `Scripts/sign-update.sh --audit` downloads the `Sill.zip.manifest` of every release that
       carries one, drafts and pre-releases included (one turned into either for a few minutes around a run
-      would otherwise pass unseen), and compares it with the record: "Audit: all N signed releases in
-      Saffsanity/sill (drafts and pre-releases included) are in your signing record." when all is well;
+      would otherwise pass unseen), and compares it with the record; it also names a `Sill.zip` not in the
+      record on any release since the first you signed, whatever became of its manifest, a release you signed
+      that GitHub no longer lists, an empty listing, a `gh` login that can't see drafts, and a manifest larger
+      than any Sill reads. "Audit: all N signed releases in Saffsanity/sill (drafts and pre-releases
+      included) are in your signing record, every Sill.zip since v… is too, and every release you signed is
+      listed." when all is well. A release you pulled yourself (deleted): mark it once with
+      `Scripts/sign-update.sh --pulled v<version>`, or the audit keeps asking where it went;
       "NOT IN YOUR SIGNING RECORD, and it verifies with your update key" names a release made with your key
       that you didn't sign here, which every Sill with Automatically update Sill on installs two days after
       it first finds it as the latest release: pull it or stop it (above), then treat the key as leaked
@@ -446,7 +451,8 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       ```
 
       The last command runs it once now: `"$d/audit.log"` then ends in "Audit: all N signed releases in
-      Saffsanity/sill (drafts and pre-releases included) are in your signing record." Another interval:
+      Saffsanity/sill (drafts and pre-releases included) are in your signing record, every Sill.zip since v… is
+      too, and every release you signed is listed." Another interval:
       change 14400 (seconds) before loading it. To stop it: `launchctl bootout
       gui/$(id -u)/me.saffer.sill.update-audit` and delete the plist. Without it, the two days protect only
       as well as you happen to notice; GitHub's "Watch › Custom › Releases" mail is the setup-free complement
@@ -498,7 +504,10 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       annotated tags on merge commits of main: v0.4.0 on its release pull request's, #41, v0.3.1 on
       #32's, and v0.3.0 on main's head that day, #20's). `make-app.sh --release` builds only the
       commit carrying it, and `release.sh --publish` refuses to start until origin's tag names that
-      commit, then makes the GitHub Release for it. Every Sill.app's update check reads the releases
+      commit, and until that commit is on main (an ancestor of `origin/main` as the checkout knows it:
+      Update Now orders a release and a nightly of one version by build number, which holds only for a
+      commit main carries; `git fetch origin` first if origin/main here is old), then makes the GitHub
+      Release for it. Every Sill.app's update check reads the releases
       of Saffsanity/sill alone (`UpdatePolicy.feed`) and compares the newest published one's tag
       (not a draft, not a prerelease) with the version it runs: Saffsanity/sill is public (since
       2026-09-26), so within a day of a release there every older Sill.app offers it (Check Now in
@@ -564,6 +573,7 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       approved, `--run <the run's number>` (the digits at the end of the run page's address): it asks GitHub
       for that run's record and signs only when it is a finished, successful run of release.yml for this tag
       whose commit (`head_sha`, GitHub's own record of what it built, which no build writes) is your tag's,
+      started by the pushed tag or Run workflow on this repository's own code,
       and it takes the zip from the artifact `sill-zip-v<version>` that run kept (30 days). A zip the app
       alone vouches for is never enough: `SillCommit` is written by the build it describes, so a tag moved
       for the run and back would pass every other check (docs/one-click-update-plan.md §12e, R1′). A

@@ -139,12 +139,14 @@ func asset(_ name: String, _ url: String, size: Any = 5_920_002, state: Any = "u
     if let digest { a["digest"] = digest }
     return a
 }
-func body(tag: Any = "v0.4.0", draft: Any = false, prerelease: Any = false, assets: Any? = nil, published: Any? = "2026-11-11T20:00:00Z") -> Data {
+func body(tag: Any = "v0.4.0", draft: Any = false, prerelease: Any = false, assets: Any? = nil, published: Any? = "2026-11-11T20:00:00Z",
+          id: Any? = 248_311_004) -> Data {
     let defaultAssets: [[String: Any]] = [asset("Sill.zip", zipURL), asset("Sill.zip.manifest", manURL, size: 700, digest: nil),
                                           asset("Sill.dmg", zipURL.replacingOccurrences(of: ".zip", with: ".dmg"))]
     var d: [String: Any] = ["tag_name": tag, "draft": draft, "prerelease": prerelease, "assets": assets ?? defaultAssets,
                             "html_url": "https://github.com/Saffsanity/sill/releases/tag/v0.4.0"]
     if let published { d["published_at"] = published }
+    if let id { d["id"] = id }
     return try! JSONSerialization.data(withJSONObject: d)
 }
 func rel(_ b: Data, offered: String = "v0.4.0", running: SillVersion = v030) -> Result<P.Release, P.Failure> {
@@ -155,7 +157,12 @@ if case .success(let r) = rel(body()) {
     check(r.zip == P.Asset(name: "Sill.zip", url: u(zipURL), size: 5_920_002, digest: sha), "the zip: \(r.zip)")
     check(r.manifest == P.Asset(name: "Sill.zip.manifest", url: u(manURL), size: 700, digest: nil), "the manifest: \(r.manifest)")
     check(r.publishedAt == M.date("2026-11-11T20:00:00Z") && r.answeredAt == nil, "AU1: GitHub's published_at read (GitHub's clock is the transfer's)")
+    check(r.releaseID == 248_311_004, "AU2: GitHub's id of the release object read: \(String(describing: r.releaseID))")
 } else { check(false, "a good release: \(rel(body()))") }
+for odd in [nil, "7", 0, -3, 1.5] as [Any?] {
+    if case .success(let r) = rel(body(id: odd)) { check(r.releaseID == nil, "AU2: an id that isn't one reads as none: \(String(describing: odd))") }
+    else { check(false, "a release without a usable id is still read (Update Now needs none)") }
+}
 for odd in [nil, "yesterday", "2026-11-11T20:00:00.5Z"] as [Any?] {
     if case .success(let r) = rel(body(published: odd)) { check(r.publishedAt == nil, "AU1: a published_at that isn't one reads as none: \(String(describing: odd))") }
     else { check(false, "a release without a usable published_at is still read") }
@@ -702,7 +709,9 @@ check(done.updatedTo == "0.4" && done.updatedAt == later(1) && done.attempts.key
 // manifest, never from its signed line alone, which whoever holds the key writes. The signed date bounds the age
 // and the future (F7). The third pass: it counts on GitHub's clock too (CL1), from the release's publication when
 // that is later (AU1). `gh`: GitHub's clock agreeing with this Mac's, the release published well before.
-func ghc(_ first: Date?, _ now: Date?, published: Date? = later(-60)) -> AP.GitHubClock { AP.GitHubClock(firstSeen: first, now: now, published: published) }
+func ghc(_ first: Date?, _ now: Date?, published: Date? = later(-60), release: Int? = 7) -> AP.GitHubClock {
+    AP.GitHubClock(firstSeen: first, now: now, published: published, release: release)
+}
 func dates(signed: Date, first: Date, now: Date, github: AP.GitHubClock? = nil, nightly: Bool = false, wait: TimeInterval? = nil) -> AP.DateVerdict {
     AP.dates(signedAt: signed, firstSeen: first, now: now, nightly: nightly, wait: wait, github: github ?? ghc(first, now))
 }
@@ -737,25 +746,57 @@ check(dates(signed: t0, first: t0, now: later(50), github: ghc(t0, later(50), pu
       "AU1: a release whose answer doesn't say when it was published never installs by itself")
 // The first sight, kept across launches: a later read never moves it; a release whose zip changed is a new sighting.
 let sha1 = String(repeating: "a", count: 64), sha2 = String(repeating: "b", count: 64)
-var seenMem = AP.sighted(AP.switched(AP.Memory(), on: true), tag: "v0.4.0", sha256: sha1, signedAt: backdated, now: t0)
-check(AP.firstSeen(seenMem, tag: "v0.4.0", sha256: sha1) == t0, "the first sight kept")
-seenMem = AP.sighted(seenMem, tag: "v0.4.0", sha256: sha1, signedAt: backdated, now: later(30))
-check(AP.firstSeen(seenMem, tag: "v0.4.0", sha256: sha1) == t0 && seenMem.seen.count == 1, "a later read never moves it")
+var seenMem = AP.sighted(AP.switched(AP.Memory(), on: true), tag: "v0.4.0", sha256: sha1, signedAt: backdated, now: t0, release: 7)
+check(AP.firstSeen(seenMem, tag: "v0.4.0", sha256: sha1, release: 7) == t0, "the first sight kept")
+seenMem = AP.sighted(seenMem, tag: "v0.4.0", sha256: sha1, signedAt: backdated, now: later(30), release: 7)
+check(AP.firstSeen(seenMem, tag: "v0.4.0", sha256: sha1, release: 7) == t0 && seenMem.seen.count == 1, "a later read never moves it")
 check(AP.waitUntil(seenMem, tag: "v0.4.0") == later(48) && AP.waitUntil(seenMem, tag: "v0.4.1") == nil, "the wait's end, from what is remembered")
-seenMem = AP.sighted(seenMem, tag: "v0.4.0", sha256: sha2, signedAt: backdated, now: later(40))
-check(AP.firstSeen(seenMem, tag: "v0.4.0", sha256: sha2) == later(40) && AP.waitUntil(seenMem, tag: "v0.4.0") == later(88),
+seenMem = AP.sighted(seenMem, tag: "v0.4.0", sha256: sha2, signedAt: backdated, now: later(40), release: 7)
+check(AP.firstSeen(seenMem, tag: "v0.4.0", sha256: sha2, release: 7) == later(40) && AP.waitUntil(seenMem, tag: "v0.4.0") == later(88),
       "a release whose zip changed: a new sighting, the wait from it")
 check(start(seenMem, waitUntil: AP.waitUntil(seenMem, tag: "v0.4.0"), now: later(87)) == .no("0.4 cools off until 2026-11-15T19:00:00Z")
       && start(seenMem, waitUntil: AP.waitUntil(seenMem, tag: "v0.4.0"), now: later(88)) == .go, "the start rule waits on the remembered sight")
 // The sighting keeps GitHub's clock from the first answer that had one, and GitHub's latest publication date: never
 // moved earlier, so neither ever shortens a wait (CL1, AU1).
-var gseen = AP.sighted(AP.Memory(), tag: "v0.4.0", sha256: sha1, signedAt: t0, now: t0, github: nil, published: later(-1))
-gseen = AP.sighted(gseen, tag: "v0.4.0", sha256: sha1, signedAt: t0, now: later(1), github: later(1), published: later(30))
-gseen = AP.sighted(gseen, tag: "v0.4.0", sha256: sha1, signedAt: t0, now: later(2), github: later(2), published: later(-2))
+var gseen = AP.sighted(AP.Memory(), tag: "v0.4.0", sha256: sha1, signedAt: t0, now: t0, github: nil, published: later(-1), release: 7)
+gseen = AP.sighted(gseen, tag: "v0.4.0", sha256: sha1, signedAt: t0, now: later(1), github: later(1), published: later(30), release: 7)
+gseen = AP.sighted(gseen, tag: "v0.4.0", sha256: sha1, signedAt: t0, now: later(2), github: later(2), published: later(-2), release: 7)
 check(gseen.seen.count == 1 && gseen.seen[0].first == t0 && gseen.seen[0].firstGitHub == later(1) && gseen.seen[0].published == later(30),
       "CL1, AU1: GitHub's first clock filled once, its publication only ever later: \(gseen.seen)")
 check(AP.waitUntil(gseen, tag: "v0.4.0") == later(77), "AU1: the remembered end follows a later publication, by this Mac's clock")
-check(AP.sighting(gseen, tag: "v0.4.0", sha256: sha1)?.firstGitHub == later(1) && AP.sighting(gseen, tag: "v0.4.0", sha256: sha2) == nil, "the sighting by tag and zip")
+check(AP.sighting(gseen, tag: "v0.4.0", sha256: sha1, release: 7)?.firstGitHub == later(1) && AP.sighting(gseen, tag: "v0.4.0", sha256: sha2, release: 7) == nil, "the sighting by tag and zip")
+// AU2 (the fourth security pass): the reviewer's proof. v0.7.0 read at t0 (release object 1), deleted, and two days
+// later an OLDER release object (2, published 30 days back) edited to carry the same tag and zip: another sighting,
+// so it waits 48 hours from its return (before, its earlier published_at was ignored and it went at once).
+var au2 = AP.sighted(AP.Memory(), tag: "v0.7.0", sha256: sha1, signedAt: t0, now: t0, github: t0, published: later(-1), release: 1)
+let returned = t0.addingTimeInterval(172_860)  // two days and a minute later, in whole seconds
+au2 = AP.sighted(au2, tag: "v0.7.0", sha256: sha1, signedAt: t0, now: returned, github: returned, published: later(-30 * 24), release: 2)
+let back = AP.sighting(au2, tag: "v0.7.0", sha256: sha1, release: 2)
+check(au2.seen.count == 2 && back?.first == returned && AP.waitUntil(au2, tag: "v0.7.0") == returned.addingTimeInterval(172_800),
+      "AU2: the same tag and zip on another release object: another sighting, its own wait")
+check(dates(signed: t0, first: back?.first ?? t0, now: returned, github: ghc(back?.firstGitHub, returned, published: back?.published, release: 2))
+      == .waitUntil(returned.addingTimeInterval(172_800)),
+      "AU2: …so it waits 48 hours from its return, by both clocks")
+let again = AP.sighted(au2, tag: "v0.7.0", sha256: sha1, signedAt: t0, now: later(60), github: later(60), published: later(-1), release: 1)
+check(again.seen.count == 2 && AP.sighting(again, tag: "v0.7.0", sha256: sha1, release: 1)?.first == t0,
+      "AU2: the same release object read again keeps its first sight (an edit or a pre-release toggle moves nothing)")
+check(dates(signed: t0, first: t0, now: later(50), github: ghc(t0, later(50), release: nil)) == .refuse("GitHub’s answer doesn’t say which release it is"),
+      "AU2: a release whose answer doesn't say which release object it is never installs by itself")
+check(dates(signed: t0, first: t0, now: later(50), github: ghc(t0, later(50), published: nil, release: nil), nightly: true, wait: 12 * 3600) == .go,
+      "AU2: a nightly needs neither (its pre-release rolls; its wait counts from the first sight)")
+// N11 a: the estimate carries a later publication over only while it is within `maxAge` of GitHub's first time, so a
+// first `Date` years off can't hold it years out (`dates`, with GitHub's clock now, decides); one years ahead still
+// makes `dates` wait, which fails safe.
+let longAgo = t0.addingTimeInterval(-25 * 365 * 86400), farAhead = t0.addingTimeInterval(10 * 365 * 86400)
+let far = AP.sighted(AP.Memory(), tag: "v0.7.0", sha256: sha1, signedAt: t0, now: t0, github: longAgo, published: later(-1), release: 1)
+check(AP.waitUntil(far, tag: "v0.7.0") == later(48), "N11 a: a first Date 25 years back: the estimate is this Mac's 48 hours, not 25 years")
+check(dates(signed: t0, first: t0, now: later(48), github: ghc(longAgo, later(48), published: later(-1), release: 1)) == .go,
+      "N11 a: …and dates, with GitHub's clock now, lets it go after them")
+var near = AP.sighted(AP.Memory(), tag: "v0.7.0", sha256: sha1, signedAt: t0, now: t0, github: t0, published: later(-1), release: 1)
+near = AP.sighted(near, tag: "v0.7.0", sha256: sha1, signedAt: t0, now: later(30), github: later(30), published: later(30), release: 1)
+check(AP.waitUntil(near, tag: "v0.7.0") == later(78), "N11 a: a publication 30 hours after the first sight is still carried over")
+check(dates(signed: t0, first: t0, now: later(48), github: ghc(farAhead, later(48), published: later(-1), release: 1)) != .go,
+      "N11 a: a first Date 10 years ahead still waits (fails safe)")
 if let data = try? JSONEncoder().encode(seenMem), let back = try? JSONDecoder().decode(AP.Memory.self, from: data) {
     check(back == seenMem, "sightings survive as JSON")
 } else { check(false, "sightings encode") }
@@ -828,9 +869,9 @@ let fewerStops = AP.bounded(AP.stopped(stops, "not a tag"), running: v030)
 check(fewerStops.stopped.count == AP.maxStops && fewerStops.stopped.first == "v0.100" && !fewerStops.stopped.contains("v0.3")
       && !fewerStops.stopped.contains("not a tag"), "stops bounded, the highest kept, none at or below this Sill")
 var sights = mem
-for i in 1...50 { sights = AP.sighted(sights, tag: "v0.\(i + 3)", sha256: sha1, signedAt: t0, now: later(Double(i))) }
+for i in 1...50 { sights = AP.sighted(sights, tag: "v0.\(i + 3)", sha256: sha1, signedAt: t0, now: later(Double(i)), release: 7) }
 check(AP.bounded(sights, running: v030).seen.count == AP.maxRemembered, "sightings bounded")
-check(AP.bounded(AP.sighted(mem, tag: "v0.4.0", sha256: "not hex", signedAt: t0, now: t0), running: v030).seen.isEmpty, "a malformed sighting goes")
+check(AP.bounded(AP.sighted(mem, tag: "v0.4.0", sha256: "not hex", signedAt: t0, now: t0, release: 7), running: v030).seen.isEmpty, "a malformed sighting goes")
 var full = AP.bounded(many, running: v030)
 full.stopped = fewerStops.stopped
 full.seen = AP.bounded(sights, running: v030).seen
@@ -1034,8 +1075,8 @@ check(AP.start(nmem, checkOn: true, available: true, refusal: nil, offered: v062
 // …and what AppUpdater keeps for it then (`if wait > 0`): its sighting under its key, "0.6.2 (1500)", bounded as its
 // attempts are (newer by version, then build), its end from that sighting on both clocks.
 let nkey = AP.key(v062, build: 1500)
-let nseen = AP.bounded(AP.sighted(nmem, tag: nkey, sha256: sha1, signedAt: t0, now: t0, github: t0), running: v062, runningBuild: 1471)
-check(nseen.seen.count == 1 && AP.firstSeen(nseen, tag: nkey, sha256: sha1) == t0 && AP.waitUntil(nseen, tag: nkey, wait: 12 * 3600) == later(12)
+let nseen = AP.bounded(AP.sighted(nmem, tag: nkey, sha256: sha1, signedAt: t0, now: t0, github: t0, release: 7), running: v062, runningBuild: 1471)
+check(nseen.seen.count == 1 && AP.firstSeen(nseen, tag: nkey, sha256: sha1, release: 7) == t0 && AP.waitUntil(nseen, tag: nkey, wait: 12 * 3600) == later(12)
       && AP.waitUntil(nseen, tag: nkey) == later(48) && AP.waitUntil(nseen, tag: AP.key(v062, build: 1501), wait: 12 * 3600) == nil,
       "NB1: a nightly's sighting kept by its key, its end from it")
 check(AP.bounded(nseen, running: v062, runningBuild: 1500).seen.isEmpty && AP.bounded(nseen, running: SillVersion("0.6.3")!, runningBuild: 1).seen.isEmpty,
@@ -1045,7 +1086,7 @@ check(AP.start(nseen, checkOn: true, available: true, refusal: nil, offered: v06
       && AP.start(nseen, checkOn: true, available: true, refusal: nil, offered: v062, offeredTag: "nightly", signed: true, running: v062, idle: true,
                   waitUntil: AP.waitUntil(nseen, tag: nkey, wait: 12 * 3600), now: later(12), offeredBuild: 1500, runningBuild: 1471) == .go,
       "NB1: …and the start waits on it")
-let nsight = AP.sighting(nseen, tag: nkey, sha256: sha1)
+let nsight = AP.sighting(nseen, tag: nkey, sha256: sha1, release: 7)
 check(AP.dates(signedAt: t0, firstSeen: nsight?.first ?? later(11), now: later(12), nightly: true, wait: 12 * 3600,
                github: AP.GitHubClock(firstSeen: nsight?.firstGitHub, now: later(12), published: nil)) == .go
       && AP.dates(signedAt: t0, firstSeen: nsight?.first ?? later(11), now: later(12), nightly: true, wait: 12 * 3600,
@@ -1056,6 +1097,11 @@ check(P.line(.keptUnstarted("it quit before it had run for long enough"), runnin
       == "Sill 0.4 didn’t start the first time, and the copy it replaced failed its last check, so Sill 0.4 stayed. If it misbehaves, download Sill again from getsill.app.",
       "W3: the words for a new copy kept")
 check(P.logText(.keptUnstarted("x")).contains("the new copy left at Sill's path, not started") && P.Failure.keptUnstarted("x").cleanUp, "W3: its log line")
+// The fourth security pass's W4: the watcher couldn't leave a whole Sill at its path, and says so.
+check(P.line(.noWholeSillLeft("it quit before it had run for long enough"), running: v040, offered: v040, keptAt: nil)
+      == "An update of Sill didn’t finish: the new version didn’t start the first time, and Sill’s watcher couldn’t leave a whole copy of Sill in its place. If this copy misbehaves, download Sill again from getsill.app.",
+      "W4: the words when no whole Sill was left")
+check(P.logText(.noWholeSillLeft("x")).contains("couldn't leave a whole Sill at Sill's path") && P.Failure.noWholeSillLeft("x").cleanUp, "W4: its log line")
 check(P.line(.manifest(.badSignature), running: v062, offered: v062, keptAt: nil, offeredBuild: 1500)
       == "Couldn’t update: the nightly’s signature with Sill’s nightly key isn’t valid. Sill 0.6.2 is unchanged.", "a nightly's failure names the nightly key")
 check(P.menuItem(.idle, offered: v062, running: v030, available: true, refusal: nil, offeredBuild: 1500).title == "Sill nightly 0.6.2 (1500) Is Available…", "the menu names the build")
@@ -1329,14 +1375,17 @@ check(updater.components(separatedBy: "Auto.began(").count == 2 && after("Auto.d
       && after("private func fetch(", "Auto.began(", in: updater), "A3: an attempt counts only on a verified release")
 // A1: the first sight is kept before the dates are judged; CL1 and AU1: with GitHub's clock and publication.
 check(after("Auto.sighted($0, tag: sightTag", "Auto.dates(signedAt: p.manifest.signedAt, firstSeen:", in: updater), "A1: the first sight before the dates")
-check(updater.contains("github: p.release.answeredAt, published: nightly ? nil : p.release.publishedAt)")
-      && updater.contains("Auto.dates(signedAt: p.manifest.signedAt, firstSeen: first, now: now, nightly: nightly, wait: wait, github: github)"),
+check(updater.contains("Auto.dates(signedAt: p.manifest.signedAt, firstSeen: first, now: now, nightly: nightly, wait: wait, github: github)"),
       "CL1, AU1: the automatic update's dates with GitHub's clock and publication")
-// …and the clock fetch judges by is GitHub's at the first sight and now, with the latest publication, word for word
-// (whitespace aside): a mutant that left the publication out of it went uncaught by the rule above.
+// …and the sighting and the clock fetch judges by, word for word (whitespace aside): GitHub's time at the first sight
+// and now, the latest publication, and GitHub's release object (the fourth pass's AU2). A mutant that left the
+// publication out of the clock went uncaught by a rule that looked for less.
 let flatUpdater = updater.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-check(flatUpdater.contains("let github = Auto.GitHubClock(firstSeen: sight?.firstGitHub ?? p.release.answeredAt, now: p.release.answeredAt, published: nightly ? nil : (sight?.published ?? p.release.publishedAt))"),
-      "CL1, AU1: fetch's GitHub clock: its first time, its time now and the latest publication")
+check(flatUpdater.contains("self.remember { Auto.sighted($0, tag: sightTag, sha256: p.manifest.sha256, signedAt: p.manifest.signedAt, now: now, github: p.release.answeredAt, published: nightly ? nil : p.release.publishedAt, release: p.release.releaseID) }")
+      && flatUpdater.contains("let sight = Auto.sighting(self.memory, tag: sightTag, sha256: p.manifest.sha256, release: p.release.releaseID)"),
+      "AU2: fetch keeps and finds the sighting by GitHub's release object too")
+check(flatUpdater.contains("let github = Auto.GitHubClock(firstSeen: sight?.firstGitHub ?? p.release.answeredAt, now: p.release.answeredAt, published: nightly ? nil : (sight?.published ?? p.release.publishedAt), release: p.release.releaseID)"),
+      "CL1, AU1, AU2: fetch's GitHub clock: its first time, its time now, the latest publication and the release object")
 check(updater.contains("let wait = nightly ? Auto.nightlyCoolingOff : Auto.coolingOff")
       && updater.contains("let sightTag = nightly ? Auto.key(p.release.version, build: p.release.build) : p.release.tag")
       && after("if wait > 0 {", "self.remember { Auto.sighted($0, tag: sightTag", in: updater)
@@ -1353,6 +1402,10 @@ check(updater.contains("            if restored.count > 2, restored[2] == \"kept
       && updater.contains("state = Policy.State(phase: .failed(.keptUnstarted(why)), mode: p[2] == \"automatic\" ? .automatic : .manual)")
       && after("if restored.count > 2, restored[2] == \"kept\"", "if let p = pending, p.count >= 3, restored.first == p[0], let (failed, failedBuild) = Auto.parseKey(p[1])", in: updater),
       "W3: a new copy the watcher kept is said, word for word, before the put-back's words")
+check(updater.contains("            if restored.count > 2, restored[2] == \"lost\", let p = pending, p.count >= 3, restored.first == p[0] {")
+      && updater.contains("state = Policy.State(phase: .failed(.noWholeSillLeft(why)), mode: automatic ? .automatic : .manual)")
+      && after("if restored.count > 2, restored[2] == \"lost\"", "if let p = pending, p.count >= 3, restored.first == p[0], let (failed, failedBuild) = Auto.parseKey(p[1])", in: updater),
+      "W4: a note that says no whole Sill was left is said, before the put-back's words")
 check(updater.contains("store.update({ Auto.bounded(change($0), running: running, runningBuild: runningBuild) }"),
       "A3: every write kept small")
 check(!updater.contains("Auto.switched($0, on: true)") && updater.contains("remember(replacingUnreadable: on) { Auto.switched($0, on: on) }")
@@ -1384,14 +1437,22 @@ check(installerText.contains("UpdateManifest.verify(manifestBody.data, keys: tru
 // new file renamed into place (never written through a link, never waiting on a FIFO). W2: the started note is
 // looked at, never opened.
 let watcher = installerText.components(separatedBy: "static let watcherScript").last ?? ""
-check(after("/bin/mv \"$old\" \"$app\"", "if ! whole \"$app\"; then", in: watcher) && after("/bin/mv -f -h \"$note\" \"$restored\"", "if ! whole \"$app\"; then", in: watcher)
-      && after("if ! whole \"$app\"; then", "\"$launcher\" \"$app\"", in: watcher), "W1: the copy at Sill's path checked after the move and the note, before it starts")
+check(after("/bin/mv \"$old\" \"$app\"", "if ! whole \"$app\" \"$cdhash\"; then", in: watcher)
+      && after("' \"$token\" \"$why\" 1<>\"$note\" && /bin/mv -f -h \"$note\" \"$restored\"\nif ! whole \"$app\" \"$cdhash\"; then", "\"$launcher\" \"$app\"", in: watcher)
+      && watcher.contains("whole \"$old\" \"$cdhash\" || exit 3"),
+      "W1: the copy at Sill's path checked after the move and the note, before it starts, each check with the cdhash it must have")
 check(!watcher.contains("> \"$restored\"") && watcher.contains("1<>\"$note\""), "W1: the restored note never written through a link or onto a FIFO")
 check(watcher.contains("many=$(/usr/bin/find \"$1\" -type f -links +1 -print 2>/dev/null) || return 1") && watcher.contains("[ -z \"$many\" ] || return 1"),
       "W3: a copy with a file of two names is never whole")
-check(after("if ! whole \"$app\"; then", "if [ -e \"$app\" ] || [ -L \"$app\" ] || ! /bin/mv \"$parked\" \"$app\"; then exit 7; fi", in: watcher)
-      && watcher.contains("    /bin/mv \"$app\" \"$dir/failed its check.app\" || exit 7\n") && watcher.contains("kept\n' \"$token\" \"$why\" 1<>\"$note\""),
-      "W3: Sill's path never left empty: the new copy back (never into what stands there), and the note says so")
+// W3 and the fourth pass's W4: the copy that failed goes aside; the parked new copy is checked whole with its own
+// cdhash before it moves back, only to an empty path; the path is checked again after the move, the kept note
+// written before that check (N11 h); `kept` stays only if the check holds, else `lost`.
+check(watcher.contains("    /bin/mv \"$app\" \"$dir/failed its check.app\" && [ ! -e \"$app\" ] && [ ! -L \"$app\" ] && whole \"$parked\" \"$newcdhash\" \\\n        && /bin/mv \"$parked\" \"$app\" && state=kept || state=lost\n    left \"$state\"\n    [ \"$state\" = kept ] && whole \"$app\" \"$newcdhash\" && exit 8\n    [ \"$state\" = kept ] && left lost\n    exit 9\n"),
+      "W3, W4: the parked copy checked whole before it goes back, the path checked after, `kept` only if that holds")
+check(watcher.contains("arch=$3; newcdhash=$4\n") && watcher.contains("[ -n \"$have\" ] && [ -n \"$2\" ] && [ \"$have\" = \"$2\" ]")
+      && installerText.contains("w.newCDHash]") && updater.contains("let newCDHash = checked.cdhashes[Policy.Architecture.current.rawValue] else { return }")
+      && updater.contains("newCDHash: newCDHash, requirement: installer.trust.signer,"),
+      "W4: the watcher takes the new copy's cdhash, the one the swap checked, and a check without one never holds")
 check(installerText.contains("serverDate = http.value(forHTTPHeaderField: \"Date\").flatMap(UpdateInstallPolicy.httpDate)")
       && installerText.contains("release.answeredAt = api.serverDate") && installerText.contains("Policy.stopNames(stopTag: stop.tag"),
       "CL1: GitHub's clock read from its answers; N10 l: a stop by version and SHA-256")

@@ -66,6 +66,8 @@ struct Release {
     /// "": none; else these words): the third security pass's AU1 and CL1.
     var publishedAt: String? = "2026-11-12T08:00:00Z"
     var date: String?
+    /// GitHub's id of the release object (nil: none in the answer): the fourth security pass's AU2.
+    var releaseID: Int? = 248_311_004
 }
 enum StopKind { case this, otherRelease, otherKey, garbage, sameVersionOtherText }
 func publish(_ r: Release) {
@@ -107,6 +109,7 @@ func publish(_ r: Release) {
     var release: [String: Any] = ["tag_name": r.tag, "draft": false, "prerelease": false, "assets": list,
                                   "html_url": "\(base)/releases/tag/\(r.tag)"]
     if let p = r.publishedAt { release["published_at"] = p }
+    if let id = r.releaseID { release["id"] = id }
     var control: [String: Any] = ["release": release, "releaseStatus": r.releaseStatus, "modes": r.modes]
     if let d = r.date { control["date"] = d }
     try! JSONSerialization.data(withJSONObject: control).write(to: out.appendingPathComponent("srv/control.json"))
@@ -359,19 +362,21 @@ await refused("N10 l: a stop naming the release's version in another form (v1.1.
 }
 // GitHub's clock and its publication date, as prepare reads them (the third security pass's CL1 and AU1): the answer's
 // Date header (the stand-in's clock, a fixed one, none, one that isn't a date) and published_at (there, or not).
-func prepareDates(_ r: Release) async -> (answered: Date?, published: Date?)? {
+func prepareDates(_ r: Release) async -> (answered: Date?, published: Date?, id: Int?)? {
     publish(r)
     guard case .success(let p) = await installer.prepare(offeredTag: r.tag, running: SillVersion("1.0")!, cancel: UpdateInstaller.Cancel()) else { return nil }
-    return (p.release.answeredAt, p.release.publishedAt)
+    return (p.release.answeredAt, p.release.publishedAt, p.release.releaseID)
 }
 if let d = await prepareDates(v11) {
     check(d.answered.map { abs($0.timeIntervalSinceNow) < 120 } == true, "CL1: GitHub's clock read from the answer's Date: \(String(describing: d.answered))")
     check(d.published == M.date("2026-11-12T08:00:00Z"), "AU1: published_at read: \(String(describing: d.published))")
+    check(d.id == 248_311_004, "AU2: GitHub's id of the release object read: \(String(describing: d.id))")
 } else { check(false, "CL1: a release prepared for its dates") }
 let fixed = await prepareDates({ var r = v11; r.date = "Wed, 11 Nov 2026 10:00:00 GMT"; return r }())
 check(fixed?.answered == M.date("2026-11-11T10:00:00Z"), "CL1: a Date header taken as GitHub's clock, word for word: \(String(describing: fixed?.answered))")
-let none = await prepareDates({ var r = v11; r.date = ""; r.publishedAt = nil; return r }())
-check(none != nil && none?.answered == nil && none?.published == nil, "CL1, AU1: no Date header and no published_at read as none (never a date made up)")
+let none = await prepareDates({ var r = v11; r.date = ""; r.publishedAt = nil; r.releaseID = nil; return r }())
+check(none != nil && none?.answered == nil && none?.published == nil && none?.id == nil,
+      "CL1, AU1, AU2: no Date header, no published_at and no id read as none (never one made up)")
 let garbled = await prepareDates({ var r = v11; r.date = "yesterday"; return r }())
 check(garbled != nil && garbled?.answered == nil, "CL1: a Date header that isn't one read as none")
 say("GitHub's clock and publication: read from the answer, none when it has none")
@@ -731,19 +736,29 @@ say("== the watcher: a new copy that doesn't start is put back by itself")
 /// installed UpdTest, or nil for a process that isn't it), and the watcher as Sill starts it, with the harness's
 /// launcher (the put-back copy's executable, never Launch Services). Waits for the watcher to end. The started
 /// note is a file whose name carries the token (STARTED; STARTED_OTHER another name). `plant` (the second security
-/// pass's W1 and W2): a link at the restored note into the copy at Sill's path; the restored note inside that
-/// copy (so the watcher's note lands in it after its move, which its check then catches); the old copy moved and
-/// a link left in its place; a FIFO at the started note; a second name (a hard link) for a file of the old copy
-/// while it waits in staging (the third security pass's W3). `expectKept`: the put-back copy failed the watcher's
-/// last check, so the new copy is back at Sill's path, not started, and the restored note says so (W3).
-enum Plant { case none, linkAtRestored, restoredInsideApp, oldIsLink, fifoAtStarted, linkAtStarted, hardLinkInOld }
+/// pass's W1 and W2, the third's W3, the fourth's W4): a link at the restored note into the copy at Sill's path;
+/// the restored note inside that copy (so each of the watcher's notes lands in whatever copy stands at Sill's path
+/// when it writes it: the put-back copy fails its last check, and so does the new copy moved back after it); the
+/// restored note in a folder only the old copy has (Before/: the first note lands in the put-back copy, which then
+/// fails its last check, and the `kept` note finds no such folder in the new copy, so the new copy stays whole); the
+/// restored note inside that copy with the new copy changed before the watcher starts (the parked copy then fails
+/// its check and is never moved back); the old copy moved and a link left in its place; a FIFO and a link at the
+/// started note; a second name (a hard link) for a file of the old copy while it waits in staging.
+enum Plant { case none, linkAtRestored, restoredInsideApp, restoredInOldOnly, restoredInsideAppNewChanged, oldIsLink, fifoAtStarted, linkAtStarted, hardLinkInOld }
+/// What the watcher leaves: the old copy back and started; the new copy where it was, nothing put back or started;
+/// the new copy moved back whole after the put-back copy failed its last check (W3); the same, but what stands at
+/// Sill's path isn't whole, and the note says `lost` (W4); nothing at Sill's path, the parked copy never moved back
+/// (W4).
+enum Left { case restored, stays, kept, lostAtPath, nothingAtPath }
 func watched(_ name: String, newCopy: [String]?, seconds: Int = 6, changeOld: Bool = false, plant: Plant = .none,
-             expectRestored: Bool, expectWhy: String? = nil, expectKept: Bool = false) async {
+             expect: Left, expectWhy: String? = nil) async {
     publish(v11)
     let before = treeHash(out.appendingPathComponent("apps/installed/UpdTest.app"))
     let oldCDHash = UpdateInstaller.cdhash(of: out.appendingPathComponent("apps/installed/UpdTest.app"), arch: .current) ?? ""
     let o = await update(name)
     guard o.failure == nil, let old = o.staged else { check(false, "\(name): the update: \(o.failure.map { P.logText($0) } ?? "")"); return }
+    let newCDHash = UpdateInstaller.cdhash(of: o.installed, arch: .current) ?? ""
+    let newTree = treeHash(o.installed)
     if changeOld {
         let h = try! FileHandle(forWritingTo: old.appendingPathComponent("Contents/Resources/note.txt")); h.seekToEndOfFile(); h.write(Data("changed while it waited\n".utf8)); h.closeFile()
     }
@@ -751,9 +766,15 @@ func watched(_ name: String, newCopy: [String]?, seconds: Int = 6, changeOld: Bo
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let token = UUID().uuidString
     let started = dir.appendingPathComponent("started \(token).txt"), other = dir.appendingPathComponent("started other.txt")
-    let restored = plant == .restoredInsideApp ? o.installed.appendingPathComponent("Contents/Resources/restored.txt")
-        : dir.appendingPathComponent("restored.txt")
+    let restored: URL
+    switch plant {
+    case .restoredInsideApp, .restoredInsideAppNewChanged: restored = o.installed.appendingPathComponent("Contents/Resources/restored.txt")
+    case .restoredInOldOnly: restored = o.installed.appendingPathComponent("Contents/Resources/Before/restored.txt")
+    default: restored = dir.appendingPathComponent("restored.txt")
+    }
     let launched = o.installed.deletingLastPathComponent().appendingPathComponent("launched.txt")
+    let parked = old.deletingLastPathComponent().appendingPathComponent("did not start.app")
+    let aside = old.deletingLastPathComponent().appendingPathComponent("failed its check.app")
     switch plant {
     case .linkAtRestored:
         try! FileManager.default.createSymbolicLink(atPath: restored.path, withDestinationPath: o.installed.appendingPathComponent("Contents/Resources/note.txt").path)
@@ -768,7 +789,10 @@ func watched(_ name: String, newCopy: [String]?, seconds: Int = 6, changeOld: Bo
         try! FileManager.default.createSymbolicLink(atPath: started.path, withDestinationPath: other.path)
     case .hardLinkInOld:
         try! FileManager.default.linkItem(at: old.appendingPathComponent("Contents/Resources/note.txt"), to: dir.appendingPathComponent("held.txt"))
-    case .none, .restoredInsideApp: break
+    case .restoredInsideAppNewChanged:
+        // The new copy changed at Sill's path before the watcher starts, so the copy it parks isn't the code that ran.
+        let h = try! FileHandle(forWritingTo: o.installed.appendingPathComponent("Contents/Resources/note.txt")); h.seekToEndOfFile(); h.write(Data("changed before it was parked\n".utf8)); h.closeFile()
+    case .none, .restoredInsideApp, .restoredInOldOnly: break
     }
     let p = Process()
     if let args = newCopy {
@@ -781,8 +805,8 @@ func watched(_ name: String, newCopy: [String]?, seconds: Int = 6, changeOld: Bo
     p.standardOutput = FileHandle.nullDevice
     try! p.run()
     let w = UpdateInstaller.Watch(pid: p.processIdentifier, installed: o.installed, executable: "UpdTest", oldCopy: old, oldCDHash: oldCDHash,
-                                  requirement: testTrust.signer, startedNote: started, token: token, restoredNote: restored, seconds: seconds,
-                                  launcher: out.appendingPathComponent("launch.sh").path)
+                                  newCDHash: newCDHash, requirement: testTrust.signer, startedNote: started, token: token, restoredNote: restored,
+                                  seconds: seconds, launcher: out.appendingPathComponent("launch.sh").path)
     check(UpdateInstaller.startWatcher(w), "\(name): the watcher started")
     // It ends by itself: the note seen, or the put-back done (or refused), at most `seconds` + 8 s.
     let deadline = Date().addingTimeInterval(Double(seconds) + 12)
@@ -792,27 +816,38 @@ func watched(_ name: String, newCopy: [String]?, seconds: Int = 6, changeOld: Bo
         try? await Task.sleep(for: .milliseconds(250))
     }
     try? await Task.sleep(for: .milliseconds(500))
-    if expectKept {
-        check(version(of: o.installed) == "1.1", "\(name): W3: the new copy back at Sill's path, never nothing (\(version(of: o.installed) ?? "none"))")
-        check(version(of: old.deletingLastPathComponent().appendingPathComponent("failed its check.app")) == "1.0",
-              "\(name): the put-back copy that failed its check moved aside")
-        let note = UpdateInstaller.readNote(restored)
-        check(note?.first == token && note?.count == 3 && note?.last == "kept", "\(name): W3: the restored note says the new copy was kept: \(note ?? [])")
-        check(!FileManager.default.fileExists(atPath: launched.path), "\(name): nothing started")
-    } else if expectRestored {
+    let note = UpdateInstaller.readNote(restored)
+    let nothingStarted = !FileManager.default.fileExists(atPath: launched.path)
+    switch expect {
+    case .kept:
+        check(version(of: o.installed) == "1.1" && treeHash(o.installed) == newTree,
+              "\(name): W3: the new copy back at Sill's path, whole (\(version(of: o.installed) ?? "none"))")
+        check(version(of: aside) == "1.0", "\(name): the put-back copy that failed its check moved aside")
+        check(!FileManager.default.fileExists(atPath: parked.path), "\(name): nothing left parked")
+        // Here the kept note finds no Before/ in the new copy, so it can't be written: only the copy matters.
+        check(nothingStarted, "\(name): nothing started")
+    case .lostAtPath:
+        check(version(of: o.installed) == "1.1" && treeHash(o.installed) != newTree,
+              "\(name): W4: what stands at Sill's path isn't the new copy whole (the kept note landed in it)")
+        check(note?.first == token && note?.count == 3 && note?.last == "lost", "\(name): W4: the restored note says no whole Sill is left: \(note ?? [])")
+        check(nothingStarted, "\(name): nothing started")
+    case .nothingAtPath:
+        check(!FileManager.default.fileExists(atPath: o.installed.path), "\(name): W4: nothing at Sill's path (\(version(of: o.installed) ?? "none"))")
+        check(version(of: parked) == "1.1", "\(name): W4: the changed new copy still parked, never moved back unchecked")
+        check(version(of: aside) == "1.0", "\(name): the put-back copy that failed its check moved aside")
+        check(nothingStarted, "\(name): nothing started")
+    case .restored:
         check(version(of: o.installed) == "1.0", "\(name): the old copy is back at the path (\(version(of: o.installed) ?? "none"))")
         check(treeHash(o.installed) == before, "\(name): the old copy back is the old copy, whole")
-        check(version(of: old.deletingLastPathComponent().appendingPathComponent("did not start.app")) == "1.1", "\(name): the new copy parked beside it")
-        let note = UpdateInstaller.readNote(restored)
+        check(version(of: parked) == "1.1", "\(name): the new copy parked beside it")
         check(note?.first == token && (expectWhy.map { note?.dropFirst().first?.hasPrefix($0) == true } ?? true),
               "\(name): the restored note: \(note ?? [])")
         var link = stat()
         check(lstat(restored.path, &link) == 0 && link.st_mode & S_IFMT == S_IFREG, "\(name): the restored note a file of its own, never written through a link")
         check((try? String(contentsOf: launched, encoding: .utf8)) == "launched 1.0\n", "\(name): the old copy was started")
-    } else {
+    case .stays:
         check(version(of: o.installed) == "1.1", "\(name): the new copy stays (\(version(of: o.installed) ?? "none"))")
-        check(!FileManager.default.fileExists(atPath: restored.path) && !FileManager.default.fileExists(atPath: launched.path),
-              "\(name): nothing put back, nothing started")
+        check(!FileManager.default.fileExists(atPath: restored.path) && nothingStarted, "\(name): nothing put back, nothing started")
     }
     if newCopy == nil {
         check(p.isRunning, "\(name): a process that isn't the new Sill is never stopped")
@@ -823,21 +858,23 @@ func watched(_ name: String, newCopy: [String]?, seconds: Int = 6, changeOld: Bo
     while p.isRunning, Date() < end { try? await Task.sleep(for: .milliseconds(100)) }
     if p.isRunning { kill(p.processIdentifier, SIGKILL) }
     if let s = o.staging { UpdateInstaller.remove(s) }
-    say("\(name): \(version(of: o.installed) ?? "?") at the path")
+    say("\(name): \(version(of: o.installed) ?? "?") at the path\(note.map { ", the note: " + $0.dropFirst(2).joined(separator: " ") } ?? "")")
 }
-await watched("the new copy proves itself", newCopy: ["started", "STARTED", "TOKEN", "1"], expectRestored: false)
-await watched("the new copy quits at once", newCopy: ["crash"], expectRestored: true, expectWhy: "it quit before it had run")
-await watched("the new copy never proves itself", newCopy: ["sleep", "30"], seconds: 3, expectRestored: true, expectWhy: "it hadn't run for long enough")
-await watched("another token in the note", newCopy: ["started", "STARTED_OTHER", "TOKEN", "1"], seconds: 3, expectRestored: true)
-// The second security pass's W1 and W2.
-await watched("a link planted at the restored note", newCopy: ["crash"], plant: .linkAtRestored, expectRestored: true, expectWhy: "it quit before it had run")
-await watched("the note lands in the put-back copy", newCopy: ["crash"], plant: .restoredInsideApp, expectRestored: false, expectKept: true)
-await watched("W3: a second name for a file of the old copy while it waits", newCopy: ["crash"], plant: .hardLinkInOld, expectRestored: false)
-await watched("the old copy replaced by a link", newCopy: ["crash"], plant: .oldIsLink, expectRestored: false)
-await watched("a FIFO at the started note", newCopy: ["sleep", "30"], seconds: 3, plant: .fifoAtStarted, expectRestored: true, expectWhy: "it hadn't run for long enough")
-await watched("a link at the started note", newCopy: ["sleep", "30"], seconds: 3, plant: .linkAtStarted, expectRestored: true, expectWhy: "it hadn't run for long enough")
-await watched("the old copy changed while it waited", newCopy: ["crash"], changeOld: true, expectRestored: false)
-await watched("the pid isn't the new Sill's", newCopy: nil, seconds: 3, expectRestored: true)
+await watched("the new copy proves itself", newCopy: ["started", "STARTED", "TOKEN", "1"], expect: .stays)
+await watched("the new copy quits at once", newCopy: ["crash"], expect: .restored, expectWhy: "it quit before it had run")
+await watched("the new copy never proves itself", newCopy: ["sleep", "30"], seconds: 3, expect: .restored, expectWhy: "it hadn't run for long enough")
+await watched("another token in the note", newCopy: ["started", "STARTED_OTHER", "TOKEN", "1"], seconds: 3, expect: .restored)
+// The second security pass's W1 and W2; the third's W3; the fourth's W4.
+await watched("a link planted at the restored note", newCopy: ["crash"], plant: .linkAtRestored, expect: .restored, expectWhy: "it quit before it had run")
+await watched("W3: the put-back copy fails its last check, the new copy goes back whole", newCopy: ["crash"], plant: .restoredInOldOnly, expect: .kept)
+await watched("W4: the kept note lands in the copy moved back, so the check after the move says lost", newCopy: ["crash"], plant: .restoredInsideApp, expect: .lostAtPath)
+await watched("W4: the parked new copy changed, never moved back", newCopy: ["crash"], plant: .restoredInsideAppNewChanged, expect: .nothingAtPath)
+await watched("W3: a second name for a file of the old copy while it waits", newCopy: ["crash"], plant: .hardLinkInOld, expect: .stays)
+await watched("the old copy replaced by a link", newCopy: ["crash"], plant: .oldIsLink, expect: .stays)
+await watched("a FIFO at the started note", newCopy: ["sleep", "30"], seconds: 3, plant: .fifoAtStarted, expect: .restored, expectWhy: "it hadn't run for long enough")
+await watched("a link at the started note", newCopy: ["sleep", "30"], seconds: 3, plant: .linkAtStarted, expect: .restored, expectWhy: "it hadn't run for long enough")
+await watched("the old copy changed while it waited", newCopy: ["crash"], changeOld: true, expect: .stays)
+await watched("the pid isn't the new Sill's", newCopy: nil, seconds: 3, expect: .restored)
 
 let g = out.appendingPathComponent("genuine")
 if FileManager.default.fileExists(atPath: g.appendingPathComponent("plain.zip").path) {

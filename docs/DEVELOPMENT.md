@@ -182,7 +182,8 @@ the defaults; only Settings turns it on). After a check, it runs Update Now's
 steps by itself for a release it first found at least 48 hours ago (its own
 first read of the verified manifest, kept across launches, never before the
 manifest's `signed` date; 48 hours by this Mac's clock and by GitHub's, the `Date`
-of its HTTPS answers, from the release's `published_at` when that is later), then
+of its HTTPS answers, from the release's `published_at` when that is later, and
+afresh for the same tag and zip on another release object, by its `id`), then
 waits for 5 minutes without a device connected, asks
 GitHub again, holds new sessions (a device that tries is told Sill is
 restarting and reconnects by itself) and installs. Two attempts a version at
@@ -2681,11 +2682,12 @@ back. The signer is built with the hardened runtime and refused without it. A
 release no Sill may install gets a stop (`update-manifest stop`, then `gh
 release upload`: docs/one-click-update-plan.md §15.4). Every manifest it signs
 goes in the signing record beside the signer (`signed.txt`), and
-`Scripts/sign-update.sh --audit` compares every release on GitHub that carries a
-manifest with it, drafts and pre-releases too (a release that verifies with the key
-but isn't in the record is one Noah didn't sign; `--notify` posts a notification
-then and whenever the audit couldn't run; its LaunchAgent, every four hours, is his
-choice: docs/release-checklist.md part 1 §7).
+`Scripts/sign-update.sh --audit` compares every release on GitHub with it, drafts
+and pre-releases too: each manifest (one that verifies with the key but isn't in the
+record is a release Noah didn't sign), each `Sill.zip` since the first release
+signed, and every release signed still listed (`--pulled vX` marks one he pulled);
+`--notify` posts a notification then and whenever the audit couldn't run; its
+LaunchAgent, every four hours, is his choice: docs/release-checklist.md part 1 §7.
 `Scripts/sign-update.sh --new-key` makes the key once (docs/release-checklist.md,
 part 1 §7); its public key goes into `UpdateManifest.releaseKeys`.
 `make-app.sh --release` embeds `Packaging/embedded.provisionprofile` (the
