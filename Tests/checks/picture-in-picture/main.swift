@@ -13,8 +13,8 @@
 //   C2 with none in front: the last choice while it is still listed, else none;
 //   C3 a window in the background, or one in front that does not qualify, added anywhere, never changes a
 //      choice made in front; nor does the order of windows used at different moments;
-// then every truth table: watched, heard, running, frozen, the device's own input held, `stops` for each
-// ending; `pauseEnds` at its edges; the words; then the Lifecycle by cases (start, pause, play, a pause
+// then every truth table: watched, heard, running, frozen, only in Picture in Picture (the device's own input,
+// its viewports and the Mac's copies wait), `stops` for each ending; `pauseEnds` at its edges; the words; then the Lifecycle by cases (start, pause, play, a pause
 // looked at before and at its ten minutes, every ending, a second start, a play or pause while off) and
 // 20,000 random lives of one window against:
 //   L1 paused only while active, and a pause time exactly while paused;
@@ -24,7 +24,7 @@
 //   L4 no pause outlives the limit unasked: a pause past it is stopped at the first look after it, and a
 //      pause's own effects say when to look (its start plus the limit);
 //   L5 the effects never ask a stop while off, and AVKit's didStop leaves it off and not paused;
-//   L6 a willStart while it shows changes nothing, one while off starts it playing;
+//   L6 a willStart while it shows changes and asks nothing, one while off starts it playing and tells AVKit;
 //   L7 an ending or a look at the clock only asks (AVKit's didStop is what ends it).
 import Foundation
 
@@ -169,8 +169,8 @@ for pip in states {
     for front in [false, true] {
         check("watched, the scene \(front ? "in front" : "not in front"), \(pip): \(P.pictureWatched(sceneForegroundActive: front, pip: pip))",
               P.pictureWatched(sceneForegroundActive: front, pip: pip) == (front || plays))
-        check("the device's own input held, the scene \(front ? "in front" : "not in front"), \(pip)",
-              P.holdsDeviceInput(sceneForegroundActive: front, pip: pip) == (pip.active && !front))
+        check("only in Picture in Picture (the device's own input, viewports and the Mac's copies wait), the scene \(front ? "in front" : "not in front"), \(pip)",
+              P.onlyInPictureInPicture(sceneForegroundActive: front, pip: pip) == (pip.active && !front))
         check("running, the app \(front ? "in the foreground" : "in the background"), \(pip)",
               P.running(appForeground: front, pip: pip) == (front || pip.active))
         for scene in [false, true] {
@@ -193,7 +193,9 @@ eq(P.soundHeard(appForeground: false, sceneForeground: false, pip: paused), fals
 eq(P.soundHeard(appForeground: true, sceneForeground: false, pip: .off), false, "this window's scene away, another in front: silent, as before")
 eq(P.running(appForeground: false, pip: paused), true, "paused: still running (iOS keeps the app while it shows)")
 eq(P.running(appForeground: false, pip: .off), false, "away without it: not running, as before")
-eq(P.holdsDeviceInput(sceneForegroundActive: true, pip: playing), false, "back in front, before it stops: the person is at Sill")
+eq(P.onlyInPictureInPicture(sceneForegroundActive: true, pip: playing), false, "back in front, before it stops: the person is at Sill")
+eq(P.onlyInPictureInPicture(sceneForegroundActive: false, pip: paused), true, "away, paused: still only there (nothing of the device's own goes)")
+eq(P.onlyInPictureInPicture(sceneForegroundActive: false, pip: .off), false, "away without it: as before (Sill is suspended there)")
 
 // pauseEnds at its edges.
 eq(P.pauseEnds(pip: paused, pausedAt: 100, now: 100), false, "paused just now: not yet")
@@ -228,7 +230,7 @@ do {
     eq(l.state, .off, "and still off")
     eq(l.tick(now: 10_000), .none, "a look while off: nothing")
     eq(l.ending(.sessionEnded), .none, "the session's end while off: no stop")
-    eq(l.willStart(), .none, "willStart")
+    eq(l.willStart(), E(invalidate: true), "willStart: AVKit told it plays")
     eq(l.state, playing, "plays")
     eq(l.pausedAt, nil, "no pause time")
     eq(l.willStart(), .none, "a second willStart: nothing more")
@@ -266,7 +268,7 @@ do {
     eq(l.setPlaying(true, now: 3), E(invalidate: true), "a play while playing: AVKit told, nothing else")
 }
 
-// MARK: L1–L5: 20,000 random lives of one window
+// MARK: L1–L7: 20,000 random lives of one window
 
 var rngLife = Rng(s: 0x291_0002)
 var lifeViolations: [String: Int] = [:], lifeFirst: [String: String] = [:]
@@ -304,7 +306,7 @@ for life in 0..<20_000 {
         if (4...6).contains(event), effects.stop != before.state.active { lifeViolated("L3 an ending's stop not exactly while active", detail) }
         if (4...6).contains(event), effects.stop { endingStops += 1 }
         if event >= 7 {
-            let due = before.state.active && before.state.paused && before.pausedAt.map { t - $0 >= P.pausedLimit } == true
+            let due = before.state.active && before.state.paused && before.pausedAt.map { t >= $0 + P.pausedLimit } == true
             if effects.stop != due { lifeViolated("L3 a look's stop not exactly at the pause's limit", detail) }
             if effects.stop { pauseStops += 1 }
         }
@@ -328,15 +330,16 @@ for life in 0..<20_000 {
         if event == 1, l.state != .off || l.pausedAt != nil { lifeViolated("L5 didStop left it on or paused", detail) }
         // L6: a willStart while it shows changes nothing; one while off starts it playing.
         if event == 0 {
-            if before.state.active, l != before { lifeViolated("L6 a willStart while it showed changed it", detail) }
+            if before.state.active, l != before || effects != .none { lifeViolated("L6 a willStart while it showed changed it, or asked something", detail) }
             if !before.state.active, l.state != playing || l.pausedAt != nil { lifeViolated("L6 a willStart did not start it playing", detail) }
+            if !before.state.active, effects != E(invalidate: true) { lifeViolated("L6 a start did not tell AVKit, or asked more", detail) }
         }
         // L7: only AVKit's events and a play or pause change it; an ending or a look only asks.
         if event >= 4, l != before { lifeViolated("L7 an ending or a look changed it", detail) }
     }
 }
 for (what, n) in lifeViolations.sorted(by: { $0.key < $1.key }) { check("\(what): \(n) times; first: \(lifeFirst[what] ?? "")", false) }
-check("20,000 random lives (\(starts) starts, \(pauses) pauses, \(pauseStops) stopped at the pause's limit, \(endingStops) by an ending): L1–L5",
+check("20,000 random lives (\(starts) starts, \(pauses) pauses, \(pauseStops) stopped at the pause's limit, \(endingStops) by an ending): L1–L7",
       lifeViolations.isEmpty && starts > 10_000 && pauses > 5_000 && pauseStops > 500 && endingStops > 5_000)
 
 print("\(passes) passed, \(fails) failed")

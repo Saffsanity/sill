@@ -230,7 +230,8 @@ final class AudioOutput {
     /// Picture in Picture's hold on the app's audio session (PictureInPicture): `.playback`, mixing with
     /// other audio, active while a window's picture is offered to Picture in Picture or shows there, so iOS
     /// finds a playback session when it decides, and never stops the person's music: one more holder beside
-    /// the engines that play (`SharedSession`). Returns whether it holds the session now. Main thread.
+    /// the engines that play (`SharedSession`). Returns whether it holds the session now. Any thread:
+    /// PictureInPicture calls it from a queue of its own, as activating a session can block a while.
     static func holdSessionForPictureInPicture(_ hold: Bool) -> Bool {
         if hold {
             do {
@@ -246,7 +247,8 @@ final class AudioOutput {
     }
 
     /// The category Picture in Picture needs (`.playback`, mixing with other audio, as every engine sets it),
-    /// without making the session active: set once a window's picture can go there. Main thread.
+    /// without making the session active: set once a window's picture can go there, before AVKit's controller
+    /// is made. Main thread: it takes no lock (`SharedSession.prepareCategory`).
     static func preparePictureInPictureCategory() {
         SharedSession.prepareCategory()
     }
@@ -517,7 +519,7 @@ final class AudioOutput {
 
     private func foregroundChanged() {
         updateSilence()
-        if !heard { stopEngine(reason: "in the background", fade: true) }
+        if !heard { stopEngine(reason: pictureInPicture.active ? "Picture in Picture paused" : "in the background", fade: true) }
     }
 
     /// Nothing is decoded while the sound cannot be heard (§7.5): muted, in the background (unless Picture
@@ -838,14 +840,14 @@ private enum SharedSession {
     }
 
     /// The category every holder sets (`take`), set without activating anything: Picture in Picture needs a
-    /// `.playback` session (Apple: "Configuring your app for media playback").
+    /// `.playback` session (Apple: "Configuring your app for media playback"). Not under the lock: it is the
+    /// category `take` sets too, so the order of the two does not matter, and the main thread, which calls this,
+    /// must never wait behind another holder's activation.
     static func prepareCategory() {
-        lock.withLock {
-            do {
-                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            } catch {
-                print("audio: Picture in Picture: the audio session's category: \(error.localizedDescription)")
-            }
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        } catch {
+            print("audio: Picture in Picture: the audio session's category: \(error.localizedDescription)")
         }
     }
 

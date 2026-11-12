@@ -19,7 +19,9 @@ import Foundation
 /// - Paused (`frozen`, `pauseEnds`): the picture frozen and silent, the connection kept; ten minutes paused
 ///   ends it.
 /// - Ends (`stops`): the session's end, the window back in front, the device's lock, ten minutes paused.
-/// - No input (`holdsDeviceInput`): the device's own pointer move waits while the picture shows only there.
+/// - Only there (`onlyInPictureInPicture`): while the picture shows only in Picture in Picture, the device's
+///   own pointer move and its viewports wait for Sill's window, and the Mac's copies are not written to the
+///   device's clipboard.
 ///
 /// Pure: Foundation only, checked with swiftc (Tests/checks/picture-in-picture). Times are systemUptime.
 enum PictureInPicturePolicy {
@@ -126,15 +128,21 @@ enum PictureInPicturePolicy {
     static func frozen(_ pip: State) -> Bool { pip.active && pip.paused }
 
     /// Whether a paused Picture in Picture has been paused long enough to stop: `pausedLimit` since
-    /// `pausedAt`, still paused. (A clock gone back reads as a pause just begun.)
+    /// `pausedAt`, still paused. Against the time it is due, not `now - pausedAt >= pausedLimit`:
+    /// (p + 600) - p can round below 600, and a look at exactly the time it was told would find nothing due
+    /// (KeyframeRecovery's ask has the same rounding). A clock gone back reads as a pause just begun.
     static func pauseEnds(pip: State, pausedAt: Double?, now: Double) -> Bool {
         guard frozen(pip), let pausedAt else { return false }
-        return now - pausedAt >= pausedLimit
+        return now >= pausedAt + pausedLimit
     }
 
-    /// The device's own input (its pointer's move to the middle of a new frame) waits: Picture in Picture
-    /// shows the picture and its window is not in front, so the person is not at it.
-    static func holdsDeviceInput(sceneForegroundActive: Bool, pip: State) -> Bool {
+    /// The picture shows only in Picture in Picture: it is active and its window is not in front, so the
+    /// person is in another app. Then nothing of the device's own goes to the Mac (its pointer's move to the
+    /// middle of a new frame waits), no viewport goes either (a layout iOS makes for its snapshots must not
+    /// resize the Mac's window or restart its stream), and the Mac's copies are not written to this device's
+    /// clipboard (they would replace what the person copies in the app in front; before Picture in Picture,
+    /// Sill was suspended there and they never came). Each waits for Sill's window, or is dropped.
+    static func onlyInPictureInPicture(sceneForegroundActive: Bool, pip: State) -> Bool {
         pip.active && !sceneForegroundActive
     }
 
@@ -181,12 +189,13 @@ enum PictureInPicturePolicy {
             static let none = Effects()
         }
 
-        /// AVKit's willStart (iOS started it as the person left Sill, or DEBUG's stand-in did): it plays.
+        /// AVKit's willStart (iOS started it as the person left Sill, or DEBUG's stand-in did): it plays, and
+        /// AVKit is told so (invalidatePlaybackState after every start, the reference says).
         mutating func willStart() -> Effects {
             guard !state.active else { return .none }
             state = State(active: true, paused: false)
             pausedAt = nil
-            return .none
+            return Effects(invalidate: true)
         }
 
         /// AVKit's didStop, or a failed start: off, whatever it was.

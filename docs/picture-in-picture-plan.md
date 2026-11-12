@@ -102,20 +102,25 @@ as it is today. The Mac changes nothing: it keeps streaming to a device that kee
    PiP keeps a Mac streaming all night.
 7. **Stops** (`stops`): PiP stops when the session ends (a goodbye, the Mac quitting Sill, a loss no move
    carries, Disconnect); when its window's scene comes back to the front (the person is back in Sill, by
-   the return button or any other way); when the device locks (iOS says protected data is about to go,
-   which needs a passcode); and at `pausedLimit` paused. A move to another path (the cable, Wi-Fi, home)
-   keeps it: the session goes on.
-8. **No input** (`holdsDeviceInput`): iOS sends no touch or key to an app in the background, and keys and
-   touches still down as Sill leaves are cancelled, so their ups reach the Mac (`pressesCancelled`,
-   `touchesCancelled`, as today). The one input the device makes by itself, its pointer's move to the middle
-   of a new frame (`pointerFrameChanged`, when the source changes while the portrait trackpad's arrow shows),
-   waits while PiP shows the picture outside Sill's window, as it waits under the tour, and goes when Sill is
-   back in front.
+   the return button or any other way, and half a second after iOS started it with the window already
+   back in front: home, then straight back, when the scene's activation came first); when the device
+   locks (iOS says protected data is about to go, which needs a passcode); and at `pausedLimit` paused. A
+   move to another path (the cable, Wi-Fi, home) keeps it: the session goes on.
+8. **Only there** (`onlyInPictureInPicture`: PiP active, its window not in front): iOS sends no touch or key
+   to an app in the background, and keys and touches still down as Sill leaves are cancelled, so their ups
+   reach the Mac (`pressesCancelled`, `touchesCancelled`, as today). Beside that, while the picture shows
+   only there: the one input the device makes by itself, its pointer's move to the middle of a new frame
+   (`pointerFrameChanged`, when the source changes while the portrait trackpad's arrow shows), waits, as it
+   waits under the tour, and goes only once Sill's window is in front again (never as PiP stops with Sill
+   away); a viewport the stream screen asks for waits too (`viewportHeld`), so a layout iOS makes for its
+   app-switcher snapshots never resizes the Mac's window or restarts its stream, and goes once Sill's window
+   is in front; and a copy on the Mac is not written to this device's clipboard (it would replace what the
+   person copies in the app in front; before PiP, Sill was suspended there and none came).
 9. Unchanged: the device's auto-lock hold (#230) counts only a window in front; the tour starts only
    while Sill is active; the clipboard's chip looks only when Sill becomes active; the viewport and the
-   frame rate are what they were (no restart on the Mac when PiP starts or stops); the stats every second
-   go on while connected; the hardware keyboard's hold is the input view's, which a background app's
-   keyboard never reaches.
+   frame rate are what they were when Sill left (no restart on the Mac when PiP starts or stops); the stats
+   every second go on while connected; the hardware keyboard's hold is the input view's, which a background
+   app's keyboard never reaches.
 
 ### What a watcher sees in the PiP window
 
@@ -252,6 +257,15 @@ Settings › General › Picture in Picture › Start PiP Automatically on (P1 c
     minutes in Sill in front.
 16. **VoiceOver.** The switch reads "Picture in Picture, switch button, off" and its footnote; in PiP,
     VoiceOver's own PiP controls work.
+17. **The Mac's window keeps its size.** Aa set (1.5×) on a window, swipe home: in PiP the window keeps the
+    size Sill gave it (Sill.log has no "Resized …" line and no stream restart while PiP shows); on the iPad,
+    open the app switcher and leave it again while PiP shows, and say whether anything restarted.
+18. **The clipboard.** Share Clipboard on: in PiP, copy something in Notes on the iPad, then have something
+    copied on the Mac (another keyboard, or `echo hi | pbcopy` in Terminal): paste in Notes: the iPad's own
+    copy, not the Mac's. Back in Sill, a new copy on the Mac reaches the iPad as before.
+19. **iOS's switch off.** Sill's switch on, iOS's Start PiP Automatically off: leave Sill: no PiP, and Sill.log
+    says "Client left" within about ten seconds (iOS suspended Sill as before, the audio session held by
+    Sill's offer notwithstanding).
 
 ## Results
 

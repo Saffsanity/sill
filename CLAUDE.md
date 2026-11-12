@@ -29,7 +29,8 @@ Picture in Picture window. Device only: no wire change, nothing on the Mac, one 
   layer, `HEVCDisplayView.setFrozen`) and the sound, the Mac still sending; play asks for a keyframe; ten
   minutes paused (`pausedLimit`) stops it. The session's end (`tearDown`), the window back in front, the
   device's lock (`protectedDataWillBecomeUnavailable`, with a passcode) stop it; a move keeps it. The
-  device's own pointer move to a new frame's middle waits while it shows (`holdsDeviceInput`). The
+  device's own pointer move to a new frame's middle and its viewports wait, and the Mac's copies are not
+  written to the device's clipboard, while the picture shows only there (`onlyInPictureInPicture`). The
   `Lifecycle` struct carries AVKit's events and the endings, so the glue only carries its answers out.
 - The glue (`PictureInPicture.swift`): `PictureInPicture`, one per StreamClient, AVKit's controller on the
   display layer (`HEVCDisplayView.sampleBufferLayer`) made only once offered, `requiresLinearPlayback`, a

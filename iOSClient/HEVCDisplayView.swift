@@ -355,13 +355,12 @@ final class HEVCDisplayView: UIView {
         displayLayer.flushAndRemoveImage()
     }
 
-    /// Session over: drop the picture and forget the format so the next Mac starts clean. Never frozen for
-    /// the next session either (its end stopped Picture in Picture, paused or not).
+    /// Session over: drop the picture and forget the format so the next Mac starts clean. (A frozen picture
+    /// is let go by the client on `renderQueue`, after any freeze still queued: `setFrozen(false)`.)
     func clear() {
         formatDescription = nil
         lastParameterSets = nil
         waitingForKeyframe = true
-        frozen = false
         #if DEBUG
         interruptedAt = nil
         #endif

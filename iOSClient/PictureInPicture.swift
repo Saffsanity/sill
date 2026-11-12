@@ -27,7 +27,7 @@ final class PictureInPicture: NSObject {
     var state: PictureInPicturePolicy.State { lifecycle.state }
     /// Offered now (PictureInPictureHub): iOS may take the picture into Picture in Picture as Sill leaves.
     private(set) var offered = false
-    /// Holding the app's audio session active (`holdSession`).
+    /// Asked to hold the app's audio session active (`holdSession`); `sessionHold` says whether it does.
     private var holdsSession = false
     /// The next look at a pause's end (Lifecycle.Effects.lookAt).
     private var look: DispatchWorkItem?
@@ -61,7 +61,8 @@ final class PictureInPicture: NSObject {
     deinit {
         observers.forEach(NotificationCenter.default.removeObserver)
         look?.cancel()
-        if holdsSession { _ = AudioOutput.holdSessionForPictureInPicture(false) }
+        let hold = sessionHold
+        Self.sessionQueue.async { hold.set(false) }
     }
 
     // MARK: Support
@@ -83,6 +84,9 @@ final class PictureInPicture: NSObject {
 
     /// Offered or not: PictureInPictureHub's decision (PictureInPicturePolicy.offered). Main thread.
     func setOffered(_ on: Bool) {
+        // First, whatever the offer: the switch turned off lets the controller go even in a window that was
+        // offered nothing (another window chosen, a locked Mac's cover).
+        forgetIfUnused()
         guard on != offered else { return }
         offered = on
         if on, controller == nil { makeController() }
@@ -96,16 +100,17 @@ final class PictureInPicture: NSObject {
         forgetIfUnused()
     }
 
-    /// AVKit's controller on this window's display layer: no skipping, no scrubbing (a live picture), the
-    /// `.playback` category it needs (AudioOutput, mixing with other audio as every engine does).
+    /// AVKit's controller on this window's display layer: no skipping, no scrubbing (a live picture). The
+    /// `.playback` category it needs (AudioOutput, mixing with other audio as every engine does) is set first,
+    /// at once: AVKit may judge whether Picture in Picture is possible as the controller is made.
     private func makeController() {
         guard Self.systemSupports, let client else { return }
+        AudioOutput.preparePictureInPictureCategory()
         let source = AVPictureInPictureController.ContentSource(sampleBufferDisplayLayer: client.displayView.sampleBufferLayer,
                                                                playbackDelegate: self)
         let made = AVPictureInPictureController(contentSource: source)
         made.delegate = self
         made.requiresLinearPlayback = true
-        AudioOutput.preparePictureInPictureCategory()
         #if DEBUG
         possibleObservation = made.observe(\.isPictureInPicturePossible, options: [.new]) { c, _ in
             let possible = c.isPictureInPicturePossible
@@ -157,6 +162,7 @@ final class PictureInPicture: NSObject {
         pausedLock.withLock { pausedForAVKit = now.paused }
         #if DEBUG
         print("pip: \(now.active ? (now.paused ? "paused" : "playing") : "off") (\(why))")
+        if !now.active { startedInFront = false }
         #endif
         holdSession(offered || now.active)
         client?.pictureInPictureChanged(from: old, to: now)
@@ -180,14 +186,37 @@ final class PictureInPicture: NSObject {
     /// Holds the app's audio session active (`.playback`, mixing) while this window's picture is offered or
     /// shows, so iOS finds a playback session when it decides; a device only, unless DEBUG `-SillPiPSession
     /// active` (the simulator's sound never opens an output: AudioOutput). DEBUG `-SillPiPSession inactive`
-    /// never holds it, for the comparison (the plan's P3).
+    /// never holds it, for the comparison (the plan's P3). The session's calls can block for a while, so they
+    /// run on a queue of their own, in the order asked (`SessionHold`), never on the main thread.
     private func holdSession(_ want: Bool) {
         let want = want && Self.holdsAudioSession
-        guard want != holdsSession else { return }
-        holdsSession = AudioOutput.holdSessionForPictureInPicture(want)
-        #if DEBUG
-        print("pip: audio session \(holdsSession ? "held active (playback, mixing with other audio)" : "let go")")
-        #endif
+        // Not only on a change: a take that failed (a call had the session) is tried again at the next look,
+        // which `SessionHold` makes nothing of while it holds already.
+        guard want || holdsSession else { return }
+        holdsSession = want
+        let hold = sessionHold
+        Self.sessionQueue.async { hold.set(want) }
+    }
+
+    /// The audio session's calls for Picture in Picture, in order, off the main thread.
+    private static let sessionQueue = DispatchQueue(label: "sill.pip.session", qos: .userInitiated)
+    private let sessionHold = SessionHold()
+
+    /// Whether this window's hold is taken, on `sessionQueue`: a take that failed (another app's call)
+    /// holds nothing, so the give that follows gives nothing back.
+    private final class SessionHold {
+        private var held = false
+        func set(_ want: Bool) {
+            let was = held
+            if want, !held {
+                held = AudioOutput.holdSessionForPictureInPicture(true)
+            } else if !want, held {
+                held = AudioOutput.holdSessionForPictureInPicture(false)
+            }
+            #if DEBUG
+            if held != was { print("pip: audio session \(held ? "held active (playback, mixing with other audio)" : "let go")") }
+            #endif
+        }
     }
 
     private static var holdsAudioSession: Bool {
@@ -210,6 +239,8 @@ final class PictureInPicture: NSObject {
     #if DEBUG
     private var debugStartScheduled = false
     private var debugAfterStartScheduled = false
+    /// The stand-in started it with Sill in front: no stop for that (`pictureInPictureControllerDidStart`).
+    private var startedInFront = false
 
     /// `-SillPiPStartAt <s>`: s seconds after this window's picture is first offered, Picture in Picture
     /// starts as iOS's automatic start would as Sill leaves (startPictureInPicture, with Sill in front: a
@@ -221,8 +252,9 @@ final class PictureInPicture: NSObject {
         debugStartScheduled = true
         print("pip: -SillPiPStartAt: Picture in Picture starts in \(at) s")
         DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
-            guard let controller = self?.controller else { print("pip: -SillPiPStartAt: no controller"); return }
+            guard let self, let controller = self.controller else { print("pip: -SillPiPStartAt: no controller"); return }
             print("pip: -SillPiPStartAt: starting (possible \(controller.isPictureInPicturePossible))")
+            self.startedInFront = self.windowInFront
             controller.startPictureInPicture()
         }
     }
@@ -268,6 +300,24 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
         print("pip: started")
         scheduleDebugAfterStart()
         #endif
+        // Home, then straight back: the window's activation can come before iOS starts Picture in Picture, and
+        // then nothing would stop it over Sill in front. Looked at a moment later, once the scene's state has
+        // settled (a scene in the middle of leaving can still read active).
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.settle) { [weak self] in
+            guard let self, self.state.active, self.windowInFront else { return }
+            #if DEBUG
+            if self.startedInFront { return }      // -SillPiPStartAt starts it with Sill in front, on purpose
+            #endif
+            self.end(.backInFront, why: "its window was in front as it started")
+        }
+    }
+
+    /// How long after Picture in Picture starts its window is looked at (`pictureInPictureControllerDidStart`).
+    private static let settle = 0.5
+
+    /// This window's scene is foreground active.
+    private var windowInFront: Bool {
+        client?.displayView.window?.windowScene?.activationState == .foregroundActive
     }
 
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController,

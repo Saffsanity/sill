@@ -413,9 +413,10 @@ final class StreamClient: ObservableObject {
 
     /// The pointer move `pointerFrameChanged` held back, once nothing holds the device's own input any more
     /// (the tour gone, Sill's window in front again): only if this device still has the pointer and its own
-    /// still shows (the Mac, or another device, may have taken it since). Main thread.
+    /// still shows (the Mac, or another device, may have taken it since), and only with its window in front,
+    /// never as Picture in Picture stops while Sill is away (#291). Main thread.
     private func releaseOwedPointerMove() {
-        guard pointerMoveOwed, !deviceInputHeld else { return }
+        guard pointerMoveOwed, !deviceInputHeld, sceneInFront else { return }
         pointerMoveOwed = false
         presence.follow(pointerFeed.current)
         guard presence.recentresOnNewFrame(now: ProcessInfo.processInfo.systemUptime), let p = presence.own else { return }
@@ -1152,9 +1153,9 @@ final class StreamClient: ObservableObject {
                 let view = self.displayView
                 self.queue.async { view.checkLayer("as its window became active") }
                 self.considerKeyframeAsk()
-                // The person is at Sill again: the device's own pointer move held while Picture in Picture
-                // showed the picture elsewhere goes now (#291).
-                self.releaseOwedPointerMove()
+                // The person is at Sill again: the device's own pointer move and viewport held while Picture in
+                // Picture showed the picture elsewhere go now (#291), once the scene reads its new state.
+                DispatchQueue.main.async { self.pictureBackInSill() }
             }
         }
         for name in [UIApplication.willResignActiveNotification, UIScene.willDeactivateNotification] {
@@ -1224,8 +1225,33 @@ final class StreamClient: ObservableObject {
             keyframeRecovery.leftForeground()
             keyframeAskWork?.cancel(); keyframeAskWork = nil
         }
-        releaseOwedPointerMove()
+        pictureBackInSill()
     }
+
+    /// What waited while the picture showed only in Picture in Picture goes, once it no longer does and
+    /// Sill's window is in front: the device's own pointer move (`releaseOwedPointerMove`) and the last
+    /// viewport the stream screen asked for (`viewportHeld`). Main thread.
+    private func pictureBackInSill() {
+        guard !shownOnlyInPictureInPicture, sceneInFront else { return }
+        releaseOwedPointerMove()
+        if let v = viewportHeld {
+            viewportHeld = nil
+            sendViewport(v)
+        }
+    }
+
+    /// The picture shows only in Picture in Picture: it is there and its window is not in front
+    /// (PictureInPicturePolicy.onlyInPictureInPicture). Nothing of the device's own goes to the Mac then,
+    /// no viewport, and the Mac's copies are not written to this device's clipboard. Main thread.
+    var shownOnlyInPictureInPicture: Bool {
+        PictureInPicturePolicy.onlyInPictureInPicture(sceneForegroundActive: sceneInFront, pip: pictureInPictureState)
+    }
+
+    /// A viewport the stream screen asked for while the picture showed only in Picture in Picture
+    /// (`sendViewport`): a layout iOS makes for its snapshots must not resize the Mac's window or restart its
+    /// stream. Sent once Sill's window is in front again (`pictureBackInSill`); forgotten with the session.
+    /// Main thread.
+    var viewportHeld: Viewport?
 
     /// `appInForeground` from the app's background state and Picture in Picture (PictureInPicturePolicy.running).
     /// Main thread.
@@ -1240,11 +1266,9 @@ final class StreamClient: ObservableObject {
         #endif
     }
 
-    /// The device's own input waits: the tour shows, or Picture in Picture shows the picture while its window
-    /// is not in front (PictureInPicturePolicy.holdsDeviceInput). Main thread.
-    private var deviceInputHeld: Bool {
-        inputPaused || PictureInPicturePolicy.holdsDeviceInput(sceneForegroundActive: sceneInFront, pip: pictureInPictureState)
-    }
+    /// The device's own input waits: the tour shows, or the picture shows only in Picture in Picture
+    /// (`shownOnlyInPictureInPicture`). Main thread.
+    private var deviceInputHeld: Bool { inputPaused || shownOnlyInPictureInPicture }
 
     /// Asks the Mac for one keyframe (kind 44) when KeyframeRecovery says one is owed and due, and looks
     /// again when an ask the spacing holds back is due, or when the keyframe of an ask that is out is
@@ -3738,6 +3762,10 @@ final class StreamClient: ObservableObject {
         apps = []
         videoSize = .zero
         displayView.clear()
+        // Never frozen for the next session (its end stopped Picture in Picture, paused or not): on the
+        // render queue, after a pause's freeze still queued there (#291).
+        let view = displayView
+        queue.async { view.setFrozen(false) }
         // Nor an interruption of its picture: the next session's starts afresh.
         keyframeRecovery = KeyframeRecovery()
         keyframeAskWork?.cancel()

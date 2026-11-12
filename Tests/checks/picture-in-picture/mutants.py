@@ -45,9 +45,10 @@ MUTANTS = [
         "static func running(appForeground: Bool, pip: State) -> Bool { appForeground }"),
     ("M22 frozen by a pause flag alone", "static func frozen(_ pip: State) -> Bool { pip.active && pip.paused }",
         "static func frozen(_ pip: State) -> Bool { pip.paused }"),
-    ("M23 a pause ends only after its limit", "return now - pausedAt >= pausedLimit", "return now - pausedAt > pausedLimit"),
-    ("M24 the device's own input held back in front", "pip.active && !sceneForegroundActive", "pip.active"),
-    ("M25 the device's own input never held", "pip.active && !sceneForegroundActive", "false"),
+    ("M23 a pause ends only after its limit", "return now >= pausedAt + pausedLimit", "return now > pausedAt + pausedLimit"),
+    ("M23b a pause's end by its length (rounds below the limit)", "return now >= pausedAt + pausedLimit", "return now - pausedAt >= pausedLimit"),
+    ("M24 only in Picture in Picture back in front", "pip.active && !sceneForegroundActive", "pip.active"),
+    ("M25 never only in Picture in Picture", "pip.active && !sceneForegroundActive", "false"),
     # What ends it.
     ("M26 back in front does not stop it", STOPS, "case .sessionEnded, .deviceLocked: return pip.active\n        case .backInFront: return false"),
     ("M27 the device's lock does not stop it", STOPS, "case .sessionEnded, .backInFront: return pip.active\n        case .deviceLocked: return false"),
@@ -65,12 +66,18 @@ MUTANTS = [
     ("M37 a pause at its limit not stopped", "return ending(.pausedTooLong)", "return .none"),
     ("M38 a look before the limit owes none", "return Effects(lookAt: pausedAt + PictureInPicturePolicy.pausedLimit)", "return .none"),
     ("M39 every ending stops it", "Effects(stop: PictureInPicturePolicy.stops(ending, pip: state))", "Effects(stop: true)"),
+    ("M42 a start tells AVKit nothing", "return Effects(invalidate: true)", "return .none"),
     ("M40 a second willStart starts it afresh", "guard !state.active else { return .none }\n            state = State(active: true, paused: false)",
         "state = State(active: true, paused: false)"),
     # The words.
     ("M41 the footnote without iOS's own switch",
         "\"iOS starts it only while Start PiP Automatically is on, in Settings › General › Picture in Picture.\"", "\"\""),
 ]
+# The check must pass on the rule as it is first: a check that fails anyway catches every mutant for nothing.
+base = os.path.join(OUT, "unmutated")
+c = subprocess.run(["swiftc", "-O", SRC, os.path.join(SP, "main.swift"), "-o", base], capture_output=True, text=True)
+if c.returncode != 0 or subprocess.run([base], capture_output=True, text=True, timeout=600).returncode != 0:
+    print("the check fails on the rule as it is: no mutant can be judged"); print(f"0 of {len(MUTANTS)} mutants caught"); sys.exit(1)
 caught = 0
 for name, old, new in MUTANTS:
     if orig.count(old) != 1:
