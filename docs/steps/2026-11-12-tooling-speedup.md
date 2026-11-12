@@ -15,7 +15,7 @@ Tooling and documents only: no app code, no wire change, no check's output chang
   non-empty line of the old section is in them in its order); `docs/steps/README.md` lists them in
   their old order, frozen. CLAUDE.md keeps what every task needs and a "Steps" section: where the
   notes are, how to add (`Scripts/steps.sh new`), list (`list`) and find (`find 349`) one, and pointers
-  to the rules that hold for all work. 777,257 bytes before, about 137,000 after.
+  to the rules that hold for all work. 777,257 bytes before, 138,033 after.
 - Checks: each folder's own `README.md` (its name as the heading, **Checks:**, **Compiles:**), made from its
   row(s) with the counts left out (a check prints its own); where merges had kept a row more than
   once, every different text is kept, to be made one when the check next changes. The old README is
@@ -58,8 +58,8 @@ Tooling and documents only: no app code, no wire change, no check's output chang
   simulator: four identical, duo-connect and duo-settings-end showing #351's version line ("Sill
   0.6.1 (4)" in the footer: 2,121 pixels, 37x207, at 218,1630; the Settings panel's end, 13.9 %),
   and duo-cover a 105x137 patch off by at most 2 levels (identical with `--tolerance 2`). The pair
-  is left shut down: the Duo 2.11 GB after its first boot, the iPad 0.02 GB (never booted); the
-  cache in ~/Library/Caches/SillAgents 0.27 GB.
+  is left shut down: the Duo 3.03 GB after its two runs, the iPad 0.02 GB (never booted); the cache
+  in ~/Library/Caches/SillAgents about 0.3 GB (three builds, one DerivedData).
 - Findings, not changed (the mutants runner was dropped): a mutant that makes a check crash before
   it prints a FAIL line counts as not caught where the script judges by FAIL lines alone (addresses,
   origin, pairing-address, remote-rules and protocol; menus needs both a FAIL line and a failing
