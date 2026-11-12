@@ -224,7 +224,7 @@ background while another stays in front (Stage Manager's minimize) is not docume
 | G1 | `Tests/checks/picture-in-picture`: the rule's cases, random sessions against the invariants, and its mutants, every one caught (CI's mutants matrix has it) |
 | G2 | The iOS app, Debug and Release for the simulator and Debug for a device (build only), with only the known `StreamClient` capture warning |
 | G3 | Harness photos of the switch and its footnote (`-SillSettings 1 -SillSettingsScroll pip -SillPiPSupported 1`): the Duo's four sizes, an iPad's, an iPhone's, default and accessibility-extra-large text |
-| G4 | On a private simulator of this run against `SillHost --synthetic` on loopback: what of PiP the simulator runs (supported, possible, a start through `-SillPiPStartAt`, frames in the PiP window, the host keeping the device, pause and play, the return, the session's end), photographed; said plainly where the simulator cannot |
+| G4 | On a private simulator of this run against `SillHost --synthetic` on loopback: what of PiP the simulator runs (supported, possible, a start through `-SillPiPStartAt`, frames in the PiP window, the host keeping the device, pause and play, the return, the session's end), photographed; said plainly where the simulator cannot (it cannot: Results) |
 | G5 | `swift build -c release` is not needed (no host file changes); the CLI and the host are untouched (`git diff --stat` shows iOSClient, docs and the check alone) |
 
 ## Test plan for Noah's devices (P list)
@@ -321,6 +321,33 @@ one derived data folder under the worktree's `.build`, each with only the known 
 warning (StreamClient.swift:4464, `[#ImplicitStrongCapture]`, the closed window's Desktop request, older
 than this branch); each built Info.plist carries `UIBackgroundModes` `["audio"]`. The Release and device
 products were removed once their results were in.
+
+### G3 and G4: one simulator (2026-11-12, 01:37–01:54)
+
+The iOS 27.1 runtime runs no iPad, only the iPhone Duo (`simctl list runtimes`: its supported device types
+are the Duo alone), and every Duo photo is that runtime's: so one iPhone Duo simulator of this run, made,
+used and deleted inside heavy.sh, twice. The first pass's photos came out black: the Duo boots closed,
+Sill runs on its cover display, and `simctl io screenshot` takes the inner one by default (Tests/duorig's
+README); the simulator was deleted, and the second pass, with the app built again for its diagnostic line,
+photographed the cover (`--display=primary`).
+
+- **G3, the switch** (`-SillSettings 1 -SillSettingsScroll pip -SillPiPSupported 1`, the mock Mac "Mac mini"):
+  14 photos in `~/Downloads/sill-handoff/pip/photos/`: the iPad's 1133×744 and 744×1133 (`-SillIdiom pad`,
+  "This iPad", drawn at 0.60 on the cover), the Duo's 951×669, 669×951 (drawn at 0.69), 466×678 and 678×466
+  (its cover, at its own size) and an iPhone's 393×852 (0.79), "This iPhone", each at the default text size
+  and accessibility-extra-large (the panel holds its text at xxLarge, as before). The switch is the group's
+  first row, off, with its footnote whole above Share Clipboard (or Larger Picture's row on a phone).
+- **G4, Picture in Picture itself:** not on this simulator. AVKit says it has none:
+  `AVPictureInPictureController.isPictureInPictureSupported()` is false on the iPhone Duo simulator (iOS 27.1),
+  so no controller is made and nothing is offered (the console, for every session: `pip: window 1 not
+  offered: iOS has it false (AVKit false), connected true, streaming true, picture true, covered false, in
+  front true`). What the pass did show, against `SillHost --synthetic` on loopback (SILL_TEST_LOOPBACK,
+  SOFTWARE_ENCODER, NO_ROUTER, NO_SCREEN): the offer's inputs follow the session (connected, then the
+  Desktop streaming, its picture, in front, away and back again, each on its own line); the Settings app in
+  front sends Sill to the background (`pip: Sill is in the background`) and the host kept streaming to it
+  for the eight seconds before it was brought back (the simulator did not suspend it that soon, PiP or
+  not); a host that quits ends the session as before. An iPad simulator (the iOS 27.0 runtime) may have
+  Picture in Picture; it was not tried (one simulator).
 
 ### The review before the first build (2026-11-11)
 

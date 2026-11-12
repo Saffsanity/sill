@@ -48,7 +48,16 @@ Picture in Picture window. Device only: no wire change, nothing on the Mac, one 
   another user's (open question 7). docs/app-store-metadata.md holds a What's New paragraph and a review
   notes line for the next version (the background mode's purpose, guideline 2.5.4); no privacy manifest,
   App Privacy or privacy page change.
-- Verified: pending (the disk was under the 25 GB floor and builds waited): the plan's G1–G4.
+- Verified (the plan's Results; 2026-11-12, after main at 936d627 was merged in): `picture-in-picture` 344
+  checks (20,000 random sets of windows, 20,000 random lives) and 43 of 43 mutants (the old rounding, M23b,
+  caught 3,283 times); the iOS app in Debug and Release for the simulator and Debug for a device, only the
+  known `StreamClient` capture warning (StreamClient.swift:4464), `UIBackgroundModes` `["audio"]` in each;
+  14 harness photos of the switch on one iPhone Duo simulator (iOS 27.1 runs no iPad): the iPad's two sizes
+  (`-SillIdiom pad`), the Duo's four, an iPhone's, default and accessibility-extra-large text, in
+  `~/Downloads/sill-handoff/pip/photos/`. Picture in Picture itself never ran: AVKit reports none on that
+  simulator (`isPictureInPictureSupported()` false), so nothing was offered; an iPad simulator (iOS 27.0) was
+  not tried. Before the first build an independent review found nine things, all fixed (40dbfe6; the plan's
+  "The review before the first build").
 - **Untested, for Noah:** everything on a device, the plan's P1–P20 (iPad mini and iPhone 15 Pro, a Debug build,
   Xcode's console for the `pip:` lines, Sill.log on the Mac): the switch and where iOS 27 keeps its own Start PiP
   Automatically; a window and the Desktop floating as Sill leaves; Apple Music never stopped with Sill muted, and
