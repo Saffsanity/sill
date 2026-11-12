@@ -120,15 +120,18 @@ final class EdgeFlickRecognizer: UIGestureRecognizer {
             return
         }
         let samples = event.coalescedTouches(for: touch) ?? [touch]
-        for sample in samples.dropLast() {
+        for sample in samples.dropLast() where !rule.verdict.decided {
             let p = point(sample)
-            if rule.moved(x: Double(p.x), y: Double(p.y), t: sample.timestamp).decided { finish(rule.verdict); return }
+            _ = rule.moved(x: Double(p.x), y: Double(p.y), t: sample.timestamp)
         }
-        let last = samples.last ?? touch
-        let p = point(last)
-        let verdict = rule.ended(x: Double(p.x), y: Double(p.y), t: last.timestamp)
-        if verdict != .hide { liftReleaseTime = ProcessInfo.processInfo.systemUptime }
-        finish(verdict)
+        if !rule.verdict.decided {
+            let last = samples.last ?? touch
+            let p = point(last)
+            _ = rule.ended(x: Double(p.x), y: Double(p.y), t: last.timestamp)
+        }
+        // Let go at the lift: whatever waited begins and ends now (EdgeRecognizers.releasedAtLift).
+        if rule.verdict != .hide { liftReleaseTime = ProcessInfo.processInfo.systemUptime }
+        finish(rule.verdict)
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
