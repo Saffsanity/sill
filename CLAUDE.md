@@ -66,7 +66,13 @@ change, nothing on the Mac, nothing stored.
   with Copy, also where it is drawn beside the sentence; the panel's tour note, the version, Disconnect; Copy
   (`-SillAXAction`) left "Sill 0.6.2 (1400)" on the simulator's clipboard (`simctl pbpaste`). Extras: a long
   version (its own line), no build ("Sill 0.6.2"), 320x568 at xLarge (beside the download link), Xcode's
-  "Sill 0.6.1 (4)". Photos and the table in sill-handoff's `version-label/` (photos/INDEX.md).
+  "Sill 0.6.1 (4)". The panel in the phone's own arrangement too (`-SillIdiom phone`; the main pass drew the
+  iPhone sizes with the iPad's compact halves), 36 pairs at six iPhone sizes: its top 12 of 12 identical, its
+  end one line on with Disconnect unmoved in 24 of 24. Photos and the tables in sill-handoff's
+  `version-label/` (photos/INDEX.md). The photos' baseline is dd6ea6a; main at 936d627 (#349, remote dialing
+  only) merged in at a8cb447 after them: CI green there (`run-all.sh` all 67, the iOS app), and here the check
+  38 of 38 and the iOS app Debug and Release for the simulator (Info.plist 0.6.1 (1414)) and Debug for a
+  device, the known warning only.
 - **Untested, for Noah:** with a build of this branch on the iPad mini and the iPhone 15 Pro (TestFlight or a
   nightly says "Sill 0.6.2 (N)", N its commit count; one from Xcode "Sill 0.6.1 (4)" until main moves to
   0.6.2): the connect screen's footer ends its first line with the version (both have the room: 360 and 341

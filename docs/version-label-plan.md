@@ -150,6 +150,11 @@ invented, nothing hidden.
     Policy) and at xLarge and xxLarge (beside the download link, then its own line), and what a build from
     Xcode says, "Sill 0.6.1 (4)", on the sentence's line even at 375x667.
   Photos, the table and INDEX.md: sill-handoff's `version-label/`.
+- G4, the phone's own arrangement (`-SillIdiom phone`; the main pass drew the iPhone sizes with the iPad's
+  compact halves, whose panel is the same view placed otherwise): the panel at its top and at its end, a Mac
+  with settings and one without, at 375x667, 393x852, 440x956, 667x375, 852x393 and 956x440, default text and
+  accessibility-extra-large, 36 pairs: at its top 12 of 12 identical; at its end 24 of 24 one line on, the
+  last bright row (Disconnect's words) unmoved in every one.
 - G5: `-SillAXDump` on the connect screen (1000x710 and the cover's 466x678, the Macs as rows): the footer
   reads "Needs the free Sill app on your Mac.", "Get it at getsill.app", "Support", "Privacy Policy", then
   "Sill version 0.6.2, build 1400" with the action Copy, though it is drawn on the sentence's line; at
@@ -167,3 +172,12 @@ invented, nothing hidden.
    other ways: on that line alone write it without the name, "0.6.2 (1400)" (Noah's own example has none;
    VoiceOver and Copy keep the name), which fits with room; or a 6 pt gap there, which fits by a point or
    two and reads as one sentence.
+
+## After main moved
+
+Main went to 936d627 (#349, a saved Mac keeps its VPN addresses: remote dialing only) and was merged in at
+a8cb447 (a merge commit; CLAUDE.md's two new entries both kept, this one first). The photos' baseline stays
+dd6ea6a: #349 changes nothing they draw. At a8cb447: CI's Build and check green (run 43168563298: `run-all.sh`
+all 67, `version-label` 38, `remote-rules` 249; the iOS app for the simulator); here the check 38 of 38 and the
+iOS app Debug and Release for the simulator (Info.plist 0.6.1 (1414), the commit count) and Debug for a
+device, only the known warning, their products cleaned.
