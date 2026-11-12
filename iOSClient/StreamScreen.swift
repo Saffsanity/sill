@@ -693,6 +693,8 @@ struct StreamScreen: View {
         // accessibility tree hands them out (VoiceOver's order, without VoiceOver), labels and frames.
         let dump = defaults.double(forKey: "SillAXDump")
         if dump > 0 { after(dump) { Self.accessibilityDump() } }
+        // `-SillAXAction '<label>|<action>'`: half a second after the dump, that element's custom action.
+        if dump > 0, let spec = defaults.string(forKey: "SillAXAction") { after(dump + 0.5) { Self.accessibilityPerform(spec) } }
         // `-SillLargerPictureToggle <s>[,<s>…]`: Larger Picture switched at those seconds, as the
         // Settings panel's switch does (saved; without `-Sill.largerPicture`, which would hold it).
         let toggles = (defaults.string(forKey: "SillLargerPictureToggle") ?? "")
@@ -807,29 +809,35 @@ struct StreamScreen: View {
     /// `-SillAXDump`: walks the key window as an assistive technology does (an element, else its
     /// `accessibilityElements`, else its element count, else its subviews) and prints one line per
     /// element: "ax: 1 Apps (14,454 76×50)".
-    private static func accessibilityDump() {
-        guard let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else {
-            print("ax: no key window"); return
+    static func accessibilityDump() {
+        guard let elements = accessibilityElementsInOrder() else { print("ax: no key window"); return }
+        for (i, element) in elements.enumerated() {
+            let f = element.accessibilityFrame
+            let label = element.accessibilityLabel ?? element.accessibilityValue ?? "(no label)"
+            // What VoiceOver says after the name: the value, the hint, dimmed and adjustable (Aa's
+            // Off and its dimmed state over the Desktop, issue #179); and its actions (the version's Copy).
+            var said: [String] = []
+            if element.accessibilityLabel != nil, let value = element.accessibilityValue, !value.isEmpty { said.append("value “\(value)”") }
+            if let hint = element.accessibilityHint, !hint.isEmpty { said.append("hint “\(hint)”") }
+            if element.accessibilityTraits.contains(.notEnabled) { said.append("dimmed") }
+            if element.accessibilityTraits.contains(.adjustable) { said.append("adjustable") }
+            if let actions = element.accessibilityCustomActions, !actions.isEmpty {
+                said.append("actions " + actions.map { "“\($0.name)”" }.joined(separator: ", "))
+            }
+            print("ax: \(i + 1) \(label) (\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height)))"
+                  + (said.isEmpty ? "" : ": " + said.joined(separator: ", ")))
         }
-        var lines: [String] = []
+    }
+
+    /// The key window's accessibility elements in the order the tree hands them out.
+    private static func accessibilityElementsInOrder() -> [NSObject]? {
+        guard let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return nil }
+        var elements: [NSObject] = []
         var seen = Set<ObjectIdentifier>()
         func visit(_ object: Any, _ depth: Int) {
             guard depth < 60, seen.count < 5000, let element = object as? NSObject, !element.accessibilityElementsHidden,
                   seen.insert(ObjectIdentifier(element)).inserted else { return }
-            if element.isAccessibilityElement {
-                let f = element.accessibilityFrame
-                let label = element.accessibilityLabel ?? element.accessibilityValue ?? "(no label)"
-                // What VoiceOver says after the name: the value, the hint, dimmed and adjustable (Aa's
-                // Off and its dimmed state over the Desktop, issue #179).
-                var said: [String] = []
-                if element.accessibilityLabel != nil, let value = element.accessibilityValue, !value.isEmpty { said.append("value “\(value)”") }
-                if let hint = element.accessibilityHint, !hint.isEmpty { said.append("hint “\(hint)”") }
-                if element.accessibilityTraits.contains(.notEnabled) { said.append("dimmed") }
-                if element.accessibilityTraits.contains(.adjustable) { said.append("adjustable") }
-                lines.append("\(label) (\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height)))"
-                             + (said.isEmpty ? "" : ": " + said.joined(separator: ", ")))
-                return
-            }
+            if element.isAccessibilityElement { elements.append(element); return }
             if let children = element.accessibilityElements, !children.isEmpty {
                 children.forEach { visit($0, depth + 1) }
                 return
@@ -844,7 +852,27 @@ struct StreamScreen: View {
             }
         }
         visit(window, 0)
-        for (i, line) in lines.enumerated() { print("ax: \(i + 1) \(line)") }
+        return elements
+    }
+
+    /// `-SillAXAction '<label>|<action>'`: performs the custom action of that name on the first element
+    /// whose label begins with that label, as VoiceOver's actions rotor does, and says what the
+    /// clipboard holds after it (the version's Copy: docs/version-label-plan.md).
+    static func accessibilityPerform(_ spec: String) {
+        let parts = spec.split(separator: "|", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { print("ax: -SillAXAction wants '<label>|<action>'"); return }
+        guard let element = accessibilityElementsInOrder()?.first(where: { ($0.accessibilityLabel ?? "").hasPrefix(parts[0]) }) else {
+            print("ax: no element whose label begins “\(parts[0])”"); return
+        }
+        guard let action = element.accessibilityCustomActions?.first(where: { $0.name == parts[1] }) else {
+            print("ax: “\(element.accessibilityLabel ?? "")” has no action “\(parts[1])”"); return
+        }
+        let done: Bool
+        if let handler = action.actionHandler { done = handler(action) }
+        else if let target = action.target as? NSObject { _ = target.perform(action.selector, with: action); done = true }
+        else { done = false }
+        print("ax: performed “\(action.name)” on “\(element.accessibilityLabel ?? "")”: \(done); the clipboard holds "
+              + (UIPasteboard.general.string.map { "“\($0)”" } ?? "no text"))
     }
     #endif
 

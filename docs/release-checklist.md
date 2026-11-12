@@ -143,6 +143,9 @@ serves the root or `/docs`, never `/site`. So:
   `grep -n` of a phrase from each block that nothing of it is left. Add the marker's line and its
   grep here when a pull request marks words; the release that ships them deletes its markers in
   `site/`, keeps the words, and takes its lines out of here.
+- Open: `Version label` (support.html, under the lede: where each app shows its version, true from
+  Sill for iPhone and iPad 0.6.2; PR #351, docs/version-label-plan.md): `grep -n "shows its version"
+  ../sill-site/support.html` finds nothing after the cut.
 - Open: `Desktop displays` (the Desktop button steps through the Mac's screens: phase 1 of
   docs/virtual-desktop-plan.md, PR #355, built on #173), support.html's "More than one screen on your
   Mac": after the perl, `grep -n "More than one screen" ../sill-site/*.html` finds nothing. README's How
