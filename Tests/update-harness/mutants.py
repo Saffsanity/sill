@@ -28,13 +28,13 @@ MUTANTS = [
     ("a kept copy cleaned up", "        return lstat(url.appendingPathComponent(keptMarker).path, &marker) != 0\n", "        return true\n"),
     ("a noted folder anywhere removed", "        guard url.deletingLastPathComponent().path == parent.path,\n", "        guard true,\n"),
     # The stop (review 3, the automatic update's point 1).
-    ("a stop ignored", "                if stop.tag == release.tag, stop.sha256 == manifest.sha256 { return .failure(.stopped(tag: release.tag)) }\n", "                _ = stop\n"),
+    ("a stop ignored", "                    return .failure(.stopped(tag: release.tag))\n", "                    _ = stop\n"),
     ("a stop taken unsigned", "            case .failure(let p):\n                return .failure(.stopUnreadable(p))\n", "            case .failure:\n                break\n"),
     # The watcher (review 3, the automatic update's point 6).
     ("the watcher puts back a changed old copy", "whole \"$old\" || exit 3\n", ""),
     ("the watcher ignores the started note", "proved() { [ -f \"$started\" ]", "proved() { false && [ -f \"$started\" ]"),
     ("W2: a link at the started note taken", "proved() { [ -f \"$started\" ] && [ ! -L \"$started\" ]; }", "proved() { [ -f \"$started\" ]; }"),
-    ("W1: the watcher starts what it didn't check", "if ! whole \"$app\"; then\n    /bin/mv \"$app\" \"$dir/failed its check.app\"\n    exit 7\nfi\n", ""),
+    ("W1: the watcher starts what it didn't check", "if ! whole \"$app\"; then\n    /bin/mv \"$app\" \"$dir/failed its check.app\" || exit 7\n", "if false; then\n    /bin/mv \"$app\" \"$dir/failed its check.app\" || exit 7\n"),
     ("W1: the restored note written through a link", "note=$(/usr/bin/mktemp \"$restored.XXXXXX\") && /usr/bin/printf '%s\n%s\n' \"$token\" \"$why\" 1<>\"$note\" && /bin/mv -f -h \"$note\" \"$restored\"\n", "/usr/bin/printf '%s\n%s\n' \"$token\" \"$why\" > \"$restored\"\n"),
     ("W1: a link taken for the old copy", "    [ -d \"$1\" ] && [ ! -L \"$1\" ] || return 1\n", ""),
     ("W2: notes read with Data(contentsOf:)", "        guard let data = readSmallFile(url), let text = String(data: data, encoding: .utf8) else { return nil }", "        guard let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8) else { return nil }"),
@@ -45,6 +45,12 @@ MUTANTS = [
     ("N: a half-published pair taken", "            if let f = Policy.nightlyMatches(m, listing: listing, endpoints: endpoints) { return .failure(f) }\n", ""),
     ("N: a nightly that moved on since the offer taken", "                guard n.manifest.version == offeredVersion, n.manifest.build == String(offeredBuild) else {\n", "                guard true else {\n"),
     ("N: an older nightly prepared", "                guard Policy.isNewer(n.manifest.version, build: offeredBuild, than: running, runningBuild: runningBuild, byBuild: true) else {\n", "                guard true else {\n"),
+    # The third security pass's W3 and N10 l.
+    ("W3: Sill's path left empty when the last check fails", "    if [ -e \"$app\" ] || [ -L \"$app\" ] || ! /bin/mv \"$parked\" \"$app\"; then exit 7; fi\n", ""),
+    ("W3: a file with two names taken", "    [ -z \"$many\" ] || return 1\n", ""),
+    ("N10 l: a stop by its tag's text", "                if Policy.stopNames(stopTag: stop.tag, stopSHA256: stop.sha256, release: release, manifestSHA256: manifest.sha256) {\n", "                if stop.tag == release.tag, stop.sha256 == manifest.sha256 {\n"),
+    ("CL1: GitHub's clock never read", "        serverDate = http.value(forHTTPHeaderField: \"Date\").flatMap(UpdateInstallPolicy.httpDate)\n", ""),
+    ("CL1: GitHub's clock left off the release", "        release.answeredAt = api.serverDate\n", ""),
     ("the watcher stops any process", "if running; then\n    why=", "if true; then\n    why="),
     ("the watcher never puts back", "/bin/mv \"$app\" \"$parked\" || exit 5\n", "exit 5\n"),
     ("the watcher doesn't start the old copy", "\"$launcher\" \"$app\"\nexit 0\n", "exit 0\n"),

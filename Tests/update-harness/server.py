@@ -12,7 +12,9 @@ Serves, from DIR/control.json read at every request:
       on), auth (401 asking for a password), status:N
   GET /assets/<name>                the asset, 200
 Every request is one line in DIR/requests.log: the method, the Host header, the path, the User-Agent,
-and whether an Authorization or Cookie header came. HTTP/1.0: one request per connection."""
+and whether an Authorization or Cookie header came. HTTP/1.0: one request per connection.
+Every answer carries a Date header, as GitHub's do: the server's clock, or control "date" word for word ("" for
+none), so the updater's reading of GitHub's clock (the third security pass's CL1) can be tried."""
 import http.server, json, os, sys, socketserver
 
 DIR, PORTFILE = sys.argv[1], sys.argv[2]
@@ -22,6 +24,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, *a):
         pass
+
+    def send_response(self, code, message=None):
+        self.log_request(code)
+        self.send_response_only(code, message)
+        self.send_header("Server", self.version_string())
+        date = getattr(self, "date", None)
+        if date is None:
+            self.send_header("Date", self.date_time_string())
+        elif date != "":
+            self.send_header("Date", date)
 
     def control(self):
         with open(os.path.join(DIR, "control.json")) as f:
@@ -51,6 +63,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         self.record()
         c = self.control()
+        self.date = c.get("date")
         port = self.server.server_address[1]
         parts = self.path.split("?")[0].split("/")
         if self.path.split("?")[0] == "/repos/test/releases/latest":

@@ -152,6 +152,12 @@ final class AppUpdater {
         return target
     }
 
+    /// The end of `offer`'s cooling-off from what this Sill remembers (a release's, or a nightly's while nightlies wait).
+    private func waitUntil(_ offer: UpdatePolicy.Offer) -> Date? {
+        guard let build = offer.build else { return Auto.waitUntil(memory, tag: offer.tag) }
+        return Auto.nightlyCoolingOff > 0 ? Auto.waitUntil(memory, tag: Auto.key(offer.version, build: build), wait: Auto.nightlyCoolingOff) : nil
+    }
+
     /// "Use nightly builds" in effect: on, and a nightly key compiled in.
     private var nightliesOn: Bool { memory.nightly && !installer.trust.nightlyKeys.isEmpty }
 
@@ -185,7 +191,7 @@ final class AppUpdater {
         let o = paneOffer
         let now = Date()
         let automatic = Auto.pane(memory, offered: o?.version, offeredTag: o?.tag, running: runningVersion,
-                                  waitUntil: o.flatMap { $0.build == nil ? Auto.waitUntil(memory, tag: $0.tag) : nil }, now: now,
+                                  waitUntil: o.flatMap(waitUntil), now: now,
                                   offeredBuild: o?.build, runningBuild: runningIsNightly ? runningBuild : nil)
         return Policy.pane(state, offered: o?.version, running: runningVersion, available: available, refusal: refusal,
                            keptAt: keptAt, automatic: automatic, offeredBuild: o?.build, ownLine: idle && o != nil && o != offer())
@@ -340,9 +346,11 @@ final class AppUpdater {
         }
     }
 
-    /// After every check GitHub answered (AppModel): the nightly looked at first while the switch is on.
-    func checkAnswered() {
-        if nightliesOn { lookAtNightly { [weak self] in self?.considerAutomatic() } } else { considerAutomatic() }
+    /// After every check GitHub answered (AppModel), and at launch (`atLaunch`, with the offer the last check stored):
+    /// the nightly looked at first while the switch is on; at launch only while Check for updates automatically is
+    /// on too, so Sill asks GitHub nothing by itself with it off (privacy.html; the footnote's "each time Sill opens").
+    func checkAnswered(atLaunch: Bool = false) {
+        if nightliesOn, !atLaunch || checkOn() { lookAtNightly { [weak self] in self?.considerAutomatic() } } else { considerAutomatic() }
     }
 
     /// The nightly pre-release (Endpoints.nightly): its listing and its manifest, verified with the nightly key, and
@@ -377,7 +385,7 @@ final class AppUpdater {
             let now = Date()
             switch Auto.start(self.memory, checkOn: self.checkOn(), available: self.available, refusal: r, offered: offer.version,
                               offeredTag: offer.tag, signed: offer.signed, running: self.runningVersion, idle: self.mayBeginAutomatic,
-                              waitUntil: offer.build == nil ? Auto.waitUntil(self.memory, tag: offer.tag) : nil, now: now,
+                              waitUntil: self.waitUntil(offer), now: now,
                               offeredBuild: offer.build, runningBuild: self.runningBuild) {
             case .no(let why):
                 if why != self.loggedAutomatic {
@@ -611,20 +619,30 @@ final class AppUpdater {
                 }
                 guard self.state.mode == .automatic else { self.send(.fetched(nil)); return }
                 // The cooling-off counts from this Sill's first read of this verified manifest, kept across launches
-                // (the second security pass's A1): the signed line is whoever holds the key's to write. A nightly has
-                // none (plan §16.3), so nothing of its sight is kept.
+                // (the second security pass's A1): the signed line is whoever holds the key's to write. It counts on
+                // GitHub's clock too, from the release's publication when that is later (the third pass's CL1 and
+                // AU1). A nightly waits only while `Auto.nightlyCoolingOff` says so (none today), and only then is
+                // its sight kept (by its key, "0.6.2 (1471)").
                 let now = Date()
-                if !nightly {
-                    self.remember { Auto.sighted($0, tag: p.release.tag, sha256: p.manifest.sha256, signedAt: p.manifest.signedAt, now: now) }
+                let wait = nightly ? Auto.nightlyCoolingOff : Auto.coolingOff
+                let sightTag = nightly ? Auto.key(p.release.version, build: p.release.build) : p.release.tag
+                if wait > 0 {
+                    self.remember { Auto.sighted($0, tag: sightTag, sha256: p.manifest.sha256, signedAt: p.manifest.signedAt, now: now,
+                                                 github: p.release.answeredAt, published: nightly ? nil : p.release.publishedAt) }
                 }
-                let first = nightly ? now : (Auto.firstSeen(self.memory, tag: p.release.tag, sha256: p.manifest.sha256) ?? now)
-                switch Auto.dates(signedAt: p.manifest.signedAt, firstSeen: first, now: now, nightly: nightly) {
+                let sight = Auto.sighting(self.memory, tag: sightTag, sha256: p.manifest.sha256)
+                let first = sight?.first ?? now
+                let github = Auto.GitHubClock(firstSeen: sight?.firstGitHub ?? p.release.answeredAt, now: p.release.answeredAt,
+                                              published: nightly ? nil : (sight?.published ?? p.release.publishedAt))
+                switch Auto.dates(signedAt: p.manifest.signedAt, firstSeen: first, now: now, nightly: nightly, wait: wait, github: github) {
                 case .go:
                     // An attempt counts from here: a verified release Sill goes on to download (A3).
                     self.remember { Auto.began($0, p.release.version, now: now, build: p.release.build) }
                     self.send(.fetched(nil))
                 case .waitUntil(let until):
-                    print("Automatic update: Sill \(p.release.version) waits until \(UpdateManifest.dateText(until)) to install by itself, \(Auto.coolingOffWords) (first found \(UpdateManifest.dateText(first)); Update Now can install it now).")
+                    let name = Policy.name(version: p.release.version, build: p.release.build)
+                    let words = nightly ? Auto.nightlyCoolingOffWords : Auto.coolingOffWords
+                    print("Automatic update: \(name) waits \(until.map { "until \(UpdateManifest.dateText($0))" } ?? "for an answer from GitHub with a date") to install by itself, \(words) (first found \(UpdateManifest.dateText(first)) by this Mac’s clock, \(sight?.firstGitHub.map(UpdateManifest.dateText) ?? "no date") by GitHub’s; Update Now can install it now).")
                     self.send(.postponed)
                 case .refuse(let why):
                     // Never counted (the second pass's N9: a Mac whose clock is wrong would otherwise run out of tries).
@@ -930,6 +948,15 @@ final class AppUpdater {
         if let restored {
             try? FileManager.default.removeItem(at: Self.restoredNote)
             try? FileManager.default.removeItem(at: Self.pendingNote)
+            // The watcher couldn't put the old copy back (it failed its last check) and left this new one at Sill's
+            // path, not started (the third security pass's W3): this Sill is that copy, opened since.
+            if restored.count > 2, restored[2] == "kept", let p = pending, p.count >= 3, restored.first == p[0], p[1] == runningKey {
+                let why = restored[1]
+                print("Update: Sill \(runningKey ?? "") didn’t start the first time (\(why)), and the copy it replaced failed the watcher’s last check, so the watcher left this one in place, not started.")
+                state = Policy.State(phase: .failed(.keptUnstarted(why)), mode: p[2] == "automatic" ? .automatic : .manual)
+                cleanUpAfterStart()
+                return
+            }
             if let p = pending, p.count >= 3, restored.first == p[0], let (failed, failedBuild) = Auto.parseKey(p[1]), let running = runningVersion,
                Policy.isNewer(failed, build: failedBuild, than: running, runningBuild: runningBuild, byBuild: true) {
                 let why = restored.count > 1 ? restored[1] : "it didn’t run"

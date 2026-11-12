@@ -8,9 +8,10 @@
 #   Scripts/sign-update.sh --new-key               make the update key (once; prints its public key)
 #   Scripts/sign-update.sh --public-key            the stored key's public key and key ID
 #   Scripts/sign-update.sh v0.6.2                  check the published release, sign it, ask, upload
-#   Scripts/sign-update.sh --audit [--notify]      every release's manifest on GitHub against what this signer
-#                                                  signed: says, and exits 1, when one verifies with a recorded
-#                                                  key but isn't in the record (a release Noah didn't sign)
+#   Scripts/sign-update.sh v0.6.2 --run 123456     the same for a release the release workflow built in run 123456
+#   Scripts/sign-update.sh --audit [--notify]      every release's manifest on GitHub, drafts and pre-releases
+#                                                  included, against what this signer signed: says, and exits 1,
+#                                                  when one isn't in the record (a release Noah didn't sign)
 #
 # The signer is the one program that ever holds the key. --install-signer copies the three files it is
 # built from (Sources/StreamProtocol/Compatibility.swift, Sources/SillMenuBar/UpdateManifest.swift and
@@ -24,13 +25,16 @@
 #
 # What it signs is a zip Noah knows without GitHub: by default the one release.sh made on this Mac
 # (.build/Sill-<version>.zip, which `release.sh --publish` uploaded), byte for byte; or, for a release the
-# release workflow built in a run he approved, --expect-sha256 with the SHA-256 that run printed. A release
-# CI published that he did not approve (T4: the `nightly` environment needs no approval and its token can
-# publish) has neither, and is refused. Either way the app must name, in its signed Info.plist (SillCommit,
-# make-app.sh), the commit his own tag names, and GitHub's tag must name it too (the second security pass's
-# R1: the trust record is read from his tag, so the zip must be built from that very commit, whatever a
-# moved tag on GitHub says). Before it signs, it shows what changed in the updater's own files since the
-# last release he signed (R2: the record pins the trust constants, not the code that uses them). GitHub's copy must equal it, and is also checked as
+# release workflow built in a run he approved, --run with that run's number: the run's own record on GitHub
+# must name his tag's commit as the one it built (`head_sha`; the third security pass's R1′: an app's
+# SillCommit is its own build's word, so a tag moved for the run and back passes every other check), and the
+# zip is the one that run kept as its artifact. A release CI published that he did not approve (T4: the
+# `nightly` environment needs no approval and its token can publish) has neither, and is refused. Either way
+# the app must name, in its signed Info.plist (SillCommit, make-app.sh), the commit his own tag names, and
+# GitHub's tag must name it too (the second security pass's R1), and it must not be a nightly (SillChannel,
+# N10 e). Before it signs, it shows what changed in the updater's own files since the last release he signed
+# and asks, whatever --yes says (R2: the record pins the trust constants, not the code that uses them).
+# GitHub's copy must equal it, and is also checked as
 # release-checklist.md checks a download: Sill.zip.sha256 and GitHub's digest; exactly one Sill.app;
 # codesign --verify --strict --deep with Sill's pinned requirement and `notarized`; stapler validate;
 # spctl's "Notarized Developer ID"; the version is the tag's. Then the manifest (tag, version, build, size,
@@ -39,24 +43,30 @@
 # back with the recorded keys, shown, and uploaded as Sill.zip.manifest once the answer is yes.
 #
 # Every manifest it signs goes in the signing record (signed.txt beside the signer: the time, the tag, the
-# manifest's SHA-256 and the zip's). `--audit` reads every published release's Sill.zip.manifest from GitHub
-# and checks each against that record: one that verifies with a key the record trusts but that this signer
-# never made is a release Noah didn't sign (a leaked update key), which every Sill would install, by itself
-# two days after it first finds it (docs/one-click-update-plan.md §15.4). Run daily (his choice: the
-# LaunchAgent in docs/release-checklist.md part 1 §7), with --notify it posts a notification when it finds one.
+# manifest's SHA-256 and the zip's). `--audit` reads the Sill.zip.manifest of every release on GitHub that
+# carries one, drafts and pre-releases too (the third security pass's AU1: one turned into either around the
+# audit's run would otherwise pass unseen), and checks each against that record: one that verifies with a key
+# the record trusts but that this signer never made is a release Noah didn't sign (a leaked update key), which
+# every Sill would install, by itself two days after it first finds it (docs/one-click-update-plan.md §15.4).
+# Run several times a day (his choice: the LaunchAgent in docs/release-checklist.md part 1 §7, every few hours
+# from when it was loaded, no time written anywhere), with --notify it posts a notification when it finds one
+# and whenever it couldn't run (an expired gh login, no network): an audit never fails in silence. The record
+# and the audit guard against a key that leaked off this Mac, not against someone in control of this Mac or
+# of Noah's account here, who also controls signed.txt, this script and the LaunchAgent.
 #
-# Options: --zip PATH, --expect-sha256 HEX, --key-file PATH (a key in a file of mode 0600 instead of the
-# login keychain: no in-person prompt, for tests and the rehearsal), --repo OWNER/NAME (default
-# Saffsanity/sill), --source DIR (the checkout whose tag is read and whose files the signer is built from;
-# by default this script's own), --yes (no question before the upload), --replace (a manifest is already
-# there), --notify (with --audit). SILL_SIGNER_DIR (TEST ONLY, with --key-file, or --audit) puts the signer
-# elsewhere than ~/Library/Application Support/Sill Update Signer; SILL_SIGN_TEST_BUILT_FROM (TEST ONLY, with
-# SILL_SIGNER_DIR) stands for the commit the app names (the genuine v0.6.1 the test signs predates SillCommit),
-# and is compared with the tag's commit as the app's own would be.
+# Options: --zip PATH, --run ID, --key-file PATH (a key in a file of mode 0600 instead of the login keychain:
+# no in-person prompt, for tests and the rehearsal), --repo OWNER/NAME (default Saffsanity/sill), --source DIR
+# (the checkout whose tag is read and whose files the signer is built from; by default this script's own),
+# --yes (no question before building the signer or the upload; the updater's changes are asked about anyway),
+# --replace (a manifest is already there), --notify (with --audit). SILL_SIGNER_DIR (TEST ONLY, with
+# --key-file, or --audit) puts the signer elsewhere than ~/Library/Application Support/Sill Update Signer;
+# SILL_SIGN_TEST_BUILT_FROM (TEST ONLY, with SILL_SIGNER_DIR and the tests' key alone, UpdateManifest.testKeySeed,
+# which no Sill trusts: never a real key restored to a file, N10 m) stands for the commit the app names (the
+# genuine v0.6.1 the test signs predates SillCommit), and is compared with the tag's commit as the app's own would be.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/.." && pwd)"
-repo="Saffsanity/sill" tag="" keyfile="" yes=0 replace=0 mode="sign" zip="" sha_expected="" source="$root" notify=0
+repo="Saffsanity/sill" tag="" keyfile="" yes=0 replace=0 mode="sign" zip="" run_id="" source="$root" notify=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --install-signer) mode="install-signer" ;;
@@ -70,13 +80,30 @@ while [ $# -gt 0 ]; do
         --yes) yes=1 ;;
         --replace) replace=1 ;;
         --zip) zip="$2"; shift ;;
-        --expect-sha256) sha_expected="$2"; shift ;;
+        --run) run_id="$2"; shift ;;
         v*) tag="$1" ;;
         *) echo "sign-update: unknown argument $1" >&2; exit 2 ;;
     esac
     shift
 done
-die() { echo "sign-update: $*" >&2; exit 1; }
+last_error="" alarm_sent=0 cleanup=()
+die() { last_error="$*"; echo "sign-update: $*" >&2; exit 1; }
+# A notification (with --audit --notify), its words without quotes or backslashes for AppleScript's string.
+notify_audit() {
+    local words; words="$(printf '%s' "$1" | tr -d '"\\' | cut -c1-220)"
+    osascript -e "display notification \"$words\" with title \"Sill update audit\"" > /dev/null 2>&1 || true
+}
+# The folders made for this run go at the end, whatever the end; and an audit with --notify that didn't end clean
+# says so, whatever stopped it (the third security pass's AU1: an expired gh login or no network must not pass in
+# silence).
+on_exit() {
+    local rc=$?
+    for d in ${cleanup[@]+"${cleanup[@]}"}; do rm -rf "$d"; done
+    if [ "$mode" = audit ] && [ "$notify" = 1 ] && [ "$rc" != 0 ] && [ "$alarm_sent" = 0 ]; then
+        notify_audit "The audit couldn't run: ${last_error:-it stopped with status $rc}. Run Scripts/sign-update.sh --audit in Terminal to see why."
+    fi
+}
+trap on_exit EXIT
 pinned='anchor apple generic and identifier "me.saffer.sill.mac" and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = "9B2KKVM937"'
 signer_dir="${SILL_SIGNER_DIR:-$HOME/Library/Application Support/Sill Update Signer}"
 signer="$signer_dir/update-manifest"
@@ -91,10 +118,14 @@ fi
 if [ -n "${SILL_SIGN_TEST_BUILT_FROM:-}" ] && [ -z "${SILL_SIGNER_DIR:-}" ]; then
     die "SILL_SIGN_TEST_BUILT_FROM is for tests, with SILL_SIGNER_DIR"
 fi
-# The updater's own files: what R2 shows the changes of since the last release signed.
+# The updater's own files and the ones that steer it: what R2 shows the changes of since the last release signed
+# (the third security pass's R2: AppModel wires the offer, the devices, the hold and the daily check; SettingsPanes
+# is the only caller of the two switches' setters; Compatibility.swift is SillVersion's order; StreamServer holds
+# new sessions for the install).
 updater_files=('Sources/SillMenuBar/Update*.swift' Sources/SillMenuBar/AppUpdater.swift Sources/SillMenuBar/AutoUpdateStore.swift
-               Sources/SillMenuBar/AppDelegate.swift Packaging Scripts/make-app.sh Scripts/release.sh Scripts/sign-update.sh
-               Scripts/update-manifest.swift)
+               Sources/SillMenuBar/AppDelegate.swift Sources/SillMenuBar/AppModel.swift Sources/SillMenuBar/SettingsPanes.swift
+               Sources/StreamProtocol/Compatibility.swift Sources/SillHost/StreamServer.swift Packaging Scripts/make-app.sh
+               Scripts/release.sh Scripts/sign-update.sh Scripts/update-manifest.swift)
 
 # The trust a Sill carries, as its source says it: the code lines that name its update keys and its pinned
 # code requirement, and Trust.release and Endpoints.github whole (comments left out: they change no trust).
@@ -127,7 +158,7 @@ if [ "$mode" = install-signer ]; then
     # Copied first, then hashed, shown and built from the copies: what is built is what was shown, whatever
     # happens to the checkout meanwhile.
     src="$(mktemp -d)"
-    trap 'rm -rf "$src"' EXIT
+    cleanup+=("$src")
     echo "The signer is built from these files of $(git -C "$source" rev-parse --short HEAD)$(git -C "$source" diff --quiet -- "${files[@]}" "$source/Scripts/sign-update.sh" || echo ' (with changes not committed)'):"
     for f in "${files[@]}"; do
         name="$(basename "$f")"; [ "$name" = update-manifest.swift ] && name=main.swift
@@ -181,43 +212,56 @@ case "$mode" in
     public-key) exec "$signer" public-key ${keyargs[@]+"${keyargs[@]}"} ;;
 esac
 
-# --audit: every published release's manifest against the signing record (A1). Reads only: GitHub's public
-# release listing and each Sill.zip.manifest (a few kilobytes each).
+# The test-only SILL_SIGN_TEST_BUILT_FROM goes with the tests' key alone, which anyone can make and no Sill trusts
+# (UpdateManifest.testKeySeed): never with a real key restored to a file (the third security pass's N10 m).
+if [ -n "${SILL_SIGN_TEST_BUILT_FROM:-}" ]; then
+    [ -n "$keyfile" ] || die "SILL_SIGN_TEST_BUILT_FROM is for tests, with --key-file and the tests' key"
+    test_id="$("$signer" test-key-id)"
+    key_id="$("$signer" public-key --key-file "$keyfile" | sed -n 's/.*(key ID \([0-9a-f]*\)).*/\1/p')"
+    [ -n "$test_id" ] && [ "$key_id" = "$test_id" ] || die "SILL_SIGN_TEST_BUILT_FROM is taken only with the tests' key (key ID $test_id), never another: this key is ${key_id:-unreadable}"
+fi
+
+# --audit: the manifest of every release that carries one, drafts and pre-releases included (the third security
+# pass's AU1: a release turned into either around a run, or still a draft, would otherwise never be seen), against
+# the signing record (A1). Reads only: GitHub's release listing (drafts are listed to an account with push rights,
+# as gh's is) and each Sill.zip.manifest, by its asset id (a draft's has no download address), a few KB each.
 if [ "$mode" = audit ]; then
     command -v gh >/dev/null || die "gh is not installed"
     keys=()
     for k in $(trusted_keys < "$anchors_file"); do keys+=(--key "$k"); done
     [ -f "$record" ] || touch "$record"
     dir="$(mktemp -d)"
-    trap 'rm -rf "$dir"' EXIT
+    cleanup+=("$dir")
     gh api --paginate "repos/$repo/releases?per_page=100" > "$dir/releases.json" || die "can't list $repo's releases"
-    jq -r -s 'add // [] | .[] | select(.draft == false and .prerelease == false)
-              | select([.assets[].name] | index("Sill.zip.manifest")) | .tag_name' "$dir/releases.json" > "$dir/tags"
+    jq -r -s 'add // [] | .[] | . as $r | .assets[] | select(.name == "Sill.zip.manifest")
+              | [$r.tag_name, (.id | tostring), (if $r.draft then "a draft" elif $r.prerelease then "a pre-release" else "published" end)]
+              | @tsv' "$dir/releases.json" > "$dir/manifests" || die "can't read $repo's release listing"
     alarms=0 n=0
-    while IFS= read -r t; do
-        [[ "$t" =~ ^v[0-9]+(\.[0-9]+){0,7}$ ]] || { echo "  $t: not a release tag Sill reads, skipped"; continue; }
+    while IFS=$'\t' read -r t id state; do
         n=$((n + 1))
-        mkdir -p "$dir/$t"
-        gh release download "$t" --repo "$repo" --pattern Sill.zip.manifest --dir "$dir/$t" > /dev/null || { echo "  $t: its manifest couldn't be downloaded"; alarms=$((alarms + 1)); continue; }
-        m="$(shasum -a 256 "$dir/$t/Sill.zip.manifest" | cut -d' ' -f1)"
+        [[ "$id" =~ ^[0-9]{1,20}$ ]] || { echo "  $t ($state): an asset id that isn't one"; alarms=$((alarms + 1)); continue; }
+        f="$dir/$id.manifest"
+        gh api -H "Accept: application/octet-stream" "repos/$repo/releases/assets/$id" > "$f" || die "can't download $t's Sill.zip.manifest ($state)"
+        m="$(shasum -a 256 "$f" | cut -d' ' -f1)"
         if awk -v t="$t" -v m="$m" '$2 == t && $3 == m { found = 1 } END { exit !found }' "$record"; then
-            echo "  $t: signed here ($(awk -v t="$t" -v m="$m" '$2 == t && $3 == m { print $1; exit }' "$record"))"
-        elif [ "${#keys[@]}" -gt 0 ] && "$signer" verify "$dir/$t/Sill.zip.manifest" "${keys[@]}" > "$dir/$t/verify.txt" 2>&1; then
-            echo "  $t: NOT IN YOUR SIGNING RECORD, and it verifies with your update key: every Sill would install it. If you didn't sign it, pull it now (docs/release-checklist.md, part 1 §7)."
-            sed 's/^/    | /' "$dir/$t/verify.txt"
+            echo "  $t ($state): signed here ($(awk -v t="$t" -v m="$m" '$2 == t && $3 == m { print $1; exit }' "$record"))"
+        elif [ "${#keys[@]}" -gt 0 ] && "$signer" verify "$f" "${keys[@]}" > "$f.verify" 2>&1; then
+            echo "  $t ($state): NOT IN YOUR SIGNING RECORD, and it verifies with your update key: every Sill would install it once it is the latest release. If you didn't sign it, pull it now (docs/release-checklist.md, part 1 §7)."
+            sed 's/^/    | /' "$f.verify"
             alarms=$((alarms + 1))
         else
-            echo "  $t: NOT IN YOUR SIGNING RECORD; it doesn't verify with your update key, so no Sill installs it, but Update Now is broken for it."
+            echo "  $t ($state): NOT IN YOUR SIGNING RECORD; it doesn't verify with your update key, so no Sill installs it, but Update Now is broken for it."
             alarms=$((alarms + 1))
         fi
-    done < "$dir/tags"
+    done < "$dir/manifests"
     if [ "$alarms" = 0 ]; then
-        echo "Audit: all $n signed releases in $repo are in your signing record."
+        echo "Audit: all $n signed releases in $repo (drafts and pre-releases included) are in your signing record."
         exit 0
     fi
     echo "Audit: $alarms of $n releases in $repo aren't what this signer signed." >&2
     if [ "$notify" = 1 ]; then
-        osascript -e "display notification \"$alarms release(s) in $repo weren't signed by your signer. Run Scripts/sign-update.sh --audit.\" with title \"Sill update audit\"" || true
+        notify_audit "$alarms release(s) in $repo weren't signed by your signer. Run Scripts/sign-update.sh --audit in Terminal."
+        alarm_sent=1
     fi
     exit 1
 fi
@@ -257,22 +301,41 @@ if [ -n "$last" ] && git -C "$source" rev-parse --verify -q "$last^{commit}" > /
     if [ -n "$changes" ]; then
         sed 's/^/  /' <<<"$changes"
         echo "  (all of it: git -C \"$source\" diff $last $tag -- ${updater_files[*]})"
-        if [ "$yes" = 0 ]; then
-            read -r -p "Have you read these changes, which every Sill runs once it has this release? [y/N] " answer
-            [ "$answer" = y ] || [ "$answer" = Y ] || die "nothing signed"
-        fi
+        # Asked whatever --yes says (the third security pass's R2): these lines run on every Sill that installs this.
+        answer=""
+        read -r -p "Have you read these changes, which every Sill runs once it has this release? [y/N] " answer || true
+        [ "$answer" = y ] || [ "$answer" = Y ] || die "nothing signed: read the updater's changes first"
     else
         echo "  none"
     fi
 fi
 
-if [ -z "$sha_expected" ]; then
-    [ -n "$zip" ] || zip="$source/.build/Sill-$version.zip"
-    [ -f "$zip" ] || die "no zip of $version built on this Mac at $zip. Sign only a release you built here (release.sh --publish), or one the release workflow built in a run you approved (--expect-sha256 with the SHA-256 it printed): a build CI made unapproved is never signed (docs/one-click-update-plan.md T4)."
-    sha_expected="$(shasum -a 256 "$zip" | cut -d' ' -f1)"
-    echo "== the zip built on this Mac: $zip, SHA-256 $sha_expected"
+work="$source/.build/update-sign"
+mkdir -p "$work"
+# R1′ (the third security pass): a release the release workflow built is signed only from the run Noah approved,
+# by GitHub's own record of it: the commit it built must be his tag's, and the zip is the one it kept.
+if [ -n "$run_id" ]; then
+    [[ "$run_id" =~ ^[0-9]{1,20}$ ]] || die "--run takes the run's number (the digits at the end of its page's address)"
+    [ -z "$zip" ] || die "--run takes the zip from the run's artifact: no --zip with it"
+    echo "== run $run_id in $repo"
+    run_json="$(gh api "repos/$repo/actions/runs/$run_id")" || die "no run $run_id in $repo"
+    [ "$(jq -r '.path // empty' <<<"$run_json")" = ".github/workflows/release.yml" ] || die "run $run_id is not the release workflow's: nothing signed"
+    [ "$(jq -r '.status + " " + (.conclusion // "")' <<<"$run_json")" = "completed success" ] || die "run $run_id didn't finish successfully: nothing signed"
+    [ "$(jq -r '.head_branch // empty' <<<"$run_json")" = "$tag" ] || die "run $run_id wasn't started for $tag: nothing signed"
+    run_sha="$(jq -r '.head_sha // empty' <<<"$run_json")"
+    [ "$run_sha" = "$commit" ] || die "run $run_id built ${run_sha:-no commit}, not your $tag's $commit: nothing signed (a tag moved for the run and back; docs/one-click-update-plan.md §12e, R1′)"
+    echo "  it built $run_sha, your $tag's commit"
+    run_dir="$(mktemp -d "$work/run-$run_id.XXXXXX")"
+    cleanup+=("$run_dir")
+    gh run download "$run_id" --repo "$repo" --name "sill-zip-$tag" --dir "$run_dir" > /dev/null \
+        || die "run $run_id has no artifact sill-zip-$tag (release.yml keeps the published zip as one for 30 days)"
+    zip="$run_dir/Sill-$version.zip"
+    [ -f "$zip" ] && [ ! -L "$zip" ] || die "run $run_id's artifact holds no Sill-$version.zip"
 fi
-[[ "$sha_expected" =~ ^[0-9a-f]{64}$ ]] || die "--expect-sha256 takes 64 lowercase hex digits"
+[ -n "$zip" ] || zip="$source/.build/Sill-$version.zip"
+[ -f "$zip" ] || die "no zip of $version built on this Mac at $zip. Sign only a release you built here (release.sh --publish), or one the release workflow built in a run you approved (--run with its number): a build CI made unapproved is never signed (docs/one-click-update-plan.md T4)."
+sha_expected="$(shasum -a 256 "$zip" | cut -d' ' -f1)"
+echo "== the zip you know: $zip, SHA-256 $sha_expected"
 
 echo "== $tag in $repo"
 release="$(gh api "repos/$repo/releases/tags/$tag")" || die "no release $tag in $repo"
@@ -286,10 +349,8 @@ if [ "$(jq -r '[.assets[] | select(.name == "Sill.zip.manifest")] | length' <<<"
 fi
 digest="$(jq -r '.assets[] | select(.name == "Sill.zip") | .digest // empty' <<<"$release")"
 
-work="$source/.build/update-sign"
-mkdir -p "$work"
 dir="$(mktemp -d "$work/$tag.XXXXXX")"
-trap 'rm -rf "$dir"' EXIT
+cleanup+=("$dir")
 echo "== downloading Sill.zip into $dir"
 gh release download "$tag" --repo "$repo" --pattern Sill.zip --pattern Sill.zip.sha256 --dir "$dir"
 sha="$(shasum -a 256 "$dir/Sill.zip" | cut -d' ' -f1)"
@@ -303,14 +364,19 @@ mkdir "$dir/unpacked"
 ditto -x -k --noqtn --norsrc --noextattr "$dir/Sill.zip" "$dir/unpacked"
 [ "$(ls -A "$dir/unpacked")" = "Sill.app" ] || die "Sill.zip holds more than Sill.app: $(ls -A "$dir/unpacked" | tr '\n' ' ')"
 app="$dir/unpacked/Sill.app"
+plist="$app/Contents/Info.plist"
+# A nightly is never signed as a release (the third security pass's N10 e): a nightly of the tag's commit would
+# otherwise pass every other check.
+channel="$(/usr/libexec/PlistBuddy -c 'Print :SillChannel' "$plist" 2>/dev/null || true)"
+[ -z "$channel" ] || die "the app is a $channel build (SillChannel in its Info.plist): a release is never signed from one"
 codesign --verify --strict --deep --verbose=2 -R "=$pinned and notarized" "$app" 2>&1 | sed 's/^/  /'
 xcrun stapler validate "$app" >/dev/null || die "the app has no valid stapled ticket"
 assessment="$(spctl -a -t exec -vv "$app" 2>&1 || true)"
 grep -q "source=Notarized Developer ID" <<< "$assessment" || die "spctl does not say Notarized Developer ID"
-plist="$app/Contents/Info.plist"
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" = "me.saffer.sill.mac" ] || die "not me.saffer.sill.mac"
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" = "$version" ] || die "the app's version is not $version"
 build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")"
+
 # R1: built from your tag's very commit (make-app.sh writes it, the code signature seals it).
 built_from="${SILL_SIGN_TEST_BUILT_FROM:-$(/usr/libexec/PlistBuddy -c 'Print :SillCommit' "$plist" 2>/dev/null || true)}"
 if [ "$built_from" != "$commit" ]; then

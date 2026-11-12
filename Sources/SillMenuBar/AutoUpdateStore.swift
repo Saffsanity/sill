@@ -48,7 +48,7 @@ final class AutoUpdateStore {
         }
     }
 
-    /// Changes what is remembered. The switch turns on only when the item could be written. An unreadable
+    /// Changes what is remembered. A switch (`on`, `nightly`) turns on only when the item could be written. An unreadable
     /// item is written over only with `replacingUnreadable` (the person turning the switch on).
     func update(_ change: (UpdateAutoPolicy.Memory) -> UpdateAutoPolicy.Memory, replacingUnreadable: Bool = false) {
         let next = change(memory)
@@ -58,9 +58,8 @@ final class AutoUpdateStore {
             unreadable = false
             return
         }
-        var held = next
-        if next.on && !memory.on { held.on = false }
-        memory = held
+        // Neither switch turns on without the write (the third security pass's N10 g: `nightly` too).
+        memory = UpdateAutoPolicy.heldBack(next, current: memory)
     }
 
     private func query(group: String) -> [String: Any] {

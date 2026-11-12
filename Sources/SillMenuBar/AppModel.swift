@@ -195,8 +195,9 @@ final class AppModel {
         }
         updates.start()
         // An offer the last check stored, with the switch on: the rule decides at once (it never repeats an
-        // attempt within its own spacing, so a relaunch is no loop).
-        updater.checkAnswered()
+        // attempt within its own spacing, so a relaunch is no loop). With Use nightly builds on, the nightly is
+        // read first, only while the daily check is on.
+        updater.checkAnswered(atLaunch: true)
     }
 
     // MARK: Pairing and remote access

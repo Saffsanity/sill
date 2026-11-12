@@ -410,16 +410,22 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       (docs/one-click-update-plan.md §15.4).
 - Noticing a release you didn't sign: every manifest `sign-update.sh` signs goes in the signing record
       (`signed.txt` beside the signer; this Mac's: sign every release here, or the audit names one signed
-      elsewhere). `Scripts/sign-update.sh --audit` downloads every published release's
-      `Sill.zip.manifest` and compares it with the record: "Audit: all N signed releases in Saffsanity/sill
-      are in your signing record." when all is well; "NOT IN YOUR SIGNING RECORD, and it verifies with your
-      update key" names a release made with your key that you didn't sign here, which every Sill with
-      Automatically update Sill on installs two days after it first finds it: pull it or stop it (above), then
-      treat the key as leaked (rotation, above). Read-only: GitHub's public release listing and a few
-      kilobytes a release; no secret.
-- [ ] Your choice: the audit every day, notifying you only when something is wrong. `--install-signer`
-      puts a copy of `sign-update.sh` beside the signer (the one you read); this LaunchAgent runs it at 10:00
-      each day (`gh` must be on its PATH: `/opt/homebrew/bin` here). In Terminal.app:
+      elsewhere). `Scripts/sign-update.sh --audit` downloads the `Sill.zip.manifest` of every release that
+      carries one, drafts and pre-releases included (one turned into either for a few minutes around a run
+      would otherwise pass unseen), and compares it with the record: "Audit: all N signed releases in
+      Saffsanity/sill (drafts and pre-releases included) are in your signing record." when all is well;
+      "NOT IN YOUR SIGNING RECORD, and it verifies with your update key" names a release made with your key
+      that you didn't sign here, which every Sill with Automatically update Sill on installs two days after
+      it first finds it as the latest release: pull it or stop it (above), then treat the key as leaked
+      (rotation, above). Read-only: GitHub's release listing (with your `gh` login, which lists drafts too)
+      and a few kilobytes a release; no secret. What it guards against is a key that leaked off this Mac:
+      someone in control of this Mac or of your account here also controls `signed.txt`, the script and
+      the LaunchAgent below (docs/one-click-update-plan.md §15.4).
+- [ ] Your choice: the audit every few hours, notifying you when something is wrong and whenever it couldn't
+      run (an expired `gh` login, no network: an audit never fails in silence). `--install-signer` puts a
+      copy of `sign-update.sh` beside the signer (the one you read); this LaunchAgent runs it every four hours
+      from the moment you load it (`StartInterval`, so no time of day is written anywhere; a Mac asleep runs it
+      once on waking), and `gh` must be on its PATH (`/opt/homebrew/bin` here). In Terminal.app:
 
       ```
       d="$HOME/Library/Application Support/Sill Update Signer"
@@ -431,7 +437,7 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       <key>ProgramArguments</key><array><string>/bin/bash</string><string>$d/sign-update.sh</string>
         <string>--audit</string><string>--notify</string></array>
       <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
-      <key>StartCalendarInterval</key><dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
+      <key>StartInterval</key><integer>14400</integer>
       <key>StandardOutPath</key><string>$d/audit.log</string><key>StandardErrorPath</key><string>$d/audit.log</string>
       </dict></plist>
       PLIST
@@ -440,10 +446,11 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       ```
 
       The last command runs it once now: `"$d/audit.log"` then ends in "Audit: all N signed releases in
-      Saffsanity/sill are in your signing record." To stop it: `launchctl bootout
+      Saffsanity/sill (drafts and pre-releases included) are in your signing record." Another interval:
+      change 14400 (seconds) before loading it. To stop it: `launchctl bootout
       gui/$(id -u)/me.saffer.sill.update-audit` and delete the plist. Without it, the two days protect only
       as well as you happen to notice; GitHub's "Watch › Custom › Releases" mail is the setup-free complement
-      (a new release, not an asset replaced on an old one).
+      (a release published, not an asset replaced on an old one or a release turned into a draft).
 
 ## Part 2: every release
 
@@ -549,10 +556,17 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       requirement, Trust.release and Endpoints.github), and refuses otherwise, showing the difference; that
       GitHub's tag names your tag's commit, and that the app in the zip was built from it (`SillCommit` in its
       Info.plist, which `make-app.sh` writes), refusing a moved tag or a build of another commit; and shows
-      what changed in the updater's own files since the last release you signed, and asks. It
-      signs only a zip you know without GitHub: by default `.build/Sill-<version>.zip` from your own
-      `release.sh` run (GitHub's must be it, byte for byte), or, for a release the release workflow built
-      in a run you approved, `--expect-sha256` with the SHA-256 that run's log printed for Sill.zip. A
+      what changed in the updater's own files (and the ones that steer it: AppModel, SettingsPanes,
+      Compatibility.swift, StreamServer) since the last release you signed, and asks, whatever `--yes`
+      says; and refuses a nightly build (`SillChannel` in its Info.plist). It signs only a zip you know
+      without GitHub: by default `.build/Sill-<version>.zip` from your own `release.sh` run (GitHub's must be
+      it, byte for byte), the way to prefer; or, for a release the release workflow built in a run you
+      approved, `--run <the run's number>` (the digits at the end of the run page's address): it asks GitHub
+      for that run's record and signs only when it is a finished, successful run of release.yml for this tag
+      whose commit (`head_sha`, GitHub's own record of what it built, which no build writes) is your tag's,
+      and it takes the zip from the artifact `sill-zip-v<version>` that run kept (30 days). A zip the app
+      alone vouches for is never enough: `SillCommit` is written by the build it describes, so a tag moved
+      for the run and back would pass every other check (docs/one-click-update-plan.md §12e, R1′). A
       release CI published that you did not approve is never signed: that is the point of the key
       (docs/one-click-update-plan.md T4). It reads the published release, downloads `Sill.zip` into
       `.build/update-sign`, checks it as the item above does (the SHA-256 against `Sill.zip.sha256` and

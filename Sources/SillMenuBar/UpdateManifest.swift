@@ -248,6 +248,18 @@ struct UpdateManifest: Equatable, Sendable {
         return raw
     }
 
+    /// The tests' key (the third security pass's N10 m): its private half is SHA-256 of a sentence written here,
+    /// so anyone can make it and no Sill ever trusts it (UpdateInstallPolicy.Trust.release takes it out of both
+    /// lists, and update-install fails a list that holds it). Scripts/sign-update.sh takes the test-only
+    /// SILL_SIGN_TEST_BUILT_FROM only with this key, never with a real one restored to a file; the signer's
+    /// `test-key` writes it for Tests/update-harness/sign-test.sh.
+    static let testKeySeed = "Sill's update test key: anyone can make it, so no Sill ever trusts it."
+    static var testPrivateKey: Curve25519.Signing.PrivateKey {
+        try! Curve25519.Signing.PrivateKey(rawRepresentation: Data(SHA256.hash(data: Data(testKeySeed.utf8))))
+    }
+    static var testPublicKey: String { testPrivateKey.publicKey.rawRepresentation.base64EncodedString() }
+    static var testKeyID: String { keyID(testPrivateKey.publicKey.rawRepresentation) }
+
     /// The y-coordinates (sign bit clear) of the Edwards points of order 1, 2, 4 and 8, and the
     /// non-canonical encodings of 0, 1 and p − 1 (libsodium's blocklist).
     static let smallOrder: [[UInt8]] = [

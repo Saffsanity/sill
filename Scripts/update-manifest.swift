@@ -18,6 +18,8 @@ import Security
 //                                                 make the nightly key (plan §16.8): only ever in a new file,
 //                                                 never the keychain
 //   update-manifest public-key [--key-file PATH]  the stored key's public key and key ID
+//   update-manifest test-key --key-file PATH      the tests' key (UpdateManifest.testKeySeed: anyone can make it, no
+//                                                 Sill trusts it) in a new file; `test-key-id` prints its key ID
 //   update-manifest sign --tag T --build B --asset NAME --size N --sha256 HEX --cdhash ARCH=HEX...
 //                        --out FILE [--key-file PATH]
 //   update-manifest verify FILE --key BASE64...   the manifest's fields, if one of the keys signed it
@@ -99,7 +101,7 @@ func describe(_ key: Curve25519.Signing.PrivateKey) -> String {
     return "public key \(pub.base64EncodedString()) (key ID \(UpdateManifest.keyID(pub)))"
 }
 
-guard let command = args.first else { fail("a command: new-key, public-key, sign, stop, verify, verify-stop, nightly or verify-nightly") }
+guard let command = args.first else { fail("a command: new-key, public-key, sign, stop, verify, verify-stop, nightly, verify-nightly, test-key or test-key-id") }
 args.removeFirst()
 switch command {
 case "new-key":
@@ -132,6 +134,18 @@ case "new-key":
     }
 case "public-key":
     print(describe(storedKey(option("--key-file"))))
+case "test-key":
+    // The tests' key, which anyone can make (UpdateManifest.testKeySeed): Scripts/sign-update.sh takes its test-only
+    // SILL_SIGN_TEST_BUILT_FROM with this key alone (the third security pass's N10 m).
+    guard let file = option("--key-file") else { fail("test-key needs --key-file") }
+    let secret = Data(UpdateManifest.testPrivateKey.rawRepresentation.base64EncodedString().utf8)
+    let fd = open(file, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
+    guard fd >= 0 else { fail("\(file) exists or can’t be made (\(String(cString: strerror(errno))))") }
+    _ = secret.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+    close(fd)
+    print(describe(UpdateManifest.testPrivateKey))
+case "test-key-id":
+    print(UpdateManifest.testKeyID)
 case "sign":
     guard let tag = option("--tag"), let build = option("--build"), let asset = option("--asset"),
           let sizeText = option("--size"), let size = Int64(sizeText), let sha = option("--sha256"), let out = option("--out") else {

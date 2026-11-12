@@ -59,10 +59,15 @@ struct Release {
     var modes: [String: String] = [:]
     var releaseStatus = 200
     /// A stop beside the release (review 3, the automatic update's point 1): naming it, naming another
-    /// release, signed with a key the Sill doesn't know, or not a stop at all.
+    /// release, signed with a key the Sill doesn't know, or not a stop at all; or naming its version in another
+    /// form ("v1.1.0" for v1.1: the third security pass's N10 l).
     var stop: StopKind?
+    /// GitHub's `published_at` (nil: none in the answer), and the answers' Date header (nil: the stand-in's clock;
+    /// "": none; else these words): the third security pass's AU1 and CL1.
+    var publishedAt: String? = "2026-11-12T08:00:00Z"
+    var date: String?
 }
-enum StopKind { case this, otherRelease, otherKey, garbage }
+enum StopKind { case this, otherRelease, otherKey, garbage, sameVersionOtherText }
 func publish(_ r: Release) {
     let fm = FileManager.default
     let assets = out.appendingPathComponent("srv/assets")
@@ -92,16 +97,18 @@ func publish(_ r: Release) {
     if let kind = r.stop {
         let stopName = r.asset + ".stop"
         let signer = kind == .otherKey ? otherKey : r.signer
-        let text = M.stopText(tag: kind == .otherRelease ? "v1.0.9" : tag, sha256: sha, signedAt: Date(),
+        let text = M.stopText(tag: kind == .otherRelease ? "v1.0.9" : kind == .sameVersionOtherText ? tag + ".0" : tag, sha256: sha, signedAt: Date(),
                               keyID: M.keyID(signer.publicKey.rawRepresentation))
         let doc = kind == .garbage ? "not a stop\n" : M.document(signedText: text, signature: try! signer.signature(for: Data(text.utf8)))
         try! Data(doc.utf8).write(to: assets.appendingPathComponent(stopName))
         list.append(["name": stopName, "size": doc.utf8.count, "state": "uploaded",
                      "browser_download_url": "\(base)/download/\(r.tag)/\(stopName)"])
     }
-    let control: [String: Any] = ["release": ["tag_name": r.tag, "draft": false, "prerelease": false, "assets": list,
-                                              "html_url": "\(base)/releases/tag/\(r.tag)"],
-                                  "releaseStatus": r.releaseStatus, "modes": r.modes]
+    var release: [String: Any] = ["tag_name": r.tag, "draft": false, "prerelease": false, "assets": list,
+                                  "html_url": "\(base)/releases/tag/\(r.tag)"]
+    if let p = r.publishedAt { release["published_at"] = p }
+    var control: [String: Any] = ["release": release, "releaseStatus": r.releaseStatus, "modes": r.modes]
+    if let d = r.date { control["date"] = d }
     try! JSONSerialization.data(withJSONObject: control).write(to: out.appendingPathComponent("srv/control.json"))
 }
 
@@ -347,6 +354,27 @@ await refused("a stop signed with the update key names the release", { var r = v
 await refused("a stop signed with another key", { var r = v11; r.stop = .otherKey; return r }()) { if case .stopUnreadable(.unknownKey) = $0 { return true }; return false }
 await refused("a stop that isn't one", { var r = v11; r.stop = .garbage; return r }()) { if case .stopUnreadable = $0 { return true }; return false }
 _ = await installs("a stop for another release", { var r = v11; r.stop = .otherRelease; return r }())
+await refused("N10 l: a stop naming the release's version in another form (v1.1.0 for v1.1)", { var r = v11; r.stop = .sameVersionOtherText; return r }()) {
+    $0 == .stopped(tag: "v1.1")
+}
+// GitHub's clock and its publication date, as prepare reads them (the third security pass's CL1 and AU1): the answer's
+// Date header (the stand-in's clock, a fixed one, none, one that isn't a date) and published_at (there, or not).
+func prepareDates(_ r: Release) async -> (answered: Date?, published: Date?)? {
+    publish(r)
+    guard case .success(let p) = await installer.prepare(offeredTag: r.tag, running: SillVersion("1.0")!, cancel: UpdateInstaller.Cancel()) else { return nil }
+    return (p.release.answeredAt, p.release.publishedAt)
+}
+if let d = await prepareDates(v11) {
+    check(d.answered.map { abs($0.timeIntervalSinceNow) < 120 } == true, "CL1: GitHub's clock read from the answer's Date: \(String(describing: d.answered))")
+    check(d.published == M.date("2026-11-12T08:00:00Z"), "AU1: published_at read: \(String(describing: d.published))")
+} else { check(false, "CL1: a release prepared for its dates") }
+let fixed = await prepareDates({ var r = v11; r.date = "Wed, 11 Nov 2026 10:00:00 GMT"; return r }())
+check(fixed?.answered == M.date("2026-11-11T10:00:00Z"), "CL1: a Date header taken as GitHub's clock, word for word: \(String(describing: fixed?.answered))")
+let none = await prepareDates({ var r = v11; r.date = ""; r.publishedAt = nil; return r }())
+check(none != nil && none?.answered == nil && none?.published == nil, "CL1, AU1: no Date header and no published_at read as none (never a date made up)")
+let garbled = await prepareDates({ var r = v11; r.date = "yesterday"; return r }())
+check(garbled != nil && garbled?.answered == nil, "CL1: a Date header that isn't one read as none")
+say("GitHub's clock and publication: read from the answer, none when it has none")
 
 say("== refused: the download")
 await refused("a redirect to another host", { var r = v11; r.modes = ["UpdTest.zip": "redirect-other"]; return r }()) { $0 == .redirectRefused("http://localhost:\(port)") }
@@ -705,10 +733,12 @@ say("== the watcher: a new copy that doesn't start is put back by itself")
 /// note is a file whose name carries the token (STARTED; STARTED_OTHER another name). `plant` (the second security
 /// pass's W1 and W2): a link at the restored note into the copy at Sill's path; the restored note inside that
 /// copy (so the watcher's note lands in it after its move, which its check then catches); the old copy moved and
-/// a link left in its place; a FIFO at the started note.
-enum Plant { case none, linkAtRestored, restoredInsideApp, oldIsLink, fifoAtStarted, linkAtStarted }
+/// a link left in its place; a FIFO at the started note; a second name (a hard link) for a file of the old copy
+/// while it waits in staging (the third security pass's W3). `expectKept`: the put-back copy failed the watcher's
+/// last check, so the new copy is back at Sill's path, not started, and the restored note says so (W3).
+enum Plant { case none, linkAtRestored, restoredInsideApp, oldIsLink, fifoAtStarted, linkAtStarted, hardLinkInOld }
 func watched(_ name: String, newCopy: [String]?, seconds: Int = 6, changeOld: Bool = false, plant: Plant = .none,
-             expectRestored: Bool, expectWhy: String? = nil, expectSetAside: Bool = false) async {
+             expectRestored: Bool, expectWhy: String? = nil, expectKept: Bool = false) async {
     publish(v11)
     let before = treeHash(out.appendingPathComponent("apps/installed/UpdTest.app"))
     let oldCDHash = UpdateInstaller.cdhash(of: out.appendingPathComponent("apps/installed/UpdTest.app"), arch: .current) ?? ""
@@ -736,6 +766,8 @@ func watched(_ name: String, newCopy: [String]?, seconds: Int = 6, changeOld: Bo
     case .linkAtStarted:
         try! Data("\(token)\n".utf8).write(to: other)
         try! FileManager.default.createSymbolicLink(atPath: started.path, withDestinationPath: other.path)
+    case .hardLinkInOld:
+        try! FileManager.default.linkItem(at: old.appendingPathComponent("Contents/Resources/note.txt"), to: dir.appendingPathComponent("held.txt"))
     case .none, .restoredInsideApp: break
     }
     let p = Process()
@@ -760,10 +792,12 @@ func watched(_ name: String, newCopy: [String]?, seconds: Int = 6, changeOld: Bo
         try? await Task.sleep(for: .milliseconds(250))
     }
     try? await Task.sleep(for: .milliseconds(500))
-    if expectSetAside {
-        check(!FileManager.default.fileExists(atPath: o.installed.path), "\(name): nothing left at Sill's path")
+    if expectKept {
+        check(version(of: o.installed) == "1.1", "\(name): W3: the new copy back at Sill's path, never nothing (\(version(of: o.installed) ?? "none"))")
         check(version(of: old.deletingLastPathComponent().appendingPathComponent("failed its check.app")) == "1.0",
               "\(name): the put-back copy that failed its check moved aside")
+        let note = UpdateInstaller.readNote(restored)
+        check(note?.first == token && note?.count == 3 && note?.last == "kept", "\(name): W3: the restored note says the new copy was kept: \(note ?? [])")
         check(!FileManager.default.fileExists(atPath: launched.path), "\(name): nothing started")
     } else if expectRestored {
         check(version(of: o.installed) == "1.0", "\(name): the old copy is back at the path (\(version(of: o.installed) ?? "none"))")
@@ -797,7 +831,8 @@ await watched("the new copy never proves itself", newCopy: ["sleep", "30"], seco
 await watched("another token in the note", newCopy: ["started", "STARTED_OTHER", "TOKEN", "1"], seconds: 3, expectRestored: true)
 // The second security pass's W1 and W2.
 await watched("a link planted at the restored note", newCopy: ["crash"], plant: .linkAtRestored, expectRestored: true, expectWhy: "it quit before it had run")
-await watched("the note lands in the put-back copy", newCopy: ["crash"], plant: .restoredInsideApp, expectRestored: false, expectSetAside: true)
+await watched("the note lands in the put-back copy", newCopy: ["crash"], plant: .restoredInsideApp, expectRestored: false, expectKept: true)
+await watched("W3: a second name for a file of the old copy while it waits", newCopy: ["crash"], plant: .hardLinkInOld, expectRestored: false)
 await watched("the old copy replaced by a link", newCopy: ["crash"], plant: .oldIsLink, expectRestored: false)
 await watched("a FIFO at the started note", newCopy: ["sleep", "30"], seconds: 3, plant: .fifoAtStarted, expectRestored: true, expectWhy: "it hadn't run for long enough")
 await watched("a link at the started note", newCopy: ["sleep", "30"], seconds: 3, plant: .linkAtStarted, expectRestored: true, expectWhy: "it hadn't run for long enough")

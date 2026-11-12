@@ -24,20 +24,33 @@ trap '[ "$keep" = 1 ] || rm -rf "$out"' EXIT
 cp "$genuine/Sill.zip" "$genuine/Sill.zip.sha256" "$out/assets/"
 cat > "$out/bin/gh" <<'GH'
 #!/bin/bash
-# The stand-in: `api repos/R/releases/tags/T`, `api [--paginate] repos/R/releases…` (one release, v0.6.1, of
-# $GH_STANDIN_ASSETS), `api repos/R/git/ref/tags/T` (the tag in the scratch checkout $GH_STANDIN_REPO, or
-# $GH_STANDIN_TAG_SHA; annotated with GH_STANDIN_TAG_ANNOTATED=1) and `api repos/R/git/tags/SHA`,
-# `release download T --repo R --pattern P... --dir D`, `release upload T FILE --repo R [--clobber]`, from and
-# into $GH_STANDIN_ASSETS; every call logged.
+# The stand-in: `api repos/R/releases/tags/T`, `api [--paginate] repos/R/releases…` (v0.6.1, of $GH_STANDIN_ASSETS,
+# and, with GH_STANDIN_EXTRA=published|prerelease|draft, a v0.7.0 carrying $GH_STANDIN_EXTRA_MANIFEST alone),
+# `api -H 'Accept: application/octet-stream' repos/R/releases/assets/ID` (an asset's bytes), `api
+# repos/R/git/ref/tags/T` (the tag in the scratch checkout $GH_STANDIN_REPO, or $GH_STANDIN_TAG_SHA; annotated
+# with GH_STANDIN_TAG_ANNOTATED=1) and `api repos/R/git/tags/SHA`, `api repos/R/actions/runs/ID` (a run of
+# $GH_STANDIN_RUN_PATH, $GH_STANDIN_RUN_CONCLUSION, $GH_STANDIN_RUN_BRANCH, $GH_STANDIN_RUN_SHA; the release
+# workflow's, successful, for v0.6.1 and its commit by default), `run download ID --repo R --name N --dir D`
+# ($GH_STANDIN_ARTIFACT as Sill-0.6.1.zip in the artifact sill-zip-v0.6.1), `release download T --repo R --pattern
+# P... --dir D`, `release upload T FILE --repo R [--clobber]`; GH_STANDIN_FAIL=1 answers every call as an expired
+# login does. Every call logged.
 set -euo pipefail
 echo "gh $*" >> "$GH_STANDIN_LOG"
 assets="$GH_STANDIN_ASSETS"
+[ "${GH_STANDIN_FAIL:-0}" = 1 ] && { echo "HTTP 401: Bad credentials (https://api.github.com/)" >&2; exit 1; }
 if [ "$1" = api ]; then
-    path=""; for a in "${@:2}"; do case "$a" in -*) ;; *) path="$a" ;; esac; done
+    path=""; skip=0
+    for a in "${@:2}"; do
+        if [ "$skip" = 1 ]; then skip=0; continue; fi
+        case "$a" in -H|--jq) skip=1 ;; -*) ;; *) path="$a" ;; esac
+    done
     sha="${GH_STANDIN_TAG_SHA:-$(git -C "$GH_STANDIN_REPO" rev-parse "v0.6.1^{commit}")}"
-    python3 -I - "$assets" "$path" "$sha" "${GH_STANDIN_TAG_ANNOTATED:-0}" <<'PY'
+    tagsha="$(git -C "$GH_STANDIN_REPO" rev-parse "v0.6.1^{commit}")"
+    python3 -I - "$assets" "$path" "$sha" "${GH_STANDIN_TAG_ANNOTATED:-0}" "${GH_STANDIN_EXTRA:-}" "${GH_STANDIN_EXTRA_MANIFEST:-}" \
+        "${GH_STANDIN_RUN_PATH:-.github/workflows/release.yml}" "${GH_STANDIN_RUN_CONCLUSION:-success}" "${GH_STANDIN_RUN_BRANCH:-v0.6.1}" \
+        "${GH_STANDIN_RUN_SHA:-$tagsha}" <<'PY'
 import hashlib, json, os, sys
-assets, path, sha, annotated = sys.argv[1:5]
+assets, path, sha, annotated, extra, extra_manifest, run_path, conclusion, run_branch, run_sha = sys.argv[1:11]
 if "/git/ref/tags/" in path:
     kind, target = ("tag", "a" * 40) if annotated == "1" else ("commit", sha)
     print(json.dumps({"ref": "refs/tags/" + path.rsplit("/", 1)[-1], "object": {"type": kind, "sha": target}}))
@@ -45,15 +58,46 @@ if "/git/ref/tags/" in path:
 if "/git/tags/" in path:
     print(json.dumps({"object": {"type": "commit", "sha": sha}}))
     sys.exit(0)
-tag = path.rsplit("/", 1)[-1] if "/releases/tags/" in path else "v0.6.1"
-items = []
-for name in sorted(os.listdir(assets)):
-    data = open(os.path.join(assets, name), "rb").read()
-    items.append({"name": name, "size": len(data), "state": "uploaded", "digest": "sha256:" + hashlib.sha256(data).hexdigest(),
-                  "browser_download_url": "https://github.com/Saffsanity/sill/releases/download/%s/%s" % (tag, name)})
-release = {"tag_name": tag, "draft": False, "prerelease": False, "assets": items}
-print(json.dumps(release if "/releases/tags/" in path else [release]))
+if "/actions/runs/" in path:
+    print(json.dumps({"id": int(path.rsplit("/", 1)[-1]), "path": run_path, "status": "completed", "conclusion": conclusion,
+                      "head_branch": run_branch, "head_sha": run_sha}))
+    sys.exit(0)
+def release(tag, files, start, draft=False, prerelease=False):
+    items = []
+    for i, (name, file) in enumerate(files):
+        data = open(file, "rb").read()
+        items.append({"id": start + i, "name": name, "size": len(data), "state": "uploaded", "digest": "sha256:" + hashlib.sha256(data).hexdigest(),
+                      "browser_download_url": "https://github.com/Saffsanity/sill/releases/download/%s/%s" % (tag, name)})
+    return {"tag_name": tag, "draft": draft, "prerelease": prerelease, "assets": items}
+main = release("v0.6.1", [(n, os.path.join(assets, n)) for n in sorted(os.listdir(assets))], 100)
+listing = [main]
+if extra in ("published", "prerelease", "draft"):
+    listing.append(release("v0.7.0", [("Sill.zip.manifest", extra_manifest)], 900, extra == "draft", extra == "prerelease"))
+if "/releases/assets/" in path:
+    wanted = int(path.rsplit("/", 1)[-1])
+    for r in listing:
+        for a, file in zip(r["assets"], [os.path.join(assets, n) for n in sorted(os.listdir(assets))] if r is main else [extra_manifest]):
+            if a["id"] == wanted:
+                sys.stdout.buffer.write(open(file, "rb").read())
+                sys.exit(0)
+    print("HTTP 404: Not Found", file=sys.stderr)
+    sys.exit(1)
+if "/releases/tags/" in path:
+    print(json.dumps(main))
+else:
+    print(json.dumps(listing))
 PY
+    exit $?
+fi
+if [ "$1 $2" = "run download" ]; then
+    shift 3
+    name=""; dir="."
+    while [ $# -gt 0 ]; do
+        case "$1" in --name) name="$2"; shift ;; --dir) dir="$2"; shift ;; --repo) shift ;; esac
+        shift
+    done
+    [ "$name" = sill-zip-v0.6.1 ] && [ -n "${GH_STANDIN_ARTIFACT:-}" ] && [ -f "$GH_STANDIN_ARTIFACT" ] || { echo "no artifact $name" >&2; exit 1; }
+    mkdir -p "$dir"; cp "$GH_STANDIN_ARTIFACT" "$dir/Sill-0.6.1.zip"
     exit 0
 fi
 if [ "$1 $2" = "release download" ]; then
@@ -110,10 +154,14 @@ MARK_FILE="$out/marker" DYLD_INSERT_LIBRARIES="$out/mark.dylib" "$out/signer/upd
 [ ! -f "$out/marker" ] && echo "  ok: a library given through DYLD_INSERT_LIBRARIES does not load into the signer" \
     || { echo "  FAIL: a library loaded into the installed signer"; failures=$((failures + 1)); }
 expect fail "the scratch signer folder without a key file (never the keychain)" "$sign" --public-key
-expect ok "a throwaway key in a file" "$sign" --new-key --key-file "$out/key"
+expect ok "a throwaway key in a file" "$sign" --new-key --key-file "$out/newkey"
+grep -q '^public key [A-Za-z0-9+/=]* (key ID [0-9a-f]*)' "$out/last.log" || { echo "  FAIL: no public key printed"; failures=$((failures + 1)); }
+expect fail "a second key never overwrites the first" "$sign" --new-key --key-file "$out/newkey"
+# The tests' key (UpdateManifest.testKeySeed: anyone can make it, no Sill trusts it): the only key the test-only
+# SILL_SIGN_TEST_BUILT_FROM goes with (the third security pass's N10 m).
+expect ok "the tests' key in a file" "$out/signer/update-manifest" test-key --key-file "$out/key"
 pub="$(sed -n 's/^public key \([A-Za-z0-9+\/=]*\) .*/\1/p' "$out/last.log")"
-[ -n "$pub" ] || { echo "  FAIL: no public key printed"; failures=$((failures + 1)); }
-expect fail "a second key never overwrites the first" "$sign" --new-key --key-file "$out/key"
+[ -n "$pub" ] || { echo "  FAIL: no public key printed for the tests' key"; failures=$((failures + 1)); }
 other="$(python3 -I -c 'import base64,os; print(base64.b64encode(os.urandom(32)).decode())')"
 
 # A scratch checkout whose tag v0.6.1 carries the trust under test (the genuine v0.6.1 zip stands for its build).
@@ -145,12 +193,17 @@ src=(--source "$scratch" --key-file "$out/key" --zip "$genuine/Sill.zip" --yes)
 # The commit the app names (R1): the genuine v0.6.1 has no SillCommit, so the test stands for one, the tag's by
 # default (BUILT_FROM for another).
 signs() { SILL_SIGN_TEST_BUILT_FROM="${BUILT_FROM:-$(git -C "$scratch" rev-parse "v0.6.1^{commit}")}" "$sign" "$@"; }
+# The question about the updater's changes (R2) is asked whatever --yes says: answered yes, or not at all.
+with_y() { printf 'y\n' | "$@"; }
+no_answer() { "$@" < /dev/null; }
+notifications() { grep -c '^osascript -e display notification' "$out/gh.log" || true; }
 expect fail "F2: the key added after the signer was installed (its trust was recorded with none)" signs v0.6.1 "${src[@]}"
 grep -q "trusts something other than what you read" "$out/last.log" || { echo "  FAIL: the refusal's words"; cat "$out/last.log"; failures=$((failures + 1)); }
 expect ok "the signer installed again from the checkout that carries the key" "$sign" --install-signer --source "$scratch" --yes
 grep -q "$pub" "$out/signer/trust.txt" || { echo "  FAIL: the recorded trust lacks the key"; failures=$((failures + 1)); }
 expect fail "a zip that isn't GitHub's" signs v0.6.1 --source "$scratch" --key-file "$out/key" --zip "$genuine/Sill.zip.sha256" --yes
-expect fail "a SHA-256 that isn't GitHub's" signs v0.6.1 --source "$scratch" --key-file "$out/key" --expect-sha256 "$zero" --yes
+expect fail "N10 m: SILL_SIGN_TEST_BUILT_FROM with a key that isn't the tests'" signs v0.6.1 --source "$scratch" --key-file "$out/newkey" --zip "$genuine/Sill.zip" --yes
+grep -q "taken only with the tests' key" "$out/last.log" || { echo "  FAIL: N10 m's words"; cat "$out/last.log"; failures=$((failures + 1)); }
 expect fail "no zip known (none built here for 0.6.1)" signs v0.6.1 --source "$scratch" --key-file "$out/key" --yes
 # R1: the app built from another commit, an app naming none, and GitHub's tag moved, each refused before signing.
 BUILT_FROM="$(git -C "$scratch" rev-parse "v0.6.1^{commit}~1")" expect fail "R1: the app built from another commit than the tag's" signs v0.6.1 "${src[@]}"
@@ -174,15 +227,31 @@ grep -q "cdhash arm64 d5feca97b4d531345aefab17bb8b588358f2975f" "$out/last.log" 
 expect fail "another key does not verify it" "$out/signer/update-manifest" verify "$out/assets/Sill.zip.manifest" --key "$other"
 expect fail "signed already, without --replace" signs v0.6.1 "${src[@]}"
 expect ok "signed again with --replace" signs v0.6.1 "${src[@]}" --replace
+# R1′: a release the release workflow built, signed from the approved run: GitHub's record of the commit it built
+# must be the tag's, and the zip is its artifact.
+run=(--source "$scratch" --key-file "$out/key" --run 4242 --yes --replace)
+GH_STANDIN_ARTIFACT="$genuine/Sill.zip" expect ok "R1′: signed from the approved run's artifact" signs v0.6.1 "${run[@]}"
+grep -q "it built $(git -C "$scratch" rev-parse "v0.6.1^{commit}"), your v0.6.1's commit" "$out/last.log" \
+    || { echo "  FAIL: R1′'s words for the run"; cat "$out/last.log"; failures=$((failures + 1)); }
+GH_STANDIN_ARTIFACT="$genuine/Sill.zip" GH_STANDIN_RUN_SHA="$(git -C "$scratch" rev-parse "v0.6.1^{commit}~1")" \
+    expect fail "R1′: a run that built another commit (a tag moved for the run and back)" signs v0.6.1 "${run[@]}"
+grep -q "built .*, not your v0.6.1's .*: nothing signed (a tag moved for the run and back" "$out/last.log" \
+    || { echo "  FAIL: R1′'s words for another commit"; cat "$out/last.log"; failures=$((failures + 1)); }
+GH_STANDIN_ARTIFACT="$genuine/Sill.zip" GH_STANDIN_RUN_CONCLUSION=failure expect fail "R1′: a run that didn't succeed" signs v0.6.1 "${run[@]}"
+GH_STANDIN_ARTIFACT="$genuine/Sill.zip" GH_STANDIN_RUN_PATH=.github/workflows/nightly.yml expect fail "R1′: another workflow's run" signs v0.6.1 "${run[@]}"
+GH_STANDIN_ARTIFACT="$genuine/Sill.zip" GH_STANDIN_RUN_BRANCH=v0.6.0 expect fail "R1′: a run started for another tag" signs v0.6.1 "${run[@]}"
+GH_STANDIN_ARTIFACT="" expect fail "R1′: a run without the zip's artifact" signs v0.6.1 "${run[@]}"
+GH_STANDIN_ARTIFACT="$genuine/Sill.zip.sha256" expect fail "R1′: an artifact that isn't GitHub's zip" signs v0.6.1 "${run[@]}"
+GH_STANDIN_ARTIFACT="$genuine/Sill.zip" expect fail "R1′: --run takes no --zip" signs v0.6.1 "${run[@]}" --zip "$genuine/Sill.zip"
 # A1: the audit, every manifest on GitHub against the signing record.
 expect ok "the audit: the release on GitHub is in the record" "$sign" --audit
-grep -q "v0.6.1: signed here" "$out/last.log" || { echo "  FAIL: the audit's words"; cat "$out/last.log"; failures=$((failures + 1)); }
+grep -q "v0.6.1 (published): signed here" "$out/last.log" || { echo "  FAIL: the audit's words"; cat "$out/last.log"; failures=$((failures + 1)); }
 cp "$out/assets/Sill.zip.manifest" "$out/recorded.manifest"
 "$out/signer/update-manifest" sign --tag v0.6.1 --build 1388 --asset Sill.zip --size "$(stat -f %z "$genuine/Sill.zip")" \
     --sha256 "$(shasum -a 256 "$genuine/Sill.zip" | cut -d' ' -f1)" --cdhash arm64=d5feca97b4d531345aefab17bb8b588358f2975f \
     --out "$out/assets/Sill.zip.manifest" --key-file "$out/key" > /dev/null
 expect fail "the audit: a manifest signed with the key outside the record (a leaked key's)" "$sign" --audit --notify
-grep -q "v0.6.1: NOT IN YOUR SIGNING RECORD, and it verifies with your update key" "$out/last.log" \
+grep -q "v0.6.1 (published): NOT IN YOUR SIGNING RECORD, and it verifies with your update key" "$out/last.log" \
     || { echo "  FAIL: the audit's alarm"; cat "$out/last.log"; failures=$((failures + 1)); }
 grep -q "^osascript -e display notification" "$out/gh.log" && echo "  ok: --notify posts a notification (a stand-in osascript)" \
     || { echo "  FAIL: no notification"; failures=$((failures + 1)); }
@@ -191,13 +260,35 @@ expect fail "the audit: a manifest no key signed" "$sign" --audit
 grep -q "doesn't verify with your update key" "$out/last.log" || { echo "  FAIL: the audit's words for garbage"; cat "$out/last.log"; failures=$((failures + 1)); }
 cp "$out/recorded.manifest" "$out/assets/Sill.zip.manifest"
 expect ok "the audit again with the recorded manifest back" "$sign" --audit
+# AU1: a release signed outside the record is seen as a pre-release and as a draft too, and an audit that can't run
+# says so with --notify.
+"$out/signer/update-manifest" sign --tag v0.7.0 --build 1500 --asset Sill.zip --size 6000000 --sha256 "$zero" \
+    --cdhash arm64=d5feca97b4d531345aefab17bb8b588358f2975f --out "$out/v070.manifest" --key-file "$out/key" > /dev/null
+for state in prerelease draft published; do
+    before="$(notifications)"
+    GH_STANDIN_EXTRA="$state" GH_STANDIN_EXTRA_MANIFEST="$out/v070.manifest" expect fail "AU1: a release outside the record, as $state" "$sign" --audit --notify
+    grep -q "v0.7.0 (.*): NOT IN YOUR SIGNING RECORD, and it verifies with your update key" "$out/last.log" && [ "$(notifications)" -gt "$before" ] \
+        && echo "  ok: AU1: named, and a notification ($state)" || { echo "  FAIL: AU1's words or notification ($state)"; cat "$out/last.log"; failures=$((failures + 1)); }
+done
+before="$(notifications)"
+GH_STANDIN_FAIL=1 expect fail "AU1: gh can't list (an expired login)" "$sign" --audit --notify
+[ "$(notifications)" -gt "$before" ] && grep -q "display notification .The audit couldn't run: can't list" "$out/gh.log" \
+    && echo "  ok: AU1: an audit that couldn't run notifies" || { echo "  FAIL: no notification when the audit couldn't run"; tail -3 "$out/gh.log"; failures=$((failures + 1)); }
+before="$(notifications)"
+expect ok "the audit, clean, posts nothing" "$sign" --audit --notify
+[ "$(notifications)" = "$before" ] && echo "  ok: a clean audit posts no notification" || { echo "  FAIL: a clean audit notified"; failures=$((failures + 1)); }
 # R2: the updater's changes since the last release signed (a release v0.6.0 recorded at the commit before).
 git -C "$scratch" tag -f v0.6.0 "v0.6.1^{commit}~1" > /dev/null
 printf '%s v0.6.0 %s %s\n' 2026-11-01T00:00:00Z "$zero" "$zero" > "$out/record.tmp"; cat "$out/signer/signed.txt" >> "$out/record.tmp"
 cp "$out/record.tmp" "$out/signer/signed.txt"
-expect ok "R2: signed with the updater's changes since v0.6.0 shown" signs v0.6.1 "${src[@]}" --replace
+expect fail "R2: --yes doesn't answer the question about the updater's changes" no_answer signs v0.6.1 "${src[@]}" --replace
+grep -q "nothing signed: read the updater's changes first" "$out/last.log" || { echo "  FAIL: R2's refusal"; cat "$out/last.log"; failures=$((failures + 1)); }
+expect ok "R2: signed with the updater's changes since v0.6.0 shown and read" with_y signs v0.6.1 "${src[@]}" --replace
 grep -q "the updater's own files since v0.6.0" "$out/last.log" && grep -q "UpdateManifest.swift" "$out/last.log" \
     && echo "  ok: R2 shows UpdateManifest.swift changed since v0.6.0" || { echo "  FAIL: R2's diff"; cat "$out/last.log"; failures=$((failures + 1)); }
+for f in AppModel.swift SettingsPanes.swift Compatibility.swift StreamServer.swift; do
+    grep -q "$f" "$root/Scripts/sign-update.sh" || { echo "  FAIL: R2's list lacks $f"; failures=$((failures + 1)); }
+done
 # F2: one line slipped into the release's Sill.
 keys_line "$pub" "$other"; retag "rotation support"
 expect fail "F2: a second key in the release's Sill" signs v0.6.1 "${src[@]}" --replace
@@ -212,7 +303,7 @@ printf '\n// A comment that names releaseKeys changes no trust.\n' >> "$scratch/
 sed -i '' 's#^    /// The only Trust Sill.app uses.#    /// The only Trust Sill.app uses (a comment changed).#' "$scratch/Sources/SillMenuBar/UpdateInstallPolicy.swift"
 retag "comments"
 grep -q "a comment changed" "$scratch/Sources/SillMenuBar/UpdateInstallPolicy.swift" || { echo "  FAIL: the comment case changed nothing"; failures=$((failures + 1)); }
-expect ok "comments change no trust" signs v0.6.1 "${src[@]}" --replace
+expect ok "comments change no trust" with_y signs v0.6.1 "${src[@]}" --replace
 # The manifest's signed time, and a stop for the release (review 3, plan §15.4), with the key in the file.
 grep -q '^signed 20[0-9][0-9]-[01][0-9]-[0-3][0-9]T[0-2][0-9]:[0-5][0-9]:[0-5][0-9]Z$' "$out/assets/Sill.zip.manifest" \
     && echo "  ok: the manifest carries the time it was signed" || { echo "  FAIL: no signed line"; failures=$((failures + 1)); }
@@ -279,6 +370,12 @@ grep -q "nightlyKeys (never releaseKeys)" "$out/last.log" && [ "$(stat -f %Lp "$
     && echo "  ok: its words, mode 0600, and no compiled signer left behind" || { echo "  FAIL: --new-key's file or its clean-up: $(ls -A "$out/newkey-tmp" | tr '\n' ' ')"; cat "$out/last.log"; failures=$((failures + 1)); }
 expect fail "sign-nightly.sh --new-key never replaces a key file" env TMPDIR="$out/newkey-tmp" "$nscratch/Scripts/sign-nightly.sh" --new-key --key-file "$out/nightly2.key"
 [ -z "$(ls -A "$out/newkey-tmp")" ] && echo "  ok: nothing left behind after a refusal either" || { echo "  FAIL: a refusal left $(ls -A "$out/newkey-tmp")"; failures=$((failures + 1)); }
+# N10 e (the third security pass): a nightly is never signed as a release, even one of the tag's own commit.
+mkdir -p "$out/nassets"
+nightly_zip nightly "$(git -C "$scratch" rev-parse "v0.6.1^{commit}")" "$out/nassets/Sill.zip"
+(cd "$out/nassets" && shasum -a 256 Sill.zip > Sill.zip.sha256)
+GH_STANDIN_ASSETS="$out/nassets" expect fail "N10 e: an app with SillChannel is never signed as a release" with_y signs v0.6.1 --source "$scratch" --key-file "$out/key" --zip "$out/nassets/Sill.zip" --yes
+grep -q "a release is never signed from one" "$out/last.log" || { echo "  FAIL: N10 e's words"; cat "$out/last.log"; failures=$((failures + 1)); }
 # F1: a signer without the hardened runtime (an older install) is refused.
 cp "$out/signer/update-manifest" "$out/plain-signer"
 codesign -s - -f "$out/plain-signer" 2> /dev/null

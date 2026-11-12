@@ -181,7 +181,9 @@ kept with what it remembers in Sill's keychain group (`AutoUpdateStore`, never
 the defaults; only Settings turns it on). After a check, it runs Update Now's
 steps by itself for a release it first found at least 48 hours ago (its own
 first read of the verified manifest, kept across launches, never before the
-manifest's `signed` date), then waits for 5 minutes without a device connected, asks
+manifest's `signed` date; 48 hours by this Mac's clock and by GitHub's, the `Date`
+of its HTTPS answers, from the release's `published_at` when that is later), then
+waits for 5 minutes without a device connected, asks
 GitHub again, holds new sessions (a device that tries is told Sill is
 restarting and reconnects by itself) and installs. Two attempts a version at
 most, a day apart. The log's lines start "Automatic update:". It never runs for the bare
@@ -197,12 +199,13 @@ a published release on Noah's Mac (Releasing).
 Use nightly builds (docs/one-click-update-plan.md §16), in a build with Update
 Now and a nightly key (`UpdateManifest.nightlyKeys`, empty until Noah makes the
 key): a switch under Automatically update Sill, off by default, kept beside it.
-With it on, the daily check also reads the nightly pre-release's
+With it on, the daily check (and each launch while that check is on) also reads the nightly pre-release's
 `Sill-nightly.zip.manifest`, verified with the nightly key alone ("Sill nightly
 1", never a release's format or keys), and offers the version and build it names
 (GitHub's title is never read); Update Now and the automatic update then install
 it through the same steps and checks, newer by version, then build, and with no
-cooling-off (a release is still newer by its version alone, so the release of a
+cooling-off (`UpdateAutoPolicy.nightlyCoolingOff`, 0: the one constant to change for
+one, plan §16.10; a release is still newer by its version alone, so the release of a
 nightly's own version is never offered to it). nightly.yml signs each night's zip with `Scripts/sign-nightly.sh`
 and the secret `SILL_NIGHTLY_UPDATE_KEY`, when the environment `nightly` has it;
 `make-app.sh` marks a nightly with `SillChannel = nightly` and every build with
@@ -2019,9 +2022,11 @@ everything is under `.build/update-harness`, removed at the end.
 at a time, and runs the harness on each copy (each must fail it; several
 minutes each; names pick some).
 `Tests/update-harness/sign-test.sh` runs `Scripts/sign-update.sh` against a
-stand-in `gh` (in `.build/update-sign-test`) serving the genuine v0.6.1, with a
-throwaway key file and the signer installed in a scratch folder: nothing is
-uploaded anywhere, and the login keychain is never used.
+stand-in `gh` (in `.build/update-sign-test`) serving the genuine v0.6.1 (and a
+release run's record and artifact for `--run`), with a throwaway key file and the
+tests' key (`UpdateManifest.testKeySeed`, which no Sill trusts, the only key the
+test-only `SILL_SIGN_TEST_BUILT_FROM` goes with) and the signer installed in a
+scratch folder: nothing is uploaded anywhere, and the login keychain is never used.
 
 ### The restore probe
 
@@ -2658,14 +2663,17 @@ A Developer ID signature has a different designated requirement, so
 permissions are granted once more.
 Update Now (docs/one-click-update-plan.md) installs a release only once it
 carries `Sill.zip.manifest`, signed with Noah's update key: `Scripts/sign-update.sh
-v<version>`, on his Mac, right after the release is published (never in CI). It
+v<version>`, on his Mac, right after the release is published (never in CI), of a
+zip built on his Mac or, with `--run ID`, the zip a release.yml run kept once
+GitHub's record of that run names his tag's commit. It
 checks the published zip as the checklist checks a download, compares what the
 tag's source trusts (its update keys, the pinned requirement, the trust and the
 endpoints) with what the signer recorded when it was installed and stops on any
 difference, requires the app to name the tag's commit (`SillCommit` in its
 Info.plist, which `make-app.sh` writes, "+changes" for a build with changes) and
-GitHub's tag to name it too, shows the updater's own changes since the last
-release it signed, signs the manifest (the tag, version, build, size, SHA-256, each
+GitHub's tag to name it too, refuses a nightly (`SillChannel`), shows the updater's
+own changes since the last release it signed and asks (whatever `--yes` says), signs
+the manifest (the tag, version, build, size, SHA-256, each
 slice's cdhash and the time) with the key in his login keychain (`--key-file
 PATH` for a key in a file) after asking in person with the whole SHA-256 shown,
 reads it back with the key the tagged source carries, uploads it and reads it
@@ -2673,10 +2681,11 @@ back. The signer is built with the hardened runtime and refused without it. A
 release no Sill may install gets a stop (`update-manifest stop`, then `gh
 release upload`: docs/one-click-update-plan.md §15.4). Every manifest it signs
 goes in the signing record beside the signer (`signed.txt`), and
-`Scripts/sign-update.sh --audit` compares every release on GitHub with it (a
-release that verifies with the key but isn't in the record is one Noah didn't
-sign; `--notify` posts a notification; its daily LaunchAgent is his choice:
-docs/release-checklist.md part 1 §7).
+`Scripts/sign-update.sh --audit` compares every release on GitHub that carries a
+manifest with it, drafts and pre-releases too (a release that verifies with the key
+but isn't in the record is one Noah didn't sign; `--notify` posts a notification
+then and whenever the audit couldn't run; its LaunchAgent, every four hours, is his
+choice: docs/release-checklist.md part 1 §7).
 `Scripts/sign-update.sh --new-key` makes the key once (docs/release-checklist.md,
 part 1 §7); its public key goes into `UpdateManifest.releaseKeys`.
 `make-app.sh --release` embeds `Packaging/embedded.provisionprofile` (the

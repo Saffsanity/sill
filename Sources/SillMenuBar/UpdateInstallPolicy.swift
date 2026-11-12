@@ -151,6 +151,37 @@ enum UpdateInstallPolicy {
         return build > runningBuild
     }
 
+    /// GitHub's clock in an HTTPS answer (the third security pass's CL1): the `Date` header in RFC 9110's
+    /// IMF-fixdate form, "Wed, 12 Nov 2026 15:55:00 GMT", a real date of the years 2000 to 2999 with its right
+    /// weekday; nil for anything else (the two obsolete forms, another zone, a 30 February), which never shortens
+    /// a wait (UpdateAutoPolicy.dates waits for an answer that has one).
+    static func httpDate(_ text: String) -> Date? {
+        let days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        let p = text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        func digits(_ s: String, _ n: Int) -> Int? { s.utf8.count == n && s.utf8.allSatisfy { $0 >= 0x30 && $0 <= 0x39 } ? Int(s) : nil }
+        guard p.count == 6, p[0].hasSuffix(","), let weekday = days.firstIndex(of: String(p[0].dropLast())),
+              let day = digits(p[1], 2), let month = months.firstIndex(of: p[2]), let year = digits(p[3], 4),
+              (2000...2999).contains(year), p[5] == "GMT" else { return nil }
+        let t = p[4].split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        guard t.count == 3, let hour = digits(t[0], 2), let minute = digits(t[1], 2), let second = digits(t[2], 2) else { return nil }
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(secondsFromGMT: 0)!
+        guard let date = utc.date(from: DateComponents(year: year, month: month + 1, day: day, hour: hour, minute: minute, second: second)) else { return nil }
+        let c = utc.dateComponents([.year, .month, .day, .hour, .minute, .second, .weekday], from: date)
+        // A real date only (the calendar rolls a 30 February over to March), and its own weekday.
+        guard c.year == year, c.month == month + 1, c.day == day, c.hour == hour, c.minute == minute, c.second == second,
+              let w = c.weekday, (w + 5) % 7 == weekday else { return nil }
+        return date
+    }
+
+    /// Whether a stop signed with an update key names this release and its zip (the third security pass's N10 l):
+    /// by version, as SillVersion compares them, so a stop for v0.7.0 stops v0.7.0.0 too, and by the zip's
+    /// SHA-256, never by the tag's text alone.
+    static func stopNames(stopTag: String, stopSHA256: String, release: Release, manifestSHA256: String) -> Bool {
+        strictTag(stopTag) == release.version && stopSHA256 == manifestSHA256
+    }
+
     /// The nightly pre-release's answer, for the daily look and Update Now alike (plan §16.4): the pre-release with
     /// the channel's tag, never a draft, and exactly one uploaded zip and one manifest under the fixed names at the
     /// URLs Sill builds. Nothing of its title, notes or page is read: the version and build Sill offers are the
@@ -345,6 +376,13 @@ enum UpdateInstallPolicy {
         /// A nightly's build, as its signed manifest names it (UpdateInstaller.prepare's nightly path).
         var build: Int? = nil
         var channel = UpdateManifest.Channel.release
+        /// When GitHub says the release was published (`published_at`; nil when it doesn't say, or for a nightly):
+        /// the automatic update's wait counts from it too, so a release deleted and published again starts over
+        /// (the third security pass's AU1). GitHub sets it; no token does.
+        var publishedAt: Date? = nil
+        /// GitHub's clock when it answered (the HTTPS answer's `Date` header; nil when it had none Sill could
+        /// read): the automatic update's wait counts on it too, never on this Mac's clock alone (CL1).
+        var answeredAt: Date? = nil
     }
 
     /// GitHub's latest release (a 200's body) as the one to install, or why not: it must be the
@@ -368,7 +406,8 @@ enum UpdateInstallPolicy {
         case .failure(let f): return .failure(f)
         case .success(let a):
             guard let manifest = a.manifest else { return .failure(.notSigned) }
-            return .success(Release(tag: tag, version: version, zip: a.zip, manifest: manifest, stop: a.stop))
+            return .success(Release(tag: tag, version: version, zip: a.zip, manifest: manifest, stop: a.stop,
+                                    publishedAt: (object["published_at"] as? String).flatMap(UpdateManifest.date)))
         }
     }
 
@@ -582,6 +621,9 @@ enum UpdateInstallPolicy {
         case checkAfterSwap(BundleProblem, putBack: Bool)
         /// The new copy didn't come up (why), and the old copy was put back (or not).
         case didNotStart(String, putBack: Bool)
+        /// The new copy didn't come up (why), the copy before it failed the watcher's last check, so the watcher
+        /// left the new one at Sill's path, not started (the third security pass's W3): this Sill.
+        case keptUnstarted(String)
         /// A stop signed with an update key names this release (its tag): never installed.
         case stopped(tag: String)
         /// The release lists a stop that doesn't check out with an update key: nothing is installed.
@@ -655,6 +697,8 @@ enum UpdateInstallPolicy {
             return putBack ? couldNot(words(p)) : lost(running: running, keptAt: keptAt)
         case .didNotStart(_, let putBack):
             return putBack ? "Sill \(offered) didn’t start, so Sill \(running) is back." : lost(running: running, keptAt: keptAt)
+        case .keptUnstarted:
+            return "Sill \(running) didn’t start the first time, and the copy it replaced failed its last check, so Sill \(running) stayed. If it misbehaves, download Sill again from getsill.app."
         case .stopped: return "Sill’s developer stopped Sill \(offered) with a stop signed with Sill’s update key, so it isn’t installed. \(unchanged)"
         case .stopUnreadable: return couldNot("the release carries a stop that isn’t signed with Sill’s update key")
         case .notAutomatic(let why): return "Sill didn’t install \(offered) by itself: \(why). Update Now still can."
@@ -708,6 +752,7 @@ enum UpdateInstallPolicy {
         case .swapFailed(let why): return "the swap failed (\(why)); nothing changed"
         case .checkAfterSwap(let p, let putBack): return "the check at the final path failed (\(p)); \(putBack ? "put back" : "NOT put back")"
         case .didNotStart(let why, let putBack): return "the new copy didn’t start (\(why)); \(putBack ? "put back" : "NOT put back")"
+        case .keptUnstarted(let why): return "the new copy didn’t start (\(why)) and the old one failed the watcher's last check: the new copy left at Sill's path, not started"
         case .stopped(let tag): return "a stop signed with an update key names \(tag)"
         case .stopUnreadable(let p): return "the release’s stop: \(p.text)"
         case .notAutomatic(let why): return "not installed by itself: \(why)"
@@ -1054,8 +1099,17 @@ enum UpdateInstallPolicy {
         return ("\(n) Is Available…", "You have \(running); opens its download page", false)
     }
 
-    /// Under "Use nightly builds" while it is on (plan §16.5).
-    static let nightlyNote = "Nightly builds are made every night from Sill’s newest code. They are less tested than releases and may break. Each is checked two ways: Apple’s signature and notarization for Sill’s developer, and Sill’s nightly key, which only the nightly build signs with. With Automatically update Sill on, each one installs by itself without the two-day wait, once no device has been connected for \(UpdateAutoPolicy.quietMinutes) minutes. Turning this off doesn’t go back to the last release: Sill keeps the nightly you have until a release with a higher version number."
+    /// Under "Use nightly builds" while it is on (plan §16.5): what a nightly trusts, said plainly (the third security
+    /// pass's NB1: GitHub builds it and signs it, so its two signatures are one job's, with nobody in between), and
+    /// when one installs by itself, from `UpdateAutoPolicy.nightlyCoolingOff` (no wait by Noah's decision of
+    /// 2026-11-12, until he changes it: then these words follow).
+    static var nightlyNote: String { nightlyWords(wait: UpdateAutoPolicy.nightlyCoolingOff) }
+
+    /// The note for a nightly's wait of `wait` (the check tries a wait of some hours too).
+    static func nightlyWords(wait: TimeInterval) -> String {
+        let when = wait > 0 ? UpdateAutoPolicy.waitWords(wait) : "as soon as Sill finds it, without the wait a release has"
+        return "Nightly builds are built and signed by GitHub from Sill’s newest code; nobody looks at them first. They are less tested than releases and may break. With Automatically update Sill on, each one installs by itself \(when), once no device has been connected for \(UpdateAutoPolicy.quietMinutes) minutes. Turning this off doesn’t go back to the last release: Sill keeps the nightly you have until a release with a higher version number."
+    }
 
     /// Under the switch while it is off and this Sill is a nightly (a release of its own version is never offered:
     /// `chooseOffer`).
@@ -1066,16 +1120,19 @@ enum UpdateInstallPolicy {
     /// Settings › General's footnote in a build with an update key (UpdatePolicy.footnote otherwise, which
     /// claims no check this build can't make). Both checks named apart: Apple's (the Developer ID signature
     /// and notarization) and Sill's own update key's (the release's signed manifest). `nightly`: "Use nightly
-    /// builds" is on (plan §16.5): a nightly is signed with the nightly key, and installs by itself with no
-    /// two-day wait.
+    /// builds" is on (plan §16.5): a nightly is built and signed by GitHub (the third security pass's NB1), Sill
+    /// also asks for one each time it opens (N10 n), and it installs by itself after its own wait
+    /// (`UpdateAutoPolicy.nightlyCoolingOff`, none today).
     static func footnote(automatic: Bool, nightly: Bool = false) -> String {
         let checks = nightly
-            ? "Before it installs a new version, Sill checks it two ways: it must carry Apple’s signature and notarization for Sill’s developer, and be signed with Sill’s own update key (a release) or its nightly key (a nightly build)."
+            ? "Before it installs a new version, Sill checks it two ways: it must carry Apple’s signature and notarization for Sill’s developer, and a release must be signed with Sill’s own update key; a nightly build is signed by GitHub, which builds it."
             : "Before it installs a new version, Sill checks it two ways: it must carry Apple’s signature and notarization for Sill’s developer, and the release must be signed with Sill’s own update key."
-        let ask = "Once a day, Sill asks GitHub whether a newer version is out. GitHub sees this Mac’s IP address and which version of Sill it has; nothing else is sent."
+        let ask = (nightly ? "Once a day, and with nightly builds on each time Sill opens, Sill asks GitHub whether a newer version is out."
+                           : "Once a day, Sill asks GitHub whether a newer version is out.")
+            + " GitHub sees this Mac’s IP address and which version of Sill it has; nothing else is sent."
         if automatic {
             let what = nightly
-                ? "Sill downloads a new release \(UpdateAutoPolicy.coolingOffWords), and a nightly build as soon as it finds it"
+                ? "Sill downloads a new release \(UpdateAutoPolicy.coolingOffWords), and a nightly build \(UpdateAutoPolicy.nightlyCoolingOffWords)"
                 : "Sill downloads a new version \(UpdateAutoPolicy.coolingOffWords)"
             return "\(ask) Automatically update Sill is on: \(what), then installs it and restarts once no device has been connected for \(UpdateAutoPolicy.quietMinutes) minutes; it never disconnects anyone. \(checks) Update Now checks it the same way, at once."
         }
@@ -1092,9 +1149,11 @@ extension UpdateInstallPolicy.Trust {
         entitlements: [.string(key: "com.apple.application-identifier", value: "9B2KKVM937.me.saffer.sill.mac"),
                        .string(key: "com.apple.developer.team-identifier", value: "9B2KKVM937"),
                        .arrayContaining(key: "keychain-access-groups", value: "9B2KKVM937.me.saffer.sill.mac")],
-        updateKeys: UpdateManifest.releaseKeys,
-        // A key in both lists is trusted for neither nightly (plan §16.2: the nightly key is never the update key).
-        nightlyKeys: UpdateManifest.nightlyKeys.filter { !UpdateManifest.releaseKeys.contains($0) })
+        // A key in both lists is trusted for neither (plan §16.2: the nightly key is never the update key; the third
+        // security pass's N10 a: the code refuses it, not only the check), and the tests' key, which anyone can make,
+        // for nothing.
+        updateKeys: UpdateManifest.releaseKeys.filter { !UpdateManifest.nightlyKeys.contains($0) && $0 != UpdateManifest.testPublicKey },
+        nightlyKeys: UpdateManifest.nightlyKeys.filter { !UpdateManifest.releaseKeys.contains($0) && $0 != UpdateManifest.testPublicKey })
 }
 
 extension UpdateInstallPolicy.Endpoints {

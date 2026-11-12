@@ -44,9 +44,14 @@ enum UpdateAutoPolicy {
     /// launches); a later check downloads and checks it again.
     static let maxWait: TimeInterval = 24 * 3600
     /// The oldest signature a nightly is installed by itself with (plan §16.3: a quiet main leaves the newest
-    /// nightly a few weeks old; a replay below what this Sill has seen is the floor's job). No cooling-off for a
-    /// nightly: Noah, 2026-11-12, "should download any update found immediately".
+    /// nightly a few weeks old; a replay below what this Sill has seen is the floor's job).
     static let nightlyMaxAge: TimeInterval = 30 * 24 * 3600
+    /// How long after THIS Sill first read a nightly's verified manifest before Sill installs it by itself: none,
+    /// Noah's decision of 2026-11-12 ("should download any update found immediately"). The third security pass's
+    /// NB1 asks him whether a nightly should wait some hours too (plan §16.10): his answer is this one line, and the
+    /// pane's and the footnote's words follow it (`nightlyCoolingOffWords`, `UpdateInstallPolicy.nightlyNote`).
+    /// A wait above zero counts as a release's does: from the first sight, on this Mac's clock and on GitHub's.
+    static let nightlyCoolingOff: TimeInterval = 0
     /// How long Settings says that Sill updated itself.
     static let updatedShown: TimeInterval = 7 * 24 * 3600
 
@@ -62,12 +67,20 @@ enum UpdateAutoPolicy {
     static var quietMinutes: Int { Int((quietFor / 60).rounded()) }
     /// "two days after it first finds it" (counted from this Sill's first read of the release's signed
     /// manifest), or "once it finds it" when the wait is off.
-    static var coolingOffWords: String {
-        guard coolingOff > 0 else { return "once it finds it" }
-        let hours = Int((coolingOff / 3600).rounded())
+    static var coolingOffWords: String { waitWords(coolingOff) }
+    /// A nightly's: "as soon as it finds it" today (`nightlyCoolingOff` is zero), else as a release's.
+    static var nightlyCoolingOffWords: String { nightlyCoolingOff > 0 ? waitWords(nightlyCoolingOff) : "as soon as it finds it" }
+
+    /// A wait in Settings' words: "two days after it first finds it", "12 hours after it first finds it", "an hour
+    /// after it first finds it", or "once it finds it" for none.
+    static func waitWords(_ wait: TimeInterval) -> String {
+        guard wait > 0 else { return "once it finds it" }
+        let minutes = Int((wait / 60).rounded())
+        if minutes < 60 { return "\(max(minutes, 1)) minute\(minutes > 1 ? "s" : "") after it first finds it" }
+        let hours = Int((wait / 3600).rounded())
         let small = ["a", "two", "three", "four", "five", "six", "seven"]
-        guard hours % 24 == 0, (1...7).contains(hours / 24) else { return "\(hours) hours after it first finds it" }
-        return "\(small[hours / 24 - 1]) day\(hours == 24 ? "" : "s") after it first finds it"
+        if hours % 24 == 0, (1...7).contains(hours / 24) { return "\(small[hours / 24 - 1]) day\(hours == 24 ? "" : "s") after it first finds it" }
+        return hours == 1 ? "an hour after it first finds it" : "\(hours) hours after it first finds it"
     }
 
     // MARK: What Sill remembers
@@ -85,13 +98,15 @@ enum UpdateAutoPolicy {
         /// itself. The check's offers alone never count: GitHub's word isn't signed, and a made-up "v9.9" there
         /// would otherwise stop every later update.
         var highestSigned: String?
-        /// Releases a signed stop named (their tags): never installed, also after the stop is gone.
+        /// Releases a signed stop named (their tags): never installed, also after the stop is gone; matched by
+        /// version, never by the tag's text (`isStopped`; the third security pass's N10 l).
         var stopped: [String] = []
         /// The last update Sill installed by itself, and when, to say so afterwards (`key`'s form).
         var updatedTo: String?
         var updatedAt: Date?
-        /// When this Sill first read each release's verified manifest (by tag and zip SHA-256): the cooling-off
-        /// counts from there (A1), across launches. A release whose zip changed is a new sighting.
+        /// When this Sill first read each release's verified manifest (by tag and zip SHA-256; a nightly's by its
+        /// `key`, "0.6.2 (1471)", while nightlies wait): the cooling-off counts from there (A1), across launches,
+        /// on this Mac's clock and on GitHub's (CL1). A release whose zip changed is a new sighting.
         var seen: [Sighting] = []
         /// "Use nightly builds" (plan §16), set only from Settings like `on`.
         var nightly = false
@@ -132,6 +147,12 @@ enum UpdateAutoPolicy {
             let first: Date
             /// The manifest's own signed time.
             let signed: Date
+            /// GitHub's clock at that first read (its answer's `Date`; the first later answer that had one, when it
+            /// had none): the wait counts on GitHub's clock too, which a clock moved on this Mac can't shorten (CL1).
+            var firstGitHub: Date?
+            /// The latest `published_at` GitHub gave for the release (only ever later): a release deleted and
+            /// published again waits afresh (AU1).
+            var published: Date?
         }
     }
 
@@ -186,12 +207,14 @@ enum UpdateAutoPolicy {
                UpdateInstallPolicy.isNewer(hv, build: hb, than: offered, runningBuild: build, byBuild: true) {
                 return .no("the newest nightly went back from \(hv) (\(hb)) to \(offered) (\(build))")
             }
-            return attemptsAllow(m, key(offered, build: build), now: now)
+            if case .no(let why) = attemptsAllow(m, key(offered, build: build), now: now) { return .no(why) }
+            if let waitUntil, now < waitUntil { return .no("nightly \(offered) (\(build)) cools off until \(UpdateManifest.dateText(waitUntil))") }
+            return .go
         }
         guard offered > running else { return .no("the offered release isn’t newer") }
         guard signed else { return .no("the release isn’t signed with Sill’s update key yet") }
         if let r = refusal { return .no(UpdateInstallPolicy.words(r)) }
-        if m.stopped.contains(offeredTag) { return .no("a stop signed with an update key names \(offeredTag)") }
+        if isStopped(m, tag: offeredTag) { return .no("a stop signed with an update key names \(offered)") }
         if let highest = m.highestSigned.flatMap(UpdateInstallPolicy.strictVersion), offered < highest {
             return .no("the latest release went back from \(highest) to \(offered)")
         }
@@ -209,39 +232,73 @@ enum UpdateAutoPolicy {
         return .go
     }
 
-    /// What the manifest's signed date says to the automatic update.
+    /// What the dates say to the automatic update.
     enum DateVerdict: Equatable, Sendable {
         case go
-        /// Not before this moment (the cooling-off): no attempt is spent.
-        case waitUntil(Date)
+        /// Not yet (the cooling-off): no attempt is spent. When, by this Mac's clock (an estimate when GitHub's clock
+        /// decides); nil when it can't be told yet (GitHub's answer carried no date Sill could read).
+        case waitUntil(Date?)
         /// Never by itself (Update Now still can): why.
         case refuse(String)
     }
 
-    /// The manifest's own date and this Sill's first sight of it against now: install, wait until a moment,
-    /// or never by itself. The signed date, which whoever holds the key writes, bounds only the age (120 days; 30
-    /// for a nightly) and the future; the cooling-off counts from the later of it and `firstSeen` (A1), so a
-    /// manifest dated back still waits the whole `coolingOff` on every Mac. A nightly has none (Noah, 2026-11-12:
-    /// "should download any update found immediately"; plan §16.7, T38).
-    static func dates(signedAt: Date, firstSeen: Date, now: Date, nightly: Bool = false) -> DateVerdict {
+    /// GitHub's side of the dates (the third security pass's CL1 and AU1), as its HTTPS answers give them: TLS keeps
+    /// them from the network, and no repository token can set them.
+    struct GitHubClock: Equatable, Sendable {
+        /// GitHub's time at this Sill's first read of the manifest (the sighting's `firstGitHub`).
+        var firstSeen: Date?
+        /// GitHub's time in the answer just read (`Release.answeredAt`).
+        var now: Date?
+        /// When GitHub says the release was published, the latest it said (a release's; nil for a nightly).
+        var published: Date?
+    }
+
+    /// The manifest's own date and this Sill's first sight of it against now: install, wait, or never by itself.
+    /// The signed date, which whoever holds the key writes, bounds only the age (120 days; 30 for a nightly) and the
+    /// future. The cooling-off (`wait`: a release's 48 hours, a nightly's `nightlyCoolingOff`, none today) must
+    /// have passed twice over, and never shortens:
+    /// - on this Mac's clock, from the later of the signed time and the first sight (A1), so a manifest dated back
+    ///   still waits the whole time;
+    /// - on GitHub's clock (CL1), from the later of its time at the first sight and the release's `published_at`
+    ///   (AU1: a release deleted and published again starts over), so a clock moved on this Mac shortens nothing.
+    ///   An answer without a date Sill can read waits for one that has it; a release whose answer doesn't say when
+    ///   it was published is never installed by itself (GitHub always says it).
+    static func dates(signedAt: Date, firstSeen: Date, now: Date, nightly: Bool = false, wait: TimeInterval? = nil,
+                      github: GitHubClock = GitHubClock()) -> DateVerdict {
         if signedAt.timeIntervalSince(now) > clockSkew { return .refuse("its signature is dated later than this Mac’s clock") }
         let age = now.timeIntervalSince(signedAt)
         let oldest = nightly ? nightlyMaxAge : maxAge
         if age > oldest { return .refuse("it was signed more than \(Int(oldest / 86400)) days ago") }
-        let until = max(signedAt, firstSeen).addingTimeInterval(coolingOff)
-        if !nightly, now < until { return .waitUntil(until) }
+        let wait = wait ?? (nightly ? nightlyCoolingOff : coolingOff)
+        guard wait > 0 else { return .go }
+        if !nightly, github.published == nil { return .refuse("GitHub’s answer doesn’t say when the release was published") }
+        let localEnd = max(signedAt, firstSeen).addingTimeInterval(wait)
+        guard let ghNow = github.now, let ghFirst = github.firstSeen else { return .waitUntil(now < localEnd ? localEnd : nil) }
+        let ghEnd = max(ghFirst, github.published ?? ghFirst).addingTimeInterval(wait)
+        let byGitHub = now.addingTimeInterval(ghEnd.timeIntervalSince(ghNow))
+        if ghNow < ghEnd || now < localEnd { return .waitUntil(max(localEnd, byGitHub)) }
         return .go
     }
 
-    /// When the cooling-off of the release `tag` ends, from what this Sill remembers (every sighting of that
-    /// tag: the latest end); nil when it never read that release's manifest.
-    static func waitUntil(_ m: Memory, tag: String) -> Date? {
-        m.seen.filter { $0.tag == tag }.map { max($0.signed, $0.first).addingTimeInterval(coolingOff) }.max()
+    /// When the cooling-off of the release `tag` (a nightly's `key`) ends, from what this Sill remembers, by this
+    /// Mac's clock: every sighting of it, the latest end, with a publication GitHub gave after the first sight
+    /// carried over by the difference between the two clocks then. Nil when it never read that manifest.
+    static func waitUntil(_ m: Memory, tag: String, wait: TimeInterval = coolingOff) -> Date? {
+        m.seen.filter { $0.tag == tag }.map { s -> Date in
+            var end = max(s.signed, s.first).addingTimeInterval(wait)
+            if let g = s.firstGitHub, let p = s.published, p > g { end = max(end, s.first.addingTimeInterval(p.timeIntervalSince(g) + wait)) }
+            return end
+        }.max()
+    }
+
+    /// The sighting of that manifest (that tag and zip), if this Sill has read it.
+    static func sighting(_ m: Memory, tag: String, sha256: String) -> Memory.Sighting? {
+        m.seen.first { $0.tag == tag && $0.sha256 == sha256 }
     }
 
     /// The first time this Sill read that release's verified manifest, if it has.
     static func firstSeen(_ m: Memory, tag: String, sha256: String) -> Date? {
-        m.seen.first { $0.tag == tag && $0.sha256 == sha256 }?.first
+        sighting(m, tag: tag, sha256: sha256)?.first
     }
 
     /// Whether the moment to install has come: no device connected now, none since `quietSince` (when the
@@ -257,12 +314,19 @@ enum UpdateAutoPolicy {
 
     // MARK: Memory
 
-    /// This Sill read the verified manifest of the release `tag` (its zip `sha256`) now: kept unless it was
-    /// read before (the first sight never moves), so the cooling-off counts from the first time.
-    static func sighted(_ m: Memory, tag: String, sha256: String, signedAt: Date, now: Date) -> Memory {
-        guard firstSeen(m, tag: tag, sha256: sha256) == nil else { return m }
+    /// This Sill read the verified manifest of the release `tag` (its zip `sha256`) now, GitHub's answer saying
+    /// `github` (its clock) and `published` (when the release was published): a new sighting, or the one there with
+    /// GitHub's clock filled in when it had none and the publication moved later when GitHub says a later one. The
+    /// first sight never moves, and nothing here ever moves an end earlier.
+    static func sighted(_ m: Memory, tag: String, sha256: String, signedAt: Date, now: Date, github: Date? = nil,
+                        published: Date? = nil) -> Memory {
         var n = m
-        n.seen.append(Memory.Sighting(tag: tag, sha256: sha256, first: now, signed: signedAt))
+        guard let i = n.seen.firstIndex(where: { $0.tag == tag && $0.sha256 == sha256 }) else {
+            n.seen.append(Memory.Sighting(tag: tag, sha256: sha256, first: now, signed: signedAt, firstGitHub: github, published: published))
+            return n
+        }
+        if n.seen[i].firstGitHub == nil { n.seen[i].firstGitHub = github }
+        if let p = published, n.seen[i].published.map({ p > $0 }) ?? true { n.seen[i].published = p }
         return n
     }
 
@@ -313,6 +377,12 @@ enum UpdateAutoPolicy {
         return n
     }
 
+    /// Whether a stop this Sill read names `tag`'s version (SillVersion's order: v0.7.0, v0.7 and v0.7.0.0 are one).
+    static func isStopped(_ m: Memory, tag: String) -> Bool {
+        guard let v = UpdateInstallPolicy.strictTag(tag) else { return false }
+        return m.stopped.contains { UpdateInstallPolicy.strictTag($0) == v }
+    }
+
     /// A signed stop named `tag`.
     static func stopped(_ m: Memory, _ tag: String) -> Memory {
         var n = m
@@ -350,8 +420,8 @@ enum UpdateAutoPolicy {
             .filter { newer($0.key) }
             .sorted { $0.value.last > $1.value.last }
             .prefix(maxRemembered)
-            .map { ($0.key, Memory.Attempt(count: $0.value.count, last: $0.value.last, failure: $0.value.failure.map { String($0.prefix(200)) })) })
-        n.seen = Array(m.seen.filter { newerTag($0.tag) && UpdateManifest.isHex($0.sha256, count: 64) }
+            .map { ($0.key, Memory.Attempt(count: $0.value.count, last: $0.value.last, failure: $0.value.failure.map { utf8Prefix($0, bytes: 200) })) })
+        n.seen = Array(m.seen.filter { (newerTag($0.tag) || (parseKey($0.tag)?.build != nil && newer($0.tag))) && UpdateManifest.isHex($0.sha256, count: 64) }
             .sorted { $0.first > $1.first }
             .prefix(maxRemembered))
         var stops: [String] = []
@@ -364,6 +434,28 @@ enum UpdateAutoPolicy {
             n.highestNightlyBuild = nil
         }
         return n
+    }
+
+    /// At most `bytes` bytes of `text`'s UTF-8, cut between Unicode scalars (the third security pass's N10 k: 200
+    /// Characters of one cluster each can be 112,511 bytes).
+    static func utf8Prefix(_ text: String, bytes: Int) -> String {
+        var kept = String.UnicodeScalarView(), count = 0
+        for scalar in text.unicodeScalars {
+            let size = String(scalar).utf8.count
+            guard count + size <= bytes else { break }
+            kept.append(scalar)
+            count += size
+        }
+        return String(kept)
+    }
+
+    /// What a failed write leaves in memory (AutoUpdateStore; the third security pass's N10 g): the change, but no
+    /// switch the person turned on (`on`, `nightly`), which holds only once it is written.
+    static func heldBack(_ next: Memory, current: Memory) -> Memory {
+        var held = next
+        if next.on && !current.on { held.on = false }
+        if next.nightly && !current.nightly { held.nightly = false }
+        return held
     }
 
     /// What Sill's keychain item says (AutoUpdateStore's read, decided here so the check can run it): no item;
@@ -460,14 +552,16 @@ enum UpdateAutoPolicy {
         a.updated = updatedLine(m, running: running, now: now, runningBuild: runningBuild)
         if let offered {
             a.afterFailure = afterFailure(m, version: offered, build: offeredBuild)
-            a.offerNote = offeredBuild.map { nightlyOfferNote(m, offered: offered, build: $0) }
+            a.offerNote = offeredBuild.map { nightlyOfferNote(m, offered: offered, build: $0, waitUntil: waitUntil, now: now) }
                 ?? offerNote(m, offered: offered, offeredTag: offeredTag, waitUntil: waitUntil, now: now)
         }
         return a
     }
 
-    /// While a nightly is offered and the switch is on: when Sill installs it by itself (no cooling-off), or why not.
-    static func nightlyOfferNote(_ m: Memory, offered: SillVersion, build: Int) -> String {
+    /// While a nightly is offered and the switch is on: when Sill installs it by itself, or why not. `wait`: the
+    /// nightly's cooling-off (`nightlyCoolingOff`, none today), `waitUntil` its end from what this Sill remembers.
+    static func nightlyOfferNote(_ m: Memory, offered: SillVersion, build: Int, waitUntil: Date? = nil, now: Date = Date(),
+                                 wait: TimeInterval = nightlyCoolingOff) -> String {
         if let hv = m.highestNightlyVersion.flatMap(UpdateInstallPolicy.strictVersion), let hb = m.highestNightlyBuild,
            UpdateInstallPolicy.isNewer(hv, build: hb, than: offered, runningBuild: build, byBuild: true) {
             return "Sill won’t install nightly \(offered) (\(build)) by itself: nightly \(hv) (\(hb)) was out before it. Update Now still can."
@@ -475,12 +569,21 @@ enum UpdateAutoPolicy {
         if let a = m.attempts[key(offered, build: build)], a.count >= maxAttempts {
             return "Sill won’t install nightly \(offered) (\(build)) by itself again; the next night’s build is tried."
         }
+        if wait > 0 {
+            if let waitUntil {
+                if now < waitUntil {
+                    return "Sill installs it by itself \(when(waitUntil, now: now, future: true)) or later, once no device has been connected for \(quietMinutes) minutes."
+                }
+            } else {
+                return "Sill installs it by itself \(waitWords(wait)), once no device has been connected for \(quietMinutes) minutes."
+            }
+        }
         return "Sill installs it by itself once no device has been connected for \(quietMinutes) minutes."
     }
 
     /// While a release is offered and the switch is on: when Sill installs it by itself, or why it won't.
     static func offerNote(_ m: Memory, offered: SillVersion, offeredTag: String?, waitUntil: Date?, now: Date) -> String {
-        if let offeredTag, m.stopped.contains(offeredTag) {
+        if let offeredTag, isStopped(m, tag: offeredTag) {
             return "A stop signed with Sill’s update key names Sill \(offered), so Sill won’t install it."
         }
         if let highest = m.highestSigned.flatMap(UpdateInstallPolicy.strictVersion), offered < highest {

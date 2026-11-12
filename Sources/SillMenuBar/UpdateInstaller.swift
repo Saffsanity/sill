@@ -84,7 +84,8 @@ final class UpdateInstaller: @unchecked Sendable {
                     return .failure(.releaseNotNewer)
                 }
                 let release = Policy.Release(tag: UpdateManifest.nightlyTag, version: n.manifest.version, zip: n.listing.zip,
-                                             manifest: n.listing.manifest, stop: nil, build: offeredBuild, channel: .nightly)
+                                             manifest: n.listing.manifest, stop: nil, build: offeredBuild, channel: .nightly,
+                                             answeredAt: n.answeredAt)
                 return .success((release, n.manifest))
             }
         }
@@ -99,11 +100,13 @@ final class UpdateInstaller: @unchecked Sendable {
                                                  configuration: configuration(api: true, resourceTimeout: 30), cancel: cancel) {
             return .failure(f)
         }
-        let release: Policy.Release
+        var release: Policy.Release
         switch Policy.releaseToInstall(body.data, offeredTag: offeredTag, running: running, endpoints: endpoints) {
         case .failure(let f): return .failure(f)
         case .success(let r): release = r
         }
+        // GitHub's clock in this answer: the automatic update's wait counts on it too (the third security pass's CL1).
+        release.answeredAt = api.serverDate
         let manifestBody = Buffer()
         let fetch = Transfer(allowed: { Policy.downloadRedirectAllowed($0, endpoints: endpoints) },
                              maxRedirects: endpoints.maxRedirects, limit: release.manifest.size, exactSize: release.manifest.size,
@@ -137,7 +140,9 @@ final class UpdateInstaller: @unchecked Sendable {
             case .failure(let p):
                 return .failure(.stopUnreadable(p))
             case .success(let stop):
-                if stop.tag == release.tag, stop.sha256 == manifest.sha256 { return .failure(.stopped(tag: release.tag)) }
+                if Policy.stopNames(stopTag: stop.tag, stopSHA256: stop.sha256, release: release, manifestSHA256: manifest.sha256) {
+                    return .failure(.stopped(tag: release.tag))
+                }
             }
         }
         return .success((release, manifest))
@@ -160,7 +165,8 @@ final class UpdateInstaller: @unchecked Sendable {
 
     /// The nightly pre-release's listing (UpdateInstallPolicy.nightlyListing) and its manifest, read and verified
     /// with the nightly key alone, for the channel ("Sill nightly 1"), and matched against the zip beside it.
-    func readNightly(cancel: Cancel) async -> Result<(listing: Policy.NightlyListing, manifest: UpdateManifest), Failure> {
+    /// `answeredAt`: GitHub's clock in the listing's answer (CL1), nil when it had none Sill could read.
+    func readNightly(cancel: Cancel) async -> Result<(listing: Policy.NightlyListing, manifest: UpdateManifest, answeredAt: Date?), Failure> {
         let endpoints = self.endpoints
         guard !trust.nightlyKeys.isEmpty else { return .failure(.manifest(.noKey)) }
         let body = Buffer()
@@ -188,7 +194,7 @@ final class UpdateInstaller: @unchecked Sendable {
         case .failure(let p): return .failure(.manifest(p))
         case .success(let m):
             if let f = Policy.nightlyMatches(m, listing: listing, endpoints: endpoints) { return .failure(f) }
-            return .success((listing, m))
+            return .success((listing, m, api.serverDate))
         }
     }
 
@@ -740,14 +746,21 @@ final class UpdateInstaller: @unchecked Sendable {
     /// copy between the first check and the move, or wrote through a link planted at the note, is caught
     /// there and moved aside, never started), and the old Sill started; it says what happened. Nothing is put
     /// back or started that isn't the old copy, whole: a folder, never a link to one (a link moved to Sill's
-    /// path would start whatever it points to later). Every path and value is an argument, never part of the
-    /// script's text.
+    /// path would start whatever it points to later), and no file of it with a second name (the third security
+    /// pass's W3: a hard link made while it waited in staging would let that file change after the check, as the
+    /// installer's own tree check refuses). When that last check fails, Sill's path is never left empty (W3): the
+    /// new copy, checked whole when it was installed, goes back there, not started, and the restored note says so
+    /// with a third line, `kept` (exit 8; never into whatever stands at Sill's path, exit 7). Every path and value is an argument, never part of the script's text;
+    /// the token is one too, readable with `ps` by this user's processes, accepted (N10 j: any of them can as well
+    /// kill the watcher, which is all a made-up started note achieves).
     static let watcherScript = #"""
 pid=$1; app=$2; exe=$3; old=$4; cdhash=$5; req=$6; started=$7; token=$8; restored=$9; shift 9; wait=$1; launcher=$2; arch=$3
 proved() { [ -f "$started" ] && [ ! -L "$started" ]; }
 running() { [ "$(/bin/ps -ww -p "$pid" -o comm= 2>/dev/null)" = "$app/Contents/MacOS/$exe" ]; }
 whole() {
     [ -d "$1" ] && [ ! -L "$1" ] || return 1
+    many=$(/usr/bin/find "$1" -type f -links +1 -print 2>/dev/null) || return 1
+    [ -z "$many" ] || return 1
     /usr/bin/codesign --verify --deep --strict "-R=$req" "$1" >/dev/null 2>&1 || return 1
     have=$(/usr/bin/codesign -d -vvv --arch "$arch" "$1" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/head -n 1)
     [ -n "$have" ] && [ "$have" = "$cdhash" ]
@@ -778,8 +791,13 @@ note=$(/usr/bin/mktemp "$restored.XXXXXX") && /usr/bin/printf '%s
 %s
 ' "$token" "$why" 1<>"$note" && /bin/mv -f -h "$note" "$restored"
 if ! whole "$app"; then
-    /bin/mv "$app" "$dir/failed its check.app"
-    exit 7
+    /bin/mv "$app" "$dir/failed its check.app" || exit 7
+    if [ -e "$app" ] || [ -L "$app" ] || ! /bin/mv "$parked" "$app"; then exit 7; fi
+    note=$(/usr/bin/mktemp "$restored.XXXXXX") && /usr/bin/printf '%s
+%s
+kept
+' "$token" "$why" 1<>"$note" && /bin/mv -f -h "$note" "$restored"
+    exit 8
 fi
 "$launcher" "$app"
 exit 0
@@ -1077,6 +1095,9 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
     /// Nil when the piece was taken, else why not (a write's error).
     private let sink: (Data) -> String?
     private let progress: ((Int64) -> Void)?
+    /// GitHub's clock in the answer (its `Date` header, UpdateInstallPolicy.httpDate), nil when it had none Sill
+    /// could read: read only once `run` has returned (the delegate queue is done with it then).
+    private(set) var serverDate: Date?
     // The delegate queue is serial; `continuation` is set before the task starts.
     private var redirects = 0
     private var received: Int64 = 0
@@ -1160,6 +1181,7 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
             completionHandler(.cancel)
             return
         }
+        serverDate = http.value(forHTTPHeaderField: "Date").flatMap(UpdateInstallPolicy.httpDate)
         let length = http.expectedContentLength
         if length >= 0 {
             if let exactSize, length != exactSize { failure = .sizeMismatch; completionHandler(.cancel); return }

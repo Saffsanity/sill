@@ -123,7 +123,8 @@ signature alone would prove only "built by Sill's CI", and one click would insta
 update key closes that: CI can sign and notarize and publish, but it cannot sign a manifest, so no Sill
 installs what it publishes; the person still sees Open Release Page…, as today. The signing step must not
 reopen it: `sign-update.sh` signs only a zip Noah knows without GitHub (the one `release.sh` made on his
-Mac, byte for byte, or the SHA-256 printed by a release workflow run he approved), so a build CI
+Mac, byte for byte, or the zip a release workflow run he approved kept, taken with `--run` only when
+GitHub's own record of that run names his tag's commit: the third security pass's R1′), so a build CI
 published unapproved, or a zip swapped in a real release before he signs, is refused there; and the key is
 held by one signer binary built once from files he read (`--install-signer`, outside the repository),
 never rebuilt from the checkout of the day, which the keychain item trusts alone. That binary would sign
@@ -361,8 +362,10 @@ updated by hand keeps trusting it. What limits the damage: the attacker still ne
 notarization for Sill's team (T4); the automatic update installs a release only two days after this Mac
 first read its verified manifest (never counted from the manifest's own signed line, which whoever holds the
 key writes: the second security pass's A1) and asks GitHub again right before it installs, so a release Noah
-pulls within two days of its appearance installs nowhere by itself (§15.4); the signing record and
-`sign-update.sh --audit` are how he notices one he didn't sign (his choice to run it daily); and a stop
+pulls within two days of its appearance installs nowhere by itself (§15.4; two days on GitHub's clock too, from
+the release's latest publication: the third security pass's CL1 and AU1); the signing record and
+`sign-update.sh --audit` (drafts and pre-releases included) are how he notices one he didn't sign (his choice to
+run it every few hours), against a key that leaked off his Mac, not against someone in control of it; and a stop
 signed with a key the Sills know (`Sill.zip.stop`, §15.4) names a release none installs, also by Update Now.
 What none of this covers: Update Now (the person installs at once), and a leaked key's release that nobody
 notices within those two days. A key compiled in that is not a usable Ed25519 public key
@@ -577,8 +580,12 @@ claims no check it can't make; every line that names a check names the one that 
   ‹its first 16 hex digits›"). A key in a file (tests, the rehearsal) has no prompt.
 - **The release step:** right after a release is published, on his Mac: `Scripts/sign-update.sh v0.6.2`.
   It first needs the zip he knows: `.build/Sill-0.6.2.zip` from his own `release.sh` run (the default,
-  `--zip` for another path), or `--expect-sha256` with the SHA-256 that a release workflow run he approved
-  printed; GitHub's `Sill.zip` must be that, byte for byte, or nothing is signed. Then it reads the published
+  `--zip` for another path), or `--run <ID>` for a release workflow run he approved: GitHub's record of that
+  run (`gh api repos/…/actions/runs/<ID>`: release.yml, finished, successful, for this tag) must name his
+  tag's commit as the one it built (`head_sha`), and the zip is the one that run kept as its artifact
+  `sill-zip-v0.6.2` (the third security pass's R1′: the app's `SillCommit` is its own build's word); GitHub's
+  `Sill.zip` must be that, byte for byte, or nothing is signed. It refuses a nightly build (`SillChannel`,
+  N10 e). Then it reads the published
   release (published, not a prerelease, Sill.zip and Sill.zip.sha256 uploaded), downloads the zip into
   `.build/update-sign`, checks it as the checklist checks a download (its SHA-256 against the `.sha256` file
   and GitHub's digest; exactly one Sill.app; `codesign --verify --strict --deep` with the pinned requirement
@@ -797,6 +804,10 @@ not asked, each with the default taken:
   nightly offered from its verified manifest and installed through the same steps; refused: one signed with the
   update key, a release-format manifest, a release signed with the nightly key, a half-published pair, an
   older nightly, one moved on since the offer; nothing offered for one not signed yet or no pre-release.
+  The third security pass (§12e): GitHub's clock and `published_at` read from the stand-in's answers (a
+  `Date` word for word, none, one that isn't a date); a stop naming the release's version in another form;
+  the watcher keeping the new copy at Sill's path when the put-back copy fails its last check, and refusing
+  an old copy with a file of two names.
 - G3 `swift build -c release`: only the known CaptureProbe warning.
 - G4 `Tests/checks/run-all.sh`: all pass.
 - G5 previews from the bare SillMenuBar binary (never the bundle) against main's: identical but for the
@@ -807,6 +818,11 @@ not asked, each with the default taken:
   changed after installing, no signer. The nightly key (§16): made only in a file, never verifying a release
   or verified by the update key; `Scripts/sign-nightly.sh` signing a nightly of its commit and refusing a
   release's app, another commit's and a key the commit's Sill doesn't carry; `--new-key` leaving nothing behind.
+  The third security pass (§12e): `--run` (GitHub's record of the run against the tag's commit, the run's
+  artifact) and its seven refusals; the audit naming a release outside the record as a draft, a pre-release
+  and published, each with a notification, and notifying when `gh` can't list; `--yes` never answering the
+  updater's question; a nightly never signed as a release; `SILL_SIGN_TEST_BUILT_FROM` only with the tests'
+  key.
 - Not on this Mac: the real end to end (two notarized builds, a key and Noah's hands: §12). No built
   Sill.app is launched, /Applications/Sill.app is never touched, no key is made in his keychain.
 
@@ -891,7 +907,8 @@ Twelve findings; each was taken, and how:
 1. **High: the signing step signed whatever GitHub served.** It checked only what T4's attacker can meet (a
    Developer ID signed, notarized zip of the right version) and signed. Fixed: `sign-update.sh` signs only a
    zip Noah knows without GitHub, his own `release.sh` output byte for byte (the default,
-   `.build/Sill-<version>.zip`), or `--expect-sha256` with the SHA-256 a release run he approved printed;
+   `.build/Sill-<version>.zip`), or `--expect-sha256` with the SHA-256 a release run he approved printed
+   (since the third security pass, `--run` with that run's number in its place: §12e, R1′);
    GitHub's `Sill.zip` must be it, or nothing is signed. G6 runs both refusals.
 2. **High: the signer was rebuilt from the checkout at every signing, with the key in reach.** A commit
    changing any file it compiled would run with the key; the changing binary trained "Allow". Fixed: the
@@ -1039,6 +1056,55 @@ N9, each answered:
 R2's residue: the diff shows the updater's code; Noah still has to read it. The rest of the reviewer's reading
 holds (its "What held": the stop, the second look, the hold, the store, no way in, the watcher's spawn).
 
+## 12e. The third security pass (2026-11-12, the same reviewer, on b69429ed)
+
+`SECURITY-REVIEW.md`'s third section has every finding and its proof (0 critical, 1 high, 1 medium, 2 low, the
+notes N10 a to n; R1 and R2 only partly closed; R3, A2, A3, W1, W2, G1 and N9 closed). Each was confirmed here
+against its proof before it was fixed (by reading, and for AU1, CL1, W3 and N10 k, l and m against the
+reviewer's runs: the audit's `select(.draft == false and .prerelease == false)` and its `die` before the
+notification; `fetch`'s `Date()` as both the first sight and now; the watcher's `exit 7` with nothing at Sill's
+path and no `-links` test; `prefix(200)` on Characters; `stop.tag == release.tag`; the variable taken with any key
+file). None turned out not to be real. What was done, and the check that fails without it:
+
+| | Finding | Done | Check that fails without it |
+|---|---|---|---|
+| NB1 | HIGH (design). On the nightly channel both proofs are one GitHub job's: any push to main reaches every Mac with both switches on within about a day. | Noah decides (§16.10: the reviewer's four options, what each stops and doesn't, which survive his account being taken over, and the exact steps and `gh api` commands for the two settings, none of them run here). Whatever he answers: the switch's words say what a nightly trusts, the reviewer's sentence ("Nightly builds are built and signed by GitHub from Sill's newest code; nobody looks at them first."); the nightly's wait is one constant, `UpdateAutoPolicy.nightlyCoolingOff`, 0 today, whose words follow it (`nightlyCoolingOffWords`, `nightlyWords(wait:)`, the footnote, the offer's note) and whose wait, above 0, counts as a release's (first sight, both clocks, the nightly's key). Today's behaviour is unchanged. | `update-install`: the words; 0 and 12 hours through `dates`, `start`, `sighted`, `bounded`, `waitUntil` and the notes; mutants "NB1: the nightly words as two checks", "NB1: the nightly's wait changed silently", "NB1: a nightly that waits begun early", "NB1: no wait taken as a wait", "NB1: a nightly's offer note without its wait", "a nightly with a cooling-off". |
+| AU1 | MEDIUM. `--audit` skipped drafts and pre-releases, stopped without a notification when `gh` couldn't list, ran at a time written in the repository; a release's first sight outlived the release. | The audit reads every release that carries `Sill.zip.manifest`, drafts and pre-releases included, each manifest by its asset id (a draft's has no download address), and names each one's state; with `--notify`, every stop of an audit notifies (an EXIT trap: an expired login, no network, an unreadable listing); the checklist's LaunchAgent runs it every four hours from when it is loaded (`StartInterval`), no time written. In Sill: the wait counts from the later of the first sight and the release's `published_at` (GitHub's field, kept per sighting, only ever later), so a release deleted and published again starts over; a release whose answer doesn't say when it was published never installs by itself. §15.4 says the record and the audit guard against a key leaked off this Mac, not against someone in control of it or of Noah's account. | `sign-test.sh`: a release outside the record as a pre-release, as a draft and published, each named with a notification; `gh` failing as an expired login: a notification. `update-install`: published again on day 2 waits afresh; no `published_at`, no automatic install; the publication kept only ever later; mutants "AU1: …" (five) and "CL1, AU1: the dates without GitHub's". |
+| CL1 | LOW. The cooling-off counted on this Mac's wall clock. | The wait counts on GitHub's clock too: `Transfer` keeps the `Date` header of each HTTPS answer (`httpDate`: RFC 9110's IMF-fixdate only, a real date with its own weekday, GMT), the sighting keeps GitHub's time at the first read (`firstGitHub`, filled once), and the install needs 48 h by GitHub's clock (from the later of that and `published_at`) as well as by this Mac's. A missing or unreadable date never counts as a go: Sill waits for an answer that has one. | `update-install`: the reviewer's two proofs (the clock 47 h ahead an hour after the first read; the clock 72 h behind at the first read with a matching signed date) wait; no date waits; the date parser's forms; mutants "CL1: …" (four). Harness: GitHub's clock and `published_at` read from the stand-in's answer, a fixed `Date` word for word, none and "yesterday" read as none; mutants "CL1: GitHub's clock never read", "CL1: GitHub's clock left off the release". |
+| W3 | LOW. When the watcher's final check failed, nothing was left at Sill's path; `whole` had no one-name rule. | On a failed final check the watcher moves the put-back copy aside and the new copy (`did not start.app`, checked whole when it was installed) back to Sill's path, not started, never into whatever stands there (exit 7 then), and writes the restored note with a third line, `kept` (exit 8); Sill, opened again, says "Sill 0.4 didn’t start the first time, and the copy it replaced failed its last check, so Sill 0.4 stayed. …" (`.keptUnstarted`). `whole` refuses a copy with a regular file of more than one name (`find -type f -links +1`), as the installer's tree check does. | Harness: "the note lands in the put-back copy" (the reviewer's B: the put-back copy fails its last check, the new copy is back at Sill's path, the note says `kept`, nothing started) and "W3: a second name for a file of the old copy while it waits" (the reviewer's F: the old copy refused, nothing put back); mutants "W3: Sill's path left empty when the last check fails", "W3: a file with two names taken". `update-install`: the words, the source rules; mutant "W3: a new copy the watcher kept unsaid". |
+| R1′ | MEDIUM (carried). `SillCommit` is the build's own word: a tag moved for the CI run and moved back before signing passed every check. | `sign-update.sh --run ID`: GitHub's record of the run (`gh api repos/…/actions/runs/ID`) must be release.yml's, completed successfully, started for this tag, and must name the local tag's commit as `head_sha`; the zip is the artifact `sill-zip-<tag>` that run kept (release.yml now keeps the published zip for 30 days). `--expect-sha256` is gone. The checklist prefers a zip built on this Mac. | `sign-test.sh`: signed from the run's artifact; refused: a run that built another commit, one that didn't succeed, another workflow's, one for another tag, one without the artifact, an artifact that isn't GitHub's zip, `--run` with `--zip`. |
+| R2 | NOTE (carried). The list of the updater's files missed four that steer it; `--yes` skipped the question. | `updater_files` adds AppModel.swift, SettingsPanes.swift, StreamProtocol/Compatibility.swift and SillHost/StreamServer.swift; the question about the updater's changes is asked whatever `--yes` says. | `sign-test.sh`: `--yes` with no answer refuses; each of the four files is in the list. |
+| N10 a | A nightly key in `releaseKeys` was a release key; only the check refused it. | `Trust.release` trusts a key in both lists for neither, and the tests' key for nothing. | `update-install`; mutant "N10 a: a nightly key in releaseKeys trusted". |
+| N10 e | `sign-update.sh` didn't refuse an app with `SillChannel`. | Refused before any other check of the app. | `sign-test.sh`: a nightly of the tag's commit. |
+| N10 g | The store held back `on` on a failed write, not `nightly`. | Both (`UpdateAutoPolicy.heldBack`). | `update-install`; mutants "N10 g: …" (two). |
+| N10 j | The watcher's token is in its arguments (`ps`). | Accepted, said in `watcherScript`'s comment and below: any process that can read it can as well kill the watcher, which is all a made-up started note achieves (no put-back); another hand-over (a file, a pipe) would leave that unchanged. | — |
+| N10 k | A failure's words were cut by Characters (200 clusters: 112,511 bytes). | Cut at 200 bytes of UTF-8, between scalars (`utf8Prefix`). | `update-install`: 250 clusters of 301 scalars stay within 200 bytes; mutant "N10 k: words cut by Characters". |
+| N10 l | Stops matched the tag's text. | By version (SillVersion's order) and the zip's SHA-256, beside the release and in what Sill remembers (`stopNames`, `isStopped`). | `update-install`: a stop for v0.4 stops v0.4.0 and one for v0.4.0 stops v0.4.0.0, by the zip's SHA-256 too; mutants "N10 l: …" (two). Harness: "a stop naming the release's version in another form (v1.1.0 for v1.1)" refused, "a stop for another release" installs; mutant "N10 l: a stop by its tag's text". |
+| N10 m | `SILL_SIGN_TEST_BUILT_FROM` was honoured with any key file. | Only with the tests' key, `UpdateManifest.testKeySeed` (SHA-256 of a sentence, so anyone can make it), which `Trust.release` trusts for nothing and the signer's `test-key` writes. | `sign-test.sh`: the variable with another key refused; `update-install`: the tests' key in no list. |
+| N10 n | The footnote said "Once a day" with nightlies on, when Sill also asks at each launch. | "Once a day, and with nightly builds on each time Sill opens, …". Found while fixing it: with "Check for updates automatically" off, a launch still read the nightly pre-release; now a launch reads it only while that check is on (`checkAnswered(atLaunch:)`), and the privacy page says when Sill asks (on turning the switch on, with each daily check, at each launch while the check is on). | `update-install`; mutants "N10 n: once a day only, with nightlies too", "N10 n: the nightly asked at launch with the daily check off". |
+
+The rest of N10, each answered (accepted, with the reason):
+- **(b) Commit counts of two lines compared as one.** A release built on a branch (1450) is offered main's nightly
+  of its version (1460), which lacks that branch's fixes. Accepted: releases are tagged on main's first-parent
+  line (docs/release-checklist.md: "only main builds"), so a release's count and a later nightly's are counts on
+  one line; a branch release would be a process error, and the nightly then is still a genuine build of main,
+  newer code by the order the person chose with the switch.
+- **(c) No stop for nightlies; a release's stop doesn't reach them.** Accepted: deleting
+  `Sill-nightly.zip.manifest` from the pre-release stops a nightly everywhere it hasn't installed (each Sill reads
+  it again before it downloads and right before it installs by itself); a stopped release's zip offered as a
+  nightly needs the nightly key, which T38 already treats as main's own power (NB1).
+- **(d) A leaked nightly key can re-sign an old genuine build with a fresh date.** Accepted: the 30 days bind only
+  the signed date, the nightly floor binds what each Mac has seen (a build below its highest is refused), and
+  every build so re-signed is a genuine notarized Sill of Sill's team; a key that leaked is replaced (§16.8).
+- **(f) `SillCommit` and `SillChannel` catch mistakes, never a hostile build.** Accepted and said: R1′'s `--run`
+  takes the commit from GitHub's record, not the app; a zip built on this Mac needs no such word.
+- **(h) The nightly words read as two independent checks.** Fixed with NB1 (i).
+- **(i) A made-up `updateLatestTag` in defaults hides the nightly offer until the next check rewrites it.**
+  Accepted: denial only, by a process of this user (which could as well quit Sill), until the next daily check.
+
+R1′'s residue: `--run` trusts GitHub's record of the run (whoever controls the account can start a run of
+another commit, but then `head_sha` says so); a zip built on this Mac remains the way to prefer.
+
 ## 13. Progress
 
 - 2026-11-11 22:40 EST: facts gathered (below), plan written and pushed (e7de2b3); the five decisions
@@ -1162,16 +1228,18 @@ Three things, at the Mac. The key list stays empty in the code until step 2's co
 **3. Every release: sign it after it is published.**
 1. Publish as today (part 2 of docs/release-checklist.md).
 2. On your Mac, from the release's tag: `Scripts/sign-update.sh v0.6.2`. If you built and published it here
-   (`release.sh --publish`), that is all: it compares GitHub's `Sill.zip` with `.build/Sill-0.6.2.zip`. If
-   the release workflow built it in a run you approved, add `--expect-sha256 ‹the SHA-256 that run's log
-   printed for Sill.zip›`. A release you did not build here or approve has neither, and is refused: that is
-   the point.
+   (`release.sh --publish`), that is all: it compares GitHub's `Sill.zip` with `.build/Sill-0.6.2.zip`, the
+   way to prefer. If the release workflow built it in a run you approved, add `--run ‹the run's number›` (the
+   digits at the end of the run page's address): it asks GitHub which commit that run built and signs only
+   when it is your tag's, taking the zip that run kept (the third security pass's R1′). A release you did not
+   build here or approve has neither, and is refused: that is the point.
 3. It checks that v0.6.2's Sill trusts exactly what you recorded at step 1.2 (or 2.3), and refuses
    otherwise, showing the difference: another key, team or host slipped into the release is caught here.
    It checks that GitHub's tag v0.6.2 names the same commit as your tag, and that the app in the zip was built
    from that commit (its Info.plist says which: `make-app.sh` writes it), and refuses otherwise (the second
-   security pass's R1: a tag moved on GitHub, a build of another commit). It shows what changed in the
-   updater's own files since the last release you signed and asks whether you read it (R2).
+   security pass's R1: a tag moved on GitHub, a build of another commit), and refuses a nightly build. It
+   shows what changed in the updater's own files and the ones that steer it since the last release you
+   signed and asks whether you read it, whatever `--yes` says (R2).
    It checks the zip (the checklist's download checks) and prints its SHA-256 in groups of eight. Then
    Touch ID (or your password) asks you to allow "sign Sill v0.6.2 for Update Now: Sill.zip, ‹size› bytes,
    SHA-256 ‹64 hex digits in groups of eight›": compare every group with the SHA-256 `release.sh` printed
@@ -1188,18 +1256,23 @@ Three things, at the Mac. The key list stays empty in the code until step 2's co
    open its release page." and nothing is downloaded.
 5. Every manifest you sign goes in the signing record beside the signer (`signed.txt`; one Mac's: sign on
    that Mac, or the audit there names what you signed elsewhere).
-   `Scripts/sign-update.sh --audit` compares every release on GitHub with it and says "Audit: all N signed
-   releases in Saffsanity/sill are in your signing record." when all is well; a release whose manifest
+   `Scripts/sign-update.sh --audit` compares every release on GitHub that carries a manifest with it, drafts
+   and pre-releases included, and says "Audit: all N signed releases in Saffsanity/sill (drafts and
+   pre-releases included) are in your signing record." when all is well; a release whose manifest
    verifies with your key but that you never signed here is a release you didn't make (a leaked key): pull it
    at once (delete the release, or mark it a prerelease) or upload a stop (§15.4). Sills with "Automatically
    update Sill" on install such a release two days after they first find it, so you have those two days.
 
-**4. Your choice: the audit every day.** Running `--audit` by hand after each release costs a few seconds. To
-have it look every day and notify you only when something is wrong, install the LaunchAgent in
-docs/release-checklist.md part 1 §7 (one command; it runs the copy of `sign-update.sh` installed beside the
-signer, makes a few requests to GitHub's public API a day, needs no secret, and shows nothing while all is
+**4. Your choice: the audit every few hours.** Running `--audit` by hand after each release costs a few
+seconds. To have it look every four hours and notify you when something is wrong or when it couldn't run,
+install the LaunchAgent in docs/release-checklist.md part 1 §7 (one command; it runs the copy of
+`sign-update.sh` installed beside the signer every four hours from when you load it, no time of day written
+anywhere, makes a few requests to GitHub's API each time, needs no secret, and shows nothing while all is
 well). Without it, the two days protect only as well as you happen to notice; GitHub's "Watch › Custom ›
-Releases" mail is the zero-setup complement (it sees a new release, not an asset replaced on an old one).
+Releases" mail is the zero-setup complement (it sees a release published, not an asset replaced on an old one
+or a release turned into a draft). The record and the audit guard against a key that leaked off this Mac:
+someone in control of this Mac or of your account here also controls `signed.txt`, the script and the
+LaunchAgent.
 
 ## 15. Automatically update Sill (round 3, 2026-11-12)
 
@@ -1305,32 +1378,53 @@ Later the same day, after reading the summary: "48 hour wait seems ok, can the 1
   installed at once (A1). The first read is this Mac's own moment, kept per release (tag and zip SHA-256) in
   its keychain memory across launches; a release whose zip changes is read afresh and waits again. Cost per
   release: none for Noah; automatic installs come two to three days after he publishes, Update Now at once.
+- **On two clocks, from the latest publication (the third security pass's CL1 and AU1).** The 48 hours must
+  have passed on this Mac's clock and on GitHub's: the sighting keeps GitHub's time at the first read (the
+  `Date` header of its HTTPS answer, `UpdateInstallPolicy.httpDate`: TLS keeps it from the network and no
+  repository token sets it), and at the install GitHub's time in the answer just read must be 48 hours past
+  the later of that first time and the release's `published_at` (GitHub's field, which no token sets; the
+  sighting keeps the latest one GitHub gave, only ever later). So a clock moved on this Mac shortens nothing
+  (a jump forward waits for GitHub's clock; a clock behind at the first read only lengthens the wait), and a
+  release deleted and published again starts its wait over. An answer without a `Date` Sill can read (or one
+  in another form than RFC 9110's IMF-fixdate) never counts as a go: the automatic update waits for an
+  answer that has one ("waits for an answer from GitHub with a date"); a release whose answer doesn't say
+  when it was published never installs by itself (GitHub always says it). Update Now is unchanged.
 - **What the wait protects against now.** A release signed with Noah's update key that he didn't make (a
   leaked key, with a notarized build: T4, T28), or one he made and regrets: every Mac with the switch on
   waits at least two days after the release appears on GitHub before it downloads it, however the manifest is
   dated, and asks GitHub again right before the swap. If Noah pulls the release (deletes it, or marks it a
   prerelease), publishes a newer one, or uploads a stop within those two days, it installs nowhere by itself.
 - **What it does not protect against.** Update Now (the person installs at once, after seeing the version);
-  a release nobody notices within two days (the wait buys time, not attention); a Mac whose clock is set ahead
-  by two days or more (setting the clock takes an administrator); a Mac that can't keep its memory (no
-  keychain group) restarts the wait at every launch, never shortens it. Nightlies have no cooling-off at all
-  (§16.7, T38).
+  a release nobody notices within two days (the wait buys time, not attention); a Mac that can't keep its
+  memory (no keychain group) restarts the wait at every launch, never shortens it. A Mac's clock no longer
+  shortens it (CL1, above). Nightlies have no cooling-off today (§16.7, T38; the one constant Noah may change,
+  §16.10).
 - **A way to notice (A1's second half).** Every manifest `sign-update.sh` signs goes in the signing record
   (`signed.txt` beside the signer: the time, the tag, the manifest's SHA-256 and the zip's).
-  `Scripts/sign-update.sh --audit` downloads every published release's `Sill.zip.manifest` (read-only: the
-  public release listing and a few kilobytes each) and compares each with the record: one that verifies with
+  `Scripts/sign-update.sh --audit` downloads the `Sill.zip.manifest` of every release that carries one,
+  drafts and pre-releases included (the third security pass's AU1: a release turned into either for a few
+  minutes around each run otherwise passed unseen; read-only: the release listing with Noah's `gh` login, and
+  each manifest by its asset id, a few kilobytes) and compares each with the record: one that verifies with
   a recorded update key but that this signer never made is a release Noah didn't sign, and it says so and
-  exits 1 (with `--notify`, also a notification). It needs nothing from Noah to keep the record; running the
-  audit is his decision: by hand after each release (a few seconds), or daily with the LaunchAgent in
-  docs/release-checklist.md (one command once; a few requests a day to GitHub's public API, no secret). Also
-  free and without setup: GitHub's "Watch › Custom › Releases" mails him every release published in the
-  repository (a new release, not an asset replaced on an old one, which only the audit sees).
+  exits 1. With `--notify` it posts a notification then, and also whenever it couldn't run (any stop: an
+  expired `gh` login, no network), so it never fails in silence. It needs nothing from Noah to keep the
+  record; running the audit is his decision: by hand after each release (a few seconds), or every four hours
+  with the LaunchAgent in docs/release-checklist.md (`StartInterval`: counted from when he loads it, so no time
+  of day is written in the repository; a few requests to GitHub's API each run, no secret). Also free and
+  without setup: GitHub's "Watch › Custom › Releases" mails him every release published in the repository (a
+  new release, not an asset replaced on an old one, which only the audit sees).
+- **What the record and the audit guard against, and what not (AU1).** A key that leaked off this Mac (a
+  backup, the 1Password copy, a file): whoever signs with it elsewhere leaves no line in this Mac's record,
+  and the audit names the release. They do not guard against someone in control of this Mac or of Noah's
+  account here: that person also controls `signed.txt`, `sign-update.sh` and the LaunchAgent (and can sign
+  with the keychain's key whenever Noah allows a prompt), so the audit there says what they want.
 - The stop: `Sill.zip.stop` beside a release, `Sill stop 1` with the release's tag and its zip's SHA-256,
   signed with an update key (`UpdateManifest.Stop`; the signer's `stop` command, asked in person). Read
-  before anything is downloaded, by Update Now and the automatic update: one that names this release ends
-  the update ("Sill’s developer stopped Sill 0.4 with a stop signed with Sill’s update key, so it isn’t
-  installed."), one that doesn't verify ends it too (fail closed), one naming another release changes
-  nothing; the tag is remembered. `Endpoints.github.stopName = nil` turns the mechanism off. Cost per
+  before anything is downloaded, by Update Now and the automatic update: one that names this release (its
+  version as SillVersion compares them, so a stop for v0.7.0 stops v0.7.0.0 too, and its zip's SHA-256: the
+  third security pass's N10 l) ends the update ("Sill’s developer stopped Sill 0.4 with a stop signed with
+  Sill’s update key, so it isn’t installed."), one that doesn't verify ends it too (fail closed), one naming
+  another release changes nothing; the tag is remembered, and matched by version too. `Endpoints.github.stopName = nil` turns the mechanism off. Cost per
   release: none until it is used; using it: one signature in person and one upload. Pulling the release
   (or marking it a prerelease) within the cooling-off stops the automatic update everywhere too, since
   each Sill asks GitHub again right before its swap: the stop matters for a release that must stay listed.
@@ -1478,7 +1572,8 @@ best option".
 ### 16.1 What it does
 
 A switch, "Use nightly builds", in Settings › General's update section, under "Automatically update Sill",
-off by default. With it on, the daily check also reads the pre-release `nightly` that
+off by default. With it on, the daily check (and each launch while that check is on: the third security pass's
+N10 n; the footnote and the privacy page say so) also reads the pre-release `nightly` that
 `.github/workflows/nightly.yml` publishes every night main moved (Developer ID signed and notarized in
 GitHub Actions), and offers its newest build when it is newer than this Sill; Update Now installs it; with
 "Automatically update Sill" on too, a nightly found is downloaded at once (no 48-hour wait) and installed
@@ -1552,7 +1647,10 @@ v0.6.1, tagged at 1388, and after it), and only the build orders builds of one v
 - **Attempts:** counted only once the nightly's manifest verified (A3), by version and build; the memory keeps
   only nightlies newer than the running one by (version, build), and releases newer by version.
 - **Dates.** A nightly's manifest carries its signed time too. No cooling-off for a nightly (Noah: "should
-  download any update found immediately"). The age limit for a nightly installed by itself is 30 days (a
+  download any update found immediately"): `UpdateAutoPolicy.nightlyCoolingOff`, 0, one constant whose words
+  (the note under the switch, the footnote, the offer's note) follow it, and whose wait, once above 0, counts as
+  a release's does, from each Mac's first sight on both clocks, kept by the nightly's key "0.6.2 (1471)" (the
+  third security pass's NB1 asks Noah whether it should be some hours: §16.10). The age limit for a nightly installed by itself is 30 days (a
   quiet main can leave the newest nightly a few weeks old; replay below what this Sill has seen is the floor's
   job), and a signature more than 10 minutes in this Mac's future is refused, as for a release.
 
@@ -1580,18 +1678,23 @@ branch.
 - Only Settings › General's switch (`AppUpdater.setNightly`), stored with the automatic switch in Sill's
   keychain item (`AutoUpdateStore`); never a device, a launch argument, `defaults` or the CLI; off by
   default; shown only where Update Now is and a nightly key is compiled in.
-- The words: the switch "Use nightly builds"; under it, while on: "Nightly builds are made every night from
-  Sill's newest code. They are less tested than releases and may break. Each is checked two ways: Apple's
-  signature and notarization for Sill's developer, and Sill's nightly key, which only the nightly build
-  signs with. With Automatically update Sill on, each one installs by itself without the two-day wait, once
-  no device has been connected for 5 minutes. Turning this off doesn't go back to the last release: Sill
-  keeps the nightly you have until a release with a higher version number." (the minutes from
-  `UpdateAutoPolicy.quietMinutes`). The offers and steps name the build: "Sill nightly 0.6.2 (1471) is available.",
-  "Downloading Sill nightly 0.6.2 (1471)…". The update key's failures for a nightly name the nightly key.
-  The footnote, while it is on, names both keys ("… and be signed with Sill's own update key (a release) or
-  its nightly key (a nightly build).") and, with Automatically update Sill on, the missing wait ("Sill downloads
-  a new release two days after it first finds it, and a nightly build as soon as it finds it, then installs
-  it …"); off, it never names nightlies.
+- The words: the switch "Use nightly builds"; under it, while on (the third security pass's NB1: the earlier
+  "Each is checked two ways: … and Sill's nightly key, which only the nightly build signs with" read as two
+  independent checks, when GitHub's one job makes both; the reviewer's sentence is taken word for word): "Nightly
+  builds are built and signed by GitHub from Sill's newest code; nobody looks at them first. They are less tested
+  than releases and may break. With Automatically update Sill on, each one installs by itself as soon as Sill
+  finds it, without the wait a release has, once no device has been connected for 5 minutes. Turning this off
+  doesn't go back to the last release: Sill keeps the nightly you have until a release with a higher version
+  number." (the minutes from `UpdateAutoPolicy.quietMinutes`; the "as soon as …" from `nightlyCoolingOff`:
+  with 12 hours, "each one installs by itself 12 hours after it first finds it, once …",
+  `UpdateInstallPolicy.nightlyWords(wait:)`). The offers and steps name the build: "Sill nightly 0.6.2 (1471)
+  is available.", "Downloading Sill nightly 0.6.2 (1471)…". The update key's failures for a nightly name the
+  nightly key. The footnote, while it is on, says a nightly is signed by GitHub ("… and a release must be signed
+  with Sill’s own update key; a nightly build is signed by GitHub, which builds it."), that Sill also asks at
+  each launch ("Once a day, and with nightly builds on each time Sill opens, Sill asks GitHub …": N10 n), and,
+  with Automatically update Sill on, the nightly's wait from the same constant ("Sill downloads a new release
+  two days after it first finds it, and a nightly build as soon as it finds it, then installs it …"); off, it
+  never names nightlies.
 - Sill for iPhone and iPad is not affected (its nightlies are TestFlight's). A Mac on a nightly speaks the
   same wire, additive as always: a device on the App Store version connects to it as to a newer release,
   and skips what it doesn't know.
@@ -1624,7 +1727,12 @@ three are in the environment `nightly`, which any commit on main runs every nigh
 T35): a pull request merged to main, or a workflow changed there, is enough. Nothing else stands in the
 way: there is no cooling-off for nightlies (Noah's decision: "should download any update found
 immediately"), no signing record to audit (CI signs them, not Noah's Mac), and the second security pass's
-lessons for releases (the first sight, the audit) don't apply. What remains is only (1) the next night's
+lessons for releases (the first sight, the audit) don't apply. The third security pass (NB1, HIGH) read the
+repository's settings on 2026-11-12: main is unprotected and has no ruleset, the only collaborator is
+Saffsanity (admin), the `nightly` environment has no reviewer and no wait timer and lets admins bypass its
+rules (`can_admins_bypass` true), and the `gh` login every agent session on this Mac uses has admin rights:
+so both proofs are one GitHub job's, and whoever can push to main (or change its workflow) holds both.
+§16.10 lists the four ways to narrow it, for Noah. What remains is only (1) the next night's
 build, which replaces it as the newest (a Mac that installed the bad build updates to the next genuine one,
 unless the bad build stopped it from updating, which it can), and (2) the watcher, which puts the old copy
 back only when the new one doesn't run at all. Someone who notices can delete `Sill-nightly.zip.manifest`
@@ -1667,7 +1775,9 @@ GitHub; sign a release's manifest with the nightly key, or a nightly with the re
    newest nightly and nothing installs by itself. Alternative: the nightly switch only with the automatic one.
 2. **A cooling-off for nightlies.** Default: none, Noah's words ("should download any update found
    immediately"); T38 is its cost. Alternative: a few hours (12, say) from each Mac's first read, as releases
-   have since the second pass, which would give a window against a bad night on main.
+   have since the second pass, which would give a window against a bad night on main. The third security
+   pass's NB1 puts it to Noah again with three other ways (§16.10); his answer is one line,
+   `UpdateAutoPolicy.nightlyCoolingOff`.
 3. **The oldest nightly installed by itself.** Default: 30 days by its signed time. Alternatives: 14; none.
 4. **A release and a nightly of one version.** Default: the release (the tested one). Alternative: the higher
    build.
@@ -1682,3 +1792,138 @@ GitHub; sign a release's manifest with the nightly key, or a nightly with the re
    job keeps a record of what it signed, and `--audit` reads it.
 8. **The pre-release's notes** say a nightly is offered only with "Use nightly builds" on once the commit
    carries a nightly key, and that the update check never offers one before (`release.sh`'s `nightly_body`).
+
+### 16.10 NB1: what stands between a push to main and every Mac with both switches on (for Noah to decide)
+
+The third security pass's NB1 (HIGH, a design finding): on the nightly channel both proofs, Apple's signature
+and notarization and the nightly key's manifest, are made by the one job that builds main (`nightly.yml`'s Mac
+job, in the environment `nightly`, which holds the Developer ID .p12, the notary key and the nightly key), so
+whoever can push to main or change its workflow holds both: every holder of Noah's GitHub credentials, every
+agent session on this Mac among them (its `gh` login has admin rights), and a GitHub-owned action at a pinned
+SHA if one were bad. With "Use nightly builds" and "Automatically update Sill" both on, nobody is in the loop:
+the next nightly run (09:17 UTC, or at once by hand), Apple's automated notarization scan, the Mac's next look
+(each daily check and each launch), then 5 quiet minutes. The 30-day limit, the nightly floor and the watcher
+don't change that (a fresh build is newer, runs for 30 s, and nightlies have no stop). If the environment's
+secrets ever left GitHub, whoever has them keeps that power until the Developer ID certificate, the notary key
+and the nightly key are all replaced.
+
+**The decision is Noah's and is not made.** What this branch did whatever he answers: the switch's words say
+what a nightly trusts (§16.5: "Nightly builds are built and signed by GitHub from Sill's newest code; nobody
+looks at them first."); the nightly's wait before it installs by itself is one constant,
+`UpdateAutoPolicy.nightlyCoolingOff`, 0 today (his decision of 2026-11-12 stands until he changes it), with the
+pane's, the offer's and the footnote's words derived from it and `update-install` covering both 0 and 12 hours
+from the first sight (on both clocks, kept by the nightly's key); so option 3's wait is a one-line change and a
+re-render (and the held-back nightly sentences in README.md, site/support.html and site/download.html, which say
+"without the two-day wait", read again). Nothing about today's behaviour changed.
+
+The reviewer's four options (any one narrows it; the first two are settings, not code):
+
+1. **A ruleset on main: no force push, no deletion, changes through pull requests.**
+   - Stops: a direct push, force push or deletion of main by anyone not on the bypass list (with the list
+     empty, nobody): a collaborator with write access, a leaked token without admin rights, a workflow's
+     `GITHUB_TOKEN` with `contents: write` (nightly.yml's job has it) pushing to main.
+   - Doesn't stop: an admin. Noah's account, and his `gh` login on this Mac, can open a pull request and
+     merge it with no approval, or edit or delete the ruleset. Mostly a record: every change to main becomes
+     a pull request, or a ruleset change in the repository's log.
+   - Survives his account being taken over: no; it only makes a push visible.
+   - Cost: every change to main goes through a pull request, Noah's own too (`gh pr merge` works as now).
+   - In the web page: github.com/Saffsanity/sill → Settings → Rules → Rulesets → New ruleset → New branch
+     ruleset. Ruleset name "main"; Enforcement status Active; Bypass list empty; Target branches: Add target →
+     Include default branch; Branch rules: keep "Restrict deletions" and "Block force pushes" checked, check
+     "Require a pull request before merging" with Required approvals 0 (a one-person repository can't approve
+     its own pull requests); Create.
+   - Or, in Terminal.app, the same as one command:
+     ```
+     gh api --method POST repos/Saffsanity/sill/rulesets --input - <<'JSON'
+     {
+       "name": "main",
+       "target": "branch",
+       "enforcement": "active",
+       "bypass_actors": [],
+       "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+       "rules": [
+         {"type": "deletion"},
+         {"type": "non_fast_forward"},
+         {"type": "pull_request", "parameters": {"required_approving_review_count": 0,
+           "dismiss_stale_reviews_on_push": false, "require_code_owner_review": false,
+           "require_last_push_approval": false, "required_review_thread_resolution": false}}
+       ]
+     }
+     JSON
+     ```
+     It answers with the ruleset (its `id`). Check: `gh api repos/Saffsanity/sill/rules/branches/main --jq
+     '.[].type'` prints deletion, non_fast_forward and pull_request. Undo: `gh api --method DELETE
+     repos/Saffsanity/sill/rulesets/<its id>`.
+
+2. **On the `nightly` environment: `can_admins_bypass` off, and a wait timer of some hours or a required
+   reviewer.** These are the only gates outside main's own code.
+   - Stops: a nightly run's jobs from getting the environment's secrets (and so from signing, notarizing and
+     publishing) until the timer has run out, or until a reviewer approved the run on its page; with the
+     bypass off, an admin can't skip either without changing the setting first. Against someone who can push
+     to main but isn't an admin, a reviewer stops the bad night and a timer gives the time to cancel it.
+   - Doesn't stop: an admin. With Noah's account or his `gh` login, the reviewer is Noah: an approval through
+     the web page or the API is his, and the setting itself can be turned back. GitHub notifies the reviewer of
+     each run waiting for review (as his notification settings say), and a change to the setting is in the
+     repository's log: a push becomes visible.
+   - Survives his account being taken over: no; it only makes a push visible (and slower).
+   - Cost: with a reviewer, every night waits for Noah's click on the run's page ("Review deployments"; both of
+     nightly.yml's jobs, Sill for Mac and Sill for iPhone and iPad, use the environment); with a timer, every
+     night publishes that much later (720 minutes: from about 21:17 UTC, plus the build).
+   - In the web page: github.com/Saffsanity/sill → Settings → Environments → nightly. Under "Deployment
+     protection rules": check "Required reviewers" and add Saffsanity, or check "Wait timer" and enter the
+     minutes (720 for 12 hours), or both; uncheck "Allow administrators to bypass configured protection rules";
+     leave "Deployment branches and tags" as it is (Selected branches and tags: main); Save protection rules.
+   - Or, in Terminal.app (both a reviewer and 12 hours here; for a timer alone give `"reviewers": []`, for a
+     reviewer alone `"wait_timer": 0`):
+     ```
+     gh api --method PUT repos/Saffsanity/sill/environments/nightly --input - <<'JSON'
+     {
+       "wait_timer": 720,
+       "prevent_self_review": false,
+       "reviewers": [{"type": "User", "id": 19507835}],
+       "deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true},
+       "can_admins_bypass": false
+     }
+     JSON
+     ```
+     19507835 is Saffsanity's user ID (`gh api repos/Saffsanity/sill --jq .owner.id`). The
+     `deployment_branch_policy` line is today's, written out so the change keeps main as the only branch that
+     may use the environment; `prevent_self_review` stays false, or Noah couldn't approve the runs he starts.
+     Check: `gh api repos/Saffsanity/sill/environments/nightly --jq '{can_admins_bypass, rules:
+     [.protection_rules[] | {type, wait_timer, reviewers: [.reviewers[]?.reviewer.login]}]}'`. Undo: the same
+     command with `"wait_timer": 0`, `"reviewers": []` and `"can_admins_bypass": true`.
+
+3. **A cooling-off for nightlies from first sight (12 to 24 hours), with a nightly audit that lists each night's
+   commit and the pull requests in it.** This revisits Noah's decision ("should download any update found
+   immediately").
+   - Stops: a bad night reaching a Mac by itself before that many hours after the Mac first found it (on its
+     clock and on GitHub's, as a release's two days); within them, deleting `Sill-nightly.zip.manifest` from
+     the pre-release `nightly` stops it on every Mac that hasn't installed it (each reads the manifest again
+     before it downloads, and right before it installs by itself).
+   - Doesn't stop: a bad night nobody notices within the wait (it buys time, not attention), Update Now (a
+     person installs at once), or the one-job origin of both proofs.
+   - Survives his account being taken over: yes. The wait lives in the Sills already installed, which no
+     GitHub setting or push changes, and the audit would run on Noah's Mac, not on GitHub.
+   - Cost: nightlies install by themselves half a day to a day later. The wait is the one line
+     `UpdateAutoPolicy.nightlyCoolingOff = 12 * 3600` (or 24) and a re-render of the previews; the nightly
+     audit is not built (a script beside `--audit`: each night's signed manifest's commit, and the pull
+     requests merged into main since the night before, read-only, notifying when a commit isn't one of
+     theirs; a few hours of work).
+
+4. **Keep the automatic update to releases, and offer a nightly to Update Now only.**
+   - Stops: the path with nobody in the loop. A person clicks Update Now for each nightly, after seeing its
+     version and build.
+   - Doesn't stop: a person installing a bad nightly (nobody reviews it either), or the one-job origin of
+     both proofs.
+   - Survives his account being taken over: yes. It lives in the Sills already installed.
+   - Cost: Noah's "download any update found immediately" for nightlies is gone; with "Automatically update
+     Sill" on, a nightly is offered, never installed by itself. Not built (a change to `UpdateAutoPolicy.start`
+     and the words; under an hour, and its checks).
+
+The reviewer's verdicts (third pass): "Use nightly builds" alone, through Update Now: go, with the honest words
+(done) and the ruleset on main (option 1). "Use nightly builds" with the automatic update: not yet; something
+outside main's own code must stand between a push and the install (option 2 with the bypass off, or option 3),
+or Noah accepts in so many words that every holder of his GitHub credentials, every agent session on this Mac
+among them, can put code on every such Mac within a day. Setting the nightly key's secret: once
+`can_admins_bypass` is off on `nightly`. Nothing in this branch changes a GitHub setting; the commands above are
+for Noah to run or approve.
