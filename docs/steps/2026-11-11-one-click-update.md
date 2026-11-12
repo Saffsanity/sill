@@ -82,7 +82,7 @@ updater features" (the plan's §15.1); the independent security review's finding
   temporary-items folder (the clean-up now goes by a note), the low-space rounding's overflow, and a
   freshly started ad hoc app held unwritable by the system policy for a moment (harness only).
 - Verified, round 3 (2026-11-12 04:40–05:20, this Mac, heavy jobs through heavy.sh, no device, nothing
-  launched but the harness's test executables and the bare SillMenuBar for previews): `update-install` 715
+  launched but the harness's test executables and the bare SillMenuBar for previews): `update-install` 716
   checks (the date, the stop, the automatic rule, both modes, the words, the reviewer's F6 cases, the source
   rules for the switch); `update-policy` 129; `Tests/update-harness/run.sh` 227 of 227 (the stop's four
   cases, link-through-link, the check right before the swap, a hard link, the watcher's six: a new copy that
@@ -93,7 +93,7 @@ updater features" (the plan's §15.1); the independent security review's finding
   signed and verified, F3's words); `swift build -c release` clean but the CaptureProbe warning; previews
   from the bare SillMenuBar against main's (0d22bbf) rendered in the same run: 161 identical, the General
   pane's four only by the "Running from" path, menu.txt's appended samples, 126 new pane-update-now files
-  (`~/Downloads/sill-handoff/one-click-update/previews/`); the mutants: running. Found on the way: the
+  (`~/Downloads/sill-handoff/one-click-update/previews/`); `update-install`'s mutants 82 of 82 (22 new: the prompt's digest, the date, the stop's signature and carriage returns, the cooling-off, the age and clock limits, the rollback floor, attempts, the daily check, the update key, a device or a pairing window at the quiet moment, the automatic mode never asking, a device that joined cut off, Install Now when refused; three caught by a trap in the check, as one was before); the harness's 13 round-3 mutants, 13 of 13 (the stop's two, the watcher's six, the check right before the swap, the note before it, hard links, a link at the signature's file, any Sill waited for; "a stop ignored" first left an empty `case` that didn't compile, fixed and run alone), its twelve older ones' patterns still applying once (not re-run); CI's Build and check green on 623e534. Found on the way: the
   watcher read no CDHash (`codesign -d -v` prints none; now `-vvv --arch`), a SIGPIPE race under pipefail
   in sign-update.sh's `codesign | grep -q` and `spctl | grep -q`, `Process.waitUntilExit` hanging after a
   hop in the harness, and macOS's SwiftUI forms have no Dynamic Type (the larger-text previews set 17 pt).

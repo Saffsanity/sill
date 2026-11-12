@@ -26,7 +26,7 @@ MUTANTS = [
     ("a kept copy cleaned up", "        return lstat(url.appendingPathComponent(keptMarker).path, &marker) != 0\n", "        return true\n"),
     ("a noted folder anywhere removed", "        guard url.deletingLastPathComponent().path == parent.path,\n", "        guard true,\n"),
     # The stop (review 3, the automatic update's point 1).
-    ("a stop ignored", "                if stop.tag == release.tag, stop.sha256 == manifest.sha256 { return .failure(.stopped(tag: release.tag)) }\n", ""),
+    ("a stop ignored", "                if stop.tag == release.tag, stop.sha256 == manifest.sha256 { return .failure(.stopped(tag: release.tag)) }\n", "                _ = stop\n"),
     ("a stop taken unsigned", "            case .failure(let p):\n                return .failure(.stopUnreadable(p))\n", "            case .failure:\n                break\n"),
     # The watcher (review 3, the automatic update's point 6).
     ("the watcher puts back a changed old copy", "/usr/bin/codesign --verify --deep --strict \"-R=$req\" \"$old\" >/dev/null 2>&1 || exit 3\n", ""),
