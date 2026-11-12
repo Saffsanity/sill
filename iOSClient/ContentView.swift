@@ -615,6 +615,18 @@ struct MockHardware: View {
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
+
+    /// The fake screen's clip: the display's rounded corners with the mock hardware, else the plain clip the
+    /// harness always had (so every photo without it is pixel for pixel as before).
+    struct Clip: ViewModifier {
+        @ViewBuilder func body(content: Content) -> some View {
+            if MockHardware.wanted {
+                content.clipShape(RoundedRectangle(cornerRadius: MockHardware.cornerRadius, style: .continuous))
+            } else {
+                content.clipped()
+            }
+        }
+    }
 }
 
 struct LayoutHarness: View {
@@ -730,7 +742,7 @@ struct LayoutHarness: View {
                     // `-SillMockHardware 1`: an iPhone's Dynamic Island, rounded corners and home indicator drawn
                     // over the fake screen, for full screen's photos of where the hidden picture goes.
                     .overlay { if MockHardware.wanted { MockHardware(size: spec.size, insets: spec.insets) } }
-                    .clipShape(RoundedRectangle(cornerRadius: MockHardware.wanted ? MockHardware.cornerRadius : 0, style: .continuous))
+                    .modifier(MockHardware.Clip())
                     .padding(1)
                     .background(Color(hex: 0x333333))
                     .rotationEffect(.degrees(fit.turned ? 90 : 0))
