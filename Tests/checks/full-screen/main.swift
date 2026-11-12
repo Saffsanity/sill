@@ -176,7 +176,7 @@ func model(_ s: Stroke) -> EdgeFlick.Verdict {
         let dx = q.x - first.x, dy = q.y - first.y
         if dx >= 6 { return .notAFlick(.movedRight) }
         if !isLift {
-            if (dx * dx + dy * dy).squareRoot() >= 8, abs(dy) > 1.2 * max(-dx, 0) { return .notAFlick(.steep) }
+            if hypot(dx, dy) >= 8, abs(dy) > 1.2 * max(-dx, 0) { return .notAFlick(.steep) }
             continue
         }
         if -dx < 12 { return .notAFlick(.tooShort) }
