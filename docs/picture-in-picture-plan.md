@@ -349,6 +349,24 @@ photographed the cover (`--display=primary`).
   not); a host that quits ends the session as before. An iPad simulator (the iOS 27.0 runtime) may have
   Picture in Picture; it was not tried (one simulator).
 
+### After #351, the version label (2026-11-12, 02:28–02:44)
+
+Main at 57a6d86 merged in (4bfc931): CLAUDE.md (this entry first, then #351's), CI's mutants matrix (the union,
+68 checks) and ContentView's harness contract (this branch's bullet, then main's) conflicted, each kept whole;
+the Settings panel merged by itself, this branch's switch first in This iPad and #351's version line the
+panel's last line, under Take the Tour's note; the pbxproj too, A291/F291 and A29A/F29A beside #351's
+AE01/FE01, four entries each. Then: the iOS app in Debug (28 s) and Release (53 s) for the simulator and Debug
+for a device (24 s), only the known capture warning, `UIBackgroundModes` `["audio"]` in each;
+`picture-in-picture` 344 passed and `version-label` 38 passed; `Tests/checks/run-all.sh`, all 68 passed
+(624 s); 19 photos of the panel in `~/Downloads/sill-handoff/pip/photos-after-351/` on one iPhone Duo simulator
+(deleted after), the iPad's two sizes, the Duo's 669×951 and an iPhone's 393×852, default and
+accessibility-extra-large text, each scrolled to the switch (`-SillSettingsScroll pip`) and to the end
+(`-SillSettingsEnd 1`, the version line under Take the Tour's note, "Sill 0.6.2 (1400)" from
+`-SillAppVersion`/`-SillAppBuild`), and a Mac without settings scrolled to the end (`-SillSettingsCase legacy`),
+the shortest panel: on the iPad sideways it shows the switch's footnote and the version line in one frame,
+the switch's own row just above; no layout shows the row and the version line together (the This iPad group
+runs about 950 pt between them).
+
 ### The review before the first build (2026-11-11)
 
 Builds waited for disk space, so the code was read before it was ever compiled: an independent read-only

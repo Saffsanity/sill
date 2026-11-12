@@ -58,6 +58,9 @@ Picture in Picture window. Device only: no wire change, nothing on the Mac, one 
   simulator (`isPictureInPictureSupported()` false), so nothing was offered; an iPad simulator (iOS 27.0) was
   not tried. Before the first build an independent review found nine things, all fixed (40dbfe6; the plan's
   "The review before the first build").
+  After #351 (main at 57a6d86, merged in 4bfc931: the panel keeps this switch first in This iPad and #351's
+  version line last; both pbxproj sets): the three iOS builds again (the known warning only), `picture-in-picture`
+  344 and `version-label` 38, `run-all.sh` all 68, and 19 photos of the panel (`photos-after-351/`).
 - **Untested, for Noah:** everything on a device, the plan's P1–P20 (iPad mini and iPhone 15 Pro, a Debug build,
   Xcode's console for the `pip:` lines, Sill.log on the Mac): the switch and where iOS 27 keeps its own Start PiP
   Automatically; a window and the Desktop floating as Sill leaves; Apple Music never stopped with Sill muted, and
