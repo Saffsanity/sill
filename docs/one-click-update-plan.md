@@ -1332,3 +1332,140 @@ A10. The security review's "Tests still wanted on real hardware": App Management
     Gatekeeper prompt at the relaunch, the 30-second handshake under heavy load); the signer as it will run
     (the key item's real ACL after `--new-key`, the installed signer refusing injection, the in-person prompt's
     text, `notarized` on the real release offline).
+
+## 16. Use nightly builds (round 4, 2026-11-12; written before the code)
+
+Noah, 2026-11-12: "can you add a toggle to Use Nightly Builds? That in tandem with automatic updates should
+download any update found immediately instead of 48 hours out. I think it will make it easier for folks to
+download nightly builds." And, on the second proof: "A separate nightly key that GitHub holds seems like the
+best option".
+
+### 16.1 What it does
+
+A switch, "Use nightly builds", in Settings › General's update section, under "Automatically update Sill",
+off by default. With it on, the daily check also reads the pre-release `nightly` that
+`.github/workflows/nightly.yml` publishes every night main moved (Developer ID signed and notarized in
+GitHub Actions), and offers its newest build when it is newer than this Sill; Update Now installs it; with
+"Automatically update Sill" on too, a nightly found is downloaded at once (no 48-hour wait) and installed
+under the same rule as a release: 5 minutes with no device connected, never disconnecting anyone, the
+watcher, the same retry bounds. Releases are still offered beside nightlies (§16.3).
+
+### 16.2 The second proof: a nightly key (Noah's decision of 2026-11-12)
+
+A nightly can't carry Noah's offline update key: nobody signs at 09:17 UTC by hand. So:
+- **A separate nightly key** (Ed25519), its private half a GitHub Actions secret of the environment
+  `nightly` (`SILL_NIGHTLY_UPDATE_KEY`), used only by nightly.yml to sign each nightly's manifest; its
+  public half compiled into Sill (`UpdateManifest.nightlyKeys`, empty until Noah makes the key: until then
+  the switch doesn't show and the channel is inert, as Update Now is without an update key).
+- **Separate everywhere.** A nightly's manifest has its own first line, "Sill nightly 1", and is verified
+  only with `nightlyKeys`; a release's, "Sill update 1", only with `releaseKeys`. Neither format parses as
+  the other, and neither key list is ever tried for the other, so a nightly key can never satisfy a
+  release's check (a release still needs the offline update key), and the release key's manifest is never
+  a nightly (decided: the update key signs releases only; a nightly signed with it would mean the offline
+  key had been brought to CI). The nightly key is trusted only while the switch is on, and only for the
+  nightly channel's asset at the tag `nightly`.
+- **What the nightly key adds over Apple's signature and notarization alone:** a nightly asset swapped or
+  replayed on GitHub (an older notarized nightly, a build of another commit, a release's zip) fails: the
+  signed manifest names this night's version, build, commit, zip size, SHA-256 and every slice's cdhash,
+  and its signed time; a rollback to an older notarized nightly fails the (version, build) rule and the
+  nightly floor (§16.3); a nightly offered as a release fails (another format, another key list). **What it
+  does not add:** whoever can change main or the workflow gets a signed, notarized nightly. That is what a
+  nightly is: code from main, built by CI, unreviewed by Noah at the moment it ships. Hence off by default,
+  and the words say so.
+- **The option not taken: Apple's checks alone.** It needs no key or secret, but then anyone who could
+  replace an asset on the pre-release (a token with release rights, a compromised workflow run) could serve
+  any older notarized Sill, or one of another commit, to every Sill on the channel; the nightly key binds
+  each night's files to that night's build. Not built.
+
+### 16.3 Versions and their crossings
+
+A nightly carries main's version, which is the next release's (main moves to the next number once a
+release ships: release-checklist "Versions"), with the commit count of main's first-parent line as its
+build: "0.6.2 (1471)". So a nightly of 0.6.2 is always built before release 0.6.2 (or from the very commit
+the release is tagged on), and the commit count orders builds of one version in time.
+- **The order.** Between releases, by version alone (as today). Wherever a nightly is on either side (the
+  switch on, or this Sill a nightly: `SillChannel` = `nightly` in its signed Info.plist, which `make-app.sh`
+  writes for `release.sh --nightly`), by version, then build (`UpdateInstallPolicy.isNewer`).
+- **The offer.** A release when its version is newer than this Sill's, or equal while this Sill is a
+  nightly (the old implicit rule "a nightly is never offered the release of its own version" is replaced on
+  purpose: nightly V always precedes release V, so release V is the newer code; the build is checked
+  against the signed manifest before anything is downloaded, and a release whose build is not newer is
+  refused there). A nightly, with the switch on, when its (version, build) is newer. Both: the higher
+  version, and on a tie the release (the tested one; the next night's nightly is offered after it).
+- **A release Sill turning the switch on:** offered the newest nightly if it is newer by (version, build):
+  on the day of a release, the nightly of the next version comes that night.
+- **The switch off while a nightly newer than the latest release runs:** no downgrade. The pane says "You
+  have a nightly build, 0.6.3 (1520). Sill updates to the next release from 0.6.3 on." Stable updates resume
+  with release 0.6.3 (newer code than nightly 0.6.3, by the build rule) or any later one.
+- **A release published while someone runs a nightly of its version:** offered (as above), installed only if
+  its signed build is newer.
+- **The rollback floors, one per channel:** the highest release version and the highest nightly (version,
+  build) whose signed manifest this Sill has read; the automatic update never installs below either.
+- **Dates.** A nightly's manifest carries its signed time too. No cooling-off for a nightly (Noah: "should
+  download any update found immediately"). The age limit for a nightly installed by itself is 30 days (a
+  quiet main can leave the newest nightly a few weeks old; replay below what this Sill has seen is the floor's
+  job), and a signature more than 10 minutes in this Mac's future is refused, as for a release.
+
+### 16.4 What nightly.yml publishes
+
+After `release.sh --nightly --publish` (the dated `Sill-nightly-<yyyymmdd>-<sha7>` files, as today), a step
+"Sign the nightly for Update Now" with the secret `SILL_NIGHTLY_UPDATE_KEY`:
+`Scripts/sign-nightly.sh` reads tonight's notarized zip, its app's version, build and every slice's cdhash,
+the zip's size and SHA-256 and the commit, signs a "Sill nightly 1" manifest with the key (in a file under
+`$RUNNER_TEMP`, deleted at the end), verifies it with the public key compiled into this commit, and uploads
+`Sill-nightly.zip` (tonight's zip under a fixed name) first and `Sill-nightly.zip.manifest` second. A Sill
+reading between the two sees a manifest that names another zip, and refuses; a night that fails or
+publishes half leaves either last night's pair or a mismatched pair, and a mismatched pair is never
+installed (the manifest binds the size, the SHA-256 and the cdhashes). Without the secret the step says
+"The nightly isn't signed for Update Now: the environment nightly has no SILL_NIGHTLY_UPDATE_KEY
+(docs/release-checklist.md, Nightlies)" and the job stays green. No secret or setting is added by this branch.
+
+### 16.5 Who can turn it on, and the words
+
+- Only Settings › General's switch (`AppUpdater.setNightly`), stored with the automatic switch in Sill's
+  keychain item (`AutoUpdateStore`); never a device, a launch argument, `defaults` or the CLI; off by
+  default; shown only where Update Now is and a nightly key is compiled in.
+- The words: the switch "Use nightly builds"; under it, while on: "Nightly builds are made every night from
+  Sill's newest code. They are less tested than releases and may break. Each is checked two ways: Apple's
+  signature and notarization for Sill's developer, and Sill's nightly key, which only the nightly build
+  signs with. Turning this off doesn't go back to the last release: Sill stays on the nightly you have until
+  a release newer than it." The offers and steps name the build: "Sill nightly 0.6.2 (1471) is available.",
+  "Downloading Sill nightly 0.6.2 (1471)…". The update key's failures for a nightly name the nightly key.
+- Sill for iPhone and iPad is not affected (its nightlies are TestFlight's). A Mac on a nightly speaks the
+  same wire, additive as always: a device on the App Store version connects to it as to a newer release,
+  and skips what it doesn't know.
+
+### 16.6 The watcher and the bounds
+
+Unchanged: the watcher, the hold, the quiet moment. Attempts are kept by version and build for a nightly, so
+a nightly that fails twice is skipped until the next night's build (a new build number); a release's by
+version, as before.
+
+### 16.7 Threat model, the new points
+
+**T35. The nightly key in CI.** Held by GitHub as a secret of the environment `nightly` (main only, no
+reviewer, as the Developer ID identity there). Whoever can run that environment can sign a nightly, which
+only Sills with "Use nightly builds" on accept, and only for the nightly channel. It cannot sign a release.
+
+**T36. A nightly served as a release, or a release as a nightly.** Another first line and another key list:
+refused both ways (`update-install`, `sign-test.sh`).
+
+**T37. A replayed or half-published nightly.** The signed manifest binds the night's build, commit, zip and
+cdhashes; the (version, build) rule and the nightly floor refuse an older one; a pair from two nights fails
+the SHA-256.
+
+### 16.8 Noah's one-time steps for the nightly key (a few minutes; Terminal.app)
+
+1. Make the key in a file on an encrypted disk image, never in the repository, ~/Downloads or the handoff
+   folder: `swift Scripts/update-manifest.swift new-key --key-file "/Volumes/<encrypted image>/sill-nightly.key"`.
+   It shows "public key <44 characters> key <8 hex digits>": the public key and its ID.
+2. Store the private half as the secret, from that file, without the clipboard:
+   `base64 -i "/Volumes/<encrypted image>/sill-nightly.key" | gh secret set SILL_NIGHTLY_UPDATE_KEY --env nightly
+   --repo Saffsanity/sill`. It shows "✓ Set Actions secret SILL_NIGHTLY_UPDATE_KEY for Saffsanity/sill".
+3. The public key into `Sources/SillMenuBar/UpdateManifest.swift`, `nightlyKeys` (one line, a commit of its
+   own; `Tests/checks/update-install` checks that it is usable and differs from every release key).
+4. Eject the disk image (or delete the file: losing it costs nothing but a new key, step 1 to 3 again, and
+   Sills on the old key need one update by hand or by a release).
+Never: reuse the release key (or any key of `releaseKeys`) as the nightly key; put the nightly key in the
+login keychain item the release signer reads (`me.saffer.sill.update-signing`), or the release key into
+GitHub; sign a release's manifest with the nightly key, or a nightly with the release key.
