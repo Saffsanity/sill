@@ -55,6 +55,7 @@ MUTANTS = {
     "R5 no back speed": ("        if velocity <= -backSpeed { return false }\n", ""),
     "R6 progress below nothing": ("return min(max(translation / width, 0), 1)", "return min(translation / width, 1)"),
     "R7 progress past the whole": ("return min(max(translation / width, 0), 1)", "return max(translation / width, 0)"),
+    "R9 a still finger held past a long press": ("static let decideWithin: Double = 0.3", "static let decideWithin: Double = 0.5"),
     "R8 the flick's travel left out": ("if velocity >= flickSpeed, translation >= flickTravel { return true }", "if velocity >= flickSpeed { return true }"),
     # EdgeDwell.
     "D1 a Pencil counts": ("guard !pencil, x <= Self.edge else {", "guard x <= Self.edge else {"),

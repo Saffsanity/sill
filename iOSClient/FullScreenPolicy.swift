@@ -252,6 +252,10 @@ enum EdgeReveal {
     static let flickTravel: Double = 12
     /// Moving back toward the edge at the lift this fast springs back, however far it came.
     static let backSpeed: Double = 200
+    /// A finger at the bezel that has not begun to swipe in this long after it landed is not swiping in (a
+    /// press, a rest): its recognizer lets it go then, so a long press near the left edge (0.45 s) is never
+    /// late, and nothing near the edge is held longer than this.
+    static let decideWithin: Double = 0.3
 
     /// How far the interface has come in, 0…1: the finger's travel over the screen's width.
     static func progress(translation: Double, width: Double) -> Double {

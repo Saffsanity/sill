@@ -125,7 +125,9 @@ reach the flick (`allowedTouchTypes`), and the pointer's own recognizers take no
 The swipe in: `UIScreenEdgePanGestureRecognizer` on the left edge, only while hidden, with the same rule of
 who waits for it; it finishes past a third of the screen's width (the lift's speed carrying it on for
 0.15 s), or at a flick in (400 pt/s after 12 pt), and springs back when moving back toward the edge at
-200 pt/s or more.
+200 pt/s or more. A touch landing more than 40 pt in fails it at once, and one at the bezel that has not
+begun to swipe in 0.3 s after it landed (`EdgeReveal.decideWithin`: a press, a rest) is let go then, so
+nothing near the edge is held longer and a long press there (0.45 s) is never late.
 
 ## Where the picture goes while hidden (open question 5)
 

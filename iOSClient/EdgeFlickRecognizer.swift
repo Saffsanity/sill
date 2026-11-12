@@ -184,6 +184,9 @@ final class RevealEdgePan: UIScreenEdgePanGestureRecognizer {
 
     /// When it last let a touch go at that touch's lift (EdgeRecognizers.releasedAtLift).
     private(set) var liftReleaseTime: TimeInterval = -1
+    /// Lets a touch go that has not begun to swipe in by EdgeReveal.decideWithin (a still finger sends no
+    /// events, and the system's recognizer would hold it until it moves or lifts).
+    private var clock: Timer?
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         if state == .possible, let view, touches.contains(where: { $0.location(in: view).x > Self.landsWithin }) {
@@ -191,11 +194,24 @@ final class RevealEdgePan: UIScreenEdgePanGestureRecognizer {
             return
         }
         super.touchesBegan(touches, with: event)
+        if state == .possible, clock == nil {
+            clock = Timer.scheduledTimer(withTimeInterval: EdgeReveal.decideWithin, repeats: false) { [weak self] _ in
+                guard let self else { return }
+                self.clock = nil
+                if self.state == .possible { self.state = .failed }
+            }
+        }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
         let held = state == .possible
         super.touchesEnded(touches, with: event)
         if held, state == .possible || state == .failed { liftReleaseTime = ProcessInfo.processInfo.systemUptime }
+    }
+
+    override func reset() {
+        super.reset()
+        clock?.invalidate()
+        clock = nil
     }
 }

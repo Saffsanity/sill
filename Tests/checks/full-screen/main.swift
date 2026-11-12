@@ -283,6 +283,8 @@ check(hidden > 1000 && outside > 2000, "the random strokes cover both sides (\(h
 // MARK: - The swipe in
 
 check(EdgeReveal.progress(translation: 0, width: 1000) == 0, "no travel, no progress")
+check(EdgeReveal.decideWithin > 0.1 && EdgeReveal.decideWithin < 0.45,
+      "the swipe in lets a finger that has not begun go after \(EdgeReveal.decideWithin) s: past a swipe's start, before a long press's 0.45 s")
 check(EdgeReveal.progress(translation: 250, width: 1000) == 0.25, "a quarter of the width, a quarter of the way")
 check(EdgeReveal.progress(translation: 1500, width: 1000) == 1, "progress stops at the whole")
 check(EdgeReveal.progress(translation: -20, width: 1000) == 0, "progress never goes back past nothing")
