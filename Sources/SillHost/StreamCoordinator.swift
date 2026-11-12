@@ -1539,9 +1539,9 @@ package final class StreamCoordinator {
     /// the window goes home (the stage's way here, WindowRestore's in `select`'s defer), the placeholder
     /// follows at once, and the window is what comes back after the unlock (unless no device is left, as
     /// `LockPolicy.Restore.devicesLeft` says). The caller returns from `select`.
-    private func lockedMidSwitch(_ source: StreamSource) {
+    private func lockedMidSwitch(_ source: StreamSource) async {
         if catalog.clientCount > 0 { _ = restore.select(source, active: active, pick: false, reading: lockReading) }
-        if virtualDisplay { stage.release() }
+        if virtualDisplay { await stage.releaseHome() }
         active = .none
         placeholderStreams = false
         broadcastList()
@@ -1941,7 +1941,7 @@ package final class StreamCoordinator {
                 // window home now, and re-read the catalog so the .window lookup below gets its
                 // home frame, not the staged one.
                 cameHome = stage.isStaged
-                await stage.leaveFullScreenIfNeeded(); stage.release()
+                await stage.leaveFullScreenIfNeeded(); await stage.releaseHome()
                 if case .window = source { await catalog.refreshWindows() }
                 leftStage = true
             }
@@ -1969,8 +1969,10 @@ package final class StreamCoordinator {
                     stage.releaseWindow()
                 }
             } else {
+                // The display goes once the window server shows the window home (StageRelease: as it went in the
+                // same millisecond, macOS moved a window still committing its move to the main display, 2026-11-12).
                 await stage.leaveFullScreenIfNeeded()
-                stage.release()
+                await stage.releaseHome()
             }
         }
         // In regular mode, every window Sill sized but the one about to stream goes back to its own
@@ -2008,18 +2010,18 @@ package final class StreamCoordinator {
             // The off-console view (docs/off-console-plan.md): never Sill's virtual display; a window staged there
             // goes home first (Sill's own staging undone) and streams where it is.
             if virtualDisplay, lockAllowed.windows, !lockAllowed.virtualDisplay, stage.isStaged {
-                await stage.leaveFullScreenIfNeeded(); stage.release(); await catalog.refreshWindows(); leftStage = true
+                await stage.leaveFullScreenIfNeeded(); await stage.releaseHome(); await catalog.refreshWindows(); leftStage = true
             }
             // On the virtual display the window may have left the on-screen list; look it up fully.
             var found = catalog.window(id: id)
             if found == nil, virtualDisplay || leftStage { found = await catalog.resolveWindow(id: id) }
             guard let w = found else {
-                if virtualDisplay { stage.release() }
+                if virtualDisplay { await stage.releaseHome() }
                 active = .none; broadcastList(); return
             }
             // Locked during this switch's awaits: nothing of the window is staged, sized, raised or
             // captured (LockPolicy), but in the off-console view, which captures it where it is.
-            if !lockAllowed.windows { lockedMidSwitch(source); return }
+            if !lockAllowed.windows { await lockedMidSwitch(source); return }
             print("Selecting window \(w.windowID) \(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "") frame \(w.frame) onScreen \(w.isOnScreen) active \(w.isActive)")
             picked = w
             listedFullScreen = WindowRestore.coversDisplay(w.frame, WindowSizer.displayFrames()) ? id : nil
@@ -2047,10 +2049,10 @@ package final class StreamCoordinator {
                 } catch {
                     // Locked while the window was being staged: no display was made (or it goes now), and
                     // nothing of the window streams in its place (LockPolicy).
-                    if !lockAllowed.windows { lockedMidSwitch(source); return }
+                    if !lockAllowed.windows { await lockedMidSwitch(source); return }
                     print("Virtual display fallback for \(w.owningApplication?.applicationName ?? "?"): \(error). Streaming the real window instead.")
                     Stats.shared.bump("vd.fallback")
-                    stage.release()
+                    await stage.releaseHome()
                     // For the menu: why this window streams in place, and whether the stage gave up
                     // for the run (it does after repeated display creation failures).
                     let why = (error as? VirtualStage.Failure)?.summary ?? "\(error)"
@@ -2063,7 +2065,7 @@ package final class StreamCoordinator {
             if sourceRect == nil {
                 // Locked while the stage tried (its awaits): nothing raised or sized either. The off-console view
                 // captures the window where it is, and raises and sizes nothing (LockPolicy.Allowed.actsOnWindows).
-                if !lockAllowed.windows { lockedMidSwitch(source); return }
+                if !lockAllowed.windows { await lockedMidSwitch(source); return }
                 let acts = lockAllowed.actsOnWindows
                 if virtualDisplay, !lockAllowed.virtualDisplay { status.update { $0.lastStageFailure = "another user is on the screen" } }
                 // Today's path: capture the window where it is, at most at its display's own scale
@@ -2123,7 +2125,7 @@ package final class StreamCoordinator {
 
         // Locked while this switch was under way (the gate set during its awaits): no frame of a window
         // goes out (`lockedMidSwitch`), and the display gives way to the placeholder (LockPolicy).
-        if case .window = source, !lockAllowed.windows { lockedMidSwitch(source); return }
+        if case .window = source, !lockAllowed.windows { await lockedMidSwitch(source); return }
         if picture == .display, !lockAllowed.display {
             filter = nil; displayScale = nil
             (width, height) = placeholderSize()
@@ -2141,13 +2143,13 @@ package final class StreamCoordinator {
                 // The display filter failed to start: send the window home and stream it there.
                 print("Capture on the virtual display failed: \(error); retrying with the real window.")
                 status.update { $0.lastStageFailure = "capture on the display failed" }
-                stage.release()
+                await stage.releaseHome()
                 if comeForward, !shuttingDown, lockAllowed.actsOnWindows { activateAndRaise(window: w) }   // regular mode now: a pick comes forward
                 let fallback = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")\(useSoftwareEncoder ? " (software encoder)" : "")"
                 let windowFilter = SCContentFilter(desktopIndependentWindow: w)
                 let windowScale = Self.displayScale(of: windowFilter)
                 let pixels = CaptureScale.windowSize(w.frame.size, knob: captureScale, displayScale: windowScale)
-                if !lockAllowed.windows { lockedMidSwitch(source); return }   // locked meanwhile: no frame of it either
+                if !lockAllowed.windows { await lockedMidSwitch(source); return }   // locked meanwhile: no frame of it either
                 do {
                     try await startPipeline(source: source, filter: windowFilter, sourceRect: nil, displayScale: windowScale,
                                             width: pixels.width, height: pixels.height,
@@ -2167,7 +2169,7 @@ package final class StreamCoordinator {
                                         testPattern: (width: width, height: height))
             } else {
                 print("Could not start streaming \(describe): \(error)")
-                if virtualDisplay { stage.release() }   // nothing streams: never leave a window on the virtual display
+                if virtualDisplay { await stage.releaseHome() }   // nothing streams: never leave a window on the virtual display
                 active = .none
             }
         }

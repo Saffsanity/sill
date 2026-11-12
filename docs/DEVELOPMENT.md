@@ -113,7 +113,16 @@ open it again) and shows as Custom; a device can pick only the presets.
 Virtual Display is on by default (2026-10-27): on a Mac whose `virtualDisplay`
 key was never set, a window a device picks moves onto Sill's virtual display
 while it streams (The command-line host, below, says how) and comes back where
-it was when it stops. The default is registered, never written
+it was when it stops. Sill's display goes only once the window server shows the
+window home, at most 1 s later: an app commits an Accessibility move a few to
+tens of milliseconds after the writes return, and a display removed before that
+took the window to the main display (Chrome filling a monitor came back filling
+the main one, 2026-11-12). The log says how long it took ("Removed virtual
+display 81 (Google Chrome home after 38 ms)"), and for 1.5 s after the removal
+a window macOS moved all the same is put back once ("Put Google Chrome — … back
+at (…): macOS had moved it to (…) as Sill's display went."). Quit and the
+signals still put the window back and remove the display at once: they cannot
+wait. The default is registered, never written
 (`HostConfig.app` in `HostSettings`), so a key set from the menu, Settings ›
 Virtual Display or a device always wins: a Mac that turned it off keeps it
 off. To go back to the default, quit Sill, run `defaults delete
