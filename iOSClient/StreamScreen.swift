@@ -299,6 +299,9 @@ struct StreamScreen: View {
     @State private var chromeSlides = true
     /// Sill's window covers the screen (FullScreenEdges; FullScreenPolicy.offered): full screen is offered.
     @State private var coversScreen = true
+    /// The window's safe area while the controls last showed (its status bar's room included): where the swipe
+    /// in's preview lays them out, so they land where the shown layout puts them; nil before any was read.
+    @State private var shownInsets: FullScreenPolicy.Insets? = nil
     /// The person's own software keyboard was up when the interface hid: it comes back with the interface.
     @State private var keyboardBeforeHide = false
     /// The hint over the hidden picture (FullScreenHint), the first few times, and its fade.
@@ -376,6 +379,7 @@ struct StreamScreen: View {
             let hidden = chromeHidden
             let insets = Self.insets(geo.safeAreaInsets)
             let room = FullScreenPolicy.room(size: geo.size, insets: insets, choice: Self.roomChoice,
+                                             topIsStatusBar: UIDevice.current.userInterfaceIdiom == .pad,
                                              foldTop: posture.info(in: geo.size).horizontalBand?.minY)
             ZStack {
                 Group {
@@ -478,7 +482,8 @@ struct StreamScreen: View {
                 onReveal: { state, travel, speed, width in revealMoved(state, travel: travel, speed: speed, width: width) },
                 onDwell: { showChrome(by: "the pointer at the left edge") },
                 onShake: { if chromeHidden { showChrome(by: "a shake") } },
-                onCoverage: { coversScreen = $0 }))
+                onCoverage: { coversScreen = $0 },
+                onInsets: { e in if chrome == .shown { shownInsets = FullScreenPolicy.Insets(top: e.top, left: e.left, bottom: e.bottom, right: e.right) } }))
             // The layouts and the overlays share this screen's space, and so its fold; the inner
             // display gives the picture the status bar's strip in every pose.
             .duoFold(posture, size: geo.size, screen: "stream screen")
@@ -1291,7 +1296,13 @@ struct StreamScreen: View {
     /// the bottom edge, as the stream screen is while shown), `progress` of the way in from the left edge, over
     /// the hidden picture, which shows through its picture's pane. It takes no touch, says nothing to VoiceOver
     /// and reports no tour target, and its picture pane holds no picture (there is one picture view).
-    private func revealPreview(_ progress: CGFloat, size: CGSize, posture: DuoPosture, insets: FullScreenPolicy.Insets) -> some View {
+    private func revealPreview(_ progress: CGFloat, size: CGSize, posture: DuoPosture, insets now: FullScreenPolicy.Insets) -> some View {
+        // Where the shown layout will be: the safe area now, down to the bottom edge; on an iPad with the status
+        // bar's room it had while shown (hidden now, the status bar comes back as the controls land). An iPhone's
+        // top inset is its sensor housing's, the same either way, and a turn while hidden changes it.
+        let pad = UIDevice.current.userInterfaceIdiom == .pad
+        let insets = FullScreenPolicy.Insets(top: pad ? (shownInsets?.top ?? now.top) : now.top, left: now.left,
+                                             bottom: now.bottom, right: now.right)
         let shown = CGRect(x: insets.left, y: insets.top, width: max(0, size.width - insets.left - insets.right),
                            height: max(0, size.height - insets.top))
         let duo = DuoLayout.of(shown.size)

@@ -341,6 +341,12 @@ check(FullScreenPolicy.room(size: phoneSideways, insets: I(left: 59, bottom: 21,
       == CGRect(x: 59, y: 0, width: 734, height: 372), "the safe area")
 check(FullScreenPolicy.room(size: CGSize(width: 1133, height: 744), insets: I(bottom: 20), choice: .clearOfHousing)
       == CGRect(x: 0, y: 0, width: 1133, height: 744), "an iPad mini sideways, status bar hidden: the whole screen")
+check(FullScreenPolicy.room(size: CGSize(width: 1133, height: 744), insets: I(top: 24, bottom: 20), choice: .clearOfHousing, topIsStatusBar: true)
+      == CGRect(x: 0, y: 0, width: 1133, height: 744), "an iPad before its status bar has gone: the status bar's inset never counted")
+check(FullScreenPolicy.room(size: CGSize(width: 1133, height: 744), insets: I(top: 24, bottom: 20), choice: .safeArea, topIsStatusBar: true)
+      == CGRect(x: 0, y: 0, width: 1133, height: 724), "an iPad's safe area: clear of the home indicator, not of the status bar")
+check(FullScreenPolicy.room(size: phoneUpright, insets: I(top: 59, bottom: 34), choice: .clearOfHousing, topIsStatusBar: false).minY == 59,
+      "an iPhone's top inset is its sensor housing, counted")
 check(FullScreenPolicy.room(size: CGSize(width: 669, height: 951), insets: I(bottom: 34), choice: .clearOfHousing, foldTop: 455.5)
       == CGRect(x: 0, y: 0, width: 669, height: 455.5), "the Duo's laptop pose: above the fold")
 check(FullScreenPolicy.room(size: CGSize(width: 669, height: 951), insets: I(bottom: 34), choice: .clearOfHousing, foldTop: 1000)

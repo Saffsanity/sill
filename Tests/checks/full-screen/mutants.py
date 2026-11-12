@@ -80,6 +80,7 @@ MUTANTS = {
     "P15 a room below nothing": ("width: max(0, size.width - left - right), height: max(0, size.height - top - bottom)",
                                  "width: size.width - left - right, height: size.height - top - bottom"),
     "P16 the screen choice clear of the housing": ("        case .screen: break\n", "        case .screen: top = insets.top; left = insets.left; right = insets.right\n"),
+    "P17 the status bar's inset counted": ("        if topIsStatusBar { top = 0 }\n", ""),
     "L1 a flick leads nowhere": ("var afterFlick: ChromeLevel { .hidden }", "var afterFlick: ChromeLevel { .shown }"),
 }
 caught = 0

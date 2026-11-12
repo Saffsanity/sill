@@ -364,6 +364,9 @@ struct ContentView: View {
 ///   fraction of the picture's pane (its middle without one), then the lift's settle: `2.5@0.3,0.4; 3
 ///   0.1` zooms in, then pinches all the way out. The console's "harness: -SillZoom …" line gives the
 ///   zoom.
+/// * `-SillMockHardware 1` — an iPhone 15 Pro's Dynamic Island (where the fake safe area puts the sensor
+///   housing), rounded corners and home indicator drawn over the fake screen (MockHardware), for photos of
+///   where full screen's hidden picture goes.
 /// * `-SillFullScreen 1` — full screen (docs/full-screen-plan.md): Sill's controls hidden from the start, the
 ///   picture in the screen's room, in the mock and live, and in the normal app. With it,
 ///   `-SillFullScreenReveal P` catches the swipe in from the left edge P of the way (0…1), so the preview of the
@@ -580,6 +583,40 @@ struct ContentView: View {
 /// The container ignores the safe area, and since the frame is centred and smaller than the
 /// device's safe area, the iPad's own insets never reach `StreamScreen`: the fake screen behaves
 /// like a device screen with zero insets.
+/// DEBUG `-SillMockHardware 1` (ContentView's contract): the parts of an iPhone 15 Pro the fake screen does not
+/// have, drawn over it for full screen's photos (docs/full-screen-plan.md, open question 5): the Dynamic Island
+/// (126×37 pt, 11 pt from the edge) on the side the fake safe area says the sensor housing is (its top inset
+/// upright, its left inset sideways), the display's rounded corners (55 pt, the clip), and the home indicator
+/// (134×5 pt, 8 pt from the bottom). Nothing here touches the stream screen's own layout.
+struct MockHardware: View {
+    let size: CGSize
+    let insets: EdgeInsets?
+    static let wanted = UserDefaults.standard.bool(forKey: "SillMockHardware")
+    static let cornerRadius: CGFloat = 55
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if let insets, insets.top > 40 {
+                Capsule().fill(Color.black)
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.25), lineWidth: 0.5))
+                    .frame(width: 126, height: 37)
+                    .offset(x: (size.width - 126) / 2, y: 11)
+            } else if let insets, insets.leading > 40 {
+                Capsule().fill(Color.black)
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.25), lineWidth: 0.5))
+                    .frame(width: 37, height: 126)
+                    .offset(x: 11, y: (size.height - 126) / 2)
+            }
+            Capsule().fill(Color.white.opacity(0.85))
+                .frame(width: 134, height: 5)
+                .offset(x: (size.width - 134) / 2, y: size.height - 8 - 5)
+        }
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 struct LayoutHarness: View {
     struct Spec {
         let size: CGSize
@@ -690,7 +727,10 @@ struct LayoutHarness: View {
                     .environment(\.duoEnvironment, spec.duoEnvironment)
                     .frame(width: spec.size.width, height: spec.size.height)
                     .coordinateSpace(.named(DuoPosture.displaySpace))
-                    .clipped()
+                    // `-SillMockHardware 1`: an iPhone's Dynamic Island, rounded corners and home indicator drawn
+                    // over the fake screen, for full screen's photos of where the hidden picture goes.
+                    .overlay { if MockHardware.wanted { MockHardware(size: spec.size, insets: spec.insets) } }
+                    .clipShape(RoundedRectangle(cornerRadius: MockHardware.wanted ? MockHardware.cornerRadius : 0, style: .continuous))
                     .padding(1)
                     .background(Color(hex: 0x333333))
                     .rotationEffect(.degrees(fit.turned ? 90 : 0))

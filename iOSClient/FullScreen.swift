@@ -27,6 +27,9 @@ struct FullScreenEdges: UIViewRepresentable {
     var onShake: () -> Void
     /// Whether the window covers the screen.
     var onCoverage: (Bool) -> Void
+    /// The window's safe area, as it changes (the swipe in's preview lands where the shown layout will be,
+    /// the status bar's room included).
+    var onInsets: (UIEdgeInsets) -> Void = { _ in }
 
     func makeUIView(context: Context) -> Anchor { Anchor() }
 
@@ -39,6 +42,7 @@ struct FullScreenEdges: UIViewRepresentable {
         anchor.onDwell = onDwell
         anchor.onShake = onShake
         anchor.onCoverage = onCoverage
+        anchor.onInsets = onInsets
         #if DEBUG
         anchor.flick.onJudged = { verdict, numbers in
             switch verdict {
@@ -65,6 +69,8 @@ struct FullScreenEdges: UIViewRepresentable {
         var onDwell: () -> Void = {}
         var onShake: () -> Void = {}
         var onCoverage: (Bool) -> Void = { _ in }
+        var onInsets: (UIEdgeInsets) -> Void = { _ in }
+        private var insets: UIEdgeInsets?
         private var shakes: NSObjectProtocol?
         private var dwell = EdgeDwell()
         private var dwellCheck: Timer?
@@ -105,15 +111,25 @@ struct FullScreenEdges: UIViewRepresentable {
             reportCoverage()
         }
 
+        override func safeAreaInsetsDidChange() {
+            super.safeAreaInsetsDidChange()
+            reportCoverage()
+        }
+
         func detach() {
             for recognizer in [flick, reveal, hover] as [UIGestureRecognizer] { host?.removeGestureRecognizer(recognizer) }
             host = nil
             dwellCheck?.invalidate()
         }
 
-        /// Whether the window covers its screen, said when it changes.
+        /// Whether the window covers its screen, and its safe area, each said when it changes.
         func reportCoverage() {
             guard let window, let screen = window.windowScene?.screen else { return }
+            if window.safeAreaInsets != insets {
+                insets = window.safeAreaInsets
+                let report = onInsets, now = window.safeAreaInsets
+                DispatchQueue.main.async { report(now) }
+            }
             let frame = window.convert(window.bounds, to: screen.coordinateSpace)
             let now = FullScreenPolicy.offered(window: frame, screen: screen.bounds)
             guard now != covers else { return }

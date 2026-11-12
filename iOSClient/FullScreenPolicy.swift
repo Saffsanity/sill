@@ -413,9 +413,11 @@ enum FullScreenPolicy {
     }
 
     /// The picture's room while hidden, in a space the size of the screen (`size`) whose safe area is
-    /// `insets`. `foldTop`: on the iPhone Duo's inner display upright in the laptop pose, where the fold's
-    /// band begins; the picture stays above it, the deck below lies flat (nil anywhere else).
-    static func room(size: CGSize, insets: Insets, choice: Room, foldTop: CGFloat? = nil) -> CGRect {
+    /// `insets`. `topIsStatusBar`: the top inset is the status bar's alone (an iPad: no sensor housing at its
+    /// top), which full screen hides, so it is never counted, even in the moment before the status bar has
+    /// gone. `foldTop`: on the iPhone Duo's inner display upright in the laptop pose, where the fold's band
+    /// begins; the picture stays above it, the deck below lies flat (nil anywhere else).
+    static func room(size: CGSize, insets: Insets, choice: Room, topIsStatusBar: Bool = false, foldTop: CGFloat? = nil) -> CGRect {
         var top: CGFloat = 0, left: CGFloat = 0, bottom: CGFloat = 0, right: CGFloat = 0
         switch choice {
         case .screen: break
@@ -424,6 +426,7 @@ enum FullScreenPolicy {
         case .safeArea:
             top = insets.top; left = insets.left; right = insets.right; bottom = insets.bottom
         }
+        if topIsStatusBar { top = 0 }
         var rect = CGRect(x: left, y: top, width: max(0, size.width - left - right), height: max(0, size.height - top - bottom))
         if let foldTop, foldTop > rect.minY, foldTop < rect.maxY {
             rect.size.height = foldTop - rect.minY
