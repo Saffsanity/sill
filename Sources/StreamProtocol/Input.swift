@@ -15,7 +15,8 @@ public enum InputEvent: Codable, Hashable {
     case pointer(PointerAction, x: Double, y: Double)
 
     /// Scroll with the cursor at (x, y). dx/dy are fractions of the frame the content should move,
-    /// natural-scrolling sign: positive dy means the content moves down (finger dragged down).
+    /// natural-scrolling sign: positive dy means the content moves down (finger dragged down, or up
+    /// while the device's Reverse Scrolling turns its fingers' scrolls around: `ScrollDirection`).
     case scroll(x: Double, y: Double, dx: Double, dy: Double)
 
     /// Text from the software keyboard. "\n", "\t" and "\u{8}" (backspace) are delivered as the

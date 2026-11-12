@@ -575,8 +575,8 @@ ClientHello (ALPN sill/1), both pinned ───────────▶  Mac
 
 | Where | Limit | On violation |
 |---|---|---|
-| Remote door, before admission | 8 pending connections in total, 2 per source address. A source with 5 failures in 60 s is refused for 300 s | Closed before TLS; counted for the minute's summary |
-| Remote door, before admission | 10 s from accept to admission (TLS, plus kind 19 on a pairing connection) | Closed |
+| Remote door, before admission | 8 pending connections in total, 2 per source address. A source with 5 failures in 60 s is refused for 300 s (since 2026-10-29, the security scan's finding 9: `DoorPolicy.Places`, docs/home-pairing-plan.md §9) | Closed before TLS; counted for the minute's summary |
+| Remote door, before admission | 10 s from accept to admission (TLS, plus kind 19 on a pairing connection); since finding 9, 4 s to `.ready` (10 s from a known address), then 4 s for the kind 19 | Closed |
 | Remote door, pairing connection | Exactly one message: kind 19, at most 4 KB | Anything else, or more: closed |
 | Remote door, admitted | 8 sessions | The 9th: goodbye `busy`, then closed |
 | Both doors, admitted | Any client → host payload at most 1 MiB (today a header can announce 4 GiB and the host waits for it all: StreamServer.swift:462) | Closed with one line |
@@ -1148,7 +1148,11 @@ An `NSWindowController` hosting a SwiftUI `PairDeviceView`.
 - A standalone window titled "Pair iPhone or iPad": not a sheet, because a device can open it while
   Settings is closed.
 - `sharingType = .none`, as a best effort (reports say ScreenCaptureKit ignores it on macOS 15+; the
-  Desktop filter is what counts).
+  Desktop filter is what counts). Since issue #108 (PR #157), Settings › Devices' "Show the pairing
+  window to screen sharing", off by default, makes it `.readOnly`, AppKit's default: Screen Sharing,
+  Apple Remote Desktop and VNC apps then show it, whoever opened it, so a Mac used through them (one
+  without a display, or one used from afar) can pair. A change applies at once to a window already
+  open (`PairingWindowSharing`).
 - One instance: opening it again brings it forward with the same code.
 - Closing it cancels the window, and the code dies with it.
 
@@ -1334,6 +1338,10 @@ An `NSWindowController` hosting a SwiftUI `PairDeviceView`.
       var method: String           // "qr" | "code"
       var lastConnectedAt: Date?
       var lastRoute: String?       // "Tailscale", "your VPN", "the internet", "by address"
+      // Since 2026-11-11 (below, "Remembered VPN addresses"); optional, so older records decode
+      // and an older build reads newer ones:
+      var addressesListedAt: Double?                  // when the Mac last listed `addresses` (this device's clock)
+      var rememberedAddresses: [RememberedAddress]?   // VPN addresses an earlier list had, each with its time
   }
   ```
 
@@ -1345,13 +1353,47 @@ An `NSWindowController` hosting a SwiftUI `PairDeviceView`.
   - `issuedAt` is newer.
 
   Refreshed: name, port and the Mac's addresses. Typed addresses and `lastWorked` are kept. The
-  `bonjourName` is learned from the connection's `.service` endpoint.
+  `bonjourName` is learned from the connection's `.service` endpoint. An empty list, or one from a
+  Mac with Remote Access off, leaves the saved addresses alone.
+- **Remembered VPN addresses** (2026-11-11, branch `keep-vpn-addresses`; `SavedMacs.remembering`,
+  pure). Noah's night: Tailscale was off on his Mac for about ten minutes while his iPad connected
+  at home; that session's kind 18 listed the Wi‑Fi address alone, the refresh replaced the saved
+  list with it, and away on a hotspot the iPad had nothing it could reach, Tailscale on again or not
+  ("‹Mac› didn’t answer. It may be asleep.", without #309's hint, which needs a VPN address). Now a
+  list that replaces the saved one keeps the VPN addresses the old one had and it lacks:
+  - only kind "vpn", the Mac's own word (Tailscale's name and addresses, another VPN's address);
+    never a LAN, router or internet address, which a new list is right to drop;
+  - each with when the Mac last listed it, by this device's clock: the time the kind 18 that set
+    the old list was taken (`addressesListedAt`); for a record no kind 18 has set yet (one from
+    before this change, or just paired, its addresses from the link), the later of its newest
+    kind 18's time and its pairing's; a time after now is read as now;
+  - for 90 days after the Mac last listed it (`rememberFor`), a season: a VPN keeps a machine's
+    addresses while it stays in it (Tailscale keeps its IP addresses and its name), so a VPN off on
+    the Mac between trips still finds it, and an address of a VPN the Mac left, or a name it no
+    longer has, stops being dialed within a season;
+  - at most four (`rememberCap`), newest first: Tailscale lists three (a name, an IPv4 and an IPv6
+    address), so four keep one VPN's set and one more;
+  - a list that has one again takes it back into `addresses` (its time refreshed);
+  - a list kept as it is (empty, Remote Access off) changes nothing but their age;
+  - a new pairing of the same Mac ID (one key) keeps what the old record had and the new one's
+    list lacks, as a kind 18 would (`adding`, aged against the pairing's time); a record retired
+    for another key (`superseding`, `replacingNewKey`) takes them with it, and so does Forget;
+  - nothing is trusted for being remembered: the dial is pinned to the record's key (§7.5).
 - **An unpaired device** decodes kind 18 without verifying it, for display only (the Away from home
   group). Nothing is saved.
 - **Never saved:** link-local, zone-scoped and (in Release) loopback addresses. DEBUG builds keep
   `127.0.0.1` for the simulator tests.
 - **At launch,** if saved Macs exist but the device key does not (a restore from backup, since the
   key is `ThisDeviceOnly`), the saved Macs are cleared.
+- **The key's life** (#140, 2026-10-28; `DeviceKeyPolicy`, SavedMacs.swift, pure): a key is made
+  only when the Keychain says there is none (errSecItemNotFound); any other failed read fails that
+  pairing or dial, so a read that failed for a moment never puts a second key under the tag. A key
+  made now is used only once the Keychain gives back this very key under the tag, as the next
+  launch looks for it; else it is added once by itself; still not given back, the pairing fails
+  with the Keychain's status ("couldn’t make its key (the Keychain didn’t keep it: ‹status›)") and
+  the key is deleted again. Before, a key the next launch could not find paired for one launch: the
+  launch then cleared the saved Mac as above, the person scanned the code again, and the Mac
+  trusted one more key of the device at every launch (#140's report).
 - **Forget** removes the record only. The Mac lists the device until it is removed there, and the
   copy says so.
 
@@ -1426,7 +1468,21 @@ and types, `isExpensive`). Then, at every browser change and at every due time:
   4. internet names, internet IPs;
   5. the other LAN addresses (a VPN into the home network).
 
-  The port is `address.port ?? remotePort`.
+  The port is `address.port ?? remotePort`. That is the first group: the Mac's list and the typed
+  addresses. The remembered VPN addresses (§7.2) are a second group after it, in the same order
+  among themselves (the address that last worked first among them), never before the Mac's own
+  list, an address in both dialed once in the first (2026-11-11). What that order costs: a
+  remembered address starts a stagger (1 s) after each address of the Mac's list that neither
+  answers nor fails at once (Noah's case: the Wi‑Fi address, then the Tailscale name 1 s later); when
+  the Mac's list answers, none starts; when nothing answers (the Mac asleep), each adds about a
+  second before the dial gives up, never past `wholeDial`.
+- **At a remembered address** (`Candidate.remembered`), which the Mac no longer lists and may be
+  another machine's by now, only the Mac's own answers (our key refused after the pin, a goodbye, a
+  refusal by its door) and silence (no answer; this device's VPN off) count. Another key (-9808), a
+  TLS that is not Sill's, and a name that no longer resolves count for nothing, as another machine
+  at a LAN address: they say nothing about the Mac, and the wrong-Mac verdict would also stop the
+  automatic redials. No other saved Mac's key is taken there either (`successors`), so a stale
+  address never retires a record.
 - **Timing:**
   - attempts start 1 s apart, or at once when the previous one fails;
   - each has TCP `connectionTimeout` 10 s;
@@ -1568,10 +1624,10 @@ and types, `isExpensive`). Then, at every browser change and at every due time:
 | wrong Mac | "This isn’t the Mac mini this ‹iPad› paired with. If Sill was set up again on it, forget it here and pair again." (no Connect Anyway) |
 | revoked | "Mac mini no longer accepts this ‹iPad›. Pair it again from Sill’s Settings on the Mac." |
 | refused | "Mac mini answered, but Sill isn’t accepting remote connections there. Check that Sill is open and Remote Access is on. If you changed its port, connect at home once." |
-| VPN off here | "Tailscale looks off on this ‹iPad›. Turn it on, then tap Mac mini." ("Your VPN" when the address has no service name) |
-| name not found | ".ts.net" names: "This ‹iPad› can’t look up mac-mini.tail1234.ts.net. Is Tailscale on?"; others: "This ‹iPad› can’t look up home.example.net." |
+| VPN off here or on the Mac | "Tailscale looks off on this ‹iPad› or on Mac mini. Turn it on for both, then tap Mac mini." ("Your VPN" when the address has no service name; both ends, as the device can't tell which is off: #309) |
+| name not found | ".ts.net" names: "This ‹iPad› can’t look up mac-mini.tail1234.ts.net. Is Tailscale on, here and on Mac mini?"; others: "This ‹iPad› can’t look up home.example.net." |
 | not Sill | "Something answered at 203.0.113.9, but it isn’t Sill. Your home’s internet address may have changed." |
-| didn't answer | "Mac mini didn’t answer. It may be asleep, or Tailscale may be off on the Mac." For a raw internet IP: "Mac mini didn’t answer at 203.0.113.9. If your home’s internet address changed, connect at home once to update it, or add an address name on the Mac." |
+| didn't answer | "Mac mini didn’t answer. It may be asleep, or Tailscale may be off on the Mac." (the VPN named by any address the dial had, a remembered one too, §7.2; without one, "Mac mini didn’t answer. It may be asleep.") For a raw internet IP: "Mac mini didn’t answer at 203.0.113.9. If your home’s internet address changed, connect at home once to update it, or add an address name on the Mac." |
 | Local Network | "To reach 192.168.1.20, allow Local Network for Sill in Settings." |
 
 #### 7.9 The address parser (`Sources/StreamProtocol/AddressParser.swift`, pure; Foundation and `inet_pton`)
@@ -1743,8 +1799,10 @@ and types, `isExpensive`). Then, at every browser change and at every due time:
 | Tailscale shields up, or ACLs that block 7455 | Dials time out with the "didn't answer" copy. The README's troubleshooting names both (an ACL must allow TCP 7455 to the Mac) |
 | MagicDNS off on the device | The `.ts.net` name fails at once, and the IPs beside it are tried |
 | A WireGuard VPN into the home router | The Mac lists "Wi‑Fi — 192.168.1.20" with its note. Away, the LAN address is dialled through the tunnel; the remote door classifies the routed private source as `lan` |
-| The VPN off on the device | "Tailscale looks off on this ‹iPad›…"; the Remote row stays (it is a saved Mac) |
+| The VPN off on the device or the Mac | "Tailscale looks off on this ‹iPad› or on ‹Mac›…"; the Remote row stays (it is a saved Mac) |
 | The VPN off on the Mac | The pane shows "Tailscale — Not connected". The device: "didn't answer…" |
+| The VPN off on the Mac while a device connects at home | That session's kind 18 lacks the VPN's addresses; the device keeps them remembered (§7.2) and dials them after the Mac's list, so once the VPN is on again the device reaches the Mac from away without another session at home |
+| The Mac's VPN address changes (it rejoined the tailnet, it was renamed) | The new one is in the Mac's list and dialed first; the old one is remembered for up to 90 days, dialed only after the list, and counts for nothing if a name no longer resolves or another key answers there |
 | The home's public IP changes | Names follow by themselves. A raw IP gets the "didn't answer at …" copy, and refreshes at the next home connection (verified kind 18) |
 | Carrier-grade NAT or double NAT | The pane says so, in orange; a VPN is the way. Sill never opens router ports |
 | The router forwards another outside port (17455 → 7455) | The Mac's address name `home.example.net:17455`, or typed on the device; the saved address keeps its own port |
@@ -2310,3 +2368,48 @@ for a few seconds, until MagicDNS answers, is expected; note it if it stays). Ea
 selected without "or" coming along, and pasted (Universal Clipboard) or typed into Enter Code
 Instead; a code works once, so New Code or reopening the window gives a second try. VoiceOver reads
 the "or" line as one element.
+
+**Remembered VPN addresses (2026-11-11, branch `keep-vpn-addresses` from main at 9ea2e41).** Noah's
+night: Tailscale was off on his Mac for about ten minutes while his iPad connected at home. That
+session's kind 18 listed the Mac's Wi‑Fi address alone, `SavedMacs.refreshed` replaced the saved list
+with it, and away on an iPhone's hotspot the iPad had nothing it could reach, Tailscale on again on the
+Mac or not, with "‹Mac› didn’t answer. It may be asleep." (#309's hint names a VPN only from a VPN
+address in the record). One session at home with Tailscale on repaired it. Device only, no wire
+change; §7.2 has the rule ("Remembered VPN addresses"), §7.5 the dial and what counts at a remembered
+address, §9 two new rows.
+- Why 90 days and four: in §7.2. A remembered address never goes before the Mac's own list, so it costs
+  nothing when that list answers; when nothing answers, each adds about a second (the stagger) before
+  the dial gives up, never past its 20 s.
+- Why only the Mac's own answers count at a remembered address: an address the Mac no longer lists may
+  be another machine's by now (a node removed and its address given to another, a renamed Mac's old
+  MagicDNS name). The pin already refuses such a machine (DeviceTLS's verify block takes the record's
+  key alone, and `successors` adds no other key there), so nothing is ever trusted for being
+  remembered; what changes is the verdict: another key there would have said "This isn’t the ‹Mac›…"
+  and stopped the automatic redials, and a renamed Mac's old name, not found, "Tailscale looks off…"
+  while the Mac was only asleep.
+- The records: a new pairing of the same Mac ID carries them (`adding`, as `homeTLS`); a record
+  retired for another key takes them with it (`superseding`, `replacingNewKey`), as does Forget. Both
+  new fields are optional: a record from before decodes as before and is written back byte for byte,
+  and a build from before reads a newer record (it ignores the keys, and drops them if it writes the
+  list).
+- The Remote rows needed nothing: `DiscoveryPolicy.remoteRows` takes the saved Macs' IDs and names, never
+  their addresses, so a Mac whose only reachable addresses are remembered ones has its row.
+- Verified (merged with main at c3382ee): `Tests/checks/remote-rules` 249 checks (70 new,
+  `vpnmemory.swift`: Noah's night as a model, the rule's edges, the dial, what counts at a remembered
+  address, every failure's words with only remembered addresses to dial, the records, a build from
+  before reading a newer record, and 2,000 random lives of one Mac against an independent bookkeeping of
+  when each address was last listed) and 124 of 124 mutants (34 new); `home-records` (46, and 27 of 27
+  mutants) and `home-model` (87, and 30 of 30), which compile SavedMacs.swift on its own; `run-all.sh`
+  all 66 passed (remote-rules 248 then; 249 on its own once the random model was added); the iOS app
+  with CI's command, and in Release for the simulator, only the known `StreamClient` warning. Live on a
+  simulator of its own (an iPhone Duo on iOS 27.1, deleted after) against `SillHost --synthetic
+  --remote` on loopback, with a vpn-kind `localhost` behind a relay standing in for a Tailscale address:
+  a real kind 18 without it moved it into memory with the old list's time; with the Mac's list answering
+  nothing it won 4.2 s into the dial (four staggers) and connected, pinned; with the list answering it
+  never started; leading to another host's key it was refused by the pin, counted for nothing, and the
+  dial said "‹Mac› didn’t answer. It may be asleep, or Tailscale may be off on the Mac." (the same
+  address in the Mac's own list: "This isn’t the ‹Mac›…"); nothing remembered, every address silent:
+  "‹Mac› didn’t answer. It may be asleep."
+- Not verified: a device; the words for a remembered address silent through a real tunnel ("…may be off
+  on the Mac": a loopback stand-in has no tunnel, so live it read "Tailscale looks off on this iPhone or on
+  ‹Mac›…"; the check has the tunnel's case). For Noah: CLAUDE.md's entry.

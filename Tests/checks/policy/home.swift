@@ -66,6 +66,7 @@ func homePolicy() {
         if g != nil { return .other }                             // quit, busy…: the words as before
         guard let s else { return .other }
         if case .saved = t { return s == -9825 || s == -9829 ? .removed : (s == -9808 ? .wrongKey : .other) }
+        if t != .open(seen: nil), s == -9808 { return .otherKey }   // the reconnect pinned to the key its lost session saw
         return s == -9825 || s == -9829 ? .pairingRequired : .other
     }
     var he = 0, heOK = 0
@@ -161,5 +162,141 @@ func homePolicy() {
           && C.closed(mac: mini) == "That code no longer works. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap Mac mini again."
           && C.proofFailed(mac: mini) == "Pairing didn\u{2019}t finish: Mac mini couldn\u{2019}t show it knows the code. Tap it to try again.")
     check("copy: no answer", C.noAnswer(mac: mini) == "Mac mini didn\u{2019}t answer. Check that Sill is open on it, then tap it again.")
+    check("copy: otherKey", C.otherKey(mac: mini, device: "iPad") == "Mac mini answered with another key, so this iPad didn\u{2019}t reconnect. Tap it to connect.")
 
+    // MARK: The reconnect of an unsaved Mac on an open door pins the key its lost session saw (the security
+    // scan's finding 3, 2026-10-29: it took any key, so whatever advertised the lost Mac's Bonjour name with
+    // p=0 got the session, what this device typed and its clipboard, with no tap)
+
+    check("reconnectKey: an open session's key once its first connection was ready", P.reconnectKey(lost: P.trust(.open(seen: nil), readyWith: k1)) == k1)
+    check("reconnectKey: none from an open session that saw none, a saved Mac's, a plain door's, a remote session's",
+          P.reconnectKey(lost: .open(seen: nil)) == nil && P.reconnectKey(lost: .saved(pin: k1)) == nil
+          && P.reconnectKey(lost: .plain) == nil && P.reconnectKey(lost: nil) == nil)
+    // The review of #255: a tap that saw no key (its dial ended before its handshake) keeps the earlier key under
+    // its name (StreamClient's openKeys); what a session saw wins; nothing else takes it.
+    check("reconnectKey: a session that saw no key takes the earlier one under its name; what a session saw wins (the review of #255)",
+          P.reconnectKey(lost: .open(seen: nil), earlier: k1) == k1 && P.reconnectKey(lost: .open(seen: k2), earlier: k1) == k2)
+    check("reconnectKey: no earlier key for a saved Mac's, a plain door's or a remote session's loss",
+          P.reconnectKey(lost: .saved(pin: k1), earlier: k2) == nil && P.reconnectKey(lost: .plain, earlier: k2) == nil
+          && P.reconnectKey(lost: nil, earlier: k2) == nil)
+    func reconnectOracle(_ d: H, _ pin: Data?, _ seen: Data?) -> T? {
+        if d == .anyKey, let seen { return .open(seen: seen) }
+        if d == .plain, seen != nil { return nil }   // never plain after it (DEBUG; the review of #255)
+        return trustOracle(d, pin)
+    }
+    var rt = 0, rtOK = 0, neverAnyKey = true, neverPlain = true, savedAsBefore = true, unseenAsBefore = true
+    for d in doors { for bits in 0..<32 { for pin in [nil, k1] as [Data?] { for seen in [nil, k1, k2] as [Data?] {
+        let b = { (i: Int) in bits & (1 << i) != 0 }
+        let dial = P.homeDial(door: d, saved: b(0), revoked: b(1), homeTLS: b(2), debug: b(3), tap: b(4))
+        let t = P.reconnectTrust(dial, savedPin: pin, seen: seen)
+        rt += 1
+        if t == reconnectOracle(dial, pin, seen) { rtOK += 1 }
+        else { print("  reconnectTrust \(dial) \(String(describing: pin)) \(String(describing: seen)): \(String(describing: t))") }
+        if seen != nil, let t, P.pin(t) == .anyKey { neverAnyKey = false }
+        if seen != nil, let t, P.pin(t) == .plainTCP { neverPlain = false }
+        if b(0), dial != .plain || seen == nil, t != P.sessionTrust(dial, savedPin: pin) { savedAsBefore = false }
+        if seen == nil, t != P.sessionTrust(dial, savedPin: pin) { unseenAsBefore = false }
+    } } } }
+    check("reconnectTrust: \(rtOK) of \(rt) combinations (an open door's row pinned to the key the lost session saw, a plain door not dialed after it, the rest as before)", rt == rtOK)
+    check("reconnectTrust: once the lost session saw a key, the reconnect never dials with any key", neverAnyKey)
+    check("reconnectTrust: …nor plain (a DEBUG build's plain door under the name; the review of #255)", neverPlain)
+    check("reconnectTrust: a saved Mac's reconnect as before, whatever the lost session saw", savedAsBefore)
+    check("reconnectTrust: a lost session that never saw a key reconnects as its tap dialed", unseenAsBefore)
+    check("homeEnd: another key at that pinned reconnect (-9808): otherKey; at a tap's open dial nothing to refuse",
+          P.homeEnd(trust: .open(seen: k1), goodbye: nil, tls: -9808) == .otherKey && P.homeEnd(trust: .open(seen: nil), goodbye: nil, tls: -9808) == .other)
+
+    // StreamClient's glue as a model: a tap on an open door's row (homeDial, sessionTrust), the first
+    // connection ready with A's key (trust(_:readyWith:), and StreamClient's openKeys under the name), the
+    // session lost (reconnectKey: the reconnect's openKey), then rows under the same name as reconnectIfListed
+    // takes them, one after another: its homeDial (no tap), the rule (reconnectTrust; main's was sessionTrust),
+    // the end at a row that waits for a tap (reconnectEnd), DeviceTLS's pin against the key that answers, and
+    // the end of a refused dial (homeEnd, at homeSessionEnded). Every sequence of one to four looks: A on its
+    // open door, B (a key of its own) on an open door, a door that requires pairing and a plain one, and the
+    // person's tap whose dial ends before its handshake (the reconnect cleared, then made again from that dial:
+    // the review of #255), in Release and DEBUG.
+    enum Look: CaseIterable { case aOpen, bOpen, bRequired, bPlain, tapFails }
+    enum Ends: Equatable { case connected(Data?), ended(DiscoveryPolicy.HomeEnd?), waiting }
+    func row(_ l: Look) -> (door: P.HomeDoor, key: Data) {
+        switch l {
+        case .aOpen: return (.open, k1)
+        case .bOpen: return (.open, k2)
+        case .bRequired: return (.pairingRequired, k2)
+        case .bPlain, .tapFails: return (.plain, k2)
+        }
+    }
+    /// How the reconnect ends over `looks`, with the dials it made, under `rule` (the trust its dial starts) and
+    /// `afterTap` (the key the reconnect made again after a tap that saw none pins, from the earlier one).
+    func reconnect(_ looks: [Look], debug: Bool, rule: (H, Data?) -> T?, afterTap: (Data?) -> Data?) -> (ends: Ends, dials: Int) {
+        let tap = P.homeDial(door: .open, saved: false, revoked: false, homeTLS: false, debug: debug, tap: true)
+        let lost = P.trust(P.sessionTrust(tap, savedPin: nil)!, readyWith: k1)
+        let earlier = P.reconnectKey(lost: lost)       // openKeys[name]: the key the session under the name saw
+        var openKey = earlier
+        var dials = 0
+        for l in looks {
+            if l == .tapFails {   // the person's tap (any key; the reconnect cleared), its dial over before its handshake
+                openKey = afterTap(earlier)
+                continue
+            }
+            let (door, key) = row(l)
+            let decision = P.homeDial(door: door, saved: false, revoked: false, homeTLS: false, debug: debug, tap: false)
+            guard let trust = rule(decision, openKey) else {
+                if P.reconnectEnd(decision, saved: false) != nil { return (.ended(nil), dials) }   // waits for a tap: its words
+                continue                                                                         // Update Sill: looks on
+            }
+            dials += 1
+            switch P.pin(trust) {
+            case .plainTCP: return (.connected(nil), dials)
+            case .anyKey: return (.connected(key), dials)
+            case .key(let pin):
+                if pin == key { return (.connected(key), dials) }
+                let end = P.homeEnd(trust: trust, goodbye: nil, tls: P.pinRefused)
+                if end == .other { continue }       // the ordinary end: the reconnect would dial on
+                return (.ended(end), dials)
+            }
+        }
+        return (.waiting, dials)
+    }
+    var sequences: [[Look]] = [], level: [[Look]] = [[]]
+    for _ in 1...4 {
+        level = level.flatMap { s in Look.allCases.map { s + [$0] } }
+        sequences += level
+    }
+    var models = 0, neverB = true, endsAtB = true, aTaken = true, plainNever = true, mainGaveB = 0, headGavePlain = 0, headGaveBAfterTap = 0
+    for debug in [false, true] { for s in sequences {
+        models += 1
+        let fixed = reconnect(s, debug: debug, rule: { d, seen in P.reconnectTrust(d, savedPin: nil, seen: seen) },
+                              afterTap: { P.reconnectKey(lost: .open(seen: nil), earlier: $0) })
+        let before = reconnect(s, debug: debug, rule: { d, _ in P.sessionTrust(d, savedPin: nil) }, afterTap: { _ in nil })
+        // #255 before its review: the open door pinned, but a plain door dialed as a tap's (a DEBUG build's), and a
+        // tap whose dial saw no key leaving a reconnect with none (any key).
+        let head = reconnect(s, debug: debug, rule: { d, seen in seen.flatMap { d == .anyKey ? T.open(seen: $0) : nil } ?? P.sessionTrust(d, savedPin: nil) },
+                             afterTap: { _ in nil })
+        // B's plain door has no key: connected(nil) is B too.
+        if fixed.ends == .connected(k2) || fixed.ends == .connected(nil) { neverB = false }
+        if before.ends == .connected(k2) { mainGaveB += 1 }
+        if head.ends == .connected(nil) { headGavePlain += 1 }
+        if head.ends == .connected(k2), s.contains(.tapFails) { headGaveBAfterTap += 1 }
+        // The first look that is dialed or ends it decides: A's key connects, B's open door ends it with
+        // otherKey after one dial, B's required door ends it with no dial; a plain door (Update Sill in
+        // Release, a plain dial a DEBUG build's tap makes) is looked past in both, and so is the person's tap
+        // whose dial saw no key: the reconnect made again after it pins A's key still (the review of #255).
+        let first = s.first { $0 != .bPlain && $0 != .tapFails }
+        switch first {
+        case .aOpen?: if fixed.ends != .connected(k1) || fixed.dials != 1 { aTaken = false }
+        case .bOpen?: if fixed.ends != .ended(.otherKey) || fixed.dials != 1 { endsAtB = false }
+        case .bRequired?: if fixed.ends != .ended(nil) || fixed.dials != 0 { endsAtB = false }
+        case .bPlain?, .tapFails?: break   // never the first: looked past
+        case nil: if fixed.ends != .waiting || fixed.dials != 0 { endsAtB = false }
+        }
+        if fixed.ends == .connected(nil) { plainNever = false }
+    } }
+    check("model (\(models) reconnects): never connected to B, by its key or by its plain door, a tap that saw no key between", neverB)
+    check("model: the first row dialed with B's key ends the reconnect (otherKey) after that one dial; B's door that requires pairing ends it with none",
+          endsAtB)
+    check("model: A answering under its name with its key reconnects, at the first dial", aTaken)
+    check("model: a plain door under the name is never dialed after the TLS session, DEBUG or Release: looked past (the review of #255)", plainNever)
+    check("model: before the fix (sessionTrust), \(mainGaveB) of the \(models) gave B's key the session", mainGaveB > 0)
+    check("model: before the review (a plain door dialed as a DEBUG tap's), \(headGavePlain) of the \(models) gave B's plain door the session", headGavePlain > 0)
+    check("model: before the review (a tap's dial that saw no key left a reconnect with none), \(headGaveBAfterTap) of the \(models) gave B's key the session",
+          headGaveBAfterTap > 0)
 }

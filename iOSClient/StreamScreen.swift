@@ -100,6 +100,103 @@ enum DuoLayout {
 
 // MARK: - Screen
 
+/// Sill's hold on the device's own auto-lock (UIApplication.isIdleTimerDisabled) across its windows
+/// (DeviceIdlePolicy, PR #230). Each window's WindowSessionObserver says which session it shows and
+/// in which UIWindow, both weak as MacMenuHub's are, so a window that closed leaves nothing, whether
+/// or not its stream screen ran its onDisappear; every look lists them afresh: whether a window's
+/// scene is foreground active now, whether its session is connected and streaming, and when the
+/// person last used it (DeviceIdlePolicy.lastUse: input the person sent the Mac, one of the stream
+/// screen's controls, the start of a session the person started, the moment the window came to the
+/// front; nothing the device did by itself). It looks again when a scene comes, goes or changes its
+/// activation, when a session connects, disconnects or changes its source, when the person uses a
+/// session while nothing holds, and when the hold would end. Main thread.
+final class DeviceIdleTimer {
+    static let shared = DeviceIdleTimer()
+
+    private struct Entry {
+        weak var client: StreamClient?
+        weak var window: UIWindow?
+        /// When its window's scene last came to the front (systemUptime); nil while it is not there.
+        var frontSince: Double?
+    }
+    private var entries: [Entry] = []
+    private var observers: [NSObjectProtocol] = []
+    private var recheck: Timer?
+    /// Whether auto-lock is held off now.
+    private(set) var holding = false
+
+    private init() {
+        for name in [UIScene.willConnectNotification, UIScene.didDisconnectNotification, UIScene.didActivateNotification,
+                     UIScene.willDeactivateNotification, UIScene.didEnterBackgroundNotification,
+                     UIScene.willEnterForegroundNotification] {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                // A scene's activation state reads its new value once its notification has gone out.
+                DispatchQueue.main.async { self?.update() }
+            })
+        }
+    }
+
+    /// A session's screen moved into `window` (nil: out of every window).
+    func session(_ client: StreamClient, window: UIWindow?) {
+        let kept = entries.first { $0.client === client }
+        entries.removeAll { $0.client == nil || $0.client === client }
+        if let window {
+            entries.append(Entry(client: client, window: window, frontSince: kept?.window === window ? kept?.frontSince : nil))
+        }
+        update()
+    }
+
+    /// The person used a session (input to the Mac, one of the stream screen's controls). While
+    /// auto-lock is held off its timer looks again when the hold would end; while it is not, now.
+    func used() { if !holding { update() } }
+
+    /// Lists the windows afresh and applies DeviceIdlePolicy.
+    func update() {
+        let now = ProcessInfo.processInfo.systemUptime
+        entries.removeAll { $0.client == nil || $0.window == nil }
+        var windows: [DeviceIdlePolicy.Window] = []
+        for i in entries.indices {
+            guard let client = entries[i].client, let window = entries[i].window else { continue }
+            let streaming = client.connected && client.active != .none
+            let front = window.windowScene?.activationState == .foregroundActive
+            if !front { entries[i].frontSince = nil } else if entries[i].frontSince == nil { entries[i].frontSince = now }
+            let used = DeviceIdlePolicy.lastUse(.init(input: client.lastPersonInputAt, control: client.lastActionAt,
+                                                      session: client.personSessionAt, front: entries[i].frontSince))
+            windows.append(DeviceIdlePolicy.Window(foregroundActive: front, streaming: streaming, lastUsedAt: used))
+        }
+        let ends = DeviceIdlePolicy.holdEnds(windows, now: now, limit: Self.limit)
+        recheck?.invalidate()
+        recheck = nil
+        if let ends {
+            let timer = Timer(timeInterval: max(ends - now, 0.5), repeats: false) { [weak self] _ in self?.update() }
+            RunLoop.main.add(timer, forMode: .common)
+            recheck = timer
+        }
+        let hold = ends != nil
+        guard hold != holding || UIApplication.shared.isIdleTimerDisabled != hold else { return }
+        holding = hold
+        UIApplication.shared.isIdleTimerDisabled = hold
+        #if DEBUG
+        if let ends {
+            print("idle: auto-lock held off while a window streams, \(Int((ends - now).rounded())) s more without use")
+        } else {
+            print("idle: auto-lock is the device's own again")
+        }
+        #endif
+    }
+
+    /// DEBUG `-SillIdleLimit <s>`: the hold's limit for one run, to see it end without waiting ten
+    /// minutes; DeviceIdlePolicy.idleLimit otherwise, and always in a Release build.
+    #if DEBUG
+    private static let limit: Double = {
+        let s = UserDefaults.standard.double(forKey: "SillIdleLimit")
+        return s > 0 ? s : DeviceIdlePolicy.idleLimit
+    }()
+    #else
+    private static let limit = DeviceIdlePolicy.idleLimit
+    #endif
+}
+
 struct StreamScreen: View {
     @ObservedObject var client: StreamClient
     @State private var drawerOpen = false
@@ -115,8 +212,9 @@ struct StreamScreen: View {
     @State private var textScale: Double? = nil
     /// The Aa slider is unfolded (finger down): the bars fade their other buttons meanwhile.
     @State private var scaleOpen = false
-    /// The thumbnail whose traffic-light submenu is open (held for 1.5 s). The bars clip their
-    /// content, so the submenu is drawn by this root, anchored to the thumbnail's frame.
+    /// The thumbnail whose traffic-light submenu is open (held for ThumbnailHold's length, 0.5 s unless
+    /// changed in Settings; issue #113). The bars clip their content, so the submenu is drawn by this
+    /// root, anchored to the thumbnail's frame.
     @State private var windowMenu: UInt32? = nil
     /// The Settings panel (the Mac's streaming settings) is open. Up here, next to the drawer, so a
     /// rotation keeps it open and it re-anchors in the other layout.
@@ -140,6 +238,11 @@ struct StreamScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The stream panel's size in points, reported by whichever layout is showing.
     @State private var panelSize: CGSize = .zero
+    /// The picture's pinch zoom (StreamZoom, issue #65): one per stream screen, so a turn keeps it and
+    /// the next session starts at 1×. Held, not watched (`@State`, as `overlay` is; a `@StateObject`
+    /// would redraw this whole screen at every step of a pinch): only the picture's own view watches it
+    /// (ZoomedStreamView).
+    @State private var zoom = StreamZoomModel()
     /// The viewport send waiting out its debounce, if any.
     @State private var pendingViewport: Task<Void, Never>? = nil
     /// The line over the stream while the link cannot carry the quality (docs/remote-bundle-plan.md
@@ -154,6 +257,8 @@ struct StreamScreen: View {
     @State private var tour: TourRun? = nil
     /// Where the tour's targets are, as the layout on screen reports them.
     @State private var tourTargets: [TourTarget: CGRect] = [:]
+    /// The Keyboard toggle on the Duo's inner display (#215), while it shows: the clipboard's chip keeps clear.
+    @State private var keyboardToggleFrame: CGRect? = nil
     /// This session's first picture (the Mac's name, a frame size, a source), systemUptime.
     @State private var pictureAt: Double? = nil
     /// The layout on screen (nil until the screen has a size), and when it began.
@@ -265,9 +370,12 @@ struct StreamScreen: View {
                 // nothing else does (the frame around it is empty). Near the bar, off the link's line,
                 // inside the stream panel's corner; never while something is open over the stream.
                 if clipboardChipAllowed, client.clipboardChip || client.clipboardNote != nil, let panel = tourTargets[.stream] {
-                    let corner = ClipboardPolicy.chipCorner(landscape: layout == .landscape, linkLineShown: shownLinkLine != nil)
+                    let corner = ClipboardPolicy.chipCorner(landscape: layout == .landscape, linkLineShown: streamLine != nil)
+                    // Never over the Keyboard toggle in the pane's other bottom corner (#215).
+                    let widest = corner == .bottomTrailing ? DuoPosture.clipboardChipMaxWidth(panel: panel, toggle: keyboardToggleFrame)
+                                                           : max(0, panel.width - 16)
                     ClipboardChip(client: client)
-                        .frame(maxWidth: max(0, panel.width - 16), alignment: .trailing)
+                        .frame(maxWidth: widest, alignment: .trailing)
                         .padding(8)
                         .frame(width: panel.width, height: panel.height,
                                alignment: corner == .topTrailing ? .topTrailing : .bottomTrailing)
@@ -278,15 +386,22 @@ struct StreamScreen: View {
                 // outside link puts the tour aside until the overlay has closed.
                 if let run = tour, !overlayShown {
                     // With Larger Picture no thumbnails: the bar card is about Apps, and the cards
-                    // upright stand in the picture's whole room, the black under a short picture.
-                    TourOverlay(run: run, copy: tourCopy(run, layout, keysOnItsSide: posture.onInnerDisplay,
-                                                         thumbnails: largerKeyboard == nil),
+                    // upright stand in the picture's whole room, the black under a short picture. The
+                    // words follow what this Mac and this device have now (TourFeatures).
+                    let features = tourFeatures(offersLarger: offersLarger)
+                    let copy = tourCopy(run, layout, keysOnItsSide: posture.onInnerDisplay,
+                                        thumbnails: largerKeyboard == nil, features: features)
+                    TourOverlay(run: run, copy: copy,
                                 layout: layout, targets: tourTargets,
                                 thumbnails: largerKeyboard == nil,
                                 room: largerKeyboard.map { PhonePortraitLayout(size: geo.size, keyboard: $0).picture },
                                 screen: geo.size, bottomInset: geo.safeAreaInsets.bottom,
                                 next: tourNext, skip: tourSkip)
                         .transition(.opacity)
+                        #if DEBUG
+                        // The console's line for the photo gates: each card's rows and what they looked at.
+                        .onChange(of: Self.tourRowsLine(run, copy, features), initial: true) { _, line in print(line) }
+                        #endif
                 }
                 // A sibling in the same stack, not an `.overlay`: over the stream's UIKit input
                 // view, only a sibling drawn after it received the touches (measured on the
@@ -298,6 +413,7 @@ struct StreamScreen: View {
             }
             .coordinateSpace(.named(TourSpace.name))
             .onPreferenceChange(TourTargetsKey.self) { tourTargets = $0 }
+            .onPreferenceChange(KeyboardToggleFrameKey.self) { keyboardToggleFrame = $0 }
             .onChange(of: layout, initial: true) { _, now in layoutChanged(to: now) }
             // A thumbnail's lights hang from the strip, which Larger Picture's arrangement has none
             // of: when the arrangement changes under them (what streams changed, or a turn), they
@@ -346,6 +462,13 @@ struct StreamScreen: View {
         .onChange(of: windowMenu) { _, menu in if menu != nil { setSettings(false) } }
         .ignoresSafeArea(edges: .bottom)
         .onAppear {
+            // Where the software keyboard is, from now on: the laptop pose's key row follows it (#215).
+            _ = KeyboardFrameMonitor.shared
+            // A click, a key, a pick, a menu item or a gesture from anywhere on this screen, before it
+            // goes out: the input view sends what is still composed, then forgets what was typed, which
+            // dictation and an input method may revise (#138).
+            let proxy = overlay
+            client.onCaretMayMove = { [weak proxy] in proxy?.caretMayHaveMoved() }
             // A fresh connection starts on the Desktop (the client asks for it as soon as the host
             // reports nothing streaming), so the drawer stays closed until the user opens it.
             sendViewport()
@@ -356,7 +479,13 @@ struct StreamScreen: View {
             #endif
         }
         .onChange(of: client.active) { _, source in
+            // Another source, whoever picked it: the whole picture again (a new frame size of the same
+            // source keeps the zoom where it is on the pane).
+            zoom.reset()
             if source != .none { withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false } }
+            // Another source, whoever picked it: the Mac's caret is in another window (#138). A pick or a
+            // launch from this device has let go of what was typed already, before it went out.
+            overlay.caretMayHaveMoved()
             // The host sizes a window as it selects it, from the last viewport it has; this repeat
             // is for a host that restarted, or a window that was picked from the Mac's side.
             sendViewport()
@@ -388,6 +517,8 @@ struct StreamScreen: View {
         // drawer or the pairing overlay opening or closing over it.
         .onChange(of: linkReportLine, initial: true) { _, _ in updateLinkLine() }
         .onChange(of: linkLineAllowed) { _, _ in updateLinkLine() }
+        // The off-console view (docs/off-console-plan.md): VoiceOver hears what the picture is, once, as it comes.
+        .onChange(of: client.lockView) { _, on in if on { AccessibilityNotification.Announcement(LockedMac.viewLine).post() } }
         // The tour: the first picture starts its beat; an outside link puts it aside and back.
         .onChange(of: pictureReady, initial: true) { _, ready in if ready { pictureCame() } }
         // The bar's own controls used, by a tap or by VoiceOver, Switch Control, Voice Control or
@@ -449,6 +580,15 @@ struct StreamScreen: View {
     /// The line as it shows over the stream now, or nil.
     private var shownLinkLine: String? { linkLine.visible ? linkLine.text : nil }
 
+    /// The line over the stream: the off-console view's while it lasts and nothing is open over the stream
+    /// (LockedMac.viewLine; docs/off-console-plan.md), else the link's.
+    private var streamLine: String? {
+        if client.lockView { return linkLineAllowed ? LockedMac.viewLine : nil }
+        return shownLinkLine
+    }
+    /// The off-console view's line takes three lines at most, the link's two.
+    private var streamLineLines: Int { client.lockView ? 3 : 2 }
+
     // MARK: Viewport
 
     /// Tells the host the panel size and text scale, now or after `delay` seconds. A newer call
@@ -465,7 +605,7 @@ struct StreamScreen: View {
             let fps = StreamClient.wantedFPS(remote: client.awayCapsFrameRate)
             #if DEBUG
             print("viewport: \(Self.points(panelSize.width))×\(Self.points(panelSize.height)) pt, scale "
-                  + (textScale.map { TextScaleControl.label($0) } ?? "none") + ", \(fps) fps")
+                  + (textScale.map { TextScaleControl.label($0) } ?? "off") + ", \(fps) fps")
             #endif
             client.sendViewport(Viewport(width: Double(panelSize.width),
                                          height: Double(panelSize.height),
@@ -553,6 +693,8 @@ struct StreamScreen: View {
         // accessibility tree hands them out (VoiceOver's order, without VoiceOver), labels and frames.
         let dump = defaults.double(forKey: "SillAXDump")
         if dump > 0 { after(dump) { Self.accessibilityDump() } }
+        // `-SillAXAction '<label>|<action>'`: half a second after the dump, that element's custom action.
+        if dump > 0, let spec = defaults.string(forKey: "SillAXAction") { after(dump + 0.5) { Self.accessibilityPerform(spec) } }
         // `-SillLargerPictureToggle <s>[,<s>…]`: Larger Picture switched at those seconds, as the
         // Settings panel's switch does (saved; without `-Sill.largerPicture`, which would hold it).
         let toggles = (defaults.string(forKey: "SillLargerPictureToggle") ?? "")
@@ -564,7 +706,42 @@ struct StreamScreen: View {
                       + (largerPictureHeld != nil ? "; the Settings panel is open, so it applies when the panel closes" : ""))
             }
         }
+        // `-SillZoom 'S@X,Y[; T S@X,Y …]'`: the picture's zoom for photos (StreamZoom): at T seconds (1
+        // without one), one pinch step of factor S about that fraction of the picture's pane (its middle
+        // without one), then the lift's settle, as two fingers would leave it: `2.5@0.3,0.4`, then
+        // `3 0.1` for a pinch all the way out. In the mock too.
+        for (time, factor, point) in Self.zoomSteps(defaults.string(forKey: "SillZoom") ?? "") {
+            after(time) {
+                var z = zoom.zoom
+                let size = z.pane
+                guard size.width > 0, size.height > 0 else { print("harness: -SillZoom: no picture pane yet"); return }
+                let at = CGPoint(x: point.x * size.width, y: point.y * size.height)
+                z.pinch(factor: factor, from: at, to: at, in: size)
+                z.settle()
+                zoom.set(z)
+                print("harness: -SillZoom \(factor)@\(point.x),\(point.y): " + Self.zoomLine(z))
+            }
+        }
+        // `-SillHitTest 'S x,y[; x,y …]'`: at S seconds, what UIKit's hit test finds at each point of the
+        // window (its points), for the zoom's gate: a zoomed picture never under the bar's or the keys'
+        // touches (StreamZoom; HEVCDisplayView takes none).
+        let probe = (defaults.string(forKey: "SillHitTest") ?? "").split(separator: ";").map { $0.split(separator: " ").map(String.init) }
+        if let first = probe.first, first.count == 2, let time = Double(first[0]) {
+            let points = ([first[1]] + probe.dropFirst().compactMap { $0.first }).compactMap { item -> CGPoint? in
+                let xy = item.split(separator: ",").compactMap { Double($0) }
+                return xy.count == 2 ? CGPoint(x: xy[0], y: xy[1]) : nil
+            }
+            after(time) {
+                guard let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return }
+                for point in points {
+                    let hit = window.hitTest(point, with: nil)
+                    print("harness: hit test at (\(Self.points(point.x)), \(Self.points(point.y))): "
+                          + (hit.map { String(describing: type(of: $0)) } ?? "nothing") + ", the zoom " + Self.zoomLine(zoom.zoom))
+                }
+            }
+        }
         guard live else { return }
+        client.runSoundArguments()
         if defaults.bool(forKey: "SillDrawer") {
             after(1.5) { print("harness: the drawer opened"); withAnimation(.easeOut(duration: 0.18)) { drawerOpen = true } }
         }
@@ -578,32 +755,89 @@ struct StreamScreen: View {
         if defaults.bool(forKey: "SillScaleOpen") {
             after(1.5) {
                 let scale = defaults.double(forKey: "SillScale")
-                if scale > 0 { textScale = scale }
+                if scale > 0 { textScale = TextScale.scale(at: scale) }     // 0.25 is Off's place: no scale
+                // Aa sizes a window: over the Desktop, or nothing, its ruler does not open (TextScale.selectable).
+                guard client.textScaleSelectable else {
+                    print("harness: the Aa ruler stays closed: Aa is for a window, and none streams")
+                    return
+                }
                 print("harness: the Aa ruler opened")
                 scaleOpen = true
+            }
+        }
+        // `-SillScaleScript '<s> <scale|off>[; …]'`: Aa's value set s seconds in, as the ruler's release
+        // sets it, whatever streams (a synthetic host streams only the Desktop, over which Aa is dimmed):
+        // the viewport it sends (the console's `viewport: …` line), and the host's `win.fitOff` for a
+        // scale then Off (issue #179). A test hook: the bars never send a scale while Aa is dimmed.
+        for step in (defaults.string(forKey: "SillScaleScript") ?? "").split(separator: ";") {
+            let parts = step.split(separator: " ")
+            let time = parts.count == 2 ? Double(parts[0]) : nil
+            let off = parts.count == 2 && parts[1].lowercased() == "off"
+            let scale = parts.count == 2 ? Double(parts[1]).map { TextScale.snap($0, offered: false) } : nil
+            guard let time, time >= 0, off || scale != nil else {
+                print("harness: -SillScaleScript: “\(step.trimmingCharacters(in: .whitespaces))” is not “<s> <scale|off>”; skipped")
+                continue
+            }
+            after(time) {
+                print("harness: Aa set to " + (off ? "Off" : TextScale.title(at: scale!)) + " at " + Self.points(CGFloat(time)) + " s")
+                textScale = off ? nil : scale
             }
         }
     }
     private static var launchArgumentsRan = false
 
+    /// `-SillZoom`'s steps: (seconds, factor, the fraction of the pane); none for what does not read.
+    static func zoomSteps(_ text: String) -> [(Double, CGFloat, CGPoint)] {
+        text.split(separator: ";").compactMap { item in
+            let words = item.split(separator: " ", omittingEmptySubsequences: true)
+            guard words.count == 1 || words.count == 2 else { return nil }
+            let time = words.count == 2 ? Double(words[0]) : 1
+            let parts = words[words.count - 1].split(separator: "@")
+            guard let time, time >= 0, let factor = Double(parts[0]), factor > 0, parts.count <= 2 else { return nil }
+            let xy = parts.count == 2 ? parts[1].split(separator: ",").compactMap { Double($0) } : [0.5, 0.5]
+            guard xy.count == 2 else { return nil }
+            return (time, CGFloat(factor), CGPoint(x: xy[0], y: xy[1]))
+        }
+    }
+
+    /// "2.50×, offset (125.0, 60.0) in a 1000×650 pt pane", for the console.
+    static func zoomLine(_ z: StreamZoom) -> String {
+        String(format: "%.2f×, offset (%.1f, %.1f) in a %@×%@ pt pane", z.scale, z.offset.width, z.offset.height,
+               points(z.pane.width), points(z.pane.height))
+    }
+
     /// `-SillAXDump`: walks the key window as an assistive technology does (an element, else its
     /// `accessibilityElements`, else its element count, else its subviews) and prints one line per
     /// element: "ax: 1 Apps (14,454 76×50)".
-    private static func accessibilityDump() {
-        guard let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else {
-            print("ax: no key window"); return
+    static func accessibilityDump() {
+        guard let elements = accessibilityElementsInOrder() else { print("ax: no key window"); return }
+        for (i, element) in elements.enumerated() {
+            let f = element.accessibilityFrame
+            let label = element.accessibilityLabel ?? element.accessibilityValue ?? "(no label)"
+            // What VoiceOver says after the name: the value, the hint, dimmed and adjustable (Aa's
+            // Off and its dimmed state over the Desktop, issue #179); and its actions (the version's Copy).
+            var said: [String] = []
+            if element.accessibilityLabel != nil, let value = element.accessibilityValue, !value.isEmpty { said.append("value “\(value)”") }
+            if let hint = element.accessibilityHint, !hint.isEmpty { said.append("hint “\(hint)”") }
+            if element.accessibilityTraits.contains(.notEnabled) { said.append("dimmed") }
+            if element.accessibilityTraits.contains(.adjustable) { said.append("adjustable") }
+            if let actions = element.accessibilityCustomActions, !actions.isEmpty {
+                said.append("actions " + actions.map { "“\($0.name)”" }.joined(separator: ", "))
+            }
+            print("ax: \(i + 1) \(label) (\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height)))"
+                  + (said.isEmpty ? "" : ": " + said.joined(separator: ", ")))
         }
-        var lines: [String] = []
+    }
+
+    /// The key window's accessibility elements in the order the tree hands them out.
+    private static func accessibilityElementsInOrder() -> [NSObject]? {
+        guard let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return nil }
+        var elements: [NSObject] = []
         var seen = Set<ObjectIdentifier>()
         func visit(_ object: Any, _ depth: Int) {
             guard depth < 60, seen.count < 5000, let element = object as? NSObject, !element.accessibilityElementsHidden,
                   seen.insert(ObjectIdentifier(element)).inserted else { return }
-            if element.isAccessibilityElement {
-                let f = element.accessibilityFrame
-                let label = element.accessibilityLabel ?? element.accessibilityValue ?? "(no label)"
-                lines.append("\(label) (\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height)))")
-                return
-            }
+            if element.isAccessibilityElement { elements.append(element); return }
             if let children = element.accessibilityElements, !children.isEmpty {
                 children.forEach { visit($0, depth + 1) }
                 return
@@ -618,7 +852,27 @@ struct StreamScreen: View {
             }
         }
         visit(window, 0)
-        for (i, line) in lines.enumerated() { print("ax: \(i + 1) \(line)") }
+        return elements
+    }
+
+    /// `-SillAXAction '<label>|<action>'`: performs the custom action of that name on the first element
+    /// whose label begins with that label, as VoiceOver's actions rotor does, and says what the
+    /// clipboard holds after it (the version's Copy: docs/version-label-plan.md).
+    static func accessibilityPerform(_ spec: String) {
+        let parts = spec.split(separator: "|", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { print("ax: -SillAXAction wants '<label>|<action>'"); return }
+        guard let element = accessibilityElementsInOrder()?.first(where: { ($0.accessibilityLabel ?? "").hasPrefix(parts[0]) }) else {
+            print("ax: no element whose label begins “\(parts[0])”"); return
+        }
+        guard let action = element.accessibilityCustomActions?.first(where: { $0.name == parts[1] }) else {
+            print("ax: “\(element.accessibilityLabel ?? "")” has no action “\(parts[1])”"); return
+        }
+        let done: Bool
+        if let handler = action.actionHandler { done = handler(action) }
+        else if let target = action.target as? NSObject { _ = target.perform(action.selector, with: action); done = true }
+        else { done = false }
+        print("ax: performed “\(action.name)” on “\(element.accessibilityLabel ?? "")”: \(done); the clipboard holds "
+              + (UIPasteboard.general.string.map { "“\($0)”" } ?? "no text"))
     }
     #endif
 
@@ -739,7 +993,8 @@ struct StreamScreen: View {
     /// The picture, as the tour counts it: the Mac's first window list, a frame size and a source
     /// that streams. A Mac that refuses this device, or cannot capture, never gets here.
     private var pictureReady: Bool {
-        !client.macName.isEmpty && client.videoSize != .zero && client.active != .none
+        // Not in the off-console view: nothing the tour teaches reaches the Mac then (docs/off-console-plan.md).
+        !client.macName.isEmpty && client.videoSize != .zero && client.active != .none && !client.lockView
     }
 
     /// The tour is on screen (not put aside under the pairing overlay).
@@ -777,12 +1032,43 @@ struct StreamScreen: View {
     }
 
     /// `keysOnItsSide`: the iPhone Duo open, whose keys and trackpad come with the device on its side.
-    /// `thumbnails`: false for a phone with Larger Picture.
-    private func tourCopy(_ run: TourRun, _ layout: TourLayout, keysOnItsSide: Bool = false, thumbnails: Bool = true) -> TourCopy {
+    /// `thumbnails`: false for a phone with Larger Picture. `features`: `tourFeatures`.
+    private func tourCopy(_ run: TourRun, _ layout: TourLayout, keysOnItsSide: Bool = false, thumbnails: Bool = true,
+                          features: TourFeatures) -> TourCopy {
         TourPolicy.copy(run.at, layout, mac: client.macName, device: StreamClient.deviceWord,
                         voiceOver: tourVoiceOver, firstOfRun: run.firstOfRun, keysOnItsSide: keysOnItsSide,
-                        thumbnails: thumbnails)
+                        thumbnails: thumbnails, features: features)
     }
+
+    /// What the tour's words depend on now (TourFeatures): the Menus button on screen (its target
+    /// reported), this device's Three-Finger Gestures with a Mac that takes them, the Mac's Virtual
+    /// Display setting as the Settings panel shows it, the clipboard the Mac's window list shares, this
+    /// device's Paste on ‹Mac› Right Away, a Mac with sound (Send Audio, on or off), and
+    /// `offersLarger`, the Settings panel's Larger Picture switch offered here (`body`). The window
+    /// list comes before the picture and kind 16 right after it, so a card sees them; a late change
+    /// redraws its rows.
+    private func tourFeatures(offersLarger: Bool) -> TourFeatures {
+        TourFeatures(menus: tourTargets[.menus] != nil,
+                     gestures: StreamClient.gesturesOn && (client.hostGestures ?? 0) >= TrackpadGesture.generation,
+                     virtualDisplay: client.settings.displayed?.virtualDisplay == true,
+                     clipboard: ClipboardPolicy.hostTakes(client.hostClipboard),
+                     pasteRightAway: StreamClient.pasteRightAwayOn,
+                     sound: client.macHasSound,
+                     largerPicture: offersLarger)
+    }
+
+    #if DEBUG
+    /// "tour: card bar (Windows and Menus): 5 rows, 2 New; Menus button, gestures, no Virtual Display,
+    /// clipboard, paste right away, sound, no Larger Picture".
+    static func tourRowsLine(_ run: TourRun, _ copy: TourCopy, _ f: TourFeatures) -> String {
+        func has(_ on: Bool, _ name: String) -> String { on ? name : "no " + name }
+        let what = [has(f.menus, "Menus button"), has(f.gestures, "gestures"), has(f.virtualDisplay, "Virtual Display"),
+                    has(f.clipboard, "clipboard"), has(f.pasteRightAway, "paste right away"), has(f.sound, "sound"),
+                    has(f.largerPicture, "Larger Picture")]
+        return "tour: card \(run.at.rawValue) (\(copy.title)): \(copy.rows.count) rows, \(copy.rows.filter(\.isNew).count) New; "
+            + what.joined(separator: ", ")
+    }
+    #endif
 
     private func tourLog(_ line: @autoclosure () -> String) {
         #if DEBUG
@@ -1032,7 +1318,8 @@ struct StreamScreen: View {
                    keyboardShown: $keyboardShown,
                    textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
                    settingsOpen: settingsOpen,
-                   // Apps, Menus, Aa, Keyboard, Desktop, Settings, and the strip.
+                   // Apps, Menus, Aa, Keyboard, Desktop, Settings, and the strip. The Mac's sound has no
+                   // button: Send Audio and Mute are the Settings panel's switches (Noah, 2026-10-27).
                    menusFit: MacMenuButton.fits(width: width - 2 * bar.padding, buttons: 6, buttonWidth: bar.buttonWidth,
                                                 gap: bar.gap, thumbWidth: bar.thumbWidth),
                    toggleKeyboard: { overlay.toggleKeyboard() },
@@ -1054,9 +1341,11 @@ struct StreamScreen: View {
                              settingsTransition: { settingsTransition(anchor: $0) },
                              onPanelSize: { panelSize = $0 },
                              pairThisDevice: openPairingOverlay,
-                             linkLine: shownLinkLine,
+                             linkLine: streamLine,
+                             linkLineLines: streamLineLines,
                              takeTour: takeTour,
-                             largerKeyboard: largerKeyboard)
+                             largerKeyboard: largerKeyboard,
+                             zoom: zoom)
     }
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
@@ -1066,8 +1355,10 @@ struct StreamScreen: View {
             Color.black
 
             ZStack {
-                StreamView(client: client)
-                // Same frame as the video, so a touch maps straight onto the streamed frame.
+                // Scaled and moved by the picture's zoom, inside the clip below.
+                ZoomedStreamView(client: client, zoom: zoom)
+                // Same frame as the video, so a touch maps straight onto the streamed frame (through the
+                // zoom, StreamZoom.unzoomedPoint).
                 InputOverlay(videoSize: client.videoSize,
                              send: { client.sendInput($0) },
                              setOwnPointer: { client.setOwnPointer($0, from: $1) },
@@ -1075,10 +1366,15 @@ struct StreamScreen: View {
                              isKeyboardShown: $keyboardShown,
                              latchedModifiers: latched,
                              onModifiersConsumed: { latched = [] },
-                             sendGesture: { client.sendGesture($0, fingers: $1) })
+                             sendGesture: { client.sendGesture($0, fingers: $1) },
+                             macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
+                             readZoom: { [zoom] in zoom.zoom },
+                             writeZoom: { [zoom] in zoom.set($0) })
             }
             .background(Palette.panel)
-            .overlay(alignment: .top) { LinkLineView(text: shownLinkLine) }
+            // A locked Mac: its cover over the picture (LockedMac), under the link's line.
+            .overlay { LockedMacShade(client: client) }
+            .overlay(alignment: .top) { LinkLineView(text: streamLine, lines: streamLineLines) }
             .clipShape(streamShape)
             .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
             // The panel itself, inside the padding: the size the host fits the Mac window to.
@@ -1139,6 +1435,8 @@ struct StreamScreen: View {
 /// (docs/iphone-duo-plan.md).
 struct LinkLineView: View {
     let text: String?
+    /// Two lines for the link's words; the off-console view's take three (docs/off-console-plan.md).
+    var lines = 2
     /// The Duo's hinge (iOS 27.1): with the fold, where the line goes.
     @Environment(\.duoEnvironment) private var duoEnvironment
     var body: some View {
@@ -1158,7 +1456,7 @@ struct LinkLineView: View {
                     .font(.footnote)
                     .foregroundStyle(Palette.text)
                     .multilineTextAlignment(.center)
-                    .lineLimit(2)
+                    .lineLimit(lines)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 7)
@@ -1173,6 +1471,53 @@ struct LinkLineView: View {
         .frame(maxWidth: .infinity, alignment: .top)
         .allowsHitTesting(false)
         .animation(.easeOut(duration: 0.2), value: text)
+    }
+}
+
+// MARK: - A locked Mac's cover
+
+/// What covers the stream while the Mac shows nothing of itself (`StreamClient.lockShade`, LockedMac,
+/// docs/locked-mac-plan.md): an opaque panel with why, then after the unlock "Unlocking…" until its
+/// picture's first keyframe. The picture under it was removed at the lock (HEVCDisplayView.blank), and the
+/// Mac streams a black placeholder meanwhile. It takes no touch: a paired device's keys and taps still
+/// reach a locked screen, where the Mac takes them; off console the Mac drops them. VoiceOver reads it as
+/// one element.
+struct LockedMacShade: View {
+    @ObservedObject var client: StreamClient
+
+    var body: some View {
+        ZStack {
+            if let shade = client.lockShade {
+                Palette.panel
+                VStack(spacing: 10) {
+                    if shade == .unlocking {
+                        ProgressView().tint(Palette.muted)
+                    } else {
+                        Image(systemName: shade == .locked(.otherUser) ? "person.2.fill" : "lock.fill")
+                            .font(.system(size: 28))
+                            .foregroundStyle(Palette.muted)
+                            .accessibilityHidden(true)
+                    }
+                    Text(LockedMac.title(mac: client.macName, shade: shade))
+                        .font(.headline)
+                        .foregroundStyle(Palette.text)
+                        .multilineTextAlignment(.center)
+                    if let detail = LockedMac.detail(shade: shade, paired: client.settings.host?.sessionPaired) {
+                        Text(detail)
+                            .font(.subheadline)
+                            .foregroundStyle(Palette.muted)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(24)
+                .frame(maxWidth: 440)
+                .accessibilityElement(children: .combine)
+                .transition(.opacity)
+            }
+        }
+        .allowsHitTesting(false)
+        .animation(.easeOut(duration: 0.2), value: client.lockShade)
     }
 }
 
@@ -1270,7 +1615,9 @@ private struct TopBar: View {
             // the right, over the two buttons after it, which fade while it is open.
             TextScaleControl(scale: $textScale, open: $scaleOpen,
                              width: metrics.buttonWidth, height: metrics.buttonHeight,
-                             pointsPerStep: metrics.buttonHeight >= 60 ? 44 : 40)
+                             pointsPerStep: metrics.buttonHeight >= 60 ? 44 : 40,
+                             offered: client.textScaleOffersOff, available: client.textScaleSelectable,
+                             unavailableHint: client.textScaleUnavailableHint)
                 .tourTarget(.textSize)
 
             button(open: keyboardShown, symbol: "keyboard", label: "Keyboard",
@@ -1373,11 +1720,14 @@ struct BarButton<Content: View>: View {
 
 /// The Aa control: a bar button that opens into a ruler while the finger is down, the way the
 /// camera's zoom button opens into its dial and the Dynamic Island timer scrubs. The thumb stays
-/// put at the button's centre and the ruler slides under it: five detents, 0.5× to 1.5× in 0.25
-/// steps, a tick of haptic at each. The bar fades the buttons next to it while `open` and brings
-/// them back on release, when the chosen value is applied once (every change restarts the stream,
-/// so nothing is sent mid-drag). A nil scale means the Mac window has never been asked to fit; it
-/// shows 1×.
+/// put at the button's centre and the ruler slides under it: six detents, Off and then 0.5× to 1.5×
+/// in 0.25 steps, a tick of haptic at each. The bar fades the buttons next to it while `open` and
+/// brings them back on release, when the chosen value is applied once (every change restarts the
+/// stream, so nothing is sent mid-drag). A nil scale means the Mac window is not fitted: the leftmost
+/// detent, Off, one step below 0.5× (`TextScale`; issue #179). Off is not offered while the virtual
+/// display is on, where a nil scale is 1× (`offered`). Only a window is sized by it: while anything
+/// else streams it is dimmed, its ruler never opens and VoiceOver hears why (`available`,
+/// `TextScale.selectable`; Noah, 2026-10-29).
 struct TextScaleControl: View {
     @Binding var scale: Double?
     @Binding var open: Bool
@@ -1392,14 +1742,30 @@ struct TextScaleControl: View {
     /// text, 2 pt over the value (every bar that has always had it).
     var iconBox: CGFloat? = nil
     var iconSpacing: CGFloat = 2
+    /// Whether the ruler has an Off detent (`TextScale.detents`, `TextScale.offersOff`).
+    var offered = true
+    /// Whether Aa can be used now (`TextScale.selectable`: only while a window streams). Otherwise
+    /// dimmed, no ruler, a VoiceOver swipe changes nothing, and VoiceOver hears
+    /// `TextScale.unavailableHint`; its value stays, for the next window.
+    var available = true
+    /// What VoiceOver hears while Aa cannot be used (the off-console view's own, else `TextScale.unavailableHint`).
+    var unavailableHint = TextScale.unavailableHint
 
-    static let steps: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5]
+    var steps: [Double] { TextScale.detents(offered: offered) }
     /// Padding either side of the visible ruler; two detents show each side of the thumb.
     static let sliderInset: CGFloat = 30
-    var sliderWidth: CGFloat { pointsPerStep * CGFloat(Self.steps.count - 1) + Self.sliderInset * 2 }
+    /// The ruler's frame shows two detents either side of the thumb, whatever the detents: Off's
+    /// sixth slides in as the finger nears it. So every bar's ruler keeps the width it had with five,
+    /// and a phone's row 1 the room it was laid out for (PhonePortraitLayout's `rulerSpans`).
+    static let detentsEachSide = 2
+    var sliderWidth: CGFloat { pointsPerStep * CGFloat(2 * Self.detentsEachSide) + Self.sliderInset * 2 }
+    /// How much of itself a dimmed Aa shows.
+    static let unavailableOpacity = 0.35
 
     @State private var live: Double = 1.0
     @State private var startValue: Double = 1.0
+    /// Where the ruler has the scale now.
+    private var position: Double { TextScale.position(of: scale, offered: offered) }
     @State private var startX: CGFloat = 0
 
     var body: some View {
@@ -1414,10 +1780,11 @@ struct TextScaleControl: View {
                     .font(.system(size: height >= 60 ? 19 : 17, weight: .semibold))
                     .foregroundStyle(Palette.text)
             }
-            Text(Self.label(scale ?? 1.0) + "×")
+            Text(TextScale.title(at: position))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Palette.barLabel)
         }
+        .opacity(available ? 1 : Self.unavailableOpacity)     // dimmed: Aa sizes a window, and none streams
         .frame(width: width, height: height)
         .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Palette.control))
         .opacity(open ? 0 : 1)
@@ -1429,13 +1796,21 @@ struct TextScaleControl: View {
                 .allowsHitTesting(false)
         }
         .zIndex(open ? 1 : 0)
-        .onChange(of: open, initial: true) { _, isOpen in if isOpen { live = scale ?? 1.0 } }
+        // A ruler asked open while Aa cannot be used (the harness's `-SillScaleOpen` over the Desktop)
+        // folds at once; one open when the window stops streaming (closed on the Mac, the Desktop
+        // picked from another device) folds without applying (`onChange(of: available)`, and `onEnded`
+        // applies nothing while Aa cannot be used).
+        .onChange(of: open, initial: true) { _, isOpen in
+            guard isOpen else { return }
+            if available { live = position } else { open = false }
+        }
+        .onChange(of: available) { _, now in if !now, open { withAnimation(.easeOut(duration: 0.2)) { open = false } } }
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 0, coordinateSpace: .local)
                 .onChanged { g in
                     if !open {
-                        startValue = scale ?? 1.0
+                        startValue = position
                         live = startValue
                         startX = g.location.x
                         withAnimation(.spring(duration: 0.22, bounce: 0.15)) { open = true }
@@ -1443,50 +1818,61 @@ struct TextScaleControl: View {
                     // The ruler follows the finger: dragging right raises the value, and the ticks
                     // slide left under the fixed thumb.
                     let dx = g.location.x - startX
-                    let snapped = Self.snap(startValue + Double(dx / pointsPerStep) * 0.25)
+                    let snapped = TextScale.snap(startValue + Double(dx / pointsPerStep) * 0.25, offered: offered)
                     if snapped != live {
                         UISelectionFeedbackGenerator().selectionChanged()
                         withAnimation(.easeOut(duration: 0.1)) { live = snapped }
                     }
                 }
                 .onEnded { _ in
-                    if (scale ?? 1.0) != live { scale = live }     // a plain tap on an untouched control changes nothing
+                    // A plain tap on an untouched control changes nothing, and nor does a drag the
+                    // stream left a window during.
+                    if available, position != live { scale = TextScale.scale(at: live) }
                     withAnimation(.easeOut(duration: 0.2)) { open = false }
-                }
+                },
+            including: available ? .all : .none      // dimmed: a touch opens nothing
         )
         .onDisappear { open = false }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Text size")
-        .accessibilityValue("\(Self.label(scale ?? 1.0)) times")
+        .accessibilityValue(TextScale.spoken(at: position))
+        .accessibilityHint(available ? "" : unavailableHint)
+        // Always adjustable, so Aa stays one view and one accessibility element when a window starts or
+        // stops streaming: VoiceOver keeps its place on it, and the ruler's fold above runs. Dimmed, it
+        // is what a disabled slider is ("dimmed, adjustable"): a swipe changes nothing. (Adding the
+        // action only while Aa can be used made a new view and element at every change: the review of
+        // #181.)
         .accessibilityAdjustableAction { direction in
-            let i = Self.steps.firstIndex(of: scale ?? 1.0) ?? 2
+            guard available else { return }
             switch direction {
-            case .increment: scale = Self.steps[min(i + 1, Self.steps.count - 1)]
-            case .decrement: scale = Self.steps[max(i - 1, 0)]
+            case .increment: scale = TextScale.scale(at: TextScale.step(from: position, up: true, offered: offered))
+            case .decrement: scale = TextScale.scale(at: TextScale.step(from: position, up: false, offered: offered))
             @unknown default: break
             }
         }
+        .disabled(!available)     // VoiceOver: "dimmed"
     }
 
-    /// The ruler: a track with five ticks and labels that slides so the live value sits under the
-    /// fixed thumb; the ends fade out where they run past the panel.
+    /// The ruler: a track with a tick and a label at each detent that slides so the live value sits
+    /// under the fixed thumb; the ends fade out where they run past the frame (two detents each side).
     private var slider: some View {
         let w = sliderWidth
         let step = pointsPerStep
         let midX = w / 2
         let midY = height / 2 + 4
         func x(_ value: Double) -> CGFloat { midX + CGFloat((value - live) / 0.25) * step }
+        let steps = self.steps
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Palette.controlOpen)
             ZStack(alignment: .topLeading) {
                 Capsule().fill(Palette.barLabel.opacity(0.35))
-                    .frame(width: step * CGFloat(Self.steps.count - 1), height: 3)
-                    .offset(x: x(Self.steps[0]), y: midY - 1.5)
-                ForEach(Self.steps, id: \.self) { value in
+                    .frame(width: step * CGFloat(steps.count - 1), height: 3)
+                    .offset(x: x(steps[0]), y: midY - 1.5)
+                ForEach(steps, id: \.self) { value in
                     Rectangle().fill(Palette.barLabel.opacity(0.6))
                         .frame(width: 2, height: 9)
                         .offset(x: x(value) - 1, y: midY - 4.5)
-                    Text(Self.label(value))
+                    Text(value == TextScale.off ? "Off" : TextScale.number(value))
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(value == live ? Palette.text : Palette.barLabel)
                         .frame(width: step, alignment: .center)
@@ -1507,7 +1893,7 @@ struct TextScaleControl: View {
             // (a phone's row 1, the compact window bar) `midY - 34` put the top of its digits 2 pt
             // outside the clip; it sits where the 58 pt bars put it (1 pt above the frame's top,
             // the digits 2 pt inside), and in the taller bars as it always has.
-            Text(Self.label(live) + "×")
+            Text(TextScale.title(at: live))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Palette.text)
                 .frame(width: 60, alignment: .center)
@@ -1517,19 +1903,8 @@ struct TextScaleControl: View {
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
     }
 
-    /// Nearest detent, clamped to the ends.
-    static func snap(_ value: Double) -> Double {
-        let clamped = min(max(value, steps[0]), steps[steps.count - 1])
-        return steps.min { abs($0 - clamped) < abs($1 - clamped) } ?? 1.0
-    }
-
     /// 0.5, 0.75, 1, 1.25, 1.5: trailing zeros dropped, and "1" rather than "1.0".
-    static func label(_ scale: Double) -> String {
-        var text = String(format: "%.2f", scale)
-        while text.hasSuffix("0") { text.removeLast() }
-        if text.hasSuffix(".") { text.removeLast() }
-        return text
-    }
+    static func label(_ scale: Double) -> String { TextScale.number(scale) }
 }
 
 // MARK: - Window thumbnails
@@ -1553,11 +1928,30 @@ struct WindowStrip: View {
     /// the submenu outside this clipped strip.
     @Binding var menuFor: UInt32?
 
-    /// Press and hold a thumbnail for 1.5 s: it starts to wiggle and its traffic lights (close,
-    /// minimize, full screen) appear in a submenu beside it, the way a held Home Screen icon
-    /// offers its menu. Keep holding and move: the submenu goes, the thumbnail lifts and drags
+    /// Press and hold a thumbnail for the hold (ThumbnailHold: 0.5 s unless changed in Settings ›
+    /// This iPad or iPhone, 0.2 to 3 s; issue #113, it was a fixed 1.5 s): it starts to wiggle and its traffic
+    /// lights (close, minimize, full screen) appear in a submenu beside it, the way a held Home Screen
+    /// icon offers its menu. Keep holding and move: the submenu goes, the thumbnail lifts and drags
     /// into a new slot. The arrangement is the device's own, persisted per Mac. A tap selects.
-    static let holdToOpen: TimeInterval = 1.5
+    ///
+    /// `Sill.thumbnailHold`, read for its changes (the panel's stepper writes it, and this redraws the
+    /// strip, whose thumbnails take the new length at once); the length itself through
+    /// `ThumbnailHold.seconds(stored:)`, since `-Sill.thumbnailHold 0.3` is a string in UserDefaults.
+    @AppStorage(ThumbnailHold.key) private var storedHold = ThumbnailHold.standard
+    private var hold: TimeInterval {
+        _ = storedHold
+        return ThumbnailHold.seconds(stored: UserDefaults.standard.object(forKey: ThumbnailHold.key))
+    }
+    #if DEBUG
+    /// The last length the console was told ("thumbnails: hold 0.5 s"), so a strip that comes and goes
+    /// (a rotation, another bar) says it only when it changes.
+    @MainActor private static var loggedHold: TimeInterval?
+    @MainActor private static func logHold(_ hold: TimeInterval) {
+        guard loggedHold != hold else { return }
+        loggedHold = hold
+        print(ThumbnailHold.consoleLine(hold))
+    }
+    #endif
     /// What the tour lights of the strip: its thumbnails' band (the strip is as tall as its bar),
     /// with the active halo's 5 pt above and the app badge's 6 pt below.
     static func tourBand(pad: CGFloat) -> EdgeInsets {
@@ -1570,6 +1964,7 @@ struct WindowStrip: View {
     var body: some View {
         let windows = client.orderedWindows
         let slot = width + spacing
+        let hold = self.hold    // read here, in the body, so a change of the setting redraws the strip
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: spacing) {
                 ForEach(Array(windows.enumerated()), id: \.element.id) { index, window in
@@ -1587,7 +1982,7 @@ struct WindowStrip: View {
                                         client.persistWindowOrder()
                                     })
                         .overlay {
-                            HoldDragOverlay(minimumHold: Self.holdToOpen,
+                            HoldDragOverlay(minimumHold: hold,
                                             onTap: { if menuFor != nil { closeMenu() } else { client.select(.window(window.id)) } },
                                             onHold: { openMenu(for: window.id) },
                                             onMove: { t in holdMoved(window: window, index: index, count: windows.count, slot: slot, translation: t) },
@@ -1622,8 +2017,10 @@ struct WindowStrip: View {
         #if DEBUG
         // Harness: `-SillWindowMenu 1` opens the first window's submenu at launch.
         .onAppear {
+            Self.logHold(hold)
             if UserDefaults.standard.bool(forKey: "SillWindowMenu"), let first = client.orderedWindows.first { menuFor = first.id }
         }
+        .onChange(of: hold) { _, now in Self.logHold(now) }
         #endif
     }
 
@@ -1670,6 +2067,8 @@ struct WindowStrip: View {
 /// ScrollView (2026-09-23), and UIKit's long press is exactly the Home Screen mechanic: by the time
 /// it recognizes, the scroll view's pan has already given up, so the drag is ours.
 struct HoldDragOverlay: UIViewRepresentable {
+    /// The hold's length (ThumbnailHold): a change reaches the long press already made, so the
+    /// thumbnails on screen wait the new length from their next press.
     var minimumHold: TimeInterval
     var onTap: () -> Void
     var onHold: () -> Void
@@ -1686,14 +2085,21 @@ struct HoldDragOverlay: UIViewRepresentable {
         hold.allowableMovement = 12        // more than this before the hold fires is a scroll, not a hold
         view.addGestureRecognizer(tap)
         view.addGestureRecognizer(hold)
+        context.coordinator.hold = hold
         return view
     }
 
-    func updateUIView(_ view: UIView, context: Context) { context.coordinator.parent = self }
+    func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.parent = self
+        // Settings › This iPad (or iPhone) changed the hold: this thumbnail's next press waits the new length.
+        if let hold = context.coordinator.hold, hold.minimumPressDuration != minimumHold { hold.minimumPressDuration = minimumHold }
+    }
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     final class Coordinator: NSObject {
         var parent: HoldDragOverlay
+        /// The thumbnail's long press, for `updateUIView` to give it a new length.
+        weak var hold: UILongPressGestureRecognizer?
         private var start = CGPoint.zero
         init(_ parent: HoldDragOverlay) { self.parent = parent }
 
@@ -1921,41 +2327,86 @@ struct AppDrawer: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            searchField
-            ScrollView {
-                VStack(spacing: 6) {
-                    if !openApps.isEmpty {
-                        header("Open now")
-                        ForEach(openApps) { app in
-                            DrawerRow(height: 50,
-                                      highlighted: app.bundleID == activeBundleID,
-                                      title: app.name,
-                                      trailing: app.windows.count == 1 ? "1 window" : "\(app.windows.count) windows",
-                                      action: { show(app) }) {
-                                AppIcon(image: client.icons[app.bundleID], name: app.name,
-                                        size: 32, radius: 9, fontSize: 12)
+            if let why = client.lockWhy, !client.lockView {
+                // A locked Mac sends no windows, apps or icons (its LockPolicy, docs/locked-mac-plan.md),
+                // and launches nothing: one line where they would be.
+                lockedLine(why)
+                Spacer(minLength: 0)
+            } else {
+                // The off-console view (docs/off-console-plan.md): what the picture is, above the open apps; nothing
+                // is launched then, so no All apps.
+                if client.lockView { viewLine }
+                searchField
+                ScrollView {
+                    VStack(spacing: 6) {
+                        if !openApps.isEmpty {
+                            header("Open now")
+                            ForEach(openApps) { app in
+                                DrawerRow(height: 50,
+                                          highlighted: app.bundleID == activeBundleID,
+                                          title: app.name,
+                                          trailing: app.windows.count == 1 ? "1 window" : "\(app.windows.count) windows",
+                                          action: { show(app) }) {
+                                    AppIcon(image: client.icons[app.bundleID], name: app.name,
+                                            size: 32, radius: 9, fontSize: 12)
+                                }
                             }
                         }
-                    }
-                    if !closedApps.isEmpty {
-                        header("All apps").padding(.top, 2)
-                        ForEach(closedApps) { app in
-                            DrawerRow(height: 46, highlighted: false, title: app.name, trailing: nil,
-                                      action: { client.launch(bundleID: app.bundleID) }) {
-                                AppIcon(image: client.icons[app.bundleID], name: app.name,
-                                        size: 32, radius: 9, fontSize: 12)
+                        if !closedApps.isEmpty, !client.lockView {
+                            header("All apps").padding(.top, 2)
+                            ForEach(closedApps) { app in
+                                DrawerRow(height: 46, highlighted: false, title: app.name, trailing: nil,
+                                          action: { client.launch(bundleID: app.bundleID) }) {
+                                    AppIcon(image: client.icons[app.bundleID], name: app.name,
+                                            size: 32, radius: 9, fontSize: 12)
+                                }
                             }
                         }
                     }
                 }
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Palette.bar))
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
             .strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
         .shadow(color: .black.opacity(0.65), radius: 30, x: 0, y: 24)
+    }
+
+    /// A locked Mac (`StreamClient.lockWhy`): one line in place of the search field and both lists, read
+    /// by VoiceOver as it is (the lock symbol is not).
+    private func lockedLine(_ why: LockedMac.Why) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: why == .otherUser ? "person.2.fill" : "lock.fill")
+                .font(.system(size: 15))
+                .foregroundStyle(Palette.muted)
+                .accessibilityHidden(true)
+            Text(LockedMac.line(mac: client.macName, why: why))
+                .font(.system(size: 15))
+                .foregroundStyle(Palette.text)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Palette.control))
+    }
+
+    /// The off-console view's line, in the locked line's look (person.2.fill), read by VoiceOver as it is.
+    private var viewLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: "person.2.fill")
+                .font(.system(size: 15))
+                .foregroundStyle(Palette.muted)
+                .accessibilityHidden(true)
+            Text(LockedMac.viewPanelLine)
+                .font(.system(size: 15))
+                .foregroundStyle(Palette.text)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Palette.control))
     }
 
     private var searchField: some View {

@@ -123,6 +123,18 @@ struct PortraitMetrics {
     /// each symbol's height (the keyboard's is 15 pt, the gear's 21), as a tab bar's do; Aa's text
     /// gets the same box (`TextScaleControl.iconBox`).
     static let phoneIconBox: CGFloat = 24
+
+    /// These metrics with the laptop pose's key row alone above the software keyboard (#215): its caps
+    /// `caps` tall, the row's gaps between them, in one row.
+    func keyboardRow(caps: CGFloat) -> PortraitMetrics {
+        PortraitMetrics(padTop: padTop, padSide: padSide, padBottom: padBottom, rowGap: rowGap,
+                        barHeight: barHeight, buttonWidth: buttonWidth, buttonHeight: buttonHeight,
+                        buttonRadius: buttonRadius, buttonIcon: buttonIcon, buttonSpacing: buttonSpacing,
+                        thumbWidth: thumbWidth, thumbHeight: thumbHeight, thumbRadius: thumbRadius,
+                        thumbSpacing: thumbSpacing, thumbPad: thumbPad, thumbFade: thumbFade, badge: badge,
+                        capHeight: caps, keyGap: DuoPosture.keyboardRowGap, keyRowGap: keyRowGap, splitKeys: false,
+                        phone: false)
+    }
 }
 
 /// Portrait, in two arrangements. The halves (the inner display's, and an iPad window's) are the
@@ -161,6 +173,8 @@ struct PortraitStreamScreen: View {
     /// The line over the stream while the link cannot carry the quality, as StreamScreen shows it
     /// (docs/remote-bundle-plan.md §6.7); nil for none.
     var linkLine: String? = nil
+    /// The line's most lines: the off-console view's three, the link's two (StreamScreen).
+    var linkLineLines = 2
     /// Take the Tour in the panel (see `StreamScreen.takeTour`).
     var takeTour: () -> Void = {}
     /// Larger Picture on a phone: the software keyboard's height its rows are kept above
@@ -168,35 +182,69 @@ struct PortraitStreamScreen: View {
     /// switch on: `PhonePortraitLayout.largerPicture(switchOn:streaming:)`); nil for the phone's usual
     /// arrangement (the switch off, the Desktop or nothing streaming), and in the halves.
     var largerKeyboard: CGFloat? = nil
+    /// The picture's pinch zoom (StreamScreen's; StreamZoom): not watched here, only by the picture's
+    /// own view, so a pinch redraws nothing else.
+    let zoom: StreamZoomModel
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
     /// The Duo's fold across this screen (StreamScreen, iOS 27.1): where the halves split.
     @Environment(\.duoFold) private var duoFold
+    /// Where the software keyboard is: the laptop pose's key row goes above its glass (#215).
+    @ObservedObject private var keyboardFrame = KeyboardFrameMonitor.shared
 
     var body: some View {
         GeometryReader { geo in
             if metrics.phone {
                 phone(PhonePortraitLayout(size: geo.size, keyboard: largerKeyboard), origin: geo.frame(in: .global).origin)
             } else {
-                halves(geo.size)
+                halves(geo.size, origin: geo.frame(in: .global).origin)
             }
         }
     }
 
     // MARK: Two halves: the inner display, an iPad window
 
-    private func halves(_ size: CGSize) -> some View {
+    /// `origin`: this screen's in the window (the keyboard's frame is the screen's).
+    private func halves(_ size: CGSize, origin: CGPoint) -> some View {
         // At the middle, as before; on the Duo (iOS 27.1) at the fold's real band half-folded, and
         // open flat at the picture's own shape (docs/iphone-duo-plan.md, (b1) and (b2)).
         let split = DuoPosture.portraitSplit(size, duoFold, aspect: client.duoPaneAspect(textScale: textScale),
                                              controls: metrics.controlsHeight)
         let half = split.picture
+        // The inner display upright with the person's software keyboard over the key row: the key row alone
+        // above the keyboard's glass, or for a keyboard that leaves it no room (or whose glass Sill cannot
+        // know) the Keyboard toggle on the picture's corner (#215).
+        let standIn = keyboardStandIn(size, origin: origin, split: split)
         return ZStack(alignment: .topLeading) {
             Color.black
 
             VStack(spacing: split.controls - half) {
                 picturePane(measured: true).padding(8).frame(height: half)
-                controls(width: size.width).frame(height: size.height - split.controls)
+                // While the key row is alone or the toggle stands in, the window bar, the key row and the
+                // trackpad stay where they are (the thumbnails' scroll, the trackpad's state), out of sight,
+                // touch and VoiceOver, and come back as they were with the keyboard. Hidden from VoiceOver
+                // only then: on an iPad, an iPhone and with the keyboard down the controls are exactly main's.
+                controls(width: size.width, hidden: standIn != nil)
+                    .opacity(standIn == nil ? 1 : 0)
+                    .allowsHitTesting(standIn == nil)
+                    .accessibilityHidden(while: standIn != nil)
+                    .frame(height: size.height - split.controls)
+            }
+
+            if let row = standIn?.row {
+                rowAlone(row)
+                    .placed(row, in: size)
+                    .transition(.opacity)
+            }
+
+            // Over the picture (above the input overlay, so a tap on it never reaches the Mac), right
+            // after it for VoiceOver.
+            if standIn?.toggle == true {
+                let rect = DuoPosture.keyboardToggle(paneBottom: half - DuoPosture.paneInset, sides: metrics.padSide)
+                keyboardToggle
+                    .background { KeyboardToggleFrame() }      // the toggle's own 44 pt, before it is placed
+                    .placed(rect, in: size)
+                    .transition(.opacity)
             }
 
             // Same order as landscape: the dim goes over the stream so a tap with the drawer
@@ -236,12 +284,112 @@ struct PortraitStreamScreen: View {
                                                              y: top / max(size.height, 1))))
             }
         }
+        // The laptop pose with the person's keyboard up: KeyboardFrameMonitor reads where its glass is after
+        // each change (a fold among them); nowhere else does it reload anything.
+        .onChange(of: KeyboardReadings(wanted: wantsKeyboardReadings(size), controlsTop: origin.y + split.controls), initial: true) { _, now in
+            KeyboardFrameMonitor.shared.setWantsReadings(now.wanted, controlsTop: now.controlsTop)
+        }
+        .onChange(of: duoFold) { _, _ in KeyboardFrameMonitor.shared.poseChanged() }
+        .onDisappear { KeyboardFrameMonitor.shared.setWantsReadings(false, controlsTop: 0) }
+        #if DEBUG
+        .onChange(of: standIn, initial: true) { old, now in
+            if now != nil || old != nil { print(keyboardStandInLine(now, size: size, origin: origin, split: split)) }
+        }
+        #endif
     }
 
-    private func controls(width: CGFloat) -> some View {
+    // MARK: The inner display upright with the software keyboard up (#215)
+
+    /// What stands in for the window bar and the key row, or nil (the controls as they are): the inner
+    /// display upright while the person's software keyboard is up and its glass (`DuoPosture.keyboardGlass`,
+    /// from `KeyboardFrameMonitor`, in this screen's space) leaves them no room (`DuoPosture.keyboardStandIn`):
+    /// the key row alone above the glass, or the toggle.
+    private func keyboardStandIn(_ size: CGSize, origin: CGPoint, split: DuoPosture.PortraitSplit) -> DuoPosture.KeyboardStandIn? {
+        guard keyboardShown else { return nil }
+        // What the window bar and the key row take from the controls' top.
+        let standard = metrics.padTop + metrics.barHeight + metrics.rowGap + metrics.keyBlockHeight
+        return DuoPosture.keyboardStandIn(size: size, fold: duoFold, controlsTop: split.controls,
+                                          glass: keyboardGlass(size, origin: origin, split: split),
+                                          standardRows: standard, sides: metrics.padSide,
+                                          settling: keyboardFrame.settling || (wantsKeyboardReadings(size) && !keyboardFrame.readingsWanted))
+    }
+
+    /// The glass in this screen's space: open flat as UIKit reports it, in the laptop pose as Sill read it.
+    private func keyboardGlass(_ size: CGSize, origin: CGPoint, split: DuoPosture.PortraitSplit) -> DuoPosture.KeyboardGlass? {
+        DuoPosture.keyboardGlass(reported: keyboardFrame.frame.map { $0.minY - origin.y },
+                                 read: keyboardFrame.read.map { $0.offsetBy(dx: -origin.x, dy: -origin.y) }, size: size,
+                                 controlsTop: split.controls, laptop: duoFold.horizontalBand != nil)
+    }
+
+    /// The Duo's inner display upright in the laptop pose with the person's keyboard up: where a reading
+    /// of the keyboard is needed (DuoPosture.keyboardGlass).
+    private func wantsKeyboardReadings(_ size: CGSize) -> Bool {
+        keyboardShown && duoFold.horizontalBand != nil && size.height > size.width
+    }
+
+    /// What KeyboardFrameMonitor is told: readings wanted, and where the controls begin on the screen.
+    private struct KeyboardReadings: Equatable {
+        var wanted: Bool
+        var controlsTop: CGFloat
+    }
+
+    /// The key row's caps as they are, the Keyboard cap among them (lit while the keyboard is up, a tap
+    /// takes it down), at the row's height and gaps. No tour target: the tour takes the keyboard down.
+    private func rowAlone(_ rect: CGRect) -> some View {
+        KeyRow(metrics: metrics.keyboardRow(caps: rect.height), keys: .full, latched: $latched, keyboardShown: keyboardShown,
+               send: { client.sendFromKeyRow($0) },
+               toggleKeyboard: { overlay.toggleKeyboard() },
+               showSpotlight: client.active == .desktop)
+    }
+
+    /// The Keyboard toggle (Noah, 2026-11-10): the bar's look, lit, the key row's Keyboard symbol; a tap puts
+    /// the keyboard away, as the row's Keyboard cap does. At the accessibility text sizes a long press shows
+    /// it large, as a phone's bar buttons do.
+    private var keyboardToggle: some View {
+        BarButton(open: true, width: DuoPosture.keyboardToggleSize, height: DuoPosture.keyboardToggleSize, radius: 11,
+                  accessibilityLabel: "Hide the keyboard", action: { overlay.toggleKeyboard() }) {
+            Image(systemName: "keyboard")
+                .font(.system(size: 20))
+                .foregroundStyle(Palette.accent)
+        }
+        .accessibilityShowsLargeContentViewer { Label("Keyboard", systemImage: "keyboard") }
+    }
+
+    #if DEBUG
+    /// The console's line for the gates: `keyboard: the row 500–551 (51 pt): the glass at 555, 59 pt under
+    /// the fold's edge at 496 (read: 0,555 669×396; reported 455.5)`, `keyboard: the toggle at 14,395
+    /// (44 pt): the glass at 506, 10 pt under …` (its place from the leading edge), `keyboard: nothing yet
+    /// (a reading on its way)`, `keyboard: the toggle …: the glass not known (no reading since the last
+    /// change)`, open flat `keyboard: the row 498–549 (51 pt): the glass at 553, 129 pt under the picture's
+    /// pane (reported)`, or `keyboard: none`.
+    private func keyboardStandInLine(_ standIn: DuoPosture.KeyboardStandIn?, size: CGSize, origin: CGPoint,
+                                     split: DuoPosture.PortraitSplit) -> String {
+        func n(_ v: CGFloat) -> String { abs(v - v.rounded()) < 0.01 ? "\(Int(v.rounded()))" : String(format: "%.1f", v) }
+        guard let standIn else { return "keyboard: none (the controls as they are)" }
+        let laptop = duoFold.horizontalBand != nil
+        let reported = keyboardFrame.frame.map { n($0.minY - origin.y) } ?? "none"
+        let read = keyboardFrame.read.map { KeyboardFrameMonitor.describe($0.offsetBy(dx: -origin.x, dy: -origin.y)) } ?? "none"
+        var parts: [String] = []
+        if let row = standIn.row { parts.append("the row \(n(row.minY))–\(n(row.maxY)) (\(n(row.height)) pt)") }
+        if standIn.toggle {
+            let rect = DuoPosture.keyboardToggle(paneBottom: split.picture - DuoPosture.paneInset, sides: metrics.padSide)
+            parts.append("the toggle at \(n(rect.minX)),\(n(rect.minY)) (\(n(rect.width)) pt)")
+        }
+        let what = parts.isEmpty ? "nothing yet (a reading on its way)" : parts.joined(separator: " and ")
+        guard let top = keyboardGlass(size, origin: origin, split: split)?.top else {
+            return "keyboard: \(what): the glass not known (read: \(read); reported \(reported))"
+        }
+        let place = laptop ? "the glass at \(n(top)), \(n(top - split.controls)) pt under the fold's edge at \(n(split.controls))"
+                           : "the glass at \(n(top)), \(n(top - split.controls)) pt under the picture's pane"
+        return "keyboard: \(what): \(place) (" + (laptop ? "read: \(read); reported \(reported)" : "reported") + ")"
+    }
+    #endif
+
+    /// `hidden`: the key row alone or the toggle above the software keyboard stands in for them (#215).
+    private func controls(width: CGFloat, hidden: Bool = false) -> some View {
         VStack(spacing: metrics.rowGap) {
             windowBar(width: width - 2 * metrics.padSide)
-            keyRow(.full)
+            keyRow(.full, hidden: hidden)
             trackpad(verticalSpan: nil)
         }
         .padding(.top, metrics.padTop)
@@ -276,7 +424,9 @@ struct PortraitStreamScreen: View {
 
             TextScaleControl(scale: $textScale, open: $scaleOpen,
                              width: metrics.buttonWidth, height: metrics.buttonHeight,
-                             radius: metrics.buttonRadius, pointsPerStep: 36)
+                             radius: metrics.buttonRadius, pointsPerStep: 36,
+                             offered: client.textScaleOffersOff, available: client.textScaleSelectable,
+                             unavailableHint: client.textScaleUnavailableHint)
                 .tourTarget(.textSize)
 
             desktopButton()
@@ -399,7 +549,9 @@ struct PortraitStreamScreen: View {
             TextScaleControl(scale: $textScale, open: $scaleOpen,
                              width: width, height: layout.row1.height,
                              radius: metrics.buttonRadius, pointsPerStep: menus ? layout.rulerStepBesideMenus : layout.rulerStep,
-                             iconBox: PortraitMetrics.phoneIconBox, iconSpacing: metrics.buttonSpacing)
+                             iconBox: PortraitMetrics.phoneIconBox, iconSpacing: metrics.buttonSpacing,
+                             offered: client.textScaleOffersOff, available: client.textScaleSelectable,
+                             unavailableHint: client.textScaleUnavailableHint)
                 .tourTarget(.textSize)
 
             barButton(open: keyboardShown, symbol: "keyboard", label: "Keyboard", width: width,
@@ -455,7 +607,8 @@ struct PortraitStreamScreen: View {
     /// the room this pane sits at the top of.
     private func picturePane(measured: Bool) -> some View {
         ZStack {
-            StreamView(client: client)
+            // Scaled and moved by the picture's zoom, inside the clip below.
+            ZoomedStreamView(client: client, zoom: zoom)
             InputOverlay(videoSize: client.videoSize,
                          send: { client.sendInput($0) },
                          setOwnPointer: { client.setOwnPointer($0, from: $1) },
@@ -463,10 +616,15 @@ struct PortraitStreamScreen: View {
                          isKeyboardShown: $keyboardShown,
                          latchedModifiers: latched,
                          onModifiersConsumed: { latched = [] },
-                         sendGesture: { client.sendGesture($0, fingers: $1) })
+                         sendGesture: { client.sendGesture($0, fingers: $1) },
+                         macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
+                         readZoom: { [zoom] in zoom.zoom },
+                         writeZoom: { [zoom] in zoom.set($0) })
         }
         .background(Palette.panel)
-        .overlay(alignment: .top) { LinkLineView(text: linkLine) }
+        // A locked Mac: its cover over the picture (LockedMac), under the link's line.
+        .overlay { LockedMacShade(client: client) }
+        .overlay(alignment: .top) { LinkLineView(text: linkLine, lines: linkLineLines) }
         .clipShape(streamShape)
         .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
         .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { if measured { onPanelSize($0) } })
@@ -482,11 +640,11 @@ struct PortraitStreamScreen: View {
     }
 
     /// A key row key keeps what the sprite shows (StreamClient.sendFromKeyRow).
-    private func keyRow(_ keys: KeyRow.Keys) -> some View {
+    private func keyRow(_ keys: KeyRow.Keys, hidden: Bool = false) -> some View {
         KeyRow(metrics: metrics, keys: keys, latched: $latched, keyboardShown: keyboardShown,
                send: { client.sendFromKeyRow($0) },
                toggleKeyboard: { overlay.toggleKeyboard() },
-               showSpotlight: client.active == .desktop)
+               showSpotlight: client.active == .desktop, hidden: hidden)
             .tourTarget(.keys)
     }
 
@@ -691,9 +849,37 @@ private extension View {
     func placed(_ rect: CGRect, in size: CGSize) -> some View {
         frame(width: rect.width, height: rect.height).placed(at: rect.origin, in: size)
     }
+
+    /// Hidden from VoiceOver and the other assistive technologies while `hidden`, and otherwise as if the
+    /// modifier were not there: an `accessibilityHidden(false)` over the window bar shows what its views
+    /// hide themselves (MacMenuButton's drawn look, an unlabeled element beside "‹App› menus"). The same
+    /// view either way, so what it holds (the thumbnails' scroll, the trackpad) stays. Before iOS 18 (no
+    /// `isEnabled:`) nothing: what it hides for, the laptop pose's key row alone (#215), needs the iPhone
+    /// Duo's fold, which only iOS 27.1 reports.
+    @ViewBuilder func accessibilityHidden(while hidden: Bool) -> some View {
+        if #available(iOS 18.0, *) {
+            accessibilityHidden(true, isEnabled: hidden)
+        } else {
+            self
+        }
+    }
 }
 
 // MARK: - Key row
+
+/// A key row cap that is held (HeldCap): dimmed while a finger is on it, and its press told as it
+/// begins and ends (the Button's own pressed state), so its key is down on the Mac from the touch to
+/// the release. The Button's action (which also ends a press whose end was not told), the Large Content
+/// Viewer and the accessibility activation are the Button's, as for every other cap.
+private struct HeldCapStyle: ButtonStyle {
+    let pressed: (Bool) -> Void
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.5 : 1)
+            .onChange(of: configuration.isPressed) { _, isPressed in pressed(isPressed) }
+    }
+}
 
 /// One cap in the key row, as data, so each layout can pick its own set and fold it.
 private enum Key {
@@ -725,7 +911,9 @@ private enum Key {
 /// 44 pt caps do not fit across 472 pt, six and then six, 72 pt wide at 500 pt. On a phone
 /// (`.phone`): escape, tab and the four modifiers, six caps across the row; the Keyboard button is
 /// in row 1, and Spotlight is cmd then space on the keyboard (a latched ⌘ turns a typed space into
-/// ⌘Space). Arrows there come from a hardware keyboard.
+/// ⌘Space). Arrows there come from a hardware keyboard. Escape, tab and the arrows are down on the
+/// Mac while a finger holds them, so the Mac repeats them (HeldCap, #162), but for the phone's at the
+/// accessibility text sizes, whose long press shows the cap large (`capsHold`).
 private struct KeyRow: View {
     enum Keys { case full, phone }
 
@@ -738,6 +926,17 @@ private struct KeyRow: View {
     /// Spotlight's panel is its own Mac window, so it only shows up in the stream while the whole
     /// desktop is the source. Anywhere else the key would be a cap that does something invisible.
     let showSpotlight: Bool
+    /// Out of sight and touch under another row (the halves' key row while the laptop pose's key row
+    /// stands alone above the software keyboard, #215): a cap held as that happens comes up at once, as
+    /// it would leaving the screen, not when the finger that held it lifts.
+    var hidden: Bool = false
+    /// Escape, tab or an arrow held down (HeldCap): its key is down on the Mac until the finger leaves.
+    @State private var heldCap = HeldCap()
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// Whether escape, tab and the arrows are held from the touch to the release: everywhere but where a
+    /// long press shows a cap large (the phone's caps at the accessibility text sizes), so that long press
+    /// stays a look, a tap at its release as before, and never a key held down and repeating on the Mac.
+    private var capsHold: Bool { !(keys == .phone && dynamicTypeSize.isAccessibilitySize) }
 
     private static let all: [Key] = [
         .press("esc", HIDKey.escape, "Escape"),
@@ -784,6 +983,10 @@ private struct KeyRow: View {
             }
         }
         .frame(height: metrics.keyBlockHeight)
+        // Gone from the screen (a turn, the stream's end) with a cap held: no release comes, so it
+        // comes up here; and hidden under the key row alone, whose caps are now the ones to touch.
+        .onDisappear { heldCap.releaseAll().forEach(send) }
+        .onChange(of: hidden) { _, now in if now { heldCap.releaseAll().forEach(send) } }
         #if DEBUG
         .onAppear(perform: runInputTest)
         #endif
@@ -791,10 +994,11 @@ private struct KeyRow: View {
 
     @ViewBuilder private func key(_ key: Key) -> some View {
         switch key {
-        case .press(let title, _, let label):
-            cap(open: false, label: label, largeContent: title, action: { tap(key) }) { text(title) }
-        case .arrow(let symbol, _, let label):
-            cap(open: false, label: label, action: { tap(key) }) {
+        case .press(let title, let usage, let label):
+            cap(open: false, label: label, largeContent: title, held: capsHold ? { touch(usage, down: $0) } : nil,
+                action: { activate(usage) }) { text(title) }
+        case .arrow(let symbol, let usage, let label):
+            cap(open: false, label: label, held: capsHold ? { touch(usage, down: $0) } : nil, action: { activate(usage) }) {
                 Image(systemName: symbol)
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Palette.text)
@@ -818,7 +1022,27 @@ private struct KeyRow: View {
         }
     }
 
-    /// What a tap on each cap does.
+    /// A finger landed on escape, tab or an arrow, or left it (HeldCap): its key down with what is
+    /// latched, which is spent, or its key up.
+    private func touch(_ usage: UInt16, down: Bool) {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard down else { heldCap.touchUp(usage, at: now).forEach(send); return }
+        let events = heldCap.touchDown(usage, latched: latched, at: now)
+        events.forEach(send)
+        if HeldCap.spendsLatch(events) { latched = [] }
+    }
+
+    /// Escape's, tab's or an arrow's action: nothing after a finger's touch (its key went down and up
+    /// with it; or its up, if the press's end was not told yet); from VoiceOver, Switch Control, Voice
+    /// Control or a keyboard, or where the caps do not hold (`capsHold`), the whole press, as `tap`.
+    private func activate(_ usage: UInt16) {
+        let events = heldCap.activated(usage, latched: latched, at: ProcessInfo.processInfo.systemUptime)
+        events.forEach(send)
+        if HeldCap.spendsLatch(events) { latched = [] }
+    }
+
+    /// What a tap on each cap does (escape, tab and the arrows: a whole press at once, as an assistive
+    /// technology's activation sends it).
     private func tap(_ key: Key) {
         switch key {
         case .press(_, let usage, _), .arrow(_, let usage, _):
@@ -837,19 +1061,27 @@ private struct KeyRow: View {
     // MARK: Caps
 
     /// `largeContent`: the cap's text, which the phone's caps (fixed in size, as the row is) show
-    /// large on a long press at the accessibility text sizes.
+    /// large on a long press at the accessibility text sizes. `held`: told when a finger's press on the
+    /// cap begins and ends (escape, tab and the arrows: HeldCap); the other caps act on their tap alone.
     @ViewBuilder
     private func cap<Content: View>(open: Bool, label: String, largeContent: String? = nil,
+                                    held: ((Bool) -> Void)? = nil,
                                     action: @escaping () -> Void,
                                     @ViewBuilder content: () -> Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: 11, style: .continuous)
-        let button = Button(action: action) {
+        let base = Button(action: action) {
             content()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(shape.fill(open ? Palette.controlOpen : Palette.control))
                 .contentShape(shape)
         }
-        .buttonStyle(.plain)
+        let button = Group {
+            if let held {
+                base.buttonStyle(HeldCapStyle(pressed: held))
+            } else {
+                base.buttonStyle(.plain)
+            }
+        }
         .accessibilityLabel(label)
         if keys == .phone, let largeContent {
             button.accessibilityShowsLargeContentViewer { Text(largeContent) }
@@ -901,4 +1133,17 @@ private struct KeyRow: View {
         }
     }
     #endif
+}
+
+/// Where the Keyboard toggle is, in the stream screen's space (TourSpace), for the clipboard's chip to keep
+/// clear of it (DuoPosture.clipboardChipMaxWidth); nil while it is not shown.
+struct KeyboardToggleFrameKey: PreferenceKey {
+    static let defaultValue: CGRect? = nil
+    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) { value = nextValue() ?? value }
+}
+
+private struct KeyboardToggleFrame: View {
+    var body: some View {
+        GeometryReader { g in Color.clear.preference(key: KeyboardToggleFrameKey.self, value: g.frame(in: .named(TourSpace.name))) }
+    }
 }

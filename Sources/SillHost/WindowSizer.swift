@@ -143,28 +143,58 @@ final class WindowSizer {
         return CGRect(x: (main.midX - w / 2).rounded(), y: (main.minY + menuBar + (main.height - menuBar - h) / 2).rounded(), width: w, height: h)
     }
 
-    /// Close, minimize or toggle full screen on a window, as its own traffic lights would.
-    static func perform(_ action: WindowCommand.Action, element: AXUIElement) -> Bool {
+    /// What a window command came to, for the coordinator's "Window 123 close: …" line.
+    enum CommandOutcome: Equatable {
+        /// The app did it.
+        case done
+        /// No such window or button, or the app said no.
+        case refused
+        /// The app did not answer within the element's timeout (Close's button: 1 s): it is busy, or,
+        /// for a close, asking about unsaved changes in an alert of its own. The command may still take
+        /// effect.
+        case noAnswer
+
+        init(_ e: AXError) { self = e == .success ? .done : e == .cannotComplete ? .noAnswer : .refused }
+
+        /// The words after "Window 123 close: ". Only a close asks about unsaved changes.
+        func words(for action: WindowCommand.Action) -> String {
+            switch (self, action) {
+            case (.done, _): return "done"
+            case (.refused, _): return "refused"
+            case (.noAnswer, .close): return "no answer in time (the app is busy, or asking about unsaved changes); it may still act"
+            case (.noAnswer, .minimize): return "no answer in time (the app is busy); it may still minimize the window"
+            case (.noAnswer, .fullScreen): return "no answer in time (the app is busy); it may still take the window in or out of full screen"
+            }
+        }
+    }
+
+    /// Close, minimize or toggle full screen on a window, as its own traffic lights would. On the
+    /// main actor, so every element here has a timeout.
+    static func perform(_ action: WindowCommand.Action, element: AXUIElement) -> CommandOutcome {
         switch action {
         case .close:
             var button: CFTypeRef?
             guard AXUIElementCopyAttributeValue(element, kAXCloseButtonAttribute as CFString, &button) == .success,
-                  let button else { return false }
-            return AXUIElementPerformAction(button as! AXUIElement, kAXPressAction as CFString) == .success
+                  let button, CFGetTypeID(button) == AXUIElementGetTypeID() else { return .refused }
+            // The button is a new element, on the system's default timeout: an app whose close runs a
+            // modal alert would hold the main actor that long.
+            let press = button as! AXUIElement
+            AXUIElementSetMessagingTimeout(press, 1.0)
+            return CommandOutcome(AXUIElementPerformAction(press, kAXPressAction as CFString))
         case .minimize:
-            return AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanTrue) == .success
+            return CommandOutcome(AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanTrue))
         case .fullScreen:
             let leaving = isFullScreen(element)
-            return AXUIElementSetAttributeValue(element, "AXFullScreen" as CFString, leaving ? kCFBooleanFalse : kCFBooleanTrue) == .success
+            return CommandOutcome(AXUIElementSetAttributeValue(element, "AXFullScreen" as CFString, leaving ? kCFBooleanFalse : kCFBooleanTrue))
         }
     }
 
     /// `perform` for a window known only by its ScreenCaptureKit description.
-    func perform(_ action: WindowCommand.Action, on window: SCWindow) -> Bool {
-        guard AXIsProcessTrusted(), let pid = window.owningApplication?.processID else { return false }
+    func perform(_ action: WindowCommand.Action, on window: SCWindow) -> CommandOutcome {
+        guard AXIsProcessTrusted(), let pid = window.owningApplication?.processID else { return .refused }
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 1.0)
-        guard let ax = Self.axWindow(matching: window, in: app) else { return false }
+        guard let ax = Self.axWindow(matching: window, in: app) else { return .refused }
         return Self.perform(action, element: ax)
     }
 

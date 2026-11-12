@@ -4,8 +4,9 @@ import SillHostCore
 import StreamProtocol
 
 /// Settings › Devices, live: Require pairing, which the model keeps in the identity store beside
-/// the trust list (never in UserDefaults), and the paired devices from the host's status (pushed,
-/// so nothing polls), with the model's actions.
+/// the trust list (never in UserDefaults), the pairing window's switch for screen sharing (in
+/// UserDefaults, HostSettings), and the paired devices from the host's status (pushed, so nothing
+/// polls), with the model's actions.
 struct LiveDevicesPane: View {
     let model: AppModel
     @Bindable var settings: HostSettings
@@ -13,6 +14,8 @@ struct LiveDevicesPane: View {
     var body: some View {
         DevicesPane(status: model.coordinator?.status.snapshot.remote ?? RemoteStatus(),
                     requirePairing: Binding(get: { settings.config.requirePairing }, set: { model.setRequirePairing($0) }),
+                    showPairingWindowToScreenSharing: $settings.showPairingWindowToScreenSharing,
+                    offConsoleView: $settings.config.offConsoleView,
                     requirePairingProblem: model.requirePairingProblem,
                     actions: DevicesPane.Actions(pair: { model.pairDevice() },
                                                  remove: { model.removeDevice($0) },
@@ -20,10 +23,11 @@ struct LiveDevicesPane: View {
     }
 }
 
-/// The Devices pane (docs/home-pairing-plan.md §6.1): Require pairing, and the devices paired with
-/// this Mac at home and from afar (one trust list), each with how it paired and how it last
-/// connected, Remove, rename and Pair iPhone or iPad…. Values in, actions out, so the previews can
-/// draw every state. Errors show inline, never in alerts.
+/// The Devices pane (docs/home-pairing-plan.md §6.1): Require pairing; Show the pairing window to
+/// screen sharing (issue #108, PairingWindowSharing); and the devices paired with this Mac at home
+/// and from afar (one trust list), each with how it paired and how it last connected, Remove, rename
+/// and Pair iPhone or iPad…. Values in, actions out, so the previews can draw every state. Errors
+/// show inline, never in alerts.
 struct DevicesPane: View {
     struct Actions {
         var pair: () -> Void = {}
@@ -34,6 +38,10 @@ struct DevicesPane: View {
 
     let status: RemoteStatus
     @Binding var requirePairing: Bool
+    /// Screen Sharing and other remote desktop apps show the pairing window (off by default).
+    @Binding var showPairingWindowToScreenSharing: Bool
+    /// Show this account while another user is on the screen (HostConfig.offConsoleView; docs/off-console-plan.md).
+    @Binding var offConsoleView: Bool
     /// The last Require pairing change the identity store did not keep.
     var requirePairingProblem: AppModel.RequirePairingProblem?
     let actions: Actions
@@ -76,6 +84,17 @@ struct DevicesPane: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+            }
+            Section {
+                Toggle("Show the pairing window to screen sharing", isOn: $showPairingWindowToScreenSharing)
+            } footer: {
+                Footnote("Turn this on to pair while you use this Mac through Screen Sharing or another remote desktop app, as you would a Mac without a display. While it’s on, anyone who can see this Mac’s screen remotely can read the code. Devices streaming this Mac never show the window.")
+            }
+            // The off-console view (docs/off-console-plan.md, issue #316): at once, no restart; the Mac's alone.
+            Section {
+                Toggle("Show this account while another user is on the screen", isOn: $offConsoleView)
+            } footer: {
+                Footnote("For a Mac you reach only through Sill. While another user, or the login window, is on this Mac’s screen, devices see this account’s own desktop and windows instead of nothing: not what the screen shows, and nothing they tap or type reaches this account until it’s back on the screen.")
             }
             pairedDevices
         }
