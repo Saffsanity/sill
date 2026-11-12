@@ -314,6 +314,14 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         if gesture.state == .began {
             zoomStroke.panBegan()
             fingerScroll = zoomStroke.scrollsMac
+        } else if gesture.state == .ended, !fingerScroll, !scrollGestureOpen, EdgeRecognizers.releasedAtLift(in: window) {
+            // UIKit let the pan go only at the lift (full screen's flick held it there, EdgeRecognizers.releasedAtLift)
+            // and ended it without a begin: it begins here, so its end carries the travel (`scrollChanged`).
+            zoomStroke.panBegan()
+            fingerScroll = zoomStroke.scrollsMac
+            if fingerScroll {
+                scroll(.began, at: gesture.location(in: self), translation: .zero, velocity: .zero, from: .finger)
+            }
         }
         guard fingerScroll else { return }
         if gesture.state == .ended || gesture.state == .cancelled { fingerScroll = false }

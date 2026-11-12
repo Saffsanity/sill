@@ -178,6 +178,9 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// with no change between, and the end then moves the pointer by the finger's travel, so none is lost; every
     /// other stroke is as before.
     private var trackChanged = false
+    /// The tracker began this stroke (its `.began` came): an end without one is a stroke UIKit let go only at the
+    /// lift, whose travel then counts from where the finger landed.
+    private var trackBegan = false
     /// Set when the pan turned this stroke into a two-finger scroll; cleared when the tracker begins
     /// the next stroke. Backs up the tracker's own second-finger check (`FingerTracker`).
     private var trackSuspended = false
@@ -319,6 +322,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
             trackSuspended = false
             trackLive = false
             trackChanged = false
+            trackBegan = true
             // From where the finger landed: the tracker begins at touch-down, unless full screen's edge
             // recognizers held it while they judged a touch at the left edge (EdgeFlickRecognizer.swift), and
             // then the travel meanwhile still counts.
@@ -327,11 +331,18 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
             trackChanged = true
             trackMoved()
         case .ended where !trackChanged && !tracker.sawSecondFinger && !trackSuspended && EdgeRecognizers.releasedAtLift(in: window):
-            // Begun only at the lift, full screen's flick having held it: the travel the finger made meanwhile.
+            // Begun only at the lift, full screen's flick having held it: the travel the finger made meanwhile (from
+            // where it landed when UIKit ended the tracker without a begin).
+            if !trackBegan {
+                trackLast = tracker.downLocation ?? tracker.location(in: self)
+                trackLive = false
+            }
             trackMoved()
             trackLive = false
+            trackBegan = false
         default:
             trackLive = false
+            trackBegan = false
         }
     }
 
