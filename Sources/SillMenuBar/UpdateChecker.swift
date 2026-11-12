@@ -86,7 +86,8 @@ final class UpdateChecker {
                 : Date(timeIntervalSince1970: d.double(forKey: UpdatePolicy.Stored.lastCheckKey)),
             etag: d.string(forKey: UpdatePolicy.Stored.etagKey),
             latestTag: d.string(forKey: UpdatePolicy.Stored.tagKey),
-            latestURL: d.string(forKey: UpdatePolicy.Stored.urlKey))
+            latestURL: d.string(forKey: UpdatePolicy.Stored.urlKey),
+            latestSigned: d.object(forKey: UpdatePolicy.Stored.signedKey) as? Bool)
         let c = URLSessionConfiguration.ephemeral
         c.timeoutIntervalForRequest = configuration.timeout
         c.timeoutIntervalForResource = configuration.timeout
@@ -253,6 +254,7 @@ final class UpdateChecker {
         set(s.etag, UpdatePolicy.Stored.etagKey)
         set(s.latestTag, UpdatePolicy.Stored.tagKey)
         set(s.latestURL, UpdatePolicy.Stored.urlKey)
+        set(s.latestSigned, UpdatePolicy.Stored.signedKey)
     }
 
     /// One GET, as UpdatePolicy reads it: the status, at most `maxBody` of the body, the ETag and

@@ -42,12 +42,15 @@ struct SettingsPane: View {
             while !Task.isCancelled {
                 model.permissions.refresh()
                 model.loginItem.refresh()
+                // Where Sill runs, for Update Now (nothing unless a release is offered and it is available).
+                if tab == .general { model.updater.refresh() }
                 try? await Task.sleep(for: .seconds(1))
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.permissions.refresh()
             model.loginItem.refresh()
+            if tab == .general { model.updater.refresh() }
             // Back from Terminal with the command run: General's firewall line follows.
             if model.visibleSettingsTab == tab, tab == .general { model.coordinator?.checkFirewall() }
         }
@@ -162,9 +165,13 @@ private struct GeneralPane: View {
             if let preview = previewUpdates {
                 UpdatesSection(pane: preview, automatic: .constant(true))
             } else {
-                UpdatesSection(pane: model.updates.pane, automatic: $settings.updateCheck,
+                UpdatesSection(pane: model.updates.pane, install: model.updater.pane, installAvailable: model.updater.available,
+                               automatic: $settings.updateCheck,
                                actions: UpdatesSection.Actions(checkNow: { model.updates.checkNow() },
-                                                               openRelease: { NSWorkspace.shared.open($0) }))
+                                                               openRelease: { NSWorkspace.shared.open($0) },
+                                                               updateNow: { model.updater.updateNow() },
+                                                               confirm: { model.updater.confirm() },
+                                                               cancel: { model.updater.cancelUpdate() }))
             }
             Section {
                 HStack {
@@ -284,15 +291,22 @@ struct ClipboardSection: View {
 // MARK: Updates
 
 /// Settings › General's update check: the automatic switch, the line (what the last check found, or
-/// why Sill cannot check), Open Release Page… while a newer release is offered, and Check Now. Plain
-/// values in, so the previews draw every state. Errors show here and in the log, never in an alert.
+/// why Sill cannot check), Open Release Page… while a newer release is offered, and Check Now. With
+/// Update Now in this build (`installAvailable`), its button beside them, its progress, its question
+/// before a disconnect, and why it cannot run here (docs/one-click-update-plan.md §4.7). Plain values
+/// in, so the previews draw every state. Errors show here and in the log, never in an alert.
 struct UpdatesSection: View {
     struct Actions {
         var checkNow: () -> Void = {}
         var openRelease: (URL) -> Void = { _ in }
+        var updateNow: () -> Void = {}
+        var confirm: () -> Void = {}
+        var cancel: () -> Void = {}
     }
 
     let pane: UpdatePolicy.Pane
+    var install = UpdateInstallPolicy.Pane()
+    var installAvailable = false
     @Binding var automatic: Bool
     var actions = Actions()
 
@@ -301,23 +315,60 @@ struct UpdatesSection: View {
             Toggle("Check for updates automatically", isOn: $automatic)
             LabeledContent {
                 HStack(spacing: 8) {
+                    if install.updateNow {
+                        Button(install.updateNowTitle) { actions.updateNow() }
+                            .disabled(!install.updateNowEnabled)
+                    }
                     if let url = pane.releasePage {
                         Button("Open Release Page…") { actions.openRelease(url) }
                     }
                     Button("Check Now") { actions.checkNow() }
-                        .disabled(!pane.canCheck)
+                        .disabled(!pane.canCheck || install.busy)
                 }
             } label: {
-                Text(pane.line)
-                    .foregroundStyle(pane.failed ? Color.orange : Color.primary)
+                Text(install.line ?? pane.line)
+                    .foregroundStyle((install.line != nil ? install.failed : pane.failed) ? Color.orange : Color.primary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             // VoiceOver hears Check Now's result, which arrives after the click.
             .onChange(of: pane.resultID) { _, _ in
                 AccessibilityNotification.Announcement(pane.line).post()
             }
+            // …and each step of an update, and its question.
+            .onChange(of: install.announce) { _, line in
+                if let line { AccessibilityNotification.Announcement(line).post() }
+            }
+            if install.progress != nil || install.spinning {
+                HStack(spacing: 8) {
+                    if let progress = install.progress {
+                        ProgressView(value: progress)
+                    } else {
+                        ProgressView().controlSize(.small)
+                        Spacer(minLength: 0)
+                    }
+                    if install.cancel, install.question == nil {
+                        Button("Cancel") { actions.cancel() }
+                    }
+                }
+            }
+            if let question = install.question {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(question)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Button(install.confirmTitle ?? "Update") { actions.confirm() }
+                        Button("Cancel") { actions.cancel() }
+                    }
+                }
+            }
+            if let note = install.note {
+                Text(note)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         } footer: {
-            Footnote(UpdatePolicy.footnote)
+            Footnote(installAvailable ? UpdateInstallPolicy.footnote : UpdatePolicy.footnote)
         }
     }
 }

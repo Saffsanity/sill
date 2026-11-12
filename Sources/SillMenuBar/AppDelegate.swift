@@ -32,6 +32,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A menu bar app with no windows open is exactly what automatic termination would end.
         ProcessInfo.processInfo.disableAutomaticTermination("Sill serves devices from the menu bar")
         ProcessInfo.processInfo.disableSuddenTermination()
+        // Another Sill of this account is running: after Update Now, the copy that launched this one,
+        // which quits once this one has finished launching (docs/one-click-update-plan.md T20). Nothing
+        // starts until it has (no status item, no host, no keychain), and this one quits if it hasn't
+        // within 30 s. Every later Sill keeps this wait: the version updating to it counts on it.
+        if AppUpdater.waitForOtherSill(then: { [weak self] in self?.finishLaunching() }) { return }
+        finishLaunching()
+    }
+
+    /// Everything a launch starts, once no other Sill of this account is running.
+    private func finishLaunching() {
         let item = StatusItemController(model: model)        // "Starting…" until the host is up
         statusItem = item
         model.onPresentation = { [weak item] p in item?.show(p) }

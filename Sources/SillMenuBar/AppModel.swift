@@ -15,6 +15,9 @@ final class AppModel {
     /// The update check (GitHub's releases feed): the menu's "Sill 0.4 Is Available…" and Settings ›
     /// General's section. Started once the host has started, or could not.
     let updates: UpdateChecker
+    /// Update Now: the one-click update of the release the check offers (docs/one-click-update-plan.md).
+    /// Not available without an update key compiled in (UpdateManifest.releaseKeys).
+    let updater: AppUpdater
     /// `--synthetic`: the Desktop streams a test pattern and the host stays off Bonjour, exactly
     /// as with the CLI's flag. No onboarding in this mode.
     let synthetic = CommandLine.arguments.contains("--synthetic")
@@ -83,9 +86,22 @@ final class AppModel {
         // is up (up to a second or more), and -SillSetAfter counts from launch. Before `start()`
         // the checker only records it.
         settings.onUpdateCheckChange = { [settings, updates] in updates.setAutomatic(settings.updateCheck) }
+        let updater = AppUpdater(bundled: Self.bundled)
+        self.updater = updater
+        updater.offer = { [updates] in updates.offer }
+        // A test feed or a test version (the check's -SillUpdateFeed, -SillUpdateVersion) is in use: Update
+        // Now is then unavailable rather than acting on what a test said.
+        let bundleVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        updater.checkerUsesTestValues = { [updates] in
+            updates.configuration.testFeed || updates.configuration.running != bundleVersion
+        }
         presentation = StatusText.present(snapshot: HostStatusSnapshot(),
                                           permissions: PermissionState(screenRecording: true, accessibility: true),
                                           startupError: nil, hasCoordinator: false)
+        // The devices an update would disconnect, by the names the menu's card gives them.
+        updater.devices = { [weak self] in
+            (self?.coordinator?.status.snapshot.devices ?? []).map { $0.name ?? "a device" }
+        }
     }
 
     static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev" }
@@ -145,6 +161,9 @@ final class AppModel {
             }
             // Never before the host is up, and also when it could not start: a newer Sill may be the fix.
             startUpdates()
+            // This Sill has run: the copy an update replaced (kept until now so it could be put back)
+            // and anything else earlier updates left go.
+            updater.cleanUpAfterStart()
         }
     }
 

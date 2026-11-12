@@ -452,6 +452,17 @@ enum DebugHooks {
                 render(section, appearance: appearance, to: out.appendingPathComponent("pane-updates-\(sample.name)-\(name).png"))
             }
         }
+        // Update Now's states, as a build with an update key draws them (this branch's builds have none).
+        let offered = updatePaneSamples().first { $0.name == "available" }!.pane
+        for sample in updateNowSamples() {
+            let section = Form { UpdatesSection(pane: offered, install: sample.install, installAvailable: true, automatic: .constant(true)) }
+                .formStyle(.grouped)
+                .frame(width: 520)
+                .background(Color(nsColor: .windowBackgroundColor))
+            for (name, appearance) in appearances {
+                render(section, appearance: appearance, to: out.appendingPathComponent("pane-update-now-\(sample.name)-\(name).png"))
+            }
+        }
         for sample in remotePaneSamples() {
             let pane = RemoteAccessPane(status: sample.status, remoteAccess: .constant(sample.status.remoteAccess),
                                         internetAccess: .constant(sample.status.internetAccess), port: 7455,
@@ -512,6 +523,18 @@ enum DebugHooks {
                                               update: (offer: previewOffer, running: SillVersion("0.3.0")!))
             menuText += "=== update-available (glyph: \(p.glyph), tooltip: \(p.tooltip))\n"
             menuText += MenuBuilder.dump(entries, card: p) + "\n"
+            // With Update Now (a build with an update key): the item opens Settings, and says an update's step.
+            let installStates: [(String, MenuBuilder.UpdateMenuState)] = [
+                ("update-now-available", MenuBuilder.UpdateMenuState(phase: .idle, available: true)),
+                ("update-now-refused", MenuBuilder.UpdateMenuState(phase: .idle, available: true, refusal: .notWritable("/Applications"))),
+                ("update-now-downloading", MenuBuilder.UpdateMenuState(phase: .downloading(received: 2_400_000, total: 5_920_002), available: true)),
+            ]
+            for (label, install) in installStates {
+                let entries = MenuBuilder.entries(presentation: p, config: model.settings.config, login: login, permissions: idle.permissions,
+                                                  update: (offer: previewOffer, running: SillVersion("0.3.0")!), install: install)
+                menuText += "=== \(label) (glyph: \(p.glyph), tooltip: \(p.tooltip))\n"
+                menuText += MenuBuilder.dump(entries, card: p) + "\n"
+            }
         }
         try? menuText.write(to: out.appendingPathComponent("menu.txt"), atomically: true, encoding: .utf8)
         renderGlyphSheet(to: out.appendingPathComponent("glyphs.png"))
@@ -829,6 +852,40 @@ extension DebugHooks {
                                                          lastCheck: lastCheck), automatic: false),
             UpdatePaneSample(name: "noversion", pane: pane(hasVersion: false)),
             UpdatePaneSample(name: "testpattern", pane: pane(testPatternOnly: true)),
+        ]
+    }
+
+    struct UpdateNowSample {
+        var name: String
+        var install: UpdateInstallPolicy.Pane
+    }
+
+    /// pane-update-now-*: the section with Update Now (a build with an update key), Sill 0.4 offered to
+    /// a running 0.3, in each of Update Now's states and refusals (docs/one-click-update-plan.md §4.7).
+    static func updateNowSamples() -> [UpdateNowSample] {
+        typealias P = UpdateInstallPolicy
+        func pane(_ phase: P.Phase, refusal: P.Refusal? = nil, keptAt: String? = nil) -> P.Pane {
+            P.pane(P.State(phase: phase), offered: previewOffer.version, running: SillVersion("0.3.0")!, available: true,
+                   refusal: refusal, keptAt: keptAt)
+        }
+        return [
+            UpdateNowSample(name: "available", install: pane(.idle)),
+            UpdateNowSample(name: "refused-folder", install: pane(.idle, refusal: .notWritable("/Applications"))),
+            UpdateNowSample(name: "refused-account", install: pane(.idle, refusal: .otherAccount("Alex Example"))),
+            UpdateNowSample(name: "refused-translocated", install: pane(.idle, refusal: .translocated)),
+            UpdateNowSample(name: "confirming", install: pane(.confirming(devices: ["iPad (iPad14,1)"]))),
+            UpdateNowSample(name: "fetching", install: pane(.fetching)),
+            UpdateNowSample(name: "downloading", install: pane(.downloading(received: 2_400_000, total: 5_920_002))),
+            UpdateNowSample(name: "checking", install: pane(.checking)),
+            UpdateNowSample(name: "ready", install: pane(.ready(devices: ["iPad (iPad14,1)", "iPhone (iPhone16,1)"]))),
+            UpdateNowSample(name: "installing", install: pane(.installing)),
+            UpdateNowSample(name: "restarting", install: pane(.restarting)),
+            UpdateNowSample(name: "failed-download", install: pane(.failed(.download("The network connection was lost.")))),
+            UpdateNowSample(name: "failed-signature", install: pane(.failed(.bundle(.wrongSigner)))),
+            UpdateNowSample(name: "failed-notsigned", install: pane(.failed(.notSigned))),
+            UpdateNowSample(name: "failed-didnotstart", install: pane(.failed(.didNotStart("it quit as it started", putBack: true)))),
+            UpdateNowSample(name: "failed-lost", install: pane(.failed(.didNotStart("it quit as it started", putBack: false)),
+                                                               keptAt: "/private/var/folders/xy/T/TemporaryItems/NSIRD_Sill_ab12Cd/Sill.app")),
         ]
     }
 }
