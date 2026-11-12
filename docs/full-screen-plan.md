@@ -113,7 +113,12 @@ the band is held only until the rule decides, and then either is the hide and no
 recognizers fail, its touch is cancelled in the views) or goes on whole, the waiting recognizers
 recognizing it as they would have, their translation counted from the touch's landing. The trackpad's
 tracker, which begins at touch-down, now starts from where the finger landed (`FingerTracker.downLocation`),
-so a stroke it waited for loses no travel. Recognizers that only watch (the stroke observer, the finger
+so a stroke it waited for loses no travel. A stroke judged only at its lift (a quick drag left that stops
+short of the edge) has its waiting recognizers let go at that lift, beginning and ending at once: the
+picture's scroll and the trackpad's tracker then carry the finger's travel at their end
+(`EdgeRecognizers.releasedAtLift`, true only in that moment after an edge recognizer let a touch go at its
+lift), and the trackpad's pan leaves a held stroke's travel to its tracker (`trackerPending`), so it counts
+once. None of this is reached by a stroke away from the edge. Recognizers that only watch (the stroke observer, the finger
 counter, the tour's touch watch) never recognize, so never wait. The Pencil and the iPad's pointer never
 reach the flick (`allowedTouchTypes`), and the pointer's own recognizers take no finger.
 
