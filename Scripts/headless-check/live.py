@@ -13,22 +13,38 @@ the Desktop, and prints one verdict per rule:
 - flicker: Sill's display made, a monitor flickering every half second for six seconds: kept; gone two seconds after
   it stays on.
 - waiting: a monitor flickering while the Desktop waits for the display: decided once, by three seconds.
+- sleep: Noah's test at 03:56 (2026-11-12): the lid closed, two monitors, locked, a device on the Desktop; the screens
+  go to sleep (macOS's display sleep: both monitors online and asleep, `screens asleep`), the Desktop is asked for again
+  as after the capture's stop, later they wake: nothing made, one "asleep, not gone" line, nothing declared after the
+  connect (the device is idle).
+- goneasleep: the only monitor unplugged while the screens sleep: nothing made while they sleep (one line), made two
+  seconds after they wake.
+- dropoff: a Mac mini whose monitor drops off as the screens sleep and is back 1.2 s after they wake: nothing made.
+- after: a device connects to a closed-lid Mac whose monitors sleep: nothing made (a Mac's connect wakes them).
+- nodevice: no device; the screens sleep, a monitor goes, they wake: no Headless display line at all.
+- lidclose: the lid closed with nothing attached (#61), macOS having said the screens slept while its stand-in draws: a
+  display working is awake, so Sill's display is made as before.
+- tapwake: the only monitor gone while the screens sleep, unlocked; a tap on the device is a person's activity, which
+  wakes them on a Mac: made two seconds after it, though the file still says asleep.
 Each host lives under 40 s and is killed at the end.
 
-    Scripts/headless-check/live.py OUT [switch|view|screenless|flicker|waiting|all]
+    Scripts/headless-check/live.py OUT [switch|view|screenless|flicker|waiting|sleep|goneasleep|dropoff|after|nodevice|
+                                        lidclose|tapwake|all]
 
-Needs .build/release/SillHost (swift build -c release). Exits 1 when a verdict fails."""
+Needs .build/release/SillHost (swift build -c release), or another build's in HEADLESS_CHECK_HOST. Exits 1 when a verdict
+fails."""
 import os, re, signal, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-HOST = os.path.join(ROOT, ".build/release/SillHost")
+HOST = os.environ.get("HEADLESS_CHECK_HOST") or os.path.join(ROOT, ".build/release/SillHost")   # another build's CLI to compare
 CLIENT = os.path.join(ROOT, "Scripts/sillclient.py")
 BASE_ENV = {"SILL_TEST_LOOPBACK": "1", "SILL_TEST_SOFTWARE_ENCODER": "1", "SILL_TEST_NO_ROUTER": "1", "SILL_TEST_NO_SCREEN": "1",
             "SILL_TEST_LOCK_IGNORE_MAC": "1"}
 TWO = "real\nreal\nlid closed\n"
 STANDIN = "standin\nlid closed\n"
 ONE = "real\nlid closed\n"
+TWO_ASLEEP = "real asleep\nreal asleep\nlid closed\nscreens asleep\n"   # macOS's display sleep: online, asleep
 
 verdicts = []
 
@@ -113,6 +129,9 @@ def client(host, out, label, seconds, args, start):
 
 CREATED, REMOVED = r"^Headless display: created ", r"^Headless display: a display is online again; removed"
 LOOKING, NONE = r"^Headless display: no real screen; looking again", r"^Headless display: a real screen works again; none made"
+ASLEEP_NOT_GONE = r"^Headless display: the (\d+ screens are|screen is) asleep, not gone; none made"
+WAITS_FOR_WAKE = r"^Headless display: no real screen, and the screens are asleep; none made until they wake\.$"
+STREAMING = r"^Streaming a synthetic test pattern"
 
 
 def files(out, label, displays, lock):
@@ -205,13 +224,129 @@ def run_waiting(out):
     verdict(not h.all(REMOVED), f"nothing made and removed in a loop: removed {h.all(REMOVED)}")
 
 
+def dry_wakes(h, after=0.0, before=1e9):
+    """The seconds whose stats line counts a declaration a test host only counts (disp.wakeDry)."""
+    return h.all(r"\[1s\].*disp\.wakeDry", after, before)
+
+
+def run_sleep(out):
+    print("== sleep: 03:56, the screens asleep with the lid closed and a device on the Desktop; the Desktop asked again", flush=True)
+    d, l = files(out, "sleep", TWO, "1")
+    h = Host(out, "sleep", {"SILL_TEST_HEADLESS": d, "SILL_TEST_LOCKED_FILE": l})
+    # The capture's stop (the host selects nothing) and the device's own request for the Desktop at once, as at 03:56:20.
+    c = client(h, out, "sleep-c1", 22, ["desktop", "--pick=none@5.0", "--pick=desktop@5.05"], start=1.0)
+    h.at(5.5); write(d, TWO_ASLEEP)              # the lock screen's idle timer: both monitors asleep, the screens asleep
+    asked = h.wait_for(STREAMING, 5.6, 9.5)      # the Desktop started again, the screens asleep
+    h.at(14.0); write(d, TWO)                    # a key at the Mac, or a tap on the device: awake, the monitors working
+    c.join(); h.at(25.0); h.stop()
+    verdict(h.first(r"^Locked: this Mac's screen is locked")[0] is not None, "locked from the start, on the console")
+    verdict(asked is not None, f"the Desktop asked again while the screens slept: streaming again at {asked} s")
+    lines = h.all(ASLEEP_NOT_GONE)
+    verdict(len(lines) == 1 and asked is not None and lines[0] >= 5.5, f"one 'asleep, not gone' line, at the request: {lines}")
+    verdict(not h.all(LOOKING) and not h.all(CREATED) and not h.all(REMOVED),
+            f"nothing made or removed, no wait for one: looking {h.all(LOOKING)}, created {h.all(CREATED)}, removed {h.all(REMOVED)}")
+    connect = dry_wakes(h, 0, 4.0)
+    verdict(len(connect) >= 1 and not dry_wakes(h, 4.0), f"a declaration counted at the connect ({connect}) and none after (idle: {dry_wakes(h, 4.0)})")
+
+
+def run_goneasleep(out):
+    print("== goneasleep: the only monitor unplugged while the screens sleep; they wake with no monitor", flush=True)
+    d, l = files(out, "goneasleep", ONE, "1")
+    h = Host(out, "goneasleep", {"SILL_TEST_HEADLESS": d, "SILL_TEST_LOCKED_FILE": l})
+    c = client(h, out, "goneasleep-c1", 22, ["desktop", "--pick=none@6.0", "--pick=desktop@6.05"], start=1.0)
+    h.at(4.0); write(d, "real asleep\nlid closed\nscreens asleep\n")
+    h.at(5.0); write(d, "standin asleep\nlid closed\nscreens asleep\n")   # unplugged while asleep: the stand-in alone, dark
+    h.at(12.0); write(d, STANDIN)                # the screens awake (a person's tap on a real Mac), still no monitor
+    woke = 12.0
+    c.join(); h.at(25.0); h.stop()
+    waits = h.all(WAITS_FOR_WAKE)
+    verdict(len(waits) == 1 and 6.5 <= waits[0] < woke, f"the Desktop asked while they slept: one 'none made until they wake' line: {waits}")
+    created = h.all(CREATED)
+    verdict(not [t for t in created if t < woke], f"nothing made while the screens slept: created {created}")
+    looked = h.first(LOOKING, woke)[0]
+    verdict(looked is not None and looked - woke < 0.6, f"the wake asked again: 'looking again' at {looked} s")
+    verdict(len(created) == 1 and 1.9 <= created[0] - woke <= 2.7, f"made two seconds after the wake (12 s): {created}")
+    verdict(not h.all(REMOVED), f"kept: removed {h.all(REMOVED)}")
+
+
+def run_dropoff(out):
+    print("== dropoff: a Mac mini's monitor drops off as the screens sleep, back 1.2 s after they wake", flush=True)
+    d, l = files(out, "dropoff", "real\n", "0")
+    h = Host(out, "dropoff", {"SILL_TEST_HEADLESS": d, "SILL_TEST_LOCKED_FILE": l})
+    c = client(h, out, "dropoff-c1", 20, ["desktop", "--pick=none@5.0", "--pick=desktop@5.05"], start=1.0)
+    h.at(4.0); write(d, "screens asleep\n")      # asleep, and its monitor gone from the list
+    h.at(10.0); write(d, "")                     # awake, nothing online yet
+    h.at(11.2); write(d, "real\n")               # the monitor back
+    c.join(); h.at(23.0); h.stop()
+    waits = h.all(WAITS_FOR_WAKE)
+    verdict(len(waits) == 1 and waits[0] < 10.0, f"asked while asleep: one 'none made until they wake' line: {waits}")
+    looked, none = h.first(LOOKING, 10.0)[0], h.first(NONE, 10.0)[0]
+    verdict(looked is not None and none is not None and none > 11.2,
+            f"the wake asked again and waited: 'looking again' at {looked}, 'none made' at {none} (the monitor back at 11.2)")
+    verdict(not h.all(CREATED) and not h.all(REMOVED), f"nothing made or removed: {h.all(CREATED)}, {h.all(REMOVED)}")
+
+
+def run_after(out):
+    print("== after: a device connects to a closed-lid Mac whose monitors sleep", flush=True)
+    d, l = files(out, "after", TWO_ASLEEP, "1")
+    h = Host(out, "after", {"SILL_TEST_HEADLESS": d, "SILL_TEST_LOCKED_FILE": l})
+    c = client(h, out, "after-c1", 10, ["desktop"], start=2.0)
+    c.join(); h.at(14.0); h.stop()
+    verdict(len(dry_wakes(h, 1.5, 5.0)) >= 1, f"the connect's declaration counted (a Mac's wakes the monitors): {dry_wakes(h, 1.5, 5.0)}")
+    verdict(len(h.all(ASLEEP_NOT_GONE)) == 1, f"one 'asleep, not gone' line: {h.all(ASLEEP_NOT_GONE)}")
+    verdict(not h.all(LOOKING) and not h.all(CREATED), f"nothing made, no wait: {h.all(LOOKING)}, {h.all(CREATED)}")
+
+
+def run_nodevice(out):
+    print("== nodevice: no device; the screens sleep, the monitors go, they wake, the monitors back", flush=True)
+    d, l = files(out, "nodevice", TWO, "1")
+    h = Host(out, "nodevice", {"SILL_TEST_HEADLESS": d, "SILL_TEST_LOCKED_FILE": l})
+    h.at(3.0); write(d, TWO_ASLEEP)
+    h.at(6.0); write(d, "standin asleep\nlid closed\nscreens asleep\n")
+    h.at(9.0); write(d, STANDIN)
+    h.at(12.0); write(d, TWO)
+    h.at(15.0); h.stop()
+    verdict(not h.all(r"^Headless display"), f"no Headless display line at all: {h.all(r'^Headless display')}")
+    verdict(not h.all(r"^Client connected"), "no device connected")
+
+
+def run_lidclose(out):
+    print("== lidclose: the lid closed with nothing attached (#61), macOS saying the screens slept while its stand-in draws", flush=True)
+    d, l = files(out, "lidclose", "standin\nlid closed\nscreens asleep\n", "1")
+    h = Host(out, "lidclose", {"SILL_TEST_HEADLESS": d, "SILL_TEST_LOCKED_FILE": l})
+    c = client(h, out, "lidclose-c1", 8, ["desktop"], start=1.0)
+    c.join(); h.at(11.0); h.stop()
+    looked, created = h.first(LOOKING)[0], h.all(CREATED)
+    verdict(not h.all(WAITS_FOR_WAKE), f"a display working (the stand-in) is awake: no 'until they wake' line: {h.all(WAITS_FOR_WAKE)}")
+    verdict(looked is not None and len(created) == 1 and 0.9 <= created[0] - looked <= 2.6,
+            f"made as before, by two seconds after the Desktop asked (the connect's wake counts): looking at {looked}, created {created}")
+
+
+def run_tapwake(out):
+    print("== tapwake: the only monitor gone while the screens sleep, unlocked; a tap on the device is their wake", flush=True)
+    d, l = files(out, "tapwake", ONE, "0")
+    h = Host(out, "tapwake", {"SILL_TEST_HEADLESS": d, "SILL_TEST_LOCKED_FILE": l})
+    c = client(h, out, "tapwake-c1", 18, ["desktop", "--pick=none@6.0", "--pick=desktop@6.05", "--tap=0.5,0.5@10.0"], start=1.0)
+    h.at(4.0); write(d, "real asleep\nlid closed\nscreens asleep\n")
+    h.at(5.0); write(d, "standin asleep\nlid closed\nscreens asleep\n")   # the file says asleep from here to the end
+    c.join(); h.at(22.0); h.stop()
+    waits = h.all(WAITS_FOR_WAKE)
+    verdict(len(waits) == 1 and waits[0] < 10.5, f"the Desktop asked while they slept: one 'until they wake' line: {waits}")
+    tap = dry_wakes(h, 10.5, 13.0)
+    verdict(len(tap) >= 1, f"the tap's declaration counted (a Mac's wakes the screens): {tap}")
+    created = h.all(CREATED)
+    verdict(len(created) == 1 and 1.9 <= created[0] - 11.0 <= 3.0,
+            f"the tap is the wake: made two seconds after it (about 11 s), the file still asleep: {created}")
+
+
 def main():
     if len(sys.argv) < 2: sys.exit(__doc__)
     out = os.path.abspath(sys.argv[1]); os.makedirs(out, exist_ok=True)
     which = sys.argv[2] if len(sys.argv) > 2 else "all"
     if not os.path.exists(HOST): sys.exit(f"live.py: no {HOST} (swift build -c release)")
     for name, run in (("switch", run_switch), ("view", run_view), ("screenless", run_screenless), ("flicker", run_flicker),
-                      ("waiting", run_waiting)):
+                      ("waiting", run_waiting), ("sleep", run_sleep), ("goneasleep", run_goneasleep), ("dropoff", run_dropoff),
+                      ("after", run_after), ("nodevice", run_nodevice), ("lidclose", run_lidclose), ("tapwake", run_tapwake)):
         if which in (name, "all"): run(out)
     bad = [w for ok, w in verdicts if not ok]
     print(f"{len(verdicts) - len(bad)} of {len(verdicts)} verdicts passed")
