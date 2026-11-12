@@ -138,7 +138,9 @@ Sill has layouts of its own.
   Access on. A device away from home gets a quality of its own, Low at Standard
   resolution until you pick another there or in Sill's settings, so a slow
   connection never starts at your home quality; your home quality comes back
-  as soon as a device at home connects. When your device comes home and your
+  as soon as a device at home connects. A device that reaches your Mac through
+  a relay or tunnel running on the Mac itself, such as a userspace Tailscale
+  node or an SSH tunnel, counts as away too. When your device comes home and your
   network lists your Mac, the session moves to your network by itself.
 - **When the link can't keep up**, Sill for Mac notices that it is holding
   frames back and tells your device, which says so over the picture and, in
