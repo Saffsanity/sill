@@ -385,7 +385,14 @@ say("== refused: the download")
 await refused("a redirect to another host", { var r = v11; r.modes = ["UpdTest.zip": "redirect-other"]; return r }()) { $0 == .redirectRefused("http://localhost:\(port)") }
 await refused("a redirect to another path", { var r = v11; r.modes = ["UpdTest.zip": "redirect-path"]; return r }()) { $0 == .redirectRefused(base) }
 await refused("redirects without end", { var r = v11; r.modes = ["UpdTest.zip": "redirect-loop"]; return r }()) { $0 == .redirectRefused(base) }
-await refused("a truncated download", { var r = v11; r.modes = ["UpdTest.zip": "truncate"]; return r }()) { if case .download = $0 { return true }; return $0 == .sizeMismatch }
+// The stand-in closes the connection partway: URLSession reports it as the download broken, or, when it delivered no
+// body bytes before it noticed (under load, seen once in round 6's mutant run), as the connection lost. Each is a
+// refusal with the installed copy unchanged, which is what this case checks.
+await refused("a truncated download", { var r = v11; r.modes = ["UpdTest.zip": "truncate"]; return r }()) {
+    if case .download = $0 { return true }
+    if case .noConnection = $0 { return true }
+    return $0 == .sizeMismatch
+}
 await refused("a Content-Length too large", { var r = v11; r.modes = ["UpdTest.zip": "oversize"]; return r }()) { $0 == .sizeMismatch }
 await refused("more bytes than the manifest says", { var r = v11; r.modes = ["UpdTest.zip": "nolength"]; return r }()) { $0 == .tooLarge }
 await refused("the zip answered 500", { var r = v11; r.modes = ["UpdTest.zip": "status:500"]; return r }()) { $0 == .github(500) }
