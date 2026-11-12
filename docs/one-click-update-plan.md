@@ -684,19 +684,30 @@ The real path cannot be rehearsed with a release of Saffsanity/sill without offe
 the rehearsal uses a throwaway public repository, a throwaway key, and a scratch branch that changes only
 constants. Builds made from it are never released.
 
-Prepare (on his Mac, from this branch merged into a scratch branch `update-rehearsal`, never pushed to
-main):
-1. A public repository `Saffsanity/sill-update-rehearsal` (no code needed).
-2. A rehearsal key in a file: `Scripts/sign-update.sh --new-key --key-file ~/Desktop/rehearsal.key`
-   (prints the public key). On `update-rehearsal`: that public key in `UpdateManifest.releaseKeys`; the
-   rehearsal repository in `UpdatePolicy.feed` and in `UpdateInstallPolicy.Endpoints.github`'s two URLs
-   (`git grep -n 'Saffsanity/sill/'` finds the three lines); CFBundleShortVersionString 0.6.90. Then
-   `SILL_SIGN_IDENTITY=… SILL_NOTARY_PROFILE=sill-notary SILL_UNIVERSAL=1 Scripts/release.sh` (no
-   `--publish`): a notarized `.build/Sill-0.6.90.zip` — build A, kept.
-3. Version 0.6.91, the same command: build B. Publish B as release `v0.6.91` of the rehearsal repository
-   with `Sill.zip` and `Sill.zip.sha256` (`gh release create v0.6.91 --repo Saffsanity/sill-update-rehearsal
-   …`), then `Scripts/sign-update.sh v0.6.91 --repo Saffsanity/sill-update-rehearsal --key-file
-   ~/Desktop/rehearsal.key --expect-key ‹the public key›`.
+Prepare (on his Mac, in a scratch clone whose pushes go nowhere, so no rehearsal tag can ever reach
+Saffsanity/sill, where a pushed `v*` tag starts the release workflow: `git clone
+https://github.com/Saffsanity/sill ~/Downloads/sill-rehearsal && cd ~/Downloads/sill-rehearsal && git
+remote set-url --push origin DISABLED && git checkout -b update-rehearsal origin/one-click-update`, or
+origin/main once this has merged):
+1. A public repository `Saffsanity/sill-update-rehearsal` with a README (`gh repo create
+   Saffsanity/sill-update-rehearsal --public --add-readme`: a release's tag needs a commit), no code.
+2. The signer, once (§14, 1.1 and 1.2: read its five files, then `Scripts/sign-update.sh
+   --install-signer`), and a rehearsal key in a file: `Scripts/sign-update.sh --new-key --key-file
+   ~/Desktop/rehearsal.key` (prints the public key; never the real key, which stays in the keychain). Copy
+   `Packaging/embedded.provisionprofile` from ~/Downloads/winstream into the clone (it is git-ignored, and
+   without it a release build has no keychain group: the rehearsal's builds would lose the pairings and
+   Update Now would refuse them). On `update-rehearsal`: that public key in `UpdateManifest.releaseKeys`;
+   the rehearsal repository in `UpdatePolicy.feed` and in `UpdateInstallPolicy.Endpoints.github`'s two
+   URLs (`git grep -n 'Saffsanity/sill/' -- 'Sources/SillMenuBar/Update*.swift'` finds the three lines);
+   CFBundleShortVersionString 0.6.90 in Packaging/Info.plist; commit, and `git tag v0.6.90` (release.sh
+   builds only a tagged commit; the tag stays in this clone). Then `SILL_SIGN_IDENTITY=…
+   SILL_NOTARY_PROFILE=sill-notary SILL_UNIVERSAL=1 Scripts/release.sh` (no `--publish`): a notarized
+   `.build/Sill-0.6.90.zip` — build A, kept.
+3. Version 0.6.91 (commit, `git tag v0.6.91`), the same command: build B. Publish B as release `v0.6.91`
+   of the rehearsal repository with `Sill.zip` and `Sill.zip.sha256` (`gh release create v0.6.91 --repo
+   Saffsanity/sill-update-rehearsal …`), then `Scripts/sign-update.sh v0.6.91 --repo
+   Saffsanity/sill-update-rehearsal --key-file ~/Desktop/rehearsal.key --expect-key ‹the public key›` (it
+   compares the published zip with this clone's `.build/Sill-0.6.91.zip`).
 4. Note what to come back to: `/Applications/Sill.app`'s version (Settings › General's footer); the way
    back is the real release from getsill.app/download.
 
