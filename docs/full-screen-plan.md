@@ -231,7 +231,54 @@ indicator too); DEBUG `-SillFullScreenRoom screen|housing|safe`.
 
 ## Results
 
-(Filled in as the gates ran.)
+All on 2026-11-12, inside the heavy lock (07:41 to 08:2x), the branch with main at 919e05a merged in.
+
+- **G1, the rule:** `Tests/checks/full-screen`, 56,514 checks, none failed: the cases at each number's edge
+  at 60, 120 and 240 Hz, and 30,000 seeded random strokes against the independent model (5,061 hid, 9,536
+  landed outside the band) with the invariants. Its mutants: 59 of 59 caught (`run.sh --mutants`).
+- **G2, the builds:** the iOS app Debug and Release for the simulator and Debug for a device, at 25eac11a and
+  again at 36686dc8 (after the room's fix below): each `** BUILD SUCCEEDED **`, the only warning the known
+  `StreamClient.swift:4518` capture one. The shared photo tool built 25eac11a, 36686dc8 and 480728cc too.
+- **G4, live on loopback** (`SillHost --synthetic` with SILL_TEST_LOOPBACK, SOFTWARE_ENCODER, NO_ROUTER,
+  NO_SCREEN and INPUT_LOG; the app's Debug build under `-SillLive 1` on the agents' iPad simulator; no device
+  on Sill.app before each run, `Scripts/encoder-check/no-device.sh`). An input script tapped (39), pressed a
+  key (24) and typed a letter (12) every 0.1 s for a second around each change while the controls hid at 4 s,
+  came back at 7, hid at 10, came back by a shake at 13, hid at 16 and came back by a played swipe in at 18.8:
+  - An iPhone 15 Pro's size upright (393×852, the island's 59 pt, `-SillIdiom phone`): the viewport
+    377×235 pt (the pane) as it connected (twice, as on main), then 393×793 at each hide and 377×235 at each
+    show, one per change, six in all. Every input reached the host: 39 left mouse downs and 39 ups, 36 key
+    events (24 presses and 12 letters: the dry run logs typed text as key 0 with its string).
+  - An iPad mini sideways (1133×744): 1117×618 as it connected, then 1133×744 and 1117×618, one per change;
+    every input reached the host, as above.
+  - The Desktop on the Mac's second screen (#355; the host's `SILL_TEST_DISPLAYS` with two): the device's own
+    Desktop button (`-SillDesktopTapAt 3`, as a finger's tap) stepped it ("Desktop: display 2 of 2 (DELL
+    U2723QE), asked by Sill agents iPad"); then the controls hid at 6, came back at 9, hid at 12 and came back
+    by a shake at 15: one viewport each (1133×744, 1117×618), and the host's only stream start after the step
+    was display 2's, so the Desktop stayed there; the 12 taps around the changes all reached it.
+  - A window's fit cannot run here: a synthetic host streams only the Desktop (SILL_TEST_NO_SCREEN keeps it
+    off this Mac's windows), and the Mac ignores a viewport's size for the Desktop. What the window case
+    needs from the device is the viewport above, one per change; the Mac fits a window to a new viewport by
+    the path a rotation takes (`StreamCoordinator.applyViewportToActiveWindow`: one restart on the virtual
+    display, a resize with Aa set), unchanged here, which Larger Picture's live gate (docs/larger-picture-
+    plan.md, D4) measured: one restart per new viewport.
+  - **Found and fixed:** the first run measured the hidden room on the upright phone at 393×852: the stream
+    screen's GeometryReader ignores the safe area while hidden, and then reports none, so the picture would
+    have gone under the Dynamic Island. The room and the swipe in's preview now take the window's safe area
+    (UIKit's, from FullScreenEdges), or in the harness its fake screen's (36686dc8); the second run above.
+- **G5, photos** (`Scripts/harness-photos.sh`, the agents' Duo on iOS 27.1 and iPad on 27.0):
+  - Shown, against main (919e05a): on the Duo simulator 15 cases (an iPhone upright and sideways, Larger
+    Picture, the Duo's book, laptop, flat and cover, the largest text size, the Desktop button on screen 2 of
+    3): 13 pixel for pixel main's; the 2 Settings photos differ by the new row, as they must. On the iPad
+    simulator 7 cases: 5 pixel for pixel main's, the 2 Settings photos by the row.
+  - Hidden (37 photos, the mock's frame drawn as a dim rectangle, `-SillPointer hidden`): an upright iPhone
+    with a tall window fills the room under the island to the bottom edge; the Desktop upright keeps its
+    shape, black above and below; sideways the room is clear of both housing sides (iOS gives both); the
+    Duo's laptop pose above the fold, its book pose and its cover; an iPad mini upright filled edge to edge
+    by a tall window; the room's three choices drawn with an iPhone's island, corners and home indicator
+    (`-SillMockHardware 1`); the hint, at the default and the largest text size; the swipe in's preview at
+    40 to 70 % in, its Desktop button reading "Desktop 2" with its dots.
+- **G6:** `Tests/checks/repo-rules`, 10 of 10 rules hold.
+- **G3, the touch rig:** RIG_RESULTS
 
 ## Noah's test (the device test, short)
 

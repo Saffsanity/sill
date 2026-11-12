@@ -79,7 +79,11 @@ final class EdgeFlickRecognizer: UIGestureRecognizer {
     /// while full screen is offered; FullScreenPolicy.offered).
     private func point(_ touch: UITouch) -> CGPoint { touch.location(in: view) }
 
+    // Each of these calls super first: UIKit's subclassing contract ("if you override one you must call super",
+    // UIGestureRecognizerSubclass.h). Without it the touch rig showed the recognizer judging the first stroke and
+    // never another, the trackpad's recognizers waiting on it for good.
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
         guard state == .possible else { return }
         guard armed else { state = .failed; return }
         if tracked != nil {
@@ -105,6 +109,7 @@ final class EdgeFlickRecognizer: UIGestureRecognizer {
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesMoved(touches, with: event)
         guard state == .possible, let touch = tracked, touches.contains(touch) else { return }
         for sample in event.coalescedTouches(for: touch) ?? [touch] {
             let p = point(sample)
@@ -114,6 +119,7 @@ final class EdgeFlickRecognizer: UIGestureRecognizer {
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesEnded(touches, with: event)
         guard state == .possible else { return }
         guard let touch = tracked, touches.contains(touch) else {
             // Another touch of this event lifted while the judged one stays: not ours to judge.
@@ -135,6 +141,7 @@ final class EdgeFlickRecognizer: UIGestureRecognizer {
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesCancelled(touches, with: event)
         guard state == .possible else { return }
         finish(rule.cancelled())
     }
@@ -189,11 +196,11 @@ final class RevealEdgePan: UIScreenEdgePanGestureRecognizer {
     private var clock: Timer?
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
         if state == .possible, let view, touches.contains(where: { $0.location(in: view).x > Self.landsWithin }) {
             state = .failed
             return
         }
-        super.touchesBegan(touches, with: event)
         if state == .possible, clock == nil {
             clock = Timer.scheduledTimer(withTimeInterval: EdgeReveal.decideWithin, repeats: false) { [weak self] _ in
                 guard let self else { return }
