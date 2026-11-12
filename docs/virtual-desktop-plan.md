@@ -24,7 +24,7 @@ makes to carry the Desktop, not a fourth; the encoder as the real limit; the Vir
 device shows it, plus a short grace, never for the whole run of Sill; a third size choice, Match this device; the
 Desktop button's cycle (the default monitor, each other monitor, then the Virtual Desktop), showing which one is up,
 the choice remembered; the wire additive; four phases, each a pull request with its gates, #200 merging first as it
-is; off by default, a Mac-side setting.
+is; off by default, a Mac-side setting (widened on 2026-11-12: decision 3).
 
 **Changed later that day:** "My only difference is that instead of measuring, choose one of the default display
 resolution and refresh rate of the primary display or 4K 60Hz, whatever is less." So Sill measures nothing: no
@@ -34,44 +34,36 @@ person's own choice from a fixed list, with plain words about what a Mac may not
 this plan was first to deliver is dropped with it; the runs the build still needs on a real Mac (the existing self
 test at each size, a window probe) are in each phase's gates, with the conditions they run under.
 
-## The decisions that are Noah's (each has the default this plan takes until he says otherwise)
+## Decided (Noah, 2026-11-12)
 
-1. **What "whatever is less" means.** Default (a), the reading he was given: the size and the rate are each held to
-   their own cap. The Virtual Desktop takes the main display's own mode, its picture held inside 3840 × 2160 pixels
-   (its shape kept) and its rate to 60 Hz: a 14-inch MacBook Pro (3024 × 1964 pixels at 120 Hz) gives 3024 × 1964 at
-   60. **(b)**, the other reading: whichever of the two whole modes is the lighter load, pixels times rate. The 14-inch's
-   own mode is 713 million pixels a second (3024 × 1964 × 120), 4K at 60 is 498 million, so it would get 3840 × 2160 at
-   60, a 16:9 desktop beside its 1.54:1 screen; so would an ultrawide at 144 Hz, a 60 Hz 5K display and most
-   ProMotion Macs. A smaller variant of (a), **(a′)**: "4K" as a count of pixels (8.3 million) rather than a box. The
-   16-inch MacBook Pro then keeps its own 1728 × 1117 points (3456 × 2234 pixels is 7.7 million, but its 2234 rows
-   are more than 2160, so the box trims it to 1670 × 1080), and a 49-inch 5120 × 1440 ultrawide keeps its own (the
-   box trims it to 3840 × 1080).
-2. **The contributors' pull requests: build on their branches, or start fresh with credit.** Default: **phase 1 is
-   built on #173** (addhumal's commits merged in as they are, with addhumal's own `reconcile-173-200` resolution
-   against #200, and this plan's changes as maintainer commits on top, so the phase's merge marks #173 merged, as
-   #223, #228 and #230 were); **#200 merges first as it is** and phase 2 moves it under the manager without changing
-   what it does; **#312, #156 and #225 are credited, not merged**: phase 4 takes dr-apple's sizing and lifetime from
-   #156/#312, lepeos's device-side rule from #312, and addhumal's sizing from #225, with `Co-authored-by` in the
-   commits that take them, a line in the pull request and on contribute.html, and Noah closes them pointing at the
-   phase. Their host halves make the device's display the Mac's main display and give it an identity of its own, both
-   of which this plan does differently (§7, §9), so carrying their commits unchanged would mean merging code only to
-   delete it. The other ways: every phase fresh from main with credit only (cleaner history; #173 not marked merged),
-   or each contributor asked to rebase onto the plan (slowest, and the plan changes #173's order and label).
-3. **What a device may change.** Default: **the Mac's alone**, as Share clipboard, Remote Access and the off-console
-   view are. A device reaches the Virtual Desktop once it is on (a step is a pick, not a setting) and its Settings
-   panel shows whether it is on and at what size, read-only; it cannot turn it on or change its size or rate. The
-   Virtual Desktop adds a display to the Mac's own arrangement, where the person at the Mac can lose the pointer and
-   windows: that is the Mac's environment, not the stream's quality. The precedent the other way: a device turns
-   Virtual Display on and off today (full parity with the Mac's menu, 2026-09-23), and that moves windows off the
-   Mac's screen too.
-4. **Windows left on it, and the grace.** Default: **30 seconds** after the last device stopped showing it, Sill moves
-   its windows to the main display (each at the same place relative to the screen, its size kept), removes it, and
-   puts them back where they were when it comes back in the same run of Sill, unless the person at the Mac has moved
-   or resized them meanwhile (§6). The other way: let macOS place them when the display goes, and nothing comes back.
-   A longer grace means fewer display changes (#333's monitor that switches itself off at one) and a phantom display
-   for longer; 30 s is what #344's fork chose for a reconnect.
+1. **"Whatever is less": the size and the rate are capped separately.** "You understood my meaning correctly, should
+   choose 3024×1964 at 60 Hz but of course everything should be user customizable." The Virtual Desktop takes the
+   main display's own mode, its pixels held inside 3840 × 2160 (its shape kept) and its rate to 60 Hz (§2): a
+   14-inch MacBook Pro (3024 × 1964 pixels at 120 Hz) gives 3024 × 1964 at 60. Everything stays the person's to change
+   (§3), from the Mac and from a device (decision 3). Considered and not taken: the lighter of the two whole modes
+   (pixels times rate, which would give the 14-inch a 16:9 3840 × 2160 at 60), and a cap on the count of pixels
+   rather than the box (which would keep a 16-inch MacBook Pro's 1728 × 1117 and a 5120 × 1440 ultrawide whole).
+2. **The contributors' pull requests: as proposed.** Phase 1 is built on #173 (addhumal's commits merged in as they
+   are, with addhumal's own `reconcile-173-200` resolution against #200, and the plan's changes as maintainer commits
+   on top, so the phase's merge marks #173 merged, as #223, #228 and #230 were); #200 merges first as it is and phase
+   2 moves it under the manager without changing what it does; #312, #156 and #225 are credited, not merged: phase 4
+   takes dr-apple's sizing and lifetime from #156/#312, lepeos's device-side rule from #312, and addhumal's sizing from
+   #225, with `Co-authored-by` in the commits that take them, a line in the pull request and on contribute.html, and
+   Noah closes them pointing at the phase. Their host halves make the device's display the Mac's main display and
+   give it an identity of its own, both of which this plan does differently (§7, §9).
+3. **Sill on the iPhone or iPad turns the Virtual Desktop on and off and changes its resolution and refresh rate**,
+   from its Settings panel; the Mac does all of it too, and the default stays off. Noah: "Go with defaults, except for
+   who can change it. Allow users to change resolution and refresh rate from the app" ("On iOS I mean"), and "The iOS
+   app should be able to switch it on as well as long as that isnt a huge technical hurdle". It is not one: a device
+   already switches the Mac's Virtual Display and other settings through kinds 16 and 17. The switch comes in phase 2
+   with the Virtual Desktop itself, the resolution and refresh rate in phase 3 under it; who may, what each does at
+   once, what the Mac shows and saves, and the wire are in §3a.
+4. **Windows left on it: as proposed.** 30 seconds after the last device stopped showing it, Sill moves its windows to
+   the main display (each at the same place relative to the screen, its size kept), removes it, and puts them back
+   where they were when it comes back in the same run of Sill, unless the person at the Mac has moved or resized them
+   meanwhile (§6).
 
-And the name, whenever he likes (§14).
+The name stays a placeholder (§14).
 
 ## The design on one page
 
@@ -84,8 +76,9 @@ And the name, whenever he likes (§14).
 - **The Virtual Desktop.** A display of Sill's own, made when a device steps onto it and removed 30 s after no device
   shows it. By default it has the main display's resolution (its points and its pixel scale) and refresh rate, never
   more than 3840 × 2160 pixels (its shape kept) and never more than 60 Hz. Phase 3 lets the person choose another size
-  and rate from a fixed list; phase 4 adds Match this device. Windows put there stay while it is shown; when it goes
-  they move to the main display, and they come back when it does.
+  and rate from a fixed list; phase 4 adds Match this device. It is switched on and off, and sized, on the Mac or from
+  a paired device's Settings panel. Windows put there stay while it is shown; when it goes they move to the main
+  display, and they come back when it does.
 - **One manager.** Every display Sill makes is made, recognised, tracked and removed by one manager: the window
   stage's (Virtual Display) and the Desktop's. The Desktop's is one display with one identity in all its roles: #200's
   display for a Mac with no working screen, the Virtual Desktop, a matched one. The stage's stays a display of its own.
@@ -277,7 +270,7 @@ Virtual Desktop that looks like 1920 × 1080 at 2x: its own pixel count, less ro
 | 24-inch iMac (4.5K) | 2240 × 1260 at 2x (4480 × 2520 px), 60 Hz | 1920 × 1080 pt at 2x (3840 × 2160 px), 60 Hz |
 | A 4K monitor set to look like 2560 × 1440 | 2560 × 1440 at 2x (5120 × 2880 backing), 60 Hz | 1920 × 1080 pt at 2x (3840 × 2160 px), 60 Hz |
 | A 34-inch ultrawide | 3440 × 1440 at 1x, 144 Hz | 3440 × 1440 pt at 1x, 60 Hz |
-| A 49-inch ultrawide | 5120 × 1440 at 1x, 120 Hz | 3840 × 1080 pt at 1x, 60 Hz (the pixel-count reading, (a′), keeps 5120 × 1440) |
+| A 49-inch ultrawide | 5120 × 1440 at 1x, 120 Hz | 3840 × 1080 pt at 1x, 60 Hz |
 | A 1080p monitor | 1920 × 1080 at 1x, 60 Hz | itself |
 | Noah's docked main monitor (lid closed, 2026-10-27) | 2560 × 1440 at 1x | itself, at its rate up to 60 Hz |
 | A 4K monitor turned upright | looks like 1080 × 1920 at 2x (2160 × 3840 px) | itself (the box turned) |
@@ -285,8 +278,8 @@ Virtual Desktop that looks like 1920 × 1080 at 2x: its own pixel count, less ro
 
 ### 3. Custom sizes and rates (phase 3)
 
-The person's own choice, on the Mac (Settings › Displays › Virtual Desktop), from a fixed list; nothing measured,
-nothing greyed.
+The person's own choice ("of course everything should be user customizable", Noah), on the Mac (Settings › Displays ›
+Virtual Desktop) or from a device's Settings panel (§3a), from one fixed list; nothing measured, nothing greyed.
 
 - **Size**: "Same as main display (1512 × 982)", the default of §2; then, written as "looks like" points at Retina
   with their pixels: 1280 × 720 (2560 × 1440 pixels), 1440 × 900 (2880 × 1800), 1512 × 982 (3024 × 1964), 1728 × 1117
@@ -304,8 +297,64 @@ nothing greyed.
   encoders take no picture wider than 4096 pixels; on those Sill streams it scaled down, or more slowly."
 - What happens when the encoder cannot keep up is today's behaviour, unchanged (§12).
 
-Open question 11: whether the first version offers choices above 4K at 60 at all (default: yes, in phase 3, since
-Noah first asked for "at least 4K 120Hz").
+Choices above 4K at 60 are in the first version, in phase 3 (Noah: "at least 4K 120Hz", and "everything should be
+user customizable").
+
+### 3a. From a device: the switch, the resolution and the refresh rate (decision 3)
+
+The switch in phase 2, with the Virtual Desktop itself; the resolution and the refresh rate in phase 3, under it, with
+the list they choose from. One value each for the Mac, whichever device or door sets it.
+
+- **Who may**: a paired session, the bar Direct Wireless has, the other setting that changes what the Mac does beyond
+  the stream: the session's key on the Mac's trust list now (`sessionPaired`, `DeviceSettings.paired`). Never an
+  unpaired key at a door that lets any device in (Require pairing off), never the CLI's plain door, for all three
+  (on and off, the size, the rate). **From away as well** (open question 25), unlike Direct Wireless, which the Mac
+  refuses from away: using the Mac from afar with no monitor attached is a main reason to want a Virtual Desktop, and
+  the remote door admits paired keys only. Kind 16's `sessionPaired` tells the panel, which disables the three rows on
+  a session that may not, with Direct Wireless's footnote words for why.
+- **What the Mac takes** (`DeviceSettings.accepted`): on or off; a size or a rate from the list this Mac offers, which
+  it sends (`virtualDesktop.sizes` and `rates`, "The wire"); anything else, or anything from a session that may not,
+  is refused ("Settings from iPad (iPad14,1) refused: virtual desktop (only a paired device)", "… virtual desktop size
+  9999x9999@2 (not offered)") and the answer keeps the Mac's value. The same four changes a second per connection as
+  every setting (`settingsPerSecond`), one answer to that device (its token), and the line for what changed: "Settings
+  from iPad (iPad14,1): virtual desktop off → on", "… virtual desktop size same as main display → 1920 × 1080 at 2x".
+  A device on a Mac whose Virtual Desktop cannot be made (the private API missing, no AppKit loop, no Screen
+  Recording) sees the switch disabled with the state's `note`, and an "on" is refused as Virtual Display's is without
+  its loop.
+- **Switched on from a device**: it joins the cycle, and the device that switched it on is shown it: the Desktop goes
+  to the Virtual Desktop's stop at once (made then, as a step onto it makes it; a window streaming gives way, as a tap
+  on Desktop would), so every device on the one stream sees it. Switched on from the Mac, it only joins the cycle
+  (nobody at a device asked to see it). The alternative, open question 26: on from a device only joins the cycle too,
+  and the person steps to it. Switched on while the Mac is locked or another user is on the screen: saved; nothing is
+  made until this account is back on an unlocked screen (§5), and the Desktop comes back on it then.
+- **Switched off**, from either end: removed at once, no grace (§5): while the stream shows it the Desktop goes to the
+  main display first, then its windows move to the main display (decision 4, §6), and the ledger brings them back if
+  it is switched on again in the same run of Sill. While locked it waits for the unlock (§5).
+- **A size or a rate changed**: at once while the Virtual Desktop exists (a new mode in place, or a remake whose
+  windows the ledger keeps, as phase 3's probe decides; the picture restarts for every device while it shows it),
+  else the next time it is made; while locked, at the unlock.
+- **What the Mac's owner sees**: the "Settings from ‹device›: …" line in Sill.log and Show Log; the menu's Virtual
+  Desktop checkmark and subtitle ("On iPad (iPad14,1): 1512 × 982, 60 Hz") and Settings › Displays' switch and pickers
+  following live, as every device change does (`onDeviceSettingsChange`); the Virtual Desktop's own line ("made for
+  iPad (iPad14,1), which switched it on"); and the display itself in System Settings › Displays.
+- **Saved** by Sill.app like a menu click (`virtualDesktop`, `virtualDesktopSize`, `virtualDesktopHz` in
+  me.saffer.sill.mac; `save(changedFrom:)` writes only the keys that changed); the CLI keeps a device's change until it
+  quits (`persistent` false).
+- **The device's panel**, in the Mac's section after Virtual Display: the switch "Virtual Desktop" (phase 2), its
+  footnote "A desktop of its own for your devices, after your Mac's screens. Turning it on shows it." while off, and
+  while on "Tap Desktop to step to it. It is here only while a device shows it." Under it, while on, "Resolution"
+  ("Same as main display (1512 × 982)", then the Mac's list, "1920 × 1080 (Retina)", "3440 × 1440") and "Refresh Rate"
+  ("Same as main display (60 Hz)", 30, 60, 120 Hz) (phase 3), with the footnote "Applies the next time the Desktop
+  shows it." while it is not shown, or "Changing it restarts the picture; its windows stay on it." while it is, and §3's
+  words beside a choice over 4K or 60 Hz. Each row is marked while its pick waits for the Mac's answer, and a refused
+  or unanswered pick goes back with the warning haptic and VoiceOver's line, as every row's does.
+- **A second device**: its open panel follows the Mac's next state (the host publishes every change to every device);
+  its picture moves or restarts with the first's; only the device that changed it hears the answer and the
+  announcement.
+- **Mixed builds**: a Mac before phase 2 reports no `virtualDesktop` (nil), so a device shows no row and sends nothing
+  (the ledger's rule 9); one before phase 3 reports the switch but no sizes, so no Resolution or Refresh Rate rows; a
+  device before either ignores the new keys and keeps working.
+- **"Match the device"** (phase 4) is one more size in the list, from either end; it matches the device in use (§4).
 
 ### 4. Match this device (phase 4)
 
@@ -328,18 +377,19 @@ Noah first asked for "at least 4K 120Hz").
 
 Pure: `VirtualDesktopLife` (a clock and events in; make, keep, remove out), checked by `virtual-desktop`.
 
-- **Made** when the Desktop is asked for on its stop (a step onto it, or the Desktop coming back to it within the
-  session span), with the setting on, unlocked, on the console, Screen Recording granted, the private API present, the
-  AppKit loop running, and not on a synthetic host.
+- **Made** when the Desktop is asked for on its stop (a step onto it, a device switching it on, which shows it
+  (§3a), or the Desktop coming back to it within the session span), with the setting on, unlocked, on the console,
+  Screen Recording granted, the private API present, the AppKit loop running, and not on a synthetic host.
 - **Kept** while the stream shows it (the Desktop on it, a device connected), and for 30 s after it stops showing it:
   a step away, a window picked, the last device gone, a dropped connection. A reconnect or a quick look elsewhere comes
   back to the same desktop.
-- **Removed**, its windows moved first (§6): 30 s after; at once when the person turns the setting off; at Quit; at
-  once off console (it would join the other user's displays; macOS moves its windows); and when macOS removes it
-  itself (its termination handler: a sleep, display arbitration), where the Desktop goes to the main display.
+- **Removed**, its windows moved first (§6): 30 s after; at once when the setting is switched off, on the Mac or from
+  a device (the Desktop first goes to the main display if it shows it); at Quit; at once off console (it would join the
+  other user's displays; macOS moves its windows); and when macOS removes it itself (its termination handler: a sleep,
+  display arbitration), where the Desktop goes to the main display.
 - **Locked** (this session's screen): never made; one that exists is kept past its 30 s until the unlock, so nothing
   changes the displays at the lock screen (#298, and #200's relock after a display change), and its 30 s count from the
-  unlock.
+  unlock. A switch, size or rate changed meanwhile, on the Mac or from a device, waits for the unlock too.
 - **#200's headless role** keeps #200's rules (made at the Desktop with no real display, at a locked screen too; kept
   between connections; gone once a real display is back and the lid opened or no device is connected), and it is the
   same display: when the last real display goes while the Virtual Desktop exists, it takes the headless role (macOS
@@ -537,14 +587,33 @@ Own Display") would free the pair, at the cost of a name users have had since Si
   says `desktopDisplays` 2 or more, only from the Desktop button while the Desktop streams. `{"number": n}` is
   reserved for #296's list. A host from before reads it as unknown and skips it. Kinds 45 and 46 stay with the open
   pull requests that hold them (the microphone, the pen, the camera).
-- **`HostSettingsState.virtualDesktop`** (host → device; kind 16), optional, for the panel's read-only row: `on`, the
-  size (`width`, `height`, `scale`), `hz`, and `choice` ("main", "custom" or "device"). Absent from `StreamSettings`
-  and `HostSettingsChange` (decision 3).
+- **The settings a device sets** (decision 3, §3a), in kind 16's `StreamSettings` (the target, which the device's
+  ledger lays its unanswered picks over) and kind 17's `HostSettingsChange`, each optional:
+  - `virtualDesktop: Bool?` (phase 2): the switch. Nil from a Mac before phase 2, or from one that cannot make the
+    Virtual Desktop at all (SillHost without the AppKit loop).
+  - `virtualDesktopSize: String?` and `virtualDesktopHz: Int?` (phase 3). A size is an id: "main", a list entry as
+    points at a scale ("1920x1080@2", "3440x1440@1"), and in phase 4 "device"; a rate is 0 (the main display's, up to
+    60) or 30, 60 or 120.
+  Beside the other settings a device sets, so everything those already do carries them unchanged: the device's ledger
+  (tokens, answers, refusals, timeouts, and its rule 9, which never sends a field the Mac did not report) and the
+  host's whitelist (`DeviceSettings.accepted`, with Direct Wireless's paired test), merge (`applying` and
+  `applyingAway`: one value home or away), rate limit, log line and saving. A Bool, a String and an Int, never an enum
+  (HostSettings.swift's rule: a new case would fail an older reader's whole decode). No new kind: kinds 16 and 17 are
+  this flow, and every place a new setting goes, as listed at the top of HostSettings.swift, gets them. The JSON keys
+  are code, not words, and keep their names whatever the feature is called (§14).
+- **`HostSettingsState.virtualDesktop`** (kind 16; phase 2), optional, read-only: `main` (what "Same as main display"
+  is on this Mac now, an id such as "1512x982@2"), `mainHz`, `shown` (the stream is on it now) and `note` (why it cannot
+  be made now: the private API missing, Screen Recording, the Mac locked). Phase 3 adds `sizes: [String]?` and
+  `rates: [Int]?`, the choices this Mac offers, so a device shows exactly those, labelled from the id, and a later
+  Mac's new entries show on any device that knows the fields. Who may change them is `sessionPaired`, already there.
+- **Mixed builds for the settings**: a Mac before phase 2 leaves `virtualDesktop` nil, so a device shows no row and
+  sends nothing (rule 9); one before phase 3 sends the switch but no sizes or rates, so no rows for them; a device
+  before either ignores the new keys (JSONDecoder skips them) and keeps working.
 - **Unchanged**: `StreamSource` (`.desktop` is the Desktop on the host's stop), `Viewport` (Match reads `width`,
   `height` and `scale`), `Hello`.
 - **Mixed builds**: an older device never sends 47, shows today's button and sees whichever stop shows; an older Mac
-  lists no stops, so a newer device sends nothing new. CLAUDE.md's compatibility floor gains kind 47 and the four
-  fields once a public build ships them.
+  lists no stops, so a newer device sends nothing new. CLAUDE.md's compatibility floor gains kind 47, the four list
+  fields and the settings fields once a public build ships them.
 
 ## The host
 
@@ -558,12 +627,15 @@ Own Display") would free the pair, at the cost of a name users have had since Si
 - **Phase 2**: `Sources/SillHost/SillDisplays.swift` (the manager); `VirtualDesktopSize` (in CaptureScale.swift);
   `VirtualDesktopLife.swift` and `DesktopWindowLedger.swift` (pure); VirtualStage (asks the manager for its display);
   #200's display moved under the manager (HeadlessDesktopPolicy unchanged); HostConfig `virtualDesktop` (off in
-  `standard` and `app`; the Mac's alone: absent from StreamSettings, HostSettingsChange, DeviceSettings.accepted,
-  `applying` and `restartNeeded`; applied at once by `setTarget`: off removes it with its windows moved, on adds the
-  stop and makes nothing); StreamCoordinator (the Virtual Desktop's stop, its lifetime's clock, the ledger at removal
-  and return, Quit); HostStatus (the card's source row); `VirtualDesktopWords`.
-- **Phase 3**: HostConfig `virtualDesktopSize` and `virtualDesktopHz`; the list; a size change by a new mode in place,
-  or a remake with the ledger; EncoderSlowState's checks at the large sizes.
+  `standard` and `app`; a device sets it, §3a: StreamSettings, HostSettingsChange, DeviceSettings.accepted with the
+  paired test, `applying` and `applyingAway`, `changes(to:)`'s words, and not `restartNeeded`; applied at once by
+  `setTarget`: off removes it with its windows moved, on adds the stop, and from a device shows it); StreamCoordinator
+  (the Virtual Desktop's stop, its lifetime's clock, the ledger at removal and return, Quit, the Desktop to it when a
+  device switches it on); HostStatus (the card's source row); `VirtualDesktopWords`; every place HostSettings.swift's
+  list names for a new setting.
+- **Phase 3**: HostConfig `virtualDesktopSize` and `virtualDesktopHz`, set from a device too (§3a), in the same places;
+  the list and the state's `sizes` and `rates`; a size change by a new mode in place, or a remake with the ledger;
+  EncoderSlowState's checks at the large sizes.
 - **Phase 4**: `VirtualDesktopSize.matched`; the device in use; the 1 s settle and the 3 s spacing; Aa on the Virtual
   Desktop.
 - **The log**, built from the constant:
@@ -572,6 +644,8 @@ Own Display") would free the pair, at the cost of a name users have had since Si
   - "Virtual Desktop 1512×982 pt @2× at 60 Hz id 7: made in 412 ms, as Built-in Retina Display (1512×982 at 2x, 120
     Hz), held to 60 Hz."
   - "Virtual Desktop: kept while this Mac is locked; it goes 30 s after the unlock unless a device shows it."
+  - "Settings from iPad (iPad14,1): virtual desktop off → on" (§3a), then the Virtual Desktop's own made line, ending
+    "for iPad (iPad14,1), which switched it on".
   - §6's two lines, and `vdesk.made`, `vdesk.removed`, `vdesk.windowsMoved`, `vdesk.windowsBack` and `desk.next` in the
     `[1s]` lines when they happen.
 
@@ -586,10 +660,13 @@ Own Display") would free the pair, at the cost of a name users have had since Si
     here only while a device shows it. Windows you move to it come back to your main screen 30 seconds after no device
     shows it, and return to it when it comes back."; the size and rate (phase 2: one line, "Same as your main display:
     1512 × 982 at 60 Hz"; phase 3: the pickers and their notes); the status (Available; Not available on this version
-    of macOS: …; Needs Screen Recording; Showing on iPad (iPad14,1)).
+    of macOS: …; Needs Screen Recording; Showing on iPad (iPad14,1)). The switch and pickers follow a device's change
+    live, as every device change does, and the footnote adds "Your devices can turn it on and change it from their
+    Settings too."
 - **The menu**: "Virtual Display" with the subtitle "Picked windows move to a display of their own" when it has nothing
   else to say; after it **"Virtual Desktop"** (checked), its subtitle "A desktop for your devices, after your screens",
-  or "On iPad (iPad14,1): 1512 × 982, 60 Hz" while it exists.
+  or "On iPad (iPad14,1): 1512 × 982, 60 Hz" while it exists; a device's switch shows at the menu's next opening, as
+  every device change does.
 - **The card's source row**: "Virtual Desktop · 1512×982 · 60 fps", "Desktop 2 of 3 · DELL U2723QE".
 
 ## The words outside the apps
@@ -600,10 +677,10 @@ for their release:
 - **Phase 1**, support.html and README's How it works: "On a Mac with more than one screen, tap Desktop while it shows
   to step to the next screen, starting from your main one. The button shows which screen is up."
 - **Phase 2**, support.html, a section "A desktop of its own for your iPhone or iPad": "Turn on Virtual Desktop in
-  Sill for Mac (Settings › Displays), and after your Mac's screens your device can step to a desktop that is its own:
-  the size of your main screen, up to 4K at 60 Hz. It is there only while a device shows it. Thirty seconds after none
-  does, the windows on it move to your main screen, and they go back when it returns." README's Good to know gains its
-  line beside the virtual display's. privacy.html's Accessibility line ("so Sill can move and size the window it
+  Sill's Settings on your iPhone or iPad, or in Sill for Mac (Settings › Displays), and after your Mac's screens your
+  device can step to a desktop that is its own: the size of your main screen, up to 4K at 60 Hz. It is there only
+  while a device shows it. Thirty seconds after none does, the windows on it move to your main screen, and they go
+  back when it returns." README's Good to know gains its line beside the virtual display's. privacy.html's Accessibility line ("so Sill can move and size the window it
   shows") gains the windows Sill moves off the Virtual Desktop when it goes; nothing of it leaves the Mac.
 - **Phase 3**: the support section gains the sizes, the rates and §3's sentence on what a Mac may not hold.
 
@@ -612,8 +689,9 @@ for their release:
 - **The Desktop button** (§1): StreamScreen's TopBar, PortraitStreamScreen's `desktopButton`, the phone's row 1.
 - **StreamClient**: #173's `tapDesktop()` (kind 47 while the list says two stops or more and the Desktop streams, else
   `select(.desktop)`), the four fields, the announcement after its own tap.
-- **The Settings panel**: a read-only row "Virtual Desktop", On or Off with its size, and the footnote "Set in Sill on
-  the Mac." (decision 3).
+- **The Settings panel**: the Virtual Desktop's switch (phase 2) and, under it, Resolution and Refresh Rate (phase 3),
+  as §3a has them: `SettingsField` cases and `HostSettingsChange.fields`, `only` and `adding` (HostSettingsLedger),
+  rule 9 for the optional fields, the rows, disabled where `sessionPaired` says no, and the DEBUG mock's cases.
 - **Harness**: #173's `-SillDesktopDisplays 3,2` gains `v` (`-SillDesktopDisplays 4,4,v`: four stops, the fourth
   shown, the last one the Virtual Desktop).
 
@@ -629,7 +707,9 @@ for their release:
     `SILL_TEST_INPUT_LOG`; the list's fields and lines as on a real Mac.
   - `SILL_TEST_VIRTUAL_DESKTOP=1`: the Virtual Desktop as a stop that makes no display, with its lifetime's lines.
   - `SILL_TEST_VD_GRACE=<s>`: the grace, in seconds.
-  - `sillclient.py --next-display@T` and `--expect=desktopDisplay=…`.
+  - `sillclient.py --next-display@T` and `--expect=desktopDisplay=…`; `--set=virtualDesktop=1`,
+    `--set=virtualDesktopSize=1920x1080@2` and `--set=virtualDesktopHz=120` (its `--set` keys and `describe`, as
+    HostSettings.swift's list says), with `--expect=virtualDesktop=1`.
 
 ## Phases, each a pull request with its gates
 
@@ -663,15 +743,20 @@ pointer onto the display and back.
 ### Phase 2: the Virtual Desktop at the main display's size
 
 - **Scope**: §2's default, §5 to §11, the manager with #200 under it, the Mac's words, `--virtual-desktop`, the
-  device's look for the Virtual Desktop's stop and the panel's row.
+  device's look for the Virtual Desktop's stop, and the switch from a device (§3a: the field in kinds 16 and 17, the
+  paired test, shown at once when a device switches it on, the panel's switch).
 - **Gates**: `virtual-desktop` (§2 with every worked example as a case and random modes against the box and the
   800-point rule; the lifetime over random sessions: never two Desktop displays, none with no device past the grace,
-  none made locked or off console, kept locked past the grace until the unlock, the headless role exactly #200's; the
-  ledger: windows out and back, moved or resized ones left, closed ones forgotten, scaled into a new size), its
-  mutants; `virtual-display-api` and `lock-policy` with #200's verdicts unchanged (its code moved, not changed); H2
+  none made locked or off console, kept locked past the grace until the unlock, the headless role exactly #200's,
+  switched on and off from either end; the ledger: windows out and back, moved or resized ones left, closed ones
+  forgotten, scaled into a new size), its mutants; `ledger` (the device's picks of the switch, rule 9 against a Mac
+  without it) and `compatibility` (the fields, read by older readers); the paired test in the check that holds
+  `DeviceSettings.accepted` (refused unpaired and at the plain door, on and off; taken from a paired session at home
+  and away); `virtual-display-api` and `lock-policy` with #200's verdicts unchanged (its code moved, not changed); H2
   with #200's lines identical; previews of the Displays tab, the menu and the card; live on loopback with
   `SILL_TEST_VIRTUAL_DESKTOP=1` and a short grace (the stop, the lines, the grace across a reconnect, the setting off
-  at once); harness photos of the Virtual Desktop's stop.
+  at once, `--set=virtualDesktop=1` from a paired and an unpaired test client: shown at once, refused); harness photos
+  of the Virtual Desktop's stop and the panel's switch (on, off, disabled unpaired).
 - **On a Mac at rest** (the conditions above, never Sill.app): the self test at the main display's default
   (`--virtual-display-selftest 60 1512x982` with the 14-inch's built-in screen as the main display; the self test makes
   2x displays, so phase 2 gives it a scale for a 1x main display such as the docked 2560 × 1440): online at its mode
@@ -680,9 +765,12 @@ pointer onto the display and back.
 
 ### Phase 3: custom sizes and rates
 
-- **Scope**: §3, a size change in place or by a remake, the words, EncoderSlowState at large sizes, #295's part.
-- **Gates**: the list against the API's bounds in `virtual-desktop`; on a Mac at rest, the self test at every entry
-  at 60 and 120 Hz on each macOS reachable (14, 15, 26, 27), dropping what macOS will not make at 2x; one probe of
+- **Scope**: §3, a size change in place or by a remake, the words, EncoderSlowState at large sizes, #295's part, and
+  the device's Resolution and Refresh Rate rows under its switch (§3a).
+- **Gates**: the list against the API's bounds in `virtual-desktop`; `ledger` and `compatibility` for the two fields,
+  `accepted` refusing what this Mac does not offer; harness photos of the two rows; on a Mac at rest, the self test at
+  every entry at 60 and 120 Hz on each macOS reachable (14, 15, 26, 27), dropping what macOS will not make at 2x; one
+  probe of
   whether a live display takes a new mode through `applySettings:`, and whether modes listed at creation switch with
   the public `CGConfigureDisplayWithDisplayMode` (deciding in place against a remake); the encoder's session start at
   each size (one frame, no stream, under the same conditions); EncoderSlowState's check at the 5K, 6K and 8K
@@ -725,15 +813,21 @@ Phase 2:
 18. The monitor of #333's kind, if at hand: whether a step onto the Virtual Desktop switches it off.
 19. The lid closed with nothing attached (#200), the setting on: one stop, Sill's display; the lid opened while a device
     shows it.
+20. From the iPad's Settings panel: the Virtual Desktop's switch on (the stream goes to it at once; Sill.log's
+    "Settings from iPad …: virtual desktop off → on"; the Mac's menu and Settings show it on), then off while it shows
+    (the main display, its windows moved there); away from home through Tailscale, the same; on an unpaired session at
+    an open door, the switch disabled.
 
 Phase 3:
-20. Each size and rate on this M2 Pro: Sill.log's "Streaming … fps" and the menu's rate; 4K at 120 and 5K at 60.
-21. An iPad mini at a 120 Hz Virtual Desktop: 60 shown.
+21. Each size and rate on this M2 Pro: Sill.log's "Streaming … fps" and the menu's rate; 4K at 120 and 5K at 60.
+22. An iPad mini at a 120 Hz Virtual Desktop: 60 shown.
+23. Resolution and Refresh Rate changed from the iPad's panel while the Virtual Desktop shows (the picture restarts,
+    its windows stay) and while it does not (applied the next time); the iPhone's open panel following.
 
 Phase 4:
-22. Match on the iPad sideways and upright, with and without Hide Top Bar: no black bars; a rotation; Settings opened
+24. Match on the iPad sideways and upright, with and without Hide Top Bar: no black bars; a rotation; Settings opened
     (nothing remade); Aa.
-23. Two devices: the one in use wins.
+25. Two devices: the one in use wins.
 
 ## Risks
 
@@ -761,7 +855,7 @@ Phase 4:
 
 ## Open questions, with the default taken
 
-1 to 4 are Noah's decisions at the top.
+1 to 4 were decided by Noah on 2026-11-12 (the top).
 
 5. **The name**: "Virtual Desktop" until Noah picks one (§14).
 6. **The order of the other monitors**: the arrangement turned to the main display (default); or the main display, then
@@ -770,7 +864,8 @@ Phase 4:
 8. **The button's look**: the label with dots (default); or "Desktop 2/3"; or the label alone, as #173.
 9. **Kind 47 as a person at the device** (it declares activity): yes (default); #173 said no.
 10. **The grace**: 30 s (default).
-11. **Choices above 4K at 60 in the first version**: yes, in phase 3 (default).
+11. **Choices above 4K at 60 in the first version**: yes, in phase 3 (decided: "everything should be user
+    customizable").
 12. **#122's budget** (a custom 4K at 120 would run at 60): not adopted (default); the person's choice stands, and
     frames drop.
 13. **Locked**: the main display's lock screen whatever the stop (default); or the stop shown.
@@ -790,8 +885,19 @@ Phase 4:
 22. **The main display's mode changing while it exists**: applied the next time it is made (default).
 23. **One identity for every device's Match**: yes (default); or one per device, so each remembers its own place.
 24. **The CLI's flag**: `--virtual-desktop[=WxH@scale:Hz|device]` (default).
+25. **A device's Virtual Desktop settings from away from home**: taken from a paired session away as at home (default:
+    using the Mac from afar with no monitor attached is a main reason to want one, and the remote door admits paired
+    keys only); or at home only, as Direct Wireless.
+26. **Switched on from a device**: it joins the cycle and that device is shown it at once (default); or it only joins
+    the cycle, and the person steps to it.
+27. **A free size** ("Custom…", any width and height typed on the Mac): not in these phases (default: the list, which
+    a device can choose from too); Noah's "everything should be user customizable" could ask for it.
 
 ## Progress
 
 - 2026-11-11: the plan written from main at dd6ea6a, #173, #296, #200, #312, #156, #225 and the issues above.
   Nothing built, nothing measured: no virtual display made, no display arrangement changed, the encoder not used.
+- 2026-11-12: Noah's rulings on the four decisions. 1, 2 and 4 as proposed (the size and the rate capped separately,
+  the other readings one line under "considered"; phase 1 on #173; Sill moves the windows, 30 s). 3 changed: a paired
+  device turns the Virtual Desktop on and off (phase 2) and sets its resolution and refresh rate (phase 3) from its
+  Settings panel, through kinds 16 and 17 (§3a, "The wire"); the Mac does all of it too. Phase 1 is unchanged.

@@ -21,9 +21,14 @@ fixed list (phase 3); Match this device is phase 4. One manager for every displa
 exists only while a device shows it, plus 30 s, its windows moved to the main display at its end and back at its
 return. Wire additive: `WindowList.desktopDisplays`, `desktopDisplay`, `desktopVirtual`, `desktopDisplayNames`, kind 47.
 Phase 1 builds on #173 (#345's fix with it); #200 merges first as it is; #312, #156 and #225 credited. Nothing built,
-nothing measured: no virtual display made, no display changed, the encoder not used. **For Noah:** the four decisions
-at the top of the plan (what "whatever is less" means, the contributors' branches, what a device may change, the
-windows left on it and the grace), and the name, from the plan's §14.
+nothing measured: no virtual display made, no display changed, the encoder not used. **Decided by Noah (2026-11-12;
+the plan's "Decided" and §3a):** the size and the rate capped separately ("should choose 3024×1964 at 60 Hz but of
+course everything should be user customizable"); phase 1 on #173, the rest credited, as proposed; Sill moves the
+windows off and back, with 30 s, as proposed; and changed from the proposal, a paired device turns the Virtual Desktop
+on and off (phase 2, shown at once when it does) and sets its resolution and refresh rate (phase 3) from its Settings
+panel, through kinds 16 and 17 (`StreamSettings` and `HostSettingsChange`: `virtualDesktop`, `virtualDesktopSize`,
+`virtualDesktopHz`), from away as well (open question 25); the Mac does all of it too, the default off. The name is
+still a placeholder (§14).
 
 **Away from home through a relay on the Mac (2026-11-09, branch `away-through-relay` from main at f224323,
 PR #339; issue #326, Ti800; the code read, the fixes weighed, eight open questions with their defaults and
