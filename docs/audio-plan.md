@@ -329,7 +329,10 @@ the device's own delays.
 - A path of its own for the sound, past a keyframe on the wire (§14).
 - Silence suppression on the host (silent packets cost 8–12 KB/s with their headers on a still
   link, §8).
-- Sound while the app is in the background (no `UIBackgroundModes`).
+- Sound while the app is in the background (no `UIBackgroundModes`). Since Picture in Picture (#291,
+  docs/picture-in-picture-plan.md) the Info.plist has the audio mode, which iOS needs for Picture in
+  Picture: the sound plays with the app away only while that window plays the picture
+  (`PictureInPicturePolicy.soundHeard`), and never otherwise.
 
 ---
 
@@ -1029,7 +1032,9 @@ and dropped, jumps.
   nodes keep their old formats, and it must not be torn down in the handler (Apple: it can
   deadlock there). On `sill.audio`: connect the mixer to the output in the output's new format,
   start, read the latencies again and reset.
-- **No `UIBackgroundModes`:** in the background the app is not heard.
+- **No `UIBackgroundModes`:** in the background the app is not heard. (Since #291 the audio mode is
+  there for Picture in Picture: heard in the background only while its window plays the picture;
+  docs/picture-in-picture-plan.md.)
 - **DEBUG `-SillSoundSink manual`:** the engine in manual rendering mode
   (`enableManualRenderingMode(.offline, format:maximumFrameCount:)`): it never opens an output
   device and the session is never activated, so nothing can reach a speaker, the simulator's (the
