@@ -836,6 +836,20 @@ struct StreamScreen: View {
                 revealMoved(.ended, travel: width * 0.5, speed: 600, width: width)
             }
         }
+        for time in fullScreen.takeBacks {
+            // In 60 % of the width in six steps 30 ms apart, then lifted moving back at 1,500 pt/s: it springs back.
+            for step in 1...6 {
+                after(time + Double(step) * 0.03) {
+                    let width = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.bounds.width }.first ?? 1000
+                    revealMoved(step == 1 ? .began : .changed, travel: width * 0.1 * CGFloat(step), speed: 0, width: width)
+                }
+            }
+            after(time + 0.25) {
+                let width = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.bounds.width }.first ?? 1000
+                print("harness: a swipe in taken back at " + Self.points(CGFloat(time)) + " s")
+                revealMoved(.ended, travel: width * 0.6, speed: -1500, width: width)
+            }
+        }
         for time in fullScreen.shakes {
             after(time) {
                 print("harness: a shake at " + Self.points(CGFloat(time)) + " s")
@@ -1315,9 +1329,9 @@ struct StreamScreen: View {
     /// The swipe in finished: the preview the rest of the way in, then the controls in its place with no slide
     /// of their own, and the picture into its pane.
     private func landReveal() {
-        withAnimation(.easeOut(duration: 0.14)) { reveal = 1 }
+        withAnimation(.easeOut(duration: 0.14 * revealSlow)) { reveal = 1 }
         Task { @MainActor in
-            try? await Task.sleep(for: .seconds(0.14))
+            try? await Task.sleep(for: .seconds(0.14 * revealSlow))
             guard chrome != .shown, reveal != nil else { return }
             chromeSlides = false
             showChrome(by: "the swipe in from the left edge")
@@ -1326,11 +1340,20 @@ struct StreamScreen: View {
         }
     }
 
+    /// The swipe in's own animations at their speed (1), or slower for photos mid-way (DEBUG `-SillRevealSlow`).
+    private var revealSlow: Double {
+        #if DEBUG
+        return FullScreenDebug.current.slow
+        #else
+        return 1
+        #endif
+    }
+
     /// The swipe in sprang back: the preview out by the left edge, then gone.
     private func springBack() {
-        withAnimation(.easeOut(duration: 0.2)) { reveal = 0 }
+        withAnimation(.easeOut(duration: 0.2 * revealSlow)) { reveal = 0 }
         Task { @MainActor in
-            try? await Task.sleep(for: .seconds(0.22))
+            try? await Task.sleep(for: .seconds(0.22 * revealSlow))
             if chrome != .shown, reveal == 0 { reveal = nil }
         }
     }

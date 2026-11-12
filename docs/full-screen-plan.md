@@ -1,8 +1,8 @@
 # Full screen: Sill's interface hidden, the picture with the whole screen
 
-Branch `full-screen` (from main at a4bad80, main at 0d22bbf merged in); issues #279 (swipe the UI away),
-#92 (hide the top bar) and #280 (use the freed room). Device only: no wire change, nothing on the Mac,
-nothing stored but a count of how often the hint has shown.
+Branch `full-screen` (from main at a4bad80, main at 0d22bbf and 919e05a merged in), PR #360; issues #279
+(swipe the UI away), #92 (hide the top bar) and #280 (use the freed room). Device only: no wire change, nothing
+on the Mac, nothing stored but a count of how often the hint has shown and Shake to Show Controls.
 
 ## What Noah asked for, and what was decided
 
@@ -37,6 +37,9 @@ provided and try it out!"):
 7. Every layout, one level (all hidden or all shown), built so that a second level is a small addition.
 8. The hardware keyboard keeps typing to the Mac while hidden.
 9. No wire change; Picture in Picture, the Mac's pointer, the Menus and three-finger gestures keep working.
+
+Items 1, 2 and 6 changed after Noah tried the first build on his devices (the next section): there is no flick,
+Settings › Full Screen is the one way in, and the swipe in is Sill's own recognizer, not the system's.
 
 Noah, later the same night (through the coordinator), on the second level upright: "for now, only apps in
 windowed mode will likely be able to take advantage of the full screen due to the aspect ratio of most
@@ -140,9 +143,9 @@ reached: the swipe in's recognizer is off, and nothing else of full screen's lis
   hidden; says whether the window covers the screen and its safe area; passes the window's shake on), the
   shake (`UIWindow.motionEnded`), the hint, the hidden picture's element, the DEBUG arguments.
 - StreamScreen: the state (`chrome`, `reveal`), hide and show, the auto-show, the room, the status bar, home
-  indicator and edge deferral, the landscape layout's hidden variant and its preview cut, the shake's switch and
-  Shake to Undo; PortraitStreamScreen: the halves' and the phone's hidden variants and preview cuts;
-  HostSettingsPanel: the two rows and their place.
+  indicator and edge deferral, the landscape layout's hidden variant and its preview (the bar alone), the shake's
+  switch and Shake to Undo; PortraitStreamScreen: the halves' and the phone's hidden variants and previews (the
+  controls on their own black); HostSettingsPanel: the two rows and their place.
 
 ## The swipe in, and the numbers
 
@@ -150,7 +153,7 @@ reached: the swipe in's recognizer is off, and nothing else of full screen's lis
 |---|---|---|
 | band | max(24 pt, the window's left safe-area inset) | a finger that comes over the bezel is first seen within a few points of the edge (Noah's: 0 to 9 pt upright, up to 21 pt at speed on the iPad's side); an iPhone on its side keeps 59 pt clear of the picture on the sensor housing's side, and a swipe from that bezel is first seen anywhere in it. A touch landing further in is the Mac's at once. |
 | judged after | 8 pt from the landing | right, and no steeper than 45° (\|dy\| ≤ dx): the swipe in; anything else is let go, before a pan's own 10 pt, so it is not late. |
-| let go by | 0.3 s after the landing | a finger that has not set off by then (a press, a rest) is the Mac's, so a long press at the edge (0.5 s) is never late. A second finger lets it go at once. |
+| let go by | 0.3 s after the landing | a finger that has not set off by then (a press, a rest) is the Mac's, so a long press at the edge (0.45 s) is never late. A second finger lets it go at once. |
 | finishes | min(a third of the width, 80 pt), the lift's speed carrying it on for 0.15 s | 80 pt is about 13 mm on both devices; a third of the width (131 to 378 pt) was more than a thumb's swipe on a phone on its side or an iPad (finding 2). |
 | flick in | 300 pt/s, once it has moved 12 pt | a quick swipe in comes whatever its length. |
 | springs back | moving back toward the edge at 200 pt/s or more | a drag in and back (finding 4). |

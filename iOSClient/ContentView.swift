@@ -385,10 +385,13 @@ struct ContentView: View {
 ///   `-SillFullScreenToggle <s>[,<s>…]` hides or shows the controls at those seconds after the stream screen
 ///   shows, as Settings › Full Screen and the swipe in do (only while a hide may start: something open, or
 ///   nothing streaming, keeps them); `-SillFullScreenSwipe <s>[,<s>…]` plays a swipe in at those seconds (its
-///   progress in steps, then its lift); `-SillShakeAt <s>[,<s>…]` a shake (the window's notification, which
-///   Shake to Show Controls, `-Sill.shakeToShowControls 0`, turns off). The console says "full screen: hidden
-///   by …" and "full screen: shown by …", and in a Debug build every touch the swipe in judged at the left edge,
-///   "reveal: …" with its numbers (RevealEdgePan), and each lift's travel, speed and verdict.
+///   progress in steps, then its lift), `-SillFullScreenTakeBack <s>[,<s>…]` one taken back (in 60 % of the
+///   width, then lifted moving back, so it springs back), and `-SillRevealSlow F` makes the swipe in's own
+///   animations F times slower (1 to 50), for photos of them mid-way; `-SillShakeAt <s>[,<s>…]` a shake (the
+///   window's notification, which Shake to Show Controls, `-Sill.shakeToShowControls 0`, turns off). The
+///   console says "full screen: hidden by …" and "full screen: shown by …", and in a Debug build every touch the
+///   swipe in judged at the left edge, "reveal: …" with its numbers (RevealEdgePan), and each lift's travel,
+///   speed and verdict.
 /// * `-SillInputScript '<t> <step>; …'` — with `-SillLive 1` only: input for the simulator gates,
 ///   which have no finger (`InputScript`): `t` is seconds since the session's first window list, and
 ///   a step is `down`, `pad DX,DY`, `lift`, `click` or `padscroll DX,DY` on the portrait pad, `tap

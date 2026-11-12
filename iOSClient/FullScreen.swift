@@ -292,7 +292,9 @@ struct HiddenPictureElement: View {
 /// `-SillFullScreenRoom screen|housing|safe` where the hidden picture goes (FullScreenPolicy.Room),
 /// `-SillFullScreenToggle <s>[,<s>…]` hidden or shown at those seconds after the stream screen shows (as
 /// Settings › Full Screen and the swipe in do), `-SillFullScreenSwipe <s>[,<s>…]` a swipe in from the left edge
-/// played at those seconds (its progress in steps, then its lift), and `-SillShakeAt <s>[,<s>…]` a shake (the
+/// played at those seconds (its progress in steps, then its lift), `-SillFullScreenTakeBack <s>[,<s>…]` one taken
+/// back (in 60 % of the width, then lifted moving back: it springs back), `-SillRevealSlow F` the swipe in's own
+/// animations F times slower (photos mid-way), and `-SillShakeAt <s>[,<s>…]` a shake (the
 /// window's notification) at those seconds.
 struct FullScreenDebug {
     enum Hint { case off, every, hold }
@@ -302,7 +304,11 @@ struct FullScreenDebug {
     var room: FullScreenPolicy.Room? = nil
     var toggles: [Double] = []
     var swipes: [Double] = []
+    var takeBacks: [Double] = []
     var shakes: [Double] = []
+    /// The swipe in's own animations (its landing, its spring back) this many times slower, for photos of them
+    /// mid-way (`-SillRevealSlow`; 1 to 50).
+    var slow: Double = 1
 
     static let current: FullScreenDebug = {
         let d = UserDefaults.standard
@@ -320,7 +326,9 @@ struct FullScreenDebug {
         debug.room = d.string(forKey: "SillFullScreenRoom").flatMap(FullScreenPolicy.Room.init(rawValue:))
         debug.toggles = seconds("SillFullScreenToggle")
         debug.swipes = seconds("SillFullScreenSwipe")
+        debug.takeBacks = seconds("SillFullScreenTakeBack")
         debug.shakes = seconds("SillShakeAt")
+        if let raw = d.string(forKey: "SillRevealSlow"), let f = Double(raw) { debug.slow = min(max(f, 1), 50) }
         return debug
     }()
 }

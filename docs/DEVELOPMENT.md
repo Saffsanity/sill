@@ -2187,8 +2187,10 @@ simulator:
   `-SillFullScreenRoom screen|housing|safe` where the hidden picture goes;
   `-SillFullScreenToggle 3,6`, `-SillFullScreenSwipe 9` and `-SillShakeAt 12`
   hide or show (as Settings › Full Screen and the swipe in do), play a swipe
-  in and shake at those seconds; `-Sill.shakeToShowControls 0` turns Shake to
-  Show Controls off for one run. The console's `full screen:` lines say what
+  in and shake at those seconds; `-SillFullScreenTakeBack 2` plays one taken
+  back (it springs back), and `-SillRevealSlow 20` makes the swipe in's own
+  animations twenty times slower, so a photo catches them mid-way;
+  `-Sill.shakeToShowControls 0` turns Shake to Show Controls off for one run. The console's `full screen:` lines say what
   happened, and in a Debug build `reveal:` lines give every touch the swipe in
   judged at the left edge (where it landed, why it was let go, when it began)
   and each lift's travel, speed and verdict; `full screen: Sill's window
