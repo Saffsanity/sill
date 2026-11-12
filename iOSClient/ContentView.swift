@@ -157,7 +157,8 @@ struct ContentView: View {
 ///   The mock otherwise starts on Code's window, as the boards draw it.
 /// * `-SillIdiom pad` — draw a screen taller than wide and narrower than 600 pt as an iPad draws
 ///   such a window (the compact halves), not as a phone does (`DuoLayout.phoneArrangement`), so an
-///   iPhone simulator can photograph it; `phone` the other way round. Also in the normal app.
+///   iPhone simulator can photograph it; `phone` the other way round. Also in the normal app. The
+///   Settings panel's "This iPad" or "This iPhone" follows it too (#291's photos, one simulator).
 /// * `-SillLive 1` — host the app's *real* `StreamClient` in the frame instead of the mock, so the
 ///   simulator can connect to a Mac over Bonjour at a Duo size. Not connected yet shows the normal
 ///   connect screen inside the frame. Without it nothing touches the network, exactly as before.
@@ -213,6 +214,8 @@ struct ContentView: View {
 ///   `-SillSettingsScroll hold` at its Hold to Show Window Controls stepper.
 ///   `-SillSettingsScroll clipboard` at the clipboard's Paste row (it and the group's footnote, which
 ///   a short screen's `gestures` leaves under the two switches above them).
+///   `-SillSettingsScroll pip` at the This iPad group's title over its first row, the Picture in Picture
+///   switch and its footnote (#291).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
@@ -279,6 +282,20 @@ struct ContentView: View {
 ///   `-SillLargerPictureToggle <s>[,<s>…]` switches it at those seconds after the stream screen
 ///   shows, as the Settings panel's switch does (saved; leave out `-Sill.largerPicture`, which would
 ///   hold it), so a live run shows the one new viewport each switch sends.
+/// * `-Sill.pictureInPicture 1` — not a harness argument either: this device's Picture in Picture switch
+///   (the Settings panel's This iPad group; docs/picture-in-picture-plan.md, #291) on for one run, in the
+///   normal app too. `-SillPiPSupported 1|0` says iOS has Picture in Picture here, or not, for one run: the
+///   switch shows (or not) whatever the simulator says, for the harness's photos (`-SillSettings 1
+///   -SillSettingsScroll pip`); AVKit's own answer still decides whether a controller is made. In a live
+///   session (the normal app with `-SillConnect`, or `-SillLive 1`), with the switch on:
+///   `-SillPiPStartAt <s>` starts Picture in Picture s seconds after the picture is first offered, as iOS
+///   starts it as Sill leaves (a stand-in for leaving, which a test cannot do: then `xcrun simctl launch
+///   UDID com.apple.Preferences` sends Sill to the background and `xcrun simctl launch UDID me.saffer.sill`
+///   brings it back); `-SillPiPPauseAt <s>[,<s>…]` presses the window's pause or play button at those
+///   seconds after it started; `-SillPiPLockAt <s>` locks the device then, as iOS says it (protected data
+///   going away); `-SillPiPSession active|inactive` holds the app's audio session active while the picture
+///   is offered or shows (a device's default), or never (the simulator's). The console's `pip:` lines say
+///   what happened ("pip: offered …", "pip: playing (iOS starts Picture in Picture)", "pip: stopping: …").
 /// * `-SillAXDump <s>` — `s` seconds after the stream screen shows, and after the connect screen
 ///   shows, the console lists its accessibility elements in the order the accessibility tree hands
 ///   them to VoiceOver ("ax: 1 Open the app list (33,463 55×50)"). SwiftUI builds that tree only for
