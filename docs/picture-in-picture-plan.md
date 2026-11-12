@@ -374,5 +374,10 @@ review of the branch found nine things, each fixed (40dbfe6) before the first bu
 
 ## Progress
 
-- 2026-11-11: plan written; the Apple documentation checked; code next. Builds wait: the disk was under
-  the 25 GB floor (15 to 17 GB free) and the coordinator paused builds and simulators.
+- 2026-11-11: plan written; the Apple documentation checked; the rule, its check, the glue and the switch
+  written, and reviewed by an independent read before any build (nine findings, fixed in 40dbfe6), while the
+  disk was under the 25 GB floor (15 to 22 GB free) and builds and simulators were paused. Draft pull
+  request #353.
+- 2026-11-12: main at 936d627 (#339, #349) merged in (61bbee7; CLAUDE.md alone conflicted; #349 changes the
+  saved records and the remote dial's candidates, not the foreground rules). G1, G2, G3 done; G4 shows the
+  simulator has no Picture in Picture. Next: Noah's devices (P1–P20).
