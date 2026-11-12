@@ -309,6 +309,69 @@ indicator too); DEBUG `-SillFullScreenRoom screen|housing|safe`.
 
 ## Results
 
+### The design now (round two)
+
+All on 2026-11-12, inside the heavy lock: at d72586f8 (main at 919e05a in it) from 16:06 to 16:48, then at 92bc426f,
+the merge of main at b3577db4 (#363, the Quality row), from 16:48 to 17:01. The merge changes only the Settings
+panel's Quality row (HostSettingsPanel.swift) and adds a step file; neither the check nor the touch rig compiles
+that file, so they ran once, before it, and the builds, the check, repo-rules and the Settings panel's photos again
+after it.
+
+- **G1, the rule:** `Tests/checks/full-screen`, 101,599 checks, none failed: the swipe in's cases at every number's
+  edge at 60, 120 and 240 Hz, 30,000 seeded random strokes against the independent model (1,966 swiped in, 20,147
+  let go at their landing) with the invariants, the finish's numbers and Noah's own lifts, and the preview's cut in
+  every layout with the layouts' own geometry; 101,602 after the merge, with three cases that pin the flick in's
+  numbers as literals. Its mutants: 66 of 67 caught at first (the flick in at 400 pt/s again went unseen: the cases
+  of its exact numbers read the constant), then 67 of 67 with those cases. `Tests/checks/phone-portrait` and
+  `Tests/checks/duo` (the layouts the cut is checked against) pass unchanged.
+- **G2, the builds:** the iOS app Debug and Release for the simulator and Debug for a device, at d72586f8 and again
+  at the merge: each succeeded, the only warning the known `StreamClient.swift` capture one.
+- **G3, the touch rig** (main's surfaces at 919e05a against this branch's, real synthesized touches through the real
+  recognizer): on the agents' iPad simulator (iOS 27.0, 130 strokes each), every existing stroke's events identical
+  to main's, 88 of 88 (`--all`), the three-finger gestures' verdict 72 of 72, and the left edge's verdict 43 of 43
+  (`--edge`): with the controls shown, 28 strokes at the left edge on the picture and the trackpad (taps, a long
+  press, drags right, up, down and left, two fingers, a grip, a scroll off the edge, the first build's four flicks)
+  exactly main's events, counts and all; hidden, four swipes in (from the very edge, from 20 pt at 30°, slowly, and
+  one taken back: in 180 pt, then back at 2,846 pt/s) each began, ended and sent the Mac nothing, where main's
+  surfaces sent 3 to 6 events; ten other strokes from the band and beside it (a tap, a long press, drags down, up and
+  left, a flick left, two fingers, a tap, a drag right and a drag left further in) sent exactly what main's surfaces
+  send, in order. On the agents' Duo simulator (iOS 27.1), the hidden strokes again, 15 of 15 upright (its cover,
+  466×678, the camera strip's 84 pt on the right) and 15 of 15 with the scene turned on its side (678×466, the strip
+  on the left, so an 84 pt band): every swipe in from the interface's left edge taken, nothing sent, on its side
+  too, where the system's edge pan had failed every one on Noah's devices.
+- **G5, photos** (the shared photo tool; the Duo on iOS 27.1, the iPad on 27.0):
+  - Shown, against main: on the Duo simulator 11 of 15 pixel for pixel main's at 919e05a (an iPhone upright, on its
+    side and with Larger Picture, the Duo's book, laptop, flat and cover poses, the largest text size, the Desktop on
+    screen 2), the other 4 the Settings panel with the two rows after Frame Rate (and in This iPhone's group for a
+    Mac without its settings), as they must. On the iPad simulator, against main at b3577db4: ipadmini-side, the
+    compact halves and the Desktop on screen 2 pixel for pixel, the 4 Settings photos by the rows, and ipadmini-up
+    by 2,585 pixels of 5.7 million, at most 4 levels of 255, all in the thumbnail strip's fade and its badges' edges.
+    That is the strip rendering differently from one run to the next, not this branch: two builds of one tree of
+    main (b3577db4 and 1554f580) differ there by 2,585 pixels too, and this branch by 2,542 the second time.
+  - After the merge, against main at b3577db4: an iPhone upright and on its side and the Duo's laptop and flat
+    poses, ipadmini-side and the compact halves pixel for pixel (ipadmini-up by the strip's 2,542 pixels); the
+    Settings panel on an iPhone upright and on its side, an iPad mini upright and on its side and the compact halves
+    with main's Quality row ("Balanced" alone) and full screen's rows after Frame Rate and its words.
+  - The swipe in's preview (32 photos, the mock's frame drawn as a dim rectangle): every Duo pose (the cover upright
+    and on its side, open flat upright and on its side, the laptop and book poses; a window and the Desktop; the
+    cover upright with Larger Picture asked for, which a foldable does not take), an iPhone upright (a tall window,
+    the Desktop, Larger Picture with a tall and a wide window) and on its side (a window, the Desktop on screen 2), an
+    iPad mini upright and on its side (a window, the Desktop), the compact halves; at 25, 55 and 90 % in: the
+    controls and their own black, nothing of the picture's place, in every one. On its side the bar alone, the picture
+    right up to its edge (Noah's "small black bar below it" gone); upright the black from the controls' block, or on
+    a phone 24 pt above row 1.
+  - A swipe in taken back, its spring back slowed twenty times (`-SillRevealSlow 20`): one photo caught the bar on
+    its way out on an iPhone on its side, about 16 % in, with nothing drawn under it; the photos' timing is too loose
+    to catch more frames, so the static previews above are the evidence for every stage.
+- **G6:** `Tests/checks/repo-rules`, every rule holds.
+- **G4, live on loopback: not run.** Noah was testing on his devices: a device was streaming from Sill.app at 16:30
+  and at 16:56, and the gate keeps the rule (`Scripts/encoder-check/no-device.sh`: nothing that could share the
+  Mac's encoder while a device is connected), though its host uses the software encoder. The first build's run of
+  it (below) covered the same paths a hide and a show take (the viewport one per change, input around each change,
+  the Desktop kept on screen 2); what is new since is the swipe in's own recognizer, which the touch rig drove with
+  real synthesized touches in both orientations, and Shake to Show Controls, whose off case the gate adds
+  (`phone-up-shake-off`).
+
 ### The first build (the flick; superseded)
 
 All on 2026-11-12, inside the heavy lock (07:41 to 10:33, in four rounds), the branch with main at 919e05a merged in;

@@ -234,6 +234,11 @@ check(EdgeReveal.finishes(translation: 20, velocity: 400, width: 1000), "a flick
 check(!EdgeReveal.finishes(translation: 8, velocity: 350, width: 1000), "a flick of 8 pt does not (its coast short of 80 pt)")
 check(EdgeReveal.finishes(translation: EdgeReveal.flickTravel, velocity: EdgeReveal.flickSpeed, width: 1000), "a flick at exactly the numbers finishes")
 check(!EdgeReveal.finishes(translation: 20, velocity: EdgeReveal.flickSpeed - 1, width: 1000), "a lift just under the flick's speed, its coast short of 80 pt, springs back")
+// The numbers themselves, as literals (the cases above move with the constants): 300 pt/s after 12 pt.
+check(EdgeReveal.finishes(translation: 20, velocity: 300, width: 1000), "a flick in at 300 pt/s finishes from 20 pt (its coast alone, 20 + 45, would not)")
+check(!EdgeReveal.finishes(translation: 20, velocity: 299, width: 1000), "at 299 pt/s, 20 pt springs back")
+check(EdgeReveal.finishes(translation: 12, velocity: 300, width: 1000) && !EdgeReveal.finishes(translation: 11.9, velocity: 300, width: 1000),
+      "a flick in counts once it has moved 12 pt")
 check(!EdgeReveal.finishes(translation: 900, velocity: -250, width: 1000), "moving back at the lift springs back, however far it came")
 check(!EdgeReveal.finishes(translation: 900, velocity: -EdgeReveal.backSpeed, width: 1000), "back at exactly the speed springs back")
 check(EdgeReveal.finishes(translation: 900, velocity: -100, width: 1000), "drifting back slowly from far in still finishes")

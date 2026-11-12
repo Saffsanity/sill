@@ -34,5 +34,15 @@ no wire change, nothing on the Mac, nothing stored but how often the hint has sh
   0`, `-SillSettingsScroll fullscreen`; the console's `full screen:` and `reveal:` lines, and `pointer: this device
   has it (…)` now names the input (ContentView's contract, docs/DEVELOPMENT.md). The touch rig: `RIG_ONLY=edge`,
   `RIG_ONLY=reveal RIG_ORIENT=landscape`, `compare.py --edge`.
-- Verified: the plan's Results.
+- Verified (the plan's Results; at d72586f8, and at 92bc426f, the merge of main at b3577db4, where noted): the check,
+  101,602 checks, and its mutants 67 of 67 (one was missed until the flick in's numbers were pinned as literals);
+  the iOS app Debug and Release for the simulator and Debug for a device, before and after the merge, only the known
+  `StreamClient` warning; repo-rules; the touch rig against main's surfaces, every existing stroke identical (88 of
+  88), the gestures 72 of 72, the left edge 43 of 43 (shown: 28 strokes exactly main's; hidden: four swipes in, one
+  taken back, nothing sent; ten other strokes main's in order), and the hidden strokes on the Duo simulator 15 of 15
+  upright and 15 of 15 with the scene on its side (an 84 pt band); photos: the shown layouts pixel for pixel main's
+  but the Settings panel (and the thumbnail strip's fade on an upright iPad mini, which differs between two builds
+  of main itself), the Settings panel after the merge with main's Quality row and these rows after Frame Rate, and
+  32 previews in every layout and Duo pose, the controls on their own black and nothing of the picture's place.
+- **Not run:** the live loopback gate (a device was on Sill.app both times; the rule holds it).
 - **Untested, for Noah:** the plan's "Noah's test" on the iPad mini and the iPhone 15 Pro.
