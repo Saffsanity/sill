@@ -8,11 +8,20 @@ import Foundation
 /// Defence in depth, not the boundary: a router that source-NATs or hairpins a port forward makes
 /// an internet peer look like `lan`. Pairing is the boundary.
 ///
+/// At the remote door a connection from this Mac itself is `relay` (`atRemoteDoor`, issue #326):
+/// something on this Mac carried it there (a userspace Tailscale or WireGuard node, an SSH tunnel, a
+/// proxy), so its address says nothing of where the device is (docs/away-through-relay-plan.md).
+///
 /// Pure (Foundation and inet_pton only), so it is checked on its own with swiftc. The live
 /// interface table comes from `InterfaceSnapshot`.
 enum OriginPolicy {
     enum Origin: String, Sendable {
         case loopback, direct, vpn, lan, internet
+        /// The remote door only (`atRemoteDoor`): from this Mac itself, loopback or one of its own
+        /// addresses, which at that door is a relay on this Mac (a userspace VPN node, a tunnel, a
+        /// proxy) carrying a device from wherever it is, or a client on this Mac (the Simulator, a
+        /// test client). Admitted as loopback was; away from home (AwayPolicy). Never the home door's.
+        case relay
     }
 
     enum InterfaceKind: Sendable {
@@ -31,6 +40,28 @@ enum OriginPolicy {
         init(kind: [String: InterfaceKind] = [:], owner: [[UInt8]: String] = [:],
              prefixes: [(interface: String, network: [UInt8], bits: Int)] = []) {
             self.kind = kind; self.owner = owner; self.prefixes = prefixes
+        }
+    }
+
+    /// Whether `remote` is this Mac itself: loopback, or one of its own addresses (`owner`, a
+    /// link-local one compared without the kernel's embedded scope, an IPv4-mapped one as its IPv4
+    /// address). Unparseable: no.
+    static func isThisMac(_ remote: String, interfaces: Interfaces) -> Bool {
+        guard let source = IPBytes.parse(remote) else { return false }
+        return IPBytes.isLoopback(source) || interfaces.owner[IPBytes.unscoped(source)] != nil
+    }
+
+    /// Where a connection at the remote door comes from (issue #326): `classify`'s origin, but a
+    /// source that is this Mac itself is a relay on it: loopback, and this network's origin from one
+    /// of the Mac's own addresses (a relay that forwards to the Mac's own LAN address). A tunnel's
+    /// origin stays `vpn` whoever sent it (the Mac at its own Tailscale address is away already), and
+    /// the internet and peer-to-peer Wi-Fi are never from this Mac. The home door keeps `classify`'s:
+    /// loopback there is a client on this Mac, at home.
+    static func atRemoteDoor(_ o: Origin, remote: String, interfaces: Interfaces) -> Origin {
+        switch o {
+        case .loopback: return .relay
+        case .lan: return isThisMac(remote, interfaces: interfaces) ? .relay : .lan
+        case .direct, .vpn, .internet, .relay: return o
         }
     }
 
@@ -87,30 +118,35 @@ enum OriginPolicy {
         return localAddress.flatMap(IPBytes.parse).flatMap { interfaces.owner[$0] }
     }
 
-    /// The home door: loopback, direct (AWDL: Direct Wireless) and this Mac's own networks.
+    /// The home door: loopback, direct (AWDL: Direct Wireless) and this Mac's own networks. Never a
+    /// relay, which only the remote door names (`atRemoteDoor`): one that reached the home door would
+    /// be loopback there.
     static func homeAdmits(_ o: Origin) -> Bool {
         o == .loopback || o == .direct || o == .lan
     }
 
-    /// The remote door: loopback, this Mac's networks and VPNs; the internet only with the Mac's
-    /// switch; never peer-to-peer (Direct Wireless is the home door's).
+    /// The remote door: loopback, this Mac's networks, VPNs and a relay on this Mac (as loopback was
+    /// before it had its own name); the internet only with the Mac's switch; never peer-to-peer
+    /// (Direct Wireless is the home door's).
     static func remoteAdmits(_ o: Origin, internetAccess: Bool) -> Bool {
         switch o {
-        case .loopback, .lan, .vpn: return true
+        case .loopback, .lan, .vpn, .relay: return true
         case .internet: return internetAccess
         case .direct: return false
         }
     }
 
     /// How the Mac's card and log name a remote route: "through Tailscale" (the VPN service's own
-    /// name when known), "through your VPN", "over the internet", "by address" (this network, or
-    /// loopback). Nil for the home door's own origins that never reach the remote door.
+    /// name when known), "through your VPN", "over the internet", "through a relay on this Mac",
+    /// "by address" (this network, or loopback). Nil for the home door's own origins that never reach
+    /// the remote door.
     static func label(_ o: Origin, interface: String?, serviceName: String?) -> String? {
         switch o {
         case .vpn:
             if let serviceName, !serviceName.isEmpty { return "through \(serviceName)" }
             return "through your VPN"
         case .internet: return "over the internet"
+        case .relay: return "through a relay on this Mac"
         case .lan, .loopback: return "by address"
         case .direct: return nil
         }
