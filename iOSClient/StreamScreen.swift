@@ -1715,9 +1715,12 @@ struct DesktopStopDots: View {
     var body: some View {
         Group {
             if let counter = face.counter {
+                // As tall as the dots it stands for, so its digits sit where they would and never reach the
+                // label above (an 8 pt line of its own overlapped "Desktop 3" in a 58 pt window bar).
                 Text(counter)
-                    .font(.system(size: 8, weight: .semibold).monospacedDigit())
+                    .font(.system(size: dot + 3, weight: .bold).monospacedDigit())
                     .foregroundStyle(Palette.accent)
+                    .frame(height: dot)
             } else if face.dots > 0 {
                 HStack(spacing: dot * 0.75) {
                     ForEach(1...face.dots, id: \.self) { i in
