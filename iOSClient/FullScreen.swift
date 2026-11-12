@@ -180,6 +180,19 @@ struct FullScreenEdges: UIViewRepresentable {
     }
 }
 
+/// The safe area the harness's fake screen stands for (ContentView's LayoutHarness, DEBUG): full screen measures
+/// its room by it there (StreamScreen's `deviceInsets`), as on a device by the window's. Nil on a device.
+struct HarnessSafeAreaKey: EnvironmentKey {
+    static let defaultValue: EdgeInsets? = nil
+}
+
+extension EnvironmentValues {
+    var harnessSafeArea: EdgeInsets? {
+        get { self[HarnessSafeAreaKey.self] }
+        set { self[HarnessSafeAreaKey.self] = newValue }
+    }
+}
+
 // MARK: - The system's own overlays
 
 /// While hidden: no status bar, the home indicator fades (`persistentSystemOverlays`, UIKit's

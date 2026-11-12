@@ -302,6 +302,12 @@ struct StreamScreen: View {
     /// The window's safe area while the controls last showed (its status bar's room included): where the swipe
     /// in's preview lays them out, so they land where the shown layout puts them; nil before any was read.
     @State private var shownInsets: FullScreenPolicy.Insets? = nil
+    /// The window's safe area as UIKit has it now (FullScreenEdges): full screen's room is measured by it, since
+    /// this screen's reader, which ignores the safe area while hidden, then reports none (`deviceInsets`).
+    @State private var windowInsets: FullScreenPolicy.Insets? = nil
+    /// The harness's fake screen's safe area (ContentView's LayoutHarness, DEBUG), which stands for the window's
+    /// there; nil on a device.
+    @Environment(\.harnessSafeArea) private var harnessSafeArea
     /// The person's own software keyboard was up when the interface hid: it comes back with the interface.
     @State private var keyboardBeforeHide = false
     /// The hint over the hidden picture (FullScreenHint), the first few times, and its fade.
@@ -377,7 +383,7 @@ struct StreamScreen: View {
             // safe area ignored), and the picture goes in the room FullScreenPolicy gives (clear of the
             // sensor housing, down to the bottom edge; above the fold in the Duo's laptop pose).
             let hidden = chromeHidden
-            let insets = Self.insets(geo.safeAreaInsets)
+            let insets = deviceInsets(geo)
             let room = FullScreenPolicy.room(size: geo.size, insets: insets, choice: Self.roomChoice,
                                              topIsStatusBar: !DuoLayout.phoneArrangement,
                                              foldTop: posture.info(in: geo.size).horizontalBand?.minY)
@@ -1106,7 +1112,9 @@ struct StreamScreen: View {
             onShake: { if chromeHidden { showChrome(by: "a shake") } },
             onCoverage: { coversScreen = $0 },
             onInsets: { e in
-                if chrome == .shown { shownInsets = FullScreenPolicy.Insets(top: e.top, left: e.left, bottom: e.bottom, right: e.right) }
+                let now = FullScreenPolicy.Insets(top: e.top, left: e.left, bottom: e.bottom, right: e.right)
+                windowInsets = now
+                if chrome == .shown { shownInsets = now }
             })
     }
 
@@ -1137,6 +1145,17 @@ struct StreamScreen: View {
     /// The safe area as FullScreenPolicy takes it.
     private static func insets(_ e: EdgeInsets) -> FullScreenPolicy.Insets {
         FullScreenPolicy.Insets(top: e.top, left: e.leading, bottom: e.bottom, right: e.trailing)
+    }
+
+    /// The screen's safe area as full screen measures its room and the swipe in's preview by (the sensor
+    /// housing's side, the status bar's room, the home indicator's): the window's, as UIKit gives it, or in the
+    /// harness its fake screen's. Not this screen's reader's: a GeometryReader that ignores the safe area, as
+    /// this one does while hidden, reports none (the live gate measured the hidden room at 393×852 on a
+    /// 393×852 screen with a 59 pt Dynamic Island), so the picture would have gone under the island. The
+    /// reader's own only before the window has said.
+    private func deviceInsets(_ geo: GeometryProxy) -> FullScreenPolicy.Insets {
+        if let harnessSafeArea { return Self.insets(harnessSafeArea) }
+        return windowInsets ?? Self.insets(geo.safeAreaInsets)
     }
 
     /// Where the hidden picture goes: clear of the sensor housing, down to the bottom edge (open question 5;

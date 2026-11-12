@@ -761,6 +761,8 @@ struct LayoutHarness: View {
                 Color.black
                 insetScreen
                     .environment(\.duoEnvironment, spec.duoEnvironment)
+                    // The fake screen's safe area, which full screen measures its room by (a device: the window's).
+                    .environment(\.harnessSafeArea, spec.insets ?? EdgeInsets())
                     .frame(width: spec.size.width, height: spec.size.height)
                     .coordinateSpace(.named(DuoPosture.displaySpace))
                     // `-SillMockHardware 1`: an iPhone's Dynamic Island, rounded corners and home indicator drawn
