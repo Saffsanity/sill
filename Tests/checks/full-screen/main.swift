@@ -212,12 +212,12 @@ for n in 0..<30_000 {
     let hz = [60.0, 120, 240][n % 3]
     var s = line(from: x0, y0, to: max(x1, -20), y1, speed: r(40...2500), hz: hz, rest: n % 5 == 0 ? r(0...0.3) : 0)
     // UIKit never reports a touch off the screen: a stroke that crosses the edge lifts there, last seen at it.
-    if let off = s.points.firstIndex(where: { $0.x <= 0 }) {
-        s.points = Array(s.points[...off]).map { (max($0.x, 0), $0.y, $0.t) }
+    if let off = s.points.firstIndex(where: { $0.x <= 0 }), off > 0 {
+        s.points = Array(s.points[...off]).map { (x: max($0.x, 0), y: $0.y, t: $0.t) }
     }
     if n % 13 == 0 {
         // Wander: a jittered path.
-        s.points = s.points.enumerated().map { i, q in i == 0 ? q : (max(q.x + r(-3...3), 0), q.y + r(-3...3), q.t) }
+        s.points = s.points.enumerated().map { i, q in i == 0 ? q : (x: max(q.x + r(-3...3), 0), y: q.y + r(-3...3), t: q.t) }
     }
     if n % 17 == 0 { s.lift = false; s.ticks = [s.points.last!.t + 0.3] }
     let run = s.run()

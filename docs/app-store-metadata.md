@@ -524,6 +524,15 @@ list) have passed; until then it stays out, as Esc's words waited for a device:
 Picture in Picture, in Settings › This iPad (This iPhone): leave Sill while your Mac’s picture shows, and it keeps playing in a small window over your other apps, with its sound when Send Audio is on. Tap the window to come back to Sill. Nothing you do in other apps reaches your Mac.
 ```
 
+Held for the next version: Full Screen (issues #279, #92, #280; docs/full-screen-plan.md), a paragraph of 237
+characters for its What's New, once Noah's device tests (the plan's "Noah's test") have passed. It promises
+nothing about the Desktop's shape upright, which keeps its own until the Virtual Desktop can match the
+device:
+
+```text
+Full Screen: flick off the left edge of the screen to hide Sill’s controls, so only your Mac’s picture shows. Swipe in from the left edge, or shake your iPhone or iPad, to bring them back. It’s also in Settings › This iPad (This iPhone).
+```
+
 ## 6. Export compliance (encryption)
 
 **The key is in the app.** `iOSClient/Info.plist` sets

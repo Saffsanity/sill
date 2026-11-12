@@ -155,6 +155,15 @@ def edge_main(base, new):
         surface = t.split(" ", 1)[0]
         events = new[t]
         hid = any(e.strip() == "[edge] hide" for e in events)
+        if " EDGE REVEALOFF " in t:
+            check(not any(e.strip().startswith("[edge] reveal began") for e in events), f"{t}: no swipe in")
+        if " EDGE REVEAL " in t:
+            revealed = any(e.strip().startswith("[edge] reveal ended") for e in events)
+            sent = sends(events)
+            check(revealed and not sent and not hid and len(sends(base.get(t, []))) > 0,
+                  f"{t}: the swipe in, nothing sent (main's surfaces sent {len(sends(base.get(t, [])))})")
+            for e in sent: print(f"       sent: {e}")
+            continue
         if " EDGE HIDE " in t:
             sent = sends(events)
             check(hid and not sent and len(sends(base.get(t, []))) > 0,
@@ -162,7 +171,7 @@ def edge_main(base, new):
             if sent:
                 for e in sent: print(f"       sent: {e}")
         else:
-            moved_after_hides = " EDGE DISARMED " in t
+            moved_after_hides = " EDGE DISARMED " in t or " EDGE REVEALOFF " in t
             a = collapsed(base.get(t, []), surface if moved_after_hides else None)
             b = collapsed(events, surface if moved_after_hides else None)
             ok = t in base and not hid and same(a, b) and len(a) > 0

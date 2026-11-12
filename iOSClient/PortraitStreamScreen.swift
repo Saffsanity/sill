@@ -499,10 +499,10 @@ struct PortraitStreamScreen: View {
     private func phoneStack(_ layout: PhonePortraitLayout, span: CGFloat) -> some View {
         let larger = layout.largerPicture
         // In reading order, which is also top to bottom: the picture, row 1, the strip (none with
-        // Larger Picture), the key row, the trackpad. Full screen: the picture alone, at the room.
-        let rects: [CGRect] = hidden ? [room]
-            : larger ? [layout.pane(video: client.videoSize), layout.row1, layout.keys, layout.trackpad]
-                     : [layout.picture, layout.row1, layout.strip, layout.keys, layout.trackpad]
+        // Larger Picture), the key row, the trackpad. Full screen: the picture alone, at the room; the rows keep
+        // their rects for the moment they slide out (and in), so none is ever placed anywhere else.
+        let rows: [CGRect] = larger ? [layout.row1, layout.keys, layout.trackpad] : [layout.row1, layout.strip, layout.keys, layout.trackpad]
+        let rects: [CGRect] = [hidden ? room : larger ? layout.pane(video: client.videoSize) : layout.picture] + rows
         return ZStack(alignment: .topLeading) {
             Color.black
 

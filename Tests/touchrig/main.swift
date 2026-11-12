@@ -68,6 +68,8 @@ enum Step {
     /// back inside their margins; the flick's recognizer listening or not.
     case edgeLayout(Bool)
     case arm(Bool)
+    /// The swipe in from the left bezel listening (the controls hidden), or not.
+    case reveal(Bool)
 }
 
 enum Gesture {
@@ -266,6 +268,13 @@ func edgeScenarios(_ y: CGFloat) -> [(String, [Step])] {
     out.append(("EDGE HIDE a flick 45° down from 40 pt", path([40, 26, 12, 2], dy: 13)))
     out.append(("EDGE HIDE a flick after a 0.1 s rest", path([36, 24, 12, 2], rest: 6)))
     out.append(("EDGE DISARMED a flick off the edge from 30 pt", [.arm(false)] + path([30, 15, 2]) + [.wait(60), .arm(true)]))
+    // The controls hidden: the flick does not listen, the swipe in from the bezel does (RevealEdgePan). A swipe
+    // in is the controls' and nothing else; a stroke elsewhere on the picture is the Mac's, whole.
+    func hiddenRun(_ steps: [Step]) -> [Step] { [.arm(false), .reveal(true)] + steps + [.wait(60), .reveal(false), .arm(true)] }
+    out.append(("EDGE REVEAL a swipe in from the bezel", hiddenRun(path([0.5, 30, 70, 120, 180, 240]))))
+    out.append(("EDGE REVEALOFF a tap in the middle while hidden", hiddenRun(Gesture.tap(1, at: CGPoint(x: 300, y: y)))))
+    out.append(("EDGE REVEALOFF a drag right in the middle while hidden", hiddenRun(Gesture.swipe(1, at: CGPoint(x: 300, y: y), dx: 120, dy: 0, frames: 12))))
+    out.append(("EDGE REVEALOFF a drag left near the edge while hidden", hiddenRun(Gesture.swipe(1, at: CGPoint(x: 60, y: y), dx: -50, dy: 0, frames: 8))))
     return out
 }
 
@@ -436,6 +445,11 @@ final class Runner {
             edgeFlick.armed = on
             RigLog.log("[edge] armed \(on)")
             #endif
+        case .reveal(let on):
+            #if EDGEFLICK
+            edgeReveal.isEnabled = on
+            RigLog.log("[edge] reveal listening \(on)")
+            #endif
         }
     }
 }
@@ -456,6 +470,20 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
 /// Full screen's flick off the left edge, on the rig's window as the app puts it on Sill's (FullScreenEdges): it
 /// listens, and says what it decided (a hide; a stroke let go, but for every touch past the band).
 let edgeFlick = EdgeFlickRecognizer()
+/// The swipe in from the left bezel, as the app has it while its controls are hidden: off but for the
+/// REVEAL strokes.
+let edgeReveal = RevealEdgePan(target: nil, action: nil)
+final class RevealLog: NSObject {
+    @objc func changed(_ g: UIScreenEdgePanGestureRecognizer) {
+        switch g.state {
+        case .began: RigLog.log("[edge] reveal began")
+        case .ended: RigLog.log(String(format: "[edge] reveal ended at %.0f pt", g.translation(in: g.view).x))
+        case .cancelled, .failed: RigLog.log("[edge] reveal cancelled")
+        default: break
+        }
+    }
+}
+let revealLog = RevealLog()
 #endif
 
 final class Root: UIViewController {
@@ -524,7 +552,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             RigLog.log("[edge] \(verdict) (\(numbers))")
         }
         w.addGestureRecognizer(edgeFlick)
-        print("RIG edge: the flick off the left edge on the window, listening")
+        edgeReveal.addTarget(revealLog, action: #selector(RevealLog.changed(_:)))
+        edgeReveal.isEnabled = false
+        w.addGestureRecognizer(edgeReveal)
+        print("RIG edge: the flick off the left edge on the window, listening; the swipe in, off but for REVEAL strokes")
         #endif
         let runner = Runner(window: w)
         runner.root = root

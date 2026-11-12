@@ -146,6 +146,11 @@ final class EdgeFlickRecognizer: UIGestureRecognizer {
 /// to fail, so a swipe in reaches the Mac not at all, and anything else (it fails a touch that does not start
 /// at the edge) not late.
 final class RevealEdgePan: UIScreenEdgePanGestureRecognizer {
+    /// A touch that lands further in than this cannot be a swipe in from the bezel: it fails at once, so a
+    /// tap or a scroll on the hidden picture never waits for the system's own judgement (which may want to
+    /// see the touch move first). The system's edge region is narrower than this.
+    static let landsWithin: CGFloat = 40
+
     override init(target: Any?, action: Selector?) {
         super.init(target: target, action: action)
         edges = .left
@@ -154,5 +159,13 @@ final class RevealEdgePan: UIScreenEdgePanGestureRecognizer {
 
     override func shouldBeRequiredToFail(by other: UIGestureRecognizer) -> Bool {
         EdgeRecognizers.waits(other, for: self)
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        if state == .possible, let view, touches.contains(where: { $0.location(in: view).x > Self.landsWithin }) {
+            state = .failed
+            return
+        }
+        super.touchesBegan(touches, with: event)
     }
 }
