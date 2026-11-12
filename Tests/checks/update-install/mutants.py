@@ -1,6 +1,6 @@
 """Update Now's mutants (docs/one-click-update-plan.md §11, G1): each changes one of the app's update files
 in one place, in a copy of Sources/SillMenuBar; build.sh compiles the check from the copy and the check
-reads the copy's sources, and it must fail. usage: mutants.py WORKTREE"""
+reads the copy's sources, and it must fail. usage: mutants.py WORKTREE [NAME…] (only the mutants named)"""
 import os, shutil, subprocess, sys, tempfile
 WT = sys.argv[1]; HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(WT, "Sources/SillMenuBar")
@@ -76,6 +76,8 @@ MUTANTS = [
     ("a trust of the app's own", APP, "let trust = Policy.Trust.release", "let trust = Policy.Trust(signer: \"anchor apple\", notarized: false)"),
 ]
 caught = 0
+ONLY = sys.argv[2:]
+if ONLY: MUTANTS = [m for m in MUTANTS if m[0] in ONLY]
 for name, file, old, new in MUTANTS:
     src = open(os.path.join(SRC, file)).read()
     if src.count(old) != 1:
