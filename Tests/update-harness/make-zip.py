@@ -3,8 +3,9 @@
 usage: make-zip.py APP_DIR OUT_ZIP CASE   (APP_DIR is the folder holding UpdTest.app)
 CASE: plain, appledouble (AppleDouble entries beside the app: skipped, the app installs), traversal
 (an entry under ../), absolute (/tmp/...), link-escape (a link out of the app and a file written
-through it), case-duplicate (Info.plist and info.plist), setuid (the executable setuid), not-a-bundle
-(UpdTest.app is a file), second-top (another top-level folder)."""
+through it), link-through-link (a link whose target steps through another link, then climbs out: review 3,
+F6), case-duplicate (Info.plist and info.plist), setuid (the executable setuid), not-a-bundle (UpdTest.app is
+a file), second-top (another top-level folder)."""
 import os, stat, sys, zipfile
 
 src, out, case = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -47,6 +48,13 @@ with zipfile.ZipFile(out, "w") as z:
         if case == "link-escape":
             z.writestr(info(TOP + "/Contents/Resources/escape", 0o120755, zipfile.ZIP_STORED), b"../../../../outside")
             z.writestr(info(TOP + "/Contents/Resources/escape/pwned.txt", 0o100644), b"written through the link")
+        if case == "link-through-link":
+            # By name L is the app's own `outside` file; really A leads to the app's top-level Z/, two levels
+            # shallower than A, so L is the `outside` beside the staging folder.
+            z.writestr(info(TOP + "/Z/", 0o040755, zipfile.ZIP_STORED), b"")
+            z.writestr(info(TOP + "/outside", 0o100644), b"inside the app")
+            z.writestr(info(TOP + "/Contents/Resources/A", 0o120755, zipfile.ZIP_STORED), b"../../Z")
+            z.writestr(info(TOP + "/Contents/Resources/L", 0o120755, zipfile.ZIP_STORED), b"A/../../../outside")
         if case == "second-top":
             z.writestr(info("Other.app/", 0o040755, zipfile.ZIP_STORED), b"")
             z.writestr(info("Other.app/x", 0o100644), b"x")

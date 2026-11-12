@@ -89,6 +89,12 @@ enum UpdateInstallPolicy {
     /// How long the old Sill waits for the new one to finish launching, and the new one for the old to
     /// quit.
     static let launchWait: TimeInterval = 30
+    /// How long the new Sill runs with its host up before it tells the watcher it works (the watcher then
+    /// leaves it, and the copy it replaced goes): longer than "the host started" (review 3, point 6).
+    static let provedAfter: TimeInterval = 30
+    /// How long the watcher waits for that word before it puts the old copy back: the old Sill's quit, the
+    /// new one's wait for it, its host's start and `provedAfter`, with room to spare.
+    static let watchWait: TimeInterval = 150
 
     /// "scheme://host" or "scheme://host:port", lowercased; nil for a URL with a user or password, or
     /// without a host.
@@ -470,9 +476,21 @@ enum UpdateInstallPolicy {
         case didNotStart(String, putBack: Bool)
         /// A stop signed with an update key names this release (its tag): never installed.
         case stopped(tag: String)
+        /// The release lists a stop that doesn't check out with an update key: nothing is installed.
+        case stopUnreadable(UpdateManifest.Problem)
         /// The automatic update leaves this release to Update Now (why: UpdateAutoPolicy's words).
         case notAutomatic(String)
         case cancelled
+
+        /// Asked again right before the automatic update's swap: an answer that says nothing about the
+        /// release (no connection, GitHub's error, a download that stopped) leaves the waiting copy waiting
+        /// for the next look; any other ends the attempt.
+        var transient: Bool {
+            switch self {
+            case .noConnection, .github, .redirectRefused, .download, .cancelled: return true
+            default: return false
+            }
+        }
 
         /// Whether the staging folder may be deleted: not when it holds the old copy that could not be
         /// put back (the person's way back).
@@ -513,6 +531,7 @@ enum UpdateInstallPolicy {
         case .didNotStart(_, let putBack):
             return putBack ? "Sill \(offered) didn’t start, so Sill \(running) is back." : lost(running: running, keptAt: keptAt)
         case .stopped: return "Sill’s developer stopped Sill \(offered) with a stop signed with Sill’s update key, so it isn’t installed. \(unchanged)"
+        case .stopUnreadable: return couldNot("the release carries a stop that isn’t signed with Sill’s update key")
         case .notAutomatic(let why): return "Sill didn’t install \(offered) by itself: \(why). Update Now still can."
         case .cancelled: return "Update cancelled. \(unchanged)"
         }
@@ -535,7 +554,7 @@ enum UpdateInstallPolicy {
         guard let keptAt else {
             return "Sill couldn’t put \(running) back in place. Download Sill again from getsill.app and put it in your Applications folder."
         }
-        return "Sill couldn’t put \(running) back in place. It is at \(keptAt): quit Sill and move it to your Applications folder."
+        return "Sill couldn’t put \(running) back in place. It is at \(keptAt): quit Sill and move it to your Applications folder soon, as macOS empties that folder after a few days."
     }
 
     /// The log's words for a failure, with what Settings leaves out.
@@ -564,6 +583,7 @@ enum UpdateInstallPolicy {
         case .checkAfterSwap(let p, let putBack): return "the check at the final path failed (\(p)); \(putBack ? "put back" : "NOT put back")"
         case .didNotStart(let why, let putBack): return "the new copy didn’t start (\(why)); \(putBack ? "put back" : "NOT put back")"
         case .stopped(let tag): return "a stop signed with an update key names \(tag)"
+        case .stopUnreadable(let p): return "the release’s stop: \(p.text)"
         case .notAutomatic(let why): return "not installed by itself: \(why)"
         case .cancelled: return "cancelled"
         }
@@ -624,9 +644,9 @@ enum UpdateInstallPolicy {
         /// The automatic update's fetch found the release still cooling off (its signed date): nothing is
         /// downloaded, and it is no failure.
         case postponed
-        /// No device connected for the while UpdateAutoPolicy asks, new sessions held, GitHub asked again:
-        /// the waiting copy is installed.
-        case quiet
+        /// No device connected for the while UpdateAutoPolicy asks, GitHub asked again, new sessions held:
+        /// the waiting copy is installed; or GitHub's answer ends the attempt (the release changed, a stop).
+        case quiet(Failure?)
         case confirm
         case cancel
         /// The release and its manifest, verified, or why not.
@@ -665,9 +685,11 @@ enum UpdateInstallPolicy {
         case (.fetching, .postponed) where s.mode == .automatic:
             n.phase = .idle
             return (n, [.cleanUp])
-        case (.waiting, .quiet) where s.mode == .automatic:
+        case (.waiting, .quiet(nil)) where s.mode == .automatic:
             n.phase = .installing
             return (n, [.install])
+        case (.waiting, .quiet(let f?)) where s.mode == .automatic:
+            return fail(f)
         case (.waiting, .updateNow(let devices)):
             // Install Now: the person's, from here on, with the copy already checked.
             n.mode = .manual

@@ -345,6 +345,9 @@ await refused("an absolute name", Release(zip: zip("hostile-absolute"), app: app
 await refused("a link out of the app, written through", Release(zip: zip("hostile-link-escape"), app: app("v1.1"))) {
     if case .archive(.badLink) = $0 { return true }; if case .archive(.throughLink) = $0 { return true }; return false
 }
+await refused("a link through a link, out of the app (review 3, F6)", Release(zip: zip("hostile-link-through-link"), app: app("v1.1"))) {
+    if case .archive(.throughLink) = $0 { return true }; return false
+}
 await refused("Info.plist and info.plist", Release(zip: zip("hostile-case-duplicate"), app: app("v1.1"))) { if case .archive(.duplicate) = $0 { return true }; return false }
 await refused("a setuid executable", Release(zip: zip("hostile-setuid"), app: app("v1.1"))) { if case .archive(.badMode) = $0 { return true }; return false }
 await refused("UpdTest.app is a file", Release(zip: zip("hostile-not-a-bundle"), app: app("v1.1"))) { $0 == .archive(.topNotFolder) }
@@ -529,6 +532,76 @@ say("staging: the noted leftover removed; listing the temporary-items folder \(r
 for u in [made[0], made[3], made[4], aside] { UpdateInstaller.remove(u) }
 
 // MARK: The genuine Sill 0.6.1 under Trust.release (with this run's key)
+
+// MARK: The watcher (review 3, the automatic update's point 6)
+
+say("== the watcher: a new copy that doesn't start is put back by itself")
+/// One update installed (1.1 over 1.0), then a process standing in for the new Sill (`newCopy`'s arguments to the
+/// installed UpdTest, or nil for a process that isn't it), and the watcher as Sill starts it, with the harness's
+/// launcher (the put-back copy's executable, never Launch Services). Waits for the watcher to end.
+func watched(_ name: String, newCopy: [String]?, seconds: Int = 6, changeOld: Bool = false,
+             expectRestored: Bool, expectWhy: String? = nil) async {
+    publish(v11)
+    let before = treeHash(out.appendingPathComponent("apps/installed/UpdTest.app"))
+    let oldCDHash = UpdateInstaller.cdhash(of: out.appendingPathComponent("apps/installed/UpdTest.app"), arch: .current) ?? ""
+    let o = await update(name)
+    guard o.failure == nil, let old = o.staged else { check(false, "\(name): the update: \(o.failure.map { P.logText($0) } ?? "")"); return }
+    if changeOld {
+        let h = try! FileHandle(forWritingTo: old.appendingPathComponent("Contents/Resources/note.txt")); h.seekToEndOfFile(); h.write(Data("changed while it waited\n".utf8)); h.closeFile()
+    }
+    let dir = out.appendingPathComponent("cases/\(name)")
+    let started = dir.appendingPathComponent("started.txt"), restored = dir.appendingPathComponent("restored.txt")
+    let launched = o.installed.deletingLastPathComponent().appendingPathComponent("launched.txt")
+    let token = UUID().uuidString
+    let p = Process()
+    if let args = newCopy {
+        p.executableURL = o.installed.appendingPathComponent("Contents/MacOS/UpdTest")
+        p.arguments = args.map { $0 == "STARTED" ? started.path : $0 == "TOKEN" ? token : $0 }
+    } else {
+        p.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        p.arguments = ["30"]
+    }
+    p.standardOutput = FileHandle.nullDevice
+    try! p.run()
+    let w = UpdateInstaller.Watch(pid: p.processIdentifier, installed: o.installed, executable: "UpdTest", oldCopy: old, oldCDHash: oldCDHash,
+                                  requirement: testTrust.signer, startedNote: started, token: token, restoredNote: restored, seconds: seconds,
+                                  launcher: out.appendingPathComponent("launch.sh").path)
+    check(UpdateInstaller.startWatcher(w), "\(name): the watcher started")
+    // It ends by itself: the note seen, or the put-back done (or refused), at most `seconds` + 8 s.
+    let deadline = Date().addingTimeInterval(Double(seconds) + 12)
+    while Date() < deadline {
+        let busy = Process.runTool("/usr/bin/pgrep", ["-f", "sill-update-watcher " + String(p.processIdentifier)]) == 0
+        if !busy { break }
+        try? await Task.sleep(for: .milliseconds(250))
+    }
+    try? await Task.sleep(for: .milliseconds(500))
+    if expectRestored {
+        check(version(of: o.installed) == "1.0", "\(name): the old copy is back at the path (\(version(of: o.installed) ?? "none"))")
+        check(treeHash(o.installed) == before, "\(name): the old copy back is the old copy, whole")
+        check(version(of: old.deletingLastPathComponent().appendingPathComponent("did not start.app")) == "1.1", "\(name): the new copy parked beside it")
+        let note = UpdateInstaller.readNote(restored)
+        check(note?.first == token && (expectWhy.map { note?.dropFirst().first?.hasPrefix($0) == true } ?? true),
+              "\(name): the restored note: \(note ?? [])")
+        check((try? String(contentsOf: launched, encoding: .utf8)) == "launched 1.0\n", "\(name): the old copy was started")
+    } else {
+        check(version(of: o.installed) == "1.1", "\(name): the new copy stays (\(version(of: o.installed) ?? "none"))")
+        check(!FileManager.default.fileExists(atPath: restored.path) && !FileManager.default.fileExists(atPath: launched.path),
+              "\(name): nothing put back, nothing started")
+    }
+    if newCopy == nil {
+        check(p.isRunning, "\(name): a process that isn't the new Sill is never stopped")
+        p.terminate()
+    }
+    p.waitUntilExit()
+    if let s = o.staging { UpdateInstaller.remove(s) }
+    say("\(name): \(version(of: o.installed) ?? "?") at the path")
+}
+await watched("the new copy proves itself", newCopy: ["started", "STARTED", "TOKEN", "1"], expectRestored: false)
+await watched("the new copy quits at once", newCopy: ["crash"], expectRestored: true, expectWhy: "it quit before it had run")
+await watched("the new copy never proves itself", newCopy: ["sleep", "30"], seconds: 3, expectRestored: true, expectWhy: "it hadn't run for long enough")
+await watched("another token in the note", newCopy: ["started", "STARTED", "not-the-token", "1"], seconds: 3, expectRestored: true)
+await watched("the old copy changed while it waited", newCopy: ["crash"], changeOld: true, expectRestored: false)
+await watched("the pid isn't the new Sill's", newCopy: nil, seconds: 3, expectRestored: true)
 
 let g = out.appendingPathComponent("genuine")
 if FileManager.default.fileExists(atPath: g.appendingPathComponent("plain.zip").path) {

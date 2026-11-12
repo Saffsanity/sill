@@ -166,7 +166,8 @@ private struct GeneralPane: View {
                 UpdatesSection(pane: preview, automatic: .constant(true))
             } else {
                 UpdatesSection(pane: model.updates.pane, install: model.updater.pane, installAvailable: model.updater.available,
-                               automatic: $settings.updateCheck,
+                               automatic: $settings.updateCheck, autoSwitch: model.updater.automaticSwitch,
+                               autoUpdate: Binding(get: { model.updater.memory.on }, set: { model.updater.setAutomaticUpdate($0) }),
                                actions: UpdatesSection.Actions(checkNow: { model.updates.checkNow() },
                                                                openRelease: { NSWorkspace.shared.open($0) },
                                                                updateNow: { model.updater.updateNow() },
@@ -308,11 +309,25 @@ struct UpdatesSection: View {
     var install = UpdateInstallPolicy.Pane()
     var installAvailable = false
     @Binding var automatic: Bool
+    /// Automatically update Sill (UpdateAutoPolicy): shown only in a build with Update Now. Settings is the only
+    /// place that turns it on (AppUpdater.setAutomaticUpdate).
+    var autoSwitch = UpdateAutoPolicy.Switch()
+    var autoUpdate: Binding<Bool> = .constant(false)
     var actions = Actions()
 
     var body: some View {
         Section {
             Toggle("Check for updates automatically", isOn: $automatic)
+            if autoSwitch.shown {
+                Toggle("Automatically update Sill", isOn: autoUpdate)
+                    .disabled(!autoSwitch.enabled)
+                if let note = autoSwitch.note {
+                    Text(note)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             LabeledContent {
                 HStack(spacing: 8) {
                     if install.updateNow {
@@ -326,9 +341,17 @@ struct UpdatesSection: View {
                         .disabled(!pane.canCheck || install.busy)
                 }
             } label: {
-                Text(install.line ?? pane.line)
-                    .foregroundStyle((install.line != nil ? install.failed : pane.failed) ? Color.orange : Color.primary)
-                    .fixedSize(horizontal: false, vertical: true)
+                // The line, and under it on a line of its own the download's size ("2.4 of 5.9 MB").
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(install.line ?? pane.line)
+                        .foregroundStyle((install.line != nil ? install.failed : pane.failed) ? Color.orange : Color.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let detail = install.detail {
+                        Text(detail)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
             }
             // VoiceOver hears Check Now's result, which arrives after the click.
             .onChange(of: pane.resultID) { _, _ in
@@ -368,7 +391,7 @@ struct UpdatesSection: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         } footer: {
-            Footnote(installAvailable ? UpdateInstallPolicy.footnote : UpdatePolicy.footnote)
+            Footnote(installAvailable ? UpdateInstallPolicy.footnote(automatic: autoSwitch.shown && autoUpdate.wrappedValue) : UpdatePolicy.footnote)
         }
     }
 }

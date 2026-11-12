@@ -92,7 +92,7 @@ for name, file, old, new in MUTANTS:
         exe = os.path.join(t, "c")
         subprocess.run([os.path.join(HERE, "build.sh"), WT, exe, copy], capture_output=True, text=True)
         if not os.path.exists(exe): print(f"{name}: did not compile"); continue
-        r = subprocess.run([exe, copy], capture_output=True, text=True, timeout=300)
+        r = subprocess.run([exe, copy, os.path.join(WT, "Sources")], capture_output=True, text=True, timeout=300)
         failed = [l for l in r.stdout.splitlines() if l.startswith("FAIL")]
         if r.returncode != 0:
             caught += 1

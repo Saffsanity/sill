@@ -90,13 +90,35 @@ final class UpdateInstaller: @unchecked Sendable {
                                                    configuration: configuration(api: false, resourceTimeout: 30), cancel: cancel) {
             return .failure(f)
         }
+        let manifest: UpdateManifest
         switch UpdateManifest.verify(manifestBody.data, keys: trust.updateKeys) {
         case .failure(let p):
             return .failure(.manifest(p))
-        case .success(let manifest):
-            if let f = Policy.manifestMatches(manifest, release: release, endpoints: endpoints) { return .failure(f) }
-            return .success((release, manifest))
+        case .success(let m):
+            if let f = Policy.manifestMatches(m, release: release, endpoints: endpoints) { return .failure(f) }
+            manifest = m
         }
+        // A stop beside it (UpdateManifest.Stop), before anything else is downloaded: one that names this
+        // release and its zip ends here, for Update Now and the automatic update alike; one that names
+        // another release changes nothing; one that doesn't check out with an update key ends here too
+        // (fail closed: whoever can put files in the release can also take the release down).
+        if let stopAsset = release.stop {
+            let stopBody = Buffer()
+            let stopFetch = Transfer(allowed: { Policy.downloadRedirectAllowed($0, endpoints: endpoints) },
+                                     maxRedirects: endpoints.maxRedirects, limit: stopAsset.size, exactSize: stopAsset.size,
+                                     sink: { stopBody.append($0); return nil }, progress: nil)
+            if case .failure(let f) = await stopFetch.run(URLRequest(url: stopAsset.url),
+                                                           configuration: configuration(api: false, resourceTimeout: 30), cancel: cancel) {
+                return .failure(f)
+            }
+            switch UpdateManifest.verifyStop(stopBody.data, keys: trust.updateKeys) {
+            case .failure(let p):
+                return .failure(.stopUnreadable(p))
+            case .success(let stop):
+                if stop.tag == release.tag, stop.sha256 == manifest.sha256 { return .failure(.stopped(tag: release.tag)) }
+            }
+        }
+        return .success((release, manifest))
     }
 
     // MARK: The download
@@ -564,6 +586,108 @@ final class UpdateInstaller: @unchecked Sendable {
         let url = URL(fileURLWithPath: text).standardizedFileURL
         guard isLeftover(url, in: parent, keep: keep), (try? FileManager.default.removeItem(at: url)) != nil else { return nil }
         return url.path
+    }
+
+    // MARK: Notes between the two Sills, and the watcher
+
+    /// A short note of lines (this user's Caches; nothing secret: a random token, a version, a mode, why).
+    static func writeNote(_ url: URL, lines: [String]) {
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? Data((lines.joined(separator: "\n") + "\n").utf8).write(to: url, options: .atomic)
+    }
+
+    /// A note's lines; nil when there is none, or it isn't one Sill could have written.
+    static func readNote(_ url: URL) -> [String]? {
+        guard let data = try? Data(contentsOf: url), data.count <= 4096, let text = String(data: data, encoding: .utf8) else { return nil }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init).dropLast()
+        return lines.isEmpty ? nil : Array(lines)
+    }
+
+    /// What the watcher needs: the new Sill's process, where Sill is and what it must be put back as.
+    struct Watch: Equatable, Sendable {
+        /// The new Sill, started by the old one and checked to be the checked code.
+        let pid: pid_t
+        let installed: URL
+        let executable: String
+        /// The old copy, in the staging folder the swap left it in, and the cdhash it ran with.
+        let oldCopy: URL
+        let oldCDHash: String
+        /// The requirement the old copy must satisfy to be put back (the trust's signer).
+        let requirement: String
+        /// The note the new Sill writes, with `token`, once it has run `Policy.provedAfter`.
+        let startedNote: URL
+        let token: String
+        /// The note the watcher writes when it puts the old copy back (the token, then why).
+        let restoredNote: URL
+        /// How long it waits for the started note before it gives up on the new Sill.
+        let seconds: Int
+        /// How it starts the copy it put back (Sill.app: macOS's `open`, through Launch Services).
+        var launcher = "/usr/bin/open"
+    }
+
+    /// The watcher (review 3, the automatic update's point 6): a few lines of /bin/sh the old Sill starts just
+    /// before it quits, since nothing of the old Sill runs after it. Until the new Sill writes the started note
+    /// (it does once it has run for `Policy.provedAfter` with its host up), the watcher looks once a second.
+    /// The note: it ends, and the new Sill removes the old copy. The new Sill's process gone without it, or no
+    /// note within `seconds`: the new Sill is stopped (only that process, still running Sill's executable from
+    /// Sill's path), the old copy is checked (valid, the trust's requirement, the cdhash it ran with) and put
+    /// back at Sill's path, the new copy moved to where the old one was, the restored note written, and the old
+    /// Sill started; it says what happened. Nothing is put back that isn't the old copy, whole. Every path and
+    /// value is an argument, never part of the script's text.
+    static let watcherScript = #"""
+pid=$1; app=$2; exe=$3; old=$4; cdhash=$5; req=$6; started=$7; token=$8; restored=$9; shift 9; wait=$1; launcher=$2
+proved() { [ -f "$started" ] && [ "$(/usr/bin/head -n 1 "$started" 2>/dev/null)" = "$token" ]; }
+running() { [ "$(/bin/ps -ww -p "$pid" -o comm= 2>/dev/null)" = "$app/Contents/MacOS/$exe" ]; }
+i=0
+while [ "$i" -lt "$wait" ]; do
+    proved && exit 0
+    running || break
+    /bin/sleep 1
+    i=$((i + 1))
+done
+/bin/sleep 2
+proved && exit 0
+why="it quit before it had run for long enough"
+if running; then
+    why="it hadn't run for long enough after $wait seconds"
+    /bin/kill -TERM "$pid" 2>/dev/null
+    /bin/sleep 3
+    running && /bin/kill -KILL "$pid" 2>/dev/null
+    /bin/sleep 1
+fi
+/usr/bin/codesign --verify --deep --strict "-R=$req" "$old" >/dev/null 2>&1 || exit 3
+have=$(/usr/bin/codesign -d -v "$old" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/head -n 1)
+[ -n "$have" ] && [ "$have" = "$cdhash" ] || exit 4
+parked="$(/usr/bin/dirname "$old")/did not start.app"
+/bin/mv "$app" "$parked" || exit 5
+if ! /bin/mv "$old" "$app"; then /bin/mv "$parked" "$app"; exit 6; fi
+/usr/bin/printf '%s
+%s
+' "$token" "$why" > "$restored"
+"$launcher" "$app"
+exit 0
+"""#
+
+    /// Starts the watcher in a session of its own (it outlives this Sill), its output thrown away. False
+    /// when it couldn't be started.
+    static func startWatcher(_ w: Watch) -> Bool {
+        let args = ["/bin/sh", "-c", watcherScript, "sill-update-watcher", String(w.pid), w.installed.path, w.executable, w.oldCopy.path,
+                    w.oldCDHash, w.requirement, w.startedNote.path, w.token, w.restoredNote.path, String(w.seconds), w.launcher]
+        var attributes: posix_spawnattr_t?
+        posix_spawnattr_init(&attributes)
+        defer { posix_spawnattr_destroy(&attributes) }
+        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT))
+        var actions: posix_spawn_file_actions_t?
+        posix_spawn_file_actions_init(&actions)
+        defer { posix_spawn_file_actions_destroy(&actions) }
+        for fd: Int32 in [0, 1, 2] { posix_spawn_file_actions_addopen(&actions, fd, "/dev/null", fd == 0 ? O_RDONLY : O_WRONLY, 0) }
+        var cargs = args.map { strdup($0) } + [nil]
+        defer { for a in cargs { free(a) } }
+        var pid: pid_t = 0
+        let environment: [UnsafeMutablePointer<CChar>?] = [strdup("PATH=/usr/bin:/bin:/usr/sbin:/sbin"), nil]
+        defer { free(environment[0]) }
+        var env = environment
+        return posix_spawn(&pid, "/bin/sh", &actions, &attributes, &cargs, &env) == 0
     }
 
     // MARK: Where Sill runs

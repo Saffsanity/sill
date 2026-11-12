@@ -91,6 +91,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if terminating { return .terminateNow }
         terminating = true
+        // An update's install step under way (under a second): the quit waits for it, so it never leaves a
+        // half-done step behind (review 3, F5), at most 10 s, on a run-loop Timer.
+        if model.updater.installing {
+            print("Quit: waiting for the update’s install step to finish.")
+            let deadline = Date().addingTimeInterval(10)
+            let poll = Timer(timeInterval: 0.1, repeats: true) { [weak self] timer in
+                MainActor.assumeIsolated {
+                    guard let self, !self.model.updater.installing || Date() >= deadline else { return }
+                    timer.invalidate()
+                    if self.quit() == .terminateNow { NSApp.reply(toApplicationShouldTerminate: true) }
+                }
+            }
+            RunLoop.main.add(poll, forMode: .common)
+            return .terminateLater
+        }
+        return quit()
+    }
+
+    /// The quit itself, once no install step runs: the update's word to its watcher (a quit asked for is no
+    /// failure of the new version), then the streamed window home and the virtual display gone.
+    private func quit() -> NSApplication.TerminateReply {
+        model.updater.willQuit()
         let coordinator = model.coordinator
         guard let c = coordinator, c.stagedWindowIsFullScreen else {
             HostShutdown.releaseForQuit(coordinator: coordinator)

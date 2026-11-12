@@ -25,6 +25,13 @@ MUTANTS = [
     ("a link to the app not seen", "            if lstat(walk.path, &l) == 0, l.st_mode & S_IFMT == S_IFLNK { link = true; break }", "            if false { link = true; break }"),
     ("a kept copy cleaned up", "        return lstat(url.appendingPathComponent(keptMarker).path, &marker) != 0\n", "        return true\n"),
     ("a noted folder anywhere removed", "        guard url.deletingLastPathComponent().path == parent.path,\n", "        guard true,\n"),
+    # The watcher (review 3, the automatic update's point 6).
+    ("the watcher puts back a changed old copy", "/usr/bin/codesign --verify --deep --strict \"-R=$req\" \"$old\" >/dev/null 2>&1 || exit 3\n", ""),
+    ("the watcher ignores the started note", "proved() { [ -f \"$started\" ]", "proved() { false && [ -f \"$started\" ]"),
+    ("any note proves the new copy", " && [ \"$(/usr/bin/head -n 1 \"$started\" 2>/dev/null)\" = \"$token\" ]", ""),
+    ("the watcher stops any process", "if running; then\n    why=", "if true; then\n    why="),
+    ("the watcher never puts back", "/bin/mv \"$app\" \"$parked\" || exit 5\n", "exit 5\n"),
+    ("the watcher doesn't start the old copy", "\"$launcher\" \"$app\"\nexit 0\n", "exit 0\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

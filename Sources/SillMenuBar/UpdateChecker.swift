@@ -61,6 +61,8 @@ final class UpdateChecker {
     private(set) var automatic: Bool
 
     @ObservationIgnored let configuration: Configuration
+    /// After every check GitHub answered: the automatic update decides then (AppUpdater.considerAutomatic).
+    @ObservationIgnored var onAnswered: (() -> Void)?
     @ObservationIgnored private let running: SillVersion?
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let session: URLSession
@@ -244,6 +246,7 @@ final class UpdateChecker {
             retryAt = now.addingTimeInterval(configuration.retry)
         }
         schedule()
+        if outcome.answered { onAnswered?() }
     }
 
     private func save(_ s: UpdatePolicy.Stored) {

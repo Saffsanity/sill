@@ -28,7 +28,7 @@ T="$out/src"; mkdir -p "$T"
 cp "$root"/Sources/StreamProtocol/*.swift "$T"/
 # SILL_HARNESS_SOURCES: a copy of Sources/SillMenuBar with one change (mutants.py); the app's own by default.
 sources="${SILL_HARNESS_SOURCES:-$root/Sources/SillMenuBar}"
-for f in UpdatePolicy UpdateInstallPolicy UpdateManifest UpdateArchive UpdateInstaller; do
+for f in UpdatePolicy UpdateInstallPolicy UpdateManifest UpdateArchive UpdateAutoPolicy UpdateInstaller; do
     sed '/^import StreamProtocol$/d' "$sources/$f.swift" > "$T/$f.swift"
 done
 cp "$here/main.swift" "$T/main.swift"
@@ -47,6 +47,18 @@ if args.count > 2, args[1] == "sleep", let s = Double(args[2]) {
     print("UpdTest running from \(bundle.lastPathComponent): its own bundle \(ok ? "writable" : "not writable (" + String(cString: strerror(errno)) + ")") to it")
     fflush(stdout)
     Thread.sleep(forTimeInterval: s)
+}
+// The watcher's cases (review 3, point 6): a new copy that proves itself (writes the started note's token
+// after a while, then runs on), and the copy the watcher starts after a put-back (says which version it is).
+if args.count > 4, args[1] == "started", let delay = Double(args[4]) {
+    Thread.sleep(forTimeInterval: delay)
+    try? (args[3] + "\n").write(toFile: args[2], atomically: true, encoding: .utf8)
+    Thread.sleep(forTimeInterval: 6)
+}
+if args.count > 2, args[1] == "mark" {
+    let info = URL(fileURLWithPath: args[0]).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Info.plist")
+    let version = (NSDictionary(contentsOf: info)?["CFBundleShortVersionString"] as? String) ?? "?"
+    try? ("launched \(version)\n").write(toFile: args[2], atomically: true, encoding: .utf8)
 }
 print("UpdTest")
 SWIFT
@@ -91,7 +103,7 @@ echo "== the zips"
 for label in v0.9 v1.1 v1.1b v1.2 other tampered-resource tampered-executable; do
     (cd "$out/apps/$label" && ditto -c -k --keepParent UpdTest.app "$out/zips/$label.zip")
 done
-for c in plain appledouble traversal absolute link-escape case-duplicate setuid not-a-bundle second-top; do
+for c in plain appledouble traversal absolute link-escape link-through-link case-duplicate setuid not-a-bundle second-top; do
     python3 -I "$here/make-zip.py" "$out/apps/v1.1" "$out/zips/hostile-$c.zip" "$c"
 done
 
@@ -110,6 +122,14 @@ if [ -f "$genuine" ]; then
     cp "$genuine" "$g/plain.zip"
     for v in tampered adhoc unstapled; do (cd "$g/$v" && ditto -c -k --keepParent Sill.app "$g/$v.zip"); done
 fi
+
+# The watcher's launcher here (Sill.app's is /usr/bin/open): the put-back copy's own executable, which says
+# which version it is; never Launch Services.
+cat > "$out/launch.sh" <<'SH'
+#!/bin/sh
+"$1/Contents/MacOS/UpdTest" mark "$(/usr/bin/dirname "$1")/launched.txt" &
+SH
+chmod +x "$out/launch.sh"
 
 echo "== the stand-in for GitHub on 127.0.0.1"
 echo '{}' > "$out/srv/control.json"

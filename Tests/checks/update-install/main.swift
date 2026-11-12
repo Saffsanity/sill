@@ -312,7 +312,7 @@ check(stopVerdict(goodStop.replacingOccurrences(of: "tag v0.4.0", with: "tag v0.
 check(stopVerdict(goodStop.replacingOccurrences(of: sha, with: String(repeating: "cd", count: 32))) == .badSignature, "a stop's SHA-256 changed")
 check(stopVerdict(good) == .format("first"), "a manifest is no stop")
 check(verdictOf(goodStop) == .format("first"), "a stop is no manifest")
-check(stopVerdict(goodStop.replacingOccurrences(of: "tag v0.4.0", with: "tag v0.4")) == .format("tag"), "a stop's tag, strictly")
+check(stopVerdict(goodStop.replacingOccurrences(of: "tag v0.4.0", with: "tag v0.4.0-rc")) == .format("tag"), "a stop's tag, strictly")
 check(stopVerdict(goodStop.replacingOccurrences(of: signedLine, with: "signed 2026-11-12")) == .format("signed"), "a stop's date, strictly")
 check(stopVerdict(goodStop + "more\n") == .format("first"), "a stop with a line more")
 check(stopVerdict(String(goodStop.dropLast())) == .notText, "a stop without its last newline")
@@ -432,7 +432,7 @@ for f in [P.Failure.bundle(.wrongSigner), .bundle(.notNotarized), .bundle(.noSta
     check(!P.line(f, running: v030, offered: v040, keptAt: nil).contains("update key"), "\(f) is Apple's check, not the update key's")
 }
 check(P.line(.didNotStart("x", putBack: true), running: v030, offered: v040, keptAt: nil) == "Sill 0.4 didn’t start, so Sill 0.3 is back.", "line: put back")
-check(P.line(.didNotStart("x", putBack: false), running: v030, offered: v040, keptAt: "/tmp/k/Sill.app") == "Sill couldn’t put 0.3 back in place. It is at /tmp/k/Sill.app: quit Sill and move it to your Applications folder.", "line: lost")
+check(P.line(.didNotStart("x", putBack: false), running: v030, offered: v040, keptAt: "/tmp/k/Sill.app") == "Sill couldn’t put 0.3 back in place. It is at /tmp/k/Sill.app: quit Sill and move it to your Applications folder soon, as macOS empties that folder after a few days.", "line: lost (review 3, N5: soon)")
 check(P.line(.checkAfterSwap(.codeChanged, putBack: false), running: v030, offered: v040, keptAt: nil) == "Sill couldn’t put 0.3 back in place. Download Sill again from getsill.app and put it in your Applications folder.", "line: lost, no whole old copy")
 check(P.line(.notSigned, running: v030, offered: v040, keptAt: nil) == "Sill 0.4 isn’t signed with Sill’s update key yet, so it can’t be installed from here. Try again later, or open its release page.", "line: not signed")
 check(P.line(.cancelled, running: v030, offered: v040, keptAt: nil) == "Update cancelled. Sill 0.3 is unchanged.", "line: cancelled")
@@ -510,9 +510,15 @@ check(step(autoFetching, .fetched(.stopped(tag: "v0.4.0"))) == (.failed(.stopped
 check(step(S(phase: .checking, mode: .automatic), .checked(nil, devices: [])) == (.waiting, []), "automatic, checked: wait for a quiet moment")
 check(step(S(phase: .checking, consented: ["iPad"], mode: .automatic), .checked(nil, devices: [D("iPad")])) == (.waiting, []), "never over a device, even one agreed to before")
 let waiting = S(phase: .waiting, mode: .automatic)
-check(step(waiting, .quiet) == (.installing, [.install]), "quiet: install")
-check(step(S(phase: .waiting, mode: .manual), .quiet) == (.waiting, []), "a quiet moment installs only the automatic update's copy")
-check(step(S(phase: .checking, mode: .automatic), .quiet) == (.checking, []), "no quiet before the check")
+check(step(waiting, .quiet(nil)) == (.installing, [.install]), "quiet: install")
+check(step(waiting, .quiet(.stopped(tag: "v0.4.0"))) == (.failed(.stopped(tag: "v0.4.0")), [.cleanUp]), "asked again: a stop ends it")
+check(step(waiting, .quiet(.releaseChanged(tag: "v0.4.1"))) == (.failed(.releaseChanged(tag: "v0.4.1")), [.cleanUp]), "asked again: another release")
+check(step(S(phase: .waiting, mode: .manual), .quiet(nil)) == (.waiting, []), "a quiet moment installs only the automatic update's copy")
+check(step(S(phase: .checking, mode: .automatic), .quiet(nil)) == (.checking, []), "no quiet before the check")
+for f in [P.Failure.noConnection("x"), .github(502), .download("x"), .redirectRefused("x"), .cancelled] { check(f.transient, "\(f) leaves the copy waiting") }
+for f in [P.Failure.stopped(tag: "v0.4.0"), .stopUnreadable(.badSignature), .releaseChanged(tag: "v0.4.1"), .notSigned, .manifest(.badSignature),
+          .manifestMismatch("sha256"), .releaseNotNewer, .releaseUnreadable("x")] { check(!f.transient, "\(f) ends the attempt") }
+check(P.provedAfter == 30 && P.watchWait >= P.launchWait + P.provedAfter + 60, "the watcher waits past the launch and the proof")
 check(step(waiting, .cancel) == (.idle, [.cleanUp]), "cancel the waiting copy")
 check(step(waiting, .confirm) == (.waiting, []), "nothing to confirm while waiting")
 check(P.next(waiting, .updateNow(devices: [])).0 == S(phase: .installing, mode: .manual) && step(waiting, .updateNow(devices: [])).1 == [.install],
@@ -810,6 +816,17 @@ let archiveCases: [(Data, A.Problem)] = [
     (zip(app([Z(name: "Sill.app/a", data: Array("Contents".utf8), mode: 0o120755, method: 0),
               Z(name: "Sill.app/b", data: Array("a".utf8), mode: 0o120755, method: 0)])), .throughLink("Sill.app/b")),
     (zip(app([Z(name: "Sill.app/Contents/Info.plist/x", data: [1])])), .underFile("Sill.app/Contents/Info.plist/x")),
+    // The security review's F6 cases (its first pass, written ready to paste). A link through another link, then
+    // "..": the file system applies ".." to where the first link leads, not to its name, so every name below is in
+    // the archive and yet L leaves Sill.app. Lexically "A/../../X" from Contents is Sill.app/X; really A is
+    // Sill.app/Z, so it is the staging folder's X.
+    (zip(app([Z(name: "Sill.app/Z/", mode: 0o040755), Z(name: "Sill.app/X", data: [1]),
+              Z(name: "Sill.app/Contents/A", data: Array("../Z".utf8), mode: 0o120755, method: 0),
+              Z(name: "Sill.app/Contents/L", data: Array("A/../../X".utf8), mode: 0o120755, method: 0)])), .throughLink("Sill.app/Contents/L")),
+    // Through a link with nothing after it but a name inside the link's own target: refused before and after the fix.
+    (zip(app([Z(name: "Sill.app/Z/", mode: 0o040755), Z(name: "Sill.app/Z/y", data: [1]),
+              Z(name: "Sill.app/Contents/A", data: Array("../Z".utf8), mode: 0o120755, method: 0),
+              Z(name: "Sill.app/Contents/L", data: Array("A/y".utf8), mode: 0o120755, method: 0)])), .throughLink("Sill.app/Contents/L")),
     (zip([Z(name: "Sill.app", data: [1])]), .topNotFolder),
     (zip([Z(name: "Sill.app", data: Array("/Applications".utf8), mode: 0o120755, method: 0)]), .topNotFolder),
     (zip([Z(name: "Sill.app/", mode: 0o040755)]), .noTop),
@@ -889,7 +906,8 @@ for file in files {
 let updater = text("AppUpdater.swift")
 check(updater.contains("let trust = Policy.Trust.release") && updater.contains("UpdateInstaller(trust: trust, endpoints: .github,"),
       "AppUpdater gives the installer the two constants")
-for file in ["UpdateInstallPolicy.swift", "UpdateManifest.swift", "UpdateArchive.swift", "UpdateInstaller.swift", "AppUpdater.swift"] {
+for file in ["UpdateInstallPolicy.swift", "UpdateManifest.swift", "UpdateArchive.swift", "UpdateInstaller.swift", "AppUpdater.swift",
+             "UpdateAutoPolicy.swift", "AutoUpdateStore.swift"] {
     // Code only: a whole-line comment may name what the code never reads.
     let s = text(file).components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }.joined(separator: "\n")
     check(!s.isEmpty, "\(file) is there")
@@ -899,6 +917,27 @@ for file in ["UpdateInstallPolicy.swift", "UpdateManifest.swift", "UpdateArchive
     }
 }
 check(text("UpdateManifest.swift").contains("static let releaseKeys: [String] = ["), "the key list is one literal")
+// Automatically update Sill (review 3, point 2): only Settings turns it on. The switch lives in Sill's keychain
+// group (the data-protection keychain, this device only, never synced), never in defaults; nothing on the wire,
+// in a device's settings or in the CLI names it; and only SettingsPanes calls the one setter.
+let store = text("AutoUpdateStore.swift")
+check(store.contains("kSecUseDataProtectionKeychain as String: true") && store.contains("kSecAttrAccessGroup as String: group")
+      && store.contains("kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly") && store.contains("kSecAttrSynchronizable as String] = false"),
+      "the switch's item: Sill's group, the data-protection keychain, this device only, never synced")
+check(!store.contains("kSecAttrSynchronizable as String] = true") && !store.contains("kSecAttrAccessibleAlways"), "never synced, never readable while locked before the first unlock")
+let setters = files.filter { $0 != "AppUpdater.swift" && text($0).contains(".setAutomaticUpdate(") }
+check(setters == ["SettingsPanes.swift"], "only Settings › General turns the switch on: \(setters)")
+check(!updater.contains("Auto.switched($0, on: true)") && updater.contains("remember { Auto.switched($0, on: on) }"), "the switch changes in one place")
+// The other targets' sources: argv[2] when the app's are a mutant's copy (mutants.py), else beside them.
+let elsewhere = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : sources + "/.."
+for path in ["StreamProtocol/HostSettings.swift", "StreamProtocol/StreamMessage.swift", "SillHost/DeviceSettings.swift", "SillHost/HostConfig.swift",
+             "SillHostCLI/main.swift", "SillMenuBar/HostSettings.swift"] {
+    let s = (try? String(contentsOfFile: elsewhere + "/" + path, encoding: .utf8)) ?? "missing"
+    check(s != "missing", "\(path) is there")
+    check(!s.contains("setAutomaticUpdate(") && !s.contains("AutoUpdateStore") && !s.contains("automaticUpdate") && !s.contains("autoUpdate"),
+          "\(path) has no way to the automatic update's switch")
+}
+check(!text("DebugHooks.swift").contains("setAutomaticUpdate(") && !text("DebugHooks.swift").contains("AutoUpdateStore"), "the previews draw the switch, never set it")
 
 print("update-install: \(checks - failures) of \(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

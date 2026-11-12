@@ -455,13 +455,19 @@ enum DebugHooks {
         // Update Now's states, as a build with an update key draws them (this branch's builds have none).
         let offered = updatePaneSamples().first { $0.name == "available" }!.pane
         for sample in updateNowSamples() {
-            let section = Form { UpdatesSection(pane: offered, install: sample.install, installAvailable: true, automatic: .constant(true)) }
+            // "auto-updated" runs the version it updated to: the check's line is the up-to-date one.
+            let checkPane = sample.name == "auto-updated" ? updatePaneSamples().first { $0.name == "uptodate" }!.pane : offered
+            let section = Form { UpdatesSection(pane: checkPane, install: sample.install, installAvailable: true, automatic: .constant(sample.checkOn),
+                                                autoSwitch: sample.autoSwitch, autoUpdate: .constant(sample.autoOn)) }
                 .formStyle(.grouped)
                 .frame(width: 520)
                 .background(Color(nsColor: .windowBackgroundColor))
             for (name, appearance) in appearances {
                 render(section, appearance: appearance, to: out.appendingPathComponent("pane-update-now-\(sample.name)-\(name).png"))
             }
+            // Larger text, as far as SwiftUI on macOS takes it (dynamicTypeSize).
+            render(section.dynamicTypeSize(.accessibility2), appearance: .aqua,
+                   to: out.appendingPathComponent("pane-update-now-\(sample.name)-light-larger.png"))
         }
         for sample in remotePaneSamples() {
             let pane = RemoteAccessPane(status: sample.status, remoteAccess: .constant(sample.status.remoteAccess),
@@ -528,6 +534,7 @@ enum DebugHooks {
                 ("update-now-available", MenuBuilder.UpdateMenuState(phase: .idle, available: true)),
                 ("update-now-refused", MenuBuilder.UpdateMenuState(phase: .idle, available: true, refusal: .notWritable("/Applications"))),
                 ("update-now-downloading", MenuBuilder.UpdateMenuState(phase: .downloading(received: 2_400_000, total: 5_920_002), available: true)),
+                ("update-now-waiting", MenuBuilder.UpdateMenuState(phase: .waiting, available: true)),
             ]
             for (label, install) in installStates {
                 let entries = MenuBuilder.entries(presentation: p, config: model.settings.config, login: login, permissions: idle.permissions,
@@ -858,16 +865,33 @@ extension DebugHooks {
     struct UpdateNowSample {
         var name: String
         var install: UpdateInstallPolicy.Pane
+        /// Automatically update Sill's switch, as the section draws it.
+        var autoSwitch = UpdateAutoPolicy.Switch(shown: true, enabled: true)
+        var autoOn = false
+        /// The daily check's switch.
+        var checkOn = true
     }
 
     /// pane-update-now-*: the section with Update Now (a build with an update key), Sill 0.4 offered to
     /// a running 0.3, in each of Update Now's states and refusals (docs/one-click-update-plan.md §4.7).
     static func updateNowSamples() -> [UpdateNowSample] {
         typealias P = UpdateInstallPolicy
-        func pane(_ phase: P.Phase, refusal: P.Refusal? = nil, keptAt: String? = nil) -> P.Pane {
-            P.pane(P.State(phase: phase), offered: previewOffer.version, running: SillVersion("0.3.0")!, available: true,
-                   refusal: refusal, keptAt: keptAt)
+        typealias A = UpdateAutoPolicy
+        let v04 = previewOffer.version, now = previewNow
+        func pane(_ phase: P.Phase, mode: P.Mode = .manual, refusal: P.Refusal? = nil, keptAt: String? = nil, offered: SillVersion? = v04,
+                  automatic: P.AutomaticPane = P.AutomaticPane()) -> P.Pane {
+            P.pane(P.State(phase: phase, mode: mode), offered: offered, running: SillVersion("0.3.0")!, available: true,
+                   refusal: refusal, keptAt: keptAt, automatic: automatic)
         }
+        // What the automatic update remembers in each sample, and its part of the pane.
+        let on = A.switched(A.Memory(), on: true)
+        func auto(_ m: A.Memory, waitUntil: Date? = nil, running: String = "0.3.0", offered: SillVersion? = v04) -> P.AutomaticPane {
+            A.pane(m, offered: offered, offeredTag: offered.map { "v\($0)" }, running: SillVersion(running), waitUntil: waitUntil, now: now)
+        }
+        let tried = A.began(on, v04, now: now.addingTimeInterval(-26 * 3600))
+        let twice = A.failed(A.began(tried, v04, now: now.addingTimeInterval(-2 * 3600)), v04, why: "the download stopped")
+        let updated = A.updated(on, to: v04, at: now.addingTimeInterval(-2 * 3600))
+        let switchOn = UpdateAutoPolicy.Switch(shown: true, enabled: true)
         return [
             UpdateNowSample(name: "available", install: pane(.idle)),
             UpdateNowSample(name: "refused-folder", install: pane(.idle, refusal: .notWritable("/Applications"))),
@@ -877,18 +901,47 @@ extension DebugHooks {
             UpdateNowSample(name: "confirming", install: pane(.confirming(devices: [P.Device(key: "1", name: "iPad (iPad14,1)")]))),
             UpdateNowSample(name: "fetching", install: pane(.fetching)),
             UpdateNowSample(name: "downloading", install: pane(.downloading(received: 2_400_000, total: 5_920_002))),
+            UpdateNowSample(name: "downloading-start", install: pane(.downloading(received: 0, total: 0))),
             UpdateNowSample(name: "checking", install: pane(.checking)),
             UpdateNowSample(name: "ready", install: pane(.ready(devices: [P.Device(key: "1", name: "iPad (iPad14,1)"), P.Device(key: "2", name: "iPhone (iPhone16,1)")]))),
             UpdateNowSample(name: "installing", install: pane(.installing)),
             UpdateNowSample(name: "restarting", install: pane(.restarting)),
             UpdateNowSample(name: "failed-download", install: pane(.failed(.download("The network connection was lost.")))),
+            // The two checks, named apart: Apple's (Developer ID, notarization) and Sill's update key's.
             UpdateNowSample(name: "failed-signature", install: pane(.failed(.bundle(.wrongSigner)))),
+            UpdateNowSample(name: "failed-notarized", install: pane(.failed(.bundle(.notNotarized)))),
+            UpdateNowSample(name: "failed-codesignature", install: pane(.failed(.bundle(.invalidSignature(-67061))))),
             UpdateNowSample(name: "failed-notsigned", install: pane(.failed(.notSigned))),
+            UpdateNowSample(name: "failed-updatekey", install: pane(.failed(.manifest(.badSignature)))),
+            UpdateNowSample(name: "failed-otherkey", install: pane(.failed(.manifest(.unknownKey("1a2b3c4d"))))),
+            UpdateNowSample(name: "failed-mismatch", install: pane(.failed(.manifestMismatch("sha256")))),
+            UpdateNowSample(name: "failed-notthecode", install: pane(.failed(.bundle(.notManifest("code"))))),
+            UpdateNowSample(name: "failed-stopped", install: pane(.failed(.stopped(tag: "v0.4.0")))),
+            UpdateNowSample(name: "failed-stopunreadable", install: pane(.failed(.stopUnreadable(.badSignature)))),
             UpdateNowSample(name: "failed-didnotstart", install: pane(.failed(.didNotStart("it quit as it started", putBack: true)))),
             UpdateNowSample(name: "failed-lost", install: pane(.failed(.didNotStart("it quit as it started", putBack: false)),
                                                                keptAt: "/private/var/folders/xy/T/TemporaryItems/Sill previous copy ab12Cd/Sill.app")),
             UpdateNowSample(name: "failed-gone", install: pane(.failed(.checkAfterSwap(.invalidSignature(-67054), putBack: false)))),
-        ]
+            // Automatically update Sill (§15): the switch and every state it adds.
+            UpdateNowSample(name: "auto-off", install: pane(.idle)),
+            UpdateNowSample(name: "auto-on", install: pane(.idle, automatic: auto(on)), autoOn: true),
+            UpdateNowSample(name: "auto-coolingoff", install: pane(.idle, automatic: auto(on, waitUntil: now.addingTimeInterval(30 * 3600))), autoOn: true),
+            UpdateNowSample(name: "auto-downloading", install: pane(.downloading(received: 2_400_000, total: 5_920_002), mode: .automatic, automatic: auto(tried)), autoOn: true),
+            UpdateNowSample(name: "auto-waiting", install: pane(.waiting, mode: .automatic, automatic: auto(tried)), autoOn: true),
+            UpdateNowSample(name: "auto-failed", install: pane(.failed(.download("The network connection was lost.")), mode: .automatic, automatic: auto(tried)), autoOn: true),
+            UpdateNowSample(name: "auto-failed-twice", install: pane(.failed(.hashMismatch), mode: .automatic, automatic: auto(twice)), autoOn: true),
+            UpdateNowSample(name: "auto-notautomatic", install: pane(.failed(.notAutomatic("it was signed more than 120 days ago")), mode: .automatic, automatic: auto(tried)), autoOn: true),
+            UpdateNowSample(name: "auto-restored", install: pane(.failed(.didNotStart("it quit before it had run for long enough", putBack: true)), mode: .automatic, automatic: auto(tried)), autoOn: true),
+            UpdateNowSample(name: "auto-rollback", install: pane(.idle, automatic: auto(A.offered(on, SillVersion("0.5")!))), autoOn: true),
+            UpdateNowSample(name: "auto-stopped", install: pane(.idle, automatic: auto(A.stopped(on, "v0.4.0"))), autoOn: true),
+            UpdateNowSample(name: "auto-updated", install: pane(.idle, offered: nil, automatic: auto(updated, running: "0.4.0", offered: nil)), autoOn: true),
+            UpdateNowSample(name: "auto-checkoff", install: pane(.idle),
+                            autoSwitch: A.switchState(available: true, canKeep: true, checkOn: false, refusal: nil, on: false), checkOn: false),
+            UpdateNowSample(name: "auto-nokeychain", install: pane(.idle),
+                            autoSwitch: A.switchState(available: true, canKeep: false, checkOn: true, refusal: nil, on: false)),
+            UpdateNowSample(name: "auto-refused", install: pane(.idle, refusal: .translocated, automatic: auto(on)),
+                            autoSwitch: A.switchState(available: true, canKeep: true, checkOn: true, refusal: .translocated, on: true), autoOn: true),
+        ].map { var s = $0; if s.autoSwitch == switchOn, s.autoOn { s.autoSwitch = A.switchState(available: true, canKeep: true, checkOn: s.checkOn, refusal: nil, on: true) }; return s }
     }
 }
 
