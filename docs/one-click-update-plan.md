@@ -720,7 +720,10 @@ Run:
     `exit(1)`, released and signed in the rehearsal repository: Update Now, then "Sill 0.6.93 didn’t
     start, so Sill 0.6.92 is back." with 0.6.92 still running.
 15. Refusals: drag build A out of the zip into ~/Downloads and open it there (translocated or not: the
-    line says which); "This copy of Sill isn’t a notarized release…" from a development build.
+    line says which); "This copy of Sill isn’t a notarized release…" from a development build; in the
+    second account, its Sill opened with a newer signed release offered: "Sill belongs to another account
+    on this Mac (‹your name›). Update it from that account." (the update left Sill.app owned by your
+    account).
 
 Back: quit Sill, install the real release from getsill.app/download, open it; delete the rehearsal
 repository and the rehearsal key file. If anything goes wrong in between: the old copy is in the folder
