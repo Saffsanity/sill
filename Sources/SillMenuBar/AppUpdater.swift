@@ -204,11 +204,13 @@ final class AppUpdater {
         guard let prepared, let staging, let token = cancel else { send(.downloaded(.cancelled)); return }
         print("Update: downloading Sill \(prepared.release.version) (\(Policy.megabytes(prepared.manifest.size)) MB) from github.com.")
         let installer = self.installer
+        // Each piece's count, on the main actor (the reference taken weakly here, held only by its hop).
+        let report: @Sendable (Int64, Int64) -> Void = { [weak self] received, total in
+            Task { @MainActor [self] in self?.progress(run, received, total) }
+        }
         Task { [weak self] in
             let result = await installer.download(prepared.release, manifest: prepared.manifest, into: staging,
-                                                  progress: { received, total in
-                                                      Task { @MainActor [weak self] in self?.progress(run, received, total) }
-                                                  }, cancel: token)
+                                                  progress: report, cancel: token)
             guard let self, run == self.attempt else { return }
             switch result {
             case .failure(let f):
@@ -304,6 +306,8 @@ final class AppUpdater {
                 self.send(.installed(f))
             case .success:
                 print("Update: replaced \(bundle.path) with Sill \(checked.version); Sill \(running) is kept at \(unpacked.path) until \(checked.version) has started.")
+                // For the new Sill, which removes it once its host is up (it can't find it by listing).
+                if let staging = self.staging { UpdateInstaller.noteLeftover(staging, in: Self.leftoverNote) }
                 self.send(.installed(nil))
             }
         }
@@ -322,9 +326,9 @@ final class AppUpdater {
         config.allowsRunningApplicationSubstitution = false
         print("Update: starting Sill \(checked.version) from \(bundle.path).")
         let started = Date()
-        NSWorkspace.shared.openApplication(at: bundle, configuration: config) { app, error in
+        NSWorkspace.shared.openApplication(at: bundle, configuration: config) { [weak self] app, error in
             let message = error?.localizedDescription
-            Task { @MainActor [weak self] in self?.opened(run, app, message, since: started) }
+            Task { @MainActor [self] in self?.opened(run, app, message, since: started) }
         }
     }
 
@@ -428,12 +432,22 @@ final class AppUpdater {
     func cleanUpAfterStart() {
         guard available, idle, keptAt == nil else { return }
         let bundle = self.bundle
+        let note = Self.leftoverNote
         DispatchQueue.global(qos: .utility).async {
-            let removed = UpdateInstaller.cleanUpStaging(for: bundle)
+            let removed = [UpdateInstaller.removeLeftover(noted: note, for: bundle)].compactMap { $0 }
+                + UpdateInstaller.cleanUpStaging(for: bundle)
             if !removed.isEmpty {
                 print("Update: removed \(removed.count) folder\(removed.count == 1 ? "" : "s") an earlier update left (\(removed.joined(separator: ", "))).")
             }
         }
+    }
+
+    /// Where an update notes the folder that holds the copy it replaced, for the next Sill: Sill's own
+    /// folder in this user's Caches.
+    static var leftoverNote: URL {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Caches")
+        return caches.appendingPathComponent("me.saffer.sill.mac", isDirectory: true).appendingPathComponent("Update Now leftover.txt")
     }
 
     /// At launch: when another Sill of this account is running (the one that launched this copy after an

@@ -386,6 +386,8 @@ check(!UpdateInstaller.process(child.processIdentifier, satisfies: P.pinnedRequi
 
 say("== where an app runs (the refusals' facts)")
 var s = UpdateInstaller.situation(bundle: running, executable: "UpdTest", runningIsRelease: true, testFeed: false, runningIsInstalled: true, neededBytes: 1 << 20)
+let direct = access(running.path, W_OK) == 0 ? "writable" : "not writable (\(String(cString: strerror(errno))))"
+say("the running copy, to the harness while a process runs from it: \(direct); the situation's bundleWritable \(s.bundleWritable)")
 check(!s.bundleIsLink && !s.translocated && !s.readOnlyVolume && !s.networkVolume && !s.diskImage && s.folderWritable && s.bundleWritable && s.ownedByUser,
       "a scratch copy: writable, local, owned: \(s)")
 check(s.otherInstances == 1 && s.otherAccounts.isEmpty, "a process running from it: \(s.otherInstances), \(s.otherAccounts)")
@@ -429,28 +431,40 @@ if Process.runTool("/usr/bin/hdiutil", ["create", "-quiet", "-size", "16m", "-fs
 say("== staging")
 let probe = installedCopy("staging", from: app("installed"))
 var made: [URL] = []
-for _ in 0..<4 { if case .success(let d) = UpdateInstaller.makeStaging(for: probe) { made.append(d) } }
-check(made.count == 4 && Set(made.map(\.path)).count == 4, "four staging folders, each new")
+for _ in 0..<5 { if case .success(let d) = UpdateInstaller.makeStaging(for: probe) { made.append(d) } }
+check(made.count == 5 && Set(made.map(\.path)).count == 5, "five staging folders, each new")
 for d in made {
     var st = stat()
     lstat(d.path, &st)
     check(st.st_mode & 0o777 == 0o700 && st.st_uid == getuid(), "0700 and this user's: \(String(st.st_mode & 0o777, radix: 8))")
 }
+func exists(_ u: URL) -> Bool { FileManager.default.fileExists(atPath: u.path) }
 // made[1] holds an old copy not put back: set aside (renamed out of NSIRD_, a note inside). made[3]: only the
-// note, as when the rename failed. made[2]: an ordinary leftover.
+// note, as when the rename failed. made[0] is the one in use.
 let aside = UpdateInstaller.setAside(made[1])
-check(aside.lastPathComponent.hasPrefix(UpdateInstaller.setAsidePrefix) && !FileManager.default.fileExists(atPath: made[1].path),
-      "set aside: renamed \(aside.lastPathComponent)")
-check(FileManager.default.fileExists(atPath: aside.appendingPathComponent(UpdateInstaller.keptMarker).path), "set aside: its note")
+check(aside.lastPathComponent.hasPrefix(UpdateInstaller.setAsidePrefix) && !exists(made[1]), "set aside: renamed \(aside.lastPathComponent)")
+check(exists(aside.appendingPathComponent(UpdateInstaller.keptMarker)), "set aside: its note")
 FileManager.default.createFile(atPath: made[3].appendingPathComponent(UpdateInstaller.keptMarker).path, contents: Data("kept".utf8))
+// The next Sill removes the folder an update noted (it can't list the temporary-items folder), and only a
+// leftover: never the one in use, one holding a copy not put back, the set-aside one, or anything elsewhere.
+let note = out.appendingPathComponent("leftover/Update Now leftover.txt")
+UpdateInstaller.noteLeftover(made[2], in: note)
+check(UpdateInstaller.removeLeftover(noted: note, for: probe, keep: made[0]) == made[2].path && !exists(made[2]) && !exists(note),
+      "the noted leftover removed, and its note")
+let elsewhere = out.appendingPathComponent("elsewhere/NSIRD_updharness_planted")
+try? FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+for (target, why) in [(made[0], "the one in use"), (made[3], "one holding a copy not put back"), (aside, "the set-aside one"),
+                      (elsewhere, "a folder of the right name elsewhere"), (out.appendingPathComponent("cases"), "the harness's own cases")] {
+    UpdateInstaller.noteLeftover(target, in: note)
+    check(UpdateInstaller.removeLeftover(noted: note, for: probe, keep: made[0]) == nil && exists(target) && !exists(note),
+          "a note naming \(why): nothing removed, the note gone")
+}
+// Listing is best effort: macOS denies reading the temporary-items folder to most processes (Sill.app too).
 let removed = UpdateInstaller.cleanUpStaging(for: probe, keep: made[0])
-check(removed.contains(made[2].path) && !removed.contains(made[0].path) && !removed.contains(made[3].path) && !removed.contains(aside.path),
-      "the ordinary leftover removed; the one in use, the set-aside one and the noted one not: \(removed)")
-check([made[0], aside, made[3]].allSatisfy { FileManager.default.fileExists(atPath: $0.path) },
-      "the one in use, the set-aside one and the noted one are there")
-UpdateInstaller.remove(made[0])
-UpdateInstaller.remove(aside)
-UpdateInstaller.remove(made[3])
+check(!removed.contains(made[0].path) && !removed.contains(made[3].path) && !removed.contains(aside.path),
+      "listing never removes the one in use, a noted-kept one or the set-aside one: \(removed)")
+say("staging: the noted leftover removed; listing the temporary-items folder \(removed.isEmpty ? "removed nothing (denied here, as to Sill.app)" : "removed \(removed.count)")")
+for u in [made[0], made[3], made[4], aside] { UpdateInstaller.remove(u) }
 
 // MARK: The genuine Sill 0.6.1 under Trust.release (with this run's key)
 

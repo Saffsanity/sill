@@ -38,9 +38,16 @@ swiftc -O "$T"/*.swift -o "$out/updharness"
 echo "== the test apps"
 cat > "$out/updtest.swift" <<'SWIFT'
 import Foundation
-// The harness's stand-in app: prints its name, or sleeps (a process running from the bundle).
+// The harness's stand-in app: prints its name, or sleeps (a process running from the bundle), first saying
+// whether its own bundle is writable to it (access W_OK), as Sill's check of where it runs asks of itself.
 let args = CommandLine.arguments
-if args.count > 2, args[1] == "sleep", let s = Double(args[2]) { Thread.sleep(forTimeInterval: s) }
+if args.count > 2, args[1] == "sleep", let s = Double(args[2]) {
+    let bundle = URL(fileURLWithPath: args[0]).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let ok = access(bundle.path, W_OK) == 0
+    print("UpdTest running from \(bundle.lastPathComponent): its own bundle \(ok ? "writable" : "not writable (" + String(cString: strerror(errno)) + ")") to it")
+    fflush(stdout)
+    Thread.sleep(forTimeInterval: s)
+}
 print("UpdTest")
 SWIFT
 swiftc -O "$out/updtest.swift" -o "$out/updtest-bin"

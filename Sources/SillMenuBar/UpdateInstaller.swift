@@ -476,25 +476,61 @@ final class UpdateInstaller: @unchecked Sendable {
     /// Removes the staging folders earlier updates left (`NSIRD_‹this process's name›_…` in the
     /// temporary-items folder of `installed`'s volume), but `keep` and any marked as holding a copy that
     /// could not be put back; what it removed.
+    /// Best effort: macOS's System Policy denies reading the temporary-items folder to most processes,
+    /// Sill.app among them (measured: an app started by Launch Services gets EPERM listing it), so this
+    /// finds nothing there; the leftover an update noted is removed by `removeLeftover` instead.
     static func cleanUpStaging(for installed: URL, keep: URL? = nil) -> [String] {
         let fm = FileManager.default
-        guard let probe = try? fm.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: installed, create: true) else {
-            return []
-        }
-        let parent = probe.deletingLastPathComponent()
-        try? fm.removeItem(at: probe)
-        let prefix = "NSIRD_\(ProcessInfo.processInfo.processName)_"
+        guard let parent = itemReplacementParent(for: installed) else { return [] }
         var removed: [String] = []
-        for name in (try? fm.contentsOfDirectory(atPath: parent.path)) ?? [] where name.hasPrefix(prefix) {
+        for name in (try? fm.contentsOfDirectory(atPath: parent.path)) ?? [] {
             let url = parent.appendingPathComponent(name)
-            if let keep, url.standardizedFileURL.path == keep.standardizedFileURL.path { continue }
-            var s = stat()
-            guard lstat(url.path, &s) == 0, s.st_mode & S_IFMT == S_IFDIR, s.st_uid == getuid() else { continue }
-            var marker = stat()
-            if lstat(url.appendingPathComponent(keptMarker).path, &marker) == 0 { continue }
-            if (try? fm.removeItem(at: url)) != nil { removed.append(url.path) }
+            if isLeftover(url, in: parent, keep: keep), (try? fm.removeItem(at: url)) != nil { removed.append(url.path) }
         }
         return removed
+    }
+
+    /// The folder FileManager makes item-replacement folders in for `installed`'s volume (a probe made in
+    /// it and removed), or nil.
+    static func itemReplacementParent(for installed: URL) -> URL? {
+        guard let probe = try? FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask,
+                                                      appropriateFor: installed, create: true) else { return nil }
+        try? FileManager.default.removeItem(at: probe)
+        return probe.deletingLastPathComponent().standardizedFileURL
+    }
+
+    /// Whether `url` is one of this process's staging folders that may go: directly in `parent`, named
+    /// NSIRD_‹this process's name›_…, a folder (not a link) of this user's, without the note that keeps a
+    /// copy not put back, and not `keep`.
+    static func isLeftover(_ url: URL, in parent: URL, keep: URL?) -> Bool {
+        let url = url.standardizedFileURL
+        guard url.deletingLastPathComponent().path == parent.path,
+              url.lastPathComponent.hasPrefix("NSIRD_\(ProcessInfo.processInfo.processName)_"),
+              keep.map({ $0.standardizedFileURL.path != url.path }) ?? true else { return false }
+        var s = stat()
+        guard lstat(url.path, &s) == 0, s.st_mode & S_IFMT == S_IFDIR, s.st_uid == getuid() else { return false }
+        var marker = stat()
+        return lstat(url.appendingPathComponent(keptMarker).path, &marker) != 0
+    }
+
+    /// Writes `staging`'s path (the folder that holds the copy an update replaced) into the file `note`,
+    /// for the next Sill to remove once its host is up: it can't find the folder by listing (above).
+    static func noteLeftover(_ staging: URL, in note: URL) {
+        try? FileManager.default.createDirectory(at: note.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? Data((staging.path + "\n").utf8).write(to: note, options: .atomic)
+    }
+
+    /// Removes the folder the file `note` names when it is still a staging folder that may go
+    /// (`isLeftover`, for `installed`'s volume), and the note either way; the folder removed, or nil. The
+    /// note is this user's to write, so all it can ever name for removal is one of Sill's own leftovers.
+    static func removeLeftover(noted note: URL, for installed: URL, keep: URL? = nil) -> String? {
+        defer { try? FileManager.default.removeItem(at: note) }
+        guard let data = try? Data(contentsOf: note), data.count <= 4096,
+              let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .newlines), text.hasPrefix("/"),
+              let parent = itemReplacementParent(for: installed) else { return nil }
+        let url = URL(fileURLWithPath: text).standardizedFileURL
+        guard isLeftover(url, in: parent, keep: keep), (try? FileManager.default.removeItem(at: url)) != nil else { return nil }
+        return url.path
     }
 
     // MARK: Where Sill runs

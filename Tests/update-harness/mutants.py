@@ -18,7 +18,8 @@ MUTANTS = [
     ("a Content-Length that disagrees taken", "            if let exactSize, length != exactSize { failure = .sizeMismatch; completionHandler(.cancel); return }\n", ""),
     ("no process found running from the app", "            guard same || text.hasPrefix(prefix) else { continue }", "            guard false else { continue }"),
     ("a link to the app not seen", "            if lstat(walk.path, &l) == 0, l.st_mode & S_IFMT == S_IFLNK { link = true; break }", "            if false { link = true; break }"),
-    ("a kept copy cleaned up", "            if lstat(url.appendingPathComponent(keptMarker).path, &marker) == 0 { continue }\n", ""),
+    ("a kept copy cleaned up", "        return lstat(url.appendingPathComponent(keptMarker).path, &marker) != 0\n", "        return true\n"),
+    ("a noted folder anywhere removed", "        guard url.deletingLastPathComponent().path == parent.path,\n", "        guard true,\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:
