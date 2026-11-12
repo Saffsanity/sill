@@ -1,0 +1,197 @@
+# Full screen: Sill's interface hidden, the picture with the whole screen
+
+Branch `full-screen` (from main at a4bad80, main at 0d22bbf merged in); issues #279 (swipe the UI away),
+#92 (hide the top bar) and #280 (use the freed room). Device only: no wire change, nothing on the Mac,
+nothing stored but a count of how often the hint has shown.
+
+## What Noah asked for, and what was decided
+
+Noah, 2026-11-12: "a full screen mode that hides the UI to get the maximum sized picture … Swipe off the
+left side of the device to hide the UI (finger starts somewhere on the display, swipes left off the
+display), and swipe in from the left side of the device to show the UI (finger starts on bezel, moves
+towards center of device). The reason I went with this idea is that no system functions are mapped to
+swiping from the left edge … We need to nail the touch detection … I don't want a persistent
+button/UI element … if the device is shaken in UI hidden mode it shows the UI again."
+
+The coordinator's changes, which Noah took ("Let's build the fullscreen UI/UX with the context you just
+provided and try it out!"):
+
+1. Show: a swipe in from the left bezel, the system's own edge recognizer; the interface follows the
+   finger and finishes or springs back by distance and speed.
+2. Hide: not from anywhere on the picture (every touch there is the Mac's: a leftward swipe scrolls it,
+   in Safari it goes back; a scroll that runs off the edge would hide the interface by accident), but a
+   short outward flick at the left edge: the touch starts within about a thumb's width of the edge,
+   moves left and leaves the screen. A touch that starts there is held back from the Mac only as long as
+   it takes to judge it; a flick sends the Mac nothing; anything else goes on whole, in order; a tap still
+   clicks.
+3. Nothing persistent while hidden; safety nets instead: a hint the first few times, the interface
+   coming back by itself whenever it is needed, a shake, an action for VoiceOver, Switch Control and Voice
+   Control (and VoiceOver's escape gesture), and on an iPad the pointer pushed against the left edge.
+4. iPadOS: priority on the left edge while hidden (`preferredScreenEdgesDeferringSystemGestures`), only
+   there; full screen by gesture only while Sill's window covers the screen.
+5. While hidden the picture gets the whole screen: no status bar, the home indicator fades, the viewport
+   is the whole room, so the Mac fits a window to it where it already does (Virtual Display on, or Aa
+   set), one restart per change as a rotation's. The Desktop is not fitted: it has the larger room.
+6. A way in that is not a gesture: Settings › This iPad (This iPhone) › Full Screen. Nothing remembered
+   across launches; kept across a rotation and a trip to another app.
+7. Every layout, one level (all hidden or all shown), built so that a second level is a small addition.
+8. The hardware keyboard keeps typing to the Mac while hidden.
+9. No wire change; Picture in Picture, the Mac's pointer, the Menus and three-finger gestures keep working.
+
+Noah, later the same night (through the coordinator), on the second level upright: "for now, only apps in
+windowed mode will likely be able to take advantage of the full screen due to the aspect ratio of most
+displays until Virtual Display is available, which could then create custom full screen resolutions to
+utilize the portrait dimensions." So: one level only (the middle level is parked); upright, the case that
+must be excellent is a window with Virtual Display on (or Aa set), which the Mac fits to the whole upright
+room; the Desktop keeps its own shape in the larger room.
+
+The Desktop upright: the Desktop is the Mac's display, landscape on nearly every Mac, so held upright it
+keeps its shape in full screen's taller room, with black above and below. The Virtual Desktop's "match
+this device" (PR #352's plan: a desktop display of Sill's own whose size can match the device) is what
+will later give the Desktop a full screen upright. Full screen already sends the room it has as the
+viewport, the same message every layout sends, so that feature can use it without a change here.
+
+## What a person does and sees
+
+- Flick off the left edge (from within 48 pt of it, out over the bezel): the bar, the thumbnails, the keys
+  and the trackpad slide out by the left edge, and the picture grows to the screen's room. The first three
+  times a card by the left edge says "Controls hidden — Swipe in from the left edge to bring them back." for
+  2.5 s.
+- Swipe in from the left bezel: the controls come in with the finger; let go past a third of the screen
+  (or with a flick) and they settle, the picture shrinking into its pane; let go short and they slide back
+  out.
+- Shake the device: the controls come back. VoiceOver: the picture is one element, "‹Mac›’s picture.
+  Sill’s controls are hidden.", whose activation, its Show Controls action and the escape gesture bring them
+  back; Voice Control knows it as "Show Controls". On an iPad, the pointer held at the left edge for half a
+  second brings them back.
+- Settings › This iPad (This iPhone) › Full Screen hides them too, the panel closing first.
+- The controls come back by themselves for the tour, a pairing or an outside link, the link's line ("The
+  link can't keep up…"), the Mac's cover (locked, another user's, unlocking), the off-console view, nothing
+  streaming (a window closed), and Sill's window no longer filling the screen.
+
+## The parts
+
+- `iOSClient/FullScreenPolicy.swift` (pure, Foundation and CoreGraphics; `Tests/checks/full-screen`):
+  `ChromeLevel` (the levels; the slot for a second), `EdgeFlick` (the hide's touch rule), `EdgeFlickGate`
+  (which touches are judged), `EdgeReveal` (the swipe in's finish or spring back), `EdgeDwell` (the pointer
+  at the edge), `FullScreenPolicy` (offered, must show and why, a hide allowed, the flick armed, the hint, the
+  room, the words).
+- `iOSClient/EdgeFlickRecognizer.swift` (UIKit and the rule only, so the touch rig compiles it): the flick's
+  recognizer and the swipe in's (`RevealEdgePan`, the system's `UIScreenEdgePanGestureRecognizer`), both on
+  Sill's window, and the one rule of which other recognizers wait for them (`EdgeRecognizers.waits`).
+- `iOSClient/FullScreen.swift`: `FullScreenEdges` (puts the recognizers and a hover on the window, says
+  whether the window covers the screen, passes the window's shake on), the shake (`UIWindow.motionEnded`),
+  the hint, the swipe in's preview hole and mask, the hidden picture's element, the DEBUG arguments.
+- StreamScreen: the state (`chrome`, `reveal`), hide and show, the auto-show, the room, the status bar,
+  home indicator and edge deferral, the landscape layout's hidden variant, the preview; PortraitStreamScreen:
+  the halves' and the phone's hidden and preview variants; HostSettingsPanel: the row; TrackpadView: the
+  tracker's touch-down point.
+
+## The touch rule, and the numbers
+
+No finger on glass could be measured here: every number is from the devices' geometry, UIKit's touch
+sampling and the strokes the rule must tell apart, each is one constant, and a Debug build prints every
+judged stroke's numbers on Xcode's console (`edge: a flick off the left edge (landed 31.0 pt from the edge,
+29.0 pt left and 0.0 pt down, 640 pt/s at the end, last seen 2.0 pt in, 62 ms, 6 samples): hide`, or `edge:
+not a flick, too slow (…)`), so Noah's first sessions measure them.
+
+| | value | why |
+|---|---|---|
+| band | 48 pt | about 7.5 mm on the iPad mini (163 pt an inch) and 8 mm on the iPhone 15 Pro (153 pt an inch): a thumb's contact patch, so a thumb that sets off with its edge at the bezel lands in it. A stroke landing further in is the Mac's at once, as it always was. |
+| travel | 12 pt left | a flick moves; a grip or a tap that rolls off the edge does not get this far, and a touch landing nearer the edge than this cannot be one. |
+| duration | 0.25 s, landing to lift | a flick takes about a tenth of a second; a resting grip, a long press (0.45 s) and a slow drag are let go by then (the recognizer's own clock: a still finger sends no events). |
+| speed | 300 pt/s left, over the last 50 ms | about 5 cm a second, half a brisk flick's slowest; a slow drag to the edge, 100 to 200 pt/s, is not one. |
+| reach | 24 pt | where the last sample may be. A finger that slides off the glass is last seen up to one sample interval short of the edge (16.7 ms at 60 Hz, 8.3 ms at 120: 5 to 17 pt at 300 to 1,000 pt/s), and a case's raised lip stops the finger's middle some 3 to 4 mm (20 to 24 pt) in, so the finger lifts there. |
+| projection | 50 ms | a faster flick last seen further in counts when its last speed carries it past the edge within this (three samples at 60 Hz). |
+| right slop, judge after | 6 pt, 8 pt | a drag right is let go after 6 pt, any stroke steeper than about 50° from straight left (\|dy\| ≤ 1.2 \|dx\|) after 8, both before a pan's own 10 pt, so the drags the band lets go are not even late. |
+
+How the hold works: every other recognizer in Sill's window that takes fingers (the picture's tap, long
+press and scroll, the trackpad's tracker, taps, pan and long press, the bars' buttons, the strip's scroll)
+waits for the flick's recognizer to fail (`shouldBeRequiredToFail(by:)`). UIKit holds their recognition
+back, not the touches: a touch outside the band fails the flick at its landing and nothing waits; a touch in
+the band is held only until the rule decides, and then either is the hide and nothing else (the waiting
+recognizers fail, its touch is cancelled in the views) or goes on whole, the waiting recognizers
+recognizing it as they would have, their translation counted from the touch's landing. The trackpad's
+tracker, which begins at touch-down, now starts from where the finger landed (`FingerTracker.downLocation`),
+so a stroke it waited for loses no travel. Recognizers that only watch (the stroke observer, the finger
+counter, the tour's touch watch) never recognize, so never wait. The Pencil and the iPad's pointer never
+reach the flick (`allowedTouchTypes`), and the pointer's own recognizers take no finger.
+
+The swipe in: `UIScreenEdgePanGestureRecognizer` on the left edge, only while hidden, with the same rule of
+who waits for it; it finishes past a third of the screen's width (the lift's speed carrying it on for
+0.15 s), or at a flick in (400 pt/s after 12 pt), and springs back when moving back toward the edge at
+200 pt/s or more.
+
+## Where the picture goes while hidden (open question 5)
+
+The room: the screen less the safe area's top, left and right (the Dynamic Island or the notch upright, the
+sensor housing's side sideways, the iPhone Duo cover's camera strip), down to the bottom edge under the home
+indicator, which fades. On an iPad with the status bar hidden that is the whole screen. On the Duo's inner
+display upright in the laptop pose, the part above the fold. The picture keeps its shape in it (letterboxed
+in black); a window the Mac fits to the viewport fills it. The other two choices, photographed for Noah:
+the whole screen (under the island and the rounded corners) and the whole safe area (clear of the home
+indicator too); DEBUG `-SillFullScreenRoom screen|housing|safe`.
+
+## The software keyboard, the hardware keyboard, the rest (open questions 7, 8, 9)
+
+- Hiding takes the person's own software keyboard down (it would cover half the picture); it comes back
+  with the controls. A hardware keyboard's hold stays (HardwareKeyboardPolicy: the Keyboard button's toggle
+  from the person's to the hardware keyboard's), so typing on one keeps reaching the Mac while hidden. No key
+  of Sill's own shows the controls: keys belong to the Mac.
+- Picture in Picture: unchanged (it takes the picture's layer whatever the layout). The Mac's pointer
+  sprite: drawn over the picture as before (the trackpad's own arrow only upright with the trackpad shown).
+  The Menus: the iPad's own menu bar stays reachable (a pointer at the top edge or a swipe down); the Menus
+  button is with the hidden controls. Three-finger gestures: unchanged on the picture.
+- The tour does not start while hidden (its rule counts the controls hidden as busy).
+- The clipboard's chip shows over the hidden picture, in its corner, as over the picture while shown.
+
+## Open questions, with the default taken
+
+1. The flick's numbers (band 48 pt, travel 12 pt, 0.25 s, 300 pt/s, reach 24 pt, 50 ms): defaults from
+   geometry and sampling; the first sessions' `edge:` lines say whether to move any.
+2. Where the flick works: anywhere along the left edge, on the picture, the trackpad and the controls in the
+   band alike (a flick that starts on the Apps button hides, and the button does not act).
+3. Offered only while Sill's window covers the screen; elsewhere (Split View, Slide Over, a Stage Manager
+   window) the row is dimmed with "Full Screen works while Sill fills the screen.", and going into such a
+   window while hidden brings the controls back.
+4. The Settings row is a button that hides now, not a switch (Noah decided on 2026-10-19 that hiding the
+   bar is a Settings toggle; with nothing remembered, a switch would read off whenever it is seen).
+5. Where the hidden picture goes: clear of the housing, under the home indicator (photos of the three).
+6. The hint: the first 3 times, 2.5 s; VoiceOver every time.
+7. A hardware keyboard shortcut to show the controls: none (keys belong to the Mac).
+8. The software keyboard: down while hidden, back with the controls; to type while hidden, a hardware
+   keyboard, or show the controls.
+9. The pointer at the left edge: half a second within 1 pt of it. With the Mac's Dock on the left, its
+   own edge, this can bring the controls back as the Dock shows.
+10. The iPad's status bar comes back as the swipe in lands, so the shown layout settles 24 pt lower then.
+11. The edge deferral only while hidden; a person who wants Stage Manager's strip then swipes twice.
+12. A second level upright (the trackpad alone hidden first): parked by Noah; not built. `ChromeLevel`
+    keeps a raw value for it between the two, and `afterFlick`/`afterReveal` are the only steps.
+
+## Results
+
+(Filled in as the gates ran; see the step file docs/steps/2026-11-12-full-screen.md.)
+
+## Noah's test (the device test, short)
+
+On the iPad mini and the iPhone 15 Pro, a Debug build from this branch, Xcode's console open for the
+`edge:` and `full screen:` lines, Sill for Mac with Virtual Display on, a window streaming:
+
+1. Flick off the left edge from the picture (your thumb at the edge, out over the bezel): the controls go,
+   the window grows to the screen (one "Resized"/restart line in Sill.log). The card shows the first 3 times.
+2. Swipe in from the left bezel slowly, stop half way, go back: the controls follow and slide back out.
+   Again past a third: they settle. Then a quick swipe in: they come.
+3. In a case if you have one: flicks stopped by its lip still hide (console: "last seen ~20 pt in").
+4. Near the left edge: a tap clicks, a drag right/up/down scrolls at once, a slow drag left scrolls (a
+   quarter second late at most), a scroll from the middle that runs off the edge scrolls and never hides.
+5. Flick from the Apps button, the thumbnails and (upright) the trackpad at the left edge: hides, nothing
+   pressed on the Mac or in Sill.
+6. Hidden: shake: back. Settings › This iPad › Full Screen: hides. VoiceOver on: the picture element,
+   double-tap: back.
+7. iPad with a trackpad or mouse: hidden, hold the pointer at the left edge: back after half a second.
+   Stage Manager on: hidden, swipe in from the left: Sill's controls (not the strip); twice: the strip.
+8. Upright on both: a window with Virtual Display on fills the screen when hidden; the Desktop keeps its
+   shape with black above and below.
+9. Hardware keyboard: hidden, type: it reaches the Mac. Software keyboard up, hide: it goes; show: it
+   comes back.
+10. Rotate while hidden: stays hidden. Leave Sill and come back: stays hidden. Relaunch: shown.

@@ -776,7 +776,16 @@ Rules found in the steps that hold for all work (each where it is written):
   #291: when a window's picture is offered and which window, what counts as watched, heard and
   running while it shows, the pause, what ends it, the Lifecycle; pure,
   `Tests/checks/picture-in-picture`; pbxproj A291/F291) and `PictureInPicture` (AVKit's
-  controller on the display layer, its delegates, `PictureInPictureHub`; A29A/F29A), `KeyChords`
+  controller on the display layer, its delegates, `PictureInPictureHub`; A29A/F29A),
+  `FullScreenPolicy` (full screen, docs/full-screen-plan.md: Sill's controls hidden, the picture in the
+  screen's room; the hide's flick off the left edge, `EdgeFlick`, the swipe in's finish, `EdgeReveal`,
+  the pointer's dwell at the edge, when it is offered and armed, when the controls come back by
+  themselves, the hint, the room, the words; pure, `Tests/checks/full-screen`; pbxproj A279/F279),
+  `EdgeFlickRecognizer` (the flick's recognizer and the swipe in's, `RevealEdgePan`, on Sill's window,
+  and which other recognizers wait for them; UIKit only, so Tests/touchrig compiles it; A27B/F27B) and
+  `FullScreen` (`FullScreenEdges`, which puts them and a hover on the window and says whether it covers
+  the screen, the shake through `UIWindow.motionEnded`, the hint, the swipe in's preview hole, the hidden
+  picture's element; A27A/F27A), `KeyChords`
   (`KeyModifiers`; a
   shortcut with its modifiers' own keys pressed around it, the Spotlight key's
   ⌘Space, the trackpad's modifier keys around a click; `ForwardedKeys`, a
@@ -1060,7 +1069,10 @@ Rules found in the steps that hold for all work (each where it is written):
   off] NAME` builds and runs it on a simulator of its own
   (`SILL_TOUCHRIG_SIM`), `compare.py` judges a run against the surfaces
   before, and a stroke made right after a gesture against the same stroke
-  made fresh.
+  made fresh; `compare.py --all` every stroke against main's, and, where the
+  sources have full screen's EdgeFlickRecognizer (on the rig's window),
+  `compare.py --edge` its strokes at the left edge (`RIG_ONLY=edge`): a flick
+  hides and sends nothing, anything else goes on whole and in order.
 - `Tests/duorig/` — TEST ONLY, private interfaces, simulator only: folds and
   turns the iPhone Duo simulator with Device Hub's own events (usage page
   0xFF61, usage 0x5B, an IOCFSerialize dictionary from

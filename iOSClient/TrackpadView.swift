@@ -313,7 +313,10 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         case .began:
             trackSuspended = false
             trackLive = false
-            trackLast = tracker.location(in: self)
+            // From where the finger landed: the tracker begins at touch-down, unless full screen's edge
+            // recognizers held it while they judged a touch at the left edge (EdgeFlickRecognizer.swift), and
+            // then the travel meanwhile still counts.
+            trackLast = tracker.downLocation ?? tracker.location(in: self)
         case .changed:
             guard trackerDriving else { return }
             let location = tracker.location(in: self)
@@ -667,6 +670,8 @@ private final class FingerCounter: UIGestureRecognizer {
 /// so the count is taken here, from the view's own touches, before the superclass sees the new one.
 private final class FingerTracker: UILongPressGestureRecognizer {
     private(set) var sawSecondFinger = false
+    /// Where the stroke's first finger landed, in the view: the tracker's start, whenever UIKit lets it begin.
+    private(set) var downLocation: CGPoint?
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         if let view,
@@ -674,12 +679,14 @@ private final class FingerTracker: UILongPressGestureRecognizer {
            down.count >= 2 {
             sawSecondFinger = true
         }
+        if downLocation == nil, let view, let first = touches.first { downLocation = first.location(in: view) }
         super.touchesBegan(touches, with: event)
     }
 
     override func reset() {
         super.reset()
         sawSecondFinger = false
+        downLocation = nil
     }
 }
 

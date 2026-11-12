@@ -185,8 +185,22 @@ struct PortraitStreamScreen: View {
     /// The picture's pinch zoom (StreamScreen's; StreamZoom): not watched here, only by the picture's
     /// own view, so a pinch redraws nothing else.
     let zoom: StreamZoomModel
+    /// Full screen (docs/full-screen-plan.md; StreamScreen's `chrome`): nothing but the picture, at `room` (in
+    /// this screen's space, which then covers the whole screen), with no margin, corner or rim. The picture's
+    /// pane is the same view hidden or not, so it keeps its input view and its frame animates.
+    var hidden = false
+    var room: CGRect = .zero
+    /// The swipe in's picture of this layout (StreamScreen's `revealPreview`): its picture pane a hole
+    /// (RevealHole), its trackpad only the well, no viewport and no console lines.
+    var preview = false
+    /// How the controls go and come as the interface hides and shows (StreamScreen's `chromeTransition`).
+    var chromeTransition: AnyTransition = .identity
+    /// Settings › This iPad › Full Screen (StreamScreen's `fullScreenRow`).
+    var fullScreen: HostSettingsPanel.FullScreenRow? = nil
+    /// The hidden picture's Show Controls (HiddenPictureElement).
+    var showChrome: () -> Void = {}
 
-    private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
+    private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: hidden ? 0 : 12, style: .continuous) }
     /// The Duo's fold across this screen (StreamScreen, iOS 27.1): where the halves split.
     @Environment(\.duoFold) private var duoFold
     /// Where the software keyboard is: the laptop pose's key row goes above its glass (#215).
@@ -219,16 +233,24 @@ struct PortraitStreamScreen: View {
             Color.black
 
             VStack(spacing: split.controls - half) {
-                picturePane(measured: true).padding(8).frame(height: half)
+                // Full screen: the room, with no margin (the pane's padding is the room's place in this screen).
+                picturePane(measured: true)
+                    .padding(hidden ? EdgeInsets(top: room.minY, leading: room.minX, bottom: max(0, size.height - room.maxY),
+                                                 trailing: max(0, size.width - room.maxX))
+                                    : EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                    .frame(height: hidden ? size.height : half)
                 // While the key row is alone or the toggle stands in, the window bar, the key row and the
                 // trackpad stay where they are (the thumbnails' scroll, the trackpad's state), out of sight,
                 // touch and VoiceOver, and come back as they were with the keyboard. Hidden from VoiceOver
                 // only then: on an iPad, an iPhone and with the keyboard down the controls are exactly main's.
-                controls(width: size.width, hidden: standIn != nil)
-                    .opacity(standIn == nil ? 1 : 0)
-                    .allowsHitTesting(standIn == nil)
-                    .accessibilityHidden(while: standIn != nil)
-                    .frame(height: size.height - split.controls)
+                if !hidden {
+                    controls(width: size.width, hidden: standIn != nil)
+                        .opacity(standIn == nil ? 1 : 0)
+                        .allowsHitTesting(standIn == nil)
+                        .accessibilityHidden(while: standIn != nil)
+                        .frame(height: size.height - split.controls)
+                        .transition(chromeTransition)
+                }
             }
 
             if let row = standIn?.row {
@@ -286,11 +308,11 @@ struct PortraitStreamScreen: View {
         }
         // The laptop pose with the person's keyboard up: KeyboardFrameMonitor reads where its glass is after
         // each change (a fold among them); nowhere else does it reload anything.
-        .onChange(of: KeyboardReadings(wanted: wantsKeyboardReadings(size), controlsTop: origin.y + split.controls), initial: true) { _, now in
-            KeyboardFrameMonitor.shared.setWantsReadings(now.wanted, controlsTop: now.controlsTop)
+        .onChange(of: KeyboardReadings(wanted: !preview && wantsKeyboardReadings(size), controlsTop: origin.y + split.controls), initial: true) { _, now in
+            if !preview { KeyboardFrameMonitor.shared.setWantsReadings(now.wanted, controlsTop: now.controlsTop) }
         }
-        .onChange(of: duoFold) { _, _ in KeyboardFrameMonitor.shared.poseChanged() }
-        .onDisappear { KeyboardFrameMonitor.shared.setWantsReadings(false, controlsTop: 0) }
+        .onChange(of: duoFold) { _, _ in if !preview { KeyboardFrameMonitor.shared.poseChanged() } }
+        .onDisappear { if !preview { KeyboardFrameMonitor.shared.setWantsReadings(false, controlsTop: 0) } }
         #if DEBUG
         .onChange(of: standIn, initial: true) { old, now in
             if now != nil || old != nil { print(keyboardStandInLine(now, size: size, origin: origin, split: split)) }
@@ -467,19 +489,20 @@ struct PortraitStreamScreen: View {
         let span = layout.trackpadSpan(video: client.videoSize)
         return phoneStack(layout, span: span)
             // The viewport: the picture's pane, or with Larger Picture its whole room (never the pane
-            // at the picture's shape, which would hold a window at the shape it has).
-            .onChange(of: layout.picture.size, initial: true) { _, size in onPanelSize(size) }
+            // at the picture's shape, which would hold a window at the shape it has); full screen, the room.
+            .onChange(of: hidden ? room.size : layout.picture.size, initial: true) { _, size in onPanelSize(size) }
             #if DEBUG
-            .modifier(PhoneConsole(layout: layout, span: span, video: client.videoSize, origin: origin))
+            .modifier(PhoneConsole(layout: layout, span: span, video: client.videoSize, origin: origin, quiet: preview || hidden))
             #endif
     }
 
     private func phoneStack(_ layout: PhonePortraitLayout, span: CGFloat) -> some View {
         let larger = layout.largerPicture
         // In reading order, which is also top to bottom: the picture, row 1, the strip (none with
-        // Larger Picture), the key row, the trackpad.
-        let rects: [CGRect] = larger ? [layout.pane(video: client.videoSize), layout.row1, layout.keys, layout.trackpad]
-                                     : [layout.picture, layout.row1, layout.strip, layout.keys, layout.trackpad]
+        // Larger Picture), the key row, the trackpad. Full screen: the picture alone, at the room.
+        let rects: [CGRect] = hidden ? [room]
+            : larger ? [layout.pane(video: client.videoSize), layout.row1, layout.keys, layout.trackpad]
+                     : [layout.picture, layout.row1, layout.strip, layout.keys, layout.trackpad]
         return ZStack(alignment: .topLeading) {
             Color.black
 
@@ -490,14 +513,20 @@ struct PortraitStreamScreen: View {
             // beside them.
             PhoneRows(size: layout.size, rects: rects) {
                 picturePane(measured: false).accessibilityHidden(drawerOpen)
-                phoneRow1(layout, menus: larger && client.menus.hasMenus)
-                if !larger {
-                    phoneRow2(layout)
-                        .opacity(drawerOpen || settingsOpen ? 0 : 1)
-                        .accessibilityHidden(drawerOpen)
+                if !hidden {
+                    phoneRow1(layout, menus: larger && client.menus.hasMenus)
+                        .transition(chromeTransition)
+                    if !larger {
+                        phoneRow2(layout)
+                            .opacity(drawerOpen || settingsOpen ? 0 : 1)
+                            .accessibilityHidden(drawerOpen)
+                            .transition(chromeTransition)
+                    }
+                    keyRow(.phone).accessibilityHidden(drawerOpen)
+                        .transition(chromeTransition)
+                    trackpad(verticalSpan: span).accessibilityHidden(drawerOpen)
+                        .transition(chromeTransition)
                 }
-                keyRow(.phone).accessibilityHidden(drawerOpen)
-                trackpad(verticalSpan: span).accessibilityHidden(drawerOpen)
             }
 
             if drawerOpen {
@@ -607,27 +636,35 @@ struct PortraitStreamScreen: View {
     /// the room this pane sits at the top of.
     private func picturePane(measured: Bool) -> some View {
         ZStack {
-            // Scaled and moved by the picture's zoom, inside the clip below.
-            ZoomedStreamView(client: client, zoom: zoom)
-            InputOverlay(videoSize: client.videoSize,
-                         send: { client.sendInput($0) },
-                         setOwnPointer: { client.setOwnPointer($0, from: $1) },
-                         proxy: overlay,
-                         isKeyboardShown: $keyboardShown,
-                         latchedModifiers: latched,
-                         onModifiersConsumed: { latched = [] },
-                         sendGesture: { client.sendGesture($0, fingers: $1) },
-                         macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
-                         readZoom: { [zoom] in zoom.zoom },
-                         writeZoom: { [zoom] in zoom.set($0) })
+            if preview {
+                // The swipe in's preview: the hidden picture shows through here (there is one picture view).
+                RevealHole()
+            } else {
+                // Scaled and moved by the picture's zoom, inside the clip below.
+                ZoomedStreamView(client: client, zoom: zoom)
+                InputOverlay(videoSize: client.videoSize,
+                             send: { client.sendInput($0) },
+                             setOwnPointer: { client.setOwnPointer($0, from: $1) },
+                             proxy: overlay,
+                             isKeyboardShown: $keyboardShown,
+                             latchedModifiers: latched,
+                             onModifiersConsumed: { latched = [] },
+                             sendGesture: { client.sendGesture($0, fingers: $1) },
+                             macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
+                             readZoom: { [zoom] in zoom.zoom },
+                             writeZoom: { [zoom] in zoom.set($0) })
+            }
         }
-        .background(Palette.panel)
+        // Full screen's letterbox is black, as a film's; the panel's own grey otherwise.
+        .background(hidden ? Color.black : Palette.panel)
         // A locked Mac: its cover over the picture (LockedMac), under the link's line.
         .overlay { LockedMacShade(client: client) }
         .overlay(alignment: .top) { LinkLineView(text: linkLine, lines: linkLineLines) }
+        // Full screen: the picture as one element for VoiceOver, Switch Control and Voice Control.
+        .overlay { HiddenPictureElement(hidden: hidden, mac: client.macName.isEmpty ? "The Mac" : client.macName, show: showChrome) }
         .clipShape(streamShape)
-        .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
-        .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { if measured { onPanelSize($0) } })
+        .overlay(streamShape.strokeBorder(Color.white.opacity(hidden ? 0 : 0.09), lineWidth: 1))
+        .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { if measured, !preview { onPanelSize($0) } })
         .tourTarget(.stream)
     }
 
@@ -648,7 +685,19 @@ struct PortraitStreamScreen: View {
             .tourTarget(.keys)
     }
 
+    @ViewBuilder
     private func trackpad(verticalSpan: CGFloat?) -> some View {
+        if preview {
+            // The swipe in's preview: the well as it looks, no surface (its recognizers, the pointer's feed).
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Palette.trackpad)
+                .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+        } else {
+            liveTrackpad(verticalSpan: verticalSpan)
+        }
+    }
+
+    private func liveTrackpad(verticalSpan: CGFloat?) -> some View {
         Trackpad(send: { client.sendInput($0) },
                  setPointer: { client.setOwnPointer($0, from: .trackpad) },
                  feed: { let f = client.pointerFeedState; return (f.anchor, f.reseeds) },
@@ -664,7 +713,7 @@ struct PortraitStreamScreen: View {
 
     private var settingsPanel: some View {
         HostSettingsPanel(client: client, close: { setSettings(false, true) }, pairThisDevice: pairThisDevice,
-                          takeTour: takeTour)
+                          takeTour: takeTour, fullScreen: fullScreen)
     }
 
     /// The drawer's dim: a tap on it closes the drawer instead of clicking the Mac.
@@ -795,14 +844,16 @@ private struct PhoneConsole: ViewModifier {
     let span: CGFloat
     let video: CGSize
     let origin: CGPoint
+    /// Full screen's hidden layout and the swipe in's preview: no trackpad, nothing to say.
+    var quiet = false
 
     func body(content: Content) -> some View {
         content
             .onChange(of: [layout.trackpad.width, layout.trackpad.height, span], initial: true) { _, _ in
-                print(trackpadLine)
+                if !quiet { print(trackpadLine) }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidChangeFrameNotification)) { note in
-                guard let end = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+                guard !quiet, let end = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
                 print(keyboardLine(end))
             }
     }

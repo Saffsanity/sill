@@ -2119,6 +2119,19 @@ simulator:
   active|inactive` holds the audio session active while a picture is offered
   or shows (a device's default), or never (the simulator's). The console's
   `pip:` lines say what happened.
+- Full screen (docs/full-screen-plan.md): `-SillFullScreen 1` starts with
+  Sill's controls hidden (in the mock, live and in the normal app), and with
+  it `-SillFullScreenReveal 0.4` catches the swipe in 40% of the way, its
+  preview photographed; `-SillFullScreenHint 1` (or `hold`, kept up) the hint;
+  `-SillFullScreenRoom screen|housing|safe` where the hidden picture goes;
+  `-SillFullScreenToggle 3,6`, `-SillFullScreenSwipe 9` and `-SillShakeAt 12`
+  hide or show, swipe in and shake at those seconds. The console's `full
+  screen:` lines say what happened, and in a Debug build `edge:` lines give
+  every stroke the flick judged at the left edge with its numbers.
+  `-SillSettings 1 -SillSettingsScroll fullscreen` opens the panel at the
+  row. The flick itself is proved in the touch rig: `RIG_ONLY=edge
+  Tests/touchrig/run.sh NAME`, then `Tests/touchrig/compare.py --edge` against
+  main's surfaces, and `compare.py --all` for every other stroke.
 - `-SillAXDump <s>`: `s` seconds after the stream screen shows, the console
   lists its accessibility elements in the order the tree hands them to
   VoiceOver. SwiftUI builds that tree only for an assistive technology, so on

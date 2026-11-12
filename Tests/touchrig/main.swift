@@ -64,6 +64,10 @@ enum Step {
     /// The picture's zoom (#65): set to `factor` about a point of the overlay (from 1×), and logged.
     case zoom(CGFloat, CGPoint)
     case logZoom
+    /// Full screen's flick (docs/full-screen-plan.md): the surfaces against the window's left edge (true), or
+    /// back inside their margins; the flick's recognizer listening or not.
+    case edgeLayout(Bool)
+    case arm(Bool)
 }
 
 enum Gesture {
@@ -230,6 +234,41 @@ func zoomScenarios(_ c: CGPoint) -> [(String, [Step])] {
 }
 #endif
 
+/// Full screen's flick off the left edge (docs/full-screen-plan.md, EdgeFlickRecognizer.swift), the same on
+/// both surfaces, laid against the window's left edge so x is the screen's: `EDGE HIDE` strokes must hide and
+/// send nothing; `EDGE ON` strokes start in the band (or end at the edge) and must go on whole, in order, as the
+/// surfaces before the flick send them (compare.py --edge); `EDGE DISARMED` is a flick while the recognizer
+/// does not listen, the surfaces' own as before.
+func edgeScenarios(_ y: CGFloat) -> [(String, [Step])] {
+    func path(_ xs: [CGFloat], dy: CGFloat = 0, rest: Int = 0) -> [Step] {
+        var steps: [Step] = [.begin([CGPoint(x: xs[0], y: y)])]
+        if rest > 0 { steps.append(.wait(rest)) }
+        for (i, x) in xs.dropFirst().enumerated() { steps.append(.move([CGPoint(x: x, y: y + dy * CGFloat(i + 1))])) }
+        return steps + [.end([0])]
+    }
+    var out: [(String, [Step])] = []
+    // The strokes that go on come first: the trackpad's pointer is relative, so every stroke before them is the
+    // same on both builds; then the hides, which move nothing; then the flick while the recognizer does not listen.
+    out.append(("EDGE ON a tap in the band", Gesture.tap(1, at: CGPoint(x: 20, y: y))))
+    out.append(("EDGE ON a long press in the band, 0.6 s", [.begin([CGPoint(x: 24, y: y)]), .wait(36), .end([0])]))
+    out.append(("EDGE ON a drag right from the band", Gesture.swipe(1, at: CGPoint(x: 20, y: y), dx: 120, dy: 0, frames: 12)))
+    out.append(("EDGE ON a drag down in the band", Gesture.swipe(1, at: CGPoint(x: 24, y: y), dx: 2, dy: 150, frames: 12)))
+    out.append(("EDGE ON a drag up in the band", Gesture.swipe(1, at: CGPoint(x: 24, y: y), dx: -2, dy: -150, frames: 12)))
+    out.append(("EDGE ON a slow drag left to the edge (40 pt in 0.5 s)", Gesture.swipe(1, at: CGPoint(x: 44, y: y), dx: -40, dy: 0, frames: 30)))
+    out.append(("EDGE ON a quick drag left lifted 26 pt in", path([48, 40, 32, 26])))
+    out.append(("EDGE ON two fingers from the band, up 150", Gesture.stroke([CGPoint(x: 20, y: y), CGPoint(x: 80, y: y)],
+                                                                             to: [CGPoint(x: 20, y: y - 150), CGPoint(x: 80, y: y - 150)], frames: 8)))
+    out.append(("EDGE ON a scroll from the middle off the left edge", Gesture.swipe(1, at: CGPoint(x: 300, y: y), dx: -300, dy: 0, frames: 10)))
+    out.append(("EDGE ON a grip resting at the edge, a tap elsewhere", [.begin([CGPoint(x: 6, y: y + 60)]), .wait(18),
+                                                                       .begin([CGPoint(x: 300, y: y)]), .wait(4), .end([1]), .wait(10), .end([0])]))
+    out.append(("EDGE HIDE a flick off the edge from 30 pt", path([30, 15, 2])))
+    out.append(("EDGE HIDE a flick stopped by a case's lip 22 pt in", path([46, 34, 22])))
+    out.append(("EDGE HIDE a flick 45° down from 40 pt", path([40, 26, 12, 2], dy: 13)))
+    out.append(("EDGE HIDE a flick after a 0.1 s rest", path([36, 24, 12, 2], rest: 6)))
+    out.append(("EDGE DISARMED a flick off the edge from 30 pt", [.arm(false)] + path([30, 15, 2]) + [.wait(60), .arm(true)]))
+    return out
+}
+
 /// The review's strokes (2026-09-27): fingers placed slowly, a thumb resting on the glass, a pinch led by
 /// the thumb, the Mac's own thumb-and-three-finger pinch, a brief extra contact, and one- and two-finger
 /// strokes made right after a gesture on the same surface (compare.py holds them to the same strokes made
@@ -322,6 +361,8 @@ final class Runner {
     #endif
     let window: UIWindow
     let synth: TouchSynth
+    /// The rig's root, for the edge layout.
+    weak var root: Root?
     var queue: [(String, UIView, [Step])] = []
     var steps: [Step] = []
     var view: UIView!
@@ -386,6 +427,15 @@ final class Runner {
             #if ZOOM
             if let overlay = view as? InputOverlayView { RigLog.log("zoom: " + Runner.zoomText(overlay.zoom)) }
             #endif
+        case .edgeLayout(let on):
+            root?.edge = on
+            root?.view.setNeedsLayout()
+            root?.view.layoutIfNeeded()
+        case .arm(let on):
+            #if EDGEFLICK
+            edgeFlick.armed = on
+            RigLog.log("[edge] armed \(on)")
+            #endif
         }
     }
 }
@@ -402,9 +452,17 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 }
 
+#if EDGEFLICK
+/// Full screen's flick off the left edge, on the rig's window as the app puts it on Sill's (FullScreenEdges): it
+/// listens, and says what it decided (a hide; a stroke let go, but for every touch past the band).
+let edgeFlick = EdgeFlickRecognizer()
+#endif
+
 final class Root: UIViewController {
     let trackpad = TrackpadSurface(frame: .zero)
     let overlay = InputOverlayView(frame: .zero)
+    /// The surfaces laid against the window's left edge, for the EDGE strokes.
+    var edge = false
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
@@ -423,7 +481,8 @@ final class Root: UIViewController {
     }
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        let b = view.bounds.inset(by: view.safeAreaInsets).insetBy(dx: 16, dy: 16)
+        var b = view.bounds.inset(by: view.safeAreaInsets).insetBy(dx: 16, dy: 16)
+        if edge { b = CGRect(x: 0, y: b.minY, width: view.bounds.width, height: b.height) }
         let h = (b.height - 16) / 2
         trackpad.frame = CGRect(x: b.minX, y: b.minY, width: b.width, height: h)
         overlay.frame = CGRect(x: b.minX, y: b.minY + h + 16, width: b.width, height: h)
@@ -457,19 +516,39 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             for g in root.trackpad.gestureRecognizers ?? [] { Tracer.shared.trace(g, as: "T.\(type(of: g))") }
             for g in root.overlay.gestureRecognizers ?? [] { Tracer.shared.trace(g, as: "O.\(type(of: g))") }
         }
+        #if EDGEFLICK
+        edgeFlick.armed = true
+        edgeFlick.onFlick = { RigLog.log("[edge] hide") }
+        edgeFlick.onJudged = { verdict, numbers in
+            if case .notAFlick(.outsideBand) = verdict { return }
+            RigLog.log("[edge] \(verdict) (\(numbers))")
+        }
+        w.addGestureRecognizer(edgeFlick)
+        print("RIG edge: the flick off the left edge on the window, listening")
+        #endif
         let runner = Runner(window: w)
+        runner.root = root
         self.runner = runner
         let tc = CGPoint(x: root.trackpad.bounds.midX, y: root.trackpad.bounds.midY + 60)
         let oc = CGPoint(x: root.overlay.bounds.midX, y: root.overlay.bounds.midY + 60)
-        // RIG_ONLY=zoom: the overlay's zoom strokes alone (#65), a minute instead of five.
-        let onlyZoom = ProcessInfo.processInfo.environment["RIG_ONLY"] == "zoom"
-        if !onlyZoom {
+        // RIG_ONLY=zoom: the overlay's zoom strokes alone (#65), a minute instead of five; edge: the strokes at the
+        // left edge alone.
+        let only = ProcessInfo.processInfo.environment["RIG_ONLY"] ?? ""
+        if only.isEmpty {
             for (title, steps) in scenarios(tc) { runner.add("TRACKPAD \(title)", root.trackpad, steps) }
             for (title, steps) in scenarios(oc) { runner.add("OVERLAY \(title)", root.overlay, steps) }
         }
         #if ZOOM
-        for (title, steps) in zoomScenarios(oc) { runner.add("OVERLAY ZOOM \(title)", root.overlay, steps) }
+        if only.isEmpty || only == "zoom" {
+            for (title, steps) in zoomScenarios(oc) { runner.add("OVERLAY ZOOM \(title)", root.overlay, steps) }
+        }
         #endif
+        // At the left edge: the surfaces laid against it first (each stroke's first step), back after the last.
+        if only.isEmpty || only == "edge" {
+            let ty = root.trackpad.bounds.midY, oy = root.overlay.bounds.midY
+            for (title, steps) in edgeScenarios(ty) { runner.add("TRACKPAD \(title)", root.trackpad, [.edgeLayout(true)] + steps) }
+            for (title, steps) in edgeScenarios(oy) { runner.add("OVERLAY \(title)", root.overlay, [.edgeLayout(true)] + steps) }
+        }
         runner.start { print("RIG done"); exit(0) }
     }
 }

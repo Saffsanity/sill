@@ -364,6 +364,19 @@ struct ContentView: View {
 ///   fraction of the picture's pane (its middle without one), then the lift's settle: `2.5@0.3,0.4; 3
 ///   0.1` zooms in, then pinches all the way out. The console's "harness: -SillZoom …" line gives the
 ///   zoom.
+/// * `-SillFullScreen 1` — full screen (docs/full-screen-plan.md): Sill's controls hidden from the start, the
+///   picture in the screen's room, in the mock and live, and in the normal app. With it,
+///   `-SillFullScreenReveal P` catches the swipe in from the left edge P of the way (0…1), so the preview of the
+///   controls coming in can be photographed. `-SillFullScreenHint 1` shows the hint every time the controls
+///   hide (`hold`: and keeps it up, for a photo; with `-SillFullScreen 1` from the start).
+///   `-SillFullScreenRoom screen|housing|safe` sets where the hidden picture goes (FullScreenPolicy.Room;
+///   `housing`, clear of the sensor housing and down under the home indicator, is the default).
+///   `-SillFullScreenToggle <s>[,<s>…]` hides or shows the controls at those seconds after the stream screen
+///   shows, as a flick and the swipe in do (only while a hide may start: something open, or nothing
+///   streaming, keeps them); `-SillFullScreenSwipe <s>[,<s>…]` plays a swipe in at those seconds (its
+///   progress in steps, then its lift); `-SillShakeAt <s>[,<s>…]` a shake (the window's notification). The
+///   console says "full screen: hidden by …" and "full screen: shown by …", and in a Debug build every stroke
+///   the flick judged at the left edge, "edge: …" with its numbers (FullScreenEdges).
 /// * `-SillInputScript '<t> <step>; …'` — with `-SillLive 1` only: input for the simulator gates,
 ///   which have no finger (`InputScript`): `t` is seconds since the session's first window list, and
 ///   a step is `down`, `pad DX,DY`, `lift`, `click` or `padscroll DX,DY` on the portrait pad, `tap

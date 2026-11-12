@@ -43,6 +43,18 @@ struct HostSettingsPanel: View {
     var pairThisDevice: () -> Void = {}
     /// Take the Tour: the stream screen puts the panel away and shows the tour of its layout.
     var takeTour: () -> Void = {}
+    /// Full Screen in This iPad (docs/full-screen-plan.md): the stream screen puts the panel away and hides
+    /// its controls; nil where the panel shows no such row.
+    var fullScreen: FullScreenRow? = nil
+
+    /// Full Screen's row: whether a hide can start now (FullScreenPolicy.hideAllowed, the panel itself not
+    /// counted), whether Sill's window covers the screen (FullScreenPolicy.offered: the footnote says why the
+    /// row is dimmed when it does not), and the hide.
+    struct FullScreenRow {
+        let offered: Bool
+        let coversScreen: Bool
+        let hide: () -> Void
+    }
 
     @AccessibilityFocusState private var headerFocused: Bool
     /// Two seconds on this connection and still no state: the Mac runs a Sill without settings.
@@ -105,6 +117,7 @@ struct HostSettingsPanel: View {
     /// `pip`, to the This iPad group's title, over its first row, the Picture in Picture switch (#291), so a
     /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
     /// says it has no Picture in Picture).
+    /// `fullscreen`, to Full Screen's row and its footnote (docs/full-screen-plan.md).
     private static var startsAt: String? {
         #if DEBUG
         switch UserDefaults.standard.string(forKey: "SillSettingsScroll") {
@@ -115,6 +128,7 @@ struct HostSettingsPanel: View {
         case "hold"?: return thumbnailHoldRowID
         case "clipboard"?: return clipboardRowsID
         case "pip"?: return gesturesGroupID
+        case "fullscreen"?: return fullScreenRowID
         default: return nil
         }
         #else
@@ -127,6 +141,7 @@ struct HostSettingsPanel: View {
     private static let reverseScrollRowID = "reverseScroll"
     private static let thumbnailHoldRowID = "thumbnailHold"
     private static let clipboardRowsID = "clipboardPaste"
+    private static let fullScreenRowID = "fullScreen"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
     static var voiceOverRunning: Bool {
@@ -622,6 +637,30 @@ struct HostSettingsPanel: View {
                 }
             }
             Footnote(text: PictureInPicturePolicy.Copy.footnote(mac: mac))
+        }
+        // Full Screen (docs/full-screen-plan.md): the way in that is not a gesture, and the one VoiceOver can use.
+        // A button, not a switch: nothing is remembered, and the interface is shown whenever this row is seen.
+        if let fullScreen {
+            Rows {
+                Button(action: fullScreen.hide) {
+                    HStack(spacing: 10) {
+                        Text(FullScreenPolicy.Copy.rowTitle)
+                            .foregroundStyle(fullScreen.offered ? Palette.accent : Palette.muted)
+                        Spacer(minLength: 8)
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .foregroundStyle(fullScreen.offered ? Palette.accent : Palette.muted)
+                            .accessibilityHidden(true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!fullScreen.offered)
+                .accessibilityHint(FullScreenPolicy.Copy.rowHint)
+                .rowFrame()
+            }
+            .id(Self.fullScreenRowID)
+            Footnote(text: fullScreen.coversScreen ? FullScreenPolicy.Copy.footnote(device: device) : FullScreenPolicy.Copy.notOffered)
         }
         if offersLargerPicture {
             Rows {
