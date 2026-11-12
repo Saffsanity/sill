@@ -138,6 +138,10 @@ final class WindowCatalog {
     var mainOnly = false {
         didSet { if mainOnly != oldValue { resolveDesktopDisplay() } }
     }
+    /// The displays the stage made this run (VirtualStage: a picked window's own display), by ID: never one of the
+    /// Desktop's stops, also once one has gone and reads nothing (vendor 0) while an old look still lists it
+    /// (DesktopDisplays.role). Kept for the run; an ID that now reads another display's identity is that display.
+    var stageDisplayIDs: Set<CGDirectDisplayID> = []
     /// TEST ONLY (SILL_TEST_DISPLAYS on a --synthetic host, DesktopDisplaysHook): the stops a test host
     /// lists in place of this Mac's displays, the first its main display. Nil on every other host.
     var testDisplays: [DesktopDisplays.Display]? {
@@ -397,7 +401,7 @@ final class WindowCatalog {
     /// display, else macOS's first, as before.
     private func resolveDesktopDisplay() {
         let before = (desktopCandidates.map(\.id), desktopCandidates.map(\.name), desktopDisplayID)
-        let stops = testDisplays ?? lookedDisplays.map(Self.described)
+        let stops = testDisplays ?? lookedDisplays.map(described)
         desktopCandidates = DesktopDisplays.candidates(stops, main: testDisplays?.first?.id ?? CGMainDisplayID())
         let id = DesktopDisplays.resolve(chosen: desktopDisplayUUID, among: desktopCandidates, mainOnly: mainOnly)?.id
         display = lookedDisplays.first { $0.displayID == id } ?? mainDisplay
@@ -407,16 +411,18 @@ final class WindowCatalog {
         }
     }
 
-    /// A display as DesktopDisplays judges it: its UUID, frame, whether it is Sill's own or macOS's
-    /// stand-in, the display it mirrors, its refresh rate and its name.
-    private static func described(_ d: SCDisplay) -> DesktopDisplays.Display {
+    /// A display as DesktopDisplays judges it: its UUID, frame, what it is (the stage's by the IDs the stage made, or
+    /// by its identity read now: DesktopDisplays.role), whether it is there now, the display it mirrors, its refresh
+    /// rate and its name.
+    private func described(_ d: SCDisplay) -> DesktopDisplays.Display {
         let id = d.displayID
         let uuid = CGDisplayCreateUUIDFromDisplayID(id).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String }
         let mirrors = CGDisplayMirrorsDisplay(id)
         let refresh = CGDisplayCopyDisplayMode(id).map { $0.refreshRate }
+        let role = DesktopDisplays.role(vendor: CGDisplayVendorNumber(id), product: CGDisplayModelNumber(id),
+                                        madeByStage: stageDisplayIDs.contains(id))
         return DesktopDisplays.Display(id: id, uuid: uuid ?? "display \(id)", frame: d.frame,
-                                       isSills: StreamCoordinator.isSillVirtualDisplay(id),
-                                       isStandIn: StreamCoordinator.isStandInDisplay(id),
+                                       role: role, online: CGDisplayIsOnline(id) != 0,
                                        mirrors: mirrors == kCGNullDirectDisplay ? nil : mirrors,
                                        refreshHz: refresh.flatMap { $0 > 0 ? $0 : nil },
                                        name: VirtualStage.screen(for: id)?.localizedName)

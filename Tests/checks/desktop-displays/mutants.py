@@ -8,7 +8,11 @@ OUT = os.path.join(ROOT, ".build", "checks", "desktop-displays")
 os.makedirs(OUT, exist_ok=True)
 SRC = os.path.join(ROOT, "Sources/StreamProtocol/DesktopDisplays.swift")
 orig = open(SRC).read()
-SHOWN_FILTER = "        let shown = displays.filter { !$0.isSills && !$0.isStandIn }\n"
+SHOWN_FILTER = "        let shown = displays.filter { $0.role == .screen && $0.online }\n"
+ROLE_MADE = "        if madeByStage && vendor == 0 { return .stage }\n"
+ROLE_STAGE = "        if vendor == sillVendor && product == stageProduct { return .stage }\n"
+ROLE_DESKTOP = "        if vendor == sillVendor && product == desktopProduct { return .sillDesktop }\n"
+ROLE_STANDIN = "        if vendor == 0x756e6b6e && product == 0x76697274 { return .standIn }   // 'unkn', 'virt'\n"
 MIRROR = "            return primary.mirrors == d.id\n"
 SORT = "        let sorted = stops.sorted { ($0.frame.minX, $0.frame.minY, $0.id) < ($1.frame.minX, $1.frame.minY, $1.id) }\n"
 TURN = "        guard let i = mainStop else { return sorted }\n        return Array(sorted[i...] + sorted[..<i])\n"
@@ -30,8 +34,8 @@ SHOWN = "        guard let displays, displays > 1, let current, (1...displays).c
 ON = "        if let pointer, frame.contains(pointer) { return nil }\n"
 MUTANTS = [
     # The stops
-    ("D1 Sill's own display a stop", SHOWN_FILTER, "        let shown = displays.filter { !$0.isStandIn }\n"),
-    ("D2 macOS's stand-in a stop", SHOWN_FILTER, "        let shown = displays.filter { !$0.isSills }\n"),
+    ("D1 the stage's display a stop", SHOWN_FILTER, "        let shown = displays.filter { ($0.role == .screen || $0.role == .stage) && $0.online }\n"),
+    ("D2 macOS's stand-in a stop", SHOWN_FILTER, "        let shown = displays.filter { ($0.role == .screen || $0.role == .standIn) && $0.online }\n"),
     ("D3 a mirror set as many stops as displays", MIRROR, "            return true\n"),
     ("D4 two displays mirroring each other both lost", MIRROR, "            return false\n"),
     ("D5 macOS's own order kept", SORT, "        let sorted = stops\n"),
@@ -102,6 +106,18 @@ MUTANTS = [
     ("D59 the label without its number", "        return \"Desktop \\(n)\"\n", "        return \"Desktop\"\n"),
     ("D60 a tap steps whatever the stops", "        button(displays: displays, current: current, names: nil, desktopStreams: desktopStreams).steps\n",
      "        desktopStreams\n"),
+    # Fault B of Noah's test (2026-11-12): what a display is, and a display gone since the last look
+    ("D61 a display an old look lists after it went a stop", SHOWN_FILTER, "        let shown = displays.filter { $0.role == .screen }\n"),
+    ("D62 Sill's Desktop display a stop in phase 1", SHOWN_FILTER,
+     "        let shown = displays.filter { ($0.role == .screen || $0.role == .sillDesktop) && $0.online }\n"),
+    ("D63 the stage known by its identity alone (the IDs it made ignored)", ROLE_MADE, ""),
+    ("D64 every display with Sill's vendor the stage's", ROLE_STAGE, "        if vendor == sillVendor { return .stage }\n"),
+    ("D65 another Sill's stage a screen", ROLE_STAGE, ""),
+    ("D66 Sill's Desktop display a screen", ROLE_DESKTOP, ""),
+    ("D67 the stand-in by its vendor alone", ROLE_STANDIN, "        if vendor == 0x756e6b6e { return .standIn }\n"),
+    ("D68 the stand-in never judged", ROLE_STANDIN, ""),
+    ("D69 the stage's product the Desktop's", "    public static let stageProduct: UInt32 = 0x0001\n", "    public static let stageProduct: UInt32 = 0x0002\n"),
+    ("D70 an ID the stage once had the stage's whatever it reads now", ROLE_MADE, "        if madeByStage { return .stage }\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

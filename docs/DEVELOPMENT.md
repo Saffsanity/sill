@@ -355,8 +355,11 @@ On a Mac with two displays or more, the Desktop button steps through them
 `docs/virtual-desktop-plan.md`). "Desktop 1" is always the main display (the
 one with the menu bar), then each display to its right as they sit in System
 Settings › Displays › Arrange, wrapping to the leftmost and back to the main
-display; Sill's own virtual display and macOS's stand-in for a Mac with no
-screen are never stops, and a mirror set is one. While the Desktop streams the
+display. The display Sill makes for a picked window (Virtual Display's) is never
+a stop and never counted, nor is macOS's stand-in for a Mac with no screen or a
+display that has gone since the last look (each step takes a fresh look first);
+a mirror set is one stop. Sill's own Desktop display (#200's, the Virtual
+Desktop's) is no stop in this phase: phase 2 adds it as the last one. While the Desktop streams the
 button reads "Desktop 2" with a dot per stop under it, the shown one filled
 ("3/7" from seven stops), and a tap moves the Desktop to the next stop; while a
 window streams it names the stop a tap brings the Desktop back to. VoiceOver

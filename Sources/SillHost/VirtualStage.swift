@@ -542,6 +542,7 @@ final class VirtualStage {
         generation += 1
         let gen = generation
         display = d
+        catalog.stageDisplayIDs.insert(d.displayID)    // never one of the Desktop's stops (DesktopDisplays.role), even once gone
         let created = Self.ms(since: t0)
         // Fires on the display's private queue; the stage lives on the main actor.
         d.onTerminated = { [weak self] in Task { @MainActor [weak self] in self?.lost(generation: gen) } }

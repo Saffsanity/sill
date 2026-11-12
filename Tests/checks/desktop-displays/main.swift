@@ -36,9 +36,9 @@ func check(_ ok: Bool, _ what: String) {
 func eq<T: Equatable>(_ a: T, _ b: T, _ what: String) { check(a == b, "\(what): \(a)" + (a == b ? "" : " (want \(b))")) }
 
 typealias D = DesktopDisplays
-func display(_ id: UInt32, _ uuid: String, x: Double, y: Double = 0, w: Double = 1512, h: Double = 982, sills: Bool = false,
-             standIn: Bool = false, mirrors: UInt32? = nil, hz: Double? = nil, name: String? = nil) -> D.Display {
-    D.Display(id: id, uuid: uuid, frame: CGRect(x: x, y: y, width: w, height: h), isSills: sills, isStandIn: standIn,
+func display(_ id: UInt32, _ uuid: String, x: Double, y: Double = 0, w: Double = 1512, h: Double = 982, role: D.Role = .screen,
+             online: Bool = true, mirrors: UInt32? = nil, hz: Double? = nil, name: String? = nil) -> D.Display {
+    D.Display(id: id, uuid: uuid, frame: CGRect(x: x, y: y, width: w, height: h), role: role, online: online,
               mirrors: mirrors, refreshHz: hz, name: name)
 }
 
@@ -47,7 +47,7 @@ func display(_ id: UInt32, _ uuid: String, x: Double, y: Double = 0, w: Double =
 let builtIn = display(1, "BUILTIN", x: 0, y: 0, hz: 120, name: "Built-in Retina Display")
 let left = display(4, "BENQ-L", x: -3840, y: -2160, w: 3840, h: 2160, hz: 60, name: "BenQ PD2705U")
 let right = display(2, "BENQ-R", x: 0, y: -2160, w: 3840, h: 2160, hz: 60, name: "BenQ PD2705U")
-let sills = display(54, "SILL-VD", x: 1512, y: 0, w: 1366, h: 1024, sills: true)
+let sills = display(54, "SILL-VD", x: 1512, y: 0, w: 1366, h: 1024, role: .stage)
 let listed = [builtIn, right, sills, left]
 
 // MARK: The stops
@@ -85,12 +85,49 @@ eq(D.candidates([display(1, "A", x: 0), display(2, "B", x: 1512, mirrors: 99)], 
 eq(D.candidates([display(1, "A", x: 0, mirrors: 1), display(2, "B", x: 1512)], main: 1).map(\.id), [1, 2],
    "a display that says it mirrors itself: a stop")
 // macOS's stand-in and Sill's own displays.
-eq(D.candidates([display(1, "MBP", x: 0), display(9, "STANDIN", x: 1512, w: 1920, h: 1080, standIn: true)], main: 1).map(\.id), [1],
+eq(D.candidates([display(1, "MBP", x: 0), display(9, "STANDIN", x: 1512, w: 1920, h: 1080, role: .standIn)], main: 1).map(\.id), [1],
    "macOS's 1x stand-in beside a real display: never a stop")
-eq(D.candidates([display(9, "STANDIN", x: 0, w: 1920, h: 1080, standIn: true)], main: 9).map(\.id), [],
+eq(D.candidates([display(9, "STANDIN", x: 0, w: 1920, h: 1080, role: .standIn)], main: 9).map(\.id), [],
    "macOS's stand-in alone: no stop (the Desktop falls back to it, as before)")
-eq(D.candidates([display(1, "MBP", x: 0), display(54, "SILL-VD", x: -4000, sills: true), display(55, "SILL-VD2", x: 5000, sills: true)], main: 1).map(\.id), [1],
+eq(D.candidates([display(1, "MBP", x: 0), display(54, "SILL-VD", x: -4000, role: .stage), display(55, "SILL-VD2", x: 5000, role: .stage)], main: 1).map(\.id), [1],
    "Sill's own displays, left and right: never stops")
+
+// Noah's test of PR #355 (2026-11-12, 04:30), lid closed: the Lenovo (main) at 0,0 and the Dell to its left. Sill's stage
+// display (81, to the right) was removed as the Desktop came back, and a step a second later, from the look before, said
+// "Desktop: display 1 of 3": the removed display, its vendor read 0, counted as a screen.
+let lenovo = display(0x41, "LENOVO", x: 0, y: 0, w: 2560, h: 1440, hz: 60, name: "LEN P24q-20")
+let dell = display(0x40, "DELL", x: -1920, y: 156, w: 1920, h: 1080, hz: 60, name: "DELL P2219H")
+let goneStage = display(0x51, "STAGE-81", x: 2560, y: 0, w: 2234, h: 1250, role: .stage, online: false)
+eq(D.candidates([lenovo, dell, goneStage], main: 0x41).map(\.id), [0x41, 0x40], "Noah's desk after the stage's display went: two stops, the Lenovo first")
+eq(D.candidates([dell, goneStage, lenovo], main: 0x41).count, 2, "listed in any order: two stops")
+eq(D.next(after: 0x40, in: D.candidates([lenovo, dell, goneStage], main: 0x41))?.id, 0x41, "a step from the Dell: the Lenovo, display 1 of 2")
+eq(D.number(of: 0x41, in: D.candidates([lenovo, dell, goneStage], main: 0x41)), 1, "the Lenovo is display 1")
+eq(D.candidates([lenovo, dell, display(0x51, "STAGE-81", x: 2560, w: 2234, h: 1250, role: .stage)], main: 0x41).map(\.id), [0x41, 0x40],
+   "the stage's display while it is up: no stop")
+eq(D.candidates([lenovo, dell, display(0x51, "STAGE-81", x: 2560, w: 2234, h: 1250, online: false)], main: 0x41).map(\.id), [0x41, 0x40],
+   "a display an old look lists after it went, whatever it reads now: no stop")
+eq(D.candidates([lenovo, display(0x40, "DELL", x: -1920, y: 156, w: 1920, h: 1080, online: false)], main: 0x41).map(\.id), [0x41],
+   "a monitor unplugged since the last look: no stop")
+eq(D.candidates([display(0x41, "LENOVO", x: 0, w: 2560, h: 1440, online: false), dell], main: 0x41).map(\.id), [0x40],
+   "the main display gone since the last look: the rest, as arranged")
+// What a display is, by what it is: the stage's by the IDs it made this run or by its identity; never "Sill's vendor".
+eq(D.role(vendor: 0, product: 0, madeByStage: true), .stage, "a display the stage made, removed (vendor 0): the stage's")
+eq(D.role(vendor: 0x10AC, product: 0xA0C4, madeByStage: true), .screen, "a monitor given an ID the stage once had (IDs change across a sleep): a screen")
+eq(D.role(vendor: 0x5111, product: 0x0001, madeByStage: true), .stage, "the stage's display while it is up")
+eq(D.role(vendor: 0x5111, product: 0x0001, madeByStage: false), .stage, "the stage's identity, another Sill's stage on this Mac: the stage's")
+eq(D.role(vendor: 0x5111, product: 0x0002, madeByStage: false), .sillDesktop, "Sill's Desktop display (#200's, the Virtual Desktop's): its own role")
+eq(D.role(vendor: 0x5111, product: 0x0003, madeByStage: false), .screen, "another display with Sill's vendor is not the stage")
+eq(D.role(vendor: 0x756e6b6e, product: 0x76697274, madeByStage: false), .standIn, "macOS's stand-in")
+eq(D.role(vendor: 0x756e6b6e, product: 0x0001, madeByStage: false), .screen, "'unkn' alone is no stand-in")
+eq(D.role(vendor: 0x10AC, product: 0xA0C4, madeByStage: false), .screen, "a Dell: a screen")
+eq(D.role(vendor: 0, product: 0, madeByStage: false), .screen, "a display that reads nothing and the stage did not make: a screen (online decides)")
+eq(D.sillVendor, 0x5111, "Sill's vendor, the stage's since 2026-09-22 (VirtualStage.vendorID)")
+eq(D.stageProduct, 0x0001, "the stage's product (VirtualStage.productID)")
+eq(D.desktopProduct, 0x0002, "the Desktop's product (docs/virtual-desktop-plan.md §7)")
+// Phase 1: Sill's Desktop display is no stop. PHASE 2 makes it the Virtual Desktop's last stop (candidates' marked line),
+// and this case changes with it.
+eq(D.candidates([lenovo, dell, display(0x60, "SILL-DESKTOP", x: 2560, w: 1920, h: 1080, role: .sillDesktop)], main: 0x41).map(\.id),
+   [0x41, 0x40], "phase 1: Sill's Desktop display is no stop")
 // The same arrangement in any order macOS lists it, and ties by ID.
 eq(D.candidates([display(3, "C", x: 0, y: 0), display(2, "B", x: 0, y: 0)], main: nil).map(\.id), [2, 3],
    "two displays at one origin (a mirror macOS did not say): by ID, so the order never flips")
@@ -272,19 +309,20 @@ for _ in 0..<5_000 {
         if mirrorOf != nil { mirrorsSeen += 1 }
         all.append(display(id, "U\(id)", x: Double(Int.random(in: -4...4, using: &rng)) * 1000 + Double(i),
                            y: Double(Int.random(in: -2...2, using: &rng)) * 1000,
-                           sills: kind == 7, standIn: kind == 8, mirrors: mirrorOf, hz: [nil, 60, 120, 59.94].randomElement(using: &rng)!))
+                           role: kind == 7 ? .stage : kind == 8 ? .standIn : kind == 6 && i % 2 == 0 ? .sillDesktop : .screen,
+                           online: !(kind == 5 && i % 3 == 0), mirrors: mirrorOf, hz: [nil, 60, 120, 59.94].randomElement(using: &rng)!))
     }
     let main = Bool.random(using: &rng) ? all.randomElement(using: &rng)?.id : UInt32.random(in: 0...200, using: &rng)
     let stops = D.candidates(all.shuffled(using: &rng), main: main)
     // P1
-    let real = all.filter { !$0.isSills && !$0.isStandIn }
+    let real = all.filter { $0.role == .screen && $0.online }
     let byID = Dictionary(real.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
     let expected = real.filter { d in
         guard let m = d.mirrors, m != d.id, let p = byID[m] else { return true }
         return p.mirrors == d.id
     }
     if Set(stops.map(\.id)) != Set(expected.map(\.id)) || stops.count != expected.count {
-        check(false, "P1 the stops are the displays not Sill's or the stand-in, one per mirror set: \(stops.map(\.id)) of \(all.map(\.id))")
+        check(false, "P1 the stops are the screens on now, one per mirror set: \(stops.map(\.id)) of \(all.map(\.id))")
     }
     // P2
     let arranged = expected.sorted { ($0.frame.minX, $0.frame.minY, $0.id) < ($1.frame.minX, $1.frame.minY, $1.id) }

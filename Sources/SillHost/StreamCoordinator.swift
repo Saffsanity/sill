@@ -1105,13 +1105,6 @@ package final class StreamCoordinator {
         CGDisplayVendorNumber(id) == VirtualStage.vendorID
     }
 
-    /// Whether `id` is macOS's own 1x stand-in for a Mac with no screen (vendor 'unkn', model 'virt',
-    /// seen on macOS 27 with the lid closed and nothing attached, PR #200): never one of the Desktop's
-    /// stops (DesktopDisplays), as no screen shows it.
-    static func isStandInDisplay(_ id: CGDirectDisplayID) -> Bool {
-        CGDisplayVendorNumber(id) == 0x756e6b6e && CGDisplayModelNumber(id) == 0x76697274
-    }
-
     // MARK: Each device's link (docs/remote-bundle-plan.md §6)
 
     /// The stream's quality as `select` commits it (nil: nothing streams). The devices' links are
@@ -2267,13 +2260,15 @@ package final class StreamCoordinator {
     }
 
     /// Kind 47: the Desktop on the Mac's next stop (DesktopDisplays: the main display first, then each
-    /// display to its right, wrapping round), worked out from a look no older than a pick's, then the Mac's
+    /// display to its right, wrapping round), worked out from a fresh look at the displays, then the Mac's
     /// pointer to its centre so the device's arrow shows at once. Ignored unless the Desktop streams, and
     /// mid-switch, so a second quick tap never skips a stop. A step whose stop does not stream goes back to
     /// the choice before it. A test host steps through its SILL_TEST_DISPLAYS and never moves the pointer.
     private func nextDesktopDisplay(askedBy who: String) async {
         guard active == .desktop, !switching else { return }
-        if !synthetic { await lookAgainIfStale() }
+        // A fresh look at the displays before every step, whatever the last one's age: a display that went since (the
+        // stage's, removed as the Desktop came back: "display 1 of 3" with two screens, 2026-11-12) is no stop.
+        if !synthetic { await catalog.refreshWindows() }
         let previous = catalog.desktopDisplayUUID
         // Locked during that look (LockPolicy refused kind 47 only as it was read on arrival): no step.
         guard active == .desktop, !switching, !shuttingDown, !lockReading.locked,

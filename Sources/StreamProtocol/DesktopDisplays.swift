@@ -6,8 +6,9 @@ import Foundation
 /// method"; the button "must show which desktop the user is on … and make it clear that tapping moves to
 /// the next"). addhumal's PR #173, grown by phase 1 of docs/virtual-desktop-plan.md (§1):
 ///
-/// - The stops (`candidates`): the displays macOS lists, never Sill's own (the window stage's virtual
-///   display) nor macOS's 1x stand-in for a Mac with no screen, one per mirror set, in the arrangement's
+/// - The stops (`candidates`): the screens macOS lists and has now (`role`, `online`): never the display Sill makes
+///   for a picked window (the stage), nor macOS's 1x stand-in for a Mac with no screen, nor one an old look still
+///   lists after it went; one per mirror set, in the arrangement's
 ///   order (left to right, then top to bottom, as System Settings › Displays draws them) turned so that
 ///   the main display (the one with the menu bar) comes first. "Desktop 1" is always the main display;
 ///   each tap moves one display to the right as they sit on the desk, wrapping to the leftmost after the
@@ -37,11 +38,12 @@ public enum DesktopDisplays {
         public var uuid: String
         /// Global points, as CGDisplayBounds.
         public var frame: CGRect
-        /// One of Sill's own virtual displays (vendor 0x5111: the window stage's), never a stop.
-        public var isSills: Bool
-        /// macOS's own 1x stand-in for a Mac with no screen (vendor 'unkn', model 'virt', seen on macOS 27,
-        /// PR #200), never a stop: no screen shows it.
-        public var isStandIn: Bool
+        /// What it is (`Role`, from `role(vendor:product:madeByStage:)`): only a screen is a stop.
+        public var role: Role
+        /// Whether it is there now (CGDisplayIsOnline). A look lists the displays of its moment, and the next comes up
+        /// to 2 s later: Sill's stage display, removed a second before a step, was counted as a third stop
+        /// ("Desktop: display 1 of 3", Noah's test of PR #355, 2026-11-12), its vendor read 0 once it had gone.
+        public var online: Bool
         /// The display this one mirrors (CGDisplayMirrorsDisplay), nil when it mirrors none: a mirror set
         /// is one stop.
         public var mirrors: UInt32?
@@ -50,22 +52,59 @@ public enum DesktopDisplays {
         /// Its name (NSScreen's localizedName, "DELL U2723QE"), for VoiceOver and the log; nil when not known.
         public var name: String?
 
-        public init(id: UInt32, uuid: String, frame: CGRect, isSills: Bool, isStandIn: Bool = false,
+        public init(id: UInt32, uuid: String, frame: CGRect, role: Role = .screen, online: Bool = true,
                     mirrors: UInt32? = nil, refreshHz: Double? = nil, name: String? = nil) {
-            self.id = id; self.uuid = uuid; self.frame = frame; self.isSills = isSills; self.isStandIn = isStandIn
+            self.id = id; self.uuid = uuid; self.frame = frame; self.role = role; self.online = online
             self.mirrors = mirrors; self.refreshHz = refreshHz; self.name = name
         }
     }
 
+    /// What a listed display is. Only a screen is one of the Desktop's stops (`candidates`).
+    public enum Role: Equatable {
+        /// A screen to show: the Mac's own, a monitor, a Sidecar iPad, an AirPlay display, another app's virtual display.
+        case screen
+        /// The display Sill makes for a picked window (VirtualStage, Virtual Display): it holds that window alone, so it
+        /// is never a stop and never counted, today or later (Noah, 2026-11-12).
+        case stage
+        /// Sill's own Desktop display (product 0x0002: #200's for a Mac with no working screen, the Virtual Desktop of
+        /// docs/virtual-desktop-plan.md §7): no screen of the Mac's. Phase 2 makes it a stop by its role, in `candidates`.
+        case sillDesktop
+        /// macOS's own 1x stand-in for a Mac with no screen (vendor 'unkn', model 'virt', seen on macOS 27, PR #200): no
+        /// screen shows it.
+        case standIn
+    }
+
+    /// Sill's display identities (docs/virtual-desktop-plan.md §7; macOS remembers a display by vendor, product and
+    /// serial): the stage's (VirtualStage: vendor 0x5111, product 0x0001) and the Desktop's (product 0x0002).
+    public static let sillVendor: UInt32 = 0x5111
+    public static let stageProduct: UInt32 = 0x0001
+    public static let desktopProduct: UInt32 = 0x0002
+
+    /// A listed display's role, by what it is: the stage's identity (the stage of this Sill or of another on this Mac),
+    /// or a display the stage made this run that reads nothing now (removed: vendor 0, while an old look still lists it);
+    /// else Sill's Desktop identity, macOS's stand-in, or a screen. An ID the stage once had that now reads another
+    /// identity (display IDs change across a sleep) is that display. Never "any display with Sill's vendor number": the
+    /// Virtual Desktop will be one, and a stop.
+    public static func role(vendor: UInt32, product: UInt32, madeByStage: Bool) -> Role {
+        if vendor == sillVendor && product == stageProduct { return .stage }
+        if madeByStage && vendor == 0 { return .stage }
+        if vendor == sillVendor && product == desktopProduct { return .sillDesktop }
+        if vendor == 0x756e6b6e && product == 0x76697274 { return .standIn }   // 'unkn', 'virt'
+        return .screen
+    }
+
     // MARK: The stops
 
-    /// The stops, in the cycle's order: every display but Sill's own and macOS's stand-in, one per
+    /// The stops, in the cycle's order: every screen on now (never the stage's display, Sill's Desktop display or
+    /// macOS's stand-in, nor one an old look lists after it went), one per
     /// mirror set (a display that mirrors another one listed is that one's stop; two that say they mirror
     /// each other are both kept, so no display is ever lost), left to right and then top to bottom (ties
     /// by ID, so the order never flips between looks), turned to start at `main`'s stop: the main display
     /// itself, or the display it mirrors. Without it among them, the arrangement as it is.
     public static func candidates(_ displays: [Display], main: UInt32?) -> [Display] {
-        let shown = displays.filter { !$0.isSills && !$0.isStandIn }
+        // PHASE 2 (docs/virtual-desktop-plan.md §1): the Virtual Desktop, Sill's Desktop display (`.sillDesktop`), joins the
+        // cycle as its last stop, by its role, while its setting is on and Sill can make it. It is never a screen here.
+        let shown = displays.filter { $0.role == .screen && $0.online }
         let byID = Dictionary(shown.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let stops = shown.filter { d in
             guard let m = d.mirrors, m != d.id, let primary = byID[m] else { return true }

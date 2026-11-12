@@ -53,7 +53,7 @@ enum DesktopDisplaysHook {
             let xy = parts[3].split(separator: ",")
             guard xy.count == 2, let x = Double(xy[0]), let y = Double(xy[1]), abs(x) <= 65_536, abs(y) <= 65_536 else { return nil }
             let display = DesktopDisplays.Display(id: UInt32(101 + i), uuid: "TEST-\(i + 1)", frame: CGRect(x: x, y: y, width: w, height: h),
-                                                  isSills: false, refreshHz: hz > 0 ? hz : nil, name: name.isEmpty ? nil : name)
+                                                  refreshHz: hz > 0 ? hz : nil, name: name.isEmpty ? nil : name)
             stops.append(Stop(display: display, scale: CGFloat(scale)))
         }
         guard !stops.isEmpty, stops.count <= 16 else { return nil }
