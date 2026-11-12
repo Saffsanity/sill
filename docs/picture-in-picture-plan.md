@@ -304,7 +304,37 @@ Settings (the gear) › This iPad (This iPhone), turn **Picture in Picture** on.
 
 ## Results
 
-(Filled in as the gates run.)
+### G1: the check (2026-11-12, 00:34–00:38)
+
+`Tests/checks/picture-in-picture`: 344 checks pass, the 20,000 random sets of windows among them (C1–C3:
+11,561 chosen in front, 848 kept while away, 7,591 none) and the 20,000 random lives of one window (27,391 starts,
+13,153 pauses, 4,467 stopped at the pause's limit, 54,889 by an ending; L1–L7). Its mutants: 43 of 43
+caught, the unchanged check passing first. M23b, the pause's end measured by its length
+(`now - pausedAt >= pausedLimit`), fails L4 3,283 times: a look at exactly the time the rule gave found
+nothing due in those lives, which the review found before the first run (below).
+
+### The review before the first build (2026-11-11)
+
+Builds waited for disk space, so the code was read before it was ever compiled: an independent read-only
+review of the branch found nine things, each fixed (40dbfe6) before the first build:
+
+1. The pause's end measured by its length rounds below the limit: the check would have failed on the rule
+   as written (and `--mutants` would have called every mutant caught). Now against the time it is due; the
+   mutants run the check unchanged first.
+2. The device's own pointer move went out as PiP stopped with Sill away (its ✕, the lock, ten minutes
+   paused): now it goes only with Sill's window in front.
+3. The audio category was set after the controller was made, on a queue: now at once, before it.
+4. The Mac's copies would have replaced the device's clipboard while the person was in another app: now
+   not written while the picture shows only in PiP (rule 8).
+5. Home, then straight back: the scene's activation could come before iOS started PiP, leaving it over
+   Sill in front: now stopped half a second after it starts with the window in front (rule 7).
+6. The controller outlived the switch in a window that was not offered: now let go whatever the offer.
+7. A layout iOS makes for its app-switcher snapshots could send a viewport while PiP showed (a restart, a
+   window resized with Aa): now held until Sill's window is in front (rule 8; P17).
+8. The audio session was made active on the main thread, and a failed take never tried again: now on a
+   queue of its own, tried again at each look.
+9. No `invalidatePlaybackState()` at the start: now at every start.
+
 
 ## Progress
 
