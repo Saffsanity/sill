@@ -312,6 +312,12 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
             && !tracker.sawSecondFinger && !trackSuspended
     }
 
+    /// The tracker has its stroke's finger and has not begun: full screen's flick held it (it begins at
+    /// touch-down otherwise), and it is about to drive, so the pan leaves the stroke's travel to it.
+    private var trackerPending: Bool {
+        tracker.state == .possible && tracker.downLocation != nil && !tracker.sawSecondFinger && !trackSuspended
+    }
+
     /// One finger, from touch-down: the pointer follows as soon as the finger clears the slop.
     /// Once a second finger joins, this stroke's motion belongs to the pan (scroll, then one-finger
     /// moves after a lift, with its own rebase) until every finger is up.
@@ -383,9 +389,10 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
                 // next callback.
                 let translation = gesture.translation(in: self)
                 lastTranslation = translation
-                // A stroke held until its lift by full screen's flick (EdgeRecognizers.releasedAtLift): the
-                // tracker's end carries its travel, once.
-                if !trackerDriving, translation != .zero, !EdgeRecognizers.releasedAtLift(in: window) {
+                // A stroke full screen's flick held (EdgeFlickRecognizer.swift): UIKit lets the tracker and this pan
+                // go together, in either order, and the tracker carries the travel from where the finger landed, once
+                // (`trackerPending`; at the lift, its end: EdgeRecognizers.releasedAtLift).
+                if !trackerDriving, !trackerPending, translation != .zero, !EdgeRecognizers.releasedAtLift(in: window) {
                     moveCursor(dx: translation.x, dy: translation.y)
                 }
             }
