@@ -203,11 +203,12 @@ key): a switch under Automatically update Sill, off by default, kept beside it.
 With it on, the daily check (and each launch while that check is on) also reads the nightly pre-release's
 `Sill-nightly.zip.manifest`, verified with the nightly key alone ("Sill nightly
 1", never a release's format or keys), and offers the version and build it names
-(GitHub's title is never read); Update Now and the automatic update then install
-it through the same steps and checks, newer by version, then build, and with no
-cooling-off (`UpdateAutoPolicy.nightlyCoolingOff`, 0: the one constant to change for
-one, plan §16.10; a release is still newer by its version alone, so the release of a
-nightly's own version is never offered to it). nightly.yml signs each night's zip with `Scripts/sign-nightly.sh`
+(GitHub's title is never read); Update Now installs it through the same steps and
+checks, newer by version, then build. The automatic update never does: it installs
+releases only (Noah's decision of 2026-11-12, option 4; `UpdateAutoPolicy.start` and
+`dates` refuse a nightly first, and AppUpdater gives it the release offer alone). A
+release is still newer by its version alone, so the release of a nightly's own version
+is never offered to it. nightly.yml signs each night's zip with `Scripts/sign-nightly.sh`
 and the secret `SILL_NIGHTLY_UPDATE_KEY`, when the environment `nightly` has it;
 `make-app.sh` marks a nightly with `SillChannel = nightly` and every build with
 its commit (`SillCommit`).

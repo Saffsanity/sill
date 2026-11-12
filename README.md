@@ -201,8 +201,8 @@ from a nightly Sill for Mac to the release keeps its settings and paired devices
 <!-- Nightly Update Now: for the first release whose Sill carries a nightly key (docs/release-checklist.md part 1 §3). -->
 Or turn on Use nightly builds in Sill for Mac's Settings › General: Sill then offers each
 night's build too, built and signed by GitHub from Sill's newest code with nobody looking
-at it first, and with Automatically update Sill on installs it by itself without the
-two-day wait.
+at it first. A nightly installs only when you click Update Now; Automatically update Sill
+installs releases only.
 <!-- /Nightly Update Now -->
 
 ## Tips

@@ -152,10 +152,9 @@ final class AppUpdater {
         return target
     }
 
-    /// The end of `offer`'s cooling-off from what this Sill remembers (a release's, or a nightly's while nightlies wait).
+    /// The end of a release's cooling-off from what this Sill remembers (a nightly has none: it never installs by itself).
     private func waitUntil(_ offer: UpdatePolicy.Offer) -> Date? {
-        guard let build = offer.build else { return Auto.waitUntil(memory, tag: offer.tag) }
-        return Auto.nightlyCoolingOff > 0 ? Auto.waitUntil(memory, tag: Auto.key(offer.version, build: build), wait: Auto.nightlyCoolingOff) : nil
+        offer.build == nil ? Auto.waitUntil(memory, tag: offer.tag) : nil
     }
 
     /// "Use nightly builds" in effect: on, and a nightly key compiled in.
@@ -167,6 +166,15 @@ final class AppUpdater {
         guard let running = runningVersion else { return nil }
         return Policy.chooseOffer(release: latestRelease(), nightly: nightliesOn ? nightlyOffer : nil, running: running,
                                   runningBuild: runningBuild)
+    }
+
+    /// What the automatic update may install: the check's latest release when it is newer than this Sill (by version;
+    /// the release of a nightly's own version never), and never a nightly, by construction: the nightly offer isn't
+    /// passed (Noah's decision of 2026-11-12, option 4: "Automatic for releases only. Nightlies take one click on
+    /// Update Now each."). With Use nightly builds on, the pane may offer a newer nightly meanwhile (`chosen`).
+    private var automaticOffer: UpdatePolicy.Offer? {
+        guard let running = runningVersion else { return nil }
+        return Policy.chooseOffer(release: latestRelease(), nightly: nil, running: running, runningBuild: runningBuild)
     }
 
     /// Update Now's own choice where it isn't the check's offer (a nightly): the menu names it.
@@ -190,9 +198,11 @@ final class AppUpdater {
     var pane: Policy.Pane {
         let o = paneOffer
         let now = Date()
+        // A nightly offered (Update Now installs it): the release the automatic update would install meanwhile, if any.
+        let alongside = o?.build == nil ? nil : automaticOffer.map { (version: $0.version, tag: $0.tag, waitUntil: waitUntil($0)) }
         let automatic = Auto.pane(memory, offered: o?.version, offeredTag: o?.tag, running: runningVersion,
                                   waitUntil: o.flatMap(waitUntil), now: now,
-                                  offeredBuild: o?.build, runningBuild: runningIsNightly ? runningBuild : nil)
+                                  offeredBuild: o?.build, runningBuild: runningIsNightly ? runningBuild : nil, release: alongside)
         return Policy.pane(state, offered: o?.version, running: runningVersion, available: available, refusal: refusal,
                            keptAt: keptAt, automatic: automatic, offeredBuild: o?.build, ownLine: idle && o != nil && o != offer())
     }
@@ -329,8 +339,9 @@ final class AppUpdater {
         }
     }
 
-    /// Settings › General's "Use nightly builds", the only code that changes it (AutoUpdateStore). Off drops a
-    /// nightly the automatic update hasn't begun installing, and never goes back to a release (plan §16.3).
+    /// Settings › General's "Use nightly builds", the only code that changes it (AutoUpdateStore). On: Sill looks for
+    /// nightlies and offers the newest one to Update Now (never to the automatic update). Off: the nightly offer goes,
+    /// and Sill never goes back to a release (plan §16.3).
     func setNightly(_ on: Bool) {
         guard available, !installer.trust.nightlyKeys.isEmpty, on != memory.nightly else { return }
         if on, !nightlySwitch.enabled { return }
@@ -342,7 +353,6 @@ final class AppUpdater {
             lookAtNightly { [weak self] in self?.considerAutomatic() }
         } else {
             nightlyOffer = nil
-            if target?.build != nil, state.mode == .automatic { cancelUpdate() }
         }
     }
 
@@ -376,17 +386,17 @@ final class AppUpdater {
     // MARK: The automatic update
 
     /// After every check that answered, and when the switch is turned on: begins the automatic update when
-    /// UpdateAutoPolicy says so, with where Sill runs looked at afresh first.
+    /// UpdateAutoPolicy says so, with where Sill runs looked at afresh first. Its offer is the release one alone
+    /// (`automaticOffer`): a nightly is never begun here, and `Auto.start` refuses one anyway (option 4).
     func considerAutomatic() {
         guard notesSettled else { considerWhenSettled = true; return }
-        guard available, memory.on, let offer = chosen, mayBeginAutomatic else { return }
+        guard available, memory.on, let offer = automaticOffer, mayBeginAutomatic else { return }
         refresh { [weak self] r in
-            guard let self, self.mayBeginAutomatic, let current = self.chosen, current == offer else { return }
+            guard let self, self.mayBeginAutomatic, let current = self.automaticOffer, current == offer else { return }
             let now = Date()
             switch Auto.start(self.memory, checkOn: self.checkOn(), available: self.available, refusal: r, offered: offer.version,
                               offeredTag: offer.tag, signed: offer.signed, running: self.runningVersion, idle: self.mayBeginAutomatic,
-                              waitUntil: self.waitUntil(offer), now: now,
-                              offeredBuild: offer.build, runningBuild: self.runningBuild) {
+                              waitUntil: self.waitUntil(offer), now: now, offeredBuild: offer.build) {
             case .no(let why):
                 if why != self.loggedAutomatic {
                     self.loggedAutomatic = why
@@ -622,30 +632,23 @@ final class AppUpdater {
                 // (the second security pass's A1): the signed line is whoever holds the key's to write. It counts on
                 // GitHub's clock too, from the release's publication when that is later (the third pass's CL1 and
                 // AU1). The sight is kept by GitHub's release object too (the fourth pass's AU2: the same tag and zip
-                // on another, older object wait afresh). A nightly waits only while `Auto.nightlyCoolingOff` says so
-                // (none today), and only then is its sight kept (by its key, "0.6.2 (1471)").
+                // on another, older object wait afresh). A nightly never gets here (option 4: the automatic update's
+                // offer is a release), and `Auto.dates` refuses one first.
                 let now = Date()
-                let wait = nightly ? Auto.nightlyCoolingOff : Auto.coolingOff
-                let sightTag = nightly ? Auto.key(p.release.version, build: p.release.build) : p.release.tag
-                if wait > 0 {
-                    self.remember { Auto.sighted($0, tag: sightTag, sha256: p.manifest.sha256, signedAt: p.manifest.signedAt, now: now,
-                                                 github: p.release.answeredAt, published: nightly ? nil : p.release.publishedAt,
-                                                 release: p.release.releaseID) }
-                }
-                let sight = Auto.sighting(self.memory, tag: sightTag, sha256: p.manifest.sha256, release: p.release.releaseID)
+                self.remember { Auto.sighted($0, tag: p.release.tag, sha256: p.manifest.sha256, signedAt: p.manifest.signedAt, now: now,
+                                             github: p.release.answeredAt, published: p.release.publishedAt, release: p.release.releaseID) }
+                let sight = Auto.sighting(self.memory, tag: p.release.tag, sha256: p.manifest.sha256, release: p.release.releaseID)
                 let first = sight?.first ?? now
                 let github = Auto.GitHubClock(firstSeen: sight?.firstGitHub ?? p.release.answeredAt, now: p.release.answeredAt,
-                                              published: nightly ? nil : (sight?.published ?? p.release.publishedAt),
-                                              release: p.release.releaseID)
-                switch Auto.dates(signedAt: p.manifest.signedAt, firstSeen: first, now: now, nightly: nightly, wait: wait, github: github) {
+                                              published: sight?.published ?? p.release.publishedAt, release: p.release.releaseID)
+                switch Auto.dates(signedAt: p.manifest.signedAt, firstSeen: first, now: now, nightly: nightly, github: github) {
                 case .go:
                     // An attempt counts from here: a verified release Sill goes on to download (A3).
                     self.remember { Auto.began($0, p.release.version, now: now, build: p.release.build) }
                     self.send(.fetched(nil))
                 case .waitUntil(let until):
                     let name = Policy.name(version: p.release.version, build: p.release.build)
-                    let words = nightly ? Auto.nightlyCoolingOffWords : Auto.coolingOffWords
-                    print("Automatic update: \(name) waits \(until.map { "until \(UpdateManifest.dateText($0))" } ?? "for an answer from GitHub with a date") to install by itself, \(words) (first found \(UpdateManifest.dateText(first)) by this Mac’s clock, \(sight?.firstGitHub.map(UpdateManifest.dateText) ?? "no date") by GitHub’s; Update Now can install it now).")
+                    print("Automatic update: \(name) waits \(until.map { "until \(UpdateManifest.dateText($0))" } ?? "for an answer from GitHub with a date") to install by itself, \(Auto.coolingOffWords) (first found \(UpdateManifest.dateText(first)) by this Mac’s clock, \(sight?.firstGitHub.map(UpdateManifest.dateText) ?? "no date") by GitHub’s; Update Now can install it now).")
                     self.send(.postponed)
                 case .refuse(let why):
                     // Never counted (the second pass's N9: a Mac whose clock is wrong would otherwise run out of tries).
@@ -728,10 +731,9 @@ final class AppUpdater {
             case .success(let c):
                 self.checked = c
                 // The floor rises only now, on an app that passed both checks (the second security pass's A2: a
-                // manifest alone, for a made-up version, would stop every later release installing by itself).
-                if let build = prepared.release.build, prepared.release.channel == .nightly {
-                    self.remember { Auto.signedNightly($0, c.version, build: build) }
-                } else {
+                // manifest alone, for a made-up version, would stop every later release installing by itself). A
+                // release's alone: the floor is the automatic update's, which installs releases only.
+                if prepared.release.channel != .nightly {
                     self.remember { Auto.signedRelease($0, c.version) }
                 }
                 let signedWith = manifest.channel == .nightly ? "the nightly signed with Sill’s nightly key" : "the release signed with Sill’s update key"

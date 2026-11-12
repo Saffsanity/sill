@@ -462,8 +462,10 @@ Rules found in the steps that hold for all work (each where it is written):
   nightly builds: when it begins; the cooling-off, 48 hours from this Sill's first sight
   of the verified manifest (never from its signed line) on this Mac's clock and on GitHub's
   (the `Date` of its HTTPS answers), from the release's latest `published_at` when that is
-  later, kept by GitHub's release object too (its `id`); a nightly's wait, `nightlyCoolingOff`, none today, one constant whose words follow
-  it; the quiet moment, what it remembers and its bounds, stops by version, its words; pure;
+  later, kept by GitHub's release object too (its `id`); never a nightly, which Update
+  Now alone installs (Noah's option 4: `start` and `dates` refuse one first, and AppUpdater
+  gives it the release offer alone); the quiet moment, what it remembers and its bounds,
+  stops by version, its words; pure;
   all four in `Tests/checks/update-install`), `UpdateInstaller` (the
   mechanism: the release, manifest and stop, GitHub's clock in each answer, the download,
   unpacking through directory descriptors, the Security checks, the atomic swap with its

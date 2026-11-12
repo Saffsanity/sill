@@ -627,7 +627,8 @@ check(P.footnote(automatic: true).contains("Automatically update Sill is on") &&
       && P.footnote(automatic: true).contains("two days after it first finds it") && P.footnote(automatic: true).contains("once no device has been connected for 5 minutes;"), "on: what it does: \(P.footnote(automatic: true))")
 check(P.footnote(automatic: true).hasSuffix("Update Now checks it the same way, at once."), "Update Now checks the same way (it does disconnect, after its question: N9)")
 // With "Use nightly builds" on (plan §16.5): what a nightly trusts, said plainly (the third security pass's NB1: GitHub
-// builds and signs it), Sill asking each time it opens (N10 n), and no two-day wait for a nightly.
+// builds and signs it), Sill asking each time it opens (N10 n), and a nightly installed only through Update Now
+// (option 4).
 for on in [false, true] {
     let f = P.footnote(automatic: on, nightly: true)
     check(f.contains("Apple’s signature and notarization") && f.contains("a release must be signed with Sill’s own update key; a nightly build is signed by GitHub, which builds it."),
@@ -635,8 +636,17 @@ for on in [false, true] {
     check(f.hasPrefix("Once a day, and with nightly builds on each time Sill opens, Sill asks GitHub whether a newer version is out.")
           && P.footnote(automatic: on).hasPrefix("Once a day, Sill asks GitHub whether a newer version is out."), "N10 n: with nightlies, each time Sill opens too (\(on))")
 }
-check(P.footnote(automatic: true, nightly: true).contains("Sill downloads a new release two days after it first finds it, and a nightly build as soon as it finds it, then installs it")
-      && !P.footnote(automatic: true, nightly: false).contains("nightly"), "with nightlies, the footnote says a nightly has no two-day wait; without, it never names nightlies")
+check(P.footnote(automatic: true, nightly: true).contains("Automatically update Sill is on: Sill downloads a new release two days after it first finds it, then installs it and restarts once no device has been connected for 5 minutes; it never disconnects anyone. A nightly build installs only when you click Update Now.")
+      && !P.footnote(automatic: true, nightly: false).contains("nightly"), "option 4: with nightlies, the footnote says releases install by themselves and a nightly through Update Now; without, it never names nightlies")
+// Nothing a person reads says a nightly installs by itself, or without the wait a release has (option 4).
+for words in [P.nightlyNote, P.footnote(automatic: true, nightly: true), P.footnote(automatic: false, nightly: true),
+              AP.nightlyOfferNote(AP.Memory(), release: nil, now: t0),
+              AP.nightlyOfferNote(AP.Memory(), release: AP.Alongside(version: v040, tag: "v0.4", waitUntil: nil), now: t0)] {
+    let nightlyPart = words.components(separatedBy: "nightly").dropFirst().joined(separator: "nightly")
+    check(!words.contains("without the wait a release has") && !words.contains("as soon as") && !words.contains("installs it by itself")
+          && !nightlyPart.contains("installs by itself") || words.contains("never installs by itself"),
+          "option 4: no word says a nightly installs by itself: \(words)")
+}
 check(!UpdatePolicy.footnote.contains("update key") && UpdatePolicy.footnote.contains("never downloads or installs anything by itself"),
       "a build with no update key claims no check it can't make")
 
@@ -712,8 +722,8 @@ check(done.updatedTo == "0.4" && done.updatedAt == later(1) && done.attempts.key
 func ghc(_ first: Date?, _ now: Date?, published: Date? = later(-60), release: Int? = 7) -> AP.GitHubClock {
     AP.GitHubClock(firstSeen: first, now: now, published: published, release: release)
 }
-func dates(signed: Date, first: Date, now: Date, github: AP.GitHubClock? = nil, nightly: Bool = false, wait: TimeInterval? = nil) -> AP.DateVerdict {
-    AP.dates(signedAt: signed, firstSeen: first, now: now, nightly: nightly, wait: wait, github: github ?? ghc(first, now))
+func dates(signed: Date, first: Date, now: Date, github: AP.GitHubClock? = nil, nightly: Bool = false) -> AP.DateVerdict {
+    AP.dates(signedAt: signed, firstSeen: first, now: now, nightly: nightly, github: github ?? ghc(first, now))
 }
 check(dates(signed: t0, first: t0, now: later(47.9)) == .waitUntil(later(48)), "cooling off for 48 hours")
 check(dates(signed: t0, first: t0, now: later(48)) == .go, "then go")
@@ -786,8 +796,8 @@ check(again.seen.count == 2 && AP.sighting(again, tag: "v0.7.0", sha256: sha1, r
       "AU2: the same release object read again keeps its first sight (an edit or a pre-release toggle moves nothing)")
 check(dates(signed: t0, first: t0, now: later(50), github: ghc(t0, later(50), release: nil)) == .refuse("GitHub’s answer doesn’t say which release it is"),
       "AU2: a release whose answer doesn't say which release object it is never installs by itself")
-check(dates(signed: t0, first: t0, now: later(50), github: ghc(t0, later(50), published: nil, release: nil), nightly: true, wait: 12 * 3600) == .go,
-      "AU2: a nightly needs neither (its pre-release rolls; its wait counts from the first sight)")
+check(dates(signed: t0, first: t0, now: later(50), github: ghc(t0, later(50), published: nil, release: nil), nightly: true) == .refuse(AP.nightlyNever),
+      "option 4: a nightly's dates refused, with or without GitHub's publication and release object")
 // N11 a and the fifth pass's N12 a: whatever GitHub's first time was (25 years back, 100 days back), the estimate is
 // this Mac's 48 hours, so the gate lets `dates` look then; `dates`, with GitHub's clock now, decides. A first `Date`
 // years ahead still makes `dates` wait, which fails safe.
@@ -1009,93 +1019,82 @@ if case .success(let l) = listing(nightlyBody()), case .success(let m) = M.verif
         check(P.nightlyMatches(m3, listing: l, endpoints: ne) == .manifestMismatch("asset"), "a nightly naming another zip")
     }
 } else { check(false, "the nightly pair") }
-// The automatic update with nightlies: the switch, no cooling-off, 30 days, the floor after both checks, attempts by build.
-var nmem = AP.switched(AP.Memory(), on: true)
-func nstart(_ m: AP.Memory, build: Int = 1500, offered: SillVersion = v062, running: SillVersion = v062, runningBuild: Int = 1471,
-            now: Date = t0) -> AP.Start {
-    AP.start(m, checkOn: true, available: true, refusal: nil, offered: offered, offeredTag: "nightly", signed: true, running: running, idle: true,
-             now: now, offeredBuild: build, runningBuild: runningBuild)
+// Option 4 (Noah's decision of 2026-11-12, the third security pass's NB1: "For nightlies, lets go with 4", that is
+// "Automatic for releases only. Nightlies take one click on Update Now each."): an automatic start is refused for a
+// nightly first, whatever the switches, the dates, the attempts and the quiet minutes say; so are its dates.
+var nmem = AP.switchedNightly(AP.switched(AP.Memory(), on: true), on: true)
+var nightlyStarts = 0, nightlyCases = 0
+for nightlyOn in [false, true] {
+    for automaticOn in [false, true] {
+        var m = AP.switchedNightly(AP.switched(AP.Memory(), on: automaticOn), on: nightlyOn)
+        m.seen = [AP.Memory.Sighting(tag: "nightly", sha256: sha1, first: later(-1000), signed: later(-1000), firstGitHub: later(-1000),
+                                     published: later(-1000), release: 7)]
+        for waitUntil in [nil, later(-500), later(500)] as [Date?] {
+            for (running, runningBuild, offered, build) in [(v062, 1471, v062, 1500), (v030, 0, v062, 1500), (v062, 1471, v063, 1)] {
+                for idle in [true, false] {
+                    nightlyCases += 1
+                    let r = AP.start(m, checkOn: true, available: true, refusal: nil, offered: offered, offeredTag: "nightly", signed: true,
+                                     running: running, idle: idle, waitUntil: waitUntil, now: t0, offeredBuild: build)
+                    if r != .no(AP.nightlyNever) { nightlyStarts += 1 }
+                    _ = runningBuild
+                }
+            }
+        }
+    }
 }
-check(nstart(nmem) == .no("Use nightly builds is off"), "a nightly only with the switch on")
-nmem = AP.switchedNightly(nmem, on: true)
-check(nstart(nmem) == .go, "on: go")
-check(nstart(nmem, build: 1400) == .no("the offered nightly isn’t newer"), "never an older build")
-check(nstart(AP.signedNightly(nmem, v062, build: 1600)) == .no("the newest nightly went back from 0.6.2 (1600) to 0.6.2 (1500)"), "the nightly floor")
-check(AP.signedNightly(AP.signedNightly(nmem, v062, build: 1600), v062, build: 1500).highestNightlyBuild == 1600, "the floor never goes down")
-let ntried = AP.failed(AP.began(AP.began(nmem, v062, now: t0, build: 1500), v062, now: later(21), build: 1500), v062, why: "x", build: 1500)
-check(nstart(ntried, now: later(100)) == .no("2 attempts at 0.6.2 (1500) failed; Update Now still can") && nstart(ntried, build: 1501, now: later(100)) == .go,
-      "a nightly that failed twice is skipped until the next night's build")
-check(AP.dates(signedAt: t0, firstSeen: t0, now: later(0.1), nightly: true) == .go, "no cooling-off for a nightly (Noah's decision)")
-check(AP.dates(signedAt: t0, firstSeen: t0, now: later(30 * 24 + 0.1), nightly: true) == .refuse("it was signed more than 30 days ago")
-      && AP.dates(signedAt: t0, firstSeen: t0, now: later(30 * 24), nightly: true) == .go, "a nightly at most 30 days old")
+check(nightlyStarts == 0 && nightlyCases == 72, "option 4: no automatic start for a nightly, in all \(nightlyCases) cases (\(nightlyStarts) went on)")
+check(AP.nightlyNever.contains("installs only through Update Now"), "option 4: the log's words")
+for (now, first) in [(later(0.1), t0), (later(100), t0), (later(24 * 200), t0)] {
+    check(AP.dates(signedAt: t0, firstSeen: first, now: now, nightly: true, github: ghc(t0, now)) == .refuse(AP.nightlyNever),
+          "option 4: a nightly's dates never go, whatever they are (\(now.timeIntervalSince(t0) / 3600) h)")
+}
+check(start(AP.switched(AP.Memory(), on: true)) == .go, "…while a release still starts")
 check(AP.key(v062, build: 1471) == "0.6.2 (1471)" && AP.parseKey("0.6.2 (1471)").map { $0.version == v062 && $0.build == 1471 } == true
       && AP.parseKey("0.6.2").map { $0.version == v062 && $0.build == nil } == true
       && AP.parseKey("0.6.2 (x)") == nil && AP.parseKey("0.6.2 1471") == nil, "keys")
-let nb = AP.bounded(AP.began(AP.began(AP.began(AP.began(nmem, v062, now: t0, build: 1500), v062, now: t0, build: 1400), v062, now: t0), v063, now: t0),
+let nb = AP.bounded(AP.began(AP.began(AP.began(AP.began(nmem, v063, now: t0, build: 1600), v062, now: t0, build: 1400), v062, now: t0), v063, now: t0),
                     running: v062, runningBuild: 1471)
-check(nb.attempts.keys.sorted() == ["0.6.2 (1500)", "0.6.3"], "kept: a newer nightly and a newer release; gone: an older nightly and release V: \(nb.attempts.keys.sorted())")
+check(nb.attempts.keys.sorted() == ["0.6.3"], "kept: a newer release's attempts alone, never a nightly's, newer or not: \(nb.attempts.keys.sorted())")
+var nightlySeen = nmem
+nightlySeen.seen = [AP.Memory.Sighting(tag: "0.6.2 (1500)", sha256: sha1, first: t0, signed: t0, firstGitHub: t0, published: nil, release: 7)]
+check(AP.bounded(nightlySeen, running: v030).seen.isEmpty, "a nightly's sighting, from an item written before, goes")
 check(AP.start(AP.switched(AP.Memory(), on: true), checkOn: true, available: true, refusal: nil, offered: v062, offeredTag: "v0.6.2", signed: true,
-               running: v062, idle: true, now: t0, runningBuild: 1471) == .no("the offered release isn’t newer"), "never release V to V by itself")
-var badFloor = nmem
-badFloor.highestNightlyVersion = "0.6.2"
-check(AP.bounded(badFloor, running: v030).highestNightlyVersion == nil, "a nightly floor without its build goes")
+               running: v062, idle: true, now: t0) == .no("the offered release isn’t newer"), "never release V to V by itself")
 // The switch, its words, and the offer's.
 check(AP.nightlySwitch(available: true, keyCompiled: false, canKeep: true, on: false, runningNightly: nil) == AP.Switch(), "no nightly key: no switch")
 check(AP.nightlySwitch(available: false, keyCompiled: true, canKeep: true, on: false, runningNightly: nil) == AP.Switch(), "no Update Now: no switch")
 check(AP.nightlySwitch(available: true, keyCompiled: true, canKeep: true, on: true, runningNightly: nil) == AP.Switch(shown: true, enabled: true, note: P.nightlyNote),
       "on: what nightlies are")
-// NB1 (the third security pass): the words say what a nightly trusts, never two independent checks; its wait before
-// it installs by itself is one constant, none today (Noah), and the words follow it whatever he chooses.
-check(P.nightlyNote.hasPrefix("Nightly builds are built and signed by GitHub from Sill’s newest code; nobody looks at them first.")
-      && P.nightlyNote.contains("less tested than releases and may break") && !P.nightlyNote.contains("checked two ways")
-      && P.nightlyNote.contains("installs by itself as soon as Sill finds it, without the wait a release has, once no device has been connected for \(AP.quietMinutes) minutes")
-      && P.nightlyNote.contains("until a release with a higher version number"), "the nightly note says what a nightly trusts, the missing wait and the quiet moment")
-check(AP.nightlyCoolingOff == 0 && P.nightlyNote == P.nightlyWords(wait: 0) && AP.nightlyCoolingOffWords == "as soon as it finds it",
-      "NB1: no wait for a nightly today (Noah's decision of 2026-11-12, until he changes it)")
-check(P.nightlyWords(wait: 12 * 3600).contains("each one installs by itself 12 hours after it first finds it, once no device has been connected for")
-      && !P.nightlyWords(wait: 12 * 3600).contains("as soon as"), "NB1: a nightly's wait of 12 hours in the note")
+// NB1 (the third security pass) and option 4: the words say what a nightly trusts, that Sill says when one is out and
+// Update Now installs it, and never that one installs by itself.
+check(P.nightlyNote == "Nightly builds are built and signed by GitHub from Sill’s newest code; nobody looks at them first. They are less tested than releases and may break. Sill tells you when one is out, and Update Now installs it; a nightly never installs by itself, even with Automatically update Sill on. Turning this off doesn’t go back to the last release: Sill keeps the nightly you have until a release with a higher version number.",
+      "the nightly note: what a nightly trusts, Update Now alone, no downgrade")
 check(AP.waitWords(0) == "once it finds it" && AP.waitWords(48 * 3600) == "two days after it first finds it" && AP.waitWords(24 * 3600) == "a day after it first finds it"
       && AP.waitWords(12 * 3600) == "12 hours after it first finds it" && AP.waitWords(3600) == "an hour after it first finds it"
       && AP.waitWords(1800) == "30 minutes after it first finds it" && AP.waitWords(60) == "1 minute after it first finds it", "the waits' words")
-// A nightly's wait above zero counts as a release's: from the first sight, on both clocks (dates with `wait`).
-check(dates(signed: t0, first: t0, now: later(11.9), github: ghc(t0, later(11.9), published: nil), nightly: true, wait: 12 * 3600) == .waitUntil(later(12))
-      && dates(signed: t0, first: t0, now: later(12), github: ghc(t0, later(12), published: nil), nightly: true, wait: 12 * 3600) == .go,
-      "NB1: a nightly that waits 12 hours goes only then, with no publication date needed")
-check(dates(signed: t0, first: t0, now: later(12), github: ghc(t0, later(1), published: nil), nightly: true, wait: 12 * 3600) == .waitUntil(later(23)),
-      "NB1: …on GitHub's clock too")
-check(dates(signed: t0, first: t0, now: later(0.01), github: ghc(nil, nil, published: nil), nightly: true) == .go, "NB1: today a nightly goes at once, whatever the clocks")
 check(AP.nightlySwitch(available: true, keyCompiled: true, canKeep: true, on: false, runningNightly: (v063, 1520)).note
       == "You have a nightly build, 0.6.3 (1520). Sill updates to the next release after 0.6.3.", "off on a nightly: no downgrade")
 check(AP.nightlySwitch(available: true, keyCompiled: true, canKeep: false, on: false, runningNightly: nil).note == AP.canKeepNote, "no keychain group")
-check(AP.nightlyOfferNote(nmem, offered: v062, build: 1500) == "Sill installs it by itself once no device has been connected for 5 minutes.", "a nightly's offer note")
-check(AP.nightlyOfferNote(nmem, offered: v062, build: 1500, waitUntil: nil, now: t0, wait: 12 * 3600)
-      == "Sill installs it by itself 12 hours after it first finds it, once no device has been connected for 5 minutes.", "NB1: a nightly's offer note while nightlies wait, before the first read")
-check(AP.nightlyOfferNote(nmem, offered: v062, build: 1500, waitUntil: later(6), now: t0, wait: 12 * 3600).hasPrefix("Sill installs it by itself today at ")
-      || AP.nightlyOfferNote(nmem, offered: v062, build: 1500, waitUntil: later(6), now: t0, wait: 12 * 3600).hasPrefix("Sill installs it by itself tomorrow at "),
-      "NB1: …and after it, from when")
-check(AP.start(nmem, checkOn: true, available: true, refusal: nil, offered: v062, offeredTag: "nightly", signed: true, running: v062, idle: true,
-               waitUntil: later(6), now: t0, offeredBuild: 1500, runningBuild: 1471) == .no("nightly 0.6.2 (1500) cools off until 2026-11-12T09:00:00Z"),
-      "NB1: a nightly that waits isn't begun before its end")
-// …and what AppUpdater keeps for it then (`if wait > 0`): its sighting under its key, "0.6.2 (1500)", bounded as its
-// attempts are (newer by version, then build), its end from that sighting on both clocks.
-let nkey = AP.key(v062, build: 1500)
-let nseen = AP.bounded(AP.sighted(nmem, tag: nkey, sha256: sha1, signedAt: t0, now: t0, github: t0, release: 7), running: v062, runningBuild: 1471)
-check(nseen.seen.count == 1 && AP.firstSeen(nseen, tag: nkey, sha256: sha1, release: 7) == t0 && AP.waitUntil(nseen, tag: nkey, wait: 12 * 3600) == later(12)
-      && AP.waitUntil(nseen, tag: nkey) == later(48) && AP.waitUntil(nseen, tag: AP.key(v062, build: 1501), wait: 12 * 3600) == nil,
-      "NB1: a nightly's sighting kept by its key, its end from it")
-check(AP.bounded(nseen, running: v062, runningBuild: 1500).seen.isEmpty && AP.bounded(nseen, running: SillVersion("0.6.3")!, runningBuild: 1).seen.isEmpty,
-      "NB1: …and dropped once this Sill is that nightly or newer")
-check(AP.start(nseen, checkOn: true, available: true, refusal: nil, offered: v062, offeredTag: "nightly", signed: true, running: v062, idle: true,
-               waitUntil: AP.waitUntil(nseen, tag: nkey, wait: 12 * 3600), now: later(11.9), offeredBuild: 1500, runningBuild: 1471) != .go
-      && AP.start(nseen, checkOn: true, available: true, refusal: nil, offered: v062, offeredTag: "nightly", signed: true, running: v062, idle: true,
-                  waitUntil: AP.waitUntil(nseen, tag: nkey, wait: 12 * 3600), now: later(12), offeredBuild: 1500, runningBuild: 1471) == .go,
-      "NB1: …and the start waits on it")
-let nsight = AP.sighting(nseen, tag: nkey, sha256: sha1, release: 7)
-check(AP.dates(signedAt: t0, firstSeen: nsight?.first ?? later(11), now: later(12), nightly: true, wait: 12 * 3600,
-               github: AP.GitHubClock(firstSeen: nsight?.firstGitHub, now: later(12), published: nil)) == .go
-      && AP.dates(signedAt: t0, firstSeen: nsight?.first ?? later(11), now: later(12), nightly: true, wait: 12 * 3600,
-                  github: AP.GitHubClock(firstSeen: nsight?.firstGitHub, now: later(11), published: nil)) != .go,
-      "NB1: …and the dates from it, as fetch reads them")
+// The pane while a nightly is offered and Automatically update Sill is on: releases only; and the release the
+// automatic update would install meanwhile, when there is one it would.
+check(AP.nightlyOfferNote(nmem, release: nil, now: t0) == "Automatically update Sill installs releases only. This nightly installs only when you click Update Now.",
+      "option 4: a nightly's offer note")
+check(AP.nightlyOfferNote(nmem, release: AP.Alongside(version: v040, tag: "v0.4", waitUntil: nil), now: t0)
+      == "Automatically update Sill installs releases only: it installs Sill 0.4 by itself two days after it first finds it, once no device has been connected for 5 minutes. This nightly installs only when you click Update Now.",
+      "option 4: a release alongside, not read yet")
+let alongsideLater = AP.nightlyOfferNote(nmem, release: AP.Alongside(version: v040, tag: "v0.4", waitUntil: later(30)), now: t0)
+check(alongsideLater.hasPrefix("Automatically update Sill installs releases only: it installs Sill 0.4 by itself tomorrow at ")
+      || alongsideLater.hasPrefix("Automatically update Sill installs releases only: it installs Sill 0.4 by itself on "), "option 4: a release alongside, cooling off: \(alongsideLater)")
+check(AP.nightlyOfferNote(nmem, release: AP.Alongside(version: v040, tag: "v0.4", waitUntil: later(-1)), now: t0)
+      == "Automatically update Sill installs releases only: it installs Sill 0.4 by itself, once no device has been connected for 5 minutes. This nightly installs only when you click Update Now.",
+      "option 4: a release alongside, its wait over")
+check(AP.nightlyOfferNote(AP.stopped(nmem, "v0.4.0"), release: AP.Alongside(version: v040, tag: "v0.4", waitUntil: nil), now: t0)
+      == "Automatically update Sill installs releases only. This nightly installs only when you click Update Now.", "option 4: a stopped release isn't named")
+check(AP.pane(nmem, offered: v062, offeredTag: "nightly", running: v030, waitUntil: nil, now: t0, offeredBuild: 1500).offerNote
+      == "Automatically update Sill installs releases only. This nightly installs only when you click Update Now.", "option 4: the pane's note under a nightly")
+check(AP.pane(nmem, offered: v062, offeredTag: "nightly", running: v030, waitUntil: nil, now: t0, offeredBuild: 1500,
+              release: (version: v040, tag: "v0.4", waitUntil: nil)).offerNote?.contains("it installs Sill 0.4 by itself") == true,
+      "option 4: …with the release alongside")
 // The third security pass's W3: the watcher kept the new copy, not started, when the old one failed its last check.
 check(P.line(.keptUnstarted("it quit before it had run for long enough"), running: v040, offered: v040, keptAt: nil)
       == "Sill 0.4 didn’t start the first time, and the copy it replaced failed its last check, so Sill 0.4 stayed. If it misbehaves, download Sill again from getsill.app.",
@@ -1369,32 +1368,38 @@ func after(_ a: String, _ b: String, in s: String) -> Bool {
     guard let ra = s.range(of: a), let rb = s.range(of: b) else { return false }
     return ra.lowerBound < rb.lowerBound
 }
-check(updater.components(separatedBy: "Auto.signedRelease(").count == 2 && after("self.checked = c", "self.remember { Auto.signedRelease($0, c.version) }", in: updater),
-      "A2: the rollback floor rises only with an app that passed both checks")
-check(updater.components(separatedBy: "Auto.signedNightly(").count == 2 && after("self.checked = c", "self.remember { Auto.signedNightly($0, c.version, build: build) }", in: updater),
-      "A2: the nightly floor too")
+check(updater.components(separatedBy: "Auto.signedRelease(").count == 2 && after("self.checked = c", "self.remember { Auto.signedRelease($0, c.version) }", in: updater)
+      && updater.contains("if prepared.release.channel != .nightly {\n                    self.remember { Auto.signedRelease($0, c.version) }"),
+      "A2: the rollback floor rises only with a release's app that passed both checks")
 // A3: an attempt counts only once the release's manifest verified and its dates let it go on (in fetch), never at
 // the offer (considerAutomatic).
 check(updater.components(separatedBy: "Auto.began(").count == 2 && after("Auto.dates(signedAt:", "self.remember { Auto.began(", in: updater)
       && after("private func fetch(", "Auto.began(", in: updater), "A3: an attempt counts only on a verified release")
 // A1: the first sight is kept before the dates are judged; CL1 and AU1: with GitHub's clock and publication.
-check(after("Auto.sighted($0, tag: sightTag", "Auto.dates(signedAt: p.manifest.signedAt, firstSeen:", in: updater), "A1: the first sight before the dates")
-check(updater.contains("Auto.dates(signedAt: p.manifest.signedAt, firstSeen: first, now: now, nightly: nightly, wait: wait, github: github)"),
-      "CL1, AU1: the automatic update's dates with GitHub's clock and publication")
+check(after("Auto.sighted($0, tag: p.release.tag", "Auto.dates(signedAt: p.manifest.signedAt, firstSeen:", in: updater), "A1: the first sight before the dates")
+check(updater.contains("Auto.dates(signedAt: p.manifest.signedAt, firstSeen: first, now: now, nightly: nightly, github: github)"),
+      "CL1, AU1: the automatic update's dates with GitHub's clock and publication (a nightly's refused)")
 // …and the sighting and the clock fetch judges by, word for word (whitespace aside): GitHub's time at the first sight
 // and now, the latest publication, and GitHub's release object (the fourth pass's AU2). A mutant that left the
 // publication out of the clock went uncaught by a rule that looked for less.
 let flatUpdater = updater.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-check(flatUpdater.contains("self.remember { Auto.sighted($0, tag: sightTag, sha256: p.manifest.sha256, signedAt: p.manifest.signedAt, now: now, github: p.release.answeredAt, published: nightly ? nil : p.release.publishedAt, release: p.release.releaseID) }")
-      && flatUpdater.contains("let sight = Auto.sighting(self.memory, tag: sightTag, sha256: p.manifest.sha256, release: p.release.releaseID)"),
+check(flatUpdater.contains("self.remember { Auto.sighted($0, tag: p.release.tag, sha256: p.manifest.sha256, signedAt: p.manifest.signedAt, now: now, github: p.release.answeredAt, published: p.release.publishedAt, release: p.release.releaseID) }")
+      && flatUpdater.contains("let sight = Auto.sighting(self.memory, tag: p.release.tag, sha256: p.manifest.sha256, release: p.release.releaseID)"),
       "AU2: fetch keeps and finds the sighting by GitHub's release object too")
-check(flatUpdater.contains("let github = Auto.GitHubClock(firstSeen: sight?.firstGitHub ?? p.release.answeredAt, now: p.release.answeredAt, published: nightly ? nil : (sight?.published ?? p.release.publishedAt), release: p.release.releaseID)"),
+check(flatUpdater.contains("let github = Auto.GitHubClock(firstSeen: sight?.firstGitHub ?? p.release.answeredAt, now: p.release.answeredAt, published: sight?.published ?? p.release.publishedAt, release: p.release.releaseID)"),
       "CL1, AU1, AU2: fetch's GitHub clock: its first time, its time now, the latest publication and the release object")
-check(updater.contains("let wait = nightly ? Auto.nightlyCoolingOff : Auto.coolingOff")
-      && updater.contains("let sightTag = nightly ? Auto.key(p.release.version, build: p.release.build) : p.release.tag")
-      && after("if wait > 0 {", "self.remember { Auto.sighted($0, tag: sightTag", in: updater)
-      && updater.contains("return Auto.nightlyCoolingOff > 0 ? Auto.waitUntil(memory, tag: Auto.key(offer.version, build: build), wait: Auto.nightlyCoolingOff) : nil"),
-      "NB1: a nightly's wait is the one constant, its sighting kept by its key only while it waits")
+// Option 4, by construction: the automatic update's offer is the check's release alone (the nightly never passed), it
+// is the only offer considerAutomatic reads, and nothing anywhere still waits for, dates or floors a nightly.
+check(flatUpdater.contains("return Policy.chooseOffer(release: latestRelease(), nightly: nil, running: running, runningBuild: runningBuild)")
+      && flatUpdater.contains("guard available, memory.on, let offer = automaticOffer, mayBeginAutomatic else { return }")
+      && flatUpdater.contains("guard let self, self.mayBeginAutomatic, let current = self.automaticOffer, current == offer else { return }")
+      && !updater.components(separatedBy: "func considerAutomatic()").last!.components(separatedBy: "func devicesChanged(").first!.contains("chosen"),
+      "option 4: the automatic update reads the release offer alone, never the nightly's")
+for name in files {
+    let t = text(name)
+    check(!t.contains("nightlyCoolingOff") && !t.contains("signedNightly") && !t.contains("highestNightly") && !t.contains("nightlyMaxAge"),
+          "option 4: \(name) keeps no nightly wait, floor or age for an automatic install")
+}
 check(updater.contains("if nightliesOn, !atLaunch || checkOn() { lookAtNightly") && text("AppModel.swift").contains("updater.checkAnswered(atLaunch: true)")
       && text("AppModel.swift").contains("updates.onAnswered = { [weak updater] in updater?.checkAnswered() }"),
       "N10 n: at launch the nightly is read only while the daily check is on; after every check that answered, always")

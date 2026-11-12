@@ -1126,11 +1126,19 @@ For a nightly tester:
   half (`UpdateManifest.nightlyKeys`, empty until Noah makes the key). With it on, the daily check also reads
   the pre-release's `Sill-nightly.zip.manifest`, signed by the step "Sign the nightly for Update Now"
   (`Scripts/sign-nightly.sh`, the secret `SILL_NIGHTLY_UPDATE_KEY` of the environment `nightly`; without it
-  the step says so and the job stays green), and offers the build it names; with Automatically update Sill on
-  too, the nightly installs by itself at the next quiet moment (no two-day wait: read the plan's T38 before
-  turning it on for anyone). A release is still newer by its version alone, so the release of a nightly's
-  own version is never offered to it. Until a release carries the key, everything in the next item holds for
-  everyone.
+  the step says so and the job stays green), and offers the build it names to Update Now: one click on Update
+  Now installs each nightly, never the automatic update, which installs releases only (Noah's decision of
+  2026-11-12, option 4: "Automatic for releases only. Nightlies take one click on Update Now each."; read the
+  plan's T38 before turning it on for anyone). A release is still newer by its version alone, so the release of
+  a nightly's own version is never offered to it. Until a release carries the key, everything in the next item
+  holds for everyone.
+  The GitHub settings the third security pass asked for are in place since 2026-11-12, 16:35 EST (the plan's
+  §16.10): the ruleset "main" (id 27158533: no deletion, no force push, every change through a pull request,
+  no bypass) and, on the environment `nightly`, administrators no longer bypass its rules (`can_admins_bypass`
+  false; its branch policy still main alone, no reviewer or wait timer, its secrets untouched). Read them back
+  before storing the nightly secret: `gh api repos/Saffsanity/sill/environments/nightly --jq .can_admins_bypass`
+  prints false, and `gh api repos/Saffsanity/sill/rules/branches/main --jq '.[].type'` prints deletion,
+  non_fast_forward and pull_request.
   The nightly key, once (a few minutes, Terminal.app; the plan's §16.8 has what each step shows):
   `Scripts/sign-nightly.sh --new-key --key-file "/Volumes/<encrypted image>/sill-nightly.key"`, then
   `gh secret set SILL_NIGHTLY_UPDATE_KEY --env nightly --repo Saffsanity/sill < "<that file>"`, then the
@@ -1433,12 +1441,15 @@ and with them the nightly Mac job's token, which can publish any release (`conte
 the update check offers included. So the approval keeps a tag from publishing a release unseen, not
 a commit on main. A ruleset on main that requires a pull request stops a direct push but not a
 merged pull request, unless an approval is required too, and GitHub never lets a pull request's
-author approve it: with Noah alone it holds only against someone else's write access. A ruleset
+author approve it: with Noah alone it holds only against someone else's write access. Main has one
+since 2026-11-12 (the ruleset "main", id 27158533: no deletion, no force push, every change through a
+pull request, 0 approvals, no bypass; docs/one-click-update-plan.md §16.10). A ruleset
 keeping `v*` tags to Noah keeps other people's tags from reaching his approval at all, and one
 that restricts updates and deletions of `v*` tags keeps any tag where it was pushed: a tag moved
 after its run began stops that run, but one moved while the job builds still gets the release,
 its files the approved commit's build and its tag and source archives the other commit's. An
-administrator can still bypass an environment's rules (GitHub's default), which is Noah.
+administrator can still bypass `release`'s rules (GitHub's default), which is Noah; on `nightly` that
+bypass is off since 2026-11-12 (`can_admins_bypass` false).
 
 | Name | Kind | What it holds |
 |---|---|---|

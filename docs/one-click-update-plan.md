@@ -1079,7 +1079,7 @@ without it:
 
 | | Finding | Done | Check that fails without it |
 |---|---|---|---|
-| NB1 | HIGH (design). On the nightly channel both proofs are one GitHub job's: any push to main reaches every Mac with both switches on within about a day. | Noah decides (§16.10: the reviewer's four options, what each stops and doesn't, which survive his account being taken over, and the exact steps and `gh api` commands for the two settings, none of them run here). Whatever he answers: the switch's words say what a nightly trusts, the reviewer's sentence ("Nightly builds are built and signed by GitHub from Sill's newest code; nobody looks at them first."); the nightly's wait is one constant, `UpdateAutoPolicy.nightlyCoolingOff`, 0 today, whose words follow it (`nightlyCoolingOffWords`, `nightlyWords(wait:)`, the footnote, the offer's note) and whose wait, above 0, counts as a release's (first sight, both clocks, the nightly's key). Today's behaviour is unchanged. | `update-install`: the words; 0 and 12 hours through `dates`, `start`, `sighted`, `bounded`, `waitUntil` and the notes; mutants "NB1: the nightly words as two checks", "NB1: the nightly's wait changed silently", "NB1: a nightly that waits begun early", "NB1: no wait taken as a wait", "NB1: a nightly's offer note without its wait", "a nightly with a cooling-off". |
+| NB1 | HIGH (design). On the nightly channel both proofs are one GitHub job's: any push to main reaches every Mac with both switches on within about a day. | **Decided 2026-11-12 (round 8): option 4.** Noah: "For nightlies, lets go with 4" ("Automatic for releases only. Nightlies take one click on Update Now each."), replacing his earlier wish that a nightly install by itself at once; and "For github set both settings": the ruleset "main" (id 27158533) and `can_admins_bypass` false on `nightly`, applied and read back by the coordinator (§16.10). In the code, by construction: the automatic update's offer is the release one alone, `UpdateAutoPolicy.start` and `dates` refuse a nightly first whatever the switches, the dates and the quiet minutes say, and the nightly's wait, floor and age limit are gone. The words say what a nightly trusts ("built and signed by GitHub from Sill's newest code; nobody looks at them first") and that Update Now installs it. What now stands between a push to main and a Mac is the person's click on Update Now for each nightly (T38). | `update-install`: an automatic start refused for a nightly in all 72 combinations of the switches, dates, builds and idleness; a nightly's dates refused; the words; the automatic update's offer read from the release alone (source rules); mutants "option 4: …" (eight). |
 | AU1 | MEDIUM. `--audit` skipped drafts and pre-releases, stopped without a notification when `gh` couldn't list, ran at a time written in the repository; a release's first sight outlived the release. | The audit reads every release that carries `Sill.zip.manifest`, drafts and pre-releases included, each manifest by its asset id (a draft's has no download address), and names each one's state; with `--notify`, every stop of an audit notifies (an EXIT trap: an expired login, no network, an unreadable listing); the checklist's LaunchAgent runs it every four hours from when it is loaded (`StartInterval`), no time written. In Sill: the wait counts from the later of the first sight and the release's `published_at` (GitHub's field, kept per sighting, only ever later), so a release deleted and published again starts over; a release whose answer doesn't say when it was published never installs by itself. §15.4 says the record and the audit guard against a key leaked off this Mac, not against someone in control of it or of Noah's account. | `sign-test.sh`: a release outside the record as a pre-release, as a draft and published, each named with a notification; `gh` failing as an expired login: a notification. `update-install`: published again on day 2 waits afresh; no `published_at`, no automatic install; the publication kept only ever later; mutants "AU1: …" (five) and "CL1, AU1: the dates without GitHub's". |
 | CL1 | LOW. The cooling-off counted on this Mac's wall clock. | The wait counts on GitHub's clock too: `Transfer` keeps the `Date` header of each HTTPS answer (`httpDate`: RFC 9110's IMF-fixdate only, a real date with its own weekday, GMT), the sighting keeps GitHub's time at the first read (`firstGitHub`, filled once), and the install needs 48 h by GitHub's clock (from the later of that and `published_at`) as well as by this Mac's. A missing or unreadable date never counts as a go: Sill waits for an answer that has one. | `update-install`: the reviewer's two proofs (the clock 47 h ahead an hour after the first read; the clock 72 h behind at the first read with a matching signed date) wait; no date waits; the date parser's forms; mutants "CL1: …" (four). Harness: GitHub's clock and `published_at` read from the stand-in's answer, a fixed `Date` word for word, none and "yesterday" read as none; mutants "CL1: GitHub's clock never read", "CL1: GitHub's clock left off the release". |
 | W3 | LOW. When the watcher's final check failed, nothing was left at Sill's path; `whole` had no one-name rule. | On a failed final check the watcher moves the put-back copy aside and the new copy (`did not start.app`, checked whole when it was installed) back to Sill's path, not started, never into whatever stands there (exit 7 then), and writes the restored note with a third line, `kept` (exit 8); Sill, opened again, says "Sill 0.4 didn’t start the first time, and the copy it replaced failed its last check, so Sill 0.4 stayed. …" (`.keptUnstarted`). `whole` refuses a copy with a regular file of more than one name (`find -type f -links +1`), as the installer's tree check does. | Harness: "the note lands in the put-back copy" (the reviewer's B: the put-back copy fails its last check, the new copy is back at Sill's path, the note says `kept`, nothing started) and "W3: a second name for a file of the old copy while it waits" (the reviewer's F: the old copy refused, nothing put back); mutants "W3: Sill's path left empty when the last check fails", "W3: a file with two names taken". `update-install`: the words, the source rules; mutant "W3: a new copy the watcher kept unsaid". |
@@ -1470,8 +1470,8 @@ Later the same day, after reading the summary: "48 hour wait seems ok, can the 1
 - **What it does not protect against.** Update Now (the person installs at once, after seeing the version);
   a release nobody notices within two days (the wait buys time, not attention); a Mac that can't keep its
   memory (no keychain group) restarts the wait at every launch, never shortens it. A Mac's clock no longer
-  shortens it (CL1, above). Nightlies have no cooling-off today (§16.7, T38; the one constant Noah may change,
-  §16.10).
+  shortens it (CL1, above). A nightly is never installed by itself, so it needs no cooling-off: Update Now alone
+  installs one (Noah's decision of 2026-11-12, option 4; §16.10, T38).
 - **A way to notice (A1's second half).** Every manifest `sign-update.sh` signs goes in the signing record
   (`signed.txt` beside the signer: the time, the tag, the manifest's SHA-256 and the zip's).
   `Scripts/sign-update.sh --audit` downloads the `Sill.zip.manifest` of every release that carries one,
@@ -1592,9 +1592,11 @@ says nothing of either (Noah: "Add the update key language when applicable as we
   builds on each time Sill opens, Sill asks GitHub whether a newer version is out. … Before it installs a new
   version, Sill checks it two ways: it must carry Apple’s signature and notarization for Sill’s developer, and
   a release must be signed with Sill’s own update key; a nightly build is signed by GitHub, which builds it."
-  With Automatically update Sill on too: "… Sill downloads a new release two days after it first finds it, and a
-  nightly build as soon as it finds it, then installs it …" (the nightly's words from `nightlyCoolingOff`).
-- Under "Use nightly builds", while on: §16.5's note.
+  With Automatically update Sill on too: "… Sill downloads a new release two days after it first finds it, then
+  installs it and restarts once no device has been connected for 5 minutes; it never disconnects anyone. A
+  nightly build installs only when you click Update Now." (option 4, Noah's decision of 2026-11-12).
+- Under "Use nightly builds", while on: §16.5's note. Under a nightly offer with Automatically update Sill on:
+  §16.3's "Both offers at once".
 - A build without an update key: the check's own footnote, unchanged ("… Sill never downloads or installs
   anything by itself: a new version opens its page on GitHub, where you download it.").
 - Apple's check: "Couldn’t update: the downloaded app isn’t signed with the Developer ID of Sill’s
@@ -1671,16 +1673,25 @@ download any update found immediately instead of 48 hours out. I think it will m
 download nightly builds." And, on the second proof: "A separate nightly key that GitHub holds seems like the
 best option".
 
+**Noah's decision of 2026-11-12 on NB1 (§16.10), replacing his earlier wish that a nightly install by itself at
+once:** asked which option he wanted for nightlies that install by themselves, he answered "For nightlies, lets
+go with 4", option 4 as it was put to him: "Automatic for releases only. Nightlies take one click on Update Now
+each." So a nightly is offered and Update Now installs it; the automatic update installs releases only, and no
+path installs, or downloads to install, a nightly without the person's click.
+
 ### 16.1 What it does
 
 A switch, "Use nightly builds", in Settings › General's update section, under "Automatically update Sill",
 off by default. With it on, the daily check (and each launch while that check is on: the third security pass's
 N10 n; the footnote and the privacy page say so) also reads the pre-release `nightly` that
 `.github/workflows/nightly.yml` publishes every night main moved (Developer ID signed and notarized in
-GitHub Actions), and offers its newest build when it is newer than this Sill; Update Now installs it; with
-"Automatically update Sill" on too, a nightly found is downloaded at once (no 48-hour wait) and installed
-under the same rule as a release: 5 minutes with no device connected, never disconnecting anyone, the
-watcher, the same retry bounds. Releases are still offered beside nightlies (§16.3).
+GitHub Actions), and offers its newest build when it is newer than this Sill: "Sill nightly 0.6.2 (1471) is
+available." with Update Now, which downloads it, checks it both ways and installs it, the watcher and all, as for
+a release. The automatic update never does (option 4, above): with "Automatically update Sill" on too, it goes on
+installing releases only, by its rules (two days from first sight on both clocks, five quiet minutes, never
+disconnecting anyone), the release offer alone, never the nightly's (`AppUpdater.automaticOffer`;
+`UpdateAutoPolicy.start` and `dates` refuse a nightly first, whatever the switches, the dates and the quiet minutes
+say). Releases are still offered beside nightlies (§16.3).
 
 ### 16.2 The second proof: a nightly key (Noah's decision of 2026-11-12)
 
@@ -1743,18 +1754,24 @@ v0.6.1, tagged at 1388, and after it), and only the build orders builds of one v
   later one (release 0.6.3 itself is never offered to a nightly of 0.6.3, as above).
 - **A release published while someone runs a nightly of its version:** not offered (as above); with the
   switch on, the next nightly brings its code, and with it off, the next version does.
-- **The rollback floors, one per channel:** the highest release version and the highest nightly (version,
-  build) whose app passed both checks here (the second security pass's A2: never a manifest alone); the
-  automatic update never installs below either.
-- **Attempts:** counted only once the nightly's manifest verified (A3), by version and build; the memory keeps
-  only nightlies newer than the running one by (version, build), and releases newer by version.
-- **Dates.** A nightly's manifest carries its signed time too. No cooling-off for a nightly (Noah: "should
-  download any update found immediately"): `UpdateAutoPolicy.nightlyCoolingOff`, 0, one constant whose words
-  (the note under the switch, the footnote, the offer's note) follow it, and whose wait, once above 0, counts as
-  a release's does, from each Mac's first sight on both clocks, kept by the nightly's key "0.6.2 (1471)" (the
-  third security pass's NB1 asks Noah whether it should be some hours: §16.10). The age limit for a nightly installed by itself is 30 days (a
-  quiet main can leave the newest nightly a few weeks old; replay below what this Sill has seen is the floor's
-  job), and a signature more than 10 minutes in this Mac's future is refused, as for a release.
+- **The rollback floor:** the highest release version whose app passed both checks here (the second security
+  pass's A2: never a manifest alone); the automatic update never installs below it. The nightly floor of rounds
+  4 to 7 went with option 4: it guarded only the automatic update's nightlies, and Update Now never installs an
+  older build than the one running (the version, then build, rule).
+- **Attempts:** the automatic update's, releases' alone, by version; the memory keeps none for a nightly.
+- **Dates.** A nightly's manifest carries its signed time, which no rule of the automatic update reads any more:
+  it never installs a nightly (option 4; `UpdateAutoPolicy.nightlyCoolingOff` and the 30-day nightly age limit
+  of rounds 4 to 7 are gone with it).
+- **Both offers at once (decided, round 8).** The pane offers one update, the newest by the order above: the
+  higher version, the release on a tie. A release newer than the nightly on offer is that update: "Sill 0.6.3 is
+  available.", Update Now installs it, and with Automatically update Sill on its note is a release's ("Sill
+  installs it by itself two days after it first finds it, …"). A nightly newer than the release is the pane's
+  offer ("Sill nightly 0.6.3 (1500) is available.", Update Now installs it), and with Automatically update Sill on
+  its note says so and names the release the automatic update installs by itself meanwhile, when there is one
+  newer than this Sill it would install: "Automatically update Sill installs releases only: it installs Sill
+  0.6.2 by itself two days after it first finds it, once no device has been connected for 5 minutes. This
+  nightly installs only when you click Update Now." (else "Automatically update Sill installs releases only. This
+  nightly installs only when you click Update Now.").
 
 ### 16.4 What nightly.yml publishes
 
@@ -1780,32 +1797,31 @@ branch.
 - Only Settings › General's switch (`AppUpdater.setNightly`), stored with the automatic switch in Sill's
   keychain item (`AutoUpdateStore`); never a device, a launch argument, `defaults` or the CLI; off by
   default; shown only where Update Now is and a nightly key is compiled in.
-- The words: the switch "Use nightly builds"; under it, while on (the third security pass's NB1: the earlier
-  "Each is checked two ways: … and Sill's nightly key, which only the nightly build signs with" read as two
-  independent checks, when GitHub's one job makes both; the reviewer's sentence is taken word for word): "Nightly
-  builds are built and signed by GitHub from Sill's newest code; nobody looks at them first. They are less tested
-  than releases and may break. With Automatically update Sill on, each one installs by itself as soon as Sill
-  finds it, without the wait a release has, once no device has been connected for 5 minutes. Turning this off
-  doesn't go back to the last release: Sill keeps the nightly you have until a release with a higher version
-  number." (the minutes from `UpdateAutoPolicy.quietMinutes`; the "as soon as …" from `nightlyCoolingOff`:
-  with 12 hours, "each one installs by itself 12 hours after it first finds it, once …",
-  `UpdateInstallPolicy.nightlyWords(wait:)`). The offers and steps name the build: "Sill nightly 0.6.2 (1471)
-  is available.", "Downloading Sill nightly 0.6.2 (1471)…". The update key's failures for a nightly name the
-  nightly key. The footnote, while it is on, says a nightly is signed by GitHub ("… and a release must be signed
-  with Sill’s own update key; a nightly build is signed by GitHub, which builds it."), that Sill also asks at
-  each launch ("Once a day, and with nightly builds on each time Sill opens, Sill asks GitHub …": N10 n), and,
-  with Automatically update Sill on, the nightly's wait from the same constant ("Sill downloads a new release
-  two days after it first finds it, and a nightly build as soon as it finds it, then installs it …"); off, it
-  never names nightlies.
+- The words: the switch "Use nightly builds"; under it, while on (the third security pass's NB1 for what a
+  nightly trusts, the reviewer's sentence word for word; option 4 for who installs one): "Nightly builds are
+  built and signed by GitHub from Sill's newest code; nobody looks at them first. They are less tested than
+  releases and may break. Sill tells you when one is out, and Update Now installs it; a nightly never installs by
+  itself, even with Automatically update Sill on. Turning this off doesn't go back to the last release: Sill
+  keeps the nightly you have until a release with a higher version number." (`UpdateInstallPolicy.nightlyNote`).
+  The offers and steps name the build: "Sill nightly 0.6.2 (1471) is available.", "Downloading Sill nightly
+  0.6.2 (1471)…". The update key's failures for a nightly name the nightly key. Under a nightly offer, with
+  Automatically update Sill on, the note of §16.3's "Both offers at once" (`UpdateAutoPolicy.nightlyOfferNote`;
+  no "installs it by itself" line under a nightly any more). The footnote, while it is on, says a nightly is
+  signed by GitHub ("… and a release must be signed with Sill’s own update key; a nightly build is signed by
+  GitHub, which builds it."), that Sill also asks at each launch ("Once a day, and with nightly builds on each
+  time Sill opens, Sill asks GitHub …": N10 n), and, with Automatically update Sill on, that it installs releases
+  and a nightly needs Update Now ("… Sill downloads a new release two days after it first finds it, then installs
+  it and restarts once no device has been connected for 5 minutes; it never disconnects anyone. A nightly build
+  installs only when you click Update Now."); off, it never names nightlies. Nothing anywhere says a nightly
+  installs by itself, or "without the wait a release has" (`update-install` checks the words).
 - Sill for iPhone and iPad is not affected (its nightlies are TestFlight's). A Mac on a nightly speaks the
   same wire, additive as always: a device on the App Store version connects to it as to a newer release,
   and skips what it doesn't know.
 
 ### 16.6 The watcher and the bounds
 
-Unchanged: the watcher, the hold, the quiet moment. Attempts are kept by version and build for a nightly, so
-a nightly that fails twice is skipped until the next night's build (a new build number); a release's by
-version, as before.
+Unchanged: the watcher, the hold, the quiet moment, all of them Update Now's for a nightly. The automatic
+update's attempts are releases' alone (option 4).
 
 ### 16.7 Threat model, the new points
 
@@ -1820,35 +1836,30 @@ refused both ways (`update-install`, `sign-test.sh`).
 cdhashes; the (version, build) rule and the nightly floor refuse an older one; a pair from two nights fails
 the size or the SHA-256, before anything is downloaded and before anything is offered.
 
-**T38. What stands between the nightly channel and every Mac with both switches on (read this before
-turning "Use nightly builds" on for anyone else).** Whoever holds the nightly key (a leaked copy, or a run
-of the environment that holds it), can write to the pre-release `nightly` and can get a build notarized for
-Sill's team can publish a nightly that every Mac with "Use nightly builds" and "Automatically update Sill"
-both on installs by itself, at its next daily check, once no device has been connected for 5 minutes. All
-three are in the environment `nightly`, which any commit on main runs every night with no reviewer (T4,
-T35): a pull request merged to main, or a workflow changed there, is enough. Nothing else stands in the
-way: there is no cooling-off for nightlies (Noah's decision: "should download any update found
-immediately"), no signing record to audit (CI signs them, not Noah's Mac), and the second security pass's
-lessons for releases (the first sight, the audit) don't apply. The third security pass (NB1, HIGH) read the
-repository's settings on 2026-11-12: main is unprotected and has no ruleset, the only collaborator is
-Saffsanity (admin), the `nightly` environment has no reviewer and no wait timer and lets admins bypass its
-rules (`can_admins_bypass` true), and the `gh` login every agent session on this Mac uses has admin rights:
-so both proofs are one GitHub job's, and whoever can push to main (or change its workflow) holds both.
-§16.10 lists the four ways to narrow it, for Noah. What remains is only (1) the next night's
-build, which replaces it as the newest (a Mac that installed the bad build updates to the next genuine one,
-unless the bad build stopped it from updating, which it can), and (2) the watcher, which puts the old copy
-back only when the new one doesn't run at all. Someone who notices can delete `Sill-nightly.zip.manifest`
-from the pre-release, and no Sill installs that nightly after (each reads the manifest again before it
-downloads, and again right before it installs by itself); with no cooling-off, most Macs with both switches on
-will have installed it by then. A leaked nightly key alone (no notarization) installs
-nothing new: the manifest binds the version, build and every slice's code, and the app must still pass
-Apple's checks for Sill's team, so it can only point Sills at genuine builds newer than what they run, and
-only from the pre-release, which takes write access to the repository too. A key that leaked is replaced
-with §16.8's steps, the old public key taken out of `nightlyKeys`; a Sill that trusts only the old key can't
-verify the new key's nightlies and keeps trusting the old one until it is updated once by hand (the next
-nightly or a release, downloaded), as with the update key (T28). So "Use nightly builds" with automatic updates means trusting main
-and the nightly environment as much as Noah's own Mac; it is off by default, and its note under the switch
-says nightlies install by themselves without the two-day wait.
+**T38. What stands between a push to main and a Mac on the nightly channel (read this before turning "Use
+nightly builds" on for anyone else; rewritten for Noah's decision of 2026-11-12, option 4).** Both of a
+nightly's proofs, Apple's notarization and the nightly key's signature, are made by the one job that builds
+main in the environment `nightly` (the third security pass's NB1): whoever can push to main, or change its
+workflow, holds both. Since 2026-11-12, what stands between such a push and a Mac is **the person's own click on
+Update Now for each nightly**: no Sill installs, or downloads to install, a nightly by itself, whatever its
+switches say (`UpdateAutoPolicy.start` and `dates` refuse one first; the automatic update reads the release offer
+alone). A person who clicks Update Now on "Sill nightly 0.6.3 (1500) is available." is trusting GitHub's build
+of main as it stands that night: the ruleset "main" (since 2026-11-12) makes every change to main a pull request,
+visible in the repository, but nobody else looks at a nightly before it is offered (the switch's note says so in
+these words: "built and signed by GitHub from Sill's newest code; nobody looks at them first"). Noah, or his
+account and his `gh` login (which every agent session on this Mac uses), can still merge a pull request with no
+approval; the ruleset doesn't stop that, it makes it a pull request. The environment `nightly` no longer lets
+administrators bypass its rules (`can_admins_bypass` false since 2026-11-12), and admits main alone; it has no
+reviewer and no wait timer (option 4 needs none). Someone who notices a bad nightly deletes
+`Sill-nightly.zip.manifest` from the pre-release: no Sill offers or installs it after (each reads the manifest
+again before it downloads); a person who clicked already has it, and the next night's build, or a release, is
+the way forward (a bad build can stop its own updates; the download page is the way back). A leaked nightly key
+alone (no notarization) installs nothing new: the manifest binds the version, build and every slice's code, and
+the app must still pass Apple's checks for Sill's team, so it can only point Sills at genuine builds newer than
+what they run, and only from the pre-release, which takes write access to the repository too. A key that leaked
+is replaced with §16.8's steps, the old public key taken out of `nightlyKeys`; a Sill that trusts only the old
+key can't verify the new key's nightlies until it is updated once by hand, as with the update key (T28). "Use
+nightly builds" is off by default.
 
 ### 16.8 Noah's one-time steps for the nightly key (a few minutes; Terminal.app)
 
@@ -1875,12 +1886,10 @@ GitHub; sign a release's manifest with the nightly key, or a nightly with the re
 
 1. **Use nightly builds without Automatically update Sill.** Default: allowed; Update Now then offers the
    newest nightly and nothing installs by itself. Alternative: the nightly switch only with the automatic one.
-2. **A cooling-off for nightlies.** Default: none, Noah's words ("should download any update found
-   immediately"); T38 is its cost. Alternative: a few hours (12, say) from each Mac's first read, as releases
-   have since the second pass, which would give a window against a bad night on main. The third security
-   pass's NB1 puts it to Noah again with three other ways (§16.10); his answer is one line,
-   `UpdateAutoPolicy.nightlyCoolingOff`.
-3. **The oldest nightly installed by itself.** Default: 30 days by its signed time. Alternatives: 14; none.
+2. **A cooling-off for nightlies. Decided (Noah, 2026-11-12): none is needed, since no nightly installs by
+   itself** (option 4, §16.10: "Automatic for releases only. Nightlies take one click on Update Now each.").
+3. **The oldest nightly installed by itself. Decided with 2:** none is, so no age limit is kept for one (Update
+   Now shows the build it installs).
 4. **A release and a nightly of one version.** Default: the release (the tested one). Alternative: the higher
    build.
 5. **Release V for someone on nightly V.** Default: never offered, as the update check never has (main keeps a
@@ -1895,7 +1904,30 @@ GitHub; sign a release's manifest with the nightly key, or a nightly with the re
 8. **The pre-release's notes** say a nightly is offered only with "Use nightly builds" on once the commit
    carries a nightly key, and that the update check never offers one before (`release.sh`'s `nightly_body`).
 
-### 16.10 NB1: what stands between a push to main and every Mac with both switches on (for Noah to decide)
+### 16.10 NB1: what stands between a push to main and every Mac with both switches on (decided: option 4)
+
+**Decided, 2026-11-12.** Noah, asked which option he wanted for nightlies that install by themselves: "For
+nightlies, lets go with 4", option 4 as it was put to him: "Automatic for releases only. Nightlies take one
+click on Update Now each." It replaces his earlier wish that a nightly install by itself at once (§16's
+opening). And on the settings: "For github set both settings". The coordinator applied both from this Mac at
+about 16:35 EST on 2026-11-12 and read both back (the answers are kept in the handoff folder's
+`github-settings`, before-* and after-*):
+- **Option 1's ruleset**, as its command below stands: "main", id 27158533, target the default branch,
+  enforcement active, bypass list empty, rules deletion, non_fast_forward and pull_request with 0 required
+  approvals; `gh api repos/Saffsanity/sill/rules/branches/main` lists the three.
+- **On the `nightly` environment, `can_admins_bypass` false**: the PUT took the field (body: wait_timer 0,
+  prevent_self_review false, reviewers [], the deployment_branch_policy as it was, can_admins_bypass false), and
+  the read back says false; its custom branch policy still lists main alone; no reviewer and no wait timer (option
+  4 needs none); its nine secrets untouched.
+
+What option 4 means in the code (round 8): no path installs, or downloads to install, a nightly without the
+person's click, by construction: the automatic update's offer is the release one alone
+(`AppUpdater.automaticOffer`), `UpdateAutoPolicy.start` and `dates` refuse a nightly first whatever the
+switches, the dates and the quiet minutes say, and `nightlyCoolingOff`, the nightly floor and the nightly age
+limit are gone (`update-install` and its mutants show it). T38 says what now stands between a push to main and
+a Mac: the person's own click.
+
+What follows is NB1 as it was put to Noah, kept as written (with the fourth and fifth passes' corrections).
 
 The third security pass's NB1 (HIGH, a design finding): on the nightly channel both proofs, Apple's signature
 and notarization and the nightly key's manifest, are made by the one job that builds main (`nightly.yml`'s Mac
@@ -1909,7 +1941,7 @@ don't change that (a fresh build is newer, runs for 30 s, and nightlies have no 
 secrets ever left GitHub, whoever has them keeps that power until the Developer ID certificate, the notary key
 and the nightly key are all replaced.
 
-**The decision is Noah's and is not made.** What this branch did whatever he answers: the switch's words say
+**(Before the decision.)** What this branch did whatever he answered: the switch's words say
 what a nightly trusts (§16.5: "Nightly builds are built and signed by GitHub from Sill's newest code; nobody
 looks at them first."); the nightly's wait before it installs by itself is one constant,
 `UpdateAutoPolicy.nightlyCoolingOff`, 0 today (his decision of 2026-11-12 stands until he changes it), with the
@@ -2000,10 +2032,11 @@ The reviewer's four options (any one narrows it; the first two are settings, not
      19507835 is Saffsanity's user ID (`gh api repos/Saffsanity/sill --jq .owner.id`). The
      `deployment_branch_policy` line is today's, written out so the change keeps main as the only branch that
      may use the environment; `prevent_self_review` stays false, or Noah couldn't approve the runs he starts.
-     This PUT may not take `can_admins_bypass` (whether GitHub's environment API accepts it there wasn't checked
-     here: no API call is made from this branch); if it doesn't, the bypass stays on without a word. The check
-     command below shows which: if it still says `"can_admins_bypass": true`, the web page's checkbox ("Allow
-     administrators to bypass configured protection rules", unchecked) is the sure way.
+     This PUT takes `can_admins_bypass`: the call of 2026-11-12 (the coordinator's, with reviewers [] and
+     wait_timer 0, option 4 needing neither) set it, and the read back said false. Before that call, whether
+     GitHub's environment API accepted the field wasn't known here (this branch makes no API call); the check
+     command below shows it, and the web page's checkbox ("Allow administrators to bypass configured protection
+     rules", unchecked) does the same.
      Check: `gh api repos/Saffsanity/sill/environments/nightly --jq '{can_admins_bypass, rules:
      [.protection_rules[] | {type, wait_timer, reviewers: [.reviewers[]?.reviewer.login]}]}'`. Undo: the same
      command with `"wait_timer": 0`, `"reviewers": []` and `"can_admins_bypass": true`.
@@ -2079,4 +2112,5 @@ among them, can put code on every such Mac within a day. Setting the nightly key
 of option 2 with the bypass verified off, option 3 with a notice that checks the five things above, option 4, or
 Noah's acceptance in so many words); for the secret, check the bypass with option 2's command after the change,
 and use the web page's checkbox if the PUT left it on. Nothing in this branch changes a GitHub setting; the
-commands above are for Noah to run or approve.
+commands above were for Noah to run or approve. Decided and done on 2026-11-12 (above): option 4, the ruleset
+"main", and the bypass off on `nightly`.

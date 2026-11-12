@@ -897,9 +897,10 @@ extension DebugHooks {
         }
         // What the automatic update remembers in each sample, and its part of the pane.
         let on = A.switched(A.Memory(), on: true)
-        func auto(_ m: A.Memory, waitUntil: Date? = nil, running: String = "0.3.0", offered: SillVersion? = v04, build: Int? = nil) -> P.AutomaticPane {
+        func auto(_ m: A.Memory, waitUntil: Date? = nil, running: String = "0.3.0", offered: SillVersion? = v04, build: Int? = nil,
+                  release: (version: SillVersion, tag: String, waitUntil: Date?)? = nil) -> P.AutomaticPane {
             A.pane(m, offered: offered, offeredTag: build != nil ? "nightly" : offered.map { "v\($0)" }, running: SillVersion(running), waitUntil: waitUntil,
-                   now: now, offeredBuild: build)
+                   now: now, offeredBuild: build, release: release)
         }
         let nightlyOn = A.switchedNightly(on, on: true)
         let tried = A.began(on, v04, now: now.addingTimeInterval(-26 * 3600))
@@ -959,17 +960,21 @@ extension DebugHooks {
             UpdateNowSample(name: "auto-lookingagain", install: pane(.lookingAgain(devices: []), automatic: auto(tried)), autoOn: true),
             UpdateNowSample(name: "auto-unreadable", install: pane(.idle),
                             autoSwitch: A.switchState(available: true, canKeep: true, checkOn: true, refusal: nil, on: false, unreadable: true)),
-            // Use nightly builds (plan §16): the switch in a build with a nightly key, on and off, a nightly offered,
-            // downloading, waiting, failed, and this Sill a nightly with the switch off.
+            // Use nightly builds (plan §16): the switch in a build with a nightly key, on and off, a nightly offered
+            // (with Automatically update Sill on: releases only, and with a release it would install meanwhile),
+            // Update Now downloading one, failed, and this Sill a nightly with the switch off. No sample has a nightly
+            // installing by itself: none can (option 4).
             UpdateNowSample(name: "nightly-off", install: pane(.idle), nightlySwitch: nightlySwitch(on: false), nightlyOn: false),
             UpdateNowSample(name: "nightly-offered", install: pane(.idle, offeredBuild: 1471, ownLine: true, version: v062),
                             nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
             UpdateNowSample(name: "nightly-auto", install: pane(.idle, automatic: auto(nightlyOn, offered: v062, build: 1471), offeredBuild: 1471, ownLine: true, version: v062),
                             autoOn: true, nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
-            UpdateNowSample(name: "nightly-downloading", install: pane(.downloading(received: 2_400_000, total: 6_210_000), mode: .automatic,
-                                                                       automatic: auto(nightlyOn, offered: v062, build: 1471), offeredBuild: 1471, version: v062),
+            UpdateNowSample(name: "nightly-auto-release", install: pane(.idle, automatic: auto(nightlyOn, offered: v062, build: 1471,
+                                                                                                release: (version: v04, tag: "v0.4", waitUntil: nil)),
+                                                                        offeredBuild: 1471, ownLine: true, version: v062),
                             autoOn: true, nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
-            UpdateNowSample(name: "nightly-waiting", install: pane(.waiting, mode: .automatic, automatic: auto(nightlyOn, offered: v062, build: 1471), offeredBuild: 1471, version: v062),
+            UpdateNowSample(name: "nightly-downloading", install: pane(.downloading(received: 2_400_000, total: 6_210_000),
+                                                                       automatic: auto(nightlyOn, offered: v062, build: 1471), offeredBuild: 1471, version: v062),
                             autoOn: true, nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
             UpdateNowSample(name: "nightly-failed-key", install: pane(.failed(.manifest(.badSignature)), offeredBuild: 1471, version: v062),
                             nightlySwitch: nightlySwitch(on: true), nightlyOn: true),

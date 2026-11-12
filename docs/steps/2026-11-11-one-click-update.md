@@ -211,6 +211,25 @@ updater features" (the plan's §15.1); the independent security review's finding
   role's `actor_id` unverified, the web steps the sure way; the declined option survives secrets leaving GitHub
   and holds against a push to main only as far as the checks before each tap). N12 d: the parked copy's held
   descriptor is the first pass's N4, accepted as N4 is.
+- Round 8: Noah decided NB1 (2026-11-12). Asked which option he wanted for nightlies that install by themselves:
+  "For nightlies, lets go with 4", option 4 as it was put to him: "Automatic for releases only. Nightlies take
+  one click on Update Now each." It replaces his earlier wish that a nightly install by itself at once. And "For
+  github set both settings": the coordinator applied them from this Mac at about 16:35 EST and read both back
+  (the answers in the handoff folder's `github-settings`): the ruleset "main" (id 27158533: deletion,
+  non_fast_forward, pull_request with 0 approvals, no bypass) and `can_admins_bypass` false on the environment
+  `nightly` (the PUT took it; its branch policy still main alone, no reviewer or wait timer, its secrets
+  untouched). In the code, by construction: the automatic update's offer is the release one alone
+  (`AppUpdater.automaticOffer`, the nightly offer never passed), `UpdateAutoPolicy.start` and `dates` refuse a
+  nightly first whatever the switches, the dates and the quiet minutes say, and `nightlyCoolingOff`, the nightly
+  floor (`signedNightly`) and the 30-day nightly age limit are gone. With Use nightly builds on, Sill still looks
+  for nightlies (the daily check, and at launch while it is on) and offers the newest verified one to Update Now.
+  The pane offers one update, the newest (the release on a tie); under a nightly, with Automatically update Sill
+  on, it says the automatic update installs releases only and names the release it would install meanwhile, if
+  any. The words: the switch's note ("… Sill tells you when one is out, and Update Now installs it; a nightly
+  never installs by itself, even with Automatically update Sill on. …"), the footnote ("A nightly build installs
+  only when you click Update Now."), README and two site pages; nothing says a nightly installs by itself. The
+  plan (§16, §16.10, T38, NB1's row, §15.4, §15.7), the checklist (the settings done; how to read them back) and
+  CLAUDE.md follow. Main (b3577db4, #363) merged in first (616086b0).
 - Verified, round 5 (2026-11-12 11:50–13:32, this Mac, heavy jobs through heavy.sh, no device, nothing launched but
   the harness's test executables and the bare SillMenuBar for previews), on cd9eaaa3 (the worktree's run is the
   commit's; the mutants on an export of it), then f9a962d4 (two check rules and the signing test's R2 list, no app
@@ -283,9 +302,8 @@ updater features" (the plan's §15.1); the independent security review's finding
   when `gh`'s login has expired), a release built by the release workflow signed with `--run` (GitHub's record
   of the run against his tag, the zip from its artifact: only ever run against the stand-in here), and the
   first sight's wait on a real release (the pane's "… or later" date two days after the first daily check that
-  read it, on GitHub's clock too). Use nightly builds: NB1's decision first (the plan's §16.10: which of the
-  four options, and `nightlyCoolingOff`), then the nightly key's four steps (the plan's §16.8; the reviewer:
-  the secret once `can_admins_bypass` is off on `nightly`), then a nightly run that ends "Signed for Update
-  Now", the switch on a Mac with that build (the offer names the build; Update Now installs it; with
-  Automatically update Sill on, it installs within the next check and 5 quiet minutes), the switch off on a
-  nightly (no downgrade, its note), and the plan's §16.9 defaults.
+  read it, on GitHub's clock too). Use nightly builds (option 4, decided; the settings done): the nightly key's
+  four steps (the plan's §16.8; `can_admins_bypass` reads false since 2026-11-12), then a nightly run that ends
+  "Signed for Update Now", the switch on a Mac with that build (the offer names the build; Update Now installs
+  it; with Automatically update Sill on, it is never installed by itself, and a newer release still is), the
+  switch off on a nightly (no downgrade, its note), and the plan's §16.9 defaults.
