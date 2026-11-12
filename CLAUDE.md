@@ -782,10 +782,12 @@ Rules found in the steps that hold for all work (each where it is written):
   the pointer's dwell at the edge, when it is offered and armed, when the controls come back by
   themselves, the hint, the room, the words; pure, `Tests/checks/full-screen`; pbxproj A279/F279),
   `EdgeFlickRecognizer` (the flick's recognizer and the swipe in's, `RevealEdgePan`, on Sill's window,
-  and which other recognizers wait for them; UIKit only, so Tests/touchrig compiles it; A27B/F27B) and
-  `FullScreen` (`FullScreenEdges`, which puts them and a hover on the window and says whether it covers
-  the screen, the shake through `UIWindow.motionEnded`, the hint, the swipe in's preview hole, the hidden
-  picture's element; A27A/F27A), `KeyChords`
+  which other recognizers wait for them, `EdgeRecognizers.waits`, and a stroke they held until its lift,
+  `releasedAtLift`; UIKit only, so Tests/touchrig compiles it; A27B/F27B) and `FullScreen`
+  (`FullScreenEdges`, which puts them and a hover on the window and says whether it covers the screen and
+  its safe area, `FullScreenSystem` for the status bar, the home indicator and the deferred left edge, the
+  shake through `UIWindow.motionEnded`, the hint, the swipe in's preview hole, the hidden picture's
+  element, DEBUG `FullScreenDebug`; A27A/F27A), `KeyChords`
   (`KeyModifiers`; a
   shortcut with its modifiers' own keys pressed around it, the Spotlight key's
   ⌘Space, the trackpad's modifier keys around a click; `ForwardedKeys`, a
