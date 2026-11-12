@@ -368,10 +368,13 @@ extension StreamClient {
         }
         hostName = name
         status = why == .automatic ? "Reconnecting to \(name) remotely…" : "Connecting to \(name) remotely…"
-        let candidates = RemoteDialPolicy.order(mac.allAddresses, remotePort: mac.remotePort, lastWorked: mac.lastWorked,
+        // The Mac's own list and the typed addresses first, then the VPN addresses an earlier list of
+        // its had (its VPN was off while this device connected at home: SavedMac.rememberedAddresses).
+        let candidates = RemoteDialPolicy.order(mac.allAddresses, remembered: SavedMacs.remembered(mac, now: Date().timeIntervalSince1970),
+                                                remotePort: mac.remotePort, lastWorked: mac.lastWorked,
                                                 localIPv4: Self.localIPv4Networks())
         #if DEBUG
-        print("remote: dialing \(name) (\(macID)) \(why): \(candidates.map(\.key))")
+        print("remote: dialing \(name) (\(macID)) \(why): \(candidates.map { $0.remembered ? "\($0.key) (remembered)" : $0.key })")
         #endif
         // A Mac set up again (a new key) that this device paired again: at an address that names
         // one machine, its newer record's key may answer for this one, and a handshake completed
@@ -498,13 +501,13 @@ extension StreamClient {
     /// again (2, 4, 8, then every 10 s) unless the Mac answered for good; anything else says why.
     func remoteDialFailed(macID: String, why: DialReason, failure: RemoteDialPolicy.Failure, candidate: RemoteDialPolicy.Candidate?) {
         let name = displayName(macID)
-        #if DEBUG
-        print("remote: dial of \(name) failed: \(failure)\(candidate.map { " (\($0.key))" } ?? "")")
-        #endif
-        let vpn = savedMac(macID)?.allAddresses.compactMap { a -> String? in
-            RemoteCopy.vpnLabel(RemoteDialPolicy.Candidate(host: a.host, port: a.port ?? 7455, kind: a.kind, via: a.via))
-        }.first
+        // Every address the dial had, the remembered ones too: a VPN off on the Mac while this device
+        // connected at home is still named ("…or Tailscale may be off on the Mac").
+        let vpn = savedMac(macID).flatMap { RemoteCopy.vpnName($0.allAddresses + SavedMacs.remembered($0, now: Date().timeIntervalSince1970)) }
         let words = RemoteCopy.dialFailure(failure, mac: name, candidate: candidate, vpnName: vpn, device: Self.deviceWord)
+        #if DEBUG
+        print("remote: dial of \(name) failed: \(failure)\(candidate.map { " (\($0.key)\($0.remembered ? ", remembered" : ""))" } ?? ""): “\(words)”")
+        #endif
         switch why {
         case .automatic:
             guard var r = reconnect, r.macID == macID else { return }
@@ -836,10 +839,19 @@ extension StreamClient {
             homeInfo.remote(info.issuedAt)
             if first { moveHomeIfListed() }
         }
-        var mac = SavedMacs.refreshed(savedMacs[i], info: info, fingerprint: fingerprint, allowLoopback: Self.keepsLoopback) ?? savedMacs[i]
+        // A list that lacks a VPN address the last one had keeps it remembered (SavedMacs.remembering).
+        var mac = SavedMacs.refreshed(savedMacs[i], info: info, fingerprint: fingerprint, allowLoopback: Self.keepsLoopback,
+                                      now: Date().timeIntervalSince1970) ?? savedMacs[i]
         // The Bonjour name of a network or Direct connection to it: how a host without the tag is
         // still recognised.
         if case .service(let name, _, _, _)? = endpoint { mac.bonjourName = name }
+        #if DEBUG
+        if mac.rememberedAddresses != savedMacs[i].rememberedAddresses {
+            let now = Date().timeIntervalSince1970
+            let kept = (mac.rememberedAddresses ?? []).map { "\($0.address.host) (\($0.address.via), last listed \(Int(now - $0.listedAt)) s ago)" }
+            print("remote: \(displayName(mac.macID)) lists \(mac.addresses.map(\.host)); VPN addresses remembered: \(kept.isEmpty ? "none" : kept.joined(separator: ", "))")
+        }
+        #endif
         if mac != savedMacs[i] {
             savedMacs[i] = mac
             persistSavedMacs()
@@ -1138,7 +1150,8 @@ extension StreamClient {
         if overlay, let s = session, !s.route.isRemote, let v = macInfoVerified, v.fingerprint == w.fingerprint, v.info.macID == macID {
             sameMac = true
             mac.bonjourName = s.bonjourName
-            mac = SavedMacs.refreshed(mac, info: v.info, fingerprint: v.fingerprint, allowLoopback: Self.keepsLoopback) ?? mac
+            mac = SavedMacs.refreshed(mac, info: v.info, fingerprint: v.fingerprint, allowLoopback: Self.keepsLoopback,
+                                      now: Date().timeIntervalSince1970) ?? mac
             session?.macID = macID
         }
         savedMacs = SavedMacs.adding(mac, to: savedMacs)
