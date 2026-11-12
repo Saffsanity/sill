@@ -1,5 +1,5 @@
 **Full screen: Sill's controls hidden by a flick off the left edge, back by a swipe in from it (2026-11-12, branch
-`full-screen` from main at a4bad80, main at 0d22bbf merged in; issues #279, #92, #280; the design, the numbers
+`full-screen` from main at a4bad80, main at 0d22bbf and 919e05a merged in, PR #360; issues #279, #92, #280; the design, the numbers
 and why, the open questions with the defaults taken, the results and Noah's device test are in
 `docs/full-screen-plan.md`).** Noah's design with the coordinator's changes: a short flick off the left edge
 hides every control, so the Mac's picture gets the screen's room; a swipe in from the left bezel brings them
