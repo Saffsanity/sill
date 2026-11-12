@@ -1,7 +1,7 @@
 # The version label on the iPhone and iPad
 
-2026-11-11, branch `version-label` from main at dd6ea6a (0.6.1 released, plus #339). Device only: no wire
-change, nothing on the Mac, nothing stored.
+2026-11-11, branch `version-label` from main at dd6ea6a (0.6.1 released, plus #339), PR #351 (a draft).
+Device only: no wire change, nothing on the Mac, nothing stored.
 
 Noah, 2026-11-11: "One more thing I want to add in the next version is a version identifier (e.g. 0.6.1.
 (1304)) at the bottom of the app in the connection screen and at the bottom of settings." Then: "Start
@@ -101,4 +101,13 @@ invented, nothing hidden.
 
 ## Results
 
-(Filled in as the gates run.)
+- G1: `Tests/checks/version-label` 38 of 38; its mutants 26 of 26 caught. Found while writing it:
+  Foundation's `whitespacesAndNewlines` counts a zero-width space (U+200B) as white space, so a first
+  draft turned "14\u{200B}00" into "14 00", a space where none shows; the cleaning follows Unicode's
+  White_Space instead and drops Cc and Cf (mutant C6 is that draft).
+- The review (2026-11-11, an independent read of the diff, read-only): three fixes taken, in a commit of
+  their own: on a line of its own the version lay over the links' tap areas (now behind them); with the
+  links on two lines it can also sit beside the download link, the shorter line (a 320 pt screen at
+  xLarge had a line it did not need); the connect screen's accessibility dump fired again over a live
+  stream screen. And G4 as first written could not hold for the panel scrolled to its end (every row
+  above the new line sits higher by it): reworded, with the panel at the top of its rows added.
