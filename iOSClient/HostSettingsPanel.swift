@@ -20,7 +20,8 @@ import StreamProtocol
 /// revised it on 2026-10-27), with Mute right under it (this device's own of the Mac's sound, off by
 /// default, `StreamClient.soundMuted`, while the Mac has sound, on or off; Noah, 2026-10-27). Errors show
 /// inline, never in alerts. After the Mac's settings come the device's own groups: This iPad (or
-/// iPhone), whose switches are preferences here and send nothing to the Mac (Larger Picture,
+/// iPhone), whose switches are preferences here and send nothing to the Mac (Picture in Picture,
+/// `StreamClient.pictureInPictureKey`, where iOS has it, #291; Larger Picture,
 /// `StreamClient.largerPictureKey`,
 /// on an iPhone without a hinge whose picture it makes larger, `largerPictureOffered`; Share Clipboard,
 /// `StreamClient.clipboardKey`, while the Mac shares its clipboard, with the system's Paste for this
@@ -55,6 +56,9 @@ struct HostSettingsPanel: View {
     /// picture's input view and the on-screen trackpad as each scroll begins (`ScrollDirection`), never
     /// sent.
     @AppStorage(StreamClient.reverseScrollKey) private var reverseScroll = false
+    /// This device's switch for Picture in Picture (#291, docs/picture-in-picture-plan.md): off unless turned
+    /// on (`PictureInPicturePolicy.defaultOn`), read by PictureInPictureHub, never sent.
+    @AppStorage(StreamClient.pictureInPictureKey) private var pictureInPicture = PictureInPicturePolicy.defaultOn
     /// This device's switch for Larger Picture (docs/larger-picture-plan.md): off unless turned on,
     /// read by the stream screen, never sent.
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
@@ -98,6 +102,9 @@ struct HostSettingsPanel: View {
     /// `hold`, to Hold to Show Window Controls, the same for its row and footnote.
     /// `clipboard`, to the clipboard's Paste row, so that photo shows it and the group's footnote under
     /// it (the review of #242: `gestures` shows only the two switches above them there).
+    /// `pip`, to the This iPad group's title, over its first row, the Picture in Picture switch (#291), so a
+    /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
+    /// says it has no Picture in Picture).
     private static var startsAt: String? {
         #if DEBUG
         switch UserDefaults.standard.string(forKey: "SillSettingsScroll") {
@@ -107,6 +114,7 @@ struct HostSettingsPanel: View {
         case "reverse"?: return reverseScrollRowID
         case "hold"?: return thumbnailHoldRowID
         case "clipboard"?: return clipboardRowsID
+        case "pip"?: return gesturesGroupID
         default: return nil
         }
         #else
@@ -575,7 +583,7 @@ struct HostSettingsPanel: View {
 
     // MARK: This device
 
-    /// This device's own group, after the Mac's: on an iPhone its switch for Larger Picture, then Share Clipboard while the Mac shares its clipboard,
+    /// This device's own group, after the Mac's: Picture in Picture where iOS has it (#291), then on an iPhone its switch for Larger Picture, then Share Clipboard while the Mac shares its clipboard,
     /// with Paste on ‹Mac› (the system's Paste control) under it while on, then Reverse Scrolling (for
     /// every Mac: it only turns this device's own deltas around), then how long a thumbnail is held for
     /// its window's lights (for every Mac: the thumbnails are this device's), then its switch for three-finger
@@ -597,6 +605,24 @@ struct HostSettingsPanel: View {
             .padding(.bottom, 6)
             .accessibilityAddTraits(.isHeader)
             .id(Self.gesturesGroupID)
+        // Picture in Picture (#291, docs/picture-in-picture-plan.md): where iOS has it. The group's first row:
+        // the newest, and the one the issue names. The hub looks again when it changes.
+        if PictureInPicture.supported {
+            Rows {
+                Toggle(isOn: $pictureInPicture) {
+                    Text(PictureInPicturePolicy.Copy.title).foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+                .onChange(of: pictureInPicture) { _, on in
+                    client.noteAction()
+                    PictureInPictureHub.shared.update()
+                    #if DEBUG
+                    print("pip: the switch \(on ? "on" : "off")")
+                    #endif
+                }
+            }
+            Footnote(text: PictureInPicturePolicy.Copy.footnote(mac: mac))
+        }
         if offersLargerPicture {
             Rows {
                 Toggle(isOn: $largerPicture) {
@@ -780,7 +806,9 @@ struct HostSettingsPanel: View {
     }
 
     /// "iPhone" or "iPad", for copy about this device.
-    private var device: String { UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad" }
+    /// "iPhone" or "iPad", by the idiom the layouts read (`DuoLayout.phoneArrangement`: the device's own, or
+    /// DEBUG `-SillIdiom phone|pad`, so one simulator photographs the panel as either says it).
+    private var device: String { DuoLayout.phoneArrangement ? "iPhone" : "iPad" }
 
     /// Why the Direct Wireless Connection switch is disabled, as its footnote says it, or nil while
     /// this device may change it: away from home (`remote`) the Mac refuses it from a remote

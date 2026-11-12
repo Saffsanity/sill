@@ -772,7 +772,11 @@ Rules found in the steps that hold for all work (each where it is written):
   holds the device's own auto-lock off: while a window the person can see streams,
   until 10 minutes after the person last used it, and what counts as the person's
   use; pure, `Tests/checks/device-idle`; pbxproj AE30/FE30; StreamScreen's
-  `DeviceIdleTimer` carries it out, PR #230), `KeyChords`
+  `DeviceIdleTimer` carries it out, PR #230), `PictureInPicturePolicy` (Picture in Picture,
+  #291: when a window's picture is offered and which window, what counts as watched, heard and
+  running while it shows, the pause, what ends it, the Lifecycle; pure,
+  `Tests/checks/picture-in-picture`; pbxproj A291/F291) and `PictureInPicture` (AVKit's
+  controller on the display layer, its delegates, `PictureInPictureHub`; A29A/F29A), `KeyChords`
   (`KeyModifiers`; a
   shortcut with its modifiers' own keys pressed around it, the Spotlight key's
   ⌘Space, the trackpad's modifier keys around a click; `ForwardedKeys`, a
@@ -1445,7 +1449,12 @@ first reads it and at each change), `-Sill.largerPicture 1` (its Larger Picture 
 in effect while a window streams, as the mock does but with `-SillActive desktop|none`;
 the console's `larger picture: …` line says what the rule made of it;
 `-SillVideoSize WxH` the mock's frame, `-SillLargerPictureToggle <s>[,<s>…]` the
-switch at those seconds), `-SillVoiceOver 1` (that group as with VoiceOver on:
+switch at those seconds), `-Sill.pictureInPicture 1` (its Picture in Picture on for one run, #291;
+`-SillPiPSupported 1|0` the switch shown or not whatever the simulator says, `-SillSettingsScroll pip`
+the panel at it; live, `-SillPiPStartAt <s>` starts it as iOS does as Sill leaves, `-SillPiPPauseAt
+<s>[,<s>…]` the window's pause and play, `-SillPiPLockAt <s>` the device's lock, `-SillPiPSession
+active|inactive` the audio session held or not; `xcrun simctl launch UDID com.apple.Preferences` sends
+Sill away, the console's `pip:` lines say what happened), `-SillVoiceOver 1` (that group as with VoiceOver on:
 its footnote says the rows do the gestures), `-SillScanOverlay 1` (Pair This
 iPad…'s overlay; `-SillOverlayLine asking|shown|openonmac|locked|noanswer` the
 line its ask's answer sets; under `-SillLive 1` it opens over the live session
