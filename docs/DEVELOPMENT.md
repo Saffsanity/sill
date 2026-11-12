@@ -1599,6 +1599,16 @@ connect (TLS 1.3, each end pinned to the other's key).
    device's Settings panel says how it is connected ("Connected through
    Tailscale · 48 ms"), and the Mac's menu shows the route of each device.
 
+The device learns the Mac's addresses for afar at every session (home or away)
+while Remote Access is on, from the list the Mac sends, and keeps the VPN ones
+(Tailscale's name and addresses, another VPN's) for 90 days after the Mac last
+listed them, even once a later list lacks them: a Mac whose VPN was off while
+the device connected at home is still reached through it away from home once
+the VPN is on again. Those remembered addresses are dialed after the Mac's
+current ones, pinned to the Mac's key like every remote dial, at most four of
+them; Forget on the device forgets them with the Mac (docs/remote-access-plan.md
+§7.2).
+
 The ways in:
 
 - **Tailscale** (the easy one): install it on the Mac and on the device, signed
@@ -1809,6 +1819,20 @@ its connections waited without being admitted, or were refused.");
 `Scripts/sillrelay.py --listen 0 --to HOST:PORT [--delay-ms N] [--rate-mbps R]
 [--blackhole-after S] [--record PREFIX]` sits between a client and a host, and
 slows or cuts the link. TLS passes through.
+
+A saved Mac's remembered VPN addresses (Remote access, above) on a simulator of
+your own, against a `--synthetic --remote` host: pair with the host's link
+(`-SillPairURL`), then write a saved record whose list is a vpn-kind
+`localhost` at a relay's port (`{"host":"localhost","port":Q,"kind":"vpn","via":"Tailscale"}`,
+`sillrelay.py --listen Q --to 127.0.0.1:P`) through the app's own preferences,
+`xcrun simctl spawn UDID defaults write <the app's data container>/Library/Preferences/me.saffer.sill.plist Sill.savedMacs -string '<JSON>'`
+(`xcrun simctl get_app_container UDID me.saffer.sill data`), and dial it with
+`-SillDialSaved 1`: the host's kind 18, which never lists that address, leaves
+it remembered (the console's "VPN addresses remembered: localhost …"). Start
+the host on another port behind the same relay and dial again: the Mac's list
+answers nothing, and the remembered address, last in the dial's list
+("(remembered)"), connects. A loopback path has no tunnel, so a remembered
+address that stays silent reads as this device's VPN off.
 
 ### The pacing harness
 
