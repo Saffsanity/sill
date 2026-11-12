@@ -101,7 +101,12 @@ let scrollOff = line(from: 400, 300, to: 0, 300, speed: 1500)
 check(why(scrollOff) == .outsideBand && scrollOff.run().decidedAt == 0, "a scroll from the middle off the left edge is the Mac's at once")
 check(why(line(from: EdgeFlick.band + 0.5, 300, to: 0, 300, speed: 900)) == .outsideBand, "half a point past the band is the Mac's")
 // A slow drag to the edge: at 100 pt/s it is still down at the duration; at 200 pt/s it lifts too slow.
-check(why(line(from: 40, 300, to: 0, 300, speed: 100)) == .tooLong, "a slow drag to the edge (100 pt/s) is let go by the duration")
+let slowDrag = line(from: 40, 300, to: 0, 300, speed: 100)
+check(why(slowDrag) == .tooLong, "a slow drag to the edge (100 pt/s) is let go by the duration")
+if let at = slowDrag.run().decidedAt {
+    check(at < slowDrag.points.count - 1 && slowDrag.points[at].t - EdgeFlick.duration < 0.01,
+          "a slow drag is let go by its first move past the duration, while it still moves (sample \(at) of \(slowDrag.points.count))")
+}
 check(why(line(from: 40, 300, to: 0, 300, speed: 200)) == .tooSlow, "a drag to the edge at 200 pt/s is too slow")
 check(why(line(from: 40, 300, to: 0, 300, speed: 299)) == .tooSlow, "a drag at 299 pt/s is too slow")
 // A drag in the band going right, up or down, and decided within a few points.
