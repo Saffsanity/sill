@@ -763,7 +763,11 @@ gseen = AP.sighted(gseen, tag: "v0.4.0", sha256: sha1, signedAt: t0, now: later(
 gseen = AP.sighted(gseen, tag: "v0.4.0", sha256: sha1, signedAt: t0, now: later(2), github: later(2), published: later(-2), release: 7)
 check(gseen.seen.count == 1 && gseen.seen[0].first == t0 && gseen.seen[0].firstGitHub == later(1) && gseen.seen[0].published == later(30),
       "CL1, AU1: GitHub's first clock filled once, its publication only ever later: \(gseen.seen)")
-check(AP.waitUntil(gseen, tag: "v0.4.0") == later(77), "AU1: the remembered end follows a later publication, by this Mac's clock")
+// The fifth security pass's N12 a: the gate's estimate is this Mac's half alone; GitHub's half (a publication after
+// the first sight, AU1) is `dates`'s, at each look, with GitHub's clock in the answer just read.
+check(AP.waitUntil(gseen, tag: "v0.4.0") == later(48), "N12 a: the estimate carries no publication over: this Mac's 48 hours")
+check(dates(signed: t0, first: t0, now: later(48), github: ghc(later(1), later(48), published: later(30))) == .waitUntil(later(78)),
+      "AU1: …while dates waits 48 hours from the later publication, by GitHub's clock")
 check(AP.sighting(gseen, tag: "v0.4.0", sha256: sha1, release: 7)?.firstGitHub == later(1) && AP.sighting(gseen, tag: "v0.4.0", sha256: sha2, release: 7) == nil, "the sighting by tag and zip")
 // AU2 (the fourth security pass): the reviewer's proof. v0.7.0 read at t0 (release object 1), deleted, and two days
 // later an OLDER release object (2, published 30 days back) edited to carry the same tag and zip: another sighting,
@@ -784,17 +788,17 @@ check(dates(signed: t0, first: t0, now: later(50), github: ghc(t0, later(50), re
       "AU2: a release whose answer doesn't say which release object it is never installs by itself")
 check(dates(signed: t0, first: t0, now: later(50), github: ghc(t0, later(50), published: nil, release: nil), nightly: true, wait: 12 * 3600) == .go,
       "AU2: a nightly needs neither (its pre-release rolls; its wait counts from the first sight)")
-// N11 a: the estimate carries a later publication over only while it is within `maxAge` of GitHub's first time, so a
-// first `Date` years off can't hold it years out (`dates`, with GitHub's clock now, decides); one years ahead still
-// makes `dates` wait, which fails safe.
-let longAgo = t0.addingTimeInterval(-25 * 365 * 86400), farAhead = t0.addingTimeInterval(10 * 365 * 86400)
-let far = AP.sighted(AP.Memory(), tag: "v0.7.0", sha256: sha1, signedAt: t0, now: t0, github: longAgo, published: later(-1), release: 1)
-check(AP.waitUntil(far, tag: "v0.7.0") == later(48), "N11 a: a first Date 25 years back: the estimate is this Mac's 48 hours, not 25 years")
-check(dates(signed: t0, first: t0, now: later(48), github: ghc(longAgo, later(48), published: later(-1), release: 1)) == .go,
-      "N11 a: …and dates, with GitHub's clock now, lets it go after them")
-var near = AP.sighted(AP.Memory(), tag: "v0.7.0", sha256: sha1, signedAt: t0, now: t0, github: t0, published: later(-1), release: 1)
-near = AP.sighted(near, tag: "v0.7.0", sha256: sha1, signedAt: t0, now: later(30), github: later(30), published: later(30), release: 1)
-check(AP.waitUntil(near, tag: "v0.7.0") == later(78), "N11 a: a publication 30 hours after the first sight is still carried over")
+// N11 a and the fifth pass's N12 a: whatever GitHub's first time was (25 years back, 100 days back), the estimate is
+// this Mac's 48 hours, so the gate lets `dates` look then; `dates`, with GitHub's clock now, decides. A first `Date`
+// years ahead still makes `dates` wait, which fails safe.
+let longAgo = t0.addingTimeInterval(-25 * 365 * 86400), hundredDays = t0.addingTimeInterval(-100 * 86400)
+let farAhead = t0.addingTimeInterval(10 * 365 * 86400)
+for (first, label) in [(longAgo, "25 years back"), (hundredDays, "100 days back")] {
+    let s = AP.sighted(AP.Memory(), tag: "v0.7.0", sha256: sha1, signedAt: t0, now: t0, github: first, published: later(-1), release: 1)
+    check(AP.waitUntil(s, tag: "v0.7.0") == later(48), "N12 a: a first Date \(label): the estimate is this Mac's 48 hours")
+    check(dates(signed: t0, first: t0, now: later(48), github: ghc(first, later(48), published: later(-1), release: 1)) == .go,
+          "N12 a: …and dates, with GitHub's clock now, lets it go then (\(label))")
+}
 check(dates(signed: t0, first: t0, now: later(48), github: ghc(farAhead, later(48), published: later(-1), release: 1)) != .go,
       "N11 a: a first Date 10 years ahead still waits (fails safe)")
 if let data = try? JSONEncoder().encode(seenMem), let back = try? JSONDecoder().decode(AP.Memory.self, from: data) {

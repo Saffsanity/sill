@@ -2685,7 +2685,8 @@ goes in the signing record beside the signer (`signed.txt`), and
 `Scripts/sign-update.sh --audit` compares every release on GitHub with it, drafts
 and pre-releases too: each manifest (one that verifies with the key but isn't in the
 record is a release Noah didn't sign), each `Sill.zip` since the first release
-signed, and every release signed still listed (`--pulled vX` marks one he pulled);
+signed, every release signed still listed (`--pulled vX` marks one he pulled), and none
+marked pulled back again;
 `--notify` posts a notification then and whenever the audit couldn't run; its
 LaunchAgent, every four hours, is his choice: docs/release-checklist.md part 1 §7.
 `Scripts/sign-update.sh --new-key` makes the key once (docs/release-checklist.md,

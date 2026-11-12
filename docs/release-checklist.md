@@ -393,7 +393,10 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       its own). `Tests/checks/update-install` checks that every key listed is usable. Then
       `--install-signer` again from that commit (it shows your key in the trust). The first release that
       carries it is installed by hand (Update Now in the Sill before it has no key to check with); the
-      release after it is the first Update Now can install.
+      release after it is the first Update Now can install. Sign that first release too, right after you
+      publish it (part 2), though no Sill installs it through Update Now: the audit checks every release from
+      the lowest version you signed, so leaving it unsigned would leave the versions between it and the next
+      signed one checked by their manifests alone (the fifth security pass's N12 b).
 - Rotation: a release carries both keys and is signed with the old one (`--install-signer` from it first:
       the trust then lists both); the next is signed with the new one; a later one drops the old. Lost: releases go out without a manifest (Update Now doesn't show;
       Open Release Page… as before) until one carrying a new key is installed by hand once (say so in its
@@ -402,7 +405,13 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       never updates by hand keeps trusting it (it can't be revoked: docs/one-click-update-plan.md T28).
 - A release no Sill may install (a bad build, one signed with a key that leaked): within two days of its
       appearance on GitHub, pull it or mark it a prerelease (each Sill waits two days after it first finds
-      a release and asks GitHub again right before it installs by itself, so none does). For one that stays listed, a stop, in Terminal.app: `"$HOME/Library/Application
+      a release and asks GitHub again right before it installs by itself, so none does), and mark it once
+      with `Scripts/sign-update.sh --pulled v<version>`. Pulling stops a release only while it stays pulled:
+      anyone with write access to the repository can publish it again from its genuine files (your signed
+      manifest and the zip), and every Mac below its version installs it 48 hours after reading it; the
+      audit names a release marked pulled that is back. To stop it for good, publish a newer release: each
+      Mac's floor then refuses the old one once it has installed the newer (the fifth security pass's AU3).
+      For one that stays listed, a stop, in Terminal.app: `"$HOME/Library/Application
       Support/Sill Update Signer/update-manifest" stop --tag v<version> --sha256 <the sha256 line of its
       Sill.zip.manifest> --out Sill.zip.stop` (Touch ID or your password, the prompt showing the whole
       SHA-256), then `gh release upload v<version> Sill.zip.stop --repo Saffsanity/sill`. Every Sill reads it

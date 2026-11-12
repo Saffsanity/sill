@@ -1142,6 +1142,24 @@ its size; `--run` without `event` or `head_repository`; the weekday). None turne
 | N11 g | The audit downloaded a manifest asset of any size. | A `Sill.zip.manifest` over 4 KiB (more than any Sill reads) is named and never downloaded. | `sign-test.sh`: a 5,000-byte one named, its asset never asked for. |
 | N11 h | The note's `1<>` still opens through a link planted in the moment after `mktemp`. | Accepted, now in every branch: every note is written before the check that follows it (the restored note before the put-back copy's check; with W4, the `kept` note before the check after the move), so a write through such a link into the copy at Sill's path is caught and the copy is never said whole. | Harness: "W4: the kept note lands in the copy moved back …" (a note written into the copy at Sill's path is caught). |
 
+## 12g. The fifth security pass (2026-11-12, the same reviewer, on f9bab246: round 6 only)
+
+`SECURITY-REVIEW.md`'s fifth section: nothing new critical, high or medium; one low (AU3) and the notes N12 a to d.
+Round 6 closed what it set out to: W4; AU2 for its three proofs (a narrower form left: both of a release's files
+renamed); N11 b, c, e, f, g; d and h accepted with sound reasons; a closed for what was proved, with a stall left
+(N12 a). Each finding was confirmed against its proof before it was fixed (the audit's listing rule asks only where
+an unpulled recorded release went, and nothing asks whether a pulled one is back; `waitUntil` still carried a
+publication over up to 120 days; the floor is the lowest version signed). None turned out not to be real.
+
+| | Finding | Done | Check that fails without it |
+|---|---|---|---|
+| AU3 | LOW. A release marked `--pulled` and published again by anyone with write access from its genuine files (Noah's signed manifest and the zip) passed the audit silently, and Macs below its version would install it 48 hours after reading it; no key needed. | The audit names a listed release whose tag is marked pulled, with its own words ("YOU MARKED IT PULLED, AND IT IS BACK ON GITHUB …: pull it again, and publish a newer release to stop it for good"). §15.4, §14 and the checklist (where it says how to pull a release) say that pulling stops a release only while it stays pulled, and that to stop one for good Noah publishes a newer release: each Mac's floor then refuses the old one once it has installed the newer. | `sign-test.sh`: the release marked pulled, back from its own files, named with a notification (against round 6's script: "all … in your signing record", exit 0). |
+| AU2′ | (The pass's table.) AU2's narrower form: a release with both of Sill's files renamed passed the audit (uninstallable while renamed: a gamble against an audit whose times are unknown). | The audit names a release at or above its floor that carries neither `Sill.zip` nor `Sill.zip.manifest` and isn't in the record. | `sign-test.sh`: a v0.7.0 carrying both under other names. |
+| N12 a | The gate still carried a first `Date` up to 120 days back whole, holding the automatic install that long though `dates` would go at 48 hours (fails safe). | The start rule's estimate is this Mac's half alone (the later of the signed time and the first sight, plus the wait); GitHub's half (its clock, the latest publication) is `dates`'s, at each look. Nothing needs the carry: a look past this Mac's half costs one read of the release and its manifest, which counts no attempt and only ever lengthens waits, and since AU2 a release published again is another release object with its own first sight. | `update-install`: a first `Date` 25 years and 100 days back each give this Mac's 48 hours and `dates` goes then; a later publication waits in `dates` (AU1); mutant "N12 a: the estimate from the signed time alone". |
+| N12 b | The audit's floor is the lowest version signed: an unsigned first key-carrying release would leave the versions between it and the floor audited by their manifests alone. | The checklist (part 1 §7) and §14 say to sign that first release too, though no Sill installs it through Update Now. Chosen over flooring the audit at the first version whose source holds a key: the audit runs from the copy beside the signer, with no checkout to read that history from, and a release Noah signs anyway costs one command. | — (a step of Noah's) |
+| N12 c | §16.10's wording, three points. | Option 1: the Actions token here can't open a pull request (the repository doesn't let Actions create them: `can_approve_pull_request_reviews` false, read 2026-11-12; nightly.yml grants no pull-request write) but can merge one someone else opened; the conclusion stands. The stronger variant: `actor_id` 5 for the admin role is unverified, and the web page's steps are the sure way. The declined option: it survives secrets that leave GitHub outright, and against a push to main it holds only as far as what Noah checks before each night's tap (the notice's checks 1 to 3 belong in that step). | — (docs) |
+| N12 d | H (a descriptor opened on a file of the parked copy while it sits in staging changes it after the watcher's last check: `kept` for a copy that isn't valid). | The first pass's N4, here in the put-back branch: accepted as N4 is. No check can see an open descriptor; the main swap has the same residue (T12). A changed executable doesn't run (macOS checks the code's pages), and a changed resource adds no grant the copy didn't have. | — |
+
 ## 13. Progress
 
 - 2026-11-11 22:40 EST: facts gathered (below), plan written and pushed (e7de2b3); the five decisions
@@ -1260,7 +1278,9 @@ Three things, at the Mac. The key list stays empty in the code until step 2's co
 3. From a checkout of that commit, `Scripts/sign-update.sh --install-signer` again: it shows the trust
    with your key in it, and from then on a release is signed only while its Sill trusts exactly that key.
 4. That first release is installed by hand (the Sill before it has no key to check with): it is the first
-   one whose Update Now works, and the release after it is the first Update Now installs.
+   one whose Update Now works, and the release after it is the first Update Now installs. Sign it too (step
+   3), though no Sill installs it through Update Now: the audit checks every release from the lowest version
+   you signed (the fifth security pass's N12 b).
 
 **3. Every release: sign it after it is published.**
 1. Publish as today (part 2 of docs/release-checklist.md).
@@ -1300,7 +1320,9 @@ Three things, at the Mac. The key list stays empty in the code until step 2's co
    listed." when all is well; a release you pulled yourself is marked with `Scripts/sign-update.sh --pulled
    v0.6.2`, or the audit keeps asking where it went; a release whose manifest
    verifies with your key but that you never signed here is a release you didn't make (a leaked key): pull it
-   at once (delete the release, or mark it a prerelease) or upload a stop (§15.4). Sills with "Automatically
+   at once (delete the release, or mark it a prerelease; mark a deleted one with `--pulled`) or upload a stop
+   (§15.4). Pulling stops it only while it stays pulled (anyone with write access can publish it again from its
+   files, and the audit then names it): to stop it for good, publish a newer release. Sills with "Automatically
    update Sill" on install such a release two days after they first find it, so you have those two days.
 
 **4. Your choice: the audit every few hours.** Running `--audit` by hand after each release costs a few
@@ -1423,7 +1445,9 @@ Later the same day, after reading the summary: "48 hour wait seems ok, can the 1
   `Date` header of its HTTPS answer, `UpdateInstallPolicy.httpDate`: TLS keeps it from the network and no
   repository token sets it), and at the install GitHub's time in the answer just read must be 48 hours past
   the later of that first time and the release's `published_at` (GitHub's field, which no token sets; the
-  sighting keeps the latest one GitHub gave, only ever later). So a clock moved on this Mac shortens nothing
+  sighting keeps the latest one GitHub gave, only ever later; GitHub's half is decided at each look, the start
+  rule's estimate being this Mac's half alone: the fifth security pass's N12 a). So a clock moved on this Mac
+  shortens nothing
   (a jump forward waits for GitHub's clock; a clock behind at the first read only lengthens the wait), and a
   release deleted and published again starts its wait over. The sighting is also kept by GitHub's release object
   (its `id`, which GitHub never gives another release: the fourth security pass's AU2), so the same tag and zip
@@ -1438,6 +1462,11 @@ Later the same day, after reading the summary: "48 hour wait seems ok, can the 1
   waits at least two days after the release appears on GitHub before it downloads it, however the manifest is
   dated, and asks GitHub again right before the swap. If Noah pulls the release (deletes it, or marks it a
   prerelease), publishes a newer one, or uploads a stop within those two days, it installs nowhere by itself.
+  Pulling stops a release only while it stays pulled (the fifth security pass's AU3): anyone with write access
+  to the repository can publish it again from its genuine files (his signed manifest and the zip, no key
+  needed), and every Mac below its version installs it 48 hours after reading it (a new release object, a
+  fresh wait). To stop a release for good, Noah publishes a newer one: each Mac's floor then refuses the old one
+  once it has installed the newer. The audit names a release marked pulled that is back.
 - **What it does not protect against.** Update Now (the person installs at once, after seeing the version);
   a release nobody notices within two days (the wait buys time, not attention); a Mac that can't keep its
   memory (no keychain group) restarts the wait at every launch, never shortens it. A Mac's clock no longer
@@ -1454,7 +1483,11 @@ Later the same day, after reading the summary: "48 hour wait seems ok, can the 1
   GitHub's digest) on any release at or above the lowest version the record names, whatever became of its
   manifest (renamed, deleted); a release the record names that GitHub doesn't list (a release Noah pulled is
   marked so with `Scripts/sign-update.sh --pulled v0.6.3`); a listing with no release at all; a login GitHub
-  lists no drafts to (`permissions.push`); and a manifest larger than any Sill reads, never downloaded. With `--notify` it posts a notification then, and also whenever it couldn't run (any stop: an
+  lists no drafts to (`permissions.push`); and a manifest larger than any Sill reads, never downloaded. Since the
+  fifth pass it also names a release marked pulled that GitHub lists again (AU3), and a release at or above that
+  lowest version carrying neither `Sill.zip` nor `Sill.zip.manifest` that isn't in the record (AU2's narrower
+  form: both renamed away while the audit looks). That lowest version is the audit's floor, so the first release
+  that carries the update key is signed too (the checklist, N12 b). With `--notify` it posts a notification then, and also whenever it couldn't run (any stop: an
   expired `gh` login, no network), so it never fails in silence. The notification is best-effort (a failed
   `osascript` must not hide the alarm, which the exit status and `audit.log` keep), and no audit reports a run
   that never happened (the Mac off, the LaunchAgent unloaded, Script Editor's notifications off): accepted (the
@@ -1890,9 +1923,11 @@ The reviewer's four options (any one narrows it; the first two are settings, not
 1. **A ruleset on main: no force push, no deletion, changes through pull requests.**
    - Stops: any change to main that doesn't go through a pull request (a direct push, a force push, a
      deletion); anyone who can merge one still changes main. With Required approvals 0, that is everyone with
-     `contents: write`: a collaborator with write access, a leaked token without admin rights, a workflow's
-     `GITHUB_TOKEN` (nightly.yml's job has it) can each open a pull request and merge it (the fourth security
-     pass read this bullet as claiming more).
+     `contents: write`: a collaborator with write access or a leaked token without admin rights can each open
+     a pull request and merge it; a workflow's `GITHUB_TOKEN` (nightly.yml's Mac job has `contents: write`)
+     can't open one here (the repository doesn't let Actions create pull requests, `can_approve_pull_request_reviews`
+     false as read on 2026-11-12, and nightly.yml grants no pull-request write) but can merge one someone else
+     opened. The conclusion stands (the fourth and fifth security passes read this bullet).
    - Doesn't stop: an admin. Noah's account, and his `gh` login on this Mac, can open a pull request and
      merge it with no approval, or edit or delete the ruleset. Mostly a record: every change to main becomes
      a pull request, or a ruleset change in the repository's log.
@@ -1902,7 +1937,9 @@ The reviewer's four options (any one narrows it; the first two are settings, not
      (his account, his `gh` login) is still not stopped. Web page: as below, but Bypass list → Add bypass →
      Repository admin, then its menu "For pull requests only"; and Required approvals 1. Command: as below,
      with `"bypass_actors": [{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"}]`
-     (5 is GitHub's id for the repository admin role) and `"required_approving_review_count": 1`.
+     and `"required_approving_review_count": 1`. That 5 is GitHub's id for the repository admin role is
+     unverified here (it matches GitHub's examples as the reviewer recalls them; no API call was made from this
+     branch): the web page's steps are the sure way.
    - Survives his account being taken over: no; it only makes a push visible.
    - Cost: every change to main goes through a pull request, Noah's own too (`gh pr merge` works as now).
    - In the web page: github.com/Saffsanity/sill → Settings → Rules → Rulesets → New ruleset → New branch
@@ -2024,11 +2061,14 @@ The reviewer's four options (any one narrows it; the first two are settings, not
      and the words; under an hour, and its checks).
 
 The option Noah declined on 2026-11-12 ("A separate nightly key that GitHub holds seems like the best option"):
-**sign each nightly on his Mac, with a key behind Touch ID as the update key is.** It is the only one that both
-restores two independent proofs (Apple's notarization from CI, the nightly's signature from his Mac) and
-survives his account being taken over outright: whoever pushes to main or holds the environment's secrets gets
-no signature. Its cost is a tap each night, with his Mac on and awake when the nightly is built; a night he
-doesn't sign has no nightly for Update Now. Named here as the fourth security pass asked, not built.
+**sign each nightly on his Mac, with a key behind Touch ID as the update key is.** It restores two independent
+proofs (Apple's notarization from CI, the nightly's signature from his Mac), and it survives the environment's
+secrets leaving GitHub outright: no key is there. Against a push to main it holds only as far as what Noah checks
+before each night's tap (the fifth security pass): CI still builds and notarizes a commit pushed to main, and a
+routine tap signs it, so the notice's checks 1 to 3 above (where the commit came from, nothing the build depends on
+changed unseen, the assets from that commit's run) belong in that step. Its cost is that tap and those checks each
+night, with his Mac on and awake when the nightly is built; a night he doesn't sign has no nightly for Update Now.
+Named here as the fourth security pass asked, not built.
 
 The reviewer's verdicts (third pass): "Use nightly builds" alone, through Update Now: go, with the honest words
 (done) and the ruleset on main (option 1). "Use nightly builds" with the automatic update: not yet; something

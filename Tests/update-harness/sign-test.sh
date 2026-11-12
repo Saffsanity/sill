@@ -28,7 +28,8 @@ cat > "$out/bin/gh" <<'GH'
 # `api [--paginate] repos/R/releases…` (v0.6.1, of $GH_STANDIN_ASSETS; GH_STANDIN_LISTING=empty lists none, =nomain
 # lists an old v0.5.0 carrying the same Sill.zip in its place; and, with GH_STANDIN_EXTRA=published|prerelease|draft,
 # a v0.7.0 carrying $GH_STANDIN_EXTRA_MANIFEST alone, =renamed a v0.7.0 carrying Sill.zip and that manifest renamed
-# Sill.zip.manifest.txt, =big a v0.7.0 whose Sill.zip.manifest is $GH_STANDIN_EXTRA_MANIFEST, larger than 4 KiB),
+# Sill.zip.manifest.txt, =big a v0.7.0 whose Sill.zip.manifest is $GH_STANDIN_EXTRA_MANIFEST, larger than 4 KiB,
+# =bare a v0.7.0 carrying both under other names, Sill.zip.renamed and Sill.zip.manifest.renamed),
 # `api -H 'Accept: application/octet-stream' repos/R/releases/assets/ID` (an asset's bytes), `api
 # repos/R/git/ref/tags/T` (the tag in the scratch checkout $GH_STANDIN_REPO, or $GH_STANDIN_TAG_SHA; annotated
 # with GH_STANDIN_TAG_ANNOTATED=1) and `api repos/R/git/tags/SHA`, `api repos/R/actions/runs/ID` (a run of
@@ -89,6 +90,8 @@ if extra in ("published", "prerelease", "draft", "big"):
     listing.append(release("v0.7.0", [("Sill.zip.manifest", extra_manifest)], 900, extra == "draft", extra == "prerelease"))
 elif extra == "renamed":
     listing.append(release("v0.7.0", [("Sill.zip", os.path.join(assets, "Sill.zip")), ("Sill.zip.manifest.txt", extra_manifest)], 900))
+elif extra == "bare":
+    listing.append(release("v0.7.0", [("Sill.zip.renamed", os.path.join(assets, "Sill.zip")), ("Sill.zip.manifest.renamed", extra_manifest)], 900))
 if "/releases/assets/" in path:
     wanted = int(path.rsplit("/", 1)[-1])
     if wanted in files:
@@ -304,6 +307,9 @@ before="$(notifications)"
 GH_STANDIN_EXTRA=renamed GH_STANDIN_EXTRA_MANIFEST="$out/v070.manifest" expect fail "AU2: a Sill.zip outside the record, its manifest renamed" "$sign" --audit --notify
 grep -q "v0.7.0 (published): CARRIES A Sill.zip THAT ISN'T IN YOUR SIGNING RECORD" "$out/last.log" && [ "$(notifications)" -gt "$before" ] \
     && echo "  ok: AU2: named, and a notification" || { echo "  FAIL: AU2's words or notification"; cat "$out/last.log"; failures=$((failures + 1)); }
+GH_STANDIN_EXTRA=bare GH_STANDIN_EXTRA_MANIFEST="$out/v070.manifest" expect fail "AU2: a release with both of Sill's files renamed" "$sign" --audit
+grep -q "v0.7.0 (published): A RELEASE SINCE YOUR FIRST SIGNED ONE THAT CARRIES NEITHER Sill.zip NOR Sill.zip.manifest" "$out/last.log" \
+    || { echo "  FAIL: AU2's words for both files renamed"; cat "$out/last.log"; failures=$((failures + 1)); }
 GH_STANDIN_LISTING=nomain expect fail "N11 b: a release the record names that GitHub doesn't list" "$sign" --audit
 grep -q "v0.6.1: IN YOUR SIGNING RECORD BUT NOT ON GITHUB" "$out/last.log" && ! grep -q "v0.5.0" "$out/last.log" \
     && echo "  ok: N11 b: named; an older release's Sill.zip, from before the record, isn't" || { echo "  FAIL: N11 b's words"; cat "$out/last.log"; failures=$((failures + 1)); }
@@ -323,6 +329,12 @@ expect fail "--pulled: asked, and no answer marks nothing" no_answer "$sign" --p
 GH_STANDIN_LISTING=nomain expect fail "--pulled: still asked where it went before" "$sign" --audit
 expect ok "--pulled: v0.6.1 marked pulled" with_y "$sign" --pulled v0.6.1
 GH_STANDIN_LISTING=nomain expect ok "--pulled: the audit no longer asks where it went" "$sign" --audit
+# AU3 (the fifth security pass): the release marked pulled, published again from its own files (its manifest signed
+# here and its zip), is named, with a notification.
+before="$(notifications)"
+expect fail "AU3: a release marked pulled, back on GitHub from its own files" "$sign" --audit --notify
+grep -q "v0.6.1 (published): YOU MARKED IT PULLED, AND IT IS BACK ON GITHUB" "$out/last.log" && [ "$(notifications)" -gt "$before" ] \
+    && echo "  ok: AU3: named, and a notification" || { echo "  FAIL: AU3's words or notification"; cat "$out/last.log"; failures=$((failures + 1)); }
 # R2: the updater's changes since the last release signed (a release v0.6.0 recorded at the commit before).
 git -C "$scratch" tag -f v0.6.0 "v0.6.1^{commit}~1" > /dev/null
 printf '%s v0.6.0 %s %s\n' 2026-11-01T00:00:00Z "$zero" "$zero" > "$out/record.tmp"; cat "$out/signer/signed.txt" >> "$out/record.tmp"

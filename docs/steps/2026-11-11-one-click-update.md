@@ -199,6 +199,18 @@ updater features" (the plan's §15.1); the independent security review's finding
   plan. §16.10 corrected as the reviewer read it (option 1's Stops bullet and its stronger variant, option 2's
   PUT that may not take `can_admins_bypass`, option 3's survival being the wait's only, with the notice's five
   checks and what it can't catch, and the option Noah declined: nightlies signed on his Mac behind Touch ID).
+- The fifth security pass (the same reviewer, on f9bab246, round 6 only; the plan's §12g; each finding confirmed
+  against its proof first, none unreal; one low, notes). AU3: the audit names a release marked pulled that GitHub
+  lists again (published again from its genuine files, it would install on every Mac below it 48 hours after it is
+  read, with no key); §15.4, §14 and the checklist say pulling stops a release only while it stays pulled, and a
+  newer release stops it for good (each Mac's floor). AU2's narrower form: a release at or above the floor with
+  neither of Sill's files under its name and not in the record is named. N12 a: the start rule's estimate is this
+  Mac's half alone; GitHub's half is `dates`'s at each look (nothing needed the carry). N12 b: the checklist and
+  §14 say to sign the first release that carries the key too (the audit's floor is the lowest version signed). N12
+  c: §16.10's three wording points (the Actions token can't open a pull request here but can merge one; the admin
+  role's `actor_id` unverified, the web steps the sure way; the declined option survives secrets leaving GitHub
+  and holds against a push to main only as far as the checks before each tap). N12 d: the parked copy's held
+  descriptor is the first pass's N4, accepted as N4 is.
 - Verified, round 5 (2026-11-12 11:50–13:32, this Mac, heavy jobs through heavy.sh, no device, nothing launched but
   the harness's test executables and the bare SillMenuBar for previews), on cd9eaaa3 (the worktree's run is the
   commit's; the mutants on an export of it), then f9a962d4 (two check rules and the signing test's R2 list, no app

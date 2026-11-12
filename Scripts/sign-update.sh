@@ -232,7 +232,12 @@ fi
 # - a Sill.zip not in the record, by GitHub's digest (AU2: its manifest renamed or gone hides nothing), on any release
 #   whose version is at or above the lowest the record names (older ones predate the update key);
 # - a release the record names that GitHub doesn't list, unless marked pulled (--pulled), and a listing with no
-#   release at all (N11 b: a short or empty answer passes nothing).
+#   release at all (N11 b: a short or empty answer passes nothing);
+# - a release marked pulled that GitHub lists again (the fifth security pass's AU3: published again from its genuine
+#   files, it would install on every Mac below it 48 hours after it is read; pulling stops a release only while it
+#   stays pulled, and a newer release stops it for good);
+# - a release at or above that lowest version that carries neither Sill.zip nor Sill.zip.manifest and isn't in the
+#   record (AU2's narrower form: both renamed away while the audit looks, back for the Sills' reads).
 # Reads only: the repository's permissions, GitHub's release listing and each Sill.zip.manifest by its asset id (a
 # draft's has no download address), a few KB each.
 if [ "$mode" = audit ]; then
@@ -284,6 +289,15 @@ if [ "$mode" = audit ]; then
                     alarm "$t ($state): NOT IN YOUR SIGNING RECORD; it doesn't verify with your update key, so no Sill installs it, but Update Now is broken for it."
                 fi
             fi
+        fi
+        # AU3: a release marked pulled is back on GitHub.
+        if grep -qxF -- "$t" "$dir/pulled-tags"; then
+            alarm "$t ($state): YOU MARKED IT PULLED, AND IT IS BACK ON GITHUB: published again from its files, every Mac below it installs it 48 hours after reading it. Pull it again, and publish a newer release to stop it for good (each Mac's floor then refuses it). If you published it again yourself, delete its 'pulled' line from $record."
+        fi
+        # AU2's narrower form: a release of the update key's time with neither of Sill's assets under its name.
+        if [ "$digest" = - ] && [ "$id" = - ] && [ -n "$floor" ] && [[ "$t" =~ ^v[0-9]+(\.[0-9]+){0,7}$ ]] \
+           && [ "$(awk "$vcmp"' BEGIN { print vcmp(ARGV[1], ARGV[2]) }' "$t" "$floor")" -ge 0 ] && ! grep -qxF -- "$t" "$dir/signed-tags"; then
+            alarm "$t ($state): A RELEASE SINCE YOUR FIRST SIGNED ONE THAT CARRIES NEITHER Sill.zip NOR Sill.zip.manifest AND ISN'T IN YOUR SIGNING RECORD: its files renamed away while the audit looks, or a release that isn't Sill's. Look at it, and pull it if you didn't make it."
         fi
         # AU2: the zip itself, whatever became of its manifest, on a release of the update key's time.
         if [ "$digest" != - ] && [ -n "$floor" ] && [[ "$t" =~ ^v[0-9]+(\.[0-9]+){0,7}$ ]] \

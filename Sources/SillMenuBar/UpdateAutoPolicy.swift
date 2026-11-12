@@ -288,22 +288,16 @@ enum UpdateAutoPolicy {
         return .go
     }
 
-    /// When the cooling-off of the release `tag` (a nightly's `key`) ends, from what this Sill remembers, by this
-    /// Mac's clock: every sighting of it, the latest end, with a publication GitHub gave after the first sight
-    /// carried over by the difference between the two clocks then. Nil when it never read that manifest. Only an
-    /// estimate, for the start rule and the pane: `dates` decides, with GitHub's clock in the answer just read. So a
-    /// publication more than `maxAge` after GitHub's time at the first sight is not carried over (the fourth
-    /// security pass's N11 a): no genuine one can be (a manifest signed before the first sight is refused once it is
-    /// older than that), and a `Date` years off at the first read would otherwise hold the estimate years out, so
-    /// that `dates` were never asked. A first `Date` years ahead still makes `dates` itself wait: that fails safe.
+    /// When the cooling-off of the release `tag` (a nightly's `key`) ends by this Mac's clock, from what this Sill
+    /// remembers: every sighting of it, the latest end, each from the later of its signed time and its first sight.
+    /// Nil when it never read that manifest. Only this Mac's half, for the start rule and the pane: GitHub's half
+    /// (its clock, the latest publication) is `dates`'s alone, decided at each look with GitHub's clock in the answer
+    /// just read. Carrying GitHub's half over here (as rounds 5 and 6 did) held the gate for as long as a first `Date`
+    /// was off, up to 120 days, though `dates` would have gone at 48 hours (the fifth security pass's N12 a); with
+    /// nothing carried, a look past this Mac's half costs one read of the release and its manifest, which counts no
+    /// attempt and only ever lengthens waits.
     static func waitUntil(_ m: Memory, tag: String, wait: TimeInterval = coolingOff) -> Date? {
-        m.seen.filter { $0.tag == tag }.map { s -> Date in
-            var end = max(s.signed, s.first).addingTimeInterval(wait)
-            if let g = s.firstGitHub, let p = s.published, p > g, p.timeIntervalSince(g) <= maxAge {
-                end = max(end, s.first.addingTimeInterval(p.timeIntervalSince(g) + wait))
-            }
-            return end
-        }.max()
+        m.seen.filter { $0.tag == tag }.map { max($0.signed, $0.first).addingTimeInterval(wait) }.max()
     }
 
     /// The sighting of that manifest (that tag and zip, on that release object: AU2), if this Sill has read it.

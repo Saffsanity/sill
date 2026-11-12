@@ -685,7 +685,8 @@ Rules found in the steps that hold for all work (each where it is written):
   tag's source carries, asks and uploads, and keeps a line in the signing record;
   `--audit [--notify]` compares every release on GitHub with that record, drafts and
   pre-releases too (each manifest, each `Sill.zip` since the first release signed, every
-  release signed still listed, an empty listing, a login that can't see drafts), and
+  release signed still listed and none marked pulled back, an empty listing, a login that
+  can't see drafts), and
   notifies when something isn't right or the audit couldn't run; `--pulled vX` marks a
   release Noah pulled; `--new-key` makes the key once; `Scripts/update-manifest.swift` is its
   tool, compiled with the app's own UpdateManifest and UpdateInstaller.
