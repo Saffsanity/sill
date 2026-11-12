@@ -246,11 +246,13 @@ enum PictureInPicturePolicy {
         static let title = "Picture in Picture"
 
         /// Under the switch: what it does, what the window shows, how to come back, and iOS's own switch,
-        /// without which iOS never starts it (the plan's open question 2).
+        /// without which iOS never starts it (the plan's open question 2). Named, not where it is: an iPhone
+        /// keeps it in Settings › General › Picture in Picture, and iPadOS 26 moved the iPad's (a person's
+        /// report puts it under Multitasking & Gestures), so a path could be wrong on one of them.
         static func footnote(mac: String) -> String {
             "Leave Sill while \(mac)’s picture shows, and it keeps playing in a small window over your other apps, "
                 + "with its sound when Send Audio is on. That window only shows the picture: tap it to come back to Sill. "
-                + "iOS starts it only while Start PiP Automatically is on, in Settings › General › Picture in Picture."
+                + "iOS starts it only while its own Start PiP Automatically setting is on."
         }
     }
 }

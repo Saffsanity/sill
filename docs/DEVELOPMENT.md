@@ -854,8 +854,9 @@ Desktop streams and its picture shows, leaving Sill (home, another app) lets iOS
 take the picture into its Picture in Picture window, where it keeps playing,
 with the Mac's sound when Send Audio is on and Mute is off. Sill never starts it
 itself: iOS does, through the automatic start, and only while the person's own
-Settings › General › Picture in Picture › Start PiP Automatically is on (App
-Review rejects an app that starts it on its way to the background). The window
+Start PiP Automatically setting is on (an iPhone's Settings › General ›
+Picture in Picture; iPadOS 26 moved the iPad's); App Review rejects an app
+that starts it on its way to the background. The window
 shows the video layer alone: no pointer, no covers' words, the whole picture
 whatever the zoom; a locked Mac's lock screen, or black for another user's. Its
 pause freezes the picture and the sound while the Mac keeps sending (the device

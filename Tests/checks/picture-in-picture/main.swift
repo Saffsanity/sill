@@ -215,8 +215,8 @@ eq(P.Copy.title, "Picture in Picture", "the switch's title, iOS's own name for i
 check("the footnote names the Mac: \(footnote)", footnote.hasPrefix("Leave Sill while Mac mini’s picture shows"))
 check("the footnote says the sound comes with Send Audio", footnote.contains("with its sound when Send Audio is on"))
 check("the footnote says nothing goes to the Mac from it", footnote.contains("only shows the picture"))
-check("the footnote names iOS's own switch and where it is",
-      footnote.contains("Start PiP Automatically") && footnote.contains("Settings › General › Picture in Picture"))
+check("the footnote names iOS's own switch, and no path to it (an iPhone's and an iPad's differ)",
+      footnote.contains("its own Start PiP Automatically setting is on") && !footnote.contains("Settings ›"))
 check("the footnote has no straight apostrophe", !footnote.contains("'"))
 
 // MARK: The Lifecycle by cases

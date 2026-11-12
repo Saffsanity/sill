@@ -71,7 +71,7 @@ MUTANTS = [
         "state = State(active: true, paused: false)"),
     # The words.
     ("M41 the footnote without iOS's own switch",
-        "\"iOS starts it only while Start PiP Automatically is on, in Settings › General › Picture in Picture.\"", "\"\""),
+        "\"iOS starts it only while its own Start PiP Automatically setting is on.\"", "\"\""),
 ]
 # The check must pass on the rule as it is first: a check that fails anyway catches every mutant for nothing.
 base = os.path.join(OUT, "unmutated")

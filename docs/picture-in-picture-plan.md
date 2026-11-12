@@ -66,11 +66,13 @@ A switch, Settings › This iPad (This iPhone) › **Picture in Picture**, off b
 (`PictureInPicturePolicy.defaultOn`). With it on, while Sill's window shows the Mac's picture, Sill lets
 iOS take that picture into PiP when the person leaves Sill (the automatic start; Sill never starts it
 itself). The PiP window shows the Mac's picture as Sill receives it, at its own shape, and the Mac's sound
-plays with it when Send Audio is on and this device's Mute is off. Nothing reaches the Mac from it. Its
-pause freezes the picture and the sound; the Mac keeps sending, so play brings the live picture back at
-once. Coming back to Sill (the PiP window's return button, or opening Sill) puts the picture back in Sill.
-The session's end, the device's lock and ten minutes paused end PiP; after that Sill is in the background
-as it is today. The Mac changes nothing: it keeps streaming to a device that keeps reading.
+plays with it when Send Audio is on and this device's Mute is off. Nothing reaches the Mac from it, nor
+from the device by itself meanwhile (no pointer move, no viewport), and the Mac's copies do not replace
+the device's clipboard while the person is in another app. Its pause freezes the picture and the sound;
+the Mac keeps sending, so play brings the live picture back at once. Coming back to Sill (the PiP
+window's return button, or opening Sill) puts the picture back in Sill. The session's end, the device's
+lock and ten minutes paused end PiP; after that Sill is in the background as it is today. The Mac changes
+nothing: it keeps streaming to a device that keeps reading.
 
 ### The rule (`PictureInPicturePolicy`, pure, `Tests/checks/picture-in-picture`)
 
@@ -190,7 +192,8 @@ background while another stays in front (Stage Manager's minimize) is not docume
 1. **On by default?** Off (`PictureInPicturePolicy.defaultOn`, one constant): keeping the radio, the
    decoder and the Mac's stream running in the background should be opt-in until Noah has tried it.
 2. **A button to start PiP by hand?** None in this version. Without one, a person who turned off iOS's
-   Start PiP Automatically (Settings › General › Picture in Picture) gets no PiP from Sill; the footnote
+   Start PiP Automatically (an iPhone's Settings › General › Picture in Picture; iPadOS 26 moved the iPad's,
+   a person's report says to Multitasking & Gestures) gets no PiP from Sill; the footnote
    says so. A button in the bar (or the Settings panel) would also float the picture while Sill stays in
    front.
 3. **A lower frame rate in PiP?** No: the stream keeps its rate (no restart on the Mac when PiP starts or
@@ -228,7 +231,9 @@ background while another stays in front (Stage Manager's minimize) is not docume
 
 The iPad mini (60 Hz) and the iPhone 15 Pro, a Debug build of this branch (Xcode's console shows the `pip:`
 lines), Sill for Mac 0.6.1, Settings › This iPad › Picture in Picture on. iOS's own switch first:
-Settings › General › Picture in Picture › Start PiP Automatically on (P1 checks its name on iOS 27).
+Start PiP Automatically on (on the iPhone in Settings › General › Picture in Picture; on the iPad wherever
+iPadOS 27 keeps it: P1 says where, and whether the footnote's "its own Start PiP Automatically setting" is
+the name iOS 27 shows).
 
 1. **The setting.** The switch is the first row of This iPad (This iPhone) with its footnote; off by
    default on a fresh install; its name and iOS's own setting's path read as on the device.
