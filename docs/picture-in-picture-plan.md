@@ -217,6 +217,14 @@ background while another stays in front (Stage Manager's minimize) is not docume
 9. **Several windows.** The one used last offers PiP (rule 2). The alternative offers PiP only while Sill
    has one window, as the Mac's menus in the iPad's bar do.
 
+10. **The Mac's cursor in the PiP window.** No. Noah asked after his first try (2026-11-12): "when it is in
+    that view, the mouse cursor is hidden but Sill cannot render its own cursor. Could the cursor be unhidden
+    when in PiP, and hidden when you come out of PiP?" It would take a wire field for the device's wish, a rule
+    on the Mac (only while every connected device asks, or a device still in Sill sees two cursors) and a
+    restart of the stream as the picture floats and again on the way back (a running SCStream is never
+    reconfigured). He dropped it the same night: "sounds too complicated and immersion breaking". The PiP
+    picture stays without a pointer.
+
 ## Gates
 
 | Gate | What |
@@ -366,6 +374,13 @@ accessibility-extra-large text, each scrolled to the switch (`-SillSettingsScrol
 the shortest panel: on the iPad sideways it shows the switch's footnote and the version line in one frame,
 the switch's own row just above; no layout shows the row and the version line together (the This iPad group
 runs about 950 pt between them).
+
+### Noah's first try (2026-11-12, about 03:15–03:25)
+
+The iPad mini with a Debug build of 52c0eaa stamped 0.6.1 (1430), Sill for Mac main 0.6.1 (1416): "PiP works
+really really well!" He approved the merge the same night. The Mac's cursor in the PiP window was asked about
+and dropped (open question 10). Not reported item by item: the P list (the iPhone, his music, the device
+locking, ten minutes paused, two windows, the battery and VoiceOver stay open).
 
 ### The review before the first build (2026-11-11)
 
