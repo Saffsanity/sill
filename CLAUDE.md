@@ -794,8 +794,9 @@ Rules found in the steps that hold for all work (each where it is written):
   the pointer's dwell at the edge, when it is offered and armed, when the controls come back by
   themselves, the hint, the room, the words; pure, `Tests/checks/full-screen`; pbxproj A279/F279),
   `EdgeFlickRecognizer` (the flick's recognizer and the swipe in's, `RevealEdgePan`, on Sill's window,
-  which other recognizers wait for them, `EdgeRecognizers.waits`, and a stroke they held until its lift,
-  `releasedAtLift`; UIKit only, so Tests/touchrig compiles it; A27B/F27B) and `FullScreen`
+  which other recognizers wait for them, `EdgeRecognizers.waits` (never one that only watches,
+  `WatchesTouchesOnly`), where a held stroke landed, `heldLanding`, for the picture's scroll, and a stroke
+  they held until its lift, `releasedAtLift`; UIKit only, so Tests/touchrig compiles it; A27B/F27B) and `FullScreen`
   (`FullScreenEdges`, which puts them and a hover on the window and says whether it covers the screen and
   its safe area, `FullScreenSystem` for the status bar, the home indicator and the deferred left edge, the
   shake through `UIWindow.motionEnded`, the hint, the swipe in's preview hole, the hidden picture's
@@ -1086,7 +1087,9 @@ Rules found in the steps that hold for all work (each where it is written):
   made fresh; `compare.py --all` every stroke against main's, and, where the
   sources have full screen's EdgeFlickRecognizer (on the rig's window),
   `compare.py --edge` its strokes at the left edge (`RIG_ONLY=edge`): a flick
-  hides and sends nothing, anything else goes on whole and in order.
+  hides and sends nothing, anything else goes on whole and in order;
+  `RIG_TRACE=1` logs every recognizer's state (and the flick's trace). It
+  compiles StreamProtocol whole, and DuoPosture.swift, as the surfaces need.
 - `Tests/duorig/` — TEST ONLY, private interfaces, simulator only: folds and
   turns the iPhone Duo simulator with Device Hub's own events (usage page
   0xFF61, usage 0x5B, an IOCFSerialize dictionary from
