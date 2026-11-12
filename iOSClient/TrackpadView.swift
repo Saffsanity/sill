@@ -383,7 +383,9 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
                 // next callback.
                 let translation = gesture.translation(in: self)
                 lastTranslation = translation
-                if !trackerDriving, translation != .zero {
+                // A stroke held until its lift by full screen's flick (EdgeRecognizers.releasedAtLift): the
+                // tracker's end carries its travel, once.
+                if !trackerDriving, translation != .zero, !EdgeRecognizers.releasedAtLift(in: window) {
                     moveCursor(dx: translation.x, dy: translation.y)
                 }
             }
