@@ -134,7 +134,11 @@ final class StreamClient: ObservableObject {
     /// those seen only over peer-to-peer Wi-Fi.
     @Published var macs: [FoundMac] = []
     @Published var connected = false {
-        didSet { if connected != oldValue { DeviceIdleTimer.shared.update() } }   // auto-lock (PR #230)
+        didSet {
+            guard connected != oldValue else { return }
+            DeviceIdleTimer.shared.update()          // auto-lock (PR #230)
+            PictureInPictureHub.shared.update()      // Picture in Picture's offer (#291)
+        }
     }
     /// The nearby (peer-to-peer) browser runs: the status line says so, or under the hint the line
     /// in Search Nearby's place.
@@ -263,7 +267,10 @@ final class StreamClient: ObservableObject {
                 presence.streaming = streaming
                 renderPointer()
             }
-            if active != oldValue { DeviceIdleTimer.shared.update() }   // auto-lock (PR #230)
+            if active != oldValue {
+                DeviceIdleTimer.shared.update()          // auto-lock (PR #230)
+                PictureInPictureHub.shared.update()      // Picture in Picture's offer (#291)
+            }
         }
     }
     @Published var thumbnails: [UInt32: UIImage] = [:] // by window ID
@@ -329,7 +336,10 @@ final class StreamClient: ObservableObject {
 
     /// Pixel size of the frames the host is sending, from the HEVC parameter sets. Input positions
     /// are fractions of this, so the overlay needs it to letterbox touches the way the layer does.
-    @Published var videoSize: CGSize = .zero
+    /// Known: the picture has come, for Picture in Picture's offer (#291).
+    @Published var videoSize: CGSize = .zero {
+        didSet { if (videoSize == .zero) != (oldValue == .zero) { PictureInPictureHub.shared.update() } }
+    }
     // The pointer sprite (docs/pointer-visibility-plan.md §7.3; the rules are PointerPresence.swift's).
     // One sprite in the display view shows the Mac's pointer while the Mac, or another device, moved it
     // last (kind 26 says where), and this device's own only for the portrait trackpad (and the Pencil,
@@ -386,6 +396,7 @@ final class StreamClient: ObservableObject {
     func noteAction() {
         lastActionAt = ProcessInfo.processInfo.systemUptime
         DeviceIdleTimer.shared.used()
+        PictureInPictureHub.shared.used(self)     // with several windows, the one used last offers it (#291)
     }
     /// The tour is on screen (StreamScreen): nothing this device does reaches the Mac as input
     /// meanwhile. The one input it makes on its own, the pointer's move to the middle of a new frame
@@ -394,16 +405,23 @@ final class StreamClient: ObservableObject {
     /// since); the DEBUG tripwire in `sendInput` names anything else. Cleared with the session.
     /// Main thread.
     var inputPaused = false {
-        didSet {
-            guard oldValue, !inputPaused, pointerMoveOwed else { return }
-            pointerMoveOwed = false
-            presence.follow(pointerFeed.current)
-            guard presence.recentresOnNewFrame(now: ProcessInfo.processInfo.systemUptime), let p = presence.own else { return }
-            sendInput(.pointer(.move, x: Double(p.x), y: Double(p.y)), byPerson: false)
-        }
+        didSet { if oldValue, !inputPaused { releaseOwedPointerMove() } }
     }
-    /// A pointer move `pointerFrameChanged` held back while input was paused.
+    /// A pointer move `pointerFrameChanged` held back while input was paused, or while Picture in Picture
+    /// showed the picture outside Sill's window (`deviceInputHeld`).
     private var pointerMoveOwed = false
+
+    /// The pointer move `pointerFrameChanged` held back, once nothing holds the device's own input any more
+    /// (the tour gone, Sill's window in front again): only if this device still has the pointer and its own
+    /// still shows (the Mac, or another device, may have taken it since), and only with its window in front,
+    /// never as Picture in Picture stops while Sill is away (#291). Main thread.
+    private func releaseOwedPointerMove() {
+        guard pointerMoveOwed, !deviceInputHeld, sceneInFront else { return }
+        pointerMoveOwed = false
+        presence.follow(pointerFeed.current)
+        guard presence.recentresOnNewFrame(now: ProcessInfo.processInfo.systemUptime), let p = presence.own else { return }
+        sendInput(.pointer(.move, x: Double(p.x), y: Double(p.y)), byPerson: false)
+    }
     /// What the automatic tour decided (TourPolicy.nextSession): this session's, kept here rather
     /// than with the stream screen, which goes with its session, so the automatic reconnect's
     /// session can go on with it. StreamScreen reads and writes it. Main thread.
@@ -497,6 +515,14 @@ final class StreamClient: ObservableObject {
             self.max = Int(sorted[sorted.count - 1].rounded())
         }
     }
+
+    /// Picture in Picture for this window's session (#291, docs/picture-in-picture-plan.md): AVKit's
+    /// controller on the display view's layer, made only once the picture is offered (the switch on), and
+    /// what it does to the session. Main thread.
+    private(set) lazy var pictureInPicture = PictureInPicture(client: self)
+    /// Its state as the client last heard it (`pictureInPictureChanged`): what counts as watched, heard and
+    /// running reads it. Main thread.
+    private(set) var pictureInPictureState = PictureInPicturePolicy.State.off
 
     /// When the device asks the Mac for a keyframe after its picture was interrupted (issue #101).
     /// Main thread.
@@ -611,8 +637,13 @@ final class StreamClient: ObservableObject {
     private var nearbyLife = BrowserLife()
     /// `startBrowsing` has run: this client looks for Macs (the harness's mock clients never do).
     private var browsing = false
-    /// The app is not in the background (UIApplication's notifications): the automatic reconnect dials
-    /// a listed row, and a failed browser is made again, only then (issue #69). Main thread.
+    /// The app is in the background (UIApplication's notifications). Main thread.
+    private var appInBackground = UIApplication.shared.applicationState == .background
+    /// Sill runs as in the foreground (PictureInPicturePolicy.running): the app is not in the background, or
+    /// this window's picture is in Picture in Picture, which keeps it running (#291). The automatic reconnect
+    /// dials a listed row, and a failed browser is made again, only then (issue #69); and a return from a
+    /// stay in the background that Picture in Picture covered throughout is no return from the background:
+    /// iOS never suspended the app, so no browser is made again (`cameForward`). Main thread.
     private(set) var appInForeground = UIApplication.shared.applicationState != .background
     #if DEBUG
     /// `-SillBrowserFail N`: each of the first N network browsers is reported failed with
@@ -912,6 +943,18 @@ final class StreamClient: ObservableObject {
     /// keyboard's characters as keys only to a Mac that says so (KeyTyping); to one before it they go
     /// through iPadOS's text system, as they always did. Cleared with the session.
     var hostKeyRepeat: Int?
+    /// How many stops this session's Mac's Desktop has and which it shows, or comes back to, from 1 (the
+    /// main display), with their names (`WindowList.desktopDisplays`, `desktopDisplay`,
+    /// `desktopDisplayNames`; DesktopDisplays): the Desktop button's "Desktop 2", its dots, VoiceOver's
+    /// "Display 2 of 3, DELL U2723QE" and its tap's kind 47. Nil from a Mac before them, with one stop and
+    /// while the Mac is locked. Cleared with the session.
+    @Published var hostDesktopDisplays: Int?
+    @Published var hostDesktopDisplay: Int?
+    @Published var hostDesktopDisplayNames: [String]?
+    /// This device's own step (kind 47) waits for the Mac's list that shows where it landed, which VoiceOver
+    /// then says ("Display 2 of 3, DELL U2723QE"): the stop shown when the tap went out, and when. Another
+    /// device's step moves this button unannounced.
+    private var desktopStepSentFrom: (stop: Int?, at: Date)?
     /// The clipboard (kind 32, StreamClient+Clipboard, docs/clipboard-plan.md): what this session's
     /// Mac takes and sends (`WindowList.clipboard`, 1 for text), nil from a Mac before it or with Share
     /// clipboard with devices off. Cleared with the session.
@@ -931,8 +974,10 @@ final class StreamClient: ObservableObject {
     /// What covers the stream (`LockedMac.Shade`): the Mac locked, then "Unlocking…" until the first
     /// keyframe after the unlock (`unlockingTimeout` at most). The picture under it was cleared at the
     /// lock (`HEVCDisplayView.blank`), so the last frame from before the lock never shows. Cleared with
-    /// the session.
-    @Published var lockShade: LockedMac.Shade?
+    /// the session. While one shows the picture is not offered to Picture in Picture (#291).
+    @Published var lockShade: LockedMac.Shade? {
+        didSet { if (lockShade == nil) != (oldValue == nil) { PictureInPictureHub.shared.update() } }
+    }
     /// "Unlocking…"'s timeout.
     private var lockShadeExpiry: DispatchWorkItem?
     /// The chip "Paste on ‹Mac›" is offered (ClipboardPolicy.offersChip) until it is used, dismissed or
@@ -1090,7 +1135,8 @@ final class StreamClient: ObservableObject {
             self?.cameForward()
         }
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.appInForeground = false
+            self?.appInBackground = true
+            self?.runningChanged()
         }
         // The clipboard's chip looks when Sill becomes active (StreamClient+Clipboard).
         observeClipboardActivation()
@@ -1119,6 +1165,9 @@ final class StreamClient: ObservableObject {
                 let view = self.displayView
                 self.queue.async { view.checkLayer("as its window became active") }
                 self.considerKeyframeAsk()
+                // The person is at Sill again: the device's own pointer move and viewport held while Picture in
+                // Picture showed the picture elsewhere go now (#291), once the scene reads its new state.
+                DispatchQueue.main.async { self.pictureBackInSill() }
             }
         }
         for name in [UIApplication.willResignActiveNotification, UIScene.willDeactivateNotification] {
@@ -1130,12 +1179,108 @@ final class StreamClient: ObservableObject {
         }
     }
 
-    /// Whether the picture can be shown now: its window's scene is in the foreground and active, or,
-    /// while it is in no window, Sill is active. Main thread.
+    /// Whether the picture can be shown now: its window's scene is in the foreground and active (or,
+    /// while it is in no window, Sill is active), or Picture in Picture shows it playing
+    /// (PictureInPicturePolicy.pictureWatched, #291). Main thread.
     private var pictureActive: Bool {
+        PictureInPicturePolicy.pictureWatched(sceneForegroundActive: sceneInFront, pip: pictureInPictureState)
+    }
+
+    /// This window's scene is in the foreground and active, or, while the picture is in no window, Sill is
+    /// active. Main thread.
+    private var sceneInFront: Bool {
         if let scene = displayView.window?.windowScene { return scene.activationState == .foregroundActive }
         return UIApplication.shared.applicationState == .active
     }
+
+    // MARK: - Picture in Picture (#291)
+
+    /// This device's switch for Picture in Picture (the Settings panel's This iPad group;
+    /// docs/picture-in-picture-plan.md): `PictureInPicturePolicy.defaultOn` (off) unless set. The device's
+    /// own preference, never sent to the Mac; PictureInPictureHub reads it at each look.
+    static let pictureInPictureKey = "Sill.pictureInPicture"
+    static var pictureInPictureOn: Bool {
+        // `bool(forKey:)`, not `as? Bool`: a launch argument's "1" is a string, which it reads as @AppStorage
+        // does, so the switch and the rule always agree.
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: pictureInPictureKey) == nil ? PictureInPicturePolicy.defaultOn
+            : defaults.bool(forKey: pictureInPictureKey)
+    }
+
+    /// This session, as Picture in Picture's offer reads it (PictureInPicturePolicy.qualifies). Main thread.
+    var pictureInPictureSession: PictureInPicturePolicy.Session {
+        PictureInPicturePolicy.Session(switchOn: Self.pictureInPictureOn, supported: PictureInPicture.supported,
+                                       connected: connected, streaming: active != .none,
+                                       pictureCame: videoSize != .zero, covered: lockShade != nil)
+    }
+
+    /// Picture in Picture's state changed (PictureInPicture): the picture frozen or not, the sound heard or
+    /// not, what runs as in the foreground, the keyframe asks for a picture watched again or no longer, and
+    /// the device's own pointer move held or let go (PictureInPicturePolicy). Main thread.
+    func pictureInPictureChanged(from old: PictureInPicturePolicy.State, to new: PictureInPicturePolicy.State) {
+        pictureInPictureState = new
+        let frozen = PictureInPicturePolicy.frozen(new)
+        let view = displayView
+        queue.async { view.setFrozen(frozen) }
+        sound.setPictureInPicture(new)
+        runningChanged()
+        let front = sceneInFront
+        let watchedBefore = PictureInPicturePolicy.pictureWatched(sceneForegroundActive: front, pip: old)
+        let watchedNow = PictureInPicturePolicy.pictureWatched(sceneForegroundActive: front, pip: new)
+        if watchedNow, !watchedBefore {
+            // Shown again, in the Picture in Picture window: a layer iOS interrupted as Sill left is flushed and
+            // asked for (KeyframeRecovery), as when its window becomes active.
+            queue.async { view.checkLayer("as Picture in Picture shows it") }
+            considerKeyframeAsk()
+        } else if watchedBefore, !watchedNow {
+            // Seen nowhere now (paused, or stopped with Sill away): as when its window leaves the foreground.
+            keyframeRecovery.leftForeground()
+            keyframeAskWork?.cancel(); keyframeAskWork = nil
+        }
+        pictureBackInSill()
+    }
+
+    /// What waited while the picture showed only in Picture in Picture goes, once it no longer does and
+    /// Sill's window is in front: the device's own pointer move (`releaseOwedPointerMove`) and the last
+    /// viewport the stream screen asked for (`viewportHeld`). Main thread.
+    private func pictureBackInSill() {
+        guard !shownOnlyInPictureInPicture, sceneInFront else { return }
+        releaseOwedPointerMove()
+        if let v = viewportHeld {
+            viewportHeld = nil
+            sendViewport(v)
+        }
+    }
+
+    /// The picture shows only in Picture in Picture: it is there and its window is not in front
+    /// (PictureInPicturePolicy.onlyInPictureInPicture). Nothing of the device's own goes to the Mac then,
+    /// no viewport, and the Mac's copies are not written to this device's clipboard. Main thread.
+    var shownOnlyInPictureInPicture: Bool {
+        PictureInPicturePolicy.onlyInPictureInPicture(sceneForegroundActive: sceneInFront, pip: pictureInPictureState)
+    }
+
+    /// A viewport the stream screen asked for while the picture showed only in Picture in Picture
+    /// (`sendViewport`): a layout iOS makes for its snapshots must not resize the Mac's window or restart its
+    /// stream. Sent once Sill's window is in front again (`pictureBackInSill`); forgotten with the session.
+    /// Main thread.
+    var viewportHeld: Viewport?
+
+    /// `appInForeground` from the app's background state and Picture in Picture (PictureInPicturePolicy.running).
+    /// Main thread.
+    private func runningChanged() {
+        let running = PictureInPicturePolicy.running(appForeground: !appInBackground, pip: pictureInPictureState)
+        guard running != appInForeground else { return }
+        appInForeground = running
+        #if DEBUG
+        if appInBackground, Self.pictureInPictureOn {
+            print("pip: Sill " + (running ? "runs as in the foreground: Picture in Picture keeps it running" : "is in the background"))
+        }
+        #endif
+    }
+
+    /// The device's own input waits: the tour shows, or the picture shows only in Picture in Picture
+    /// (`shownOnlyInPictureInPicture`). Main thread.
+    private var deviceInputHeld: Bool { inputPaused || shownOnlyInPictureInPicture }
 
     /// Asks the Mac for one keyframe (kind 44) when KeyframeRecovery says one is owed and due, and looks
     /// again when an ask the spacing holds back is due, or when the keyframe of an ask that is out is
@@ -1267,10 +1412,12 @@ final class StreamClient: ObservableObject {
     /// (DiscoveryPolicy.rebuildBrowser: iOS may have made their connection to mDNSResponder defunct while the
     /// app was suspended, and said nothing yet), and the automatic reconnect's count of dials starts again:
     /// the person is back, so a listed row is dialled at once. Only after the app was seen going to the
-    /// background. Main thread.
+    /// background with nothing keeping it running: a stay that Picture in Picture covered throughout is none
+    /// (`appInForeground` stayed true, #291). Main thread.
     private func cameForward() {
         let wasInBackground = !appInForeground
-        appInForeground = true
+        appInBackground = false
+        runningChanged()
         guard browsing, wasInBackground else { return }
         rebuildIfDue(.network, cameForward: true)
         if nearbyBrowser != nil { rebuildIfDue(.nearby, cameForward: true) }
@@ -3540,6 +3687,9 @@ final class StreamClient: ObservableObject {
     /// never delivered its window list: the connect screen never left, and its Remote rows must not
     /// vanish for another 3 s. Main thread.
     func tearDown(status: String, restartSearch: Bool = true) {
+        // Picture in Picture shows nothing of a session that has ended: it stops (PictureInPicturePolicy.stops;
+        // the reconnect runs when Sill comes back, as after any stay in the background).
+        pictureInPicture.end(.sessionEnded, why: "the session ended (\(status))")
         abandonMove()
         resetPath()
         lastMoveAttempt = nil
@@ -3579,6 +3729,10 @@ final class StreamClient: ObservableObject {
         hostProtocol = nil
         hostGestures = nil
         hostKeyRepeat = nil
+        hostDesktopDisplays = nil
+        hostDesktopDisplay = nil
+        hostDesktopDisplayNames = nil
+        desktopStepSentFrom = nil
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -3624,6 +3778,10 @@ final class StreamClient: ObservableObject {
         apps = []
         videoSize = .zero
         displayView.clear()
+        // Never frozen for the next session (its end stopped Picture in Picture, paused or not): on the
+        // render queue, after a pause's freeze still queued there (#291).
+        let view = displayView
+        queue.async { view.setFrozen(false) }
         // Nor an interruption of its picture: the next session's starts afresh.
         keyframeRecovery = KeyframeRecovery()
         keyframeAskWork?.cancel()
@@ -3675,6 +3833,43 @@ final class StreamClient: ObservableObject {
     func select(_ source: StreamSource) {
         noteAction()
         request(source)
+    }
+
+    /// The Desktop button: while the Desktop streams on a Mac with two stops or more, the Mac's next stop
+    /// (kind 47, DesktopDisplays); else the Desktop picked, as before, which shows the stop the Mac keeps.
+    /// Only the button: this device's own Desktop requests and a gesture's go through `select`, so nothing
+    /// steps by itself. VoiceOver says where a step lands once the Mac's list shows it.
+    func tapDesktop() {
+        guard DesktopDisplays.tapSendsNext(desktopStreams: active == .desktop, displays: hostDesktopDisplays,
+                                           current: hostDesktopDisplay) else {
+            select(.desktop)
+            return
+        }
+        noteAction()
+        choicesSent += 1
+        desktopStepSentFrom = (hostDesktopDisplay, Date())
+        sendAfterInput(.nextDisplay, Data())
+    }
+
+    /// The Desktop button as the Mac's stops have it now (DesktopDisplays.button): its label, its dots while
+    /// the Desktop streams, VoiceOver's words and what a tap does.
+    var desktopButton: DesktopDisplays.Button {
+        DesktopDisplays.button(displays: hostDesktopDisplays, current: hostDesktopDisplay, names: hostDesktopDisplayNames,
+                               desktopStreams: active == .desktop)
+    }
+
+    /// A window list's stops: the button follows them; after this device's own step, the first list that
+    /// shows another stop (within 5 s) is said once by VoiceOver.
+    private func desktopStopsChanged(_ list: WindowList) {
+        if hostDesktopDisplays != list.desktopDisplays { hostDesktopDisplays = list.desktopDisplays }
+        if hostDesktopDisplay != list.desktopDisplay { hostDesktopDisplay = list.desktopDisplay }
+        if hostDesktopDisplayNames != list.desktopDisplayNames { hostDesktopDisplayNames = list.desktopDisplayNames }
+        guard let sent = desktopStepSentFrom else { return }
+        guard Date().timeIntervalSince(sent.at) < 5 else { desktopStepSentFrom = nil; return }
+        guard let count = list.desktopDisplays, let shown = list.desktopDisplay, shown != sent.stop else { return }
+        desktopStepSentFrom = nil
+        UIAccessibility.post(notification: .announcement,
+                             argument: DesktopDisplays.value(shown, of: count, names: list.desktopDisplayNames))
     }
 
     /// Asks the host to stream this source: the person's pick (`select`), or this device's own
@@ -3805,6 +4000,7 @@ final class StreamClient: ObservableObject {
         if byPerson {
             lastPersonInputAt = lastInputAt
             DeviceIdleTimer.shared.used()      // the person is at the device: auto-lock held off again (PR #230)
+            PictureInPictureHub.shared.used(self)   // with several windows, the one used last offers it (#291)
         }
         // A click or a key from any view: what the input view remembers of what was typed goes (#138).
         if TextInputRules.movesCaret(event) { onCaretMayMove?() }
@@ -3991,8 +4187,9 @@ final class StreamClient: ObservableObject {
         presence.follow(pointerFeed.current)
         guard presence.recentresOnNewFrame(now: ProcessInfo.processInfo.systemUptime) else { return }
         setOwnPointer(CGPoint(x: 0.5, y: 0.5), from: presence.origin)
-        // While the tour shows nothing goes to the Mac as input: its cursor follows at the end.
-        if inputPaused { pointerMoveOwed = true; return }
+        // While the tour shows nothing goes to the Mac as input, nor while Picture in Picture shows the
+        // picture outside Sill's window (#291): its cursor follows at the end.
+        if deviceInputHeld { pointerMoveOwed = true; return }
         sendInput(.pointer(.move, x: 0.5, y: 0.5), byPerson: false)
     }
 
@@ -4232,6 +4429,7 @@ final class StreamClient: ObservableObject {
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
                 self.hostKeyRepeat = list.keyRepeat
+                self.desktopStopsChanged(list)
                 // A locked Mac's list has no windows: the drawer and the panel say why, the cover over the
                 // stream too (LockedMac).
                 if self.lockWhy != why { self.lockWhy = why }

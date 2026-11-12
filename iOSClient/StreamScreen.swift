@@ -693,6 +693,8 @@ struct StreamScreen: View {
         // accessibility tree hands them out (VoiceOver's order, without VoiceOver), labels and frames.
         let dump = defaults.double(forKey: "SillAXDump")
         if dump > 0 { after(dump) { Self.accessibilityDump() } }
+        // `-SillAXAction '<label>|<action>'`: half a second after the dump, that element's custom action.
+        if dump > 0, let spec = defaults.string(forKey: "SillAXAction") { after(dump + 0.5) { Self.accessibilityPerform(spec) } }
         // `-SillLargerPictureToggle <s>[,<s>…]`: Larger Picture switched at those seconds, as the
         // Settings panel's switch does (saved; without `-Sill.largerPicture`, which would hold it).
         let toggles = (defaults.string(forKey: "SillLargerPictureToggle") ?? "")
@@ -807,29 +809,35 @@ struct StreamScreen: View {
     /// `-SillAXDump`: walks the key window as an assistive technology does (an element, else its
     /// `accessibilityElements`, else its element count, else its subviews) and prints one line per
     /// element: "ax: 1 Apps (14,454 76×50)".
-    private static func accessibilityDump() {
-        guard let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else {
-            print("ax: no key window"); return
+    static func accessibilityDump() {
+        guard let elements = accessibilityElementsInOrder() else { print("ax: no key window"); return }
+        for (i, element) in elements.enumerated() {
+            let f = element.accessibilityFrame
+            let label = element.accessibilityLabel ?? element.accessibilityValue ?? "(no label)"
+            // What VoiceOver says after the name: the value, the hint, dimmed and adjustable (Aa's
+            // Off and its dimmed state over the Desktop, issue #179); and its actions (the version's Copy).
+            var said: [String] = []
+            if element.accessibilityLabel != nil, let value = element.accessibilityValue, !value.isEmpty { said.append("value “\(value)”") }
+            if let hint = element.accessibilityHint, !hint.isEmpty { said.append("hint “\(hint)”") }
+            if element.accessibilityTraits.contains(.notEnabled) { said.append("dimmed") }
+            if element.accessibilityTraits.contains(.adjustable) { said.append("adjustable") }
+            if let actions = element.accessibilityCustomActions, !actions.isEmpty {
+                said.append("actions " + actions.map { "“\($0.name)”" }.joined(separator: ", "))
+            }
+            print("ax: \(i + 1) \(label) (\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height)))"
+                  + (said.isEmpty ? "" : ": " + said.joined(separator: ", ")))
         }
-        var lines: [String] = []
+    }
+
+    /// The key window's accessibility elements in the order the tree hands them out.
+    private static func accessibilityElementsInOrder() -> [NSObject]? {
+        guard let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return nil }
+        var elements: [NSObject] = []
         var seen = Set<ObjectIdentifier>()
         func visit(_ object: Any, _ depth: Int) {
             guard depth < 60, seen.count < 5000, let element = object as? NSObject, !element.accessibilityElementsHidden,
                   seen.insert(ObjectIdentifier(element)).inserted else { return }
-            if element.isAccessibilityElement {
-                let f = element.accessibilityFrame
-                let label = element.accessibilityLabel ?? element.accessibilityValue ?? "(no label)"
-                // What VoiceOver says after the name: the value, the hint, dimmed and adjustable (Aa's
-                // Off and its dimmed state over the Desktop, issue #179).
-                var said: [String] = []
-                if element.accessibilityLabel != nil, let value = element.accessibilityValue, !value.isEmpty { said.append("value “\(value)”") }
-                if let hint = element.accessibilityHint, !hint.isEmpty { said.append("hint “\(hint)”") }
-                if element.accessibilityTraits.contains(.notEnabled) { said.append("dimmed") }
-                if element.accessibilityTraits.contains(.adjustable) { said.append("adjustable") }
-                lines.append("\(label) (\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height)))"
-                             + (said.isEmpty ? "" : ": " + said.joined(separator: ", ")))
-                return
-            }
+            if element.isAccessibilityElement { elements.append(element); return }
             if let children = element.accessibilityElements, !children.isEmpty {
                 children.forEach { visit($0, depth + 1) }
                 return
@@ -844,7 +852,27 @@ struct StreamScreen: View {
             }
         }
         visit(window, 0)
-        for (i, line) in lines.enumerated() { print("ax: \(i + 1) \(line)") }
+        return elements
+    }
+
+    /// `-SillAXAction '<label>|<action>'`: performs the custom action of that name on the first element
+    /// whose label begins with that label, as VoiceOver's actions rotor does, and says what the
+    /// clipboard holds after it (the version's Copy: docs/version-label-plan.md).
+    static func accessibilityPerform(_ spec: String) {
+        let parts = spec.split(separator: "|", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { print("ax: -SillAXAction wants '<label>|<action>'"); return }
+        guard let element = accessibilityElementsInOrder()?.first(where: { ($0.accessibilityLabel ?? "").hasPrefix(parts[0]) }) else {
+            print("ax: no element whose label begins “\(parts[0])”"); return
+        }
+        guard let action = element.accessibilityCustomActions?.first(where: { $0.name == parts[1] }) else {
+            print("ax: “\(element.accessibilityLabel ?? "")” has no action “\(parts[1])”"); return
+        }
+        let done: Bool
+        if let handler = action.actionHandler { done = handler(action) }
+        else if let target = action.target as? NSObject { _ = target.perform(action.selector, with: action); done = true }
+        else { done = false }
+        print("ax: performed “\(action.name)” on “\(element.accessibilityLabel ?? "")”: \(done); the clipboard holds "
+              + (UIPasteboard.general.string.map { "“\($0)”" } ?? "no text"))
     }
     #endif
 
@@ -1599,9 +1627,13 @@ private struct TopBar: View {
                 .allowsHitTesting(!scaleOpen)
                 .tourTarget(.keyboard)
 
-            button(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop",
-                   accessibilityLabel: "Show the full Mac desktop",
-                   action: { client.select(.desktop) })
+            // The Desktop on the Mac's stop it shows, and with two stops or more the next at a tap
+            // (DesktopDisplays): "Desktop 2", a dot per stop while the Desktop streams.
+            let desktop = client.desktopButton
+            button(open: client.active == .desktop, symbol: "desktopcomputer", label: desktop.label,
+                   accessibilityLabel: desktop.accessibilityLabel,
+                   action: { client.tapDesktop() })
+                .desktopStops(desktop, inset: metrics.buttonHeight >= 60 ? 5 : 3.5)
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
 
@@ -1685,6 +1717,50 @@ struct BarButton<Content: View>: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+extension View {
+    /// The Desktop button beyond its label and symbol (DesktopDisplays.button), on a Mac with two stops or
+    /// more: VoiceOver's value ("Display 2 of 3, DELL U2723QE") and hint ("Shows the next display." while
+    /// a tap steps), and the stops' dots, the shown one filled ("3/7" from seven), over the button's bottom
+    /// margin `inset` from its edge while the Desktop streams, so no bar's layout moves for them. Nothing
+    /// with one stop or a Mac from before this, as before.
+    func desktopStops(_ face: DesktopDisplays.Button, inset: CGFloat, dot: CGFloat = 4) -> some View {
+        accessibilityValue(face.accessibilityValue ?? "")
+            .accessibilityHint(face.accessibilityHint ?? "")
+            .overlay(alignment: .bottom) { DesktopStopDots(face: face, dot: dot).padding(.bottom, inset) }
+    }
+}
+
+/// The Desktop button's place among the Mac's stops while the Desktop streams (DesktopDisplays): one dot per
+/// stop, the shown one filled, as a page control shows a page; "3/7" in place of seven dots or more. The
+/// button reads it whole; VoiceOver hears its value instead.
+struct DesktopStopDots: View {
+    let face: DesktopDisplays.Button
+    var dot: CGFloat = 4
+
+    var body: some View {
+        Group {
+            if let counter = face.counter {
+                // As tall as the dots it stands for, so its digits sit where they would and never reach the
+                // label above (an 8 pt line of its own overlapped "Desktop 3" in a 58 pt window bar).
+                Text(counter)
+                    .font(.system(size: dot + 3, weight: .bold).monospacedDigit())
+                    .foregroundStyle(Palette.accent)
+                    .frame(height: dot)
+            } else if face.dots > 0 {
+                HStack(spacing: dot * 0.75) {
+                    ForEach(1...face.dots, id: \.self) { i in
+                        Circle()
+                            .fill(Palette.accent.opacity(i == face.lit ? 1 : 0.32))
+                            .frame(width: dot, height: dot)
+                    }
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

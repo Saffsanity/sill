@@ -147,6 +147,9 @@ final class VirtualStage {
     /// the display, found no AX window at that frame and warned about a window already on its way
     /// home (System Settings, twice, 2026-09-23), so `evictForeignWindows` asks this element instead.
     private var lastReleased: (windowID: CGWindowID, element: AXUIElement)?
+    /// The window `releaseWindow` last sent home, and the display it left: `releaseHome` removes that display only once the
+    /// window server shows the window off it (StageRelease), so macOS never moves it to the main display as the display goes.
+    private var homeward: (placement: WindowSizer.Placement, from: CGDirectDisplayID?)?
     /// The window server tore the display down on its own (sleep, display arbitration). Main actor.
     var onLost: (() -> Void)?
     /// Called just before the stage warps the cursor home (`releaseWindow`): that motion is Sill's,
@@ -584,6 +587,7 @@ final class VirtualStage {
         generation += 1
         let gen = generation
         display = d
+        catalog.stageDisplayIDs.insert(d.displayID)    // never one of the Desktop's stops (DesktopDisplays.role), even once gone
         let created = Self.ms(since: t0)
         // Fires on the display's private queue; the stage lives on the main actor.
         d.onTerminated = { [weak self] in Task { @MainActor [weak self] in self?.lost(generation: gen) } }
@@ -709,6 +713,7 @@ final class VirtualStage {
                      : "Could not restore \(p.appName) — \(p.title) to \(Self.fmt(p.originalFrame)); it is on a real display but not where it was")
             Stats.shared.bump("vd.restored")
             lastReleased = (p.windowID, p.element)   // for the eviction scan that may follow at once
+            homeward = (p, display?.displayID)        // for `releaseHome`: the display waits for it to leave
         }
         // The Mac cursor followed the device onto the virtual display: bring it back where it was
         // (or to the middle of the main display) so it is not stranded on a screen about to vanish.
@@ -729,8 +734,9 @@ final class VirtualStage {
     }
 
     /// Removes the display. Call `releaseWindow()` first while both displays exist, so the window
-    /// goes exactly where it was instead of wherever the window server dumps it.
-    func destroyDisplay() {
+    /// goes exactly where it was instead of wherever the window server dumps it; `releaseHome` also
+    /// waits for the window to have left. `note` ends the line ("Google Chrome home after 38 ms").
+    func destroyDisplay(note: String? = nil) {
         captureGeneration += 1
         captureMembership = nil
         if let d = display {
@@ -738,16 +744,78 @@ final class VirtualStage {
             display = nil
             scDisplay = nil
             d.destroy()
-            print("Removed virtual display \(id)")
+            print("Removed virtual display \(id)" + (note.map { " (\($0))" } ?? ""))
         }
         display = nil
         scDisplay = nil
     }
 
-    /// Window home, then display gone.
+    /// Window home, then display gone, in one go: the teardowns (Quit, the signals, a shutdown mid-switch), which cannot
+    /// wait. The ways out that go on running take `releaseHome`.
     func release() {
         releaseWindow()
         destroyDisplay()
+    }
+
+    /// Window home, then the display gone once the window server shows the window off it (StageRelease): the ways out
+    /// that go on running (the Desktop or nothing picked, Virtual Display turned off, a staging or a capture that failed,
+    /// the off-console view, a lock mid-switch). A window sent home from this display just before (a staging that failed
+    /// sends it home itself) is waited for too. The display waits at most `StageRelease.commitDeadline`; once it has gone
+    /// the window is watched for `StageRelease.afterLook` and put back once if macOS moved it. A teardown during the wait
+    /// (Quit, a signal) removes the display itself, and this way out ends there. A pick of another window keeps the
+    /// display (`releaseWindow` alone), as before.
+    func releaseHome() async {
+        releaseWindow()
+        guard let d = display, d.isAlive, let w = homeward, w.from == d.displayID else {
+            destroyDisplay()
+            return
+        }
+        let stageBounds = CGDisplayBounds(d.displayID)
+        let t0 = Date()
+        var settled: CGRect?
+        var left = false
+        while true {
+            let listed = WindowSizer.liveBounds(of: w.placement.windowID)
+            let decision = StageRelease.decide(elapsed: Date().timeIntervalSince(t0), listed: listed,
+                                               home: w.placement.originalFrame, stage: stageBounds)
+            if case .remove(let off) = decision {
+                left = off
+                if off { settled = listed }
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(Int(StageRelease.pollInterval * 1000)))
+            // A teardown removed the display meanwhile (it is gone, or no longer this one), or a staging holds it again.
+            guard display === d, d.isAlive, placement == nil else { return }
+        }
+        let name = "\(w.placement.appName)"
+        destroyDisplay(note: left ? "\(name) home after \(Self.ms(since: t0)) ms"
+                                  : "\(name) was still on it after \(Self.ms(since: t0)) ms")
+        homeward = nil
+        let p = w.placement
+        Task { @MainActor [weak self] in await self?.lookAfterRemoval(p, settled: settled) }
+    }
+
+    /// After its display was removed, the window that left it is watched for `StageRelease.afterLook` and put back once if
+    /// macOS moved it (or it never left in time). Not once it streams again (staged, or picked in regular mode, which may
+    /// size it for a device) or is closed; another window staged meanwhile does not stop it.
+    private func lookAfterRemoval(_ p: WindowSizer.Placement, settled: CGRect?) async {
+        let t0 = Date()
+        while Date().timeIntervalSince(t0) < StageRelease.afterLook {
+            try? await Task.sleep(for: .milliseconds(Int(StageRelease.afterPoll * 1000)))
+            if placement?.windowID == p.windowID || catalog.stagedWindowID == p.windowID || catalog.activeWindowID == p.windowID { return }
+            let listed = WindowSizer.liveBounds(of: p.windowID)
+            switch StageRelease.afterRemoval(listed: listed, settled: settled, home: p.originalFrame) {
+            case .stay: continue
+            case .gone: return
+            case .putBack:
+                let ok = sizer.restore(p)
+                print((ok ? "Put \(p.appName) — \(p.title) back at \(Self.fmt(p.originalFrame))"
+                          : "Could not put \(p.appName) — \(p.title) back at \(Self.fmt(p.originalFrame))")
+                      + ": macOS had moved it to \(listed.map(Self.fmt) ?? "?") as Sill's display went.")
+                Stats.shared.bump("vd.putBack")
+                return
+            }
+        }
     }
 
     /// The window server tore the display down (sleep, another display arriving). The object is

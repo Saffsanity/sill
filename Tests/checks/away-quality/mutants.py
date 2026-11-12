@@ -15,8 +15,11 @@ MUTANTS = [
     ("AQ8 an away pick sets the home bitrate", H + "DeviceSettings.swift", "if let v = change.bitrate { c.awayBitrate = v }", "if let v = change.bitrate { c.bitrate = v }"),
     ("AQ9 an away pick also sets the home bitrate", H + "DeviceSettings.swift", "        rest.bitrate = nil\n", ""),
     ("AQ10 an away pick also sets the home scale", H + "DeviceSettings.swift", "        rest.captureScale = nil\n", ""),
-    ("AQ11 the remote door from this network counts as away", H + "AwayPolicy.swift", "remoteDoor && (origin == .vpn || origin == .internet)", "remoteDoor && (origin == .vpn || origin == .internet || origin == .lan)"),
-    ("AQ12 the home door counts as away from a VPN", H + "AwayPolicy.swift", "remoteDoor && (origin == .vpn || origin == .internet)", "remoteDoor || origin == .vpn || origin == .internet"),
+    ("AQ11 the remote door from this network counts as away", H + "AwayPolicy.swift", "remoteDoor && (origin == .vpn || origin == .internet || origin == .relay)", "remoteDoor && (origin == .vpn || origin == .internet || origin == .relay || origin == .lan)"),
+    ("AQ12 the home door counts as away from a VPN", H + "AwayPolicy.swift", "remoteDoor && (origin == .vpn || origin == .internet || origin == .relay)", "remoteDoor || origin == .vpn || origin == .internet || origin == .relay"),
+    # Issue #326: a relay on this Mac is away, as a VPN.
+    ("AQ40 a relay on this Mac at home (the rule before #326)", H + "AwayPolicy.swift", "remoteDoor && (origin == .vpn || origin == .internet || origin == .relay)", "remoteDoor && (origin == .vpn || origin == .internet)"),
+    ("AQ41 loopback at the remote door away too", H + "AwayPolicy.swift", "remoteDoor && (origin == .vpn || origin == .internet || origin == .relay)", "remoteDoor && (origin == .vpn || origin == .internet || origin == .relay || origin == .loopback)"),
     ("AQ13 nobody connected clears the flag", H + "AwayPolicy.swift", "devicesAway.isEmpty ? current : devicesAway.allSatisfy { $0 }", "devicesAway.isEmpty ? false : devicesAway.allSatisfy { $0 }"),
     ("AQ14 one device away is enough", H + "AwayPolicy.swift", "devicesAway.isEmpty ? current : devicesAway.allSatisfy { $0 }", "devicesAway.isEmpty ? current : devicesAway.contains { $0 }"),
     ("AQ15 the away line names the away pair as the home one", H + "AwayPolicy.swift", '+ "The home quality stays \\(title(c.bitrate, c.captureScale))."', '+ "The home quality stays \\(title(c.awayBitrate, c.awayCaptureScale))."'),

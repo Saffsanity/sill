@@ -5,8 +5,9 @@ Sill, see the [Support](https://getsill.app/support) page on
 [getsill.app](https://getsill.app).
 
 Until 2026-09-25 this was the README, so where a plan in `docs/` mentions "the
-README", it means a section here. `CLAUDE.md` has the rest: the work in
-progress, the decisions already made, and every test hook.
+README", it means a section here. `CLAUDE.md` has the rest: the layout, the
+decisions already made and every test hook; `docs/steps/` has what each piece of
+work did, a file each.
 
 ## Overview
 
@@ -112,7 +113,16 @@ open it again) and shows as Custom; a device can pick only the presets.
 Virtual Display is on by default (2026-10-27): on a Mac whose `virtualDisplay`
 key was never set, a window a device picks moves onto Sill's virtual display
 while it streams (The command-line host, below, says how) and comes back where
-it was when it stops. The default is registered, never written
+it was when it stops. Sill's display goes only once the window server shows the
+window home, at most 1 s later: an app commits an Accessibility move a few to
+tens of milliseconds after the writes return, and a display removed before that
+took the window to the main display (Chrome filling a monitor came back filling
+the main one, 2026-11-12). The log says how long it took ("Removed virtual
+display 81 (Google Chrome home after 38 ms)"), and for 1.5 s after the removal
+a window macOS moved all the same is put back once ("Put Google Chrome — … back
+at (…): macOS had moved it to (…) as Sill's display went."). Quit and the
+signals still put the window back and remove the display at once: they cannot
+wait. The default is registered, never written
 (`HostConfig.app` in `HostSettings`), so a key set from the menu, Settings ›
 Virtual Display or a device always wins: a Mac that turned it off keeps it
 off. To go back to the default, quit Sill, run `defaults delete
@@ -350,6 +360,58 @@ start streaming the whole desktop: ‹error›. Looked at the displays again: tr
 once more on display 53."); a second failure is the old line, and nothing
 streams.
 
+On a Mac with two displays or more, the Desktop button steps through them
+(issue #91; addhumal's PR #173, grown by phase 1 of
+`docs/virtual-desktop-plan.md`). "Desktop 1" is always the main display (the
+one with the menu bar), then each display to its right as they sit in System
+Settings › Displays › Arrange, wrapping to the leftmost and back to the main
+display. The display Sill makes for a picked window (Virtual Display's) is never
+a stop and never counted, nor is macOS's stand-in for a Mac with no screen or a
+display that has gone since the last look (each step takes a fresh look first);
+a mirror set is one stop. Sill's own Desktop display (#200's, the Virtual
+Desktop's) is no stop in this phase: phase 2 adds it as the last one. While the Desktop streams the
+button reads "Desktop 2" with a dot per stop under it, the shown one filled
+("3/7" from seven stops), and a tap moves the Desktop to the next stop; while a
+window streams it names the stop a tap brings the Desktop back to. VoiceOver
+reads "Desktop", the value "Display 2 of 3, DELL U2723QE" and the hint "Shows
+the next display.", and after this device's own tap says where it landed. The
+device sends kind 47 only to a Mac whose window list says `desktopDisplays` 2 or
+more (with `desktopDisplay` and `desktopDisplayNames`), so with one display or
+an older Mac the button is as before. The choice is the Mac's, by the display's
+UUID (a new ID after a sleep is still the same display), kept while a device is
+connected and for 30 s after the last one left: a reconnect or a move to the
+cable comes back to it, and a session that starts later begins on the main
+display, Virtual Display on or off (issue #345). A stop that is unplugged sends
+the Desktop to the main display and back when it returns; one that will not
+stream sends it back to the stop it was on. The host moves the Mac's pointer to
+the new stop's centre and logs "Desktop: display 2 of 3 (DELL U2723QE), asked
+by ‹device›."; input lands on the stop the capture runs on, never the one just
+chosen. The stream's rate is held to the shown stop's refresh rate when it
+reports one: a 60 Hz monitor streams at 60, at the 60 fps bitrate, to a 120 Hz
+iPad. The Desktop's sound is built on the main display whatever stop shows, so a
+step never restarts it, and kind 47 is a person at the device (it wakes a
+sleeping display; the "Woke the display" line reads the shown stop's). Every
+device watching the Desktop moves with it: the Mac streams one source. Locked,
+or with another user on the screen (the off-console view too), the Desktop is
+the main display, its lock screen, the list says no stops and kind 47 is refused
+as a window pick is (`LockPolicy`); the chosen stop comes back after the
+unlock. The rule is `Sources/StreamProtocol/DesktopDisplays.swift`, checked in
+`Tests/checks/desktop-displays`.
+
+To try it without monitors, a synthetic host takes stops of its own (TEST ONLY,
+honoured only with `--synthetic`; nothing of this Mac's displays is read, and
+nothing is posted or warped):
+`SILL_TEST_DISPLAYS='Built-in Retina Display:1512x982@2:120:0,0;DELL U2723QE:2560x1440@1:60:1512,0'`
+(a name, points@scale, Hz, the origin; the first the main display). The test
+pattern then shows the stop the Desktop is on at its size, with "display 2 of 2
+(DELL U2723QE)" drawn on it; `python3 Scripts/sillclient.py PORT 10 desktop
+--next-display@3 --expect=desktopDisplay=2` steps it (kind 47 goes only to a
+`--synthetic` host on this Mac), and with `SILL_TEST_INPUT_LOG=1` the dry run's
+log shows input landing in each stop's own space. On the device,
+`-SillDesktopDisplays 3,2` (with `-SillActive desktop` for the dots) draws the
+harness's mock on stop 2 of 3, and `-SillDesktopDisplayNames 'A|B|C'` names
+them.
+
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom. After the Mac's settings
 come the device's own: This iPad (or iPhone), with Larger Picture on an iPhone
@@ -532,7 +594,8 @@ On the device, the Settings panel's Mute switch (right under Send Audio, off by 
 Mac with sound, Send Audio on or off; no bar has a Sound button since
 2026-10-27) mutes it on that device alone, remembered across launches
 (`Sill.soundMuted`); the Mac keeps sending. It plays mixed with the device's own
-audio, on silent too, as a video app does, and never in the background.
+audio, on silent too, as a video app does, and never in the background but
+in Picture in Picture.
 Headphones taken out mute it and say so. The device keeps it a little behind
 the picture, never ahead: the console's `audio:` lines (DEBUG) say how far each
 second, and each jump with its size and cause. The simulator never opens an
@@ -844,6 +907,42 @@ the Mac's or the portrait trackpad's, keeps its size at the zoomed place. A turn
 the other layout, Split View or a fold keeps the zoom on the same point of the
 picture; another window or the Desktop gives the whole picture again.
 `iOSClient/StreamZoom.swift` is the rule, checked in `Tests/checks/stream-zoom`.
+
+## Picture in Picture
+
+Settings › This iPad (This iPhone) › Picture in Picture (issue #291, off by
+default: `PictureInPicturePolicy.defaultOn`): with it on, while a window or the
+Desktop streams and its picture shows, leaving Sill (home, another app) lets iOS
+take the picture into its Picture in Picture window, where it keeps playing,
+with the Mac's sound when Send Audio is on and Mute is off. Sill never starts it
+itself: iOS does, through the automatic start, and only while the person's own
+Start PiP Automatically setting is on (an iPhone's Settings › General ›
+Picture in Picture; iPadOS 26 moved the iPad's); App Review rejects an app
+that starts it on its way to the background. The window
+shows the video layer alone: no pointer, no covers' words, the whole picture
+whatever the zoom; a locked Mac's lock screen, or black for another user's. Its
+pause freezes the picture and the sound while the Mac keeps sending (the device
+drops the frames before decoding), so play is live at once (a keyframe asked
+for, kind 44); ten minutes paused stops it. The session's end (a goodbye, a loss
+no move carries, Disconnect), Sill's window in front again (the window's return
+button, or opening Sill) and the device's lock (with a passcode, iOS says so
+about ten seconds after) stop it; a move to the cable, to Wi-Fi or home keeps
+it. While it plays the picture counts as watched (an interrupted picture is
+asked for again), the sound as heard, and the automatic reconnect and the
+browsers as in the foreground; nothing reaches the Mac from it (iOS sends a
+background app no touch or key, and the device's own pointer move waits). The
+viewport and the frame rate stay as they were: no restart on the Mac. With
+several Sill windows the one used last offers it. The app has the audio
+background mode for it (UIBackgroundModes `audio`, both Info.plists); the sound
+still never plays in the background otherwise. The audio session stays
+`.playback` mixing with other audio, held active on a device while a picture is
+offered or shows, so another app's music never stops.
+`iOSClient/PictureInPicturePolicy.swift` is the rule, checked in
+`Tests/checks/picture-in-picture`; `iOSClient/PictureInPicture.swift` carries it
+out (AVKit's controller, its delegates, `PictureInPictureHub`).
+docs/picture-in-picture-plan.md has the plan, what Apple documents and does not,
+the open questions and the device tests. Its console lines (DEBUG) start with
+`pip:`.
 
 ## A hardware keyboard and trackpad on the device
 
@@ -1562,6 +1661,16 @@ connect (TLS 1.3, each end pinned to the other's key).
    device's Settings panel says how it is connected ("Connected through
    Tailscale · 48 ms"), and the Mac's menu shows the route of each device.
 
+The device learns the Mac's addresses for afar at every session (home or away)
+while Remote Access is on, from the list the Mac sends, and keeps the VPN ones
+(Tailscale's name and addresses, another VPN's) for 90 days after the Mac last
+listed them, even once a later list lacks them: a Mac whose VPN was off while
+the device connected at home is still reached through it away from home once
+the VPN is on again. Those remembered addresses are dialed after the Mac's
+current ones, pinned to the Mac's key like every remote dial, at most four of
+them; Forget on the device forgets them with the Mac (docs/remote-access-plan.md
+§7.2).
+
 The ways in:
 
 - **Tailscale** (the easy one): install it on the Mac and on the device, signed
@@ -1597,10 +1706,14 @@ If it doesn't connect:
   Devices); pair it again.
 
 Away from home has its own quality (docs/remote-bundle-plan.md). While every
-connected device is away, through a VPN or over the internet, the Mac streams
-at the away quality, Low at Standard resolution until you change it, and its
-log says "Away from home: …"; a device at home connected at the same time
-brings the home quality back for every device ("Home quality again: …"). A
+connected device is away, through a VPN, over the internet or through a relay
+on the Mac itself (a userspace Tailscale or WireGuard node, an SSH tunnel, a
+proxy: the remote door sees it come from this Mac, loopback or one of the Mac's
+own addresses, and the log says "Remote client connected: … through a relay on
+this Mac (127.0.0.1:…)"; issue #326, docs/away-through-relay-plan.md), the Mac
+streams at the away quality, Low at Standard resolution until you change it,
+and its log says "Away from home: …"; a device at home connected at the same
+time brings the home quality back for every device ("Home quality again: …"). A
 device away that picks a Quality or Resolution sets the away pair, never the
 home one; Sill.app saves both (`awayBitrate` and `awayCaptureScale` beside
 `bitrate` and `captureScale`), Settings › Streaming shows both, and the menu's
@@ -1657,28 +1770,18 @@ tests of Direct Wireless Connection and remote access.
 
 ### The pure checks
 
-`Tests/checks/run-all.sh` compiles the files that decide things (discovery and
-the session's path, the settings ledger, the wire format, pairing, who may use
-which door, how frames go into the video encoder and when a stream gets a new
-encoder session, the device floor, how a session ends, how the device reads the
-Mac's messages, the update check, the disk image's window, where everything goes
-on a phone held upright, who moves the Mac's pointer, the Mac's menus on both
-ends, which three-finger strokes are gestures and what the Mac does with one,
-which modifiers a device's keys leave set on the Mac, what an input method or
-dictation sends the Mac and whose Control-Space it is, when a held key repeats
-on the Mac, the first-run tour,
-pairing at home (the doors, the cable, the device's rows), whether screen
-sharing shows the pairing window, which keychain Sill.app keeps its identity
-in, the away quality and the link's judgement, the iPhone Duo's layouts, what
-of the clipboard goes between the Mac and a device, which type encodings the
-virtual display's private API may report, when the Mac's display is woken for a
-device, and the picture's pinch zoom with who two fingers belong to) on their own with a check each, and
-runs them: about five minutes, no device, permission or encoder. `--mutants`
-also checks that each check fails when its file is changed in one place (well
-over an hour).
-`Tests/checks/README.md` lists them. CI (`.github/workflows/ci.yml`) runs them
-on every pull request and push to `main`, with `swift build -c release` and the
-iOS app's build for the simulator.
+`Tests/checks/run-all.sh` compiles the files that decide things (the rules, not
+the views: discovery and the session's path, the wire format, pairing and the
+doors, what a host takes of a device's input, the encoder's bookkeeping, where
+the layouts put things, and so on) on their own with a check each, and runs
+them: about five minutes, no device, permission or encoder. `--mutants` also
+checks that each check fails when its file is changed in one place (well over
+an hour). Each check says what it checks in its own folder's `README.md`, and
+`Tests/checks/list.sh` prints them all: no list of them is kept by hand, here or
+anywhere (`Tests/checks/README.md` says how to add one). CI
+(`.github/workflows/ci.yml`) runs them on every pull request and push to
+`main`, with `swift build -c release` and the iOS app's build for the simulator;
+its mutants run, by hand, reads the checks with mutants from the folders.
 
 ### The test client and the relay
 
@@ -1768,6 +1871,20 @@ its connections waited without being admitted, or were refused.");
 `Scripts/sillrelay.py --listen 0 --to HOST:PORT [--delay-ms N] [--rate-mbps R]
 [--blackhole-after S] [--record PREFIX]` sits between a client and a host, and
 slows or cuts the link. TLS passes through.
+
+A saved Mac's remembered VPN addresses (Remote access, above) on a simulator of
+your own, against a `--synthetic --remote` host: pair with the host's link
+(`-SillPairURL`), then write a saved record whose list is a vpn-kind
+`localhost` at a relay's port (`{"host":"localhost","port":Q,"kind":"vpn","via":"Tailscale"}`,
+`sillrelay.py --listen Q --to 127.0.0.1:P`) through the app's own preferences,
+`xcrun simctl spawn UDID defaults write <the app's data container>/Library/Preferences/me.saffer.sill.plist Sill.savedMacs -string '<JSON>'`
+(`xcrun simctl get_app_container UDID me.saffer.sill data`), and dial it with
+`-SillDialSaved 1`: the host's kind 18, which never lists that address, leaves
+it remembered (the console's "VPN addresses remembered: localhost …"). Start
+the host on another port behind the same relay and dial again: the Mac's list
+answers nothing, and the remembered address, last in the dial's list
+("(remembered)"), connects. A loopback path has no tunnel, so a remembered
+address that stays silent reads as this device's VPN off.
 
 ### The pacing harness
 
@@ -2050,6 +2167,19 @@ simulator:
   picture's room (2800x1800 otherwise); `-SillLargerPictureToggle 4,8`
   switches it at those seconds as the panel's switch does (leave out
   `-Sill.largerPicture`, which would hold it).
+- Picture in Picture: `-Sill.pictureInPicture 1` turns the device's switch on
+  for one run (in the normal app too); `-SillPiPSupported 1|0` says iOS has it
+  or not, for the panel's photos (`-SillSettings 1 -SillSettingsScroll pip`),
+  while AVKit's own answer decides whether a controller is made. Live, with the
+  switch on: `-SillPiPStartAt <s>` starts it s seconds after the picture is first
+  offered, as iOS does as Sill leaves (a Debug build only: a stand-in for
+  leaving); `xcrun simctl launch UDID com.apple.Preferences` then sends Sill to
+  the background and `xcrun simctl launch UDID me.saffer.sill` brings it back;
+  `-SillPiPPauseAt 5,9` presses the window's pause, then play;
+  `-SillPiPLockAt <s>` locks the device as iOS says it; `-SillPiPSession
+  active|inactive` holds the audio session active while a picture is offered
+  or shows (a device's default), or never (the simulator's). The console's
+  `pip:` lines say what happened.
 - `-SillAXDump <s>`: `s` seconds after the stream screen shows, the console
   lists its accessibility elements in the order the tree hands them to
   VoiceOver. SwiftUI builds that tree only for an assistive technology, so on
@@ -2058,7 +2188,7 @@ simulator:
 - `-SillIdiom pad`: a screen taller than wide and narrower than 600 pt is
   drawn as an iPad draws such a window (the compact halves), not as a phone
   does, so an iPhone simulator can photograph it; `phone` the other way
-  round.
+  round. The Settings panel's "This iPad" or "This iPhone" follows it too.
 - Pairing at home: `-SillServiceType _silltest._tcp` (only test hosts
   registered under that type are rows), `-SillHomeDoor paired|open|plain`
   (what a `-SillConnect` address counts as), `-SillCableTest 1` (this
@@ -2493,7 +2623,10 @@ layouts need: the app it checks must say it was built with it).
 required-reason APIs its binary uses. `--build-number N` builds with N for the
 run only (xcodebuild's `CURRENT_PROJECT_VERSION=N`; the project is never
 changed), and `--whats-new FILE`, with `--upload` and `--api-key`, sets the
-build's What to Test once App Store Connect has processed it. The TestFlight
+build's What to Test once App Store Connect has processed it. The app shows the
+version and build it was built with at the bottom of its connect screen and of
+its Settings panel ("Sill 0.6.2 (1400)", `iOSClient/VersionLabel.swift`): N for
+such a build, the project's own 4 for one from Xcode. The TestFlight
 workflow (`.github/workflows/testflight.yml`) runs it on GitHub, by hand and
 from main only (its job runs in the environment `nightly`, which only main may
 use, and holds the App Store Connect key), with the commit count as the build
@@ -2513,7 +2646,13 @@ rolling pre-release `nightly` (the seven newest kept, never "latest");
 `Scripts/asc.swift` (App Store Connect's API: an ES256 token from the .p8 key
 with CryptoKit, Foundation only) waits for App Store Connect to process it,
 sets What to Test and gives it to every internal TestFlight group, and to the
-public beta group only while `SILL_NIGHTLY_PUBLIC_BETA` is `true`.
+public beta group only while `SILL_NIGHTLY_PUBLIC_BETA` is `true`. The night's
+notes replace a build's What to Test only when that run uploaded it (`asc.swift
+distribute --replace-whats-new`): a build App Store Connect had already, uploaded
+by hand from main's head or by an earlier run, keeps its own and gets the notes
+only if it has none; `asc.swift whats-new` always replaces.
+`Tests/checks/asc` runs asc.swift against a stand-in App Store Connect on
+127.0.0.1 (throwaway keys, every run sandboxed to loopback).
 `Scripts/nightly-notes.sh` writes both apps' words from the pull requests
 merged since the last release tag. A nightly says the version main says, the
 version of main's next release (0.6.1 since App Review approved 0.6.0; 0.6.0

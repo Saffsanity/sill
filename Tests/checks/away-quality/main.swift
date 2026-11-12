@@ -240,7 +240,11 @@ do {
 // MARK: AwayPolicy
 
 do {
-    for (origin, want) in [(OriginPolicy.Origin.vpn, true), (.internet, true), (.lan, false), (.loopback, false), (.direct, false)] {
+    // Issue #326: a relay on this Mac (a userspace Tailscale or WireGuard node, an SSH tunnel, a proxy)
+    // hands the remote door a device from this Mac's own address, wherever the device is: away, as a VPN.
+    // Loopback itself never reaches the remote door's routes any more (OriginPolicy.atRemoteDoor names it
+    // a relay); were it to, it would be at home, as before.
+    for (origin, want) in [(OriginPolicy.Origin.vpn, true), (.internet, true), (.relay, true), (.lan, false), (.loopback, false), (.direct, false)] {
         eq(AwayPolicy.isAway(remoteDoor: true, origin: origin), want, "the remote door from \(origin) is away: \(want)")
         eq(AwayPolicy.isAway(remoteDoor: false, origin: origin), false, "the home door from \(origin) is at home")
     }
