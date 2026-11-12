@@ -477,7 +477,23 @@ final class PictureInPictureHub {
         #endif
         for entry in entries {
             guard let client = entry.client, let session = sessions[entry.id] else { continue }
-            client.pictureInPicture.setOffered(PictureInPicturePolicy.offered(session, chosen: entry.id == chosen))
+            let offered = PictureInPicturePolicy.offered(session, chosen: entry.id == chosen)
+            #if DEBUG
+            // With the switch on, why a window's picture is offered or not, once a change (the gates read it).
+            if session.switchOn {
+                let front = windows.first { $0.id == entry.id }?.foregroundActive ?? false
+                let line = "pip: window \(entry.id) \(offered ? "offered" : "not offered"): iOS has it \(session.supported) "
+                    + "(AVKit \(PictureInPicture.systemSupports)), connected \(session.connected), streaming \(session.streaming), "
+                    + "picture \(session.pictureCame), covered \(session.covered), in front \(front), chosen \(entry.id == chosen)"
+                if debugLines[entry.id] != line { debugLines[entry.id] = line; print(line) }
+            }
+            #endif
+            client.pictureInPicture.setOffered(offered)
         }
     }
+
+    #if DEBUG
+    /// Each window's last "offered or not, and why" line, so each prints once a change.
+    private var debugLines: [Int: String] = [:]
+    #endif
 }
