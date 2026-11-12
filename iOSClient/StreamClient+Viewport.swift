@@ -21,6 +21,16 @@ extension StreamClient {
     func sendViewport(_ v: Viewport) {
         guard var v = ViewportBounds.held(v) else { return }
         if v.localCursor == nil { v.localCursor = localCursorState.wanted }
+        // While the picture shows only in Picture in Picture (#291), a layout iOS makes for its snapshots
+        // must not resize the Mac's window or restart its stream: the viewport waits for Sill's window
+        // (`pictureBackInSill`), the last one sent standing meanwhile.
+        if shownOnlyInPictureInPicture {
+            viewportHeld = v
+            #if DEBUG
+            print("viewport: held while the picture shows only in Picture in Picture")
+            #endif
+            return
+        }
         lastViewport = v
         send(.viewport, payload: Wire.encode(v))
     }
@@ -37,7 +47,8 @@ extension StreamClient {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.localCursorState.pending = nil
-            guard var v = self.lastViewport, (v.localCursor ?? false) != wanted else { return }
+            // The newest viewport: one held while the picture showed only in Picture in Picture, else the last sent.
+            guard var v = self.viewportHeld ?? self.lastViewport, (v.localCursor ?? false) != wanted else { return }
             v.localCursor = wanted
             self.sendViewport(v)
         }
@@ -70,6 +81,7 @@ extension StreamClient {
         localCursorState.pending?.cancel()
         localCursorState.pending = nil
         lastViewport = nil
+        viewportHeld = nil
     }
 
     /// The rate the host should stream at for this device: the panel's ceiling (120 on ProMotion

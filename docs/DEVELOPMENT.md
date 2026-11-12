@@ -532,7 +532,8 @@ On the device, the Settings panel's Mute switch (right under Send Audio, off by 
 Mac with sound, Send Audio on or off; no bar has a Sound button since
 2026-10-27) mutes it on that device alone, remembered across launches
 (`Sill.soundMuted`); the Mac keeps sending. It plays mixed with the device's own
-audio, on silent too, as a video app does, and never in the background.
+audio, on silent too, as a video app does, and never in the background but
+in Picture in Picture.
 Headphones taken out mute it and say so. The device keeps it a little behind
 the picture, never ahead: the console's `audio:` lines (DEBUG) say how far each
 second, and each jump with its size and cause. The simulator never opens an
@@ -844,6 +845,42 @@ the Mac's or the portrait trackpad's, keeps its size at the zoomed place. A turn
 the other layout, Split View or a fold keeps the zoom on the same point of the
 picture; another window or the Desktop gives the whole picture again.
 `iOSClient/StreamZoom.swift` is the rule, checked in `Tests/checks/stream-zoom`.
+
+## Picture in Picture
+
+Settings › This iPad (This iPhone) › Picture in Picture (issue #291, off by
+default: `PictureInPicturePolicy.defaultOn`): with it on, while a window or the
+Desktop streams and its picture shows, leaving Sill (home, another app) lets iOS
+take the picture into its Picture in Picture window, where it keeps playing,
+with the Mac's sound when Send Audio is on and Mute is off. Sill never starts it
+itself: iOS does, through the automatic start, and only while the person's own
+Start PiP Automatically setting is on (an iPhone's Settings › General ›
+Picture in Picture; iPadOS 26 moved the iPad's); App Review rejects an app
+that starts it on its way to the background. The window
+shows the video layer alone: no pointer, no covers' words, the whole picture
+whatever the zoom; a locked Mac's lock screen, or black for another user's. Its
+pause freezes the picture and the sound while the Mac keeps sending (the device
+drops the frames before decoding), so play is live at once (a keyframe asked
+for, kind 44); ten minutes paused stops it. The session's end (a goodbye, a loss
+no move carries, Disconnect), Sill's window in front again (the window's return
+button, or opening Sill) and the device's lock (with a passcode, iOS says so
+about ten seconds after) stop it; a move to the cable, to Wi-Fi or home keeps
+it. While it plays the picture counts as watched (an interrupted picture is
+asked for again), the sound as heard, and the automatic reconnect and the
+browsers as in the foreground; nothing reaches the Mac from it (iOS sends a
+background app no touch or key, and the device's own pointer move waits). The
+viewport and the frame rate stay as they were: no restart on the Mac. With
+several Sill windows the one used last offers it. The app has the audio
+background mode for it (UIBackgroundModes `audio`, both Info.plists); the sound
+still never plays in the background otherwise. The audio session stays
+`.playback` mixing with other audio, held active on a device while a picture is
+offered or shows, so another app's music never stops.
+`iOSClient/PictureInPicturePolicy.swift` is the rule, checked in
+`Tests/checks/picture-in-picture`; `iOSClient/PictureInPicture.swift` carries it
+out (AVKit's controller, its delegates, `PictureInPictureHub`).
+docs/picture-in-picture-plan.md has the plan, what Apple documents and does not,
+the open questions and the device tests. Its console lines (DEBUG) start with
+`pip:`.
 
 ## A hardware keyboard and trackpad on the device
 
@@ -2078,6 +2115,19 @@ simulator:
   picture's room (2800x1800 otherwise); `-SillLargerPictureToggle 4,8`
   switches it at those seconds as the panel's switch does (leave out
   `-Sill.largerPicture`, which would hold it).
+- Picture in Picture: `-Sill.pictureInPicture 1` turns the device's switch on
+  for one run (in the normal app too); `-SillPiPSupported 1|0` says iOS has it
+  or not, for the panel's photos (`-SillSettings 1 -SillSettingsScroll pip`),
+  while AVKit's own answer decides whether a controller is made. Live, with the
+  switch on: `-SillPiPStartAt <s>` starts it s seconds after the picture is first
+  offered, as iOS does as Sill leaves (a Debug build only: a stand-in for
+  leaving); `xcrun simctl launch UDID com.apple.Preferences` then sends Sill to
+  the background and `xcrun simctl launch UDID me.saffer.sill` brings it back;
+  `-SillPiPPauseAt 5,9` presses the window's pause, then play;
+  `-SillPiPLockAt <s>` locks the device as iOS says it; `-SillPiPSession
+  active|inactive` holds the audio session active while a picture is offered
+  or shows (a device's default), or never (the simulator's). The console's
+  `pip:` lines say what happened.
 - `-SillAXDump <s>`: `s` seconds after the stream screen shows, the console
   lists its accessibility elements in the order the tree hands them to
   VoiceOver. SwiftUI builds that tree only for an assistive technology, so on
@@ -2086,7 +2136,7 @@ simulator:
 - `-SillIdiom pad`: a screen taller than wide and narrower than 600 pt is
   drawn as an iPad draws such a window (the compact halves), not as a phone
   does, so an iPhone simulator can photograph it; `phone` the other way
-  round.
+  round. The Settings panel's "This iPad" or "This iPhone" follows it too.
 - Pairing at home: `-SillServiceType _silltest._tcp` (only test hosts
   registered under that type are rows), `-SillHomeDoor paired|open|plain`
   (what a `-SillConnect` address counts as), `-SillCableTest 1` (this

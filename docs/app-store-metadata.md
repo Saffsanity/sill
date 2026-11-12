@@ -516,6 +516,14 @@ While your Mac’s display sleeps, a tap on the Desktop’s black picture now on
 If another user has your Mac’s screen, your iPhone or iPad can show your own account’s desktop and windows instead, with a note that it isn’t the Mac’s screen. Turn on Show this account while another user is on the screen in Sill’s Settings › Devices on your Mac. Taps and keys reach your account once it’s back on the screen. It needs Sill for Mac from this release.
 ```
 
+Held for the next version: Picture in Picture (issue #291, docs/picture-in-picture-plan.md), a
+paragraph of 284 characters for its What's New, once Noah's device tests (the plan's P
+list) have passed; until then it stays out, as Esc's words waited for a device:
+
+```text
+Picture in Picture, in Settings › This iPad (This iPhone): leave Sill while your Mac’s picture shows, and it keeps playing in a small window over your other apps, with its sound when Send Audio is on. Tap the window to come back to Sill. Nothing you do in other apps reaches your Mac.
+```
+
 ## 6. Export compliance (encryption)
 
 **The key is in the app.** `iOSClient/Info.plist` sets
@@ -646,6 +654,25 @@ FUNCTIONALITY, REMOTE ACCESS and VIDEO are shorter; REMOTE ACCESS loses 0.5.1's 
 quality for slower links."; WHAT TO TRY loses the three-finger line and "Apple Pencil works as a mouse."
 (PURPOSE AND AUDIENCE names the Pencil). The answers to App Review's questions about 0.5 (purpose and
 audience, accounts, external services, regions, no VPN functionality) stay.
+
+Held for the next version: Picture in Picture (issue #291) puts the audio background mode in the
+binary (`UIBackgroundModes` `audio`, Xcode's "Audio, AirPlay, and Picture in Picture"), which App Review
+sees; guideline 2.5.4 allows background services only for their intended purposes, and Apple's own
+pages make Picture in Picture one of this mode's (Configuring background execution modes; the
+AVPictureInPictureController reference requires it). One developer reported a 2.5.4 rejection for an app
+that declared the mode for AirPlay and Picture in Picture (Apple Developer Forums 671406, unanswered), so
+the next notes say what the mode is for, in their NEW IN list (330 bytes, ASCII; the
+next notes make room as each version's NEW IN list replaces the last's):
+
+```text
+- Picture in Picture (Settings > This iPad, off by default): leaving the app floats the Mac's live picture in iOS's Picture in Picture window, with the Mac's sound if Send Audio is on. The audio background mode is declared for this alone; nothing plays in the background otherwise. To try: turn it on, stream a window, swipe home.
+```
+
+Nothing else about it changes App Store Connect: no new privacy manifest entry (it uses no
+required-reason API beyond UserDefaults and `systemUptime`, declared already), nothing new collected
+(App Privacy, section 4), no new data sent (site/privacy.html lists what goes between the devices and
+the Mac; Picture in Picture sends nothing new, it keeps the same connection running), no entitlement
+(the playback variant needs none; the video-call one, not used, is for calls).
 
 ## 8. Demo video
 
