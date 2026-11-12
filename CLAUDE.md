@@ -788,7 +788,10 @@ Rules found in the steps that hold for all work (each where it is written):
   touch and scroll lands through it: PR #196, issue #65), `ThumbnailHold` (how long a window's thumbnail is
   held before its lights show and its drag can start: 0.2 to 2 s in tenths, 0.5 s unless changed, the words
   of the Settings panel's stepper; pure, `Tests/checks/thumbnail-hold`; WindowStrip and HoldDragOverlay
-  in StreamScreen.swift take it, issue #113),
+  in StreamScreen.swift take it, issue #113), `VersionLabel` (this app's version and build as its bundle says
+  them, CFBundleShortVersionString and CFBundleVersion cleaned: "Sill 0.6.2 (1400)", spoken "Sill version 0.6.2,
+  build 1400"; pure, `Tests/checks/version-label`; pbxproj AE01/FE01; `VersionLine` in ContentView.swift shows it,
+  with Copy on a long press, at the bottom of the connect screen's footer and as the Settings panel's last line),
   `HEVCDisplayView` (shared display view, the one pointer sprite + DEBUG HUD;
   the picture's interruptions on the network queue: `checkLayer` flushes a layer
   that failed, could not decode a frame or needs a flush to decode again, at each
@@ -816,7 +819,9 @@ Rules found in the steps that hold for all work (each where it is written):
   12 pt clear, both inside the gap); one scroll view
   whatever the fit (`ColumnOverFooter`, measuring a hidden copy of the
   footer), so a fit that changes never builds the card anew (its fields, the
-  camera); + DEBUG harness, and `InputScript`, `-SillInputScript`'s steps),
+  camera); in the footer, at its trailing edge on a line it already has wherever
+  it fits there, this app's version (`VersionLine`; docs/version-label-plan.md);
+  + DEBUG harness, and `InputScript`, `-SillInputScript`'s steps),
   `SillLinks`
   (the site's addresses, written once; getsill.app is live since 2026-09-25;
   and the App Store address for a Mac's update notice, the App Store Connect
@@ -825,7 +830,8 @@ Rules found in the steps that hold for all work (each where it is written):
   (the Mac's settings with this device's unanswered picks; pure logic, checked
   with swiftc), `HostSettingsPanel` (the Settings panel; the route line, Away
   from home, the away line in the header, the link's callout and its button,
-  the footnote, the slow-link callout for older Macs), `AwayCopy` (every
+  the footnote, the slow-link callout for older Macs; its last line this app's
+  version, `VersionLine`), `AwayCopy` (every
   string of away from home and the link on the device, which callout shows,
   and `LinkLine`, the stream screen's line over time; pure,
   `Tests/checks/away-copy`; pbxproj A801/F801). Remote access: `DeviceIdentity`

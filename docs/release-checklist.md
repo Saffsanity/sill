@@ -143,6 +143,9 @@ serves the root or `/docs`, never `/site`. So:
   `grep -n` of a phrase from each block that nothing of it is left. Add the marker's line and its
   grep here when a pull request marks words; the release that ships them deletes its markers in
   `site/`, keeps the words, and takes its lines out of here.
+- Open: `Version label` (support.html, under the lede: where each app shows its version, true from
+  Sill for iPhone and iPad 0.6.2; PR #351, docs/version-label-plan.md): `grep -n "shows its version"
+  ../sill-site/support.html` finds nothing after the cut.
 - Held back from the support page in 0.6.1, until a test shows it true: #228's tap sentence. The
   page says "To wake it again, move the pointer, scroll, or press the Command key on a keyboard
   attached to your iPhone or iPad; Shift alone doesn’t reach your Mac." With the sentence it would
