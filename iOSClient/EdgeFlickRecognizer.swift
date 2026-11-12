@@ -26,6 +26,20 @@ enum EdgeRecognizers {
         if other is EdgeFlickRecognizer || other is RevealEdgePan || other is UIHoverGestureRecognizer { return false }
         return other.allowedTouchTypes.contains(NSNumber(value: UITouch.TouchType.direct.rawValue))
     }
+
+    /// Whether one of `window`'s edge recognizers has just let a touch go at its lift (within `lately` of now:
+    /// the same lift's handling). A recognizer that waited for it, and that UIKit lets begin only then, begins
+    /// and ends with no change between; the picture's scroll and the trackpad's tracker then carry the finger's
+    /// travel at their end (InputOverlay, TrackpadView), so a stroke held until its lift loses nothing. Nothing
+    /// else ever sees this: a touch away from the edge lets them go at its landing.
+    static func releasedAtLift(in window: UIWindow?, lately: TimeInterval = 0.05) -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        for recognizer in window?.gestureRecognizers ?? [] {
+            if let flick = recognizer as? EdgeFlickRecognizer, abs(now - flick.liftReleaseTime) < lately { return true }
+            if let reveal = recognizer as? RevealEdgePan, abs(now - reveal.liftReleaseTime) < lately { return true }
+        }
+        return false
+    }
 }
 
 /// The hide's flick: EdgeFlick on each finger that lands while nothing else is down (EdgeFlickGate). It
@@ -42,6 +56,8 @@ final class EdgeFlickRecognizer: UIGestureRecognizer {
     private var rule = EdgeFlick()
     private weak var tracked: UITouch?
     private var clock: Timer?
+    /// When it last let a touch go at that touch's lift (the lift's time; EdgeRecognizers.releasedAtLift).
+    private(set) var liftReleaseTime: TimeInterval = -1
 
     init() {
         super.init(target: nil, action: nil)
@@ -110,7 +126,9 @@ final class EdgeFlickRecognizer: UIGestureRecognizer {
         }
         let last = samples.last ?? touch
         let p = point(last)
-        finish(rule.ended(x: Double(p.x), y: Double(p.y), t: last.timestamp))
+        let verdict = rule.ended(x: Double(p.x), y: Double(p.y), t: last.timestamp)
+        if verdict != .hide { liftReleaseTime = ProcessInfo.processInfo.systemUptime }
+        finish(verdict)
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
@@ -161,11 +179,20 @@ final class RevealEdgePan: UIScreenEdgePanGestureRecognizer {
         EdgeRecognizers.waits(other, for: self)
     }
 
+    /// When it last let a touch go at that touch's lift (EdgeRecognizers.releasedAtLift).
+    private(set) var liftReleaseTime: TimeInterval = -1
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         if state == .possible, let view, touches.contains(where: { $0.location(in: view).x > Self.landsWithin }) {
             state = .failed
             return
         }
         super.touchesBegan(touches, with: event)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        let held = state == .possible
+        super.touchesEnded(touches, with: event)
+        if held, state == .possible || state == .failed { liftReleaseTime = ProcessInfo.processInfo.systemUptime }
     }
 }

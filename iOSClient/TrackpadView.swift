@@ -173,6 +173,11 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     private var trackLast: CGPoint = .zero
     /// True once the tracked finger has cleared the slop.
     private var trackLive = false
+    /// The tracker has had a change since it began. When UIKit lets it begin only as the finger lifts (full
+    /// screen's flick held it while it judged a touch at the left edge: EdgeRecognizers.releasedAtLift), it ends
+    /// with no change between, and the end then moves the pointer by the finger's travel, so none is lost; every
+    /// other stroke is as before.
+    private var trackChanged = false
     /// Set when the pan turned this stroke into a two-finger scroll; cleared when the tracker begins
     /// the next stroke. Backs up the tracker's own second-finger check (`FingerTracker`).
     private var trackSuspended = false
@@ -313,25 +318,36 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         case .began:
             trackSuspended = false
             trackLive = false
+            trackChanged = false
             // From where the finger landed: the tracker begins at touch-down, unless full screen's edge
             // recognizers held it while they judged a touch at the left edge (EdgeFlickRecognizer.swift), and
             // then the travel meanwhile still counts.
             trackLast = tracker.downLocation ?? tracker.location(in: self)
         case .changed:
-            guard trackerDriving else { return }
-            let location = tracker.location(in: self)
-            if !trackLive {
-                guard hypot(location.x - trackLast.x, location.y - trackLast.y) > Self.trackSlop else { return }
-                trackLive = true
-            }
-            let dx = location.x - trackLast.x
-            let dy = location.y - trackLast.y
-            trackLast = location
-            guard dx != 0 || dy != 0 else { return }
-            moveCursor(dx: dx, dy: dy)
+            trackChanged = true
+            trackMoved()
+        case .ended where !trackChanged && !tracker.sawSecondFinger && !trackSuspended && EdgeRecognizers.releasedAtLift(in: window):
+            // Begun only at the lift, full screen's flick having held it: the travel the finger made meanwhile.
+            trackMoved()
+            trackLive = false
         default:
             trackLive = false
         }
+    }
+
+    /// The tracked finger's travel since the last move turned into pointer motion, past the slop.
+    private func trackMoved() {
+        guard trackerDriving || tracker.state == .ended else { return }
+        let location = tracker.location(in: self)
+        if !trackLive {
+            guard hypot(location.x - trackLast.x, location.y - trackLast.y) > Self.trackSlop else { return }
+            trackLive = true
+        }
+        let dx = location.x - trackLast.x
+        let dy = location.y - trackLast.y
+        trackLast = location
+        guard dx != 0 || dy != 0 else { return }
+        moveCursor(dx: dx, dy: dy)
     }
 
     /// One or two fingers. The touch count is re-read every callback, so dropping a second finger

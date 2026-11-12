@@ -82,6 +82,11 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// True between the `.scrollGesture(.began)` this view sent and its `.ended`, so an end is
     /// never sent for a pan that could not begin (no video yet).
     private var scrollGestureOpen = false
+    /// The scroll in progress has had a change since it began. A finger's pan that UIKit lets begin only as the
+    /// finger lifts (full screen's flick held it while it judged a touch at the left edge, and the lift said it
+    /// was not one: EdgeRecognizers.releasedAtLift) begins and ends with no change between, and its end then
+    /// sends the travel first, so none is lost. Every other pan is as before.
+    private var scrollChanged = false
     /// -1 while Reverse Scrolling turns the scroll in progress around (a finger's drag; a connected
     /// trackpad's or wheel's never), else 1 (`ScrollDirection`): read as each scroll begins, so its
     /// deltas and the coast after its lift keep the direction it began with.
@@ -404,6 +409,7 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         case .began:
             setOwnPointer(nil, .none)
             lastPanTranslation = .zero
+            scrollChanged = false
             // A new pan while the last flick is still coasting ends the coast first, so the Mac
             // sees momentumEnded before this gesture's began. (touchesBegan has usually done it.)
             momentum.stop()
@@ -419,10 +425,15 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
             // once it has moved, and its first change carries that, as always.
             if source != .finger { scrolled(to: translation, at: location) }
         case .changed:
+            scrollChanged = true
             scrolled(to: translation, at: location)
         case .ended, .cancelled:
-            // What a trackpad's or a wheel's last event moved, if its change never came.
+            // What a trackpad's or a wheel's last event moved, if its change never came; and a finger's whole
+            // travel when its pan began only at the lift (`scrollChanged`).
             if source != .finger, state == .ended { scrolled(to: translation, at: location) }
+            if source == .finger, state == .ended, !scrollChanged, scrollGestureOpen, EdgeRecognizers.releasedAtLift(in: window) {
+                scrolled(to: translation, at: location)
+            }
             lastPanTranslation = .zero
             // A wheel never opened a gesture: nothing to close, and no coast.
             guard scrollGestureOpen else { return }
