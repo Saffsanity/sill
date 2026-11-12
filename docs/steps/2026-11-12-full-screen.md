@@ -6,10 +6,11 @@ hides every control, so the Mac's picture gets the screen's room; a swipe in fro
 back, the controls following the finger; nothing of Sill's stays on screen. Device only: no wire change,
 nothing on the Mac, nothing stored but how often the hint has shown.
 - The rule (`FullScreenPolicy.swift`, pure; `Tests/checks/full-screen`): `EdgeFlick`, the hide's touch rule (a
-  finger alone landing within 48 pt of the left edge, 12 pt left, within 0.25 s, 300 pt/s over its last 50 ms,
+  finger alone landing within 48 pt of the left edge, 12 pt left, within 0.25 s, 300 pt/s over its last 50 ms (from
+  where the finger was 50 ms before the lift, so a rest before the flick does not count),
   lifting within 24 pt of the edge or carried past it within 50 ms; let go after 6 pt right or 8 pt steeper than
   about 50°), `EdgeFlickGate`, `EdgeReveal` (the swipe in finishes past a third of the width, or at a flick in;
-  springs back moving back), `EdgeDwell` (the iPad's pointer half a second at the left edge), `FullScreenPolicy`
+  springs back moving back; a finger at the bezel that has not begun to swipe in by 0.3 s is let go), `EdgeDwell` (the iPad's pointer half a second at the left edge), `FullScreenPolicy`
   (offered while Sill's window covers the screen; why the controls come back by themselves; the hint the first
   3 times; the room: clear of the sensor housing, down under the home indicator; the words), `ChromeLevel` (one
   level: everything or nothing; a slot for a second, parked by Noah).
