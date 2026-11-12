@@ -1316,3 +1316,10 @@ A7. A stop: sign one for the rehearsal release (§15.4), upload it, Check Now: t
     downloaded.
 A8. Quit Sill while it installs (the second of "Installing…"): it quits once the step is done.
 A9. VoiceOver: the switch, the download's two lines read together, the waiting copy's buttons.
+A10. The security review's "Tests still wanted on real hardware": App Management with a real swap in
+    /Applications on macOS 14, 15, 26 and 27 (no prompt for Sill; whether another process of the account can
+    rename or write into the swapped-in bundle right after); continuity through a real update in both accounts
+    (TCC grants, the login item with no Background Items notice, the data-protection keychain and pairings, no
+    Gatekeeper prompt at the relaunch, the 30-second handshake under heavy load); the signer as it will run
+    (the key item's real ACL after `--new-key`, the installed signer refusing injection, the in-person prompt's
+    text, `notarized` on the real release offline).
