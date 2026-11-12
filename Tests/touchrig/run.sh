@@ -37,7 +37,8 @@ out="$root/.build/touchrig"
 work="$out/$name"
 rm -rf "$work"; mkdir -p "$work/src" "$work/TouchRig.app"
 
-# The sources, from the working tree or REV. A file REV does not have is left out.
+# The sources, from the working tree or REV. A file REV does not have is left out. DuoPosture.swift (pure) since the
+# laptop pose's keyboard readings (#215) made InputOverlay.swift's KeyboardFrameMonitor use it.
 fetch() {
     if [ -z "$rev" ]; then
         [ -f "$root/$1" ] && cp "$root/$1" "$work/src/$(basename "$1")" || true
@@ -49,7 +50,7 @@ for f in iOSClient/TrackpadView.swift iOSClient/InputOverlay.swift iOSClient/Poi
          iOSClient/TrackpadGestures.swift iOSClient/KeyChords.swift iOSClient/PortraitStreamScreen.swift \
          iOSClient/HardwareKeyboardPolicy.swift iOSClient/TextComposition.swift Sources/StreamProtocol/Input.swift \
          Sources/StreamProtocol/ScrollDirection.swift iOSClient/StreamZoom.swift iOSClient/PhonePortraitLayout.swift \
-         iOSClient/FullScreenPolicy.swift iOSClient/EdgeFlickRecognizer.swift; do
+         iOSClient/FullScreenPolicy.swift iOSClient/EdgeFlickRecognizer.swift iOSClient/DuoPosture.swift; do
     fetch "$f"
 done
 cd "$work/src"
@@ -71,7 +72,7 @@ cp "$here/Stubs.swift" "$here/main.swift" "$here/TouchSynth.h" "$here/TouchSynth
 target=arm64-apple-ios17.0-simulator
 xcrun -sdk iphonesimulator clang -target $target -fobjc-arc -Wall -c TouchSynth.m -o TouchSynth.o
 xcrun -sdk iphonesimulator swiftc -target $target -swift-version 5 -module-name TouchRig -Onone ${flags[@]+"${flags[@]}"} \
-    -import-objc-header Bridging.h Stubs.swift Keys.swift Input.swift $(ls PointerPresence.swift TrackpadGestures.swift KeyChords.swift HardwareKeyboardPolicy.swift TextComposition.swift ScrollDirection.swift StreamZoom.swift PhonePortraitLayout.swift FullScreenPolicy.swift EdgeFlickRecognizer.swift 2>/dev/null) \
+    -import-objc-header Bridging.h Stubs.swift Keys.swift Input.swift $(ls PointerPresence.swift TrackpadGestures.swift KeyChords.swift HardwareKeyboardPolicy.swift TextComposition.swift ScrollDirection.swift StreamZoom.swift PhonePortraitLayout.swift FullScreenPolicy.swift EdgeFlickRecognizer.swift DuoPosture.swift 2>/dev/null) \
     TrackpadView.swift InputOverlay.swift main.swift TouchSynth.o -o "$work/TouchRig.app/TouchRig"
 cat > "$work/TouchRig.app/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
