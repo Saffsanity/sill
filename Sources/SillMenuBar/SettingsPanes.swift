@@ -421,7 +421,8 @@ struct UpdatesSection: View {
                 }
             }
         } footer: {
-            Footnote(installAvailable ? UpdateInstallPolicy.footnote(automatic: autoSwitch.shown && autoUpdate.wrappedValue) : UpdatePolicy.footnote)
+            Footnote(installAvailable ? UpdateInstallPolicy.footnote(automatic: autoSwitch.shown && autoUpdate.wrappedValue,
+                                                                     nightly: nightlySwitch.shown && nightly.wrappedValue) : UpdatePolicy.footnote)
         }
     }
 }

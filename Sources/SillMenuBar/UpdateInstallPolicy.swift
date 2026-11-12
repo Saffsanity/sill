@@ -1065,12 +1065,19 @@ enum UpdateInstallPolicy {
 
     /// Settings › General's footnote in a build with an update key (UpdatePolicy.footnote otherwise, which
     /// claims no check this build can't make). Both checks named apart: Apple's (the Developer ID signature
-    /// and notarization) and Sill's own update key's (the release's signed manifest).
-    static func footnote(automatic: Bool) -> String {
-        let checks = "Before it installs a new version, Sill checks it two ways: it must carry Apple’s signature and notarization for Sill’s developer, and the release must be signed with Sill’s own update key."
+    /// and notarization) and Sill's own update key's (the release's signed manifest). `nightly`: "Use nightly
+    /// builds" is on (plan §16.5): a nightly is signed with the nightly key, and installs by itself with no
+    /// two-day wait.
+    static func footnote(automatic: Bool, nightly: Bool = false) -> String {
+        let checks = nightly
+            ? "Before it installs a new version, Sill checks it two ways: it must carry Apple’s signature and notarization for Sill’s developer, and be signed with Sill’s own update key (a release) or its nightly key (a nightly build)."
+            : "Before it installs a new version, Sill checks it two ways: it must carry Apple’s signature and notarization for Sill’s developer, and the release must be signed with Sill’s own update key."
         let ask = "Once a day, Sill asks GitHub whether a newer version is out. GitHub sees this Mac’s IP address and which version of Sill it has; nothing else is sent."
         if automatic {
-            return "\(ask) Automatically update Sill is on: Sill downloads a new version \(UpdateAutoPolicy.coolingOffWords), then installs it and restarts once no device has been connected for \(UpdateAutoPolicy.quietMinutes) minutes; it never disconnects anyone. \(checks) Update Now checks it the same way, at once."
+            let what = nightly
+                ? "Sill downloads a new release \(UpdateAutoPolicy.coolingOffWords), and a nightly build as soon as it finds it"
+                : "Sill downloads a new version \(UpdateAutoPolicy.coolingOffWords)"
+            return "\(ask) Automatically update Sill is on: \(what), then installs it and restarts once no device has been connected for \(UpdateAutoPolicy.quietMinutes) minutes; it never disconnects anyone. \(checks) Update Now checks it the same way, at once."
         }
         return "\(ask) Sill downloads and installs nothing by itself. Update Now downloads the new version from GitHub, puts it in place of this copy and restarts Sill; Open Release Page… shows it on GitHub instead. \(checks)"
     }

@@ -455,8 +455,10 @@ enum DebugHooks {
         // Update Now's states, as a build with an update key draws them (this branch's builds have none).
         let offered = updatePaneSamples().first { $0.name == "available" }!.pane
         for sample in updateNowSamples() {
-            // "auto-updated" runs the version it updated to: the check's line is the up-to-date one.
-            let checkPane = sample.name == "auto-updated" ? updatePaneSamples().first { $0.name == "uptodate" }!.pane : offered
+            // "auto-updated" runs the version it updated to, and "nightly-running-off" a nightly newer than any
+            // release: the check's line is the up-to-date one.
+            let checkPane = ["auto-updated", "nightly-running-off"].contains(sample.name)
+                ? updatePaneSamples().first { $0.name == "uptodate" }!.pane : offered
             let section = Form { UpdatesSection(pane: checkPane, install: sample.install, installAvailable: true, automatic: .constant(sample.checkOn),
                                                 autoSwitch: sample.autoSwitch, autoUpdate: .constant(sample.autoOn),
                                                 nightlySwitch: sample.nightlySwitch, nightly: .constant(sample.nightlyOn)) }

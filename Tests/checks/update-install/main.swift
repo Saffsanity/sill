@@ -599,6 +599,14 @@ check(P.footnote(automatic: false).contains("Sill downloads and installs nothing
 check(P.footnote(automatic: true).contains("Automatically update Sill is on") && P.footnote(automatic: true).contains("it never disconnects anyone")
       && P.footnote(automatic: true).contains("two days after it first finds it") && P.footnote(automatic: true).contains("once no device has been connected for 5 minutes;"), "on: what it does: \(P.footnote(automatic: true))")
 check(P.footnote(automatic: true).hasSuffix("Update Now checks it the same way, at once."), "Update Now checks the same way (it does disconnect, after its question: N9)")
+// With "Use nightly builds" on (plan §16.5): the nightly key and no two-day wait for a nightly, in the footnote too.
+for on in [false, true] {
+    let f = P.footnote(automatic: on, nightly: true)
+    check(f.contains("Apple’s signature and notarization") && f.contains("signed with Sill’s own update key (a release) or its nightly key (a nightly build)"),
+          "with nightlies, the footnote names the nightly key (\(on))")
+}
+check(P.footnote(automatic: true, nightly: true).contains("Sill downloads a new release two days after it first finds it, and a nightly build as soon as it finds it, then installs it")
+      && !P.footnote(automatic: true, nightly: false).contains("nightly"), "with nightlies, the footnote says a nightly has no two-day wait; without, it never names nightlies")
 check(!UpdatePolicy.footnote.contains("update key") && UpdatePolicy.footnote.contains("never downloads or installs anything by itself"),
       "a build with no update key claims no check it can't make")
 

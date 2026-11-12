@@ -793,7 +793,10 @@ not asked, each with the default taken:
   forged notes refused. With the genuine v0.6.1 (downloaded
   read-only with `gh`): `Trust.release`'s every rule with the harness's key: 0.6.1 over 0.6.0 installed;
   the same version, a v0.6.2 tag, another team pinned, Apple's own requirement as the running one, a
-  tampered, an ad hoc and an unstapled copy, a manifest naming other code: refused.
+  tampered, an ad hoc and an unstapled copy, a manifest naming other code: refused. A nightly feed (§16): a
+  nightly offered from its verified manifest and installed through the same steps; refused: one signed with the
+  update key, a release-format manifest, a release signed with the nightly key, a half-published pair, an
+  older nightly, one moved on since the offer; nothing offered for one not signed yet or no pre-release.
 - G3 `swift build -c release`: only the known CaptureProbe warning.
 - G4 `Tests/checks/run-all.sh`: all pass.
 - G5 previews from the bare SillMenuBar binary (never the bundle) against main's: identical but for the
@@ -801,7 +804,9 @@ not asked, each with the default taken:
 - G6 `Scripts/sign-update.sh` against a stand-in `gh` serving the genuine v0.6.1, with a throwaway key file
   and a signer installed in a scratch folder (`SILL_SIGNER_DIR`): every check, the manifest, the "upload"
   recorded and read back, nothing sent anywhere; refused for a zip that isn't the one known, a signer
-  changed after installing, no signer.
+  changed after installing, no signer. The nightly key (§16): made only in a file, never verifying a release
+  or verified by the update key; `Scripts/sign-nightly.sh` signing a nightly of its commit and refusing a
+  release's app, another commit's and a key the commit's Sill doesn't carry; `--new-key` leaving nothing behind.
 - Not on this Mac: the real end to end (two notarized builds, a key and Noah's hands: §12). No built
   Sill.app is launched, /Applications/Sill.app is never touched, no key is made in his keychain.
 
@@ -1583,6 +1588,10 @@ branch.
   keeps the nightly you have until a release with a higher version number." (the minutes from
   `UpdateAutoPolicy.quietMinutes`). The offers and steps name the build: "Sill nightly 0.6.2 (1471) is available.",
   "Downloading Sill nightly 0.6.2 (1471)…". The update key's failures for a nightly name the nightly key.
+  The footnote, while it is on, names both keys ("… and be signed with Sill's own update key (a release) or
+  its nightly key (a nightly build).") and, with Automatically update Sill on, the missing wait ("Sill downloads
+  a new release two days after it first finds it, and a nightly build as soon as it finds it, then installs
+  it …"); off, it never names nightlies.
 - Sill for iPhone and iPad is not affected (its nightlies are TestFlight's). A Mac on a nightly speaks the
   same wire, additive as always: a device on the App Store version connects to it as to a newer release,
   and skips what it doesn't know.
@@ -1618,7 +1627,10 @@ immediately"), no signing record to audit (CI signs them, not Noah's Mac), and t
 lessons for releases (the first sight, the audit) don't apply. What remains is only (1) the next night's
 build, which replaces it as the newest (a Mac that installed the bad build updates to the next genuine one,
 unless the bad build stopped it from updating, which it can), and (2) the watcher, which puts the old copy
-back only when the new one doesn't run at all. A leaked nightly key alone (no notarization) installs
+back only when the new one doesn't run at all. Someone who notices can delete `Sill-nightly.zip.manifest`
+from the pre-release, and no Sill installs that nightly after (each reads the manifest again before it
+downloads, and again right before it installs by itself); with no cooling-off, most Macs with both switches on
+will have installed it by then. A leaked nightly key alone (no notarization) installs
 nothing new: the manifest binds the version, build and every slice's code, and the app must still pass
 Apple's checks for Sill's team, so it can only point Sills at genuine builds newer than what they run, and
 only from the pre-release, which takes write access to the repository too. A key that leaked is replaced
