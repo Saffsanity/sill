@@ -24,7 +24,9 @@ Options of harness-photos.sh:
     --tolerance N     a channel difference up to N counts as the same (default 0: exact)
 
 A CASES file has one photo a line: a name, then the app's launch arguments, as a shell would split
-them; `--wait=S` among them sets that photo's wait and is not passed on; `#` starts a comment.
+them; `--wait=S` among them sets that photo's wait and `--pose=NAME` the Duo's pose (Tests/duorig's:
+flat-portrait by default, so the inner display shows the app at 669x951 points; closed-upright and
+closed-side photograph the cover), neither passed on; `#` starts a comment.
 Scripts/harness-photos/example.cases has some.
 
     duo-landscape-drawer  -SillLayout 951x669 -SillHinge flat -SillDrawer 1
@@ -42,6 +44,8 @@ The rules it keeps itself (and refuses to run otherwise):
   device.sh is not needed (no host, no encoder; a screenshot is a still picture, never a recording).
 - Disk: it refuses to build, to boot a simulator for the first time, or to create one while `df -g /`
   shows less than 25 GB free.
+- A photo of one colour is a photo of a display the app was not on (or had not drawn): the report says
+  BLANK and the run fails, so an empty comparison never passes as "identical".
 
 Where things are: ~/Library/Caches/SillAgents/ (SILL_AGENTS_CACHE): apps/<commit>-<Xcode build>/Sill.app,
 the builds kept (the newest 8), DerivedData (one, shared by every build), src (the tree being built)
@@ -66,6 +70,11 @@ DEVICES = {
              "com.apple.CoreSimulator.SimRuntime.iOS-27-0"),
 }
 DUO_SIZES = {"951x669", "669x951", "466x678", "678x466"}
+# The Duo's poses (Tests/duorig) and the display each shows: the cover is "primary", the inner "primary-1".
+DUO_POSES = {"closed-upright": "primary", "closed-side": "primary", "flat-portrait": "primary-1",
+             "flat-landscape": "primary-1", "laptop": "primary-1", "book": "primary-1"}
+DUO_DEFAULT_POSE = "flat-portrait"
+TOOL_ROOT = os.path.dirname(os.path.dirname(HERE))
 BUNDLE = "me.saffer.sill"
 FLOOR_GB = 25
 FIRST_BOOT_GB = 3          # a simulator's first boot writes about 2.4 GB of its own
@@ -281,10 +290,16 @@ def read_cases(path, default_wait, device):
         words = shlex.split(line, comments=True)
         if not words:
             continue
-        name, args, wait = words[0], [], default_wait
+        name, args, wait, pose = words[0], [], default_wait, None
         for w in words[1:]:
             if w.startswith("--wait="):
                 wait = float(w.split("=", 1)[1])
+            elif w.startswith("--pose="):
+                pose = w.split("=", 1)[1]
+                if pose not in DUO_POSES:
+                    die(f"{path}:{n}: {name}: no pose {pose!r} (one of {', '.join(DUO_POSES)})")
+                if device != "duo":
+                    die(f"{path}:{n}: {name}: --pose is the Duo's")
             else:
                 args.append(w)
         if not all(c.isalnum() or c in "-_." for c in name):
@@ -300,7 +315,7 @@ def read_cases(path, default_wait, device):
         if device != "duo" and (layout in DUO_SIZES or "-SillHinge" in args):
             die(f"{path}:{n}: {name}: refused on the iPad (iOS 27.0): a Duo size or -SillHinge is photographed "
                 "on the Duo, iOS 27.1, only (Noah, 2026-10-27): --device duo")
-        cases.append((name, args, wait))
+        cases.append((name, args, wait, pose or (DUO_DEFAULT_POSE if device == "duo" else None)))
     if not cases:
         die(f"{path}: no cases")
     names = [c[0] for c in cases]
@@ -311,16 +326,35 @@ def read_cases(path, default_wait, device):
 
 # ---------------------------------------------------------------------------------- the photos
 
-def photograph(udid, app, cases, folder):
+def set_pose(udid, pose):
+    """The Duo folded or opened with Tests/duorig (the tool's own copy), which waits for it to settle."""
+    rig = os.path.join(TOOL_ROOT, "Tests/duorig/run.sh")
+    if not os.path.exists(rig):
+        die(f"no {rig}: the Duo's poses need Tests/duorig")
+    run([rig, udid, "pose", pose], timeout=120)
+
+
+def photograph(udid, app, cases, folder, blank):
     os.makedirs(folder, exist_ok=True)
     run(["xcrun", "simctl", "uninstall", udid, BUNDLE], check=False)     # fresh data for each commit
     run(["xcrun", "simctl", "install", udid, app])
-    for name, args, wait in cases:
+    exe = pixeldiff()
+    current = None
+    for name, args, wait, pose in cases:
         run(["xcrun", "simctl", "launch", "--terminate-running-process", udid, BUNDLE, *args])
+        # The app is in front before the Duo folds: closing over the Home Screen puts it to sleep.
+        if pose and pose != current:
+            set_pose(udid, pose)
+            current = pose
         time.sleep(wait)
         path = os.path.join(folder, f"{name}.png")
-        run(["xcrun", "simctl", "io", udid, "screenshot", "--type=png", path])
-        say(f"  {name}: {path}")
+        display = ["--display=" + DUO_POSES[pose]] if pose else []
+        run(["xcrun", "simctl", "io", udid, "screenshot", "--type=png", *display, path])
+        if subprocess.run([exe, "--uniform", path], capture_output=True).returncode == 0:
+            blank.append(path)
+            say(f"  {name}: {path}: BLANK (one colour: the app was not on that display, or not drawn yet)")
+        else:
+            say(f"  {name}: {path}" + (f" ({pose})" if pose else ""))
     run(["xcrun", "simctl", "terminate", udid, BUNDLE], check=False)
 
 
@@ -337,7 +371,7 @@ def pixeldiff():
 def compare(cases, base_dir, new_dir, out, tolerance):
     exe = pixeldiff()
     lines, same = [], 0
-    for name, _, _ in cases:
+    for name, _, _, _ in cases:
         a, b = os.path.join(base_dir, f"{name}.png"), os.path.join(new_dir, f"{name}.png")
         diff = os.path.join(out, "differences", f"{name}.png")
         os.makedirs(os.path.dirname(diff), exist_ok=True)
@@ -418,6 +452,7 @@ def photos(argv):
     out = os.path.abspath(opts["--out"] or os.path.join(repo, ".build/harness-photos", run_name))
     os.makedirs(out, exist_ok=True)
     started = time.time()
+    blank = []
     try:
         if sim["state"] != "Booted":
             say(f"booting {sim['name']} ({udid})")
@@ -429,7 +464,7 @@ def photos(argv):
              "charged", "--batteryLevel", "100", "--wifiBars", "3"], check=False)
         for commit, app in apps:
             say(f"photographing {commit[:12]} on {sim['name']}")
-            photograph(udid, app, cases, os.path.join(out, commit[:12]))
+            photograph(udid, app, cases, os.path.join(out, commit[:12]), blank)
     finally:
         subprocess.run(["xcrun", "simctl", "shutdown", udid], capture_output=True)
         say(f"{sim['name']} shut down")
@@ -441,11 +476,13 @@ def photos(argv):
         report += [f"against {base}: {same} of {len(cases)} identical" +
                    (f" (a channel difference up to {opts['--tolerance']} counted as the same)" if int(opts["--tolerance"]) else "")]
         report += lines
+    if blank:
+        report += [f"BLANK: {len(blank)} photo(s) of one colour, so they prove nothing: " + ", ".join(blank)]
     text = "\n".join(report) + "\n"
     open(os.path.join(out, "report.txt"), "w").write(text)
     print(text, end="")
     say(f"photos and report in {out}")
-    return 0
+    return 1 if blank else 0
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@
 //
 //   swiftc -O pixeldiff.swift -o pixeldiff
 //   pixeldiff BASE.png NEW.png [DIFF.png] [--tolerance N]
+//   pixeldiff --uniform FILE.png
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -39,6 +40,22 @@ func load(_ path: String) -> Bitmap {
 }
 
 var args = Array(CommandLine.arguments.dropFirst())
+// `pixeldiff --uniform FILE`: whether every pixel of one picture is the same colour (a photo of a
+// display the app was not on, or had not drawn yet): exit 0 and {"uniform":true}, else exit 1.
+if args.count == 2 && args[0] == "--uniform" {
+    let p = load(args[1])
+    var uniform = true
+    var o = 4
+    while o < p.bytes.count {
+        if p.bytes[o] != p.bytes[0] || p.bytes[o + 1] != p.bytes[1] || p.bytes[o + 2] != p.bytes[2] || p.bytes[o + 3] != p.bytes[3] {
+            uniform = false
+            break
+        }
+        o += 4
+    }
+    print("{\"uniform\":\(uniform),\"width\":\(p.width),\"height\":\(p.height)}")
+    exit(uniform ? 0 : 1)
+}
 var tolerance = 0
 if let i = args.firstIndex(of: "--tolerance"), i + 1 < args.count, let t = Int(args[i + 1]) {
     tolerance = t
