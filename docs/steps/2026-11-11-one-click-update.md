@@ -285,6 +285,17 @@ updater features" (the plan's §15.1); the independent security review's finding
   files); `repo-rules` 10 of 10; the check's mutants for what changed 4 of 4 (N12 a's new one, and the sightings'
   three). `sign-test.sh` against f9bab246's `sign-update.sh`: exactly round 7's two audit cases fail (4 lines).
   CI's Build and check green on f31b704c.
+- Verified, round 8 (2026-11-12 17:01–17:50, this Mac, heavy jobs through heavy.sh, no device, nothing launched but
+  the harness's test executables and the bare SillMenuBar for previews), on a0dedd68: `update-install` 955 of 955
+  (an automatic start refused for a nightly in all 72 combinations of the switches, the dates, the builds and
+  idleness; a nightly's dates refused; the release offer alone in considerAutomatic, by source rule; no file keeps
+  a nightly wait, floor or age; the words; the pane's note under a nightly, with and without a release beside it;
+  the first run didn't compile, its date helper still passing the removed wait: fixed before the commit);
+  `swift build -c release`; the harness 298 of 298 (Update Now's nightly path unchanged); `repo-rules` 10 of 10;
+  the mutants of the two files that changed most and of the words and the offer, 59 of 59 (eight new: option 4's);
+  the harness's nightly mutants 5 of 5; previews, 319: 304 identical to round 5's, 12 changed (the nightly samples'
+  words), 3 new (nightly-auto-release), 3 gone (nightly-waiting: no such state any more), in the handoff's previews/
+  with COMPARE-round8.txt; CI's Build and check green on a0dedd68. `sign-test.sh` unchanged (not run).
 - **Untested, for Noah:** the plan's §12 rehearsal with a throwaway repository and key (two notarized
   builds); the first real Update Now (a release carrying the key installed by hand first); §14's three
   step lists (once: the signer, the key, its backup; once: the public key into `releaseKeys`, a commit of
