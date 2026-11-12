@@ -598,6 +598,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         edgeFlick.armed = true
         edgeFlick.onFlick = { RigLog.log("[edge] hide") }
         edgeFlick.trace = { RigLog.log("[edge] trace " + $0) }
+        if ProcessInfo.processInfo.environment["RIG_TRACE"] == "1" {
+            Tracer.shared.trace(edgeFlick, as: "W.EdgeFlick")
+            for g in root.button.view.gestureRecognizers ?? [] { Tracer.shared.trace(g, as: "B.\(type(of: g))") }
+        }
         edgeFlick.onJudged = { verdict, numbers in
             if case .notAFlick(.outsideBand) = verdict { return }
             RigLog.log("[edge] \(verdict) (\(numbers))")
