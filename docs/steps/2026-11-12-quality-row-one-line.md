@@ -12,3 +12,9 @@ iOS app's Settings panel only: no wire change, nothing on the Mac.
   rate as before (`QualityPreset.title`). It is the picker's `currentValueLabel`, which is iOS 18's: on
   iOS 17 the row shows the whole title and stacks as it did. The running stream's rate is still in the
   panel's readout at its top.
+- Verified: harness photos on the agents' Duo simulator against main, 8 cases (an iPhone on its side and
+  upright at Extreme, at the default and at a bitrate set by hand; the Duo flat and its cover; larger
+  text): every case differs from main only at the row. On an iPhone on its side main stacks "Quality"
+  over "Extreme — 150 Mbps"; here the row reads "Quality … Extreme" on one line and Frame Rate comes
+  into view. Noah had it on his iPhone 15 Pro and iPad mini in a try build (2026-11-12).
+- Not verified: iOS 17 (no device or simulator of it here); by the code it shows the whole title as before.
