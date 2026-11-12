@@ -183,6 +183,34 @@ updater features" (the plan's §15.1); the independent security review's finding
   with nightlies on, the footnote still said every new version waits two days and is signed with the update key;
   it now names the nightly key and the missing wait (update-install 836 of 836, the build, the harness 277 of 277;
   only the six nightly-on samples' renderings changed).
+- Verified, round 5 (2026-11-12 11:50–13:32, this Mac, heavy jobs through heavy.sh, no device, nothing launched but
+  the harness's test executables and the bare SillMenuBar for previews), on cd9eaaa3 (the worktree's run is the
+  commit's; the mutants on an export of it), then f9a962d4 (two check rules and the signing test's R2 list, no app
+  source): `update-install` 903 of 903 (67 new), 904 on f9a962d4; `swift build -c release`, no
+  warning; the harness 288 of 288 (11 new: GitHub's clock and `published_at` read from the stand-in's answers, a
+  fixed date word for word, none and "yesterday" read as none; a stop naming the release's version in another
+  form; the watcher keeping the new copy at Sill's path when the put-back copy fails its last check, and refusing
+  an old copy with a file of two names); `sign-test.sh` all 83 steps (21 new: `--run` and its seven refusals, the
+  audit naming a release outside the record as a draft, a pre-release and published with a notification each,
+  a notification when `gh` can't list, `--yes` never answering the updater's question, the four steering files in
+  its list, a nightly never signed as a release, `SILL_SIGN_TEST_BUILT_FROM` refused with another key);
+  `repo-rules` 10 of 10. The mutants on an export of cd9eaaa3: `update-install` 139 of 141 (25 new); the two left
+  were holes in the check's source rules, not in the code (fetch's GitHub clock without the publication, which
+  no rule pinned; `if false,` before the kept branch, past a rule that looked only for its two strings): rules for
+  both in f9a962d4, and on its export those two and a new one (this Mac's clock taken for GitHub's) 3 of 3; the
+  harness's new and moved ones 7 of 7 (W3's two, N10 l's, CL1's two, "a stop ignored" and W1's, moved), its 34
+  others' patterns still applying once (not re-run). `sign-test.sh` against b69429ed's `sign-update.sh`: 20
+  failed, each a round-5 case (N10 m and the record it then wrote, R1′'s three, AU1's nine with the audit's new
+  words, R2's six, N10 e). Previews from the bare SillMenuBar, 319: 301 identical to round 4's, 18 changed (the
+  five nightly-on samples' note and footnote; and auto-stopped's three, whose stop, recorded as v0.4.0 for an
+  offered v0.4, round 4 matched by text and so showed the cooling-off's words: matched by version now, N10 l, it
+  shows the stop's); in the handoff's previews/ with COMPARE-round5.txt. CI's Build and check green on cd9eaaa3.
+  Found on the way: the
+  check's T36 rule and two of the signing test's audit lines still named the old words (fixed before the commit);
+  while fixing N10 n, that a launch read the nightly pre-release with "Check for updates automatically" off
+  (fixed, with a check and a mutant); and §16.10's `gh api` commands, first written as indented heredocs whose
+  terminator a copy from the page would break, are here-strings now (run with a stand-in `gh` that only parses
+  the bodies, in zsh and bash; nothing sent to GitHub).
 - **Untested, for Noah:** the plan's §12 rehearsal with a throwaway repository and key (two notarized
   builds); the first real Update Now (a release carrying the key installed by hand first); §14's three
   step lists (once: the signer, the key, its backup; once: the public key into `releaseKeys`, a commit of
