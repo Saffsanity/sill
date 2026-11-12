@@ -74,7 +74,7 @@ grep -q "Compatibility.swift" "$out/last.log" && grep -q "UpdateManifest.swift" 
     && ! grep -q "UpdateInstallPolicy.swift\|UpdateArchive.swift" "$out/last.log" \
     || { echo "  FAIL: the signer is built from three files (Compatibility, UpdateManifest, its main): $(grep '  [0-9a-f]\{64\}' "$out/last.log" | tr '\n' ' ')"; failures=$((failures + 1)); }
 # F1: the hardened runtime, and a library given to it through DYLD_INSERT_LIBRARIES never loads.
-codesign -dv "$out/signer/update-manifest" 2>&1 | grep -q 'flags=.*runtime' && echo "  ok: the installed signer has the hardened runtime" \
+grep -q 'flags=.*runtime' <<< "$(codesign -dv "$out/signer/update-manifest" 2>&1 || true)" && echo "  ok: the installed signer has the hardened runtime" \
     || { echo "  FAIL: the installed signer has no hardened runtime"; failures=$((failures + 1)); }
 cat > "$out/mark.c" <<'C'
 #include <stdio.h>
@@ -153,6 +153,15 @@ sed -i '' 's#^    /// The only Trust Sill.app uses.#    /// The only Trust Sill.
 retag "comments"
 grep -q "a comment changed" "$scratch/Sources/SillMenuBar/UpdateInstallPolicy.swift" || { echo "  FAIL: the comment case changed nothing"; failures=$((failures + 1)); }
 expect ok "comments change no trust" "$sign" v0.6.1 "${src[@]}" --replace
+# The manifest's signed time, and a stop for the release (review 3, plan §15.4), with the key in the file.
+grep -q '^signed 20[0-9][0-9]-[01][0-9]-[0-3][0-9]T[0-2][0-9]:[0-5][0-9]:[0-5][0-9]Z$' "$out/assets/Sill.zip.manifest" \
+    && echo "  ok: the manifest carries the time it was signed" || { echo "  FAIL: no signed line"; failures=$((failures + 1)); }
+sha="$(sed -n 's/^sha256 //p' "$out/assets/Sill.zip.manifest")"
+expect ok "a stop for v0.6.1" "$out/signer/update-manifest" stop --tag v0.6.1 --sha256 "$sha" --out "$out/Sill.zip.stop" --key-file "$out/key"
+expect ok "the stop verifies with the key" "$out/signer/update-manifest" verify-stop "$out/Sill.zip.stop" --key "$pub"
+grep -q "stop: tag v0.6.1, SHA-256 $sha" "$out/last.log" || { echo "  FAIL: the stop's fields"; cat "$out/last.log"; failures=$((failures + 1)); }
+expect fail "another key does not verify the stop" "$out/signer/update-manifest" verify-stop "$out/Sill.zip.stop" --key "$other"
+expect fail "a manifest is no stop" "$out/signer/update-manifest" verify-stop "$out/assets/Sill.zip.manifest" --key "$pub"
 # F1: a signer without the hardened runtime (an older install) is refused.
 cp "$out/signer/update-manifest" "$out/plain-signer"
 codesign -s - -f "$out/plain-signer" 2> /dev/null

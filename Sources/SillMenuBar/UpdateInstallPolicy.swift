@@ -647,6 +647,9 @@ enum UpdateInstallPolicy {
         /// No device connected for the while UpdateAutoPolicy asks, GitHub asked again, new sessions held:
         /// the waiting copy is installed; or GitHub's answer ends the attempt (the release changed, a stop).
         case quiet(Failure?)
+        /// Right before Update Now's install, new sessions held: a device connected that the person didn't
+        /// agree to disconnect (it would be cut off without the question). Update Now asks again.
+        case devicesJoined([Device])
         case confirm
         case cancel
         /// The release and its manifest, verified, or why not.
@@ -737,6 +740,9 @@ enum UpdateInstallPolicy {
         case (.ready, .cancel), (.waiting, .cancel), (.fetching, .cancel), (.downloading, .cancel), (.unpacking, .cancel), (.checking, .cancel):
             n.phase = .idle
             return (n, [.cleanUp])
+        case (.installing, .devicesJoined(let devices)) where s.mode == .manual:
+            n.phase = .ready(devices: devices)
+            return (n, [])
         case (.installing, .installed(nil)):
             n.phase = .restarting
             return (n, [.launch])

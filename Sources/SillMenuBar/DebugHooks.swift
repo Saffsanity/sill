@@ -465,8 +465,10 @@ enum DebugHooks {
             for (name, appearance) in appearances {
                 render(section, appearance: appearance, to: out.appendingPathComponent("pane-update-now-\(sample.name)-\(name).png"))
             }
-            // Larger text, as far as SwiftUI on macOS takes it (dynamicTypeSize).
-            render(section.dynamicTypeSize(.accessibility2), appearance: .aqua,
+            // Larger text: SwiftUI on macOS has no Dynamic Type for a Settings form (dynamicTypeSize renders the
+            // same, byte for byte), so the section's own text is set at 17 points instead of 13, to see every row
+            // wrap rather than cut off at the pane's width.
+            render(section.font(.system(size: 17)), appearance: .aqua,
                    to: out.appendingPathComponent("pane-update-now-\(sample.name)-light-larger.png"))
         }
         for sample in remotePaneSamples() {

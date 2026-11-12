@@ -95,7 +95,13 @@ updater features" (the plan's §15.1); the independent security review's finding
   builds); the first real Update Now (a release carrying the key installed by hand first); §14's three
   step lists (once: the signer, the key, its backup; once: the public key into `releaseKeys`, a commit of
   its own; every release: `sign-update.sh` after publishing). Open: §10 Q2 ask before disconnecting, Q3
-  refuse while the other account's Sill runs (with what he sees), Q4 the menu item opens Settings.
+  refuse while the other account's Sill runs (with what he sees), Q4 the menu item opens Settings. The
+  automatic update's steps (the plan's §15.8, A1–A9: the switch, its keeping, a quiet install with the
+  iPad trying to connect during the hold, the watcher's put-back of a release that quits at launch and its
+  renames in /Applications under App Management, a stop, a quit during an install step, VoiceOver), and
+  its open questions 13–23 with their defaults (48 h cooling-off, the stop, 10 minutes with no device,
+  two attempts a day apart, 120 days, the watcher's 30 s and 150 s, GitHub asked again before the swap,
+  the "restarting" goodbye, the keychain group for the switch, a day's wait at most, Check Now included).
 
 **Picture in Picture (2026-11-11, branch `picture-in-picture` from main at dd6ea6a; issue #291, Noah's: "I
 want to get PiP support in the next version"; the plan, what Apple documents and does not, the rule, what a

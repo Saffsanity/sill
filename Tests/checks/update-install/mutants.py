@@ -92,6 +92,7 @@ MUTANTS = [
     ("without the update key", AUTO, '        guard signed else { return .no(', '        guard true else { return .no('),
     ("installed over a device", AUTO, "        devices == 0 && !pairing && now.timeIntervalSince(quietSince) >= quietFor", "        !pairing && now.timeIntervalSince(quietSince) >= quietFor"),
     ("installed during a pairing", AUTO, "        devices == 0 && !pairing && now.timeIntervalSince(quietSince) >= quietFor", "        devices == 0 && now.timeIntervalSince(quietSince) >= quietFor"),
+    ("a device that joined cut off", POL, "        case (.installing, .devicesJoined(let devices)) where s.mode == .manual:\n            n.phase = .ready(devices: devices)\n", "        case (.installing, .devicesJoined(let devices)) where s.mode == .manual:\n            n.phase = .installing\n"),
     ("the automatic update asks like Update Now", POL, "            if s.mode == .automatic { n.phase = .waiting; return (n, []) }\n", ""),
     # Sill.app's sources (T21): read by the check, not compiled by it.
     ("a default read by the installer", INS, "    let userAgent: String\n", "    let userAgent: String\n    let host = UserDefaults.standard.string(forKey: \"SillUpdateHost\")\n"),

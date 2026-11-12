@@ -589,7 +589,7 @@ func watched(_ name: String, newCopy: [String]?, seconds: Int = 6, changeOld: Bo
     // It ends by itself: the note seen, or the put-back done (or refused), at most `seconds` + 8 s.
     let deadline = Date().addingTimeInterval(Double(seconds) + 12)
     while Date() < deadline {
-        let busy = Process.runTool("/usr/bin/pgrep", ["-f", "sill-update-watcher " + String(p.processIdentifier)]) == 0
+        let busy = Process.runTool("/usr/bin/pgrep", ["-q", "-f", "sill-update-watcher " + String(p.processIdentifier)]) == 0
         if !busy { break }
         try? await Task.sleep(for: .milliseconds(250))
     }

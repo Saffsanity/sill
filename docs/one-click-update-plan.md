@@ -610,6 +610,12 @@ checklist.md part 1 §3's marker rule).
 
 - Every later Sill keeps the wait at launch (§5) and finishes launching within 30 s while another Sill
   runs: the version that updates to it launches it beside itself and waits for that.
+- Every later Sill.app, with Update Now or without, answers the watcher (§15.5): once its host has been up
+  `provedAfter` (30 s), or when it is quit, it writes the pending note's token to the started note
+  (`AppUpdater.afterHostUp`, `willQuit`, from Sill's Caches folder). A later Sill that didn't would be put
+  back by the watcher of the version that updated to it, 150 s after its launch.
+- The manifest's signed date (`signed …Z`) and a stop (`Sill stop 1`) are part of format "1" from this
+  version on: no Sill.app with an update key ever shipped before them.
 - Every release keeps T24's shape and, for Update Now, its manifest. The manifest's first line, "Sill
   update 1", names its format; a later format gets another number and is published beside, never instead
   of, a "1" while Sills that read only "1" are in use.
@@ -1170,8 +1176,10 @@ with the test app's own executable as the launcher in place of `open`.
    check off and so stops automatic updates (a denial, nothing installed). Checked: `update-install` reads the
    sources.
 3. *No gap between the look and the quit:* met: the hold and the count in one step on the host's queue, then
-   no session can register until the quit; a pairing window open counts as not quiet. By reading; Noah's
-   step A4.
+   no session can register until the quit; a pairing window open counts as not quiet. Update Now's install
+   holds the same way (the gap the reviewer found there too): a device that connected since the person's
+   answer is asked about first (`devicesJoined`), never cut off. Checked: `update-install`'s state machine
+   (and its mutant "a device that joined cut off"); the hold itself by reading, and Noah's step A4.
 4. *The waiting copy checked again before the swap:* met: `install` runs the whole check on the staged copy
    (the code signature with strict flags, the pinned requirement, notarization and the stapled ticket, the
    identifier, team, entitlements and hardened runtime, the version, every slice's cdhash against the

@@ -125,7 +125,10 @@ if [ "$mode" = install-signer ]; then
     swiftc -O "$src"/*.swift -o "$signer.new" > "$src/build.log" 2>&1 || { cat "$src/build.log" >&2; rm -f "$signer.new"; die "the signer did not compile"; }
     # The hardened runtime: no DYLD_INSERT_LIBRARIES, no debugger, for the binary the key trusts (F1).
     codesign -s - -f -o runtime -i me.saffer.sill.update-signer "$signer.new" 2>/dev/null || { rm -f "$signer.new"; die "couldn't sign the signer with the hardened runtime"; }
-    codesign -dv "$signer.new" 2>&1 | grep -q 'flags=.*runtime' || { rm -f "$signer.new"; die "the signer has no hardened runtime"; }
+    # The whole output read first: `grep -q` stops reading at its match, and under pipefail codesign's SIGPIPE
+    # would then fail the pipe however the flags read.
+    flags="$(codesign -dv "$signer.new" 2>&1 || true)"
+    grep -q 'flags=.*runtime' <<< "$flags" || { rm -f "$signer.new"; die "the signer has no hardened runtime"; }
     mv -f "$signer.new" "$signer"
     shasum -a 256 "$signer" | cut -d' ' -f1 > "$signer.sha256"
     mv -f "$src/trust.txt" "$anchors_file"
@@ -139,7 +142,8 @@ fi
 # The installed signer, unchanged since it was installed, with the hardened runtime, and its trust record.
 [ -x "$signer" ] && [ -f "$signer.sha256" ] || die "no signer installed: Scripts/sign-update.sh --install-signer (after reading its files)"
 [ "$(shasum -a 256 "$signer" | cut -d' ' -f1)" = "$(cat "$signer.sha256")" ] || die "the installed signer changed since it was installed: install it again"
-codesign -dv "$signer" 2>&1 | grep -q 'flags=.*runtime' || die "the installed signer has no hardened runtime (an older install): install it again"
+flags="$(codesign -dv "$signer" 2>&1 || true)"
+grep -q 'flags=.*runtime' <<< "$flags" || die "the installed signer has no hardened runtime (an older install): install it again"
 [ -f "$anchors_file" ] || die "the installed signer has no trust record (an older install): install it again"
 
 case "$mode" in
@@ -203,7 +207,8 @@ ditto -x -k --noqtn --norsrc --noextattr "$dir/Sill.zip" "$dir/unpacked"
 app="$dir/unpacked/Sill.app"
 codesign --verify --strict --deep --verbose=2 -R "=$pinned and notarized" "$app" 2>&1 | sed 's/^/  /'
 xcrun stapler validate "$app" >/dev/null || die "the app has no valid stapled ticket"
-spctl -a -t exec -vv "$app" 2>&1 | grep -q "source=Notarized Developer ID" || die "spctl does not say Notarized Developer ID"
+assessment="$(spctl -a -t exec -vv "$app" 2>&1 || true)"
+grep -q "source=Notarized Developer ID" <<< "$assessment" || die "spctl does not say Notarized Developer ID"
 plist="$app/Contents/Info.plist"
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" = "me.saffer.sill.mac" ] || die "not me.saffer.sill.mac"
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" = "$version" ] || die "the app's version is not $version"

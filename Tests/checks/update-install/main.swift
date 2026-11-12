@@ -474,6 +474,11 @@ check(step(S(phase: .checking, consented: ["c1"]), .checked(nil, devices: [D("iP
 check(P.next(S(phase: .ready(devices: [D("iPad")])), .confirm).0 == S(phase: .installing, consented: ["iPad"]), "ready, yes: install")
 check(step(S(phase: .ready(devices: [D("iPad")])), .cancel) == (.idle, [.cleanUp]), "ready, no: clean up")
 check(step(S(phase: .installing), .installed(nil)) == (.restarting, [.launch]), "installed: launch")
+check(step(S(phase: .installing, consented: ["iPad"]), .devicesJoined([D("iPad"), D("iPhone")])) == (.ready(devices: [D("iPad"), D("iPhone")]), []),
+      "a device joined right before the install: ask again (review 3, point 3)")
+check(P.next(P.next(S(phase: .installing, consented: ["iPad"]), .devicesJoined([D("iPad"), D("iPhone")])).0, .confirm).0
+      == S(phase: .installing, consented: ["iPad", "iPhone"]), "…and yes: both agreed to")
+check(step(S(phase: .installing, mode: .automatic), .devicesJoined([D("iPad")])) == (.installing, []), "the automatic update's own hold, never a question")
 check(step(S(phase: .installing), .installed(.checkAfterSwap(.codeChanged, putBack: true))) == (.failed(.checkAfterSwap(.codeChanged, putBack: true)), [.cleanUp]), "put back: clean up")
 check(step(S(phase: .installing), .installed(.checkAfterSwap(.codeChanged, putBack: false))) == (.failed(.checkAfterSwap(.codeChanged, putBack: false)), []), "not put back: keep the staging folder")
 check(step(S(phase: .installing), .cancel) == (.installing, []), "no cancel once installing")

@@ -32,6 +32,9 @@ final class AppUpdater {
     private(set) var keptAt: String?
     /// Update Now exists in this build: Sill.app itself, in a .app bundle, with an update key compiled in.
     let available: Bool
+    /// Sill.app itself, in a .app bundle, with a version: it answers an update's watcher whatever its own
+    /// key list says (a later Sill without Update Now must still tell the watcher it runs, or it is put back).
+    @ObservationIgnored private let isApp: Bool
     /// What the automatic update remembers, its switch among it (AutoUpdateStore's, mirrored for Settings).
     private(set) var memory: Auto.Memory
     /// The end of a cooling-off this launch learned (UpdateAutoPolicy.coolingOff), for one version.
@@ -91,7 +94,8 @@ final class AppUpdater {
         bundle = Bundle.main.bundleURL
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
         runningVersion = version.flatMap(Policy.strictVersion)
-        let available = bundled && !trust.updateKeys.isEmpty && bundle.pathExtension == "app" && runningVersion != nil
+        isApp = bundled && bundle.pathExtension == "app" && runningVersion != nil
+        let available = isApp && !trust.updateKeys.isEmpty
         self.available = available
         installer = UpdateInstaller(trust: trust, endpoints: .github, userAgent: "Sill/\(version ?? "unknown")")
         // Read only where the switch can be: a build without an update key reads no keychain item.
@@ -553,6 +557,20 @@ final class AppUpdater {
 
     private func startInstall(_ run: Int) {
         guard let prepared, let unpacked, let checked, let running = runningVersion else { send(.installed(.cancelled)); return }
+        // Update Now: new sessions held from here to the restart (a device that tries is told Sill is restarting
+        // and reconnects by itself), and in the same step the last look: one connected since the person's
+        // answer is asked about first, never cut off (review 3, point 3; the automatic update held them
+        // before its own last look, `installWhenQuiet`).
+        if state.mode == .manual {
+            let connected = hold(true)
+            holding = true
+            let now = devices()
+            if connected > state.consented.count || !Set(now.map(\.key)).isSubset(of: Set(state.consented)) {
+                print("Update: a device connected since the question; asking again.")
+                send(.devicesJoined(now))
+                return
+            }
+        }
         let installer = self.installer
         let bundle = self.bundle
         let manifest = prepared.manifest
@@ -728,7 +746,7 @@ final class AppUpdater {
     /// The launch the watcher made after it put this copy back: what happened, in Settings and the log.
     /// Otherwise: what earlier updates left goes at once.
     func afterHostUp() {
-        guard available else { return }
+        guard isApp else { return }
         let pending = UpdateInstaller.readNote(Self.pendingNote)
         if let restored = UpdateInstaller.readNote(Self.restoredNote) {
             try? FileManager.default.removeItem(at: Self.restoredNote)
@@ -763,7 +781,7 @@ final class AppUpdater {
     private func proved(token: String, automatic: Bool) {
         UpdateInstaller.writeNote(Self.startedNote, lines: [token])
         try? FileManager.default.removeItem(at: Self.pendingNote)
-        if automatic, let v = runningVersion { remember { Auto.updated($0, to: v, at: Date()) } }
+        if automatic, available, let v = runningVersion { remember { Auto.updated($0, to: v, at: Date()) } }
         print("Update: Sill \(runningVersion.map { "\($0)" } ?? "") has run for \(Int(Policy.provedAfter)) s; the copy it replaced goes.")
         let later = Timer(timeInterval: 3, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -777,7 +795,7 @@ final class AppUpdater {
     /// Quitting before `proved`: a quit asked for (not a crash) is no failure of the update, so the watcher
     /// is told the same. From AppDelegate's quit.
     func willQuit() {
-        guard available, let p = UpdateInstaller.readNote(Self.pendingNote), p.count >= 3, p[1] == runningVersion?.description else { return }
+        guard isApp, let p = UpdateInstaller.readNote(Self.pendingNote), p.count >= 3, p[1] == runningVersion?.description else { return }
         proved(token: p[0], automatic: p[2] == "automatic")
     }
 
@@ -788,7 +806,7 @@ final class AppUpdater {
     /// until now so it could be put back). Never while an update is under way (its own folder is spared),
     /// and never a folder marked as holding a copy that could not be put back.
     func cleanUpAfterStart() {
-        guard available, mayBegin, keptAt == nil else { return }
+        guard isApp, mayBegin, keptAt == nil else { return }
         let bundle = self.bundle
         let note = Self.leftoverNote
         DispatchQueue.global(qos: .utility).async {
