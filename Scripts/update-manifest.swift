@@ -63,7 +63,7 @@ func describe(_ key: Curve25519.Signing.PrivateKey) -> String {
     return "public key \(pub.base64EncodedString()) (key ID \(UpdateManifest.keyID(pub)))"
 }
 
-guard let command = args.first else { fail("a command: new-key, public-key, cdhashes, sign or verify") }
+guard let command = args.first else { fail("a command: new-key, public-key, sign or verify") }
 args.removeFirst()
 switch command {
 case "new-key":
