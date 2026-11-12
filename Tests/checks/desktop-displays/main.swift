@@ -111,7 +111,11 @@ eq(D.candidates([lenovo, display(0x40, "DELL", x: -1920, y: 156, w: 1920, h: 108
 eq(D.candidates([display(0x41, "LENOVO", x: 0, w: 2560, h: 1440, online: false), dell], main: 0x41).map(\.id), [0x40],
    "the main display gone since the last look: the rest, as arranged")
 // What a display is, by what it is: the stage's by the IDs it made this run or by its identity; never "Sill's vendor".
-eq(D.role(vendor: 0, product: 0, madeByStage: true), .stage, "a display the stage made, removed (vendor 0): the stage's")
+eq(D.role(vendor: 0xFFFF_FFFF, product: 0xFFFF_FFFF, madeByStage: true), .stage,
+   "a display the stage made, removed (its ID reads 0xFFFFFFFF, as display 81 did on 2026-11-12): the stage's")
+eq(D.role(vendor: 0, product: 0, madeByStage: true), .stage, "one that reads vendor 0: the stage's too")
+eq(D.role(vendor: 0xFFFF_FFFF, product: 0xFFFF_FFFF, madeByStage: false), .screen, "a gone display the stage did not make: a screen, which online leaves out")
+eq(D.noMonitor, 0xFFFF_FFFF, "what CoreGraphics reads of a display that has gone")
 eq(D.role(vendor: 0x10AC, product: 0xA0C4, madeByStage: true), .screen, "a monitor given an ID the stage once had (IDs change across a sleep): a screen")
 eq(D.role(vendor: 0x5111, product: 0x0001, madeByStage: true), .stage, "the stage's display while it is up")
 eq(D.role(vendor: 0x5111, product: 0x0001, madeByStage: false), .stage, "the stage's identity, another Sill's stage on this Mac: the stage's")
@@ -120,7 +124,7 @@ eq(D.role(vendor: 0x5111, product: 0x0003, madeByStage: false), .screen, "anothe
 eq(D.role(vendor: 0x756e6b6e, product: 0x76697274, madeByStage: false), .standIn, "macOS's stand-in")
 eq(D.role(vendor: 0x756e6b6e, product: 0x0001, madeByStage: false), .screen, "'unkn' alone is no stand-in")
 eq(D.role(vendor: 0x10AC, product: 0xA0C4, madeByStage: false), .screen, "a Dell: a screen")
-eq(D.role(vendor: 0, product: 0, madeByStage: false), .screen, "a display that reads nothing and the stage did not make: a screen (online decides)")
+eq(D.role(vendor: 0, product: 0, madeByStage: false), .screen, "a display that reads vendor 0 and the stage did not make: a screen (online decides)")
 eq(D.sillVendor, 0x5111, "Sill's vendor, the stage's since 2026-09-22 (VirtualStage.vendorID)")
 eq(D.stageProduct, 0x0001, "the stage's product (VirtualStage.productID)")
 eq(D.desktopProduct, 0x0002, "the Desktop's product (docs/virtual-desktop-plan.md §7)")

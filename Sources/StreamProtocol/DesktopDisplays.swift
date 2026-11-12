@@ -79,15 +79,18 @@ public enum DesktopDisplays {
     public static let sillVendor: UInt32 = 0x5111
     public static let stageProduct: UInt32 = 0x0001
     public static let desktopProduct: UInt32 = 0x0002
+    /// What CoreGraphics reads of a display ID with no monitor behind it (a display that has gone): vendor and model.
+    public static let noMonitor: UInt32 = 0xFFFF_FFFF
 
     /// A listed display's role, by what it is: the stage's identity (the stage of this Sill or of another on this Mac),
-    /// or a display the stage made this run that reads nothing now (removed: vendor 0, while an old look still lists it);
+    /// or a display the stage made this run that reads no monitor now (removed, while an old look still lists it: its ID
+    /// reads vendor and model 0xFFFFFFFF, measured 2026-11-12; 0 is taken the same way);
     /// else Sill's Desktop identity, macOS's stand-in, or a screen. An ID the stage once had that now reads another
     /// identity (display IDs change across a sleep) is that display. Never "any display with Sill's vendor number": the
     /// Virtual Desktop will be one, and a stop.
     public static func role(vendor: UInt32, product: UInt32, madeByStage: Bool) -> Role {
         if vendor == sillVendor && product == stageProduct { return .stage }
-        if madeByStage && vendor == 0 { return .stage }
+        if madeByStage && (vendor == noMonitor || vendor == 0) { return .stage }
         if vendor == sillVendor && product == desktopProduct { return .sillDesktop }
         if vendor == 0x756e6b6e && product == 0x76697274 { return .standIn }   // 'unkn', 'virt'
         return .screen

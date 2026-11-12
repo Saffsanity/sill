@@ -9,7 +9,7 @@ os.makedirs(OUT, exist_ok=True)
 SRC = os.path.join(ROOT, "Sources/StreamProtocol/DesktopDisplays.swift")
 orig = open(SRC).read()
 SHOWN_FILTER = "        let shown = displays.filter { $0.role == .screen && $0.online }\n"
-ROLE_MADE = "        if madeByStage && vendor == 0 { return .stage }\n"
+ROLE_MADE = "        if madeByStage && (vendor == noMonitor || vendor == 0) { return .stage }\n"
 ROLE_STAGE = "        if vendor == sillVendor && product == stageProduct { return .stage }\n"
 ROLE_DESKTOP = "        if vendor == sillVendor && product == desktopProduct { return .sillDesktop }\n"
 ROLE_STANDIN = "        if vendor == 0x756e6b6e && product == 0x76697274 { return .standIn }   // 'unkn', 'virt'\n"
@@ -118,6 +118,8 @@ MUTANTS = [
     ("D68 the stand-in never judged", ROLE_STANDIN, ""),
     ("D69 the stage's product the Desktop's", "    public static let stageProduct: UInt32 = 0x0001\n", "    public static let stageProduct: UInt32 = 0x0002\n"),
     ("D70 an ID the stage once had the stage's whatever it reads now", ROLE_MADE, "        if madeByStage { return .stage }\n"),
+    ("D71 a removed display's 0xFFFFFFFF not taken for no monitor", ROLE_MADE, "        if madeByStage && vendor == 0 { return .stage }\n"),
+    ("D72 no monitor read as vendor 0 alone", "    public static let noMonitor: UInt32 = 0xFFFF_FFFF\n", "    public static let noMonitor: UInt32 = 0\n"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

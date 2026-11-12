@@ -139,7 +139,7 @@ final class WindowCatalog {
         didSet { if mainOnly != oldValue { resolveDesktopDisplay() } }
     }
     /// The displays the stage made this run (VirtualStage: a picked window's own display), by ID: never one of the
-    /// Desktop's stops, also once one has gone and reads nothing (vendor 0) while an old look still lists it
+    /// Desktop's stops, also once one has gone and reads no monitor (vendor 0xFFFFFFFF) while an old look still lists it
     /// (DesktopDisplays.role). Kept for the run; an ID that now reads another display's identity is that display.
     var stageDisplayIDs: Set<CGDirectDisplayID> = []
     /// TEST ONLY (SILL_TEST_DISPLAYS on a --synthetic host, DesktopDisplaysHook): the stops a test host
@@ -422,7 +422,7 @@ final class WindowCatalog {
         let role = DesktopDisplays.role(vendor: CGDisplayVendorNumber(id), product: CGDisplayModelNumber(id),
                                         madeByStage: stageDisplayIDs.contains(id))
         return DesktopDisplays.Display(id: id, uuid: uuid ?? "display \(id)", frame: d.frame,
-                                       role: role, online: CGDisplayIsOnline(id) != 0,
+                                       role: role, online: CGDisplayIsOnline(id) > 0,   // a gone display's ID reads -1
                                        mirrors: mirrors == kCGNullDirectDisplay ? nil : mirrors,
                                        refreshHz: refresh.flatMap { $0 > 0 ? $0 : nil },
                                        name: VirtualStage.screen(for: id)?.localizedName)
