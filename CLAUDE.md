@@ -9,7 +9,7 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **Update Now, the one-click update of Sill for Mac (2026-11-11 and 12, branch `one-click-update` from main
-at dd6ea6a, main at 936d627 (PR #349) merged in, not rebased; draft PR; the plan, its threat model point by point, the open questions with the default taken
+at dd6ea6a, main at 936d627 (PR #349) merged in, not rebased; draft PR #354; the plan, its threat model point by point, the open questions with the default taken
 for each, the gates and Noah's rehearsal are in `docs/one-click-update-plan.md`).** Noah, 2026-11-11: "make a
 note that I want to make the Sill update checker also have a 1 click updater as a new feature", then "Start
 working on ... one-click updater ... Use subagents." On 2026-11-12 he chose the second factor, quoting the
