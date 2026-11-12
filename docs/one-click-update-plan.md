@@ -1112,7 +1112,8 @@ In his words: "Your defaults are correct for the new updater features". So these
 ### 15.2 The design
 
 - **One state machine** (§4.6): the state carries a `mode`. `automatic` begins only from `idle` or
-  `failed` (never beside Update Now, a question, or a copy already waiting); its steps are Update Now's
+  `failed` (never beside Update Now, a question, or a copy already waiting, and never after a failure that
+  left the old copy out of place: its way back stays the person's); its steps are Update Now's
   (fetch, download, unpack, check), with the same refusals and the same two checks; after the check it
   goes to `waiting`, never to `ready` (a device connected is never asked about, and never disconnected).
   `quiet(nil)` installs a waiting copy; `quiet(failure)` ends it. Install Now (Update Now's button on a

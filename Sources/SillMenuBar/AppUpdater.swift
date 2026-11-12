@@ -122,6 +122,13 @@ final class AppUpdater {
         }
     }
 
+    /// The automatic update may begin: as `mayBegin`, but never after a failure that left Sill's old copy out
+    /// of place (its way back shown in Settings stays the person's, as Try Again does: dimmed).
+    private var mayBeginAutomatic: Bool {
+        if case .failed(let f) = state.phase, !f.cleanUp { return false }
+        return mayBegin && keptAt == nil
+    }
+
     /// The release Update Now's part of the pane is about: the check's offer while nothing runs, when it is
     /// signed for Update Now (a release Noah has not signed yet shows as before: Open Release Page… alone),
     /// else the release of the update under way.
@@ -276,12 +283,12 @@ final class AppUpdater {
     /// After every check that answered, and when the switch is turned on: begins the automatic update when
     /// UpdateAutoPolicy says so, with where Sill runs looked at afresh first.
     func considerAutomatic() {
-        guard available, memory.on, let offer = offer(), mayBegin else { return }
+        guard available, memory.on, let offer = offer(), mayBeginAutomatic else { return }
         refresh { [weak self] r in
-            guard let self, self.mayBegin, let current = self.offer(), current == offer else { return }
+            guard let self, self.mayBeginAutomatic, let current = self.offer(), current == offer else { return }
             let now = Date()
             switch Auto.start(self.memory, checkOn: self.checkOn(), available: self.available, refusal: r, offered: offer.version,
-                              offeredTag: offer.tag, signed: offer.signed, running: self.runningVersion, idle: self.mayBegin,
+                              offeredTag: offer.tag, signed: offer.signed, running: self.runningVersion, idle: self.mayBeginAutomatic,
                               waitUntil: self.coolingOffUntil(offer.version), now: now) {
             case .no(let why):
                 if why != self.loggedAutomatic {
