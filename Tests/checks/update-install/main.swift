@@ -117,6 +117,11 @@ check(P.refusal(with { $0.ownedByUser = false; $0.ownerName = "A"; $0.runningIsI
       "another owner before a changed copy and other accounts")
 check(P.refusal(with { $0.freeBytes = nil }) == nil, "free space unknown: no refusal (the unpacking checks it again)")
 check(P.refusal(with { $0.freeBytes = 96 << 20 }) == nil, "exactly the space needed")
+// Any count, Int64.max included, without an overflow (the harness's way of asking for too much found it).
+check(P.refusal(with { $0.neededBytes = .max; $0.freeBytes = 0 }) == .lowSpace(volume: "Macintosh HD", neededMB: 8_796_093_022_208),
+      "Int64.max needed: \(String(describing: P.refusal(with { $0.neededBytes = .max; $0.freeBytes = 0 })))")
+check(P.mebibytesRoundedUp(0) == 0 && P.mebibytesRoundedUp(1) == 1 && P.mebibytesRoundedUp(1 << 20) == 1
+      && P.mebibytesRoundedUp((1 << 20) + 1) == 2 && P.mebibytesRoundedUp(96 << 20) == 96, "MiB rounded up")
 check(P.words(.notRelease) == "This copy of Sill isn’t a notarized release, so it can’t update itself.", "words: notRelease")
 check(P.words(.otherAccount("Alex Example")) == "Sill is open in another account on this Mac (Alex Example). Quit it there first, then update.", "words: otherAccount")
 check(P.words(.notWritable("/Applications")) == "Sill is in a folder this account can’t change (/Applications).", "words: notWritable")

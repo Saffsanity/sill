@@ -199,9 +199,14 @@ enum UpdateInstallPolicy {
         if let other = s.otherAccounts.first { return .otherAccount(other) }
         if s.otherInstances > 0 { return .otherInstance }
         if let free = s.freeBytes, free < s.neededBytes {
-            return .lowSpace(volume: s.volumeName, neededMB: Int((s.neededBytes + (1 << 20) - 1) >> 20))
+            return .lowSpace(volume: s.volumeName, neededMB: mebibytesRoundedUp(s.neededBytes))
         }
         return nil
+    }
+
+    /// Whole MiB, rounded up, for any count (Int64.max included: no addition that could overflow).
+    static func mebibytesRoundedUp(_ bytes: Int64) -> Int {
+        Int(bytes >> 20) + (bytes & 0xF_FFFF != 0 ? 1 : 0)
     }
 
     /// What the staging volume needs before the download: four times the zip, and the margin.

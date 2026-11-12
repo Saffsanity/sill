@@ -19,7 +19,8 @@ def info(name, mode, method=zipfile.ZIP_DEFLATED):
 
 with zipfile.ZipFile(out, "w") as z:
     if case == "not-a-bundle":
-        z.writestr(info(TOP, 0o100644), b"not a folder")
+        # Over the release's 1 KB floor, so the archive's own rule refuses it (not the size).
+        z.writestr(info(TOP, 0o100644, zipfile.ZIP_STORED), b"not a folder" + bytes(range(256)) * 16)
     else:
         for dirpath, dirnames, filenames in os.walk(os.path.join(src, TOP)):
             dirnames.sort()

@@ -32,7 +32,8 @@ for f in UpdatePolicy UpdateInstallPolicy UpdateManifest UpdateArchive UpdateIns
     sed '/^import StreamProtocol$/d' "$sources/$f.swift" > "$T/$f.swift"
 done
 cp "$here/main.swift" "$T/main.swift"
-swiftc -O "$T"/*.swift -o "$out/harness"
+# Named so its staging folders (NSIRD_updharness_…) are its own: the clean-up goes by the process name.
+swiftc -O "$T"/*.swift -o "$out/updharness"
 
 echo "== the test apps"
 cat > "$out/updtest.swift" <<'SWIFT'
@@ -111,4 +112,4 @@ for _ in $(seq 50); do [ -f "$out/port" ] && break; sleep 0.1; done
 [ -f "$out/port" ] || { echo "the server did not start" >&2; exit 1; }
 
 echo "== the cases"
-"$out/harness" "$out"
+"$out/updharness" "$out"

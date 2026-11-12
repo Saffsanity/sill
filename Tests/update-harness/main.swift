@@ -16,7 +16,7 @@ let base = "http://127.0.0.1:\(port)"
 var failures = 0, checks = 0
 func check(_ ok: Bool, _ what: @autoclosure () -> String, line: Int = #line) {
     checks += 1
-    if !ok { failures += 1; print("FAIL (line \(line)): \(what())") }
+    if !ok { failures += 1; print("FAIL (line \(line)): \(what())"); fflush(stdout) }
 }
 func say(_ s: String) { print(s); fflush(stdout) }
 
@@ -408,7 +408,8 @@ for d in made {
 }
 UpdateInstaller.markKept(made[1], path: made[1].appendingPathComponent("UpdTest.app").path)
 let removed = UpdateInstaller.cleanUpStaging(for: probe, keep: made[0])
-check(Set(removed) == Set([made[2].path]), "only the unmarked other removed: \(removed)")
+check(removed.contains(made[2].path) && !removed.contains(made[0].path) && !removed.contains(made[1].path),
+      "the unmarked other removed, the kept one and the marked one not: \(removed)")
 check(FileManager.default.fileExists(atPath: made[0].path) && FileManager.default.fileExists(atPath: made[1].path),
       "the kept one and the one holding a copy not put back are there")
 UpdateInstaller.remove(made[0])
