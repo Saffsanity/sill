@@ -80,3 +80,31 @@ is up and that a tap moves to the next. No setting; nothing of the Virtual Deskt
   monitor unplugged and back; ⌃⌘Q on Desktop 2 (the main screen's lock screen, is the password field there, back on
   Desktop 2 after the unlock); a 120 Hz device on a 60 Hz monitor ("… 60 fps"); the span (30 s); the sound across steps;
   mirroring and Sidecar; VoiceOver; two devices; mixed builds; Spaces on another monitor.
+- **Noah's first test (cbc10b9, 2026-11-12 04:30; the lid closed, the Lenovo main at 0,0, the Dell at -1920,156, Virtual
+  Display on):** "The desktop button works except that when I have a window open on Display 2 (for example) and switch to
+  windowed mode and back, it puts the window on Display 1 for some reason. Windows should return to the display, size and
+  position they were in before windowed mode" (a requirement). Two faults:
+  - A, the window came back on the main display: main's race, not this branch's (VirtualStage.release: the Accessibility
+    writes and the display's removal in one turn, before the app committed the move). Fixed in its own pull request,
+    #358 (`stage-restore-display`, docs/steps/2026-11-12-stage-restore-display.md), merged in here (6b371d4).
+  - B, "Desktop: display 1 of 3" with two screens a second after the stage's display was removed: the look still listed
+    it, its ID read no monitor once gone (vendor and model 0xFFFFFFFF, CGDisplayIsOnline -1: measured on this Mac), and
+    the rule knew Sill's display only by its vendor (`described`'s `isSills`); `nextDesktopDisplay` took the look as it
+    was (`lookAgainIfStale` found it young). Fixed (fed5987, 8270168): `DesktopDisplays.Role` (screen, stage,
+    sillDesktop, standIn) and `online` in place of `isSills`/`isStandIn`; `role(vendor:product:madeByStage:)` knows the
+    stage by what it is (its identity 0x5111/0x0001, or an ID it made this run that reads no monitor now; an ID that reads
+    another display now is that display), never "any display with Sill's vendor" (Noah: the Virtual Desktop will be
+    reached through the Desktop button); Sill's Desktop display (0x0002) is its own role, no stop in phase 1, and
+    `candidates()` has the one marked "PHASE 2" line where it becomes the last stop; `WindowCatalog.stageDisplayIDs`
+    (VirtualStage writes each display it makes); online is `CGDisplayIsOnline > 0`; a step takes a fresh look first.
+  - Verified after both (8270168, 05:17–05:35): `swift build -c release`, only the CaptureProbe warning; `run-all.sh`, all
+    71 (desktop-displays 140 checks, stage-release 847, compatibility 165, lock-policy 1,411, display-wake 272,
+    pointer-control 160); desktop-displays 72 of 72 mutants (12 new: the stage's display, a display gone since the look,
+    Sill's Desktop display in phase 1, every role's line, 0xFFFFFFFF) and stage-release 25 of 25 on the merge (its
+    wiring's text holds in this branch's coordinator); the live gate 24 of 24; the iOS app's Debug build for the
+    simulator, only the known StreamClient warning; `Tests/checks/repo-rules` 10 of 10. Not verified: the role on real
+    displays (what a real removal reads in the half second it takes, a Sidecar iPad's and AirPlay's vendors), anything
+    on a device.
+  - Which of the pull request's 14 steps change: 2 (a window, then the Desktop), 1 and 4 (two monitors: two stops, also
+    right after a window streamed), 5 and 10 (a display that went is never counted); step 15 is new (a window filling a
+    monitor, then the Desktop, then a tap: the window home, "display 1 of 2").
