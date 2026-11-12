@@ -28,6 +28,12 @@ MUTANTS = [
     ("Z14 another pane keeps the offset as it was (another point at the middle)", "offset.width * size.width / pane.width", "offset.width"),
     ("Z15 the visible part as big as the pane", "return CGRect(x: origin.x, y: origin.y, width: size.width / s, height: size.height / s)",
      "return CGRect(x: origin.x, y: origin.y, width: size.width, height: size.height)"),
+    # The trackpad's edge follow.
+    ("F1 no horizontal follow", "offset.width + shift(at.x, span: pane.width)", "offset.width"),
+    ("F2 no vertical follow", "offset.height + shift(at.y, span: pane.height)", "offset.height"),
+    ("F3 small panes lose their middle", "let edge = min(44, span / 4)", "let edge: CGFloat = 44"),
+    ("F4 follow ignores the letterbox origin", "videoRect.minY + point.y * videoRect.height", "point.y * videoRect.height"),
+    ("F5 follow ignores the frame's fitted width", "videoRect.minX + point.x * videoRect.width", "videoRect.minX + point.x * pane.width"),
     # The stroke.
     ("S1 two fingers on a zoomed picture not the picture's at once", "            if owner == .undecided, zoom.isZoomed { owner = .picture }\n", ""),
     ("S2 the pan's start always the Mac's (a pinch whose midpoint moved scrolls)",

@@ -83,7 +83,9 @@ Sill has layouts of its own.
   your Mac has for them.
   Pinch the picture to zoom it, up to 5×, around the point between your
   fingers; two fingers move a zoomed picture, and a pinch all the way out
-  shows the whole picture again.
+  shows the whole picture again. Moving the pointer with the on-screen
+  trackpad near an edge of a zoomed picture moves the picture to keep it in view.
+  Zooming in slows the trackpad’s pointer movement in proportion, for finer control.
 - **On iPhone**, held upright, the picture is on top with buttons, keys and a
   trackpad below. Larger Picture, in the settings panel, gives a window's
   picture the room of the window thumbnails, down to where the keyboard comes

@@ -3,10 +3,11 @@ import Foundation
 
 /// Pinch to zoom on the stream picture (issue #65; Noah's decisions of 2026-10-19 and 2026-10-20): two
 /// fingers on the picture zoom it from 1× to 5×, centred on the pinch (the midpoint between the
-/// fingers) as a photo in Photos is, and move it with that midpoint; no slider, and the Mac's pointer
-/// is not involved (no zoom about the cursor, no view following it). A slight pinch out leaves the
-/// picture where it is; only a pinch all the way out gives back the whole picture. The zoom is this
-/// device's alone: nothing is sent, and the Mac's window and the viewport stay as they are.
+/// fingers) as a photo in Photos is, and move it with that midpoint; no slider or zoom about the
+/// cursor. Only moving the pointer with the on-screen trackpad follows it near the pane's edges.
+/// A slight pinch out leaves the picture where it is; only a pinch all the way out gives back the
+/// whole picture. The zoom is this device's alone: nothing is sent, and the Mac's window and the
+/// viewport stay as they are.
 ///
 /// The picture is drawn scaled about the pane's middle, then moved by `offset` (`ZoomedStreamView`:
 /// `.scaleEffect(scale).offset(offset)` on the stream's view), so a point `u` of the pane as it is at
@@ -83,6 +84,27 @@ struct StreamZoom: Equatable, Sendable {
         let maxY = size.height * (scale - 1) / 2
         offset = CGSize(width: min(maxX, max(-maxX, offset.width * size.width / pane.width)),
                         height: min(maxY, max(-maxY, offset.height * size.height / pane.height)))
+    }
+
+    /// A move from the on-screen trackpad, in frame fractions. Keep the pointer 44 pt inside the
+    /// pane when possible, moving only as far as needed and stopping at the same limits as a pinch.
+    /// `videoRect` is the aspect-fitted picture at 1×, including its letterbox origin. A small pane
+    /// keeps a middle half where nothing moves. Direct touches and the Mac's pointer reports never
+    /// call this: a pinch or two-finger pan stays where the fingers put it.
+    mutating func followTrackpadPointer(_ point: CGPoint, videoRect: CGRect) {
+        guard isZoomed, pane.width > 0, pane.height > 0, !videoRect.isEmpty,
+              point.x.isFinite, point.y.isFinite else { return }
+        let picturePoint = CGPoint(x: videoRect.minX + point.x * videoRect.width,
+                                   y: videoRect.minY + point.y * videoRect.height)
+        let at = zoomedPoint(picturePoint, in: pane)
+        func shift(_ at: CGFloat, span: CGFloat) -> CGFloat {
+            let edge = min(44, span / 4)
+            return min(span - edge, max(edge, at)) - at
+        }
+        let maxX = pane.width * (scale - 1) / 2
+        let maxY = pane.height * (scale - 1) / 2
+        offset = CGSize(width: min(maxX, max(-maxX, offset.width + shift(at.x, span: pane.width))),
+                        height: min(maxY, max(-maxY, offset.height + shift(at.y, span: pane.height))))
     }
 
     /// A point of the pane on screen, back to where it is in the picture at 1×: what the input view

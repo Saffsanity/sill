@@ -649,14 +649,20 @@ struct PortraitStreamScreen: View {
     }
 
     private func trackpad(verticalSpan: CGFloat?) -> some View {
-        Trackpad(send: { client.sendInput($0) },
+        Trackpad(send: { event in
+                     if case let .pointer(.move, x, y) = event {
+                         zoom.followTrackpadPointer(CGPoint(x: x, y: y), videoSize: client.videoSize)
+                     }
+                     client.sendInput(event)
+                 },
                  setPointer: { client.setOwnPointer($0, from: .trackpad) },
                  feed: { let f = client.pointerFeedState; return (f.anchor, f.reseeds) },
                  onFingers: { client.trackpadFingers($0) },
                  latched: latched,
                  onModifiersConsumed: { latched = [] },
                  verticalSpan: verticalSpan,
-                 sendGesture: { client.sendGesture($0, fingers: $1) })
+                 sendGesture: { client.sendGesture($0, fingers: $1) },
+                 readZoom: { [zoom] in zoom.zoom })
             .tourTarget(.trackpad)
     }
 

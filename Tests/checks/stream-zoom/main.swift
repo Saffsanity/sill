@@ -574,5 +574,103 @@ do {
     check("20,000 random strokes: two fingers in parallel on the whole picture are never the picture's", i7)
 }
 
+// MARK: - On-screen trackpad: follow only at an edge, without changing the zoom
+
+do {
+    // The pad sends frame fractions after unzooming its motion. Compare the resulting travel
+    // on the screen at several zooms, including after edge following moved the picture.
+    let size = CGSize(width: 400, height: 300)
+    let frame = CGRect(origin: .zero, size: size)
+    let padDelta = CGPoint(x: 0.0125, y: -0.025)
+    for scale: CGFloat in [1, 2, 5] {
+        var z = zoomed(scale, at: CGPoint(x: 200, y: 150), in: size)
+        z.followTrackpadPointer(CGPoint(x: 0.8, y: 0.2), videoRect: frame)
+        let step = z.unzoomedDelta(padDelta)
+        let from = z.zoomedPoint(CGPoint(x: 200, y: 150), in: size)
+        let to = z.zoomedPoint(CGPoint(x: 200 + step.x * size.width,
+                                     y: 150 + step.y * size.height), in: size)
+        check("trackpad at \(scale)×: the same on-screen travel, after following too",
+              near(to.x - from.x, padDelta.x * size.width)
+              && near(to.y - from.y, padDelta.y * size.height))
+    }
+}
+
+do {
+    let size = CGSize(width: 400, height: 300)
+    let video = CGRect(origin: .zero, size: size)
+    let middle = CGPoint(x: 200, y: 150)
+    var whole = Z()
+    whole.resized(to: size)
+    let before = whole
+    whole.followTrackpadPointer(.zero, videoRect: video)
+    check("trackpad at 1×: leaves the whole picture where it is", whole == before)
+
+    let start = zoomed(2, at: middle, in: size)
+    var still = start
+    still.followTrackpadPointer(CGPoint(x: 0.5, y: 0.5), videoRect: video)
+    check("trackpad in the middle: no movement", still == start)
+    // Points given in the frame's fractions; their on-screen positions before following.
+    for (at, expected) in [(CGPoint(x: 10, y: 150), CGPoint(x: 44, y: 150)),
+                           (CGPoint(x: 390, y: 150), CGPoint(x: 356, y: 150)),
+                           (CGPoint(x: 200, y: 10), CGPoint(x: 200, y: 44)),
+                           (CGPoint(x: 200, y: 290), CGPoint(x: 200, y: 256)),
+                           (CGPoint(x: 10, y: 290), CGPoint(x: 44, y: 256)),
+                           (CGPoint(x: -100, y: 400), CGPoint(x: 44, y: 256))] {
+        let frame = start.unzoomedPoint(at, in: size)
+        let fraction = CGPoint(x: frame.x / size.width, y: frame.y / size.height)
+        var followed = start
+        followed.followTrackpadPointer(fraction, videoRect: video)
+        check("trackpad at \(str(at)): minimal shift into the edge band",
+              near(followed.zoomedPoint(frame, in: size), expected) && followed.scale == start.scale && covers(followed, size))
+        let once = followed
+        followed.followTrackpadPointer(fraction, videoRect: video)
+        check("trackpad at \(str(at)): following again does not drift", followed == once)
+    }
+    for corner in [CGPoint.zero, CGPoint(x: 1, y: 0), CGPoint(x: 0, y: 1), CGPoint(x: 1, y: 1)] {
+        var followed = start
+        followed.followTrackpadPointer(corner, videoRect: video)
+        check("frame corner \(str(corner)): stops at the picture's edge",
+              near(followed.zoomedPoint(CGPoint(x: corner.x * 400, y: corner.y * 300), in: size),
+                   CGPoint(x: corner.x * 400, y: corner.y * 300)) && covers(followed, size))
+    }
+    var small = zoomed(2, at: CGPoint(x: 50, y: 40), in: CGSize(width: 100, height: 80))
+    small.followTrackpadPointer(CGPoint(x: 0.3, y: 0.3), videoRect: CGRect(x: 0, y: 0, width: 100, height: 80))
+    check("small pane: edge band at most a quarter along either axis",
+          near(small.zoomedPoint(CGPoint(x: 30, y: 24), in: small.pane), CGPoint(x: 25, y: 20)))
+
+    // A 2:1 frame letterboxed into 400×300: its top at 50 pt, not at the pane's top.
+    var letterbox = start
+    letterbox.followTrackpadPointer(CGPoint(x: 0.5, y: 0.2), videoRect: CGRect(x: 0, y: 50, width: 400, height: 200))
+    check("letterboxed frame: pointer uses the picture's origin and height",
+          near(letterbox.zoomedPoint(CGPoint(x: 200, y: 90), in: size), CGPoint(x: 200, y: 44)))
+    var pillarbox = start
+    pillarbox.followTrackpadPointer(CGPoint(x: 0.1, y: 0.5), videoRect: CGRect(x: 100, y: 0, width: 200, height: 300))
+    check("pillarboxed frame: pointer uses the picture's origin and width",
+          near(pillarbox.zoomedPoint(CGPoint(x: 120, y: 150), in: size), CGPoint(x: 44, y: 150)))
+
+    var invalid = start
+    invalid.followTrackpadPointer(.zero, videoRect: .zero)
+    invalid.followTrackpadPointer(CGPoint(x: CGFloat.nan, y: 0), videoRect: video)
+    invalid.followTrackpadPointer(CGPoint(x: 0, y: CGFloat.infinity), videoRect: video)
+    check("no video or a non-finite pointer: no movement", invalid == start)
+    var noPane = Z()
+    noPane.followTrackpadPointer(.zero, videoRect: video)
+    check("no pane yet: no movement", noPane == Z())
+
+    // Following changed only the offset: a subsequent pinch still keeps its anchor, and resizing
+    // (including the keyboard reducing the picture's room) retains a valid view of the same point.
+    var next = letterbox
+    let anchor = CGPoint(x: 100, y: 100)
+    let under = next.unzoomedPoint(anchor, in: size)
+    next.pinch(factor: 1.1, from: anchor, to: anchor, in: size)
+    check("pinch after following keeps its anchor", near(next.unzoomedPoint(anchor, in: size), under))
+    let centerBefore = next.unzoomedPoint(middle, in: size)
+    next.resized(to: CGSize(width: 300, height: 200))
+    let centerAfter = next.unzoomedPoint(CGPoint(x: 150, y: 100), in: next.pane)
+    check("resizing after following retains the same frame point at the middle",
+          near(centerBefore.x / 400, centerAfter.x / 300) && near(centerBefore.y / 300, centerAfter.y / 200)
+          && covers(next, next.pane))
+}
+
 print("\(passes) passed, \(fails) failed")
 exit(fails == 0 ? 0 : 1)
