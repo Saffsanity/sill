@@ -55,7 +55,18 @@ the menu are what they were.
   cdhash (now the old copy validated whole, a copy that failed its check moved off the path, only a whole
   old copy offered); device keys could repeat; the old copy went even when the host failed; a full disk
   could lose the note keeping it (now a rename).
-- Verified: (filled in once compiled; the disk was under the 25 GB floor from 22:50 to …).
+- Verified (2026-11-12, this Mac, macOS 27.2 and Xcode 27.1, no device involved, every heavy job through
+  heavy.sh; the plan's Progress): `Tests/checks/update-install` 480 checks and its 60 mutants (all 60 on the
+  code before the owner refusal, 60 of 60; the refusal's four again after it, 4 of 4); `update-policy` 129;
+  `Tests/update-harness/run.sh` 174 of 174 (installs, put-backs, each hostile case refused with the
+  installed copy unchanged, a bundle held across the swap reading the old version while Security reads the
+  new, the genuine v0.6.1 under `Trust.release` with codesign's CDHash equal to Security's on both slices)
+  and its 12 mechanism mutants, 12 of 12; `sign-test.sh` all 14 steps; `swift build -c release` clean
+  but the known CaptureProbe warning; previews from the bare SillMenuBar identical to main's (936d627) but
+  the 36 new pane-update-now files and menu.txt's appended samples; CI's Build and check green on df36dc2
+  and be7e41b (run-all's 67 checks, the iOS build, no AppUpdater warning). Found on the way: macOS's System Policy denies listing the
+  temporary-items folder (the clean-up now goes by a note), the low-space rounding's overflow, and a
+  freshly started ad hoc app held unwritable by the system policy for a moment (harness only).
 - **Untested, for Noah:** the plan's §12 rehearsal with a throwaway repository and key (two notarized
   builds); the first real Update Now (a release carrying the key installed by hand first); §14's three
   step lists (once: the signer, the key, its backup; once: the public key into `releaseKeys`, a commit of
