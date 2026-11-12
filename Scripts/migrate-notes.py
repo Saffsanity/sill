@@ -496,6 +496,13 @@ def migrate(root, ours, theirs):
         for f in t_files:
             text = show(theirs, f"{STEPS}/{f}") or ""
             by_first.setdefault(text.split("\n", 1)[0], f)
+        # the working tree's step files: a second run finds what the first one moved
+        wt_dir = os.path.join(root, STEPS)
+        wt_steps = {f: read(os.path.join(wt_dir, f)) for f in os.listdir(wt_dir)
+                    if f.endswith(".md") and f != "README.md"}
+        wt_by_first = {}
+        for f, x in sorted(wt_steps.items()):
+            wt_by_first.setdefault(x.split("\n", 1)[0], f)
         b_set, b_by_first = set(b_entries), {x.split("\n", 1)[0]: x for x in b_entries}
         b_by_name = {}
         for x in b_entries:
@@ -517,6 +524,14 @@ def migrate(root, ours, theirs):
                 write(os.path.join(root, path), merged)
                 (conflicted if n else resolved).append(path)
                 notes.append(f"{path}: this branch's changes to that entry, merged into it")
+            elif first in wt_by_first:
+                path = f"{STEPS}/{wt_by_first[first]}"
+                if wt_steps[wt_by_first[first]] != text:
+                    write(os.path.join(root, path), text)
+                    notes.append(f"{path}: this branch's entry, written again as it is in the branch")
+                else:
+                    notes.append(f"{path}: this branch's entry, moved already")
+                resolved.append(path)
             else:
                 new_texts.append(text)
         taken = {f[:-3] for f in t_files} | {f[:-3] for f in os.listdir(os.path.join(root, STEPS))}
@@ -626,6 +641,11 @@ def main(argv):
                              "conflicts, or pass --ours HEAD^1 --theirs HEAD^2 after a merge you committed.")
         theirs = r.stdout.strip()
         ours = ours or "HEAD"
+    else:
+        dirty = git("status", "--porcelain", "--", CLAUDE, CHECKS_README, DEVELOPMENT, CI, STEPS,
+                    "Tests/checks", cwd=root)
+        if dirty.strip():
+            raise SystemExit("Uncommitted changes to the files this writes; commit or stash them first:\n" + dirty)
     ours = ours or "HEAD"
     return 0 if migrate(root, ours, theirs) else 1
 
