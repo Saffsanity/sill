@@ -327,6 +327,22 @@ check(Wire.decode(WindowList.self, from: Wire.encode(displays)).map { $0.desktop
       "desktopDisplays and desktopDisplay round-trip beside keyRepeat")
 check(Wire.decode(ReaderBefore.self, from: Wire.encode(displays)).map { $0.macName == "Mac mini" && $0.clipboard == 1 } == true,
       "a reader from before them skips desktopDisplays and desktopDisplay")
+// Their names (docs/virtual-desktop-plan.md phase 1, PR #296's field): VoiceOver's "Display 2 of 3, DELL
+// U2723QE". Additive as the two: left out when nil, nil from an older host, skipped by an older reader.
+var named = displays
+named.desktopDisplayNames = ["Built-in Retina Display", "DELL U2723QE"]
+check(json(named).contains(#""desktopDisplayNames":["Built-in Retina Display","DELL U2723QE"]"#),
+      "a list with the stops' names says them in order: \(json(named))")
+check(!json(displays).contains("desktopDisplayNames") && displays.desktopDisplayNames == nil, "a list without names leaves the key out")
+check(decodedOld != nil && decodedOld?.desktopDisplayNames == nil, "an older host's list decodes, the names nil")
+check(Wire.decode(WindowList.self, from: Wire.encode(named)).map {
+          $0.desktopDisplayNames == ["Built-in Retina Display", "DELL U2723QE"] && $0.desktopDisplays == 2 && $0.desktopDisplay == 1
+      } == true, "the names round-trip beside desktopDisplays and desktopDisplay")
+struct ReaderOf173: Decodable { var macName: String; var desktopDisplays: Int?; var desktopDisplay: Int? }
+check(Wire.decode(ReaderOf173.self, from: Wire.encode(named)).map { $0.desktopDisplays == 2 && $0.desktopDisplay == 1 } == true,
+      "a reader of #173's two fields alone skips the names and reads the two")
+check(Wire.decode(ReaderBefore.self, from: Wire.encode(named)).map { $0.macName == "Mac mini" && $0.clipboard == 1 } == true,
+      "a reader from before them skips all three")
 check(StreamMessageKind.nextDisplay.rawValue == 47 && StreamMessageKind(rawValue: 47) == .nextDisplay, "kind 47 is the next display")
 check(StreamMessageKind(rawValue: 45) == nil && StreamMessageKind(rawValue: 46) == nil,
       "45 and 46 not this build's (open pull requests' microphone, pen and camera)")
@@ -347,6 +363,8 @@ if let out {
         "windowListClipboard": String(decoding: Wire.encode(shares), as: UTF8.self),
         "windowListKeyRepeat": String(decoding: Wire.encode(repeats), as: UTF8.self),
         "clipboardMessage": clipboardMessage.base64EncodedString(),
+        "windowListDesktopStops": String(decoding: Wire.encode(named), as: UTF8.self),
+        "nextDisplayMessage": nextMessage.base64EncodedString(),
     ]
     try! JSONSerialization.data(withJSONObject: payloads, options: [.sortedKeys, .prettyPrinted]).write(to: URL(fileURLWithPath: out))
 }

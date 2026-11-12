@@ -488,9 +488,10 @@ enum LockPolicy {
     // MARK: What the devices are shown
 
     /// The window list a device is sent: locked, no windows, no `clipboard` (a device sends no kind 32
-    /// then, and offers no Paste), no `desktopDisplays` or `desktopDisplay` (no kind 47, and nothing of the
-    /// Mac's screens), `locked` true and, off console, `offConsole` true; unlocked, `list` as it is, both
-    /// left out, so the bytes are what they were before this change.
+    /// then, and offers no Paste), no `desktopDisplays`, `desktopDisplay` or `desktopDisplayNames` (one
+    /// stop, the main display: no kind 47, and nothing of the Mac's screens), `locked` true and, off
+    /// console, `offConsole` true; unlocked, `list` as it is, both left out, so the bytes are what they
+    /// were before this change.
     /// `offConsoleView`: the off-console view, for a device whose hello said it shows it
     /// (`Hello.offConsoleView`): the windows stay and `offConsoleView` says so; the displays stay out (one
     /// stop: this session's main display). Any other device is sent the list without windows, as before.
@@ -501,6 +502,7 @@ enum LockPolicy {
         l.clipboard = nil
         l.desktopDisplays = nil
         l.desktopDisplay = nil
+        l.desktopDisplayNames = nil
         l.locked = true
         l.offConsole = r == .offConsole ? true : nil
         if view, r == .offConsole { l.windows = list.windows; l.offConsoleView = true }

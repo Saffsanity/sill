@@ -11,8 +11,10 @@ import StreamProtocol
 /// - A device's session connecting declares at once, every connection: the wake.
 /// - What a person does to the Mac from the device declares when the last declaration is `interval`
 ///   or more ago: an app opened (kind 7), input (kind 8), a window's button (15), a menu item chosen
-///   (25), a trackpad gesture (28). So a stream of input declares at most once every 5 s and keeps
-///   the display on as local input would, while a device that sends nothing lets it sleep.
+///   (25), a trackpad gesture (28), the Desktop stepped to the Mac's next display (47: only the Desktop
+///   button sends it, never the device by itself; docs/virtual-desktop-plan.md §1). So a stream of
+///   input declares at most once every 5 s and keeps the display on as local input would, while a
+///   device that sends nothing lets it sleep.
 /// - Never a pick (kind 6): the device asks for the Desktop by itself (on a connection's first list,
 ///   when the Mac stopped the Desktop it streamed, when the watched window closed) and picks again
 ///   what it watched after a move, with nobody at it; a person's pick is followed by their input.
@@ -60,6 +62,8 @@ struct DisplayWake {
         case menuItem
         /// Kind 28: a three- or four-finger trackpad gesture.
         case gesture
+        /// Kind 47: the Desktop button tapped while the Desktop streams, for the Mac's next display.
+        case nextDisplay
         /// A press held back on a display that read asleep (`pass`): it only wakes the display.
         case wakingPress
     }
@@ -130,7 +134,8 @@ struct DisplayWake {
             case .windowCommand: return .windowButton
             case .pressMenuItem: return .menuItem
             case .gesture: return .gesture
-            default: return nil                          // a pick (6), the viewport (9), settings (17), the next display (47), …
+            case .nextDisplay: return .nextDisplay
+            default: return nil                          // a pick (6), the viewport (9), settings (17), …
             }
         }
     }
@@ -231,6 +236,7 @@ struct DisplayWake {
         case .windowButton: return "pressed a window’s button"
         case .menuItem: return "chose a menu item"
         case .gesture: return "made a trackpad gesture"
+        case .nextDisplay: return "stepped the Desktop to the next display"
         case .wakingPress: return "clicked while the display was asleep; the click was held back"
         }
     }

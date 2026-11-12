@@ -420,6 +420,7 @@ var full = WindowList(macName: "Noah’s MacBook Pro", windows: windows, active:
 full.keyRepeat = 1
 full.desktopDisplays = 2
 full.desktopDisplay = 1
+full.desktopDisplayNames = ["Built-in Retina Display", "DELL U2723QE"]
 let unlockedList = P.list(full, reading: .unlocked)
 check(sortedJSON(unlockedList) == sortedJSON(full) && Wire.encode(unlockedList).count == Wire.encode(full).count,
       "unlocked: the list as it is, byte for byte: \(sortedJSON(unlockedList))")
@@ -427,8 +428,8 @@ check(!json(unlockedList).contains("locked") && !json(unlockedList).contains("of
 for rd in [Reading.screenLocked, .offConsole] {
     let l = P.list(full, reading: rd)
     check(l.windows.isEmpty && l.clipboard == nil && !json(l).contains("clipboard"), "\(rd): no windows, no clipboard")
-    check(l.desktopDisplays == nil && l.desktopDisplay == nil && !json(l).contains("desktopDisplay"),
-          "\(rd): no displays either (a device sends no kind 47, and learns nothing of the Mac's screens)")
+    check(l.desktopDisplays == nil && l.desktopDisplay == nil && l.desktopDisplayNames == nil && !json(l).contains("desktopDisplay")
+          && !json(l).contains("DELL"), "\(rd): no displays or their names either (one stop: a device sends no kind 47, and learns nothing of the Mac's screens)")
     check(l.locked == true && json(l).contains(#""locked":true"#), "\(rd): `locked` true")
     check(rd == .offConsole ? (l.offConsole == true && json(l).contains(#""offConsole":true"#)) : (l.offConsole == nil && !json(l).contains("offConsole")),
           "\(rd): `offConsole` \(rd == .offConsole ? "true" : "left out")")
@@ -710,6 +711,8 @@ check(P.stricter(.take, .letGo) == .letGo && P.stricter(.letGo, .refuse(.input))
 let viewList = P.list(full, reading: .offConsole, offConsoleView: true)
 check(viewList.windows == full.windows && viewList.locked == true && viewList.offConsole == true && viewList.offConsoleView == true
       && viewList.clipboard == nil && json(viewList).contains(#""offConsoleView":true"#), "the view's list: the windows, `locked`, `offConsole` and `offConsoleView`, no clipboard")
+check(viewList.desktopDisplays == nil && viewList.desktopDisplay == nil && viewList.desktopDisplayNames == nil && !json(viewList).contains("desktopDisplay"),
+      "the view's list: no displays (one stop, this session's main display: no kind 47)")
 check(sortedJSON(P.list(full, reading: .offConsole)) == sortedJSON(P.list(full, reading: .offConsole, offConsoleView: false))
       && !json(P.list(full, reading: .offConsole)).contains("offConsoleView"), "the plain list off console: 0.6.0's, no `offConsoleView`")
 check(sortedJSON(P.list(full, reading: .screenLocked, offConsoleView: true)) == sortedJSON(P.list(full, reading: .screenLocked))

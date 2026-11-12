@@ -94,9 +94,11 @@ public enum StreamMessageKind: UInt8 {
     // The Desktop's displays (DesktopDisplays.swift, issue #91), after 45 and 46, which open pull requests
     // hold (the microphone and the pen; the camera). Older hosts map it to `.unknown` and skip it.
     case nextDisplay = 47    // device → host, empty payload: the Desktop button tapped while the Desktop
-                             // streams, so the Desktop moves to the Mac's next display (left to right,
-                             // wrapping). Only to a host whose window list says `desktopDisplays` 2 or more;
-                             // ignored unless the Desktop streams
+                             // streams, so the Desktop moves to the Mac's next stop (DesktopDisplays: the
+                             // main display first, then each display to its right, wrapping). Only to a host
+                             // whose window list says `desktopDisplays` 2 or more; ignored unless the Desktop
+                             // streams, refused while the Mac is locked. A person at the device (DisplayWake).
+                             // `{"number": n}` is kept for PR #296's list
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 
