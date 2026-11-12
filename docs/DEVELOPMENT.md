@@ -2521,7 +2521,10 @@ layouts need: the app it checks must say it was built with it).
 required-reason APIs its binary uses. `--build-number N` builds with N for the
 run only (xcodebuild's `CURRENT_PROJECT_VERSION=N`; the project is never
 changed), and `--whats-new FILE`, with `--upload` and `--api-key`, sets the
-build's What to Test once App Store Connect has processed it. The TestFlight
+build's What to Test once App Store Connect has processed it. The app shows the
+version and build it was built with at the bottom of its connect screen and of
+its Settings panel ("Sill 0.6.2 (1400)", `iOSClient/VersionLabel.swift`): N for
+such a build, the project's own 4 for one from Xcode. The TestFlight
 workflow (`.github/workflows/testflight.yml`) runs it on GitHub, by hand and
 from main only (its job runs in the environment `nightly`, which only main may
 use, and holds the App Store Connect key), with the commit count as the build
