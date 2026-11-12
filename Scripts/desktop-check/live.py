@@ -115,9 +115,9 @@ def main(out):
     try:
         verdict(bool(h.all(r"^Test displays: 3 in place of this Mac's")), "the host says it lists three test stops")
         # A: steps through the three and back, a tap on each; then a step locked, and the unlock.
-        a, ra = client(h, out, "a", 24, ["desktop", "--fps=120", "--tap=0.5,0.5@3", "--next-display@4", "--tap=0.5,0.5@6",
+        a, ra = client(h, out, "a", 25, ["desktop", "--fps=120", "--tap=0.5,0.5@3", "--next-display@4", "--tap=0.5,0.5@6",
                                           "--next-display@7", "--tap=0.5,0.5@9", "--next-display@10", "--tap=0.5,0.5@12",
-                                          "--next-display@13", "--next-display@17", "--tap=0.25,0.25@21"], 1)
+                                          "--next-display@13", "--next-display@17", "--tap=0.25,0.25@22"], 1)
         h.at(16); open(lock, "w").write("1")
         h.at(18.5); open(lock, "w").write("0")
         a.join()
@@ -152,16 +152,16 @@ def main(out):
     verdict(bool(locked) and locked[0][:2] == (1, "Built-in Retina Display"),
             f"locked on Desktop 2: the Desktop moves to the main display (its lock screen): {locked}")
     verdict(not h.all(r"^Desktop: display", 16.5, 18.5), "a step while locked: refused, no step")
-    unlocked = streams(h, 18.5, 25)
+    unlocked = streams(h, 18.5, 26)
     verdict(bool(unlocked) and unlocked[-1][:2] == (2, "DELL U2723QE"), f"unlocked: the stop chosen comes back: {unlocked}")
-    late_tap = lands(h, 19.5, 25.5)
+    late_tap = lands(h, 19.5, 26.5)
     verdict(late_tap == [(2152, 360)], f"a tap after the unlock lands on Desktop 2 again: {late_tap}")
     la = lists(ra.get("out", ""))
     verdict(any(l[:3] == (3, 1, NAMES) for l in la), "A's lists say three stops, Desktop 1, and their names")
     verdict(any(l[3] and l[0] is None and l[1] is None and l[2] is None for l in la), "a locked list says no stops and no names")
     verdict(any(l[:2] == (3, 2) and not l[3] for l in la[-3:]), "after the unlock the lists say Desktop 2 again")
-    verdict(rb.get("exit") == 0 and "EXPECT ok" in rb.get("out", ""), "B, 6 s after A left: Desktop 2, the stop chosen (the span)")
-    verdict(rc.get("exit") == 0 and "EXPECT ok" in rc.get("out", ""), "C, 37 s after B left: Desktop 1, the main display (the span over)")
+    verdict(rb.get("exit") == 0 and "EXPECT ok" in rb.get("out", ""), "B, 4 s after A left: Desktop 2, the stop chosen (the span)")
+    verdict(rc.get("exit") == 0 and "EXPECT ok" in rc.get("out", ""), "C, 33 s after B left: Desktop 1, the main display (the span over)")
     verdict(bool(streams(h, 66, 72)) and streams(h, 66, 72)[0][:2] == (1, "Built-in Retina Display"), "C's Desktop streams the main display")
     verdict(not h.all(r"CGWarp|warp", 0, 1e9), "nothing warped")
 
