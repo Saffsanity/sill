@@ -188,7 +188,12 @@ def edge_main(base, new):
             moved_after_hides = " EDGE DISARMED " in t or " EDGE REVEALOFF " in t
             a = collapsed(base.get(t, []), surface if moved_after_hides else None)
             b = collapsed(events, surface if moved_after_hides else None)
-            ok = t in base and not hid and same(a, b) and (len(a) > 0 or swiftui)
+            # A stroke main's surfaces answer with nothing (a grip at the edge with a tap elsewhere, on the picture:
+            # two fingers down, so no tap) must stay nothing; any other must send what main's do.
+            quiet = t in base and not a
+            if quiet and not swiftui:
+                print(f"note {t}: main's surfaces send nothing for it")
+            ok = t in base and not hid and same(a, b) and (len(a) > 0 or swiftui or quiet)
             check(ok, f"{t}: not hidden, the same events as main's surfaces, in order ({len(b)})")
             if not ok:
                 for x, y in zip(a + ["-"] * (len(b) - len(a)), b + ["-"] * (len(a) - len(b))):

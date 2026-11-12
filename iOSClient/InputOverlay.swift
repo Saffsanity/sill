@@ -321,11 +321,33 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
             fingerScroll = zoomStroke.scrollsMac
             if fingerScroll {
                 scroll(.began, at: gesture.location(in: self), translation: .zero, velocity: .zero, from: .finger)
+                carryHeldTravel(gesture)
             }
         }
         guard fingerScroll else { return }
         if gesture.state == .ended || gesture.state == .cancelled { fingerScroll = false }
         scroll(gesture, .finger)
+        if gesture.state == .began { carryHeldTravel(gesture) }
+    }
+
+    /// A finger's pan full screen's flick held while it judged a stroke at the left edge
+    /// (EdgeRecognizers.heldLanding): UIKit begins it only as the flick lets the stroke go and counts its
+    /// translation from there, where on its own it counts from 10 pt past the landing
+    /// (EdgeRecognizers.panHysteresis). The next delta carries the difference, so the Mac scrolls what the same
+    /// stroke scrolls anywhere else. A pan that began on its own, as the flick let go, needs nothing: its
+    /// translation's origin is already there.
+    private func carryHeldTravel(_ gesture: UIPanGestureRecognizer) {
+        guard gesture.numberOfTouches <= 1, let window, let held = EdgeRecognizers.heldLanding(in: window) else { return }
+        let landing = convert(held, from: window)
+        let location = gesture.location(in: self)
+        let t = gesture.translation(in: self)
+        let d = CGPoint(x: location.x - landing.x, y: location.y - landing.y)
+        let length = hypot(d.x, d.y)
+        let h = EdgeRecognizers.panHysteresis
+        guard length > h else { return }
+        let own = CGPoint(x: landing.x + d.x / length * h, y: landing.y + d.y / length * h)
+        let now = CGPoint(x: location.x - t.x, y: location.y - t.y)
+        lastPanTranslation = CGPoint(x: own.x - now.x, y: own.y - now.y)
     }
 
     /// Every direct touch on the picture, from the stroke observer: who the stroke belongs to, and while

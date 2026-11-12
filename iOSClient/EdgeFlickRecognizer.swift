@@ -37,6 +37,25 @@ enum EdgeRecognizers {
     /// and ends with no change between; the picture's scroll and the trackpad's tracker then carry the finger's
     /// travel at their end (InputOverlay, TrackpadView), so a stroke held until its lift loses nothing. Nothing
     /// else ever sees this: a touch away from the edge lets them go at its landing.
+    /// UIKit's pan hysteresis: a finger's pan begins once it has moved this far, and counts its translation
+    /// from there, so a scroll's first 10 pt never reach the Mac (main's way, which a held stroke keeps). The
+    /// touch rig measured it: main's overlay scrolled a slow drag's travel less exactly 10 pt.
+    static let panHysteresis: CGFloat = 10
+
+    /// Where the stroke the flick has just let go (within `lately`) landed, in the window, when it held it while
+    /// it judged it (a stroke at the left edge that is not a flick, of one finger): a pan that UIKit lets begin
+    /// only now counts its translation from here and now, not from 10 pt past the landing as it would have,
+    /// so the picture's scroll carries the difference (InputOverlay's `carryHeldTravel`). Nil otherwise.
+    static func heldLanding(in window: UIWindow?, lately: TimeInterval = 0.05) -> CGPoint? {
+        let now = ProcessInfo.processInfo.systemUptime
+        for recognizer in window?.gestureRecognizers ?? [] {
+            if let flick = recognizer as? EdgeFlickRecognizer, let held = flick.heldLanding, abs(now - held.at) < lately {
+                return held.point
+            }
+        }
+        return nil
+    }
+
     static func releasedAtLift(in window: UIWindow?, lately: TimeInterval = 0.05) -> Bool {
         let now = ProcessInfo.processInfo.systemUptime
         for recognizer in window?.gestureRecognizers ?? [] {
@@ -65,6 +84,9 @@ final class EdgeFlickRecognizer: UIGestureRecognizer {
     private var clock: Timer?
     /// When it last let a touch go at that touch's lift (the lift's time; EdgeRecognizers.releasedAtLift).
     private(set) var liftReleaseTime: TimeInterval = -1
+    /// The last stroke of one finger it held and then let go: where it landed (the window's space) and when
+    /// (EdgeRecognizers.heldLanding).
+    private(set) var heldLanding: (point: CGPoint, at: TimeInterval)?
 
     init() {
         super.init(target: nil, action: nil)
@@ -162,6 +184,11 @@ final class EdgeFlickRecognizer: UIGestureRecognizer {
         clock?.invalidate()
         clock = nil
         onJudged?(verdict, rule.numbers)
+        // A stroke of one finger that was held while judged (not one let go at its landing, nor two fingers).
+        if case .notAFlick(let why) = verdict, why != .outsideBand, why != .secondTouch, why != .cancelled,
+           let first = rule.samples.first {
+            heldLanding = (CGPoint(x: first.x, y: first.y), ProcessInfo.processInfo.systemUptime)
+        }
         state = verdict == .hide ? .recognized : .failed
     }
 
