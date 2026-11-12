@@ -1,5 +1,5 @@
 **A staged window goes home before Sill's display goes (2026-11-12, branch `stage-restore-display` from main at
-0d22bbf; a draft pull request; fault A of Noah's test of PR #355, merged into `desktop-displays` so he tests both together).**
+0d22bbf; draft PR #358; fault A of Noah's test of PR #355, merged into `desktop-displays` so he tests both together).**
 Noah, testing #355 with the lid closed, the Lenovo as the main display and the Dell to its left: "when I have a window open
 on Display 2 (for example) and switch to windowed mode and back, it puts the window on Display 1 for some reason. Windows
 should return to the display, size and position they were in before windowed mode". That sentence is a requirement.
