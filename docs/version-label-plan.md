@@ -111,3 +111,59 @@ invented, nothing hidden.
   xLarge had a line it did not need); the connect screen's accessibility dump fired again over a live
   stream screen. And G4 as first written could not hold for the panel scrolled to its end (every row
   above the new line sits higher by it): reworded, with the panel at the top of its rows added.
+- CI on the pull request (run 43154140966, head 567ea50, the review's fixes in it): Build and check
+  passed: `run-all.sh`, all 67 (`version-label` 38 passed); the iOS app for the simulator, Debug, only the
+  known StreamClient.swift:4320 capture warning.
+- G3 here: the iOS app Debug for the simulator (before the review's fixes, MARKETING_VERSION 0.6.2 and
+  CURRENT_PROJECT_VERSION 1400, so the bundle said what a TestFlight build of the next version would: its
+  Info.plist read 0.6.2 and 1400), only the known warning; after the review's fixes, at 567ea50, Release for the simulator
+  with CURRENT_PROJECT_VERSION 1404 (the commit count, as `release-ios.sh --build-number` gives it: its
+  Info.plist read 0.6.1 and 1404) and Debug for a device (generic, unsigned): both BUILD SUCCEEDED with only
+  the known warning, their products cleaned after (the coordinator's terms of 2026-11-12).
+- G4: harness photos of main's build (dd6ea6a's Debug) and the branch's (its bundle 0.6.2 (1400)) with the
+  same arguments, 432 pairs (24 sizes and hinge states × 9 cases × 2 text sizes), the Duo's on an iPhone Duo
+  simulator (iOS 27.1: its cover display, the inner display's sizes scaled to 0.70, those sideways turned a
+  quarter), the others 1:1 on an iPad Pro 13-inch simulator (iOS 27.0); one simulator at a time, each deleted
+  after (the coordinator's terms of 2026-11-11 23:14, after two at once had loaded the Mac). Compared pixel
+  by pixel, a pixel counting when a channel changed by more than 2 of 255 (new simulators redrew four of
+  main's photos byte for byte but for 8 pixels of a tile's fade changed by 1):
+  - the connect screen at the default text size, 144 pairs: 138 differ only in the version's own line (the
+    title, the rows and the links unmoved), on every Duo size and hinge state, at 1000x710, 710x1000,
+    393x852, 852x393, 440x956, 956x440 and 667x375; at 375x667 (6) the version takes a line of its own (the
+    sentence's line has 323 pt, it needs about 328), the footer 24 pt taller: the column unmoved in 4
+    (centred with room, or scrolling) and risen 24 pt in 2 (`methods`' six tiles, `homerows` as rows), which
+    sat at the footer's 24 pt gap, as the column's rule has it;
+  - at accessibility-extra-large (the footer caps at xxLarge), 144 pairs: at 375x667 (6) the version beside
+    Support · Privacy Policy, no line added (the links take two lines there on main too); elsewhere a line
+    of its own, the footer about 28 pt taller: the column risen 11 to 28.5 pt in 15, elsewhere unmoved
+    (centred with room, or scrolling, its fade higher);
+  - the panel at the top of its rows, 48 pairs: 41 identical, 7 within noise (at most 6 pixels, changed by
+    at most 3 of 255);
+  - the panel scrolled to its end, a Mac with settings and one without, 96 pairs: the middle one line on in
+    every one, the header never different, Disconnect unmoved in 92; in 4 (a Mac without settings at
+    1000x710, and in the Duo's inner display on its side with the hinge closed, flat and half) the middle
+    fitted without scrolling on main and now scrolls, so the panel takes its whole room: Disconnect 7 and
+    4.3 pt lower. No Mac a current device connects to lacks settings (every Sill for Mac since 0.4.0 sends
+    them); the same panel shows only for the 2 s before a slow Mac's first state;
+  - extras: "Sill 0.10.12 (10000)" at 375x667, 393x852 and 1000x710 (its own line where the sentence's has no
+    room), a bundle without a build ("Sill 0.6.2"), 320x568 at the default size (beside Support · Privacy
+    Policy) and at xLarge and xxLarge (beside the download link, then its own line), and what a build from
+    Xcode says, "Sill 0.6.1 (4)", on the sentence's line even at 375x667.
+  Photos, the table and INDEX.md: sill-handoff's `version-label/`.
+- G5: `-SillAXDump` on the connect screen (1000x710 and the cover's 466x678, the Macs as rows): the footer
+  reads "Needs the free Sill app on your Mac.", "Get it at getsill.app", "Support", "Privacy Policy", then
+  "Sill version 0.6.2, build 1400" with the action Copy, though it is drawn on the sentence's line; at
+  accessibility-extra-large at 393x852, the same order; the panel's end (1000x710): the tour's note, the
+  version, Disconnect. `-SillAXAction 'Sill version|Copy'` on both screens: performed, the app's clipboard
+  "Sill 0.6.2 (1400)", and the simulator's read back from outside (`xcrun simctl pbpaste`) the same.
+- Not done here: the long press itself (no finger reaches a simulator here: the menu is UIKit's context menu,
+  its Copy the same function as the VoiceOver action's), VoiceOver itself, anything on a device.
+
+## An open question the photos raised
+
+8. A 375 pt iPhone (the SE, the 12 and 13 mini) at the default text size: the sentence's line has 323 pt and
+   "Sill 0.6.2 (1400)" with its gap needs about 328, so the version takes a line of its own, and a column
+   with many Macs that sat at the footer's gap rises 24 pt. Taken: as it is (the rule of the footer). The
+   other ways: on that line alone write it without the name, "0.6.2 (1400)" (Noah's own example has none;
+   VoiceOver and Copy keep the name), which fits with room; or a 6 pt gap there, which fits by a point or
+   two and reads as one sentence.
