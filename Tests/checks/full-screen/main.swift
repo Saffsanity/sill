@@ -271,7 +271,7 @@ check(EdgeReveal.finishes(translation: EdgeReveal.flickTravel, velocity: EdgeRev
 check(!EdgeReveal.finishes(translation: 900, velocity: -250, width: 1000), "moving back at the lift springs back, however far it came")
 check(!EdgeReveal.finishes(translation: 900, velocity: -EdgeReveal.backSpeed, width: 1000), "back at exactly the speed springs back")
 check(EdgeReveal.finishes(translation: 900, velocity: -100, width: 1000), "drifting back slowly from far in still finishes")
-check(EdgeReveal.finishes(translation: 131, velocity: 0, width: 393), "an iPhone upright: a third is 131 pt")
+check(EdgeReveal.finishes(translation: 132, velocity: 0, width: 393) && !EdgeReveal.finishes(translation: 130, velocity: 0, width: 393), "an iPhone upright: a third is 131 pt")
 check(!EdgeReveal.finishes(translation: 100, velocity: 0, width: 0), "no width never finishes")
 
 // MARK: - The pointer at the edge
