@@ -145,6 +145,27 @@ indicator too); DEBUG `-SillFullScreenRoom screen|housing|safe`.
 - The tour does not start while hidden (its rule counts the controls hidden as busy).
 - The clipboard's chip shows over the hidden picture, in its corner, as over the picture while shown.
 
+## How this relates to the open pull requests
+
+- #197 (addhumal, Hide Top Bar; closes #92 as decided on 2026-10-19): a Settings switch hides the landscape top
+  bar, a shake shows it, and a small pill button and ⇧⌘B show it too. Full screen covers more (every layout,
+  every control) and keeps no button on screen, which Noah has now ruled out; it keeps the shake and puts the
+  Settings way in as a row that hides at once. Both change StreamScreen.swift and HostSettingsPanel.swift; with
+  this merged, #197's `TopBarVisibility` would go, and its photos and checks with it.
+- #312 (lepeos, on #197): the Desktop edge to edge on an iPad under Hide Top Bar, through a display of the
+  device's size on the Mac (`Viewport.deviceDesktop`, #156's host half). Full screen already sends its room as
+  the viewport; such a request would hang off full screen's hidden state instead of Hide Top Bar. Noah's chosen
+  way to give the Desktop the device's shape is the Virtual Desktop's "match this device" (PR #352's plan).
+- #206 (RaffaelFerro, part 5 of #202–#206): Full Screen on an iPhone held upright, in by a ⤢ button in the
+  picture's corner and out by a handle, the free room the window's display, and Keep Screen On. The room as the
+  viewport is the same idea; the persistent button and handle are what Noah ruled out. It changes
+  StreamScreen.swift, PortraitStreamScreen.swift, PhonePortraitLayout.swift and InputOverlay.swift heavily, so
+  one of the two would be rebuilt on the other.
+- #156 (dr-apple): the Desktop full screen by a second tap on Desktop, two small buttons to leave, the Mac's own
+  display of the device's size with a curtain, and a picture clock. Noah said on #92 the second tap does not fit;
+  its host half lives on in #312. Nothing of it is taken here.
+- #161 (lepeos, closed): Immersive on an iPad with a hardware keyboard, closed in favour of #197.
+
 ## Open questions, with the default taken
 
 1. The flick's numbers (band 48 pt, travel 12 pt, 0.25 s, 300 pt/s, reach 24 pt, 50 ms): defaults from

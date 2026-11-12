@@ -7,6 +7,7 @@
 // Environment (simctl launch's SIMCTL_CHILD_ prefix): RIG_SWITCH=off makes `sendGesture` answer false,
 // as StreamClient does with the device's switch off; RIG_TRACE=1 also logs recognizer transitions.
 import UIKit
+import SwiftUI
 
 // MARK: - Log
 
@@ -275,6 +276,9 @@ func edgeScenarios(_ y: CGFloat) -> [(String, [Step])] {
     out.append(("EDGE REVEALOFF a tap in the middle while hidden", hiddenRun(Gesture.tap(1, at: CGPoint(x: 300, y: y)))))
     out.append(("EDGE REVEALOFF a drag right in the middle while hidden", hiddenRun(Gesture.swipe(1, at: CGPoint(x: 300, y: y), dx: 120, dy: 0, frames: 12))))
     out.append(("EDGE REVEALOFF a drag left near the edge while hidden", hiddenRun(Gesture.swipe(1, at: CGPoint(x: 60, y: y), dx: -50, dy: 0, frames: 8))))
+    out.append(("EDGE REVEALOFF a tap 20 pt from the edge while hidden", hiddenRun(Gesture.tap(1, at: CGPoint(x: 20, y: y)))))
+    out.append(("EDGE REVEALOFF a long press 20 pt from the edge while hidden", hiddenRun([.begin([CGPoint(x: 20, y: y)]), .wait(36), .end([0])])))
+    out.append(("EDGE REVEALOFF a drag down 20 pt from the edge while hidden", hiddenRun(Gesture.swipe(1, at: CGPoint(x: 20, y: y), dx: 0, dy: 150, frames: 12))))
     return out
 }
 
@@ -486,9 +490,21 @@ final class RevealLog: NSObject {
 let revealLog = RevealLog()
 #endif
 
+/// A SwiftUI button at the left edge, as the bar's Apps button and the phone's row 1 have one there: a flick
+/// that starts on it must hide and never press it (BUTTON EDGE strokes).
+struct RigButton: View {
+    var body: some View {
+        Button { RigLog.log("[button] pressed") } label: {
+            Text("Apps").frame(width: 96, height: 56).background(Color.gray.opacity(0.4))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 final class Root: UIViewController {
     let trackpad = TrackpadSurface(frame: .zero)
     let overlay = InputOverlayView(frame: .zero)
+    let button = UIHostingController(rootView: RigButton())
     /// The surfaces laid against the window's left edge, for the EDGE strokes.
     var edge = false
     override func viewDidLoad() {
@@ -498,6 +514,10 @@ final class Root: UIViewController {
         overlay.backgroundColor = UIColor(white: 0.2, alpha: 1)
         view.addSubview(trackpad)
         view.addSubview(overlay)
+        addChild(button)
+        button.view.backgroundColor = .clear
+        view.addSubview(button.view)
+        button.didMove(toParent: self)
         trackpad.send = { RigLog.log("trackpad send \(describe($0))") }
         overlay.send = { RigLog.log("overlay  send \(describe($0))") }
         overlay.videoSize = CGSize(width: 1512, height: 948)
@@ -514,6 +534,8 @@ final class Root: UIViewController {
         let h = (b.height - 16) / 2
         trackpad.frame = CGRect(x: b.minX, y: b.minY, width: b.width, height: h)
         overlay.frame = CGRect(x: b.minX, y: b.minY + h + 16, width: b.width, height: h)
+        // Over the overlay's top-left corner, against the window's edge only for the edge strokes.
+        button.view.frame = CGRect(x: edge ? 0 : b.minX, y: overlay.frame.minY + 20, width: 96, height: 56)
     }
 }
 
@@ -579,6 +601,13 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             let ty = root.trackpad.bounds.midY, oy = root.overlay.bounds.midY
             for (title, steps) in edgeScenarios(ty) { runner.add("TRACKPAD \(title)", root.trackpad, [.edgeLayout(true)] + steps) }
             for (title, steps) in edgeScenarios(oy) { runner.add("OVERLAY \(title)", root.overlay, [.edgeLayout(true)] + steps) }
+            // The button: a tap presses it; a flick from it hides and presses nothing (y: the button's middle).
+            let by: CGFloat = 28
+            runner.add("BUTTON EDGE ON a tap on the button at the edge", root.button.view,
+                       [.edgeLayout(true)] + Gesture.tap(1, at: CGPoint(x: 30, y: by)))
+            runner.add("BUTTON EDGE HIDE a flick off the edge from the button", root.button.view,
+                       [.edgeLayout(true), .begin([CGPoint(x: 30, y: by)]), .move([CGPoint(x: 15, y: by)]),
+                        .move([CGPoint(x: 2, y: by)]), .end([0])])
         }
         runner.start { print("RIG done"); exit(0) }
     }
