@@ -226,14 +226,14 @@ typealias E = PictureInPicturePolicy.Lifecycle.Effects
 do {
     var l = L()
     eq(l.state, .off, "a new window: off")
-    eq(l.setPlaying(false, now: 5), .none, "a pause while off: nothing (AVKit asks nothing then)")
+    eq(l.setPlaying(false, now: 5), E.none, "a pause while off: nothing (AVKit asks nothing then)")
     eq(l.state, .off, "and still off")
-    eq(l.tick(now: 10_000), .none, "a look while off: nothing")
-    eq(l.ending(.sessionEnded), .none, "the session's end while off: no stop")
+    eq(l.tick(now: 10_000), E.none, "a look while off: nothing")
+    eq(l.ending(.sessionEnded), E.none, "the session's end while off: no stop")
     eq(l.willStart(), E(invalidate: true), "willStart: AVKit told it plays")
     eq(l.state, playing, "plays")
     eq(l.pausedAt, nil, "no pause time")
-    eq(l.willStart(), .none, "a second willStart: nothing more")
+    eq(l.willStart(), E.none, "a second willStart: nothing more")
     eq(l.setPlaying(false, now: 100), E(invalidate: true, lookAt: 700), "the pause: AVKit told, looked at again at 10 minutes")
     eq(l.state, paused, "paused")
     eq(l.pausedAt, 100, "since 100")
@@ -243,15 +243,15 @@ do {
     eq(l.setPlaying(true, now: 701), E(invalidate: true), "a play before AVKit's didStop: AVKit told")
     eq(l.state, playing, "plays again")
     eq(l.pausedAt, nil, "its pause forgotten")
-    eq(l.tick(now: 10_000), .none, "playing: a look asks nothing")
+    eq(l.tick(now: 10_000), E.none, "playing: a look asks nothing")
     eq(l.ending(.backInFront), E(stop: true), "the window back in front: stopped")
-    eq(l.ended(), .none, "AVKit's didStop")
+    eq(l.ended(), E.none, "AVKit's didStop")
     eq(l.state, .off, "off")
-    eq(l.ending(.backInFront), .none, "back in front again, already off: nothing")
+    eq(l.ending(.backInFront), E.none, "back in front again, already off: nothing")
 }
 do {
     var l = L(); _ = l.willStart(); _ = l.setPlaying(false, now: 50)
-    eq(l.willStart(), .none, "a willStart while paused: nothing")
+    eq(l.willStart(), E.none, "a willStart while paused: nothing")
     eq(l.state, paused, "still paused")
     eq(l.pausedAt, 50, "since 50")
     eq(l.ending(.sessionEnded), E(stop: true), "paused, the session ends: stopped")
@@ -259,12 +259,12 @@ do {
     eq(l.ending(.pausedTooLong), E(stop: true), "paused: the pause's ending stops it")
     _ = l.ended()
     eq(l.pausedAt, nil, "didStop forgets the pause")
-    eq(l.tick(now: 10_000), .none, "and no look is owed")
+    eq(l.tick(now: 10_000), E.none, "and no look is owed")
 }
 do {
     var l = L(); _ = l.willStart()
     eq(l.ending(.deviceLocked), E(stop: true), "playing, the device locks: stopped")
-    eq(l.ending(.pausedTooLong), .none, "playing: the pause's ending stops nothing")
+    eq(l.ending(.pausedTooLong), E.none, "playing: the pause's ending stops nothing")
     eq(l.setPlaying(true, now: 3), E(invalidate: true), "a play while playing: AVKit told, nothing else")
 }
 
@@ -330,7 +330,7 @@ for life in 0..<20_000 {
         if event == 1, l.state != .off || l.pausedAt != nil { lifeViolated("L5 didStop left it on or paused", detail) }
         // L6: a willStart while it shows changes nothing; one while off starts it playing.
         if event == 0 {
-            if before.state.active, l != before || effects != .none { lifeViolated("L6 a willStart while it showed changed it, or asked something", detail) }
+            if before.state.active, l != before || effects != E.none { lifeViolated("L6 a willStart while it showed changed it, or asked something", detail) }
             if !before.state.active, l.state != playing || l.pausedAt != nil { lifeViolated("L6 a willStart did not start it playing", detail) }
             if !before.state.active, effects != E(invalidate: true) { lifeViolated("L6 a start did not tell AVKit, or asked more", detail) }
         }

@@ -171,6 +171,20 @@ and controller (`PictureInPicture`, one per StreamClient); `PictureInPictureHub`
 DeviceIdleTimer does and tells each whether it is offered. What iOS does when one Sill window goes to the
 background while another stays in front (Stage Manager's minimize) is not documented: P13.
 
+## Beside the related work
+
+- **#152** (acalatrava, open): a background task as Sill resigns active while streaming, so the stream stays
+  responsive for the seconds iOS grants. It touches the same observers in StreamClient (willResignActive,
+  didEnterBackground, willEnterForeground) and `tearDown`'s first lines: whichever lands second keeps both.
+  With Picture in Picture on, iOS keeps Sill running for as long as the window shows, so the task matters
+  only with the switch off, or before iOS starts Picture in Picture.
+- **#206** (Keep Screen On, iPhone upright): its idle-timer hold is the foreground's, as #230's; Picture in
+  Picture changes neither.
+- **#284** (recording the stream): it would write the same frames the layer gets; a frozen picture
+  (`setFrozen`) drops frames before the layer only, after the network queue has them.
+- **#94** (Send Audio): the sound plays in Picture in Picture through the same engine and session rules
+  (`soundHeard`), never in the background otherwise.
+
 ## Open questions for Noah (each default is taken unless Noah says otherwise)
 
 1. **On by default?** Off (`PictureInPicturePolicy.defaultOn`, one constant): keeping the radio, the
