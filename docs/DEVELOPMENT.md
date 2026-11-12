@@ -141,8 +141,30 @@ release, as before v0.3.0), it logs "Update check failed: GitHub has no
 release of Sill (HTTP 404)." once a day. It keeps `updateLastCheck`,
 `updateETag`, `updateLatestTag` and `updateLatestURL` in `me.saffer.sill.mac`;
 to make the next launch check again after 30 s: `for k in updateLastCheck
-updateETag updateLatestTag updateLatestURL; do defaults delete
+updateETag updateLatestTag updateLatestURL updateLatestSigned; do defaults delete
 me.saffer.sill.mac $k; done` (`defaults delete` takes one key at a time).
+
+Update Now (docs/one-click-update-plan.md): beside Open Release Page…, in a
+build with an update key (`UpdateManifest.releaseKeys`, empty until Noah makes
+the key, so no build shows it yet) and for a release signed for it (the check
+stores `updateLatestSigned` when the release lists `Sill.zip.manifest`). One
+click reads the release again, verifies the manifest's Ed25519 signature with
+the compiled-in key, downloads `Sill.zip` (GitHub's hosts only, the manifest's
+size and SHA-256), unpacks it with Sill's own zip reader into a temporary folder
+on Sill.app's volume, checks the app (Developer ID 9B2KKVM937 as
+me.saffer.sill.mac, notarized, strictly valid, this app's own designated
+requirement, the keychain entitlements, newer, every slice the code the
+manifest names), swaps it into place in one `renamex_np(RENAME_SWAP)`, checks it
+again there, launches it as a new instance and quits; the new Sill waits for the
+old to quit, and once its host is up removes the old copy. Any failure puts the
+old copy back and says why in Settings › General. It never runs for the bare
+binary, a development or unnotarized build, a test feed (`-SillUpdateFeed`) or
+version (`-SillUpdateVersion`), a translocated copy, a disk image, a folder this
+account can't change, or while another account's Sill runs from the same copy.
+`Tests/checks/update-install` checks its rules; `Tests/update-harness/run.sh`
+drives the real mechanism against scratch bundles and a stand-in for GitHub on
+127.0.0.1 (The update harness, below); `Scripts/sign-update.sh v<version>` signs
+a published release on Noah's Mac (Releasing).
 
 ### The command-line host
 
@@ -1822,6 +1844,27 @@ Close, also off every display, whose close holds the fixture 4 s: the press
 must come back within its own 1 s, as no answer. The file's header says how to
 build and run it.
 
+### The update harness
+
+`Tests/update-harness/run.sh [--keep]` (docs/one-click-update-plan.md §11, G2) compiles
+UpdateInstaller and the pure update files with its own `main.swift`, makes test apps
+(a tiny executable signed ad hoc as `me.saffer.sill.updater-test`, versions 0.9 to
+1.2, some changed after signing), zips them with ditto and with `make-zip.py`'s
+hostile kinds, starts `server.py`, a stand-in for GitHub's release API and download
+hosts on 127.0.0.1, and runs every case: the installs, each refusal with the
+installed copy's tree unchanged, the requests (Sill's User-Agent, no credential or
+cookie), the launch check against a running process, where an app runs (a folder
+made read-only, a link, a disk image writable and read-only, made with hdiutil
+under `.build` and never browsable), and the staging folders. The trust, the
+endpoints and the update key are the harness's own; nothing in Sill.app can take
+them. With the genuine v0.6.1 zip in `.build/updater-scratch/release-v0.6.1` (a
+read-only `gh release download v0.6.1 --repo Saffsanity/sill --pattern Sill.zip`),
+it also runs `Trust.release`'s every rule, with the harness's key, against Sill's
+real signature: installed over a 0.6.0, refused for the same version, a tag that
+isn't its version, another team, a tampered, an ad hoc and an unstapled copy. It
+never touches /Applications, a keychain or Sill's defaults, and launches no app;
+everything is under `.build/update-harness`, removed at the end.
+
 ### The restore probe
 
 `Scripts/restore-probe/run.sh` checks that a window Sill sized goes back, with
@@ -2442,6 +2485,15 @@ that the layout tool writes.
 The one-time setup and each release's steps are in docs/release-checklist.md.
 A Developer ID signature has a different designated requirement, so
 permissions are granted once more.
+Update Now (docs/one-click-update-plan.md) installs a release only once it
+carries `Sill.zip.manifest`, signed with Noah's update key: `Scripts/sign-update.sh
+v<version>`, on his Mac, right after the release is published (never in CI). It
+checks the published zip as the checklist checks a download, signs the manifest
+(the tag, version, build, size, SHA-256 and each slice's cdhash) with the key in
+his login keychain (`--key-file PATH` for a key in a file), reads it back with the
+key the tagged source carries, asks, uploads it and reads it back.
+`Scripts/sign-update.sh --new-key` makes the key once (docs/release-checklist.md,
+part 1 §7); its public key goes into `UpdateManifest.releaseKeys`.
 `make-app.sh --release` embeds `Packaging/embedded.provisionprofile` (the
 Developer ID provisioning profile, git-ignored) and signs with
 `Packaging/SillRelease.entitlements`, so Sill keeps its key and paired devices

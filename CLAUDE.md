@@ -7969,8 +7969,21 @@ good.
   pure, `Tests/checks/pairing-sharing`), `PairingWindowAddress` (the address that window gives to type:
   Tailscale's name and IPv4 first, another VPN's IP only under this network's
   address; pure, checked with swiftc), `UpdatePolicy` (the update check's rules
-  and words; pure, checked with swiftc) and `UpdateChecker` (main actor; asks
-  GitHub's releases feed and times the checks; compiles on its own with swiftc).
+  and words, and whether a release is signed for Update Now; pure, checked with
+  swiftc) and `UpdateChecker` (main actor; asks GitHub's releases feed and times
+  the checks; compiles on its own with swiftc). Update Now, the one-click update
+  (docs/one-click-update-plan.md): `UpdateInstallPolicy` (the trust and endpoints
+  Sill.app uses, `Trust.release` and `Endpoints.github`, immutable; the refusals and
+  their words; the release; the bundle's verdict; the state machine; the words; pure),
+  `UpdateManifest` (the release's manifest and its Ed25519 signature with Noah's
+  update key; `releaseKeys`, empty until he makes the key, so no build shows Update
+  Now; pure), `UpdateArchive` (Sill's own zip reader and inflate; pure; all three in
+  `Tests/checks/update-install`), `UpdateInstaller` (the mechanism: the release and
+  manifest, the download, unpacking through directory descriptors, the Security
+  checks, the atomic swap and its put-back, the staging folders, where Sill runs; no
+  AppKit, driven by `Tests/update-harness`) and `AppUpdater` (main actor: the facts,
+  the steps, the relaunch and the quit, the wait at launch for a Sill that is quitting,
+  the clean-up after a start).
 - `Packaging/` — Sill.app's `Info.plist` and the development entitlements
   (get-task-allow only), the release's (`SillRelease.entitlements`:
   `com.apple.application-identifier`, the team and the keychain group, signed
@@ -8169,7 +8182,13 @@ good.
   `sillclient.py --hello=VER[,PROTO]` (or `none`) sends a device's hello
   first (`--hello-delay=S` S seconds after the connection is up, for a change
   made while a host's device gate holds it), and kind 22's new fields are
-  printed. `Scripts/sillfeed.py PORT`
+  printed. `Scripts/sign-update.sh v<version>` signs a published release for Update
+  Now on Noah's Mac (never CI): it checks the published Sill.zip as the checklist
+  checks a download, signs `Sill.zip.manifest` with his update key (login keychain,
+  or `--key-file`), reads it back with the key the tag's source carries, asks and
+  uploads; `--new-key` makes the key once; `Scripts/update-manifest.swift` is its
+  tool, compiled with the app's own UpdateManifest and UpdateInstaller.
+  `Scripts/sillfeed.py PORT`
   is a fake GitHub releases feed for the update check's tests (`--tag`,
   `--status`, `--etag`, `--draft`, `--prerelease`, `--html-url`, `--body`,
   `--big`, `--slow`, `--reset`, `--redirect`, `--set-cookie`,
@@ -8593,7 +8612,9 @@ good.
   `remote-rules` (with its `home.swift`), `settings-window` (Sill.app's
   `SettingsWindowFit`), `stream-zoom` (iOSClient's StreamZoom), `test-host` (Sill.app's AppIdentity with
   IdentityStorePlan), `text-composition` (iOSClient's TextComposition with
-  StreamProtocol's Input.swift), `tour`, `update-policy`, `virtual-display-api`
+  StreamProtocol's Input.swift), `tour`, `update-install` (Update Now's
+  UpdateInstallPolicy, UpdateManifest and UpdateArchive, and the app's sources read
+  as text for its source rules), `update-policy`, `virtual-display-api`
   `SettingsWindowFit`), `stream-zoom` (iOSClient's StreamZoom), `text-composition` (iOSClient's TextComposition with
   StreamProtocol's Input.swift), `thumbnail-hold` (iOSClient's ThumbnailHold), `tour`, `update-policy`, `virtual-display-api`
   (VirtualDisplay.swift whole, as VirtualDisplayProbe compiles it: its surface,
@@ -8612,6 +8633,14 @@ good.
   fails); `common.sh` is sourced by each `run.sh`; `README.md` lists what each
   compiles and the checks that belong to open branches. A change to a checked
   file updates its check (and a mutant's pattern) in the same commit.
+- `Tests/update-harness/` — Update Now's mechanism end to end (docs/one-click-update-plan.md
+  §11, G2): `run.sh` compiles UpdateInstaller and the pure update files with `main.swift`,
+  makes ad hoc test apps (`me.saffer.sill.updater-test`) and their zips (ditto's, and
+  `make-zip.py`'s hostile kinds), starts `server.py` (a stand-in for GitHub on 127.0.0.1),
+  and checks the installs and every refusal (the installed copy's tree unchanged), the
+  requests, the launch check, where an app runs (a disk image too) and the staging; with
+  the genuine v0.6.1 zip in `.build/updater-scratch`, `Trust.release`'s every rule with
+  the harness's own key. Local only (not CI): no /Applications, no keychain, no launch.
 - `Tests/touchrig/` — the touch rig (docs/trackpad-gestures-plan.md §9.2): the
   real `TrackpadView.swift` and `InputOverlay.swift` in a scratch simulator
   app, driven with synthesized touches (`TouchSynth`, private UIKit calls, test

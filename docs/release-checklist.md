@@ -143,6 +143,11 @@ serves the root or `/docs`, never `/site`. So:
   `grep -n` of a phrase from each block that nothing of it is left. Add the marker's line and its
   grep here when a pull request marks words; the release that ships them deletes its markers in
   `site/`, keeps the words, and takes its lines out of here.
+- `Update Now` (privacy.html's Update check section, the one-click update, docs/one-click-update-plan.md
+  §7): `perl -0pi -e 's/[ \t]*<!-- Update Now:.*?<!-- \/Update Now -->\n//gs' ../sill-site/*.html`, then
+  `grep -n 'release-assets.githubusercontent.com' ../sill-site/*.html` prints nothing. It ships with the
+  first release whose Sill carries an update key (part 1 §7), not with the code alone: a release whose
+  Sill has an empty key list offers no Update Now.
 - Held back from the support page in 0.6.1, until a test shows it true: #228's tap sentence. The
   page says "To wake it again, move the pointer, scroll, or press the Command key on a keyboard
   attached to your iPhone or iPad; Shift alone doesn’t reach your Mac." With the sentence it would
@@ -340,6 +345,31 @@ comes later, when the cask qualifies (below).
       `site/download.html`, the README, the tap's README and part 2's Homebrew item say `brew
       install --cask sill`.
 
+### 7. Update Now's key (once, on Noah's Mac; docs/one-click-update-plan.md §4.8)
+
+Update Now installs a release only when its manifest (`Sill.zip.manifest`) is signed with an update key
+whose public half is compiled into the Sill that runs (`UpdateManifest.releaseKeys`). The private half
+never touches GitHub or CI: the Developer ID identity does (the `nightly` environment signs and notarizes
+with no reviewer), so this key is what tells a release Noah made from a build CI made.
+
+- [ ] Make the key: `Scripts/sign-update.sh --new-key`. It makes an Ed25519 key (CryptoKit) and keeps it
+      in the login keychain (a generic password: service `me.saffer.sill.update-signing`, account
+      `ed25519`, label "Sill update signing key", not synchronizable), and prints the public key and its
+      key ID. Run it once: it refuses when the keychain has one.
+- [ ] One copy off the Mac, for loss: the private key as base64, shown once with `security
+      find-generic-password -s me.saffer.sill.update-signing -a ed25519 -w` (the keychain asks), into a
+      1Password item (or on paper in a safe). Never a file in the repository, the handoff folder or
+      ~/Downloads (every agent and tool works there), never GitHub, never CI.
+- [ ] The public key into `Sources/SillMenuBar/UpdateManifest.swift`, `releaseKeys` (one line, a commit of
+      its own). `Tests/checks/update-install` checks that every key listed is usable. The first release
+      that carries it is installed by hand (Update Now in the Sill before it has no key to check with);
+      the release after it is the first Update Now can install.
+- Rotation: a release carries both keys and is signed with the old one; the next is signed with the new
+      one; a later one drops the old. Lost: releases go out without a manifest (Update Now doesn't show;
+      Open Release Page… as before) until one carrying a new key is installed by hand once (say so in its
+      notes). Leaked: the same as lost, and the notes ask people to update by hand once; the leaked key
+      alone installs nothing (a Developer ID signed, notarized build is still needed).
+
 ## Part 2: every release
 
 - [ ] Versions: one number for both apps. From 0.5.1 on, a release's Sill for Mac and Sill for
@@ -438,6 +468,17 @@ comes later, when the cask qualifies (below).
       `.sha256`, `spctl -a -vv -t open --context context:primary-signature` on the image and
       `spctl -a -vv -t exec` on the Sill.app inside each ("Notarized Developer ID"), and the app's
       `CFBundleShortVersionString` and `CFBundleVersion`.
+- [ ] Sign the release for Update Now, on Noah's Mac, right after it is published (never in CI: part 1
+      §7): `Scripts/sign-update.sh v<version>`. It reads the published release, downloads `Sill.zip`
+      into `.build/update-sign`, checks it as the item above does (the SHA-256 against `Sill.zip.sha256`
+      and GitHub's digest, exactly one Sill.app, `codesign --verify --strict --deep` with Sill's pinned
+      requirement and `notarized`, `stapler validate`, spctl's "Notarized Developer ID", the version is
+      the tag's), reads each slice's cdhash as Update Now does, signs the manifest (the keychain asks),
+      reads it back with the key the tagged source carries, shows it, asks, uploads `Sill.zip.manifest`
+      and downloads it again to compare. Until it is there, Update Now does not show for the release
+      (every Sill's check stores whether the release lists the manifest), and the release page is the
+      way, as before Update Now. A Sill that checked before the signing shows Update Now after its next
+      daily check, or Check Now.
 - [ ] Homebrew: bump the cask once the release is published (its `Sill.dmg` must answer). In the
       tap (part 1 §6), from a Mac that has it tapped and the cask trusted: `brew bump-cask-pr
       --no-fork --version <version> --sha256 <SHA-256> saffsanity/sill/sill`, the SHA-256 the one in
@@ -452,12 +493,12 @@ comes later, when the cask qualifies (below).
 - [x] Done 2026-09-27 with Sill for Mac 0.3.1 (PR #33; sill-site 39754b9): the download page
       moved to Sill.dmg, after the release that carries it was published and its
       `releases/latest/download/Sill.dmg` answered.
-- [ ] Keep `Sill.zip` in every release for now: `release.sh --publish` uploads it beside the disk
-      image, so the page's zip links keep working until it moves, and so do links that name
-      `Sill.zip` elsewhere (v0.3.0's notes, pages people saved). Every Sill.app's update check
-      opens the release's page, which lists both. Dropping the zip later is one line in
-      `publish_release` (and its `.sha256`), for a release after the page has moved, never while
-      download.html still links it.
+- [ ] Keep `Sill.zip` in every release: `release.sh --publish` uploads it beside the disk image, so
+      the page's zip links keep working, and so do links that name `Sill.zip` elsewhere (v0.3.0's
+      notes, pages people saved). Every Sill.app's update check opens the release's page, which lists
+      both. Update Now installs exactly `Sill.zip` (docs/one-click-update-plan.md T24): that name, one
+      top-level `Sill.app`, stapled, its version the tag's. Never drop or rename it, and never zip it
+      another way than `release.sh` does (`ditto -c -k --keepParent`).
 - [x] Done 2026-09-26 with v0.3.0 (sill-site e4046a1): the first release, and the site
       republished right after Saffsanity/sill went public, so the button shows.
 - [ ] iOS: `Scripts/release-ios.sh --bump --upload` (a new version's first upload without `--bump`:
