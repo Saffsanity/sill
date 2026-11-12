@@ -207,7 +207,11 @@ the launch (T10), and on any doubt swaps the old copy back, but only the old cop
 staging folder after the swap (this user's, so anything of this user can change it) is put back only if it
 is still the code that was running (its cdhash), else it stays out and the checked new copy stays in place.
 A race can make the update fail; it cannot make Sill launch, or put into Sill.app's place, code other than
-what it checked or what was running. A folder above Sill.app that is a link is refused (§4.1), so the swap
+what it checked or what was running. The check at the final path reads through Security's static code,
+which reads the files again: an NSBundle and a CFBundle made for that path before the swap (as
+Sill.app's Bundle.main is) still give the old Info.plist after it (measured in the harness: 1.0 from
+both, 1.1 from Security), so after the swap the updater decides nothing from a bundle object (it reads
+Bundle.main only at launch, for the running version). A folder above Sill.app that is a link is refused (§4.1), so the swap
 cannot be sent elsewhere between the checks and the exchange; the exchange itself is by path (not by
 directory descriptors), which a process of this user that can rename folders above Sill.app could still
 race: T12's residue. Not measured here: whether App Management stops
@@ -800,6 +804,19 @@ the source rules missed `Trust.init(` and CFPreferences (added); the mechanism h
   tests too: the genuine install's assertion, a 401 case, stronger source rules.
 - Disk under the 25 GB floor from 22:50 (12 to 22 GB free while other agents built): code and documents
   written without compiling until it is back.
+- 00:12 to 00:33: compiled at last (the coordinator's floor of 20 GB, through heavy.sh). The first build
+  found one error (BundleProblem had to conform to Error); the check's synthetic executable compressed past
+  the ratio case's limit (made incompressible). update-install 474 checks, its 60 mutants all caught.
+- 00:20: Noah's ruling on Q1 (the key; §10, §14); the review's twelve findings written up (§12a).
+- 00:36: a refusal of its own for a Sill.app another account owns (it said "a folder this account can't
+  change" when the folder could be changed): on Noah's two-account Mac the second account's case after
+  every update from the first.
+- 00:39, the harness's first run: the post-swap check is right to read through Security. With an NSBundle
+  and a CFBundle held for the installed path across the swap (as Sill.app's Bundle.main is), both still
+  said 1.0 after it, while Security's read said 1.1. It found one fault in the code and one in itself:
+  the refusal's MiB rounding overflowed for Int64.max bytes and trapped (now
+  `mebibytesRoundedUp`, which never adds; the check asks for Int64.max too); its hostile "UpdTest.app is
+  a file" zip was under the release's 1 KB floor, so the size rule refused it first (now 4 KB).
 - Measured for this plan: v0.6.1's zip (13 entries, stored and deflate, 8 with data descriptors, no
   AppleDouble, no links, 16.1 MB unpacked); its signature (Developer ID 9B2KKVM937, runtime, universal,
   stapled, the designated requirement in §4.5 3); the `notarized` keyword (§4.5 4); strict validation
