@@ -144,9 +144,10 @@ serves the root or `/docs`, never `/site`. So:
   grep here when a pull request marks words; the release that ships them deletes its markers in
   `site/`, keeps the words, and takes its lines out of here.
 - Open: `Desktop displays` (the Desktop button steps through the Mac's screens: phase 1 of
-  docs/virtual-desktop-plan.md, built on #173), support.html's "More than one screen on your Mac"
-  and README's How it works line (README is not republished, so its marker lines go in the release's
-  words commit): after the perl, `grep -n "More than one screen" ../sill-site/*.html` finds nothing.
+  docs/virtual-desktop-plan.md, PR #355, built on #173), support.html's "More than one screen on your
+  Mac": after the perl, `grep -n "More than one screen" ../sill-site/*.html` finds nothing. README's How
+  it works line waits inside an HTML comment after the iPhone Duo bullet (README is the public page on
+  main, never republished): the release's words commit takes the comment out and makes it a bullet.
 - Held back from the support page in 0.6.1, until a test shows it true: #228's tap sentence. The
   page says "To wake it again, move the pointer, scroll, or press the Command key on a keyboard
   attached to your iPhone or iPad; Shift alone doesn’t reach your Mac." With the sentence it would
