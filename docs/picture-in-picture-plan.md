@@ -313,6 +313,15 @@ caught, the unchanged check passing first. M23b, the pause's end measured by its
 (`now - pausedAt >= pausedLimit`), fails L4 3,283 times: a look at exactly the time the rule gave found
 nothing due in those lives, which the review found before the first run (below).
 
+### G2: the builds (2026-11-12, 01:20–01:22, after main at 936d627 was merged in)
+
+On 61bbee7 (this branch with main's #339 and #349): the check again, 344 passed; the iOS app for the
+simulator in Debug (ad hoc signed, 26 s) and Release (50 s), and for a device in Debug (23 s), each from
+one derived data folder under the worktree's `.build`, each with only the known `StreamClient` capture
+warning (StreamClient.swift:4464, `[#ImplicitStrongCapture]`, the closed window's Desktop request, older
+than this branch); each built Info.plist carries `UIBackgroundModes` `["audio"]`. The Release and device
+products were removed once their results were in.
+
 ### The review before the first build (2026-11-11)
 
 Builds waited for disk space, so the code was read before it was ever compiled: an independent read-only
