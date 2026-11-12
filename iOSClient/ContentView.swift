@@ -207,7 +207,7 @@ struct ContentView: View {
 /// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
 /// * `-SillSettingsEnd 1` — with `-SillSettings 1`: the panel's rows start scrolled to their end,
 ///   so a photo of a short screen shows the last groups (Direct Wireless, Away from home, This
-///   iPad, Take the Tour). `-SillSettingsScroll gestures` starts them at the This iPad group
+///   iPad, Take the Tour, the version). `-SillSettingsScroll gestures` starts them at the This iPad group
 ///   instead (its switches and rows, which the footnotes under them push out of the end's view on a
 ///   short screen), `-SillSettingsScroll sound` at the Send Audio row, `-SillSettingsScroll mute` at
 ///   the Mute row under Send Audio, `-SillSettingsScroll reverse` at its Reverse Scrolling switch, and
@@ -296,11 +296,22 @@ struct ContentView: View {
 ///   going away); `-SillPiPSession active|inactive` holds the app's audio session active while the picture
 ///   is offered or shows (a device's default), or never (the simulator's). The console's `pip:` lines say
 ///   what happened ("pip: offered …", "pip: playing (iOS starts Picture in Picture)", "pip: stopping: …").
-/// * `-SillAXDump <s>` — `s` seconds after the stream screen shows, the console lists its
-///   accessibility elements in the order the accessibility tree hands them to VoiceOver ("ax: 1
-///   Open the app list (33,463 55×50)"). SwiftUI builds that tree only for an assistive technology:
-///   on a private simulator, `xcrun simctl spawn UDID defaults write com.apple.Accessibility
-///   ApplicationAccessibilityEnabled -bool true` first. In the mock and the normal app.
+/// * `-SillAXDump <s>` — `s` seconds after the stream screen shows, and after the connect screen
+///   shows, the console lists its accessibility elements in the order the accessibility tree hands
+///   them to VoiceOver ("ax: 1 Open the app list (33,463 55×50)"). SwiftUI builds that tree only for
+///   an assistive technology: on a private simulator, `xcrun simctl spawn UDID defaults write
+///   com.apple.Accessibility ApplicationAccessibilityEnabled -bool true` first. In the mock and the
+///   normal app. Each line ends in the element's custom actions ("actions “Copy”").
+///   `-SillAXAction '<label>|<action>'`, with it: half a second after the dump, the custom action of
+///   that name on the first element whose label begins with that label, as VoiceOver's actions do
+///   it, then what the clipboard holds ("ax: performed “Copy” on “Sill version 0.6.2, build 1400”:
+///   true; the clipboard holds “Sill 0.6.2 (1400)”"): a private simulator only (it writes that
+///   simulator's clipboard, and Simulator.app, while it runs, can share it with the Mac's).
+/// * `-SillAppVersion <v>` and `-SillAppBuild <b>` — the version label at the bottom of the connect
+///   screen and of the Settings panel (VersionLabel.shown) shows these instead of the bundle's
+///   CFBundleShortVersionString and CFBundleVersion (an empty one: as if the bundle had none), so a
+///   photo shows a long version or a missing one without another build. The label alone: the hello
+///   still says the bundle's. In the mock and the normal app.
 /// * `-SillVoiceOver 1` — the Settings panel acts as if VoiceOver were on: the This iPad group's
 ///   footnote says VoiceOver keeps three fingers and its rows do the gestures instead (they are
 ///   accessibility actions whether or not it is on).
@@ -1270,6 +1281,20 @@ struct ConnectScreen: View {
             #if DEBUG
             print("connect: \(style.rawValue) (Sill.connectionStyle \(styleRaw ?? "unset"))")
             scheduleStyleToggles()
+            // `-SillAXDump <s>`: the connect screen's accessibility elements too, s seconds after it shows,
+            // and `-SillAXAction '<label>|<action>'` half a second later.
+            // Not once a session has taken the screen: the stream screen dumps itself.
+            let dump = UserDefaults.standard.double(forKey: "SillAXDump")
+            if dump > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + dump) { [client] in
+                    if !client.connected { StreamScreen.accessibilityDump() }
+                }
+            }
+            if dump > 0, let spec = UserDefaults.standard.string(forKey: "SillAXAction") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + dump + 0.5) { [client] in
+                    if !client.connected { StreamScreen.accessibilityPerform(spec) }
+                }
+            }
             #endif
         }
         .onChange(of: client.status) { _, line in announce(line) }
@@ -1653,30 +1678,67 @@ struct ConnectScreen: View {
     // MARK: The footer
 
     /// For someone who found Sill here first, and for App Review: what else it needs, where to get
-    /// it, where to get help, and the privacy policy. Muted and 13 pt like the status line, but it
-    /// follows the text size, up to the Settings panel's cap (the column keeps its fixed sizes); it
-    /// wraps, never truncates. Each link opens in Safari (a Link hands its URL to the environment's
-    /// openURL), and VoiceOver reads it as a link. The addresses are SillLinks'.
+    /// it, where to get help, and the privacy policy; and this app's version, for a bug report. Muted
+    /// and 13 pt like the status line, but it follows the text size, up to the Settings panel's cap
+    /// (the column keeps its fixed sizes); it wraps, never truncates. Each link opens in Safari (a
+    /// Link hands its URL to the environment's openURL), and VoiceOver reads it as a link. The
+    /// addresses are SillLinks'.
+    ///
+    /// The version (VersionLine, docs/version-label-plan.md) sits at the footer's trailing edge, on a
+    /// line the footer has wherever it fits there, so the footer is no taller for it and the column
+    /// never moves for it (ColumnOverFooter measures this view): after "Needs the free Sill app on your
+    /// Mac." (every screen from 390 pt wide at the default text size); else a line of its own under
+    /// the links on one line; else, the links on two lines, beside Support and the privacy policy, or
+    /// beside the download link, the shorter; else a line of its own under those. VoiceOver reads it
+    /// last in the footer, wherever it is.
     private func footer(_ layout: ConnectLayout) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Needs the free Sill app on your Mac.")
-                .foregroundStyle(Palette.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            // All three on one line while they fit, else the download link over the other two,
-            // the lines far enough apart that their tap areas meet without overlapping. Upward the
-            // areas reach a little into the line above, which is plain text.
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 0) {
-                    downloadLink
-                    linkSeparator
-                    supportAndPrivacy
+        Group {
+            if let version = VersionLabel.shown {
+                ViewThatFits(in: .horizontal) {
+                    // After the sentence; the links are on one line whenever this fits.
+                    VStack(alignment: .leading, spacing: 8) {
+                        atLineEnd(needsMac, version)
+                        linksOnOneLine
+                    }
+                    // A line of its own under the links on one line.
+                    VStack(alignment: .leading, spacing: 8) {
+                        needsMac
+                        linksOnOneLine
+                        onItsOwnLine(version)
+                    }
+                    // The links on two lines: beside Support and the privacy policy, else beside the
+                    // download link, the shorter.
+                    VStack(alignment: .leading, spacing: 8) {
+                        needsMac
+                        VStack(alignment: .leading, spacing: 2 * Self.linkReach) {
+                            downloadLink
+                            atLineEnd(supportAndPrivacy, version)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        needsMac
+                        VStack(alignment: .leading, spacing: 2 * Self.linkReach) {
+                            atLineEnd(downloadLink, version)
+                            supportAndPrivacy
+                        }
+                    }
+                    // A line of its own under the two lines of links.
+                    VStack(alignment: .leading, spacing: 8) {
+                        needsMac
+                        linksOnTwoLines
+                        onItsOwnLine(version)
+                    }
                 }
-                VStack(alignment: .leading, spacing: 2 * Self.linkReach) {
-                    downloadLink
-                    supportAndPrivacy
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    needsMac
+                    links
                 }
             }
         }
+        // One container, so VoiceOver can read the version after the links (VersionLine's sort
+        // priority) where it is drawn beside the sentence above them.
+        .accessibilityElement(children: .contain)
         .font(.footnote)
         .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         .padding(.horizontal, 10)
@@ -1688,6 +1750,61 @@ struct ConnectScreen: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         // Room for the last link's tap area, which then stays on the screen.
         .padding(.bottom, Self.linkReach)
+    }
+
+    /// The least room between the version and the words before it on their line.
+    private static let versionGap: CGFloat = 12
+
+    /// The version at the end of a line of the footer, at its trailing edge. The gap is the version's
+    /// own padding, so it is part of the line's width when ViewThatFits asks whether the line fits
+    /// (the Spacer beside it asks for none). Read after the links (the footer is one container).
+    private func atLineEnd(_ words: some View, _ version: VersionLabel) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+            words
+            Spacer(minLength: 0)
+            VersionLine(label: version).padding(.leading, Self.versionGap).accessibilitySortPriority(-1)
+        }
+    }
+
+    /// The version on a line of its own under the links, at the trailing edge, and behind them: the
+    /// links' tap areas reach 14 pt below their words, into this line, as they reached below the
+    /// footer's last line before.
+    private func onItsOwnLine(_ version: VersionLabel) -> some View {
+        VersionLine(label: version)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .accessibilitySortPriority(-1)
+            .zIndex(-1)
+    }
+
+    private var needsMac: some View {
+        Text("Needs the free Sill app on your Mac.")
+            .foregroundStyle(Palette.muted)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// All three on one line while they fit, else the download link over the other two, the lines
+    /// far enough apart that their tap areas meet without overlapping. Upward the areas reach a
+    /// little into the line above, which is plain text.
+    private var links: some View {
+        ViewThatFits(in: .horizontal) {
+            linksOnOneLine
+            linksOnTwoLines
+        }
+    }
+
+    private var linksOnOneLine: some View {
+        HStack(spacing: 0) {
+            downloadLink
+            linkSeparator
+            supportAndPrivacy
+        }
+    }
+
+    private var linksOnTwoLines: some View {
+        VStack(alignment: .leading, spacing: 2 * Self.linkReach) {
+            downloadLink
+            supportAndPrivacy
+        }
     }
 
     private var downloadLink: some View {
@@ -1722,6 +1839,45 @@ struct ConnectScreen: View {
         }
         .padding(.vertical, -Self.linkReach)
     }
+}
+
+/// This app's version and build, "Sill 0.6.2 (1400)" (VersionLabel), at the bottom of the connect
+/// screen's footer and as the Settings panel's last line (Noah, 2026-11-11; docs/version-label-plan.md),
+/// in the muted colour, at the size of the text around it (the footnote style both give it). One
+/// element for VoiceOver, "Sill version 0.6.2, build 1400". A long press offers Copy (a context menu:
+/// a tap and a scroll pass by), which puts the words shown on the clipboard for a bug report;
+/// VoiceOver has it as an action. It wraps rather than truncate, on a screen too narrow for it.
+struct VersionLine: View {
+    let label: VersionLabel
+
+    var body: some View {
+        Text(label.text)
+            .foregroundStyle(Palette.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .contextMenu {
+                Button("Copy", systemImage: "doc.on.doc", action: copy)
+            }
+            .accessibilityLabel(label.spoken)
+            .accessibilityAction(named: "Copy", copy)
+    }
+
+    private func copy() {
+        UIPasteboard.general.string = label.text
+    }
+}
+
+extension VersionLabel {
+    /// This app's, from its bundle's Info.plist. DEBUG: `-SillAppVersion <v>` and `-SillAppBuild <b>`
+    /// stand in for the bundle's values in the label alone (not the hello), so the harness photographs
+    /// a long version or a missing one (an empty value) without another build.
+    static let shown: VersionLabel? = {
+        var info = Bundle.main.infoDictionary ?? [:]
+        #if DEBUG
+        if let v = UserDefaults.standard.string(forKey: "SillAppVersion") { info["CFBundleShortVersionString"] = v }
+        if let b = UserDefaults.standard.string(forKey: "SillAppBuild") { info["CFBundleVersion"] = b }
+        #endif
+        return VersionLabel(info: info)
+    }()
 }
 
 /// The connect screen's column inside the scroll view that sits above its footer. The column sits
