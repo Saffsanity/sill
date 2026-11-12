@@ -99,8 +99,11 @@ final class AppModel {
                                           permissions: PermissionState(screenRecording: true, accessibility: true),
                                           startupError: nil, hasCoordinator: false)
         // The devices an update would disconnect, by the names the menu's card gives them.
+        // Each by its connection (two iPads of one name are two devices), named as the menu's card names it.
         updater.devices = { [weak self] in
-            (self?.coordinator?.status.snapshot.devices ?? []).map { $0.name ?? "a device" }
+            (self?.coordinator?.status.snapshot.devices ?? []).map {
+                UpdateInstallPolicy.Device(key: String(describing: $0.id), name: $0.name ?? "a device")
+            }
         }
     }
 

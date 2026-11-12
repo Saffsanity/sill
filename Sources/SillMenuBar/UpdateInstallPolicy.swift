@@ -543,16 +543,23 @@ enum UpdateInstallPolicy {
 
     // MARK: The state machine (§4.6)
 
+    /// A connected device: `key` tells one connection from another (two unnamed iPads are two devices),
+    /// `name` is what the words say.
+    struct Device: Equatable, Sendable {
+        let key: String
+        let name: String
+    }
+
     enum Phase: Equatable, Sendable {
         case idle
         /// The click came while devices were connected: asks first.
-        case confirming(devices: [String])
+        case confirming(devices: [Device])
         case fetching
         case downloading(received: Int64, total: Int64)
         case unpacking
         case checking
         /// Checked; devices connected that the person did not agree to disconnect: asks first.
-        case ready(devices: [String])
+        case ready(devices: [Device])
         case installing
         case restarting
         case failed(Failure)
@@ -568,12 +575,12 @@ enum UpdateInstallPolicy {
 
     struct State: Equatable, Sendable {
         var phase = Phase.idle
-        /// The devices the person agreed to disconnect.
+        /// The devices the person agreed to disconnect, by key.
         var consented: [String] = []
     }
 
     enum Event: Equatable, Sendable {
-        case updateNow(devices: [String])
+        case updateNow(devices: [Device])
         case confirm
         case cancel
         /// The release and its manifest, verified, or why not.
@@ -581,7 +588,7 @@ enum UpdateInstallPolicy {
         case progress(received: Int64, total: Int64)
         case downloaded(Failure?)
         case unpacked(Failure?)
-        case checked(Failure?, devices: [String])
+        case checked(Failure?, devices: [Device])
         case installed(Failure?)
         case launched(Failure?)
     }
@@ -604,7 +611,7 @@ enum UpdateInstallPolicy {
             n.phase = .confirming(devices: devices)
             return (n, [])
         case (.confirming(let devices), .confirm):
-            n.consented = devices
+            n.consented = devices.map(\.key)
             n.phase = .fetching
             return (n, [.fetch])
         case (.confirming, .cancel):
@@ -629,13 +636,13 @@ enum UpdateInstallPolicy {
         case (.unpacking, .unpacked(let f?)):
             return fail(f)
         case (.checking, .checked(nil, let devices)):
-            if Set(devices).isSubset(of: Set(s.consented)) { n.phase = .installing; return (n, [.install]) }
+            if Set(devices.map(\.key)).isSubset(of: Set(s.consented)) { n.phase = .installing; return (n, [.install]) }
             n.phase = .ready(devices: devices)
             return (n, [])
         case (.checking, .checked(let f?, _)):
             return fail(f)
         case (.ready(let devices), .confirm):
-            n.consented = devices
+            n.consented = devices.map(\.key)
             n.phase = .installing
             return (n, [.install])
         case (.ready, .cancel), (.fetching, .cancel), (.downloading, .cancel), (.unpacking, .cancel), (.checking, .cancel):
@@ -697,7 +704,7 @@ enum UpdateInstallPolicy {
             p.note = refusal.map(words)
         case .confirming(let devices):
             p.updateNow = false
-            p.question = "Updating restarts Sill and disconnects \(names(devices))."
+            p.question = "Updating restarts Sill and disconnects \(names(devices.map(\.name)))."
             p.confirmTitle = "Update and Disconnect"
             p.cancel = true
         case .fetching:
@@ -715,7 +722,7 @@ enum UpdateInstallPolicy {
             p.cancel = true
         case .ready(let devices):
             p.line = "\(target) is ready."
-            p.question = "Installing it restarts Sill and disconnects \(names(devices))."
+            p.question = "Installing it restarts Sill and disconnects \(names(devices.map(\.name)))."
             p.confirmTitle = "Install and Disconnect"
             p.cancel = true
         case .installing:

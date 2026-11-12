@@ -352,6 +352,11 @@ whose public half is compiled into the Sill that runs (`UpdateManifest.releaseKe
 never touches GitHub or CI: the Developer ID identity does (the `nightly` environment signs and notarizes
 with no reviewer), so this key is what tells a release Noah made from a build CI made.
 
+- [ ] Install the signer, the one program that ever holds the key: `Scripts/sign-update.sh
+      --install-signer`. It lists the five files it is built from with their SHA-256 and the commit, asks
+      whether you have read them, and builds it into `~/Library/Application Support/Sill Update Signer/`;
+      signing runs that binary only, never one rebuilt from the checkout of the day. Again after any change
+      to those files you have read (the keychain then asks once before the new one uses the key).
 - [ ] Make the key: `Scripts/sign-update.sh --new-key`. It makes an Ed25519 key (CryptoKit) and keeps it
       in the login keychain (a generic password: service `me.saffer.sill.update-signing`, account
       `ed25519`, label "Sill update signing key", not synchronizable), and prints the public key and its
@@ -469,7 +474,11 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       `spctl -a -vv -t exec` on the Sill.app inside each ("Notarized Developer ID"), and the app's
       `CFBundleShortVersionString` and `CFBundleVersion`.
 - [ ] Sign the release for Update Now, on Noah's Mac, right after it is published (never in CI: part 1
-      §7): `Scripts/sign-update.sh v<version>`. It reads the published release, downloads `Sill.zip`
+      §7): `Scripts/sign-update.sh v<version>`. It signs only a zip you know without GitHub: by default
+      `.build/Sill-<version>.zip` from your own `release.sh` run (GitHub's must be it, byte for byte), or,
+      for a release the release workflow built in a run you approved, `--expect-sha256` with the SHA-256
+      that run's log printed for Sill.zip. A release CI published that you did not approve is never signed:
+      that is the point of the key (docs/one-click-update-plan.md T4). It reads the published release, downloads `Sill.zip`
       into `.build/update-sign`, checks it as the item above does (the SHA-256 against `Sill.zip.sha256`
       and GitHub's digest, exactly one Sill.app, `codesign --verify --strict --deep` with Sill's pinned
       requirement and `notarized`, `stapler validate`, spctl's "Notarized Developer ID", the version is

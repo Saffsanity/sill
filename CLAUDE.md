@@ -8,6 +8,48 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Update Now, the one-click update of Sill for Mac (2026-11-11 and 12, branch `one-click-update` from main
+at dd6ea6a; draft PR; the plan, its threat model point by point, the open questions with the default taken
+for each, the gates and Noah's rehearsal are in `docs/one-click-update-plan.md`).** Noah, 2026-11-11: "make a
+note that I want to make the Sill update checker also have a 1 click updater as a new feature", then "Start
+working on ... one-click updater ... Use subagents." **Inert until Noah makes the update key:**
+`UpdateManifest.releaseKeys` is empty on purpose, so no build from this branch shows Update Now; Settings and
+the menu are what they were.
+- Two signatures, each necessary: Noah's update key (Ed25519, CryptoKit) over the release's manifest
+  (`Sill.zip.manifest`: tag, version, build, size, SHA-256, each slice's cdhash; verified before the zip is
+  fetched), because GitHub Actions holds the Developer ID identity (the `nightly` environment signs and
+  notarizes with no reviewer, and its token can publish); and the code signature against a requirement
+  compiled in (Apple's anchor, a Developer ID Application leaf of team 9B2KKVM937, me.saffer.sill.mac,
+  `notarized`, measured: the SDK has no SecAssessment, and spctl follows Gatekeeper's settings), every slice,
+  strict, with the running app's own designated requirement, the keychain entitlements, the hardened
+  runtime and a stapled ticket. Version from the signed Info.plist, strictly newer than this bundle's own.
+- The mechanism (`UpdateInstaller`): GitHub's hosts only (release-assets.githubusercontent.com after
+  github.com, https, no credential, the manifest's size and SHA-256); Sill's own zip reader (`UpdateArchive`:
+  central and local headers agree, printable ASCII names under Sill.app, no case duplicates, links only
+  inside and never written through, no zip64, encryption or setuid, AppleDouble skipped) writing through
+  directory descriptors with O_NOFOLLOW; checks in a 0700 item-replacement folder on Sill.app's volume; one
+  `renamex_np(RENAME_SWAP)`; every check again at /Applications with the same code; put back (only the old
+  copy, by cdhash) on any failure. Relaunch without a helper: the new copy as a new instance waits for the
+  old to quit (`AppUpdater.waitForOtherSill`, a contract for every later Sill); the old quits from a
+  run-loop Timer once the new one's running code is the code checked; the new removes the old copy once its
+  host is up. Refusals with words (`UpdateInstallPolicy.refusal`): a build that is not a notarized release,
+  a test feed or version, translocated, a disk image, read-only or network volume, a link on the way, a
+  folder this account can't change, a copy changed since launch, another account's Sill or another Sill of
+  this account, no room. A device connected asks first (by connection). Never a hook: two constants, and
+  `Tests/checks/update-install` reads the sources.
+- The release step: `Scripts/sign-update.sh v<version>` on Noah's Mac (never CI), with a signer installed
+  once from files he read (`--install-signer`), signing only a zip he knows without GitHub (his own
+  `release.sh` output, or `--expect-sha256` from a release run he approved); the key in his login keychain
+  (`--new-key`, once) with one copy off the Mac (docs/release-checklist.md part 1 §7, part 2). The check
+  stores `updateLatestSigned`: an unsigned release shows Open Release Page… alone, as before.
+- An independent review of the code as written (a read-only subagent, 2026-11-12): twelve findings, all
+  taken (the plan's Progress has them).
+- Verified: (filled in once compiled; the disk was under the 25 GB floor from 22:50 to …).
+- **Untested, for Noah:** the plan's §12 rehearsal with a throwaway repository and key (two notarized
+  builds); the first real Update Now (a release carrying the key installed by hand first). Decisions: §10
+  (Q1 the key, recommended; Q2 ask before disconnecting; Q3 refuse while the other account's Sill runs, with
+  what he sees; Q4 the menu item opens Settings).
+
 **Away from home through a relay on the Mac (2026-11-09, branch `away-through-relay` from main at f224323,
 PR #339; issue #326, Ti800; the code read, the fixes weighed, eight open questions with their defaults and
 the results are in `docs/away-through-relay-plan.md`).** A remote connection that reached Sill through

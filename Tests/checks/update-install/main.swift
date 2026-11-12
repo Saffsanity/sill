@@ -365,13 +365,15 @@ check(P.megabytes(5_920_002) == "5.9", "megabytes")
 // MARK: The state machine
 
 typealias S = P.State
+func D(_ name: String, _ key: String? = nil) -> P.Device { P.Device(key: key ?? name, name: name) }
 func step(_ s: S, _ e: P.Event) -> (P.Phase, [P.Effect]) { let (n, effects) = P.next(s, e); return (n.phase, effects) }
 let idle = S()
 check(step(idle, .updateNow(devices: [])) == (.fetching, [.fetch]), "Update Now with no device: fetch")
-check(step(idle, .updateNow(devices: ["iPad"])) == (.confirming(devices: ["iPad"]), []), "Update Now with a device: ask")
-let confirming = P.next(idle, .updateNow(devices: ["iPad"])).0
+check(step(idle, .updateNow(devices: [D("iPad")])) == (.confirming(devices: [D("iPad")]), []), "Update Now with a device: ask")
+let confirming = P.next(idle, .updateNow(devices: [D("iPad")])).0
 check(P.next(confirming, .confirm).0 == S(phase: .fetching, consented: ["iPad"]), "yes: fetch, the iPad agreed to")
 check(step(confirming, .cancel) == (.idle, []), "no: idle, nothing to clean")
+check(P.next(S(phase: .confirming(devices: [D("iPad", "c9")])), .confirm).0.consented == ["c9"], "consent is by connection, not by name")
 let fetching = S(phase: .fetching, consented: [])
 check(step(fetching, .fetched(nil)) == (.downloading(received: 0, total: 0), [.download]), "fetched: download")
 check(step(fetching, .fetched(.notSigned)) == (.failed(.notSigned), [.cleanUp]), "not signed: failed, clean up")
@@ -384,12 +386,14 @@ check(step(downloading, .cancel) == (.idle, [.cleanUp]), "cancel while downloadi
 check(step(S(phase: .unpacking), .unpacked(nil)) == (.checking, [.check]), "unpacked: check")
 check(step(S(phase: .unpacking), .unpacked(.archive(.zip64))) == (.failed(.archive(.zip64)), [.cleanUp]), "a bad archive")
 check(step(S(phase: .checking, consented: []), .checked(nil, devices: [])) == (.installing, [.install]), "checked, nobody connected: install")
-check(step(S(phase: .checking, consented: ["iPad"]), .checked(nil, devices: ["iPad"])) == (.installing, [.install]), "the iPad agreed: install")
-check(step(S(phase: .checking, consented: ["iPad"]), .checked(nil, devices: ["iPad", "iPhone"])) == (.ready(devices: ["iPad", "iPhone"]), []), "an iPhone joined: ask again")
-check(step(S(phase: .checking, consented: []), .checked(nil, devices: ["iPad"])) == (.ready(devices: ["iPad"]), []), "a device joined: ask")
+check(step(S(phase: .checking, consented: ["iPad"]), .checked(nil, devices: [D("iPad")])) == (.installing, [.install]), "the iPad agreed: install")
+check(step(S(phase: .checking, consented: ["iPad"]), .checked(nil, devices: [D("iPad"), D("iPhone")])) == (.ready(devices: [D("iPad"), D("iPhone")]), []), "an iPhone joined: ask again")
+check(step(S(phase: .checking, consented: []), .checked(nil, devices: [D("iPad")])) == (.ready(devices: [D("iPad")]), []), "a device joined: ask")
 check(step(S(phase: .checking), .checked(.bundle(.wrongSigner), devices: [])) == (.failed(.bundle(.wrongSigner)), [.cleanUp]), "a bad bundle")
-check(P.next(S(phase: .ready(devices: ["iPad"])), .confirm).0 == S(phase: .installing, consented: ["iPad"]), "ready, yes: install")
-check(step(S(phase: .ready(devices: ["iPad"])), .cancel) == (.idle, [.cleanUp]), "ready, no: clean up")
+// Two devices with one name are two devices: the one that joined is asked about.
+check(step(S(phase: .checking, consented: ["c1"]), .checked(nil, devices: [D("iPad", "c1"), D("iPad", "c2")])) == (.ready(devices: [D("iPad", "c1"), D("iPad", "c2")]), []), "another iPad of the same name")
+check(P.next(S(phase: .ready(devices: [D("iPad")])), .confirm).0 == S(phase: .installing, consented: ["iPad"]), "ready, yes: install")
+check(step(S(phase: .ready(devices: [D("iPad")])), .cancel) == (.idle, [.cleanUp]), "ready, no: clean up")
 check(step(S(phase: .installing), .installed(nil)) == (.restarting, [.launch]), "installed: launch")
 check(step(S(phase: .installing), .installed(.checkAfterSwap(.codeChanged, putBack: true))) == (.failed(.checkAfterSwap(.codeChanged, putBack: true)), [.cleanUp]), "put back: clean up")
 check(step(S(phase: .installing), .installed(.checkAfterSwap(.codeChanged, putBack: false))) == (.failed(.checkAfterSwap(.codeChanged, putBack: false)), []), "not put back: keep the staging folder")
@@ -423,14 +427,14 @@ let available = pane(.idle)
 check(available.updateNow && available.updateNowEnabled && available.updateNowTitle == "Update Now" && available.line == nil && available.note == nil, "offered: Update Now")
 let refused = pane(.idle, refusal: .otherInstance)
 check(refused.updateNow && !refused.updateNowEnabled && refused.note == P.words(.otherInstance), "refused: disabled, with why")
-let asking = pane(.confirming(devices: ["iPad"]))
+let asking = pane(.confirming(devices: [D("iPad")]))
 check(!asking.updateNow && asking.question == "Updating restarts Sill and disconnects iPad." && asking.confirmTitle == "Update and Disconnect" && asking.cancel, "the question")
 check(asking.announce == asking.question, "VoiceOver hears the question")
 let dl = pane(.downloading(received: 2_960_001, total: 5_920_002))
 check(dl.line == "Downloading Sill 0.4… 3.0 of 5.9 MB" && dl.progress == 0.5 && dl.cancel && dl.busy && !dl.updateNow, "downloading: \(dl)")
 check(pane(.fetching).line == "Getting Sill 0.4 from GitHub…" && pane(.fetching).spinning, "fetching")
 check(pane(.checking).line == "Checking Sill 0.4…" && pane(.unpacking).line == "Checking Sill 0.4…", "checking")
-let ready = pane(.ready(devices: ["iPad", "iPhone"]))
+let ready = pane(.ready(devices: [D("iPad"), D("iPhone")]))
 check(ready.line == "Sill 0.4 is ready." && ready.question == "Installing it restarts Sill and disconnects iPad and iPhone." && ready.confirmTitle == "Install and Disconnect", "ready")
 check(pane(.installing).line == "Installing Sill 0.4…" && !pane(.installing).cancel, "installing: no cancel")
 check(pane(.restarting).line == "Restarting Sill…" && pane(.restarting).busy, "restarting")
@@ -626,7 +630,7 @@ func count(_ pattern: String, in s: String) -> Int {
 }
 for file in files {
     let s = text(file)
-    let trusts = count("\\bTrust\\s*\\(", in: s), endpoints = count("\\bEndpoints\\s*\\(", in: s)
+    let trusts = count("\\bTrust\\s*(\\.init)?\\s*\\(", in: s), endpoints = count("\\bEndpoints\\s*(\\.init)?\\s*\\(", in: s)
     if file == "UpdateInstallPolicy.swift" {
         check(trusts == 1 && endpoints == 1, "\(file) makes only Trust.release and Endpoints.github (\(trusts), \(endpoints))")
     } else {
@@ -643,7 +647,8 @@ for file in ["UpdateInstallPolicy.swift", "UpdateManifest.swift", "UpdateArchive
     // Code only: a whole-line comment may name what the code never reads.
     let s = text(file).components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }.joined(separator: "\n")
     check(!s.isEmpty, "\(file) is there")
-    for forbidden in ["UserDefaults", "NSUserDefaults", ".environment", ".arguments", "CommandLine", "getenv", "-Sill", "SILL_"] {
+    for forbidden in ["UserDefaults", "NSUserDefaults", "CFPreferences", "NSUbiquitousKeyValueStore", ".environment", ".arguments",
+                      "CommandLine", "getenv", "-Sill", "SILL_"] {
         check(!s.contains(forbidden), "\(file) reads \(forbidden)")
     }
 }

@@ -9,14 +9,13 @@ import StreamProtocol
 /// the quit, the wait at launch for a Sill that is quitting, and the clean-up after a start.
 ///
 /// It passes UpdateInstaller only `Trust.release` and `Endpoints.github`, and reads no default, no
-/// variable and no argument: a test feed or a test version given to the update check
-/// (`-SillUpdateFeed`, `-SillUpdateVersion`) makes Update Now unavailable instead. With no update key
-/// compiled in (UpdateManifest.releaseKeys, empty until Noah makes the key) it is not available at all,
-/// and Settings and the menu show what they showed before it.
+/// variable and no argument: a test feed or a test version given to the update check makes Update Now
+/// unavailable instead. With no update key compiled in (UpdateManifest.releaseKeys, empty until Noah
+/// makes the key) it is not available at all, and Settings and the menu show what they showed before it.
 ///
-/// Main actor. The network steps run in Tasks, the file steps in detached Tasks; each answer carries
-/// the attempt it belongs to, and an answer for an attempt that was cancelled or replaced is dropped.
-/// The quit starts from a run-loop Timer, never a Task (AppDelegate's modal-loop rule).
+/// Main actor. The network steps run in Tasks, the file steps in detached Tasks; each answer carries the
+/// attempt it belongs to, and an answer for an attempt since cancelled or replaced is dropped before it
+/// touches anything. The quit starts from a run-loop Timer, never a Task (AppDelegate's modal-loop rule).
 @MainActor @Observable
 final class AppUpdater {
     typealias Policy = UpdateInstallPolicy
@@ -30,16 +29,19 @@ final class AppUpdater {
     let available: Bool
 
     /// Wired by AppModel: the release the check offers; whether the check runs on a test feed or a test
-    /// version; the names of the connected devices.
+    /// version; the connected devices.
     @ObservationIgnored var offer: () -> UpdatePolicy.Offer? = { nil }
     @ObservationIgnored var checkerUsesTestValues: () -> Bool = { false }
-    @ObservationIgnored var devices: () -> [String] = { [] }
+    @ObservationIgnored var devices: () -> [Policy.Device] = { [] }
 
     @ObservationIgnored private let installer: UpdateInstaller
     @ObservationIgnored private let bundle: URL
     /// This bundle's own version (its signed Info.plist, read at launch), never a test version.
     @ObservationIgnored private let runningVersion: SillVersion?
     @ObservationIgnored private var runningCodeCache: UpdateInstaller.RunningCode?
+    /// The release Update Now was clicked for: an update under way goes on with it whatever a later
+    /// check says.
+    @ObservationIgnored private var target: UpdatePolicy.Offer?
     @ObservationIgnored private var attempt = 0
     @ObservationIgnored private var cancel: UpdateInstaller.Cancel?
     @ObservationIgnored private var staging: URL?
@@ -47,6 +49,8 @@ final class AppUpdater {
     @ObservationIgnored private var zip: URL?
     @ObservationIgnored private var unpacked: URL?
     @ObservationIgnored private var checked: Policy.Checked?
+    /// The running code's cdhash, which the copy put aside by the swap must still show to be put back.
+    @ObservationIgnored private var oldCDHash: String?
     @ObservationIgnored private var watch: Timer?
     @ObservationIgnored private var shownProgress: (Int64, Date) = (0, .distantPast)
     @ObservationIgnored private var loggedRefusal: Policy.Refusal?
@@ -70,31 +74,30 @@ final class AppUpdater {
 
     // MARK: What Settings and the menu show
 
-    /// Update Now shows for the offer: this build has it, and the release is signed for it (its manifest
-    /// listed), or an update of it has begun. A release Noah has not signed yet shows as before: Open
-    /// Release Page… alone.
+    private var idle: Bool { if case .idle = state.phase { return true }; return false }
+
+    /// Update Now shows: this build has it, and the offered release is signed for it (its manifest
+    /// listed), or an update has begun. A release Noah has not signed yet shows as before: Open Release
+    /// Page… alone.
     private var shown: Bool {
-        guard available, let offer = offer() else { return false }
-        if case .idle = state.phase { return offer.signed }
-        return true
+        guard available else { return false }
+        return idle ? offer()?.signed == true : target != nil
     }
 
     var pane: Policy.Pane {
-        Policy.pane(state, offered: offer()?.version, running: runningVersion, available: shown, refusal: refusal, keptAt: keptAt)
+        Policy.pane(state, offered: idle ? offer()?.version : target?.version, running: runningVersion, available: shown,
+                    refusal: refusal, keptAt: keptAt)
     }
 
     var menu: MenuBuilder.UpdateMenuState {
         MenuBuilder.UpdateMenuState(phase: state.phase, available: shown, refusal: refusal)
     }
 
-    /// Looks again at where Sill runs: Settings › General calls it while it shows, and Update Now first.
-    /// Nothing while no release is offered or an update is under way.
+    /// Looks again at where Sill runs: Settings › General calls it while it shows, the menu as it opens,
+    /// and Update Now first. Nothing while no signed release is offered or an update is under way.
     func refresh() {
         guard shown, !state.phase.busy else { return }
-        let installed = UpdateInstaller.runningIsInstalled(bundle).0
-        let s = UpdateInstaller.situation(bundle: bundle, runningIsRelease: runningCode.isRelease, testFeed: checkerUsesTestValues(),
-                                          runningIsInstalled: installed, neededBytes: Policy.neededBytes(assetBytes: 8 << 20))
-        let r = Policy.refusal(s)
+        let r = currentRefusal()
         if r != refusal { refusal = r }
         if let r, r != loggedRefusal {
             loggedRefusal = r
@@ -102,14 +105,31 @@ final class AppUpdater {
         }
     }
 
+    /// The first refusal that holds now (UpdateInstallPolicy.refusal over UpdateInstaller.situation),
+    /// counting every other Sill of this account by its bundle identifier wherever it runs from: the new
+    /// copy, once started, waits for every one of them to quit.
+    private func currentRefusal() -> Policy.Refusal? {
+        let installed = UpdateInstaller.runningIsInstalled(bundle).0
+        var s = UpdateInstaller.situation(bundle: bundle, executable: installer.trust.executable, runningIsRelease: runningCode.isRelease,
+                                          testFeed: checkerUsesTestValues(), runningIsInstalled: installed,
+                                          neededBytes: Policy.neededBytes(assetBytes: 8 << 20))
+        let own = ProcessInfo.processInfo.processIdentifier
+        let sameID = Bundle.main.bundleIdentifier.map {
+            NSRunningApplication.runningApplications(withBundleIdentifier: $0).filter { $0.processIdentifier != own && !$0.isTerminated }.count
+        } ?? 0
+        s.otherInstances = max(s.otherInstances, sameID)
+        return Policy.refusal(s)
+    }
+
     // MARK: The person's buttons (SwiftUI Button actions)
 
     func updateNow() {
-        guard shown, !state.phase.busy else { return }
+        guard shown, !state.phase.busy, let offer = offer(), offer.signed else { return }
         refresh()
         guard refusal == nil else { return }
         attempt += 1
         keptAt = nil
+        target = offer
         send(.updateNow(devices: devices()))
     }
 
@@ -117,8 +137,10 @@ final class AppUpdater {
         send(.confirm)
     }
 
+    /// Cancel retires the attempt: whatever it had in flight answers into nothing.
     func cancelUpdate() {
         cancel?.cancel()
+        attempt += 1
         send(.cancel)
     }
 
@@ -127,13 +149,8 @@ final class AppUpdater {
     private func send(_ event: Policy.Event) {
         let (next, effects) = Policy.next(state, event)
         if next != state { state = next }
+        if idle { target = nil }
         for effect in effects { perform(effect) }
-    }
-
-    /// An answer for `run`, dropped when it belongs to an attempt since cancelled or replaced.
-    private func deliver(_ run: Int, _ event: Policy.Event) {
-        guard run == attempt else { return }
-        send(event)
     }
 
     private func perform(_ effect: Policy.Effect) {
@@ -151,36 +168,36 @@ final class AppUpdater {
     }
 
     private func fetch(_ run: Int) {
-        guard let offer = offer(), let running = runningVersion else { deliver(run, .fetched(.releaseNotNewer)); return }
+        guard let target, let running = runningVersion else { send(.fetched(.releaseNotNewer)); return }
         let token = UpdateInstaller.Cancel()
         cancel = token
         switch UpdateInstaller.makeStaging(for: bundle) {
         case .failure(let f):
             log(f)
-            deliver(run, .fetched(f))
+            send(.fetched(f))
             return
         case .success(let dir):
             staging = dir
         }
-        print("Update: getting Sill \(offer.version) (\(offer.tag)) from GitHub.")
+        print("Update: getting Sill \(target.version) (\(target.tag)) from GitHub.")
         let installer = self.installer
         Task { [weak self] in
-            let result = await installer.prepare(offeredTag: offer.tag, running: running, cancel: token)
-            guard let self else { return }
+            let result = await installer.prepare(offeredTag: target.tag, running: running, cancel: token)
+            guard let self, run == self.attempt else { return }
             switch result {
             case .failure(let f):
                 self.log(f)
-                self.deliver(run, .fetched(f))
+                self.send(.fetched(f))
             case .success(let p):
                 self.prepared = p
                 print("Update: Sill \(p.release.version)’s manifest is signed with the update key \(p.manifest.keyID): \(p.manifest.size) bytes, SHA-256 \(p.manifest.sha256).")
-                self.deliver(run, .fetched(nil))
+                self.send(.fetched(nil))
             }
         }
     }
 
     private func startDownload(_ run: Int) {
-        guard let prepared, let staging, let token = cancel else { deliver(run, .downloaded(.cancelled)); return }
+        guard let prepared, let staging, let token = cancel else { send(.downloaded(.cancelled)); return }
         print("Update: downloading Sill \(prepared.release.version) (\(Policy.megabytes(prepared.manifest.size)) MB) from github.com.")
         let installer = self.installer
         Task { [weak self] in
@@ -188,14 +205,14 @@ final class AppUpdater {
                                                   progress: { received, total in
                                                       Task { @MainActor [weak self] in self?.progress(run, received, total) }
                                                   }, cancel: token)
-            guard let self else { return }
+            guard let self, run == self.attempt else { return }
             switch result {
             case .failure(let f):
                 self.log(f)
-                self.deliver(run, .downloaded(f))
+                self.send(.downloaded(f))
             case .success(let file):
                 self.zip = file
-                self.deliver(run, .downloaded(nil))
+                self.send(.downloaded(nil))
             }
         }
     }
@@ -210,27 +227,27 @@ final class AppUpdater {
     }
 
     private func startUnpack(_ run: Int) {
-        guard let prepared, let staging, let zip, let token = cancel else { deliver(run, .unpacked(.cancelled)); return }
+        guard let prepared, let staging, let zip, let token = cancel else { send(.unpacked(.cancelled)); return }
         let installer = self.installer
         let manifest = prepared.manifest
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
                 installer.unpack(zip, manifest: manifest, into: staging, cancel: token)
             }.value
-            guard let self else { return }
+            guard let self, run == self.attempt else { return }
             switch result {
             case .failure(let f):
                 self.log(f)
-                self.deliver(run, .unpacked(f))
+                self.send(.unpacked(f))
             case .success(let app):
                 self.unpacked = app
-                self.deliver(run, .unpacked(nil))
+                self.send(.unpacked(nil))
             }
         }
     }
 
     private func startCheck(_ run: Int) {
-        guard let prepared, let unpacked, let running = runningVersion else { deliver(run, .checked(.cancelled, devices: [])); return }
+        guard let prepared, let unpacked, let running = runningVersion else { send(.checked(.cancelled, devices: [])); return }
         let installer = self.installer
         let manifest = prepared.manifest
         let requirement = runningCode.requirement
@@ -238,23 +255,31 @@ final class AppUpdater {
             let result = await Task.detached(priority: .userInitiated) {
                 installer.check(unpacked, manifest: manifest, running: running, runningRequirement: requirement)
             }.value
-            guard let self else { return }
+            guard let self, run == self.attempt else { return }
             switch result {
             case .failure(let f):
                 self.log(f)
-                self.deliver(run, .checked(f, devices: []))
+                self.send(.checked(f, devices: []))
             case .success(let c):
                 self.checked = c
-                print("Update: Sill \(c.version) (\(c.build)) checked: signed by Developer ID \(installer.trust.teamID ?? "-") as \(installer.trust.identifier), notarized, \(c.version) newer than \(running), the code the manifest names.")
-                self.deliver(run, .checked(nil, devices: self.devices()))
+                print("Update: Sill \(c.version) (\(c.build)) checked: signed by Developer ID \(installer.trust.teamID ?? "-") as \(installer.trust.identifier), notarized, newer than \(running), every slice the code the manifest names.")
+                self.send(.checked(nil, devices: self.devices()))
             }
         }
     }
 
     private func startInstall(_ run: Int) {
-        guard let prepared, let unpacked, let checked, let running = runningVersion else { deliver(run, .installed(.cancelled)); return }
+        guard let prepared, let unpacked, let checked, let running = runningVersion else { send(.installed(.cancelled)); return }
+        // Everything once more, right before the swap: another account or copy may have started Sill
+        // since the click.
+        if let r = currentRefusal() {
+            refusal = r
+            send(.installed(.unavailable(r)))
+            return
+        }
         let (isInstalled, cdhash) = UpdateInstaller.runningIsInstalled(bundle)
-        guard isInstalled, let cdhash else { deliver(run, .installed(.changedSinceStart)); return }
+        guard isInstalled, let cdhash else { send(.installed(.changedSinceStart)); return }
+        oldCDHash = cdhash
         let installer = self.installer
         let bundle = self.bundle
         let manifest = prepared.manifest
@@ -264,15 +289,15 @@ final class AppUpdater {
                 installer.install(staged: unpacked, installed: bundle, runningCDHash: cdhash, expected: checked,
                                   manifest: manifest, running: running, runningRequirement: requirement)
             }.value
-            guard let self else { return }
+            guard let self, run == self.attempt else { return }
             switch result {
             case .failure(let f):
+                if !f.cleanUp { self.keep(unpacked) }
                 self.log(f)
-                if !f.cleanUp { self.keptAt = unpacked.path }
-                self.deliver(run, .installed(f))
+                self.send(.installed(f))
             case .success:
                 print("Update: replaced \(bundle.path) with Sill \(checked.version); Sill \(running) is kept at \(unpacked.path) until \(checked.version) has started.")
-                self.deliver(run, .installed(nil))
+                self.send(.installed(nil))
             }
         }
     }
@@ -318,7 +343,7 @@ final class AppUpdater {
                         return
                     }
                     print("Update: Sill \(checked.version) started (pid \(app.processIdentifier)) and is waiting for this Sill to quit; quitting.")
-                    self.deliver(run, .launched(nil))
+                    if run == self.attempt { self.send(.launched(nil)) }
                 } else if Date() >= deadline {
                     timer.invalidate()
                     app.forceTerminate()
@@ -330,21 +355,31 @@ final class AppUpdater {
         RunLoop.main.add(timer, forMode: .common)
     }
 
-    /// The new copy didn't come up: the old one back where it was (the new one goes with the staging
-    /// folder), and why.
+    /// The new copy didn't come up: the old one back where it was if it is still the old one (the new one
+    /// goes with the staging folder), and why.
     private func didNotStart(_ run: Int, _ why: String) {
+        guard run == attempt else { return }
         var putBack = false
-        if let unpacked { putBack = installer.putBack(staged: unpacked, installed: bundle) }
-        if !putBack, let unpacked { keptAt = unpacked.path }
+        if let unpacked, let oldCDHash { putBack = installer.putBack(staged: unpacked, installed: bundle, old: oldCDHash) }
+        if !putBack, let unpacked { keep(unpacked) }
         let f = Policy.Failure.didNotStart(why, putBack: putBack)
         log(f)
-        deliver(run, .launched(f))
+        send(.launched(f))
+    }
+
+    /// The old copy could not be put back: its folder is marked so no clean-up deletes it, and Settings
+    /// and the log say where it is.
+    private func keep(_ copy: URL) {
+        keptAt = copy.path
+        UpdateInstaller.markKept(copy.deletingLastPathComponent(), path: copy.path)
     }
 
     /// Quits through the ordinary quit path (the streamed window home, the virtual display gone), from a
     /// run-loop Timer: NSApp.terminate can answer .terminateLater.
     private func quitForUpdate() {
-        let timer = Timer(timeInterval: 0.2, repeats: false) { _ in NSApp.terminate(nil) }
+        let timer = Timer(timeInterval: 0.2, repeats: false) { _ in
+            MainActor.assumeIsolated { NSApp.terminate(nil) }
+        }
         RunLoop.main.add(timer, forMode: .common)
     }
 
@@ -352,7 +387,7 @@ final class AppUpdater {
         watch?.invalidate()
         watch = nil
         cancel = nil
-        if let staging {
+        if let staging, keptAt == nil {
             DispatchQueue.global(qos: .utility).async { UpdateInstaller.remove(staging) }
         }
         staging = nil
@@ -360,21 +395,24 @@ final class AppUpdater {
         zip = nil
         unpacked = nil
         checked = nil
+        oldCDHash = nil
         shownProgress = (0, .distantPast)
     }
 
     private func log(_ f: Policy.Failure) {
         if f == .cancelled { print("Update: cancelled."); return }
         print("Update failed: \(Policy.logText(f)).")
-        if !f.cleanUp, let unpacked { print("Update: Sill’s previous copy is kept at \(unpacked.path); to put it back, quit Sill and move it to \(bundle.deletingLastPathComponent().path).") }
+        if let keptAt { print("Update: Sill’s previous copy is kept at \(keptAt); to put it back, quit Sill and move it to \(bundle.deletingLastPathComponent().path).") }
     }
 
     // MARK: Launch and start
 
     /// Once this Sill's host has started: what earlier updates left in the temporary folder goes, the
-    /// copy an update replaced among it (kept until now so it could be put back).
+    /// copy an update replaced among it (kept until now so it could be put back). Never while an update
+    /// is under way (its own folder is spared), and never a folder marked as holding a copy that could
+    /// not be put back.
     func cleanUpAfterStart() {
-        guard available else { return }
+        guard available, idle, keptAt == nil else { return }
         let bundle = self.bundle
         DispatchQueue.global(qos: .utility).async {
             let removed = UpdateInstaller.cleanUpStaging(for: bundle)

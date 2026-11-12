@@ -118,8 +118,13 @@ a release (CLAUDE.md, "Nightly builds", the review's "route through main"). So "
 enough to produce a Developer ID signed, notarized Sill and to publish it as the latest release: the code
 signature alone would prove only "built by Sill's CI", and one click would install it everywhere. The
 update key closes that: CI can sign and notarize and publish, but it cannot sign a manifest, so no Sill
-installs what it publishes; the person still sees Open Release Page…, as today. What remains: someone
-with both the update key (Noah's Mac or its backup) and a Developer ID signed, notarized build. The two
+installs what it publishes; the person still sees Open Release Page…, as today. The signing step must not
+reopen it: `sign-update.sh` signs only a zip Noah knows without GitHub (the one `release.sh` made on his
+Mac, byte for byte, or the SHA-256 printed by a release workflow run he approved), so a build CI
+published unapproved, or a zip swapped in a real release before he signs, is refused there; and the key is
+held by one signer binary built once from files he read (`--install-signer`, outside the repository),
+never rebuilt from the checkout of the day, which the keychain item trusts alone. What remains: someone with
+both the update key (Noah's Mac or its backup) and a Developer ID signed, notarized build. The two
 alternatives Noah can choose instead, with what each costs, are §10 Q1.
 
 **T5. A redirect to another host.** Downloads start at
@@ -197,15 +202,24 @@ user owns; the updater cannot stop that and does not try. What it must not do is
 right to change Sill.app: since macOS 13, App Management keeps apps of other teams from modifying a
 signed app, while Sill (team 9B2KKVM937) may modify itself (NSUpdateSecurityPolicy's default: apps of the
 same Team ID may). The updater runs only Sill's own code, checks at the final path, pins the code through
-the launch (T10), and on any doubt swaps the old copy back. A race can make the update fail; it cannot
-make Sill launch code other than what it checked. Not measured here: whether App Management stops
+the launch (T10), and on any doubt swaps the old copy back, but only the old copy: what waits in the
+staging folder after the swap (this user's, so anything of this user can change it) is put back only if it
+is still the code that was running (its cdhash), else it stays out and the checked new copy stays in place.
+A race can make the update fail; it cannot make Sill launch, or put into Sill.app's place, code other than
+what it checked or what was running. A folder above Sill.app that is a link is refused (§4.1), so the swap
+cannot be sent elsewhere between the checks and the exchange; the exchange itself is by path (not by
+directory descriptors), which a process of this user that can rename folders above Sill.app could still
+race: T12's residue. Not measured here: whether App Management stops
 another process of this user from renaming the bundle's folder itself (Apple's pages don't say); nothing
 here depends on it.
 
 **T13. Another account on this Mac running the same Sill.app.** Noah's Mac has one most days (a second
 logged-in account runs /Applications/Sill.app beside his, measured 2026-11-11). The updater finds every
-process whose executable is in its own bundle (`proc_listallpids`, `proc_pidpath`: readable for other
-users' processes, measured) and refuses while one runs (Q3). What would happen otherwise, and why it
+process running its executable (the same file by device and inode, whatever path started it) or any file
+in its bundle (`proc_listallpids`, `proc_pidpath`: readable for other users' processes, measured), and
+every other Sill of this account by bundle identifier wherever it runs from (the new copy waits for every
+one of them, so one left running would leave no Sill), and refuses while one runs (Q3); it looks again
+right before the swap. What would happen otherwise, and why it
 refuses: that process keeps running its old code (its executable's vnode stays alive, at the staging path
 after the swap), but resources it loads later come from the new bundle at the same path (a mix of
 versions); its login item names the path, so its next login starts the new version; its Screen Recording
@@ -214,8 +228,9 @@ own keychain, read by the same access group. The other account cannot touch this
 (0700). A bundle owned by another account is refused anyway (T18). What Noah sees: Q3.
 
 **T14. A second update racing the first.** One AppUpdater per process, a state machine that takes Update
-Now only when idle or failed, and every step's answer carries its attempt (a late answer of a cancelled
-one is dropped); another Sill of this user running from the same bundle is refused (T13); right before
+Now only when idle or failed, and every step's answer carries its attempt: Cancel retires the attempt, and
+an answer of another attempt is dropped before it touches anything; another Sill of this user is refused
+(T13); right before
 the swap, the copy at the path must still be the code that is running (its cdhash, as a requirement the
 kernel's copy of this process must satisfy), so a copy replaced meanwhile (another account's updater, a
 drag in Finder) stops the swap with nothing changed. Two accounts both past that check within
@@ -261,18 +276,21 @@ host, no keychain). The old Sill waits (up to 30 s) for the new one to finish la
 Timer (the modal-loop rule: NSApp.terminate can answer `.terminateLater`). If the new Sill fails to
 launch, quits, or does not finish launching in time, the old one stops it, swaps the old copy back and
 stays, saying so. Once the new Sill's host has started, it deletes the staging folder and the old copy in
-it. If the new Sill fails after that, the old copy is gone; if it fails before (it crashes during its
-first start), the old copy is still in the staging folder, whose path the log gives ("Sill 0.6.1 is kept
-at …"), and the way back is §12's last paragraph.
+it, never while an update of its own is under way, and never a folder marked as holding a copy that could
+not be put back (a file in it says so: the person's way back stays until they move it). If the new Sill
+fails after that, the old copy is gone; if it fails before (it crashes during its first start), the old
+copy is still in the staging folder, whose path the log gives ("Sill 0.6.1 is kept at …"), and the way back
+is §12's last paragraph.
 
 **T21. Hooks.** Nothing in Sill.app can loosen the pinned requirement, the update keys, the allow-list,
 the version rule or the size limits: Trust and Endpoints are immutable values made whole; the mechanism
 takes them as parameters; the app passes two constants (`UpdateInstallPolicy.Trust.release`,
 `.Endpoints.github`); no updater file reads UserDefaults, the environment or the arguments.
 `Tests/checks/update-install` reads the app's sources and fails if any file but the policy makes a Trust
-or Endpoints, if any file but AppUpdater makes an UpdateInstaller, if AppUpdater gives it anything but
-the two constants, or if an updater file's code mentions UserDefaults, `.environment`, `.arguments`,
-CommandLine, getenv, `-Sill` or `SILL_`. The harness that injects test values (`Tests/update-harness`)
+or Endpoints (`Trust(`, `Trust.init(`), if any file but AppUpdater makes an UpdateInstaller, if AppUpdater
+gives it anything but the two constants, or if an updater file's code mentions UserDefaults,
+CFPreferences, NSUbiquitousKeyValueStore, `.environment`, `.arguments`, CommandLine, getenv, `-Sill` or
+`SILL_`. A text rule catches the plain ways, not every way: a reviewer still reads changes to these files. The harness that injects test values (`Tests/update-harness`)
 compiles the same files into its own binary; it is no part of any product.
 
 **T22. Logs.** One line per step, never the download URL's signed query (GitHub's short-lived
@@ -295,10 +313,11 @@ fails closed: nothing changed, the reason shown, Open Release Page… there.
 requirement, both kept. Not measured here (it needs a real update): §12 checks it.
 
 **T27. Revocation.** The code signature check runs with macOS's default network behaviour (no
-`kSecCSNoNetworkAccess`): when Apple can be reached, a revoked notarization or certificate fails it; with
-no network, the stapled ticket suffices (measured: the release's check takes 25 ms either way, so it does
-not wait on the network). Not `kSecCSEnforceRevocationChecks`, which would fail every update on a network
-that blocks Apple's OCSP (Q8).
+`kSecCSNoNetworkAccess`), so macOS may ask Apple about a revoked notarization or certificate; with no
+network, the stapled ticket suffices. Measured: the release's check takes 25 ms with and without
+`kSecCSNoNetworkAccess`, so with a stapled ticket it likely makes no online check at all; whether a revoked
+notarization would be caught is not measured (no revoked build to try). Not
+`kSecCSEnforceRevocationChecks`, which would fail every update on a network that blocks Apple's OCSP (Q8).
 
 **T28. The update key itself (added with the second factor).** Lost: no Sill can verify a new manifest,
 so no release shows Update Now (Open Release Page… as today) until a release carrying a new public key is
@@ -391,11 +410,12 @@ the size. The writer (UpdateInstaller) only ever writes what a `Listing` says.
 Gathered by UpdateInstaller from Security.framework and lstat, judged here (`verdict`), in this order:
 1. `Sill.app` is a folder, not a link; `Contents/Info.plist` and `Contents/MacOS/Sill` are regular
    files, the latter executable.
-2. The signature is valid: `SecStaticCodeCheckValidityWithErrors` with `kSecCSCheckAllArchitectures |
+2. The signature is valid on every slice: `SecStaticCodeCheckValidityWithErrors` with `kSecCSCheckAllArchitectures |
    kSecCSCheckNestedCode | kSecCSStrictValidate | kSecCSRestrictSymlinks | kSecCSRestrictSidebandData |
    kSecCSRestrictToAppLike`, no requirement (measured: a resource fork or a changed resource or
    executable fails it).
-3. It satisfies the pinned requirement, without `notarized`:
+3. Every slice satisfies the pinned requirement (`kSecCSCheckAllArchitectures` on every requirement check,
+   3 to 6: by default Security checks only this Mac's slice), without `notarized`:
    `anchor apple generic and identifier "me.saffer.sill.mac" and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = "9B2KKVM937"`
    (Apple's anchor, the Developer ID intermediate, a Developer ID Application leaf, the team, the
    identifier: exactly Sill's own designated requirement, read from v0.6.1 with `codesign -d -r-`). The
@@ -464,15 +484,26 @@ instead."
   and asks before giving it to a program, so each signing is a deliberate click. A file is still
   possible (`--key-file`, a new file of mode 0600; best on an encrypted disk image mounted only for
   signing). Nothing here made a key: the harness and the checks make throwaway ones in memory.
-- **The release step:** right after a release is published (`release.sh --publish` or the release
-  workflow), on his Mac: `Scripts/sign-update.sh v0.6.2`. It reads the published release (published, not
-  a prerelease, Sill.zip and Sill.zip.sha256 uploaded), downloads the zip into `.build/update-sign`,
-  checks it as the checklist checks a download (its SHA-256 against the `.sha256` file and GitHub's
-  digest; exactly one Sill.app; `codesign --verify --strict --deep` with the pinned requirement and
-  `notarized`; `stapler validate`; spctl's "Notarized Developer ID"; the version is the tag's), reads each
-  slice's cdhash as Update Now will (the app's own UpdateInstaller), signs the manifest (the keychain asks),
-  reads it back with the key the tag's app carries, shows it, asks, uploads `Sill.zip.manifest`, and
-  downloads it again to compare. Until he does, Update Now does not show for that release (T29).
+- **The signer, once per reviewed change to it:** `Scripts/sign-update.sh --install-signer` lists the five
+  files the signer is built from (UpdateManifest, UpdateInstallPolicy, UpdateArchive, StreamProtocol's
+  Compatibility.swift and `Scripts/update-manifest.swift`) with their SHA-256 and the commit, asks whether
+  he has read them, and builds it into `~/Library/Application Support/Sill Update Signer/` (0700) with its
+  own SHA-256 beside it. Signing runs that binary only, after checking it is unchanged, never one built
+  from the checkout of the day: a commit on main that changes those files does not reach the key until he
+  installs the signer again. The keychain item trusts the binary that made it; a later signer asks once.
+- **The release step:** right after a release is published, on his Mac: `Scripts/sign-update.sh v0.6.2`.
+  It first needs the zip he knows: `.build/Sill-0.6.2.zip` from his own `release.sh` run (the default,
+  `--zip` for another path), or `--expect-sha256` with the SHA-256 that a release workflow run he approved
+  printed; GitHub's `Sill.zip` must be that, byte for byte, or nothing is signed. Then it reads the published
+  release (published, not a prerelease, Sill.zip and Sill.zip.sha256 uploaded), downloads the zip into
+  `.build/update-sign`, checks it as the checklist checks a download (its SHA-256 against the `.sha256` file
+  and GitHub's digest; exactly one Sill.app; `codesign --verify --strict --deep` with the pinned requirement
+  and `notarized`; `stapler validate`; spctl's "Notarized Developer ID"; the version is the tag's), reads
+  each slice's cdhash with codesign (the same value as Update Now's Security reading, checked by the
+  harness on v0.6.1's both slices), signs the manifest with the installed signer (the keychain asks unless
+  it made the item), reads it back with the key the tag's app carries, shows it, asks, uploads
+  `Sill.zip.manifest`, and downloads it again to compare. Until he does, Update Now does not show for that
+  release (T29).
 - **Rotation (planned):** release N carries both keys in `releaseKeys` and is signed with the old one (the
   Sills before N know only it); from N + 1 on, sign with the new one (N knows both); N + 2 may drop the old.
 - **Lost:** no new manifest can be made that any Sill in the field accepts. Releases then go out unsigned
@@ -638,8 +669,10 @@ checklist.md part 1 §3's marker rule).
 - G4 `Tests/checks/run-all.sh`: all pass.
 - G5 previews from the bare SillMenuBar binary (never the bundle) against main's: identical but for the
   new samples (pane-update-now-*, menu.txt's update-now-*): with no key, nothing else changes.
-- G6 `Scripts/sign-update.sh` against a stand-in `gh` serving the genuine v0.6.1, with a throwaway key
-  file: every check, the manifest, the "upload" recorded, nothing sent anywhere.
+- G6 `Scripts/sign-update.sh` against a stand-in `gh` serving the genuine v0.6.1, with a throwaway key file
+  and a signer installed in a scratch folder (`SILL_SIGNER_DIR`): every check, the manifest, the "upload"
+  recorded and read back, nothing sent anywhere; refused for a zip that isn't the one known, a signer
+  changed after installing, no signer.
 - Not on this Mac: the real end to end (two notarized builds, a key and Noah's hands: §12). No built
   Sill.app is launched, /Applications/Sill.app is never touched, no key is made in his keychain.
 
@@ -707,6 +740,15 @@ steps 7 to 12 again then.
   sent to the coordinator.
 - 23:00: the coordinator (and Noah's recommendation to come): build the second factor now, the key list
   empty on the branch, the release step written, the alternatives and their costs kept (this version).
+- 2026-11-12 00:20: an independent review of the code as written (read-only, a subagent): twelve findings,
+  each taken: the signing step signed whatever GitHub served (now a zip Noah knows, by its SHA-256) and was
+  rebuilt from the checkout with the key in reach (now a signer installed once); the put-back carried
+  whatever was in staging into place (now only the running code); another copy of Sill from another path
+  left no Sill running (now refused); Cancel did not retire its attempt; the clean-up could delete a live or
+  a kept staging folder; requirements were checked on this Mac's slice only; processes matched by a path
+  string (now by file identity, again right before the swap); a linked folder above Sill.app; consent by
+  name (now by connection); the section could vanish mid-update; the entitlements' flag. Its notes on the
+  tests too: the genuine install's assertion, a 401 case, stronger source rules.
 - Disk under the 25 GB floor from 22:50 (12 to 22 GB free while other agents built): code and documents
   written without compiling until it is back.
 - Measured for this plan: v0.6.1's zip (13 entries, stored and deflate, 8 with data descriptors, no

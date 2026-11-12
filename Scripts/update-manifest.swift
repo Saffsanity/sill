@@ -2,20 +2,22 @@ import CryptoKit
 import Foundation
 import Security
 
-// The update manifest's tool (docs/one-click-update-plan.md §4.3), for Scripts/sign-update.sh: compiled
-// by it with Sources/SillMenuBar's UpdateManifest, UpdateInstallPolicy, UpdatePolicy and UpdateInstaller
-// and StreamProtocol, so the manifest it writes and the cdhashes it reads are the app's own definitions.
+// The update manifest's signer (docs/one-click-update-plan.md §4.8), the one program that ever holds the
+// update key. `Scripts/sign-update.sh --install-signer` compiles it once, from a commit Noah has read, with
+// the app's own pure definitions of the manifest (UpdateManifest, with UpdateInstallPolicy, UpdateArchive
+// and StreamProtocol's Compatibility.swift for the version), into a folder outside the repository; signing
+// runs that binary only, never one built from whatever the checkout holds that day, and the keychain item
+// trusts that binary alone (any other program asks). It reads no network and runs no other program.
 //
 //   update-manifest new-key [--key-file PATH]     make the update key: in the login keychain (service
 //                                                 me.saffer.sill.update-signing, account ed25519, never
 //                                                 synced), or a new file of mode 0600; prints the public key
 //   update-manifest public-key [--key-file PATH]  the stored key's public key and key ID
-//   update-manifest cdhashes APP                  each slice's cdhash, as Update Now reads them
 //   update-manifest sign --tag T --build B --asset NAME --size N --sha256 HEX --cdhash ARCH=HEX...
 //                        --out FILE [--key-file PATH]
 //   update-manifest verify FILE --key BASE64...   the manifest's fields, if one of the keys signed it
 //
-// The private key is read from the keychain (which asks before giving it to this tool) or from the file
+// The private key is read from the keychain (which asks unless this binary made the item) or from the file
 // given; it is never printed, never written anywhere else, and never sent anywhere.
 
 let service = "me.saffer.sill.update-signing", account = "ed25519"
@@ -86,11 +88,6 @@ case "new-key":
     print("Put the public key in Sources/SillMenuBar/UpdateManifest.swift's releaseKeys, and keep a copy of the private key off this Mac (docs/release-checklist.md, Update Now's key).")
 case "public-key":
     print(describe(storedKey(option("--key-file"))))
-case "cdhashes":
-    guard let path = args.first else { fail("cdhashes APP") }
-    for arch in UpdateInstallPolicy.Architecture.allCases {
-        if let h = UpdateInstaller.cdhash(of: URL(fileURLWithPath: path), arch: arch) { print("\(arch.rawValue)=\(h)") }
-    }
 case "sign":
     guard let tag = option("--tag"), let build = option("--build"), let asset = option("--asset"),
           let sizeText = option("--size"), let size = Int64(sizeText), let sha = option("--sha256"), let out = option("--out") else {

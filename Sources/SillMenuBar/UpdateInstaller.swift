@@ -269,13 +269,15 @@ final class UpdateInstaller: @unchecked Sendable {
         guard created == errSecSuccess, let code else { f.signatureStatus = created; return f }
         f.signatureStatus = SecStaticCodeCheckValidityWithErrors(code, Self.strictFlags, nil, nil)
         guard f.signatureStatus == errSecSuccess else { return f }
+        // Every requirement on every slice: SecStaticCodeCheckValidity checks only this Mac's slice unless asked.
         f.signer = Self.satisfies(code, trust.signer)
         if trust.notarized { f.notarized = Self.satisfies(code, "notarized") }
         if trust.runningRequirement {
-            f.runningRequirement = runningRequirement.map { SecStaticCodeCheckValidity(code, [], $0) == errSecSuccess } ?? false
+            f.runningRequirement = runningRequirement.map { SecStaticCodeCheckValidity(code, Self.allSlices, $0) == errSecSuccess } ?? false
         }
         var info: CFDictionary?
-        if SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation | kSecCSContentInformation), &info) == errSecSuccess,
+        if SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation | kSecCSContentInformation | kSecCSRequirementInformation),
+                                         &info) == errSecSuccess,
            let d = info as? [String: Any] {
             f.identifier = d[kSecCodeInfoIdentifier as String] as? String
             f.teamID = d[kSecCodeInfoTeamIdentifier as String] as? String
@@ -304,10 +306,13 @@ final class UpdateInstaller: @unchecked Sendable {
     static let strictFlags = SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSCheckNestedCode | kSecCSStrictValidate
                                           | kSecCSRestrictSymlinks | kSecCSRestrictSidebandData | kSecCSRestrictToAppLike)
 
+    static let allSlices = SecCSFlags(rawValue: kSecCSCheckAllArchitectures)
+
+    /// Whether every slice of `code` satisfies `requirement`.
     static func satisfies(_ code: SecStaticCode, _ requirement: String) -> Bool {
         var req: SecRequirement?
         guard SecRequirementCreateWithString(requirement as CFString, [], &req) == errSecSuccess, let req else { return false }
-        return SecStaticCodeCheckValidity(code, [], req) == errSecSuccess
+        return SecStaticCodeCheckValidity(code, allSlices, req) == errSecSuccess
     }
 
     /// The cdhash (40 lowercase hex digits) of `bundle`'s slice for `arch`, or nil when it has none.
@@ -356,10 +361,10 @@ final class UpdateInstaller: @unchecked Sendable {
     /// RENAME_SWAP), when the copy there is still a folder and, given `runningCDHash`, still the code
     /// that is running. Then every check again at `installed`, the same code required; on any failure
     /// the exchange is undone. Afterwards `staged` holds the old copy.
-    func install(staged: URL, installed: URL, runningCDHash: String?, expected: Policy.Checked, manifest: UpdateManifest,
+    func install(staged: URL, installed: URL, runningCDHash: String, expected: Policy.Checked, manifest: UpdateManifest,
                  running: SillVersion, runningRequirement: SecRequirement?) -> Result<Void, Failure> {
         guard Self.isFolder(installed) else { return .failure(.changedSinceStart) }
-        if let runningCDHash, Self.cdhash(of: installed, arch: .current) != runningCDHash { return .failure(.changedSinceStart) }
+        guard Self.cdhash(of: installed, arch: .current) == runningCDHash else { return .failure(.changedSinceStart) }
         guard Self.isFolder(staged) else { return .failure(.swapFailed("the checked copy is gone")) }
         guard let a = Self.device(of: staged.deletingLastPathComponent()), let b = Self.device(of: installed.deletingLastPathComponent()),
               a == b else { return .failure(.swapFailed("not on the same volume")) }
@@ -368,15 +373,19 @@ final class UpdateInstaller: @unchecked Sendable {
         case .success(let c) where c == expected:
             return .success(())
         case .failure(.bundle(let p)):
-            return .failure(.checkAfterSwap(p, putBack: putBack(staged: staged, installed: installed)))
+            return .failure(.checkAfterSwap(p, putBack: putBack(staged: staged, installed: installed, old: runningCDHash)))
         default:
-            return .failure(.checkAfterSwap(.codeChanged, putBack: putBack(staged: staged, installed: installed)))
+            return .failure(.checkAfterSwap(.codeChanged, putBack: putBack(staged: staged, installed: installed, old: runningCDHash)))
         }
     }
 
-    /// The exchange again: the old copy back at `installed`, the new one in `staged`.
-    func putBack(staged: URL, installed: URL) -> Bool {
-        renamex_np(staged.path, installed.path, UInt32(RENAME_SWAP)) == 0
+    /// The exchange again: the old copy back at `installed`, the new one in `staged`, but only when what
+    /// waits in `staged` is still the old copy, the code that was running (`old`, its cdhash for this
+    /// Mac's slice): the staging folder is this user's, and anything of this user could have put
+    /// something else there meanwhile, which Sill's right to change Sill.app must never carry into place.
+    func putBack(staged: URL, installed: URL, old: String) -> Bool {
+        guard Self.isFolder(staged), Self.cdhash(of: staged, arch: .current) == old else { return false }
+        return renamex_np(staged.path, installed.path, UInt32(RENAME_SWAP)) == 0
     }
 
     // MARK: Staging
@@ -403,8 +412,20 @@ final class UpdateInstaller: @unchecked Sendable {
         try? FileManager.default.removeItem(at: staging)
     }
 
+    /// The file that marks a staging folder holding the old copy that could not be put back: the
+    /// person's way back, which no clean-up deletes.
+    static let keptMarker = "Sill’s previous copy is here.txt"
+
+    /// Marks `staging` as holding the old copy that could not be put back.
+    static func markKept(_ staging: URL, path: String) {
+        let text = "This folder holds the copy of Sill that an update replaced and could not put back: \(path).\nTo go back to it, quit Sill and move it to your Applications folder.\n"
+        FileManager.default.createFile(atPath: staging.appendingPathComponent(keptMarker).path, contents: Data(text.utf8),
+                                       attributes: [.posixPermissions: 0o600])
+    }
+
     /// Removes the staging folders earlier updates left (`NSIRD_‹this process's name›_…` in the
-    /// temporary-items folder of `installed`'s volume), but `keep`; what it removed.
+    /// temporary-items folder of `installed`'s volume), but `keep` and any marked as holding a copy that
+    /// could not be put back; what it removed.
     static func cleanUpStaging(for installed: URL, keep: URL? = nil) -> [String] {
         let fm = FileManager.default
         guard let probe = try? fm.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: installed, create: true) else {
@@ -419,6 +440,8 @@ final class UpdateInstaller: @unchecked Sendable {
             if let keep, url.standardizedFileURL.path == keep.standardizedFileURL.path { continue }
             var s = stat()
             guard lstat(url.path, &s) == 0, s.st_mode & S_IFMT == S_IFDIR, s.st_uid == getuid() else { continue }
+            var marker = stat()
+            if lstat(url.appendingPathComponent(keptMarker).path, &marker) == 0 { continue }
             if (try? fm.removeItem(at: url)) != nil { removed.append(url.path) }
         }
         return removed
@@ -477,13 +500,19 @@ final class UpdateInstaller: @unchecked Sendable {
     }
 
     /// Where `bundle` is, for UpdateInstallPolicy.refusal (the running-code facts come from the caller).
-    static func situation(bundle: URL, runningIsRelease: Bool, testFeed: Bool, runningIsInstalled: Bool,
+    static func situation(bundle: URL, executable: String, runningIsRelease: Bool, testFeed: Bool, runningIsInstalled: Bool,
                           neededBytes: Int64) -> Policy.Situation {
-        var link = false, owned = false
+        var owned = false
         var s = stat()
-        if lstat(bundle.path, &s) == 0 {
-            link = s.st_mode & S_IFMT == S_IFLNK
-            owned = s.st_uid == getuid()
+        if lstat(bundle.path, &s) == 0 { owned = s.st_uid == getuid() }
+        // A link anywhere on the way (the bundle or a folder above it) could send the swap elsewhere
+        // between the checks and the exchange.
+        var link = false
+        var walk = bundle.standardizedFileURL
+        while walk.path != "/" {
+            var l = stat()
+            if lstat(walk.path, &l) == 0, l.st_mode & S_IFMT == S_IFLNK { link = true; break }
+            walk = walk.deletingLastPathComponent()
         }
         var readOnly = false, network = false, image = false
         var volume = "this disk"
@@ -500,7 +529,7 @@ final class UpdateInstaller: @unchecked Sendable {
             }
         }
         let parent = bundle.deletingLastPathComponent()
-        let others = processesRunning(from: bundle, excluding: getpid())
+        let others = processesRunning(from: bundle, executable: executable, excluding: getpid())
         let me = getuid()
         let accounts = Set(others.filter { $0.uid != me }.map { accountName($0.uid) }).sorted()
         return Policy.Situation(
@@ -512,10 +541,13 @@ final class UpdateInstaller: @unchecked Sendable {
             freeBytes: freeBytes(at: parent), neededBytes: neededBytes)
     }
 
-    /// Every other process whose executable is inside `bundle` (any account's: proc_pidpath reads
+    /// Every other process running `bundle`'s executable (the same file, by device and inode, whatever
+    /// path it was started by) or any other file inside it (by path), any account's (proc_pidpath reads
     /// other users' processes), with its user.
-    static func processesRunning(from bundle: URL, excluding own: pid_t) -> [(pid: pid_t, uid: uid_t)] {
+    static func processesRunning(from bundle: URL, executable: String, excluding own: pid_t) -> [(pid: pid_t, uid: uid_t)] {
         let prefix = bundle.resolvingSymlinksInPath().standardizedFileURL.path + "/"
+        var main = stat()
+        let haveMain = stat(bundle.appendingPathComponent("Contents/MacOS/\(executable)").path, &main) == 0
         let wanted = proc_listallpids(nil, 0)
         guard wanted > 0 else { return [] }
         var pids = [pid_t](repeating: 0, count: Int(wanted) + 256)
@@ -527,7 +559,10 @@ final class UpdateInstaller: @unchecked Sendable {
         var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
         for pid in pids.prefix(min(Int(count), pids.count)) where pid > 0 && pid != own {
             guard proc_pidpath(pid, &path, UInt32(path.count)) > 0 else { continue }
-            guard String(cString: path).hasPrefix(prefix) else { continue }
+            let text = String(cString: path)
+            var file = stat()
+            let same = haveMain && stat(text, &file) == 0 && file.st_dev == main.st_dev && file.st_ino == main.st_ino
+            guard same || text.hasPrefix(prefix) else { continue }
             found.append((pid, uid(of: pid) ?? uid_t.max))
         }
         return found
@@ -729,12 +764,14 @@ private final class Transfer: NSObject, URLSessionDataDelegate, @unchecked Senda
         answer(challenge, completionHandler)
     }
 
-    /// The server's certificate by the system's rules; anything that would send a credential, refused.
+    /// The server's certificate by the system's rules; anything that would send a credential, refused,
+    /// and the transfer ends there.
     private func answer(_ challenge: URLAuthenticationChallenge,
                         _ completionHandler: (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust {
             completionHandler(.performDefaultHandling, nil)
         } else {
+            if failure == nil { failure = .download("the server asked for a credential, which Sill never sends") }
             completionHandler(.cancelAuthenticationChallenge, nil)
         }
     }

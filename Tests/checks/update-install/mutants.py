@@ -40,7 +40,8 @@ MUTANTS = [
     ("another owner's copy", POL, "if !s.folderWritable || !s.bundleWritable || !s.ownedByUser {", "if !s.folderWritable || !s.bundleWritable {"),
     ("no room needed to the byte", POL, "if let free = s.freeBytes, free < s.neededBytes {", "if let free = s.freeBytes, free <= s.neededBytes {"),
     # The state machine.
-    ("a device joining never asked about", POL, "if Set(devices).isSubset(of: Set(s.consented)) { n.phase = .installing; return (n, [.install]) }", "n.phase = .installing; return (n, [.install])"),
+    ("a device joining never asked about", POL, "if Set(devices.map(\\.key)).isSubset(of: Set(s.consented)) { n.phase = .installing; return (n, [.install]) }", "n.phase = .installing; return (n, [.install])"),
+    ("consent by name", POL, "        case (.confirming(let devices), .confirm):\n            n.consented = devices.map(\\.key)", "        case (.confirming(let devices), .confirm):\n            n.consented = devices.map(\\.name)"),
     ("the old copy deleted when not put back", POL, "return (n, f.cleanUp ? [.cleanUp] : [])", "return (n, [.cleanUp])"),
     ("cancel while installing", POL, "case (.ready, .cancel), (.fetching, .cancel),", "case (.ready, .cancel), (.installing, .cancel), (.fetching, .cancel),"),
     ("a copy not put back cleaned up", POL, "case .checkAfterSwap(_, let putBack), .didNotStart(_, let putBack): return putBack", "case .checkAfterSwap, .didNotStart: return true"),

@@ -177,7 +177,7 @@ func update(_ name: String, using ins: UpdateInstaller = installer, installedFro
             .first { FileManager.default.fileExists(atPath: $0.path) }!
         let h = try! FileHandle(forWritingTo: note); h.seekToEndOfFile(); h.write(Data("changed between the check and the swap".utf8)); h.closeFile()
     }
-    let runningCDHash = tamper == .wrongRunningCDHash ? String(repeating: "0", count: 40) : UpdateInstaller.cdhash(of: installed, arch: .current)
+    let runningCDHash = tamper == .wrongRunningCDHash ? String(repeating: "0", count: 40) : (UpdateInstaller.cdhash(of: installed, arch: .current) ?? "")
     switch ins.install(staged: staged, installed: installed, runningCDHash: runningCDHash, expected: checked, manifest: prepared.manifest,
                        running: running, runningRequirement: runningRequirement) {
     case .failure(let f): o.failure = f
@@ -201,17 +201,19 @@ func refused(_ name: String, _ r: Release, offeredTag: String = "v1.1", running:
     if let s = o.staging { UpdateInstaller.remove(s) }
 }
 
-/// A case that must install: the new version at the path, the old in staging.
+/// A case that must install: the new version at the path, its code the manifest's, the old copy whole in staging.
 func installs(_ name: String, _ r: Release, expectVersion: String = "1.1", using ins: UpdateInstaller = installer,
               installedFrom: URL? = nil, offeredTag: String = "v1.1", running: SillVersion = SillVersion("1.0")!,
               runningRequirement: SecRequirement? = nil, keepStaging: Bool = false) async -> Outcome {
     publish(r)
+    let before = treeHash(installedFrom ?? out.appendingPathComponent("apps/installed/UpdTest.app"))
     let o = await update(name, using: ins, installedFrom: installedFrom, offeredTag: offeredTag, running: running,
                          runningRequirement: runningRequirement)
     check(o.failure == nil, "\(name): \(o.failure.map { P.logText($0) } ?? "")")
     check(version(of: o.installed) == expectVersion, "\(name): the installed version is \(version(of: o.installed) ?? "none")")
+    check(cdhashes(o.installed) == cdhashes(r.app), "\(name): the installed code is the manifest's")
     if let staged = o.staged {
-        check(version(of: staged) != expectVersion, "\(name): the old copy is in staging (\(version(of: staged) ?? "none"))")
+        check(treeHash(staged) == before, "\(name): the old copy is in staging, whole")
     }
     say("\(name): installed \(version(of: o.installed) ?? "?")")
     if !keepStaging, let s = o.staging { UpdateInstaller.remove(s) }
@@ -227,8 +229,20 @@ let v11 = Release(zip: zip("v1.1"), app: app("v1.1"))
 say("== installs")
 var o = await installs("ditto zip (AppleDouble beside its files)", v11, keepStaging: true)
 // The old copy can be put back by the same exchange.
+let oldCode = UpdateInstaller.cdhash(of: app("installed"), arch: .current)!
 if let staged = o.staged {
-    check(installer.putBack(staged: staged, installed: o.installed) && version(of: o.installed) == "1.0", "put back: 1.0 at the path again")
+    check(!installer.putBack(staged: staged, installed: o.installed, old: String(repeating: "0", count: 40)) && version(of: o.installed) == "1.1",
+          "no put back when the copy in staging is not the old code")
+    check(installer.putBack(staged: staged, installed: o.installed, old: oldCode) && version(of: o.installed) == "1.0", "put back: 1.0 at the path again")
+    UpdateInstaller.remove(o.staging!)
+}
+// What waits in staging was replaced (by anything of this user) after the swap: never carried into place.
+o = await installs("a swap, then the old copy replaced in staging", v11, keepStaging: true)
+if let staged = o.staged {
+    try? FileManager.default.removeItem(at: staged)
+    _ = Process.runTool("/usr/bin/ditto", [app("other").path, staged.path])
+    check(!installer.putBack(staged: staged, installed: o.installed, old: oldCode) && version(of: o.installed) == "1.1",
+          "another bundle in staging is not put back: the checked new copy stays")
     UpdateInstaller.remove(o.staging!)
 }
 o = await installs("zipfile zip", Release(zip: zip("hostile-plain"), app: app("v1.1")))
@@ -259,6 +273,9 @@ await refused("a truncated download", { var r = v11; r.modes = ["UpdTest.zip": "
 await refused("a Content-Length too large", { var r = v11; r.modes = ["UpdTest.zip": "oversize"]; return r }()) { $0 == .sizeMismatch }
 await refused("more bytes than the manifest says", { var r = v11; r.modes = ["UpdTest.zip": "nolength"]; return r }()) { $0 == .tooLarge }
 await refused("the zip answered 500", { var r = v11; r.modes = ["UpdTest.zip": "status:500"]; return r }()) { $0 == .github(500) }
+await refused("a server asking for a password", { var r = v11; r.modes = ["UpdTest.zip": "auth"]; return r }()) {
+    $0 == .download("the server asked for a credential, which Sill never sends") || $0 == .github(401)
+}
 
 say("== refused: the archive")
 await refused("a name under ../", Release(zip: zip("hostile-traversal"), app: app("v1.1"))) { if case .archive(.badName) = $0 { return true }; return false }
@@ -297,7 +314,8 @@ let log = (try? String(contentsOf: out.appendingPathComponent("srv/requests.log"
 let requests = log.split(separator: "\n")
 check(!requests.isEmpty, "requests were made")
 check(requests.allSatisfy { $0.contains("ua=Sill/test") }, "every request carries Sill's User-Agent")
-check(requests.allSatisfy { $0.contains("auth=no") && $0.contains("cookie=no") }, "no credential and no cookie, ever")
+check(requests.allSatisfy { $0.contains("auth=no") && $0.contains("cookie=no") }, "no credential and no cookie, ever (a 401 asked for one)")
+check(requests.filter { $0.contains("/download/v1.1/UpdTest.zip") }.count >= 1, "the zip was asked for")
 check(!requests.contains { $0.contains("host=localhost") }, "no request followed the redirect to another host")
 check(!requests.contains { $0.contains("/elsewhere/") }, "no request followed the redirect to another path")
 say("\(requests.count) requests, every one with Sill/test, none with a credential or a cookie")
@@ -319,25 +337,25 @@ check(!UpdateInstaller.process(child.processIdentifier, satisfies: "identifier \
 check(!UpdateInstaller.process(child.processIdentifier, satisfies: P.pinnedRequirement), "the test app is not Sill")
 
 say("== where an app runs (the refusals' facts)")
-var s = UpdateInstaller.situation(bundle: running, runningIsRelease: true, testFeed: false, runningIsInstalled: true, neededBytes: 1 << 20)
+var s = UpdateInstaller.situation(bundle: running, executable: "UpdTest", runningIsRelease: true, testFeed: false, runningIsInstalled: true, neededBytes: 1 << 20)
 check(!s.bundleIsLink && !s.translocated && !s.readOnlyVolume && !s.networkVolume && !s.diskImage && s.folderWritable && s.bundleWritable && s.ownedByUser,
       "a scratch copy: writable, local, owned: \(s)")
 check(s.otherInstances == 1 && s.otherAccounts.isEmpty, "a process running from it: \(s.otherInstances), \(s.otherAccounts)")
 check(P.refusal(s) == .otherInstance, "refused while it runs")
 child.terminate()
 child.waitUntilExit()
-s = UpdateInstaller.situation(bundle: running, runningIsRelease: true, testFeed: false, runningIsInstalled: true, neededBytes: 1 << 20)
+s = UpdateInstaller.situation(bundle: running, executable: "UpdTest", runningIsRelease: true, testFeed: false, runningIsInstalled: true, neededBytes: 1 << 20)
 check(s.otherInstances == 0 && P.refusal(s) == nil, "nothing running from it: no refusal")
 let folder = running.deletingLastPathComponent()
 chmod(folder.path, 0o555)
-s = UpdateInstaller.situation(bundle: running, runningIsRelease: true, testFeed: false, runningIsInstalled: true, neededBytes: 1 << 20)
+s = UpdateInstaller.situation(bundle: running, executable: "UpdTest", runningIsRelease: true, testFeed: false, runningIsInstalled: true, neededBytes: 1 << 20)
 check(!s.folderWritable && P.refusal(s) == .notWritable(folder.path), "a folder this account can't change")
 chmod(folder.path, 0o755)
 let link = folder.appendingPathComponent("Link.app")
 try? FileManager.default.createSymbolicLink(at: link, withDestinationURL: running)
-s = UpdateInstaller.situation(bundle: link, runningIsRelease: true, testFeed: false, runningIsInstalled: true, neededBytes: 1 << 20)
+s = UpdateInstaller.situation(bundle: link, executable: "UpdTest", runningIsRelease: true, testFeed: false, runningIsInstalled: true, neededBytes: 1 << 20)
 check(s.bundleIsLink && P.refusal(s) == .link(link.path), "a link to the app")
-s = UpdateInstaller.situation(bundle: running, runningIsRelease: true, testFeed: false, runningIsInstalled: true, neededBytes: Int64.max)
+s = UpdateInstaller.situation(bundle: running, executable: "UpdTest", runningIsRelease: true, testFeed: false, runningIsInstalled: true, neededBytes: Int64.max)
 check(P.refusal(s).map { if case .lowSpace = $0 { return true }; return false } == true, "not enough space")
 // A disk image, writable then read-only (hdiutil, in the scratch folder, never browsable).
 let image = out.appendingPathComponent("image.dmg"), mount = out.appendingPathComponent("mnt-image")
@@ -349,7 +367,7 @@ if Process.runTool("/usr/bin/hdiutil", ["create", "-quiet", "-size", "16m", "-fs
         guard Process.runTool("/usr/bin/hdiutil", args) == 0 else { check(false, "hdiutil attach"); continue }
         let onImage = mount.appendingPathComponent("UpdTest.app")
         if !readOnly { _ = Process.runTool("/usr/bin/ditto", [app("installed").path, onImage.path]) }
-        let t = UpdateInstaller.situation(bundle: onImage, runningIsRelease: true, testFeed: false, runningIsInstalled: true, neededBytes: 1 << 20)
+        let t = UpdateInstaller.situation(bundle: onImage, executable: "UpdTest", runningIsRelease: true, testFeed: false, runningIsInstalled: true, neededBytes: 1 << 20)
         check(t.diskImage, "a disk image is seen as one (read-only \(readOnly))")
         check(t.readOnlyVolume == readOnly, "read-only: \(t.readOnlyVolume)")
         check(P.refusal(t) == .diskImage, "refused on a disk image")
@@ -370,10 +388,13 @@ for d in made {
     lstat(d.path, &st)
     check(st.st_mode & 0o777 == 0o700 && st.st_uid == getuid(), "0700 and this user's: \(String(st.st_mode & 0o777, radix: 8))")
 }
+UpdateInstaller.markKept(made[1], path: made[1].appendingPathComponent("UpdTest.app").path)
 let removed = UpdateInstaller.cleanUpStaging(for: probe, keep: made[0])
-check(Set(removed) == Set(made.dropFirst().map(\.path)), "the others removed, the kept one kept: \(removed)")
-check(FileManager.default.fileExists(atPath: made[0].path), "the kept one is there")
+check(Set(removed) == Set([made[2].path]), "only the unmarked other removed: \(removed)")
+check(FileManager.default.fileExists(atPath: made[0].path) && FileManager.default.fileExists(atPath: made[1].path),
+      "the kept one and the one holding a copy not put back are there")
 UpdateInstaller.remove(made[0])
+UpdateInstaller.remove(made[1])
 
 // MARK: The genuine Sill 0.6.1 under Trust.release (with this run's key)
 
@@ -395,6 +416,18 @@ if FileManager.default.fileExists(atPath: g.appendingPathComponent("plain.zip").
     let plainApp = g.appendingPathComponent("plain/Sill.app"), installedSill = g.appendingPathComponent("installed/Sill.app")
     let codes = cdhashes(plainApp)
     check(codes.keys.sorted() == ["arm64", "x86_64"], "the release is universal: \(codes)")
+    // The signer reads each slice's cdhash with codesign; Update Now with Security: the same values.
+    for (arch, hash) in codes {
+        let p = Process(), pipe = Pipe()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        p.arguments = ["-dvvv", "--arch", arch, plainApp.path]
+        p.standardError = pipe
+        p.standardOutput = pipe
+        try! p.run()
+        p.waitUntilExit()
+        let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        check(text.contains("CDHash=\(hash)\n"), "codesign's CDHash for \(arch) is Update Now's \(hash)")
+    }
     say("genuine cdhashes: \(codes)")
     let genuine = Release(tag: "v0.6.1", zip: g.appendingPathComponent("plain.zip"), asset: "Sill.zip", app: plainApp, build: "1388")
     _ = await installs("genuine 0.6.1 over 0.6.0", genuine, expectVersion: "0.6.1", using: real, installedFrom: installedSill, offeredTag: "v0.6.1",

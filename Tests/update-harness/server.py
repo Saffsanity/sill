@@ -8,7 +8,7 @@ Serves, from DIR/control.json read at every request:
       Content-Length that says so), nolength (100 bytes more, no Content-Length), redirect-same (302 to
       /assets/<name> here), redirect-other (302 to http://localhost:<port>/assets/<name>), redirect-path
       (302 to /elsewhere/<name> here), redirect-loop (302 to /assets/hop-<name>, which sends itself on and
-      on), status:N
+      on), auth (401 asking for a password), status:N
   GET /assets/<name>                the asset, 200
 Every request is one line in DIR/requests.log: the method, the Host header, the path, the User-Agent,
 and whether an Authorization or Cookie header came. HTTP/1.0: one request per connection."""
@@ -61,6 +61,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             mode = c.get("modes", {}).get(name, "normal")
             if mode.startswith("status:"):
                 return self.send(int(mode[7:]), b"no")
+            if mode == "auth":
+                return self.send(401, b"who are you", {"WWW-Authenticate": 'Basic realm="harness"'})
             if mode == "redirect-same":
                 return self.send(302, b"", {"Location": "http://127.0.0.1:%d/assets/%s" % (port, name)})
             if mode == "redirect-other":
