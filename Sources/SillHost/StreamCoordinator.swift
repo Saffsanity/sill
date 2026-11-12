@@ -411,7 +411,8 @@ package final class StreamCoordinator {
         WindowCatalog.screenless = noScreen.on
         let keyframeIgnore = Self.keyframeIgnoreHook(synthetic: synthetic, environment: env)
         let desktopFail = Self.desktopFailHook(synthetic: synthetic, environment: env)
-        let displaysHook = DesktopDisplaysHook.read(synthetic: synthetic, environment: env)
+        let displaysHook = DesktopDisplaysHook.read(testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
+                                                    environment: env)
         pointer = PointerWatch(synthetic: synthetic, path: path.path)
         softwareOnly = software.on
         let userActive = DisplayWake.userActive(environment: env, testHost: synthetic)

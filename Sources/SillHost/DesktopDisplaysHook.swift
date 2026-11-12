@@ -10,7 +10,8 @@ import StreamProtocol
 /// drawn on it, its rate held to the stop's; kind 47 steps through them; input lands in each one's own
 /// space (the dry run's log under SILL_TEST_INPUT_LOG); the window list's fields and the lines are as on a
 /// real Mac. Nothing of this Mac's displays is read for it, and nothing is posted or warped. Honoured only by
-/// a synthetic host: anywhere else one line says it is ignored.
+/// a test host (`--synthetic`, and never Sill.app's own executable: DoorPolicy.isTestHost): anywhere else one
+/// line says it is ignored.
 enum DesktopDisplaysHook {
     static let variable = "SILL_TEST_DISPLAYS"
 
@@ -21,9 +22,9 @@ enum DesktopDisplaysHook {
     }
 
     /// The stops a test host takes, and the one line it prints at start (nil when the variable is not set).
-    static func read(synthetic: Bool, environment: [String: String]) -> (stops: [Stop]?, line: String?) {
+    static func read(testHost: Bool, environment: [String: String]) -> (stops: [Stop]?, line: String?) {
         guard let raw = environment[variable], !raw.isEmpty else { return (nil, nil) }
-        guard synthetic else { return (nil, "\(variable) ignored: only a --synthetic host takes it.") }
+        guard testHost else { return (nil, "\(variable) ignored: only a --synthetic test host takes it, never Sill.app.") }
         guard let stops = parse(raw) else {
             return (nil, "\(variable) ignored: it takes NAME:WxH@SCALE:HZ:X,Y entries separated by ';', the first the main display.")
         }
