@@ -99,8 +99,10 @@ final class WindowCatalog {
             guard clientCount != oldValue else { return }
             Stats.shared.activeClients = clientCount
             if oldValue == 0 && clientCount > 0 {
+                devicesArrived()
                 startPolling()
             } else if oldValue > 0 && clientCount == 0 {
+                devicesLeftAt = .now
                 stopPolling()
             } else if clientCount > oldValue {
                 resendAllThumbnails()      // another client joined; it has no thumbnails yet
@@ -112,21 +114,37 @@ final class WindowCatalog {
     /// because its contents are the ones changing. Nil is fine: it is then treated like any other.
     var activeWindowID: UInt32?
 
-    /// `--virtual-display`: the Desktop source must capture the Mac's real main display, never the
-    /// virtual one. `SCShareableContent.displays` order is not guaranteed once a second display
-    /// exists, so pick by ID. Off by default: the default path keeps `displays.first`.
-    var preferMainDisplay = false
-
-    /// The Desktop's display a device stepped to (kind 47, DesktopDisplays), by its UUID: kept while
-    /// Sill runs and across sleeps, where its ID can change. Nil until a device steps; while it is
-    /// unplugged the Desktop is on the display it would be on without it.
-    private var desktopDisplayUUID: String?
-    /// The displays the Desktop can stream, from the last look, in DesktopDisplays' order (never Sill's
-    /// virtual display): the window list's `desktopDisplays` and `desktopDisplay`.
+    /// The Desktop's stop a device stepped to (kind 47, DesktopDisplays), by its UUID: kept across sleeps,
+    /// where a display's ID can change, while a device is connected and for DesktopDisplays.choiceGrace
+    /// after the last one left (`clientCount`), so a reconnect or a move to the cable comes back to it and a
+    /// later session begins on the main display. Nil until a device steps; while its display is unplugged
+    /// the Desktop is on the main display, and back on it when it returns.
+    private(set) var desktopDisplayUUID: String?
+    /// When the last device left, on the clock that keeps counting while the Mac sleeps: the choice's span.
+    private var devicesLeftAt: ContinuousClock.Instant?
+    /// The Desktop's stops from the last look, in the cycle's order (DesktopDisplays.candidates: the main
+    /// display first, never Sill's own display or macOS's stand-in, one per mirror set): the window list's
+    /// `desktopDisplays`, `desktopDisplay` and `desktopDisplayNames`.
     private(set) var desktopCandidates: [DesktopDisplays.Display] = []
+    /// The stop the Desktop shows, or comes back to while a window streams: `display`'s ID, or a test
+    /// host's stop's (`testDisplays`). Nil with no display at all.
+    private(set) var desktopDisplayID: UInt32?
+    /// The displays the last look listed, which the stops are chosen among (where PR #200 puts its pool:
+    /// a real display, else Sill's, else macOS's stand-in).
     private var lookedDisplays: [SCDisplay] = []
-    /// How many displays the Desktop can stream, or which it streams, changed: the list goes out again,
-    /// and a Desktop streaming another display restarts.
+    /// The Desktop on the main display alone (DesktopDisplays.resolve's `mainOnly`): this Mac locked, or
+    /// another user on its screen (the coordinator's lock reading). The choice is kept, and the Desktop
+    /// goes back to it when this is cleared.
+    var mainOnly = false {
+        didSet { if mainOnly != oldValue { resolveDesktopDisplay() } }
+    }
+    /// TEST ONLY (SILL_TEST_DISPLAYS on a --synthetic host, DesktopDisplaysHook): the stops a test host
+    /// lists in place of this Mac's displays, the first its main display. Nil on every other host.
+    var testDisplays: [DesktopDisplays.Display]? {
+        didSet { resolveDesktopDisplay() }
+    }
+    /// The Desktop's stops, which one it shows, or their names changed: the list goes out again, and a
+    /// Desktop streaming another display restarts on the one it shows now.
     var onDesktopDisplaysChanged: (() -> Void)?
 
     /// `--virtual-display`: the window the coordinator has moved onto the virtual display. Set right
@@ -342,45 +360,66 @@ final class WindowCatalog {
         }
     }
 
-    /// Steps the Desktop to the display after the one it streams (kind 47), from the last look: kept by
-    /// its UUID, and `display` at once. Nil with fewer than two displays.
+    /// Steps the Desktop to the stop after the one it shows (kind 47), from the last look: kept by its
+    /// UUID, and `display` at once. Nil with fewer than two stops, or while only the main display shows.
     func chooseNextDesktopDisplay() -> DesktopDisplays.Display? {
-        guard let next = DesktopDisplays.next(after: display?.displayID, in: desktopCandidates) else { return nil }
+        guard !mainOnly, let next = DesktopDisplays.next(after: desktopDisplayID, in: desktopCandidates) else { return nil }
         chooseDesktopDisplay(next.uuid)
         return next
     }
 
-    /// The Desktop's display by UUID (nil: none chosen), and `display` from the last look at once.
+    /// The Desktop's stop by UUID (nil: none chosen, the main display), and `display` from the last look
+    /// at once.
     func chooseDesktopDisplay(_ uuid: String?) {
         desktopDisplayUUID = uuid
         resolveDesktopDisplay()
     }
 
-    /// The UUID of the display the Desktop is on now, if it is a candidate.
-    var desktopDisplayChoice: String? { desktopCandidates.first { $0.id == display?.displayID }?.uuid }
+    /// The stop the Desktop shows now, if it is one.
+    var desktopStop: DesktopDisplays.Display? { desktopCandidates.first { $0.id == desktopDisplayID } }
 
-    /// `display` from the last look: the display a device stepped to while it is connected, else the one
-    /// it was while it is still there (macOS's order of displays may change between looks), else as
-    /// before (with the virtual display on the main display, else macOS's first); never Sill's virtual
-    /// display while there is another.
+    /// The main display as the last look has it, whatever the Desktop shows: the Desktop's sound is built
+    /// on it (the coordinator's `makeAudioSource`), so a step never restarts the sound. Else macOS's first.
+    var mainDisplay: SCDisplay? { lookedDisplays.first { $0.displayID == CGMainDisplayID() } ?? lookedDisplays.first }
+
+    /// A device is connected again after none was: a choice older than its span is forgotten, so the
+    /// session begins on the main display (DesktopDisplays.keepsChoice).
+    private func devicesArrived() {
+        defer { devicesLeftAt = nil }
+        guard desktopDisplayUUID != nil, let left = devicesLeftAt else { return }
+        let gone = CatalogLook.seconds(ContinuousClock.now - left)
+        if !DesktopDisplays.keepsChoice(devices: 0, leftAt: 0, now: gone) { chooseDesktopDisplay(nil) }
+    }
+
+    /// `display` from the last look (DesktopDisplays.resolve): the main display while `mainOnly`; else the
+    /// stop a device stepped to while it is connected; else the main display, with Virtual Display on or
+    /// off (issue #345). With no stop at all (every display Sill's own or macOS's stand-in): the main
+    /// display, else macOS's first, as before.
     private func resolveDesktopDisplay() {
-        let before = (desktopCandidates.count, display?.displayID, DesktopDisplays.number(of: display?.displayID, in: desktopCandidates))
-        let todays = preferMainDisplay
-            ? (lookedDisplays.first { $0.displayID == CGMainDisplayID() } ?? lookedDisplays.first)
-            : lookedDisplays.first
-        desktopCandidates = DesktopDisplays.candidates(lookedDisplays.map(Self.described))
-        let kept = DesktopDisplays.number(of: display?.displayID, in: desktopCandidates) != nil ? display?.displayID : nil
-        let id = DesktopDisplays.resolve(chosen: desktopDisplayUUID, among: desktopCandidates, fallback: kept ?? todays?.displayID)?.id
-        display = lookedDisplays.first { $0.displayID == id } ?? todays
-        if (desktopCandidates.count, display?.displayID, DesktopDisplays.number(of: display?.displayID, in: desktopCandidates)) != before {
+        let before = (desktopCandidates.map(\.id), desktopCandidates.map(\.name), desktopDisplayID)
+        let stops = testDisplays ?? lookedDisplays.map(Self.described)
+        desktopCandidates = DesktopDisplays.candidates(stops, main: testDisplays?.first?.id ?? CGMainDisplayID())
+        let id = DesktopDisplays.resolve(chosen: desktopDisplayUUID, among: desktopCandidates, mainOnly: mainOnly)?.id
+        display = lookedDisplays.first { $0.displayID == id } ?? mainDisplay
+        desktopDisplayID = testDisplays != nil ? id : display?.displayID
+        if before != (desktopCandidates.map(\.id), desktopCandidates.map(\.name), desktopDisplayID) {
             onDesktopDisplaysChanged?()
         }
     }
 
+    /// A display as DesktopDisplays judges it: its UUID, frame, whether it is Sill's own or macOS's
+    /// stand-in, the display it mirrors, its refresh rate and its name.
     private static func described(_ d: SCDisplay) -> DesktopDisplays.Display {
-        let uuid = CGDisplayCreateUUIDFromDisplayID(d.displayID).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String }
-        return DesktopDisplays.Display(id: d.displayID, uuid: uuid ?? "display \(d.displayID)", frame: d.frame,
-                                       isSills: StreamCoordinator.isSillVirtualDisplay(d.displayID))
+        let id = d.displayID
+        let uuid = CGDisplayCreateUUIDFromDisplayID(id).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String }
+        let mirrors = CGDisplayMirrorsDisplay(id)
+        let refresh = CGDisplayCopyDisplayMode(id).map { $0.refreshRate }
+        return DesktopDisplays.Display(id: id, uuid: uuid ?? "display \(id)", frame: d.frame,
+                                       isSills: StreamCoordinator.isSillVirtualDisplay(id),
+                                       isStandIn: StreamCoordinator.isStandInDisplay(id),
+                                       mirrors: mirrors == kCGNullDirectDisplay ? nil : mirrors,
+                                       refreshHz: refresh.flatMap { $0 > 0 ? $0 : nil },
+                                       name: VirtualStage.screen(for: id)?.localizedName)
     }
 
     /// Thumbnail cadence, per window: every pass (2 s) if its `WindowInfo` changed since its last
