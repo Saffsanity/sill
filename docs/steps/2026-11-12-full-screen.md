@@ -44,5 +44,9 @@ no wire change, nothing on the Mac, nothing stored but how often the hint has sh
   but the Settings panel (and the thumbnail strip's fade on an upright iPad mini, which differs between two builds
   of main itself), the Settings panel after the merge with main's Quality row and these rows after Frame Rate, and
   32 previews in every layout and Duo pose, the controls on their own black and nothing of the picture's place.
-- **Not run:** the live loopback gate (a device was on Sill.app both times; the rule holds it).
+- Live on loopback at 67039ddd once Noah's devices were off Sill.app (18:12): five cases (an iPhone upright, an iPad
+  mini on its side, the Desktop on screen 2, Shake to Show Controls off, a swipe in taken back), one viewport per
+  change in each, none for the swipe in taken back, every scripted tap, key and letter at the host, the Desktop kept
+  on screen 2, a shake with the switch off leaving the controls hidden; the same as round one's run but for one
+  extra identical viewport at one connect.
 - **Untested, for Noah:** the plan's "Noah's test" on the iPad mini and the iPhone 15 Pro.

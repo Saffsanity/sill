@@ -364,13 +364,33 @@ after it.
     its way out on an iPhone on its side, about 16 % in, with nothing drawn under it; the photos' timing is too loose
     to catch more frames, so the static previews above are the evidence for every stage.
 - **G6:** `Tests/checks/repo-rules`, every rule holds.
-- **G4, live on loopback: not run.** Noah was testing on his devices: a device was streaming from Sill.app at 16:30
-  and at 16:56, and the gate keeps the rule (`Scripts/encoder-check/no-device.sh`: nothing that could share the
-  Mac's encoder while a device is connected), though its host uses the software encoder. The first build's run of
-  it (below) covered the same paths a hide and a show take (the viewport one per change, input around each change,
-  the Desktop kept on screen 2); what is new since is the swipe in's own recognizer, which the touch rig drove with
-  real synthesized touches in both orientations, and Shake to Show Controls, whose off case the gate adds
-  (`phone-up-shake-off`).
+- **G4, live on loopback**, at 67039ddd from 18:12 to 18:17, once Noah had disconnected his devices (a device was on
+  Sill.app at 16:30 and 16:56, so it waited; `Scripts/encoder-check/no-device.sh` said "OK: no device connected"
+  before every case): `SillHost --synthetic` (loopback only, the software encoder, no router, no screen, the
+  dry-run input log) and the app's Debug build under `-SillLive 1` on the agents' iPad simulator, an input script
+  tapping, pressing keys and typing every 0.1 s for a second around each change. Five cases, every one as it should:
+  - An iPhone 15 Pro's size upright: hidden at 4 s, back at 7, hidden at 10, back by a shake at 13 (Shake to Show
+    Controls on), hidden at 16, back by a played swipe in at 18.8: the viewport 377×235 twice as it connected, then
+    393×793 and 377×235, one per change, six; every input at the host (39 taps, each down and up; 24 keys and 12
+    letters).
+  - An iPad mini on its side, the same: 1117×618 as it connected, then 1133×744 and 1117×618, one per change; every
+    input at the host.
+  - The Desktop on the Mac's second screen (two test screens): the device's own Desktop button ("Desktop 1") stepped
+    the host to display 2, then hidden, back, hidden, back by a shake: one viewport each, and the host's only stream
+    start after the step was display 2's; the 12 taps arrived.
+  - Shake to Show Controls off: hidden at 4, a shake at 7 left the controls hidden ("full screen: a shake, and Shake
+    to Show Controls is off: the controls stay hidden"), a played swipe in at 10 brought them back: one viewport per
+    change; the 12 taps arrived.
+  - A swipe in taken back: hidden at 4, a played swipe in taken back at 7 ("reveal: lifted after 619 pt at -1500
+    pt/s …: springs back"): the controls stayed hidden, no viewport and nothing sent for it; back by a shake at 10,
+    hidden at 13, back by a played swipe in at 16: one viewport per change, four; every input at the host (39 taps,
+    24 keys and letters). In every case the one `pointer: this device has it (a pointer move)` line is the session's
+    first tap, at 3.5 s; none follows a swipe in, finished or taken back.
+  - Against round one: the same viewports and the same input, change for change. Once, in the taken-back case, the
+    connect sent its 377×235 a third time, before anything of full screen happened. Played, not swiped: the swipe in
+    reaches the stream screen as the recognizer's moves and lift (`revealMoved`), which the touch rig drove with real
+    synthesized touches; the hide is the harness's, the same `hideChrome` that Settings › Full Screen calls once its
+    panel has closed.
 
 ### The first build (the flick; superseded)
 
