@@ -693,10 +693,15 @@ struct PortraitStreamScreen: View {
                   })
     }
 
+    /// The Desktop on the Mac's stop it shows, and with two stops or more the next at a tap
+    /// (DesktopDisplays): "Desktop 2", a dot per stop while the Desktop streams, in each bar's bottom margin.
     private func desktopButton(width: CGFloat? = nil) -> some View {
-        barButton(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop", width: width,
-                  accessibilityLabel: "Show the full Mac desktop",
-                  action: { client.select(.desktop) })
+        let desktop = client.desktopButton
+        return barButton(open: client.active == .desktop, symbol: "desktopcomputer", label: desktop.label, width: width,
+                         accessibilityLabel: desktop.accessibilityLabel,
+                         action: { client.tapDesktop() })
+            .desktopStops(desktop, inset: metrics.phone ? 1.5 : metrics.buttonHeight >= 58 ? 3.5 : 2.5,
+                          dot: metrics.phone ? 3 : 4)
     }
 
     /// Leave's old slot: Disconnect is the Settings panel's pinned last row now.

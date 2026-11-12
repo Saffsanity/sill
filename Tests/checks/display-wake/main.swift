@@ -102,7 +102,8 @@ eq(W.userActiveVariable, "SILL_TEST_USER_ACTIVE", "the TEST ONLY variable's name
 // MARK: - Whose each message is: every kind there is
 
 /// The kinds that are a person at the device, written out: the rule's table must be exactly this.
-let personKinds: [UInt8: W.Activity] = [7: .launch, 8: .input, 15: .windowButton, 25: .menuItem, 28: .gesture]
+let personKinds: [UInt8: W.Activity] = [7: .launch, 8: .input, 15: .windowButton, 25: .menuItem, 28: .gesture,
+                                        47: .nextDisplay]   // only the Desktop button sends 47 (docs/virtual-desktop-plan.md §1)
 var kinds = 0
 let fresh = W(testHost: false)
 for raw in 0...255 {
@@ -111,7 +112,7 @@ for raw in 0...255 {
     eq(fresh.activity(msg(kind, kind == .input ? tap : nil), at: 100), personKinds[UInt8(raw)], "kind \(raw) (\(kind))")
 }
 // A kind added to the wire fails this until it is decided here (and in the rule).
-eq(kinds, 33, "every kind there is decided (a new kind: say here whether it is a person at the device)")
+eq(kinds, 34, "every kind there is decided (a new kind: say here whether it is a person at the device)")
 for (raw, what) in [(6, "a pick, the device's own Desktop request among them"), (9, "the viewport"), (17, "a settings change"),
                     (21, "show your pairing code"), (27, "a menu fetched"), (32, "the clipboard"),
                     (43, "the Mac's sound, which only a host sends"), (44, "a keyframe request")] as [(UInt8, String)] {
@@ -267,6 +268,16 @@ eq(W.why(.input), "sent input", "why: input")
 eq(W.why(.windowButton), "pressed a window’s button", "why: a window's button")
 eq(W.why(.menuItem), "chose a menu item", "why: a menu item")
 eq(W.why(.gesture), "made a trackpad gesture", "why: a gesture")
+eq(W.why(.nextDisplay), "stepped the Desktop to the next display", "why: the Desktop's next display (kind 47)")
+eq(fresh.activity(msg(.nextDisplay, tap), at: 100), .nextDisplay, "kind 47 is a person's whatever rides with it (the device never sends it by itself)")
+do {
+    var w = W(testHost: false)
+    eq(w.decide(.message(.nextDisplay, nil), at: 0), .declare(.nextDisplay), "kind 47 declares, a stop asleep wakes")
+    eq(w.decide(.message(.nextDisplay, nil), at: 2), .nothing, "a second step within the interval: the display is counted in use")
+    eq(w.decide(.message(.nextDisplay, nil), at: 5), .declare(.nextDisplay), "a step 5 s on declares again")
+    var t = W(testHost: true)
+    eq(t.decide(.message(.nextDisplay, nil), at: 0), .count, "a test host counts kind 47, declares nothing")
+}
 check(Set(W.Activity.allCases.map(W.why)).count == W.Activity.allCases.count, "each activity's words its own")
 eq(W.wokeLine(device: "iPad (iPad14,1)", activity: .connect), "Woke the display for iPad (iPad14,1), which connected.",
    "the woke line for a connect")
@@ -558,7 +569,7 @@ func isPerson(_ event: W.Event, now: TimeInterval, lastChange: TimeInterval?) ->
     case .connect, .wakingPress: return true
     case .message(let kind, let input):
         switch kind.rawValue {
-        case 7, 15, 25, 28: return true
+        case 7, 15, 25, 28, 47: return true
         case 8:
             guard let input else { return false }
             if case .pointer(.move, _, _) = input, let c = lastChange, now >= c, now - c < two { return false }
@@ -567,7 +578,7 @@ func isPerson(_ event: W.Event, now: TimeInterval, lastChange: TimeInterval?) ->
         }
     }
 }
-let otherKinds: [Kind] = (0...255).compactMap { Kind(rawValue: UInt8($0)) }.filter { ![7, 8, 15, 25, 28].contains($0.rawValue) }
+let otherKinds: [Kind] = (0...255).compactMap { Kind(rawValue: UInt8($0)) }.filter { ![7, 8, 15, 25, 28, 47].contains($0.rawValue) }
 var steps = 0, declared = 0, counted = 0, heldOff = 0, clockBacks = 0, streamed = 0, own = 0, ownMoves = 0, changes = 0, wakingPresses = 0
 for session in 0..<20_000 {
     let testHost = rng.below(4) == 0
@@ -612,7 +623,7 @@ for session in 0..<20_000 {
         case ..<24: event = msg(otherKinds[rng.below(otherKinds.count)], rng.below(2) == 0 ? tap : nil)
         case ..<26: event = msg(.input)
         case ..<29: event = msg(.launchApp)
-        case ..<35: event = msg([Kind.windowCommand, .pressMenuItem, .gesture][rng.below(3)])
+        case ..<35: event = msg([Kind.windowCommand, .pressMenuItem, .gesture, .nextDisplay][rng.below(4)])
         case ..<65: event = msg(.input, rng.below(3) == 0 ? recentred : move)
         case ..<69: event = .wakingPress
         default: event = msg(.input, events[rng.below(events.count)].0)

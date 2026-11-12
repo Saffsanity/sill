@@ -153,6 +153,11 @@ serves the root or `/docs`, never `/site`. So:
 - Open: `Version label` (support.html, under the lede: where each app shows its version, true from
   Sill for iPhone and iPad 0.6.2; PR #351, docs/version-label-plan.md): `grep -n "shows its version"
   ../sill-site/support.html` finds nothing after the cut.
+- Open: `Desktop displays` (the Desktop button steps through the Mac's screens: phase 1 of
+  docs/virtual-desktop-plan.md, PR #355, built on #173), support.html's "More than one screen on your
+  Mac": after the perl, `grep -n "More than one screen" ../sill-site/*.html` finds nothing. README's How
+  it works line waits inside an HTML comment after the iPhone Duo bullet (README is the public page on
+  main, never republished): the release's words commit takes the comment out and makes it a bullet.
 - Held back from the support page in 0.6.1, until a test shows it true: #228's tap sentence. The
   page says "To wake it again, move the pointer, scroll, or press the Command key on a keyboard
   attached to your iPhone or iPad; Shift alone doesn’t reach your Mac." With the sentence it would

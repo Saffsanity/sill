@@ -290,5 +290,10 @@ M = [
     ("LockedMac: another generation", S, "    public static let viewGeneration = 1", "    public static let viewGeneration = 2"),
     ("LockedMac: the line says nothing of the screen", S, "Your account’s own desktop, not this Mac’s screen. Taps", "Your account’s own desktop. Taps"),
     ("Hello: offConsoleView never stored", C, "        self.offConsoleView = offConsoleView\n", "        self.offConsoleView = nil\n"),
+    # The Desktop's displays (issue #91).
+    ("decide: the next display taken while locked", F, "        case .nextDisplay: return .refuse(.pick)", "        case .nextDisplay: return .take"),
+    ("list: a locked list keeps the displays", F, "        l.desktopDisplays = nil\n", ""),
+    ("list: a locked list keeps which display", F, "        l.desktopDisplay = nil\n", ""),
+    ("list: a locked list keeps the displays' names", F, "        l.desktopDisplayNames = nil\n", ""),
 ]
 sys.exit(0 if module.mutate("lock-policy", M, sys.argv[1]) else 1)

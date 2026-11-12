@@ -113,6 +113,12 @@ Sill has layouts of its own.
   the inner display; half open, the picture is above the fold with a trackpad
   and keys below; closed, Sill runs on the cover display. Nothing you touch
   sits on the fold.
+  <!-- Desktop displays (phase 1 of docs/virtual-desktop-plan.md, PR #355): hidden until the release that
+  ships it, whose words commit takes the comment out and makes this its own bullet:
+  - **The Desktop** on a Mac with more than one screen: tap Desktop while it
+    shows to step to the next screen, starting from your main one. The button
+    shows which screen is up.
+  -->
 - **The menus** of the app you use reach your device too: in the iPad's own
   menu bar on iPadOS 26 or later, and behind the Menus button in Sill's bar.
   Sill for Mac reads each menu from the app as you open it and chooses the

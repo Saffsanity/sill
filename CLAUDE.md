@@ -88,7 +88,14 @@ Rules found in the steps that hold for all work (each where it is written):
   messages the host had read on the connection). `Gesture.swift` —
   `TrackpadGesture` (kind 28, device → host: a three- or four-finger gesture
   by name, and its fingers), sent only to a host whose `WindowList.gestures`
-  is 1 or more. `Clipboard.swift` — `Clipboard` (kind 32, both ways: `text`,
+  is 1 or more. `DesktopDisplays.swift` — the Desktop's stops (kind 47 and
+  `WindowList.desktopDisplays`, `desktopDisplay`, `desktopDisplayNames`; issue
+  #91, PR #173, docs/virtual-desktop-plan.md §1): which displays are stops and
+  their order (the main display first, then to its right, wrapping), the stop
+  shown (the main display while locked; the choice by UUID for the session and
+  30 s after), the next, the rate held to a stop's refresh rate, where input
+  lands, the pointer's target, and the device's button (its label, dots or
+  "3/7", VoiceOver's words); pure, `Tests/checks/desktop-displays`. `Clipboard.swift` — `Clipboard` (kind 32, both ways: `text`,
   `image` reserved for a later generation, a device's `stop`) and its 256 KB
   cap; `ClipboardPolicy.swift` — the clipboard's rules for both ends (what a
   device's message asks of the host and the rate, which a stop never meets;
@@ -159,7 +166,11 @@ Rules found in the steps that hold for all work (each where it is written):
   log file),
   `WindowCatalog` (polls windows and thumbnails only while a client is
   connected; icons; installed apps in the background; when its last look
-  landed, `lookAge`), `CatalogLook` (whether a capture may be built from that
+  landed, `lookAge`; the Desktop's stops from that look, `desktopCandidates`,
+  the one shown, `display` and `desktopDisplayID`, the choice a device stepped
+  to and its span, `mainOnly` while locked, `mainDisplay` for the sound;
+  DesktopDisplays), `DesktopDisplaysHook` (TEST ONLY: SILL_TEST_DISPLAYS, a
+  synthetic host's stops in place of this Mac's), `CatalogLook` (whether a capture may be built from that
   look or the catalog looks again first: its display no longer active, none, no
   look, or older than two polls; the Desktop's lines and its one more try's;
   pure, `Tests/checks/catalog-look`; the black screen of 2026-10-28),
@@ -185,7 +196,8 @@ Rules found in the steps that hold for all work (each where it is written):
   full-screen window's crop keeps the panel's shape (`windowSize`); pure,
   `Tests/checks/capture-scale`), `SyntheticCapture` (test pattern for
   `--synthetic`; SILL_TEST_PATTERN=noise adds a square of noise,
-  SILL_TEST_PATTERN=picture:<path> shows a still picture instead,
+  SILL_TEST_PATTERN=picture:<path> shows a still picture instead, under
+  SILL_TEST_DISPLAYS the shown stop's number and name drawn on it,
   SILL_TEST_STILL_AFTER=<s> sends no frame from s seconds on, as a window that
   stopped changing), `HEVCEncoder` (VideoToolbox with one frame inside, a
   one-slot mailbox behind it and a hang watchdog; hardware or software; says
@@ -1160,6 +1172,8 @@ SILL_TEST_LOOPBACK=1 SILL_TEST_HOTKEYS='108=off,173=off' .build/release/SillHost
 swift run -c release SillHost --no-clipboard  # share nothing of the clipboard with devices (on by default, as in Sill.app)
 swift run -c release SillHost --off-console-view   # show this account while another user is on the screen (off by default, as in Sill.app's Settings › Devices): docs/off-console-plan.md
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_PASTEBOARD=me.saffer.sill.test.x SILL_TEST_CLIPBOARD_LOG=1 .build/release/SillHost --synthetic   # the clipboard on a pasteboard of its own (never this Mac's), each decision printed with sizes
+SILL_TEST_DISPLAYS='Built-in Retina Display:1512x982@2:120:0,0;DELL U2723QE:2560x1440@1:60:1512,0' SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: the Desktop's stops in place of this Mac's (DesktopDisplays): the test pattern at the shown stop's size with its number and name, kind 47 steps, nothing read, posted or warped
+python3 Scripts/sillclient.py PORT 10 desktop --fps=120 --next-display@3 --expect=desktopDisplay=2   # step to the next stop (kind 47, only to a --synthetic host on this Mac); each list prints desktopDisplays=, desktopDisplay= and names=
 SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: ScreenCaptureKit never asked (no window list, no thumbnails), so a host an agent runs asks macOS for no screen recording
 SILL_TEST_FIREWALL=executable SILL_TEST_NO_SCREEN=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 .build/release/SillHost --synthetic   # TEST ONLY: the macOS firewall's answers canned (executable|bundle|both|all|off|allowed|unreadable, or a file holding one, read at each check): "Firewall: the macOS firewall blocks Sill’s executable, …"
 /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate; …/socketfilterfw --listapps; …/socketfilterfw --getappblocked PATH   # the firewall, read-only as any user; never --unblockapp, --add, --remove or --set* (they change it, with sudo)
