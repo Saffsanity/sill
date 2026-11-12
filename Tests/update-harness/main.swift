@@ -137,7 +137,10 @@ struct Outcome {
     var staging: URL?
     var staged: URL?
 }
-enum Tamper { case none, stagedResource, wrongRunningCDHash }
+/// stagedResource: the checked new copy changed in staging between the check and the swap. both: that, and
+/// the installed (old) copy's resource changed before the swap too, so it is not the old copy whole once it
+/// waits in staging. wrongRunningCDHash: the copy at the path is not the running one.
+enum Tamper { case none, stagedResource, both, wrongRunningCDHash }
 
 /// prepare, staging, download, unpack, check, install: the first failure, or none (the new copy in place).
 func update(_ name: String, using ins: UpdateInstaller = installer, installedFrom: URL? = nil, offeredTag: String = "v1.1",
@@ -189,11 +192,15 @@ func update(_ name: String, using ins: UpdateInstaller = installer, installedFro
     case .failure(let f): o.failure = f; return o
     case .success(let c): checked = c
     }
-    if tamper == .stagedResource {
-        let note = ["Contents/Resources/note.txt", "Contents/Resources/AppIcon.icns"].map { staged.appendingPathComponent($0) }
+    func append(_ bundle: URL, _ text: String) {
+        let note = ["Contents/Resources/note.txt", "Contents/Resources/AppIcon.icns"].map { bundle.appendingPathComponent($0) }
             .first { FileManager.default.fileExists(atPath: $0.path) }!
-        let h = try! FileHandle(forWritingTo: note); h.seekToEndOfFile(); h.write(Data("changed between the check and the swap".utf8)); h.closeFile()
+        let h = try! FileHandle(forWritingTo: note); h.seekToEndOfFile(); h.write(Data(text.utf8)); h.closeFile()
     }
+    if tamper == .stagedResource || tamper == .both { append(staged, "changed between the check and the swap") }
+    // A resource changes nothing of the cdhash (it is read from the executable's signature): the copy at the
+    // path still reads as the running code, and only validation tells it isn't whole.
+    if tamper == .both { append(installed, "the old copy changed before the swap") }
     let runningCDHash = tamper == .wrongRunningCDHash ? String(repeating: "0", count: 40) : (UpdateInstaller.cdhash(of: installed, arch: .current) ?? "")
     switch ins.install(staged: staged, installed: installed, runningCDHash: runningCDHash, expected: checked, manifest: prepared.manifest,
                        running: running, runningRequirement: runningRequirement) {
@@ -248,9 +255,10 @@ var o = await installs("ditto zip (AppleDouble beside its files)", v11, keepStag
 // The old copy can be put back by the same exchange.
 let oldCode = UpdateInstaller.cdhash(of: app("installed"), arch: .current)!
 if let staged = o.staged {
-    check(!installer.putBack(staged: staged, installed: o.installed, old: String(repeating: "0", count: 40)) && version(of: o.installed) == "1.1",
-          "no put back when the copy in staging is not the old code")
-    check(installer.putBack(staged: staged, installed: o.installed, old: oldCode) && version(of: o.installed) == "1.0", "put back: 1.0 at the path again")
+    check(installer.putBack(staged: staged, installed: o.installed, old: String(repeating: "0", count: 40)) == .notTheOldCopy
+          && version(of: o.installed) == "1.1", "no put back when the copy in staging is not the old code")
+    check(installer.putBack(staged: staged, installed: o.installed, old: oldCode) == .done && version(of: o.installed) == "1.0",
+          "put back: 1.0 at the path again")
     UpdateInstaller.remove(o.staging!)
 }
 // What waits in staging was replaced (by anything of this user) after the swap: never carried into place.
@@ -258,8 +266,18 @@ o = await installs("a swap, then the old copy replaced in staging", v11, keepSta
 if let staged = o.staged {
     try? FileManager.default.removeItem(at: staged)
     _ = Process.runTool("/usr/bin/ditto", [app("other").path, staged.path])
-    check(!installer.putBack(staged: staged, installed: o.installed, old: oldCode) && version(of: o.installed) == "1.1",
+    check(installer.putBack(staged: staged, installed: o.installed, old: oldCode) == .notTheOldCopy && version(of: o.installed) == "1.1",
           "another bundle in staging is not put back: the checked new copy stays")
+    UpdateInstaller.remove(o.staging!)
+}
+// The old copy changed in staging where its cdhash can't tell (a resource): not whole, so not put back.
+o = await installs("a swap, then a resource of the old copy changed in staging", v11, keepStaging: true)
+if let staged = o.staged {
+    let note = staged.appendingPathComponent("Contents/Resources/note.txt")
+    let h = try! FileHandle(forWritingTo: note); h.seekToEndOfFile(); h.write(Data("changed in staging".utf8)); h.closeFile()
+    check(UpdateInstaller.cdhash(of: staged, arch: .current) == oldCode, "a resource leaves the cdhash as it was")
+    check(installer.putBack(staged: staged, installed: o.installed, old: oldCode) == .notTheOldCopy && version(of: o.installed) == "1.1",
+          "the old copy with a changed resource is not put back: the checked new copy stays")
     UpdateInstaller.remove(o.staging!)
 }
 o = await installs("zipfile zip", Release(zip: zip("hostile-plain"), app: app("v1.1")))
@@ -326,6 +344,18 @@ await refused("changed between the check and the swap", v11, tamper: .stagedReso
     if case .checkAfterSwap(.invalidSignature, putBack: true) = $0 { return true }; return false
 }
 await refused("the copy at the path is not the running one", v11, tamper: .wrongRunningCDHash) { $0 == .changedSinceStart }
+// Both changed: the new copy fails its check at the final path and the old one, in staging, is not whole.
+// Neither is left where Sill starts from: the failing copy goes to the staging folder.
+publish(v11)
+let both = await update("both copies changed", tamper: .both)
+if case .checkAfterSwap(.invalidSignature, putBack: false)? = both.failure { check(true, "") } else {
+    check(false, "both copies changed: \(both.failure.map { P.logText($0) } ?? "installed")")
+}
+check(!FileManager.default.fileExists(atPath: both.installed.path), "both copies changed: nothing left at the app's path")
+check(both.staging.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent("UpdTest (failed its check).app").path) } == true,
+      "both copies changed: the failing copy moved into the staging folder")
+say("both copies changed: \(both.failure.map { P.logText($0) } ?? "installed"); the path empty, the failing copy in staging")
+if let s = both.staging { UpdateInstaller.remove(s) }
 
 say("== the requests GitHub would have seen")
 let log = (try? String(contentsOf: out.appendingPathComponent("srv/requests.log"), encoding: .utf8)) ?? ""
@@ -399,21 +429,28 @@ if Process.runTool("/usr/bin/hdiutil", ["create", "-quiet", "-size", "16m", "-fs
 say("== staging")
 let probe = installedCopy("staging", from: app("installed"))
 var made: [URL] = []
-for _ in 0..<3 { if case .success(let d) = UpdateInstaller.makeStaging(for: probe) { made.append(d) } }
-check(made.count == 3 && Set(made.map(\.path)).count == 3, "three staging folders, each new")
+for _ in 0..<4 { if case .success(let d) = UpdateInstaller.makeStaging(for: probe) { made.append(d) } }
+check(made.count == 4 && Set(made.map(\.path)).count == 4, "four staging folders, each new")
 for d in made {
     var st = stat()
     lstat(d.path, &st)
     check(st.st_mode & 0o777 == 0o700 && st.st_uid == getuid(), "0700 and this user's: \(String(st.st_mode & 0o777, radix: 8))")
 }
-UpdateInstaller.markKept(made[1], path: made[1].appendingPathComponent("UpdTest.app").path)
+// made[1] holds an old copy not put back: set aside (renamed out of NSIRD_, a note inside). made[3]: only the
+// note, as when the rename failed. made[2]: an ordinary leftover.
+let aside = UpdateInstaller.setAside(made[1])
+check(aside.lastPathComponent.hasPrefix(UpdateInstaller.setAsidePrefix) && !FileManager.default.fileExists(atPath: made[1].path),
+      "set aside: renamed \(aside.lastPathComponent)")
+check(FileManager.default.fileExists(atPath: aside.appendingPathComponent(UpdateInstaller.keptMarker).path), "set aside: its note")
+FileManager.default.createFile(atPath: made[3].appendingPathComponent(UpdateInstaller.keptMarker).path, contents: Data("kept".utf8))
 let removed = UpdateInstaller.cleanUpStaging(for: probe, keep: made[0])
-check(removed.contains(made[2].path) && !removed.contains(made[0].path) && !removed.contains(made[1].path),
-      "the unmarked other removed, the kept one and the marked one not: \(removed)")
-check(FileManager.default.fileExists(atPath: made[0].path) && FileManager.default.fileExists(atPath: made[1].path),
-      "the kept one and the one holding a copy not put back are there")
+check(removed.contains(made[2].path) && !removed.contains(made[0].path) && !removed.contains(made[3].path) && !removed.contains(aside.path),
+      "the ordinary leftover removed; the one in use, the set-aside one and the noted one not: \(removed)")
+check([made[0], aside, made[3]].allSatisfy { FileManager.default.fileExists(atPath: $0.path) },
+      "the one in use, the set-aside one and the noted one are there")
 UpdateInstaller.remove(made[0])
-UpdateInstaller.remove(made[1])
+UpdateInstaller.remove(aside)
+UpdateInstaller.remove(made[3])
 
 // MARK: The genuine Sill 0.6.1 under Trust.release (with this run's key)
 

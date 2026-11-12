@@ -137,8 +137,12 @@ final class AppUpdater {
         send(.confirm)
     }
 
-    /// Cancel retires the attempt: whatever it had in flight answers into nothing.
+    /// Cancel retires the attempt (whatever it had in flight answers into nothing), but only in a phase
+    /// that takes it: a Cancel that arrives once installing has begun (a click on a button the next
+    /// frame removes, an assistive technology's late action) changes nothing, so the install's and the
+    /// launch's answers still land.
     func cancelUpdate() {
+        guard Policy.next(state, .cancel).0 != state else { return }
         cancel?.cancel()
         attempt += 1
         send(.cancel)
@@ -285,14 +289,17 @@ final class AppUpdater {
         let manifest = prepared.manifest
         let requirement = runningCode.requirement
         Task { [weak self] in
-            let result = await Task.detached(priority: .userInitiated) {
-                installer.install(staged: unpacked, installed: bundle, runningCDHash: cdhash, expected: checked,
-                                  manifest: manifest, running: running, runningRequirement: requirement)
+            let (result, oldCopyWaits) = await Task.detached(priority: .userInitiated) { () -> (Result<Void, Policy.Failure>, Bool) in
+                let r = installer.install(staged: unpacked, installed: bundle, runningCDHash: cdhash, expected: checked,
+                                          manifest: manifest, running: running, runningRequirement: requirement)
+                // Not put back: whether what waits in staging is still the old copy, whole (the way back).
+                if case .failure(let f) = r, !f.cleanUp { return (r, installer.isTheOldCopy(unpacked, old: cdhash)) }
+                return (r, false)
             }.value
             guard let self, run == self.attempt else { return }
             switch result {
             case .failure(let f):
-                if !f.cleanUp { self.keep(unpacked) }
+                if oldCopyWaits { self.keep(unpacked) }
                 self.log(f)
                 self.send(.installed(f))
             case .success:
@@ -355,23 +362,26 @@ final class AppUpdater {
         RunLoop.main.add(timer, forMode: .common)
     }
 
-    /// The new copy didn't come up: the old one back where it was if it is still the old one (the new one
-    /// goes with the staging folder), and why.
+    /// The new copy didn't come up: the old one back where it was if it is still the old one, whole (the
+    /// new one goes with the staging folder), and why. When it is the old one but the exchange failed, it
+    /// is kept as the way back; when it is not, it is never offered (the checked new copy stays in place,
+    /// and Settings says to download Sill again).
     private func didNotStart(_ run: Int, _ why: String) {
         guard run == attempt else { return }
-        var putBack = false
-        if let unpacked, let oldCDHash { putBack = installer.putBack(staged: unpacked, installed: bundle, old: oldCDHash) }
-        if !putBack, let unpacked { keep(unpacked) }
-        let f = Policy.Failure.didNotStart(why, putBack: putBack)
+        var back = UpdateInstaller.PutBack.notTheOldCopy
+        if let unpacked, let oldCDHash { back = installer.putBack(staged: unpacked, installed: bundle, old: oldCDHash) }
+        if back == .failed, let unpacked { keep(unpacked) }
+        let f = Policy.Failure.didNotStart(why, putBack: back == .done)
         log(f)
         send(.launched(f))
     }
 
-    /// The old copy could not be put back: its folder is marked so no clean-up deletes it, and Settings
-    /// and the log say where it is.
+    /// The old copy could not be put back but is whole: its folder is set aside (renamed out of every
+    /// clean-up's reach, with a note), and Settings and the log say where it is.
     private func keep(_ copy: URL) {
-        keptAt = copy.path
-        UpdateInstaller.markKept(copy.deletingLastPathComponent(), path: copy.path)
+        let folder = UpdateInstaller.setAside(copy.deletingLastPathComponent())
+        keptAt = folder.appendingPathComponent(copy.lastPathComponent).path
+        staging = nil
     }
 
     /// Quits through the ordinary quit path (the streamed window home, the virtual display gone), from a
@@ -402,7 +412,11 @@ final class AppUpdater {
     private func log(_ f: Policy.Failure) {
         if f == .cancelled { print("Update: cancelled."); return }
         print("Update failed: \(Policy.logText(f)).")
-        if let keptAt { print("Update: Sill’s previous copy is kept at \(keptAt); to put it back, quit Sill and move it to \(bundle.deletingLastPathComponent().path).") }
+        if let keptAt {
+            print("Update: Sill’s previous copy is kept at \(keptAt); to put it back, quit Sill and move it to \(bundle.deletingLastPathComponent().path).")
+        } else if !f.cleanUp {
+            print("Update: what waits in the temporary folder is no longer Sill’s previous copy whole, so it is not offered as the way back; download Sill again.")
+        }
     }
 
     // MARK: Launch and start

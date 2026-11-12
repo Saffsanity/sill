@@ -365,6 +365,7 @@ check(P.line(.hashMismatch, running: v030, offered: v040, keptAt: nil) == "Could
 check(P.line(.bundle(.wrongSigner), running: v030, offered: v040, keptAt: nil) == "Couldn’t update: the downloaded app isn’t signed by Sill’s developer. Sill 0.3 is unchanged.", "line: signer")
 check(P.line(.didNotStart("x", putBack: true), running: v030, offered: v040, keptAt: nil) == "Sill 0.4 didn’t start, so Sill 0.3 is back.", "line: put back")
 check(P.line(.didNotStart("x", putBack: false), running: v030, offered: v040, keptAt: "/tmp/k/Sill.app") == "Sill couldn’t put 0.3 back in place. It is at /tmp/k/Sill.app: quit Sill and move it to your Applications folder.", "line: lost")
+check(P.line(.checkAfterSwap(.codeChanged, putBack: false), running: v030, offered: v040, keptAt: nil) == "Sill couldn’t put 0.3 back in place. Download Sill again from getsill.app and put it in your Applications folder.", "line: lost, no whole old copy")
 check(P.line(.notSigned, running: v030, offered: v040, keptAt: nil) == "Sill 0.4 isn’t ready for Update Now yet. Try again later, or open its release page.", "line: not signed")
 check(P.line(.cancelled, running: v030, offered: v040, keptAt: nil) == "Update cancelled. Sill 0.3 is unchanged.", "line: cancelled")
 check(P.logText(.checkAfterSwap(.codeChanged, putBack: false)).hasSuffix("NOT put back"), "the log says when nothing was put back")

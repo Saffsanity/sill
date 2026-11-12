@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import LocalAuthentication
 import Security
 
 // The update manifest's signer (docs/one-click-update-plan.md §4.8), the one program that ever holds the
@@ -18,7 +19,11 @@ import Security
 //   update-manifest verify FILE --key BASE64...   the manifest's fields, if one of the keys signed it
 //
 // The private key is read from the keychain (which asks unless this binary made the item) or from the file
-// given; it is never printed, never written anywhere else, and never sent anywhere.
+// given; it is never printed, never written anywhere else, and never sent anywhere. Before the keychain's key
+// signs anything, Noah confirms in person (Touch ID or his password), with the tag and the start of the zip's
+// SHA-256 in the prompt: the keychain lets this signer read the key without asking, so without that any
+// program running as him could have it sign; with it, nothing is signed unseen. A key in a file (tests, the
+// rehearsal) has no such prompt.
 
 let service = "me.saffer.sill.update-signing", account = "ed25519"
 var args = Array(CommandLine.arguments.dropFirst())
@@ -56,6 +61,25 @@ func storedKey(_ file: String?) -> Curve25519.Signing.PrivateKey {
     }
     guard let key = try? Curve25519.Signing.PrivateKey(rawRepresentation: raw) else { fail("the stored key is not an Ed25519 private key") }
     return key
+}
+
+/// Touch ID or the login password, through LocalAuthentication, with `reason` in the prompt; exits when it
+/// can't ask or the answer is no.
+func confirmInPerson(_ reason: String) {
+    let context = LAContext()
+    var error: NSError?
+    guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
+        fail("can’t ask you to confirm the signing (\(error?.localizedDescription ?? "no way to ask")); nothing signed")
+    }
+    final class Answer: @unchecked Sendable { var allowed = false }   // written once, before the signal
+    let answer = Answer()
+    let answered = DispatchSemaphore(value: 0)
+    context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { ok, _ in
+        answer.allowed = ok
+        answered.signal()
+    }
+    answered.wait()
+    guard answer.allowed else { fail("not confirmed; nothing signed") }
 }
 
 func describe(_ key: Curve25519.Signing.PrivateKey) -> String {
@@ -99,7 +123,11 @@ case "sign":
         guard parts.count == 2 else { fail("--cdhash ARCH=HEX: \(pair)") }
         cdhashes[parts[0]] = parts[1]
     }
-    let key = storedKey(option("--key-file"))
+    let file = option("--key-file")
+    if file == nil {
+        confirmInPerson("sign Sill \(tag) for Update Now: \(asset), \(size) bytes, SHA-256 \(sha.prefix(16))")
+    }
+    let key = storedKey(file)
     let text = UpdateManifest.signedText(tag: tag, build: build, asset: asset, size: size, sha256: sha, cdhashes: cdhashes,
                                          keyID: UpdateManifest.keyID(key.publicKey.rawRepresentation))
     guard let signature = try? key.signature(for: Data(text.utf8)) else { fail("signing failed") }

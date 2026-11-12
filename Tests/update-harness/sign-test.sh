@@ -64,6 +64,7 @@ expect() {  # expect ok|fail "what" command...
 echo "== sign-test"
 expect fail "no signer installed yet" "$sign" --public-key --key-file "$out/key"
 expect ok "the signer installed (from this checkout, in the scratch folder)" "$sign" --install-signer --yes
+expect fail "the scratch signer folder without a key file (never the keychain)" "$sign" --public-key
 expect ok "a throwaway key in a file" "$sign" --new-key --key-file "$out/key"
 pub="$(sed -n 's/^public key \([A-Za-z0-9+\/=]*\) .*/\1/p' "$out/last.log")"
 [ -n "$pub" ] || { echo "  FAIL: no public key printed"; failures=$((failures + 1)); }

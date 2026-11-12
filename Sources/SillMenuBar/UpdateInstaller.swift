@@ -360,7 +360,10 @@ final class UpdateInstaller: @unchecked Sendable {
     /// The checked `staged` app into `installed`'s place in one atomic exchange (renamex_np,
     /// RENAME_SWAP), when the copy there is still a folder and, given `runningCDHash`, still the code
     /// that is running. Then every check again at `installed`, the same code required; on any failure
-    /// the exchange is undone. Afterwards `staged` holds the old copy.
+    /// the exchange is undone when the old copy is still whole (`putBack`), and when it can't be, the copy
+    /// that failed its check is moved off Sill's path into the staging folder: nothing that failed a
+    /// check is ever left where Sill (and its login item) starts from. Afterwards `staged` holds the old
+    /// copy.
     func install(staged: URL, installed: URL, runningCDHash: String, expected: Policy.Checked, manifest: UpdateManifest,
                  running: SillVersion, runningRequirement: SecRequirement?) -> Result<Void, Failure> {
         guard Self.isFolder(installed) else { return .failure(.changedSinceStart) }
@@ -369,23 +372,59 @@ final class UpdateInstaller: @unchecked Sendable {
         guard let a = Self.device(of: staged.deletingLastPathComponent()), let b = Self.device(of: installed.deletingLastPathComponent()),
               a == b else { return .failure(.swapFailed("not on the same volume")) }
         guard renamex_np(staged.path, installed.path, UInt32(RENAME_SWAP)) == 0 else { return .failure(.swapFailed(Self.errnoText())) }
+        let problem: Policy.BundleProblem
         switch check(installed, manifest: manifest, running: running, runningRequirement: runningRequirement) {
-        case .success(let c) where c == expected:
-            return .success(())
-        case .failure(.bundle(let p)):
-            return .failure(.checkAfterSwap(p, putBack: putBack(staged: staged, installed: installed, old: runningCDHash)))
-        default:
-            return .failure(.checkAfterSwap(.codeChanged, putBack: putBack(staged: staged, installed: installed, old: runningCDHash)))
+        case .success(let c) where c == expected: return .success(())
+        case .failure(.bundle(let p)): problem = p
+        default: problem = .codeChanged
         }
+        let back = putBack(staged: staged, installed: installed, old: runningCDHash)
+        if back != .done { Self.moveAside(installed, into: staged.deletingLastPathComponent()) }
+        return .failure(.checkAfterSwap(problem, putBack: back == .done))
+    }
+
+    /// What became of the old copy when an update was to be undone.
+    enum PutBack: Equatable, Sendable {
+        /// It is at Sill.app's path again.
+        case done
+        /// What waits in the staging folder is not the old copy whole: never carried into place, and
+        /// never offered to the person as the way back.
+        case notTheOldCopy
+        /// It is the old copy, whole, but the exchange failed: it stays in the staging folder, the way
+        /// back.
+        case failed
     }
 
     /// The exchange again: the old copy back at `installed`, the new one in `staged`, but only when what
-    /// waits in `staged` is still the old copy, the code that was running (`old`, its cdhash for this
-    /// Mac's slice): the staging folder is this user's, and anything of this user could have put
-    /// something else there meanwhile, which Sill's right to change Sill.app must never carry into place.
-    func putBack(staged: URL, installed: URL, old: String) -> Bool {
-        guard Self.isFolder(staged), Self.cdhash(of: staged, arch: .current) == old else { return false }
-        return renamex_np(staged.path, installed.path, UInt32(RENAME_SWAP)) == 0
+    /// waits in `staged` is still the old copy, whole (`isTheOldCopy`): the staging folder is this
+    /// user's, and anything of this user could have changed what is there meanwhile, which Sill's right to
+    /// change Sill.app must never carry into place.
+    func putBack(staged: URL, installed: URL, old: String) -> PutBack {
+        guard isTheOldCopy(staged, old: old) else { return .notTheOldCopy }
+        return renamex_np(staged.path, installed.path, UInt32(RENAME_SWAP)) == 0 ? .done : .failed
+    }
+
+    /// Whether `bundle` is the copy that was running, whole: its slice for this Mac is that code (`old`,
+    /// its cdhash, which is read from the executable's signature and so says nothing of Info.plist, the
+    /// resources or the other slice), and every slice and everything it seals validates under the strict
+    /// flags with the trust's signer.
+    func isTheOldCopy(_ bundle: URL, old: String) -> Bool {
+        guard Self.isFolder(bundle), Self.cdhash(of: bundle, arch: .current) == old else { return false }
+        var code: SecStaticCode?
+        var requirement: SecRequirement?
+        guard SecStaticCodeCreateWithPath(bundle as CFURL, [], &code) == errSecSuccess, let code,
+              SecRequirementCreateWithString(trust.signer as CFString, [], &requirement) == errSecSuccess, let requirement else {
+            return false
+        }
+        return SecStaticCodeCheckValidityWithErrors(code, Self.strictFlags, requirement, nil) == errSecSuccess
+    }
+
+    /// Moves the copy at `installed` (one that failed its check at the final path, with no whole old copy
+    /// to put back) into `folder`, off the path Sill and its login item start from; nothing when it
+    /// can't (the failure says so either way).
+    static func moveAside(_ installed: URL, into folder: URL) {
+        let name = (installed.deletingPathExtension().lastPathComponent) + " (failed its check)." + installed.pathExtension
+        _ = renamex_np(installed.path, folder.appendingPathComponent(name).path, UInt32(RENAME_EXCL))
     }
 
     // MARK: Staging
@@ -416,11 +455,22 @@ final class UpdateInstaller: @unchecked Sendable {
     /// person's way back, which no clean-up deletes.
     static let keptMarker = "Sill’s previous copy is here.txt"
 
-    /// Marks `staging` as holding the old copy that could not be put back.
-    static func markKept(_ staging: URL, path: String) {
-        let text = "This folder holds the copy of Sill that an update replaced and could not put back: \(path).\nTo go back to it, quit Sill and move it to your Applications folder.\n"
-        FileManager.default.createFile(atPath: staging.appendingPathComponent(keptMarker).path, contents: Data(text.utf8),
+    /// The name a set-aside staging folder takes (and its random part after it).
+    static let setAsidePrefix = "Sill previous copy "
+
+    /// Keeps a staging folder that holds the old copy an update could not put back (the person's way
+    /// back) out of every clean-up: renamed "Sill previous copy ‹its random part›" beside it, so its name
+    /// no longer starts with NSIRD_ (a rename needs no free space, and a full disk may be why the update
+    /// failed), with a note inside when one can be written. Its URL after: the same when the rename
+    /// failed, the note then guarding it (cleanUpStaging skips a folder with one).
+    static func setAside(_ staging: URL) -> URL {
+        let random = staging.lastPathComponent.split(separator: "_").last.map(String.init) ?? "kept"
+        let named = staging.deletingLastPathComponent().appendingPathComponent(setAsidePrefix + random)
+        let folder = renamex_np(staging.path, named.path, UInt32(RENAME_EXCL)) == 0 ? named : staging
+        let text = "This folder holds the copy of Sill that an update replaced and could not put back.\nTo go back to it, quit Sill and move the app in this folder to your Applications folder.\n"
+        FileManager.default.createFile(atPath: folder.appendingPathComponent(keptMarker).path, contents: Data(text.utf8),
                                        attributes: [.posixPermissions: 0o600])
+        return folder
     }
 
     /// Removes the staging folders earlier updates left (`NSIRD_‹this process's name›_…` in the

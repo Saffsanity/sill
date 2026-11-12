@@ -520,8 +520,13 @@ enum UpdateInstallPolicy {
         }
     }
 
+    /// The old copy was not put back: where it is when it is kept whole, else (it was not the old copy,
+    /// whole, any more) the download.
     private static func lost(running: SillVersion, keptAt: String?) -> String {
-        "Sill couldn’t put \(running) back in place. It is at \(keptAt ?? "a temporary folder"): quit Sill and move it to your Applications folder."
+        guard let keptAt else {
+            return "Sill couldn’t put \(running) back in place. Download Sill again from getsill.app and put it in your Applications folder."
+        }
+        return "Sill couldn’t put \(running) back in place. It is at \(keptAt): quit Sill and move it to your Applications folder."
     }
 
     /// The log's words for a failure, with what Settings leaves out.

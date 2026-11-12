@@ -125,9 +125,14 @@ reopen it: `sign-update.sh` signs only a zip Noah knows without GitHub (the one 
 Mac, byte for byte, or the SHA-256 printed by a release workflow run he approved), so a build CI
 published unapproved, or a zip swapped in a real release before he signs, is refused there; and the key is
 held by one signer binary built once from files he read (`--install-signer`, outside the repository),
-never rebuilt from the checkout of the day, which the keychain item trusts alone. What remains: someone with
-both the update key (Noah's Mac or its backup) and a Developer ID signed, notarized build. The two
-alternatives Noah can choose instead, with what each costs, are §10 Q1.
+never rebuilt from the checkout of the day, which the keychain item trusts alone. That binary would sign
+whatever it is handed, and any program running as Noah can run it (a script of a later commit he runs,
+release.sh or make-app.sh among them, or a changed `sign-update.sh`), so it signs nothing with the
+keychain's key until Noah confirms in person (LocalAuthentication: Touch ID or his password), the prompt
+naming the tag, the zip's size and the start of its SHA-256, which he compares with what `release.sh` (or
+the approved run) printed: nothing is signed unseen (the second review, §12b). What remains: someone with
+both the update key (Noah's Mac or its backup) and a Developer ID signed, notarized build, or Noah allowing
+a prompt he did not compare. The two alternatives Noah could have chosen instead are §10 Q1.
 
 **T5. A redirect to another host.** Downloads start at
 `https://github.com/Saffsanity/sill/releases/download/<tag>/<asset>` (built by Sill, compared with the
@@ -499,7 +504,10 @@ instead."
   he has read them, and builds it into `~/Library/Application Support/Sill Update Signer/` (0700) with its
   own SHA-256 beside it. Signing runs that binary only, after checking it is unchanged, never one built
   from the checkout of the day: a commit on main that changes those files does not reach the key until he
-  installs the signer again. The keychain item trusts the binary that made it; a later signer asks once.
+  installs the signer again. The keychain item trusts the binary that made it (a later signer asks once),
+  so the signer itself asks Noah in person before every signature with the keychain's key (Touch ID or his
+  password; the prompt says "sign Sill v0.6.2 for Update Now: Sill.zip, ‹size› bytes, SHA-256
+  ‹its first 16 hex digits›"). A key in a file (tests, the rehearsal) has no prompt.
 - **The release step:** right after a release is published, on his Mac: `Scripts/sign-update.sh v0.6.2`.
   It first needs the zip he knows: `.build/Sill-0.6.2.zip` from his own `release.sh` run (the default,
   `--zip` for another path), or `--expect-sha256` with the SHA-256 that a release workflow run he approved
@@ -509,8 +517,9 @@ instead."
   and GitHub's digest; exactly one Sill.app; `codesign --verify --strict --deep` with the pinned requirement
   and `notarized`; `stapler validate`; spctl's "Notarized Developer ID"; the version is the tag's), reads
   each slice's cdhash with codesign (the same value as Update Now's Security reading, checked by the
-  harness on v0.6.1's both slices), signs the manifest with the installed signer (the keychain asks unless
-  it made the item), reads it back with the key the tag's app carries, shows it, asks, uploads
+  harness on v0.6.1's both slices), signs the manifest with the installed signer (Touch ID or his password,
+  the prompt naming the tag, the size and the start of the SHA-256, which he compares with what release.sh
+  printed), reads it back with the key the tag's app carries, shows it, asks, uploads
   `Sill.zip.manifest`, and downloads it again to compare. Until he does, Update Now does not show for that
   release (T29).
 - **Rotation (planned):** release N carries both keys in `releaseKeys` and is signed with the old one (the
@@ -800,6 +809,43 @@ the source rules missed `Trust.init(` and CFPreferences (added); the mechanism h
 `Tests/update-harness/mutants.py`). It found no compile error with confidence; the first build found one
 (BundleProblem had to conform to Error).
 
+## 12b. The second review (2026-11-12, after the first build; a subagent reading the fixes)
+
+An Opus subagent read the twelve fixes and the night's later changes read-only, as a hostile reviewer
+(`git diff 17bb723..HEAD`). Six findings; each was checked here against the code and taken:
+
+1. **Medium: a late Cancel stopped an update half done.** Cancel retired the attempt in any phase, and a
+   Cancel arriving once installing had begun (a click on the button the next frame removes, an assistive
+   technology's late action) dropped the install's answer: no launch, the phase busy for good, and a copy
+   not put back never kept. Fixed: Cancel retires the attempt only in a phase that takes it.
+2. **Medium: the signer signs whatever it is handed, and anything running as Noah can run it.** The checkout's
+   `sign-update.sh` chooses what is signed, and the installed signer reads the keychain's key without a
+   prompt, so a later commit's script (or any program running as him) could have it sign silently. Fixed:
+   every signature with the keychain's key needs Noah in person (LocalAuthentication, Touch ID or his
+   password), the prompt naming the tag, the size and the start of the SHA-256 to compare with what
+   release.sh printed (T4, §14 3.3). Also: `--install-signer` copies the files first and shows and builds
+   from the same copies, names `sign-update.sh` too (it chooses what is signed), and stops on a failed
+   compile (a stale `update-manifest.new` could have been installed); `SILL_SIGNER_DIR` only with a key file.
+3. **Low-medium: the put-back trusted a cdhash.** A cdhash is read from the executable's signature and says
+   nothing of Info.plist, the resources or the other slice, so a staged old copy changed there was put back;
+   and when the put-back was refused, the copy that had just failed its check stayed at Sill's path, and the
+   person was pointed at the staged copy as the way back. Fixed: `isTheOldCopy` also validates everything
+   sealed, on every slice, against the pinned signer; when no whole old copy can come back, the copy that
+   failed its check is moved off the path (`moveAside`); only a whole old copy is kept and offered, else
+   Settings says to download Sill again. The harness changes a resource of each copy and sees both.
+4. **Low: device keys could repeat.** A connection's object identity is an address, reused once it is gone,
+   so a device connecting during the download could pass for one the person agreed to. Fixed: the key is
+   the connection's endpoint (a new connection has a new source port) with its identity.
+5. **Low: the old copy was deleted also when the new Sill's host failed to start.** Fixed: only once the host
+   is up (T20).
+6. **Low: the note that keeps an old copy could fail on a full disk** (one way an update fails), and the next
+   start would delete it. Fixed: the staging folder is renamed out of the clean-up's reach ("Sill previous
+   copy ‹…›"; a rename needs no space), with the note when it can be written.
+
+Its verdicts on the rest: fixes 4, 7, 8, 9, 11 and 12 hold, 5 and 6 with findings 1, 5 and 6, 10 with
+finding 4; the owner refusal and the rounding hold; nothing in Sill.app lets an argument, a variable or a
+default loosen the trust, the hosts or the version rule.
+
 ## 13. Progress
 
 - 2026-11-11 22:40 EST: facts gathered (below), plan written and pushed (e7de2b3); the five decisions
@@ -880,10 +926,14 @@ Three things, at the Mac. The key list stays empty in the code until step 2's co
    the release workflow built it in a run you approved, add `--expect-sha256 ‹the SHA-256 that run's log
    printed for Sill.zip›`. A release you did not build here or approve has neither, and is refused: that is
    the point.
-3. It checks the zip (the checklist's download checks), shows the manifest, asks "Upload Sill.zip.manifest
-   to v0.6.2 in Saffsanity/sill?", and on yes uploads it and reads it back. The keychain asks before the
-   signer uses the key (unless it is the signer that made it). When it worked, the last line is
-   "Uploaded and read back: v0.6.2 is signed for Update Now." and the release lists `Sill.zip.manifest`.
+3. It checks the zip (the checklist's download checks). Then Touch ID (or your password) asks you to allow
+   "sign Sill v0.6.2 for Update Now: Sill.zip, ‹size› bytes, SHA-256 ‹16 hex digits›": compare those
+   digits with the start of the SHA-256 `release.sh` printed for Sill.zip (or the approved run's), and
+   allow only when they match. Any other time this prompt appears (when you didn't just run
+   sign-update.sh), cancel it: something is trying to use your key. Then it shows the manifest, asks
+   "Upload Sill.zip.manifest to v0.6.2 in Saffsanity/sill?", and on yes uploads it and reads it back. When it
+   worked, the last line is "Uploaded and read back: v0.6.2 is signed for Update Now." and the release lists
+   `Sill.zip.manifest`.
 4. Until you sign a release, Sill shows it as before Update Now: "Sill 0.6.2 is available." with Open
    Release Page… and no Update Now (every Sill's check notes whether the release lists the manifest). A Sill
    that checked before you signed shows Update Now after its next daily check, or at Check Now. Someone who

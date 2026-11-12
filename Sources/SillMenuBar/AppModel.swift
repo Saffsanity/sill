@@ -98,11 +98,13 @@ final class AppModel {
         presentation = StatusText.present(snapshot: HostStatusSnapshot(),
                                           permissions: PermissionState(screenRecording: true, accessibility: true),
                                           startupError: nil, hasCoordinator: false)
-        // The devices an update would disconnect, by the names the menu's card gives them.
-        // Each by its connection (two iPads of one name are two devices), named as the menu's card names it.
+        // The devices an update would disconnect, each by its connection (two iPads of one name are two
+        // devices), named as the menu's card names it. The key is the connection's endpoint (a new
+        // connection has a new source port) with its object's identity, which alone can be reused once a
+        // connection is gone: a device that connects later is never taken for one the person agreed to.
         updater.devices = { [weak self] in
             (self?.coordinator?.status.snapshot.devices ?? []).map {
-                UpdateInstallPolicy.Device(key: String(describing: $0.id), name: $0.name ?? "a device")
+                UpdateInstallPolicy.Device(key: "\($0.endpoint) \(String(describing: $0.id))", name: $0.name ?? "a device")
             }
         }
     }
@@ -158,15 +160,16 @@ final class AppModel {
                 // Off by default, and worth seeing in a log someone sends (issue #108).
                 if settings.showPairingWindowToScreenSharing { print(PairingWindowSharing.line(on: true)) }
                 onboardIfNeeded()
+                // This Sill's host is up: the copy an update replaced (kept until now so it could be put
+                // back) and anything else earlier updates left go. Not when the host could not start: the
+                // copy before may be the way back.
+                updater.cleanUpAfterStart()
             } catch {
                 startupError = "\(error)"
                 print("Sill couldn’t start: \(error)")
             }
             // Never before the host is up, and also when it could not start: a newer Sill may be the fix.
             startUpdates()
-            // This Sill has run: the copy an update replaced (kept until now so it could be put back)
-            // and anything else earlier updates left go.
-            updater.cleanUpAfterStart()
         }
     }
 

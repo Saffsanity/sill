@@ -886,7 +886,8 @@ extension DebugHooks {
             UpdateNowSample(name: "failed-notsigned", install: pane(.failed(.notSigned))),
             UpdateNowSample(name: "failed-didnotstart", install: pane(.failed(.didNotStart("it quit as it started", putBack: true)))),
             UpdateNowSample(name: "failed-lost", install: pane(.failed(.didNotStart("it quit as it started", putBack: false)),
-                                                               keptAt: "/private/var/folders/xy/T/TemporaryItems/NSIRD_Sill_ab12Cd/Sill.app")),
+                                                               keptAt: "/private/var/folders/xy/T/TemporaryItems/Sill previous copy ab12Cd/Sill.app")),
+            UpdateNowSample(name: "failed-gone", install: pane(.failed(.checkAfterSwap(.invalidSignature(-67054), putBack: false)))),
         ]
     }
 }

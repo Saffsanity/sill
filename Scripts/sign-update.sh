@@ -52,29 +52,41 @@ signer_dir="${SILL_SIGNER_DIR:-$HOME/Library/Application Support/Sill Update Sig
 signer="$signer_dir/update-manifest"
 keyargs=(); [ -n "$keyfile" ] && keyargs=(--key-file "$keyfile")
 
+# SILL_SIGNER_DIR is the tests' (with a key in a file): never the keychain's key.
+if [ -n "${SILL_SIGNER_DIR:-}" ] && [ -z "$keyfile" ] && [ "$mode" != install-signer ]; then
+    die "SILL_SIGNER_DIR is for tests, with --key-file"
+fi
+
 if [ "$mode" = install-signer ]; then
     files=("$root/Sources/StreamProtocol/Compatibility.swift" "$root/Sources/SillMenuBar/UpdateInstallPolicy.swift"
            "$root/Sources/SillMenuBar/UpdateManifest.swift" "$root/Sources/SillMenuBar/UpdateArchive.swift"
            "$here/update-manifest.swift")
-    echo "The signer is built from these files of $(git -C "$root" rev-parse --short HEAD)$(git -C "$root" diff --quiet -- "${files[@]}" || echo ' (with changes not committed)'):"
-    for f in "${files[@]}"; do echo "  $(shasum -a 256 "$f" | cut -d' ' -f1)  ${f#$root/}"; done
+    # Copied first, then hashed, shown and built from the copies: what is built is what was shown, whatever
+    # happens to the checkout meanwhile.
+    src="$(mktemp -d)"
+    trap 'rm -rf "$src"' EXIT
+    echo "The signer is built from these files of $(git -C "$root" rev-parse --short HEAD)$(git -C "$root" diff --quiet -- "${files[@]}" "$here/sign-update.sh" || echo ' (with changes not committed)'):"
+    for f in "${files[@]}"; do
+        name="$(basename "$f")"; [ "$name" = update-manifest.swift ] && name=main.swift
+        cp "$f" "$src/$name.orig"
+        echo "  $(shasum -a 256 "$src/$name.orig" | cut -d' ' -f1)  ${f#$root/}"
+        sed '/^import StreamProtocol$/d' "$src/$name.orig" > "$src/$name"
+        rm "$src/$name.orig"
+    done
+    echo "and this script, which chooses what it signs (read it too):"
+    echo "  $(shasum -a 256 "$here/sign-update.sh" | cut -d' ' -f1)  ${here#$root/}/sign-update.sh"
     if [ "$yes" = 0 ]; then
         read -r -p "Have you read them, and build the signer from them? [y/N] " answer
         [ "$answer" = y ] || [ "$answer" = Y ] || die "not built"
     fi
-    src="$(mktemp -d)"
-    trap 'rm -rf "$src"' EXIT
-    for f in "${files[@]}"; do
-        name="$(basename "$f")"; [ "$name" = update-manifest.swift ] && name=main.swift
-        sed '/^import StreamProtocol$/d' "$f" > "$src/$name"
-    done
     mkdir -p "$signer_dir"
     chmod 700 "$signer_dir"
-    swiftc -O "$src"/*.swift -o "$signer.new" 2>&1 | grep -E "error" && die "the signer did not compile"
+    rm -f "$signer.new"
+    swiftc -O "$src"/*.swift -o "$signer.new" > "$src/build.log" 2>&1 || { cat "$src/build.log" >&2; rm -f "$signer.new"; die "the signer did not compile"; }
     mv -f "$signer.new" "$signer"
     shasum -a 256 "$signer" | cut -d' ' -f1 > "$signer.sha256"
     echo "Installed $signer ($(cat "$signer.sha256")). An update key the keychain holds trusts the signer that made it:"
-    echo "a signer installed later asks once before it may use the key."
+    echo "a signer installed later asks once before it may use the key, and every signature with the keychain's key asks you in person (Touch ID or your password)."
     exit 0
 fi
 

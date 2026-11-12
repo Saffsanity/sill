@@ -483,7 +483,8 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       SHA-256 against `Sill.zip.sha256` and GitHub's digest, exactly one Sill.app, `codesign --verify
       --strict --deep` with Sill's pinned requirement and `notarized`, `stapler validate`, spctl's
       "Notarized Developer ID", the version is the tag's), reads each slice's cdhash with codesign (the
-      values Update Now reads with Security), signs the manifest (the keychain asks), reads it back with
+      values Update Now reads with Security), signs the manifest (Touch ID or your password: allow only
+      when the prompt's 16 hex digits are the start of the SHA-256 release.sh printed), reads it back with
       the key the tagged source carries, shows it, asks, uploads `Sill.zip.manifest` and downloads it
       again to compare. Until it is there, Update Now does not show for the release (every Sill's check
       stores whether the release lists the manifest), and the release page is the way, as before Update
