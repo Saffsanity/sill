@@ -258,6 +258,14 @@ updater features" (the plan's §15.1); the independent security review's finding
   refusals, and the case now takes both (the one mutant whose first failure was that case, "the watcher doesn't
   start the old copy", run again alone after it: caught by the watcher's own case, "the old copy was started"; the
   harness 298 of 298 again with the change).
+- Verified, round 7 (2026-11-12 15:59–16:07, this Mac, heavy jobs through heavy.sh, no device), on f31b704c:
+  `update-install` 926 of 926 (N12 a: a first `Date` 25 years and 100 days back each give this Mac's 48 hours and
+  `dates` goes then; a later publication waits in `dates`); `swift build -c release`; `sign-test.sh` all 102 steps
+  (the release marked pulled, back from its own files, named with a notification; a release with both of Sill's
+  files renamed named); the harness 298 of 298 (the watcher didn't change; run for its compile of the policy
+  files); `repo-rules` 10 of 10; the check's mutants for what changed 4 of 4 (N12 a's new one, and the sightings'
+  three). `sign-test.sh` against f9bab246's `sign-update.sh`: exactly round 7's two audit cases fail (4 lines).
+  CI's Build and check green on f31b704c.
 - **Untested, for Noah:** the plan's §12 rehearsal with a throwaway repository and key (two notarized
   builds); the first real Update Now (a release carrying the key installed by hand first); §14's three
   step lists (once: the signer, the key, its backup; once: the public key into `releaseKeys`, a commit of
@@ -270,8 +278,8 @@ updater features" (the plan's §15.1); the independent security review's finding
   seems ok, can the 10 minute wait be shortened to 5 minutes?"; the stop,
   two attempts a day apart, 120 days, the watcher's 30 s and 150 s, GitHub asked again before the swap,
   the "restarting" goodbye, the keychain group for the switch, a day's wait at most, Check Now included).
-  From the second and third passes: the audit (`sign-update.sh --audit` by hand after a release, a pre-release
-  and a draft among GitHub's releases; the LaunchAgent if he wants it every four hours, and its notification
+  From the second to fifth passes: the audit (`sign-update.sh --audit` by hand after a release, a pre-release,
+  a draft, a release pulled and marked, and one published again after it among GitHub's releases; the LaunchAgent if he wants it every four hours, and its notification
   when `gh`'s login has expired), a release built by the release workflow signed with `--run` (GitHub's record
   of the run against his tag, the zip from its artifact: only ever run against the stand-in here), and the
   first sight's wait on a real release (the pane's "… or later" date two days after the first daily check that
