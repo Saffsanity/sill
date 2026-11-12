@@ -1997,9 +1997,13 @@ private struct TopBar: View {
                 .allowsHitTesting(!scaleOpen)
                 .tourTarget(.keyboard)
 
-            button(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop",
-                   accessibilityLabel: "Show the full Mac desktop",
-                   action: { client.select(.desktop) })
+            // The Desktop on the Mac's stop it shows, and with two stops or more the next at a tap
+            // (DesktopDisplays): "Desktop 2", a dot per stop while the Desktop streams.
+            let desktop = client.desktopButton
+            button(open: client.active == .desktop, symbol: "desktopcomputer", label: desktop.label,
+                   accessibilityLabel: desktop.accessibilityLabel,
+                   action: { client.tapDesktop() })
+                .desktopStops(desktop, inset: metrics.buttonHeight >= 60 ? 5 : 3.5)
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
 
@@ -2083,6 +2087,50 @@ struct BarButton<Content: View>: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+extension View {
+    /// The Desktop button beyond its label and symbol (DesktopDisplays.button), on a Mac with two stops or
+    /// more: VoiceOver's value ("Display 2 of 3, DELL U2723QE") and hint ("Shows the next display." while
+    /// a tap steps), and the stops' dots, the shown one filled ("3/7" from seven), over the button's bottom
+    /// margin `inset` from its edge while the Desktop streams, so no bar's layout moves for them. Nothing
+    /// with one stop or a Mac from before this, as before.
+    func desktopStops(_ face: DesktopDisplays.Button, inset: CGFloat, dot: CGFloat = 4) -> some View {
+        accessibilityValue(face.accessibilityValue ?? "")
+            .accessibilityHint(face.accessibilityHint ?? "")
+            .overlay(alignment: .bottom) { DesktopStopDots(face: face, dot: dot).padding(.bottom, inset) }
+    }
+}
+
+/// The Desktop button's place among the Mac's stops while the Desktop streams (DesktopDisplays): one dot per
+/// stop, the shown one filled, as a page control shows a page; "3/7" in place of seven dots or more. The
+/// button reads it whole; VoiceOver hears its value instead.
+struct DesktopStopDots: View {
+    let face: DesktopDisplays.Button
+    var dot: CGFloat = 4
+
+    var body: some View {
+        Group {
+            if let counter = face.counter {
+                // As tall as the dots it stands for, so its digits sit where they would and never reach the
+                // label above (an 8 pt line of its own overlapped "Desktop 3" in a 58 pt window bar).
+                Text(counter)
+                    .font(.system(size: dot + 3, weight: .bold).monospacedDigit())
+                    .foregroundStyle(Palette.accent)
+                    .frame(height: dot)
+            } else if face.dots > 0 {
+                HStack(spacing: dot * 0.75) {
+                    ForEach(1...face.dots, id: \.self) { i in
+                        Circle()
+                            .fill(Palette.accent.opacity(i == face.lit ? 1 : 0.32))
+                            .frame(width: dot, height: dot)
+                    }
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

@@ -155,6 +155,11 @@ struct ContentView: View {
 ///   only at a synthetic host, or put a relay that drops kind 8 (input) in front of the host.
 /// * `-SillActive none` — start with nothing streaming (also `desktop`, or a window ID like `104`).
 ///   The mock otherwise starts on Code's window, as the boards draw it.
+/// * `-SillDesktopDisplays 3,2` — the mock's Mac has three stops, the Desktop on the second: the
+///   Desktop button reads "Desktop 2", with three dots while the Desktop streams (`-SillActive desktop`)
+///   and "2/7" from seven stops (DesktopDisplays, issue #91, docs/virtual-desktop-plan.md §1). `2` alone
+///   is the first. The stops are named as a MacBook with monitors would name them ("Built-in Retina
+///   Display", "DELL U2723QE", …), for VoiceOver's value; `-SillDesktopDisplayNames 'A|B|C'` names them.
 /// * `-SillIdiom pad` — draw a screen taller than wide and narrower than 600 pt as an iPad draws
 ///   such a window (the compact halves), not as a phone does (`DuoLayout.phoneArrangement`), so an
 ///   iPhone simulator can photograph it; `phone` the other way round. Also in the normal app. The
@@ -724,10 +729,26 @@ struct LayoutHarness: View {
     init(spec: Spec, live: StreamClient) {
         self.spec = spec
         self.live = live
-        _mock = StateObject(wrappedValue: spec.connectCase.map(MockCatalog.connectClient)
+        _mock = StateObject(wrappedValue: Self.withDisplays(spec.connectCase.map(MockCatalog.connectClient)
                                 ?? MockCatalog.client(active: spec.mockActive, settings: spec.settingsCase,
                                                       menus: spec.live ? nil : spec.macMenu,
-                                                      pointer: spec.pointer, pencilPointer: spec.pencilPointer))
+                                                      pointer: spec.pointer, pencilPointer: spec.pencilPointer)))
+    }
+
+    /// `-SillDesktopDisplays 3,2`: the mock's Mac has three stops and the Desktop is on the second
+    /// (DesktopDisplays: the Desktop button reads "Desktop 2"); `2` alone, the first. Named as a MacBook's
+    /// screens would be, or by `-SillDesktopDisplayNames 'A|B|C'`.
+    private static func withDisplays(_ client: StreamClient) -> StreamClient {
+        let parts = (UserDefaults.standard.string(forKey: "SillDesktopDisplays") ?? "").split(separator: ",").compactMap { Int($0) }
+        if let count = parts.first {
+            client.hostDesktopDisplays = count
+            client.hostDesktopDisplay = parts.count > 1 ? parts[1] : 1
+            let given = (UserDefaults.standard.string(forKey: "SillDesktopDisplayNames") ?? "").split(separator: "|").map(String.init)
+            let mock = ["Built-in Retina Display", "DELL U2723QE", "LG HDR 4K", "Studio Display", "Sidecar Display (iPad)",
+                        "BenQ PD2705U", "SAMSUNG", "PHL 346B1C", "ASUS PA279CV"]
+            client.hostDesktopDisplayNames = given.count == count ? given : (0..<max(0, count)).map { mock[$0 % mock.count] }
+        }
+        return client
     }
 
     var body: some View {
