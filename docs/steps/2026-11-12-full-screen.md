@@ -14,9 +14,12 @@ nothing on the Mac, nothing stored but how often the hint has shown.
   3 times; the room: clear of the sensor housing, down under the home indicator; the words), `ChromeLevel` (one
   level: everything or nothing; a slot for a second, parked by Noah).
 - The recognizers (`EdgeFlickRecognizer.swift`): the flick's and the swipe in's (`RevealEdgePan`, the system's
-  edge recognizer), on Sill's window; every other recognizer there that takes fingers waits for them to fail
-  (`shouldBeRequiredToFail(by:)`), so a touch at the edge is held only while the rule decides and then is the hide
-  alone or goes on whole. The trackpad's tracker starts from where the finger landed (`downLocation`).
+  edge recognizer, failing at once for a touch landing more than 40 pt in), on Sill's window; every other
+  recognizer there that takes fingers waits for them to fail (`EdgeRecognizers.waits`), so a touch at the edge is
+  held only while the rule decides and then is the hide alone or goes on whole. The trackpad's tracker starts from
+  where the finger landed (`downLocation`); a stroke judged only at its lift keeps its travel
+  (`EdgeRecognizers.releasedAtLift`: the picture's scroll and the trackpad's tracker carry it at their end, the
+  trackpad's pan leaves it to the tracker, `trackerPending`). Nothing of this is reached away from the edge.
 - The glue (`FullScreen.swift`): `FullScreenEdges` (the recognizers and a hover on the window, the window covering
   the screen, the window's shake), the shake (`UIWindow.motionEnded`; Shake to Undo off while hidden), the hint,
   the swipe in's preview hole, the hidden picture as one element (Show Controls; the escape gesture; Voice
