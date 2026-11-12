@@ -46,7 +46,7 @@ the menu are what they were.
   (`--new-key`, once) with one copy off the Mac (docs/release-checklist.md part 1 §7, part 2). The check
   stores `updateLatestSigned`: an unsigned release shows Open Release Page… alone, as before.
 - An independent review of the code as written (a read-only subagent, 2026-11-12): twelve findings, all
-  taken (the plan's Progress has them).
+  taken (the plan's §12a has each and its fix; the two high ones were in the signing step).
 - Verified: (filled in once compiled; the disk was under the 25 GB floor from 22:50 to …).
 - **Untested, for Noah:** the plan's §12 rehearsal with a throwaway repository and key (two notarized
   builds); the first real Update Now (a release carrying the key installed by hand first); §14's three

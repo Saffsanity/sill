@@ -141,9 +141,26 @@ enum Tamper { case none, stagedResource, wrongRunningCDHash }
 
 /// prepare, staging, download, unpack, check, install: the first failure, or none (the new copy in place).
 func update(_ name: String, using ins: UpdateInstaller = installer, installedFrom: URL? = nil, offeredTag: String = "v1.1",
-            running: SillVersion = SillVersion("1.0")!, runningRequirement: SecRequirement? = nil, tamper: Tamper = .none) async -> Outcome {
+            running: SillVersion = SillVersion("1.0")!, runningRequirement: SecRequirement? = nil, tamper: Tamper = .none,
+            holdBundle: Bool = false) async -> Outcome {
     let installed = installedCopy(name, from: installedFrom ?? out.appendingPathComponent("apps/installed/UpdTest.app"))
     var o = Outcome(failure: nil, installed: installed)
+    // In Sill.app, Bundle.main is the installed copy, its Info.plist read long before the swap. With holdBundle an
+    // NSBundle and a CFBundle for the path, each with its Info.plist read, live across the swap, so a check after it
+    // that read a cached bundle would see the old version and fail.
+    let heldBundle = holdBundle ? Bundle(url: installed) : nil
+    let heldCF = holdBundle ? CFBundleCreate(nil, installed as CFURL) : nil
+    if holdBundle {
+        check((heldBundle?.infoDictionary?["CFBundleShortVersionString"] as? String) != nil, "\(name): the held NSBundle read its Info.plist")
+        check(heldCF.flatMap { CFBundleGetInfoDictionary($0) } != nil, "\(name): the held CFBundle read its Info.plist")
+    }
+    defer {
+        if holdBundle {
+            let nsVersion = heldBundle?.infoDictionary?["CFBundleShortVersionString"] as? String ?? "none"
+            let cfVersion = heldCF.flatMap { (CFBundleGetInfoDictionary($0) as? [String: Any])?["CFBundleShortVersionString"] as? String } ?? "none"
+            say("\(name): after the swap the held NSBundle says \(nsVersion), the held CFBundle \(cfVersion), Security's read \(ins.facts(of: installed, runningRequirement: nil).plist["CFBundleShortVersionString"] ?? "none")")
+        }
+    }
     let cancel = UpdateInstaller.Cancel()
     let prepared: (release: P.Release, manifest: UpdateManifest)
     switch await ins.prepare(offeredTag: offeredTag, running: running, cancel: cancel) {
@@ -204,11 +221,11 @@ func refused(_ name: String, _ r: Release, offeredTag: String = "v1.1", running:
 /// A case that must install: the new version at the path, its code the manifest's, the old copy whole in staging.
 func installs(_ name: String, _ r: Release, expectVersion: String = "1.1", using ins: UpdateInstaller = installer,
               installedFrom: URL? = nil, offeredTag: String = "v1.1", running: SillVersion = SillVersion("1.0")!,
-              runningRequirement: SecRequirement? = nil, keepStaging: Bool = false) async -> Outcome {
+              runningRequirement: SecRequirement? = nil, keepStaging: Bool = false, holdBundle: Bool = false) async -> Outcome {
     publish(r)
     let before = treeHash(installedFrom ?? out.appendingPathComponent("apps/installed/UpdTest.app"))
     let o = await update(name, using: ins, installedFrom: installedFrom, offeredTag: offeredTag, running: running,
-                         runningRequirement: runningRequirement)
+                         runningRequirement: runningRequirement, holdBundle: holdBundle)
     check(o.failure == nil, "\(name): \(o.failure.map { P.logText($0) } ?? "")")
     check(version(of: o.installed) == expectVersion, "\(name): the installed version is \(version(of: o.installed) ?? "none")")
     check(cdhashes(o.installed) == cdhashes(r.app), "\(name): the installed code is the manifest's")
@@ -252,6 +269,7 @@ check(leftovers.isEmpty, "no AppleDouble file written: \(leftovers)")
 if let s = o.staging { UpdateInstaller.remove(s) }
 o = await installs("a redirect to the asset host", { var r = v11; r.modes = ["UpdTest.zip": "redirect-same", "UpdTest.zip.manifest": "redirect-same"]; return r }())
 o = await installs("no digest from GitHub (the manifest's alone)", { var r = v11; r.apiDigest = .some(nil); return r }())
+o = await installs("a bundle held for the path across the swap (Bundle.main)", v11, holdBundle: true)
 
 say("== refused: the release and its manifest")
 await refused("missing manifest", { var r = v11; r.withManifest = false; return r }()) { $0 == .notSigned }
@@ -431,7 +449,7 @@ if FileManager.default.fileExists(atPath: g.appendingPathComponent("plain.zip").
     say("genuine cdhashes: \(codes)")
     let genuine = Release(tag: "v0.6.1", zip: g.appendingPathComponent("plain.zip"), asset: "Sill.zip", app: plainApp, build: "1388")
     _ = await installs("genuine 0.6.1 over 0.6.0", genuine, expectVersion: "0.6.1", using: real, installedFrom: installedSill, offeredTag: "v0.6.1",
-                       running: SillVersion("0.6.0")!, runningRequirement: sillDR)
+                       running: SillVersion("0.6.0")!, runningRequirement: sillDR, holdBundle: true)
     await refused("genuine, the same version running", genuine, offeredTag: "v0.6.1", running: SillVersion("0.6.1")!, using: real,
                   installedFrom: installedSill, runningRequirement: sillDR) { $0 == .releaseNotNewer }
     await refused("genuine, tagged v0.6.2", { var x = genuine; x.tag = "v0.6.2"; return x }(), offeredTag: "v0.6.2", running: SillVersion("0.6.0")!,

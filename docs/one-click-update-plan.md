@@ -641,7 +641,8 @@ checklist.md part 1 §3's marker rule).
 - G2 `Tests/update-harness/run.sh`: against scratch bundles in `.build` (ad hoc, a test identifier, the
   trust, endpoints and update key made by the harness only) and a stand-in for GitHub on 127.0.0.1: the
   positive path (a ditto zip with AppleDouble entries, a plain one, a redirect to the asset path, no
-  GitHub digest), put back, and each hostile case refused for its reason with the installed copy's tree
+  GitHub digest, an NSBundle and a CFBundle held for the installed path across the swap as Bundle.main is
+  in Sill.app), put back, and each hostile case refused for its reason with the installed copy's tree
   unchanged: a missing manifest, one by another key, one changed after signing, one of another tag, a
   digest that disagrees, a SHA-256 that disagrees, a lower and the same version, another release than
   offered, a 404; a redirect to another host, to another path, without end; a truncated download, a
@@ -725,56 +726,6 @@ The first real one: Noah makes the real key (§4.8), its public key ships in a r
 (the first with Update Now able to verify), and the release after it is the first real Update Now;
 steps 7 to 12 again then.
 
-## 14. For Noah: the update key, step by step
-
-Three things, at the Mac. The key list stays empty in the code until step 2's commit; nothing here made a key.
-
-**1. Once: the signer, the key, its backup.**
-1. Read the five files the signer is built from: `Scripts/update-manifest.swift`,
-   `Sources/SillMenuBar/UpdateManifest.swift`, `UpdateInstallPolicy.swift`, `UpdateArchive.swift` and
-   `Sources/StreamProtocol/Compatibility.swift` (the last three only for the version and the format's
-   helpers). The signer is the only program that will ever hold the key.
-2. `Scripts/sign-update.sh --install-signer`: it lists those files with their SHA-256 and the commit,
-   asks whether you read them, and builds the signer into `~/Library/Application Support/Sill Update
-   Signer/`. Every signing checks that binary is unchanged. After a change to those files, read it and run
-   this again (the keychain then asks once before the new signer may use the key).
-3. `Scripts/sign-update.sh --new-key`: makes the key and keeps it in your login keychain ("Sill update
-   signing key", never synced), and prints the public key and its key ID. It refuses to make a second one.
-4. Back it up once, off the Mac: `security find-generic-password -s me.saffer.sill.update-signing -a ed25519
-   -w` shows the private key (the keychain asks); put it in a 1Password item (or on paper in a safe), and
-   nowhere else: not a file in the repository, the handoff folder or Downloads, not GitHub, not CI.
-5. What a lost key costs: no Sill already installed can accept another update through Update Now. Releases
-   then go out unsigned (Update Now doesn't show; Open Release Page… as before) until one carrying a new
-   public key is installed by hand once; its notes say so. A leaked key: the same, and the notes ask people
-   to update by hand once; the leaked key alone installs nothing (a Developer ID signed, notarized build is
-   still needed).
-
-**2. Once: the public key into the app.**
-1. Give the public key that step 1.3 printed (a line of base64; it is not a secret) to whoever makes the
-   change, or make it yourself.
-2. It goes into `Sources/SillMenuBar/UpdateManifest.swift`, `static let releaseKeys: [String] =
-   ["‹the public key›"]`, in a commit of its own, reviewed, before the first release that carries the
-   updater. `Tests/checks/update-install` checks every key there is usable.
-3. That first release is installed by hand (the Sill before it has no key to check with): it is the first
-   one whose Update Now works, and the release after it is the first Update Now installs.
-
-**3. Every release: sign it after it is published.**
-1. Publish as today (part 2 of docs/release-checklist.md).
-2. On your Mac, from the release's tag: `Scripts/sign-update.sh v0.6.2`. If you built and published it here
-   (`release.sh --publish`), that is all: it compares GitHub's `Sill.zip` with `.build/Sill-0.6.2.zip`. If
-   the release workflow built it in a run you approved, add `--expect-sha256 ‹the SHA-256 that run's log
-   printed for Sill.zip›`. A release you did not build here or approve has neither, and is refused: that is
-   the point.
-3. It checks the zip (the checklist's download checks), shows the manifest, asks "Upload Sill.zip.manifest
-   to v0.6.2 in Saffsanity/sill?", and on yes uploads it and reads it back. The keychain asks before the
-   signer uses the key (unless it is the signer that made it). When it worked, the last line is
-   "Uploaded and read back: v0.6.2 is signed for Update Now." and the release lists `Sill.zip.manifest`.
-4. Until you sign a release, Sill shows it as before Update Now: "Sill 0.6.2 is available." with Open
-   Release Page… and no Update Now (every Sill's check notes whether the release lists the manifest). A Sill
-   that checked before you signed shows Update Now after its next daily check, or at Check Now. Someone who
-   clicked Update Now in between is told "Sill 0.6.2 isn’t ready for Update Now yet. Try again later, or
-   open its release page." and nothing is downloaded.
-
 ## 12a. The review before the first build (2026-11-12, a subagent reading the code as written)
 
 An Opus subagent read the plan and the code read-only, before anything was compiled, as a hostile reviewer.
@@ -830,7 +781,7 @@ the source rules missed `Trust.init(` and CFPreferences (added); the mechanism h
   sent to the coordinator.
 - 23:00: the coordinator (and Noah's recommendation to come): build the second factor now, the key list
   empty on the branch, the release step written, the alternatives and their costs kept (this version).
-- 2026-11-12 00:20: an independent review of the code as written (read-only, a subagent): twelve findings,
+- 2026-11-12 00:09: an independent review of the code as written (read-only, a subagent): twelve findings,
   each taken: the signing step signed whatever GitHub served (now a zip Noah knows, by its SHA-256) and was
   rebuilt from the checkout with the key in reach (now a signer installed once); the put-back carried
   whatever was in staging into place (now only the running code); another copy of Sill from another path
@@ -850,3 +801,53 @@ the source rules missed `Trust.init(` and CFPreferences (added); the mechanism h
   item-replacement directory on the data volume and an atomic swap with a folder in ~/Downloads;
   `proc_pidpath` reading uid 502's Sill; a folder moved to another parent needs write permission on
   itself; a mounted disk image's volume under AppleDiskImageDevice in the I/O Registry.
+
+## 14. For Noah: the update key, step by step
+
+Three things, at the Mac. The key list stays empty in the code until step 2's commit; nothing here made a key.
+
+**1. Once: the signer, the key, its backup.**
+1. Read the five files the signer is built from: `Scripts/update-manifest.swift`,
+   `Sources/SillMenuBar/UpdateManifest.swift`, `UpdateInstallPolicy.swift`, `UpdateArchive.swift` and
+   `Sources/StreamProtocol/Compatibility.swift` (the last three only for the version and the format's
+   helpers). The signer is the only program that will ever hold the key.
+2. `Scripts/sign-update.sh --install-signer`: it lists those files with their SHA-256 and the commit,
+   asks whether you read them, and builds the signer into `~/Library/Application Support/Sill Update
+   Signer/`. Every signing checks that binary is unchanged. After a change to those files, read it and run
+   this again (the keychain then asks once before the new signer may use the key).
+3. `Scripts/sign-update.sh --new-key`: makes the key and keeps it in your login keychain ("Sill update
+   signing key", never synced), and prints the public key and its key ID. It refuses to make a second one.
+4. Back it up once, off the Mac: `security find-generic-password -s me.saffer.sill.update-signing -a ed25519
+   -w` shows the private key (the keychain asks); put it in a 1Password item (or on paper in a safe), and
+   nowhere else: not a file in the repository, the handoff folder or Downloads, not GitHub, not CI.
+5. What a lost key costs: no Sill already installed can accept another update through Update Now. Releases
+   then go out unsigned (Update Now doesn't show; Open Release Page… as before) until one carrying a new
+   public key is installed by hand once; its notes say so. A leaked key: the same, and the notes ask people
+   to update by hand once; the leaked key alone installs nothing (a Developer ID signed, notarized build is
+   still needed).
+
+**2. Once: the public key into the app.**
+1. Give the public key that step 1.3 printed (a line of base64; it is not a secret) to whoever makes the
+   change, or make it yourself.
+2. It goes into `Sources/SillMenuBar/UpdateManifest.swift`, `static let releaseKeys: [String] =
+   ["‹the public key›"]`, in a commit of its own, reviewed, before the first release that carries the
+   updater. `Tests/checks/update-install` checks every key there is usable.
+3. That first release is installed by hand (the Sill before it has no key to check with): it is the first
+   one whose Update Now works, and the release after it is the first Update Now installs.
+
+**3. Every release: sign it after it is published.**
+1. Publish as today (part 2 of docs/release-checklist.md).
+2. On your Mac, from the release's tag: `Scripts/sign-update.sh v0.6.2`. If you built and published it here
+   (`release.sh --publish`), that is all: it compares GitHub's `Sill.zip` with `.build/Sill-0.6.2.zip`. If
+   the release workflow built it in a run you approved, add `--expect-sha256 ‹the SHA-256 that run's log
+   printed for Sill.zip›`. A release you did not build here or approve has neither, and is refused: that is
+   the point.
+3. It checks the zip (the checklist's download checks), shows the manifest, asks "Upload Sill.zip.manifest
+   to v0.6.2 in Saffsanity/sill?", and on yes uploads it and reads it back. The keychain asks before the
+   signer uses the key (unless it is the signer that made it). When it worked, the last line is
+   "Uploaded and read back: v0.6.2 is signed for Update Now." and the release lists `Sill.zip.manifest`.
+4. Until you sign a release, Sill shows it as before Update Now: "Sill 0.6.2 is available." with Open
+   Release Page… and no Update Now (every Sill's check notes whether the release lists the manifest). A Sill
+   that checked before you signed shows Update Now after its next daily check, or at Check Now. Someone who
+   clicked Update Now in between is told "Sill 0.6.2 isn’t ready for Update Now yet. Try again later, or
+   open its release page." and nothing is downloaded.

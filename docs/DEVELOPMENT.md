@@ -1861,9 +1861,17 @@ them. With the genuine v0.6.1 zip in `.build/updater-scratch/release-v0.6.1` (a
 read-only `gh release download v0.6.1 --repo Saffsanity/sill --pattern Sill.zip`),
 it also runs `Trust.release`'s every rule, with the harness's key, against Sill's
 real signature: installed over a 0.6.0, refused for the same version, a tag that
-isn't its version, another team, a tampered, an ad hoc and an unstapled copy. It
-never touches /Applications, a keychain or Sill's defaults, and launches no app;
+isn't its version, another team, a tampered, an ad hoc and an unstapled copy, and
+each slice's cdhash as codesign prints it. It never touches /Applications, a
+keychain or Sill's defaults, and launches no app (the launch check's test
+executable runs directly, never through Launch Services, and is stopped);
 everything is under `.build/update-harness`, removed at the end.
+`Tests/update-harness/mutants.py` changes UpdateInstaller in eight places, one at
+a time, and runs the harness on each copy (each must fail it; about 20 minutes).
+`Tests/update-harness/sign-test.sh` runs `Scripts/sign-update.sh` against a
+stand-in `gh` (in `.build/update-sign-test`) serving the genuine v0.6.1, with a
+throwaway key file and the signer installed in a scratch folder: nothing is
+uploaded anywhere, and the login keychain is never used.
 
 ### The restore probe
 
