@@ -2186,12 +2186,18 @@ simulator:
   preview photographed; `-SillFullScreenHint 1` (or `hold`, kept up) the hint;
   `-SillFullScreenRoom screen|housing|safe` where the hidden picture goes;
   `-SillFullScreenToggle 3,6`, `-SillFullScreenSwipe 9` and `-SillShakeAt 12`
-  hide or show, swipe in and shake at those seconds. The console's `full
-  screen:` lines say what happened, and in a Debug build `edge:` lines give
-  every stroke the flick judged at the left edge with its numbers.
+  hide or show (as Settings › Full Screen and the swipe in do), play a swipe
+  in and shake at those seconds; `-Sill.shakeToShowControls 0` turns Shake to
+  Show Controls off for one run. The console's `full screen:` lines say what
+  happened, and in a Debug build `reveal:` lines give every touch the swipe in
+  judged at the left edge (where it landed, why it was let go, when it began)
+  and each lift's travel, speed and verdict; `full screen: Sill's window
+  fills the screen: …` gives the window's and the screen's frames.
   `-SillSettings 1 -SillSettingsScroll fullscreen` opens the panel at the
-  row. The flick itself is proved in the touch rig: `RIG_ONLY=edge
-  Tests/touchrig/run.sh NAME`, then `Tests/touchrig/compare.py --edge` against
+  rows (after Frame Rate). The swipe in itself is proved in the touch rig:
+  `RIG_ONLY=edge Tests/touchrig/run.sh NAME` (the controls shown, then hidden),
+  `RIG_ONLY=reveal RIG_ORIENT=landscape` on an iPhone-idiom simulator for the
+  hidden strokes on its side, then `Tests/touchrig/compare.py --edge` against
   main's surfaces, and `compare.py --all` for every other stroke.
 - `-SillAXDump <s>`: `s` seconds after the stream screen shows, the console
   lists its accessibility elements in the order the tree hands them to

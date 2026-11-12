@@ -83,9 +83,9 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// never sent for a pan that could not begin (no video yet).
     private var scrollGestureOpen = false
     /// The scroll in progress has had a change since it began. A finger's pan that UIKit lets begin only as the
-    /// finger lifts (full screen's flick held it while it judged a touch at the left edge, and the lift said it
-    /// was not one: EdgeRecognizers.releasedAtLift) begins and ends with no change between, and its end then
-    /// sends the travel first, so none is lost. Every other pan is as before.
+    /// finger lifts (full screen's swipe in held it while it judged a touch at the left edge with the controls
+    /// hidden, and the lift said it was not one: EdgeRecognizers.releasedAtLift) begins and ends with no change
+    /// between, and its end then sends the travel first, so none is lost. Every other pan is as before.
     private var scrollChanged = false
     /// -1 while Reverse Scrolling turns the scroll in progress around (a finger's drag; a connected
     /// trackpad's or wheel's never), else 1 (`ScrollDirection`): read as each scroll begins, so its
@@ -315,8 +315,9 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
             zoomStroke.panBegan()
             fingerScroll = zoomStroke.scrollsMac
         } else if gesture.state == .ended, !fingerScroll, !scrollGestureOpen, EdgeRecognizers.releasedAtLift(in: window) {
-            // UIKit let the pan go only at the lift (full screen's flick held it there, EdgeRecognizers.releasedAtLift)
-            // and ended it without a begin: it begins here, so its end carries the travel (`scrollChanged`).
+            // UIKit let the pan go only at the lift (full screen's swipe in held it there,
+            // EdgeRecognizers.releasedAtLift) and ended it without a begin: it begins here, so its end carries the
+            // travel (`scrollChanged`).
             zoomStroke.panBegan()
             fingerScroll = zoomStroke.scrollsMac
             if fingerScroll {
@@ -330,11 +331,11 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
         if gesture.state == .began { carryHeldTravel(gesture) }
     }
 
-    /// A finger's pan full screen's flick held while it judged a stroke at the left edge
-    /// (EdgeRecognizers.heldLanding): UIKit begins it only as the flick lets the stroke go and counts its
+    /// A finger's pan full screen's swipe in held while it judged a stroke at the left edge, the controls hidden
+    /// (EdgeRecognizers.heldLanding): UIKit begins it only as the swipe in lets the stroke go and counts its
     /// translation from there, where on its own it counts from 10 pt past the landing
     /// (EdgeRecognizers.panHysteresis). The next delta carries the difference, so the Mac scrolls what the same
-    /// stroke scrolls anywhere else. A pan that began on its own, as the flick let go, needs nothing: its
+    /// stroke scrolls anywhere else. A pan that began on its own, as the swipe in let go, needs nothing: its
     /// translation's origin is already there.
     private func carryHeldTravel(_ gesture: UIPanGestureRecognizer) {
         guard gesture.numberOfTouches <= 1, let window, let held = EdgeRecognizers.heldLanding(in: window) else { return }

@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-// Full screen's glue (docs/full-screen-plan.md): the edge recognizers on the window (EdgeFlickRecognizer.swift)
+// Full screen's glue (docs/full-screen-plan.md): the swipe in's recognizer on the window (RevealEdgePan.swift)
 // and the pointer's dwell at the left edge, whether Sill's window covers the screen, the shake, the hint, and
 // the hidden picture as one element for VoiceOver, Switch Control and Voice Control. The rules are
 // FullScreenPolicy.swift's; StreamScreen owns the state (`chrome`) and PortraitStreamScreen draws its part.
@@ -9,15 +9,12 @@ import UIKit
 // MARK: - The window's edges
 
 /// A view with no size and no touch that puts full screen's recognizers on its window, as TouchWatcher puts
-/// the tour's: the flick off the left edge (while `flickArmed`), the swipe in from the left bezel (while
-/// `revealArmed`), and a hover that sees the iPad's pointer held at the left edge (while hidden). It also says
-/// whether the window covers the screen, as it joins a window and at every layout (a Stage Manager window
-/// resized, Split View): FullScreenPolicy.offered.
+/// the tour's: the swipe in from the left edge and a hover that sees the iPad's pointer held at the left edge,
+/// both only while the interface is hidden (`hidden`): while it shows, neither listens and no touch waits for
+/// either. It also says whether the window covers the screen, as it joins a window and at every layout (a
+/// Stage Manager window resized, Split View): FullScreenPolicy.offered.
 struct FullScreenEdges: UIViewRepresentable {
-    var flickArmed: Bool
-    var revealArmed: Bool
-    /// The flick off the left edge was recognized.
-    var onFlick: () -> Void
+    var hidden: Bool
     /// The swipe in: `.began`, `.changed` with the finger's travel, `.ended` or `.cancelled` with its travel
     /// and speed (points, points a second, rightward).
     var onReveal: (UIGestureRecognizer.State, CGFloat, CGFloat, CGFloat) -> Void
@@ -34,32 +31,20 @@ struct FullScreenEdges: UIViewRepresentable {
     func makeUIView(context: Context) -> Anchor { Anchor() }
 
     func updateUIView(_ anchor: Anchor, context: Context) {
-        anchor.flick.armed = flickArmed
-        anchor.reveal.isEnabled = revealArmed
-        anchor.dwellArmed = revealArmed
-        anchor.flick.onFlick = onFlick
+        anchor.reveal.isEnabled = hidden
+        anchor.hover.isEnabled = hidden
+        anchor.dwellArmed = hidden
         anchor.onReveal = onReveal
         anchor.onDwell = onDwell
         anchor.onShake = onShake
         anchor.onCoverage = onCoverage
         anchor.onInsets = onInsets
-        #if DEBUG
-        anchor.flick.onJudged = { verdict, numbers in
-            switch verdict {
-            case .hide: print("edge: a flick off the left edge (\(numbers)): hide")
-            case .notAFlick(.outsideBand): break      // every touch past the band: too many to print
-            case .notAFlick(let why): print("edge: not a flick, \(why.rawValue) (\(numbers)): the stroke goes on")
-            case .undecided: break
-            }
-        }
-        #endif
         anchor.reportCoverage()
     }
 
     static func dismantleUIView(_ anchor: Anchor, coordinator: ()) { anchor.detach() }
 
     final class Anchor: UIView, UIGestureRecognizerDelegate {
-        let flick = EdgeFlickRecognizer()
         let reveal = RevealEdgePan(target: nil, action: nil)
         let hover = UIHoverGestureRecognizer(target: nil, action: nil)
         var dwellArmed = false {
@@ -89,6 +74,7 @@ struct FullScreenEdges: UIViewRepresentable {
             reveal.addTarget(self, action: #selector(revealChanged))
             reveal.isEnabled = false
             hover.addTarget(self, action: #selector(hovered))
+            hover.isEnabled = false
             hover.delegate = self
             // A shake reaches the window it was given to (UIWindow.motionEnded, below): this one's only.
             shakes = NotificationCenter.default.addObserver(forName: .sillDeviceShaken, object: nil, queue: .main) { [weak self] note in
@@ -105,7 +91,6 @@ struct FullScreenEdges: UIViewRepresentable {
             reportCoverage()
             guard host !== window else { return }
             detach()
-            window.addGestureRecognizer(flick)
             window.addGestureRecognizer(reveal)
             window.addGestureRecognizer(hover)
             host = window
@@ -122,7 +107,7 @@ struct FullScreenEdges: UIViewRepresentable {
         }
 
         func detach() {
-            for recognizer in [flick, reveal, hover] as [UIGestureRecognizer] { host?.removeGestureRecognizer(recognizer) }
+            for recognizer in [reveal, hover] as [UIGestureRecognizer] { host?.removeGestureRecognizer(recognizer) }
             host = nil
             dwellCheck?.invalidate()
             dwellCheck = nil
@@ -140,6 +125,13 @@ struct FullScreenEdges: UIViewRepresentable {
             let now = FullScreenPolicy.offered(window: frame, screen: screen.bounds)
             guard now != covers else { return }
             covers = now
+            #if DEBUG
+            // Each change, with the frames that made it: on the first build Noah's iPad brought the controls back
+            // by itself three times, a narrower window each time (docs/full-screen-plan.md, "The window").
+            print(String(format: "full screen: Sill's window %@ the screen: the window %.0f×%.0f at %.0f,%.0f on a screen %.0f×%.0f",
+                         now ? "fills" : "does not fill", frame.width, frame.height, frame.minX, frame.minY,
+                         screen.bounds.width, screen.bounds.height))
+            #endif
             let report = onCoverage
             DispatchQueue.main.async { report(now) }
         }
@@ -265,44 +257,6 @@ struct FullScreenHint: View {
     }
 }
 
-// MARK: - The swipe in's preview
-
-/// The swipe in's preview of the shown interface (StreamScreen's `revealPreview`) has no picture of its own
-/// (there is one picture view, the hidden one): its picture pane is this, which says where it is, so the
-/// preview is cut away there (RevealMask) and the hidden picture shows through.
-struct RevealHoleKey: PreferenceKey {
-    /// The preview's own space, in which the hole is given.
-    static let space = "sill.reveal"
-    static let defaultValue: CGRect? = nil
-    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) { value = nextValue() ?? value }
-}
-
-struct RevealHole: View {
-    var body: some View {
-        GeometryReader { g in
-            Color.clear.preference(key: RevealHoleKey.self, value: g.frame(in: .named(RevealHoleKey.space)))
-        }
-        .allowsHitTesting(false)
-    }
-}
-
-/// Everything but the hole, rounded as the picture's pane is.
-struct RevealMask: View {
-    let hole: CGRect?
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            Rectangle()
-            if let hole {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .frame(width: hole.width, height: hole.height)
-                    .offset(x: hole.minX, y: hole.minY)
-                    .blendMode(.destinationOut)
-            }
-        }
-        .compositingGroup()
-    }
-}
-
 // MARK: - The hidden picture for assistive technologies
 
 /// While hidden, the picture is the only thing on the screen, and the stream's input view is not an element
@@ -336,10 +290,10 @@ struct HiddenPictureElement: View {
 /// and live), `-SillFullScreenReveal P` with it, the swipe in caught at P of the way (0…1) for a photo,
 /// `-SillFullScreenHint 1` the hint every time it hides (`hold`: and kept up, for a photo),
 /// `-SillFullScreenRoom screen|housing|safe` where the hidden picture goes (FullScreenPolicy.Room),
-/// `-SillFullScreenToggle <s>[,<s>…]` hidden or shown at those seconds after the stream screen shows (as a
-/// flick and the swipe in do), `-SillFullScreenSwipe <s>[,<s>…]` a swipe in from the left edge played at those
-/// seconds (its progress in steps, then its lift), and `-SillShakeAt <s>[,<s>…]` a shake (the window's
-/// notification) at those seconds.
+/// `-SillFullScreenToggle <s>[,<s>…]` hidden or shown at those seconds after the stream screen shows (as
+/// Settings › Full Screen and the swipe in do), `-SillFullScreenSwipe <s>[,<s>…]` a swipe in from the left edge
+/// played at those seconds (its progress in steps, then its lift), and `-SillShakeAt <s>[,<s>…]` a shake (the
+/// window's notification) at those seconds.
 struct FullScreenDebug {
     enum Hint { case off, every, hold }
     var startHidden = false

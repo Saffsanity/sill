@@ -24,7 +24,7 @@
 		A1000001000000000000A291 /* PictureInPicturePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F291 /* PictureInPicturePolicy.swift */; };
 		A1000001000000000000A279 /* FullScreenPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F279 /* FullScreenPolicy.swift */; };
 		A1000001000000000000A27A /* FullScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F27A /* FullScreen.swift */; };
-		A1000001000000000000A27B /* EdgeFlickRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F27B /* EdgeFlickRecognizer.swift */; };
+		A1000001000000000000A27B /* RevealEdgePan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F27B /* RevealEdgePan.swift */; };
 		A10000010000000000AC0138 /* TextComposition.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000010000000000FC0138 /* TextComposition.swift */; };
 		A1000001000000000000A00A /* TrackpadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F00B /* TrackpadView.swift */; };
 		A1000001000000000000A701 /* TrackpadGestures.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F701 /* TrackpadGestures.swift */; };
@@ -94,7 +94,7 @@
 		A1000001000000000000F291 /* PictureInPicturePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PictureInPicturePolicy.swift; sourceTree = "<group>"; };
 		A1000001000000000000F279 /* FullScreenPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullScreenPolicy.swift; sourceTree = "<group>"; };
 		A1000001000000000000F27A /* FullScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullScreen.swift; sourceTree = "<group>"; };
-		A1000001000000000000F27B /* EdgeFlickRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeFlickRecognizer.swift; sourceTree = "<group>"; };
+		A1000001000000000000F27B /* RevealEdgePan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RevealEdgePan.swift; sourceTree = "<group>"; };
 		A10000010000000000FC0138 /* TextComposition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextComposition.swift; sourceTree = "<group>"; };
 		A1000001000000000000F00B /* TrackpadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackpadView.swift; sourceTree = "<group>"; };
 		A1000001000000000000F701 /* TrackpadGestures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackpadGestures.swift; sourceTree = "<group>"; };
@@ -172,7 +172,7 @@
 				A1000001000000000000F291 /* PictureInPicturePolicy.swift */,
 				A1000001000000000000F279 /* FullScreenPolicy.swift */,
 				A1000001000000000000F27A /* FullScreen.swift */,
-				A1000001000000000000F27B /* EdgeFlickRecognizer.swift */,
+				A1000001000000000000F27B /* RevealEdgePan.swift */,
 				A10000010000000000FC0138 /* TextComposition.swift */,
 				A1000001000000000000F013 /* HostSettingsPanel.swift */,
 				A1000001000000000000FC64 /* StreamClient+Clipboard.swift */,
@@ -333,7 +333,7 @@
 				A1000001000000000000A291 /* PictureInPicturePolicy.swift in Sources */,
 				A1000001000000000000A279 /* FullScreenPolicy.swift in Sources */,
 				A1000001000000000000A27A /* FullScreen.swift in Sources */,
-				A1000001000000000000A27B /* EdgeFlickRecognizer.swift in Sources */,
+				A1000001000000000000A27B /* RevealEdgePan.swift in Sources */,
 				A10000010000000000AC0138 /* TextComposition.swift in Sources */,
 				A1000001000000000000A013 /* HostSettingsPanel.swift in Sources */,
 				A1000001000000000000AC64 /* StreamClient+Clipboard.swift in Sources */,

@@ -2,29 +2,31 @@ import CoreGraphics
 import Foundation
 
 /// Full screen (docs/full-screen-plan.md): Sill's whole interface on the device hidden, so the Mac's picture
-/// gets the screen, with nothing of Sill's left on it. Noah's design (2026-11-12): a swipe off the left side
-/// hides it, a swipe in from the left side shows it, because iOS maps nothing to the left edge (the top is
-/// Control Center, Siri and notifications, the bottom the app switcher, the right side on iPadOS the windowed
-/// apps); a shake shows it too. With the coordinator's changes: the hide is a short outward flick that starts
-/// at the left edge (anywhere else on the picture a leftward swipe is the Mac's scroll, and in Safari its way
-/// back), and the ways back that need no hand at the edge (VoiceOver's action and escape gesture, the
-/// pointer pushed against the edge, the interface coming back by itself whenever it is needed).
+/// gets the screen, with nothing of Sill's left on it. Noah's design after trying the first build on his iPad
+/// mini and iPhone 15 Pro (2026-11-12): Settings › Full Screen is the one way in ("remove the side swipe to
+/// start full screen and just have it be invoked from the button in settings"); a swipe in from the left edge
+/// brings the interface back, and so does a shake while Shake to Show Controls is on ("a toggle in settings to
+/// enable/disable shake to revert"); and the ways back that need no hand at the edge (VoiceOver's action and
+/// escape gesture, the pointer held at the edge, the interface coming back by itself whenever it is needed).
+/// While the interface shows nothing of full screen listens to a touch.
 ///
-/// The rules here, pure (Foundation and CoreGraphics only; Tests/checks/full-screen): `ChromeLevel`, how much
-/// shows; `EdgeFlick`, the hide's touch rule; `EdgeReveal`, whether the swipe in finishes or springs back;
-/// `EdgeDwell`, the pointer at the left edge; `FullScreenPolicy`, when it is offered and armed, when the
-/// interface comes back by itself, the hint, where the picture goes, and every word. The glue is
-/// EdgeFlickRecognizer.swift (the flick's recognizer on the window) and FullScreen.swift; StreamScreen and
-/// PortraitStreamScreen draw it.
+/// The rules here, pure (Foundation and CoreGraphics only, with DuoPosture.swift's split and PhonePortraitLayout.swift
+/// for the preview's cut; Tests/checks/full-screen): `ChromeLevel`, how much
+/// shows; `EdgeSwipe`, which touch at the left edge is a swipe in and when it is let go; `EdgeReveal`, how far
+/// the interface has come and whether it finishes or springs back; `RevealCut`, the preview's cut over the
+/// picture's place in each layout; `EdgeDwell`, the pointer at the left edge; `FullScreenPolicy`, when it is offered, when the
+/// interface comes back by itself, the shake, the hint, the Settings rows' place, where the picture goes, and
+/// every word. The glue is RevealEdgePan.swift (the swipe in's recognizer on the window) and FullScreen.swift;
+/// StreamScreen and PortraitStreamScreen draw it.
 
 // MARK: - How much of the interface shows
 
-/// How much of Sill's interface shows. One level in this first build: everything, or nothing but the
-/// picture. Noah's earlier idea (issue #279) has two upright: first the trackpad goes (the picture grows into
-/// its room, #280), then the rest. That level goes between these two, its own raw value 1, and the two
-/// functions below are the only places that step: a flick from `.shown` upright would give it, a flick from it
-/// `.hidden`; the swipe in from `.hidden` gives it back, and from it `.shown`. Each layout draws the levels it
-/// knows (StreamScreen's `chromeHidden`).
+/// How much of Sill's interface shows. One level: everything, or nothing but the picture (Noah, 2026-11-12).
+/// His earlier idea (issue #279) has two upright: first the trackpad goes (the picture grows into its room,
+/// #280), then the rest. That level would go between these two, its own raw value 1, and the two functions
+/// below are the only places that step: a hide from `.shown` upright would give it, a hide from it `.hidden`;
+/// the swipe in from `.hidden` gives it back, and from it `.shown`. Each layout draws the levels it knows
+/// (StreamScreen's `chromeHidden`).
 enum ChromeLevel: Int, Comparable, CaseIterable {
     /// Every control, as before.
     case shown = 0
@@ -33,229 +35,153 @@ enum ChromeLevel: Int, Comparable, CaseIterable {
 
     static func < (a: ChromeLevel, b: ChromeLevel) -> Bool { a.rawValue < b.rawValue }
 
-    /// The level a hide flick leads to from this one.
-    var afterFlick: ChromeLevel { .hidden }
+    /// The level Settings › Full Screen leads to from this one.
+    var afterHide: ChromeLevel { .hidden }
 
     /// The level the swipe in from the left edge (or a shake, an action, the pointer) leads to from this one.
     var afterReveal: ChromeLevel { .shown }
 }
 
-// MARK: - The hide: a flick off the left edge
+// MARK: - The show: a swipe in from the left edge
 
-/// The hide's touch rule: one finger that lands within `band` of the screen's left edge, moves left and
-/// leaves the screen, quickly. Fed one touch's samples from its landing (x from the screen's left edge, y
-/// down, t in seconds), it answers as soon as it can: `notAFlick` the moment the touch shows it is something
-/// else (the stream then gets it whole: the recognizer's failure lets the waiting ones go), `hide` at the lift
-/// of a flick, `undecided` meanwhile. Only the touches that land in the band are judged at all, and a
-/// touch is held back only while it could still be a flick: a tap, a long press, a drag right, up or down, or
-/// a second finger is let go at once or within a few points; a slow drag left at most `duration` after it
-/// landed.
+/// The swipe in's start (RevealEdgePan): which touch at the left edge of Sill's window is a swipe in, judged
+/// as early as it can be, fed one touch's samples from its landing (x from the window's left edge, y down, t in
+/// seconds). Sill's own rule, not the system's edge recognizer: on the window, UIScreenEdgePanGestureRecognizer
+/// read the device's upright left edge as "left" whichever way it was held, and failed every swipe from the
+/// interface's left edge on its side (Noah's iPad mini and iPhone 15 Pro, 2026-11-12); in the window's own
+/// space this is the interface's left edge in every orientation.
 ///
-/// The numbers (docs/full-screen-plan.md, "The numbers"; no finger on glass could be measured here, so each
-/// is from the devices' geometry, UIKit's touch sampling and the strokes it must tell apart, and a Debug build
-/// prints every judged stroke's numbers, `edge:` on Xcode's console, for the first sessions to measure):
-/// - `band` 48 pt: about 7.5 mm on the iPad mini (163 pt an inch) and 8 mm on the iPhone 15 Pro (153), a
-///   thumb's contact patch, so a thumb that sets off with its edge at the bezel lands in it; past it a stroke
-///   is the Mac's at once, as it always was.
-/// - `travel` 12 pt: a flick moves; a grip or a tap that rolls off the edge does not get this far, and a touch
-///   that lands nearer the edge than this cannot be one.
-/// - `duration` 0.25 s from landing to lifting: a flick takes about a tenth of a second; a resting grip, a
-///   long press (0.45 s) and a slow drag are let go by then.
-/// - `speed` 300 pt/s left over the last `speedWindow` (50 ms) before the lift: about 5 cm a second, half a
-///   brisk flick's slowest; a slow drag to the edge, 100 to 200 pt/s, is not one.
-/// - `reach` 24 pt: where the last sample may be. A finger that slides off the glass is last seen up to one
-///   sample interval short of the edge (16.7 ms at 60 Hz, 8.3 ms at 120: 5 to 17 pt at 300 to 1,000 pt/s), and a
-///   case's raised lip stops the finger's middle some 3 to 4 mm (20 to 24 pt) in, so the finger lifts there.
-/// - `projection` 50 ms: a faster flick, last seen further in, counts when its last speed carries it past the
-///   edge within this (three samples at 60 Hz).
-/// - `rightSlop` 6 pt and `judgeAfter` 8 pt: a drag right is let go after 6 pt, and any stroke steeper than
-///   `steepness` (|dy| ≤ 1.2 |dx|, about 50° from straight left) after 8, both before a pan's own 10 pt
-///   threshold, so the drags the band lets go are not even late.
-struct EdgeFlick: Equatable {
-    static let band: Double = 48
-    static let travel: Double = 12
-    static let duration: Double = 0.25
-    static let speed: Double = 300
-    static let speedWindow: Double = 0.05
-    static let reach: Double = 24
-    static let projection: Double = 0.05
-    static let rightSlop: Double = 6
+/// One finger, alone, that lands within `band` of the left edge (or within the window's left safe-area inset,
+/// where that is wider: an iPhone on its side keeps 59 pt clear of the picture there, and a thumb coming over
+/// the bezel is first seen anywhere in it), and once it has moved `judgeAfter` sets off to the right, no
+/// steeper than 45°. Anything else is let go and goes on to the Mac whole: a touch further in at its landing,
+/// a second finger, a drag left, up or down, a finger still or not yet judged `decideWithin` after it landed.
+/// The cost: a drag to the right that starts inside the band while the interface is hidden brings it in and
+/// never reaches the Mac (the system's recognizer took only fingers that came over the bezel).
+///
+/// The numbers (docs/full-screen-plan.md, "The numbers"): `band` 24 pt, where Noah's swipes in were first seen
+/// (0 to 9 pt upright, up to 21 pt at speed on the iPad on its side); `judgeAfter` 8 pt, before a pan's own
+/// 10 pt, so a drag that is let go is not even late; `decideWithin` 0.3 s, before a long press's 0.45 s.
+struct EdgeSwipe: Equatable {
+    static let band: Double = 24
     static let judgeAfter: Double = 8
-    static let steepness: Double = 1.2
+    static let decideWithin: Double = 0.3
 
-    struct Sample: Equatable {
-        var x: Double
-        var y: Double
-        var t: Double
-    }
+    /// The band for a window whose left safe-area inset is `leftInset`.
+    static func reach(leftInset: Double) -> Double { max(band, leftInset) }
 
-    /// Why a touch is not a hide flick, for the console and the check.
+    /// Why a touch is not a swipe in, for the console and the check.
     enum Reason: String, Equatable {
-        /// It landed further in than `band`.
-        case outsideBand = "landed outside the band"
+        /// It landed further in than the band.
+        case outsideBand = "landed further in than the band"
         /// Another finger came down, or was down already.
         case secondTouch = "a second finger"
-        /// It moved right `rightSlop` or more.
-        case movedRight = "moved right"
-        /// Up, down or anywhere but left: steeper than `steepness`.
-        case steep = "not leftward"
-        /// Still down `duration` after it landed.
-        case tooLong = "held too long"
-        /// Lifted without moving `travel` left.
-        case tooShort = "too short"
-        /// Lifted moving left slower than `speed`.
-        case tooSlow = "too slow"
-        /// Lifted further in than `reach`, and its speed would not have carried it off.
-        case shortOfEdge = "lifted short of the edge"
+        /// It set off to the left, or straight up or down.
+        case notRightward = "did not set off to the right"
+        /// To the right, but steeper than 45°.
+        case steep = "set off steeper than 45°"
+        /// Not judged `decideWithin` after it landed (a still finger, a press).
+        case tooLong = "had not set off by 0.3 s"
+        /// It lifted before it was judged (a tap at the edge).
+        case lifted = "lifted before it set off"
         /// The system took the touch.
         case cancelled = "cancelled"
     }
 
     enum Verdict: Equatable {
         case undecided
-        case hide
-        case notAFlick(Reason)
+        case swipe
+        case notASwipe(Reason)
 
         var decided: Bool { self != .undecided }
     }
 
-    /// The touch's samples, from its landing.
-    private(set) var samples: [Sample] = []
+    private(set) var landing: (x: Double, y: Double, t: Double)?
+    private(set) var last: (x: Double, y: Double, t: Double)?
     private(set) var verdict: Verdict = .undecided
 
     init() {}
 
-    /// The touch landed `x` from the screen's left edge.
-    mutating func began(x: Double, y: Double, t: Double) -> Verdict {
-        guard verdict == .undecided, samples.isEmpty else { return verdict }
-        samples = [Sample(x: x, y: y, t: t)]
-        if x > Self.band { verdict = .notAFlick(.outsideBand) }
+    static func == (a: EdgeSwipe, b: EdgeSwipe) -> Bool {
+        a.verdict == b.verdict && a.landing?.x == b.landing?.x && a.landing?.y == b.landing?.y && a.landing?.t == b.landing?.t
+    }
+
+    /// One finger landed `x` from the left edge, with nothing else down (`alone`), in a window whose band is
+    /// `band` (`EdgeSwipe.reach(leftInset:)`).
+    mutating func began(x: Double, y: Double, t: Double, band: Double, alone: Bool = true) -> Verdict {
+        guard verdict == .undecided, landing == nil else { return verdict }
+        landing = (x, y, t)
+        last = (x, y, t)
+        if !alone { verdict = .notASwipe(.secondTouch) } else if x > band { verdict = .notASwipe(.outsideBand) }
         return verdict
     }
 
-    /// It moved (each coalesced sample, in order).
+    /// It moved (each coalesced sample, in order): judged once it is `judgeAfter` from its landing on either
+    /// axis.
     mutating func moved(x: Double, y: Double, t: Double) -> Verdict {
-        guard verdict == .undecided, let first = samples.first else { return verdict }
-        samples.append(Sample(x: x, y: y, t: t))
-        if t - first.t > Self.duration {
-            verdict = .notAFlick(.tooLong)
-        } else if let why = Self.wrongWay(from: first, to: Sample(x: x, y: y, t: t)) {
-            verdict = .notAFlick(why)
-        }
+        guard verdict == .undecided, let landing else { return verdict }
+        last = (x, y, t)
+        if t - landing.t > Self.decideWithin { verdict = .notASwipe(.tooLong); return verdict }
+        let dx = x - landing.x, dy = y - landing.y
+        guard max(abs(dx), abs(dy)) >= Self.judgeAfter else { return verdict }
+        if dx <= 0 { verdict = .notASwipe(.notRightward) } else if abs(dy) > dx { verdict = .notASwipe(.steep) } else { verdict = .swipe }
         return verdict
     }
 
-    /// It lifted here.
+    /// It lifted before it was judged.
     mutating func ended(x: Double, y: Double, t: Double) -> Verdict {
-        guard verdict == .undecided, let first = samples.first else { return verdict }
-        let last = Sample(x: x, y: y, t: t)
-        samples.append(last)
-        verdict = Self.judge(samples, first: first, last: last)
+        guard verdict == .undecided, landing != nil else { return verdict }
+        last = (x, y, t)
+        verdict = .notASwipe(.lifted)
         return verdict
     }
 
     /// Another finger came down.
     mutating func another() -> Verdict {
-        if verdict == .undecided { verdict = .notAFlick(.secondTouch) }
+        if verdict == .undecided { verdict = .notASwipe(.secondTouch) }
         return verdict
     }
 
     /// The system took the touch.
     mutating func cancelled() -> Verdict {
-        if verdict == .undecided { verdict = .notAFlick(.cancelled) }
+        if verdict == .undecided { verdict = .notASwipe(.cancelled) }
         return verdict
     }
 
-    /// The clock, with no new sample: a touch still down `duration` after it landed is let go.
+    /// The clock, with no new sample: a finger not judged `decideWithin` after it landed is let go.
     mutating func tick(t: Double) -> Verdict {
-        if verdict == .undecided, let first = samples.first, t - first.t > Self.duration {
-            verdict = .notAFlick(.tooLong)
-        }
+        if verdict == .undecided, let landing, t - landing.t > Self.decideWithin { verdict = .notASwipe(.tooLong) }
         return verdict
     }
 
-    /// Right, or steep once it has moved `judgeAfter`: not a flick, whatever comes after.
-    private static func wrongWay(from first: Sample, to now: Sample) -> Reason? {
-        let dx = now.x - first.x, dy = now.y - first.y
-        if dx >= rightSlop { return .movedRight }
-        if hypot(dx, dy) >= judgeAfter, abs(dy) > steepness * max(-dx, 0) { return .steep }
-        return nil
-    }
-
-    /// The verdict at the lift.
-    private static func judge(_ samples: [Sample], first: Sample, last: Sample) -> Verdict {
-        if last.t - first.t > duration { return .notAFlick(.tooLong) }
-        let dx = last.x - first.x, dy = last.y - first.y
-        if dx >= rightSlop { return .notAFlick(.movedRight) }
-        let left = -dx
-        if left < travel { return .notAFlick(.tooShort) }
-        if abs(dy) > steepness * left { return .notAFlick(.steep) }
-        let v = leftSpeed(samples, at: last)
-        if v < speed { return .notAFlick(.tooSlow) }
-        if last.x <= reach || last.x - v * projection <= 0 { return .hide }
-        return .notAFlick(.shortOfEdge)
-    }
-
-    /// Points a second leftward over the last `speedWindow` before `last`: from where the finger was that long
-    /// before the lift, in proportion between the samples on either side of that moment (the whole stroke's
-    /// average when it is shorter). A still finger sends no samples, so after a rest the next sample is the
-    /// motion's first: the proportion across the rest puts the finger at most that one sample's step short of
-    /// where it set off. (From the sample before that moment instead, a flick after a rest would count the rest
-    /// and read slow: 36 pt in 37 ms after a 0.1 s rest is 250 pt/s over the whole stroke, 600 over its end.)
-    static func leftSpeed(_ samples: [Sample], at last: Sample) -> Double {
-        guard let first = samples.first else { return 0 }
-        let since = last.t - speedWindow
-        if first.t >= since {
-            let dt = last.t - first.t
-            return dt > 0 ? (first.x - last.x) / dt : 0
-        }
-        var before = first, after = last
-        for sample in samples {
-            if sample.t <= since { before = sample } else { after = sample; break }
-        }
-        let span = after.t - before.t
-        let x = span > 0 ? before.x + (after.x - before.x) * ((since - before.t) / span) : before.x
-        return (x - last.x) / speedWindow
-    }
-
-    /// The console's numbers for a judged stroke: where it landed, how far left it went, how fast at the
-    /// end, where it lifted, how long it took (Debug builds, `edge:` lines; docs/full-screen-plan.md).
+    /// The console's numbers: where it landed, where it was last seen, how long after (Debug builds, `reveal:`
+    /// lines).
     var numbers: String {
-        guard let first = samples.first, let last = samples.last else { return "no samples" }
-        let v = Self.leftSpeed(samples, at: last)
-        return String(format: "landed %.1f pt from the edge, %.1f pt left and %.1f pt %@, %.0f pt/s at the end, last seen %.1f pt in, %.0f ms, %ld samples",
-                      first.x, first.x - last.x, abs(last.y - first.y), last.y >= first.y ? "down" : "up",
-                      v, last.x, (last.t - first.t) * 1000, samples.count)
+        guard let landing, let last else { return "no samples" }
+        return String(format: "landed %.1f pt from the left edge (y %.0f), last seen %.1f pt right and %.1f pt %@ of it, %.0f ms",
+                      landing.x, landing.y, last.x - landing.x, abs(last.y - landing.y), last.y >= landing.y ? "below" : "above",
+                      (last.t - landing.t) * 1000)
     }
 }
 
-/// Which touches the flick's recognizer judges at all (EdgeFlickRecognizer): a finger, never a Pencil or the
-/// iPad's own trackpad or mouse, with no other touch down in Sill's window. Any other touch fails the
-/// recognizer at once, so nothing waits for it; and a finger that comes down while one is judged ends the
-/// judging (`EdgeFlick.another`): two fingers are a scroll, a zoom or the start of a gesture.
-enum EdgeFlickGate {
-    static func judges(direct: Bool, alreadyDown: Int) -> Bool { direct && alreadyDown == 0 }
-}
-
-// MARK: - The show: a swipe in from the left bezel
-
-/// The swipe in from the left edge (UIScreenEdgePanGestureRecognizer: the system decides that it started at
-/// the bezel): the interface follows the finger, its progress the finger's travel across the screen, and
-/// at the lift it finishes or springs back by distance and speed, as a navigation's swipe back does.
+/// The rest of the swipe in, once it has begun: the interface follows the finger, its progress the finger's
+/// travel across the screen, and at the lift it finishes or springs back by distance and speed, as a
+/// navigation's swipe back does. The travel is the pan's translation, which counts from where the pan began
+/// (10 pt and more past the landing: 13 to 65 pt on Noah's devices), the feel he tried and kept.
 enum EdgeReveal {
     /// The interface comes all the way by itself past a third of the screen's width (with the lift's speed
     /// carrying it on for `coast`)...
     static let share: Double = 1.0 / 3
     static let coast: Double = 0.15
+    /// ...and never further than this: a third of an iPad's width, or of an iPhone's on its side, is further
+    /// than a thumb at the edge reaches (Noah's devices, 2026-11-12: the first build's swipe in came in on the
+    /// iPhone upright, 131 pt, and nowhere else: 284 pt on its side, 248 and 378 pt on the iPad mini).
+    static let pull: Double = 80
     /// ...or at a flick in: this fast to the right, once it has moved `flickTravel`.
-    static let flickSpeed: Double = 400
+    static let flickSpeed: Double = 300
     static let flickTravel: Double = 12
     /// Moving back toward the edge at the lift this fast springs back, however far it came.
     static let backSpeed: Double = 200
-    /// A finger at the bezel that has not begun to swipe in this long after it landed is not swiping in (a
-    /// press, a rest): its recognizer lets it go then, so a long press near the left edge (0.45 s) is never
-    /// late, and nothing near the edge is held longer than this.
-    static let decideWithin: Double = 0.3
 
     /// How far the interface has come in, 0…1: the finger's travel over the screen's width.
     static func progress(translation: Double, width: Double) -> Double {
@@ -263,12 +189,74 @@ enum EdgeReveal {
         return min(max(translation / width, 0), 1)
     }
 
+    /// How far the finger comes before the interface finishes by itself: a third of the width, `pull` at most.
+    static func distance(width: Double) -> Double { min(share * width, pull) }
+
     /// At the lift: whether the interface comes the rest of the way in (true) or springs back out.
     static func finishes(translation: Double, velocity: Double, width: Double) -> Bool {
         guard width > 0 else { return false }
         if velocity <= -backSpeed { return false }
         if velocity >= flickSpeed, translation >= flickTravel { return true }
-        return translation + coast * max(velocity, 0) >= share * width
+        return translation + coast * max(velocity, 0) >= distance(width: width)
+    }
+}
+
+/// The swipe in's preview (StreamScreen's `revealPreview`) is the shown interface coming in with the finger over
+/// the hidden picture. Until the controls land it draws them with the background they sit on and nothing of the
+/// picture's place: no pane, rim, margin or room's black over the hidden picture (Noah,
+/// 2026-11-12, on the try builds: "a bezel for the virtual display that shows above the controls as you swipe
+/// in", "the bottom of it has a small black bar below it", "Ideally, no bezel gets rendered above or below the
+/// controls until they are fully summoned", and on an iPhone upright "just a touch of black above the UI buttons
+/// on iPhone in portrait to make it look uniform"). Each layout gives its place from its own geometry, never from
+/// the picture: a pane at the video's shape is narrower or shorter than its room (an iPhone upright with Larger
+/// Picture and a tall window showed the room's black beside it, 2026-11-12). The layouts draw nothing in the place
+/// and their black only at `shown`, by construction: no mask over a drawn pane, which a measurement a frame late
+/// let flash (Noah, on an iPhone on its side: "something quickly renders below the UI … very jarring").
+/// - Landscape: everything under the top bar, which carries its own background (`Palette.bar`), so the cut ends
+///   at its bottom edge, and the pane, its margin and the black round it all go.
+/// - The halves (an iPad upright, the Duo's inner display upright, the laptop pose): everything over the
+///   controls' block (`DuoPosture.PortraitSplit.controls`): the picture's half with the pane's margin, and the
+///   laptop pose's fold. The block's own top margin, the black above the window bar, stays, as once they land.
+/// - A phone upright and the Duo's cover upright (`PhonePortraitLayout`): everything over the bottom of the
+///   picture's room (`picture`, Larger Picture's room too, whatever the video). The gap above row 1 stays black,
+///   24 pt to the buttons, the shown layout's own.
+enum RevealCut {
+    /// Where the picture's place is in a layout: everything under a line (a bar's bottom edge), or over one
+    /// (where the black the controls sit on begins).
+    enum Place: Equatable {
+        case under(CGFloat)
+        case over(CGFloat)
+    }
+
+    /// Landscape: under the top bar, `barHeight` tall (StreamScreen's `BarMetrics.height`, the fold cleared).
+    static func landscape(barHeight: CGFloat) -> Place { .under(barHeight) }
+    /// The halves: over the controls' block.
+    static func halves(_ split: DuoPosture.PortraitSplit) -> Place { .over(split.controls) }
+    /// A phone upright: over the bottom of the picture's room.
+    static func phone(_ layout: PhonePortraitLayout) -> Place { .over(layout.picture.maxY) }
+
+    /// The cut in a preview of `size`: the place across the whole width, from its line to the far edge.
+    static func cut(_ place: Place, in size: CGSize) -> CGRect {
+        guard size.width > 0, size.height > 0 else { return .zero }
+        switch place {
+        case .under(let line):
+            let top = min(max(line, 0), size.height)
+            return CGRect(x: 0, y: top, width: size.width, height: size.height - top)
+        case .over(let line):
+            let bottom = min(max(line, 0), size.height)
+            return CGRect(x: 0, y: 0, width: size.width, height: bottom)
+        }
+    }
+
+    /// What the preview draws: the rest of it, the controls with the background they sit on (the upright layouts
+    /// draw their black exactly here; landscape's bar carries its own).
+    static func shown(_ place: Place, in size: CGSize) -> CGRect {
+        guard size.width > 0, size.height > 0 else { return .zero }
+        let cut = cut(place, in: size)
+        switch place {
+        case .under: return CGRect(x: 0, y: 0, width: size.width, height: cut.minY)
+        case .over: return CGRect(x: 0, y: cut.maxY, width: size.width, height: size.height - cut.maxY)
+        }
     }
 }
 
@@ -351,14 +339,15 @@ enum FullScreenPolicy {
         case offConsoleView = "the off-console view"
         /// Nothing streams: a window closed, nothing picked; what to stream is in the controls.
         case nothingStreams = "nothing streams"
-        /// Sill's window no longer covers the screen (Split View, Stage Manager, Slide Over): no bezel at its
-        /// left edge to swipe from.
+        /// Sill's window no longer covers the screen (Split View, Stage Manager, Slide Over): its left edge is
+        /// not the screen's, and iPadOS's windowing and the other app share it.
         case window = "the window no longer fills the screen"
     }
 
-    /// Full screen by gesture is offered only while Sill's window covers the screen (within half a point):
-    /// a window that does not reach the screen's edges has no bezel at its left edge to swipe in from, and a
-    /// flick at its edge lands on the other app. The Settings row says so and is dimmed (open question 3).
+    /// Full screen is offered only while Sill's window covers the screen (within half a point): a window that
+    /// does not reach the screen's edges shares its left edge with iPadOS's windowing (the window's own
+    /// handles, Stage Manager's strip) and with the other app, where a swipe in would be a guess. The Settings
+    /// row says so and is dimmed (open question 3).
     static func offered(window: CGRect, screen: CGRect) -> Bool {
         guard window.width > 0, window.height > 0 else { return false }
         return abs(window.minX - screen.minX) <= 0.5 && abs(window.minY - screen.minY) <= 0.5
@@ -379,18 +368,33 @@ enum FullScreenPolicy {
         return nil
     }
 
-    /// Whether the interface may hide now (a flick, the Settings row): nothing that would bring it straight
-    /// back, and nothing open over the stream (the Settings row closes the panel first).
+    /// Whether the interface may hide now (Settings › Full Screen): nothing that would bring it straight back,
+    /// and nothing open over the stream (the row closes the panel first).
     static func hideAllowed(_ s: Situation) -> Bool {
         mustShow(s) == nil && !s.somethingOpen
     }
 
-    /// Whether the flick off the left edge is listened for: the interface shown, a hide allowed, and no
-    /// assistive technology that keeps one-finger swipes for itself (VoiceOver's own swipes would never
-    /// reach it; Settings › Full Screen is the way in then).
-    static func flickArmed(_ s: Situation, level: ChromeLevel, voiceOver: Bool) -> Bool {
-        level == .shown && !voiceOver && hideAllowed(s)
-    }
+    // MARK: The shake
+
+    /// Shake to Show Controls (Settings › This iPad), a Bool on this device, on unless turned off.
+    static let shakeKey = "Sill.shakeToShowControls"
+
+    /// Whether a shake brings the interface back: while it is hidden and the switch is on. Off, a shake does
+    /// nothing of Sill's.
+    static func shakeShows(_ level: ChromeLevel, switchOn: Bool) -> Bool { level != .shown && switchOn }
+
+    /// Whether iOS's Shake to Undo is off for the app: only while the interface is hidden and a shake is
+    /// Sill's, so the shake never brings an Undo alert; otherwise it stays as it is.
+    static func shakeToUndoOff(_ level: ChromeLevel, switchOn: Bool) -> Bool { shakeShows(level, switchOn: switchOn) }
+
+    // MARK: The Settings rows
+
+    /// Where Settings shows Full Screen and Shake to Show Controls: right after Frame Rate and its words while
+    /// the Mac's settings show (Noah, 2026-11-12: "move the fullscreen and shake toggle up to be after the
+    /// frame rate setting"), in This iPad's group while they do not (loading, or a Mac without them).
+    enum RowsPlace: Equatable { case afterFrameRate, thisDevice }
+
+    static func rowsPlace(macSettingsShown: Bool) -> RowsPlace { macSettingsShown ? .afterFrameRate : .thisDevice }
 
     // MARK: The hint
 
@@ -468,9 +472,10 @@ enum FullScreenPolicy {
         /// Settings › This iPad › Full Screen.
         static let rowTitle = "Full Screen"
         static let rowHint = "Hides Sill’s controls."
-        static func footnote(device: String) -> String {
-            "Hides Sill’s controls, so only the picture shows. To bring them back, swipe in from the left edge or shake your \(device). To hide them again, flick off the left edge."
-        }
+        static let footnote = "Hides Sill’s controls, so only the picture shows. Swipe in from the left edge to bring them back."
+        /// Settings › This iPad › Shake to Show Controls, and the line under it.
+        static let shakeTitle = "Shake to Show Controls"
+        static func shakeFootnote(device: String) -> String { "Shaking your \(device) brings the controls back too." }
         /// Under the row while Sill's window does not fill the screen.
         static let notOffered = "Full Screen works while Sill fills the screen."
     }

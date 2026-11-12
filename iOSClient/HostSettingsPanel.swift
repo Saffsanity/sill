@@ -74,6 +74,8 @@ struct HostSettingsPanel: View {
     /// This device's switch for Larger Picture (docs/larger-picture-plan.md): off unless turned on,
     /// read by the stream screen, never sent.
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
+    /// Shake to Show Controls (full screen, docs/full-screen-plan.md): on unless turned off, never sent.
+    @AppStorage(FullScreenPolicy.shakeKey) private var shakeShowsControls = true
     /// Whether the switch is offered here, the stream screen's say (`largerPictureOffered`): only on an
     /// iPhone without a hinge whose picture it makes larger.
     @Environment(\.largerPictureOffered) private var offersLargerPicture
@@ -336,6 +338,8 @@ struct HostSettingsPanel: View {
                 if let note = AwayCopy.footnote(state.away, mac: mac, remoteAccessOn: client.macInfo?.remoteAccess == true) {
                     Footnote(text: note, top: 0)
                 }
+                // Full Screen and Shake to Show Controls, right after Frame Rate and its words (Noah, 2026-11-12).
+                if fullScreenPlace == .afterFrameRate { fullScreenRows }
                 // As in the Mac's Settings › Streaming: its own group, the Mac's name for it, and
                 // what it trades away.
                 Rows {
@@ -492,6 +496,52 @@ struct HostSettingsPanel: View {
         Footnote(text: TourPolicy.takeTourFootnote(device: device))
     }
 
+    /// Full Screen (docs/full-screen-plan.md) and Shake to Show Controls, each with its words under it: the one
+    /// way in (a button, not a switch: nothing is remembered, and the interface is shown whenever this row is
+    /// seen) and whether a shake brings the controls back. Two groups, a footnote under each, so they never touch.
+    @ViewBuilder private var fullScreenRows: some View {
+        if let fullScreen {
+            Rows {
+                Button(action: fullScreen.hide) {
+                    HStack(spacing: 10) {
+                        Text(FullScreenPolicy.Copy.rowTitle)
+                            .foregroundStyle(fullScreen.offered ? Palette.accent : Palette.muted)
+                        Spacer(minLength: 8)
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .foregroundStyle(fullScreen.offered ? Palette.accent : Palette.muted)
+                            .accessibilityHidden(true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!fullScreen.offered)
+                .accessibilityHint(FullScreenPolicy.Copy.rowHint)
+                .rowFrame()
+            }
+            .id(Self.fullScreenRowID)
+            Footnote(text: fullScreen.coversScreen ? FullScreenPolicy.Copy.footnote : FullScreenPolicy.Copy.notOffered)
+            Rows {
+                Toggle(isOn: $shakeShowsControls) {
+                    Text(FullScreenPolicy.Copy.shakeTitle).foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+                .onChange(of: shakeShowsControls) { _, on in
+                    client.noteAction()
+                    #if DEBUG
+                    print("full screen: Shake to Show Controls \(on ? "on" : "off")")
+                    #endif
+                }
+            }
+            Footnote(text: FullScreenPolicy.Copy.shakeFootnote(device: device))
+        }
+    }
+
+    /// Where those rows go: after Frame Rate while the Mac's settings show, in This iPad's group while not.
+    private var fullScreenPlace: FullScreenPolicy.RowsPlace {
+        FullScreenPolicy.rowsPlace(macSettingsShown: client.settings.host != nil && client.settings.displayed != nil)
+    }
+
     /// Most-changed first, so the compact halves' 259 pt shows Quality, Resolution and Frame Rate
     /// before anything scrolls.
     private func streamRows(_ shown: StreamSettings) -> some View {
@@ -638,30 +688,9 @@ struct HostSettingsPanel: View {
             }
             Footnote(text: PictureInPicturePolicy.Copy.footnote(mac: mac))
         }
-        // Full Screen (docs/full-screen-plan.md): the way in that is not a gesture, and the one VoiceOver can use.
-        // A button, not a switch: nothing is remembered, and the interface is shown whenever this row is seen.
-        if let fullScreen {
-            Rows {
-                Button(action: fullScreen.hide) {
-                    HStack(spacing: 10) {
-                        Text(FullScreenPolicy.Copy.rowTitle)
-                            .foregroundStyle(fullScreen.offered ? Palette.accent : Palette.muted)
-                        Spacer(minLength: 8)
-                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .foregroundStyle(fullScreen.offered ? Palette.accent : Palette.muted)
-                            .accessibilityHidden(true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(!fullScreen.offered)
-                .accessibilityHint(FullScreenPolicy.Copy.rowHint)
-                .rowFrame()
-            }
-            .id(Self.fullScreenRowID)
-            Footnote(text: fullScreen.coversScreen ? FullScreenPolicy.Copy.footnote(device: device) : FullScreenPolicy.Copy.notOffered)
-        }
+        // Full Screen and Shake to Show Controls here only while the Mac's settings do not show (loading, or a
+        // Mac without them): FullScreenPolicy.rowsPlace.
+        if fullScreenPlace == .thisDevice { fullScreenRows }
         if offersLargerPicture {
             Rows {
                 Toggle(isOn: $largerPicture) {

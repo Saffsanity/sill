@@ -190,8 +190,9 @@ struct PortraitStreamScreen: View {
     /// pane is the same view hidden or not, so it keeps its input view and its frame animates.
     var hidden = false
     var room: CGRect = .zero
-    /// The swipe in's picture of this layout (StreamScreen's `revealPreview`): its picture pane a hole
-    /// (RevealHole), its trackpad only the well, no viewport and no console lines.
+    /// The swipe in's picture of this layout (StreamScreen's `revealPreview`): the controls with the black they
+    /// sit on and nothing of the picture's place (RevealCut.halves, RevealCut.phone), its trackpad only the well,
+    /// no viewport and no console lines.
     var preview = false
     /// How the controls go and come as the interface hides and shows (StreamScreen's `chromeTransition`).
     var chromeTransition: AnyTransition = .identity
@@ -230,7 +231,13 @@ struct PortraitStreamScreen: View {
         // know) the Keyboard toggle on the picture's corner (#215).
         let standIn = keyboardStandIn(size, origin: origin, split: split)
         return ZStack(alignment: .topLeading) {
-            Color.black
+            // The swipe in's preview draws the controls with the black they sit on and nothing of the picture's
+            // place (RevealCut.halves): the black only behind the controls' block, its top margin included.
+            if preview {
+                Color.black.placed(RevealCut.shown(RevealCut.halves(split), in: size), in: size)
+            } else {
+                Color.black
+            }
 
             VStack(spacing: split.controls - half) {
                 // Full screen: the room, with no margin (the pane's padding is the room's place in this screen).
@@ -261,7 +268,7 @@ struct PortraitStreamScreen: View {
 
             // Over the picture (above the input overlay, so a tap on it never reaches the Mac), right
             // after it for VoiceOver.
-            if standIn?.toggle == true {
+            if standIn?.toggle == true, !preview {
                 let rect = DuoPosture.keyboardToggle(paneBottom: half - DuoPosture.paneInset, sides: metrics.padSide)
                 keyboardToggle
                     .background { KeyboardToggleFrame() }      // the toggle's own 44 pt, before it is placed
@@ -270,8 +277,9 @@ struct PortraitStreamScreen: View {
             }
 
             // Same order as landscape: the dim goes over the stream so a tap with the drawer
-            // open closes the drawer instead of clicking the Mac. It covers both halves.
-            if drawerOpen {
+            // open closes the drawer instead of clicking the Mac. It covers both halves. Never in the swipe
+            // in's preview (nothing is open while the controls are hidden; nor is the picture's place drawn).
+            if drawerOpen, !preview {
                 dim
 
                 drawer
@@ -289,7 +297,7 @@ struct PortraitStreamScreen: View {
             // crease and the stream above stays in view. No dim; the tap catcher covers both
             // halves, as the drawer's dim does, so a tap anywhere outside closes the panel first
             // and never reaches the Mac.
-            if settingsOpen {
+            if settingsOpen, !preview {
                 let top = split.controls + metrics.padTop + metrics.barHeight + 8
                 catcher
 
@@ -504,7 +512,14 @@ struct PortraitStreamScreen: View {
         let rows: [CGRect] = larger ? [layout.row1, layout.keys, layout.trackpad] : [layout.row1, layout.strip, layout.keys, layout.trackpad]
         let rects: [CGRect] = [hidden ? room : larger ? layout.pane(video: client.videoSize) : layout.picture] + rows
         return ZStack(alignment: .topLeading) {
-            Color.black
+            // The swipe in's preview draws the rows with the black they sit on and nothing of the picture's place
+            // (RevealCut.phone): the black from the bottom of the picture's room down, so the gap above row 1
+            // stays as it is once they land; never from the pane at the video's shape.
+            if preview {
+                Color.black.placed(RevealCut.shown(RevealCut.phone(layout), in: layout.size), in: layout.size)
+            } else {
+                Color.black
+            }
 
             // While the drawer is open VoiceOver skips what it dims (a double-tap there would reach
             // the Mac, where a tap only closes the drawer): row 1, then the drawer. The drawer and the
@@ -529,7 +544,7 @@ struct PortraitStreamScreen: View {
                 }
             }
 
-            if drawerOpen {
+            if drawerOpen, !preview {
                 ForEach(layout.dim.indices, id: \.self) { index in
                     dim.placed(layout.dim[index], in: layout.size)
                 }
@@ -539,7 +554,7 @@ struct PortraitStreamScreen: View {
                     .transition(.opacity)
             }
 
-            if settingsOpen {
+            if settingsOpen, !preview {
                 ForEach(layout.dim.indices, id: \.self) { index in
                     catcher.placed(layout.dim[index], in: layout.size)
                 }
@@ -634,26 +649,32 @@ struct PortraitStreamScreen: View {
     /// its size is the panel the video is fitted into, which the viewport sends the Mac (the halves);
     /// a phone sends its layout's picture instead (`phone`), the same rect or, with Larger Picture,
     /// the room this pane sits at the top of.
+    /// In the swipe in's preview, nothing at all: the picture's place (RevealCut), so no pane, panel, rim, cover
+    /// or line can come in with the controls, by construction (there is one picture view, the hidden one).
+    @ViewBuilder
     private func picturePane(measured: Bool) -> some View {
+        if preview {
+            Color.clear
+        } else {
+            livePicturePane(measured: measured)
+        }
+    }
+
+    private func livePicturePane(measured: Bool) -> some View {
         ZStack {
-            if preview {
-                // The swipe in's preview: the hidden picture shows through here (there is one picture view).
-                RevealHole()
-            } else {
-                // Scaled and moved by the picture's zoom, inside the clip below.
-                ZoomedStreamView(client: client, zoom: zoom)
-                InputOverlay(videoSize: client.videoSize,
-                             send: { client.sendInput($0) },
-                             setOwnPointer: { client.setOwnPointer($0, from: $1) },
-                             proxy: overlay,
-                             isKeyboardShown: $keyboardShown,
-                             latchedModifiers: latched,
-                             onModifiersConsumed: { latched = [] },
-                             sendGesture: { client.sendGesture($0, fingers: $1) },
-                             macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
-                             readZoom: { [zoom] in zoom.zoom },
-                             writeZoom: { [zoom] in zoom.set($0) })
-            }
+            // Scaled and moved by the picture's zoom, inside the clip below.
+            ZoomedStreamView(client: client, zoom: zoom)
+            InputOverlay(videoSize: client.videoSize,
+                         send: { client.sendInput($0) },
+                         setOwnPointer: { client.setOwnPointer($0, from: $1) },
+                         proxy: overlay,
+                         isKeyboardShown: $keyboardShown,
+                         latchedModifiers: latched,
+                         onModifiersConsumed: { latched = [] },
+                         sendGesture: { client.sendGesture($0, fingers: $1) },
+                         macRepeatsKeys: { KeyTyping.macRepeats(keyRepeat: client.hostKeyRepeat) },
+                         readZoom: { [zoom] in zoom.zoom },
+                         writeZoom: { [zoom] in zoom.set($0) })
         }
         // Full screen's letterbox is black, as a film's; the panel's own grey otherwise.
         .background(hidden ? Color.black : Palette.panel)
@@ -664,7 +685,7 @@ struct PortraitStreamScreen: View {
         .overlay { HiddenPictureElement(hidden: hidden, mac: client.macName.isEmpty ? "The Mac" : client.macName, show: showChrome) }
         .clipShape(streamShape)
         .overlay(streamShape.strokeBorder(Color.white.opacity(hidden ? 0 : 0.09), lineWidth: 1))
-        .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { if measured, !preview { onPanelSize($0) } })
+        .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { if measured { onPanelSize($0) } })
         .tourTarget(.stream)
     }
 

@@ -3,11 +3,13 @@
 
 usage: compare.py BASE.log NEW.log [OFF.log]
        compare.py --all BASE.log NEW.log     every stroke both logs have but the EDGE ones: the same events
-       compare.py --edge BASE.log NEW.log    full screen's flick (docs/full-screen-plan.md): EDGE HIDE strokes hide
-                                             and send nothing; EDGE ON and EDGE DISARMED strokes go on whole and in
-                                             order (runs of moves by where they end, of scroll deltas by their sum,
-                                             not by their count: a stroke held while the flick was judged sends its
-                                             first steps as one)
+       compare.py --edge BASE.log NEW.log    full screen at the left edge (docs/full-screen-plan.md): EDGE ON strokes
+                                             (the controls shown, nothing of full screen's listening) send exactly
+                                             what main's surfaces send; EDGE REVEAL strokes (hidden, a swipe in from
+                                             the band) bring the controls and send nothing; EDGE REVEALOFF strokes
+                                             (hidden, anything else) go on whole and in order (runs of moves by where
+                                             they end, of scroll deltas by their sum, not by their count: a stroke
+                                             held while the swipe in judged it sends its first steps as one)
 
 BASE is the surfaces before the gestures, NEW this branch's with the device's switch on, OFF the same
 with it off. A run's events are compared with their times left out; runs of pointer moves and of
@@ -150,54 +152,40 @@ def edge_main(base, new):
         checks += 1
         if not ok: fails += 1
         print(("ok   " if ok else "FAIL ") + what)
+    def differ(a, b):
+        for x, y in zip(a + ["-"] * (len(b) - len(a)), b + ["-"] * (len(a) - len(b))):
+            print(f"       main's: {x}\n       now:    {y}")
     titles = [t for t in new if " EDGE " in t]
-    check(len(titles) >= 30, f"the EDGE strokes ran ({len(titles)})")
+    shown = [t for t in titles if " EDGE ON " in t]
+    hidden = [t for t in titles if " EDGE REVEAL" in t]
+    check(len(hidden) >= 13 and (not shown or len(shown) >= 28), f"the EDGE strokes ran ({len(shown)} shown, {len(hidden)} hidden)")
     for t in titles:
         surface = t.split(" ", 1)[0]
         events = new[t]
-        hid = any(e.strip() == "[edge] hide" for e in events)
-        if " EDGE REVEALOFF " in t:
-            check(not any(e.strip().startswith("[edge] reveal began") for e in events), f"{t}: no swipe in")
-        if " EDGE REVEAL " in t:
-            revealed = any(e.strip().startswith("[edge] reveal ended") for e in events)
+        began = any(e.strip().startswith("[edge] reveal began") for e in events)
+        if " EDGE ON " in t:
+            # The controls shown: nothing of full screen's listens, so the stroke is main's exactly, counts and all.
+            a, b = normal(base.get(t, [])), normal(events)
+            quiet = t in base and not a
+            if quiet: print(f"note {t}: main's surfaces send nothing for it")
+            ok = t in base and not began and same(a, b) and (len(a) > 0 or quiet)
+            check(ok, f"{t}: exactly main's events ({len(b)})")
+            if not ok: differ(a, b)
+        elif " EDGE REVEAL " in t:
+            ended = any(e.strip().startswith("[edge] reveal ended") for e in events)
             sent = sends(events)
-            if not revealed and not any(e.strip().startswith("[edge] reveal") and "listening" not in e for e in events):
-                # The system's edge recognizer may take only touches the digitizer marked as starting at the bezel,
-                # which a synthesized touch is not: then it never begins here, and the stroke must be the surfaces'
-                # own, whole (nothing held or eaten by a recognizer that never began). A device shows the swipe in.
-                print(f"note {t}: the system's edge recognizer took no synthesized touch; the stroke is checked as the surfaces' own")
-                a, b = collapsed(base.get(t, []), surface), collapsed(events, surface)
-                check(same(a, b) and len(a) > 0, f"{t}: not swiped in here, the same events as main's surfaces ({len(b)})")
-                continue
-            check(revealed and not sent and not hid and len(sends(base.get(t, []))) > 0,
+            check(began and ended and not sent and len(sends(base.get(t, []))) > 0,
                   f"{t}: the swipe in, nothing sent (main's surfaces sent {len(sends(base.get(t, [])))})")
             for e in sent: print(f"       sent: {e}")
-            continue
-        # SwiftUI's Button takes no synthesized touch (main's run presses it neither), so on the button the rig
-        # shows only that a flick hides and a tap does not.
-        swiftui = t.startswith("BUTTON ") and not normal(base.get(t, []))
-        if swiftui:
-            print(f"note {t}: the rig cannot press a SwiftUI button (main's run did not either)")
-        if " EDGE HIDE " in t:
-            sent = sends(events)
-            check(hid and not sent and (swiftui or len(sends(base.get(t, []))) > 0),
-                  f"{t}: hidden, nothing sent (main's surfaces sent {len(sends(base.get(t, [])))})")
-            if sent:
-                for e in sent: print(f"       sent: {e}")
         else:
-            moved_after_hides = " EDGE DISARMED " in t or " EDGE REVEALOFF " in t
-            a = collapsed(base.get(t, []), surface if moved_after_hides else None)
-            b = collapsed(events, surface if moved_after_hides else None)
-            # A stroke main's surfaces answer with nothing (a grip at the edge with a tap elsewhere, on the picture:
-            # two fingers down, so no tap) must stay nothing; any other must send what main's do.
+            # Hidden, not a swipe in: let go, and main's events, in order (the first steps of a stroke held while
+            # the swipe in judged it come as one).
+            a, b = collapsed(base.get(t, []), surface), collapsed(events, surface)
             quiet = t in base and not a
-            if quiet and not swiftui:
-                print(f"note {t}: main's surfaces send nothing for it")
-            ok = t in base and not hid and same(a, b) and (len(a) > 0 or swiftui or quiet)
-            check(ok, f"{t}: not hidden, the same events as main's surfaces, in order ({len(b)})")
-            if not ok:
-                for x, y in zip(a + ["-"] * (len(b) - len(a)), b + ["-"] * (len(a) - len(b))):
-                    print(f"       main's: {x}\n       now:    {y}")
+            if quiet: print(f"note {t}: main's surfaces send nothing for it")
+            ok = t in base and not began and same(a, b) and (len(a) > 0 or quiet)
+            check(ok, f"{t}: not a swipe in, main's events in order ({len(b)})")
+            if not ok: differ(a, b)
     print(f"{checks} checks, {fails} failed")
     sys.exit(1 if fails else 0)
 
