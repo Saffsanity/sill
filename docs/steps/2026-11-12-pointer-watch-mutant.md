@@ -1,5 +1,5 @@
 **The pointer-watch check's stale mutant, and checks for the no-screen hook (2026-11-12, branch
-`pointer-watch-mutant` from main at 919e05a).** Noah: "Run the mutants job once on GitHub". Run
+`pointer-watch-mutant` from main at 919e05a, PR #361 (a draft)).** Noah: "Run the mutants job once on GitHub". Run
 43198344081 on main at 0d22bbf: 67 of the 68 checks with mutants caught every mutant, and
 `pointer-watch` failed, 39 of 40, with "any value turns the software encoder on: NOT APPLIED
 (pattern found 2 times)". Tests only: no app code, no wire change.
