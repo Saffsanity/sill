@@ -21,8 +21,9 @@ final class WindowCatalog {
     private(set) var windows: [SCWindow] = []
     private(set) var infos: [WindowInfo] = []
     private(set) var display: SCDisplay?
-    /// Sill's fallback display is kept while devices work with the lid shut (HeadlessDesktopPolicy.releases): the
-    /// Desktop's display is it, before a real one (the coordinator's).
+    /// Sill's fallback display exists and is not being released: the Desktop's display is it, before a real one, so
+    /// the Desktop stays on it through a real screen's two seconds (HeadlessDesktopPolicy.Watch) and moves once, when
+    /// it goes (the coordinator's).
     var keepsSills = false
     private(set) var installedApps: [AppInfo] = []
     /// This process as ScreenCaptureKit lists it, from the last look: the Desktop stream leaves it

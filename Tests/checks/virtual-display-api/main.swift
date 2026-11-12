@@ -218,16 +218,191 @@ check(HDP.pool([HDP.Kind.standIn, .sills, .real], kind: { $0 }) == [.real], "a r
 check(HDP.pool([HDP.Kind.standIn, .sills], kind: { $0 }) == [.sills], "the lid closed, Sill's Retina display made: it, not macOS's stand-in")
 check(HDP.pool([HDP.Kind.standIn], kind: { $0 }) == [.standIn], "only macOS's stand-in (before Sill's is made): the stand-in")
 check(HDP.pool([HDP.Kind](), kind: { $0 }) == [], "no display: none")
-// Kept while a device works with the lid shut (#298): a monitor Sill's wake brings back is a display change
-// macOS may lock a closed-lid Mac on, so Sill's display stays, and the Desktop stays on it.
-check(HDP.releases(realDisplays: 0, builtInActive: false, devices: 0) == false, "no real display: kept")
-check(HDP.releases(realDisplays: 1, builtInActive: false, devices: 1) == false, "the lid shut, a monitor back, a device connected: kept")
-check(HDP.releases(realDisplays: 1, builtInActive: false, devices: 0) == true, "the lid shut, a monitor back, no device: it goes")
-check(HDP.releases(realDisplays: 1, builtInActive: true, devices: 1) == true, "the lid opened with a device connected: it goes at once, as before")
-check(HDP.releases(realDisplays: 2, builtInActive: true, devices: 0) == true, "the lid opened, nobody connected: it goes")
+// While Sill's display exists and is not being released (the coordinator's keepsSills), the Desktop stays on it through
+// a real screen's two seconds and moves once, when it goes (Watch).
 check(HDP.pool([HDP.Kind.standIn, .sills, .real], kind: { $0 }, sillsFirst: true) == [.sills], "kept: Sill's display before a real one")
 check(HDP.pool([HDP.Kind.real, .standIn], kind: { $0 }, sillsFirst: true) == [.real], "kept but not listed yet: the real one")
 check(HDP.pool([HDP.Kind.standIn, .sills, .real], kind: { $0 }, sillsFirst: false) == [.real], "not kept: the real one first, as before")
+
+// MARK: When Sill's display is made and when it goes (Watch; Noah's test of 2026-11-12)
+
+typealias Watch = HDP.Watch
+func near(_ a: Double?, _ b: Double?) -> Bool { a == b || (a != nil && b != nil && abs(a! - b!) < 1e-9) }
+func waitUntil(_ m: Watch.Make) -> Double? { if case .wait(let t) = m { return t }; return nil }
+func waitUntil(_ r: Watch.Release) -> Double? { if case .wait(let t) = r { return t }; return nil }
+
+check(Watch.settle == 1 && Watch.settleCap == 3 && Watch.hysteresis == 2, "a second to settle, three at most, two seconds both ways")
+// The watch's own bookkeeping.
+do {
+    var w = Watch()
+    w.saw(real: 0, list: ["s:standIn:active"], at: 10)
+    check(w.listChangedAt == nil && w.realGoneAt == nil && w.realBackAt == nil, "the first look records no change")
+    w.saw(real: 0, list: ["s:standIn:active"], at: 11)
+    check(w.listChangedAt == nil, "the same list again: no change")
+    w.saw(real: 0, list: ["t:standIn:active"], at: 12)
+    check(near(w.listChangedAt, 12), "another list, the same count: a change, seen by a look alone")
+    w.saw(real: 1, list: ["m:real:active"], at: 13)
+    check(near(w.realBackAt, 13) && w.realGoneAt == nil, "a real screen back: when")
+    w.saw(real: 0, list: ["s:standIn:active"], at: 14)
+    check(near(w.realGoneAt, 14) && near(w.realBackAt, 13), "the real screen gone: when")
+    w.changed(at: 15)
+    check(near(w.listChangedAt, 15), "macOS's callback is a change before any look")
+    w.cameBack(at: 16)
+    check(near(w.cameBackAt, 16), "back on the console, unlocked or woken: when")
+    var first = Watch()
+    first.saw(real: 2, list: ["a:real:active", "b:real:active"], at: 1)
+    check(first.realBackAt == nil && first.realGoneAt == nil && first.real == 2, "a first look with screens: no transition")
+}
+// The make rule at its edges: a second's quiet after the later of the list's change, the return and the first look;
+// two seconds without a real screen after the later of its going and the return; three seconds at most.
+do {
+    var w = Watch()
+    w.saw(real: 0, list: ["s:standIn:active"], at: 0)
+    check(w.make(wantedSince: 100, now: 100) == .wait(until: 101), "a screenless Mac, steady: a second after the first look")
+    check(w.make(wantedSince: 100, now: 100.999) == .wait(until: 101), "…not before")
+    check(w.make(wantedSince: 100, now: 101) == .make, "…then made")
+    w.saw(real: 1, list: ["m:real:active"], at: 50)
+    check(w.make(wantedSince: 100, now: 200) == .no, "a real screen works: never made")
+    var lid = Watch()
+    lid.saw(real: 1, list: ["builtin:real:active"], at: 0)
+    lid.saw(real: 0, list: ["s:standIn:active"], at: 90)                 // the lid closed, nothing attached
+    check(waitUntil(lid.make(wantedSince: 90.2, now: 90.2)) == 92, "the built-in screen gone 0.2 s ago: two seconds after it went")
+    check(waitUntil(lid.make(wantedSince: 95, now: 95)) == 96, "gone 5 s ago: a second after the first look")
+    var back = lid
+    back.cameBack(at: 94)
+    check(waitUntil(back.make(wantedSince: 94.3, now: 94.3)) == 96, "back on the console at 94: two seconds after it")
+    var busy = lid
+    busy.changed(at: 99)
+    check(waitUntil(busy.make(wantedSince: 98, now: 99)) == 100, "the list changed at 99: a second after it")
+    busy.changed(at: 100.9)
+    check(waitUntil(busy.make(wantedSince: 98, now: 100.9)) == 101, "still changing: three seconds after the first look at most")
+    check(busy.make(wantedSince: 98, now: 101) == .make, "…then made on that look")
+}
+// The release rule: two seconds after a real screen came back, the lid closed and a device connected too.
+do {
+    var w = Watch()
+    w.saw(real: 0, list: ["s:sills:active"], at: 0)
+    check(w.release(now: 100) == .keep, "no real screen: kept")
+    w.saw(real: 1, list: ["m:real:active", "s:sills:active"], at: 120)
+    check(w.release(now: 120) == .wait(until: 122), "a monitor back: two seconds")
+    check(w.release(now: 121.999) == .wait(until: 122), "…not before")
+    check(w.release(now: 122) == .release, "…then it goes")
+    w.saw(real: 0, list: ["s:sills:active"], at: 121)
+    check(w.release(now: 122) == .keep, "the monitor gone again within the two seconds: kept")
+}
+
+// The coordinator's part, modelled: macOS's callback looks at every change of the displays; the lock's changes say when
+// this session came back; a Desktop that wants Sill's display looks, waits as `make` says, looks again then, and makes
+// it on that look (the gate, on the console with a device, asked at every look); once made, `release` is asked at
+// every change and at the end of each wait it names. The display the model makes is listed as Sill's.
+struct Screens { let at: Double; let real: Int; let list: [String] }
+func replay(screens: [Screens], cameBack: [Double], onConsole: (Double) -> Bool, wanted: Double, until end: Double)
+    -> (made: Double?, released: Double?, makes: Int) {
+    var w = Watch()
+    var made: Double? = nil, released: Double? = nil, makes = 0
+    var i = 0
+    var backs = cameBack.sorted()
+    func seen() -> (real: Int, list: [String]) {
+        (screens[i].real, screens[i].list + (made != nil && released == nil ? ["sills:active"] : []))
+    }
+    func look(_ t: Double) { let s = seen(); w.saw(real: s.real, list: s.list, at: t) }
+    look(screens[0].at)
+    var wakeUp: Double? = wanted, releaseAt: Double? = nil
+    func askRelease(_ t: Double) {
+        guard made != nil, released == nil else { return }
+        switch w.release(now: t) {
+        case .release: released = t; releaseAt = nil; w.changed(at: t); look(t)
+        case .wait(let u): releaseAt = u
+        case .keep: releaseAt = nil
+        }
+    }
+    // One event at a time, in time order: a return, then a change, then the Desktop's look, then the release's.
+    while true {
+        let change = i + 1 < screens.count ? screens[i + 1].at : Double.infinity
+        let back = backs.first ?? Double.infinity
+        let next = min(change, back, wakeUp ?? Double.infinity, releaseAt ?? Double.infinity)
+        guard next <= end else { break }
+        if back == next { w.cameBack(at: next); backs.removeFirst(); continue }
+        if change == next { i += 1; w.changed(at: next); look(next); askRelease(next); continue }
+        if wakeUp == next {
+            look(next)
+            guard onConsole(next) else { wakeUp = nil; continue }
+            switch w.make(wantedSince: wanted, now: next) {
+            case .no: wakeUp = nil
+            case .wait(let v): wakeUp = v
+            case .make: made = next; makes += 1; wakeUp = nil; w.changed(at: next); look(next)
+            }
+            continue
+        }
+        if releaseAt == next { releaseAt = nil; look(next); askRelease(next) }
+    }
+    return (made, released, makes)
+}
+
+// Tonight's sequence, from Sill.log (seconds after 01:10:00, 2026-11-12): the lid closed, two monitors; off console at
+// 48.598 (the off-console view on); the stand-in alone from 53.743 (the Desktop followed it to 1920×1080); back on the
+// console, unlocked, at 54.688; locked at 55.040, when the Desktop asked for the display (made at 55.203 before this);
+// the monitors back a second after the return. Nothing may be made.
+let two = ["a:real:active", "b:real:active"], standIn = ["s:standIn:active"]
+func tonight(monitorsBack: Double) -> (made: Double?, released: Double?, makes: Int) {
+    replay(screens: [Screens(at: 0, real: 2, list: two), Screens(at: 53.743, real: 0, list: standIn),
+                     Screens(at: monitorsBack, real: 2, list: two)],
+           cameBack: [54.688], onConsole: { $0 < 48.598 || $0 >= 54.688 }, wanted: 55.040, until: 70)
+}
+let night = tonight(monitorsBack: 55.688)
+check(night.made == nil && night.makes == 0, "tonight: the monitors back a second after the return: nothing made (\(String(describing: night.made)))")
+do {
+    var w = Watch()
+    w.saw(real: 2, list: two, at: 0)
+    w.changed(at: 53.743); w.saw(real: 0, list: standIn, at: 53.743)
+    w.cameBack(at: 54.688)
+    check(near(waitUntil(w.make(wantedSince: 55.040, now: 55.040)), 56.688), "tonight at 55.040, the instant the old rule made it: wait until 56.688")
+}
+let slower = tonight(monitorsBack: 56.6)
+check(slower.made == nil, "the monitors back 1.9 s after the return: still nothing made")
+let late = tonight(monitorsBack: 57.5)
+check(near(late.made, 56.688) && near(late.released, 59.5) && late.makes == 1,
+      "the monitors back 2.8 s after the return: made at 56.688, gone two seconds after they came (\(String(describing: late.made)), \(String(describing: late.released)))")
+// #340's off-console view at the switch: the Desktop streams off console, and the stand-in alone while off console.
+let viewed = replay(screens: [Screens(at: 0, real: 2, list: two), Screens(at: 53.743, real: 0, list: standIn)],
+                    cameBack: [], onConsole: { $0 < 48.598 }, wanted: 53.9, until: 70)
+check(viewed.made == nil, "off console (the view on), the stand-in alone: nothing made")
+// A Mac with truly no screen: the stand-in alone and steady; the display a second after the Desktop asked.
+let bare = replay(screens: [Screens(at: 0, real: 0, list: standIn)], cameBack: [], onConsole: { _ in true }, wanted: 100.3, until: 110)
+check(near(bare.made, 101.3) && bare.released == nil, "a screenless Mac: made a second after the Desktop asked (\(String(describing: bare.made)))")
+let bareLocked = replay(screens: [Screens(at: 0, real: 0, list: standIn)], cameBack: [], onConsole: { _ in true }, wanted: 100.3, until: 110)
+check(near(bareLocked.made, 101.3), "…locked (the lock screen on the console): the same")
+let bareOff = replay(screens: [Screens(at: 0, real: 0, list: standIn)], cameBack: [], onConsole: { _ in false }, wanted: 100.3, until: 110)
+check(bareOff.made == nil, "…off console: none")
+// A monitor back with the lid closed and a device connected: gone two seconds after, locked or not.
+let monitor = replay(screens: [Screens(at: 0, real: 0, list: standIn), Screens(at: 120, real: 1, list: ["m:real:active"])],
+                     cameBack: [], onConsole: { _ in true }, wanted: 100.3, until: 130)
+check(near(monitor.made, 101.3) && near(monitor.released, 122), "a monitor back at 120: gone at 122 (\(String(describing: monitor.released)))")
+// A monitor that flickers every half second from 130 to 136, then stays: kept through the flicker, gone at 138.
+var flicker = [Screens(at: 0, real: 0, list: standIn)]
+for k in 0..<12 { flicker.append(Screens(at: 130 + Double(k) * 0.5, real: k % 2 == 0 ? 1 : 0, list: k % 2 == 0 ? ["m:real:active"] : standIn)) }
+flicker.append(Screens(at: 136, real: 1, list: ["m:real:active"]))
+let flickered = replay(screens: flicker, cameBack: [], onConsole: { _ in true }, wanted: 100.3, until: 145)
+check(near(flickered.made, 101.3) && near(flickered.released, 138) && flickered.makes == 1,
+      "a monitor flickering 130–136: kept through it, gone at 138 (\(String(describing: flickered.released)))")
+// A monitor flickering while the Desktop waits for the display: decided at the cap (three seconds), once.
+var early = [Screens(at: 0, real: 0, list: standIn)]
+for k in 0..<14 { early.append(Screens(at: 139.5 + Double(k) * 0.5, real: k % 2 == 0 ? 1 : 0, list: k % 2 == 0 ? ["m:real:active"] : standIn)) }
+let waited = replay(screens: early, cameBack: [], onConsole: { _ in true }, wanted: 140.2, until: 150)
+check(waited.makes <= 1 && (waited.made == nil || near(waited.made, 143.2)), "a monitor flickering while the Desktop waits: decided at 143.2, once (\(String(describing: waited.made)))")
+check(waited.released == nil, "…and nothing made and removed in a loop while it flickers")
+
+// TEST ONLY: SILL_TEST_HEADLESS, a test host's scripted list, and who takes it (not SILL_TEST_DISPLAYS, the Desktop's stops').
+let parsed = HDP.testHeadlessList("real\nreal asleep # a comment\nstandin\nlid closed\nbogus line\n# real\n")
+check(parsed.displays == [HDP.TestDisplay(kind: .real, active: true), HDP.TestDisplay(kind: .real, active: false),
+                          HDP.TestDisplay(kind: .standIn, active: true)] && parsed.lidClosed,
+      "the scripted list: a screen, one asleep, the stand-in, the lid closed; comments and the rest left out")
+check(HDP.testHeadlessList("").displays.isEmpty && !HDP.testHeadlessList("").lidClosed, "an empty file: no display, the lid open")
+check(HDP.testHeadless(environment: ["SILL_TEST_HEADLESS": "/tmp/d"], testHost: true).path == "/tmp/d", "a test host takes the file")
+check(HDP.testHeadless(environment: ["SILL_TEST_DISPLAYS": "/tmp/d"], testHost: true) == (nil, nil), "the Desktop stops' variable is not this one")
+let refused = HDP.testHeadless(environment: ["SILL_TEST_HEADLESS": "/tmp/d"], testHost: false)
+check(refused.path == nil && refused.line == "SILL_TEST_HEADLESS ignored: only a --synthetic test host takes it, never Sill.app.", "any other host ignores it, with one line")
+check(HDP.testHeadless(environment: [:], testHost: true) == (nil, nil), "unset: nothing")
 // Which real displays keep Sill's display from being made (the review of 2026-11-09): a display only asleep is
 // online and keeps its windows, and 0.6.0's display wake (#151) turns it on as a device connects, so it counts; with
 // the lid closed only the active ones count, a monitor asleep there being none (#298).

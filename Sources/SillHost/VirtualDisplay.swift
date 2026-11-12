@@ -505,13 +505,13 @@ enum HeadlessDesktopPolicy {
     }
 
     /// Whether the Desktop needs Sill's display: no real display, as `realDisplays` counts them (macOS's stand-in
-    /// and Sill's own are none). When it goes once made is `releases`.
+    /// and Sill's own are none). When it is made, and when it goes, is `Watch`'s.
     static func stillNeeded(physicalDisplays: Int) -> Bool { physicalDisplays == 0 }
 
     /// The real displays that keep Sill's display from being made. The online ones, a display asleep among them: it
     /// keeps its windows, and 0.6.0's display wake (#151) turns it on as a device connects, while the Desktop starts
     /// within about a third of a second of the connect; Sill's display made in that moment would show none of those
-    /// windows, and on a Mac without a built-in screen stay for the session (`releases`). With the lid
+    /// windows. With the lid
     /// closed, the active ones alone: a monitor asleep there counts as none (#298, a closed-lid Mac whose only
     /// monitor is off or asleep).
     static func realDisplays(active: Int, online: Int, lidClosed: Bool) -> Int { lidClosed ? active : online }
@@ -523,16 +523,122 @@ enum HeadlessDesktopPolicy {
 
     enum Kind: Equatable { case real, sills, standIn }
 
-    /// Whether the fallback display goes now: a real display is active and the built-in screen is among them
-    /// (the lid opened: someone is at the Mac, and the windows come back to it) or no device is connected. A
-    /// monitor that comes back while the lid stays shut and a device works leaves it (#298): its going is a
-    /// display change, which macOS may lock a closed-lid Mac on.
-    static func releases(realDisplays: Int, builtInActive: Bool, devices: Int) -> Bool {
-        realDisplays > 0 && (builtInActive || devices == 0)
+    /// The displays as Sill has looked at them over time, and the two rules that read them: when Sill's display may
+    /// be made, and when it goes. Times are seconds on one clock (the coordinator's); nothing here reads a clock or a
+    /// display.
+    ///
+    /// Noah's test of 2026-11-12 (a MacBook Pro with its lid closed and two monitors, an iPad connected): back from a
+    /// fast user switch, this session saw only macOS's stand-in for about a second before its monitors returned;
+    /// Sill's display, made in that second, then stayed beside both monitors as the main display, because the rule
+    /// before this kept it while a device worked with the lid shut. Now:
+    /// - It is made only once the display list has been unchanged for `settle` (1 s) since the later of its last
+    ///   change and the first look that wanted it, and no real screen has worked for `hysteresis` (2 s) since the
+    ///   later of the last one's going and this session's return (back on the console, unlocked, woken: `cameBack`),
+    ///   so a return always waits the two seconds; never later than `settleCap` (3 s) after that first look. The
+    ///   coordinator looks again when `make` says, and makes the display on that look alone.
+    /// - It goes once a real screen has worked for `hysteresis` (2 s), the lid closed and a device connected too: it
+    ///   exists only while no real screen works. The two seconds both ways keep a monitor that flickers from making
+    ///   and removing it in a loop.
+    struct Watch: Equatable {
+        static let settle: Double = 1
+        static let settleCap: Double = 3
+        static let hysteresis: Double = 2
+
+        /// The real screens the last look found, as `realDisplays` counts them.
+        private(set) var real = 0
+        /// The whole list the last look found (each display's ID, kind and state), so a change shows where the count
+        /// stays; nil before the first look.
+        private(set) var list: [String]?
+        /// When the list last changed: a look that found it different, or macOS's reconfiguration callback.
+        private(set) var listChangedAt: Double?
+        /// When the real screens last went from some to none, and from none to some (nil: not seen).
+        private(set) var realGoneAt: Double?
+        private(set) var realBackAt: Double?
+        /// When this session last came back on the console, was unlocked, or woke.
+        private(set) var cameBackAt: Double?
+
+        init() {}
+
+        /// A look at the displays at `now`. The first look changes nothing but what it found.
+        mutating func saw(real: Int, list: [String], at now: Double) {
+            if let before = self.list, before != list { listChangedAt = now }
+            if self.list != nil, self.real > 0, real == 0 { realGoneAt = now }
+            if self.list != nil, self.real == 0, real > 0 { realBackAt = now }
+            self.list = list
+            self.real = real
+        }
+
+        /// macOS said the display configuration changed (its reconfiguration callback), with or before a look.
+        mutating func changed(at now: Double) { listChangedAt = now }
+
+        /// This session came back on the console, was unlocked, or woke: what it sees may still be changing.
+        mutating func cameBack(at now: Double) { cameBackAt = now }
+
+        enum Make: Equatable { case no, wait(until: Double), make }
+
+        /// Whether Sill's display is made now, for a Desktop that first wanted it at `wantedSince`: `.no` while a real
+        /// screen works, else `.wait` until the time to look again, or `.make` on this look.
+        func make(wantedSince: Double, now: Double) -> Make {
+            guard HeadlessDesktopPolicy.stillNeeded(physicalDisplays: real) else { return .no }
+            let settled = max(listChangedAt ?? -Double.infinity, wantedSince) + Self.settle
+            let noScreen = max(realGoneAt ?? -Double.infinity, cameBackAt ?? -Double.infinity) + Self.hysteresis
+            let ready = min(max(settled, noScreen), wantedSince + Self.settleCap)
+            return now >= ready ? .make : .wait(until: ready)
+        }
+
+        enum Release: Equatable { case keep, wait(until: Double), release }
+
+        /// Whether Sill's display goes now: `.keep` while no real screen works, else `.wait` until a real screen has
+        /// worked `hysteresis`, then `.release`.
+        func release(now: Double) -> Release {
+            guard real > 0 else { return .keep }
+            let ready = (realBackAt ?? -Double.infinity) + Self.hysteresis
+            return now >= ready ? .release : .wait(until: ready)
+        }
     }
 
-    /// The displays the Desktop may stream: the real ones, else Sill's, else macOS's stand-in; Sill's first while
-    /// it is kept (`releases`), so the Desktop stays where macOS moved the windows.
+    /// TEST ONLY (SILL_TEST_HEADLESS): one display of a test host's scripted list.
+    struct TestDisplay: Equatable {
+        var kind: Kind
+        var active: Bool
+    }
+
+    /// TEST ONLY: the variable whose file a test host reads its displays from instead of this Mac's (and makes and
+    /// removes no display: it says what it would do). Honoured only by a test host (`--synthetic`, and never Sill.app's
+    /// own executable: DoorPolicy.isTestHost). Not SILL_TEST_DISPLAYS, which is the Desktop's stops'
+    /// (DesktopDisplaysHook, #355); the local fixes of 2026-11-12 named this one so before #355 landed.
+    static let testHeadlessVariable = "SILL_TEST_HEADLESS"
+
+    /// The file the variable names, and the one line it prints at start (nil when it is not set).
+    static func testHeadless(environment: [String: String], testHost: Bool) -> (path: String?, line: String?) {
+        guard let value = environment[testHeadlessVariable], !value.isEmpty else { return (nil, nil) }
+        guard testHost else { return (nil, "\(testHeadlessVariable) ignored: only a --synthetic test host takes it, never Sill.app.") }
+        return (value, "Test displays: this host's displays are what \(value) lists, read at each look; Sill's display is never made or removed here, only said.")
+    }
+
+    /// The file's list: one display a line, `real` (a screen that works), `real asleep` (online, not active) or
+    /// `standin` (macOS's stand-in); a line `lid closed` says the lid is closed; `#` starts a comment; anything else is
+    /// left out (a test writes the file).
+    static func testHeadlessList(_ text: String) -> (displays: [TestDisplay], lidClosed: Bool) {
+        var displays: [TestDisplay] = []
+        var lidClosed = false
+        for raw in text.split(whereSeparator: \.isNewline) {
+            let words = raw.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0]
+                .split(whereSeparator: \.isWhitespace).map { $0.lowercased() }
+            switch words {
+            case ["real"]: displays.append(TestDisplay(kind: .real, active: true))
+            case ["real", "asleep"]: displays.append(TestDisplay(kind: .real, active: false))
+            case ["standin"]: displays.append(TestDisplay(kind: .standIn, active: true))
+            case ["lid", "closed"]: lidClosed = true
+            default: break
+            }
+        }
+        return (displays, lidClosed)
+    }
+
+    /// The displays the Desktop may stream: the real ones, else Sill's, else macOS's stand-in; Sill's first while it
+    /// exists and is not being released (the coordinator's `catalog.keepsSills`), so the Desktop stays on it through
+    /// `Watch`'s two seconds and moves once, when the display goes.
     static func pool<T>(_ displays: [T], kind: (T) -> Kind, sillsFirst: Bool = false) -> [T] {
         for wanted in sillsFirst ? [Kind.sills, .real] : [Kind.real, .sills] {
             let some = displays.filter { kind($0) == wanted }
