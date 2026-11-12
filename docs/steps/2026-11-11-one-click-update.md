@@ -127,6 +127,36 @@ updater features" (the plan's §15.1); the independent security review's finding
   watcher read no CDHash (`codesign -d -v` prints none; now `-vvv --arch`), a SIGPIPE race under pipefail
   in sign-update.sh's `codesign | grep -q` and `spctl | grep -q`, `Process.waitUntilExit` hanging after a
   hop in the harness, and macOS's SwiftUI forms have no Dynamic Type (the larger-text previews set 17 pt).
+- Verified, round 4 (2026-11-12 06:50–10:37, this Mac, heavy jobs through heavy.sh, no device, nothing launched
+  but the harness's test executables and the bare SillMenuBar for previews). The 5 minutes (aa8ee628):
+  `update-install` 718, its 85 mutants 85 of 85 on an export of the commit, the harness 227 of 227, previews. The
+  second pass (b6486d0b, on an export of the commit): `update-install` 766 of 766, the harness 265 of 265 (38 new:
+  the staged copy changed when the leftover note appears, a link planted at the restored note, the note landing in
+  the put-back copy, the old copy replaced by a link, a FIFO, a link and a 5,000-byte file where a note goes, a
+  FIFO and a link at the started note), `sign-test.sh` all passed (the signing record, the audit's alarm and its
+  notification, R1's three refusals and an annotated tag read through, R2's diff), `swift build -c release`; CI's
+  Build and check green on b6486d0b. Use nightly builds (2f096747): `update-install` 833 of 833 (67 new: the
+  nightly format and its separation both ways, the order, what Update Now offers, the downloaded app's order by
+  channel, the listing and its pair, the nightly rule, the switch's and the offer's words, the source rules);
+  `swift build -c release` with no warning from the changed files; the harness 277 of 277 (a nightly feed on the
+  stand-in: offered from its manifest and installed through the same steps, T35, T36 both ways, T37's
+  half-published pair, an older nightly, one moved on since the offer, one not signed yet, no pre-release);
+  `sign-test.sh` all passed (62 steps: the nightly key in a file only, its separation from the update key both
+  ways, sign-nightly.sh signing tonight's zip and refusing a release's app, another commit's and a key the commit
+  doesn't carry, --new-key's mode 0600 and its clean-up); the mutants on an export of 2f096747, the second pass's
+  and the nightly's among them: `update-install` 116 of 116 (115 on that export; the 116th, the nightly floor's,
+  was written so it couldn't compile: fixed, and caught on an export of 2929da1e), the harness 16 of 16 (the
+  second pass's eleven and the nightly's five); previews from the bare SillMenuBar, 319 files (against the round
+  before, aa8ee628's: the second pass's words in the 39 automatic-update renderings, 27 new, 6 the second pass's
+  and 21 the nightly's, the rest identical; in the handoff's previews/); CI's Build and check green on 2f096747.
+  Found on the way, each fixed before the first build: the design's "release V offered to nightly V" (main keeps a
+  version before and after its release, so nightly users would have seen an older release offered for weeks, then
+  refused); nightly.yml red between the secret and the compiled key (now green, signing nothing); `sign-nightly.sh
+  --new-key`'s exec, which skipped the trap and left the compiled signer in TMPDIR (shown before and after: the
+  old script left its sill-nightly-sign folder there, the fix nothing). From the previews, then fixed (2929da1e):
+  with nightlies on, the footnote still said every new version waits two days and is signed with the update key;
+  it now names the nightly key and the missing wait (update-install 836 of 836, the build, the harness 277 of 277;
+  only the six nightly-on samples' renderings changed).
 - **Untested, for Noah:** the plan's §12 rehearsal with a throwaway repository and key (two notarized
   builds); the first real Update Now (a release carrying the key installed by hand first); §14's three
   step lists (once: the signer, the key, its backup; once: the public key into `releaseKeys`, a commit of
