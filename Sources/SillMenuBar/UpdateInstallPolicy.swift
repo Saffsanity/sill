@@ -152,6 +152,8 @@ enum UpdateInstallPolicy {
         var folderWritable: Bool
         var bundleWritable: Bool
         var ownedByUser: Bool
+        /// The account that owns the bundle, by name, when it is not this one (for the refusal's words).
+        var ownerName: String
         /// The copy at the path is the code that is running (its cdhash for this Mac's architecture).
         var runningIsInstalled: Bool
         /// Other accounts' names whose processes run from this bundle.
@@ -171,6 +173,9 @@ enum UpdateInstallPolicy {
         case networkVolume(String)
         case link(String)
         case notWritable(String)
+        /// Sill.app belongs to another account (its name): the swap would hand that account's copy to
+        /// this one.
+        case otherOwner(String)
         case changedSinceStart(String)
         case otherAccount(String)
         case otherInstance
@@ -186,9 +191,10 @@ enum UpdateInstallPolicy {
         if s.readOnlyVolume { return .readOnlyVolume(s.volumeName) }
         if s.networkVolume { return .networkVolume(s.volumeName) }
         if s.bundleIsLink { return .link(s.bundlePath) }
-        if !s.folderWritable || !s.bundleWritable || !s.ownedByUser {
+        if !s.folderWritable || !s.bundleWritable {
             return .notWritable((s.bundlePath as NSString).deletingLastPathComponent)
         }
+        if !s.ownedByUser { return .otherOwner(s.ownerName) }
         if !s.runningIsInstalled { return .changedSinceStart(s.bundlePath) }
         if let other = s.otherAccounts.first { return .otherAccount(other) }
         if s.otherInstances > 0 { return .otherInstance }
@@ -214,6 +220,7 @@ enum UpdateInstallPolicy {
         case .networkVolume(let v): return "Sill is on a network disk (\(v)), so it doesn’t update itself there."
         case .link(let path): return "Sill runs through a link (\(path)), so it can’t replace itself there."
         case .notWritable(let folder): return "Sill is in a folder this account can’t change (\(folder))."
+        case .otherOwner(let name): return "Sill belongs to another account on this Mac (\(name)). Update it from that account."
         case .changedSinceStart(let path): return "Sill at \(path) changed since it started. Quit Sill and open it again."
         case .otherAccount(let name):
             return "Sill is open in another account on this Mac (\(name)). Quit it there first, then update."

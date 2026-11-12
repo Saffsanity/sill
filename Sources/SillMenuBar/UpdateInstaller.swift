@@ -503,8 +503,12 @@ final class UpdateInstaller: @unchecked Sendable {
     static func situation(bundle: URL, executable: String, runningIsRelease: Bool, testFeed: Bool, runningIsInstalled: Bool,
                           neededBytes: Int64) -> Policy.Situation {
         var owned = false
+        var ownerName = "another account"
         var s = stat()
-        if lstat(bundle.path, &s) == 0 { owned = s.st_uid == getuid() }
+        if lstat(bundle.path, &s) == 0 {
+            owned = s.st_uid == getuid()
+            if !owned { ownerName = accountName(s.st_uid) }
+        }
         // A link anywhere on the way (the bundle or a folder above it) could send the swap elsewhere
         // between the checks and the exchange.
         var link = false
@@ -536,7 +540,8 @@ final class UpdateInstaller: @unchecked Sendable {
             runningIsRelease: runningIsRelease, testFeed: testFeed, bundlePath: bundle.path, bundleIsLink: link,
             translocated: bundle.path.contains("/AppTranslocation/"), volumeName: volume, readOnlyVolume: readOnly,
             networkVolume: network, diskImage: image, folderWritable: access(parent.path, W_OK) == 0,
-            bundleWritable: access(bundle.path, W_OK) == 0, ownedByUser: owned, runningIsInstalled: runningIsInstalled,
+            bundleWritable: access(bundle.path, W_OK) == 0, ownedByUser: owned, ownerName: owned ? "" : ownerName,
+            runningIsInstalled: runningIsInstalled,
             otherAccounts: accounts, otherInstances: others.filter { $0.uid == me }.count,
             freeBytes: freeBytes(at: parent), neededBytes: neededBytes)
     }

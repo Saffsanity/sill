@@ -85,7 +85,7 @@ check(P.assetURL(tag: "../v0.4.0", name: "Sill.zip", endpoints: gh) == nil, "a t
 
 let fine = P.Situation(runningIsRelease: true, testFeed: false, bundlePath: "/Applications/Sill.app", bundleIsLink: false,
                        translocated: false, volumeName: "Macintosh HD", readOnlyVolume: false, networkVolume: false, diskImage: false,
-                       folderWritable: true, bundleWritable: true, ownedByUser: true, runningIsInstalled: true, otherAccounts: [],
+                       folderWritable: true, bundleWritable: true, ownedByUser: true, ownerName: "", runningIsInstalled: true, otherAccounts: [],
                        otherInstances: 0, freeBytes: 10 << 30, neededBytes: P.neededBytes(assetBytes: 8 << 20))
 check(P.refusal(fine) == nil, "a release in Applications, alone, with room: no refusal")
 check(P.neededBytes(assetBytes: 8 << 20) == 32 << 20 + 64 << 20, "the space needed")
@@ -100,7 +100,7 @@ let refusalCases: [(P.Situation, P.Refusal)] = [
     (with { $0.bundleIsLink = true }, .link("/Applications/Sill.app")),
     (with { $0.folderWritable = false }, .notWritable("/Applications")),
     (with { $0.bundleWritable = false }, .notWritable("/Applications")),
-    (with { $0.ownedByUser = false }, .notWritable("/Applications")),
+    (with { $0.ownedByUser = false; $0.ownerName = "Alex Example" }, .otherOwner("Alex Example")),
     (with { $0.runningIsInstalled = false }, .changedSinceStart("/Applications/Sill.app")),
     (with { $0.otherAccounts = ["Alex Example", "Zed"] }, .otherAccount("Alex Example")),
     (with { $0.otherInstances = 1 }, .otherInstance),
@@ -112,11 +112,15 @@ check(P.refusal(with { $0.runningIsRelease = false; $0.testFeed = true; $0.other
 check(P.refusal(with { $0.testFeed = true; $0.translocated = true }) == .testFeed, "testFeed before translocated")
 check(P.refusal(with { $0.otherAccounts = ["A"]; $0.otherInstances = 1; $0.freeBytes = 0 }) == .otherAccount("A"), "another account before the rest")
 check(P.refusal(with { $0.runningIsInstalled = false; $0.otherAccounts = ["A"] }) == .changedSinceStart("/Applications/Sill.app"), "changed before accounts")
+check(P.refusal(with { $0.bundleWritable = false; $0.ownedByUser = false; $0.ownerName = "A" }) == .notWritable("/Applications"), "not writable before another owner")
+check(P.refusal(with { $0.ownedByUser = false; $0.ownerName = "A"; $0.runningIsInstalled = false; $0.otherAccounts = ["B"] }) == .otherOwner("A"),
+      "another owner before a changed copy and other accounts")
 check(P.refusal(with { $0.freeBytes = nil }) == nil, "free space unknown: no refusal (the unpacking checks it again)")
 check(P.refusal(with { $0.freeBytes = 96 << 20 }) == nil, "exactly the space needed")
 check(P.words(.notRelease) == "This copy of Sill isn’t a notarized release, so it can’t update itself.", "words: notRelease")
 check(P.words(.otherAccount("Alex Example")) == "Sill is open in another account on this Mac (Alex Example). Quit it there first, then update.", "words: otherAccount")
 check(P.words(.notWritable("/Applications")) == "Sill is in a folder this account can’t change (/Applications).", "words: notWritable")
+check(P.words(.otherOwner("Alex Example")) == "Sill belongs to another account on this Mac (Alex Example). Update it from that account.", "words: otherOwner")
 check(P.words(.translocated).hasPrefix("macOS is running Sill from a temporary copy."), "words: translocated")
 check(P.words(.lowSpace(volume: "X", neededMB: 96)) == "Not enough free space on X: about 96 MB are needed.", "words: lowSpace")
 

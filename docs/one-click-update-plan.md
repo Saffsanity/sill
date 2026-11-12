@@ -226,7 +226,9 @@ after the swap), but resources it loads later come from the new bundle at the sa
 versions); its login item names the path, so its next login starts the new version; its Screen Recording
 and Accessibility grants are its own, kept by the designated requirement; its keychain items are in its
 own keychain, read by the same access group. The other account cannot touch this user's staging folder
-(0700). A bundle owned by another account is refused anyway (T18). What Noah sees: Q3.
+(0700). A bundle owned by another account is refused anyway, with words of its own (T18, §4.1): an
+update leaves Sill.app owned by the account that ran it, so from the other account Update Now then says
+"Sill belongs to another account on this Mac (‹name›). Update it from that account." What Noah sees: Q3.
 
 **T14. A second update racing the first.** One AppUpdater per process, a state machine that takes Update
 Now only when idle or failed, and every step's answer carries its attempt: Cancel retires the attempt, and
@@ -354,7 +356,8 @@ shows under the offer (in this order):
 | A read-only volume | Sill is on a disk this Mac can’t change (‹volume›). |
 | A network volume | Sill is on a network disk (‹volume›), so it doesn’t update itself there. |
 | The bundle path is a symbolic link | Sill runs through a link (‹path›), so it can’t replace itself there. |
-| The folder or the bundle is not writable, or the bundle belongs to another account | Sill is in a folder this account can’t change (‹folder›). |
+| The folder or the bundle is not writable | Sill is in a folder this account can’t change (‹folder›). |
+| The bundle belongs to another account (the last to install or update it) | Sill belongs to another account on this Mac (‹full name›). Update it from that account. |
 | The copy at the path is not the running one | Sill at ‹path› changed since it started. Quit Sill and open it again. |
 | Another account runs Sill from this copy | Sill is open in another account on this Mac (‹full name›). Quit it there first, then update. |
 | Another Sill of this account runs from this copy | Another copy of Sill is running. Quit it first, then update. |
@@ -613,8 +616,10 @@ checklist.md part 1 §3's marker rule).
    (fast user switching, or the Lock Screen's account list), choose Quit Sill from its menu, switch back
    (within a second Update Now is enabled: Settings looks again every second), and click Update Now. That
    account's Sill then starts the new version at its next login (its login item names the path) or when
-   opened. Logging that account out does the same. Alternative: update anyway, and that account's Sill
-   runs old code with new resources until it quits.
+   opened. Logging that account out does the same. In the second account itself, Update Now is dimmed
+   with "Sill belongs to another account on this Mac (‹his full name›). Update it from that account."
+   whenever his account installed or last updated Sill.app (it owns it then). Alternative: update anyway,
+   and that account's Sill runs old code with new resources until it quits.
 4. **The status menu's item.** Default: opens Settings › General when Update Now is offered and not
    refused, the release page otherwise. Alternatives: the release page always (as today); or the item
    starts the update.

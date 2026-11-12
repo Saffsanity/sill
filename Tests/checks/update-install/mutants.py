@@ -37,7 +37,7 @@ MUTANTS = [
     # Refusals.
     ("translocation ignored", POL, "if s.translocated { return .translocated }", ""),
     ("another account ignored", POL, "if let other = s.otherAccounts.first { return .otherAccount(other) }", ""),
-    ("another owner's copy", POL, "if !s.folderWritable || !s.bundleWritable || !s.ownedByUser {", "if !s.folderWritable || !s.bundleWritable {"),
+    ("another owner's copy", POL, "        if !s.ownedByUser { return .otherOwner(s.ownerName) }\n", ""),
     ("no room needed to the byte", POL, "if let free = s.freeBytes, free < s.neededBytes {", "if let free = s.freeBytes, free <= s.neededBytes {"),
     # The state machine.
     ("a device joining never asked about", POL, "if Set(devices.map(\\.key)).isSubset(of: Set(s.consented)) { n.phase = .installing; return (n, [.install]) }", "n.phase = .installing; return (n, [.install])"),

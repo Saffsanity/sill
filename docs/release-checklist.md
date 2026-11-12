@@ -477,17 +477,18 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       §7): `Scripts/sign-update.sh v<version>`. It signs only a zip you know without GitHub: by default
       `.build/Sill-<version>.zip` from your own `release.sh` run (GitHub's must be it, byte for byte), or,
       for a release the release workflow built in a run you approved, `--expect-sha256` with the SHA-256
-      that run's log printed for Sill.zip. A release CI published that you did not approve is never signed:
-      that is the point of the key (docs/one-click-update-plan.md T4). It reads the published release, downloads `Sill.zip`
-      into `.build/update-sign`, checks it as the item above does (the SHA-256 against `Sill.zip.sha256`
-      and GitHub's digest, exactly one Sill.app, `codesign --verify --strict --deep` with Sill's pinned
-      requirement and `notarized`, `stapler validate`, spctl's "Notarized Developer ID", the version is
-      the tag's), reads each slice's cdhash as Update Now does, signs the manifest (the keychain asks),
-      reads it back with the key the tagged source carries, shows it, asks, uploads `Sill.zip.manifest`
-      and downloads it again to compare. Until it is there, Update Now does not show for the release
-      (every Sill's check stores whether the release lists the manifest), and the release page is the
-      way, as before Update Now. A Sill that checked before the signing shows Update Now after its next
-      daily check, or Check Now.
+      that run's log printed for Sill.zip. A release CI published that you did not approve is never
+      signed: that is the point of the key (docs/one-click-update-plan.md T4). It reads the published
+      release, downloads `Sill.zip` into `.build/update-sign`, checks it as the item above does (the
+      SHA-256 against `Sill.zip.sha256` and GitHub's digest, exactly one Sill.app, `codesign --verify
+      --strict --deep` with Sill's pinned requirement and `notarized`, `stapler validate`, spctl's
+      "Notarized Developer ID", the version is the tag's), reads each slice's cdhash with codesign (the
+      values Update Now reads with Security), signs the manifest (the keychain asks), reads it back with
+      the key the tagged source carries, shows it, asks, uploads `Sill.zip.manifest` and downloads it
+      again to compare. Until it is there, Update Now does not show for the release (every Sill's check
+      stores whether the release lists the manifest), and the release page is the way, as before Update
+      Now. A Sill that checked before the signing shows Update Now after its next daily check, or Check
+      Now.
 - [ ] Homebrew: bump the cask once the release is published (its `Sill.dmg` must answer). In the
       tap (part 1 §6), from a Mac that has it tapped and the cask trusted: `brew bump-cask-pr
       --no-fork --version <version> --sha256 <SHA-256> saffsanity/sill/sill`, the SHA-256 the one in

@@ -37,8 +37,8 @@ the menu are what they were.
   run-loop Timer once the new one's running code is the code checked; the new removes the old copy once its
   host is up. Refusals with words (`UpdateInstallPolicy.refusal`): a build that is not a notarized release,
   a test feed or version, translocated, a disk image, read-only or network volume, a link on the way, a
-  folder this account can't change, a copy changed since launch, another account's Sill or another Sill of
-  this account, no room. A device connected asks first (by connection). Never a hook: two constants, and
+  folder this account can't change, a Sill.app another account owns (the last to install or update it), a
+  copy changed since launch, another account's Sill or another Sill of this account, no room. A device connected asks first (by connection). Never a hook: two constants, and
   `Tests/checks/update-install` reads the sources.
 - The release step: `Scripts/sign-update.sh v<version>` on Noah's Mac (never CI), with a signer installed
   once from files he read (`--install-signer`), signing only a zip he knows without GitHub (his own

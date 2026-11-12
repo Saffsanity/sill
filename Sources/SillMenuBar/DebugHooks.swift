@@ -872,6 +872,7 @@ extension DebugHooks {
             UpdateNowSample(name: "available", install: pane(.idle)),
             UpdateNowSample(name: "refused-folder", install: pane(.idle, refusal: .notWritable("/Applications"))),
             UpdateNowSample(name: "refused-account", install: pane(.idle, refusal: .otherAccount("Alex Example"))),
+            UpdateNowSample(name: "refused-owner", install: pane(.idle, refusal: .otherOwner("Alex Example"))),
             UpdateNowSample(name: "refused-translocated", install: pane(.idle, refusal: .translocated)),
             UpdateNowSample(name: "confirming", install: pane(.confirming(devices: [P.Device(key: "1", name: "iPad (iPad14,1)")]))),
             UpdateNowSample(name: "fetching", install: pane(.fetching)),

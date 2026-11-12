@@ -160,7 +160,8 @@ old to quit, and once its host is up removes the old copy. Any failure puts the
 old copy back and says why in Settings › General. It never runs for the bare
 binary, a development or unnotarized build, a test feed (`-SillUpdateFeed`) or
 version (`-SillUpdateVersion`), a translocated copy, a disk image, a folder this
-account can't change, or while another account's Sill runs from the same copy.
+account can't change, a Sill.app another account owns, or while another account's
+Sill runs from the same copy.
 `Tests/checks/update-install` checks its rules; `Tests/update-harness/run.sh`
 drives the real mechanism against scratch bundles and a stand-in for GitHub on
 127.0.0.1 (The update harness, below); `Scripts/sign-update.sh v<version>` signs
