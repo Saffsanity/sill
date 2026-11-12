@@ -283,7 +283,30 @@ All on 2026-11-12, inside the heavy lock (07:41 to 08:2x), the branch with main 
     (`-SillMockHardware 1`); the hint, at the default and the largest text size; the swipe in's preview at
     40 to 70 % in, its Desktop button reading "Desktop 2" with its dots.
 - **G6:** `Tests/checks/repo-rules`, 10 of 10 rules hold.
-- **G3, the touch rig:** RIG_RESULTS
+- **G3, the touch rig** (Tests/touchrig on the agents' iPad simulator, main's surfaces at 919e05a against this
+  branch's, 134 strokes each): every existing stroke's events identical to main's, 88 of 88 (`compare.py
+  --all`); the three-finger gestures' verdict 72 of 72; the strokes at the left edge, 59 of 59 (`--edge`):
+  - Each flick hides and sends nothing, on the picture and on the trackpad (off the edge from 30 pt, stopped by
+    a case's lip 22 pt in, 45° down from 40 pt, after a 0.1 s rest: 440 to 569 pt/s at their ends), and from a
+    button at the edge; a flick while the recognizer does not listen goes on as main's.
+  - Every other stroke in the band sends what main's surfaces send, in order: a tap (let go at its lift), a
+    0.6 s long press (at 0.25 s), drags right (at 6 pt), down and up (at 8 pt), a slow drag left (at 0.25 s), a
+    quick drag left lifted 26 pt in (at its lift), two fingers (at the second's landing), a scroll from the
+    middle that runs off the edge (never held), a grip resting at the edge with a tap elsewhere.
+  - The controls hidden: a tap, drags right and left, a drag down and a long press near the edge and away from
+    it, as main's, none taken by the swipe in.
+  - UIKit's pan began 10 pt into a 1 pt-a-frame drag, right, left and down alike: a drag the band lets go at 6
+    or 8 pt is not late.
+  - **Found and fixed by it**, each against main's surfaces: recognizers that only watch, made to wait, kept the
+    flick and the trackpad from ever resetting after the first stroke it held (the trackpad answered nothing
+    more; they no longer wait, `WatchesTouchesOnly`); a held pan counted its travel from where it was let go, so
+    a slow drag left near the edge scrolled 20 pt where main's scrolled 30 (the picture's scroll now carries the
+    difference, `heldLanding`); the recognizers did not call super in their touch overrides. The rig itself no
+    longer built against main (InputOverlay's DuoPosture since #215, KeyChords' paste key since #64): it compiles
+    DuoPosture.swift and StreamProtocol whole now.
+  - Not shown by it: the system's edge recognizer takes no synthesized touch, so the swipe in was played in the
+    live gate, not swiped; SwiftUI's Button takes no synthesized touch either (main's run pressed it neither), so
+    on the button the rig shows a flick hiding and nothing pressed, not a tap pressing it.
 
 ## Noah's test (the device test, short)
 

@@ -47,10 +47,13 @@ nothing on the Mac, nothing stored but how often the hint has shown.
   the shown layouts pixel for pixel main's but the Settings panel's new row (13 of 15 on the Duo simulator, 5 of 7
   on the iPad's), 37 hidden photos (the room's choices, a tall window filling an upright iPhone and iPad mini, the
   Desktop letterboxed, the Duo's poses, the hint, the swipe in's preview with "Desktop 2"); the touch rig, every
-  existing stroke identical to main's (88 of 88) and the gestures' verdict 72 of 72, STEP_RIG. Found and fixed on
-  the way: the hidden room under the Dynamic Island (a GeometryReader that ignores the safe area reports none: the
-  window's safe area now); the edge recognizers not calling super (the rig: the flick judged one stroke, then held
-  the trackpad for good); a flick after a sample-free rest read slow (the speed's window interpolated); the
-  swipe in holding a still finger at the bezel until it lifted (0.3 s now); the rig itself no longer built against
-  main (DuoPosture.swift, and StreamProtocol whole).
+  existing stroke identical to main's (88 of 88), the gestures' verdict 72 of 72, and the strokes at the left edge
+  59 of 59 (every flick hides and sends nothing; every other stroke in the band sends what main's surfaces send, in
+  order). Found and fixed on the way: watch-only recognizers made to wait, which kept the flick and the trackpad
+  from ever resetting after the first stroke it held (the rig's first run: the trackpad answered nothing more); a
+  held pan's travel lost (the picture's scroll now carries it as an unheld pan counts it); the hidden room under the
+  Dynamic Island (a GeometryReader that ignores the safe area reports none: the window's safe area now); a flick
+  after a sample-free rest read slow (the speed's window interpolated); the swipe in holding a still finger at the
+  bezel until it lifted (0.3 s now); the recognizers not calling super in their touch overrides (UIKit's
+  contract); the rig itself no longer built against main (DuoPosture.swift, and StreamProtocol whole).
 - **Untested, for Noah:** the plan's "Noah's test" on the iPad mini and the iPhone 15 Pro.
