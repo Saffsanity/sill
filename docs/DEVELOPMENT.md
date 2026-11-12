@@ -350,21 +350,54 @@ start streaming the whole desktop: ‹error›. Looked at the displays again: tr
 once more on display 53."); a second failure is the old line, and nothing
 streams.
 
-On a Mac with two displays or more, the Desktop button reads "Desktop 1",
-"Desktop 2"… (numbered left to right, then top to bottom, as System Settings ›
-Displays arranges them; never Sill's virtual display), and a tap while the
-Desktop streams moves it to the next display, wrapping round (issue #91). The
-device sends kind 47 only to a Mac whose window list says `desktopDisplays` 2
-or more, so with one display or an older Mac the button is as before. The host
-works the next display out from its own newest look, keeps the choice by the
-display's UUID while Sill runs (a new ID after a sleep is still the same
-display; unplugged, the Desktop falls back and returns when it is back), moves
-the Mac's pointer to the new display's centre, and logs "Desktop: display 2 of
-3 (DELL U2723QE), asked by ‹device›." (`Sources/StreamProtocol/DesktopDisplays.swift`,
-checked in `Tests/checks/desktop-displays`). Every device watching the Desktop
-moves with it: the Mac streams one source. A locked Mac lists no displays and
-refuses kind 47 as it refuses a window pick (`LockPolicy`, checked in
-`Tests/checks/lock-policy`), so the button reads "Desktop" and steps nowhere.
+On a Mac with two displays or more, the Desktop button steps through them
+(issue #91; addhumal's PR #173, grown by phase 1 of
+`docs/virtual-desktop-plan.md`). "Desktop 1" is always the main display (the
+one with the menu bar), then each display to its right as they sit in System
+Settings › Displays › Arrange, wrapping to the leftmost and back to the main
+display; Sill's own virtual display and macOS's stand-in for a Mac with no
+screen are never stops, and a mirror set is one. While the Desktop streams the
+button reads "Desktop 2" with a dot per stop under it, the shown one filled
+("3/7" from seven stops), and a tap moves the Desktop to the next stop; while a
+window streams it names the stop a tap brings the Desktop back to. VoiceOver
+reads "Desktop", the value "Display 2 of 3, DELL U2723QE" and the hint "Shows
+the next display.", and after this device's own tap says where it landed. The
+device sends kind 47 only to a Mac whose window list says `desktopDisplays` 2 or
+more (with `desktopDisplay` and `desktopDisplayNames`), so with one display or
+an older Mac the button is as before. The choice is the Mac's, by the display's
+UUID (a new ID after a sleep is still the same display), kept while a device is
+connected and for 30 s after the last one left: a reconnect or a move to the
+cable comes back to it, and a session that starts later begins on the main
+display, Virtual Display on or off (issue #345). A stop that is unplugged sends
+the Desktop to the main display and back when it returns; one that will not
+stream sends it back to the stop it was on. The host moves the Mac's pointer to
+the new stop's centre and logs "Desktop: display 2 of 3 (DELL U2723QE), asked
+by ‹device›."; input lands on the stop the capture runs on, never the one just
+chosen. The stream's rate is held to the shown stop's refresh rate when it
+reports one: a 60 Hz monitor streams at 60, at the 60 fps bitrate, to a 120 Hz
+iPad. The Desktop's sound is built on the main display whatever stop shows, so a
+step never restarts it, and kind 47 is a person at the device (it wakes a
+sleeping display; the "Woke the display" line reads the shown stop's). Every
+device watching the Desktop moves with it: the Mac streams one source. Locked,
+or with another user on the screen (the off-console view too), the Desktop is
+the main display, its lock screen, the list says no stops and kind 47 is refused
+as a window pick is (`LockPolicy`); the chosen stop comes back after the
+unlock. The rule is `Sources/StreamProtocol/DesktopDisplays.swift`, checked in
+`Tests/checks/desktop-displays`.
+
+To try it without monitors, a synthetic host takes stops of its own (TEST ONLY,
+honoured only with `--synthetic`; nothing of this Mac's displays is read, and
+nothing is posted or warped):
+`SILL_TEST_DISPLAYS='Built-in Retina Display:1512x982@2:120:0,0;DELL U2723QE:2560x1440@1:60:1512,0'`
+(a name, points@scale, Hz, the origin; the first the main display). The test
+pattern then shows the stop the Desktop is on at its size, with "display 2 of 2
+(DELL U2723QE)" drawn on it; `python3 Scripts/sillclient.py PORT 10 desktop
+--next-display@3 --expect=desktopDisplay=2` steps it (kind 47 goes only to a
+`--synthetic` host on this Mac), and with `SILL_TEST_INPUT_LOG=1` the dry run's
+log shows input landing in each stop's own space. On the device,
+`-SillDesktopDisplays 3,2` (with `-SillActive desktop` for the dots) draws the
+harness's mock on stop 2 of 3, and `-SillDesktopDisplayNames 'A|B|C'` names
+them.
 
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom. After the Mac's settings
