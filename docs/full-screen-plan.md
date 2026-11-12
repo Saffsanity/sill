@@ -236,7 +236,8 @@ indicator too); DEBUG `-SillFullScreenRoom screen|housing|safe`.
 
 ## Results
 
-All on 2026-11-12, inside the heavy lock (07:41 to 08:2x), the branch with main at 919e05a merged in.
+All on 2026-11-12, inside the heavy lock (07:41 to 10:33, in four rounds), the branch with main at 919e05a merged in;
+the builds and the check again at 1442d8ac, the code as it is in the pull request.
 
 - **G1, the rule:** `Tests/checks/full-screen`, 56,514 checks, none failed: the cases at each number's edge
   at 60, 120 and 240 Hz, and 30,000 seeded random strokes against the independent model (5,061 hid, 9,536
