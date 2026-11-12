@@ -943,6 +943,18 @@ final class StreamClient: ObservableObject {
     /// keyboard's characters as keys only to a Mac that says so (KeyTyping); to one before it they go
     /// through iPadOS's text system, as they always did. Cleared with the session.
     var hostKeyRepeat: Int?
+    /// How many stops this session's Mac's Desktop has and which it shows, or comes back to, from 1 (the
+    /// main display), with their names (`WindowList.desktopDisplays`, `desktopDisplay`,
+    /// `desktopDisplayNames`; DesktopDisplays): the Desktop button's "Desktop 2", its dots, VoiceOver's
+    /// "Display 2 of 3, DELL U2723QE" and its tap's kind 47. Nil from a Mac before them, with one stop and
+    /// while the Mac is locked. Cleared with the session.
+    @Published var hostDesktopDisplays: Int?
+    @Published var hostDesktopDisplay: Int?
+    @Published var hostDesktopDisplayNames: [String]?
+    /// This device's own step (kind 47) waits for the Mac's list that shows where it landed, which VoiceOver
+    /// then says ("Display 2 of 3, DELL U2723QE"): the stop shown when the tap went out, and when. Another
+    /// device's step moves this button unannounced.
+    private var desktopStepSentFrom: (stop: Int?, at: Date)?
     /// The clipboard (kind 32, StreamClient+Clipboard, docs/clipboard-plan.md): what this session's
     /// Mac takes and sends (`WindowList.clipboard`, 1 for text), nil from a Mac before it or with Share
     /// clipboard with devices off. Cleared with the session.
@@ -3717,6 +3729,10 @@ final class StreamClient: ObservableObject {
         hostProtocol = nil
         hostGestures = nil
         hostKeyRepeat = nil
+        hostDesktopDisplays = nil
+        hostDesktopDisplay = nil
+        hostDesktopDisplayNames = nil
+        desktopStepSentFrom = nil
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -3817,6 +3833,43 @@ final class StreamClient: ObservableObject {
     func select(_ source: StreamSource) {
         noteAction()
         request(source)
+    }
+
+    /// The Desktop button: while the Desktop streams on a Mac with two stops or more, the Mac's next stop
+    /// (kind 47, DesktopDisplays); else the Desktop picked, as before, which shows the stop the Mac keeps.
+    /// Only the button: this device's own Desktop requests and a gesture's go through `select`, so nothing
+    /// steps by itself. VoiceOver says where a step lands once the Mac's list shows it.
+    func tapDesktop() {
+        guard DesktopDisplays.tapSendsNext(desktopStreams: active == .desktop, displays: hostDesktopDisplays,
+                                           current: hostDesktopDisplay) else {
+            select(.desktop)
+            return
+        }
+        noteAction()
+        choicesSent += 1
+        desktopStepSentFrom = (hostDesktopDisplay, Date())
+        sendAfterInput(.nextDisplay, Data())
+    }
+
+    /// The Desktop button as the Mac's stops have it now (DesktopDisplays.button): its label, its dots while
+    /// the Desktop streams, VoiceOver's words and what a tap does.
+    var desktopButton: DesktopDisplays.Button {
+        DesktopDisplays.button(displays: hostDesktopDisplays, current: hostDesktopDisplay, names: hostDesktopDisplayNames,
+                               desktopStreams: active == .desktop)
+    }
+
+    /// A window list's stops: the button follows them; after this device's own step, the first list that
+    /// shows another stop (within 5 s) is said once by VoiceOver.
+    private func desktopStopsChanged(_ list: WindowList) {
+        if hostDesktopDisplays != list.desktopDisplays { hostDesktopDisplays = list.desktopDisplays }
+        if hostDesktopDisplay != list.desktopDisplay { hostDesktopDisplay = list.desktopDisplay }
+        if hostDesktopDisplayNames != list.desktopDisplayNames { hostDesktopDisplayNames = list.desktopDisplayNames }
+        guard let sent = desktopStepSentFrom else { return }
+        guard Date().timeIntervalSince(sent.at) < 5 else { desktopStepSentFrom = nil; return }
+        guard let count = list.desktopDisplays, let shown = list.desktopDisplay, shown != sent.stop else { return }
+        desktopStepSentFrom = nil
+        UIAccessibility.post(notification: .announcement,
+                             argument: DesktopDisplays.value(shown, of: count, names: list.desktopDisplayNames))
     }
 
     /// Asks the host to stream this source: the person's pick (`select`), or this device's own
@@ -4376,6 +4429,7 @@ final class StreamClient: ObservableObject {
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
                 self.hostKeyRepeat = list.keyRepeat
+                self.desktopStopsChanged(list)
                 // A locked Mac's list has no windows: the drawer and the panel say why, the cover over the
                 // stream too (LockedMac).
                 if self.lockWhy != why { self.lockWhy = why }
