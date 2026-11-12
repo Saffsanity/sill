@@ -74,7 +74,6 @@ DUO_SIZES = {"951x669", "669x951", "466x678", "678x466"}
 DUO_POSES = {"closed-upright": "primary", "closed-side": "primary", "flat-portrait": "primary-1",
              "flat-landscape": "primary-1", "laptop": "primary-1", "book": "primary-1"}
 DUO_DEFAULT_POSE = "flat-portrait"
-TOOL_ROOT = os.path.dirname(os.path.dirname(HERE))
 BUNDLE = "me.saffer.sill"
 FLOOR_GB = 25
 FIRST_BOOT_GB = 3          # a simulator's first boot writes about 2.4 GB of its own
@@ -82,6 +81,7 @@ KEEP_BUILDS = 8
 CACHE = os.path.expanduser(os.environ.get("SILL_AGENTS_CACHE", "~/Library/Caches/SillAgents"))
 HEAVY = os.path.expanduser(os.environ.get("SILL_HEAVY", "~/Downloads/sill-handoff/tools/heavy.sh"))
 HERE = os.path.dirname(os.path.abspath(__file__))
+TOOL_ROOT = os.path.dirname(os.path.dirname(HERE))      # the repository this script is in (Tests/duorig)
 # Arguments that make the app dial a host, pair, or send input: never in a harness photo.
 NETWORK_ARGS = {
     "-SillLive", "-SillConnect", "-SillInputScript", "-SillInputTest", "-SillPairURL", "-SillPairCode",
