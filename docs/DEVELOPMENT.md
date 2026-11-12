@@ -194,6 +194,20 @@ drives the real mechanism against scratch bundles and a stand-in for GitHub on
 127.0.0.1 (The update harness, below); `Scripts/sign-update.sh v<version>` signs
 a published release on Noah's Mac (Releasing).
 
+Use nightly builds (docs/one-click-update-plan.md §16), in a build with Update
+Now and a nightly key (`UpdateManifest.nightlyKeys`, empty until Noah makes the
+key): a switch under Automatically update Sill, off by default, kept beside it.
+With it on, the daily check also reads the nightly pre-release's
+`Sill-nightly.zip.manifest`, verified with the nightly key alone ("Sill nightly
+1", never a release's format or keys), and offers the version and build it names
+(GitHub's title is never read); Update Now and the automatic update then install
+it through the same steps and checks, newer by version, then build, and with no
+cooling-off (a release is still newer by its version alone, so the release of a
+nightly's own version is never offered to it). nightly.yml signs each night's zip with `Scripts/sign-nightly.sh`
+and the secret `SILL_NIGHTLY_UPDATE_KEY`, when the environment `nightly` has it;
+`make-app.sh` marks a nightly with `SillChannel = nightly` and every build with
+its commit (`SillCommit`).
+
 ### The command-line host
 
 ```
@@ -2754,8 +2768,8 @@ only if it has none; `asc.swift whats-new` always replaces.
 merged since the last release tag. A nightly says the version main says, the
 version of main's next release (0.6.1 since App Review approved 0.6.0; 0.6.0
 from 2026-10-31 until then, 0.5.5 the pre-release number before), with the commit
-count as its build, as in "Sill nightly 0.6.1 (1280)"; the update check never offers a nightly, and offers
-one nothing until a release newer than its version exists. A nightly reads the
+count as its build, as in "Sill nightly 0.6.1 (1280)"; the update check never offers a nightly (Update Now
+does, with Use nightly builds on: above), and offers one nothing until a release newer than its version exists. A nightly reads the
 release's data-protection keychain items, so a device paired with one stays
 paired with the other. `swift Scripts/asc.swift groups --key-file … --key-id …
 --issuer …` lists the app's TestFlight groups (reads only).

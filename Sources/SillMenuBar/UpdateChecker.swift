@@ -114,6 +114,11 @@ final class UpdateChecker {
     var canCheck: Bool { running != nil && !testPatternOnly }
     private var testPatternOnly: Bool { configuration.testPattern && !configuration.testFeed }
 
+    /// The stored release, newer or not (Update Now's choice beside a nightly).
+    var latest: UpdatePolicy.Offer? {
+        UpdatePolicy.latest(stored: stored, anyReleaseURL: configuration.testFeed)
+    }
+
     /// The stored release, when it is newer than what runs.
     var offer: UpdatePolicy.Offer? {
         UpdatePolicy.offer(stored: stored, running: running, anyReleaseURL: configuration.testFeed)

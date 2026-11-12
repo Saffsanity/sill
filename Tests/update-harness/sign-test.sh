@@ -222,6 +222,63 @@ expect ok "the stop verifies with the key" "$out/signer/update-manifest" verify-
 grep -q "stop: tag v0.6.1, SHA-256 $sha" "$out/last.log" || { echo "  FAIL: the stop's fields"; cat "$out/last.log"; failures=$((failures + 1)); }
 expect fail "another key does not verify the stop" "$out/signer/update-manifest" verify-stop "$out/Sill.zip.stop" --key "$other"
 expect fail "a manifest is no stop" "$out/signer/update-manifest" verify-stop "$out/assets/Sill.zip.manifest" --key "$pub"
+# Use nightly builds (plan §16): the nightly key apart from the update key, both ways (T35, T36), and
+# Scripts/sign-nightly.sh signing tonight's zip and reading it back with the commit's nightlyKeys.
+c40="$(printf 'c%.0s' {1..40})"
+expect fail "new-key --nightly never uses the keychain" "$out/signer/update-manifest" new-key --nightly
+expect ok "the nightly key, in a file of its own" "$out/signer/update-manifest" new-key --nightly --key-file "$out/nightly.key"
+grep -q "nightlyKeys (never releaseKeys)" "$out/last.log" || { echo "  FAIL: the nightly key's words"; cat "$out/last.log"; failures=$((failures + 1)); }
+npub="$(sed -n 's/^public key \([A-Za-z0-9+\/=]*\) .*/\1/p' "$out/last.log")"
+nargs=(--version 0.6.2 --build 1471 --commit "$c40" --asset Sill-nightly.zip --size 100 --sha256 "$zero" --cdhash "arm64=$c40")
+expect fail "a nightly manifest never from the keychain" "$out/signer/update-manifest" nightly "${nargs[@]}" --out "$out/n.manifest"
+expect ok "a nightly manifest with the nightly key" "$out/signer/update-manifest" nightly "${nargs[@]}" --out "$out/n.manifest" --key-file "$out/nightly.key"
+expect ok "it verifies as a nightly" "$out/signer/update-manifest" verify-nightly "$out/n.manifest" --key "$npub"
+expect fail "T36: a nightly's manifest is never a release's" "$out/signer/update-manifest" verify "$out/n.manifest" --key "$npub"
+expect fail "T36: a release's manifest is never a nightly's" "$out/signer/update-manifest" verify-nightly "$out/assets/Sill.zip.manifest" --key "$pub"
+expect fail "T35: the nightly key never verifies a release" "$out/signer/update-manifest" verify "$out/assets/Sill.zip.manifest" --key "$npub"
+expect fail "the update key never verifies a nightly" "$out/signer/update-manifest" verify-nightly "$out/n.manifest" --key "$pub"
+nscratch="$out/nscratch"
+mkdir -p "$nscratch/Sources/StreamProtocol" "$nscratch/Sources/SillMenuBar" "$nscratch/Scripts"
+cp "$root/Sources/StreamProtocol/Compatibility.swift" "$nscratch/Sources/StreamProtocol/"
+cp "$root/Sources/SillMenuBar/UpdateManifest.swift" "$nscratch/Sources/SillMenuBar/"
+cp "$root/Scripts/update-manifest.swift" "$root/Scripts/sign-nightly.sh" "$nscratch/Scripts/"
+python3 -I - "$nscratch/Sources/SillMenuBar/UpdateManifest.swift" "$npub" <<'PY'
+import re, sys
+p, key = sys.argv[1], sys.argv[2]
+s = open(p).read()
+s, n = re.subn(r"static let nightlyKeys: \[String\] = \[.*\]", 'static let nightlyKeys: [String] = ["' + key + '"]', s)
+assert n == 1
+open(p, "w").write(s)
+PY
+git -C "$nscratch" init -q
+git -C "$nscratch" -c user.name=t -c user.email=t@t add -A
+git -C "$nscratch" -c user.name=t -c user.email=t@t commit -q -m "a nightly key"
+ncommit="$(git -C "$nscratch" rev-parse HEAD)"
+nightly_zip() {  # nightly_zip CHANNEL COMMIT OUT: the genuine v0.6.1 marked as a nightly (its seal no longer covers it: sign-nightly reads, it doesn't verify)
+    rm -rf "$out/napp"; mkdir -p "$out/napp"
+    ditto -x -k --noqtn --norsrc --noextattr "$genuine/Sill.zip" "$out/napp"
+    [ -z "$1" ] || /usr/libexec/PlistBuddy -c "Add :SillChannel string $1" "$out/napp/Sill.app/Contents/Info.plist"
+    [ -z "$2" ] || /usr/libexec/PlistBuddy -c "Add :SillCommit string $2" "$out/napp/Sill.app/Contents/Info.plist"
+    rm -f "$3"; (cd "$out/napp" && ditto -c -k --keepParent Sill.app "$3")
+}
+nightly_zip nightly "$ncommit" "$out/Sill-nightly-20261112-abcdef0.zip"
+expect ok "sign-nightly.sh signs tonight's zip" "$nscratch/Scripts/sign-nightly.sh" --key-file "$out/nightly.key" --zip "$out/Sill-nightly-20261112-abcdef0.zip" --out "$out/nout"
+expect ok "its manifest verifies with the nightly key" "$out/signer/update-manifest" verify-nightly "$out/nout/Sill-nightly.zip.manifest" --key "$npub"
+grep -q "nightly 0.6.1 (1388), commit $ncommit, Sill-nightly.zip" "$out/last.log" && cmp -s "$out/nout/Sill-nightly.zip" "$out/Sill-nightly-20261112-abcdef0.zip" \
+    && echo "  ok: the manifest names tonight's version, build, commit and the zip under its fixed name" || { echo "  FAIL: the nightly manifest's fields"; cat "$out/last.log"; failures=$((failures + 1)); }
+expect fail "sign-nightly.sh refuses a release's app (no SillChannel)" "$nscratch/Scripts/sign-nightly.sh" --key-file "$out/nightly.key" --zip "$genuine/Sill.zip" --out "$out/nout2"
+nightly_zip nightly "$zero" "$out/other-commit.zip"
+expect fail "sign-nightly.sh refuses an app of another commit" "$nscratch/Scripts/sign-nightly.sh" --key-file "$out/nightly.key" --zip "$out/other-commit.zip" --out "$out/nout3"
+expect fail "sign-nightly.sh refuses a key this commit's Sill doesn't carry (the update key's file)" "$nscratch/Scripts/sign-nightly.sh" --key-file "$out/key" --zip "$out/Sill-nightly-20261112-abcdef0.zip" --out "$out/nout4"
+grep -q "doesn't verify with this commit's nightlyKeys" "$out/last.log" || { echo "  FAIL: the words for a key the commit doesn't carry"; cat "$out/last.log"; failures=$((failures + 1)); }
+# sign-nightly.sh --new-key (Noah's step 1, plan §16.8): the key only in a new file of mode 0600, and the compiled
+# signer removed after (the script waits for it rather than exec, so its trap runs).
+mkdir -p "$out/newkey-tmp"
+expect ok "sign-nightly.sh --new-key makes the nightly key in a new file" env TMPDIR="$out/newkey-tmp" "$nscratch/Scripts/sign-nightly.sh" --new-key --key-file "$out/nightly2.key"
+grep -q "nightlyKeys (never releaseKeys)" "$out/last.log" && [ "$(stat -f %Lp "$out/nightly2.key")" = 600 ] && [ -z "$(ls -A "$out/newkey-tmp")" ] \
+    && echo "  ok: its words, mode 0600, and no compiled signer left behind" || { echo "  FAIL: --new-key's file or its clean-up: $(ls -A "$out/newkey-tmp" | tr '\n' ' ')"; cat "$out/last.log"; failures=$((failures + 1)); }
+expect fail "sign-nightly.sh --new-key never replaces a key file" env TMPDIR="$out/newkey-tmp" "$nscratch/Scripts/sign-nightly.sh" --new-key --key-file "$out/nightly2.key"
+[ -z "$(ls -A "$out/newkey-tmp")" ] && echo "  ok: nothing left behind after a refusal either" || { echo "  FAIL: a refusal left $(ls -A "$out/newkey-tmp")"; failures=$((failures + 1)); }
 # F1: a signer without the hardened runtime (an older install) is refused.
 cp "$out/signer/update-manifest" "$out/plain-signer"
 codesign -s - -f "$out/plain-signer" 2> /dev/null

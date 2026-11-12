@@ -83,6 +83,22 @@ updater features" (the plan's §15.1); the independent security review's finding
   token), G1 (Install Now on a waiting copy asks GitHub again); N9 answered (a wrong clock no longer costs
   attempts; a quit during the install step leaves the new copy unstarted; the switch's and the footnote's
   words). Each verified first, each fix with a check that fails without it.
+- Use nightly builds (the plan's §16; Noah, 2026-11-12: "can you add a toggle to Use Nightly Builds? That in
+  tandem with automatic updates should download any update found immediately instead of 48 hours out", and
+  "A separate nightly key that GitHub holds seems like the best option"): a switch under Automatically update
+  Sill, off by default, shown only with Update Now and a nightly key compiled in (`UpdateManifest.nightlyKeys`,
+  empty on purpose). The nightly key is a GitHub secret of the environment `nightly`
+  (`SILL_NIGHTLY_UPDATE_KEY`), used by nightly.yml's "Sign the nightly for Update Now" (`Scripts/sign-nightly.sh`;
+  green and silent without it); its manifests have their own first line ("Sill nightly 1") and key list, so
+  neither key or format ever crosses over (T35, T36), and a key in both lists is trusted for neither nightly.
+  The offer comes from the verified manifest alone (version, build, commit; GitHub's title never read); the
+  order is a release's by version alone, a nightly's by version, then build (`isNewer`, `chooseOffer`: a tie goes
+  to the release; the release of a nightly's own version is never offered, as the update check never has, since
+  main keeps a version before and after its release); the automatic update installs nightlies with no
+  cooling-off, 30 days at most, above a nightly floor raised only after both checks, attempts by build. T38
+  says plainly what stands between the nightly channel and every Mac with both switches on: only the next
+  night's build and the watcher. Device impact: none (the wire is the release's). Noah's one-time steps:
+  §16.8 and the checklist's Nightlies.
 - Verified (2026-11-12, this Mac, macOS 27.2 and Xcode 27.1, no device involved, every heavy job through
   heavy.sh; the plan's Progress): `Tests/checks/update-install` 480 checks and its 60 mutants (all 60 on the
   code before the owner refusal, 60 of 60; the refusal's four again after it, 4 of 4); `update-policy` 129;
@@ -123,3 +139,10 @@ updater features" (the plan's §15.1); the independent security review's finding
   seems ok, can the 10 minute wait be shortened to 5 minutes?"; the stop,
   two attempts a day apart, 120 days, the watcher's 30 s and 150 s, GitHub asked again before the swap,
   the "restarting" goodbye, the keychain group for the switch, a day's wait at most, Check Now included).
+  From the second pass: the audit (`sign-update.sh --audit` by hand after a release; the LaunchAgent if he
+  wants it daily), a release built by the release workflow signed with `--expect-sha256` (R1's commit
+  checks), and the first sight's wait on a real release (the pane's "… or later" date two days after the
+  first daily check that read it). Use nightly builds: the nightly key's four steps (the plan's §16.8), then
+  a nightly run that ends "Signed for Update Now", the switch on a Mac with that build (the offer names the
+  build; Update Now installs it; with Automatically update Sill on, it installs within the next check and 5
+  quiet minutes), the switch off on a nightly (no downgrade, its note), and the plan's §16.9 defaults.

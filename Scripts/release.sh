@@ -709,13 +709,19 @@ nightly_prune_names() {
 # lines), and the comment with the commit's sha that nightly_last_sha reads.
 nightly_body() {
     local repo="$1" version="$2" build="$3" stem="$4" dmg_sha="$5" zip_sha="$6" notes="$7" older="$8"
-    local head date url
+    local head date url offered
     head="$(git rev-parse HEAD)"
+    # Whether this commit's Sill can take a nightly (Use nightly builds: a nightly key compiled in, plan §16).
+    if grep -m1 'static let nightlyKeys' Sources/SillMenuBar/UpdateManifest.swift 2>/dev/null | grep -q '"'; then
+        offered='Sill offers a nightly only to a Mac whose Settings › General has "Use nightly builds" turned on (off unless you turn it on).'
+    else
+        offered="Sill's update check never offers a nightly."
+    fi
     date="${stem#Sill-nightly-}"
     date="${date%%-*}"
     url="https://github.com/$repo/releases/download/nightly"
     cat <<BODY
-**Not a release.** A nightly is Sill for Mac built from \`main\` on a night it changed: signed with Developer ID and notarized like a release, but not tried by hand, so it can break. Sill's update check never offers a nightly. To go back, download the release from https://getsill.app/download and replace Sill in your Applications folder: a nightly keeps its settings, permissions and paired devices where the release keeps them, so nothing has to be set up again either way.
+**Not a release.** A nightly is Sill for Mac built from \`main\` on a night it changed: signed with Developer ID and notarized like a release, but not tried by hand, so it can break. $offered To go back, download the release from https://getsill.app/download and replace Sill in your Applications folder: a nightly keeps its settings, permissions and paired devices where the release keeps them, so nothing has to be set up again either way.
 
 **Newest: Sill for Mac $version ($build), ${date:0:4}-${date:4:2}-${date:6:2}, from [\`${head:0:7}\`](https://github.com/$repo/commit/$head)**
 

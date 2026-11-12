@@ -198,6 +198,12 @@ goes to the [nightly pre-release](https://github.com/Saffsanity/sill/releases/ta
 and Sill for iPhone and iPad to TestFlight's testers. A nightly is tested less
 than a release and can break; Sill's update check never offers one, and going back
 from a nightly Sill for Mac to the release keeps its settings and paired devices.
+<!-- Nightly Update Now: for the first release whose Sill carries a nightly key (docs/release-checklist.md part 1 §3). -->
+Or turn on Use nightly builds in Sill for Mac's Settings › General: Sill then offers each
+night's build too, checked with Apple's signature and notarization and with Sill's
+nightly key, and with Automatically update Sill on installs it by itself without the
+two-day wait.
+<!-- /Nightly Update Now -->
 
 ## Tips
 

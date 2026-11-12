@@ -3,6 +3,7 @@
 usage: server.py DIR PORTFILE
 Serves, from DIR/control.json read at every request:
   GET /repos/test/releases/latest   the release (control "release", a JSON object) or control "releaseStatus"
+  GET /repos/test/releases/tags/nightly   the nightly pre-release (control "nightly"), or 404 without one
   GET /download/<tag>/<name>        the asset DIR/assets/<name>, as control "modes"[name] says:
       normal (200), truncate (half of it, then the connection closed), oversize (100 bytes more, with a
       Content-Length that says so), nolength (100 bytes more, no Content-Length), redirect-same (302 to
@@ -55,6 +56,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path.split("?")[0] == "/repos/test/releases/latest":
             status = c.get("releaseStatus", 200)
             body = json.dumps(c.get("release", {})).encode() if status == 200 else b'{"message":"no"}'
+            return self.send(status, body, {"Content-Type": "application/json"})
+        if self.path.split("?")[0] == "/repos/test/releases/tags/nightly":
+            status = c.get("nightlyStatus", 200 if "nightly" in c else 404)
+            body = json.dumps(c.get("nightly", {})).encode() if status == 200 else b'{"message":"Not Found"}'
             return self.send(status, body, {"Content-Type": "application/json"})
         if len(parts) == 4 and parts[1] == "download":
             name = parts[3]

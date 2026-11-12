@@ -168,6 +168,8 @@ private struct GeneralPane: View {
                 UpdatesSection(pane: model.updates.pane, install: model.updater.pane, installAvailable: model.updater.available,
                                automatic: $settings.updateCheck, autoSwitch: model.updater.automaticSwitch,
                                autoUpdate: Binding(get: { model.updater.memory.on }, set: { model.updater.setAutomaticUpdate($0) }),
+                               nightlySwitch: model.updater.nightlySwitch,
+                               nightly: Binding(get: { model.updater.memory.nightly }, set: { model.updater.setNightly($0) }),
                                actions: UpdatesSection.Actions(checkNow: { model.updates.checkNow() },
                                                                openRelease: { NSWorkspace.shared.open($0) },
                                                                updateNow: { model.updater.updateNow() },
@@ -313,6 +315,9 @@ struct UpdatesSection: View {
     /// place that turns it on (AppUpdater.setAutomaticUpdate).
     var autoSwitch = UpdateAutoPolicy.Switch()
     var autoUpdate: Binding<Bool> = .constant(false)
+    /// "Use nightly builds" (plan §16): shown only where Update Now is and a nightly key is compiled in.
+    var nightlySwitch = UpdateAutoPolicy.Switch()
+    var nightly: Binding<Bool> = .constant(false)
     var actions = Actions()
 
     var body: some View {
@@ -323,6 +328,16 @@ struct UpdatesSection: View {
                     .disabled(!autoSwitch.enabled)
                 // Why it can't act here; said once (Update Now's row may say the same refusal under its button).
                 if let note = autoSwitch.note, note != install.note {
+                    Text(note)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if nightlySwitch.shown {
+                Toggle("Use nightly builds", isOn: nightly)
+                    .disabled(!nightlySwitch.enabled)
+                if let note = nightlySwitch.note {
                     Text(note)
                         .font(.footnote)
                         .foregroundStyle(.secondary)

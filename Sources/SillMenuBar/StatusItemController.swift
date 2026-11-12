@@ -94,7 +94,7 @@ enum MenuBuilder {
         if let update {
             if install.available {
                 let item = UpdateInstallPolicy.menuItem(install.phase, offered: update.offer.version, running: update.running,
-                                                        available: true, refusal: install.refusal)
+                                                        available: true, refusal: install.refusal, offeredBuild: update.offer.build)
                 menu.append(MenuEntry(kind: .item, title: item.title, subtitle: item.subtitle,
                                       action: item.opensSettings ? .showSettingsTab(.general) : .openUpdate(update.offer.url)))
             } else {
@@ -182,7 +182,8 @@ enum MenuBuilder {
                                needsApproval: model.loginItem.needsApproval, error: model.loginItem.error)
         let permissions = PermissionState(screenRecording: model.permissions.screenRecording,
                                           accessibility: model.permissions.accessibility)
-        let update = model.updates.offer.flatMap { offer in model.updates.runningVersion.map { (offer: offer, running: $0) } }
+        // Update Now's own choice where it has one (a nightly), else the check's.
+        let update = (model.updater.offered ?? model.updates.offer).flatMap { offer in model.updates.runningVersion.map { (offer: offer, running: $0) } }
         if update != nil { model.updater.refresh() }
         return entries(presentation: model.presentation, config: model.settings.config, login: login, permissions: permissions,
                        update: update, install: model.updater.menu)

@@ -44,8 +44,24 @@ struct UpdateManifest: Equatable, Sendable {
     /// one line here; a second key beside the first is how the key is rotated (plan §4.3).
     static let releaseKeys: [String] = []
 
+    /// The Ed25519 public keys of the nightly key (plan §16.2, Noah's decision of 2026-11-12: "A separate nightly
+    /// key that GitHub holds"), held by GitHub as a secret and used only by nightly.yml, whose signature a
+    /// nightly's manifest ("Sill nightly 1") needs. Trusted only for the nightly channel, only while "Use nightly
+    /// builds" is on; never for a release, whose manifest needs `releaseKeys`. EMPTY ON PURPOSE until Noah makes
+    /// the key (plan §16.8): until then the switch doesn't show.
+    static let nightlyKeys: [String] = []
+
     static let firstLine = "Sill update 1"
+    /// A nightly's manifest: its own first line, so that neither kind can ever be read as the other.
+    static let nightlyFirstLine = "Sill nightly 1"
+    /// The pre-release nightly.yml publishes the nightlies on.
+    static let nightlyTag = "nightly"
     static let maxBytes = 4096
+
+    /// Which manifest: a release's (signed with the offline update key) or a nightly's (with the nightly key).
+    enum Channel: String, Equatable, Sendable {
+        case release, nightly
+    }
 
     let tag: String
     let version: SillVersion
@@ -61,6 +77,9 @@ struct UpdateManifest: Equatable, Sendable {
     let signedAt: Date
     /// The first 8 hex digits of the SHA-256 of the signing key's raw bytes.
     let keyID: String
+    /// A nightly's manifest names its channel and the commit it was built from (`tag` is then "nightly").
+    var channel = Channel.release
+    var commit: String?
 
     enum Problem: Error, Equatable, Sendable {
         case tooLarge
@@ -107,12 +126,24 @@ struct UpdateManifest: Equatable, Sendable {
             defer { i += 1 }
             return String(lines[i].dropFirst(key.count + 1))
         }
-        guard lines.first == firstLine else { return .failure(.format("first")) }
+        let tag: String, version: SillVersion, build: String
+        var channel = Channel.release, commit: String?
         i = 1
-        guard let tag = field("tag"), let tagVersion = strictTag(tag) else { return .failure(.format("tag")) }
-        guard let versionText = field("version"), versionText == String(tag.dropFirst()),
-              let version = strictVersion(versionText), version == tagVersion else { return .failure(.format("version")) }
-        guard let build = field("build"), isDigits(build, 1...9) else { return .failure(.format("build")) }
+        if lines.first == firstLine {
+            guard let t = field("tag"), let tagVersion = strictTag(t) else { return .failure(.format("tag")) }
+            guard let versionText = field("version"), versionText == String(t.dropFirst()),
+                  let v = strictVersion(versionText), v == tagVersion else { return .failure(.format("version")) }
+            guard let b = field("build"), isDigits(b, 1...9) else { return .failure(.format("build")) }
+            (tag, version, build) = (t, v, b)
+        } else if lines.first == nightlyFirstLine {
+            // A nightly: no tag of its own (the pre-release's is "nightly"), its build and commit signed.
+            guard let versionText = field("version"), let v = strictVersion(versionText) else { return .failure(.format("version")) }
+            guard let b = field("build"), isDigits(b, 1...9) else { return .failure(.format("build")) }
+            guard let c = field("commit"), isHex(c, count: 40) else { return .failure(.format("commit")) }
+            (tag, version, build, channel, commit) = (nightlyTag, v, b, .nightly, c)
+        } else {
+            return .failure(.format("first"))
+        }
         guard let asset = field("asset"), isAssetName(asset) else { return .failure(.format("asset")) }
         guard let sizeText = field("size"), isDigits(sizeText, 1...12), let size = Int64(sizeText), size > 0 else { return .failure(.format("size")) }
         guard let sha256 = field("sha256"), isHex(sha256, count: 64) else { return .failure(.format("sha256")) }
@@ -136,17 +167,20 @@ struct UpdateManifest: Equatable, Sendable {
               signature.base64EncodedString() == signatureText else { return .failure(.format("signature")) }
         guard i == lines.count else { return .failure(.format("last")) }
         let manifest = UpdateManifest(tag: tag, version: version, build: build, asset: asset, size: size, sha256: sha256,
-                                      cdhashes: cdhashes, signedAt: signedAt, keyID: keyID)
+                                      cdhashes: cdhashes, signedAt: signedAt, keyID: keyID, channel: channel, commit: commit)
         return .success((manifest, Data(bytes[0..<signedEnd]), signature))
     }
 
     /// The manifest, if `data` is of the format and signed by one of `keys` (the one its key line
     /// names). Every key in the list must be usable, or none is trusted.
-    static func verify(_ data: Data, keys: [String]) -> Result<UpdateManifest, Problem> {
+    /// `channel`: the kind of manifest wanted; the other kind is refused as a format (its first line), whatever
+    /// key signed it, so a nightly key's manifest is never a release's and the update key's never a nightly's.
+    static func verify(_ data: Data, keys: [String], channel: Channel = .release) -> Result<UpdateManifest, Problem> {
         switch parse(data) {
         case .failure(let problem):
             return keys.isEmpty ? .failure(.noKey) : .failure(problem)
         case .success(let parsed):
+            guard parsed.manifest.channel == channel else { return .failure(.format("first")) }
             if let problem = check(parsed.signed, parsed.signature, keyID: parsed.manifest.keyID, keys: keys) { return .failure(problem) }
             return .success(parsed.manifest)
         }
@@ -172,9 +206,22 @@ struct UpdateManifest: Equatable, Sendable {
     /// The lines a signature covers, as the signer writes them (each ending in "\n").
     static func signedText(tag: String, build: String, asset: String, size: Int64, sha256: String,
                            cdhashes: [String: String], signedAt: Date, keyID: String) -> String {
-        var text = "\(firstLine)\ntag \(tag)\nversion \(tag.dropFirst())\nbuild \(build)\nasset \(asset)\nsize \(size)\nsha256 \(sha256)\n"
+        "\(firstLine)\ntag \(tag)\nversion \(tag.dropFirst())\nbuild \(build)\nasset \(asset)\nsize \(size)\nsha256 \(sha256)\n"
+            + signedTail(cdhashes: cdhashes, signedAt: signedAt, keyID: keyID)
+    }
+
+    /// The lines both kinds end with: every slice's cdhash, the signed time and the key's ID.
+    private static func signedTail(cdhashes: [String: String], signedAt: Date, keyID: String) -> String {
+        var text = ""
         for arch in cdhashes.keys.sorted() { text += "cdhash \(arch) \(cdhashes[arch]!)\n" }
         return text + "signed \(dateText(signedAt))\nkey \(keyID)\n"
+    }
+
+    /// A nightly's signed lines (`nightlyFirstLine`): its version, build and commit instead of a tag.
+    static func nightlyText(version: String, build: String, commit: String, asset: String, size: Int64, sha256: String,
+                            cdhashes: [String: String], signedAt: Date, keyID: String) -> String {
+        "\(nightlyFirstLine)\nversion \(version)\nbuild \(build)\ncommit \(commit)\nasset \(asset)\nsize \(size)\nsha256 \(sha256)\n"
+            + signedTail(cdhashes: cdhashes, signedAt: signedAt, keyID: keyID)
     }
 
     /// The whole manifest: the signed lines and the signature line.

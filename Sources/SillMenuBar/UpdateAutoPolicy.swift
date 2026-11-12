@@ -43,6 +43,10 @@ enum UpdateAutoPolicy {
     /// A checked copy that waited this long for a quiet moment is dropped (and is never kept across
     /// launches); a later check downloads and checks it again.
     static let maxWait: TimeInterval = 24 * 3600
+    /// The oldest signature a nightly is installed by itself with (plan §16.3: a quiet main leaves the newest
+    /// nightly a few weeks old; a replay below what this Sill has seen is the floor's job). No cooling-off for a
+    /// nightly: Noah, 2026-11-12, "should download any update found immediately".
+    static let nightlyMaxAge: TimeInterval = 30 * 24 * 3600
     /// How long Settings says that Sill updated itself.
     static let updatedShown: TimeInterval = 7 * 24 * 3600
 
@@ -83,12 +87,18 @@ enum UpdateAutoPolicy {
         var highestSigned: String?
         /// Releases a signed stop named (their tags): never installed, also after the stop is gone.
         var stopped: [String] = []
-        /// The last update Sill installed by itself, and when, to say so afterwards.
+        /// The last update Sill installed by itself, and when, to say so afterwards (`key`'s form).
         var updatedTo: String?
         var updatedAt: Date?
         /// When this Sill first read each release's verified manifest (by tag and zip SHA-256): the cooling-off
         /// counts from there (A1), across launches. A release whose zip changed is a new sighting.
         var seen: [Sighting] = []
+        /// "Use nightly builds" (plan §16), set only from Settings like `on`.
+        var nightly = false
+        /// The highest nightly whose manifest, signed with the nightly key, this Sill has read: the nightly
+        /// channel's own rollback floor.
+        var highestNightlyVersion: String?
+        var highestNightlyBuild: Int?
 
         init() {}
 
@@ -102,6 +112,9 @@ enum UpdateAutoPolicy {
             updatedTo = try c.decodeIfPresent(String.self, forKey: .updatedTo)
             updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt)
             seen = try c.decodeIfPresent([Sighting].self, forKey: .seen) ?? []
+            nightly = try c.decodeIfPresent(Bool.self, forKey: .nightly) ?? false
+            highestNightlyVersion = try c.decodeIfPresent(String.self, forKey: .highestNightlyVersion)
+            highestNightlyBuild = try c.decodeIfPresent(Int.self, forKey: .highestNightlyBuild)
         }
 
         struct Attempt: Codable, Equatable, Sendable {
@@ -130,18 +143,51 @@ enum UpdateAutoPolicy {
         case no(String)
     }
 
+    /// How what Sill remembers names a version: "0.6.2", or a nightly's "0.6.2 (1471)" (a nightly that failed
+    /// twice is skipped until the next night's build).
+    static func key(_ version: SillVersion, build: Int?) -> String {
+        build.map { "\(version) (\($0))" } ?? version.description
+    }
+
+    /// A key back: "0.6.2", or "0.6.2 (1471)".
+    static func parseKey(_ text: String) -> (version: SillVersion, build: Int?)? {
+        let parts = text.split(separator: " ", maxSplits: 1).map(String.init)
+        guard let first = parts.first, let v = UpdateInstallPolicy.strictVersion(first) else { return nil }
+        guard parts.count == 2 else { return (v, nil) }
+        let inner = String(parts[1].dropFirst().dropLast())
+        guard parts[1].hasPrefix("("), parts[1].hasSuffix(")"), UpdateManifest.isDigits(inner, 1...9), let b = Int(inner) else { return nil }
+        return (v, b)
+    }
+
     /// Whether Sill begins an automatic update of `offered` now: after a check offered it, and only from
     /// an idle updater (never beside Update Now, never twice). `available`: this build has Update Now;
     /// `signed`: the release lists a manifest; `refusal`: why Update Now can't run here; `waitUntil`: the
-    /// end of the release's cooling-off, from what this Sill remembers (`waitUntil(_:tag:)`).
+    /// end of the release's cooling-off, from what this Sill remembers (`waitUntil(_:tag:)`). `offeredBuild`:
+    /// the offer is a nightly (plan §16), newer by version, then build, than this Sill (`runningBuild`); a
+    /// release is newer by its version alone.
     static func start(_ m: Memory, checkOn: Bool, available: Bool, refusal: UpdateInstallPolicy.Refusal?,
                       offered: SillVersion?, offeredTag: String?, signed: Bool, running: SillVersion?, idle: Bool,
-                      waitUntil: Date? = nil, now: Date) -> Start {
+                      waitUntil: Date? = nil, now: Date, offeredBuild: Int? = nil, runningBuild: Int? = nil) -> Start {
         guard m.on else { return .no("the switch is off") }
         guard checkOn else { return .no("the daily check is off") }
         guard available, let running else { return .no("Update Now isn’t available in this build") }
         guard idle else { return .no("an update is under way or waiting") }
         guard let offered, let offeredTag else { return .no("no release is offered") }
+        if let build = offeredBuild {
+            // A nightly (plan §16): the switch on, newer by version then build, signed with the nightly key, never
+            // below the highest nightly read; attempts by its build.
+            guard m.nightly else { return .no("Use nightly builds is off") }
+            guard UpdateInstallPolicy.isNewer(offered, build: build, than: running, runningBuild: runningBuild, byBuild: true) else {
+                return .no("the offered nightly isn’t newer")
+            }
+            guard signed else { return .no("the nightly isn’t signed with Sill’s nightly key yet") }
+            if let r = refusal { return .no(UpdateInstallPolicy.words(r)) }
+            if let hv = m.highestNightlyVersion.flatMap(UpdateInstallPolicy.strictVersion), let hb = m.highestNightlyBuild,
+               UpdateInstallPolicy.isNewer(hv, build: hb, than: offered, runningBuild: build, byBuild: true) {
+                return .no("the newest nightly went back from \(hv) (\(hb)) to \(offered) (\(build))")
+            }
+            return attemptsAllow(m, key(offered, build: build), now: now)
+        }
         guard offered > running else { return .no("the offered release isn’t newer") }
         guard signed else { return .no("the release isn’t signed with Sill’s update key yet") }
         if let r = refusal { return .no(UpdateInstallPolicy.words(r)) }
@@ -149,11 +195,17 @@ enum UpdateAutoPolicy {
         if let highest = m.highestSigned.flatMap(UpdateInstallPolicy.strictVersion), offered < highest {
             return .no("the latest release went back from \(highest) to \(offered)")
         }
-        if let a = m.attempts[offered.description] {
-            if a.count >= maxAttempts { return .no("\(a.count) attempts at \(offered) failed; Update Now still can") }
-            if now.timeIntervalSince(a.last) < retryAfter { return .no("\(offered) was tried at \(UpdateManifest.dateText(a.last))") }
-        }
+        if case .no(let why) = attemptsAllow(m, key(offered, build: nil), now: now) { return .no(why) }
         if let waitUntil, now < waitUntil { return .no("\(offered) cools off until \(UpdateManifest.dateText(waitUntil))") }
+        return .go
+    }
+
+    /// Two attempts at most, a day apart (by `key`: a release's version, or a nightly's version and build).
+    private static func attemptsAllow(_ m: Memory, _ key: String, now: Date) -> Start {
+        if let a = m.attempts[key] {
+            if a.count >= maxAttempts { return .no("\(a.count) attempts at \(key) failed; Update Now still can") }
+            if now.timeIntervalSince(a.last) < retryAfter { return .no("\(key) was tried at \(UpdateManifest.dateText(a.last))") }
+        }
         return .go
     }
 
@@ -167,15 +219,17 @@ enum UpdateAutoPolicy {
     }
 
     /// The manifest's own date and this Sill's first sight of it against now: install, wait until a moment,
-    /// or never by itself. The signed date, which whoever holds the key writes, bounds only the age (120 days)
-    /// and the future; the cooling-off counts from the later of it and `firstSeen` (A1), so a manifest dated
-    /// back still waits the whole `coolingOff` on every Mac.
-    static func dates(signedAt: Date, firstSeen: Date, now: Date) -> DateVerdict {
+    /// or never by itself. The signed date, which whoever holds the key writes, bounds only the age (120 days; 30
+    /// for a nightly) and the future; the cooling-off counts from the later of it and `firstSeen` (A1), so a
+    /// manifest dated back still waits the whole `coolingOff` on every Mac. A nightly has none (Noah, 2026-11-12:
+    /// "should download any update found immediately"; plan §16.7, T38).
+    static func dates(signedAt: Date, firstSeen: Date, now: Date, nightly: Bool = false) -> DateVerdict {
         if signedAt.timeIntervalSince(now) > clockSkew { return .refuse("its signature is dated later than this Mac’s clock") }
         let age = now.timeIntervalSince(signedAt)
-        if age > maxAge { return .refuse("it was signed more than \(Int(maxAge / 86400)) days ago") }
+        let oldest = nightly ? nightlyMaxAge : maxAge
+        if age > oldest { return .refuse("it was signed more than \(Int(oldest / 86400)) days ago") }
         let until = max(signedAt, firstSeen).addingTimeInterval(coolingOff)
-        if now < until { return .waitUntil(until) }
+        if !nightly, now < until { return .waitUntil(until) }
         return .go
     }
 
@@ -222,30 +276,40 @@ enum UpdateAutoPolicy {
         return n
     }
 
-    /// An automatic attempt at `version` began.
-    static func began(_ m: Memory, _ version: SillVersion, now: Date) -> Memory {
+    /// A nightly's app passed both checks (as `signedRelease`, the second security pass's A2): the nightly floor rises.
+    static func signedNightly(_ m: Memory, _ version: SillVersion, build: Int) -> Memory {
         var n = m
-        let key = version.description
-        n.attempts[key] = Memory.Attempt(count: (m.attempts[key]?.count ?? 0) + 1, last: now, failure: nil)
+        if let hv = m.highestNightlyVersion.flatMap(UpdateInstallPolicy.strictVersion), let hb = m.highestNightlyBuild,
+           !UpdateInstallPolicy.isNewer(version, build: build, than: hv, runningBuild: hb, byBuild: true) { return n }
+        n.highestNightlyVersion = version.description
+        n.highestNightlyBuild = build
         return n
     }
 
-    /// The attempt at `version` failed (`why`, for the log). It stays counted.
-    static func failed(_ m: Memory, _ version: SillVersion, why: String) -> Memory {
+    /// An automatic attempt at `version` (a nightly's `build`) began.
+    static func began(_ m: Memory, _ version: SillVersion, now: Date, build: Int? = nil) -> Memory {
         var n = m
-        let key = version.description
-        if var a = n.attempts[key] { a.failure = why; n.attempts[key] = a }
+        let k = key(version, build: build)
+        n.attempts[k] = Memory.Attempt(count: (m.attempts[k]?.count ?? 0) + 1, last: now, failure: nil)
+        return n
+    }
+
+    /// The attempt at `version` (a nightly's `build`) failed (`why`, for the log). It stays counted.
+    static func failed(_ m: Memory, _ version: SillVersion, why: String, build: Int? = nil) -> Memory {
+        var n = m
+        let k = key(version, build: build)
+        if var a = n.attempts[k] { a.failure = why; n.attempts[k] = a }
         return n
     }
 
     /// The attempt at `version` ended in a wait, not a failure (the cooling-off, no quiet moment within
     /// `maxWait`): it isn't counted.
-    static func forgive(_ m: Memory, _ version: SillVersion) -> Memory {
+    static func forgive(_ m: Memory, _ version: SillVersion, build: Int? = nil) -> Memory {
         var n = m
-        let key = version.description
-        guard var a = n.attempts[key] else { return n }
+        let k = key(version, build: build)
+        guard var a = n.attempts[k] else { return n }
         a.count -= 1
-        n.attempts[key] = a.count <= 0 ? nil : a
+        n.attempts[k] = a.count <= 0 ? nil : a
         return n
     }
 
@@ -256,12 +320,12 @@ enum UpdateAutoPolicy {
         return n
     }
 
-    /// Sill updated itself to `version`: attempts at it and older are forgotten.
-    static func updated(_ m: Memory, to version: SillVersion, at: Date) -> Memory {
+    /// Sill updated itself to `version` (a nightly's `build`): attempts at it and older versions are forgotten.
+    static func updated(_ m: Memory, to version: SillVersion, at: Date, build: Int? = nil) -> Memory {
         var n = m
-        n.updatedTo = version.description
+        n.updatedTo = key(version, build: build)
         n.updatedAt = at
-        n.attempts = n.attempts.filter { UpdateInstallPolicy.strictVersion($0.key).map { $0 > version } ?? false }
+        n.attempts = n.attempts.filter { k, _ in parseKey(k).map { $0.version > version } ?? false }
         return n
     }
 
@@ -269,11 +333,14 @@ enum UpdateAutoPolicy {
     /// version newer than `running` (an older one is never offered as an update again), at most
     /// `maxRemembered` attempts and sightings (the newest) and `maxStops` stops (the highest versions). Applied
     /// to every write, so no sequence of offers grows the item.
-    static func bounded(_ m: Memory, running: SillVersion?) -> Memory {
+    /// A nightly's attempts ("0.6.2 (1471)") are kept the same way: newer by version, then build, than this Sill
+    /// (`runningBuild`); a release's by its version alone, as Update Now offers it (plan §16.3).
+    static func bounded(_ m: Memory, running: SillVersion?, runningBuild: Int? = nil) -> Memory {
         var n = m
         func newer(_ text: String) -> Bool {
-            guard let v = UpdateInstallPolicy.strictVersion(text) else { return false }
-            return running.map { v > $0 } ?? true
+            guard let (v, b) = parseKey(text) else { return false }
+            guard let running else { return true }
+            return UpdateInstallPolicy.isNewer(v, build: b, than: running, runningBuild: runningBuild, byBuild: b != nil)
         }
         func newerTag(_ tag: String) -> Bool {
             guard let v = UpdateInstallPolicy.strictTag(tag) else { return false }
@@ -291,7 +358,11 @@ enum UpdateAutoPolicy {
         for tag in m.stopped where newerTag(tag) && !stops.contains(tag) { stops.append(tag) }
         n.stopped = Array(stops.sorted { UpdateInstallPolicy.strictTag($0)! > UpdateInstallPolicy.strictTag($1)! }.prefix(maxStops))
         if let h = m.highestSigned, UpdateInstallPolicy.strictVersion(h) == nil { n.highestSigned = nil }
-        if let u = m.updatedTo, UpdateInstallPolicy.strictVersion(u) == nil { n.updatedTo = nil; n.updatedAt = nil }
+        if let u = m.updatedTo, parseKey(u) == nil { n.updatedTo = nil; n.updatedAt = nil }
+        if m.highestNightlyVersion.flatMap(UpdateInstallPolicy.strictVersion) == nil || m.highestNightlyBuild == nil {
+            n.highestNightlyVersion = nil
+            n.highestNightlyBuild = nil
+        }
         return n
     }
 
@@ -312,6 +383,28 @@ enum UpdateAutoPolicy {
         guard data.count <= maxItemBytes else { return .unreadable("the item is \(data.count) bytes, larger than Sill ever writes") }
         guard let memory = try? JSONDecoder().decode(Memory.self, from: data) else { return .unreadable("the item isn’t what Sill writes") }
         return .memory(memory)
+    }
+
+    /// "Use nightly builds", turned on or off by the person (Settings › General: the only place that can).
+    static func switchedNightly(_ m: Memory, on: Bool) -> Memory {
+        var n = m
+        n.nightly = on
+        return n
+    }
+
+    /// The nightly switch in Settings › General: shown only where Update Now is and a nightly key is compiled
+    /// in; usable where the switch can be kept; its words under it.
+    static func nightlySwitch(available: Bool, keyCompiled: Bool, canKeep: Bool, on: Bool, runningNightly: (SillVersion, Int)?,
+                              unreadable: Bool = false) -> Switch {
+        var s = Switch()
+        guard available, keyCompiled else { return s }
+        s.shown = true
+        s.enabled = canKeep || on
+        if !canKeep { s.note = canKeepNote }
+        else if on { s.note = UpdateInstallPolicy.nightlyNote }
+        else if unreadable { s.note = unreadableNote }
+        else if let (v, b) = runningNightly { s.note = UpdateInstallPolicy.nightlyOffNote(version: v, build: b) }
+        return s
     }
 
     /// The switch, turned on or off by the person (Settings › General: the only place that can).
@@ -360,16 +453,29 @@ enum UpdateAutoPolicy {
 
     /// The pane's automatic part for this moment.
     static func pane(_ m: Memory, offered: SillVersion?, offeredTag: String?, running: SillVersion?, waitUntil: Date?,
-                     now: Date) -> UpdateInstallPolicy.AutomaticPane {
+                     now: Date, offeredBuild: Int? = nil, runningBuild: Int? = nil) -> UpdateInstallPolicy.AutomaticPane {
         var a = UpdateInstallPolicy.AutomaticPane()
         a.on = m.on
         a.quietMinutes = quietMinutes
-        a.updated = updatedLine(m, running: running, now: now)
+        a.updated = updatedLine(m, running: running, now: now, runningBuild: runningBuild)
         if let offered {
-            a.afterFailure = afterFailure(m, version: offered)
-            a.offerNote = offerNote(m, offered: offered, offeredTag: offeredTag, waitUntil: waitUntil, now: now)
+            a.afterFailure = afterFailure(m, version: offered, build: offeredBuild)
+            a.offerNote = offeredBuild.map { nightlyOfferNote(m, offered: offered, build: $0) }
+                ?? offerNote(m, offered: offered, offeredTag: offeredTag, waitUntil: waitUntil, now: now)
         }
         return a
+    }
+
+    /// While a nightly is offered and the switch is on: when Sill installs it by itself (no cooling-off), or why not.
+    static func nightlyOfferNote(_ m: Memory, offered: SillVersion, build: Int) -> String {
+        if let hv = m.highestNightlyVersion.flatMap(UpdateInstallPolicy.strictVersion), let hb = m.highestNightlyBuild,
+           UpdateInstallPolicy.isNewer(hv, build: hb, than: offered, runningBuild: build, byBuild: true) {
+            return "Sill won’t install nightly \(offered) (\(build)) by itself: nightly \(hv) (\(hb)) was out before it. Update Now still can."
+        }
+        if let a = m.attempts[key(offered, build: build)], a.count >= maxAttempts {
+            return "Sill won’t install nightly \(offered) (\(build)) by itself again; the next night’s build is tried."
+        }
+        return "Sill installs it by itself once no device has been connected for \(quietMinutes) minutes."
     }
 
     /// While a release is offered and the switch is on: when Sill installs it by itself, or why it won't.
@@ -395,16 +501,17 @@ enum UpdateAutoPolicy {
     }
 
     /// The pane's note after Sill updated itself (this launch runs that version), for `updatedShown`.
-    static func updatedLine(_ m: Memory, running: SillVersion?, now: Date) -> String? {
-        guard let to = m.updatedTo, let at = m.updatedAt, let running, running.description == to,
+    static func updatedLine(_ m: Memory, running: SillVersion?, now: Date, runningBuild: Int? = nil) -> String? {
+        guard let to = m.updatedTo, let at = m.updatedAt, let running, key(running, build: runningBuild) == to || running.description == to,
               now.timeIntervalSince(at) < updatedShown, at.timeIntervalSince(now) < clockSkew else { return nil }
         return "Sill updated itself to \(to) \(when(at, now: now))."
     }
 
     /// What follows a failed automatic attempt's line.
-    static func afterFailure(_ m: Memory, version: SillVersion) -> String {
-        if let a = m.attempts[version.description], a.count >= maxAttempts {
-            return "Sill won’t install \(version) by itself again; Update Now still can."
+    static func afterFailure(_ m: Memory, version: SillVersion, build: Int? = nil) -> String {
+        if let a = m.attempts[key(version, build: build)], a.count >= maxAttempts {
+            return build == nil ? "Sill won’t install \(version) by itself again; Update Now still can."
+                : "Sill won’t install this nightly by itself again; the next night’s build is tried."
         }
         return "Sill tries again after its next daily check."
     }

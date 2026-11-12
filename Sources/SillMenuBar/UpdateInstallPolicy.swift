@@ -44,6 +44,9 @@ enum UpdateInstallPolicy {
         /// Ed25519 public keys (base64): the release's manifest must be signed with one. Empty: Update
         /// Now is not offered at all.
         let updateKeys: [String]
+        /// The nightly key's public halves (`UpdateManifest.nightlyKeys`): for the nightly channel's manifests
+        /// only, never a release's (plan §16.2).
+        var nightlyKeys: [String] = []
     }
 
     enum RequiredEntitlement: Equatable, Sendable {
@@ -73,6 +76,9 @@ enum UpdateInstallPolicy {
         /// A stop for the release (UpdateManifest.Stop), read when the release lists it; nil reads none
         /// (the switch for the whole mechanism: plan §10, Q10).
         var stopName: String? = nil
+        /// The nightly channel's: its pre-release's tag ("nightly"), and the manifest kind it takes. Nil for
+        /// releases (a tag "v" and a version).
+        var channelTag: String? = nil
         /// Origins a download may be redirected to, and the path it must start with there.
         let redirectOrigins: [String]
         let redirectPathPrefix: String
@@ -113,7 +119,8 @@ enum UpdateInstallPolicy {
     /// An asset's URL, built by Sill from the tag (never taken from GitHub's answer, which must equal
     /// it).
     static func assetURL(tag: String, name: String, endpoints: Endpoints) -> URL? {
-        guard strictTag(tag) != nil, name == endpoints.assetName || name == endpoints.manifestName || name == endpoints.stopName else { return nil }
+        guard strictTag(tag) != nil || (endpoints.channelTag != nil && tag == endpoints.channelTag),
+              name == endpoints.assetName || name == endpoints.manifestName || name == endpoints.stopName else { return nil }
         return URL(string: endpoints.downloadPrefix + tag + "/" + name)
     }
 
@@ -134,6 +141,82 @@ enum UpdateInstallPolicy {
     /// The version rules and the architectures are UpdateManifest's (the signer compiles that file alone,
     /// with SillVersion); these name them where the rest of Update Now reads them.
     static func strictVersion(_ text: String) -> SillVersion? { UpdateManifest.strictVersion(text) }
+
+    /// Whether (`version`, `build`) is newer than what runs (plan §16.3): by version alone where a release is the
+    /// candidate; by version, then build (the number of commits the app was built from, make-app.sh's `git
+    /// rev-list --count HEAD`), where a nightly is (`byBuild`).
+    static func isNewer(_ version: SillVersion, build: Int?, than running: SillVersion, runningBuild: Int?, byBuild: Bool) -> Bool {
+        if version != running { return version > running }
+        guard byBuild, let build, let runningBuild else { return false }
+        return build > runningBuild
+    }
+
+    /// The nightly pre-release's answer, for the daily look and Update Now alike (plan §16.4): the pre-release with
+    /// the channel's tag, never a draft, and exactly one uploaded zip and one manifest under the fixed names at the
+    /// URLs Sill builds. Nothing of its title, notes or page is read: the version and build Sill offers are the
+    /// manifest's, once it verifies with the nightly key, and the page is the one Sill builds from the endpoints.
+    struct NightlyListing: Equatable, Sendable {
+        let page: URL
+        let zip: Asset
+        let manifest: Asset
+    }
+
+    static func nightlyListing(_ body: Data, endpoints: Endpoints) -> Result<NightlyListing, Failure> {
+        guard let tag = endpoints.channelTag else { return .failure(.releaseUnreadable("no nightly channel")) }
+        guard body.count <= maxReleaseBytes,
+              let object = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] else {
+            return .failure(.releaseUnreadable("not a JSON object"))
+        }
+        guard object["tag_name"] as? String == tag, object["prerelease"] as? Bool == true, object["draft"] as? Bool != true else {
+            return .failure(.releaseUnreadable("not the nightly pre-release"))
+        }
+        guard let page = URL(string: endpoints.downloadPrefix.replacingOccurrences(of: "/releases/download/", with: "/releases/tag/") + tag) else {
+            return .failure(.releaseUnreadable("the nightly's page"))
+        }
+        switch releaseAssets(object, tag: tag, endpoints: endpoints) {
+        case .failure(let f): return .failure(f)
+        case .success(let a):
+            guard let manifest = a.manifest else { return .failure(.notSigned) }
+            return .success(NightlyListing(page: page, zip: a.zip, manifest: manifest))
+        }
+    }
+
+    /// The nightly's verified manifest against its listing (the daily look's and Update Now's alike): the fixed
+    /// name, the zip's size and GitHub's digest; a manifest of another night than the zip beside it (a half-
+    /// published pair) fails here, before anything is downloaded.
+    static func nightlyMatches(_ m: UpdateManifest, listing l: NightlyListing, endpoints: Endpoints) -> Failure? {
+        guard m.channel == .nightly else { return .manifestMismatch("channel") }
+        guard m.asset == endpoints.assetName else { return .manifestMismatch("asset") }
+        guard m.size == l.zip.size else { return .manifestMismatch("size") }
+        if let digest = l.zip.digest, digest != m.sha256 { return .manifestMismatch("sha256") }
+        return nil
+    }
+
+    /// What Update Now offers (plan §16.3): `release` (the check's latest, newer or not) when its version is higher
+    /// than this Sill's, as the update check has always offered it (never the release of a nightly's own version:
+    /// main keeps a version both before its release and after it, so only the release's signed build could tell,
+    /// and the offer is made before any manifest is read); `nightly` (the switch on) when newer by version, then
+    /// build. Both: the higher version, and on a tie the release.
+    static func chooseOffer(release: UpdatePolicy.Offer?, nightly: UpdatePolicy.Offer?, running: SillVersion,
+                            runningBuild: Int?) -> UpdatePolicy.Offer? {
+        let r = release.flatMap { $0.version > running ? $0 : nil }
+        let n = nightly.flatMap { o -> UpdatePolicy.Offer? in
+            guard let build = o.build, isNewer(o.version, build: build, than: running, runningBuild: runningBuild, byBuild: true) else { return nil }
+            return o
+        }
+        switch (r, n) {
+        case (nil, nil): return nil
+        case (let r?, nil): return r
+        case (nil, let n?): return n
+        case (let r?, let n?): return n.version > r.version ? n : r
+        }
+    }
+
+    /// How an offer is named: "Sill 0.6.2", or "Sill nightly 0.6.2 (1471)".
+    static func name(version: SillVersion, build: Int?) -> String {
+        build.map { "Sill nightly \(version) (\($0))" } ?? "Sill \(version)"
+    }
+
     static func strictTag(_ tag: String) -> SillVersion? { UpdateManifest.strictTag(tag) }
 
     // MARK: Where Sill runs, and the refusals
@@ -259,12 +342,17 @@ enum UpdateInstallPolicy {
         let manifest: Asset
         /// A stop listed beside them (read before anything is downloaded).
         var stop: Asset? = nil
+        /// A nightly's build, as its signed manifest names it (UpdateInstaller.prepare's nightly path).
+        var build: Int? = nil
+        var channel = UpdateManifest.Channel.release
     }
 
     /// GitHub's latest release (a 200's body) as the one to install, or why not: it must be the
     /// offered tag, strict, published, newer than `running`, with exactly one zip and one manifest at
-    /// the URLs Sill builds, uploaded, of possible sizes.
+    /// the URLs Sill builds, uploaded, of possible sizes. A release is newer by its version alone, also beside a
+    /// nightly (plan §16.3). The nightly channel's answer is `nightlyListing`'s, never this.
     static func releaseToInstall(_ body: Data, offeredTag: String, running: SillVersion, endpoints: Endpoints) -> Result<Release, Failure> {
+        guard endpoints.channelTag == nil else { return .failure(.releaseUnreadable("the nightly channel's answer")) }
         guard body.count <= maxReleaseBytes,
               let object = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] else {
             return .failure(.releaseUnreadable("not a JSON object"))
@@ -276,6 +364,18 @@ enum UpdateInstallPolicy {
             return .failure(.releaseUnreadable("a draft or a prerelease"))
         }
         guard version > running else { return .failure(.releaseNotNewer) }
+        switch releaseAssets(object, tag: tag, endpoints: endpoints) {
+        case .failure(let f): return .failure(f)
+        case .success(let a):
+            guard let manifest = a.manifest else { return .failure(.notSigned) }
+            return .success(Release(tag: tag, version: version, zip: a.zip, manifest: manifest, stop: a.stop))
+        }
+    }
+
+    /// A release's assets (the zip, its manifest, a stop) at the URLs Sill builds from `tag`, each one of its name,
+    /// uploaded, of a possible size, with GitHub's digest when it sent one. No zip: unreadable; no manifest: nil
+    /// (not signed for Update Now).
+    static func releaseAssets(_ object: [String: Any], tag: String, endpoints: Endpoints) -> Result<(zip: Asset, manifest: Asset?, stop: Asset?), Failure> {
         guard let assets = object["assets"] as? [[String: Any]] else { return .failure(.releaseUnreadable("no assets")) }
         func asset(_ name: String, sizes: ClosedRange<Int64>) -> Result<Asset?, Failure> {
             let matches = assets.filter { $0["name"] as? String == name }
@@ -312,17 +412,17 @@ enum UpdateInstallPolicy {
             return .failure(f)
         case (.success(.none), _):
             return .failure(.releaseUnreadable("no \(endpoints.assetName)"))
-        case (.success(_), .success(.none)):
-            return .failure(.notSigned)
-        case (.success(let zip?), .success(let manifest?)):
-            return .success(Release(tag: tag, version: version, zip: zip, manifest: manifest, stop: stop))
+        case (.success(let zip?), .success(let manifest)):
+            return .success((zip, manifest, stop))
         }
     }
 
     /// The verified manifest against the release: the same tag, the zip's name and size, GitHub's
     /// digest when it sent one.
     static func manifestMatches(_ m: UpdateManifest, release r: Release, endpoints: Endpoints) -> Failure? {
+        guard m.channel == r.channel else { return .manifestMismatch("channel") }
         guard m.tag == r.tag, m.version == r.version else { return .manifestMismatch("tag") }
+        if let build = r.build, m.build != String(build) { return .manifestMismatch("build") }
         guard m.asset == endpoints.assetName else { return .manifestMismatch("asset") }
         guard m.size == r.zip.size else { return .manifestMismatch("size") }
         if let digest = r.zip.digest, digest != m.sha256 { return .manifestMismatch("sha256") }
@@ -388,9 +488,10 @@ enum UpdateInstallPolicy {
         case codeChanged
     }
 
-    /// The judgement of a bundle's facts, in the plan's order (§4.5).
+    /// The judgement of a bundle's facts, in the plan's order (§4.5). Newer by version alone for a release's
+    /// manifest; by version, then build (`runningBuild`, this Sill's), for a nightly's (plan §16.3).
     static func verdict(_ f: BundleFacts, trust: Trust, manifest: UpdateManifest, running: SillVersion,
-                        arch: Architecture, macOS: OperatingSystemVersion) -> Result<Checked, BundleProblem> {
+                        arch: Architecture, macOS: OperatingSystemVersion, runningBuild: Int? = nil) -> Result<Checked, BundleProblem> {
         if let tree = f.tree { return .failure(.notABundle(tree)) }
         guard f.signatureStatus == 0 else { return .failure(.invalidSignature(f.signatureStatus)) }
         guard f.signer else { return .failure(.wrongSigner) }
@@ -414,7 +515,8 @@ enum UpdateInstallPolicy {
             return .failure(.info("CFBundleShortVersionString"))
         }
         guard let build = f.plist["CFBundleVersion"], UpdateManifest.isDigits(build, 1...9) else { return .failure(.info("CFBundleVersion")) }
-        guard version > running else { return .failure(.notNewer(versionText)) }
+        guard isNewer(version, build: Int(build), than: running, runningBuild: runningBuild,
+                      byBuild: manifest.channel == .nightly) else { return .failure(.notNewer(versionText)) }
         guard version == manifest.version else { return .failure(.notManifest("version")) }
         guard build == manifest.build else { return .failure(.notManifest("build")) }
         if let minimum = f.plist["LSMinimumSystemVersion"] {
@@ -510,9 +612,26 @@ enum UpdateInstallPolicy {
 
     /// Settings' orange line for a failure. `running` and `offered` as SillVersion shows them;
     /// `keptAt` where the old copy is when it could not be put back.
-    static func line(_ f: Failure, running: SillVersion, offered: SillVersion, keptAt: String?) -> String {
+    /// `offeredBuild`: the offer is a nightly (plan §16): it is named with its build, and its signature is the
+    /// nightly key's.
+    static func line(_ f: Failure, running: SillVersion, offered: SillVersion, keptAt: String?, offeredBuild: Int? = nil) -> String {
         let unchanged = "Sill \(running) is unchanged."
         func couldNot(_ why: String) -> String { "Couldn’t update: \(why). \(unchanged)" }
+        if let build = offeredBuild {
+            let nightly = name(version: offered, build: build)
+            switch f {
+            case .releaseChanged: return "GitHub’s newest nightly is no longer \(nightly). Check again."
+            case .releaseNotNewer: return couldNot("the nightly isn’t newer than this Sill")
+            case .releaseUnreadable: return couldNot("GitHub’s answer wasn’t a nightly Sill can install")
+            case .notSigned: return "\(nightly) isn’t signed with Sill’s nightly key yet, so it can’t be installed from here. Try again later."
+            case .manifest(let p): return couldNot(updateKeyWords(p, nightly: true))
+            case .manifestMismatch: return couldNot("the nightly on GitHub isn’t the one signed with Sill’s nightly key")
+            case .bundle(.notManifest): return couldNot("the downloaded app isn’t the one signed with Sill’s nightly key")
+            case .didNotStart(_, true): return "\(nightly) didn’t start, so Sill \(running) is back."
+            case .notAutomatic(let why): return "Sill didn’t install nightly \(offered) (\(build)) by itself: \(why). Update Now still can."
+            default: break
+            }
+        }
         switch f {
         case .unavailable(let r): return words(r)
         case .releaseChanged: return "GitHub’s latest release is no longer Sill \(offered). Check again."
@@ -545,12 +664,13 @@ enum UpdateInstallPolicy {
 
     /// Why the release's signature with Sill's update key didn't hold, in Settings' words: kept apart from
     /// Apple's signature and notarization (BundleProblem), which the download is checked against too.
-    static func updateKeyWords(_ p: UpdateManifest.Problem) -> String {
+    static func updateKeyWords(_ p: UpdateManifest.Problem, nightly: Bool = false) -> String {
+        let (what, key) = nightly ? ("nightly", "nightly key") : ("release", "update key")
         switch p {
-        case .noKey, .badKey: return "this Sill has no usable update key"
-        case .unknownKey: return "the release is signed with an update key this Sill doesn’t know"
-        case .badSignature: return "the release’s signature with Sill’s update key isn’t valid"
-        default: return "the release’s signature with Sill’s update key can’t be read"
+        case .noKey, .badKey: return "this Sill has no usable \(key)"
+        case .unknownKey: return "the \(what) is signed with \(key == "update key" ? "an update key" : "a nightly key") this Sill doesn’t know"
+        case .badSignature: return "the \(what)’s signature with Sill’s \(key) isn’t valid"
+        default: return "the \(what)’s signature with Sill’s \(key) can’t be read"
         }
     }
 
@@ -821,17 +941,21 @@ enum UpdateInstallPolicy {
     /// The pane for `state`, when the check offers `offered` to `running`. `available`: this build has an
     /// update key (else nothing of Update Now shows). `refusal`: why it cannot run here. `keptAt`: where
     /// the old copy is when it could not be put back.
+    /// `offeredBuild`: the offer is a nightly (named with its build). `ownLine`: the offer is not the check's own
+    /// (a nightly), so the pane says it is available itself.
     static func pane(_ s: State, offered: SillVersion?, running: SillVersion?, available: Bool, refusal: Refusal?,
-                     keptAt: String? = nil, automatic: AutomaticPane = AutomaticPane()) -> Pane {
+                     keptAt: String? = nil, automatic: AutomaticPane = AutomaticPane(), offeredBuild: Int? = nil,
+                     ownLine: Bool = false) -> Pane {
         var p = Pane()
         guard available, let running else { return p }
-        let target = offered.map { "Sill \($0)" } ?? "the update"
+        let target = offered.map { name(version: $0, build: offeredBuild) } ?? "the update"
         switch s.phase {
         case .idle:
             guard offered != nil else {
                 p.note = automatic.updated
                 return p
             }
+            if ownLine { p.line = "\(target) is available." }
             p.updateNow = true
             p.updateNowEnabled = refusal == nil
             p.note = refusal.map(words) ?? (automatic.on ? automatic.offerNote : nil)
@@ -878,7 +1002,7 @@ enum UpdateInstallPolicy {
             p.line = "Restarting Sill…"
             p.spinning = true
         case .failed(let f):
-            p.line = line(f, running: running, offered: offered ?? running, keptAt: keptAt)
+            p.line = line(f, running: running, offered: offered ?? running, keptAt: keptAt, offeredBuild: offeredBuild)
             p.failed = true
             p.updateNow = offered != nil
             p.updateNowEnabled = refusal == nil && f.cleanUp
@@ -907,10 +1031,11 @@ enum UpdateInstallPolicy {
 
     /// The status menu's update item: its title and subtitle, and whether it opens Settings › General
     /// (else the release page, as before Update Now).
-    static func menuItem(_ phase: Phase, offered: SillVersion, running: SillVersion, available: Bool, refusal: Refusal?)
-        -> (title: String, subtitle: String, opensSettings: Bool) {
+    static func menuItem(_ phase: Phase, offered: SillVersion, running: SillVersion, available: Bool, refusal: Refusal?,
+                         offeredBuild: Int? = nil) -> (title: String, subtitle: String, opensSettings: Bool) {
+        let n = name(version: offered, build: offeredBuild)
         if case .waiting = phase {
-            return ("Sill \(offered) Is Ready to Install…", "Installs by itself while no device is connected", true)
+            return ("\(n) Is Ready to Install…", "Installs by itself while no device is connected", true)
         }
         if phase.busy {
             let step: String
@@ -921,12 +1046,21 @@ enum UpdateInstallPolicy {
             case .installing: step = "Installing"
             default: step = "Restarting"
             }
-            return ("Updating to Sill \(offered)…", step, true)
+            return ("Updating to \(n)…", step, true)
         }
         if available, refusal == nil {
-            return ("Sill \(offered) Is Available…", "You have \(running); update it in Settings", true)
+            return ("\(n) Is Available…", "You have \(running); update it in Settings", true)
         }
-        return ("Sill \(offered) Is Available…", "You have \(running); opens its download page", false)
+        return ("\(n) Is Available…", "You have \(running); opens its download page", false)
+    }
+
+    /// Under "Use nightly builds" while it is on (plan §16.5).
+    static let nightlyNote = "Nightly builds are made every night from Sill’s newest code. They are less tested than releases and may break. Each is checked two ways: Apple’s signature and notarization for Sill’s developer, and Sill’s nightly key, which only the nightly build signs with. With Automatically update Sill on, each one installs by itself without the two-day wait, once no device has been connected for \(UpdateAutoPolicy.quietMinutes) minutes. Turning this off doesn’t go back to the last release: Sill keeps the nightly you have until a release with a higher version number."
+
+    /// Under the switch while it is off and this Sill is a nightly (a release of its own version is never offered:
+    /// `chooseOffer`).
+    static func nightlyOffNote(version: SillVersion, build: Int) -> String {
+        "You have a nightly build, \(version) (\(build)). Sill updates to the next release after \(version)."
     }
 
     /// Settings › General's footnote in a build with an update key (UpdatePolicy.footnote otherwise, which
@@ -951,11 +1085,22 @@ extension UpdateInstallPolicy.Trust {
         entitlements: [.string(key: "com.apple.application-identifier", value: "9B2KKVM937.me.saffer.sill.mac"),
                        .string(key: "com.apple.developer.team-identifier", value: "9B2KKVM937"),
                        .arrayContaining(key: "keychain-access-groups", value: "9B2KKVM937.me.saffer.sill.mac")],
-        updateKeys: UpdateManifest.releaseKeys)
+        updateKeys: UpdateManifest.releaseKeys,
+        // A key in both lists is trusted for neither nightly (plan §16.2: the nightly key is never the update key).
+        nightlyKeys: UpdateManifest.nightlyKeys.filter { !UpdateManifest.releaseKeys.contains($0) })
 }
 
 extension UpdateInstallPolicy.Endpoints {
-    /// The only Endpoints Sill.app uses: GitHub, over https, Saffsanity/sill's releases. GitHub sends a
+    /// The nightly channel's (plan §16): the pre-release `nightly`, its newest build under fixed names beside the
+    /// dated files (`Sill-nightly.zip` and its manifest, signed with the nightly key, Scripts/sign-nightly.sh).
+    static let nightly = UpdateInstallPolicy.Endpoints(
+        latestRelease: URL(string: "https://api.github.com/repos/Saffsanity/sill/releases/tags/nightly")!,
+        apiOrigins: github.apiOrigins, downloadPrefix: github.downloadPrefix,
+        assetName: "Sill-nightly.zip", manifestName: "Sill-nightly.zip.manifest", stopName: nil, channelTag: "nightly",
+        redirectOrigins: github.redirectOrigins, redirectPathPrefix: github.redirectPathPrefix,
+        maxRedirects: github.maxRedirects, minAssetBytes: github.minAssetBytes, maxAssetBytes: github.maxAssetBytes)
+
+    /// The only Endpoints Sill.app uses for releases: GitHub, over https, Saffsanity/sill's releases. GitHub sends a
     /// release download to release-assets.githubusercontent.com (measured 2026-11-11, path
     /// /github-production-release-asset/1381093165/…); objects.githubusercontent.com is its older host.
     static let github = UpdateInstallPolicy.Endpoints(

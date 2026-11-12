@@ -14,6 +14,9 @@ import Security
 //   update-manifest new-key [--key-file PATH]     make the update key: in the login keychain (service
 //                                                 me.saffer.sill.update-signing, account ed25519, never
 //                                                 synced), or a new file of mode 0600; prints the public key
+//   update-manifest new-key --nightly --key-file PATH
+//                                                 make the nightly key (plan §16.8): only ever in a new file,
+//                                                 never the keychain
 //   update-manifest public-key [--key-file PATH]  the stored key's public key and key ID
 //   update-manifest sign --tag T --build B --asset NAME --size N --sha256 HEX --cdhash ARCH=HEX...
 //                        --out FILE [--key-file PATH]
@@ -21,6 +24,11 @@ import Security
 //   update-manifest stop --tag T --sha256 HEX --out FILE [--key-file PATH]
 //                                                 a stop for that release (no Sill installs it)
 //   update-manifest verify-stop FILE --key BASE64...
+//   update-manifest nightly --version V --build B --commit SHA --asset NAME --size N --sha256 HEX --cdhash ARCH=HEX...
+//                           --out FILE --key-file PATH
+//                                                 a nightly's manifest ("Sill nightly 1"), with the nightly key in a
+//                                                 file (GitHub's secret, in CI): never the keychain's update key
+//   update-manifest verify-nightly FILE --key BASE64...
 //
 // The private key is read from the keychain (which asks unless this binary made the item) or from the file
 // given; it is never printed, never written anywhere else, and never sent anywhere. Before the keychain's key
@@ -91,11 +99,15 @@ func describe(_ key: Curve25519.Signing.PrivateKey) -> String {
     return "public key \(pub.base64EncodedString()) (key ID \(UpdateManifest.keyID(pub)))"
 }
 
-guard let command = args.first else { fail("a command: new-key, public-key, sign, stop, verify or verify-stop") }
+guard let command = args.first else { fail("a command: new-key, public-key, sign, stop, verify, verify-stop, nightly or verify-nightly") }
 args.removeFirst()
 switch command {
 case "new-key":
+    let nightly = args.contains("--nightly")
+    args.removeAll { $0 == "--nightly" }
     let file = option("--key-file")
+    // The nightly key only ever in a file: the keychain item is the update key's, and the two never meet.
+    if nightly, file == nil { fail("new-key --nightly needs --key-file: the nightly key never goes in the keychain, where the update key is") }
     let key = Curve25519.Signing.PrivateKey()
     let secret = Data(key.rawRepresentation.base64EncodedString().utf8)
     if let file {
@@ -113,7 +125,11 @@ case "new-key":
         }
     }
     print(describe(key))
-    print("Put the public key in Sources/SillMenuBar/UpdateManifest.swift's releaseKeys, and keep a copy of the private key off this Mac (docs/release-checklist.md, Update Now's key).")
+    if nightly {
+        print("Put the public key in Sources/SillMenuBar/UpdateManifest.swift's nightlyKeys (never releaseKeys), and the private key in the GitHub secret SILL_NIGHTLY_UPDATE_KEY of the environment nightly (docs/release-checklist.md, Nightlies); never in the keychain or the repository.")
+    } else {
+        print("Put the public key in Sources/SillMenuBar/UpdateManifest.swift's releaseKeys, and keep a copy of the private key off this Mac (docs/release-checklist.md, Update Now's key).")
+    }
 case "public-key":
     print(describe(storedKey(option("--key-file"))))
 case "sign":
@@ -165,6 +181,41 @@ case "verify-stop":
     switch UpdateManifest.verifyStop(data, keys: options("--key")) {
     case .success(let stop): print("stop: tag \(stop.tag), SHA-256 \(stop.sha256), signed \(UpdateManifest.dateText(stop.signedAt)), key \(stop.keyID)")
     case .failure(let p): fail("not verified: \(p.text)")
+    }
+case "nightly":
+    // The nightly key only ever comes from a file (docs/one-click-update-plan.md §16.2): this command never reads
+    // the keychain, where the update key lives, so the update key can't sign a nightly from here.
+    guard let file = option("--key-file") else { fail("nightly needs --key-file: the nightly key, never the keychain's update key") }
+    guard let version = option("--version"), let build = option("--build"), let commit = option("--commit"), let asset = option("--asset"),
+          let sizeText = option("--size"), let size = Int64(sizeText), let sha = option("--sha256"), let out = option("--out") else {
+        fail("nightly needs --version, --build, --commit, --asset, --size, --sha256, --cdhash ARCH=HEX, --out and --key-file")
+    }
+    var cdhashes: [String: String] = [:]
+    for pair in options("--cdhash") {
+        let parts = pair.split(separator: "=").map(String.init)
+        guard parts.count == 2 else { fail("--cdhash ARCH=HEX: \(pair)") }
+        cdhashes[parts[0]] = parts[1]
+    }
+    let key = storedKey(file)
+    let text = UpdateManifest.nightlyText(version: version, build: build, commit: commit, asset: asset, size: size, sha256: sha,
+                                          cdhashes: cdhashes, signedAt: Date(), keyID: UpdateManifest.keyID(key.publicKey.rawRepresentation))
+    guard let signature = try? key.signature(for: Data(text.utf8)) else { fail("signing failed") }
+    let document = Data(UpdateManifest.document(signedText: text, signature: signature).utf8)
+    guard case .success = UpdateManifest.verify(document, keys: [key.publicKey.rawRepresentation.base64EncodedString()], channel: .nightly) else {
+        fail("the nightly's manifest does not read back (a field is not of the format: \(text))")
+    }
+    guard FileManager.default.createFile(atPath: out, contents: document) else { fail("can’t write \(out)") }
+    print("Signed the nightly \(version) (\(build)) of \(commit.prefix(12)) (\(asset), \(size) bytes) with \(describe(key)): \(out)")
+case "verify-nightly":
+    guard let file = args.first, let data = FileManager.default.contents(atPath: file) else { fail("verify-nightly FILE --key BASE64") }
+    args.removeFirst()
+    switch UpdateManifest.verify(data, keys: options("--key"), channel: .nightly) {
+    case .success(let m):
+        print("nightly \(m.version) (\(m.build)), commit \(m.commit ?? "-"), \(m.asset) \(m.size) bytes, SHA-256 \(m.sha256), key \(m.keyID)")
+        for (arch, h) in m.cdhashes.sorted(by: { $0.key < $1.key }) { print("cdhash \(arch) \(h)") }
+        print("signed \(UpdateManifest.dateText(m.signedAt))")
+    case .failure(let p):
+        fail("not verified: \(p.text)")
     }
 case "verify":
     guard let file = args.first, let data = FileManager.default.contents(atPath: file) else { fail("verify FILE --key BASE64") }

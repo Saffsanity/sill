@@ -763,6 +763,163 @@ check(AP.storeRead(status: 0, data: nil, error: "x") == .unreadable("x"), "no da
 check(P.isToken(UUID().uuidString) && !P.isToken("not-the-token") && !P.isToken("../../Library/LaunchAgents/x.plist-0000000000000")
       && !P.isToken(UUID().uuidString.lowercased()) && !P.isToken(UUID().uuidString + "/"), "the watcher's token: a UUID's text alone")
 
+// MARK: Use nightly builds (plan §16)
+
+// The nightly key's manifest: its own first line and key list, never a release's, and never the other way round.
+func nightlyManifest(version: String = "0.6.2", build: String = "1471", commit: String = String(repeating: "c", count: 40),
+                     asset: String = "Sill-nightly.zip", size: Int64 = 6_210_000, sha256: String = sha, signedAt: Date = signedDate,
+                     key: Curve25519.Signing.PrivateKey = testKey) -> String {
+    let text = M.nightlyText(version: version, build: build, commit: commit, asset: asset, size: size, sha256: sha256, cdhashes: cd,
+                             signedAt: signedAt, keyID: M.keyID(key.publicKey.rawRepresentation))
+    return M.document(signedText: text, signature: try! key.signature(for: Data(text.utf8)))
+}
+let nightlyDoc = nightlyManifest()
+check(nightlyDoc.hasPrefix("Sill nightly 1\nversion 0.6.2\nbuild 1471\ncommit \(String(repeating: "c", count: 40))\nasset Sill-nightly.zip\nsize 6210000\nsha256 \(sha)\n"),
+      "the nightly format: \(nightlyDoc)")
+switch M.verify(Data(nightlyDoc.utf8), keys: [testPublic], channel: .nightly) {
+case .success(let m):
+    check(m.channel == .nightly && m.tag == "nightly" && m.version == SillVersion("0.6.2")! && m.build == "1471"
+          && m.commit == String(repeating: "c", count: 40) && m.asset == "Sill-nightly.zip" && m.size == 6_210_000, "a nightly read back: \(m)")
+case .failure(let p): check(false, "a good nightly: \(p)")
+}
+func nightlyProblem(_ text: String, keys: [String] = [testPublic], channel: M.Channel = .nightly) -> M.Problem? {
+    if case .failure(let p) = M.verify(Data(text.utf8), keys: keys, channel: channel) { return p }
+    return nil
+}
+check(nightlyProblem(nightlyDoc, channel: .release) == .format("first"), "T36: a nightly's manifest is never a release's, whatever key signed it")
+check(nightlyProblem(good) == .format("first"), "T36: a release's manifest is never a nightly's")
+check(nightlyProblem(nightlyDoc, keys: [otherPublic]) == .unknownKey(M.keyID(testKey.publicKey.rawRepresentation)), "a nightly signed with a key not in the list")
+check(nightlyProblem(nightlyManifest(commit: "abc")) == .format("commit"), "a nightly names its whole commit")
+check(nightlyProblem(nightlyManifest(build: "14x1")) == .format("build"), "a nightly's build is digits")
+check(nightlyProblem(nightlyManifest(version: "0.6.2-beta")) == .format("version"), "a nightly's version is strict")
+check(nightlyProblem(nightlyDoc.replacingOccurrences(of: "build 1471", with: "build 1472")) == .badSignature, "a nightly's build is signed")
+check(P.Trust.release.nightlyKeys == M.nightlyKeys.filter { !M.releaseKeys.contains($0) }, "the nightly keys Sill trusts: never an update key")
+for key in M.nightlyKeys { check(M.usableKey(key) != nil && !M.releaseKeys.contains(key), "a compiled-in nightly key is usable and no update key: \(key)") }
+// The order (plan §16.3): a release by its version alone; a nightly by version, then build.
+let v062 = SillVersion("0.6.2")!, v063 = SillVersion("0.6.3")!
+check(P.isNewer(v063, build: nil, than: v062, runningBuild: nil, byBuild: false) && !P.isNewer(v062, build: nil, than: v062, runningBuild: nil, byBuild: false),
+      "releases by version alone")
+check(P.isNewer(v062, build: 1471, than: v062, runningBuild: 1400, byBuild: true) && !P.isNewer(v062, build: 1400, than: v062, runningBuild: 1471, byBuild: true)
+      && !P.isNewer(v062, build: 1471, than: v062, runningBuild: 1471, byBuild: true), "a nightly by build within its version")
+check(!P.isNewer(v062, build: 1471, than: v062, runningBuild: 1400, byBuild: false), "builds count only for a nightly")
+check(!P.isNewer(v062, build: 9999, than: v063, runningBuild: 1, byBuild: true), "a lower version never wins by its build")
+// What Update Now offers.
+func offer(_ v: SillVersion, build: Int? = nil) -> UpdatePolicy.Offer {
+    UpdatePolicy.Offer(version: v, tag: build == nil ? "v\(v)" : "nightly", url: u("https://github.com/Saffsanity/sill/releases/tag/x"), signed: true, build: build)
+}
+check(P.chooseOffer(release: offer(v063), nightly: nil, running: v062, runningBuild: 1471) == offer(v063), "a newer release")
+check(P.chooseOffer(release: nil, nightly: offer(v063, build: 1500), running: v062, runningBuild: 1471) == offer(v063, build: 1500), "a newer nightly")
+check(P.chooseOffer(release: offer(v063), nightly: offer(v063, build: 1500), running: v062, runningBuild: 1471) == offer(v063),
+      "a release and a nightly of one version: the release")
+check(P.chooseOffer(release: offer(v062), nightly: offer(v063, build: 1500), running: v062, runningBuild: 1471) == offer(v063, build: 1500),
+      "the higher version wins")
+check(P.chooseOffer(release: offer(v062), nightly: offer(v062, build: 1500), running: v062, runningBuild: 1471) == offer(v062, build: 1500),
+      "a newer nightly of this version beside its release: the nightly")
+// Main keeps a version both before its release and after it (0.6.1: nightlies of it before v0.6.1 and after), so
+// release V is never offered to nightly V by its version: only its signed build could tell (the update check never
+// offered it either).
+check(P.chooseOffer(release: offer(v062), nightly: nil, running: v062, runningBuild: 1471) == nil, "release V never offered to V, a nightly's or a release's")
+check(P.chooseOffer(release: nil, nightly: offer(v062, build: 1400), running: v062, runningBuild: 1471) == nil, "never an older nightly")
+check(P.name(version: v062, build: 1471) == "Sill nightly 0.6.2 (1471)" && P.name(version: v062, build: nil) == "Sill 0.6.2", "names")
+// The downloaded app's order (verdict): a release's manifest by its version alone, a nightly's by version, then build.
+if case .success(let nm) = M.verify(Data(nightlyManifest(version: "0.4.0", build: "120").utf8), keys: [testPublic], channel: .nightly) {
+    check(problem(P.verdict(base, trust: release, manifest: nm, running: v040, arch: .arm64, macOS: macOS, runningBuild: 100)) == nil,
+          "a nightly of this version and a higher build passes")
+    check(problem(P.verdict(base, trust: release, manifest: nm, running: v040, arch: .arm64, macOS: macOS, runningBuild: 120)) == .notNewer("0.4.0"),
+          "a nightly of this very build doesn't")
+} else { check(false, "a nightly manifest for the verdict") }
+check(problem(P.verdict(base, trust: release, manifest: manifest, running: v040, arch: .arm64, macOS: macOS, runningBuild: 100)) == .notNewer("0.4.0"),
+      "a release's manifest of this version never passes by its build")
+// The nightly channel's endpoints and listing: the version and build come from the signed manifest alone.
+let ne = P.Endpoints.nightly
+check(ne.latestRelease.absoluteString == "https://api.github.com/repos/Saffsanity/sill/releases/tags/nightly" && ne.channelTag == "nightly"
+      && ne.assetName == "Sill-nightly.zip" && ne.manifestName == "Sill-nightly.zip.manifest" && ne.stopName == nil
+      && ne.downloadPrefix == gh.downloadPrefix && ne.redirectOrigins == gh.redirectOrigins && ne.apiOrigins == gh.apiOrigins, "the nightly endpoints")
+check(P.assetURL(tag: "nightly", name: "Sill-nightly.zip", endpoints: ne)?.absoluteString == "https://github.com/Saffsanity/sill/releases/download/nightly/Sill-nightly.zip"
+      && P.assetURL(tag: "nightly", name: "Sill.zip", endpoints: gh) == nil, "the tag nightly only on the nightly channel")
+let nZip = "https://github.com/Saffsanity/sill/releases/download/nightly/Sill-nightly.zip"
+let nMan = nZip + ".manifest"
+func nightlyBody(tag: Any = "nightly", draft: Any = false, prerelease: Any = true, assets: Any? = nil, name: Any = "Sill nightly 9.9 (1), 2026-11-12") -> Data {
+    let defaultAssets: [[String: Any]] = [asset("Sill-nightly.zip", nZip, size: 6_210_000), asset("Sill-nightly.zip.manifest", nMan, size: 900, digest: nil),
+                                          asset("Sill-nightly-20261112-abcdef0.dmg", "https://github.com/Saffsanity/sill/releases/download/nightly/Sill-nightly-20261112-abcdef0.dmg")]
+    let d: [String: Any] = ["tag_name": tag, "draft": draft, "prerelease": prerelease, "assets": assets ?? defaultAssets, "name": name,
+                            "html_url": "https://evil.example/elsewhere"]
+    return try! JSONSerialization.data(withJSONObject: d)
+}
+func listing(_ b: Data, endpoints: P.Endpoints = ne) -> Result<P.NightlyListing, P.Failure> { P.nightlyListing(b, endpoints: endpoints) }
+if case .success(let l) = listing(nightlyBody()) {
+    check(l.page.absoluteString == "https://github.com/Saffsanity/sill/releases/tag/nightly", "the page is Sill's own, never GitHub's word: \(l.page)")
+    check(l.zip.size == 6_210_000 && l.zip.url.absoluteString == nZip && l.manifest.url.absoluteString == nMan, "the pair under the fixed names")
+} else { check(false, "a good nightly listing: \(listing(nightlyBody()))") }
+func listingFailure(_ r: Result<P.NightlyListing, P.Failure>) -> P.Failure? { if case .failure(let f) = r { return f }; return nil }
+check(listingFailure(listing(nightlyBody(prerelease: false))) == .releaseUnreadable("not the nightly pre-release"), "the nightly is a pre-release")
+check(listingFailure(listing(nightlyBody(draft: true))) == .releaseUnreadable("not the nightly pre-release"), "never a draft")
+check(listingFailure(listing(nightlyBody(tag: "v0.6.2"))) == .releaseUnreadable("not the nightly pre-release"), "only the tag nightly")
+check(listingFailure(listing(nightlyBody(assets: [asset("Sill-nightly.zip", nZip, size: 6_210_000)]))) == .notSigned, "no manifest yet: nothing offered")
+check(listingFailure(listing(nightlyBody(assets: [asset("Sill-nightly.zip", nZip.replacingOccurrences(of: "/nightly/", with: "/v0.6.2/"), size: 6_210_000),
+                                                   asset("Sill-nightly.zip.manifest", nMan, size: 900, digest: nil)]))) == .releaseUnreadable("Sill-nightly.zip’s URL"),
+      "the zip at the URL Sill builds")
+check(listingFailure(listing(nightlyBody(), endpoints: gh)) == .releaseUnreadable("no nightly channel"), "the release endpoints read no nightly")
+check(failure(P.releaseToInstall(nightlyBody(), offeredTag: "nightly", running: v030, endpoints: ne)) == .releaseUnreadable("the nightly channel's answer"),
+      "the release rule never reads the nightly channel")
+if case .success(let l) = listing(nightlyBody()), case .success(let m) = M.verify(Data(nightlyDoc.utf8), keys: [testPublic], channel: .nightly) {
+    check(P.nightlyMatches(m, listing: l, endpoints: ne) == nil, "the pair matches")
+    if case .success(let m2) = M.verify(Data(nightlyManifest(size: 6_210_001).utf8), keys: [testPublic], channel: .nightly) {
+        check(P.nightlyMatches(m2, listing: l, endpoints: ne) == .manifestMismatch("size"), "T37: a manifest of another night than the zip beside it")
+    }
+    if case .success(let m3) = M.verify(Data(nightlyManifest(asset: "Sill.zip").utf8), keys: [testPublic], channel: .nightly) {
+        check(P.nightlyMatches(m3, listing: l, endpoints: ne) == .manifestMismatch("asset"), "a nightly naming another zip")
+    }
+} else { check(false, "the nightly pair") }
+// The automatic update with nightlies: the switch, no cooling-off, 30 days, the floor after both checks, attempts by build.
+var nmem = AP.switched(AP.Memory(), on: true)
+func nstart(_ m: AP.Memory, build: Int = 1500, offered: SillVersion = v062, running: SillVersion = v062, runningBuild: Int = 1471,
+            now: Date = t0) -> AP.Start {
+    AP.start(m, checkOn: true, available: true, refusal: nil, offered: offered, offeredTag: "nightly", signed: true, running: running, idle: true,
+             now: now, offeredBuild: build, runningBuild: runningBuild)
+}
+check(nstart(nmem) == .no("Use nightly builds is off"), "a nightly only with the switch on")
+nmem = AP.switchedNightly(nmem, on: true)
+check(nstart(nmem) == .go, "on: go")
+check(nstart(nmem, build: 1400) == .no("the offered nightly isn’t newer"), "never an older build")
+check(nstart(AP.signedNightly(nmem, v062, build: 1600)) == .no("the newest nightly went back from 0.6.2 (1600) to 0.6.2 (1500)"), "the nightly floor")
+check(AP.signedNightly(AP.signedNightly(nmem, v062, build: 1600), v062, build: 1500).highestNightlyBuild == 1600, "the floor never goes down")
+let ntried = AP.failed(AP.began(AP.began(nmem, v062, now: t0, build: 1500), v062, now: later(21), build: 1500), v062, why: "x", build: 1500)
+check(nstart(ntried, now: later(100)) == .no("2 attempts at 0.6.2 (1500) failed; Update Now still can") && nstart(ntried, build: 1501, now: later(100)) == .go,
+      "a nightly that failed twice is skipped until the next night's build")
+check(AP.dates(signedAt: t0, firstSeen: t0, now: later(0.1), nightly: true) == .go, "no cooling-off for a nightly (Noah's decision)")
+check(AP.dates(signedAt: t0, firstSeen: t0, now: later(30 * 24 + 0.1), nightly: true) == .refuse("it was signed more than 30 days ago")
+      && AP.dates(signedAt: t0, firstSeen: t0, now: later(30 * 24), nightly: true) == .go, "a nightly at most 30 days old")
+check(AP.key(v062, build: 1471) == "0.6.2 (1471)" && AP.parseKey("0.6.2 (1471)").map { $0.version == v062 && $0.build == 1471 } == true
+      && AP.parseKey("0.6.2").map { $0.version == v062 && $0.build == nil } == true
+      && AP.parseKey("0.6.2 (x)") == nil && AP.parseKey("0.6.2 1471") == nil, "keys")
+let nb = AP.bounded(AP.began(AP.began(AP.began(AP.began(nmem, v062, now: t0, build: 1500), v062, now: t0, build: 1400), v062, now: t0), v063, now: t0),
+                    running: v062, runningBuild: 1471)
+check(nb.attempts.keys.sorted() == ["0.6.2 (1500)", "0.6.3"], "kept: a newer nightly and a newer release; gone: an older nightly and release V: \(nb.attempts.keys.sorted())")
+check(AP.start(AP.switched(AP.Memory(), on: true), checkOn: true, available: true, refusal: nil, offered: v062, offeredTag: "v0.6.2", signed: true,
+               running: v062, idle: true, now: t0, runningBuild: 1471) == .no("the offered release isn’t newer"), "never release V to V by itself")
+var badFloor = nmem
+badFloor.highestNightlyVersion = "0.6.2"
+check(AP.bounded(badFloor, running: v030).highestNightlyVersion == nil, "a nightly floor without its build goes")
+// The switch, its words, and the offer's.
+check(AP.nightlySwitch(available: true, keyCompiled: false, canKeep: true, on: false, runningNightly: nil) == AP.Switch(), "no nightly key: no switch")
+check(AP.nightlySwitch(available: false, keyCompiled: true, canKeep: true, on: false, runningNightly: nil) == AP.Switch(), "no Update Now: no switch")
+check(AP.nightlySwitch(available: true, keyCompiled: true, canKeep: true, on: true, runningNightly: nil) == AP.Switch(shown: true, enabled: true, note: P.nightlyNote),
+      "on: what nightlies are")
+check(P.nightlyNote.contains("less tested than releases and may break") && P.nightlyNote.contains("Apple’s signature and notarization")
+      && P.nightlyNote.contains("Sill’s nightly key")
+      && P.nightlyNote.contains("installs by itself without the two-day wait, once no device has been connected for \(AP.quietMinutes) minutes")
+      && P.nightlyNote.contains("until a release with a higher version number"), "the nightly note names both checks, the missing wait and the quiet moment")
+check(AP.nightlySwitch(available: true, keyCompiled: true, canKeep: true, on: false, runningNightly: (v063, 1520)).note
+      == "You have a nightly build, 0.6.3 (1520). Sill updates to the next release after 0.6.3.", "off on a nightly: no downgrade")
+check(AP.nightlySwitch(available: true, keyCompiled: true, canKeep: false, on: false, runningNightly: nil).note == AP.canKeepNote, "no keychain group")
+check(AP.nightlyOfferNote(nmem, offered: v062, build: 1500) == "Sill installs it by itself once no device has been connected for 5 minutes.", "a nightly's offer note")
+check(P.line(.manifest(.badSignature), running: v062, offered: v062, keptAt: nil, offeredBuild: 1500)
+      == "Couldn’t update: the nightly’s signature with Sill’s nightly key isn’t valid. Sill 0.6.2 is unchanged.", "a nightly's failure names the nightly key")
+check(P.menuItem(.idle, offered: v062, running: v030, available: true, refusal: nil, offeredBuild: 1500).title == "Sill nightly 0.6.2 (1500) Is Available…", "the menu names the build")
+check(P.pane(S(), offered: v062, running: v030, available: true, refusal: nil, offeredBuild: 1500, ownLine: true).line == "Sill nightly 0.6.2 (1500) is available.",
+      "the pane says a nightly is available itself")
+
 // What Sill remembers survives as JSON, and an empty item is the switch off.
 if let data = try? JSONEncoder().encode(tried), let back = try? JSONDecoder().decode(AP.Memory.self, from: data) {
     check(back == tried, "the memory round-trips")
@@ -983,17 +1140,17 @@ for file in files {
     let s = text(file)
     let trusts = count("\\bTrust\\s*(\\.init)?\\s*\\(", in: s), endpoints = count("\\bEndpoints\\s*(\\.init)?\\s*\\(", in: s)
     if file == "UpdateInstallPolicy.swift" {
-        check(trusts == 1 && endpoints == 1, "\(file) makes only Trust.release and Endpoints.github (\(trusts), \(endpoints))")
+        check(trusts == 1 && endpoints == 2, "\(file) makes only Trust.release, Endpoints.github and Endpoints.nightly (\(trusts), \(endpoints))")
     } else {
         check(trusts == 0 && endpoints == 0, "\(file) makes a Trust or Endpoints of its own")
     }
     if file != "UpdateInstaller.swift" {
-        check(count("\\bUpdateInstaller\\s*\\(", in: s) == (file == "AppUpdater.swift" ? 1 : 0), "\(file) makes an UpdateInstaller")
+        check(count("\\bUpdateInstaller\\s*\\(", in: s) == (file == "AppUpdater.swift" ? 2 : 0), "\(file) makes an UpdateInstaller")
     }
 }
 let updater = text("AppUpdater.swift")
-check(updater.contains("let trust = Policy.Trust.release") && updater.contains("UpdateInstaller(trust: trust, endpoints: .github,"),
-      "AppUpdater gives the installer the two constants")
+check(updater.contains("let trust = Policy.Trust.release") && updater.contains("UpdateInstaller(trust: trust, endpoints: .github,")
+      && updater.contains("UpdateInstaller(trust: trust, endpoints: .nightly,"), "AppUpdater gives its two installers the constants")
 for file in ["UpdateInstallPolicy.swift", "UpdateManifest.swift", "UpdateArchive.swift", "UpdateInstaller.swift", "AppUpdater.swift",
              "UpdateAutoPolicy.swift", "AutoUpdateStore.swift"] {
     // Code only: a whole-line comment may name what the code never reads.
@@ -1022,15 +1179,20 @@ func after(_ a: String, _ b: String, in s: String) -> Bool {
 }
 check(updater.components(separatedBy: "Auto.signedRelease(").count == 2 && after("self.checked = c", "self.remember { Auto.signedRelease($0, c.version) }", in: updater),
       "A2: the rollback floor rises only with an app that passed both checks")
+check(updater.components(separatedBy: "Auto.signedNightly(").count == 2 && after("self.checked = c", "self.remember { Auto.signedNightly($0, c.version, build: build) }", in: updater),
+      "A2: the nightly floor too")
 // A3: an attempt counts only once the release's manifest verified and its dates let it go on (in fetch), never at
 // the offer (considerAutomatic).
 check(updater.components(separatedBy: "Auto.began(").count == 2 && after("Auto.dates(signedAt:", "self.remember { Auto.began(", in: updater)
       && after("private func fetch(", "Auto.began(", in: updater), "A3: an attempt counts only on a verified release")
 // A1: the first sight is kept before the dates are judged.
 check(after("Auto.sighted($0, tag: p.release.tag", "Auto.dates(signedAt: p.manifest.signedAt, firstSeen:", in: updater), "A1: the first sight before the dates")
-check(updater.contains("store.update({ Auto.bounded(change($0), running: running) }"), "A3: every write kept small")
-check(!updater.contains("Auto.switched($0, on: true)") && updater.contains("{ Auto.switched($0, on: on) }")
-      && updater.components(separatedBy: "replacingUnreadable: on").count == 2, "the switch changes in one place, the one write that may replace an unreadable item")
+check(updater.contains("store.update({ Auto.bounded(change($0), running: running, runningBuild: runningBuild) }"),
+      "A3: every write kept small")
+check(!updater.contains("Auto.switched($0, on: true)") && updater.contains("remember(replacingUnreadable: on) { Auto.switched($0, on: on) }")
+      && updater.contains("remember(replacingUnreadable: on) { Auto.switchedNightly($0, on: on) }")
+      && updater.components(separatedBy: "replacingUnreadable: on").count == 3,
+      "each switch changes in one place, the only writes that may replace an unreadable item")
 // W2: notes read only as small regular files, never with Data(contentsOf:), and the launch's off the main actor.
 let installerText = text("UpdateInstaller.swift")
 check(!installerText.contains("Data(contentsOf:") && installerText.contains("O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC")
@@ -1042,6 +1204,16 @@ check(updater.contains("func considerAutomatic() {\n        guard notesSettled e
 // R3: the leftover note before the last check, not between it and the swap.
 check(after("Self.noteLeftover(staged.deletingLastPathComponent(), in: leftoverNote)", "switch check(staged, manifest: manifest", in: installerText),
       "R3: the leftover note before the last check")
+// Use nightly builds (plan §16): only Settings turns it on, the nightly key is never an update key, and the
+// nightly's offer comes from its verified manifest, never GitHub's title.
+let nightlySetters = files.filter { $0 != "AppUpdater.swift" && text($0).contains(".setNightly(") }
+check(nightlySetters == ["SettingsPanes.swift"], "only Settings › General turns nightly builds on: \(nightlySetters)")
+check(text("UpdateManifest.swift").contains("static let nightlyKeys: [String] = ["), "the nightly key list is one literal")
+check(text("UpdateInstallPolicy.swift").contains("nightlyKeys: UpdateManifest.nightlyKeys.filter { !UpdateManifest.releaseKeys.contains($0) })"),
+      "T36: a key in both lists is trusted for neither nightly")
+check(!text("UpdateInstallPolicy.swift").contains("object[\"name\"]") && !installerText.contains("\"name\"]"), "the nightly's title is never read")
+check(installerText.contains("UpdateManifest.verify(manifestBody.data, keys: trust.nightlyKeys, channel: .nightly)")
+      && installerText.contains("UpdateManifest.verify(manifestBody.data, keys: keys, channel: .release)"), "each channel read with its own keys alone")
 // W1: the watcher checks the copy at Sill's path after its move and its note, before it starts it; the note goes in a
 // new file renamed into place (never written through a link, never waiting on a FIFO). W2: the started note is
 // looked at, never opened.
@@ -1057,10 +1229,11 @@ for path in ["StreamProtocol/HostSettings.swift", "StreamProtocol/StreamMessage.
              "SillHostCLI/main.swift", "SillMenuBar/HostSettings.swift"] {
     let s = (try? String(contentsOfFile: elsewhere + "/" + path, encoding: .utf8)) ?? "missing"
     check(s != "missing", "\(path) is there")
-    check(!s.contains("setAutomaticUpdate(") && !s.contains("AutoUpdateStore") && !s.contains("automaticUpdate") && !s.contains("autoUpdate"),
-          "\(path) has no way to the automatic update's switch")
+    check(!s.contains("setAutomaticUpdate(") && !s.contains("AutoUpdateStore") && !s.contains("automaticUpdate") && !s.contains("autoUpdate")
+          && !s.contains("setNightly(") && !s.contains("switchedNightly("), "\(path) has no way to the automatic update's switches")
 }
-check(!text("DebugHooks.swift").contains("setAutomaticUpdate(") && !text("DebugHooks.swift").contains("AutoUpdateStore"), "the previews draw the switch, never set it")
+check(!text("DebugHooks.swift").contains("setAutomaticUpdate(") && !text("DebugHooks.swift").contains("AutoUpdateStore")
+      && !text("DebugHooks.swift").contains("setNightly("), "the previews draw the switches, never set them")
 
 print("update-install: \(checks - failures) of \(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

@@ -56,11 +56,20 @@ enum UpdatePolicy {
         let url: URL
         /// The release carries Update Now's signed manifest (`manifestAsset`).
         var signed = false
+        /// A nightly's build (its tag is then "nightly": UpdateInstallPolicy.chooseOffer); nil for a release.
+        var build: Int? = nil
     }
 
     /// The asset that says a release is signed for Update Now (UpdateInstallPolicy.Endpoints.github's
     /// manifest).
     static let manifestAsset = "Sill.zip.manifest"
+
+    /// The stored release whether or not it is newer (Update Now's choice with nightlies: UpdateInstallPolicy.chooseOffer).
+    static func latest(stored: Stored, anyReleaseURL: Bool = false) -> Offer? {
+        guard let tag = stored.latestTag, let version = SillVersion(tag), let text = stored.latestURL,
+              let url = releasePage(text, anyReleaseURL: anyReleaseURL) else { return nil }
+        return Offer(version: version, tag: tag, url: url, signed: stored.latestSigned == true)
+    }
 
     /// The stored release when it is newer than `running` and its page is one Sill opens: on
     /// github.com over https (with a test feed, any http or https page). Read again at every use, so

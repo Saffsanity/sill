@@ -440,6 +440,110 @@ check(version(of: failedSwap.installed) == "1.0", "the swap fails: the copy at t
 say("the swap fails: \(failedSwap.failure.map { P.logText($0) } ?? "installed"); the note was written before it")
 if let s = failedSwap.staging { UpdateInstaller.remove(s) }
 
+say("== Use nightly builds (plan §16): the nightly key's manifest, read from its own channel alone")
+let nightlyKey = Curve25519.Signing.PrivateKey()
+var nightlyTrust = testTrust
+nightlyTrust.nightlyKeys = [nightlyKey.publicKey.rawRepresentation.base64EncodedString()]
+let nightlyEndpoints = P.Endpoints(latestRelease: URL(string: base + "/repos/test/releases/tags/nightly")!, apiOrigins: [base],
+                                   downloadPrefix: base + "/download/", assetName: "UpdTest-nightly.zip", manifestName: "UpdTest-nightly.zip.manifest",
+                                   stopName: nil, channelTag: "nightly", redirectOrigins: [base], redirectPathPrefix: "/assets/",
+                                   maxRedirects: 3, minAssetBytes: 1024, maxAssetBytes: 64 << 20)
+let nightlyInstaller = UpdateInstaller(trust: nightlyTrust, endpoints: nightlyEndpoints, userAgent: "Sill/test")
+let releaseWithNightlyKeys = UpdateInstaller(trust: nightlyTrust, endpoints: testEndpoints, userAgent: "Sill/test")
+/// The nightly pre-release: `zip` under the fixed name, a manifest for `app` (its version and build, signed with
+/// `signer` in `format`), or none. Kind "release": a release-format manifest (Sill update 1) in its place.
+func publishNightly(zip: URL, app: URL, version: String, build: String, signer: Curve25519.Signing.PrivateKey = nightlyKey,
+                    releaseFormat: Bool = false, manifestZip: URL? = nil, withManifest: Bool = true, status: Int = 200) {
+    let fm = FileManager.default
+    let assets = out.appendingPathComponent("srv/assets")
+    try? fm.removeItem(at: assets)
+    try! fm.createDirectory(at: assets, withIntermediateDirectories: true)
+    try! fm.copyItem(at: zip, to: assets.appendingPathComponent("UpdTest-nightly.zip"))
+    let named = manifestZip ?? zip
+    let size = Int64(try! Data(contentsOf: named).count), digest = sha256(named)
+    let keyID = M.keyID(signer.publicKey.rawRepresentation)
+    let text = releaseFormat
+        ? M.signedText(tag: "v" + version, build: build, asset: "UpdTest-nightly.zip", size: size, sha256: digest, cdhashes: cdhashes(app), signedAt: Date(), keyID: keyID)
+        : M.nightlyText(version: version, build: build, commit: String(repeating: "c", count: 40), asset: "UpdTest-nightly.zip", size: size, sha256: digest,
+                        cdhashes: cdhashes(app), signedAt: Date(), keyID: keyID)
+    let manifest = M.document(signedText: text, signature: try! signer.signature(for: Data(text.utf8)))
+    try! Data(manifest.utf8).write(to: assets.appendingPathComponent("UpdTest-nightly.zip.manifest"))
+    let zipSize = Int64(try! Data(contentsOf: zip).count)
+    var list: [[String: Any]] = [["name": "UpdTest-nightly.zip", "size": zipSize, "state": "uploaded", "digest": "sha256:" + sha256(zip),
+                                  "browser_download_url": "\(base)/download/nightly/UpdTest-nightly.zip"]]
+    if withManifest {
+        list.append(["name": "UpdTest-nightly.zip.manifest", "size": manifest.utf8.count, "state": "uploaded",
+                     "browser_download_url": "\(base)/download/nightly/UpdTest-nightly.zip.manifest"])
+    }
+    let control: [String: Any] = ["nightly": ["tag_name": "nightly", "draft": false, "prerelease": true, "assets": list,
+                                              "name": "Sill nightly 9.9 (1), a title nothing reads", "html_url": "\(base)/elsewhere"],
+                                  "nightlyStatus": status, "release": ["tag_name": "v1.0", "assets": []]]
+    try! JSONSerialization.data(withJSONObject: control).write(to: out.appendingPathComponent("srv/control.json"))
+}
+func nightlyOffer() async -> Result<UpdatePolicy.Offer?, P.Failure> { await nightlyInstaller.nightlyOffer(cancel: UpdateInstaller.Cancel()) }
+let appsDir = out.appendingPathComponent("apps"), zipsDir = out.appendingPathComponent("zips")
+let v11app = appsDir.appendingPathComponent("v1.1/UpdTest.app"), v11zip = zipsDir.appendingPathComponent("v1.1.zip")
+let v12app = appsDir.appendingPathComponent("v1.2/UpdTest.app"), v12zip = zipsDir.appendingPathComponent("v1.2.zip")
+let v09app = appsDir.appendingPathComponent("v0.9/UpdTest.app"), v09zip = zipsDir.appendingPathComponent("v0.9.zip")
+do {
+    // A nightly offered from its verified manifest, then installed through the same steps as a release.
+    publishNightly(zip: v11zip, app: v11app, version: "1.1", build: "11")
+    let found = await nightlyOffer()
+    if case .success(let o?) = found {
+        check(o.version == SillVersion("1.1")! && o.build == 11 && o.tag == "nightly" && o.signed, "the nightly offered as its manifest names it: \(o)")
+    } else { check(false, "a nightly offered: \(found)") }
+    let installed = installedCopy("a nightly installs", from: out.appendingPathComponent("apps/installed/UpdTest.app"))
+    let cancel = UpdateInstaller.Cancel()
+    switch await nightlyInstaller.prepare(offeredTag: "nightly", running: SillVersion("1.0")!, cancel: cancel, offeredVersion: SillVersion("1.1")!,
+                                          offeredBuild: 11, runningBuild: 10) {
+    case .failure(let f): check(false, "a nightly prepared: \(P.logText(f))")
+    case .success(let p):
+        check(p.release.channel == .nightly && p.release.build == 11 && p.manifest.channel == .nightly, "the nightly's release and manifest")
+        if case .success(let staging) = UpdateInstaller.makeStaging(for: installed),
+           case .success(let zip) = await nightlyInstaller.download(p.release, manifest: p.manifest, into: staging, progress: { _, _ in }, cancel: cancel),
+           case .success(let staged) = nightlyInstaller.unpack(zip, manifest: p.manifest, into: staging, cancel: cancel),
+           case .success(let checked) = nightlyInstaller.check(staged, manifest: p.manifest, running: SillVersion("1.0")!, runningRequirement: nil,
+                                                               runningBuild: 10) {
+            let r = nightlyInstaller.install(staged: staged, installed: installed, runningCDHash: UpdateInstaller.cdhash(of: installed, arch: .current) ?? "",
+                                             expected: checked, manifest: p.manifest, running: SillVersion("1.0")!, runningRequirement: nil,
+                                             runningBuild: 10)
+            check((try? r.get()) != nil && version(of: installed) == "1.1", "a nightly installed: \(r), \(version(of: installed) ?? "none")")
+            UpdateInstaller.remove(staging)
+        } else { check(false, "a nightly's download, unpack and check") }
+    }
+    // T36: neither key nor format crosses over.
+    publishNightly(zip: v11zip, app: v11app, version: "1.1", build: "11", signer: key)
+    if case .failure(.manifest(.unknownKey)) = await nightlyOffer() { check(true, "") } else { check(false, "T36: the update key's nightly manifest is refused") }
+    publishNightly(zip: v11zip, app: v11app, version: "1.1", build: "11", releaseFormat: true)
+    if case .failure(.manifest(.format("first"))) = await nightlyOffer() { check(true, "") } else { check(false, "T36: a release-format manifest is never a nightly's") }
+    publish(Release(tag: "v1.1", zip: v11zip, app: v11app))
+    let asRelease = await releaseWithNightlyKeys.prepare(offeredTag: "v1.1", running: SillVersion("1.0")!, cancel: UpdateInstaller.Cancel())
+    check((try? asRelease.get()) != nil, "the same trust takes a release signed with the update key: \(asRelease)")
+    let nightlySigned = Release(tag: "v1.1", zip: v11zip, app: v11app, signer: nightlyKey)
+    publish(nightlySigned)
+    if case .failure(.manifest(.unknownKey)) = await releaseWithNightlyKeys.prepare(offeredTag: "v1.1", running: SillVersion("1.0")!, cancel: UpdateInstaller.Cancel()) {
+        check(true, "")
+    } else { check(false, "T35: a release signed with the nightly key is refused") }
+    // T37: a half-published pair, an older nightly, and the channel moved since the offer.
+    publishNightly(zip: v12zip, app: v11app, version: "1.1", build: "11", manifestZip: v11zip)
+    if case .failure(.manifestMismatch) = await nightlyOffer() { check(true, "") } else { check(false, "T37: a manifest of another night than the zip beside it") }
+    publishNightly(zip: v09zip, app: v09app, version: "0.9", build: "9")
+    if case .failure(.releaseNotNewer) = await nightlyInstaller.prepare(offeredTag: "nightly", running: SillVersion("1.0")!, cancel: UpdateInstaller.Cancel(),
+                                                                      offeredVersion: SillVersion("0.9")!, offeredBuild: 9, runningBuild: 10) {
+        check(true, "")
+    } else { check(false, "an older nightly is never installed") }
+    publishNightly(zip: v12zip, app: v12app, version: "1.2", build: "12")
+    if case .failure(.releaseChanged) = await nightlyInstaller.prepare(offeredTag: "nightly", running: SillVersion("1.0")!, cancel: UpdateInstaller.Cancel(),
+                                                                     offeredVersion: SillVersion("1.1")!, offeredBuild: 11, runningBuild: 10) {
+        check(true, "")
+    } else { check(false, "a nightly that moved on since the offer: check again") }
+    publishNightly(zip: v11zip, app: v11app, version: "1.1", build: "11", withManifest: false)
+    if case .success(nil) = await nightlyOffer() { check(true, "") } else { check(false, "a nightly not signed yet: nothing offered") }
+    publishNightly(zip: v11zip, app: v11app, version: "1.1", build: "11", status: 404)
+    if case .success(nil) = await nightlyOffer() { check(true, "") } else { check(false, "no nightly pre-release: nothing offered") }
+    say("nightlies: offered from the manifest, installed, and refused across keys, formats, nights and versions")
+}
+
 say("== the notes between two Sills: read as small regular files, never waiting (the second security pass's W2)")
 do {
     let dir = out.appendingPathComponent("cases/notes")

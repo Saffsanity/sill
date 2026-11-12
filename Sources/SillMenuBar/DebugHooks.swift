@@ -458,7 +458,8 @@ enum DebugHooks {
             // "auto-updated" runs the version it updated to: the check's line is the up-to-date one.
             let checkPane = sample.name == "auto-updated" ? updatePaneSamples().first { $0.name == "uptodate" }!.pane : offered
             let section = Form { UpdatesSection(pane: checkPane, install: sample.install, installAvailable: true, automatic: .constant(sample.checkOn),
-                                                autoSwitch: sample.autoSwitch, autoUpdate: .constant(sample.autoOn)) }
+                                                autoSwitch: sample.autoSwitch, autoUpdate: .constant(sample.autoOn),
+                                                nightlySwitch: sample.nightlySwitch, nightly: .constant(sample.nightlyOn)) }
                 .formStyle(.grouped)
                 .frame(width: 520)
                 .background(Color(nsColor: .windowBackgroundColor))
@@ -872,6 +873,9 @@ extension DebugHooks {
         var autoOn = false
         /// The daily check's switch.
         var checkOn = true
+        /// "Use nightly builds", as the section draws it (plan §16).
+        var nightlySwitch = UpdateAutoPolicy.Switch()
+        var nightlyOn = false
     }
 
     /// pane-update-now-*: the section with Update Now (a build with an update key), Sill 0.4 offered to
@@ -881,15 +885,21 @@ extension DebugHooks {
         typealias A = UpdateAutoPolicy
         let v04 = previewOffer.version, now = previewNow
         func pane(_ phase: P.Phase, mode: P.Mode = .manual, refusal: P.Refusal? = nil, keptAt: String? = nil, offered: SillVersion? = v04,
-                  automatic: P.AutomaticPane = P.AutomaticPane()) -> P.Pane {
-            P.pane(P.State(phase: phase, mode: mode), offered: offered, running: SillVersion("0.3.0")!, available: true,
-                   refusal: refusal, keptAt: keptAt, automatic: automatic)
+                  automatic: P.AutomaticPane = P.AutomaticPane(), offeredBuild: Int? = nil, ownLine: Bool = false, version: SillVersion? = nil) -> P.Pane {
+            P.pane(P.State(phase: phase, mode: mode), offered: version ?? offered, running: SillVersion("0.3.0")!, available: true,
+                   refusal: refusal, keptAt: keptAt, automatic: automatic, offeredBuild: offeredBuild, ownLine: ownLine)
+        }
+        let v062 = SillVersion("0.6.2")!
+        func nightlySwitch(on: Bool) -> UpdateAutoPolicy.Switch {
+            A.nightlySwitch(available: true, keyCompiled: true, canKeep: true, on: on, runningNightly: nil)
         }
         // What the automatic update remembers in each sample, and its part of the pane.
         let on = A.switched(A.Memory(), on: true)
-        func auto(_ m: A.Memory, waitUntil: Date? = nil, running: String = "0.3.0", offered: SillVersion? = v04) -> P.AutomaticPane {
-            A.pane(m, offered: offered, offeredTag: offered.map { "v\($0)" }, running: SillVersion(running), waitUntil: waitUntil, now: now)
+        func auto(_ m: A.Memory, waitUntil: Date? = nil, running: String = "0.3.0", offered: SillVersion? = v04, build: Int? = nil) -> P.AutomaticPane {
+            A.pane(m, offered: offered, offeredTag: build != nil ? "nightly" : offered.map { "v\($0)" }, running: SillVersion(running), waitUntil: waitUntil,
+                   now: now, offeredBuild: build)
         }
+        let nightlyOn = A.switchedNightly(on, on: true)
         let tried = A.began(on, v04, now: now.addingTimeInterval(-26 * 3600))
         let twice = A.failed(A.began(tried, v04, now: now.addingTimeInterval(-2 * 3600)), v04, why: "the download stopped")
         let updated = A.updated(on, to: v04, at: now.addingTimeInterval(-2 * 3600))
@@ -947,6 +957,23 @@ extension DebugHooks {
             UpdateNowSample(name: "auto-lookingagain", install: pane(.lookingAgain(devices: []), automatic: auto(tried)), autoOn: true),
             UpdateNowSample(name: "auto-unreadable", install: pane(.idle),
                             autoSwitch: A.switchState(available: true, canKeep: true, checkOn: true, refusal: nil, on: false, unreadable: true)),
+            // Use nightly builds (plan §16): the switch in a build with a nightly key, on and off, a nightly offered,
+            // downloading, waiting, failed, and this Sill a nightly with the switch off.
+            UpdateNowSample(name: "nightly-off", install: pane(.idle), nightlySwitch: nightlySwitch(on: false), nightlyOn: false),
+            UpdateNowSample(name: "nightly-offered", install: pane(.idle, offeredBuild: 1471, ownLine: true, version: v062),
+                            nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
+            UpdateNowSample(name: "nightly-auto", install: pane(.idle, automatic: auto(nightlyOn, offered: v062, build: 1471), offeredBuild: 1471, ownLine: true, version: v062),
+                            autoOn: true, nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
+            UpdateNowSample(name: "nightly-downloading", install: pane(.downloading(received: 2_400_000, total: 6_210_000), mode: .automatic,
+                                                                       automatic: auto(nightlyOn, offered: v062, build: 1471), offeredBuild: 1471, version: v062),
+                            autoOn: true, nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
+            UpdateNowSample(name: "nightly-waiting", install: pane(.waiting, mode: .automatic, automatic: auto(nightlyOn, offered: v062, build: 1471), offeredBuild: 1471, version: v062),
+                            autoOn: true, nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
+            UpdateNowSample(name: "nightly-failed-key", install: pane(.failed(.manifest(.badSignature)), offeredBuild: 1471, version: v062),
+                            nightlySwitch: nightlySwitch(on: true), nightlyOn: true),
+            UpdateNowSample(name: "nightly-running-off", install: pane(.idle, offered: nil),
+                            nightlySwitch: A.nightlySwitch(available: true, keyCompiled: true, canKeep: true, on: false, runningNightly: (SillVersion("0.6.3")!, 1520)),
+                            nightlyOn: false),
         ].map { var s = $0; if s.autoSwitch == switchOn, s.autoOn { s.autoSwitch = A.switchState(available: true, canKeep: true, checkOn: s.checkOn, refusal: nil, on: true) }; return s }
     }
 }

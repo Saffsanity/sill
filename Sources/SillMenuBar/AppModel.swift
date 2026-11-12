@@ -93,7 +93,8 @@ final class AppModel {
         // answer, the pairing window, and the host's hold on new sessions (none connected and none can be,
         // or nothing installs by itself).
         updater.checkOn = { [settings] in settings.updateCheck }
-        updates.onAnswered = { [weak updater] in updater?.considerAutomatic() }
+        updates.onAnswered = { [weak updater] in updater?.checkAnswered() }
+        updater.latestRelease = { [updates] in updates.latest }
 
         // A test feed or a test version (the check's -SillUpdateFeed, -SillUpdateVersion) is in use: Update
         // Now is then unavailable rather than acting on what a test said.
@@ -195,7 +196,7 @@ final class AppModel {
         updates.start()
         // An offer the last check stored, with the switch on: the rule decides at once (it never repeats an
         // attempt within its own spacing, so a relaunch is no loop).
-        updater.considerAutomatic()
+        updater.checkAnswered()
     }
 
     // MARK: Pairing and remote access

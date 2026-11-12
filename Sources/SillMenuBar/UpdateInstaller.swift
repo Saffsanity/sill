@@ -66,8 +66,30 @@ final class UpdateInstaller: @unchecked Sendable {
 
     /// GitHub's latest release, which must be `offeredTag` and newer than `running`, and its manifest,
     /// signed with one of the trust's keys and describing exactly that release's zip. Nothing is written.
-    func prepare(offeredTag: String, running: SillVersion, cancel: Cancel) async -> Result<(release: Policy.Release, manifest: UpdateManifest), Failure> {
-        guard !trust.updateKeys.isEmpty else { return .failure(.manifest(.noKey)) }
+    /// The nightly channel (`endpoints.channelTag`) is read with the nightly key alone, a release with the update
+    /// key alone (plan §16.2): a nightly's `offeredVersion` and `offeredBuild` (the daily look's verified manifest)
+    /// must be the manifest's again, newer by version, then build than this Sill's (`runningBuild`; `readNightly`).
+    /// A release is newer by its version alone (UpdateInstallPolicy.releaseToInstall).
+    func prepare(offeredTag: String, running: SillVersion, cancel: Cancel, offeredVersion: SillVersion? = nil, offeredBuild: Int? = nil,
+                 runningBuild: Int? = nil) async -> Result<(release: Policy.Release, manifest: UpdateManifest), Failure> {
+        if endpoints.channelTag != nil {
+            guard let offeredVersion, let offeredBuild else { return .failure(.releaseUnreadable("no nightly offered")) }
+            switch await readNightly(cancel: cancel) {
+            case .failure(let f): return .failure(f)
+            case .success(let n):
+                guard n.manifest.version == offeredVersion, n.manifest.build == String(offeredBuild) else {
+                    return .failure(.releaseChanged(tag: "nightly \(n.manifest.version) (\(n.manifest.build))"))
+                }
+                guard Policy.isNewer(n.manifest.version, build: offeredBuild, than: running, runningBuild: runningBuild, byBuild: true) else {
+                    return .failure(.releaseNotNewer)
+                }
+                let release = Policy.Release(tag: UpdateManifest.nightlyTag, version: n.manifest.version, zip: n.listing.zip,
+                                             manifest: n.listing.manifest, stop: nil, build: offeredBuild, channel: .nightly)
+                return .success((release, n.manifest))
+            }
+        }
+        let keys = trust.updateKeys
+        guard !keys.isEmpty else { return .failure(.manifest(.noKey)) }
         let endpoints = self.endpoints
         let body = Buffer()
         let api = Transfer(allowed: { Policy.apiRedirectAllowed($0, endpoints: endpoints) },
@@ -91,7 +113,7 @@ final class UpdateInstaller: @unchecked Sendable {
             return .failure(f)
         }
         let manifest: UpdateManifest
-        switch UpdateManifest.verify(manifestBody.data, keys: trust.updateKeys) {
+        switch UpdateManifest.verify(manifestBody.data, keys: keys, channel: .release) {
         case .failure(let p):
             return .failure(.manifest(p))
         case .success(let m):
@@ -119,6 +141,55 @@ final class UpdateInstaller: @unchecked Sendable {
             }
         }
         return .success((release, manifest))
+    }
+
+    /// The nightly channel's newest build as an offer (plan §16): its listing and its manifest, verified with the
+    /// nightly key (`readNightly`), offered as exactly the version and build the manifest names; nil when there is
+    /// no nightly pre-release, or it has no signed pair yet.
+    func nightlyOffer(cancel: Cancel) async -> Result<UpdatePolicy.Offer?, Failure> {
+        guard endpoints.channelTag != nil else { return .success(nil) }
+        switch await readNightly(cancel: cancel) {
+        case .failure(.github(404)), .failure(.notSigned): return .success(nil)
+        case .failure(let f): return .failure(f)
+        case .success(let n):
+            guard let build = Int(n.manifest.build) else { return .failure(.manifest(.format("build"))) }
+            return .success(UpdatePolicy.Offer(version: n.manifest.version, tag: UpdateManifest.nightlyTag, url: n.listing.page,
+                                               signed: true, build: build))
+        }
+    }
+
+    /// The nightly pre-release's listing (UpdateInstallPolicy.nightlyListing) and its manifest, read and verified
+    /// with the nightly key alone, for the channel ("Sill nightly 1"), and matched against the zip beside it.
+    func readNightly(cancel: Cancel) async -> Result<(listing: Policy.NightlyListing, manifest: UpdateManifest), Failure> {
+        let endpoints = self.endpoints
+        guard !trust.nightlyKeys.isEmpty else { return .failure(.manifest(.noKey)) }
+        let body = Buffer()
+        let api = Transfer(allowed: { Policy.apiRedirectAllowed($0, endpoints: endpoints) },
+                           maxRedirects: endpoints.maxRedirects, limit: Int64(Policy.maxReleaseBytes), exactSize: nil,
+                           sink: { body.append($0); return nil }, progress: nil)
+        if case .failure(let f) = await api.run(URLRequest(url: endpoints.latestRelease),
+                                                 configuration: configuration(api: true, resourceTimeout: 30), cancel: cancel) {
+            return .failure(f)
+        }
+        let listing: Policy.NightlyListing
+        switch Policy.nightlyListing(body.data, endpoints: endpoints) {
+        case .failure(let f): return .failure(f)
+        case .success(let l): listing = l
+        }
+        let manifestBody = Buffer()
+        let fetch = Transfer(allowed: { Policy.downloadRedirectAllowed($0, endpoints: endpoints) },
+                             maxRedirects: endpoints.maxRedirects, limit: listing.manifest.size, exactSize: listing.manifest.size,
+                             sink: { manifestBody.append($0); return nil }, progress: nil)
+        if case .failure(let f) = await fetch.run(URLRequest(url: listing.manifest.url),
+                                                   configuration: configuration(api: false, resourceTimeout: 30), cancel: cancel) {
+            return .failure(f)
+        }
+        switch UpdateManifest.verify(manifestBody.data, keys: trust.nightlyKeys, channel: .nightly) {
+        case .failure(let p): return .failure(.manifest(p))
+        case .success(let m):
+            if let f = Policy.nightlyMatches(m, listing: listing, endpoints: endpoints) { return .failure(f) }
+            return .success((listing, m))
+        }
     }
 
     // MARK: The download
@@ -315,9 +386,11 @@ final class UpdateInstaller: @unchecked Sendable {
     }
 
     /// The trust's judgement of `bundle` against the verified manifest.
-    func check(_ bundle: URL, manifest: UpdateManifest, running: SillVersion, runningRequirement: SecRequirement?) -> Result<Policy.Checked, Failure> {
+    func check(_ bundle: URL, manifest: UpdateManifest, running: SillVersion, runningRequirement: SecRequirement?,
+               runningBuild: Int? = nil) -> Result<Policy.Checked, Failure> {
         switch Policy.verdict(facts(of: bundle, runningRequirement: runningRequirement), trust: trust, manifest: manifest,
-                              running: running, arch: .current, macOS: ProcessInfo.processInfo.operatingSystemVersion) {
+                              running: running, arch: .current, macOS: ProcessInfo.processInfo.operatingSystemVersion,
+                              runningBuild: runningBuild) {
         case .success(let c): return .success(c)
         case .failure(let p): return .failure(.bundle(p))
         }
@@ -417,7 +490,7 @@ final class UpdateInstaller: @unchecked Sendable {
     /// note and between the last check and the swap); Sill.app never passes either.
     func install(staged: URL, installed: URL, runningCDHash: String, expected: Policy.Checked, manifest: UpdateManifest,
                  running: SillVersion, runningRequirement: SecRequirement?, leftoverNote: URL? = nil,
-                 afterNote: (() -> Void)? = nil, beforeSwap: (() -> Void)? = nil) -> Result<Void, Failure> {
+                 afterNote: (() -> Void)? = nil, beforeSwap: (() -> Void)? = nil, runningBuild: Int? = nil) -> Result<Void, Failure> {
         guard Self.isFolder(installed) else { return .failure(.changedSinceStart) }
         guard Self.cdhash(of: installed, arch: .current) == runningCDHash else { return .failure(.changedSinceStart) }
         guard Self.isFolder(staged) else { return .failure(.swapFailed("the checked copy is gone")) }
@@ -425,7 +498,7 @@ final class UpdateInstaller: @unchecked Sendable {
               a == b else { return .failure(.swapFailed("not on the same volume")) }
         if let leftoverNote { Self.noteLeftover(staged.deletingLastPathComponent(), in: leftoverNote) }
         afterNote?()
-        switch check(staged, manifest: manifest, running: running, runningRequirement: runningRequirement) {
+        switch check(staged, manifest: manifest, running: running, runningRequirement: runningRequirement, runningBuild: runningBuild) {
         case .success(let c) where c == expected: break
         case .failure(.bundle(let p)): return .failure(.bundle(p))
         default: return .failure(.bundle(.codeChanged))
@@ -433,7 +506,7 @@ final class UpdateInstaller: @unchecked Sendable {
         beforeSwap?()
         guard renamex_np(staged.path, installed.path, UInt32(RENAME_SWAP)) == 0 else { return .failure(.swapFailed(Self.errnoText())) }
         let problem: Policy.BundleProblem
-        switch check(installed, manifest: manifest, running: running, runningRequirement: runningRequirement) {
+        switch check(installed, manifest: manifest, running: running, runningRequirement: runningRequirement, runningBuild: runningBuild) {
         case .success(let c) where c == expected: return .success(())
         case .failure(.bundle(let p)): problem = p
         default: problem = .codeChanged

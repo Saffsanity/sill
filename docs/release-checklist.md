@@ -150,6 +150,13 @@ serves the root or `/docs`, never `/site`. So:
   (README.md's block, marked the same, goes out with the release that ships it). It ships with the
   first release whose Sill carries an update key (part 1 §7), not with the code alone: a release whose
   Sill has an empty key list offers no Update Now.
+- `Nightly Update Now` (Use nightly builds: support.html's paragraph after "Updating Sill for Mac",
+  download.html's, privacy.html's, docs/one-click-update-plan.md §16): `perl -0pi -e
+  's/[ \t]*<!-- Nightly Update Now:.*?<!-- \/Nightly Update Now -->\n//gs' ../sill-site/*.html`, then
+  `grep -n 'Use nightly builds' ../sill-site/*.html` prints nothing (README.md's block, marked the same, goes
+  out with the release that ships it). It ships with the first release whose Sill carries a nightly key
+  (`UpdateManifest.nightlyKeys`, "Nightlies"), and that release also deletes the sentences that say Sill
+  never offers a nightly (download.html's two, README.md's two, "Nightlies" here).
 - Open: `Version label` (support.html, under the lede: where each app shows its version, true from
   Sill for iPhone and iPad 0.6.2; PR #351, docs/version-label-plan.md): `grep -n "shows its version"
   ../sill-site/support.html` finds nothing after the cut.
@@ -1081,6 +1088,23 @@ For a nightly tester:
   nightly, and back. The settings (`me.saffer.sill.mac`) and the Screen Recording and Accessibility
   permissions (granted to the bundle ID and the designated requirement, which names the team) carry
   over too. That is why a nightly refuses to build without the profile.
+- Use nightly builds (docs/one-click-update-plan.md §16, with Update Now): a switch in Sill for Mac's
+  Settings › General, off by default, shown only in a build with Update Now and the nightly key's public
+  half (`UpdateManifest.nightlyKeys`, empty until Noah makes the key). With it on, the daily check also reads
+  the pre-release's `Sill-nightly.zip.manifest`, signed by the step "Sign the nightly for Update Now"
+  (`Scripts/sign-nightly.sh`, the secret `SILL_NIGHTLY_UPDATE_KEY` of the environment `nightly`; without it
+  the step says so and the job stays green), and offers the build it names; with Automatically update Sill on
+  too, the nightly installs by itself at the next quiet moment (no two-day wait: read the plan's T38 before
+  turning it on for anyone). A release is still newer by its version alone, so the release of a nightly's
+  own version is never offered to it. Until a release carries the key, everything in the next item holds for
+  everyone.
+  The nightly key, once (a few minutes, Terminal.app; the plan's §16.8 has what each step shows):
+  `Scripts/sign-nightly.sh --new-key --key-file "/Volumes/<encrypted image>/sill-nightly.key"`, then
+  `gh secret set SILL_NIGHTLY_UPDATE_KEY --env nightly --repo Saffsanity/sill < "<that file>"`, then the
+  public key it printed into `nightlyKeys` (a commit of its own), then eject the image. Never: the update key
+  (or any key of `releaseKeys`) as the nightly key; the nightly key in the keychain item the release signer
+  reads (`me.saffer.sill.update-signing`), or the update key in GitHub; a release signed with the nightly key,
+  or a nightly with the update key (neither verifies anyway: another first line, another key list).
 - The update check never offers a nightly: it reads only
   `https://api.github.com/repos/Saffsanity/sill/releases/latest`, which never lists a pre-release
   (`UpdatePolicy.feed`), refuses an answer that says `prerelease` anyway (`UpdatePolicy.release`), and
