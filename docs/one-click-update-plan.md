@@ -1024,6 +1024,21 @@ The reviewer's seven points for an automatic updater are §15.6.
   harness; the harness now looks again for up to 5 s. Sill, notarized and of its own team, is not tracked so;
   the rehearsal (§12, step 11) is where a real update shows it.
 
+- 2026-11-12 03:30–06:30 (round 3: the security review, the size line, Automatically update Sill, the update
+  key's words; the Mac restarted at 03:02, so the session's scratch moved to the handoff folder): every
+  finding verified and fixed or answered (§12c); the automatic update built (§15); main at 0d22bbf (PR #356,
+  the notes in docs/steps) merged with `Scripts/migrate-notes.py`. Results on 623e534 and 3e68898:
+  `update-install` 716 checks and 82 of 82 mutants; the harness 227 of 227 and its 13 new mutants, 13 of 13;
+  `sign-test.sh` all passed; `swift build -c release` clean but CaptureProbe's; previews against main's
+  rendered in the same run (161 identical; the General pane's path; 126 new); CI's Build and check green on
+  623e534. Found by running: the watcher's CDHash read (`codesign -d -v` prints none), a SIGPIPE race in
+  sign-update.sh's `| grep -q` pipes under pipefail, `Process.waitUntilExit` waiting for good in the harness,
+  an empty `case` in a mutant. Found by reading, fixed: the rollback floor had risen with the check's
+  unsigned offer (a made-up "v9.9" would have stopped every later automatic update); the automatic update
+  could have begun over a lost old copy; a later Sill without Update Now would not have answered the
+  watcher (now every Sill.app does: §8); Update Now's install could cut off a device that joined after its
+  question (now held and asked about, as the automatic update).
+
 ## 14. For Noah: the update key, step by step
 
 Three things, at the Mac. The key list stays empty in the code until step 2's commit; nothing here made a key.
