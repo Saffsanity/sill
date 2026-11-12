@@ -379,7 +379,7 @@ struct StreamScreen: View {
             let hidden = chromeHidden
             let insets = Self.insets(geo.safeAreaInsets)
             let room = FullScreenPolicy.room(size: geo.size, insets: insets, choice: Self.roomChoice,
-                                             topIsStatusBar: UIDevice.current.userInterfaceIdiom == .pad,
+                                             topIsStatusBar: !DuoLayout.phoneArrangement,
                                              foldTop: posture.info(in: geo.size).horizontalBand?.minY)
             ZStack {
                 Group {
@@ -389,8 +389,9 @@ struct StreamScreen: View {
                 // not the stream's UIKit input view (nor, so, the Pencil, a hover or a key).
                 .allowsHitTesting(!overlayShown && tour == nil)
                 // The pointer sprite follows the layout: the trackpad's arrow shows only in the
-                // laptop layout, and a rotation re-renders it at once; the Mac's arrow stays.
-                .onChange(of: DuoLayout.of(geo.size).isPortrait, initial: true) { _, portrait in
+                // laptop layout, and a rotation re-renders it at once; the Mac's arrow stays. Full screen
+                // has no trackpad, so none of its arrow either.
+                .onChange(of: DuoLayout.of(geo.size).isPortrait && !hidden, initial: true) { _, portrait in
                     client.setPointerLayout(portrait: portrait)
                 }
                 // The clipboard's chip on screen or not: its 20 s run only while it is, and VoiceOver
@@ -1300,7 +1301,7 @@ struct StreamScreen: View {
         // Where the shown layout will be: the safe area now, down to the bottom edge; on an iPad with the status
         // bar's room it had while shown (hidden now, the status bar comes back as the controls land). An iPhone's
         // top inset is its sensor housing's, the same either way, and a turn while hidden changes it.
-        let pad = UIDevice.current.userInterfaceIdiom == .pad
+        let pad = !DuoLayout.phoneArrangement      // an iPad's idiom (DEBUG `-SillIdiom` changes it, as for the layouts)
         let insets = FullScreenPolicy.Insets(top: pad ? (shownInsets?.top ?? now.top) : now.top, left: now.left,
                                              bottom: now.bottom, right: now.right)
         let shown = CGRect(x: insets.left, y: insets.top, width: max(0, size.width - insets.left - insets.right),

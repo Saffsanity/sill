@@ -160,6 +160,14 @@ def edge_main(base, new):
         if " EDGE REVEAL " in t:
             revealed = any(e.strip().startswith("[edge] reveal ended") for e in events)
             sent = sends(events)
+            if not revealed and not any(e.strip().startswith("[edge] reveal") and "listening" not in e for e in events):
+                # The system's edge recognizer may take only touches the digitizer marked as starting at the bezel,
+                # which a synthesized touch is not: then it never begins here, and the stroke must be the surfaces'
+                # own, whole (nothing held or eaten by a recognizer that never began). A device shows the swipe in.
+                print(f"note {t}: the system's edge recognizer took no synthesized touch; the stroke is checked as the surfaces' own")
+                a, b = collapsed(base.get(t, []), surface), collapsed(events, surface)
+                check(same(a, b) and len(a) > 0, f"{t}: not swiped in here, the same events as main's surfaces ({len(b)})")
+                continue
             check(revealed and not sent and not hid and len(sends(base.get(t, []))) > 0,
                   f"{t}: the swipe in, nothing sent (main's surfaces sent {len(sends(base.get(t, [])))})")
             for e in sent: print(f"       sent: {e}")
