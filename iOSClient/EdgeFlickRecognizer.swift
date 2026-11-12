@@ -16,14 +16,19 @@ import UIKit.UIGestureRecognizerSubclass
 /// trackpad's finger counter, the tour's touch watch) never recognize, so they never wait; the Pencil's and
 /// the iPad pointer's touches never reach these two (`allowedTouchTypes`), and the pointer's own recognizers
 /// (hover, its scrolls) take no finger, so they never wait either.
+/// A recognizer that only watches touches and never recognizes (the trackpad's finger counter, the stroke
+/// observer on both surfaces): it has nothing to hold back, so it never waits for the edge recognizers.
+protocol WatchesTouchesOnly: UIGestureRecognizer {}
+
 enum EdgeRecognizers {
     /// Whether `other` waits for `edge` (the flick or the swipe in) to fail: it is in the same window, below
     /// the window itself (the system's own recognizers on the window are left alone), takes fingers, and is
-    /// not one of the edge recognizers or a hover.
+    /// not one of the edge recognizers, a hover or a recognizer that only watches.
     static func waits(_ other: UIGestureRecognizer, for edge: UIGestureRecognizer) -> Bool {
         guard other !== edge, let window = edge.view, let view = other.view, view !== window,
               view.isDescendant(of: window) else { return false }
-        if other is EdgeFlickRecognizer || other is RevealEdgePan || other is UIHoverGestureRecognizer { return false }
+        if other is EdgeFlickRecognizer || other is RevealEdgePan || other is UIHoverGestureRecognizer
+            || other is WatchesTouchesOnly { return false }
         return other.allowedTouchTypes.contains(NSNumber(value: UITouch.TouchType.direct.rawValue))
     }
 

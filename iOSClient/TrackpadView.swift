@@ -660,7 +660,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
 /// never hears a finger lift. This recognizer sees every touch and never recognizes (it stays
 /// possible, so UIKit ends it with the last finger), takes none from the view (`cancelsTouchesInView`
 /// off) and delays none (`delaysTouchesEnded` off); the pad's delegate lets it run beside the rest.
-private final class FingerCounter: UIGestureRecognizer {
+private final class FingerCounter: UIGestureRecognizer, WatchesTouchesOnly {
     var onCount: ((Int) -> Void)?
     private var down = Set<UITouch>()
 

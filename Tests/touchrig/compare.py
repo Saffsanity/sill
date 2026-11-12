@@ -172,9 +172,14 @@ def edge_main(base, new):
                   f"{t}: the swipe in, nothing sent (main's surfaces sent {len(sends(base.get(t, [])))})")
             for e in sent: print(f"       sent: {e}")
             continue
+        # SwiftUI's Button takes no synthesized touch (main's run presses it neither), so on the button the rig
+        # shows only that a flick hides and a tap does not.
+        swiftui = t.startswith("BUTTON ") and not normal(base.get(t, []))
+        if swiftui:
+            print(f"note {t}: the rig cannot press a SwiftUI button (main's run did not either)")
         if " EDGE HIDE " in t:
             sent = sends(events)
-            check(hid and not sent and len(sends(base.get(t, []))) > 0,
+            check(hid and not sent and (swiftui or len(sends(base.get(t, []))) > 0),
                   f"{t}: hidden, nothing sent (main's surfaces sent {len(sends(base.get(t, [])))})")
             if sent:
                 for e in sent: print(f"       sent: {e}")
@@ -182,7 +187,7 @@ def edge_main(base, new):
             moved_after_hides = " EDGE DISARMED " in t or " EDGE REVEALOFF " in t
             a = collapsed(base.get(t, []), surface if moved_after_hides else None)
             b = collapsed(events, surface if moved_after_hides else None)
-            ok = t in base and not hid and same(a, b) and len(a) > 0
+            ok = t in base and not hid and same(a, b) and (len(a) > 0 or swiftui)
             check(ok, f"{t}: not hidden, the same events as main's surfaces, in order ({len(b)})")
             if not ok:
                 for x, y in zip(a + ["-"] * (len(b) - len(a)), b + ["-"] * (len(a) - len(b))):

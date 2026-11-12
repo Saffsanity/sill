@@ -2088,7 +2088,7 @@ struct InputOverlay: UIViewRepresentable {
 /// Only direct touches are fingers: a Pencil is the mouse, and a Magic Keyboard trackpad's click is
 /// one indirect touch. Those only end a finished stroke's silence (`otherTouch`), since the
 /// portrait trackpad's recognizers take them too.
-final class StrokeObserver: UIGestureRecognizer, UIGestureRecognizerDelegate {
+final class StrokeObserver: UIGestureRecognizer, UIGestureRecognizerDelegate, WatchesTouchesOnly {
     private var strokes = TrackpadGestures()
     /// From three fingers down until the next stroke's first touch: the surface sends nothing.
     var silent: Bool { strokes.silent }
