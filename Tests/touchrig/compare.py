@@ -40,6 +40,7 @@ def normal(events):
     out, coasting = [], False
     for e in events:
         if e.startswith("[touch]") or e.startswith("[edge]") or e.startswith("[measure]"): continue
+        if re.match(r"\s*\[[TOWB]\.", e): continue      # RIG_TRACE's recognizer states, not events
         who, _, what = e.partition(" send ")
         who = who.strip()
         if not what:
