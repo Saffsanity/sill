@@ -227,6 +227,25 @@ updater features" (the plan's §15.1); the independent security review's finding
   (fixed, with a check and a mutant); and §16.10's `gh api` commands, first written as indented heredocs whose
   terminator a copy from the page would break, are here-strings now (run with a stand-in `gh` that only parses
   the bodies, in zsh and bash; nothing sent to GitHub).
+- Verified, round 6 (2026-11-12 14:30–15:25, this Mac, heavy jobs through heavy.sh, no device, nothing launched but
+  the harness's test executables and the bare SillMenuBar for previews), on 08651219 (the worktree's run is the
+  commit's; the mutants on an export of it): `update-install` 924 of 924 (20 new); `swift build -c release`, no
+  warning; the harness 298 of 298 (the watcher's cases rewritten with one expected outcome each: W3's kept with the
+  new copy whole, W4's `lost` when the kept note lands in the copy moved back, W4's parked copy changed and never
+  moved back; the release `id` read, and none); `sign-test.sh` all 99 steps (16 new: the audit's renamed manifest
+  beside a `Sill.zip` outside the record, a recorded release missing, an empty listing, no push permission, a
+  5,000-byte manifest never downloaded, `--pulled`, `--run`'s event and head repository); `repo-rules` 10 of 10;
+  `release.sh`'s ancestry rule in a scratch repository (on main nothing, a branch's commit refused, no
+  `origin/main` refused). Mutants on the export: `update-install`'s for what changed 17 of 17 (AU2's five, N11 a's,
+  W4's five, and six whose patterns moved), the harness's watcher mutants 17 of 17. `sign-test.sh` against
+  3ec9e3d1's `sign-update.sh`: 16 failed, each a round-6 case (one, the notification when the audit can't run,
+  only by its words: the first call is now the permissions read). Previews: 319, identical to round 5's (no
+  sample shows round 6's new words). CI's Build and check green on 08651219. Found on the way: the signing test's
+  words for an audit that can't run; and, in the harness mutants' run, that the stand-in's truncated download is
+  sometimes reported as the connection lost (no body bytes seen yet) rather than the download broken: both are
+  refusals, and the case now takes both (the one mutant whose first failure was that case, "the watcher doesn't
+  start the old copy", run again alone after it: caught by the watcher's own case, "the old copy was started"; the
+  harness 298 of 298 again with the change).
 - **Untested, for Noah:** the plan's §12 rehearsal with a throwaway repository and key (two notarized
   builds); the first real Update Now (a release carrying the key installed by hand first); §14's three
   step lists (once: the signer, the key, its backup; once: the public key into `releaseKeys`, a commit of
