@@ -29,6 +29,10 @@ leaves this machine.
                                           committed (HEAD^1 and HEAD^2), or between any two commits
     python3 Scripts/migrate-notes.py --move-entries             an entry written into CLAUDE.md after
                                           the move (its "Steps" section), out to its own step file
+    python3 Scripts/migrate-notes.py --absorb                   the other way round: in a branch that
+                                          has the new layout (tooling-speedup until it merges), right
+                                          after merging a main that does not yet, main's new entries,
+                                          rows and lists go where the layout puts them
     python3 Scripts/migrate-notes.py --convert                  the conversion itself, once, on the
                                           working tree (tooling-speedup used it on main at 936d627)
     python3 Scripts/migrate-notes.py --verify REV               checks that docs/steps and the check
@@ -570,11 +574,7 @@ def migrate(root, ours, theirs):
             if text in b_set:
                 continue
             first = text.split("\n", 1)[0]
-            old = b_by_first.get(first) or b_by_name.get(base_name(text))
-            if old is None:
-                ratios = [(difflib.SequenceMatcher(None, text[:600], x[:600]).ratio(), x) for x in b_entries]
-                best = max(ratios, default=(0, None))
-                old = best[1] if best[0] >= 0.75 else None
+            old = match_old(text, b_entries, b_by_first, b_by_name)
             target = by_first.get(old.split("\n", 1)[0]) if old else None
             if old is not None and target is not None:
                 path = f"{STEPS}/{target}"
@@ -671,12 +671,115 @@ def migrate(root, ours, theirs):
     return not conflicted
 
 
+def match_old(text, b_entries, b_by_first, b_by_name):
+    """The base entry an entry is a later version of: the same first line, else the same date and
+    branch reading alike (not a second entry of one branch on one day), else one that reads much alike;
+    None for a new entry."""
+    first = text.split("\n", 1)[0]
+    old = b_by_first.get(first)
+    if old is None and base_name(text) in b_by_name:
+        x = b_by_name[base_name(text)]
+        old = x if difflib.SequenceMatcher(None, text[:600], x[:600]).ratio() >= 0.5 else None
+    if old is None:
+        ratios = [(difflib.SequenceMatcher(None, text[:600], x[:600]).ratio(), x) for x in b_entries]
+        best = max(ratios, default=(0, None), key=lambda r: r[0])
+        old = best[1] if best[0] >= 0.75 else None
+    return old
+
+
+def absorb(root, theirs):
+    """This branch has the new layout, the main it merges does not yet: main's entries and rows that
+    are new since the merge base go to their own files, its other changes are merged three ways."""
+    ours = "HEAD"
+    base = git("merge-base", ours, theirs).strip()
+    o_claude, b_claude, t_claude = show(ours, CLAUDE), show(base, CLAUDE), show(theirs, CLAUDE)
+    if OLD_SECTION in o_claude.split("\n") or OLD_SECTION not in t_claude.split("\n"):
+        raise SystemExit("--absorb is for a branch with docs/steps merging a main with a Current step")
+    resolved, conflicted, notes = [], [], []
+    pointer, bullet = section_text(o_claude, NEW_SECTION) or POINTER, bullet_text(o_claude) or CHECKS_BULLET
+    b_lean, b_entries, _ = split_claude(b_claude, pointer, bullet)
+    t_lean, t_entries, _ = split_claude(t_claude, pointer, bullet)
+    lean, n = merge3(o_claude, b_lean, t_lean)
+    write(os.path.join(root, CLAUDE), lean)
+    (conflicted if n else resolved).append(CLAUDE)
+    o_files = [f for f in git("ls-tree", "--name-only", f"{ours}:{STEPS}").split() if f.endswith(".md") and f != "README.md"]
+    by_first = {}
+    for f in o_files:
+        by_first.setdefault((show(ours, f"{STEPS}/{f}") or "").split("\n", 1)[0], f)
+    b_set, b_by_first, b_by_name = set(b_entries), {x.split("\n", 1)[0]: x for x in b_entries}, {}
+    for x in b_entries:
+        b_by_name.setdefault(base_name(x), x)
+    new_texts = []
+    for text in t_entries:
+        if text in b_set:
+            continue
+        old = match_old(text, b_entries, b_by_first, b_by_name)
+        target = by_first.get(old.split("\n", 1)[0]) if old else by_first.get(text.split("\n", 1)[0])
+        if target is not None:
+            path = f"{STEPS}/{target}"
+            merged, n = merge3(show(ours, path), old or show(ours, path), text)
+            write(os.path.join(root, path), merged)
+            (conflicted if n else resolved).append(path)
+            notes.append(f"{path}: main's changes to that entry, merged into it")
+        else:
+            new_texts.append(text)
+    for name, text in zip(names_for(new_texts, {f[:-3] for f in o_files}), new_texts):
+        path = f"{STEPS}/{name}.md"
+        write(os.path.join(root, path), text)
+        resolved.append(path)
+        notes.append(f"{path}: main's new entry, out of its CLAUDE.md word for word")
+    b_rows, t_rows = table_rows(show(base, CHECKS_README)), table_rows(show(theirs, CHECKS_README))
+    for name, rows in t_rows.items():
+        if b_rows.get(name) == rows:
+            continue
+        theirs_t = check_readme(name, rows)
+        base_t = check_readme(name, b_rows[name]) if name in b_rows else ""
+        if theirs_t == base_t:
+            continue
+        path = f"Tests/checks/{name}/README.md"
+        mine = show(ours, path)
+        text, n = (theirs_t, 0) if mine is None else merge3(mine, base_t, theirs_t)
+        write(os.path.join(root, path), text)
+        (conflicted if n else resolved).append(path)
+        notes.append(f"{path}: main's row for `{name}`, as the check's own README.md")
+    write(os.path.join(root, CHECKS_README), show(ours, CHECKS_README))
+    resolved.append(CHECKS_README)
+    for path, normalize in ((DEVELOPMENT, dev_normalized), (CI, ci_normalized)):
+        o_text, b_text, t_text = show(ours, path), show(base, path), show(theirs, path)
+        if None in (o_text, b_text, t_text) or b_text == t_text:
+            continue
+        text, n = merge3(o_text, normalize(b_text, o_text), normalize(t_text, o_text))
+        write(os.path.join(root, path), text)
+        (conflicted if n else resolved).append(path)
+    staged = [p for p in resolved if p not in conflicted]
+    if staged:
+        git("add", "--", *staged, cwd=root)
+    print(f"Merge base {base[:12]}, this branch {git('rev-parse', '--short=12', ours).strip()}, "
+          f"main {git('rev-parse', '--short=12', theirs).strip()}.")
+    for note in notes:
+        print("  " + note)
+    print("Resolved and staged: " + ", ".join(staged))
+    if conflicted:
+        print("Left with conflict markers (resolve, then git add): " + ", ".join(conflicted))
+    others = [p for p in git("diff", "--name-only", "--diff-filter=U", cwd=root).split()
+              if p not in staged and p not in conflicted]
+    if others:
+        print("Still conflicted, not notes (as any merge): " + ", ".join(others))
+    return not conflicted
+
+
 def main(argv):
     args = argv[1:]
     root = root_dir()
     if args[:1] == ["--convert"]:
         convert(root)
         return 0
+    if args[:1] == ["--absorb"]:
+        r = subprocess.run(["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"], capture_output=True,
+                           text=True, cwd=root)
+        if r.returncode != 0:
+            raise SystemExit("No merge in progress: run it right after `git merge origin/main` stops")
+        return 0 if absorb(root, r.stdout.strip()) else 1
     if args[:1] == ["--move-entries"]:
         move_entries(root)
         return 0
