@@ -16,17 +16,21 @@ enum UpdateAutoPolicy {
     // MARK: The defaults (open questions, §10)
 
     /// How long a release must have been signed (its manifest's own date) before Sill installs it by
-    /// itself: the time Noah has to see a release he didn't make and pull it. Update Now isn't held. Zero
-    /// turns the wait off (plan §10, Q9).
+    /// itself: the time Noah has to see a release he didn't make and pull it. Update Now isn't held. Noah's
+    /// decision of 2026-11-12: "48 hour wait seems ok" (plan §15.1). Zero turns the wait off.
     static let coolingOff: TimeInterval = 48 * 3600
     /// The oldest signature Sill installs by itself: an old release offered as the latest again (a
     /// rollback through GitHub, review 3's F7) is left to Update Now and the person's eyes.
     static let maxAge: TimeInterval = 120 * 24 * 3600
     /// A signature dated this far ahead of this Mac's clock is refused (its clock, or the signer's, is wrong).
     static let clockSkew: TimeInterval = 10 * 60
-    /// How long no device must have been connected before Sill installs: longer than a reconnect, a short
-    /// trip to the background or a cable pulled and plugged in again, short enough to fit a night.
-    static let quietFor: TimeInterval = 10 * 60
+    /// How long no device must have been connected before Sill installs. Noah's decision of 2026-11-12: "can
+    /// the 10 minute wait be shortened to 5 minutes?" (plan §15.1). Still far longer than any reconnect Sill
+    /// makes by itself: the device's redials of a listed Mac are 5, 10, 20 and then 30 s apart (a dial let go
+    /// after 5 s), so one that wants back is in again within about 35 s, and every connection starts the wait
+    /// over; the cable and Wi-Fi moves hand over with no moment unconnected. Every word that names the wait
+    /// comes from here (`quietMinutes`).
+    static let quietFor: TimeInterval = 5 * 60
     /// Automatic attempts at one version (a failure of any kind counts, a new version that didn't start and
     /// was put back too) before Sill leaves that version to Update Now.
     static let maxAttempts = 2

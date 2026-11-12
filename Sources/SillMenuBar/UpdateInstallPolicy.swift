@@ -796,8 +796,8 @@ enum UpdateInstallPolicy {
         var afterFailure: String?
         /// After Sill updated itself (this launch runs that version), for a few days.
         var updated: String?
-        /// How long the install waits with no device connected.
-        var quietMinutes = 10
+        /// How long the install waits with no device connected (UpdateAutoPolicy's, in minutes).
+        var quietMinutes = UpdateAutoPolicy.quietMinutes
     }
 
     /// The pane for `state`, when the check offers `offered` to `running`. `available`: this build has an

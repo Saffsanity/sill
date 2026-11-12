@@ -61,7 +61,7 @@ updater features" (the plan's §15.1); the independent security review's finding
   Settings (`setAutomaticUpdate`). One state machine with Update Now (a `mode`, a `waiting` phase): after a
   check GitHub answered, Update Now's steps for a release signed at least 48 h ago and at most 120 days,
   never below the highest signed release it has read or a stopped one, two attempts a version at most, 20 h apart; then a wait
-  for 10 minutes with no device connected and no pairing window, GitHub asked again, and in one step on the
+  for 5 minutes with no device connected (Noah, 2026-11-12) and no pairing window, GitHub asked again, and in one step on the
   host's queue the hold of new sessions with the count of the connected ones
   (`StreamServer.holdNewSessions`; goodbye `restarting`, reconnect true), then the install. The download's
   size on a line of its own under "Downloading …" (`Pane.detail`); every line that names a check names
@@ -105,6 +105,7 @@ updater features" (the plan's §15.1); the independent security review's finding
   automatic update's steps (the plan's §15.8, A1–A9: the switch, its keeping, a quiet install with the
   iPad trying to connect during the hold, the watcher's put-back of a release that quits at launch and its
   renames in /Applications under App Management, a stop, a quit during an install step, VoiceOver), and
-  its open questions 13–23 with their defaults (48 h cooling-off, the stop, 10 minutes with no device,
+  its open questions 14 and 16–23 with their defaults (Noah decided 13 and 15 on 2026-11-12: "48 hour wait
+  seems ok, can the 10 minute wait be shortened to 5 minutes?"; the stop,
   two attempts a day apart, 120 days, the watcher's 30 s and 150 s, GitHub asked again before the swap,
   the "restarting" goodbye, the keychain group for the switch, a day's wait at most, Check Now included).

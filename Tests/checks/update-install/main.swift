@@ -583,13 +583,13 @@ for on in [false, true] {
 }
 check(P.footnote(automatic: false).contains("Sill downloads and installs nothing by itself."), "off: nothing by itself")
 check(P.footnote(automatic: true).contains("Automatically update Sill is on") && P.footnote(automatic: true).contains("it never disconnects anyone")
-      && P.footnote(automatic: true).contains("two days after it is signed") && P.footnote(automatic: true).contains("10 minutes"), "on: what it does: \(P.footnote(automatic: true))")
+      && P.footnote(automatic: true).contains("two days after it is signed") && P.footnote(automatic: true).contains("once no device has been connected for 5 minutes;"), "on: what it does: \(P.footnote(automatic: true))")
 check(!UpdatePolicy.footnote.contains("update key") && UpdatePolicy.footnote.contains("never downloads or installs anything by itself"),
       "a build with no update key claims no check it can't make")
 
 check(pane(.waiting).line == "Sill 0.4 is ready." && pane(.waiting).updateNowTitle == "Install Now" && pane(.waiting).updateNow
       && pane(.waiting).updateNowEnabled && pane(.waiting).cancel && !pane(.waiting).busy, "waiting: \(pane(.waiting))")
-check(pane(.waiting).note == "Sill installs it by itself once no device has been connected for 10 minutes, then restarts.", "waiting's note")
+check(pane(.waiting).note == "Sill installs it by itself once no device has been connected for 5 minutes, then restarts.", "waiting's note")
 check(!pane(.waiting, refusal: .otherInstance).updateNowEnabled && pane(.waiting, refusal: .otherInstance).note == P.words(.otherInstance), "waiting, refused")
 func autoPane(_ phase: P.Phase, mode: P.Mode = .automatic, offered: SillVersion? = v040, refusal: P.Refusal? = nil, a: P.AutomaticPane) -> P.Pane {
     P.pane(S(phase: phase, mode: mode), offered: offered, running: v030, available: true, refusal: refusal, automatic: a)
@@ -653,8 +653,10 @@ check(AP.dates(signedAt: t0, now: later(120 * 24)) == .go, "120 days exactly")
 check(AP.dates(signedAt: later(0.2), now: t0) == .refuse("its signature is dated later than this Mac’s clock"), "from the future")
 check(AP.dates(signedAt: later(0.15), now: t0) == .waitUntil(later(48.15)), "within the clock's skew")
 // The quiet moment (review 3's point 3).
-check(AP.quiet(devices: 0, quietSince: t0, pairing: false, now: later(10.0 / 60)), "10 minutes with no device")
-check(!AP.quiet(devices: 0, quietSince: t0, pairing: false, now: later(9.9 / 60)), "not before")
+// Noah, 2026-11-12: "can the 10 minute wait be shortened to 5 minutes?"
+check(AP.quietFor == 5 * 60 && AP.quietMinutes == 5, "the wait with no device is 5 minutes (Noah's decision)")
+check(AP.quiet(devices: 0, quietSince: t0, pairing: false, now: later(5.0 / 60)), "5 minutes with no device")
+check(!AP.quiet(devices: 0, quietSince: t0, pairing: false, now: later(4.99 / 60)), "not before")
 check(!AP.quiet(devices: 1, quietSince: t0, pairing: false, now: later(5)), "never with a device connected")
 check(!AP.quiet(devices: 0, quietSince: t0, pairing: true, now: later(5)), "never with a pairing window open")
 check(AP.waitedTooLong(since: t0, now: later(24)) && !AP.waitedTooLong(since: t0, now: later(23.9)), "a copy waits a day at most")
@@ -666,8 +668,9 @@ check(AP.switchState(available: true, canKeep: true, checkOn: false, refusal: ni
 check(AP.switchState(available: true, canKeep: false, checkOn: true, refusal: nil, on: false) == AP.Switch(shown: true, enabled: false, note: "This copy of Sill can’t keep this setting: it isn’t a notarized release."), "no keychain group")
 check(AP.switchState(available: true, canKeep: true, checkOn: true, refusal: .translocated, on: false) == AP.Switch(shown: true, enabled: true, note: P.words(.translocated)), "a refusal said under it")
 // Its words.
-check(AP.quietMinutes == 10 && AP.coolingOffWords == "two days after it is signed", "the waits in words")
-check(AP.offerNote(mem, offered: v040, offeredTag: "v0.4.0", waitUntil: nil, now: t0) == "Sill installs it by itself once no device has been connected for 10 minutes.", "the offer's note")
+check(AP.coolingOff == 48 * 3600 && AP.coolingOffWords == "two days after it is signed", "the cooling-off is 48 hours (Noah's decision), in words")
+check(P.AutomaticPane().quietMinutes == AP.quietMinutes, "the pane's words take the wait from the rule")
+check(AP.offerNote(mem, offered: v040, offeredTag: "v0.4.0", waitUntil: nil, now: t0) == "Sill installs it by itself once no device has been connected for 5 minutes.", "the offer's note")
 check(AP.offerNote(mem, offered: v040, offeredTag: "v0.4.0", waitUntil: later(30), now: t0).hasPrefix("Sill installs it by itself tomorrow at ")
       || AP.offerNote(mem, offered: v040, offeredTag: "v0.4.0", waitUntil: later(30), now: t0).hasPrefix("Sill installs it by itself on "), "cooling off: from when")
 check(AP.offerNote(AP.stopped(mem, "v0.4.0"), offered: v040, offeredTag: "v0.4.0", waitUntil: nil, now: t0) == "A stop signed with Sill’s update key names Sill 0.4, so Sill won’t install it.", "stopped")
@@ -680,7 +683,7 @@ check(AP.updatedLine(done, running: v040, now: later(2))?.hasPrefix("Sill update
 check(AP.updatedLine(done, running: v030, now: later(2)) == nil, "only while that version runs (not after a put-back)")
 check(AP.updatedLine(done, running: v040, now: later(1 + 7 * 24)) == nil, "for a week")
 let paneNow = AP.pane(AP.began(mem, v040, now: t0), offered: v040, offeredTag: "v0.4.0", running: v030, waitUntil: nil, now: t0)
-check(paneNow.on && paneNow.quietMinutes == 10 && paneNow.afterFailure == "Sill tries again after its next daily check." && paneNow.updated == nil, "the pane's part")
+check(paneNow.on && paneNow.quietMinutes == 5 && paneNow.afterFailure == "Sill tries again after its next daily check." && paneNow.updated == nil, "the pane's part")
 // What Sill remembers survives as JSON, and an empty item is the switch off.
 if let data = try? JSONEncoder().encode(tried), let back = try? JSONDecoder().decode(AP.Memory.self, from: data) {
     check(back == tried, "the memory round-trips")

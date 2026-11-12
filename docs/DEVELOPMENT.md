@@ -180,7 +180,7 @@ Update Now: a switch under "Check for updates automatically", off by default,
 kept with what it remembers in Sill's keychain group (`AutoUpdateStore`, never
 the defaults; only Settings turns it on). After a check, it runs Update Now's
 steps by itself for a release signed at least 48 hours ago (the manifest's
-`signed` date), then waits for 10 minutes without a device connected, asks
+`signed` date), then waits for 5 minutes without a device connected, asks
 GitHub again, holds new sessions (a device that tries is told Sill is
 restarting and reconnects by itself) and installs. Two attempts a version at
 most, a day apart. The log's lines start "Automatic update:". It never runs for the bare

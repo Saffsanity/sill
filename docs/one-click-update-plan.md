@@ -723,15 +723,16 @@ checklist.md part 1 §3's marker rule).
 Automatically update Sill (§15). Noah decided five points on 2026-11-12 (§15.1); these are what he was
 not asked, each with the default taken:
 
-13. **The cooling-off.** Default: 48 hours from the manifest's signed date before Sill installs a release by
-    itself (Update Now at once). Cost per release: none for Noah; automatic installs come two to three days
-    after he signs. Alternatives: 24 hours; none (`coolingOff = 0`).
+13. **The cooling-off. Decided by Noah on 2026-11-12: "48 hour wait seems ok".** 48 hours from the
+    manifest's signed date before Sill installs a release by itself (Update Now at once; §15.1). Cost per
+    release: none for Noah; automatic installs come two to three days after he signs.
 14. **A signed stop.** Default: built and read (`Sill.zip.stop`, §15.4). Cost per release: none until used;
     using it, one signature in person and one upload. Alternative: none (pulling the release within the
     cooling-off already stops the automatic update everywhere, as each Sill asks GitHub again before its
     swap): `stopName = nil`.
-15. **The wait with no device connected.** Default: 10 minutes (longer than a reconnect or a short trip to
-    the background; any device restarts it). Alternatives: 5, 30 or 60 minutes; only at night.
+15. **The wait with no device connected. Decided by Noah on 2026-11-12: "can the 10 minute wait be
+    shortened to 5 minutes?"** 5 minutes (any device restarts it; still far longer than every reconnect Sill
+    makes by itself, §15.2).
 16. **How many retries.** Default: two attempts a version, at least 20 hours apart (a daily check each), then
     Update Now only. Alternatives: three; one.
 17. **The oldest release installed by itself.** Default: one signed within 120 days and not below the
@@ -1124,6 +1125,12 @@ In his words: "Your defaults are correct for the new updater features". So these
 4. It needs the update key, and passes the same two checks as Update Now.
 5. A failed update is tried again at the next daily check, never in a loop.
 
+Later the same day, after reading the summary: "48 hour wait seems ok, can the 10 minute wait be shortened to
+5 minutes?" So also decided:
+6. The cooling-off is 48 hours from the manifest's signed date (`UpdateAutoPolicy.coolingOff`).
+7. The wait with no device connected is 5 minutes (`UpdateAutoPolicy.quietFor`; every word that names it is
+   made from it).
+
 ### 15.2 The design
 
 - **One state machine** (§4.6): the state carries a `mode`. `automatic` begins only from `idle` or
@@ -1143,7 +1150,7 @@ In his words: "Your defaults are correct for the new updater features". So these
   more than 120 days ago, or more than 10 minutes in this Mac's future, is never installed by itself
   ("Sill didn’t install 0.4 by itself: … Update Now still can.").
 - **The quiet moment.** A checked copy waits; a run-loop Timer looks every 30 s. Any device connected
-  restarts the wait (and the host's status changes reset it at once); once none has been connected for 10
+  restarts the wait (and the host's status changes reset it at once); once none has been connected for 5
   minutes and no pairing window is open, GitHub is asked again (the release must still be the latest, its
   manifest the one checked, and no stop beside it; an answer that says nothing, such as no connection,
   waits for the next look). Then, in one step on the host's queue, new sessions are held and the
@@ -1165,7 +1172,7 @@ In his words: "Your defaults are correct for the new updater features". So these
 - **The watcher** (§15.5) puts the old copy back if the new one doesn't run.
 - **Words** (§15.7): the download's size on a line of its own under "Downloading …"; the switch and its
   notes; the waiting copy ("Sill 0.4 is ready." with "Sill installs it by itself once no device has been
-  connected for 10 minutes, then restarts.", Install Now and Cancel); after a failure, "Sill tries again
+  connected for 5 minutes, then restarts.", Install Now and Cancel); after a failure, "Sill tries again
   after its next daily check." or "Sill won’t install 0.4 by itself again; Update Now still can."; after an
   update, "Sill updated itself to 0.4 today at 03:12." for a week; the menu's "Sill 0.4 Is Ready to
   Install…" with "Installs by itself while no device is connected".
@@ -1186,9 +1193,10 @@ In his words: "Your defaults are correct for the new updater features". So these
   made-up "v9.9" would stop every later update), and the tags a signed
   stop named (never installed, also after the stop is gone).
 
-### 15.4 A cooling-off and a way to stop it (review 3's point 1; open questions 13 and 14)
+### 15.4 A cooling-off and a way to stop it (review 3's point 1; question 13, decided, and open question 14)
 
-- The cooling-off: 48 hours from the manifest's signed date (`UpdateAutoPolicy.coolingOff`; 0 turns it off).
+- The cooling-off: 48 hours from the manifest's signed date (`UpdateAutoPolicy.coolingOff`; 0 turns it off),
+  Noah's decision of 2026-11-12 ("48 hour wait seems ok").
   Cost per release: none for Noah; automatic installs come two to three days after he signs (the first daily
   check after 48 hours), Update Now at once.
 - The stop: `Sill.zip.stop` beside a release, `Sill stop 1` with the release's tag and its zip's SHA-256,
@@ -1224,8 +1232,8 @@ with the test app's own executable as the launcher in place of `open`.
 
 ### 15.6 The reviewer's seven points, and how each is met
 
-1. *A cooling-off on a signed date, and a signed way to stop:* met, both switchable, both open questions for
-   Noah (13, 14) with their costs (§15.4). F1, F2, F3 and F7 are fixed first (§12c). Checked: `update-install`
+1. *A cooling-off on a signed date, and a signed way to stop:* met, both switchable, with their costs (§15.4):
+   the cooling-off's 48 hours decided by Noah (13), the stop still an open question (14). F1, F2, F3 and F7 are fixed first (§12c). Checked: `update-install`
    (the date, the stop's format and signature, `dates`, the start rule, which answers end a waiting copy).
 2. *Only Settings turns it on:* met (§15.2). An attacker running as Noah cannot read, add or change the item
    (no process without Sill's signature and keychain group can); with Accessibility granted to it, it can click
@@ -1261,7 +1269,7 @@ says nothing of either (Noah: "Add the update key language when applicable as we
   must carry Apple’s signature and notarization for Sill’s developer, and the release must be signed with
   Sill’s own update key."
 - Footnote, switch on: "… nothing else is sent. Automatically update Sill is on: Sill downloads a new version
-  two days after it is signed, then installs it and restarts once no device has been connected for 10
+  two days after it is signed, then installs it and restarts once no device has been connected for 5
   minutes; it never disconnects anyone. Before it installs a new version, Sill checks it two ways: … Update
   Now does the same at once."
 - A build without an update key: the check's own footnote, unchanged ("… Sill never downloads or installs
@@ -1280,11 +1288,11 @@ says nothing of either (Noah: "Add the update key language when applicable as we
   automatically is on.", "This copy of Sill can’t keep this setting: it isn’t a notarized release.", or the
   refusal's own line.
 - While a release is offered, under Update Now: "Sill installs it by itself once no device has been connected
-  for 10 minutes.", "Sill installs it by itself tomorrow at 03:00 or later, once no device has been connected
-  for 10 minutes.", "A stop signed with Sill’s update key names Sill 0.4, so Sill won’t install it.", "Sill
+  for 5 minutes.", "Sill installs it by itself tomorrow at 03:00 or later, once no device has been connected
+  for 5 minutes.", "A stop signed with Sill’s update key names Sill 0.4, so Sill won’t install it.", "Sill
   won’t install 0.4 by itself: Sill 0.5 was out before it. Update Now still can.", "Sill won’t install 0.4 by
   itself again; Update Now still can."
-- Waiting: "Sill 0.4 is ready." / "Sill installs it by itself once no device has been connected for 10
+- Waiting: "Sill 0.4 is ready." / "Sill installs it by itself once no device has been connected for 5
   minutes, then restarts." [Install Now] [Cancel]. Menu: "Sill 0.4 Is Ready to Install…" / "Installs by
   itself while no device is connected".
 - After: "Sill didn’t install 0.4 by itself: it was signed more than 120 days ago. Update Now still can.",
@@ -1303,10 +1311,11 @@ A3. For the rehearsal set `coolingOff` to 0 in that build (one line, as its key)
     newer release published and signed: Check Now. Within seconds Settings shows "Downloading Sill …" with
     the size under it, then "Sill … is ready." with Install Now and Cancel; the log's "Automatic update:"
     lines.
-A4. With the iPad connected, nothing installs for as long as it stays. Disconnect it; about 10 minutes later
-    the log's "no device connected for 10 minutes; new sessions are held", the install and the restart. Try
+A4. With the iPad connected, nothing installs for as long as it stays. Disconnect it; about 5 minutes later
+    (5 to 5½: Sill looks every 30 s) the log's "no device connected for 5 minutes; new sessions are held",
+    the install and the restart. Try
     to connect the iPad in that minute: its message, then it reconnects to the new Sill by itself.
-A5. Connect a device at minute 9 and leave again: the 10 minutes start over.
+A5. Connect a device at minute 4 and leave again: the 5 minutes start over.
 A6. The watcher: a rehearsal release whose app quits at launch (a build with `exit(1)` first thing, signed
     and notarized): within about two and a half minutes the old version is back and running, Settings: "Sill …
     didn’t start, so Sill … is back." and "Sill tries again after its next daily check."; a day later the
