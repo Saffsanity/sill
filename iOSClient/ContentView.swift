@@ -1664,8 +1664,8 @@ struct ConnectScreen: View {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(alignment: .firstTextBaseline, spacing: 0) {
                             needsMac
-                            Spacer(minLength: Self.versionGap)
-                            VersionLine(label: version).accessibilitySortPriority(-1)
+                            Spacer(minLength: 0)
+                            VersionLine(label: version).padding(.leading, Self.versionGap).accessibilitySortPriority(-1)
                         }
                         links
                     }
@@ -1680,8 +1680,8 @@ struct ConnectScreen: View {
                             downloadLink
                             HStack(alignment: .firstTextBaseline, spacing: 0) {
                                 supportAndPrivacy
-                                Spacer(minLength: Self.versionGap)
-                                VersionLine(label: version).accessibilitySortPriority(-1)
+                                Spacer(minLength: 0)
+                                VersionLine(label: version).padding(.leading, Self.versionGap).accessibilitySortPriority(-1)
                             }
                         }
                     }
@@ -1714,7 +1714,9 @@ struct ConnectScreen: View {
         .padding(.bottom, Self.linkReach)
     }
 
-    /// The least room between the version and the words before it on their line.
+    /// The least room between the version and the words before it on their line: the version's own
+    /// padding, so it is part of the line's width when ViewThatFits asks whether the line fits (the
+    /// Spacer beside it asks for none).
     private static let versionGap: CGFloat = 12
 
     private var needsMac: some View {
