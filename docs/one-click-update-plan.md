@@ -742,7 +742,8 @@ Run:
     account).
 
 Back: quit Sill, install the real release from getsill.app/download, open it; delete the rehearsal
-repository and the rehearsal key file. If anything goes wrong in between: the old copy is in the folder
+repository, the rehearsal key file and the clone (`~/Downloads/sill-rehearsal`, its tags with it). If
+anything goes wrong in between: the old copy is in the folder
 Sill.log names ("Sill’s previous copy is kept at /private/var/folders/…/NSIRD_Sill_…/Sill.app"); quit
 Sill, Finder › Go › Go to Folder…, that folder, drag Sill.app to Applications, Replace.
 
