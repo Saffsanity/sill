@@ -49,12 +49,15 @@ Picture in Picture window. Device only: no wire change, nothing on the Mac, one 
   notes line for the next version (the background mode's purpose, guideline 2.5.4); no privacy manifest,
   App Privacy or privacy page change.
 - Verified: pending (the disk was under the 25 GB floor and builds waited): the plan's G1–G4.
-- **Untested, for Noah:** everything on a device, the plan's P1–P16 (iPad mini and iPhone 15 Pro): the switch;
-  a window and the Desktop floating as Sill leaves; Apple Music never stopped with Sill muted, and PiP still
-  starting (the open question on `.mixWithOthers`); sound, pause and play; no input to the Mac from other
-  apps, and a ⌘ held as Sill leaves coming up; the return by the window's button and from the Home Screen; a
-  locked Mac and another user; the Mac quitting Sill; the device's lock; ten minutes paused; a move to the
-  cable; two Sill windows and Stage Manager; the switch off; battery over half an hour; VoiceOver.
+- **Untested, for Noah:** everything on a device, the plan's P1–P20 (iPad mini and iPhone 15 Pro, a Debug build,
+  Xcode's console for the `pip:` lines, Sill.log on the Mac): the switch and where iOS 27 keeps its own Start PiP
+  Automatically; a window and the Desktop floating as Sill leaves; Apple Music never stopped with Sill muted, and
+  PiP still starting (the open question on `.mixWithOthers`); sound, pause and play; no input to the Mac from other
+  apps, and a ⌘ held as Sill leaves coming up; the return by the window's button, from the Home Screen, and
+  straight back before it floats; a locked Mac and another user; the Mac quitting Sill; the device's lock, and
+  whether PiP keeps it awake; ten minutes paused; a move to the cable; two Sill windows and Stage Manager; the
+  switch off and iOS's off; the Mac's window keeping its size (no viewport from a snapshot layout); the
+  clipboard while PiP shows; battery over half an hour; VoiceOver; the iPhone upright and sideways.
 
 **Away from home through a relay on the Mac (2026-11-09, branch `away-through-relay` from main at f224323,
 PR #339; issue #326, Ti800; the code read, the fixes weighed, eight open questions with their defaults and

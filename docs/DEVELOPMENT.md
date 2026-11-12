@@ -2112,7 +2112,7 @@ simulator:
 - `-SillIdiom pad`: a screen taller than wide and narrower than 600 pt is
   drawn as an iPad draws such a window (the compact halves), not as a phone
   does, so an iPhone simulator can photograph it; `phone` the other way
-  round.
+  round. The Settings panel's "This iPad" or "This iPhone" follows it too.
 - Pairing at home: `-SillServiceType _silltest._tcp` (only test hosts
   registered under that type are rows), `-SillHomeDoor paired|open|plain`
   (what a `-SillConnect` address counts as), `-SillCableTest 1` (this

@@ -790,7 +790,9 @@ struct HostSettingsPanel: View {
     }
 
     /// "iPhone" or "iPad", for copy about this device.
-    private var device: String { UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad" }
+    /// "iPhone" or "iPad", by the idiom the layouts read (`DuoLayout.phoneArrangement`: the device's own, or
+    /// DEBUG `-SillIdiom phone|pad`, so one simulator photographs the panel as either says it).
+    private var device: String { DuoLayout.phoneArrangement ? "iPhone" : "iPad" }
 
     /// Why the Direct Wireless Connection switch is disabled, as its footnote says it, or nil while
     /// this device may change it: away from home (`remote`) the Mac refuses it from a remote

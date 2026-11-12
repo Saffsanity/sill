@@ -229,62 +229,78 @@ background while another stays in front (Stage Manager's minimize) is not docume
 
 ## Test plan for Noah's devices (P list)
 
-The iPad mini (60 Hz) and the iPhone 15 Pro, a Debug build of this branch (Xcode's console shows the `pip:`
-lines), Sill for Mac 0.6.1, Settings › This iPad › Picture in Picture on. iOS's own switch first:
-Start PiP Automatically on (on the iPhone in Settings › General › Picture in Picture; on the iPad wherever
-iPadOS 27 keeps it: P1 says where, and whether the footnote's "its own Start PiP Automatically setting" is
-the name iOS 27 shows).
+**Set up.** A Debug build of this branch on the iPad mini (60 Hz) and the iPhone 15 Pro, Xcode's console
+open on the device (its `pip:`, `display:`, `audio:`, `keyframe:`, `viewport:` and `clipboard:` lines say what
+happened); Sill for Mac 0.6.1 on the Mac (nothing on the Mac changes), `tail -F ~/Library/Logs/Sill/Sill.log`
+in Terminal. iOS's own switch on: on the iPhone, Settings › General › Picture in Picture › Start PiP
+Automatically; on the iPad, search Settings for "Picture in Picture" (iPadOS 26 moved it). Then, in Sill's
+Settings (the gear) › This iPad (This iPhone), turn **Picture in Picture** on.
 
-1. **The setting.** The switch is the first row of This iPad (This iPhone) with its footnote; off by
-   default on a fresh install; its name and iOS's own setting's path read as on the device.
-2. **A window, then home.** Stream a window that changes (a build log, a video): swipe home. The picture
-   floats in iOS's PiP window and keeps moving, at the window's shape, without a pointer. Sill.log on the
-   Mac keeps the device ("Client left" never comes); its card shows frame age and rtt as before.
-3. **The audio session.** Music playing in Apple Music, Sill's sound muted (Mute on): stream, swipe home. The
-   music never stops, and PiP still starts. If PiP does not start, note it (open question 5) and try once
-   with Mute off and Send Audio on, then with `-SillPiPSession inactive` in the scheme.
-4. **Sound.** Send Audio on, Mute off: the Mac's sound goes on with the PiP picture; Mute on before leaving:
-   silence in PiP. Pause in the PiP window: the picture freezes and the sound stops; play: the live picture
-   within a second, the sound back.
-5. **The Desktop.** The Desktop streams, swipe home: PiP shows the Desktop at the display's shape.
-6. **Another app's window.** In PiP, switch to Safari, scroll, type: nothing reaches the Mac (Sill.log has
-   no input line, the Mac's pointer stays). With a Magic Keyboard attached: type in Notes while Sill is in
-   PiP, nothing on the Mac; hold ⌘ in Sill and swipe home with the other hand: the Mac's ⌘ is up at once
-   (no "Keys: … came up" line in Sill.log).
-7. **Return.** Tap the PiP window, then its return button: Sill comes back with the picture in place, no
-   reconnect (no new "Client connected" in Sill.log). Again by opening Sill from the Home Screen while PiP
-   shows: PiP closes, the picture is in Sill.
-8. **A locked Mac.** In PiP, lock the Mac (⌃⌘Q): the PiP window shows the Mac's lock screen; unlock it: the
-   window comes back in PiP. In Settings › Devices on the Mac, another user logged in (fast user switch):
-   black in PiP; back: the picture.
-9. **The session ends.** In PiP, quit Sill on the Mac: PiP closes. Open Sill: the usual "‹Mac› quit Sill." and
-   the reconnect once the Mac is back.
-10. **The device locks.** In PiP, lock the iPad with its button: PiP is gone after unlocking, and within a
-    minute the Mac's Sill.log says "Client left" (the device was suspended). Wait ten seconds before unlocking
-    (iOS tells Sill of the lock about ten seconds after it, with a passcode). Leave PiP alone, untouched,
-    for the iPad's Auto-Lock time: say whether the iPad locks by itself while PiP plays.
-11. **Paused for long.** Pause PiP, wait ten minutes: PiP closes, and a minute later Sill.log says "Client
-    left".
-12. **A move.** At home on Wi-Fi in PiP, plug the cable in: PiP goes on (the Mac logs the new connection over
-    the cable); pull it: PiP goes on over Wi-Fi.
-13. **Two Sill windows (iPad).** Two windows side by side, each streaming a different Mac window: use the
-    left one last, swipe home: the left one's picture floats. Back, use the right one, swipe home: the right
-    one's. In Stage Manager, minimize one window while the other stays in front: say what happens.
-14. **The switch off.** Switch off, swipe home: no PiP, the picture stops as before (Sill.log: "Client left"
-    a few seconds later).
-15. **Battery.** Thirty minutes of PiP on a moving window, from a full charge: note the drop, beside thirty
-    minutes in Sill in front.
-16. **VoiceOver.** The switch reads "Picture in Picture, switch button, off" and its footnote; in PiP,
-    VoiceOver's own PiP controls work.
-17. **The Mac's window keeps its size.** Aa set (1.5×) on a window, swipe home: in PiP the window keeps the
-    size Sill gave it (Sill.log has no "Resized …" line and no stream restart while PiP shows); on the iPad,
-    open the app switcher and leave it again while PiP shows, and say whether anything restarted.
-18. **The clipboard.** Share Clipboard on: in PiP, copy something in Notes on the iPad, then have something
-    copied on the Mac (another keyboard, or `echo hi | pbcopy` in Terminal): paste in Notes: the iPad's own
-    copy, not the Mac's. Back in Sill, a new copy on the Mac reaches the iPad as before.
+1. **The switch.** It is the first row of This iPad (This iPhone), off on a fresh install, with the footnote
+   "Leave Sill while ‹Mac›’s picture shows, and it keeps playing in a small window over your other apps, with
+   its sound when Send Audio is on. That window only shows the picture: tap it to come back to Sill. iOS
+   starts it only while its own Start PiP Automatically setting is on." Turning it on prints `pip: the switch
+   on`, `pip: controller made on the display layer`, `pip: offered: …` and, a moment later, `pip: possible
+   true`. Note where iOS 27 keeps its own switch on each device, and whether it is called Start PiP
+   Automatically.
+2. **A window, then home.** Stream a window that keeps changing (Terminal running `top`, a video in
+   QuickTime Player). Swipe up to the Home Screen. Expected: the picture shrinks into a floating window that
+   keeps moving, at the window's shape, without a pointer; the console says `pip: playing (iOS starts Picture
+   in Picture)`, `pip: started`, `pip: the window shows the picture at W×H px`. Leave it two minutes over the
+   Home Screen and another app: Sill.log never says "Client left", and the Mac's card for the device keeps its
+   fps, frame age and rtt.
+3. **Your music.** Play something in Apple Music on the device. In Sill, Settings › Mute on, then swipe home:
+   the music never pauses, and the picture still floats. If it does not float, note the console's `pip:
+   possible …` and any `pip: failed to start: …`, try again with Mute off, then with `-SillPiPSession inactive`
+   in the scheme's arguments (open question 5).
+4. **Sound, pause and play.** Send Audio on, Mute off, a video playing in a Mac window: in PiP the sound goes
+   on with the picture. Tap the PiP window, then its pause button: the picture freezes and the sound stops
+   (`pip: paused`, `display: frozen: …`, `audio: engine off (Picture in Picture paused)`). Its play button: the
+   picture moves again within about a second (`display: frozen no more: waiting for a keyframe`, `keyframe: …
+   asked the Mac for a keyframe`, `pip: playing`), then the sound.
+5. **The Desktop.** The Desktop streaming (Sill's Desktop button), swipe home: the PiP window shows the
+   Desktop at the display's shape.
+6. **Nothing reaches the Mac.** While PiP shows: in Safari, scroll, tap and type. On the Mac nothing moves
+   or types, and Sill.log has no line of input. With the Magic Keyboard: type in Notes: nothing on the Mac.
+   Back in Sill, hold ⌘ on the Magic Keyboard and swipe home with the other hand: a click on the Mac right
+   after is a plain click, and Sill.log has no "Keys: … came up, this Mac's modifier keys still read" line.
+7. **Coming back.** Tap the PiP window, then its return button: Sill comes back with the picture in place
+   and no reconnect (Sill.log: no new "Client connected"; the console: `pip: the window's return button: Sill's
+   interface restored`, `pip: off (it stopped)`). Leave again, and this time open Sill from the Home Screen
+   while PiP shows: PiP closes and the picture is in Sill (`pip: stopping: its window is in front again`).
+   Swipe home and come straight back before the picture has floated: it ends in Sill, not floating over it.
+8. **A locked Mac.** In PiP, lock the Mac (⌃⌘Q): the PiP window shows the Mac's lock screen. Unlock it: the
+   window's picture comes back in PiP. Fast-switch the Mac to another user: black in PiP; back to yours: the
+   picture.
+9. **The session ends.** In PiP, quit Sill on the Mac: PiP closes (`pip: stopping: the session ended (…)`).
+   Open Sill: "‹Mac› quit Sill.", and the session comes back once Sill on the Mac is open again.
+10. **The device locks.** In PiP, press the top button, wait 15 seconds, unlock: no PiP (`pip: stopping: the
+    device locked`), and within a minute Sill.log says "Client left". Then leave PiP alone, untouched, with
+    the window moving, for the device's Auto-Lock time: say whether the device locked by itself.
+11. **Ten minutes paused.** Pause PiP and wait ten minutes: PiP closes (`pip: stopping: paused for 10
+    minutes`), and within a minute Sill.log says "Client left".
+12. **A move.** At home on Wi-Fi, in PiP, plug the USB cable in: PiP goes on, and Sill.log shows the new
+    connection over the cable, then "Client left" for the Wi-Fi one. Pull it: PiP goes on over Wi-Fi.
+13. **Two Sill windows (iPad).** Two windows side by side, each streaming a different Mac window. Tap in the
+    left one last, swipe home: the left one's picture floats. Come back, tap in the right one, swipe home: the
+    right one's. In Stage Manager, minimize one window while the other stays in front: say what happens.
+14. **The switch off.** Turn it off, swipe home: no PiP, and Sill.log says "Client left" a few seconds later,
+    as before this branch.
+15. **Battery.** Thirty minutes of PiP over a moving window from a known charge, then thirty minutes with Sill
+    in front: note both drops.
+16. **VoiceOver.** The switch reads "Picture in Picture, switch button, off", then its footnote; PiP's own
+    controls work with VoiceOver.
+17. **The Mac's window keeps its size.** Aa at 1.5× on a window, swipe home: in PiP, Sill.log has no
+    "Resized …" line and no stream restart. On the iPad, open the app switcher and leave it again while PiP
+    shows: still none (the console says `viewport: held while the picture shows only in Picture in Picture` if
+    iOS laid Sill out for its snapshots).
+18. **The clipboard.** Share Clipboard on. In PiP, copy something in Notes on the device, then copy on the Mac
+    (`echo hi | pbcopy` in Terminal): paste in Notes: the device's own copy, not "hi" (`clipboard: a copy from
+    the Mac not written: …`). Back in Sill, a new copy on the Mac reaches the device as before.
 19. **iOS's switch off.** Sill's switch on, iOS's Start PiP Automatically off: leave Sill: no PiP, and Sill.log
-    says "Client left" within about ten seconds (iOS suspended Sill as before, the audio session held by
-    Sill's offer notwithstanding).
+    says "Client left" within about ten seconds (iOS suspended Sill as before).
+20. **The iPhone.** P2, P4 and P7 on the iPhone 15 Pro, held upright and sideways, with Larger Picture on too:
+    the PiP window keeps the window's shape whatever Sill's layout.
 
 ## Results
 
