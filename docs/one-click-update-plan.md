@@ -896,6 +896,20 @@ default loosen the trust, the hosts or the version rule.
   item-replacement directory on the data volume and an atomic swap with a folder in ~/Downloads;
   `proc_pidpath` reading uid 502's Sill; a folder moved to another parent needs write permission on
   itself; a mounted disk image's volume under AppleDiskImageDevice in the I/O Registry.
+- 01:00 to 01:20: the second review (§12b), its six findings taken (df36dc2). CI's Build and check passed on
+  df36dc2 on GitHub's runner: `swift build -c release`, `Tests/checks/run-all.sh` (67 checks, update-install
+  480 and update-policy 129 among them), the iOS app's build and the CLI's steps.
+- 01:22: the harness found the clean-up could never list the temporary-items folder (T20): now a note
+  names the folder for the next Sill (4716964).
+- 02:02, after the second review's fixes: update-install 480 of 480; the harness 174 of 174 (the noted
+  leftover removed and five forged notes refused; listing the temporary-items folder denied, as to an app:
+  "System Policy: deny(1) file-read-data …/TemporaryItems" in the log); sign-test all; `swift build -c
+  release` clean (the two capture warnings the 01:23 build gave in AppUpdater gone); previews identical to
+  main's (936d627) but the 36 new files and menu.txt's appended samples. Seen once in the 01:23 run and not
+  again: macOS's system policy put the freshly started ad hoc test app into provenance tracking ("ASP:
+  Security policy would not allow process"), and while it ran its bundle read as not writable to the
+  harness; the harness now looks again for up to 5 s. Sill, notarized and of its own team, is not tracked so;
+  the rehearsal (§12, step 11) is where a real update shows it.
 
 ## 14. For Noah: the update key, step by step
 

@@ -386,8 +386,18 @@ check(!UpdateInstaller.process(child.processIdentifier, satisfies: P.pinnedRequi
 
 say("== where an app runs (the refusals' facts)")
 var s = UpdateInstaller.situation(bundle: running, executable: "UpdTest", runningIsRelease: true, testFeed: false, runningIsInstalled: true, neededBytes: 1 << 20)
+// Seen once (2026-11-12 01:23): macOS's system policy put the freshly started ad hoc test app into provenance
+// tracking ("ASP: Security policy would not allow process", syspolicyd "Putting process into provenance
+// tracking"), and while it ran its bundle read as not writable to the harness. Sill, notarized, is not
+// tracked; here the look is taken again for up to 5 s before it counts.
+var held = 0.0
+while !s.bundleWritable && held < 5 {
+    usleep(500_000)
+    held += 0.5
+    s = UpdateInstaller.situation(bundle: running, executable: "UpdTest", runningIsRelease: true, testFeed: false, runningIsInstalled: true, neededBytes: 1 << 20)
+}
 let direct = access(running.path, W_OK) == 0 ? "writable" : "not writable (\(String(cString: strerror(errno))))"
-say("the running copy, to the harness while a process runs from it: \(direct); the situation's bundleWritable \(s.bundleWritable)")
+say("the running copy, to the harness while a process runs from it: \(direct)\(held > 0 ? " after \(held) s held by macOS's system policy" : "")")
 check(!s.bundleIsLink && !s.translocated && !s.readOnlyVolume && !s.networkVolume && !s.diskImage && s.folderWritable && s.bundleWritable && s.ownedByUser,
       "a scratch copy: writable, local, owned: \(s)")
 check(s.otherInstances == 1 && s.otherAccounts.isEmpty, "a process running from it: \(s.otherInstances), \(s.otherAccounts)")
