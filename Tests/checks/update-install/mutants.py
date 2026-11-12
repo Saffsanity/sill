@@ -141,6 +141,7 @@ MUTANTS = [
     ("AU1: a publication moved earlier", AUTO, "        if let p = published, n.seen[i].published.map({ p > $0 }) ?? true { n.seen[i].published = p }\n", "        if let p = published { n.seen[i].published = p }\n"),
     ("AU1: the remembered end without the publication", AUTO, "            if let g = s.firstGitHub, let p = s.published, p > g { end = max(end, s.first.addingTimeInterval(p.timeIntervalSince(g) + wait)) }\n", ""),
     ("AU1: published_at not read", POL, "                                    publishedAt: (object[\"published_at\"] as? String).flatMap(UpdateManifest.date)))", "                                    publishedAt: nil))"),
+    ("CL1: this Mac's clock taken for GitHub's", APP, "now: p.release.answeredAt,\n", "now: Date(),\n"),
     ("CL1, AU1: the dates without GitHub's", APP, "                                              published: nightly ? nil : (sight?.published ?? p.release.publishedAt))\n", "                                              published: Date.distantPast)\n"),
     ("N10 a: a nightly key in releaseKeys trusted", POL, "        updateKeys: UpdateManifest.releaseKeys.filter { !UpdateManifest.nightlyKeys.contains($0) && $0 != UpdateManifest.testPublicKey },", "        updateKeys: UpdateManifest.releaseKeys,"),
     ("N10 g: nightly turned on without a write", AUTO, "        if next.nightly && !current.nightly { held.nightly = false }\n", ""),

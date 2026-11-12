@@ -670,6 +670,10 @@ checklist.md part 1 §3's marker rule).
   first line, a UUID's text (`AppUpdater.afterHostUp`, `willQuit`). The watcher only looks whether that regular
   file is there (the second security pass's W2: never opened). A later Sill that didn't would be put back by
   the watcher of the version that updated to it, 150 s after its launch.
+- Every later Sill reads the restored note as this one writes it: the token, why, and, when the copy the
+  watcher put back failed its last check and the new copy stayed (the third security pass's W3), a third line,
+  `kept`; a Sill that finds `kept` and the pending note naming its own version says it stayed
+  (`.keptUnstarted`), never that the old one is back.
 - The manifest's signed date (`signed …Z`) and a stop (`Sill stop 1`) are part of format "1" from this
   version on: no Sill.app with an update key ever shipped before them.
 - Every release keeps T24's shape and, for Update Now, its manifest. The manifest's first line, "Sill
@@ -1060,11 +1064,13 @@ holds (its "What held": the stop, the second look, the hold, the store, no way i
 
 `SECURITY-REVIEW.md`'s third section has every finding and its proof (0 critical, 1 high, 1 medium, 2 low, the
 notes N10 a to n; R1 and R2 only partly closed; R3, A2, A3, W1, W2, G1 and N9 closed). Each was confirmed here
-against its proof before it was fixed (by reading, and for AU1, CL1, W3 and N10 k, l and m against the
-reviewer's runs: the audit's `select(.draft == false and .prerelease == false)` and its `die` before the
-notification; `fetch`'s `Date()` as both the first sight and now; the watcher's `exit 7` with nothing at Sill's
-path and no `-links` test; `prefix(200)` on Characters; `stop.tag == release.tag`; the variable taken with any key
-file). None turned out not to be real. What was done, and the check that fails without it:
+against its proof before it was fixed: the code each proof ran, read at the lines it names, does what the proof
+says (for AU1, CL1, W3 and N10 k, l and m: the audit's `select(.draft == false and .prerelease == false)` and its
+`die` before the notification; `fetch`'s `Date()` as both the first sight and now; the watcher's `exit 7` with
+nothing at Sill's path and no `-links` test; `prefix(200)` on Characters; `stop.tag == release.tag`; the variable
+taken with any key file), and the new checks fail on the code before the fix (the mutants, and `sign-test.sh` run
+against b69429ed's `sign-update.sh`). None turned out not to be real. What was done, and the check that fails
+without it:
 
 | | Finding | Done | Check that fails without it |
 |---|---|---|---|
@@ -1104,6 +1110,10 @@ The rest of N10, each answered (accepted, with the reason):
 
 R1′'s residue: `--run` trusts GitHub's record of the run (whoever controls the account can start a run of
 another commit, but then `head_sha` says so); a zip built on this Mac remains the way to prefer.
+
+W3's residue: the watcher no longer leaves Sill's path empty by its own decision, but a process of this user can
+still remove what is there or the parked copy (in the staging folder, which belongs to the user), as it could
+remove Sill.app at any other time; what App Management allows there is Noah's A6.
 
 ## 13. Progress
 
@@ -1442,12 +1452,15 @@ whose name carries the token (§8); the watcher, looking once a second whether i
 the second security pass's W2), then ends, and the new Sill removes the old copy 3 s later. If the new
 Sill's process is gone without the note, or there is no note after 150 s (`watchWait`): the watcher stops
 that process (only while it runs Sill's executable from Sill's path: `ps`), checks the old copy (a folder, not
-a link; valid with strict checks, the trust's requirement, the cdhash it ran with), puts it back at Sill's
+a link; no file with a second name, the third security pass's W3; valid with strict checks, the trust's
+requirement, the cdhash it ran with), puts it back at Sill's
 path (two renames; the new copy goes to "did not start.app" in the staging folder), writes the restored note
 (the token, why: a new file renamed into place, never written through a link or onto a FIFO), checks the copy
 at Sill's path again as before the move (W1: anything that changed it meanwhile, in the staging folder that
 is this user's, or wrote into it through a planted link, is moved aside to "failed its check.app" and never
-started) and starts it with `open`. That Sill says what happened ("Sill 0.4 didn’t start, so Sill 0.3 is back.",
+started; then, W3, the new copy goes back to Sill's path, not started, never into whatever stands there, and the
+restored note gets a third line, `kept`, so Sill's path is never left empty by the watcher and the Sill opened
+next says so) and starts it with `open`. That Sill says what happened ("Sill 0.4 didn’t start, so Sill 0.3 is back.",
 then the automatic note) and counts the attempt. Nothing that isn't the old copy, whole, is put back; a
 process that isn't the new Sill is never stopped. A process of this user can write the started note (no
 put-back) or stop the new Sill early (a put-back of the previous genuine version, checked): neither installs
@@ -1498,6 +1511,13 @@ says nothing of either (Noah: "Add the update key language when applicable as we
   two days after it first finds it, then installs it and restarts once no device has been connected for 5
   minutes; it never disconnects anyone. Before it installs a new version, Sill checks it two ways: … Update
   Now checks it the same way, at once."
+- Footnote, Use nightly builds on (the third security pass's NB1 and N10 n): "Once a day, and with nightly
+  builds on each time Sill opens, Sill asks GitHub whether a newer version is out. … Before it installs a new
+  version, Sill checks it two ways: it must carry Apple’s signature and notarization for Sill’s developer, and
+  a release must be signed with Sill’s own update key; a nightly build is signed by GitHub, which builds it."
+  With Automatically update Sill on too: "… Sill downloads a new release two days after it first finds it, and a
+  nightly build as soon as it finds it, then installs it …" (the nightly's words from `nightlyCoolingOff`).
+- Under "Use nightly builds", while on: §16.5's note.
 - A build without an update key: the check's own footnote, unchanged ("… Sill never downloads or installs
   anything by itself: a new version opens its page on GitHub, where you download it.").
 - Apple's check: "Couldn’t update: the downloaded app isn’t signed with the Developer ID of Sill’s
@@ -1526,7 +1546,10 @@ says nothing of either (Noah: "Add the update key language when applicable as we
   second pass's G1), then the install or the question.
 - After: "Sill didn’t install 0.4 by itself: it was signed more than 120 days ago. Update Now still can.",
   "Sill tries again after its next daily check.", "Sill won’t install 0.4 by itself again; Update Now still
-  can.", "Sill updated itself to 0.4 today at 03:12.", "Sill 0.4 didn’t start, so Sill 0.3 is back."
+  can.", "Sill updated itself to 0.4 today at 03:12.", "Sill 0.4 didn’t start, so Sill 0.3 is back.", and when the
+  copy the watcher put back failed its last check (the third security pass's W3): "Sill 0.4 didn’t start the
+  first time, and the copy it replaced failed its last check, so Sill 0.4 stayed. If it misbehaves, download Sill
+  again from getsill.app."
 - The way back: "Sill couldn’t put 0.3 back in place. It is at ‹path›: quit Sill and move it to your
   Applications folder soon, as macOS empties that folder after a few days."
 - To a device during the hold: "‹Mac› is restarting Sill to install an update. It reconnects in a moment."
@@ -1834,8 +1857,7 @@ The reviewer's four options (any one narrows it; the first two are settings, not
      its own pull requests); Create.
    - Or, in Terminal.app, the same as one command:
      ```
-     gh api --method POST repos/Saffsanity/sill/rulesets --input - <<'JSON'
-     {
+     gh api --method POST repos/Saffsanity/sill/rulesets --input - <<< '{
        "name": "main",
        "target": "branch",
        "enforcement": "active",
@@ -1848,8 +1870,7 @@ The reviewer's four options (any one narrows it; the first two are settings, not
            "dismiss_stale_reviews_on_push": false, "require_code_owner_review": false,
            "require_last_push_approval": false, "required_review_thread_resolution": false}}
        ]
-     }
-     JSON
+     }'
      ```
      It answers with the ruleset (its `id`). Check: `gh api repos/Saffsanity/sill/rules/branches/main --jq
      '.[].type'` prints deletion, non_fast_forward and pull_request. Undo: `gh api --method DELETE
@@ -1876,15 +1897,13 @@ The reviewer's four options (any one narrows it; the first two are settings, not
    - Or, in Terminal.app (both a reviewer and 12 hours here; for a timer alone give `"reviewers": []`, for a
      reviewer alone `"wait_timer": 0`):
      ```
-     gh api --method PUT repos/Saffsanity/sill/environments/nightly --input - <<'JSON'
-     {
+     gh api --method PUT repos/Saffsanity/sill/environments/nightly --input - <<< '{
        "wait_timer": 720,
        "prevent_self_review": false,
        "reviewers": [{"type": "User", "id": 19507835}],
        "deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true},
        "can_admins_bypass": false
-     }
-     JSON
+     }'
      ```
      19507835 is Saffsanity's user ID (`gh api repos/Saffsanity/sill --jq .owner.id`). The
      `deployment_branch_policy` line is today's, written out so the change keeps main as the only branch that

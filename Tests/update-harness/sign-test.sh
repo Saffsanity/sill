@@ -286,8 +286,10 @@ grep -q "nothing signed: read the updater's changes first" "$out/last.log" || { 
 expect ok "R2: signed with the updater's changes since v0.6.0 shown and read" with_y signs v0.6.1 "${src[@]}" --replace
 grep -q "the updater's own files since v0.6.0" "$out/last.log" && grep -q "UpdateManifest.swift" "$out/last.log" \
     && echo "  ok: R2 shows UpdateManifest.swift changed since v0.6.0" || { echo "  FAIL: R2's diff"; cat "$out/last.log"; failures=$((failures + 1)); }
-for f in AppModel.swift SettingsPanes.swift Compatibility.swift StreamServer.swift; do
-    grep -q "$f" "$root/Scripts/sign-update.sh" || { echo "  FAIL: R2's list lacks $f"; failures=$((failures + 1)); }
+# The list itself (updater_files), not the script at large: Compatibility.swift is named elsewhere in it too.
+r2list="$(awk '/^updater_files=\(/,/\)$/' "$root/Scripts/sign-update.sh")"
+for f in SillMenuBar/AppModel.swift SillMenuBar/SettingsPanes.swift StreamProtocol/Compatibility.swift SillHost/StreamServer.swift; do
+    grep -q "Sources/$f" <<<"$r2list" || { echo "  FAIL: R2's list lacks $f"; failures=$((failures + 1)); }
 done
 # F2: one line slipped into the release's Sill.
 keys_line "$pub" "$other"; retag "rotation support"

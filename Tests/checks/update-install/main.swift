@@ -1332,6 +1332,11 @@ check(after("Auto.sighted($0, tag: sightTag", "Auto.dates(signedAt: p.manifest.s
 check(updater.contains("github: p.release.answeredAt, published: nightly ? nil : p.release.publishedAt)")
       && updater.contains("Auto.dates(signedAt: p.manifest.signedAt, firstSeen: first, now: now, nightly: nightly, wait: wait, github: github)"),
       "CL1, AU1: the automatic update's dates with GitHub's clock and publication")
+// …and the clock fetch judges by is GitHub's at the first sight and now, with the latest publication, word for word
+// (whitespace aside): a mutant that left the publication out of it went uncaught by the rule above.
+let flatUpdater = updater.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+check(flatUpdater.contains("let github = Auto.GitHubClock(firstSeen: sight?.firstGitHub ?? p.release.answeredAt, now: p.release.answeredAt, published: nightly ? nil : (sight?.published ?? p.release.publishedAt))"),
+      "CL1, AU1: fetch's GitHub clock: its first time, its time now and the latest publication")
 check(updater.contains("let wait = nightly ? Auto.nightlyCoolingOff : Auto.coolingOff")
       && updater.contains("let sightTag = nightly ? Auto.key(p.release.version, build: p.release.build) : p.release.tag")
       && after("if wait > 0 {", "self.remember { Auto.sighted($0, tag: sightTag", in: updater)
@@ -1344,7 +1349,10 @@ check(text("AutoUpdateStore.swift").contains("memory = UpdateAutoPolicy.heldBack
 check(text("UpdateInstallPolicy.swift").contains("updateKeys: UpdateManifest.releaseKeys.filter { !UpdateManifest.nightlyKeys.contains($0) && $0 != UpdateManifest.testPublicKey },")
       && text("UpdateInstallPolicy.swift").contains("nightlyKeys: UpdateManifest.nightlyKeys.filter { !UpdateManifest.releaseKeys.contains($0) && $0 != UpdateManifest.testPublicKey })"),
       "N10 a: Trust.release trusts a key in both lists for neither, and the tests' key for nothing")
-check(updater.contains("restored[2] == \"kept\"") && updater.contains(".failed(.keptUnstarted(why))"), "W3: a new copy the watcher kept is said")
+check(updater.contains("            if restored.count > 2, restored[2] == \"kept\", let p = pending, p.count >= 3, restored.first == p[0], p[1] == runningKey {")
+      && updater.contains("state = Policy.State(phase: .failed(.keptUnstarted(why)), mode: p[2] == \"automatic\" ? .automatic : .manual)")
+      && after("if restored.count > 2, restored[2] == \"kept\"", "if let p = pending, p.count >= 3, restored.first == p[0], let (failed, failedBuild) = Auto.parseKey(p[1])", in: updater),
+      "W3: a new copy the watcher kept is said, word for word, before the put-back's words")
 check(updater.contains("store.update({ Auto.bounded(change($0), running: running, runningBuild: runningBuild) }"),
       "A3: every write kept small")
 check(!updater.contains("Auto.switched($0, on: true)") && updater.contains("remember(replacingUnreadable: on) { Auto.switched($0, on: on) }")
