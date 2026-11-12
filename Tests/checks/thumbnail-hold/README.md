@@ -1,0 +1,5 @@
+# `thumbnail-hold`
+
+**Checks:** how long a window's thumbnail is held before its lights show and it can be dragged (issue #113; Noah's decision of 2026-10-29): 0.2 to 3 s in tenths, 0.5 s unless changed; every tenth exactly its decimal, halfway values up, the ends (a huge value without overflowing, nothing usable the standard), the stepper's + and − (28 steps either way, end to end, every value on the way exactly its decimal), a stored value (numbers, strings, junk, the registration domain, and `-Sill.thumbnailHold 0.3` in a child run: a string in the argument domain), every word (the row, VoiceOver's "Hold to show window controls, 0.5 seconds", "0.5 s" shown, the footnote, the console's line), the title's three lines, the narrowest it may be beside the stepper before the row stacks (its words in order and whole, and of its six three-line splits the one whose widest line is shortest in the system font at 17, 19 and 21 pt, measured with CoreText), and every hundredth from -4 to 10 s against the invariants
+
+**Compiles:** `iOSClient/ThumbnailHold.swift`
