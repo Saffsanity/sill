@@ -807,7 +807,7 @@ struct StreamScreen: View {
     /// `-SillAXDump`: walks the key window as an assistive technology does (an element, else its
     /// `accessibilityElements`, else its element count, else its subviews) and prints one line per
     /// element: "ax: 1 Apps (14,454 76×50)".
-    private static func accessibilityDump() {
+    static func accessibilityDump() {
         guard let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else {
             print("ax: no key window"); return
         }

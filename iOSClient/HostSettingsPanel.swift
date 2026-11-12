@@ -31,7 +31,8 @@ import StreamProtocol
 /// `StreamClient.pasteRightAwayKey`, and the system's Paste for this device's text; Reverse
 /// Scrolling, `StreamClient.reverseScrollKey`; Three-Finger Gestures, `StreamClient.gesturesKey`),
 /// and whose gesture rows, as accessibility actions, do their gestures
-/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour.
+/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour, and last
+/// this app's version, "Sill 0.6.2 (1400)" (VersionLine).
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
@@ -81,7 +82,7 @@ struct HostSettingsPanel: View {
     private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
     private static let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
     /// DEBUG `-SillSettingsEnd 1`: the rows start scrolled to their end, so a photo of a short
-    /// screen shows the last groups (Direct Wireless, Away from home, This iPad, Take the Tour).
+    /// screen shows the last groups (Direct Wireless, Away from home, This iPad, Take the Tour, the version).
     private static var startsAtEnd: Bool {
         #if DEBUG
         return UserDefaults.standard.bool(forKey: "SillSettingsEnd")
@@ -431,6 +432,21 @@ struct HostSettingsPanel: View {
             // for a Mac without them too. Both are this device's own: its gestures, then the tour.
             thisDevice
             tour
+            versionLine
+        }
+    }
+
+    /// The last line, after Take the Tour's footnote (Noah, 2026-11-11: "at the bottom of settings";
+    /// docs/version-label-plan.md): this app's version and build, "Sill 0.6.2 (1400)" (VersionLine),
+    /// in the footnotes' size, colour and inset, the gap between groups above it (the footnote's own)
+    /// and below it. In the part that scrolls, so the header and Disconnect stay as they are.
+    @ViewBuilder private var versionLine: some View {
+        if let label = VersionLabel.shown {
+            VersionLine(label: label)
+                .font(.footnote)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
         }
     }
 
