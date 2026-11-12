@@ -43,10 +43,17 @@ the menu are what they were.
 - The release step: `Scripts/sign-update.sh v<version>` on Noah's Mac (never CI), with a signer installed
   once from files he read (`--install-signer`), signing only a zip he knows without GitHub (his own
   `release.sh` output, or `--expect-sha256` from a release run he approved); the key in his login keychain
-  (`--new-key`, once) with one copy off the Mac (docs/release-checklist.md part 1 §7, part 2). The check
-  stores `updateLatestSigned`: an unsigned release shows Open Release Page… alone, as before.
+  (`--new-key`, once) with one copy off the Mac (docs/release-checklist.md part 1 §7, part 2), and every
+  signature with it confirmed by him in person (Touch ID or his password, the prompt naming the tag, the
+  size and the start of the SHA-256), so nothing running as him signs silently. The check stores
+  `updateLatestSigned`: an unsigned release shows Open Release Page… alone, as before.
 - An independent review of the code as written (a read-only subagent, 2026-11-12): twelve findings, all
-  taken (the plan's §12a has each and its fix; the two high ones were in the signing step).
+  taken (the plan's §12a has each and its fix; the two high ones were in the signing step). A second one
+  of the fixes after the first build: six, all taken (§12b): a late Cancel stranded an update; the signer
+  could be run silently by anything running as Noah (now in person per signature); the put-back trusted a
+  cdhash (now the old copy validated whole, a copy that failed its check moved off the path, only a whole
+  old copy offered); device keys could repeat; the old copy went even when the host failed; a full disk
+  could lose the note keeping it (now a rename).
 - Verified: (filled in once compiled; the disk was under the 25 GB floor from 22:50 to …).
 - **Untested, for Noah:** the plan's §12 rehearsal with a throwaway repository and key (two notarized
   builds); the first real Update Now (a release carrying the key installed by hand first); §14's three
