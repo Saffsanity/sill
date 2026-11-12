@@ -4,11 +4,12 @@ import LocalAuthentication
 import Security
 
 // The update manifest's signer (docs/one-click-update-plan.md §4.8), the one program that ever holds the
-// update key. `Scripts/sign-update.sh --install-signer` compiles it once, from a commit Noah has read, with
-// the app's own pure definitions of the manifest (UpdateManifest, with UpdateInstallPolicy, UpdateArchive
-// and StreamProtocol's Compatibility.swift for the version), into a folder outside the repository; signing
-// runs that binary only, never one built from whatever the checkout holds that day, and the keychain item
-// trusts that binary alone (any other program asks). It reads no network and runs no other program.
+// update key. `Scripts/sign-update.sh --install-signer` compiles it from a commit Noah has read, with the
+// app's own pure definition of the manifest (UpdateManifest.swift, and StreamProtocol's Compatibility.swift
+// for SillVersion: nothing else of Sill), signs it with the hardened runtime (no library loaded into it, no
+// debugger) and puts it in a folder outside the repository; signing runs that binary only, never one built
+// from whatever the checkout holds that day, and the keychain item trusts that binary alone (any other
+// program asks). It reads no network and runs no other program.
 //
 //   update-manifest new-key [--key-file PATH]     make the update key: in the login keychain (service
 //                                                 me.saffer.sill.update-signing, account ed25519, never
@@ -125,7 +126,7 @@ case "sign":
     }
     let file = option("--key-file")
     if file == nil {
-        confirmInPerson("sign Sill \(tag) for Update Now: \(asset), \(size) bytes, SHA-256 \(sha.prefix(16))")
+        confirmInPerson(UpdateManifest.signingReason(tag: tag, asset: asset, size: size, sha256: sha))
     }
     let key = storedKey(file)
     let text = UpdateManifest.signedText(tag: tag, build: build, asset: asset, size: size, sha256: sha, cdhashes: cdhashes,

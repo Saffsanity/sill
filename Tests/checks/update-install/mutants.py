@@ -9,7 +9,7 @@ MUTANTS = [
     # The version rule and the release.
     ("the same version installed", POL, "guard version > running else { return .failure(.notNewer(versionText)) }", "guard version >= running else { return .failure(.notNewer(versionText)) }"),
     ("the same release fetched", POL, "guard version > running else { return .failure(.releaseNotNewer) }", "guard version >= running else { return .failure(.releaseNotNewer) }"),
-    ("loose versions", POL, "parts.allSatisfy({ (1...9).contains($0.utf8.count) && $0.utf8.allSatisfy { $0 >= 0x30 && $0 <= 0x39 } })", "parts.allSatisfy({ (1...9).contains($0.utf8.count) })"),
+    ("loose versions", MAN, "parts.allSatisfy({ (1...9).contains($0.utf8.count) && $0.utf8.allSatisfy { $0 >= 0x30 && $0 <= 0x39 } })", "parts.allSatisfy({ (1...9).contains($0.utf8.count) })"),
     ("drafts and prereleases", POL, "if object[\"draft\"] as? Bool == true || object[\"prerelease\"] as? Bool == true {", "if false {"),
     ("GitHub's URL for an asset", POL, "a[\"browser_download_url\"] as? String == url.absoluteString else {", "true else {"),
     ("an upload not finished", POL, "guard a[\"state\"] as? String == \"uploaded\" else {", "guard true else {"),

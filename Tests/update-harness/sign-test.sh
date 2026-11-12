@@ -2,7 +2,12 @@
 # G6 (docs/one-click-update-plan.md §11): Scripts/sign-update.sh against a stand-in `gh` (this file writes it
 # into .build) serving the genuine v0.6.1 from .build/updater-scratch/release-v0.6.1, with a throwaway key in
 # a file and the signer installed in a scratch folder (SILL_SIGNER_DIR). Nothing is uploaded anywhere: the
-# stand-in records what would have gone. Never the login keychain (every step passes --key-file).
+# stand-in records what would have gone. Never the login keychain (every step passes --key-file), so the
+# signer's in-person prompt is never shown.
+# Review 3: the installed signer has the hardened runtime and no library loads into it (F1); a release is
+# signed only when the trust its tag's Sill carries (its keys, the pinned requirement, Trust.release,
+# Endpoints.github) is the trust recorded when the signer was installed, read here from a scratch git
+# repository whose tag says each (F2); the key's backup words (F3).
 #   Tests/update-harness/sign-test.sh [--keep]
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -62,25 +67,108 @@ expect() {  # expect ok|fail "what" command...
     if [ "$got" = "$want" ]; then echo "  ok: $what"; else echo "  FAIL: $what (expected $want)"; sed 's/^/    /' "$out/last.log"; failures=$((failures + 1)); fi
 }
 echo "== sign-test"
+zero="$(printf '0%.0s' {1..64})"
 expect fail "no signer installed yet" "$sign" --public-key --key-file "$out/key"
 expect ok "the signer installed (from this checkout, in the scratch folder)" "$sign" --install-signer --yes
+grep -q "Compatibility.swift" "$out/last.log" && grep -q "UpdateManifest.swift" "$out/last.log" && grep -q "update-manifest.swift" "$out/last.log" \
+    && ! grep -q "UpdateInstallPolicy.swift\|UpdateArchive.swift" "$out/last.log" \
+    || { echo "  FAIL: the signer is built from three files (Compatibility, UpdateManifest, its main): $(grep '  [0-9a-f]\{64\}' "$out/last.log" | tr '\n' ' ')"; failures=$((failures + 1)); }
+# F1: the hardened runtime, and a library given to it through DYLD_INSERT_LIBRARIES never loads.
+codesign -dv "$out/signer/update-manifest" 2>&1 | grep -q 'flags=.*runtime' && echo "  ok: the installed signer has the hardened runtime" \
+    || { echo "  FAIL: the installed signer has no hardened runtime"; failures=$((failures + 1)); }
+cat > "$out/mark.c" <<'C'
+#include <stdio.h>
+#include <stdlib.h>
+__attribute__((constructor)) static void mark(void) {
+    const char *p = getenv("MARK_FILE");
+    if (p) { FILE *f = fopen(p, "w"); if (f) { fputs("loaded\n", f); fclose(f); } }
+}
+C
+clang -dynamiclib "$out/mark.c" -o "$out/mark.dylib"
+MARK_FILE="$out/marker" DYLD_INSERT_LIBRARIES="$out/mark.dylib" "$out/signer/update-manifest" verify /dev/null --key x > /dev/null 2>&1 || true
+[ ! -f "$out/marker" ] && echo "  ok: a library given through DYLD_INSERT_LIBRARIES does not load into the signer" \
+    || { echo "  FAIL: a library loaded into the installed signer"; failures=$((failures + 1)); }
 expect fail "the scratch signer folder without a key file (never the keychain)" "$sign" --public-key
 expect ok "a throwaway key in a file" "$sign" --new-key --key-file "$out/key"
 pub="$(sed -n 's/^public key \([A-Za-z0-9+\/=]*\) .*/\1/p' "$out/last.log")"
 [ -n "$pub" ] || { echo "  FAIL: no public key printed"; failures=$((failures + 1)); }
 expect fail "a second key never overwrites the first" "$sign" --new-key --key-file "$out/key"
-expect fail "a zip that isn't GitHub's" "$sign" v0.6.1 --key-file "$out/key" --expect-key "$pub" --zip "$genuine/Sill.zip.sha256" --yes
-expect fail "a SHA-256 that isn't GitHub's" "$sign" v0.6.1 --key-file "$out/key" --expect-key "$pub" --expect-sha256 "$(printf '0%.0s' {1..64})" --yes
-expect fail "no zip known (none built here for 0.6.1)" "$sign" v0.6.1 --key-file "$out/key" --expect-key "$pub" --yes
-expect ok "the release signed, uploaded and read back" "$sign" v0.6.1 --key-file "$out/key" --expect-key "$pub" --zip "$genuine/Sill.zip" --yes
+other="$(python3 -I -c 'import base64,os; print(base64.b64encode(os.urandom(32)).decode())')"
+
+# A scratch checkout whose tag v0.6.1 carries the trust under test (the genuine v0.6.1 zip stands for its build).
+scratch="$out/scratch"
+mkdir -p "$scratch/Sources/StreamProtocol" "$scratch/Sources/SillMenuBar" "$scratch/Scripts"
+cp "$root/Sources/StreamProtocol/Compatibility.swift" "$scratch/Sources/StreamProtocol/"
+cp "$root/Sources/SillMenuBar/UpdateManifest.swift" "$root/Sources/SillMenuBar/UpdateInstallPolicy.swift" "$scratch/Sources/SillMenuBar/"
+cp "$root/Scripts/update-manifest.swift" "$root/Scripts/sign-update.sh" "$scratch/Scripts/"
+git -C "$scratch" init -q
+git -C "$scratch" -c user.name=t -c user.email=t@t add -A
+git -C "$scratch" -c user.name=t -c user.email=t@t commit -q -m "no key"
+keys_line() {  # keys_line KEY…: the releaseKeys line with those keys
+    local list=""; for k in "$@"; do list="$list${list:+, }\"$k\""; done
+    python3 -I - "$scratch/Sources/SillMenuBar/UpdateManifest.swift" "$list" <<'PY'
+import re, sys
+p, keys = sys.argv[1], sys.argv[2]
+s = open(p).read()
+s, n = re.subn(r"static let releaseKeys: \[String\] = \[.*\]", "static let releaseKeys: [String] = [" + keys + "]", s)
+assert n == 1
+open(p, "w").write(s)
+PY
+}
+retag() {  # retag MESSAGE: commit the scratch checkout and move v0.6.1 to it
+    git -C "$scratch" -c user.name=t -c user.email=t@t commit -q -am "$1"
+    git -C "$scratch" tag -f v0.6.1 > /dev/null
+}
+keys_line "$pub"; retag "the key"
+src=(--source "$scratch" --key-file "$out/key" --zip "$genuine/Sill.zip" --yes)
+expect fail "F2: the key added after the signer was installed (its trust was recorded with none)" "$sign" v0.6.1 "${src[@]}"
+grep -q "trusts something other than what you read" "$out/last.log" || { echo "  FAIL: the refusal's words"; cat "$out/last.log"; failures=$((failures + 1)); }
+expect ok "the signer installed again from the checkout that carries the key" "$sign" --install-signer --source "$scratch" --yes
+grep -q "$pub" "$out/signer/trust.txt" || { echo "  FAIL: the recorded trust lacks the key"; failures=$((failures + 1)); }
+expect fail "a zip that isn't GitHub's" "$sign" v0.6.1 --source "$scratch" --key-file "$out/key" --zip "$genuine/Sill.zip.sha256" --yes
+expect fail "a SHA-256 that isn't GitHub's" "$sign" v0.6.1 --source "$scratch" --key-file "$out/key" --expect-sha256 "$zero" --yes
+expect fail "no zip known (none built here for 0.6.1)" "$sign" v0.6.1 --source "$scratch" --key-file "$out/key" --yes
+expect ok "the release signed, uploaded and read back" "$sign" v0.6.1 "${src[@]}"
+grep -q "SHA-256 $(shasum -a 256 "$genuine/Sill.zip" | cut -d' ' -f1 | sed -E 's/(.{8})/\1 /g; s/ $//')" "$out/last.log" \
+    || { echo "  FAIL: the whole SHA-256, grouped, before signing"; failures=$((failures + 1)); }
 [ -f "$out/assets/Sill.zip.manifest" ] || { echo "  FAIL: nothing uploaded"; failures=$((failures + 1)); }
 expect ok "the uploaded manifest verifies with the key" "$out/signer/update-manifest" verify "$out/assets/Sill.zip.manifest" --key "$pub"
 grep -q "tag v0.6.1, version 0.6.1, build 1388, Sill.zip 5920002 bytes" "$out/last.log" || { echo "  FAIL: the manifest's fields"; cat "$out/last.log"; failures=$((failures + 1)); }
 grep -q "cdhash arm64 d5feca97b4d531345aefab17bb8b588358f2975f" "$out/last.log" || { echo "  FAIL: the arm64 cdhash"; failures=$((failures + 1)); }
-expect fail "another key does not verify it" "$out/signer/update-manifest" verify "$out/assets/Sill.zip.manifest" --key "$(python3 -I -c 'import base64,os; print(base64.b64encode(os.urandom(32)).decode())')"
-expect fail "signed already, without --replace" "$sign" v0.6.1 --key-file "$out/key" --expect-key "$pub" --zip "$genuine/Sill.zip" --yes
-expect ok "signed again with --replace" "$sign" v0.6.1 --key-file "$out/key" --expect-key "$pub" --zip "$genuine/Sill.zip" --yes --replace
+expect fail "another key does not verify it" "$out/signer/update-manifest" verify "$out/assets/Sill.zip.manifest" --key "$other"
+expect fail "signed already, without --replace" "$sign" v0.6.1 "${src[@]}"
+expect ok "signed again with --replace" "$sign" v0.6.1 "${src[@]}" --replace
+# F2: one line slipped into the release's Sill.
+keys_line "$pub" "$other"; retag "rotation support"
+expect fail "F2: a second key in the release's Sill" "$sign" v0.6.1 "${src[@]}" --replace
+keys_line "$pub"; retag "back to one key"
+sed -i '' 's/leaf\[subject.OU\] = \\"9B2KKVM937\\"/leaf[subject.OU] = \\"ABCDE12345\\"/' "$scratch/Sources/SillMenuBar/UpdateInstallPolicy.swift"; retag "another team"
+expect fail "F2: another team in the pinned requirement" "$sign" v0.6.1 "${src[@]}" --replace
+git -C "$scratch" checkout -q HEAD~1 -- Sources/SillMenuBar/UpdateInstallPolicy.swift; retag "the team back"
+sed -i '' 's#"https://api.github.com"#"https://api.githubusercontent.com"#' "$scratch/Sources/SillMenuBar/UpdateInstallPolicy.swift"; retag "another API host"
+expect fail "F2: another host in Endpoints.github" "$sign" v0.6.1 "${src[@]}" --replace
+git -C "$scratch" checkout -q HEAD~1 -- Sources/SillMenuBar/UpdateInstallPolicy.swift; retag "the host back"
+printf '\n// A comment that names releaseKeys changes no trust.\n' >> "$scratch/Sources/SillMenuBar/UpdateManifest.swift"
+sed -i '' 's#^    /// The only Trust Sill.app uses.#    /// The only Trust Sill.app uses (a comment changed).#' "$scratch/Sources/SillMenuBar/UpdateInstallPolicy.swift"
+retag "comments"
+grep -q "a comment changed" "$scratch/Sources/SillMenuBar/UpdateInstallPolicy.swift" || { echo "  FAIL: the comment case changed nothing"; failures=$((failures + 1)); }
+expect ok "comments change no trust" "$sign" v0.6.1 "${src[@]}" --replace
+# F1: a signer without the hardened runtime (an older install) is refused.
+cp "$out/signer/update-manifest" "$out/plain-signer"
+codesign -s - -f "$out/plain-signer" 2> /dev/null
+cp "$out/signer/update-manifest" "$out/hardened-signer"
+cp "$out/plain-signer" "$out/signer/update-manifest"
+shasum -a 256 "$out/signer/update-manifest" | cut -d' ' -f1 > "$out/signer/update-manifest.sha256"
+expect fail "F1: a signer without the hardened runtime" "$sign" v0.6.1 "${src[@]}" --replace
+grep -q "no hardened runtime" "$out/last.log" || { echo "  FAIL: the refusal's words"; cat "$out/last.log"; failures=$((failures + 1)); }
+cp "$out/hardened-signer" "$out/signer/update-manifest"
+shasum -a 256 "$out/signer/update-manifest" | cut -d' ' -f1 > "$out/signer/update-manifest.sha256"
 printf 'x' >> "$out/signer/update-manifest"
-expect fail "a signer changed after it was installed" "$sign" v0.6.1 --key-file "$out/key" --expect-key "$pub" --zip "$genuine/Sill.zip" --yes --replace
+expect fail "a signer changed after it was installed" "$sign" v0.6.1 "${src[@]}" --replace
+# F3: the backup's words.
+for doc in docs/release-checklist.md docs/one-click-update-plan.md; do
+    grep -q "never Always Allow" "$root/$doc" && grep -q "Terminal.app" "$root/$doc" && echo "  ok: $doc says Allow, never Always Allow, in Terminal.app" \
+        || { echo "  FAIL: $doc's backup words (F3)"; failures=$((failures + 1)); }
+done
 grep -c '^uploaded ' "$out/gh.log" | sed 's/^/  uploads recorded: /'
 [ "$failures" = 0 ] && echo "sign-test: all passed" || { echo "sign-test: $failures failed"; exit 1; }

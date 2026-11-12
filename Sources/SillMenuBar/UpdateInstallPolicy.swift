@@ -116,20 +116,10 @@ enum UpdateInstallPolicy {
 
     // MARK: Versions
 
-    /// A version of digits and dots only: 1 to 8 parts of 1 to 9 digits ("0.6.2"). SillVersion reads
-    /// the digits-and-dots prefix of anything ("0.6.2-rc" is 0.6.2); Update Now takes only this.
-    static func strictVersion(_ text: String) -> SillVersion? {
-        let parts = text.split(separator: ".", omittingEmptySubsequences: false)
-        guard (1...8).contains(parts.count),
-              parts.allSatisfy({ (1...9).contains($0.utf8.count) && $0.utf8.allSatisfy { $0 >= 0x30 && $0 <= 0x39 } }) else { return nil }
-        return SillVersion(text)
-    }
-
-    /// A tag: "v" and a strict version.
-    static func strictTag(_ tag: String) -> SillVersion? {
-        guard tag.hasPrefix("v") else { return nil }
-        return strictVersion(String(tag.dropFirst()))
-    }
+    /// The version rules and the architectures are UpdateManifest's (the signer compiles that file alone,
+    /// with SillVersion); these name them where the rest of Update Now reads them.
+    static func strictVersion(_ text: String) -> SillVersion? { UpdateManifest.strictVersion(text) }
+    static func strictTag(_ tag: String) -> SillVersion? { UpdateManifest.strictTag(tag) }
 
     // MARK: Where Sill runs, and the refusals
 
@@ -317,18 +307,7 @@ enum UpdateInstallPolicy {
 
     // MARK: The bundle
 
-    enum Architecture: String, CaseIterable, Sendable {
-        case arm64, x86_64
-
-        /// The slice this process runs (Rosetta runs x86_64).
-        static var current: Architecture {
-            #if arch(arm64)
-            return .arm64
-            #else
-            return .x86_64
-            #endif
-        }
-    }
+    typealias Architecture = UpdateManifest.Architecture
 
     enum EntitlementValue: Equatable, Sendable {
         case string(String)

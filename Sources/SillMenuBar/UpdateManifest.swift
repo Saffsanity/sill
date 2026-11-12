@@ -10,9 +10,10 @@ import StreamProtocol
 /// only "built by Sill's CI"; this signature proves "Noah released this build". Update Now verifies it
 /// before the zip is even downloaded, and then holds the zip and the unpacked app to it.
 ///
-/// Pure: Foundation, CryptoKit and StreamProtocol's SillVersion. The app and the signer
-/// (Scripts/update-manifest.swift, compiled with this file by Scripts/sign-update.sh) share this one
-/// definition of the format. Checked by Tests/checks/update-install.
+/// Pure: Foundation, CryptoKit and StreamProtocol's SillVersion, and nothing else of Sill, so the signer
+/// (Scripts/update-manifest.swift) compiles from this file, SillVersion's Compatibility.swift and its own
+/// main: the three files Noah reads before he installs it. The app and the signer share this one definition
+/// of the format, the version rules and the architectures. Checked by Tests/checks/update-install.
 ///
 /// The format, ASCII, one field a line, each line ending in "\n", no other whitespace, at most 4 KB:
 ///
@@ -97,9 +98,9 @@ struct UpdateManifest: Equatable, Sendable {
         }
         guard lines.first == firstLine else { return .failure(.format("first")) }
         i = 1
-        guard let tag = field("tag"), let tagVersion = UpdateInstallPolicy.strictTag(tag) else { return .failure(.format("tag")) }
+        guard let tag = field("tag"), let tagVersion = strictTag(tag) else { return .failure(.format("tag")) }
         guard let versionText = field("version"), versionText == String(tag.dropFirst()),
-              let version = UpdateInstallPolicy.strictVersion(versionText), version == tagVersion else { return .failure(.format("version")) }
+              let version = strictVersion(versionText), version == tagVersion else { return .failure(.format("version")) }
         guard let build = field("build"), isDigits(build, 1...9) else { return .failure(.format("build")) }
         guard let asset = field("asset"), isAssetName(asset) else { return .failure(.format("asset")) }
         guard let sizeText = field("size"), isDigits(sizeText, 1...12), let size = Int64(sizeText), size > 0 else { return .failure(.format("size")) }
@@ -108,7 +109,7 @@ struct UpdateManifest: Equatable, Sendable {
         var order: [String] = []
         while i < lines.count, lines[i].hasPrefix("cdhash ") {
             let parts = lines[i].split(separator: " ", omittingEmptySubsequences: false).map(String.init)
-            guard parts.count == 3, UpdateInstallPolicy.Architecture(rawValue: parts[1]) != nil, isHex(parts[2], count: 40),
+            guard parts.count == 3, Architecture(rawValue: parts[1]) != nil, isHex(parts[2], count: 40),
                   cdhashes[parts[1]] == nil else { return .failure(.format("cdhash")) }
             cdhashes[parts[1]] = parts[2]
             order.append(parts[1])
@@ -212,5 +213,56 @@ struct UpdateManifest: Equatable, Sendable {
     static func isAssetName(_ s: String) -> Bool {
         (1...64).contains(s.utf8.count) && s.utf8.first != 0x2E
             && s.utf8.allSatisfy { ($0 >= 0x30 && $0 <= 0x39) || ($0 >= 0x41 && $0 <= 0x5A) || ($0 >= 0x61 && $0 <= 0x7A) || $0 == 0x2E || $0 == 0x2D || $0 == 0x5F }
+    }
+}
+
+// MARK: The signer's prompt
+
+extension UpdateManifest {
+    /// What the signer asks Noah in person before the keychain's key signs (LocalAuthentication shows
+    /// "update-manifest is trying to ‹this›"): the tag, the asset, its size and its whole SHA-256 in groups of
+    /// eight, to compare with what release.sh printed. The whole of it: with 16 digits a zip that looks the
+    /// same was a 2^64 search away (review 3, F4).
+    static func signingReason(tag: String, asset: String, size: Int64, sha256: String) -> String {
+        var groups: [String] = []
+        var rest = Substring(sha256)
+        while !rest.isEmpty {
+            groups.append(String(rest.prefix(8)))
+            rest = rest.dropFirst(8)
+        }
+        return "sign Sill \(tag) for Update Now: \(asset), \(size) bytes, SHA-256 \(groups.joined(separator: " "))"
+    }
+}
+
+// MARK: Versions and architectures (Update Now's, here so the signer needs this file alone)
+
+extension UpdateManifest {
+    /// A version of digits and dots only: 1 to 8 parts of 1 to 9 digits ("0.6.2"). SillVersion reads
+    /// the digits-and-dots prefix of anything ("0.6.2-rc" is 0.6.2); Update Now takes only this.
+    static func strictVersion(_ text: String) -> SillVersion? {
+        let parts = text.split(separator: ".", omittingEmptySubsequences: false)
+        guard (1...8).contains(parts.count),
+              parts.allSatisfy({ (1...9).contains($0.utf8.count) && $0.utf8.allSatisfy { $0 >= 0x30 && $0 <= 0x39 } }) else { return nil }
+        return SillVersion(text)
+    }
+
+    /// A tag: "v" and a strict version.
+    static func strictTag(_ tag: String) -> SillVersion? {
+        guard tag.hasPrefix("v") else { return nil }
+        return strictVersion(String(tag.dropFirst()))
+    }
+
+    /// The slices a release may have.
+    enum Architecture: String, CaseIterable, Sendable {
+        case arm64, x86_64
+
+        /// The slice this process runs (Rosetta runs x86_64).
+        static var current: Architecture {
+            #if arch(arm64)
+            return .arm64
+            #else
+            return .x86_64
+            #endif
+        }
     }
 }

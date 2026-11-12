@@ -915,25 +915,35 @@ default loosen the trust, the hosts or the version rule.
 
 Three things, at the Mac. The key list stays empty in the code until step 2's commit; nothing here made a key.
 
-**1. Once: the signer, the key, its backup.**
-1. Read the five files the signer is built from: `Scripts/update-manifest.swift`,
-   `Sources/SillMenuBar/UpdateManifest.swift`, `UpdateInstallPolicy.swift`, `UpdateArchive.swift` and
-   `Sources/StreamProtocol/Compatibility.swift` (the last three only for the version and the format's
-   helpers). The signer is the only program that will ever hold the key.
-2. `Scripts/sign-update.sh --install-signer`: it lists those files with their SHA-256 and the commit,
-   asks whether you read them, and builds the signer into `~/Library/Application Support/Sill Update
-   Signer/`. Every signing checks that binary is unchanged. After a change to those files, read it and run
-   this again (the keychain then asks once before the new signer may use the key).
+**1. Once: the signer, the key, its backup.** In Terminal.app, never a terminal inside the Claude app
+(agents can read that one).
+1. Read the three files the signer is built from: `Scripts/update-manifest.swift`,
+   `Sources/SillMenuBar/UpdateManifest.swift` and `Sources/StreamProtocol/Compatibility.swift` (the last
+   only for SillVersion), and `Scripts/sign-update.sh`, which chooses what it signs. The signer is the only
+   program that will ever hold the key.
+2. `Scripts/sign-update.sh --install-signer`: it lists those files with their SHA-256 and the commit, and
+   the trust it will hold every release to (the update keys, the pinned code requirement, Trust.release and
+   Endpoints.github, as the checkout says them), asks whether you read them, and builds the signer into
+   `~/Library/Application Support/Sill Update Signer/` with the hardened runtime (no program can load code
+   into it or attach to it). Every signing checks that binary is unchanged and hardened, and that the
+   release's Sill carries exactly that trust. After a change to any of it that you have read (your key,
+   step 2; a rotation), run this again from that checkout. The keychain then asks once before the new
+   signer may use the key: allow it only right after you ran --install-signer yourself; any other time a
+   prompt about the update key appears, deny it.
 3. `Scripts/sign-update.sh --new-key`: makes the key and keeps it in your login keychain ("Sill update
    signing key", never synced), and prints the public key and its key ID. It refuses to make a second one.
-4. Back it up once, off the Mac: `security find-generic-password -s me.saffer.sill.update-signing -a ed25519
-   -w` shows the private key (the keychain asks); put it in a 1Password item (or on paper in a safe), and
-   nowhere else: not a file in the repository, the handoff folder or Downloads, not GitHub, not CI.
+4. Back it up once, off the Mac, in Terminal.app: `security find-generic-password -s
+   me.saffer.sill.update-signing -a ed25519 -w` shows the private key. At the keychain's question choose
+   Allow, never Always Allow (Always Allow would let `security`, and so any program running as you, read the
+   key without asking). Type its 44 characters into a 1Password item (or on paper in a safe); don't copy and
+   paste it (Sill shares the clipboard with your devices, and Universal Clipboard with your other Apple
+   devices); then press ⌘K to clear the window. Nowhere else: not a file in the repository, the handoff
+   folder or Downloads, not GitHub, not CI.
 5. What a lost key costs: no Sill already installed can accept another update through Update Now. Releases
    then go out unsigned (Update Now doesn't show; Open Release Page… as before) until one carrying a new
    public key is installed by hand once; its notes say so. A leaked key: the same, and the notes ask people
    to update by hand once; the leaked key alone installs nothing (a Developer ID signed, notarized build is
-   still needed).
+   still needed), but no Sill that never updates by hand can be told to stop trusting it (N1).
 
 **2. Once: the public key into the app.**
 1. Give the public key that step 1.3 printed (a line of base64; it is not a secret) to whoever makes the
@@ -941,7 +951,9 @@ Three things, at the Mac. The key list stays empty in the code until step 2's co
 2. It goes into `Sources/SillMenuBar/UpdateManifest.swift`, `static let releaseKeys: [String] =
    ["‹the public key›"]`, in a commit of its own, reviewed, before the first release that carries the
    updater. `Tests/checks/update-install` checks every key there is usable.
-3. That first release is installed by hand (the Sill before it has no key to check with): it is the first
+3. From a checkout of that commit, `Scripts/sign-update.sh --install-signer` again: it shows the trust
+   with your key in it, and from then on a release is signed only while its Sill trusts exactly that key.
+4. That first release is installed by hand (the Sill before it has no key to check with): it is the first
    one whose Update Now works, and the release after it is the first Update Now installs.
 
 **3. Every release: sign it after it is published.**
@@ -951,11 +963,14 @@ Three things, at the Mac. The key list stays empty in the code until step 2's co
    the release workflow built it in a run you approved, add `--expect-sha256 ‹the SHA-256 that run's log
    printed for Sill.zip›`. A release you did not build here or approve has neither, and is refused: that is
    the point.
-3. It checks the zip (the checklist's download checks). Then Touch ID (or your password) asks you to allow
-   "sign Sill v0.6.2 for Update Now: Sill.zip, ‹size› bytes, SHA-256 ‹16 hex digits›": compare those
-   digits with the start of the SHA-256 `release.sh` printed for Sill.zip (or the approved run's), and
-   allow only when they match. Any other time this prompt appears (when you didn't just run
-   sign-update.sh), cancel it: something is trying to use your key. Then it shows the manifest, asks
+3. It checks that v0.6.2's Sill trusts exactly what you recorded at step 1.2 (or 2.3), and refuses
+   otherwise, showing the difference: another key, team or host slipped into the release is caught here.
+   It checks the zip (the checklist's download checks) and prints its SHA-256 in groups of eight. Then
+   Touch ID (or your password) asks you to allow "sign Sill v0.6.2 for Update Now: Sill.zip, ‹size› bytes,
+   SHA-256 ‹64 hex digits in groups of eight›": compare every group with the SHA-256 `release.sh` printed
+   for Sill.zip (or the approved run's), and allow only when all match. Any other time this prompt appears
+   (when you didn't just run sign-update.sh), cancel it: something is trying to use your key. Then it
+   shows the manifest, asks
    "Upload Sill.zip.manifest to v0.6.2 in Saffsanity/sill?", and on yes uploads it and reads it back. When it
    worked, the last line is "Uploaded and read back: v0.6.2 is signed for Update Now." and the release lists
    `Sill.zip.manifest`.

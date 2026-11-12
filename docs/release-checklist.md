@@ -355,25 +355,33 @@ whose public half is compiled into the Sill that runs (`UpdateManifest.releaseKe
 never touches GitHub or CI: the Developer ID identity does (the `nightly` environment signs and notarizes
 with no reviewer), so this key is what tells a release Noah made from a build CI made.
 
-- [ ] Install the signer, the one program that ever holds the key: `Scripts/sign-update.sh
-      --install-signer`. It lists the five files it is built from with their SHA-256 and the commit, asks
-      whether you have read them, and builds it into `~/Library/Application Support/Sill Update Signer/`;
-      signing runs that binary only, never one rebuilt from the checkout of the day. Again after any change
-      to those files you have read (the keychain then asks once before the new one uses the key).
+- [ ] In Terminal.app, never a terminal inside the Claude app (agents can read that one). Install the
+      signer, the one program that ever holds the key: `Scripts/sign-update.sh --install-signer`. It lists
+      the three files it is built from (UpdateManifest.swift, Compatibility.swift and its own main) with
+      their SHA-256 and the commit, and the trust it will hold every release to (the update keys, the
+      pinned code requirement, Trust.release and Endpoints.github), asks whether you have read them, and
+      builds it with the hardened runtime into `~/Library/Application Support/Sill Update Signer/`;
+      signing runs that binary only, and only for a release whose Sill carries exactly that trust. Again
+      after any change to those files or that trust you have read (the keychain then asks once before the
+      new one uses the key: allow it only right after you ran --install-signer yourself).
 - [ ] Make the key: `Scripts/sign-update.sh --new-key`. It makes an Ed25519 key (CryptoKit) and keeps it
       in the login keychain (a generic password: service `me.saffer.sill.update-signing`, account
       `ed25519`, label "Sill update signing key", not synchronizable), and prints the public key and its
       key ID. Run it once: it refuses when the keychain has one.
-- [ ] One copy off the Mac, for loss: the private key as base64, shown once with `security
-      find-generic-password -s me.saffer.sill.update-signing -a ed25519 -w` (the keychain asks), into a
-      1Password item (or on paper in a safe). Never a file in the repository, the handoff folder or
-      ~/Downloads (every agent and tool works there), never GitHub, never CI.
+- [ ] One copy off the Mac, for loss, in Terminal.app: `security find-generic-password -s
+      me.saffer.sill.update-signing -a ed25519 -w` shows the private key as base64. At the keychain's
+      question choose Allow, never Always Allow (Always Allow lets `security`, and so any program running
+      as you, read it without asking). Type it into a 1Password item (or on paper in a safe), without the
+      clipboard (Sill shares it with your devices, Universal Clipboard with your other Apple devices), then
+      ⌘K. Never a file in the repository, the handoff folder or ~/Downloads (every agent and tool works
+      there), never GitHub, never CI.
 - [ ] The public key into `Sources/SillMenuBar/UpdateManifest.swift`, `releaseKeys` (one line, a commit of
-      its own). `Tests/checks/update-install` checks that every key listed is usable. The first release
-      that carries it is installed by hand (Update Now in the Sill before it has no key to check with);
-      the release after it is the first Update Now can install.
-- Rotation: a release carries both keys and is signed with the old one; the next is signed with the new
-      one; a later one drops the old. Lost: releases go out without a manifest (Update Now doesn't show;
+      its own). `Tests/checks/update-install` checks that every key listed is usable. Then
+      `--install-signer` again from that commit (it shows your key in the trust). The first release that
+      carries it is installed by hand (Update Now in the Sill before it has no key to check with); the
+      release after it is the first Update Now can install.
+- Rotation: a release carries both keys and is signed with the old one (`--install-signer` from it first:
+      the trust then lists both); the next is signed with the new one; a later one drops the old. Lost: releases go out without a manifest (Update Now doesn't show;
       Open Release Page… as before) until one carrying a new key is installed by hand once (say so in its
       notes). Leaked: the same as lost, and the notes ask people to update by hand once; the leaked key
       alone installs nothing (a Developer ID signed, notarized build is still needed).
@@ -476,23 +484,26 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       `.sha256`, `spctl -a -vv -t open --context context:primary-signature` on the image and
       `spctl -a -vv -t exec` on the Sill.app inside each ("Notarized Developer ID"), and the app's
       `CFBundleShortVersionString` and `CFBundleVersion`.
-- [ ] Sign the release for Update Now, on Noah's Mac, right after it is published (never in CI: part 1
-      §7): `Scripts/sign-update.sh v<version>`. It signs only a zip you know without GitHub: by default
-      `.build/Sill-<version>.zip` from your own `release.sh` run (GitHub's must be it, byte for byte), or,
-      for a release the release workflow built in a run you approved, `--expect-sha256` with the SHA-256
-      that run's log printed for Sill.zip. A release CI published that you did not approve is never
-      signed: that is the point of the key (docs/one-click-update-plan.md T4). It reads the published
-      release, downloads `Sill.zip` into `.build/update-sign`, checks it as the item above does (the
-      SHA-256 against `Sill.zip.sha256` and GitHub's digest, exactly one Sill.app, `codesign --verify
-      --strict --deep` with Sill's pinned requirement and `notarized`, `stapler validate`, spctl's
-      "Notarized Developer ID", the version is the tag's), reads each slice's cdhash with codesign (the
-      values Update Now reads with Security), signs the manifest (Touch ID or your password: allow only
-      when the prompt's 16 hex digits are the start of the SHA-256 release.sh printed), reads it back with
-      the key the tagged source carries, shows it, asks, uploads `Sill.zip.manifest` and downloads it
-      again to compare. Until it is there, Update Now does not show for the release (every Sill's check
-      stores whether the release lists the manifest), and the release page is the way, as before Update
-      Now. A Sill that checked before the signing shows Update Now after its next daily check, or Check
-      Now.
+- [ ] Sign the release for Update Now, on Noah's Mac, in Terminal.app, right after it is published (never
+      in CI: part 1 §7): `Scripts/sign-update.sh v<version>`. It first checks that the release's Sill
+      trusts exactly what you recorded at `--install-signer` (its update keys, the pinned code
+      requirement, Trust.release and Endpoints.github), and refuses otherwise, showing the difference. It
+      signs only a zip you know without GitHub: by default `.build/Sill-<version>.zip` from your own
+      `release.sh` run (GitHub's must be it, byte for byte), or, for a release the release workflow built
+      in a run you approved, `--expect-sha256` with the SHA-256 that run's log printed for Sill.zip. A
+      release CI published that you did not approve is never signed: that is the point of the key
+      (docs/one-click-update-plan.md T4). It reads the published release, downloads `Sill.zip` into
+      `.build/update-sign`, checks it as the item above does (the SHA-256 against `Sill.zip.sha256` and
+      GitHub's digest, exactly one Sill.app, `codesign --verify --strict --deep` with Sill's pinned
+      requirement and `notarized`, `stapler validate`, spctl's "Notarized Developer ID", the version is
+      the tag's), reads each slice's cdhash with codesign (the values Update Now reads with Security),
+      prints the SHA-256 in groups of eight, and signs the manifest: Touch ID or your password, the prompt
+      showing the whole SHA-256 in the same groups; allow only when every group is the SHA-256 release.sh
+      printed. It reads the manifest back with the recorded keys, shows it, asks, uploads
+      `Sill.zip.manifest` and downloads it again to compare. Until it is there, Update Now does not show
+      for the release (every Sill's check stores whether the release lists the manifest), and the release
+      page is the way, as before Update Now. A Sill that checked before the signing shows Update Now after
+      its next daily check, or Check Now.
 - [ ] Homebrew: bump the cask once the release is published (its `Sill.dmg` must answer). In the
       tap (part 1 §6), from a Mac that has it tapped and the cask trusted: `brew bump-cask-pr
       --no-fork --version <version> --sha256 <SHA-256> saffsanity/sill/sill`, the SHA-256 the one in
