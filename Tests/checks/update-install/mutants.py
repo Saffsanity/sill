@@ -84,7 +84,7 @@ MUTANTS = [
     ("no cooling-off", AUTO, "        if age < coolingOff { return .waitUntil(signedAt.addingTimeInterval(coolingOff)) }\n", ""),
     ("no age limit", AUTO, "        if age > maxAge { return .refuse(", "        if false { return .refuse("),
     ("a signature from the future", AUTO, "        if signedAt.timeIntervalSince(now) > clockSkew {", "        if false {"),
-    ("a rollback by itself", AUTO, "        if let highest = m.highestOffered.flatMap(UpdateInstallPolicy.strictVersion), offered < highest {\n            return .no(", "        if let highest = m.highestOffered.flatMap(UpdateInstallPolicy.strictVersion), false, offered < highest {\n            return .no("),
+    ("a rollback by itself", AUTO, "        if let highest = m.highestSigned.flatMap(UpdateInstallPolicy.strictVersion), offered < highest {\n            return .no(", "        if let highest = m.highestSigned.flatMap(UpdateInstallPolicy.strictVersion), false, offered < highest {\n            return .no("),
     ("a third attempt", AUTO, "            if a.count >= maxAttempts { return .no(", "            if a.count > maxAttempts { return .no("),
     ("attempts back to back", AUTO, "            if now.timeIntervalSince(a.last) < retryAfter { return .no(", "            if false { return .no("),
     ("a stopped release by itself", AUTO, "        if m.stopped.contains(offeredTag) { return .no(", "        if false { return .no("),

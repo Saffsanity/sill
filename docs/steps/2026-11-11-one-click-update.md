@@ -60,7 +60,7 @@ updater features" (the plan's §15.1); the independent security review's finding
   keychain group (`AutoUpdateStore`, data-protection, this device only), never the defaults, set only from
   Settings (`setAutomaticUpdate`). One state machine with Update Now (a `mode`, a `waiting` phase): after a
   check GitHub answered, Update Now's steps for a release signed at least 48 h ago and at most 120 days,
-  never below the highest offered or a stopped one, two attempts a version at most, 20 h apart; then a wait
+  never below the highest signed release it has read or a stopped one, two attempts a version at most, 20 h apart; then a wait
   for 10 minutes with no device connected and no pairing window, GitHub asked again, and in one step on the
   host's queue the hold of new sessions with the count of the connected ones
   (`StreamServer.holdNewSessions`; goodbye `restarting`, reconnect true), then the install. The download's
@@ -81,6 +81,22 @@ updater features" (the plan's §15.1); the independent security review's finding
   and be7e41b (run-all's 67 checks, the iOS build, no AppUpdater warning). Found on the way: macOS's System Policy denies listing the
   temporary-items folder (the clean-up now goes by a note), the low-space rounding's overflow, and a
   freshly started ad hoc app held unwritable by the system policy for a moment (harness only).
+- Verified, round 3 (2026-11-12 04:40–05:20, this Mac, heavy jobs through heavy.sh, no device, nothing
+  launched but the harness's test executables and the bare SillMenuBar for previews): `update-install` 715
+  checks (the date, the stop, the automatic rule, both modes, the words, the reviewer's F6 cases, the source
+  rules for the switch); `update-policy` 129; `Tests/update-harness/run.sh` 227 of 227 (the stop's four
+  cases, link-through-link, the check right before the swap, a hard link, the watcher's six: a new copy that
+  proves itself stays, one that quits at once, one that never proves itself and one that writes another
+  token are put back and the old copy started, an old copy changed while it waited is never put back, and
+  a process that isn't the new copy is never stopped); `sign-test.sh` all passed (F1's runtime and
+  DYLD_INSERT_LIBRARIES marker, F2's four refusals and the comment-only change, the signed time, a stop
+  signed and verified, F3's words); `swift build -c release` clean but the CaptureProbe warning; previews
+  from the bare SillMenuBar against main's (0d22bbf) rendered in the same run: 161 identical, the General
+  pane's four only by the "Running from" path, menu.txt's appended samples, 126 new pane-update-now files
+  (`~/Downloads/sill-handoff/one-click-update/previews/`); the mutants: running. Found on the way: the
+  watcher read no CDHash (`codesign -d -v` prints none; now `-vvv --arch`), a SIGPIPE race under pipefail
+  in sign-update.sh's `codesign | grep -q` and `spctl | grep -q`, `Process.waitUntilExit` hanging after a
+  hop in the harness, and macOS's SwiftUI forms have no Dynamic Type (the larger-text previews set 17 pt).
 - **Untested, for Noah:** the plan's §12 rehearsal with a throwaway repository and key (two notarized
   builds); the first real Update Now (a release carrying the key installed by hand first); §14's three
   step lists (once: the signer, the key, its backup; once: the public key into `releaseKeys`, a commit of

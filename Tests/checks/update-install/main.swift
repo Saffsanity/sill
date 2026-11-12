@@ -629,9 +629,9 @@ check(start(mem, signed: false) == .no("the release isn’t signed with Sill’s
 check(start(mem, refusal: .otherAccount("Alex")) == .no(P.words(.otherAccount("Alex"))), "a refusal holds: nothing downloaded")
 check(start(AP.stopped(mem, "v0.4.0")) == .no("a stop signed with an update key names v0.4.0"), "a stopped release")
 check(start(AP.stopped(mem, "v0.4.1")) == .go, "another release's stop")
-check(start(AP.offered(mem, SillVersion("0.5")!)) == .no("the latest release went back from 0.5 to 0.4"), "a rollback (F7)")
-check(start(AP.offered(mem, v040)) == .go && start(AP.offered(AP.offered(mem, v040), v030)) == .go, "the highest offer kept")
-check(AP.offered(AP.offered(mem, SillVersion("0.5")!), v040).highestOffered == "0.5", "a lower offer never lowers it")
+check(start(AP.signedRelease(mem, SillVersion("0.5")!)) == .no("the latest release went back from 0.5 to 0.4"), "a rollback (F7)")
+check(start(AP.signedRelease(mem, v040)) == .go && start(AP.signedRelease(AP.signedRelease(mem, v040), v030)) == .go, "the highest offer kept")
+check(AP.signedRelease(AP.signedRelease(mem, SillVersion("0.5")!), v040).highestSigned == "0.5", "a lower release never lowers it")
 var tried = AP.began(mem, v040, now: t0)
 check(tried.attempts["0.4"]?.count == 1, "one attempt")
 check(start(tried, now: later(19.9)) == .no("0.4 was tried at 2026-11-12T03:00:00Z"), "not again within 20 hours")
@@ -672,7 +672,7 @@ check(AP.offerNote(mem, offered: v040, offeredTag: "v0.4.0", waitUntil: later(30
       || AP.offerNote(mem, offered: v040, offeredTag: "v0.4.0", waitUntil: later(30), now: t0).hasPrefix("Sill installs it by itself on "), "cooling off: from when")
 check(AP.offerNote(AP.stopped(mem, "v0.4.0"), offered: v040, offeredTag: "v0.4.0", waitUntil: nil, now: t0) == "A stop signed with Sill’s update key names Sill 0.4, so Sill won’t install it.", "stopped")
 check(AP.offerNote(tried, offered: v040, offeredTag: "v0.4.0", waitUntil: nil, now: t0) == "Sill won’t install 0.4 by itself again; Update Now still can.", "after two attempts")
-check(AP.offerNote(AP.offered(mem, SillVersion("0.5")!), offered: v040, offeredTag: "v0.4.0", waitUntil: nil, now: t0) == "Sill won’t install 0.4 by itself: 0.5 was offered before it. Update Now still can.", "a rollback")
+check(AP.offerNote(AP.signedRelease(mem, SillVersion("0.5")!), offered: v040, offeredTag: "v0.4.0", waitUntil: nil, now: t0) == "Sill won’t install 0.4 by itself: Sill 0.5 was out before it. Update Now still can.", "a rollback")
 check(AP.afterFailure(AP.began(mem, v040, now: t0), version: v040) == "Sill tries again after its next daily check.", "after one failure")
 check(AP.afterFailure(tried, version: v040) == "Sill won’t install 0.4 by itself again; Update Now still can.", "after two")
 check(AP.updatedLine(done, running: v040, now: later(2))?.hasPrefix("Sill updated itself to 0.4 today at ") == true
@@ -933,6 +933,8 @@ check(store.contains("kSecUseDataProtectionKeychain as String: true") && store.c
 check(!store.contains("kSecAttrSynchronizable as String] = true") && !store.contains("kSecAttrAccessibleAlways"), "never synced, never readable while locked before the first unlock")
 let setters = files.filter { $0 != "AppUpdater.swift" && text($0).contains(".setAutomaticUpdate(") }
 check(setters == ["SettingsPanes.swift"], "only Settings › General turns the switch on: \(setters)")
+check(updater.contains("self.remember { Auto.signedRelease($0, p.release.version) }") && updater.components(separatedBy: "Auto.signedRelease(").count == 2,
+      "the rollback floor rises only with a release whose manifest verified, never with the check's word")
 check(!updater.contains("Auto.switched($0, on: true)") && updater.contains("remember { Auto.switched($0, on: on) }"), "the switch changes in one place")
 // The other targets' sources: argv[2] when the app's are a mutant's copy (mutants.py), else beside them.
 let elsewhere = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : sources + "/.."

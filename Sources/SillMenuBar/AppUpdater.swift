@@ -276,9 +276,7 @@ final class AppUpdater {
     /// After every check that answered, and when the switch is turned on: begins the automatic update when
     /// UpdateAutoPolicy says so, with where Sill runs looked at afresh first.
     func considerAutomatic() {
-        guard available, memory.on, let offer = offer() else { return }
-        remember { Auto.offered($0, offer.version) }
-        guard mayBegin else { return }
+        guard available, memory.on, let offer = offer(), mayBegin else { return }
         refresh { [weak self] r in
             guard let self, self.mayBegin, let current = self.offer(), current == offer else { return }
             let now = Date()
@@ -462,6 +460,8 @@ final class AppUpdater {
                 self.send(.fetched(f))
             case .success(let p):
                 self.prepared = p
+                // A signed release read: the highest is the floor below which nothing installs by itself.
+                self.remember { Auto.signedRelease($0, p.release.version) }
                 print("Update: Sill \(p.release.version)’s release is signed with Sill’s update key \(p.manifest.keyID) at \(UpdateManifest.dateText(p.manifest.signedAt)): \(p.manifest.size) bytes, SHA-256 \(p.manifest.sha256).")
                 guard self.state.mode == .automatic else { self.send(.fetched(nil)); return }
                 switch Auto.dates(signedAt: p.manifest.signedAt, now: Date()) {

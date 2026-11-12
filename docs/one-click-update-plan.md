@@ -369,8 +369,8 @@ here. Try again later, or open its release page." — nothing downloaded.
 proofs are the whole gate, and a release that passes them installs on every such Mac within a day. So F1, F2
 and F3 were fixed first (§12c); a release installs by itself only two days after the time it was signed
 (the manifest's own line, which GitHub can't change) and only while GitHub still lists it, unchanged and not
-stopped, right before the swap; a release signed long ago, dated in the future, or below a version offered
-before never installs by itself (F7). Update Now is unchanged: the person sees the version and clicks.
+stopped, right before the swap; a release signed long ago, dated in the future, or below a version whose signed
+release it has read never installs by itself (F7). Update Now is unchanged: the person sees the version and clicks.
 
 **T31. Who turns it on (added).** Only Settings › General's switch. The switch and what the update remembers
 live in one item of Sill's keychain group (data-protection keychain, this device only, never synced): no
@@ -673,7 +673,7 @@ checklist.md part 1 §3's marker rule).
 | Half an update | one atomic swap; put back on every later failure |
 | Automatically update Sill turned on by anything but Settings › General | the switch in Sill's keychain group only, set only by `setAutomaticUpdate` from `SettingsPanes`; the update-install check's source rules (T31) |
 | An automatic install over a connected device, or a device cut off by Update Now's restart | the hold and the count in one step on the host's queue (T32); Update Now asks about a device that joined |
-| An automatic install of a release signed less than two days ago, long ago, in the future, below one offered before, or stopped | `UpdateAutoPolicy.start` and `dates`, the stop read before the download, GitHub asked again before the swap (T30) |
+| An automatic install of a release signed less than two days ago, long ago, in the future, below one signed before, or stopped | `UpdateAutoPolicy.start` and `dates`, the stop read before the download, GitHub asked again before the swap (T30) |
 | An automatic retry loop | two attempts a version, a day apart, remembered in the keychain item (§15.3) |
 | A broken new version left in place with nobody there | the watcher puts the old copy back and starts it (T34) |
 
@@ -735,7 +735,7 @@ not asked, each with the default taken:
 16. **How many retries.** Default: two attempts a version, at least 20 hours apart (a daily check each), then
     Update Now only. Alternatives: three; one.
 17. **The oldest release installed by itself.** Default: one signed within 120 days and not below the
-    highest version offered before. Alternative: no age limit.
+    highest version whose signed release this Sill has read. Alternative: no age limit.
 18. **The watcher.** Default: the new Sill must run 30 s with its host up within 150 s, else the old copy is
     put back and started, for Update Now too. Alternatives: only for the automatic update; longer times.
 19. **GitHub asked again right before the automatic swap.** Default: yes (one request and the manifest; a
@@ -958,7 +958,7 @@ reviewer's fixes. Each was verified here first; what was done, and the check tha
 | F4 | MEDIUM. The in-person prompt showed 64 bits of the SHA-256. | The whole SHA-256, in groups of eight, in the prompt and printed before it (`UpdateManifest.signingReason`, `grouped`). | `update-install`: the prompt's exact text and its 64 digits; mutant "the prompt's digest shortened". |
 | F5 | LOW. A same-user process could leave a changed, unchecked copy at Sill's path (change it in staging, kill Sill after the swap). | The staged copy is checked once more right before the swap and must equal the first check (`UpdateInstaller.install`); the quit waits for an install step (`AppDelegate`); T12 corrected. The moment left is between that check and `renamex_np` (microseconds), and the check after the swap still covers it. | Harness: "changed after the check, before install" refused before the swap; "raced" caught after it and put back; mutant "no check right before the swap". |
 | F6 | LOW. A link through a link escaped Sill.app; Security opened links at the signature's own paths. | The link rule walks a target as the file system does and refuses a step into any link (the reviewer's patch); links at `Contents/_CodeSignature` and `Contents/CodeResources` refused; the tree check refuses anything but files, folders and links there. | `update-install`: the reviewer's three cases and two more; mutants "a walk through a link", "links at the signature's paths"; harness case "link-through-link" and "the new copy's CodeResources a link". |
-| F7 | LOW. Rollback to an older signed release; manifests never expire. | The manifest carries its signed date (`signed …Z`). The automatic update installs nothing signed more than 120 days ago or dated ahead of this Mac's clock, and never a version below the highest the check has offered (§15.3). Update Now shows the version and the person decides. | `update-install`: the date's form, a changed date, `dates`, the start rule's rollback case. |
+| F7 | LOW. Rollback to an older signed release; manifests never expire. | The manifest carries its signed date (`signed …Z`). The automatic update installs nothing signed more than 120 days ago or dated ahead of this Mac's clock, and never a version below the highest whose signed release it has read (§15.3). Update Now shows the version and the person decides. | `update-install`: the date's form, a changed date, `dates`, the start rule's rollback case. |
 | N1 | A leaked key cannot be revoked. | T28 says so, and what limits the damage (§15.4: the cooling-off, the second look at GitHub, the stop). | Documentation. |
 | N2 | `refresh()` ran 10–70 ms on the main actor every second. | The look runs in a detached task; one at a time, callers queued (`AppUpdater.refresh`). | By reading (AppKit: no harness). |
 | N3 | `forceTerminate` could end the old Sill itself. | Never this process: guarded in both places (`opened`). | By reading; the reviewer's probe: the launch always returned a new process here. |
@@ -1120,7 +1120,7 @@ In his words: "Your defaults are correct for the new updater features". So these
 - **The rule** (`UpdateAutoPolicy`, pure, checked): it begins after a check GitHub answered, and when the
   switch is turned on, when the switch is on, the daily check is on, Update Now is available and not
   refused (looked at afresh first, off the main actor), the offer is newer and signed with the update key,
-  no stop names it, it isn't below the highest version the check has offered, and it has had fewer than
+  no stop names it, it isn't below the highest version whose signed release this Sill has read, and it has had fewer than
   two attempts, the last at least 20 hours ago.
 - **The signed date.** The manifest's `signed` line (UTC, by Noah's clock; GitHub's own date is not signed).
   A release signed less than 48 hours ago waits (no attempt spent; Settings says from when); one signed
@@ -1139,7 +1139,7 @@ In his words: "Your defaults are correct for the new updater features". So these
   waited a day without a quiet moment is dropped (no attempt spent) and a later check starts afresh; a
   waiting copy never outlives the launch.
 - **Where the switch lives.** With what the update remembers (attempts by version, the highest version
-  offered, stopped releases, the last update it made), in one item of Sill's own keychain group in the
+  whose signed release it read, stopped releases, the last update it made), in one item of Sill's own keychain group in the
   data-protection keychain (`AutoUpdateStore`: service `me.saffer.sill.update`, this device only, after
   first unlock, never synchronized). Not in Sill's defaults. Only Settings › General's switch turns it on
   (`AppUpdater.setAutomaticUpdate`, called from `SettingsPanes` alone); no kind 17, `DeviceSettings`, launch
@@ -1165,7 +1165,9 @@ In his words: "Your defaults are correct for the new updater features". So these
 - Staging: every attempt makes one folder and its end removes it, but for a folder holding the old copy that
   could not be put back (set aside, the person's way back); what earlier attempts left goes once the next
   Sill's host is up (T20).
-- The highest version offered (a later, lower offer is a rollback: never by itself), and the tags a signed
+- The highest version whose release, signed with the update key, this Sill has read (a later, lower offer is
+  a rollback: never by itself; the check's offers alone don't count, as GitHub's word isn't signed and a
+  made-up "v9.9" would stop every later update), and the tags a signed
   stop named (never installed, also after the stop is gone).
 
 ### 15.4 A cooling-off and a way to stop it (review 3's point 1; open questions 13 and 14)
@@ -1264,7 +1266,7 @@ says nothing of either (Noah: "Add the update key language when applicable as we
 - While a release is offered, under Update Now: "Sill installs it by itself once no device has been connected
   for 10 minutes.", "Sill installs it by itself tomorrow at 03:00 or later, once no device has been connected
   for 10 minutes.", "A stop signed with Sill’s update key names Sill 0.4, so Sill won’t install it.", "Sill
-  won’t install 0.4 by itself: 0.5 was offered before it. Update Now still can.", "Sill won’t install 0.4 by
+  won’t install 0.4 by itself: Sill 0.5 was out before it. Update Now still can.", "Sill won’t install 0.4 by
   itself again; Update Now still can."
 - Waiting: "Sill 0.4 is ready." / "Sill installs it by itself once no device has been connected for 10
   minutes, then restarts." [Install Now] [Cancel]. Menu: "Sill 0.4 Is Ready to Install…" / "Installs by

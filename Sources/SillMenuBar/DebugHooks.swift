@@ -934,7 +934,7 @@ extension DebugHooks {
             UpdateNowSample(name: "auto-failed-twice", install: pane(.failed(.hashMismatch), mode: .automatic, automatic: auto(twice)), autoOn: true),
             UpdateNowSample(name: "auto-notautomatic", install: pane(.failed(.notAutomatic("it was signed more than 120 days ago")), mode: .automatic, automatic: auto(tried)), autoOn: true),
             UpdateNowSample(name: "auto-restored", install: pane(.failed(.didNotStart("it quit before it had run for long enough", putBack: true)), mode: .automatic, automatic: auto(tried)), autoOn: true),
-            UpdateNowSample(name: "auto-rollback", install: pane(.idle, automatic: auto(A.offered(on, SillVersion("0.5")!))), autoOn: true),
+            UpdateNowSample(name: "auto-rollback", install: pane(.idle, automatic: auto(A.signedRelease(on, SillVersion("0.5")!))), autoOn: true),
             UpdateNowSample(name: "auto-stopped", install: pane(.idle, automatic: auto(A.stopped(on, "v0.4.0"))), autoOn: true),
             UpdateNowSample(name: "auto-updated", install: pane(.idle, offered: nil, automatic: auto(updated, running: "0.4.0", offered: nil)), autoOn: true),
             UpdateNowSample(name: "auto-checkoff", install: pane(.idle),

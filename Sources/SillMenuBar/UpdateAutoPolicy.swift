@@ -58,9 +58,11 @@ enum UpdateAutoPolicy {
         var on = false
         /// Automatic attempts, by version (SillVersion's text).
         var attempts: [String: Attempt] = [:]
-        /// The highest version the daily check has offered: a lower one offered later is a rollback,
-        /// never installed by itself.
-        var highestOffered: String?
+        /// The highest version whose release, signed with the update key, this Sill has read (the manifest
+        /// verified, by Update Now or by itself): a lower one offered later is a rollback, never installed by
+        /// itself. The check's offers alone never count: GitHub's word isn't signed, and a made-up "v9.9" there
+        /// would otherwise stop every later update.
+        var highestSigned: String?
         /// Releases a signed stop named (their tags): never installed, also after the stop is gone.
         var stopped: [String] = []
         /// The last update Sill installed by itself, and when, to say so afterwards.
@@ -99,7 +101,7 @@ enum UpdateAutoPolicy {
         guard signed else { return .no("the release isn’t signed with Sill’s update key yet") }
         if let r = refusal { return .no(UpdateInstallPolicy.words(r)) }
         if m.stopped.contains(offeredTag) { return .no("a stop signed with an update key names \(offeredTag)") }
-        if let highest = m.highestOffered.flatMap(UpdateInstallPolicy.strictVersion), offered < highest {
+        if let highest = m.highestSigned.flatMap(UpdateInstallPolicy.strictVersion), offered < highest {
             return .no("the latest release went back from \(highest) to \(offered)")
         }
         if let a = m.attempts[offered.description] {
@@ -141,11 +143,11 @@ enum UpdateAutoPolicy {
 
     // MARK: Memory
 
-    /// The check offered `offered`: the highest offer is kept.
-    static func offered(_ m: Memory, _ offered: SillVersion) -> Memory {
+    /// A release's manifest, signed with the update key, verified (`version` its version): the highest is kept.
+    static func signedRelease(_ m: Memory, _ version: SillVersion) -> Memory {
         var n = m
-        if let h = m.highestOffered.flatMap(UpdateInstallPolicy.strictVersion), h >= offered { return n }
-        n.highestOffered = offered.description
+        if let h = m.highestSigned.flatMap(UpdateInstallPolicy.strictVersion), h >= version { return n }
+        n.highestSigned = version.description
         return n
     }
 
@@ -247,8 +249,8 @@ enum UpdateAutoPolicy {
         if let offeredTag, m.stopped.contains(offeredTag) {
             return "A stop signed with Sill’s update key names Sill \(offered), so Sill won’t install it."
         }
-        if let highest = m.highestOffered.flatMap(UpdateInstallPolicy.strictVersion), offered < highest {
-            return "Sill won’t install \(offered) by itself: \(highest) was offered before it. Update Now still can."
+        if let highest = m.highestSigned.flatMap(UpdateInstallPolicy.strictVersion), offered < highest {
+            return "Sill won’t install \(offered) by itself: Sill \(highest) was out before it. Update Now still can."
         }
         if let a = m.attempts[offered.description], a.count >= maxAttempts {
             return "Sill won’t install \(offered) by itself again; Update Now still can."
