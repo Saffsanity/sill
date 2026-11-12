@@ -211,7 +211,7 @@ struct EdgeFlick: Equatable {
     var numbers: String {
         guard let first = samples.first, let last = samples.last else { return "no samples" }
         let v = Self.leftSpeed(samples, at: last)
-        return String(format: "landed %.1f pt from the edge, %.1f pt left and %.1f pt %@, %.0f pt/s at the end, last seen %.1f pt in, %.0f ms, %d samples",
+        return String(format: "landed %.1f pt from the edge, %.1f pt left and %.1f pt %@, %.0f pt/s at the end, last seen %.1f pt in, %.0f ms, %ld samples",
                       first.x, first.x - last.x, abs(last.y - first.y), last.y >= first.y ? "down" : "up",
                       v, last.x, (last.t - first.t) * 1000, samples.count)
     }
