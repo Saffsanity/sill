@@ -8,7 +8,8 @@ This is the most security-sensitive code Sill for Mac has: it downloads a progra
 that is running. It is written for a hostile reader: every claim says what enforces it, and every
 residual risk is named. A separate security review follows.
 
-**Status: inert until Noah makes the update key.** Update Now needs two signatures on a release (§3):
+**Status: inert until Noah makes the update key** (his choice of 2026-11-12, §10 Q1; his steps, §14).
+Update Now needs two signatures on a release (§3):
 Apple's Developer ID and notarization, and Noah's own update key, whose public half is compiled in
 (`UpdateManifest.releaseKeys`). That list is empty on this branch, on purpose: no key exists yet and none
 was made here. With it empty, no build from this branch shows Update Now anywhere; Settings and the menu
@@ -593,25 +594,15 @@ checklist.md part 1 §3's marker rule).
 
 ## 10. Open questions (each with the default this branch takes)
 
-1. **How far to trust GitHub Actions (T4).** Default, built here: the second factor (Noah's update key),
-   inert until he makes the key. The other two, with what each costs:
-   - (a) **Accept the CI-only trust.** No key, no extra step: `releaseKeys`' check dropped, Update Now
-     trusting the Developer ID signature and notarization alone. Cost: anyone who gets a commit onto main
-     (a stolen token, a merged pull request that changes the workflow, a compromised action) gets a
-     signed, notarized Sill published as the latest release that every Sill installs with one click; the
-     `nightly` environment has no reviewer, so nothing stops it before the night's run. Apple's
-     notarization scan and revocation are the only checks left.
-   - (c) **Take the Developer ID identity out of the `nightly` environment.** Nightlies built ad hoc (or
-     signed on Noah's Mac by hand), so only the `release` environment, behind his approval, holds the
-     key. Cost: nightlies are notarized today because testers install them; ad hoc nightlies are blocked
-     by Gatekeeper on a tester's Mac (right-click › Open, or the quarantine removed by hand each night),
-     cannot read the release's data-protection keychain items (no profile and entitlement: every tester
-     pairs again and keeps two Sill identities), and get new Screen Recording and Accessibility grants
-     with every build (an ad hoc designated requirement is the build's cdhash). It also leaves the
-     `release` route: a tag Noah approves runs that commit's scripts with the key (CLAUDE.md's review).
-     With (c), the code signature regains its meaning but the update key's protection is still stronger.
-   Recommended: the update key (b), the default here, before the first release that carries the updater;
-   (c) as well if he wants the Developer ID key off GitHub for its own sake.
+1. **How far to trust GitHub Actions (T4). Settled by Noah on 2026-11-12: the update key.** In his words,
+   quoting the option: "Add an update key that only you hold... You sign each release with one command on
+   your Mac after it publishes. The key never goes near GitHub. Sill installs an update only if it carries
+   both Apple's signature and yours." Built here as §4.3 and §4.8; his steps are §14. Considered and not
+   taken: (a) trusting the Developer ID signature and notarization alone (one commit on main would then be
+   enough to install code everywhere with a click, the `nightly` environment having no reviewer); (c)
+   taking the Developer ID identity out of the `nightly` environment (testers' nightlies would lose
+   notarization, their keychain items and their grants with every build, and the `release` route would
+   remain). (c) stays open as a hardening of its own.
 2. **A device connected at the click.** Default: ask ("Updating restarts Sill and disconnects ‹iPad›."
    [Update and Disconnect] [Cancel]), and ask again before installing if one he did not agree to has
    connected meanwhile. Alternatives: wait until none is connected; never ask.
@@ -733,6 +724,105 @@ Sill, Finder › Go › Go to Folder…, that folder, drag Sill.app to Applicati
 The first real one: Noah makes the real key (§4.8), its public key ships in a release installed by hand
 (the first with Update Now able to verify), and the release after it is the first real Update Now;
 steps 7 to 12 again then.
+
+## 14. For Noah: the update key, step by step
+
+Three things, at the Mac. The key list stays empty in the code until step 2's commit; nothing here made a key.
+
+**1. Once: the signer, the key, its backup.**
+1. Read the five files the signer is built from: `Scripts/update-manifest.swift`,
+   `Sources/SillMenuBar/UpdateManifest.swift`, `UpdateInstallPolicy.swift`, `UpdateArchive.swift` and
+   `Sources/StreamProtocol/Compatibility.swift` (the last three only for the version and the format's
+   helpers). The signer is the only program that will ever hold the key.
+2. `Scripts/sign-update.sh --install-signer`: it lists those files with their SHA-256 and the commit,
+   asks whether you read them, and builds the signer into `~/Library/Application Support/Sill Update
+   Signer/`. Every signing checks that binary is unchanged. After a change to those files, read it and run
+   this again (the keychain then asks once before the new signer may use the key).
+3. `Scripts/sign-update.sh --new-key`: makes the key and keeps it in your login keychain ("Sill update
+   signing key", never synced), and prints the public key and its key ID. It refuses to make a second one.
+4. Back it up once, off the Mac: `security find-generic-password -s me.saffer.sill.update-signing -a ed25519
+   -w` shows the private key (the keychain asks); put it in a 1Password item (or on paper in a safe), and
+   nowhere else: not a file in the repository, the handoff folder or Downloads, not GitHub, not CI.
+5. What a lost key costs: no Sill already installed can accept another update through Update Now. Releases
+   then go out unsigned (Update Now doesn't show; Open Release Page… as before) until one carrying a new
+   public key is installed by hand once; its notes say so. A leaked key: the same, and the notes ask people
+   to update by hand once; the leaked key alone installs nothing (a Developer ID signed, notarized build is
+   still needed).
+
+**2. Once: the public key into the app.**
+1. Give the public key that step 1.3 printed (a line of base64; it is not a secret) to whoever makes the
+   change, or make it yourself.
+2. It goes into `Sources/SillMenuBar/UpdateManifest.swift`, `static let releaseKeys: [String] =
+   ["‹the public key›"]`, in a commit of its own, reviewed, before the first release that carries the
+   updater. `Tests/checks/update-install` checks every key there is usable.
+3. That first release is installed by hand (the Sill before it has no key to check with): it is the first
+   one whose Update Now works, and the release after it is the first Update Now installs.
+
+**3. Every release: sign it after it is published.**
+1. Publish as today (part 2 of docs/release-checklist.md).
+2. On your Mac, from the release's tag: `Scripts/sign-update.sh v0.6.2`. If you built and published it here
+   (`release.sh --publish`), that is all: it compares GitHub's `Sill.zip` with `.build/Sill-0.6.2.zip`. If
+   the release workflow built it in a run you approved, add `--expect-sha256 ‹the SHA-256 that run's log
+   printed for Sill.zip›`. A release you did not build here or approve has neither, and is refused: that is
+   the point.
+3. It checks the zip (the checklist's download checks), shows the manifest, asks "Upload Sill.zip.manifest
+   to v0.6.2 in Saffsanity/sill?", and on yes uploads it and reads it back. The keychain asks before the
+   signer uses the key (unless it is the signer that made it). When it worked, the last line is
+   "Uploaded and read back: v0.6.2 is signed for Update Now." and the release lists `Sill.zip.manifest`.
+4. Until you sign a release, Sill shows it as before Update Now: "Sill 0.6.2 is available." with Open
+   Release Page… and no Update Now (every Sill's check notes whether the release lists the manifest). A Sill
+   that checked before you signed shows Update Now after its next daily check, or at Check Now. Someone who
+   clicked Update Now in between is told "Sill 0.6.2 isn’t ready for Update Now yet. Try again later, or
+   open its release page." and nothing is downloaded.
+
+## 12a. The review before the first build (2026-11-12, a subagent reading the code as written)
+
+An Opus subagent read the plan and the code read-only, before anything was compiled, as a hostile reviewer.
+Twelve findings; each was taken, and how:
+
+1. **High: the signing step signed whatever GitHub served.** It checked only what T4's attacker can meet (a
+   Developer ID signed, notarized zip of the right version) and signed. Fixed: `sign-update.sh` signs only a
+   zip Noah knows without GitHub, his own `release.sh` output byte for byte (the default,
+   `.build/Sill-<version>.zip`), or `--expect-sha256` with the SHA-256 a release run he approved printed;
+   GitHub's `Sill.zip` must be it, or nothing is signed. G6 runs both refusals.
+2. **High: the signer was rebuilt from the checkout at every signing, with the key in reach.** A commit
+   changing any file it compiled would run with the key; the changing binary trained "Allow". Fixed: the
+   signer is installed once (`--install-signer`) from five files Noah has read, outside the repository, its
+   SHA-256 checked at every signing; the keychain item trusts the binary that made it; it compiles nothing of
+   the app but the pure manifest files (no network code), and the shell reads the cdhashes with codesign
+   (checked equal to Update Now's Security reading on v0.6.1's both slices).
+3. **Medium: putting the old copy back moved whatever was in the staging folder into place.** Fixed:
+   `putBack` swaps only when the staged folder's code is still the running code's (its cdhash); otherwise the
+   checked new copy stays and the failure says so. The harness puts another bundle there and sees it refused.
+4. **Medium: an update with another copy of Sill running from another path left no Sill running** (the new
+   copy waits for every Sill with its bundle identifier). Fixed: every other Sill of this account, by bundle
+   identifier wherever it runs from, refuses Update Now.
+5. **Medium-low: Cancel did not retire its attempt, and stale answers wrote state before the attempt was
+   checked.** Fixed: Cancel increments the attempt; every step's answer checks its attempt first, before it
+   touches anything.
+6. **Medium-low: the clean-up at start could delete a live staging folder, or the copy the person was told
+   to keep.** Fixed: no clean-up while an update is under way; a staging folder holding a copy that could not
+   be put back carries a marker file and is never deleted by Sill.
+7. **Low: the requirement checks looked at this Mac's slice only.** Fixed: `kSecCSCheckAllArchitectures` on
+   the pinned requirement, `notarized` and the running app's requirement.
+8. **Low: other accounts and other copies were looked for only at the click, by a path string.** Fixed:
+   processes match the executable by device and inode (or any file in the bundle by path), and the whole
+   look is taken again right before the swap.
+9. **Low: a linked folder above Sill.app could redirect the swap.** Fixed in part: a link anywhere on the
+   path refuses. The exchange stays path-based (T12's residue, said there).
+10. **Low: consent was matched by display name.** Fixed: devices are matched by their connection; two iPads
+    of one name are two devices.
+11. **Low: the update section could vanish mid-update when a later check changed the offer.** Fixed: the
+    release clicked for is kept until the update ends, and the section follows it.
+12. **Low: the entitlements were read without `kSecCSRequirementInformation`, and T27 claimed more than was
+    measured.** Fixed: the flag is passed; T27 now says what was measured and what was not.
+
+Its notes on the tests, also taken: the genuine install compared versions that were equal (now the tree and
+the code); the 401 case was missing (added: no credential, ever); `c == expected` after the swap is implied
+by the verdict against the same manifest and so cannot be told apart by a test (said here, not a mutant);
+the source rules missed `Trust.init(` and CFPreferences (added); the mechanism had no mutants (eight now,
+`Tests/update-harness/mutants.py`). It found no compile error with confidence; the first build found one
+(BundleProblem had to conform to Error).
 
 ## 13. Progress
 

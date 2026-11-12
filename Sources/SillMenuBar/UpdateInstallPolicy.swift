@@ -354,7 +354,7 @@ enum UpdateInstallPolicy {
         let cdhashes: [String: String]
     }
 
-    enum BundleProblem: Equatable, Sendable {
+    enum BundleProblem: Error, Equatable, Sendable {
         case notABundle(String)
         case invalidSignature(Int32)
         case wrongSigner

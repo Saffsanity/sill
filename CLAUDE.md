@@ -12,7 +12,10 @@ Formerly winstream; the folder still carries the old name.
 at dd6ea6a; draft PR; the plan, its threat model point by point, the open questions with the default taken
 for each, the gates and Noah's rehearsal are in `docs/one-click-update-plan.md`).** Noah, 2026-11-11: "make a
 note that I want to make the Sill update checker also have a 1 click updater as a new feature", then "Start
-working on ... one-click updater ... Use subagents." **Inert until Noah makes the update key:**
+working on ... one-click updater ... Use subagents." On 2026-11-12 he chose the second factor, quoting the
+option: "Add an update key that only you hold... You sign each release with one command on your Mac after
+it publishes. The key never goes near GitHub. Sill installs an update only if it carries both Apple's
+signature and yours." (the plan's §10 Q1; his steps, §14). **Inert until Noah makes the update key:**
 `UpdateManifest.releaseKeys` is empty on purpose, so no build from this branch shows Update Now; Settings and
 the menu are what they were.
 - Two signatures, each necessary: Noah's update key (Ed25519, CryptoKit) over the release's manifest
@@ -46,9 +49,10 @@ the menu are what they were.
   taken (the plan's Progress has them).
 - Verified: (filled in once compiled; the disk was under the 25 GB floor from 22:50 to …).
 - **Untested, for Noah:** the plan's §12 rehearsal with a throwaway repository and key (two notarized
-  builds); the first real Update Now (a release carrying the key installed by hand first). Decisions: §10
-  (Q1 the key, recommended; Q2 ask before disconnecting; Q3 refuse while the other account's Sill runs, with
-  what he sees; Q4 the menu item opens Settings).
+  builds); the first real Update Now (a release carrying the key installed by hand first); §14's three
+  step lists (once: the signer, the key, its backup; once: the public key into `releaseKeys`, a commit of
+  its own; every release: `sign-update.sh` after publishing). Open: §10 Q2 ask before disconnecting, Q3
+  refuse while the other account's Sill runs (with what he sees), Q4 the menu item opens Settings.
 
 **Away from home through a relay on the Mac (2026-11-09, branch `away-through-relay` from main at f224323,
 PR #339; issue #326, Ti800; the code read, the fixes weighed, eight open questions with their defaults and

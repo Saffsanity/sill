@@ -511,7 +511,9 @@ func zip(_ entries: [Z], comment: String = "", zip64Locator: Bool = false, prefi
     out += le16(commentBytes.count) + commentBytes
     return Data(out)
 }
-let exe = [UInt8](repeating: 0x41, count: 5000) + Array("the executable".utf8)
+// Bytes that barely compress (a fixed LCG), as an executable's mostly do.
+var seed: UInt32 = 0x5111
+let exe = (0..<5000).map { _ -> UInt8 in seed = seed &* 1_664_525 &+ 1_013_904_223; return UInt8(truncatingIfNeeded: seed >> 24) } + Array("the executable".utf8)
 let plist = Array("<?xml version=\"1.0\"?><plist><dict/></plist>".utf8)
 func app(_ extra: [Z] = [], top: String = "Sill.app") -> [Z] {
     [Z(name: "\(top)/", mode: 0o040755), Z(name: "\(top)/Contents/", mode: 0o040755),
@@ -608,7 +610,8 @@ if case .success(let l) = read(bomb), let e = l.entries.first(where: { $0.path =
     check(r == .failure(.inflate("Sill.app/bomb")) && made <= 100 + 65536, "inflating the lying bomb stops at its size: \(r), \(made)")
 }
 // An honest bomb over the ratio (a limit of 10 to 1 here; the real one is deflate's own, 1,100).
-check(archiveProblem(zip(app([Z(name: "Sill.app/zeros", data: [UInt8](repeating: 0, count: 100_000))])), limits: A.Limits(ratio: 10)) == .badSizes("Sill.app/zeros"), "the ratio")
+let zeros = zip(app([Z(name: "Sill.app/zeros", data: [UInt8](repeating: 0, count: 100_000))]))
+check(archiveProblem(zeros, limits: A.Limits(ratio: 10)) == .badSizes("Sill.app/zeros"), "the ratio: \(String(describing: archiveProblem(zeros, limits: A.Limits(ratio: 10))))")
 // A truncated deflate stream ends short of its size.
 let short = deflate([UInt8](repeating: 7, count: 100_000)).dropLast(20)
 let truncated: Result<UInt32, A.Problem> = Array(short).withUnsafeBytes { A.inflate($0, size: 100_000, name: "t", write: { _ in true }) }
