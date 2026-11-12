@@ -291,23 +291,45 @@ do {
     check(w.release(now: 122) == .keep, "the monitor gone again within the two seconds: kept")
 }
 
-// The coordinator's part, modelled: macOS's callback looks at every change of the displays; the lock's changes say when
-// this session came back; a Desktop that wants Sill's display looks, waits as `make` says, looks again then, and makes
-// it on that look (the gate, on the console with a device, asked at every look); once made, `release` is asked at
-// every change and at the end of each wait it names. The display the model makes is listed as Sill's.
-struct Screens { let at: Double; let real: Int; let list: [String] }
+// The coordinator's part, modelled: macOS's callback looks at every change of the displays (the screens' sleep and wake
+// among them, as NSWorkspace says them); the lock's changes say when this session came back; a Desktop that wants
+// Sill's display looks, waits as `make` says, looks again then, and makes it on that look (the gate, on the console with
+// a device, asked at every look); a look that finds the screens awake after asleep asks again for a Desktop with no real
+// screen and no Sill's display (`screensWoke`, `desktopAgainAtWake`), unless a wait is under way; once made, `release`
+// is asked at every change and at the end of each wait it names. The display the model makes is listed as Sill's.
+struct Screens {
+    let at: Double; let real: Int; let list: [String]; var asleep = false
+    /// A look as the coordinator takes it from a Mac: the real displays active and online, the lid, whether macOS said
+    /// the screens sleep, and whether macOS's stand-in is listed working (`standIn`); `real` and `asleep` by the rule's
+    /// own functions.
+    static func mac(at: Double, active: Int, online: Int, lidClosed: Bool, said: Bool, standIn: Bool = false, list: [String]) -> Screens {
+        Screens(at: at, real: HDP.realDisplays(active: active, online: online, lidClosed: lidClosed), list: list,
+                asleep: HDP.screensAsleep(said: said, active: active + (standIn ? 1 : 0)))
+    }
+}
 func replay(screens: [Screens], cameBack: [Double], onConsole: (Double) -> Bool, wanted: Double, until end: Double)
     -> (made: Double?, released: Double?, makes: Int) {
     var w = Watch()
     var made: Double? = nil, released: Double? = nil, makes = 0
     var i = 0
     var backs = cameBack.sorted()
-    func seen() -> (real: Int, list: [String]) {
-        (screens[i].real, screens[i].list + (made != nil && released == nil ? ["sills:active"] : []))
-    }
-    func look(_ t: Double) { let s = seen(); w.saw(real: s.real, list: s.list, at: t) }
-    look(screens[0].at)
+    var wantedSince = wanted
     var wakeUp: Double? = wanted, releaseAt: Double? = nil
+    func seen() -> (real: Int, list: [String], asleep: Bool) {
+        (screens[i].real, screens[i].list + (made != nil && released == nil ? ["sills:active"] : []), screens[i].asleep)
+    }
+    func look(_ t: Double) {
+        let s = seen(), was = w.asleep
+        w.saw(real: s.real, list: s.list, asleep: s.asleep, at: t)
+        // The wake: the Desktop (wanted from `wanted` on) asks again, with no real screen and no Sill's display.
+        let gate = HDP.needsVirtualDesktop(hasDisplay: w.real > 0, clientCount: 1, appKitLoop: true, synthetic: false,
+                                           apiAvailable: true, screenRecording: true, onConsole: onConsole(t))
+        if was, !w.asleep, wakeUp == nil, t >= wanted,
+           HDP.desktopAgainAtWake(streamsDesktop: true, sills: made != nil && released == nil, gate: gate) {
+            wantedSince = t; wakeUp = t
+        }
+    }
+    look(screens[0].at)
     func askRelease(_ t: Double) {
         guard made != nil, released == nil else { return }
         switch w.release(now: t) {
@@ -325,12 +347,13 @@ func replay(screens: [Screens], cameBack: [Double], onConsole: (Double) -> Bool,
         if back == next { w.cameBack(at: next); backs.removeFirst(); continue }
         if change == next { i += 1; w.changed(at: next); look(next); askRelease(next); continue }
         if wakeUp == next {
-            look(next)
-            guard onConsole(next) else { wakeUp = nil; continue }
-            switch w.make(wantedSince: wanted, now: next) {
-            case .no: wakeUp = nil
+            look(next)              // a wait under way: a wake this look finds asks nothing more (its own select decides)
+            wakeUp = nil
+            guard onConsole(next) else { continue }
+            switch w.make(wantedSince: wantedSince, now: next) {
+            case .no, .asleep: break
             case .wait(let v): wakeUp = v
-            case .make: made = next; makes += 1; wakeUp = nil; w.changed(at: next); look(next)
+            case .make: made = next; makes += 1; w.changed(at: next); look(next)
             }
             continue
         }
@@ -392,31 +415,161 @@ let waited = replay(screens: early, cameBack: [], onConsole: { _ in true }, want
 check(waited.makes <= 1 && (waited.made == nil || near(waited.made, 143.2)), "a monitor flickering while the Desktop waits: decided at 143.2, once (\(String(describing: waited.made)))")
 check(waited.released == nil, "…and nothing made and removed in a loop while it flickers")
 
+// MARK: The screens' sleep (Noah's test of 2026-11-12, 03:56)
+// The watch: never made while the screens sleep (`.asleep`), however long; the wake is a return (two seconds), found by
+// a look alone; a real screen's `.no` comes first; the first look records no wake.
+let twoAsleep = ["a:real:asleep", "b:real:asleep"]
+do {
+    var w = Watch()
+    w.saw(real: 0, list: standIn, asleep: true, at: 0)
+    check(w.asleep && w.cameBackAt == nil, "a first look asleep: asleep, and no return recorded")
+    check(w.make(wantedSince: 10, now: 10) == .asleep, "no real screen, the screens asleep: not made (.asleep)")
+    check(w.make(wantedSince: 10, now: 1000) == .asleep, "…however long the Desktop has wanted it")
+    w.saw(real: 0, list: standIn, asleep: true, at: 20)
+    check(w.cameBackAt == nil, "still asleep: no return")
+    w.saw(real: 0, list: standIn, asleep: false, at: 120)
+    check(!w.asleep && near(w.cameBackAt, 120) && w.listChangedAt == nil, "awake at 120: a return at 120, found by a look alone (the list the same)")
+    check(w.make(wantedSince: 120, now: 120) == .wait(until: 122), "…made two seconds after the wake")
+    check(w.make(wantedSince: 120, now: 122) == .make, "…then made")
+    w.saw(real: 0, list: standIn, asleep: false, at: 130)
+    check(near(w.cameBackAt, 120), "awake again: no new return")
+    var real = Watch()
+    real.saw(real: 2, list: twoAsleep, asleep: true, at: 0)
+    check(real.make(wantedSince: 5, now: 5) == .no, "two monitors asleep, the screens asleep: .no (they count), not .asleep")
+    var first = Watch()
+    first.saw(real: 0, list: standIn, asleep: false, at: 3)
+    check(first.cameBackAt == nil, "a first look awake: no return")
+    var sleeping = Watch()
+    sleeping.saw(real: 2, list: two, at: 0)
+    sleeping.saw(real: 2, list: twoAsleep, asleep: true, at: 50)
+    check(sleeping.realGoneAt == nil && sleeping.realBackAt == nil, "two monitors falling asleep: no real screen's going")
+    sleeping.saw(real: 2, list: two, asleep: false, at: 90)
+    check(sleeping.realBackAt == nil && near(sleeping.cameBackAt, 90), "…waking: no real screen's return, but this session's")
+    check(sleeping.release(now: 200) == .release, "a real screen counted asleep or awake: a Sill's display there would go")
+}
+
+// Tonight at 03:56 (seconds after 03:55:00, from Sill.log and macOS's log): the lid closed, two monitors, this session
+// back on the console and locked at 42.241, the iPad connected at 50.759; the lock screen's idle timer put the screens
+// to sleep at 80.843 (both monitors online, asleep); the capture stopped and the iPad asked for the Desktop again at
+// 80.889; 1414 made Sill's display at 83.369, which got no frame until a key at the Mac woke the screens at 154.418 (the
+// monitors working by about 154.6), and removed it at 156.613. Nothing may be made.
+let closedLid = true
+func at0356(said: Bool, sleepSeenAt: Double) -> (made: Double?, released: Double?, makes: Int) {
+    replay(screens: [.mac(at: 0, active: 2, online: 2, lidClosed: closedLid, said: false, list: two),
+                     .mac(at: sleepSeenAt, active: 0, online: 2, lidClosed: closedLid, said: said, list: twoAsleep),
+                     .mac(at: 154.45, active: 0, online: 2, lidClosed: closedLid, said: false, list: twoAsleep),
+                     .mac(at: 154.6, active: 2, online: 2, lidClosed: closedLid, said: false, list: two)],
+           cameBack: [42.241, 154.45], onConsole: { $0 >= 42.241 }, wanted: 80.889, until: 170)
+}
+let sleep0356 = at0356(said: true, sleepSeenAt: 80.843)
+check(sleep0356.made == nil && sleep0356.makes == 0,
+      "tonight at 03:56, the screens asleep at 80.843 and the Desktop asked at 80.889: nothing made (\(String(describing: sleep0356.made)))")
+// The same without macOS saying the sleep (no NSWorkspace notification, no callback: the select's look the first to see
+// it): the monitors asleep still count, so still nothing; 1414's rule made it at 82.889.
+let unsaid0356 = at0356(said: false, sleepSeenAt: 80.889)
+check(unsaid0356.made == nil, "…with the sleep never said: still nothing made, asleep monitors count (\(String(describing: unsaid0356.made)))")
+// The only monitor unplugged while the screens sleep (a closed-lid MacBook, a device connected): nothing made while
+// they sleep; the wake asks again; made two seconds after it, as no real screen came back.
+let goneAsleep = replay(screens: [.mac(at: 0, active: 1, online: 1, lidClosed: true, said: false, list: ["m:real:active"]),
+                                  .mac(at: 50, active: 0, online: 1, lidClosed: true, said: true, list: ["m:real:asleep"]),
+                                  .mac(at: 60, active: 0, online: 0, lidClosed: true, said: true, list: standIn),
+                                  .mac(at: 90, active: 0, online: 0, lidClosed: true, said: false, list: standIn)],
+                        cameBack: [], onConsole: { _ in true }, wanted: 60.05, until: 100)
+check(near(goneAsleep.made, 92) && goneAsleep.released == nil && goneAsleep.makes == 1,
+      "the monitor unplugged while the screens sleep: none made asleep, made two seconds after the wake (\(String(describing: goneAsleep.made)))")
+// A Mac mini whose monitor drops off as it sleeps and comes back 1.2 s after the wake: never made, never removed.
+let dropOff = replay(screens: [.mac(at: 0, active: 1, online: 1, lidClosed: false, said: false, list: ["m:real:active"]),
+                               .mac(at: 50, active: 0, online: 0, lidClosed: false, said: true, list: []),
+                               .mac(at: 80, active: 0, online: 0, lidClosed: false, said: false, list: []),
+                               .mac(at: 81.2, active: 1, online: 1, lidClosed: false, said: false, list: ["m:real:active"])],
+                     cameBack: [], onConsole: { _ in true }, wanted: 50.05, until: 95)
+check(dropOff.made == nil && dropOff.released == nil,
+      "a monitor that drops off asleep and is back 1.2 s after the wake: nothing made or removed (\(String(describing: dropOff.made)))")
+// A device connecting to a closed-lid Mac whose monitors sleep, its connect's wake slow to reach them (2.5 s): nothing.
+let slowWake = replay(screens: [.mac(at: 0, active: 0, online: 2, lidClosed: true, said: true, list: twoAsleep),
+                                .mac(at: 100.15, active: 0, online: 2, lidClosed: true, said: false, list: twoAsleep),
+                                .mac(at: 102.65, active: 2, online: 2, lidClosed: true, said: false, list: two)],
+                      cameBack: [100.15], onConsole: { _ in true }, wanted: 100.3, until: 110)
+check(slowWake.made == nil, "a connect waking asleep monitors in 2.5 s with the lid closed: nothing made (\(String(describing: slowWake.made)))")
+// A screenless Mac whose screens sleep and wake after Sill's display was made: kept through both, none made again.
+let keptAsleep = replay(screens: [.mac(at: 0, active: 0, online: 0, lidClosed: true, said: false, list: standIn),
+                                  .mac(at: 120, active: 0, online: 0, lidClosed: true, said: true, list: standIn),
+                                  .mac(at: 150, active: 0, online: 0, lidClosed: true, said: false, list: standIn)],
+                        cameBack: [], onConsole: { _ in true }, wanted: 100.3, until: 170)
+check(near(keptAsleep.made, 101.3) && keptAsleep.released == nil && keptAsleep.makes == 1,
+      "a screenless Mac asleep and awake after Sill's display was made: kept, made once (\(keptAsleep.makes))")
+// No device (or off console): the screens sleep and wake, a monitor unplugged meanwhile: nothing made.
+let nobody = replay(screens: [.mac(at: 0, active: 1, online: 1, lidClosed: true, said: false, list: ["m:real:active"]),
+                              .mac(at: 50, active: 0, online: 1, lidClosed: true, said: true, list: ["m:real:asleep"]),
+                              .mac(at: 60, active: 0, online: 0, lidClosed: true, said: true, list: standIn),
+                              .mac(at: 90, active: 0, online: 0, lidClosed: true, said: false, list: standIn)],
+                    cameBack: [], onConsole: { _ in false }, wanted: 60.05, until: 100)
+check(nobody.made == nil, "no device or off console: nothing made at the wake either")
+// The lid closed with nothing attached while a device streams (#61's own case): macOS may say the screens slept as the
+// built-in one went, while its stand-in draws; a display working is awake, so Sill's display a second after the Desktop
+// asked, as before.
+let lidClose = replay(screens: [.mac(at: 0, active: 1, online: 1, lidClosed: false, said: false, list: ["builtin:real:active"]),
+                                .mac(at: 50, active: 0, online: 0, lidClosed: true, said: true, standIn: true, list: standIn)],
+                      cameBack: [], onConsole: { _ in true }, wanted: 50.3, until: 60)
+check(near(lidClose.made, 52) && lidClose.makes == 1,
+      "the lid closed, nothing attached, the sleep said but the stand-in drawing: made as before (\(String(describing: lidClose.made)))")
+
 // TEST ONLY: SILL_TEST_HEADLESS, a test host's scripted list, and who takes it (not SILL_TEST_DISPLAYS, the Desktop's stops').
-let parsed = HDP.testHeadlessList("real\nreal asleep # a comment\nstandin\nlid closed\nbogus line\n# real\n")
+let parsed = HDP.testHeadlessList("real\nreal asleep # a comment\nstandin\nstandin asleep\nlid closed\nscreens asleep\nbogus line\n# real\n")
 check(parsed.displays == [HDP.TestDisplay(kind: .real, active: true), HDP.TestDisplay(kind: .real, active: false),
-                          HDP.TestDisplay(kind: .standIn, active: true)] && parsed.lidClosed,
-      "the scripted list: a screen, one asleep, the stand-in, the lid closed; comments and the rest left out")
-check(HDP.testHeadlessList("").displays.isEmpty && !HDP.testHeadlessList("").lidClosed, "an empty file: no display, the lid open")
+                          HDP.TestDisplay(kind: .standIn, active: true), HDP.TestDisplay(kind: .standIn, active: false)]
+      && parsed.lidClosed && parsed.screensAsleep,
+      "the scripted list: a screen, one asleep, the stand-in working and dark, the lid closed, the screens asleep; comments and the rest left out")
+check(HDP.testHeadlessList("").displays.isEmpty && !HDP.testHeadlessList("").lidClosed && !HDP.testHeadlessList("").screensAsleep,
+      "an empty file: no display, the lid open, the screens awake")
+check(!HDP.testHeadlessList("real\n# screens asleep\n").screensAsleep, "the screens' line commented out: awake")
 check(HDP.testHeadless(environment: ["SILL_TEST_HEADLESS": "/tmp/d"], testHost: true).path == "/tmp/d", "a test host takes the file")
 check(HDP.testHeadless(environment: ["SILL_TEST_DISPLAYS": "/tmp/d"], testHost: true) == (nil, nil), "the Desktop stops' variable is not this one")
 let refused = HDP.testHeadless(environment: ["SILL_TEST_HEADLESS": "/tmp/d"], testHost: false)
 check(refused.path == nil && refused.line == "SILL_TEST_HEADLESS ignored: only a --synthetic test host takes it, never Sill.app.", "any other host ignores it, with one line")
 check(HDP.testHeadless(environment: [:], testHost: true) == (nil, nil), "unset: nothing")
-// Which real displays keep Sill's display from being made (the review of 2026-11-09): a display only asleep is
-// online and keeps its windows, and 0.6.0's display wake (#151) turns it on as a device connects, so it counts; with
-// the lid closed only the active ones count, a monitor asleep there being none (#298).
+// Which real displays keep Sill's display from being made (the review of 2026-11-09; Noah's test of 2026-11-12, 03:56):
+// a display only asleep is online and keeps its windows, and it is asleep because macOS's display sleep took every
+// screen, Sill's own with them, so it counts whatever the lid: a person's tap on a device wakes it (#151, #228).
 check(HDP.realDisplays(active: 0, online: 1, lidClosed: false) == 1, "the lid open, its screen asleep: counted (the wake turns it on)")
 check(HDP.realDisplays(active: 0, online: 2, lidClosed: false) == 2, "a Mac mini, its two monitors asleep: counted")
 check(HDP.realDisplays(active: 1, online: 1, lidClosed: false) == 1, "a monitor awake: counted")
 check(HDP.realDisplays(active: 0, online: 0, lidClosed: false) == 0, "a Mac with no monitor: none")
-check(HDP.realDisplays(active: 0, online: 2, lidClosed: true) == 0, "the lid closed, its monitors asleep: none (#298)")
-check(HDP.realDisplays(active: 1, online: 2, lidClosed: true) == 1, "the lid closed, a monitor awake: counted")
+check(HDP.realDisplays(active: 0, online: 2, lidClosed: true) == 2, "the lid closed, its monitors asleep: counted (asleep, not gone)")
+check(HDP.realDisplays(active: 1, online: 2, lidClosed: true) == 2, "the lid closed, one monitor awake, one asleep: both counted")
+check(HDP.realDisplays(active: 2, online: 2, lidClosed: true) == 2, "the lid closed, both monitors awake: counted")
 check(HDP.realDisplays(active: 0, online: 0, lidClosed: true) == 0, "the lid closed, nothing attached: none")
 check(!HDP.stillNeeded(physicalDisplays: HDP.realDisplays(active: 0, online: 1, lidClosed: false)),
       "a screen asleep with the lid open, or a Mac mini's monitor asleep: no display made")
-check(HDP.stillNeeded(physicalDisplays: HDP.realDisplays(active: 0, online: 1, lidClosed: true)),
-      "a monitor asleep with the lid closed: Sill's display made (#298)")
+check(!HDP.stillNeeded(physicalDisplays: HDP.realDisplays(active: 0, online: 1, lidClosed: true)),
+      "a monitor asleep with the lid closed: no display made either (tonight's 73 s without a frame)")
+check(HDP.stillNeeded(physicalDisplays: HDP.realDisplays(active: 0, online: 0, lidClosed: true)),
+      "the lid closed, nothing online but the stand-in: Sill's display wanted")
+
+// The screens' sleep (macOS's display sleep), as the coordinator reads it: what macOS said, unless a display works (a real
+// one, or macOS's stand-in).
+check(HDP.screensAsleep(said: true, active: 0) == true, "macOS said they sleep, none works: asleep")
+check(HDP.screensAsleep(said: false, active: 0) == false, "nothing said: awake (a Mac with no display at all reads none)")
+check(HDP.screensAsleep(said: true, active: 1) == false, "said asleep, but a display works: awake (a wake macOS did not say, a stand-in drawing)")
+check(HDP.screensAsleep(said: false, active: 2) == false, "awake and working: awake")
+// The line a Desktop prints instead of making Sill's display: the lid closed, every real display asleep, none gone.
+check(HDP.asleepNotGone(lidClosed: true, online: 2, active: 0) == 2, "the lid closed, two monitors asleep: the line, for two")
+check(HDP.asleepNotGone(lidClosed: true, online: 1, active: 0) == 1, "…one monitor asleep: for one")
+check(HDP.asleepNotGone(lidClosed: false, online: 1, active: 0) == nil, "the lid open, its screen asleep: no line (0.6.1 made none there)")
+check(HDP.asleepNotGone(lidClosed: true, online: 2, active: 1) == nil, "a monitor working: no line")
+check(HDP.asleepNotGone(lidClosed: true, online: 0, active: 0) == nil, "nothing online: no line (Sill's display is wanted)")
+check(HDP.asleepNotGoneLine(asleep: 2) == "Headless display: the 2 screens are asleep, not gone; none made (a tap on a device wakes them).",
+      "the line for two screens: \(HDP.asleepNotGoneLine(asleep: 2))")
+check(HDP.asleepNotGoneLine(asleep: 1) == "Headless display: the screen is asleep, not gone; none made (a tap on a device wakes it).",
+      "the line for one: \(HDP.asleepNotGoneLine(asleep: 1))")
+check(HDP.waitsForWakeLine == "Headless display: no real screen, and the screens are asleep; none made until they wake.",
+      "the line while the screens sleep with none: \(HDP.waitsForWakeLine)")
+// At the wake, a Desktop that streams without a real screen and without Sill's display asks again.
+check(HDP.desktopAgainAtWake(streamsDesktop: true, sills: false, gate: true) == true, "the Desktop on the stand-in at the wake: again")
+check(HDP.desktopAgainAtWake(streamsDesktop: true, sills: true, gate: true) == false, "Sill's display there already: nothing")
+check(HDP.desktopAgainAtWake(streamsDesktop: false, sills: false, gate: true) == false, "a window, or nothing, streams: nothing (the device asks)")
+check(HDP.desktopAgainAtWake(streamsDesktop: true, sills: false, gate: false) == false,
+      "a real screen came back, no device, off console, no Screen Recording: nothing")
 // Its size: the MacBook's own screen as Sill last saw it, so windows keep their places (Noah's choice, 2026-11-02).
 check(HDP.desktopDimensions(builtIn: (1800, 1169), viewportWidth: 1366, viewportHeight: 1024) == HDP.Dimensions(widthPt: 1800, heightPt: 1168, scale: 2),
       "the built-in screen last seen at 1800×1169 pt: 1800×1168 @2× (even), not the iPad's size")

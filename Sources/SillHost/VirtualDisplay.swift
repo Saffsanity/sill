@@ -508,13 +508,49 @@ enum HeadlessDesktopPolicy {
     /// and Sill's own are none). When it is made, and when it goes, is `Watch`'s.
     static func stillNeeded(physicalDisplays: Int) -> Bool { physicalDisplays == 0 }
 
-    /// The real displays that keep Sill's display from being made. The online ones, a display asleep among them: it
-    /// keeps its windows, and 0.6.0's display wake (#151) turns it on as a device connects, while the Desktop starts
-    /// within about a third of a second of the connect; Sill's display made in that moment would show none of those
-    /// windows. With the lid
-    /// closed, the active ones alone: a monitor asleep there counts as none (#298, a closed-lid Mac whose only
-    /// monitor is off or asleep).
-    static func realDisplays(active: Int, online: Int, lidClosed: Bool) -> Int { lidClosed ? active : online }
+    /// The real displays that keep Sill's display from being made: the online ones, a display asleep among them,
+    /// whatever the lid. A display reads asleep in macOS's display sleep, which takes every screen at once, Sill's own
+    /// with them: nothing is drawn on any until they wake (Noah's test of 2026-11-12, 03:56: the lid closed, two
+    /// monitors, the iPad connected; the lock screen's idle timer put the screens to sleep, and Sill's display, made
+    /// then because a monitor asleep with the lid closed counted as none, got no frame for 73 s, until a key at the
+    /// Mac woke them; then the monitors worked and it went again). They wake with a person's activity, which
+    /// DisplayWake declares for a person at a device: its connect, a tap or a key (#151, the waking click #228), as
+    /// for the lid open. An asleep monitor also keeps its windows and stays the main display, where the lock screen's
+    /// password field is, so Sill's display beside it would show neither, awake or not (0a0e84d, the review of
+    /// 2026-11-11's risk 1). The other choice, a closed-lid monitor that macOS still reads asleep once the screens
+    /// have woken counted as none (#298's first reading; no such monitor has been seen), is `lidClosed ? active :
+    /// online`; `Watch.make` never makes the display while the screens sleep, so it is safe at a display sleep.
+    static func realDisplays(active: Int, online: Int, lidClosed: Bool) -> Int { online }
+
+    /// Whether the screens sleep (macOS's display sleep), for `Watch.saw`: what macOS last said (NSWorkspace's
+    /// screensDidSleep, until screensDidWake, a person's declared activity, an unlock or a return to the console; a
+    /// test host's `screens asleep` line), and no display works now: `active` counts the real ones and macOS's
+    /// stand-in that read active (Sill's own is no witness: WindowServer turned on the one made while they slept, and
+    /// it drew nothing; Noah's test of 2026-11-12). A display working means they are awake whatever macOS said last,
+    /// so a lid closed with nothing attached, where macOS may say they slept while its stand-in draws, still gets
+    /// Sill's display (#61).
+    static func screensAsleep(said: Bool, active: Int) -> Bool { said && active == 0 }
+
+    /// The lid closed and every real display online asleep, none gone: how many, for the line a Desktop that would
+    /// have had Sill's display in 0.6.1 (1414) prints instead, once until a real display works again; nil otherwise.
+    static func asleepNotGone(lidClosed: Bool, online: Int, active: Int) -> Int? {
+        lidClosed && online > 0 && active == 0 ? online : nil
+    }
+
+    static func asleepNotGoneLine(asleep: Int) -> String {
+        asleep == 1
+            ? "Headless display: the screen is asleep, not gone; none made (a tap on a device wakes it)."
+            : "Headless display: the \(asleep) screens are asleep, not gone; none made (a tap on a device wakes them)."
+    }
+
+    /// No real screen, and the screens asleep (`Watch.Make.asleep`): once a sleep.
+    static let waitsForWakeLine = "Headless display: no real screen, and the screens are asleep; none made until they wake."
+
+    /// The screens woke while a device's Desktop streams with no real screen and no Sill's display (macOS's stand-in:
+    /// Sill's display waited for the wake, `Watch.Make.asleep`): the Desktop starts again, so Sill's display is made as
+    /// `Watch` says, two seconds after the wake. `gate`: `needsVirtualDesktop` now (no real screen, a device, on the
+    /// console…).
+    static func desktopAgainAtWake(streamsDesktop: Bool, sills: Bool, gate: Bool) -> Bool { streamsDesktop && !sills && gate }
 
     /// macOS's own stand-in display, a 1x 1920×1080 "Display" (vendor 'unkn', model 'virt') that it makes when a
     /// Mac has no screen at all (the lid closed and nothing attached, seen on macOS 27). Not a real display:
@@ -539,6 +575,12 @@ enum HeadlessDesktopPolicy {
     /// - It goes once a real screen has worked for `hysteresis` (2 s), the lid closed and a device connected too: it
     ///   exists only while no real screen works. The two seconds both ways keep a monitor that flickers from making
     ///   and removing it in a loop.
+    /// - It is never made while the screens sleep (macOS's display sleep, `asleep`): nothing would be drawn on it until
+    ///   they woke (Noah's test of 2026-11-12, 03:56: 73 s without a frame), and a monitor that drops off as it sleeps
+    ///   (a Mac mini's, some USB-C ones) comes back as they wake, so it would go again two seconds later. The wake is a
+    ///   return (`cameBackAt`): the coordinator's Desktop asks again then (`desktopAgainAtWake`), and it is made two
+    ///   seconds after the wake if no real screen came back. Nothing here wakes the screens: a person at a device does
+    ///   (DisplayWake), and a device left alone lets them sleep.
     struct Watch: Equatable {
         static let settle: Double = 1
         static let settleCap: Double = 3
@@ -554,18 +596,24 @@ enum HeadlessDesktopPolicy {
         /// When the real screens last went from some to none, and from none to some (nil: not seen).
         private(set) var realGoneAt: Double?
         private(set) var realBackAt: Double?
-        /// When this session last came back on the console, was unlocked, or woke.
+        /// When this session last came back on the console, was unlocked, or woke (the screens too).
         private(set) var cameBackAt: Double?
+        /// Whether the screens slept at the last look (`screensAsleep`): nothing is drawn on any display, Sill's own
+        /// included, until they wake.
+        private(set) var asleep = false
 
         init() {}
 
-        /// A look at the displays at `now`. The first look changes nothing but what it found.
-        mutating func saw(real: Int, list: [String], at now: Double) {
+        /// A look at the displays at `now`. The first look changes nothing but what it found. `asleep`: the screens
+        /// sleep (`screensAsleep`); a look that finds them awake after asleep is a return, as a wake is.
+        mutating func saw(real: Int, list: [String], asleep: Bool = false, at now: Double) {
             if let before = self.list, before != list { listChangedAt = now }
             if self.list != nil, self.real > 0, real == 0 { realGoneAt = now }
             if self.list != nil, self.real == 0, real > 0 { realBackAt = now }
+            if self.list != nil, self.asleep, !asleep { cameBackAt = now }
             self.list = list
             self.real = real
+            self.asleep = asleep
         }
 
         /// macOS said the display configuration changed (its reconfiguration callback), with or before a look.
@@ -574,12 +622,14 @@ enum HeadlessDesktopPolicy {
         /// This session came back on the console, was unlocked, or woke: what it sees may still be changing.
         mutating func cameBack(at now: Double) { cameBackAt = now }
 
-        enum Make: Equatable { case no, wait(until: Double), make }
+        enum Make: Equatable { case no, asleep, wait(until: Double), make }
 
         /// Whether Sill's display is made now, for a Desktop that first wanted it at `wantedSince`: `.no` while a real
-        /// screen works, else `.wait` until the time to look again, or `.make` on this look.
+        /// screen works, `.asleep` while the screens sleep (the wake asks again), else `.wait` until the time to look
+        /// again, or `.make` on this look.
         func make(wantedSince: Double, now: Double) -> Make {
             guard HeadlessDesktopPolicy.stillNeeded(physicalDisplays: real) else { return .no }
+            guard !asleep else { return .asleep }
             let settled = max(listChangedAt ?? -Double.infinity, wantedSince) + Self.settle
             let noScreen = max(realGoneAt ?? -Double.infinity, cameBackAt ?? -Double.infinity) + Self.hysteresis
             let ready = min(max(settled, noScreen), wantedSince + Self.settleCap)
@@ -616,12 +666,15 @@ enum HeadlessDesktopPolicy {
         return (value, "Test displays: this host's displays are what \(value) lists, read at each look; Sill's display is never made or removed here, only said.")
     }
 
-    /// The file's list: one display a line, `real` (a screen that works), `real asleep` (online, not active) or
-    /// `standin` (macOS's stand-in); a line `lid closed` says the lid is closed; `#` starts a comment; anything else is
-    /// left out (a test writes the file).
-    static func testHeadlessList(_ text: String) -> (displays: [TestDisplay], lidClosed: Bool) {
+    /// The file's list: one display a line, `real` (a screen that works), `real asleep` (online, not active), `standin`
+    /// (macOS's stand-in) or `standin asleep` (the stand-in, dark in a display sleep); a line `lid closed` says the lid
+    /// is closed, and `screens asleep` that macOS said the screens sleep (its display sleep, as NSWorkspace says it on a
+    /// Mac: the line's coming and going are its two notifications); `#` starts a comment; anything else is left out
+    /// (a test writes the file).
+    static func testHeadlessList(_ text: String) -> (displays: [TestDisplay], lidClosed: Bool, screensAsleep: Bool) {
         var displays: [TestDisplay] = []
         var lidClosed = false
+        var screensAsleep = false
         for raw in text.split(whereSeparator: \.isNewline) {
             let words = raw.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0]
                 .split(whereSeparator: \.isWhitespace).map { $0.lowercased() }
@@ -629,11 +682,13 @@ enum HeadlessDesktopPolicy {
             case ["real"]: displays.append(TestDisplay(kind: .real, active: true))
             case ["real", "asleep"]: displays.append(TestDisplay(kind: .real, active: false))
             case ["standin"]: displays.append(TestDisplay(kind: .standIn, active: true))
+            case ["standin", "asleep"]: displays.append(TestDisplay(kind: .standIn, active: false))
             case ["lid", "closed"]: lidClosed = true
+            case ["screens", "asleep"]: screensAsleep = true
             default: break
             }
         }
-        return (displays, lidClosed)
+        return (displays, lidClosed, screensAsleep)
     }
 
     /// The displays the Desktop may stream: the real ones, else Sill's, else macOS's stand-in; Sill's first while it
