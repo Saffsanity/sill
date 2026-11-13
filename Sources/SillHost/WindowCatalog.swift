@@ -355,10 +355,10 @@ final class WindowCatalog {
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
         lookedDisplays = content.displays
         resolveDesktopDisplay()
-        lastTabs = currentTabs
         tabSwaps = CatalogWindows.mergedSwaps(existing: tabSwaps, next: swaps)
         for line in CatalogWindows.leftOutLines(plain, ownPID: Self.ownPID, named: &leftOutNamed) { print(line) }
         if let pinned, !visible.contains(where: { $0.windowID == pinned.windowID }) { visible.append(pinned) }
+        lastTabs = visible.map(Self.tab)
         // The system's order is not front-to-back and shuffles between polls. The brief wants a
         // fixed order in the bar, so keep first-seen order (a native tab taking its previous tab's
         // slot, #366) and append newcomers.
