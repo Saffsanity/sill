@@ -193,6 +193,11 @@ package final class StreamCoordinator {
     private var rectCache: (id: CGWindowID, rect: CGRect, at: CFAbsoluteTime)?
     private var pendingLaunch: String?
     private var switching = false
+    /// Fallback virtual display created for Desktop mode on a headless Mac or closed-lid MacBook (#61).
+    private var headlessDisplay: VirtualDisplay?
+    private var releasingHeadless = false
+    /// The Desktop's display size in points as its capture was built (`desktopCapture`).
+    private var desktopStreamPoints: CGSize?
     /// A restart of the active source is in flight (a settings change, a resize, a rate change,
     /// the encoder fallback, a lost display): the source being restarted. Nil during a switch to
     /// another source.
@@ -637,6 +642,9 @@ package final class StreamCoordinator {
                 SessionLock.shared.devices(count)
                 self.catalog.clientCount = count          // the catalog idles itself at 0
                 // Nobody is watching: stop capturing and encoding. The next client picks afresh.
+                // The fallback display stays while devices work with the lid shut: macOS locks a closed-lid Mac
+                // whose display changes (#298). It goes when a real display is back and the lid opened or the
+                // last device left, once `select(.none)` has stopped the capture.
                 if count == 0 { self.viewport = nil; self.clientFPS = [:]; self.fitScales = [:] }   // the next device starts from scratch
                 if count == 0 { self.gestureChords.forget() }                 // and did not open a view it could close
                 // On the software encoder, the hardware is checked only while someone watches.
@@ -647,8 +655,9 @@ package final class StreamCoordinator {
                     self.deselectWhenSettled = false
                 } else if self.switching {
                     self.deselectWhenSettled = true     // `select` would refuse it now; its tail applies it
-                } else if self.active != .none {
-                    await self.select(.none)
+                } else {
+                    if self.active != .none { await self.select(.none) }
+                    if self.catalog.clientCount == 0 { self.releaseHeadlessDisplayIfDone() }
                 }
             }
         }
@@ -848,6 +857,7 @@ package final class StreamCoordinator {
         // Show this account while another user is on the screen (docs/off-console-plan.md): one line, only when on.
         if config.offConsoleView { print(LockPolicy.offConsoleViewStartLine) }
         checkFirewall()                                         // at launch, beside the listener's own check
+        watchDisplayChanges()                                   // the fallback display goes when a real one is back
         if !synthetic, promptForPermissions { InputInjector.ensureAccessibility() }   // prompts once; input is dropped silently without it
         if softwareOnly {
             // TEST ONLY: a gate that must never touch the Mac's one hardware encoder (Noah may be
@@ -1101,8 +1111,69 @@ package final class StreamCoordinator {
     }
 
     /// Whether `id` is a Sill virtual display, which the app keeps its own windows off.
-    package static func isSillVirtualDisplay(_ id: CGDirectDisplayID) -> Bool {
+    package nonisolated static func isSillVirtualDisplay(_ id: CGDirectDisplayID) -> Bool {
         CGDisplayVendorNumber(id) == VirtualStage.vendorID
+    }
+
+    /// A real display, Sill's own virtual one, or macOS's 1x stand-in (HeadlessDesktopPolicy.isStandIn).
+    nonisolated static func displayKind(_ id: CGDirectDisplayID) -> HeadlessDesktopPolicy.Kind {
+        if isSillVirtualDisplay(id) { return .sills }
+        return HeadlessDesktopPolicy.isStandIn(vendor: CGDisplayVendorNumber(id), model: CGDisplayModelNumber(id)) ? .standIn : .real
+    }
+
+    /// Creates a fallback virtual display when Desktop mode is requested on a headless Mac or a
+    /// MacBook with its lid closed and no physical monitor attached (issue #61).
+    private func ensureHeadlessDisplayIfNeeded() async {
+        let apiOK = VirtualDisplay.checkPrivateAPI().isEmpty
+        guard HeadlessDesktopPolicy.needsVirtualDesktop(
+            hasDisplay: !Self.headlessDisplayNeeded(),
+            clientCount: catalog.clientCount,
+            appKitLoop: appKitLoop,
+            synthetic: synthetic,
+            apiAvailable: apiOK,
+            screenRecording: CGPreflightScreenCaptureAccess(),  // never a display without it (VirtualStage.prepare's rule)
+            onConsole: lockReading != .offConsole               // never one that would join another user's displays
+        ) else { return }
+        // The system removed it on its own (sleep and wake can, as VirtualStage's `onLost` knows): made again, not
+        // kept as a display that is no longer there, with the Desktop on macOS's stand-in until Sill quits.
+        if let d = headlessDisplay, CGDisplayIsOnline(d.displayID) == 0 {
+            print("Headless display: the virtual Desktop display (id \(d.displayID)) is gone; making it again.")
+            headlessDisplay = nil
+        }
+        if headlessDisplay == nil {
+            let dims = HeadlessDesktopPolicy.desktopDimensions(
+                builtIn: WindowCatalog.lastBuiltIn,
+                viewportWidth: viewport?.width,
+                viewportHeight: viewport?.height
+            )
+            do {
+                let d = try VirtualDisplay(
+                    name: "Sill Desktop",
+                    widthPt: dims.widthPt,
+                    heightPt: dims.heightPt,
+                    scale: dims.scale,
+                    refreshHz: Double(effectiveFPS),
+                    vendorID: VirtualStage.vendorID,
+                    productID: VirtualStage.productID + 1,
+                    serialNum: VirtualStage.serialNum + 1
+                )
+                headlessDisplay = d
+                catalog.keepsSills = true
+                _ = await d.waitUntilOnline(timeout: 3)
+                print("Headless display: created \(dims.widthPt)×\(dims.heightPt) pt @\(dims.scale)× virtual display (id \(d.displayID)) for Desktop mode.")
+            } catch {
+                print("Headless display: could not create virtual display (\(error)).")
+                return
+            }
+        }
+        // Until the catalog's look has it (macOS's stand-in may still be listed beside it).
+        let onIt = { [catalog] in catalog.display.map { Self.isSillVirtualDisplay($0.displayID) } ?? false }
+        let deadline = Date().addingTimeInterval(3)
+        while !onIt(), Date() < deadline {
+            await catalog.refreshWindows()
+            if onIt() { break }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
     }
 
     // MARK: Each device's link (docs/remote-bundle-plan.md §6)
@@ -1917,9 +1988,12 @@ package final class StreamCoordinator {
             // and over a queued pick: there is nobody left to fit the window to or stream to.
             if deselectWhenSettled {
                 deselectWhenSettled = false
-                if catalog.clientCount == 0, active != .none {
+                if catalog.clientCount == 0 {
                     viewportArrivedWhileSwitching = false
-                    Task { @MainActor in await self.select(.none) }
+                    Task { @MainActor in
+                        if self.active != .none { await self.select(.none) }
+                        if self.catalog.clientCount == 0 { self.releaseHeadlessDisplayIfDone() }
+                    }
                 }
             }
             if catalog.clientCount == 0 { pick = nil }
@@ -2188,6 +2262,9 @@ package final class StreamCoordinator {
                 title = "Test Pattern"; kind = .testPattern
                 picture = .display
             } else {
+                // No real display online (a closed lid and no monitor, a headless Mac; macOS's 1x stand-in is
+                // none): Sill's own Retina display first (#61).
+                if Self.headlessDisplayNeeded() { await ensureHeadlessDisplayIfNeeded() }
                 // The display as the newest look has it, read after every await (`desktopCapture`).
                 guard let plan = await desktopCapture() else { active = .none; broadcastList(); return }
                 if let line = CatalogLook.desktopLine(was: lookBefore.display, now: plan.displayID, age: lookBefore.age) { print(line) }
@@ -2366,6 +2443,7 @@ package final class StreamCoordinator {
         let scale = Self.displayScale(of: displayFilter)
         let pixelScale = CaptureScale.effective(knob: captureScale, displayScale: scale)
         desktopStreamDisplay = d.displayID
+        desktopStreamPoints = CGSize(width: d.width, height: d.height)
         return (displayFilter, d.displayID, scale, evenPixels(CGFloat(d.width) * pixelScale), evenPixels(CGFloat(d.height) * pixelScale))
     }
 
@@ -2859,6 +2937,88 @@ package final class StreamCoordinator {
         }
     }
 
+    /// The fallback display goes once a real display is active again and the lid opened or the last device left
+    /// (HeadlessDesktopPolicy.releases), told by macOS's display reconfiguration callback, which fires with no
+    /// device connected too (the catalog's poll idles then), and by the last device leaving: the Desktop restarts
+    /// on the real one first, so its capture never loses the display under it, then the virtual display goes
+    /// and macOS brings the windows it moved there back.
+    private func releaseHeadlessDisplayIfDone() {
+        guard headlessDisplay != nil, !releasingHeadless, !shuttingDown, Self.headlessReleases(devices: catalog.clientCount) else { return }
+        releasingHeadless = true
+        Task { @MainActor in
+            defer { self.releasingHeadless = false; self.catalog.keepsSills = self.headlessDisplay != nil }
+            // A switch under way first (a pick, a restart): `select` would return at once, and the display
+            // would go from under the capture that switch starts. At most 5 s.
+            for _ in 0..<100 where self.switching { try? await Task.sleep(for: .milliseconds(50)) }
+            // A device back meanwhile (a blip) keeps the display, and its Desktop stays on it.
+            guard Self.headlessReleases(devices: self.catalog.clientCount) else { return }
+            // Only while the Desktop streams (the lid opened with a device watching) does the capture move
+            // to the real display first; when the last device left, `select(.none)` has stopped it already.
+            if self.active == .desktop {
+                self.catalog.keepsSills = false
+                // The look first: a fresh one still has the fallback display as the Desktop's (11:38:45, 2026-11-02).
+                await self.catalog.refreshWindows()
+                for _ in 0..<100 where self.switching { try? await Task.sleep(for: .milliseconds(50)) }
+                if self.active == .desktop, Self.headlessReleases(devices: self.catalog.clientCount) {
+                    await self.select(.desktop)
+                }
+            }
+            guard self.headlessDisplay != nil, Self.headlessReleases(devices: self.catalog.clientCount) else {
+                // Kept after all (the lid shut again during the restart): the Desktop goes back to it.
+                self.catalog.keepsSills = self.headlessDisplay != nil
+                for _ in 0..<100 where self.switching { try? await Task.sleep(for: .milliseconds(50)) }
+                if self.active == .desktop { await self.catalog.refreshWindows(); await self.select(.desktop) }
+                return
+            }
+            self.headlessDisplay = nil
+            print("Headless display: a display is online again; removed the virtual Desktop display.")
+        }
+    }
+
+    /// macOS's display changes (the lid opened, a monitor plugged in), for `releaseHeadlessDisplayIfDone`.
+    /// Never removed: one coordinator lives as long as the process.
+    private func watchDisplayChanges() {
+        CGDisplayRegisterReconfigurationCallback({ _, flags, context in
+            guard !flags.contains(.beginConfigurationFlag), let context else { return }
+            let coordinator = Unmanaged<StreamCoordinator>.fromOpaque(context).takeUnretainedValue()
+            Task { @MainActor in
+                coordinator.releaseHeadlessDisplayIfDone()
+                coordinator.desktopFollowsDisplaySize()
+            }
+        }, Unmanaged.passUnretained(self).toOpaque())
+    }
+
+    /// The Desktop's display changed size under it (the lid opened: macOS shows the built-in screen at its
+    /// default for a moment, then at the person's own; a resolution changed in System Settings): the
+    /// Desktop restarts at the new size, rather than streaming the display scaled into the old one.
+    private func desktopFollowsDisplaySize() {
+        guard active == .desktop, !switching, !releasingHeadless, let was = desktopStreamPoints else { return }
+        Task { @MainActor in
+            await self.catalog.refreshWindows()
+            guard self.active == .desktop, !self.switching, !self.releasingHeadless, let d = self.catalog.display,
+                  CGSize(width: d.width, height: d.height) != was else { return }
+            print("Desktop: the display is \(d.width)×\(d.height) pt now (was \(Int(was.width))×\(Int(was.height))); restarting at its size.")
+            await self.select(.desktop)
+        }
+    }
+
+    /// No real display, as `HeadlessDesktopPolicy.realDisplays` counts them: none online (a Mac with no monitor, a
+    /// closed lid with nothing attached; macOS's 1x stand-in and Sill's own are none), or with the lid closed none
+    /// awake (#298). A display only asleep, with the lid open or on a Mac with no lid, counts: DisplayWake turns it on.
+    private static func headlessDisplayNeeded() -> Bool {
+        let real = { (ids: [UInt32]) in ids.filter { displayKind($0) == .real }.count }
+        let active = real(WindowCatalog.activeDisplayIDs())
+        guard active == 0 else { return false }       // a display awake, the usual case: nothing more is read
+        return HeadlessDesktopPolicy.stillNeeded(physicalDisplays: HeadlessDesktopPolicy.realDisplays(
+            active: active, online: real(WindowCatalog.onlineDisplayIDs()), lidClosed: WindowCatalog.lidClosed()))
+    }
+
+    private static func headlessReleases(devices: Int) -> Bool {
+        let real = WindowCatalog.activeDisplayIDs().filter { displayKind($0) == .real }
+        return HeadlessDesktopPolicy.releases(realDisplays: real.count, builtInActive: real.contains { CGDisplayIsBuiltin($0) != 0 },
+                                              devices: devices)
+    }
+
     /// Every catalog poll (2 s) while a device is connected.
     private func menusPolled() {
         guard menus.hasSubscribers else { return }
@@ -3102,6 +3262,7 @@ package final class StreamCoordinator {
         audio.shutdown()   // "Audio stopped: Sill is quitting."
         restoreFits(keeping: nil)
         stage.release()
+        headlessDisplay = nil
     }
 
     /// The CLI's default path at a signal (HostShutdown.installKeyRelease), just before it dies of it:

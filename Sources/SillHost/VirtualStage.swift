@@ -160,7 +160,7 @@ final class VirtualStage {
 
     /// Fixed identity, so System Settings › Displays keeps one remembered "Sill" entry across runs
     /// (the probe used serial 0xF00D and does not collide).
-    static let vendorID: UInt32 = 0x5111, productID: UInt32 = 0x0001, serialNum: UInt32 = 1
+    nonisolated static let vendorID: UInt32 = 0x5111, productID: UInt32 = 0x0001, serialNum: UInt32 = 1
 
     init(sizer: WindowSizer, catalog: WindowCatalog) {
         self.sizer = sizer

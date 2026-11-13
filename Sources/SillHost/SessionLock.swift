@@ -231,7 +231,7 @@ package final class SessionLock: @unchecked Sendable {
 
     /// A change of the gate: its line now (the off-console view's when it applies), then the coordinator.
     private func changed(_ change: LockPolicy.Change) {
-        if let line = LockPolicy.line(change, offConsoleView: gate.offConsoleView) { print(line) }
+        if let line = LockPolicy.line(change, offConsoleView: gate.offConsoleView) { print(line); print(WindowCatalog.displaysLine()) }
         onChange?()
     }
 
