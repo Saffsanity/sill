@@ -232,8 +232,9 @@ final class ExternalDisplay: ObservableObject {
     }
 
     /// With the picture on a monitor this screen may go untouched for a long while, and if it locks the
-    /// stream stops.
-    private func keepAwake() { UIApplication.shared.isIdleTimerDisabled = size != nil && client != nil }
+    /// stream stops (`DeviceIdleTimer`).
+    var isHoldingAwake: Bool { size != nil && client != nil }
+    private func keepAwake() { DeviceIdleTimer.shared.update() }
 
     private func attach() {
         guard size != nil, let client, let root = window?.rootViewController?.view else { return }

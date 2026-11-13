@@ -26,6 +26,8 @@ MUTANTS = [
     ("a name misspelt", "Gesture.swift", 'public static let swipeLeft = "swipeLeft"', 'public static let swipeLeft = "swipeleft"'),
     ("spread left out of the names", "Gesture.swift", "public static let names = [swipeUp, swipeDown, swipeLeft, swipeRight, pinch, spread]", "public static let names = [swipeUp, swipeDown, swipeLeft, swipeRight, pinch]"),
     ("kind 28 as 250", "StreamMessage.swift", "case gesture = 28", "case gesture = 250"),
+    ("kind 47 as 48 (the Desktop's next stop)", "StreamMessage.swift", "case nextDisplay = 47", "case nextDisplay = 48"),
+    ("kind 47 as 46 (an open pull request's)", "StreamMessage.swift", "case nextDisplay = 47", "case nextDisplay = 46"),
     ("device never nil", "Compatibility.swift", "self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device", "self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device ?? \"\""),
     # The Mac's sound (docs/audio-plan.md §3.4): the hello's codecs, the host's pick, Send Audio, the note, the stats.
     ("the hello's codecs never kept", "Compatibility.swift", "        self.audio = audio\n", "        self.audio = nil\n"),
