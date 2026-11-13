@@ -2636,7 +2636,7 @@ package final class StreamCoordinator {
         // window under the click point.
         let point = injectorProbePoint(event)
         let cover = point.flatMap { Self.topmostWindow(at: $0) }
-        let covered = cover != nil && cover?.id != id            // any other window over the spot, same app or not
+        let covered = cover != nil && cover?.id != id && !(staged && cover?.pid == pid)   // on the stage, the app's own sheet or new tab (#366) is not a stranger
         // On the virtual display a cover is a stranger (a window left there by an earlier run):
         // move it off, then the click lands.
         if staged, covered { stage.evictForeignWindows() }
@@ -2851,6 +2851,10 @@ package final class StreamCoordinator {
     /// before a fit landed can still give at its old value; a resize is `windowsChanged`'s.
     private func catalogPolled() {
         menusPolled()
+        if !switching, !shuttingDown, case .window(let id) = active, catalog.tabSwaps[id] != nil {
+            Task { @MainActor in _ = await self.followTabSwap(for: id) }
+            return
+        }
         guard !switching, !shuttingDown, case .window(let id) = active, !(virtualDisplay && stage.isStaged),
               let w = catalog.window(id: id), capturePixelScale(of: w) != streamPixelScale else { return }
         Task { @MainActor in
@@ -3405,6 +3409,7 @@ package final class StreamCoordinator {
             return
         }
         if case .window(let id) = active {
+            if await followTabSwap(for: id) { return }
             guard let w = infos.first(where: { $0.id == id }) else {
                 // Alive on the virtual display even if the on-screen list dropped it.
                 if virtualDisplay, stage.isStaged, Self.liveBounds(of: id) != nil { broadcastList(); return }
@@ -3463,6 +3468,24 @@ package final class StreamCoordinator {
             }
         }
         broadcastList()
+    }
+
+    /// Re-targets the stream when the active window (`id`) was replaced in place by another native tab
+    /// (#366). Waits while a switch is in flight so `tabSwaps[id]` is not consumed before `select` can
+    /// take it (`catalogPolled` picks it up once `!switching`).
+    private func followTabSwap(for id: CGWindowID) async -> Bool {
+        guard !switching, !shuttingDown, active == .window(id),
+              let nextID = catalog.tabSwaps[id], let nextW = catalog.window(id: nextID) else { return false }
+        catalog.tabSwaps.removeValue(forKey: id)
+        print("Tab switched in \(nextW.owningApplication?.applicationName ?? "?"): window \(id) → \(nextID) (\(nextW.title ?? "")).")
+        if virtualDisplay, stage.isStaged, stage.placement?.windowID == id {
+            _ = stage.adoptTab(nextW)
+        }
+        if fits.record(id) != nil, let nextPlacement = sizer.placement(for: nextW) {
+            fits.transfer(from: id, to: nextID, handle: nextPlacement)
+        }
+        await select(.window(nextID))
+        return true
     }
 
     private var encoderWidth: Int { encoder?.width ?? 0 }

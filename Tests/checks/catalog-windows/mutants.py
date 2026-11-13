@@ -43,6 +43,12 @@ MUTANTS = [
     ("a line for windows that were never tiles",
      "for w in windows where isAppWindow(w, ownPID: ownPID) {", "for w in windows {"),
     ("the two lines' words swapped", "lines.append(kind == .systemInterface", "lines.append(kind != .systemInterface"),
+    # Native tab switches (#366).
+    ("another app's window at the same frame taken for a tab (#366)", "$0.pid == old.pid && $0.sameFrame(as: old)", "$0.sameFrame(as: old)"),
+    ("any new window of the app taken for a tab regardless of frame", "$0.pid == old.pid && $0.sameFrame(as: old)", "$0.pid == old.pid"),
+    ("a swapped tab sent to the end of the bar", "let mapped = swaps[id] ?? id", "let mapped = id"),
+    ("chained swaps not resolved", "let target = next[mid] ?? mid", "let target = mid"),
+    ("a round-trip swap back to the original tab kept", "if target != old { out[old] = target }", "out[old] = target"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

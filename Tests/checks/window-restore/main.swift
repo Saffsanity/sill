@@ -1027,6 +1027,18 @@ let needed = ["first fit", "re-fit", "fit refused", "fit: full screen", "fit: no
 for k in needed { check((globalSeen[k] ?? 0) > 0, "model: never came up: \(k)") }
 print("window-restore: the model, \(sessions) sessions: " + needed.map { "\($0) \(globalSeen[$0] ?? 0)" }.joined(separator: ", "))
 
+do {
+    var ledger = WindowRestore.Ledger<Int>()
+    let before = CGRect(x: 100, y: 100, width: 900, height: 600)
+    let after = CGRect(x: 100, y: 100, width: 1200, height: 800)
+    ledger.fitted(3508, handle: 11, before: before, after: after, asked: after.size)
+    ledger.transfer(from: 3508, to: 3509, handle: 22)
+    check(ledger.record(3508) == nil && ledger.record(3509)?.original == before && ledger.entries[3509]?.handle == 22,
+          "#366: a tab swap transfers the fit record to the new tab's ID and handle")
+    ledger.transfer(from: 3509, to: 3509, handle: 33)
+    check(ledger.entries[3509]?.handle == 22, "#366: transferring to the same ID leaves the entry alone")
+}
+
 if failures == 0 {
     print("window-restore: all \(passes) checks passed")
     exit(0)

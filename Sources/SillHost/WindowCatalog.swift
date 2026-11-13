@@ -165,6 +165,18 @@ final class WindowCatalog {
                               width: Double(w.frame.width), height: Double(w.frame.height))
     }
 
+    /// A window's identity and frame for spotting a macOS native tab switch (#366).
+    static func tab(_ w: SCWindow) -> CatalogWindows.Tab {
+        CatalogWindows.Tab(id: w.windowID, pid: w.owningApplication?.processID ?? -1,
+                           x: Double(w.frame.origin.x), y: Double(w.frame.origin.y),
+                           width: Double(w.frame.width), height: Double(w.frame.height))
+    }
+
+    /// The last look's on-screen windows, and native tab switches (`oldID -> newID`, #366) seen since
+    /// the coordinator last took them.
+    private var lastTabs: [CatalogWindows.Tab] = []
+    var tabSwaps: [CGWindowID: CGWindowID] = [:]
+
     /// The owners whose left-out windows Sill.log has named (CatalogWindows.leftOutLines): once each.
     private var leftOutNamed: Set<String> = []
 
@@ -322,11 +334,17 @@ final class WindowCatalog {
         let seq = refreshSeq
         guard !Self.screenless else { return }      // TEST ONLY: ScreenCaptureKit never asked
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else { return }
-        // The staged window, if the on-screen list dropped it: one extra SCShareableContent call per
-        // poll, and only then. Fetched before the sequence check so its await cannot let an older
-        // refresh overwrite a newer one.
+        // An app's own windows only (CatalogWindows): no widgets, wallpaper or backstop, nothing of
+        // Sill's, and no helper's window (LayerProbeParent, macOS's own interface, a tool's overlay).
+        let plain = content.windows.map(Self.plain)
+        var visible = zip(content.windows, plain).filter { CatalogWindows.lists($1, ownPID: Self.ownPID) }.map(\.0)
+        let currentTabs = visible.map(Self.tab)
+        let swaps = CatalogWindows.tabSwaps(from: lastTabs, to: currentTabs)
+        // The staged window, if the on-screen list dropped it without another tab of its window taking its
+        // place (#366): one extra SCShareableContent call per poll, and only then. Fetched before the
+        // sequence check so its await cannot let an older refresh overwrite a newer one.
         var pinned: SCWindow? = nil
-        if let id = stagedWindowID, !content.windows.contains(where: { $0.windowID == id }),
+        if let id = stagedWindowID, swaps[id] == nil, !content.windows.contains(where: { $0.windowID == id }),
            let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) {
             pinned = all.windows.first { $0.windowID == id && !Self.isOwn($0) }
             if pinned != nil { print("Catalog: the staged window \(id) is not in the on-screen list; pinned it from the full list.") }
@@ -337,16 +355,15 @@ final class WindowCatalog {
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
         lookedDisplays = content.displays
         resolveDesktopDisplay()
-        // An app's own windows only (CatalogWindows): no widgets, wallpaper or backstop, nothing of
-        // Sill's, and no helper's window (LayerProbeParent, macOS's own interface, a tool's overlay).
-        let plain = content.windows.map(Self.plain)
-        var visible = zip(content.windows, plain).filter { CatalogWindows.lists($1, ownPID: Self.ownPID) }.map(\.0)
+        tabSwaps = CatalogWindows.mergedSwaps(existing: tabSwaps, next: swaps)
         for line in CatalogWindows.leftOutLines(plain, ownPID: Self.ownPID, named: &leftOutNamed) { print(line) }
         if let pinned, !visible.contains(where: { $0.windowID == pinned.windowID }) { visible.append(pinned) }
+        lastTabs = visible.map(Self.tab)
         // The system's order is not front-to-back and shuffles between polls. The brief wants a
-        // fixed order in the bar, so keep first-seen order and append newcomers.
+        // fixed order in the bar, so keep first-seen order (a native tab taking its previous tab's
+        // slot, #366) and append newcomers.
         let byID = Dictionary(uniqueKeysWithValues: visible.map { ($0.windowID, $0) })
-        seenOrder = seenOrder.filter { byID[$0] != nil } + visible.map(\.windowID).filter { !seenOrder.contains($0) }
+        seenOrder = CatalogWindows.orderedIDs(seenOrder: seenOrder, currentIDs: visible.map(\.windowID), swaps: swaps)
         let ordered = seenOrder.compactMap { byID[$0] }
         let newInfos = ordered.map { w in
             WindowInfo(id: w.windowID,

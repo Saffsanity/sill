@@ -96,4 +96,75 @@ enum CatalogWindows {
         }
         return lines
     }
+
+    // MARK: Native tab switches (#366)
+
+    /// An on-screen window's identity and frame, for spotting a macOS native tab switch (issue #366):
+    /// in a native tab group (Ghostty, Safari, Terminal, Chrome) each tab is its own NSWindow with its
+    /// own CGWindowID, and only the active tab is on screen, at the same frame.
+    struct Tab: Equatable {
+        var id: UInt32
+        var pid: Int32
+        var x: Double
+        var y: Double
+        var width: Double
+        var height: Double
+
+        func sameFrame(as other: Tab) -> Bool {
+            abs(x - other.x) <= 2 && abs(y - other.y) <= 2
+                && abs(width - other.width) <= 2 && abs(height - other.height) <= 2
+        }
+    }
+
+    /// Native tab switches between two looks (`oldID -> newID`, issue #366): an on-screen window that
+    /// left the list while a new on-screen window of the same process appeared at the same frame
+    /// (±2 pt). Paired one-to-one in list order.
+    static func tabSwaps(from previous: [Tab], to current: [Tab]) -> [UInt32: UInt32] {
+        let currentIDs = Set(current.map(\.id))
+        let previousIDs = Set(previous.map(\.id))
+        let gone = previous.filter { !currentIDs.contains($0.id) }
+        let arrived = current.filter { !previousIDs.contains($0.id) }
+        var used = Set<UInt32>()
+        var swaps: [UInt32: UInt32] = [:]
+        for old in gone {
+            if let next = arrived.first(where: { !used.contains($0.id) && $0.pid == old.pid && $0.sameFrame(as: old) }) {
+                swaps[old.id] = next.id
+                used.insert(next.id)
+            }
+        }
+        return swaps
+    }
+
+    /// The bar's window order (`seenOrder`) updated for `currentIDs`, keeping a swapped tab in the
+    /// slot its previous tab held (#366) and appending genuinely new windows at the end.
+    static func orderedIDs(seenOrder: [UInt32], currentIDs: [UInt32], swaps: [UInt32: UInt32]) -> [UInt32] {
+        let live = Set(currentIDs)
+        var replaced: [UInt32] = []
+        for id in seenOrder {
+            let mapped = swaps[id] ?? id
+            if live.contains(mapped), !replaced.contains(mapped) {
+                replaced.append(mapped)
+            }
+        }
+        for id in currentIDs where !replaced.contains(id) {
+            replaced.append(id)
+        }
+        return replaced
+    }
+
+    /// Chains `next` onto `existing` (`A -> B` then `B -> C` is `A -> C`; `A -> B` then `B -> A` is
+    /// back on `A`, so removed).
+    static func mergedSwaps(existing: [UInt32: UInt32], next: [UInt32: UInt32]) -> [UInt32: UInt32] {
+        guard !next.isEmpty else { return existing }
+        let intermediates = Set(existing.values)
+        var out: [UInt32: UInt32] = [:]
+        for (old, mid) in existing {
+            let target = next[mid] ?? mid
+            if target != old { out[old] = target }
+        }
+        for (old, target) in next where !intermediates.contains(old) && out[old] == nil && old != target {
+            out[old] = target
+        }
+        return out
+    }
 }
