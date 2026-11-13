@@ -20,6 +20,29 @@ final class WindowCatalog {
     private(set) var windows: [SCWindow] = []
     private(set) var infos: [WindowInfo] = []
     private(set) var display: SCDisplay?
+    /// The successful raw look, before the thumbnail policy drops menus, sheets and small windows.
+    /// A failed read leaves the previous snapshot intact; it never means an empty allowlist.
+    struct CaptureSnapshot {
+        let applications: [SCRunningApplication]
+        let windows: [SCWindow]
+        let startedAt: ContinuousClock.Instant
+
+        static func plain(_ window: SCWindow) -> StageCaptureWindows.Window {
+            StageCaptureWindows.Window(id: window.windowID, owner: window.owningApplication.map(plain))
+        }
+
+        static func plain(_ app: SCRunningApplication) -> StageCaptureWindows.Application {
+            StageCaptureWindows.Application(pid: app.processID, bundleID: app.bundleIdentifier)
+        }
+
+        func membership(for selected: SCWindow) -> StageCaptureWindows {
+            // Preparation reads the full list; polling usually reads only on-screen windows. Judge
+            // both alike, or an off-screen auxiliary window would cause a restart every poll.
+            StageCaptureWindows(selected: Self.plain(selected), applications: applications.map(Self.plain),
+                                windows: windows.filter { $0.isOnScreen }.map(Self.plain))
+        }
+    }
+    private(set) var captureSnapshot: CaptureSnapshot?
     private(set) var installedApps: [AppInfo] = []
     /// This process as ScreenCaptureKit lists it, from the last look: the Desktop stream leaves it
     /// out, so Sill's own windows (the pairing code above all) never reach a device. Nil when it
@@ -320,19 +343,30 @@ final class WindowCatalog {
     func refreshWindows() async {
         refreshSeq += 1
         let seq = refreshSeq
+        let startedAt = ContinuousClock.now
         guard !Self.screenless else { return }      // TEST ONLY: ScreenCaptureKit never asked
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else { return }
         // The staged window, if the on-screen list dropped it: one extra SCShareableContent call per
         // poll, and only then. Fetched before the sequence check so its await cannot let an older
         // refresh overwrite a newer one.
         var pinned: SCWindow? = nil
-        if let id = stagedWindowID, !content.windows.contains(where: { $0.windowID == id }),
-           let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) {
-            pinned = all.windows.first { $0.windowID == id && !Self.isOwn($0) }
-            if pinned != nil { print("Catalog: the staged window \(id) is not in the on-screen list; pinned it from the full list.") }
+        var captureContent = content
+        var captureReadSucceeded = true
+        if let id = stagedWindowID, !content.windows.contains(where: { $0.windowID == id }) {
+            if let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) {
+                captureContent = all
+                if stagedWindowID == id { pinned = all.windows.first { $0.windowID == id && !Self.isOwn($0) } }
+                if pinned != nil { print("Catalog: the staged window \(id) is not in the on-screen list; pinned it from the full list.") }
+            } else {
+                captureReadSucceeded = false
+            }
         }
         guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
         appliedSeq = seq
+        if captureReadSucceeded {
+            captureSnapshot = CaptureSnapshot(applications: captureContent.applications, windows: captureContent.windows,
+                                              startedAt: startedAt)
+        }
         lookedAt = .now
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
         lookedDisplays = content.displays

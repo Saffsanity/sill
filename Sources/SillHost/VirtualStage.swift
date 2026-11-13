@@ -52,6 +52,7 @@ final class VirtualStage {
         case moveRefused(AXError)
         case notOnDisplay(CGRect)
         case windowMissing
+        case captureContentUnavailable
         /// This Mac read locked as the display was about to be made (LockPolicy: no virtual display while
         /// locked). Never counted as a creation failure; the coordinator streams nothing of the window.
         case locked
@@ -69,6 +70,7 @@ final class VirtualStage {
             case .moveRefused(let e): return "moveRefused (\(WindowSizer.axErrorName(e)))"
             case .notOnDisplay(let r): return String(format: "notOnDisplay (the window stayed at %.0f,%.0f %.0f×%.0f; fullscreen Space or clamped origin?)", r.minX, r.minY, r.width, r.height)
             case .windowMissing: return "windowMissing (the window vanished while being staged)"
+            case .captureContentUnavailable: return "captureContentUnavailable (could not read the staged app's capture windows)"
             }
         }
 
@@ -85,6 +87,7 @@ final class VirtualStage {
             case .moveRefused: return "the app refused the move"
             case .notOnDisplay: return "the window didn’t move"
             case .windowMissing: return "the window went away"
+            case .captureContentUnavailable: return "the capture windows could not be read"
             case .locked: return "this Mac is locked"
             }
         }
@@ -132,6 +135,10 @@ final class VirtualStage {
     private var creationFailures = 0
     /// Bumped per display created, so a late termination callback for an old display is ignored.
     private var generation = 0
+    /// A preparation or release invalidates queued membership work, even for A → B → A on the
+    /// same display. The coordinator never carries a catalog refresh into another capture.
+    private(set) var captureGeneration = 0
+    private var captureMembership: (policy: StageCaptureWindows, selected: SCWindow, startedAt: ContinuousClock.Instant)?
     /// Where the Mac cursor was before the host first drove it onto the virtual display.
     private var cursorBefore: CGPoint?
     /// The window `releaseWindow` last sent home. The window list shows an AX move only once the
@@ -168,6 +175,44 @@ final class VirtualStage {
     }
 
     var isStaged: Bool { display != nil && placement != nil }
+
+    /// Only a successful look begun after preparation can change the running filter. Comparing
+    /// sets in StageCaptureWindows makes catalog reordering and other apps' windows no-ops.
+    var captureMembershipChanged: Bool {
+        guard let current = captureMembership, let snapshot = catalog.captureSnapshot,
+              snapshot.startedAt > current.startedAt, placement?.windowID == current.selected.windowID,
+              let display, display.isAlive else { return false }
+        let selected = snapshot.windows.first { $0.windowID == current.selected.windowID } ?? current.selected
+        return snapshot.membership(for: selected) != current.policy
+    }
+
+    /// Both normal and full-screen staging use the same owner policy. The bounded full read is
+    /// fresh after movement; resolveWindow can otherwise return the pre-move thumbnail snapshot.
+    private func captureFilter(windowID: CGWindowID) async throws -> SCContentFilter {
+        guard let d = display, d.isAlive, placement?.windowID == windowID else { throw Failure.windowMissing }
+        let epoch = captureGeneration
+        let startedAt = ContinuousClock.now
+        let content = await WindowCatalog.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3)
+        guard captureGeneration == epoch, display === d, d.isAlive, placement?.windowID == windowID,
+              let scDisplay, scDisplay.displayID == d.displayID else { throw Failure.notListedBySCK }
+        guard let content else { throw Failure.captureContentUnavailable }
+        guard let selected = content.windows.first(where: { $0.windowID == windowID && !WindowCatalog.isOwn($0) }) else {
+            throw Failure.windowMissing
+        }
+        let snapshot = WindowCatalog.CaptureSnapshot(applications: content.applications, windows: content.windows, startedAt: startedAt)
+        let policy = snapshot.membership(for: selected)
+        let filter: SCContentFilter
+        switch policy.filter {
+        case .application:
+            guard let app = selected.owningApplication else { throw Failure.windowMissing }
+            filter = SCContentFilter(display: scDisplay, including: [app], exceptingWindows: [])
+        case .windows(let ids):
+            filter = SCContentFilter(display: scDisplay, including: content.windows.filter { ids.contains($0.windowID) })
+            print("Virtual display \(d.displayID): window \(windowID), pid \(selected.owningApplication?.processID ?? -1), capture windows \(ids.sorted())")
+        }
+        captureMembership = (policy, selected, startedAt)
+        return filter
+    }
 
     /// True when `windowID` is the staged window and `size` is what was last asked for it (±2 pt),
     /// so a repeated viewport needs no restart. Compared against the asked size, not the size the
@@ -283,6 +328,8 @@ final class VirtualStage {
     /// the window's frame as it is found. Only a window not already staged takes it.
     func prepare(window: SCWindow, wanted: CGSize, envelope: CGSize, captureScale: CGFloat, refreshHz: Int = 60,
                  home: CGRect? = nil) async throws -> Prepared {
+        captureGeneration += 1
+        captureMembership = nil
         self.refreshHz = refreshHz
         // (1) A run-level decision already made.
         if let why = disabledReason { throw Failure.disabled(why) }
@@ -350,12 +397,10 @@ final class VirtualStage {
             askedSize = wanted
             fullScreen = true
             Stats.shared.bump("vd.fullScreen")
-            let fresh = await catalog.resolveWindow(id: p.windowID) ?? window
+            let filter = try await captureFilter(windowID: p.windowID)
             // No releaseWindow here: a full-screen window cannot be put back mid-Space anyway.
-            guard let scDisplay, let alive = display, alive.isAlive else { throw Failure.notListedBySCK }
+            guard let alive = display, alive.isAlive else { throw Failure.notListedBySCK }
             print("\(p.appName) — \(p.title) is full screen on virtual display \(alive.displayID); capturing \(Self.fmt(crop)) of it")
-            let filter = fresh.owningApplication.map { SCContentFilter(display: scDisplay, including: [$0], exceptingWindows: []) }
-                ?? SCContentFilter(display: scDisplay, including: [fresh])
             // The band is the display's width, twice the panel's: encode at the panel's size.
             let output = CGSize(width: min(crop.width, wanted.width), height: min(crop.height, wanted.height))
             return Prepared(filter: filter, sourceRect: crop,
@@ -486,21 +531,18 @@ final class VirtualStage {
         captureRect = crop
         Stats.shared.bump("vd.placed")
 
-        let fresh = await catalog.resolveWindow(id: p.windowID) ?? window
+        let filter = try await captureFilter(windowID: p.windowID)
         // The grow path may have replaced the display, so read `display` again here rather than
         // the one step (4) produced (that one is destroyed by then).
-        guard let scDisplay, let d = display, d.isAlive else {
+        guard let d = display, d.isAlive else {
             releaseWindow()
             throw Failure.notListedBySCK
         }
         print("Capturing \(Self.fmt(crop)) of virtual display \(d.displayID) for \(p.appName) — \(p.title)")
         let describe = "\(p.appName) — \(p.title) on virtual display \(d.displayID) (\(d.widthPt)×\(d.heightPt) pt @\(d.scale)×)"
-        // The whole app on this display, not just the window: menus, popovers, sheets and tooltips
-        // are their own windows and were missing from the stream (Messages' filter popover,
-        // 2026-09-23). Nothing else lives on the virtual display, so this shows exactly the app.
+        // Menus, popovers, sheets and tooltips are separate windows. captureFilter includes the
+        // selected PID's on-screen windows when bundle IDs collide, and follows the app otherwise.
         // Whatever lies outside the window's rectangle is still cut by the crop.
-        let filter = fresh.owningApplication.map { SCContentFilter(display: scDisplay, including: [$0], exceptingWindows: []) }
-            ?? SCContentFilter(display: scDisplay, including: [fresh])
         return Prepared(filter: filter, sourceRect: crop, describe: describe)
     }
 
@@ -663,6 +705,8 @@ final class VirtualStage {
 
     /// Puts the staged window back where it was and forgets it. The display stays.
     func releaseWindow() {
+        captureGeneration += 1
+        captureMembership = nil
         if let p = placement {
             let ok = sizer.restore(p)
             print(ok ? "Restored \(p.appName) — \(p.title) to \(Self.fmt(p.originalFrame))"
@@ -693,6 +737,8 @@ final class VirtualStage {
     /// goes exactly where it was instead of wherever the window server dumps it; `releaseHome` also
     /// waits for the window to have left. `note` ends the line ("Google Chrome home after 38 ms").
     func destroyDisplay(note: String? = nil) {
+        captureGeneration += 1
+        captureMembership = nil
         if let d = display {
             let id = d.displayID
             display = nil
