@@ -30,6 +30,15 @@ package final class StreamCoordinator {
     private var wantedFPS: Int { min(maxFPS, max(24, clientFPS.values.max() ?? 60)) }
     /// What the next pipeline will run at: the software encoder is not asked for more than 60.
     private var effectiveFPS: Int { useSoftwareEncoder ? min(wantedFPS, 60) : wantedFPS }
+    /// The rate the next pipeline for `source` runs at: the devices' (`wanted`, `effectiveFPS` unless
+    /// said), and the Desktop's held to its stop's refresh rate (DesktopDisplays.rate): a 60 Hz monitor's
+    /// Desktop streams at 60, at the 60 fps bitrate, to a 120 Hz iPad, since its capture gives no more. A
+    /// test host's test pattern only under SILL_TEST_DISPLAYS, whose stops say their rate.
+    private func streamRate(for source: StreamSource, wanted: Int? = nil) -> Int {
+        let wanted = wanted ?? effectiveFPS
+        guard source == .desktop, !synthetic || catalog.testDisplays != nil else { return wanted }
+        return DesktopDisplays.rate(wanted, refreshHz: catalog.desktopStop?.refreshHz)
+    }
     /// The bitrate knob is per 60 fps; a faster stream gets proportionally more so each frame
     /// keeps its share of bits.
     private var streamBitrate: Int { bitrate * fps / 60 }
@@ -175,7 +184,7 @@ package final class StreamCoordinator {
             if active == .none { status.update { $0.stream = nil } }
             server.setStreaming(active != .none)   // link keepalive ticks while a source is live
             // The Mac's cursor shape, never while it is locked (LockPolicy: another user's, or the lock screen's).
-            cursorShapes.running = active != .none && LockPolicy.allowed(lockReading).pointer
+            cursorShapes.running = active != .none && lockAllowed.pointer
             pointer.setGeometry(pointerGeometry(), fps: fps)   // also on a restart of the same source
             menuTargetChanged()                     // the menus' app follows the source (only for devices that asked)
             audioFollow()                           // and the sound (the same app keeps its stream)
@@ -198,6 +207,13 @@ package final class StreamCoordinator {
     /// Desktop request can land then (StreamClient's window list handling) and must not override
     /// the user's pick.
     private var pickArrivedWhileSwitching: StreamSource?
+    /// The display the Desktop's capture was built on (`desktopCapture`). When the catalog's Desktop
+    /// display moves off it (the display a device stepped to plugged in again, a new ID after a sleep),
+    /// the Desktop restarts there, so input never lands on a display the devices are not shown.
+    private var desktopStreamDisplay: UInt32?
+    /// TEST ONLY (SILL_TEST_DISPLAYS, DesktopDisplaysHook): each test stop's pixel scale, for the test
+    /// pattern's size. Empty on every other host.
+    private var testDisplayScales: [UInt32: CGFloat] = [:]
     /// The client's last stream panel size and text scale. One stream, so with several clients
     /// the last one to report wins. Only ever one a host takes (ViewportBounds); a refused one
     /// leaves it as it was.
@@ -240,6 +256,10 @@ package final class StreamCoordinator {
     /// it takes are ignored, with a line each, as a Mac from before kind 44 skips every one, so a
     /// device's ask again after its wait runs for real (`keyframeIgnoreHook`). Zero otherwise.
     private var keyframeRequestsToIgnore: Int
+    /// TEST ONLY. `SILL_TEST_DISPLAY_ASLEEP=<file>` on a --synthetic host: its display reads asleep
+    /// while the file exists, so a test client's press shows DisplayWake.pass at work
+    /// (`pressLandsAsleep`). Nil otherwise: a test host's display never reads asleep.
+    private let testDisplayAsleepFile: String?
     /// TEST ONLY. `SILL_TEST_DESKTOP_FAIL=<n>` on a --synthetic host: the first n starts of the
     /// Desktop's capture fail, as ScreenCaptureKit's "Start stream failed … The stream is nil" did on
     /// 2026-10-28 (CatalogLook), so the host's one more try (n = 1) and a device's second ask (n = 2:
@@ -300,6 +320,8 @@ package final class StreamCoordinator {
     /// that streamed when the lock began, picked again after the unlock.
     private let lockGate = SessionLock.shared.gate
     private var lockActedOn: LockPolicy.Reading?
+    /// The off-console view `lockChanged` last acted on (docs/off-console-plan.md).
+    private var lockActedView = false
     private var restore = LockPolicy.Restore()
     /// The Desktop streams the placeholder (a black still, no capture: StillCapture), not the display:
     /// what a locked Mac streams.
@@ -394,11 +416,15 @@ package final class StreamCoordinator {
         WindowCatalog.screenless = noScreen.on
         let keyframeIgnore = Self.keyframeIgnoreHook(synthetic: synthetic, environment: env)
         let desktopFail = Self.desktopFailHook(synthetic: synthetic, environment: env)
+        let displaysHook = DesktopDisplaysHook.read(testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
+                                                    environment: env)
         pointer = PointerWatch(synthetic: synthetic, path: path.path)
         softwareOnly = software.on
         let userActive = DisplayWake.userActive(environment: env, testHost: synthetic)
         displayActivity = DisplayActivity(remote: userActive.remote)
         keyframeRequestsToIgnore = keyframeIgnore.count
+        let displayAsleep = DisplayWake.testDisplayAsleep(environment: env, testHost: synthetic)
+        testDisplayAsleepFile = displayAsleep.path
         // The firewall's TEST ONLY answers, for a test host alone (StreamServer's own rule).
         let firewallTest = FirewallCheck.TestHook.read(testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
                                                        environment: env)
@@ -406,7 +432,7 @@ package final class StreamCoordinator {
         firewallPaths = FirewallRule.paths(executable: FirewallCheck.executablePath())
         desktopStartsToFail = desktopFail.count
         testHookLines = [path.line, software.line, inputLog.line, userActive.line, keyframeIgnore.line, desktopFail.line,
-                         noScreen.line, firewallTest.line].compactMap { $0 }
+                         noScreen.line, firewallTest.line, displayAsleep.line, displaysHook.line].compactMap { $0 }
         status = HostStatus()
         var home = StreamServer.HomeDoorMode.plain
         if homePairing, let remote {
@@ -456,6 +482,9 @@ package final class StreamCoordinator {
         // first reading the gate reads off console.
         let gate = lockGate
         server.lockGate = gate
+        // Show this account while another user is on the screen (docs/off-console-plan.md): the gate has the
+        // switch before its first reading, so that reading's line and the first frames already follow it.
+        gate.setOffConsoleView(config.offConsoleView)
         // An icon or the apps that raced the lock (the gate withheld them on the network queue after this
         // side had sent them): the device they were for gets every icon and the apps at the unlock.
         server.onCatalogWithheld = { [weak self] id in
@@ -464,7 +493,12 @@ package final class StreamCoordinator {
                 if let id { self.appsAndIconsSent.remove(id) } else { self.appsAndIconsSent.removeAll() }
             }
         }
-        catalog.isLocked = { gate.locked }
+        catalog.isLocked = { !gate.allowed.windows }    // the off-console view lists windows and takes thumbnails
+        // TEST ONLY: a test host's stops in place of this Mac's displays (SILL_TEST_DISPLAYS).
+        if let stops = displaysHook.stops {
+            catalog.testDisplays = stops.map(\.display)
+            testDisplayScales = Dictionary(stops.map { ($0.display.id, $0.scale) }, uniquingKeysWith: { a, _ in a })
+        }
         clipboard.isLocked = { gate.locked }
         menus.isLocked = { gate.locked }
         injector.lockReading = { gate.reading }
@@ -475,7 +509,6 @@ package final class StreamCoordinator {
         // The identity's TXT record (its tag, and `p` on a TLS home door) must be in the first
         // registration: set before `server.start()`.
         remote?.attach(server: server, status: status, macName: macName, requirePairing: config.requirePairing)
-        catalog.preferMainDisplay = virtualDisplay   // the Desktop source must never capture the virtual display
         stage.onLost = { [weak self] in Task { @MainActor in await self?.stageLost() } }
         status.update { $0.synthetic = synthetic; $0.virtualDisplayOn = config.virtualDisplay }
         // Every change of the snapshot re-publishes the devices' settings state (deduplicated, so
@@ -527,8 +560,9 @@ package final class StreamCoordinator {
                     self.remote?.sessionStarted(fingerprint: fp, route: words, cableDevice: route.cableDevice)
                 }
                 // A device got in from the network while the firewall's verdict said none could:
-                // that verdict is stale (FirewallRule.asksAgain).
-                if FirewallRule.asksAgain(after: self.status.snapshot.firewall, fromLoopback: route.origin == .loopback) {
+                // that verdict is stale (FirewallRule.asksAgain). One through a relay on this Mac came
+                // from this Mac itself, as one over loopback does, which says nothing of the firewall.
+                if FirewallRule.asksAgain(after: self.status.snapshot.firewall, fromLoopback: route.origin == .loopback || route.origin == .relay) {
                     self.checkFirewall()
                 }
                 // Home or away before its catalog: its settings state says which quality it sets.
@@ -581,6 +615,7 @@ package final class StreamCoordinator {
                 if self.flipWait == id { self.flipWait = nil }
                 self.menus.clientLeft(connection)
                 self.clipboard.clientLeft(connection)
+                self.displayWake.forget(id)
                 // Its keys go up, and its buttons when the Mac no longer served it (`revoked`, read before
                 // it is forgotten below). Its input still held for an activation is judged as a departed
                 // device's from here on (`gone`: `leftWhileHeld`), and an identifier a later connection
@@ -592,7 +627,7 @@ package final class StreamCoordinator {
                 let flipped = self.routesChanged(joined: nil, endpoint: nil)
                 // A 120 Hz device left a 60 Hz one behind: come down to its rate. The restart takes
                 // the flip too (select's commit), so a device that leaves costs one.
-                if self.active != .none, self.catalog.clientCount > 1, self.effectiveFPS != self.fps {
+                if self.active != .none, self.catalog.clientCount > 1, self.streamRate(for: self.active) != self.fps {
                     await self.select(self.active)
                 } else if flipped {
                     await self.applyPending()
@@ -643,6 +678,11 @@ package final class StreamCoordinator {
         catalog.onWindowsChanged = { [weak self] infos in
             Task { @MainActor in await self?.windowsChanged(infos) }
         }
+        catalog.onDesktopDisplaysChanged = { [weak self] in
+            guard let self else { return }
+            self.broadcastList()
+            Task { @MainActor in await self.followDesktopStop() }
+        }
         catalog.onThumbnail = { [weak self] id, jpeg in
             self?.server.broadcast(StreamMessage(kind: .thumbnail, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                                                  payload: ImageBlob.encodeThumbnail(windowID: id, jpeg: jpeg)))
@@ -690,6 +730,15 @@ package final class StreamCoordinator {
         // they always did; a remote device keeps its paired name meanwhile.
         server.onClientHello = { [weak self] connection, hello in
             let id = ObjectIdentifier(connection)
+            // A device that shows the off-console view (docs/off-console-plan.md): its hello is read after its first
+            // window list went out (the plain one: the server knew no better yet), so while the view applies it is
+            // sent the view's list now (StreamServer picks it by the hello, as every list from here on).
+            if (hello.offConsoleView ?? 0) >= LockedMac.viewGeneration {
+                Task { @MainActor in
+                    guard let self, let view = self.listMessages().view else { return }
+                    self.server.send(view, to: connection)
+                }
+            }
             let name = SafeText.label(hello.device ?? "")
             guard !name.isEmpty else { return }
             Task { @MainActor in
@@ -805,6 +854,8 @@ package final class StreamCoordinator {
         if let line = clipboard.testHookLine { print(line) }   // TEST ONLY, and only with one of its variables set
         // TEST ONLY, on a test host with one of SessionLock's variables set.
         for line in SessionLock.testHookLines(testHost: server.isTestHost, environment: ProcessInfo.processInfo.environment) { print(line) }
+        // Show this account while another user is on the screen (docs/off-console-plan.md): one line, only when on.
+        if config.offConsoleView { print(LockPolicy.offConsoleViewStartLine) }
         checkFirewall()                                         // at launch, beside the listener's own check
         watchDisplayChanges()                                   // the fallback display goes when a real one is back
         if !synthetic, promptForPermissions { InputInjector.ensureAccessibility() }   // prompts once; input is dropped silently without it
@@ -898,6 +949,13 @@ package final class StreamCoordinator {
         // Share clipboard with devices, at once rather than between pipelines: off must stop what goes
         // out now, not after a restart. The lists say `clipboard` again (or no longer).
         if clipboard.setEnabled(new.shareClipboard) { broadcastList() }
+        // Show this account while another user is on the screen (docs/off-console-plan.md), at once too: the
+        // gate takes it now (off stops this session's pictures before the next frame), the stream follows.
+        let view = lockGate.setOffConsoleView(new.offConsoleView)
+        if view.was != view.now {
+            print(LockPolicy.viewChangedLine(view.now))
+            Task { @MainActor in await self.lockChanged() }
+        }
         guard new != target else { return false }
         pendingConfig = new
         publishSettings()
@@ -973,7 +1031,7 @@ package final class StreamCoordinator {
     private func restartNeeded(for new: HostConfig, away: Bool) -> Bool {
         guard active != .none else { return false }
         let wanted = min(new.maxFPS, max(24, clientFPS.values.max() ?? 60))
-        let newFPS = useSoftwareEncoder ? min(wanted, 60) : wanted
+        let newFPS = streamRate(for: active, wanted: useSoftwareEncoder ? min(wanted, 60) : wanted)
         let pair = new.effective(away: away)
         let newScale = useSoftwareEncoder ? min(pair.captureScale, 1.0) : pair.captureScale
         if newFPS != fps || newScale != captureScale { return true }
@@ -998,7 +1056,6 @@ package final class StreamCoordinator {
             || old.requirePairing != next.requirePairing {
             remote?.apply(next)
         }
-        catalog.preferMainDisplay = next.virtualDisplay   // the Desktop source must never capture the virtual display
         if old.virtualDisplay && !next.virtualDisplay {
             stage.release()        // idempotent: select has already sent a staged window home
             status.update { $0.lastStageFailure = nil }
@@ -1201,7 +1258,7 @@ package final class StreamCoordinator {
         // paired session at a locked screen, nobody off console), and from any other only the up of what
         // it holds down, where the pointer is. What the lock refuses wakes nothing either.
         let reading = LockPolicy.restrictive(arrived, lockReading)
-        switch lockDecision(message, input: input, from: sender, reading: reading) {
+        switch lockDecision(message, input: input, from: sender, arrived: arrived) {
         case .take:
             break
         case .letGo:
@@ -1211,9 +1268,18 @@ package final class StreamCoordinator {
             refusedWhileLocked(why, message, from: connection)
             return
         }
+        // A press on a display that reads asleep wakes it and goes no further, nor does its release
+        // (DisplayWake.pass, PR #228): a tap on a black picture clicks nothing out of sight. Only input the
+        // lock took gets here, so what the lock refuses or lets go is never held back.
+        let passed = input.map { event in
+            displayWake.pass(event, from: sender, at: CFAbsoluteTimeGetCurrent(),
+                             asleep: { pressLandsAsleep(event) })
+        }
+        if passed?.waking == true { Stats.shared.bump(DisplayWake.heldKey) }
         // Every message goes to DisplayWake, which alone says which of them is a person at the device
-        // (a pick never is: the device asks for the Desktop by itself), issue #134; at the lock's reading.
-        deviceActive(.message(message.kind, input), connection, reading: reading)
+        // (a pick never is: the device asks for the Desktop by itself), issue #134; a press held back
+        // declares at once; at the lock's reading.
+        deviceActive(passed?.waking == true ? .wakingPress : .message(message.kind, input), connection, reading: reading)
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
@@ -1224,6 +1290,11 @@ package final class StreamCoordinator {
             // list: the Desktop at a connection's start or once the Mac stopped it, and after a move
             // what it watched, the Desktop or a window).
             await handlePick(source)
+        case .nextDisplay:
+            // The Desktop button tapped while the Desktop streams (DesktopDisplays). A synthetic host's
+            // Desktop is the test pattern, which has stops only under SILL_TEST_DISPLAYS.
+            guard !synthetic || catalog.testDisplays != nil else { return }
+            await nextDesktopDisplay(askedBy: deviceName(connection))
         case .windowCommand:
             // The bar's long-press menu: the window's own traffic lights, pressed through
             // Accessibility. The staged window's element is already matched; others are looked up.
@@ -1253,7 +1324,7 @@ package final class StreamCoordinator {
                 if let error { print("Launch failed: \(error.localizedDescription)") }
             }
         case .input:
-            guard let event = input else { return }
+            guard let event = passed?.event else { return }     // it does not decode, or a release held back
             let device = ObjectIdentifier(connection)
             guard let rect = currentSourceRect() else {
                 // Nothing streams (between sources, or the stream stopped: the window closed under a
@@ -1442,13 +1513,34 @@ package final class StreamCoordinator {
     /// session's start declares nothing (none of the screen streams), a person's activity a paired
     /// session's taken input brought still does, as the Mac's own keyboard would.
     private func deviceActive(_ event: DisplayWake.Event, _ connection: NWConnection, reading: LockPolicy.Reading? = nil) {
-        let allowed = LockPolicy.allowed(reading ?? lockReading)
+        let allowed = LockPolicy.allowed(reading ?? lockReading, offConsoleView: lockGate.offConsoleView)
         if case .connect = event { guard allowed.wakeOnConnect else { return } } else { guard allowed.wakeOnActivity else { return } }
         switch displayWake.decide(event, at: CFAbsoluteTimeGetCurrent()) {
         case .nothing: break
         case .count: Stats.shared.bump(DisplayWake.dryKey)
-        case .declare(let activity): displayActivity.declare(for: deviceName(connection), activity)
+        // The line reads the display the devices are shown: the Desktop's stop, else the main display.
+        case .declare(let activity): displayActivity.declare(for: deviceName(connection), activity,
+                                                             display: active == .desktop && !placeholderStreams ? desktopStreamDisplay : nil)
         }
+    }
+
+    /// Whether the display a device's press lands on reads asleep (DisplayWake.pass asks only for a
+    /// press): the display under the press in the streamed source, the virtual display when a window
+    /// is staged there, as CoreGraphics reads it; the main display when nothing streams or the press
+    /// lands on no display. A test host never reads a display: its test pattern never sleeps, but
+    /// under SILL_TEST_DISPLAY_ASLEEP while that file exists.
+    private func pressLandsAsleep(_ event: InputEvent) -> Bool {
+        if synthetic { return testDisplayAsleepFile.map { FileManager.default.fileExists(atPath: $0) } ?? false }
+        guard case .pointer(_, let x, let y) = event, let rect = currentSourceRect(), !rect.isNull else {
+            return CGDisplayIsAsleep(CGMainDisplayID()) != 0
+        }
+        var display = CGDirectDisplayID(0)
+        var count: UInt32 = 0
+        let point = InputLanding.point(x: x, y: y, in: rect, displayScale: nil)
+        guard CGGetDisplaysWithPoint(point, 1, &display, &count) == .success, count == 1 else {
+            return CGDisplayIsAsleep(CGMainDisplayID()) != 0
+        }
+        return CGDisplayIsAsleep(display) != 0
     }
 
     /// Parameter sets went out at `time` (the encoder's callback, hopped here). A stream's first, and
@@ -1472,6 +1564,9 @@ package final class StreamCoordinator {
 
     /// The gate's reading now (SessionLock's, set on its own queue).
     private var lockReading: LockPolicy.Reading { lockGate.reading }
+    /// What the lock lets the devices see and do now: the gate's reading with the off-console view, the Mac's
+    /// switch Show this account while another user is on the screen (LockPolicy.allowed; docs/off-console-plan.md).
+    private var lockAllowed: LockPolicy.Allowed { lockGate.allowed }
 
     /// The gate changed (SessionLock.onChange, hopped here): what the devices are shown follows the reading
     /// as it is now, once per change however many came meanwhile. SessionLock printed its line already.
@@ -1482,17 +1577,26 @@ package final class StreamCoordinator {
     private func lockChanged() async {
         let now = lockReading
         guard lockGate.established else { return }
-        let was = lockActedOn
+        let was = lockActedOn, wasView = lockActedView
+        let view = lockGate.offConsoleView
         lockActedOn = now
+        lockActedView = view
         // Changes coalesce (a lock and an unlock both before this ran): it acts on the reading as it is,
         // and also when nothing changed but what streams or was listed does not fit it: a select that
         // finished while the gate read locked (the placeholder) or unlocked (a window, the display) in
         // between, or a locked list sent meanwhile (LockPolicy.reconciles).
         let streams: LockPolicy.Streams = placeholderStreams ? .placeholder : Self.isWindow(active) ? .window
             : active == .desktop ? .display : .nothing
-        guard now != was || LockPolicy.reconciles(now, streams: streams, lockedListSent: lockedListSent) else { return }
-        let allowed = LockPolicy.allowed(now)
+        guard now != was || view != wasView
+              || LockPolicy.reconciles(now, streams: streams, lockedListSent: lockedListSent, offConsoleView: view) else { return }
+        let allowed = LockPolicy.allowed(now, offConsoleView: view)
+        let catalogWithheld = catalog.locked
         catalog.locked = !allowed.windows
+        // Locked, or another user on the screen: the Desktop's one stop is the main display, whose lock
+        // screen takes the password (DesktopDisplays); the stop a device chose comes back after the unlock.
+        // A Desktop on another display moves now (`followDesktopStop`, from the catalog's change).
+        catalog.mainOnly = now.locked
+        status.update { $0.offConsoleView = view }      // the card's subtitle
         clipboard.setLocked(!allowed.clipboard)
         cursorShapes.running = active != .none && allowed.pointer
         pointer.setGeometry(pointerGeometry(), fps: fps)     // nothing of the pointer read while locked
@@ -1503,6 +1607,10 @@ package final class StreamCoordinator {
         menuTargetChanged()                  // no app's menus while locked, the source's again after
         audioFollow()                        // and no sound
         broadcastList()                      // the windows go now; they come back once looked at
+        // The off-console view began after a lock (the switch on while off console, or the console's witness
+        // after a note): what the lock withheld of the icons and the installed apps goes now; the catalog takes
+        // every thumbnail again by itself.
+        if now.locked, catalogWithheld, !catalog.locked { sendWithheldAppsAndIcons() }
         if now.locked {
             restore.lockBegan(active: active)    // a window streaming now is what comes back
             await enforceLock()
@@ -1519,12 +1627,27 @@ package final class StreamCoordinator {
     private func enforceLock() async {
         // With no device left, the client count's own select(.none) stops the stream instead.
         guard lockReading.locked, !switching, catalog.clientCount > 0 else { return }
+        let allowed = lockAllowed
+        // The off-console view (docs/off-console-plan.md): a window streams on, never from Sill's virtual display,
+        // which would join the other user's displays: a staged one is restarted where it is (`select`).
+        if Self.isWindow(active), allowed.windows {
+            if virtualDisplay, stage.isStaged, !allowed.virtualDisplay { await select(active) }
+            return
+        }
         // The Desktop already as this reading has it (the placeholder, or the display where it may stream:
         // a locked screen with `LockPolicy.lockScreenStreams`); else the Desktop again, so another user
         // taking the console turns the display into the placeholder, and this session back on it, locked,
         // turns the placeholder into the lock screen.
-        if active == .desktop, placeholderStreams != LockPolicy.allowed(lockReading).display { return }
+        // The display only on the main display (DesktopDisplays: `mainOnly`), whatever stop was chosen.
+        if active == .desktop, placeholderStreams != allowed.display, placeholderStreams || desktopOnItsStop { return }
         await select(.desktop)
+    }
+
+    /// The Desktop's capture runs on the stop the catalog shows (a test host's test pattern without
+    /// SILL_TEST_DISPLAYS has none, and is on it).
+    private var desktopOnItsStop: Bool {
+        if synthetic, catalog.testDisplays == nil { return true }
+        return desktopStreamDisplay == catalog.desktopDisplayID
     }
 
     /// A switch to a window found this Mac locked just before the window would be staged or its pipeline
@@ -1532,9 +1655,9 @@ package final class StreamCoordinator {
     /// the window goes home (the stage's way here, WindowRestore's in `select`'s defer), the placeholder
     /// follows at once, and the window is what comes back after the unlock (unless no device is left, as
     /// `LockPolicy.Restore.devicesLeft` says). The caller returns from `select`.
-    private func lockedMidSwitch(_ source: StreamSource) {
+    private func lockedMidSwitch(_ source: StreamSource) async {
         if catalog.clientCount > 0 { _ = restore.select(source, active: active, pick: false, reading: lockReading) }
-        if virtualDisplay { stage.release() }
+        if virtualDisplay { await stage.releaseHome() }
         active = .none
         placeholderStreams = false
         broadcastList()
@@ -1596,8 +1719,9 @@ package final class StreamCoordinator {
     /// decoded or looked up; locked, whether the session is paired is (input comes up to 120 times a
     /// second, and only while locked does it matter).
     private func lockDecision(_ message: StreamMessage, input: InputEvent?, from id: ObjectIdentifier,
-                              reading: LockPolicy.Reading) -> LockPolicy.Decision {
-        guard reading.locked else { return .take }
+                              arrived: LockPolicy.Reading) -> LockPolicy.Decision {
+        let now = lockReading
+        guard arrived.locked || now.locked else { return .take }
         let request: LockPolicy.Request
         switch message.kind {
         case .input:
@@ -1605,6 +1729,8 @@ package final class StreamCoordinator {
             request = .input(letsGo: injector.releasesWhatItHolds(input, from: id))
         case .selectSource:
             request = .pick(Wire.decode(StreamSource.self, from: message.payload) ?? .none)
+        case .nextDisplay:
+            request = .nextDisplay
         case .launchApp:
             request = .launch
         case .windowCommand:
@@ -1620,7 +1746,8 @@ package final class StreamCoordinator {
         default:
             return .take
         }
-        return LockPolicy.decide(request, reading: reading, paired: sessionPaired(id))
+        // At the reading as it arrived and now, the off-console view as it is now: the stricter answer.
+        return LockPolicy.decide(request, arrived: arrived, now: now, paired: sessionPaired(id), offConsoleView: lockGate.offConsoleView)
     }
 
     /// A request the lock refused: counted, a line a minute at most for its kind (the first at once), and
@@ -1655,9 +1782,10 @@ package final class StreamCoordinator {
             return nil
         case .desktop:
             // The test pattern with the TEST ONLY scripted pointer: its own space, where a test
-            // client's input moves that pointer (a synthetic host posts nothing).
-            if synthetic, pointer.hasTestPointer { return Self.testPatternRect }
-            return catalog.display?.frame
+            // client's input moves that pointer (a synthetic host posts nothing). Under SILL_TEST_DISPLAYS
+            // the shown stop's own space instead, so the dry run's log shows where input lands on each.
+            if synthetic, pointer.hasTestPointer, catalog.testDisplays == nil { return Self.testPatternRect }
+            return desktopFrame
         case .window(let id):
             // On the virtual display the video is the captured crop, not the whole window: an app
             // that took a larger size than asked overhangs the display and the overhang is not shown.
@@ -1670,6 +1798,13 @@ package final class StreamCoordinator {
             rectCache = (id, rect, now)
             return rect
         }
+    }
+
+    /// The Desktop's rectangle: the stop its capture runs on (DesktopDisplays.landing), else the
+    /// catalog's display (a test host's stop under SILL_TEST_DISPLAYS).
+    private var desktopFrame: CGRect? {
+        DesktopDisplays.landing(streaming: desktopStreamDisplay, among: catalog.desktopCandidates)
+            ?? (catalog.testDisplays != nil ? catalog.desktopStop?.frame : catalog.display?.frame)
     }
 
     private static func liveBounds(of id: CGWindowID) -> CGRect? {
@@ -1696,13 +1831,13 @@ package final class StreamCoordinator {
     /// never reads the real pointer (a real window picked there included).
     private func pointerGeometry() -> PointerWatch.Geometry? {
         // A locked Mac's pointer is never read (LockPolicy): off console it is the console's, another user's.
-        guard LockPolicy.allowed(lockReading).pointer else { return nil }
+        guard lockAllowed.pointer else { return nil }
         switch active {
         case .none:
             return nil
         case .desktop:
             if synthetic { return pointer.hasTestPointer ? .rect(Self.testPatternRect) : nil }
-            return catalog.display.map { .rect($0.frame) }
+            return desktopFrame.map { .rect($0) }
         case .window(let id):
             guard !synthetic else { return nil }
             if virtualDisplay, stage.isStaged, let onScreen = stage.captureRectOnScreen { return .rect(onScreen) }
@@ -1756,7 +1891,7 @@ package final class StreamCoordinator {
     private func applyViewportToActiveWindow() async {
         // A different rate (a ProMotion device joined, Low Power Mode toggled) needs a new capture
         // interval and encoder session: one restart, whatever the source.
-        if active != .none, effectiveFPS != fps { await select(active); return }
+        if active != .none, streamRate(for: active) != fps { await select(active); return }
         if virtualDisplay, stage.isStaged, case .window(let id) = active {
             // One restart: prepare re-places the window on the same display (the display is only
             // recreated if the envelope grew). The client's identical re-send after a switch is a
@@ -1772,7 +1907,8 @@ package final class StreamCoordinator {
             return
         }
         // A locked Mac sizes no window (LockPolicy): the one streaming at the lock gives way to the placeholder.
-        guard case .window(let id) = active, !lockReading.locked, let w = catalog.window(id: id) else { return }
+        // Nor does the off-console view (Accessibility acts in a session nobody at the device can use).
+        guard case .window(let id) = active, lockAllowed.actsOnWindows, let w = catalog.window(id: id) else { return }
         if fitToViewport(w) != nil { await catalog.refreshWindows() }
     }
 
@@ -1834,7 +1970,7 @@ package final class StreamCoordinator {
     func select(_ source: StreamSource, bringForward: Bool = false) async {
         guard !switching, !shuttingDown else { return }
         var source = source
-        switch restore.select(source, active: active, pick: bringForward, reading: lockReading) {
+        switch restore.select(source, active: active, pick: bringForward, reading: lockReading, offConsoleView: lockGate.offConsoleView) {
         case .proceed: break
         case .desktop: source = .desktop
         case .stay: return
@@ -1881,7 +2017,8 @@ package final class StreamCoordinator {
             if active == .none { judgeLinks(nil); restoreFits(keeping: nil) }
             // Locked while this switch was under way, and what started is a picture of the Mac (a window,
             // the display): the placeholder now (LockPolicy). The gate withheld its frames meanwhile.
-            if lockReading.locked, active != .none, !placeholderStreams { Task { @MainActor in await self.enforceLock() } }
+            // The off-console view: the placeholder that started meanwhile gives way to this session's picture.
+            if lockReading.locked, active != .none, !placeholderStreams || lockGate.offConsoleView { Task { @MainActor in await self.enforceLock() } }
         }
 
         await capture.stop()
@@ -1909,7 +2046,7 @@ package final class StreamCoordinator {
                 }
             case .chord(let keyCode, let flags, let device):
                 if gone(device) { Stats.shared.bump("in.revoked"); continue }
-                if !LockPolicy.allowed(lockReading).gestures { Stats.shared.bump("in.locked"); continue }
+                if !lockAllowed.gestures { Stats.shared.bump("in.locked"); continue }
                 injector.chord(keyCode: keyCode, flags: flags)
             }
         }
@@ -1933,7 +2070,7 @@ package final class StreamCoordinator {
                 // window home now, and re-read the catalog so the .window lookup below gets its
                 // home frame, not the staged one.
                 cameHome = stage.isStaged
-                await stage.leaveFullScreenIfNeeded(); stage.release()
+                await stage.leaveFullScreenIfNeeded(); await stage.releaseHome()
                 if case .window = source { await catalog.refreshWindows() }
                 leftStage = true
             }
@@ -1945,7 +2082,11 @@ package final class StreamCoordinator {
             // Home or away changed (a device joined or left): the pipeline takes the other pair.
             adopt(config, away: awayWanted)
         }
-        fps = effectiveFPS             // the devices' panel rate (highest), or 60 before any has said
+        // The devices' panel rate (highest), or 60 before any has said; the Desktop's held to its stop's
+        // refresh rate (the stop as the last look has it, the main display while locked: checked again once
+        // the capture is built).
+        catalog.mainOnly = lockReading.locked
+        fps = streamRate(for: source)
         // The devices' links: judged afresh when the stream comes back at another quality or not at
         // all, kept through a restart that keeps it (a window picked, a rotation, a resize).
         judgeLinks(source == .none ? nil : LinkJudge.Quality(bitrate: bitrate, fps: fps, captureScale: Double(captureScale)))
@@ -1961,8 +2102,10 @@ package final class StreamCoordinator {
                     stage.releaseWindow()
                 }
             } else {
+                // The display goes once the window server shows the window home (StageRelease: as it went in the
+                // same millisecond, macOS moved a window still committing its move to the main display, 2026-11-12).
                 await stage.leaveFullScreenIfNeeded()
-                stage.release()
+                await stage.releaseHome()
             }
         }
         // In regular mode, every window Sill sized but the one about to stream goes back to its own
@@ -1972,6 +2115,9 @@ package final class StreamCoordinator {
         // The catalog's look, before a capture is built from it (CatalogLook): after a spell with no
         // device it can be hours old and its display gone (the black screen of 2026-10-28), so it is
         // looked at again first. The Desktop reads its display after this and after its own await.
+        // Locked, or another user on the screen: the Desktop's stop is the main display (DesktopDisplays),
+        // before the look below is taken, so its line never takes the lock for a change of displays.
+        catalog.mainOnly = lockReading.locked
         let lookBefore = (display: catalog.display?.displayID, age: catalog.lookAge)
         if source != .none, !(synthetic && source == .desktop) {
             await lookAgainIfStale()
@@ -1997,23 +2143,28 @@ package final class StreamCoordinator {
             broadcastList()
             return
         case .window(let id):
+            // The off-console view (docs/off-console-plan.md): never Sill's virtual display; a window staged there
+            // goes home first (Sill's own staging undone) and streams where it is.
+            if virtualDisplay, lockAllowed.windows, !lockAllowed.virtualDisplay, stage.isStaged {
+                await stage.leaveFullScreenIfNeeded(); await stage.releaseHome(); await catalog.refreshWindows(); leftStage = true
+            }
             // On the virtual display the window may have left the on-screen list; look it up fully.
             var found = catalog.window(id: id)
             if found == nil, virtualDisplay || leftStage { found = await catalog.resolveWindow(id: id) }
             guard let w = found else {
-                if virtualDisplay { stage.release() }
+                if virtualDisplay { await stage.releaseHome() }
                 active = .none; broadcastList(); return
             }
             // Locked during this switch's awaits: nothing of the window is staged, sized, raised or
-            // captured (LockPolicy).
-            if lockReading.locked { lockedMidSwitch(source); return }
+            // captured (LockPolicy), but in the off-console view, which captures it where it is.
+            if !lockAllowed.windows { await lockedMidSwitch(source); return }
             print("Selecting window \(w.windowID) \(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "") frame \(w.frame) onScreen \(w.isOnScreen) active \(w.isActive)")
             picked = w
             listedFullScreen = WindowRestore.coversDisplay(w.frame, WindowSizer.displayFrames()) ? id : nil
             streamedPID = w.owningApplication.map { (window: id, pid: $0.processID) }
             title = Self.menuTitle(for: w)
             var size = w.frame.size
-            if virtualDisplay, stage.disabledReason == nil {
+            if virtualDisplay, stage.disabledReason == nil, lockAllowed.virtualDisplay {
                 let want = wantedStage(for: w)
                 // A window Sill sized in regular mode (the virtual display turned on while it
                 // streamed): the stage keeps the frame it would have gone back to as its way home.
@@ -2034,11 +2185,10 @@ package final class StreamCoordinator {
                 } catch {
                     // Locked while the window was being staged: no display was made (or it goes now), and
                     // nothing of the window streams in its place (LockPolicy).
-                    if case VirtualStage.Failure.locked = error { lockedMidSwitch(source); return }
-                    if lockReading.locked { lockedMidSwitch(source); return }
+                    if !lockAllowed.windows { await lockedMidSwitch(source); return }
                     print("Virtual display fallback for \(w.owningApplication?.applicationName ?? "?"): \(error). Streaming the real window instead.")
                     Stats.shared.bump("vd.fallback")
-                    stage.release()
+                    await stage.releaseHome()
                     // For the menu: why this window streams in place, and whether the stage gave up
                     // for the run (it does after repeated display creation failures).
                     let why = (error as? VirtualStage.Failure)?.summary ?? "\(error)"
@@ -2049,8 +2199,11 @@ package final class StreamCoordinator {
                 }
             }
             if sourceRect == nil {
-                // Locked while the stage tried (its awaits): nothing raised or sized either.
-                if lockReading.locked { lockedMidSwitch(source); return }
+                // Locked while the stage tried (its awaits): nothing raised or sized either. The off-console view
+                // captures the window where it is, and raises and sizes nothing (LockPolicy.Allowed.actsOnWindows).
+                if !lockAllowed.windows { await lockedMidSwitch(source); return }
+                let acts = lockAllowed.actsOnWindows
+                if virtualDisplay, !lockAllowed.virtualDisplay { status.update { $0.lastStageFailure = "another user is on the screen" } }
                 // Today's path: capture the window where it is, at most at its display's own scale
                 // (a window on a 1x display drawn at 1x into a 2x buffer filled its top-left quarter).
                 let windowFilter = SCContentFilter(desktopIndependentWindow: w)
@@ -2060,11 +2213,11 @@ package final class StreamCoordinator {
                 // picked window). A covered window stops repainting, so it would stream frozen, and
                 // keys go to the active app's key window. Done before capture starts, so the first
                 // frames already show it uncovered. The virtual display's fallback lands here too.
-                if comeForward, !shuttingDown { activateAndRaise(window: w) }
+                if comeForward, !shuttingDown, acts { activateAndRaise(window: w) }
                 // Fit the window to the client's panel before capture starts, so the stream comes up
                 // at the new size instead of restarting once the catalog notices. `w` is a snapshot
                 // with the old frame; the window server has the new one.
-                if let resized = fitToViewport(w) { size = Self.liveBounds(of: id)?.size ?? resized }
+                if acts, let resized = fitToViewport(w) { size = Self.liveBounds(of: id)?.size ?? resized }
                 describe = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")\(useSoftwareEncoder ? " (software encoder)" : "")"
             }
             if sourceRect == nil {
@@ -2080,12 +2233,27 @@ package final class StreamCoordinator {
             // Staged on the virtual display, nothing is activated or raised on select: the window
             // cannot be covered there, and the AX moves that put it there touch no focus.
         case .desktop:
-            if !LockPolicy.allowed(lockReading).display {
+            if !lockAllowed.display {
                 // A locked Mac's Desktop (LockPolicy): the placeholder, a black still and no capture.
                 (width, height) = placeholderSize()
                 picture = .placeholder
                 describe = "a placeholder (this Mac is locked: nothing of it is captured)"
                 title = "Locked"; kind = .desktop
+            } else if synthetic, let stop = testStop() {
+                // TEST ONLY (SILL_TEST_DISPLAYS): the test pattern at the shown stop's size and scale, with
+                // its number and name drawn on it, its rate held to the stop's (`streamRate`).
+                desktopStreamDisplay = stop.display.id
+                let pixelScale = CaptureScale.effective(knob: captureScale, displayScale: stop.scale)
+                width = evenPixels(stop.display.frame.width * pixelScale); height = evenPixels(stop.display.frame.height * pixelScale)
+                describe = "a synthetic test pattern of \(stop.words)\(useSoftwareEncoder ? " (software encoder)" : "")"
+                title = "Test Pattern"; kind = .testPattern
+                picture = .display
+                syntheticCapture.label = stop.words
+                let rate = DesktopDisplays.rate(effectiveFPS, refreshHz: stop.display.refreshHz)
+                if rate != fps {
+                    fps = rate
+                    judgeLinks(LinkJudge.Quality(bitrate: bitrate, fps: fps, captureScale: Double(captureScale)))
+                }
             } else if synthetic {
                 // A 1512×949-point test pattern: the same size as a typical streamed window, so the
                 // encoder and the fallback see realistic load without Screen Recording.
@@ -2106,13 +2274,20 @@ package final class StreamCoordinator {
                 describe = "the whole desktop\(useSoftwareEncoder ? " (software encoder)" : "")"
                 title = "Whole Desktop"; kind = .desktop
                 picture = .display
+                // The stop's own refresh rate, now that its display is known (a look during the awaits can
+                // have moved the Desktop to a stop of another rate): judged at the rate it runs.
+                let rate = DesktopDisplays.rate(effectiveFPS, refreshHz: catalog.desktopCandidates.first { $0.id == plan.displayID }?.refreshHz)
+                if rate != fps {
+                    fps = rate
+                    judgeLinks(LinkJudge.Quality(bitrate: bitrate, fps: fps, captureScale: Double(captureScale)))
+                }
             }
         }
 
         // Locked while this switch was under way (the gate set during its awaits): no frame of a window
         // goes out (`lockedMidSwitch`), and the display gives way to the placeholder (LockPolicy).
-        if case .window = source, lockReading.locked { lockedMidSwitch(source); return }
-        if picture == .display, !LockPolicy.allowed(lockReading).display {
+        if case .window = source, !lockAllowed.windows { await lockedMidSwitch(source); return }
+        if picture == .display, !lockAllowed.display {
             filter = nil; displayScale = nil
             (width, height) = placeholderSize()
             picture = .placeholder
@@ -2129,13 +2304,13 @@ package final class StreamCoordinator {
                 // The display filter failed to start: send the window home and stream it there.
                 print("Capture on the virtual display failed: \(error); retrying with the real window.")
                 status.update { $0.lastStageFailure = "capture on the display failed" }
-                stage.release()
-                if comeForward, !shuttingDown { activateAndRaise(window: w) }   // regular mode now: a pick comes forward
+                await stage.releaseHome()
+                if comeForward, !shuttingDown, lockAllowed.actsOnWindows { activateAndRaise(window: w) }   // regular mode now: a pick comes forward
                 let fallback = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")\(useSoftwareEncoder ? " (software encoder)" : "")"
                 let windowFilter = SCContentFilter(desktopIndependentWindow: w)
                 let windowScale = Self.displayScale(of: windowFilter)
                 let pixels = CaptureScale.windowSize(w.frame.size, knob: captureScale, displayScale: windowScale)
-                if lockReading.locked { lockedMidSwitch(source); return }   // locked meanwhile: no frame of it either
+                if !lockAllowed.windows { await lockedMidSwitch(source); return }   // locked meanwhile: no frame of it either
                 do {
                     try await startPipeline(source: source, filter: windowFilter, sourceRect: nil, displayScale: windowScale,
                                             width: pixels.width, height: pixels.height,
@@ -2155,12 +2330,73 @@ package final class StreamCoordinator {
                                         testPattern: (width: width, height: height))
             } else {
                 print("Could not start streaming \(describe): \(error)")
-                if virtualDisplay { stage.release() }   // nothing streams: never leave a window on the virtual display
+                if virtualDisplay { await stage.releaseHome() }   // nothing streams: never leave a window on the virtual display
                 active = .none
             }
         }
         broadcastList()
         // Mid-switch requests (a viewport, the last client leaving) are applied by the defer.
+    }
+
+    /// Kind 47: the Desktop on the Mac's next stop (DesktopDisplays: the main display first, then each
+    /// display to its right, wrapping round), worked out from a fresh look at the displays, then the Mac's
+    /// pointer to its centre so the device's arrow shows at once. Ignored unless the Desktop streams, and
+    /// mid-switch, so a second quick tap never skips a stop. A step whose stop does not stream goes back to
+    /// the choice before it. A test host steps through its SILL_TEST_DISPLAYS and never moves the pointer.
+    private func nextDesktopDisplay(askedBy who: String) async {
+        guard active == .desktop, !switching else { return }
+        // A fresh look at the displays before every step, whatever the last one's age: a display that went since (the
+        // stage's, removed as the Desktop came back: "display 1 of 3" with two screens, 2026-11-12) is no stop.
+        if !synthetic { await catalog.refreshWindows() }
+        let previous = catalog.desktopDisplayUUID
+        // Locked during that look (LockPolicy refused kind 47 only as it was read on arrival): no step.
+        guard active == .desktop, !switching, !shuttingDown, !lockReading.locked,
+              let next = catalog.chooseNextDesktopDisplay() else { return }
+        let candidates = catalog.desktopCandidates
+        let name = Self.displayName(next)
+        print("Desktop: display \(DesktopDisplays.number(of: next.id, in: candidates) ?? 0) of \(candidates.count) (\(name)), asked by \(who).")
+        Stats.shared.bump("desk.next")
+        await select(.desktop)
+        guard !shuttingDown else { return }
+        let streamed = active == .desktop
+        catalog.chooseDesktopDisplay(DesktopDisplays.afterStep(stepped: next.uuid, previous: previous, streamed: streamed))
+        if !streamed {
+            // Its start and the one more try failed: the Desktop goes back to the stop it was on, rather
+            // than staying black where the button can no longer step from.
+            print("Desktop: \(name) did not stream; back to the display it was on.")
+            await select(.desktop)
+            return
+        }
+        // Never a test host's pointer (it posts nothing: the test pattern is not the screen), nor while
+        // locked or off console (the console's pointer: the stage's `mayWarp`).
+        guard !synthetic, catalog.desktopDisplayID == next.id, !lockReading.locked,
+              let to = DesktopDisplays.pointerTarget(pointer: CGEvent(source: nil)?.location, on: next.frame) else { return }
+        pointer.sillMoved()
+        CGWarpMouseCursorPosition(to)
+    }
+
+    /// A stop's name for the log and the devices (NSScreen's, cleaned), else "display 3".
+    private static func displayName(_ d: DesktopDisplays.Display) -> String {
+        let name = SafeText.label(d.name ?? "", limit: 64)
+        return name.isEmpty ? "display \(d.id)" : name
+    }
+
+    /// TEST ONLY (SILL_TEST_DISPLAYS, DesktopDisplaysHook): the stop a test host's Desktop shows, its scale
+    /// and its words ("display 2 of 3 (DELL U2723QE)"); nil on every other host.
+    private func testStop() -> (display: DesktopDisplays.Display, scale: CGFloat, words: String)? {
+        guard synthetic, catalog.testDisplays != nil, let stop = catalog.desktopStop,
+              let n = DesktopDisplays.number(of: stop.id, in: catalog.desktopCandidates) else { return nil }
+        return (stop, testDisplayScales[stop.id] ?? 1, "display \(n) of \(catalog.desktopCandidates.count) (\(Self.displayName(stop)))")
+    }
+
+    /// The Desktop streams a display other than the stop the catalog shows now (a step, the stop
+    /// unplugged or back, the main display changed, this Mac locked or unlocked: `mainOnly`): restart it
+    /// there. Not the placeholder, which captures no display; not mid-switch, whose own end decides.
+    private func followDesktopStop() async {
+        guard active == .desktop, !switching, !shuttingDown, !placeholderStreams,
+              synthetic ? catalog.testDisplays != nil : true,
+              let streams = desktopStreamDisplay, streams != catalog.desktopDisplayID else { return }
+        await select(.desktop)
     }
 
     /// The catalog's look, before a capture is built from it (CatalogLook): looked at once more when it
@@ -2182,6 +2418,10 @@ package final class StreamCoordinator {
     /// was built on a display read before an await, which the look that landed during it had replaced
     /// (CatalogLook). Nil when the catalog has no display, or the host is quitting.
     private func desktopCapture() async -> (filter: SCContentFilter, displayID: UInt32, displayScale: CGFloat?, width: Int, height: Int)? {
+        // Locked, or another user on the screen, the Desktop is the main display (DesktopDisplays): its lock
+        // screen, whatever stop a device chose, which comes back after the unlock. Read now, ahead of the
+        // lock's own change (`lockChanged`), so no other display's lock screen is ever built on.
+        catalog.mainOnly = lockReading.locked
         guard catalog.display != nil else { return nil }
         // Sill's own windows (Settings, Log, the pairing window with its code) never go out
         // in a Desktop stream. Fixed here at pipeline start: a running SCStream is never
@@ -2202,6 +2442,7 @@ package final class StreamCoordinator {
         // buffer (5120×2880 for a 1x 2560×1440 display: four times the pixels to encode).
         let scale = Self.displayScale(of: displayFilter)
         let pixelScale = CaptureScale.effective(knob: captureScale, displayScale: scale)
+        desktopStreamDisplay = d.displayID
         desktopStreamPoints = CGSize(width: d.width, height: d.height)
         return (displayFilter, d.displayID, scale, evenPixels(CGFloat(d.width) * pixelScale), evenPixels(CGFloat(d.height) * pixelScale))
     }
@@ -2225,7 +2466,7 @@ package final class StreamCoordinator {
             plan = (next.filter, next.displayID, next.displayScale, next.width, next.height)
         }
         // Locked during those awaits (LockPolicy): the placeholder, never the display.
-        let locked = !LockPolicy.allowed(lockReading).display
+        let locked = !lockAllowed.display
         if locked { plan = (nil, nil, nil, placeholderSize().width, placeholderSize().height) }
         print(CatalogLook.retryLine(source: describe, error: "\(error)", display: plan.displayID))
         do {
@@ -2366,7 +2607,7 @@ package final class StreamCoordinator {
                 logClick(event, in: rect); injector.apply(event, in: rect, from: device)
             case .chord(let keyCode, let flags, let device):
                 if gone(device) { Stats.shared.bump("in.revoked"); continue }
-                if !LockPolicy.allowed(lockReading).gestures { Stats.shared.bump("in.locked"); continue }   // no gesture at a locked Mac
+                if !lockAllowed.gestures { Stats.shared.bump("in.locked"); continue }   // no gesture at a locked Mac
                 injector.chord(keyCode: keyCode, flags: flags)
             }
         }
@@ -2642,7 +2883,7 @@ package final class StreamCoordinator {
     /// The app behind the current source, for the menus: nil for nothing streaming and for Sill, and
     /// while this Mac is locked (LockPolicy: a subscriber's top level is then empty).
     private func menuTarget() -> MenuMirror.Target? {
-        guard LockPolicy.allowed(lockReading).windows else { return nil }
+        guard lockAllowed.actsOnWindows else { return nil }      // none in the off-console view either
         switch active {
         case .none:
             return nil
@@ -2909,7 +3150,7 @@ package final class StreamCoordinator {
         if shuttingDown { return (.none, "Sill is quitting") }
         guard config.sendAudio else { return (.none, "Send Audio is off") }
         guard audioListeners > 0 else { return (.none, "no connected device plays sound") }
-        guard LockPolicy.allowed(lockReading).sound else { return (.none, "this Mac is locked") }
+        guard lockAllowed.sound else { return (.none, "this Mac is locked") }
         switch active {
         case .none:
             return (.none, "nothing streams")
@@ -2947,8 +3188,9 @@ package final class StreamCoordinator {
     }
 
     /// The source for `key`: ScreenCaptureKit's sound of one app, or of every app but Sill's, on the
-    /// main display (sound does not depend on the display: an app on the virtual display is heard
-    /// the same); or a synthetic host's test tone.
+    /// main display whatever stop the Desktop shows (sound does not depend on the display: an app on the
+    /// virtual display or another monitor is heard the same), so a step to another stop keeps the sound
+    /// running (DesktopDisplays); or a synthetic host's test tone.
     private func makeAudioSource(_ key: AudioKey) async -> AudioPipeline.Made {
         switch key {
         case .none:
@@ -2956,7 +3198,7 @@ package final class StreamCoordinator {
         case .test:
             return .source(SyntheticAudio(queue: audio.queue), line: "Audio: a test tone (440 Hz at -30 dBFS, a click at each second).")
         case .desktop:
-            guard let display = catalog.display else { return .failed("no display to capture from") }
+            guard let display = catalog.mainDisplay else { return .failed("no display to capture from") }
             let filter: SCContentFilter
             if let own = catalog.ownApplication {
                 filter = SCContentFilter(display: display, excludingApplications: [own], exceptingWindows: [])
@@ -2965,7 +3207,7 @@ package final class StreamCoordinator {
             }
             return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing the whole Mac's sound (every app but Sill).")
         case .app(let pid, let name):
-            guard let display = catalog.display else { return .failed("no display to capture from") }
+            guard let display = catalog.mainDisplay else { return .failed("no display to capture from") }
             guard let app = await runningApplication(pid) else { return .failed("\(name) is not among the apps ScreenCaptureKit lists") }
             let filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
             return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing \(name)'s sound (every window of it).")
@@ -3317,7 +3559,7 @@ package final class StreamCoordinator {
         defer { pointer.setGeometry(pointerGeometry(), fps: fps) }
         // Locked, with no window streaming: the devices' list has no windows whatever changed, and no
         // launched app's window is picked (LockPolicy).
-        if lockReading.locked, !Self.isWindow(active) { return }
+        if !lockAllowed.windows, !Self.isWindow(active) { return }
         if let pending = pendingLaunch, let w = infos.first(where: { $0.bundleID == pending }) {
             pendingLaunch = nil
             await select(.window(w.id), bringForward: true)   // launched from the device to use it: a pick
@@ -3481,34 +3723,56 @@ package final class StreamCoordinator {
 
     // MARK: Catalog to clients
 
-    private func listMessage() -> StreamMessage {
+    /// The window list as each device is sent it (`broadcastList`, `sendCatalog`): in the off-console view
+    /// (docs/off-console-plan.md) `view` is the view's list, with the windows and `offConsoleView`, for a device
+    /// whose hello said it shows it, and `plain` the locked list for every other; else `view` is nil.
+    private func listMessages() -> (view: StreamMessage?, plain: StreamMessage) {
+        let plain = listMessage()
+        guard lockGate.offConsoleView, lockReading == .offConsole else { return (nil, plain) }
+        return (listMessage(offConsoleView: true), plain)
+    }
+
+    private func listMessage(offConsoleView: Bool = false) -> StreamMessage {
         var list = WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
                               hostVersion: hostVersion, protocol: SillProtocol.current,
                               gestures: TrackpadGesture.generation, clipboard: clipboard.advertised)
         // This host repeats a device's held key (KeyRepeat), so a device sends it a hardware keyboard's
         // characters as keys.
         list.keyRepeat = KeyRepeat.generation
+        // The Desktop's stops (DesktopDisplays), with two or more: a device's button reads "Desktop 2" and
+        // steps with kind 47, and VoiceOver names the stop. None from a synthetic host, whose Desktop is the
+        // test pattern, but under SILL_TEST_DISPLAYS; none while locked or off console (LockPolicy.list).
+        let stops = catalog.desktopCandidates
+        if !synthetic || catalog.testDisplays != nil, stops.count > 1 {
+            list.desktopDisplays = stops.count
+            list.desktopDisplay = DesktopDisplays.number(of: catalog.desktopDisplayID, in: stops)
+            list.desktopDisplayNames = stops.map { SafeText.label($0.name ?? "", limit: 64) }
+        }
         // A locked Mac's list: no windows, no clipboard, `locked`, and off console `offConsole`
         // (LockPolicy); unlocked, as it is, byte for byte. Which went last, for `lockChanged`.
         let reading = lockReading
         lockedListSent = reading.locked
         return StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
-                             payload: Wire.encode(LockPolicy.list(list, reading: reading)))
+                             payload: Wire.encode(LockPolicy.list(list, reading: reading, offConsoleView: offConsoleView)))
     }
 
-    private func broadcastList() { server.broadcast(listMessage()) }
+    private func broadcastList() {
+        let lists = listMessages()
+        if let view = lists.view { server.broadcastList(view: view, plain: lists.plain) } else { server.broadcast(lists.plain) }
+    }
 
     private func sendCatalog(to connection: NWConnection) {
         let now = Date().timeIntervalSince1970
         // One reading for the whole catalog (the server's gate withholds the icons and apps anyway if the
         // Mac locks before they go).
-        let shows = LockPolicy.allowed(lockReading).appsAndIcons
+        let shows = lockAllowed.appsAndIcons
         if shows {
             print("Catalog → \(connection.endpoint): \(catalog.infos.count) windows, \(catalog.allIcons.count) icons, \(catalog.installedApps.count) apps")
         } else {
             print("Catalog → \(connection.endpoint): no windows, icons or apps (this Mac is locked)")
         }
-        server.send(listMessage(), to: connection)
+        let lists = listMessages()
+        if let view = lists.view { server.sendList(view: view, plain: lists.plain, to: connection) } else { server.send(lists.plain, to: connection) }
         // What the settings are, silently (the line above is the only one printed on connect). An
         // older device skips the kind. Recorded as what this connection was last sent, and only
         // then does it join the publishes: none goes out ahead of its window list, and the catalog
@@ -3534,7 +3798,7 @@ package final class StreamCoordinator {
                                       payload: Wire.encode(catalog.installedApps)), to: connection)
         }
         // The cursor's shape says what is under it: none while locked (the gate withholds it too).
-        if shows, let shape = cursorShapes.current {
+        if lockAllowed.pointer, let shape = cursorShapes.current {
             server.send(StreamMessage(kind: .cursorShape, timestamp: now, isKeyframe: false, payload: shape), to: connection)
         }
     }
@@ -3542,7 +3806,11 @@ package final class StreamCoordinator {
     /// A locked Mac's placeholder size: the Desktop's display's shape from the catalog's last look, with no
     /// new ScreenCaptureKit call (LockPolicy.placeholderSize).
     private func placeholderSize() -> (width: Int, height: Int) {
-        LockPolicy.placeholderSize(display: catalog.display.map { ($0.width, $0.height) })
+        // A test host's shown stop under SILL_TEST_DISPLAYS (the main display while locked).
+        if catalog.testDisplays != nil, let stop = catalog.desktopStop {
+            return LockPolicy.placeholderSize(display: (Int(stop.frame.width), Int(stop.frame.height)))
+        }
+        return LockPolicy.placeholderSize(display: catalog.display.map { ($0.width, $0.height) })
     }
 
     // MARK: Settings to devices
@@ -3635,9 +3903,9 @@ package final class StreamCoordinator {
 }
 
 extension ClientRoute {
-    /// Away from home: the remote door from a VPN or the internet (AwayPolicy.isAway). Its Quality and
-    /// Resolution picks set the away quality, which runs while every connected device is away. Here,
-    /// not beside ClientRoute in StreamServer.swift, which the pacing harness compiles without the
-    /// coordinator's files.
+    /// Away from home: the remote door from a VPN, the internet or a relay on this Mac
+    /// (AwayPolicy.isAway). Its Quality and Resolution picks set the away quality, which runs while
+    /// every connected device is away. Here, not beside ClientRoute in StreamServer.swift, which the
+    /// pacing harness compiles without the coordinator's files.
     var isAway: Bool { AwayPolicy.isAway(remoteDoor: isRemote, origin: origin) }
 }

@@ -19,6 +19,12 @@
 		A1000001000000000000A501 /* PhonePortraitLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F501 /* PhonePortraitLayout.swift */; };
 		A1000001000000000000A901 /* KeyChords.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F901 /* KeyChords.swift */; };
 		A1000001000000000000AC01 /* HardwareKeyboardPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FC01 /* HardwareKeyboardPolicy.swift */; };
+		A1000001000000000000AE30 /* DeviceIdlePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FE30 /* DeviceIdlePolicy.swift */; };
+		A1000001000000000000A29A /* PictureInPicture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F29A /* PictureInPicture.swift */; };
+		A1000001000000000000A291 /* PictureInPicturePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F291 /* PictureInPicturePolicy.swift */; };
+		A1000001000000000000A279 /* FullScreenPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F279 /* FullScreenPolicy.swift */; };
+		A1000001000000000000A27A /* FullScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F27A /* FullScreen.swift */; };
+		A1000001000000000000A27B /* RevealEdgePan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F27B /* RevealEdgePan.swift */; };
 		A10000010000000000AC0138 /* TextComposition.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000010000000000FC0138 /* TextComposition.swift */; };
 		A1000001000000000000A00A /* TrackpadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F00B /* TrackpadView.swift */; };
 		A1000001000000000000A701 /* TrackpadGestures.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F701 /* TrackpadGestures.swift */; };
@@ -36,6 +42,7 @@
 		A1000001000000000000AD64 /* ClipboardChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FD64 /* ClipboardChip.swift */; };
 		A1000001000000000000AE65 /* StreamZoom.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FE65 /* StreamZoom.swift */; };
 		A1000001000000000000A113 /* ThumbnailHold.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F113 /* ThumbnailHold.swift */; };
+		A1000001000000000000AE01 /* VersionLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FE01 /* VersionLabel.swift */; };
 		A1000001000000000000A014 /* DiscoveryPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F014 /* DiscoveryPolicy.swift */; };
 		A1000001000000000000A015 /* SessionLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F015 /* SessionLink.swift */; };
 		A1000001000000000000A020 /* MessageReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F020 /* MessageReader.swift */; };
@@ -82,6 +89,12 @@
 		A1000001000000000000F501 /* PhonePortraitLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhonePortraitLayout.swift; sourceTree = "<group>"; };
 		A1000001000000000000F901 /* KeyChords.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyChords.swift; sourceTree = "<group>"; };
 		A1000001000000000000FC01 /* HardwareKeyboardPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareKeyboardPolicy.swift; sourceTree = "<group>"; };
+		A1000001000000000000FE30 /* DeviceIdlePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdlePolicy.swift; sourceTree = "<group>"; };
+		A1000001000000000000F29A /* PictureInPicture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PictureInPicture.swift; sourceTree = "<group>"; };
+		A1000001000000000000F291 /* PictureInPicturePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PictureInPicturePolicy.swift; sourceTree = "<group>"; };
+		A1000001000000000000F279 /* FullScreenPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullScreenPolicy.swift; sourceTree = "<group>"; };
+		A1000001000000000000F27A /* FullScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullScreen.swift; sourceTree = "<group>"; };
+		A1000001000000000000F27B /* RevealEdgePan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RevealEdgePan.swift; sourceTree = "<group>"; };
 		A10000010000000000FC0138 /* TextComposition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextComposition.swift; sourceTree = "<group>"; };
 		A1000001000000000000F00B /* TrackpadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackpadView.swift; sourceTree = "<group>"; };
 		A1000001000000000000F701 /* TrackpadGestures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackpadGestures.swift; sourceTree = "<group>"; };
@@ -98,6 +111,7 @@
 		A1000001000000000000FD64 /* ClipboardChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardChip.swift; sourceTree = "<group>"; };
 		A1000001000000000000FE65 /* StreamZoom.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamZoom.swift; sourceTree = "<group>"; };
 		A1000001000000000000F113 /* ThumbnailHold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailHold.swift; sourceTree = "<group>"; };
+		A1000001000000000000FE01 /* VersionLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersionLabel.swift; sourceTree = "<group>"; };
 		A1000001000000000000F014 /* DiscoveryPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryPolicy.swift; sourceTree = "<group>"; };
 		A1000001000000000000F015 /* SessionLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionLink.swift; sourceTree = "<group>"; };
 		A1000001000000000000F020 /* MessageReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageReader.swift; sourceTree = "<group>"; };
@@ -153,12 +167,19 @@
 				A1000001000000000000F501 /* PhonePortraitLayout.swift */,
 				A1000001000000000000F901 /* KeyChords.swift */,
 				A1000001000000000000FC01 /* HardwareKeyboardPolicy.swift */,
+				A1000001000000000000FE30 /* DeviceIdlePolicy.swift */,
+				A1000001000000000000F29A /* PictureInPicture.swift */,
+				A1000001000000000000F291 /* PictureInPicturePolicy.swift */,
+				A1000001000000000000F279 /* FullScreenPolicy.swift */,
+				A1000001000000000000F27A /* FullScreen.swift */,
+				A1000001000000000000F27B /* RevealEdgePan.swift */,
 				A10000010000000000FC0138 /* TextComposition.swift */,
 				A1000001000000000000F013 /* HostSettingsPanel.swift */,
 				A1000001000000000000FC64 /* StreamClient+Clipboard.swift */,
 				A1000001000000000000FD64 /* ClipboardChip.swift */,
 				A1000001000000000000FE65 /* StreamZoom.swift */,
 				A1000001000000000000F113 /* ThumbnailHold.swift */,
+				A1000001000000000000FE01 /* VersionLabel.swift */,
 				A1000001000000000000F402 /* TourOverlay.swift */,
 				A1000001000000000000F401 /* TourPolicy.swift */,
 				A1000001000000000000FB01 /* DuoPosture.swift */,
@@ -307,12 +328,19 @@
 				A1000001000000000000A501 /* PhonePortraitLayout.swift in Sources */,
 				A1000001000000000000A901 /* KeyChords.swift in Sources */,
 				A1000001000000000000AC01 /* HardwareKeyboardPolicy.swift in Sources */,
+				A1000001000000000000AE30 /* DeviceIdlePolicy.swift in Sources */,
+				A1000001000000000000A29A /* PictureInPicture.swift in Sources */,
+				A1000001000000000000A291 /* PictureInPicturePolicy.swift in Sources */,
+				A1000001000000000000A279 /* FullScreenPolicy.swift in Sources */,
+				A1000001000000000000A27A /* FullScreen.swift in Sources */,
+				A1000001000000000000A27B /* RevealEdgePan.swift in Sources */,
 				A10000010000000000AC0138 /* TextComposition.swift in Sources */,
 				A1000001000000000000A013 /* HostSettingsPanel.swift in Sources */,
 				A1000001000000000000AC64 /* StreamClient+Clipboard.swift in Sources */,
 				A1000001000000000000AD64 /* ClipboardChip.swift in Sources */,
 				A1000001000000000000AE65 /* StreamZoom.swift in Sources */,
 				A1000001000000000000A113 /* ThumbnailHold.swift in Sources */,
+				A1000001000000000000AE01 /* VersionLabel.swift in Sources */,
 				A1000001000000000000A402 /* TourOverlay.swift in Sources */,
 				A1000001000000000000A401 /* TourPolicy.swift in Sources */,
 				A1000001000000000000AB01 /* DuoPosture.swift in Sources */,
@@ -502,7 +530,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.6.0;
+				MARKETING_VERSION = 0.6.2;
 				PRODUCT_BUNDLE_IDENTIFIER = me.saffer.sill;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -534,7 +562,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.6.0;
+				MARKETING_VERSION = 0.6.2;
 				PRODUCT_BUNDLE_IDENTIFIER = me.saffer.sill;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

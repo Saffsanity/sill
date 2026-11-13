@@ -2,6 +2,14 @@
 """H7 (docs/trackpad-gestures-plan.md §9.4): the touch rig's logs judged.
 
 usage: compare.py BASE.log NEW.log [OFF.log]
+       compare.py --all BASE.log NEW.log     every stroke both logs have but the EDGE ones: the same events
+       compare.py --edge BASE.log NEW.log    full screen at the left edge (docs/full-screen-plan.md): EDGE ON strokes
+                                             (the controls shown, nothing of full screen's listening) send exactly
+                                             what main's surfaces send; EDGE REVEAL strokes (hidden, a swipe in from
+                                             the band) bring the controls and send nothing; EDGE REVEALOFF strokes
+                                             (hidden, anything else) go on whole and in order (runs of moves by where
+                                             they end, of scroll deltas by their sum, not by their count: a stroke
+                                             held while the swipe in judged it sends its first steps as one)
 
 BASE is the surfaces before the gestures, NEW this branch's with the device's switch on, OFF the same
 with it off. A run's events are compared with their times left out; runs of pointer moves and of
@@ -33,7 +41,8 @@ def normal(events):
     paces them)."""
     out, coasting = [], False
     for e in events:
-        if e.startswith("[touch]"): continue
+        if e.startswith("[touch]") or e.startswith("[edge]") or e.startswith("[measure]"): continue
+        if re.match(r"\s*\[[TOWB]\.", e): continue      # RIG_TRACE's recognizer states, not events
         who, _, what = e.partition(" send ")
         who = who.strip()
         if not what:
@@ -118,7 +127,90 @@ UNCHANGED = ["1-finger tap", "1-finger drag right 120", "1-finger hold 0.6 s, th
              "2-finger scroll up 150 (flick)", "2-finger scroll down 90, slowly", "2-finger tap",
              "2 fingers scroll 60, a 3rd lands 133 ms after the first, all move 120 more"]
 
+NUMBER = re.compile(r"-?\d+\.\d+")
+
+def collapsed(events, surface=None):
+    """normal() without the counts of runs (a held stroke's first steps come as one), and on the trackpad after a
+    hide without its pointer's place (`surface` given: the relative pointer did not move during the hide)."""
+    out = [re.sub(r" ×\d+", "", e) for e in normal(events)]
+    if surface == "TRACKPAD":
+        out = [re.sub(r"(pointer\.\w+)\s*(→ )?\([-\d.]+,[-\d.]+\)", r"\1", e) for e in out]
+    return out
+
+def same(a, b, tolerance=0.002):
+    """The same events, numbers within `tolerance` (a fraction of the frame)."""
+    if len(a) != len(b): return False
+    for x, y in zip(a, b):
+        if NUMBER.sub("#", x) != NUMBER.sub("#", y): return False
+        if any(abs(float(p) - float(q)) > tolerance for p, q in zip(NUMBER.findall(x), NUMBER.findall(y))): return False
+    return True
+
+def edge_main(base, new):
+    fails = checks = 0
+    def check(ok, what):
+        nonlocal fails, checks
+        checks += 1
+        if not ok: fails += 1
+        print(("ok   " if ok else "FAIL ") + what)
+    def differ(a, b):
+        for x, y in zip(a + ["-"] * (len(b) - len(a)), b + ["-"] * (len(a) - len(b))):
+            print(f"       main's: {x}\n       now:    {y}")
+    titles = [t for t in new if " EDGE " in t]
+    shown = [t for t in titles if " EDGE ON " in t]
+    hidden = [t for t in titles if " EDGE REVEAL" in t]
+    check(len(hidden) >= 13 and (not shown or len(shown) >= 28), f"the EDGE strokes ran ({len(shown)} shown, {len(hidden)} hidden)")
+    for t in titles:
+        surface = t.split(" ", 1)[0]
+        events = new[t]
+        began = any(e.strip().startswith("[edge] reveal began") for e in events)
+        if " EDGE ON " in t:
+            # The controls shown: nothing of full screen's listens, so the stroke is main's exactly, counts and all.
+            a, b = normal(base.get(t, [])), normal(events)
+            quiet = t in base and not a
+            if quiet: print(f"note {t}: main's surfaces send nothing for it")
+            ok = t in base and not began and same(a, b) and (len(a) > 0 or quiet)
+            check(ok, f"{t}: exactly main's events ({len(b)})")
+            if not ok: differ(a, b)
+        elif " EDGE REVEAL " in t:
+            ended = any(e.strip().startswith("[edge] reveal ended") for e in events)
+            sent = sends(events)
+            check(began and ended and not sent and len(sends(base.get(t, []))) > 0,
+                  f"{t}: the swipe in, nothing sent (main's surfaces sent {len(sends(base.get(t, [])))})")
+            for e in sent: print(f"       sent: {e}")
+        else:
+            # Hidden, not a swipe in: let go, and main's events, in order (the first steps of a stroke held while
+            # the swipe in judged it come as one).
+            a, b = collapsed(base.get(t, []), surface), collapsed(events, surface)
+            quiet = t in base and not a
+            if quiet: print(f"note {t}: main's surfaces send nothing for it")
+            ok = t in base and not began and same(a, b) and (len(a) > 0 or quiet)
+            check(ok, f"{t}: not a swipe in, main's events in order ({len(b)})")
+            if not ok: differ(a, b)
+    print(f"{checks} checks, {fails} failed")
+    sys.exit(1 if fails else 0)
+
+def all_main(base, new):
+    fails = checks = 0
+    titles = [t for t in base if t in new and " EDGE " not in t]
+    for t in titles:
+        a, b = sends(base[t]), sends(new[t])
+        checks += 1
+        if a != b:
+            fails += 1
+            print(f"FAIL {t}")
+            for x, y in zip(a + ["-"] * (len(b) - len(a)), b + ["-"] * (len(a) - len(b))):
+                if x != y: print(f"       main's: {x}\n       now:    {y}")
+        else:
+            print(f"ok   {t} ({len(b)})")
+    missing = [t for t in base if t not in new and " EDGE " not in t]
+    for t in missing: print(f"FAIL {t}: not in the new log")
+    print(f"{checks} strokes compared, {fails} differ, {len(missing)} missing")
+    sys.exit(1 if fails or missing or checks == 0 else 0)
+
 def main():
+    if len(sys.argv) == 4 and sys.argv[1] in ("--edge", "--all"):
+        base, new = load(sys.argv[2]), load(sys.argv[3])
+        (edge_main if sys.argv[1] == "--edge" else all_main)(base, new)
     if len(sys.argv) not in (3, 4):
         print(__doc__); sys.exit(2)
     base, new = load(sys.argv[1]), load(sys.argv[2])

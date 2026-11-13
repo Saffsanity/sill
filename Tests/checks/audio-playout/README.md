@@ -1,0 +1,5 @@
+# `audio-playout`
+
+**Checks:** the device's playout of the Mac's sound on a simulated clock (docs/audio-plan.md §7.2): the floor, the need and its cover (start, bounds, rising at once), the picture's lag and the guard, placement by time and packet after packet, each packet's last 5 ms held for its fade (and given out faded when a packet comes past its deadline before its timer), late packets (and a packet that waited behind the engine starting, counted when it came), duplicates and a move's hand-over, gaps and joins on a reset decoder, drift by single frames at 1.9 ms a second or better, jumps and steps (a clock stepped either way, a slower path, the round trip's threshold) and each jump reported once with its size and cause, an engine starting, mute, fades and a frame gained or lost, a move home as a hand-over; then 5,000 random runs against the invariants (nothing before it arrives, no overlap, never ahead of the picture, never under the IO buffer + 2 ms ahead of its render, no noise played, nothing twice, a frame at most a packet)
+
+**Compiles:** `iOSClient/AudioPlayout.swift`

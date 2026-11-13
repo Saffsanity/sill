@@ -375,12 +375,14 @@ let everyRequest: [(R, String)] = [
     (.menuRequest, "a menu fetched or chosen"), (.gesture, "a gesture"), (.clipboardText, "a device's clipboard text"),
     (.clipboardSubscription, "the clipboard's subscription or stop"), (.input(letsGo: false), "input"),
     (.input(letsGo: true), "the up of what the device holds down"), (.other, "settings, the viewport, a keyframe, Pair This iPad…"),
+    (.nextDisplay, "the Desktop's next display (kind 47)"),
 ]
 func expectedDecision(_ r: R, _ rd: Reading, paired: Bool) -> P.Decision {
     guard rd.locked else { return .take }
     switch r {
     case .pick(.window): return .refuse(.pick)
     case .pick: return .take
+    case .nextDisplay: return .refuse(.pick)
     case .launch: return .refuse(.launch)
     case .windowCommand: return .refuse(.windowCommand)
     case .menuSubscription, .clipboardSubscription, .other: return .take
@@ -416,6 +418,9 @@ let windows = [WindowInfo(id: 11, title: "Budget.numbers", appName: "Numbers", b
 var full = WindowList(macName: "Noah’s MacBook Pro", windows: windows, active: .window(11), launchID: "L1", hostVersion: "0.6.0",
                       protocol: 1, gestures: 1, clipboard: 1)
 full.keyRepeat = 1
+full.desktopDisplays = 2
+full.desktopDisplay = 1
+full.desktopDisplayNames = ["Built-in Retina Display", "DELL U2723QE"]
 let unlockedList = P.list(full, reading: .unlocked)
 check(sortedJSON(unlockedList) == sortedJSON(full) && Wire.encode(unlockedList).count == Wire.encode(full).count,
       "unlocked: the list as it is, byte for byte: \(sortedJSON(unlockedList))")
@@ -423,6 +428,8 @@ check(!json(unlockedList).contains("locked") && !json(unlockedList).contains("of
 for rd in [Reading.screenLocked, .offConsole] {
     let l = P.list(full, reading: rd)
     check(l.windows.isEmpty && l.clipboard == nil && !json(l).contains("clipboard"), "\(rd): no windows, no clipboard")
+    check(l.desktopDisplays == nil && l.desktopDisplay == nil && l.desktopDisplayNames == nil && !json(l).contains("desktopDisplay")
+          && !json(l).contains("DELL"), "\(rd): no displays or their names either (one stop: a device sends no kind 47, and learns nothing of the Mac's screens)")
     check(l.locked == true && json(l).contains(#""locked":true"#), "\(rd): `locked` true")
     check(rd == .offConsole ? (l.offConsole == true && json(l).contains(#""offConsole":true"#)) : (l.offConsole == nil && !json(l).contains("offConsole")),
           "\(rd): `offConsole` \(rd == .offConsole ? "true" : "left out")")
@@ -631,6 +638,173 @@ for _ in 0..<2_000 {
 }
 check(shadeBroken == 0, "2000 random sessions of lists and frames: the cover while another user has the console (a locked screen streams its lock screen), Unlocking… until a keyframe after it, none otherwise")
 
+// MARK: - The off-console view (docs/off-console-plan.md, issue #316)
+
+// The console's own witness: another user, loginwindow or nobody by SCDynamicStore, or a test host's 2;
+// never a notification, the session dictionary, or an unread or unreadable witness.
+var takenWrong = 0, takenCombos = 0
+for c in consoles { for s in screens { for d in sessions { for sn in [nil, P.Note.screenLocked] { for cn in [nil, P.Note.offConsole] {
+    for t in [nil] + readings {
+        var w = P.Witnesses()
+        w.console = c; w.screen = s; w.session = d; w.screenNote = sn; w.consoleNote = cn; w.test = t
+        takenCombos += 1
+        let want = c == .otherUser || c == .nobody || t == .offConsole
+        if P.consoleTaken(w) != want { takenWrong += 1 }
+        // Taken only where the reading is off console: the view can never stand for a locked screen.
+        if P.consoleTaken(w), P.reading(w) != .offConsole { takenWrong += 1 }
+    }
+} } } } }
+check(takenWrong == 0, "\(takenCombos) witness combinations: the console taken only by the console's user (another, loginwindow or nobody) or a test host's 2, and only where the reading is off console")
+var noteOnly = P.Witnesses(); noteOnly.console = .thisUser; noteOnly.screen = .unlocked; noteOnly.session = .offConsole; noteOnly.consoleNote = .offConsole
+check(P.reading(noteOnly) == .offConsole && !P.consoleTaken(noteOnly),
+      "a switch-away notification or a stale session dictionary reads off console but never takes the console (no view)")
+for r in readings { for est in [false, true] { for taken in [false, true] { for on in [false, true] {
+    check(P.offConsoleView(reading: r, established: est, consoleTaken: taken, switchOn: on) == (r == .offConsole && est && taken && on),
+          "the view at \(r), \(est ? "established" : "unknown"), console \(taken ? "taken" : "not taken"), switch \(on ? "on" : "off"): only all four")
+} } } }
+
+// What the view allows: to look at, nothing that acts or is the console's.
+check(P.offConsoleViewAllowed == P.Allowed(display: true, windows: true, appsAndIcons: true, launches: false, sound: false, clipboard: false,
+                                            pointer: false, gestures: false, virtualDisplay: false, input: .nobody,
+                                            wakeOnConnect: false, wakeOnActivity: false, viewOnly: true),
+      "the view: the display, windows, icons and apps; no launch, sound, clipboard, pointer, gesture, virtual display, input or wake")
+check(P.allowed(.offConsole, offConsoleView: true) == P.offConsoleViewAllowed && !P.offConsoleViewAllowed.actsOnWindows,
+      "off console with the view: the view's allowance, and nothing acts on a window (no raise, size, buttons or menus)")
+for r in [Reading.unlocked, .screenLocked] {
+    check(P.allowed(r, offConsoleView: true) == P.allowed(r), "\(r): the view changes nothing (a locked screen stays 0.6.0's)")
+}
+for r in readings { check(P.allowed(r).actsOnWindows == P.allowed(r).windows, "\(r): acting on a window goes with its windows, as before") }
+for kind in gateKinds { for picture in pictures {
+    let got = P.withheld(kind, picture: picture, reading: .offConsole, offConsoleView: true)
+    let a = P.offConsoleViewAllowed
+    let want: Bool
+    switch kind {
+    case .audio: want = !a.sound
+    case .clipboard: want = !a.clipboard
+    case .cursorShape, .macPointer: want = !a.pointer
+    default: want = false
+    }
+    check(got == want, "the view: kind \(kind.rawValue) (\(picture.map { "\($0)" } ?? "no picture")) \(want ? "withheld" : "sent")")
+    for r in [Reading.unlocked, .screenLocked] {
+        check(P.withheld(kind, picture: picture, reading: r, offConsoleView: true) == P.withheld(kind, picture: picture, reading: r),
+              "\(r): kind \(kind.rawValue) (\(picture.map { "\($0)" } ?? "no picture")) as without the view")
+    }
+} }
+
+// A device's requests in the view, and at arrival and now.
+for (q, what) in everyRequest { for paired in [false, true] {
+    var want = expectedDecision(q, .offConsole, paired: paired)
+    if case .pick = q { want = .take }
+    check(P.decide(q, reading: .offConsole, paired: paired, offConsoleView: true) == want, "the view, \(what): \(want)")
+    for r in [Reading.unlocked, .screenLocked] {
+        check(P.decide(q, reading: r, paired: paired, offConsoleView: true) == P.decide(q, reading: r, paired: paired), "\(r), \(what): as without the view")
+    }
+    for arrived in readings { for now in readings {
+        check(P.decide(q, arrived: arrived, now: now, paired: paired) == P.decide(q, reading: P.restrictive(arrived, now), paired: paired),
+              "\(what) arrived \(arrived), handled \(now), the view off: 0.6.0's answer at the more restrictive reading")
+        let both = P.stricter(P.decide(q, reading: arrived, paired: paired, offConsoleView: true), P.decide(q, reading: now, paired: paired, offConsoleView: true))
+        check(P.decide(q, arrived: arrived, now: now, paired: paired, offConsoleView: true) == both, "\(what) arrived \(arrived), handled \(now) in the view: the stricter")
+    } }
+} }
+check(P.decide(.pick(.window(4)), arrived: .screenLocked, now: .offConsole, paired: true, offConsoleView: true) == .refuse(.pick),
+      "a window pick sent at a locked screen is refused, even if handled in the view")
+check(P.decide(.pick(.window(4)), arrived: .offConsole, now: .offConsole, paired: false, offConsoleView: true) == .take
+      && P.decide(.launch, arrived: .offConsole, now: .offConsole, paired: true, offConsoleView: true) == .refuse(.launch)
+      && P.decide(.input(letsGo: false), arrived: .offConsole, now: .offConsole, paired: true, offConsoleView: true) == .refuse(.input),
+      "in the view: a window picked; a launch and a paired device's input refused")
+check(P.stricter(.take, .letGo) == .letGo && P.stricter(.letGo, .refuse(.input)) == .refuse(.input) && P.stricter(.take, .take) == .take
+      && P.stricter(.refuse(.pick), .take) == .refuse(.pick), "stricter: a refusal, then letting go, then taking")
+
+// The lists: the view's to a device that shows it; the plain one as 0.6.0's.
+let viewList = P.list(full, reading: .offConsole, offConsoleView: true)
+check(viewList.windows == full.windows && viewList.locked == true && viewList.offConsole == true && viewList.offConsoleView == true
+      && viewList.clipboard == nil && json(viewList).contains(#""offConsoleView":true"#), "the view's list: the windows, `locked`, `offConsole` and `offConsoleView`, no clipboard")
+check(viewList.desktopDisplays == nil && viewList.desktopDisplay == nil && viewList.desktopDisplayNames == nil && !json(viewList).contains("desktopDisplay"),
+      "the view's list: no displays (one stop, this session's main display: no kind 47)")
+check(sortedJSON(P.list(full, reading: .offConsole)) == sortedJSON(P.list(full, reading: .offConsole, offConsoleView: false))
+      && !json(P.list(full, reading: .offConsole)).contains("offConsoleView"), "the plain list off console: 0.6.0's, no `offConsoleView`")
+check(sortedJSON(P.list(full, reading: .screenLocked, offConsoleView: true)) == sortedJSON(P.list(full, reading: .screenLocked))
+      && sortedJSON(P.list(full, reading: .unlocked, offConsoleView: true)) == sortedJSON(full), "the view's flag changes no other reading's list")
+check(Wire.decode(OlderReader.self, from: Wire.encode(viewList)).map { $0.windows.count == 2 } == true
+      && Wire.decode(WindowList.self, from: Wire.encode(viewList))?.offConsoleView == true, "the view's list decodes, for an older reader too")
+
+// Reconciling and the window that comes back, in the view.
+for streams in [P.Streams.nothing, .placeholder, .display, .window] { for listed in [false, true] {
+    check(P.reconciles(.offConsole, streams: streams, lockedListSent: listed, offConsoleView: true) == (streams == .placeholder),
+          "the view, \(streams) streaming: \(streams == .placeholder ? "acted on (this session's picture)" : "nothing to put right")")
+    for r in [Reading.unlocked, .screenLocked] {
+        check(P.reconciles(r, streams: streams, lockedListSent: listed, offConsoleView: true) == P.reconciles(r, streams: streams, lockedListSent: listed),
+              "\(r), \(streams): as without the view")
+    }
+} }
+var vr = P.Restore(); vr.lockBegan(active: .window(5))
+check(vr.select(.window(6), active: .window(5), pick: true, reading: .offConsole, offConsoleView: true) == .proceed && vr.comesBack == nil,
+      "the view: a window picked streams, and nothing else comes back after")
+vr = P.Restore(); vr.lockBegan(active: .window(5))
+check(vr.select(.window(5), active: .window(5), pick: false, reading: .offConsole, offConsoleView: true) == .proceed && vr.comesBack == 5,
+      "the view: a restart of the window streams it on and keeps what comes back")
+check(vr.select(.window(5), active: .desktop, pick: false, reading: .screenLocked, offConsoleView: true) == .stay,
+      "a locked screen with the switch on: 0.6.0's (the window waits)")
+
+// The lines.
+check(P.line(P.Change(from: .unlocked, to: .offConsole), offConsoleView: true) == P.offConsoleViewLine
+      && P.offConsoleViewLine == "Locked: another user, or the login window, is on this Mac's screen; devices see this session's own desktop and windows instead, but nothing they send reaches it until it is back.",
+      "off console with the view: its line")
+check(P.line(P.Change(from: .offConsole, to: .screenLocked), offConsoleView: true) == P.line(P.Change(from: .offConsole, to: .screenLocked))
+      && P.line(P.Change(from: .screenLocked, to: .unlocked), offConsoleView: true) == P.unlockedLine, "the other lines as without the view")
+check(P.viewChangedLine(true) == P.offConsoleViewLine && P.viewChangedLine(false) == P.line(P.Change(from: .unlocked, to: .offConsole)),
+      "the view starting or ending off console: the matching off-console line")
+check(P.offConsoleViewStartLine.hasPrefix("Off-console view: ") && P.offConsoleViewStartLine.contains("to look at"), "the start line")
+
+// The gate with the view: the switch and the console's witness, only once established and off console.
+let vg = LockGate(.offConsole, established: false)
+_ = vg.setOffConsoleView(true); _ = vg.setConsoleTaken(true)
+check(!vg.offConsoleView && vg.withholds(.frame, picture: .display) && !vg.allowed.windows, "an unknown reading never shows the view")
+vg.set(.offConsole)
+check(vg.offConsoleView && !vg.withholds(.frame, picture: .display) && !vg.withholds(.frame, picture: .window) && !vg.withholds(.thumbnail)
+      && vg.withholds(.audio) && vg.withholds(.macPointer) && vg.withholds(.cursorShape) && vg.withholds(.clipboard) && vg.allowed == P.offConsoleViewAllowed,
+      "established off console, the console taken, the switch on: the view (its pictures go, nothing of the console's)")
+check(vg.setConsoleTaken(false) == (true, false) && vg.withholds(.frame, picture: .display) && vg.withholds(.frame, picture: .window),
+      "the console's witness back to this user: the view ends at once, before any settle")
+check(vg.setConsoleTaken(true) == (false, true) && vg.setOffConsoleView(false) == (true, false) && vg.withholds(.frame, picture: .window),
+      "the switch turned off: the view ends at once")
+_ = vg.setOffConsoleView(true); vg.set(.screenLocked)
+check(!vg.offConsoleView && vg.withholds(.frame, picture: .window) && vg.allowed == P.allowed(.screenLocked), "a locked screen with the switch on: 0.6.0's")
+vg.set(.unlocked)
+check(!vg.offConsoleView && !vg.withholds(.frame, picture: .window), "unlocked: everything, the view not in play")
+
+// The device: the view's list, no cover and a live picture; the words.
+var viewL = WindowList(macName: "M", windows: [], active: .desktop); viewL.locked = true; viewL.offConsole = true; viewL.offConsoleView = true
+var oddView = WindowList(macName: "M", windows: [], active: .desktop); oddView.offConsoleView = true
+var lockedView = oddView; lockedView.locked = true
+check(LockedMac.view(viewL) && !LockedMac.view(oddView) && !LockedMac.view(lockedView) && !LockedMac.view(locked2) && LockedMac.why(viewL) == .otherUser,
+      "the view only with `locked`, `offConsole` and `offConsoleView` together (still switched to another user)")
+check(LockedMac.covers(.otherUser, view: false) && !LockedMac.covers(.otherUser, view: true) && !LockedMac.covers(.screenLocked, view: false)
+      && !LockedMac.covers(nil, view: false), "covered (and its picture cleared) only off console without the view")
+check(LockedMac.shade(nil, list: .otherUser, view: true) == nil && LockedMac.shade(.locked(.otherUser), list: .otherUser, view: true) == nil
+      && LockedMac.shade(nil, list: .otherUser, view: false) == .locked(.otherUser) && LockedMac.shade(.locked(.otherUser), list: .screenLocked, view: false) == .unlocking
+      && LockedMac.shade(nil, list: .screenLocked, view: false) == nil && LockedMac.shade(nil, list: nil, view: false) == nil,
+      "the view's list: no cover (the picture is live); otherwise 0.6.0's cover")
+var viewBroken = 0
+for _ in 0..<2_000 {
+    var shade: LockedMac.Shade? = nil
+    var covered = false
+    for _ in 0..<30 {
+        let why: LockedMac.Why? = [nil, .screenLocked, .otherUser][rng.int(3)]
+        let isView = why == .otherUser && rng.int(2) == 0
+        if rng.int(2) == 0 { shade = LockedMac.shade(shade, list: why, view: isView); covered = LockedMac.covers(why, view: isView) }
+        else { shade = LockedMac.shade(shade, frameIsKeyframe: rng.int(3) == 0) }
+        if covered != (shade == .locked(.otherUser)) { viewBroken += 1 }
+    }
+}
+check(viewBroken == 0, "2000 random sessions with the view: the cover exactly while off console without it")
+check(LockedMac.viewGeneration == 1 && LockedMac.viewLine.contains("not this Mac’s screen") && LockedMac.viewLine.contains("Taps and keys")
+      && LockedMac.viewPanelLine.hasPrefix("Another user is on this Mac’s screen.") && LockedMac.viewTextScaleHint.contains("back on this Mac’s screen"),
+      "the device's words: the picture is not the screen, and taps and keys wait")
+let hv = Hello(appVersion: "0.6.1", device: "iPad", offConsoleView: LockedMac.viewGeneration)
+check(Wire.decode(Hello.self, from: Wire.encode(hv))?.offConsoleView == 1 && Wire.decode(Hello.self, from: Data(#"{"appVersion":"0.6.0"}"#.utf8))?.offConsoleView == nil
+      && !json(Hello(appVersion: "0.6.0")).contains("offConsoleView"), "the hello's `offConsoleView`: 1 from this device, nil (and left out) before")
+
 // MARK: - The coordinator's glue
 
 /// A copy of StreamCoordinator's glue around LockPolicy: the gate (SessionLock's effective reading, which
@@ -654,6 +828,22 @@ struct Glue {
     /// Windows a device picked while the gate read locked, at arrival or after: none may ever stream before an unlock.
     var refusedPicks: Set<UInt32> = []
     var started: [String] = []
+    /// The off-console view (docs/off-console-plan.md): the Mac's switch; the console's witness counts as
+    /// taken whenever the gate reads off console here (SessionLock's side is checked above).
+    var switchOn = false
+    var actedView = false
+    /// Sill's virtual display is on in settings, and the window streaming is staged on it.
+    var virtualDisplay = true
+    var staged = false
+    var view: Bool { switchOn && gate == .offConsole }
+    var allowed: P.Allowed { P.allowed(gate, offConsoleView: view) }
+
+    mutating func switchChanges(to on: Bool) {
+        guard on != switchOn else { return }
+        let was = view
+        switchOn = on
+        if view != was { jobs.append(.lockChanged) }
+    }
 
     mutating func gateChanges(to r: Reading) {
         guard r != gate else { return }
@@ -666,9 +856,10 @@ struct Glue {
 
     mutating func lockChanged() {
         let now = gate
-        let was = acted
+        let was = acted, wasView = actedView
         acted = now
-        guard now != was || P.reconciles(now, streams: streams, lockedListSent: false) else { return }
+        actedView = view
+        guard now != was || view != wasView || P.reconciles(now, streams: streams, lockedListSent: false, offConsoleView: view) else { return }
         if now.locked {
             pendingLaunch = nil
             restore.lockBegan(active: active)
@@ -680,14 +871,18 @@ struct Glue {
 
     mutating func enforceLock() {
         guard gate.locked, inFlight == nil, devices > 0 else { return }
-        if active == .desktop, placeholder != P.allowed(gate).display { return }
+        if isWindow(active), allowed.windows {
+            if virtualDisplay, staged, !allowed.virtualDisplay { select(active, pick: false) }
+            return
+        }
+        if active == .desktop, placeholder != allowed.display { return }
         select(.desktop, pick: false)
     }
 
     mutating func select(_ source: StreamSource, pick: Bool) {
         guard inFlight == nil else { return }       // `switching`: refused
         var source = source
-        switch restore.select(source, active: active, pick: pick, reading: gate) {
+        switch restore.select(source, active: active, pick: pick, reading: gate, offConsoleView: view) {
         case .proceed: break
         case .desktop: source = .desktop
         case .stay: return
@@ -700,30 +895,35 @@ struct Glue {
         guard let source = inFlight else { return }
         inFlight = nil
         placeholder = false
+        staged = false
         switch source {
         case .none:
             active = .none
         case .window(let id):
-            if gate.locked { lockedMidSwitch(source); return }
+            if !allowed.windows { lockedMidSwitch(source); return }
             active = listed.contains(id) ? source : .none
-            if case .window = active { started.append("window \(id) at \(gate)") }
+            if case .window = active {
+                started.append("window \(id) at \(gate)\(view ? " (the view)" : "")")
+                staged = virtualDisplay && allowed.virtualDisplay
+            }
         case .desktop:
-            if P.allowed(gate).display {
+            if allowed.display {
                 active = .desktop
-                started.append("display at \(gate)")
-                if !P.allowed(gate).display { violations.append("the display started while the gate read \(gate)") }
+                started.append("display at \(gate)\(view ? " (the view)" : "")")
+                if !allowed.display { violations.append("the display started while the gate read \(gate)") }
             } else {
                 active = .desktop
                 placeholder = true
             }
         }
-        if gate.locked, case .window(let id) = active { violations.append("window \(id) began streaming while the gate read \(gate)") }
-        if case .window(let id) = active, refusedPicks.contains(id), gate.locked { violations.append("a refused pick of \(id) streams") }
+        if !allowed.windows, case .window(let id) = active { violations.append("window \(id) began streaming while the gate read \(gate)") }
+        if staged, !allowed.virtualDisplay { violations.append("a window staged on the virtual display at \(gate)") }
+        if case .window(let id) = active, refusedPicks.contains(id), gate.locked, !view { violations.append("a refused pick of \(id) streams") }
         if deselectWhenSettled {
             deselectWhenSettled = false
             if devices == 0, active != .none { select(.none, pick: false) }
         }
-        if gate.locked, active != .none, !placeholder { jobs.append(.enforce) }
+        if gate.locked, active != .none, !placeholder || view { jobs.append(.enforce) }
     }
 
     mutating func lockedMidSwitch(_ source: StreamSource) {
@@ -755,7 +955,7 @@ struct Glue {
     /// A device's messages (`handle`): judged by the more restrictive of the gate as it arrived and now.
     mutating func devicePick(_ s: StreamSource, arrived: Reading) {
         guard devices > 0 else { return }
-        if P.decide(.pick(s), reading: P.restrictive(arrived, gate), paired: true) != .take {
+        if P.decide(.pick(s), arrived: arrived, now: gate, paired: true, offConsoleView: view) != .take {
             if case .window(let id) = s { refusedPicks.insert(id) }
             return
         }
@@ -765,7 +965,7 @@ struct Glue {
 
     mutating func deviceLaunch(_ id: UInt32, arrived: Reading) {
         guard devices > 0 else { return }
-        guard P.decide(.launch, reading: P.restrictive(arrived, gate), paired: true) == .take else { return }
+        guard P.decide(.launch, arrived: arrived, now: gate, paired: true, offConsoleView: view) == .take else { return }
         pendingLaunch = id
     }
 
@@ -774,7 +974,7 @@ struct Glue {
     mutating func windowAppears(_ id: UInt32) {
         listed.insert(id)
         guard devices > 0 else { return }
-        if gate.locked, !isWindow(active) { return }
+        if !allowed.windows, !isWindow(active) { return }
         if pendingLaunch == id {
             pendingLaunch = nil
             select(.window(id), pick: true)
@@ -784,7 +984,7 @@ struct Glue {
     mutating func windowCloses(_ id: UInt32) {
         listed.remove(id)
         guard devices > 0 else { return }
-        if gate.locked, !isWindow(active) { return }
+        if !allowed.windows, !isWindow(active) { return }
         if active == .window(id) { select(.none, pick: false) }
     }
 
@@ -811,6 +1011,13 @@ struct Glue {
     }
 
     var settledViolation: String? {
+        if view {
+            // The off-console view: this session's picture (a window where it is, or the display), never the
+            // placeholder, never Sill's virtual display.
+            if staged { return "settled in the view with a window on the virtual display" }
+            if devices > 0, active == .desktop, placeholder { return "settled in the view with the placeholder" }
+            return nil
+        }
         if gate.locked, case .window(let id) = active { return "settled at \(gate) with window \(id) streaming" }
         if gate.locked, active == .desktop, !placeholder, !P.allowed(gate).display { return "settled at \(gate) with the display streaming" }
         if gate.locked, devices > 0, active != .desktop, active != .none { return "settled at \(gate) without the placeholder" }
@@ -946,15 +1153,63 @@ scenario("S15: the display streams, another user takes the console: the placehol
     return g.active == .desktop && !g.placeholder
 }
 
+scenario("V1: the view (switch on), another user takes the console with the Desktop streaming: this session's display, never the placeholder") { g in
+    g.switchOn = true
+    g.devicePick(.desktop, arrived: .unlocked); g.settle()
+    g.gateChanges(to: .offConsole); g.settle()
+    guard g.active == .desktop, !g.placeholder else { return false }
+    g.restart(); g.settle()      // the capture restarted (a user switch takes this session's displays away first)
+    return g.active == .desktop && !g.placeholder && g.started.contains("display at offConsole (the view)")
+}
+scenario("V2: the view: a window staged on the virtual display streams on where it is, never staged") { g in
+    g.switchOn = true
+    g.devicePick(.window(2), arrived: .unlocked); g.settle()
+    guard g.active == .window(2), g.staged else { return false }
+    g.gateChanges(to: .offConsole); g.settle()
+    return g.active == .window(2) && !g.staged && g.started.contains("window 2 at offConsole (the view)")
+}
+scenario("V3: the view: a window picked streams (to look at); back on the console locked: the lock screen; unlocked: that window again") { g in
+    g.switchOn = true
+    g.gateChanges(to: .offConsole); g.settle()
+    g.devicePick(.window(3), arrived: .offConsole); g.settle()
+    guard g.active == .window(3) else { return false }
+    g.gateChanges(to: .screenLocked); g.settle()
+    guard g.active == .desktop, g.placeholder == !P.lockScreenStreams, g.restore.comesBack == 3 else { return false }
+    g.gateChanges(to: .unlocked); g.settle()
+    return g.active == .window(3)
+}
+scenario("V4: the switch turned off in the view: the placeholder at once; on again: this session's display") { g in
+    g.switchOn = true
+    g.gateChanges(to: .offConsole); g.settle()
+    g.devicePick(.window(1), arrived: .offConsole); g.settle()
+    g.switchChanges(to: false); g.settle()
+    guard g.active == .desktop, g.placeholder, g.restore.comesBack == 1 else { return false }
+    g.switchChanges(to: true); g.settle()
+    return g.active == .desktop && !g.placeholder
+}
+scenario("V5: the switch off: off console is 0.6.0's (the placeholder, a window pick refused)") { g in
+    g.gateChanges(to: .offConsole); g.settle()
+    g.devicePick(.window(1), arrived: .offConsole); g.settle()
+    return g.active == .desktop && g.placeholder && g.refusedPicks.contains(1) && g.started.isEmpty
+}
+scenario("V6: a launch in the view is refused; a window pick sent at a locked screen and handled in the view too") { g in
+    g.switchOn = true
+    g.gateChanges(to: .screenLocked); g.settle()
+    g.gateChanges(to: .offConsole)
+    g.devicePick(.window(2), arrived: .screenLocked)
+    g.deviceLaunch(9, arrived: .offConsole); g.settle()
+    return g.pendingLaunch == nil && g.refusedPicks.contains(2) && g.active == .desktop && !g.placeholder
+}
+
 // Random sessions: the rule's invariants under every interleaving the glue allows.
-var sessionsRun = 0, sessionsBroken = 0, returned = 0, lockedSettles = 0, refusedSeen = 0
+var sessionsRun = 0, sessionsBroken = 0, returned = 0, lockedSettles = 0, refusedSeen = 0, viewSettles = 0
 var firstBroken: String?
 for _ in 0..<5_000 {
     var g = Glue()
     var log: [String] = []
     var previousGate = g.gate
     for _ in 0..<(20 + rng.int(40)) {
-        let e = rng.int(13)
+        let e = rng.int(14)
         let arrived = rng.int(3) == 0 ? previousGate : g.gate     // a message that arrived a moment ago
         switch e {
         case 0: previousGate = g.gate; g.gateChanges(to: readings[rng.int(3)]); log.append("gate \(g.gate)")
@@ -969,6 +1224,7 @@ for _ in 0..<5_000 {
         case 9: let w = UInt32(5 + rng.int(2)); g.deviceLaunch(w, arrived: arrived); log.append("launch \(w)")
         case 10: if rng.int(3) == 0 { g.deviceLeaves(); log.append("leave") } else { g.deviceJoins(); log.append("join") }
         case 11: g.devicePick(.none, arrived: arrived); log.append("pick none")
+        case 12: g.switchChanges(to: !g.switchOn); log.append("switch \(g.switchOn ? "on" : "off")")
         default: g.settle(); log.append("settle")
         }
         if !g.refusedPicks.isEmpty { refusedSeen += 1 }
@@ -977,6 +1233,7 @@ for _ in 0..<5_000 {
     g.jobs.append(.lockChanged); g.settle()
     if let v = g.settledViolation { g.violations.append(v) }
     if g.gate.locked { lockedSettles += 1 }
+    if g.view { viewSettles += 1 }
     // Then unlock and settle: what was remembered, if listed with a device left, streams.
     let remembered = g.restore.comesBack
     let wasLocked = g.gate.locked
@@ -995,6 +1252,7 @@ for _ in 0..<5_000 {
 }
 check(sessionsBroken == 0, "\(sessionsRun) random sessions: no window starts while the gate reads locked and the display only where the rule lets it (a locked screen), a locked Mac settles on the placeholder or the lock screen, the remembered window comes back"
       + (firstBroken.map { ": \($0)" } ?? ""))
+check(viewSettles > 300, "the random sessions settle in the off-console view: \(viewSettles)")
 check(returned > 150 && lockedSettles > 1_000 && refusedSeen > 1_000,
       "the random sessions reach what they test: \(returned) windows came back after an unlock, \(lockedSettles) settled locked, \(refusedSeen) steps after a refused pick")
 

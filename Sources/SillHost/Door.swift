@@ -14,13 +14,16 @@ import StreamProtocol
 /// 19, 10 s in all. A connection that ends unadmitted, and a pairing connection when its kind 19
 /// comes, costs its address (and, from an address not known, its /64) a tenth of a failure, one
 /// more for every 2 s it waited beyond the first 2, never less than a tenth for each second it
-/// waited, and at least one when the door refused it; 5 failures within 60 s refuse the address for
-/// 300 s, 12 within 300 s its /64 (an address counting 6 at most; never the /64's known addresses),
-/// and a paired key clears its address's count. Sources the door does not admit are cancelled
-/// before the connection starts, so they get no byte, and judged again at `.preparing`, `.ready`
-/// and at kind 19. The verify block decides trust from the lock-protected TrustSnapshot and the
-/// negotiated ALPN (DoorPolicy.trusts). Refusals and backoffs are counted and reported at most once
-/// a minute, one line each per door.
+/// waited, and at least one when the door refused it; one that never finished its TLS handshake
+/// (timed out, or gone before `.ready`) is never a refusal and costs the tenth alone unless every
+/// shared place was held while it waited (issue #314, DoorPolicy.chargeBeforeKey), with its own
+/// line; 5 failures within 60 s refuse the address for 300 s, 12 within 300 s its /64 (an address
+/// counting 6 at most; never the /64's known addresses), and a paired key clears its address's
+/// count. Sources the door does not admit are cancelled before the connection starts, so they get
+/// no byte, and judged again at `.preparing`, `.ready` and at kind 19. The verify block decides
+/// trust from the lock-protected TrustSnapshot and the negotiated ALPN (DoorPolicy.trusts).
+/// Refusals, backoffs and handshakes that never finished are counted and reported at most once a
+/// minute, one line each per door.
 ///
 /// Admitted sessions pass the device gate here, one place for both doors (DeviceGate; with the
 /// floor above "0" the hello, the first message inside TLS, is read before anything is registered,
@@ -89,6 +92,9 @@ final class Door {
         var refused = false
         /// The Mac let it go (Direct Wireless turned off): its end costs nothing.
         var dropped = false
+        /// Its deadline passed before `.ready`: no TLS handshake finished, no key was checked (issue
+        /// #314). Never a refusal.
+        var timedOut = false
         var deadline: DispatchWorkItem?
     }
     private var pending: [ObjectIdentifier: Pending] = [:]
@@ -113,6 +119,15 @@ final class Door {
                     + "\(c["vpn", default: 0]) through a VPN, \(c["internet", default: 0]) from the internet, "
                     + "\(c["older", default: 0]) from an older Sill (not TLS), \(c["limit", default: 0]) over the limit."
             }
+        }
+    }()
+
+    /// Connections that never finished their TLS handshake (issue #314; DoorPolicy.stall), one line a
+    /// minute at most per door (the first at once), apart from the refusals: no key was checked.
+    private lazy var stalls: RefusalSummary = {
+        let door = kind
+        return RefusalSummary(queue: queue, categories: ["timedOut", "closed"]) { c in
+            DoorPolicy.stallLine(door, timedOut: c["timedOut", default: 0], closed: c["closed", default: 0])
         }
     }()
 
@@ -482,34 +497,48 @@ final class Door {
 
     /// Its deadline (DoorPolicy.deadline) passed while it waited: the handshake's, or once ready the
     /// kind 19's. One that finds its place's deadline still ahead (moved at `.ready`, or a timer that
-    /// fired early) waits again for it.
+    /// fired early) waits again for it. A pairing connection that reached `.ready` and sent no kind 19
+    /// showed a key: refused ("unpaired"). One whose handshake never finished showed none: timed out
+    /// (issue #314), counted on its own line and never as a refusal.
     private func deadlinePassed(_ id: ObjectIdentifier) {
         guard let p = pending[id], let at = places.deadline(id) else { return }
         let now = Self.clock()
         if now < at - 0.05 { armDeadline(id, now: now); return }
-        refuse(id, "unpaired")
-        p.connection.cancel()        // `.cancelled` then counts the failure
+        if places.waited(id, now: now)?.ready == true {
+            refuse(id, "unpaired")
+        } else {
+            pending[id]?.timedOut = true
+        }
+        p.connection.cancel()        // `.cancelled` then counts what it costs
     }
 
     /// A connection that ended before it was admitted costs its address and its /64
     /// (DoorPolicy.Places): at least one failure when the door refused it (marked by `refuse`, or a
-    /// handshake the door failed, DoorPolicy.handshakeRefusal, counted for the summary here), else
-    /// a tenth of one and one more for every 2 s it waited beyond the first 2, never less than a
-    /// tenth for each second it waited (DoorPolicy.waitCost). A device that cancels the losers of
-    /// its own staggered dial within that, or gives up on a Mac whose key it no longer pins, never
-    /// adds up to a backoff, nor does an older Sill's plain try at the home door (-9836), which is
-    /// counted and shown instead and costs a tenth, so an iPad updated after a few plain retries is
-    /// not refused for 5 minutes; connections that wait for nothing do, their address refused for
-    /// 300 s. Direct Wireless turned off (`cancelPending`) costs nothing.
+    /// handshake the door failed, DoorPolicy.handshakeRefusal, counted for the summary here). One
+    /// that never finished its TLS handshake, timed out at its deadline or gone by itself before
+    /// `.ready`, showed no key (issue #314): never a refusal, it costs a tenth of a failure, and what
+    /// holding its place costs (one more for every 2 s beyond the first 2, never less than a tenth a
+    /// second) only when every shared place was held while it waited (DoorPolicy.chargeBeforeKey).
+    /// Those that timed out, or that the other end gave up on after 2 s or more, are counted on their
+    /// own line (DoorPolicy.stall, `stalls`) and in `door.stalled`. A device that cancels the losers
+    /// of its own staggered dial, or gives up on a Mac whose key it no longer pins, never adds up to
+    /// a backoff, nor does an older Sill's plain try at the home door (-9836), which is counted and
+    /// shown instead and costs a tenth, so an iPad updated after a few plain retries is not refused
+    /// for 5 minutes; nor, now, does a device whose every dial stalls before Sill sees its key.
+    /// Connections that hold every place, waiting for nothing, still do: their address refused for
+    /// 300 s. One that waited past `.ready` and went away by itself (a pairing connection without its
+    /// kind 19) costs what it held. Direct Wireless turned off (`cancelPending`) costs nothing.
     private func endedBeforeAdmission(_ id: ObjectIdentifier, error: NWError?) {
         guard let p = pending[id] else { return }
         var refused = p.refused
-        if !refused, let error, let status = RemoteTLS.status(of: error) {
+        var older = false
+        if !refused, !p.timedOut, let error, let status = RemoteTLS.status(of: error) {
             switch DoorPolicy.handshakeRefusal(kind, status: status) {
             case .refused(let word)?:
                 refused = true
                 refusals.count(word)
             case .olderSill?:
+                older = true
                 refusals.count("older")
                 let seen = DoorPolicy.olderSillTry(olderTries[p.source] ?? [], now: CFAbsoluteTimeGetCurrent())
                 olderTries[p.source] = seen.tries
@@ -518,7 +547,12 @@ final class Door {
                 break
             }
         }
-        take(id, p.dropped ? .dropped : refused ? .refused : .ended)
+        if !refused, !older, !p.dropped, let w = places.waited(id, now: Self.clock()), !w.ready,
+           let category = DoorPolicy.stall(timedOut: p.timedOut, held: w.held) {
+            stalls.count(category)
+            Stats.shared.bump("door.stalled")
+        }
+        take(id, p.dropped ? .dropped : refused ? .refused : p.timedOut ? .timedOut : .ended)
     }
 
     /// Forgets stale per-source records, so a scan from many addresses cannot grow them for ever.

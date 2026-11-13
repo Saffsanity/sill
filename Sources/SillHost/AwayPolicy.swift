@@ -7,12 +7,16 @@ import StreamProtocol
 /// (StreamProtocol, OriginPolicy's `Origin` and HostConfig), checked with swiftc
 /// (Tests/checks/away-quality).
 enum AwayPolicy {
-    /// A device is away when the remote door admitted it from a VPN or from the internet ("through
-    /// Tailscale", "through your VPN", "over the internet"). The remote door from this Mac's own
-    /// networks or loopback ("by address") is at home, since a device that dials the Mac's LAN
-    /// address is in the house, and so is every connection through the home door.
+    /// A device is away when the remote door admitted it from a VPN, from the internet or through a
+    /// relay on this Mac ("through Tailscale", "through your VPN", "over the internet", "through a
+    /// relay on this Mac"). A relay (a userspace Tailscale or WireGuard node, an SSH tunnel, a proxy)
+    /// hands the door every device from this Mac's own address, wherever the device is, so it counts
+    /// as a VPN does: away, until the device comes home and moves to the home door (issue #326,
+    /// docs/away-through-relay-plan.md). The remote door from this Mac's own networks ("by address")
+    /// is at home, since a device that dials the Mac's LAN address is in the house, and so is every
+    /// connection through the home door.
     static func isAway(remoteDoor: Bool, origin: OriginPolicy.Origin) -> Bool {
-        remoteDoor && (origin == .vpn || origin == .internet)
+        remoteDoor && (origin == .vpn || origin == .internet || origin == .relay)
     }
 
     /// Whether the away quality is the target: while at least one device is connected and every

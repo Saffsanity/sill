@@ -189,19 +189,31 @@ package final class SessionLock: @unchecked Sendable {
         let screen = hooks.ignoreMac && hooks.notifyName == nil ? LockPolicy.Screen.unlocked : readScreen()
         let test = testReading()
         let now = Self.clock()
-        let (change, startRead, line) = state.withLockUnchecked { s -> (LockPolicy.Change?, Bool, String?) in
+        let (change, view, startRead, line) = state.withLockUnchecked { s -> (LockPolicy.Change?, (was: Bool, now: Bool), Bool, String?) in
             update?(&s.reader)
             s.reader.console(console)
             s.reader.screen(screen)
             s.reader.test(test)
             if hooks.ignoreMac { s.reader.session(.unlocked, startedAt: now) }
+            // The off-console view follows the console's own witness (LockPolicy.consoleTaken), set at every look
+            // with the reading: a console back to this user ends it at this look, before the reading's settle.
+            // Each step on the way only narrows it (the view needs both), so no picture of this session goes
+            // out in between, and one that stays on never flickers off.
+            let before = gate.offConsoleView
             let change = settle(&s, now: now)
+            let after = gate.setConsoleTaken(LockPolicy.consoleTaken(s.reader.witnesses)).now
             let startRead = !hooks.ignoreMac && s.sessionReadStarted == nil && LockPolicy.readsSession(s.reader.witnesses)
             if startRead { s.sessionReadStarted = now }
-            return (change, startRead, hooks.log ? logLine(s.reader, cause: cause) : nil)
+            return (change, (before, after), startRead, hooks.log ? logLine(s.reader, cause: cause) : nil)
         }
         if let line { print(line) }
-        if let change { changed(change) }
+        if let change {
+            changed(change)
+        } else if view.was != view.now {
+            // The view began or ended while the reading stayed off console: its line, and the coordinator.
+            print(LockPolicy.viewChangedLine(view.now))
+            onChange?()
+        }
         if startRead { readSession(startedAt: now) }
         scheduleSettle()
     }
@@ -217,9 +229,9 @@ package final class SessionLock: @unchecked Sendable {
         LockPolicy.testLogLine(r.witnesses, raw: LockPolicy.reading(r.witnesses), gate: r.gate, established: r.established, cause: cause)
     }
 
-    /// A change of the gate: its line now, then the coordinator.
+    /// A change of the gate: its line now (the off-console view's when it applies), then the coordinator.
     private func changed(_ change: LockPolicy.Change) {
-        if let line = LockPolicy.line(change) { print(line); print(WindowCatalog.displaysLine()) }
+        if let line = LockPolicy.line(change, offConsoleView: gate.offConsoleView) { print(line); print(WindowCatalog.displaysLine()) }
         onChange?()
     }
 

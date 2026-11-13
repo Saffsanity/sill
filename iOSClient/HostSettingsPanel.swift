@@ -20,7 +20,8 @@ import StreamProtocol
 /// revised it on 2026-10-27), with Mute right under it (this device's own of the Mac's sound, off by
 /// default, `StreamClient.soundMuted`, while the Mac has sound, on or off; Noah, 2026-10-27). Errors show
 /// inline, never in alerts. After the Mac's settings come the device's own groups: This iPad (or
-/// iPhone), whose switches are preferences here and send nothing to the Mac (Larger Picture,
+/// iPhone), whose switches are preferences here and send nothing to the Mac (Picture in Picture,
+/// `StreamClient.pictureInPictureKey`, where iOS has it, #291; Larger Picture,
 /// `StreamClient.largerPictureKey`,
 /// on an iPhone without a hinge whose picture it makes larger, `largerPictureOffered`; Share Clipboard,
 /// `StreamClient.clipboardKey`, while the Mac shares its clipboard, with the system's Paste for this
@@ -31,7 +32,8 @@ import StreamProtocol
 /// `StreamClient.pasteRightAwayKey`, and the system's Paste for this device's text; Reverse
 /// Scrolling, `StreamClient.reverseScrollKey`; Three-Finger Gestures, `StreamClient.gesturesKey`),
 /// and whose gesture rows, as accessibility actions, do their gestures
-/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour.
+/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour, and last
+/// this app's version, "Sill 0.6.2 (1400)" (VersionLine).
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
@@ -41,6 +43,18 @@ struct HostSettingsPanel: View {
     var pairThisDevice: () -> Void = {}
     /// Take the Tour: the stream screen puts the panel away and shows the tour of its layout.
     var takeTour: () -> Void = {}
+    /// Full Screen in This iPad (docs/full-screen-plan.md): the stream screen puts the panel away and hides
+    /// its controls; nil where the panel shows no such row.
+    var fullScreen: FullScreenRow? = nil
+
+    /// Full Screen's row: whether a hide can start now (FullScreenPolicy.hideAllowed, the panel itself not
+    /// counted), whether Sill's window covers the screen (FullScreenPolicy.offered: the footnote says why the
+    /// row is dimmed when it does not), and the hide.
+    struct FullScreenRow {
+        let offered: Bool
+        let coversScreen: Bool
+        let hide: () -> Void
+    }
 
     @AccessibilityFocusState private var headerFocused: Bool
     /// Two seconds on this connection and still no state: the Mac runs a Sill without settings.
@@ -54,9 +68,14 @@ struct HostSettingsPanel: View {
     /// picture's input view and the on-screen trackpad as each scroll begins (`ScrollDirection`), never
     /// sent.
     @AppStorage(StreamClient.reverseScrollKey) private var reverseScroll = false
+    /// This device's switch for Picture in Picture (#291, docs/picture-in-picture-plan.md): off unless turned
+    /// on (`PictureInPicturePolicy.defaultOn`), read by PictureInPictureHub, never sent.
+    @AppStorage(StreamClient.pictureInPictureKey) private var pictureInPicture = PictureInPicturePolicy.defaultOn
     /// This device's switch for Larger Picture (docs/larger-picture-plan.md): off unless turned on,
     /// read by the stream screen, never sent.
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
+    /// Shake to Show Controls (full screen, docs/full-screen-plan.md): on unless turned off, never sent.
+    @AppStorage(FullScreenPolicy.shakeKey) private var shakeShowsControls = true
     /// Whether the switch is offered here, the stream screen's say (`largerPictureOffered`): only on an
     /// iPhone without a hinge whose picture it makes larger.
     @Environment(\.largerPictureOffered) private var offersLargerPicture
@@ -81,7 +100,7 @@ struct HostSettingsPanel: View {
     private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
     private static let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
     /// DEBUG `-SillSettingsEnd 1`: the rows start scrolled to their end, so a photo of a short
-    /// screen shows the last groups (Direct Wireless, Away from home, This iPad, Take the Tour).
+    /// screen shows the last groups (Direct Wireless, Away from home, This iPad, Take the Tour, the version).
     private static var startsAtEnd: Bool {
         #if DEBUG
         return UserDefaults.standard.bool(forKey: "SillSettingsEnd")
@@ -97,6 +116,10 @@ struct HostSettingsPanel: View {
     /// `hold`, to Hold to Show Window Controls, the same for its row and footnote.
     /// `clipboard`, to the clipboard's Paste row, so that photo shows it and the group's footnote under
     /// it (the review of #242: `gestures` shows only the two switches above them there).
+    /// `pip`, to the This iPad group's title, over its first row, the Picture in Picture switch (#291), so a
+    /// photo shows the title, the switch and its footnote (with `-SillPiPSupported 1` on a simulator that
+    /// says it has no Picture in Picture).
+    /// `fullscreen`, to Full Screen's row and its footnote (docs/full-screen-plan.md).
     private static var startsAt: String? {
         #if DEBUG
         switch UserDefaults.standard.string(forKey: "SillSettingsScroll") {
@@ -106,6 +129,8 @@ struct HostSettingsPanel: View {
         case "reverse"?: return reverseScrollRowID
         case "hold"?: return thumbnailHoldRowID
         case "clipboard"?: return clipboardRowsID
+        case "pip"?: return gesturesGroupID
+        case "fullscreen"?: return fullScreenRowID
         default: return nil
         }
         #else
@@ -118,6 +143,7 @@ struct HostSettingsPanel: View {
     private static let reverseScrollRowID = "reverseScroll"
     private static let thumbnailHoldRowID = "thumbnailHold"
     private static let clipboardRowsID = "clipboardPaste"
+    private static let fullScreenRowID = "fullScreen"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
     static var voiceOverRunning: Bool {
@@ -235,7 +261,8 @@ struct HostSettingsPanel: View {
                 // A locked Mac's lists have no windows while it shows nothing of itself (its LockPolicy,
                 // docs/locked-mac-plan.md): why, under the readout, its own element for VoiceOver.
                 if let why = client.lockWhy {
-                    Text(LockedMac.line(mac: client.macName, why: why))
+                    // The off-console view's own (docs/off-console-plan.md): the picture is this account's, live.
+                    Text(client.lockView ? LockedMac.viewPanelLine : LockedMac.line(mac: client.macName, why: why))
                         .font(.footnote)
                         .foregroundStyle(Palette.text)
                         .fixedSize(horizontal: false, vertical: true)
@@ -311,6 +338,8 @@ struct HostSettingsPanel: View {
                 if let note = AwayCopy.footnote(state.away, mac: mac, remoteAccessOn: client.macInfo?.remoteAccess == true) {
                     Footnote(text: note, top: 0)
                 }
+                // Full Screen and Shake to Show Controls, right after Frame Rate and its words (Noah, 2026-11-12).
+                if fullScreenPlace == .afterFrameRate { fullScreenRows }
                 // As in the Mac's Settings › Streaming: its own group, the Mac's name for it, and
                 // what it trades away.
                 Rows {
@@ -430,6 +459,21 @@ struct HostSettingsPanel: View {
             // for a Mac without them too. Both are this device's own: its gestures, then the tour.
             thisDevice
             tour
+            versionLine
+        }
+    }
+
+    /// The last line, after Take the Tour's footnote (Noah, 2026-11-11: "at the bottom of settings";
+    /// docs/version-label-plan.md): this app's version and build, "Sill 0.6.2 (1400)" (VersionLine),
+    /// in the footnotes' size, colour and inset, the gap between groups above it (the footnote's own)
+    /// and below it. In the part that scrolls, so the header and Disconnect stay as they are.
+    @ViewBuilder private var versionLine: some View {
+        if let label = VersionLabel.shown {
+            VersionLine(label: label)
+                .font(.footnote)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
         }
     }
 
@@ -452,20 +496,58 @@ struct HostSettingsPanel: View {
         Footnote(text: TourPolicy.takeTourFootnote(device: device))
     }
 
+    /// Full Screen (docs/full-screen-plan.md) and Shake to Show Controls, each with its words under it: the one
+    /// way in (a button, not a switch: nothing is remembered, and the interface is shown whenever this row is
+    /// seen) and whether a shake brings the controls back. Two groups, a footnote under each, so they never touch.
+    @ViewBuilder private var fullScreenRows: some View {
+        if let fullScreen {
+            Rows {
+                Button(action: fullScreen.hide) {
+                    HStack(spacing: 10) {
+                        Text(FullScreenPolicy.Copy.rowTitle)
+                            .foregroundStyle(fullScreen.offered ? Palette.accent : Palette.muted)
+                        Spacer(minLength: 8)
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .foregroundStyle(fullScreen.offered ? Palette.accent : Palette.muted)
+                            .accessibilityHidden(true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!fullScreen.offered)
+                .accessibilityHint(FullScreenPolicy.Copy.rowHint)
+                .rowFrame()
+            }
+            .id(Self.fullScreenRowID)
+            Footnote(text: fullScreen.coversScreen ? FullScreenPolicy.Copy.footnote : FullScreenPolicy.Copy.notOffered)
+            Rows {
+                Toggle(isOn: $shakeShowsControls) {
+                    Text(FullScreenPolicy.Copy.shakeTitle).foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+                .onChange(of: shakeShowsControls) { _, on in
+                    client.noteAction()
+                    #if DEBUG
+                    print("full screen: Shake to Show Controls \(on ? "on" : "off")")
+                    #endif
+                }
+            }
+            Footnote(text: FullScreenPolicy.Copy.shakeFootnote(device: device))
+        }
+    }
+
+    /// Where those rows go: after Frame Rate while the Mac's settings show, in This iPad's group while not.
+    private var fullScreenPlace: FullScreenPolicy.RowsPlace {
+        FullScreenPolicy.rowsPlace(macSettingsShown: client.settings.host != nil && client.settings.displayed != nil)
+    }
+
     /// Most-changed first, so the compact halves' 259 pt shows Quality, Resolution and Frame Rate
     /// before anything scrolls.
     private func streamRows(_ shown: StreamSettings) -> some View {
         Rows {
             AdaptiveRow(title: "Quality", since: client.settings.pendingSince(.bitrate)) {
-                Picker("Quality", selection: binding(shown.bitrate) { HostSettingsChange(bitrate: $0) }) {
-                    ForEach(QualityPreset.allCases) { Text($0.title).tag($0.rawValue) }
-                    if QualityPreset(rawValue: shown.bitrate) == nil {
-                        // Set by hand on the Mac: shown, never offered (the Mac's menu does the same).
-                        Text(QualityPreset.title(forBitrate: shown.bitrate)).tag(shown.bitrate)
-                    }
-                }
-                .pickerStyle(.menu)
-                .fixedSize()     // one line; the row stacks instead when it does not fit beside the title
+                qualityPicker(shown)
             }
             RowDivider()
             AdaptiveRow(title: "Resolution", since: client.settings.pendingSince(.captureScale)) {
@@ -486,6 +568,36 @@ struct HostSettingsPanel: View {
                 .pickerStyle(.segmented)
                 .fixedSize()
             }
+        }
+    }
+
+    /// Quality's menu. The row shows the quality's name alone ("Extreme"; "12 Mbps" for a bitrate set by hand on
+    /// the Mac) and the menu lists each quality with its rate ("Extreme — 150 Mbps"): with the rate in the row
+    /// too, Extreme's did not fit beside the title on an iPhone on its side and the row stacked (Noah,
+    /// 2026-11-12: "just showing the Mbps in the menu itself would work to solve this"). A menu's own label can
+    /// differ from its choices from iOS 18 on; before that the row shows the whole title, as it did.
+    @ViewBuilder private func qualityPicker(_ shown: StreamSettings) -> some View {
+        let selection = binding(shown.bitrate) { HostSettingsChange(bitrate: $0) }
+        if #available(iOS 18.0, *) {
+            Picker("Quality", selection: selection) {
+                qualityChoices(shown)
+            } currentValueLabel: {
+                Text(QualityPreset.name(forBitrate: shown.bitrate))
+            }
+            .pickerStyle(.menu)
+            .fixedSize()     // one line; the row stacks instead when it does not fit beside the title
+        } else {
+            Picker("Quality", selection: selection) { qualityChoices(shown) }
+                .pickerStyle(.menu)
+                .fixedSize()
+        }
+    }
+
+    @ViewBuilder private func qualityChoices(_ shown: StreamSettings) -> some View {
+        ForEach(QualityPreset.allCases) { Text($0.title).tag($0.rawValue) }
+        if QualityPreset(rawValue: shown.bitrate) == nil {
+            // Set by hand on the Mac: shown, never offered (the Mac's menu does the same).
+            Text(QualityPreset.title(forBitrate: shown.bitrate)).tag(shown.bitrate)
         }
     }
 
@@ -558,7 +670,7 @@ struct HostSettingsPanel: View {
 
     // MARK: This device
 
-    /// This device's own group, after the Mac's: on an iPhone its switch for Larger Picture, then Share Clipboard while the Mac shares its clipboard,
+    /// This device's own group, after the Mac's: Picture in Picture where iOS has it (#291), then on an iPhone its switch for Larger Picture, then Share Clipboard while the Mac shares its clipboard,
     /// with Paste on ‹Mac› (the system's Paste control) under it while on, then Reverse Scrolling (for
     /// every Mac: it only turns this device's own deltas around), then how long a thumbnail is held for
     /// its window's lights (for every Mac: the thumbnails are this device's), then its switch for three-finger
@@ -580,6 +692,27 @@ struct HostSettingsPanel: View {
             .padding(.bottom, 6)
             .accessibilityAddTraits(.isHeader)
             .id(Self.gesturesGroupID)
+        // Picture in Picture (#291, docs/picture-in-picture-plan.md): where iOS has it. The group's first row:
+        // the newest, and the one the issue names. The hub looks again when it changes.
+        if PictureInPicture.supported {
+            Rows {
+                Toggle(isOn: $pictureInPicture) {
+                    Text(PictureInPicturePolicy.Copy.title).foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+                .onChange(of: pictureInPicture) { _, on in
+                    client.noteAction()
+                    PictureInPictureHub.shared.update()
+                    #if DEBUG
+                    print("pip: the switch \(on ? "on" : "off")")
+                    #endif
+                }
+            }
+            Footnote(text: PictureInPicturePolicy.Copy.footnote(mac: mac))
+        }
+        // Full Screen and Shake to Show Controls here only while the Mac's settings do not show (loading, or a
+        // Mac without them): FullScreenPolicy.rowsPlace.
+        if fullScreenPlace == .thisDevice { fullScreenRows }
         if offersLargerPicture {
             Rows {
                 Toggle(isOn: $largerPicture) {
@@ -763,7 +896,9 @@ struct HostSettingsPanel: View {
     }
 
     /// "iPhone" or "iPad", for copy about this device.
-    private var device: String { UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad" }
+    /// "iPhone" or "iPad", by the idiom the layouts read (`DuoLayout.phoneArrangement`: the device's own, or
+    /// DEBUG `-SillIdiom phone|pad`, so one simulator photographs the panel as either says it).
+    private var device: String { DuoLayout.phoneArrangement ? "iPhone" : "iPad" }
 
     /// Why the Direct Wireless Connection switch is disabled, as its footnote says it, or nil while
     /// this device may change it: away from home (`remote`) the Mac refuses it from a remote

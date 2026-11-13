@@ -106,6 +106,12 @@ Sill has layouts of its own.
   the inner display; half open, the picture is above the fold with a trackpad
   and keys below; closed, Sill runs on the cover display. Nothing you touch
   sits on the fold.
+  <!-- Desktop displays (phase 1 of docs/virtual-desktop-plan.md, PR #355): hidden until the release that
+  ships it, whose words commit takes the comment out and makes this its own bullet:
+  - **The Desktop** on a Mac with more than one screen: tap Desktop while it
+    shows to step to the next screen, starting from your main one. The button
+    shows which screen is up.
+  -->
 - **The menus** of the app you use reach your device too: in the iPad's own
   menu bar on iPadOS 26 or later, and behind the Menus button in Sill's bar.
   Sill for Mac reads each menu from the app as you open it and chooses the
@@ -138,7 +144,9 @@ Sill has layouts of its own.
   Access on. A device away from home gets a quality of its own, Low at Standard
   resolution until you pick another there or in Sill's settings, so a slow
   connection never starts at your home quality; your home quality comes back
-  as soon as a device at home connects. When your device comes home and your
+  as soon as a device at home connects. A device that reaches your Mac through
+  a relay or tunnel running on the Mac itself, such as a userspace Tailscale
+  node or an SSH tunnel, counts as away too. When your device comes home and your
   network lists your Mac, the session moves to your network by itself.
 - **When the link can't keep up**, Sill for Mac notices that it is holding
   frames back and tells your device, which says so over the picture and, in
@@ -189,7 +197,8 @@ from a nightly Sill for Mac to the release keeps its settings and paired devices
 Sill is free, with no ads, no tracking and no subscription. If it is useful to
 you, a tip through [GitHub Sponsors](https://github.com/sponsors/Saffsanity)
 helps pay for the developer account. A tip unlocks nothing: every feature is
-free.
+free. Who sponsors Sill, who has contributed, and how to join
+them: [getsill.app/contribute](https://getsill.app/contribute).
 
 ## Building from source
 
@@ -245,7 +254,8 @@ Before a pull request, `Tests/checks/run-all.sh` runs the same pure checks as
 CI, in about five minutes and with no device.
 Contributions are accepted under the project's license. Please report a
 security problem privately, as [SECURITY.md](SECURITY.md) says, not in a
-public issue.
+public issue. These rules, with the sponsors and the contributors, are at
+[getsill.app/contribute](https://getsill.app/contribute).
 
 ## License
 
