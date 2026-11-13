@@ -53,7 +53,7 @@ final class PictureInPicture: NSObject {
         // picture belongs in Sill again. The scene's notification, so another Sill window's coming forward
         // stops nothing here.
         observers.append(center.addObserver(forName: UIScene.didActivateNotification, object: nil, queue: .main) { [weak self] note in
-            guard let self, let scene = note.object as? UIScene, scene === self.client?.displayView.window?.windowScene else { return }
+            guard let self, let scene = note.object as? UIScene, scene === self.client?.ownScene else { return }
             self.end(.backInFront, why: "its window is in front again")
         })
     }
