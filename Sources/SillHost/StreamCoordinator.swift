@@ -3058,8 +3058,8 @@ package final class StreamCoordinator {
                 filter = SCContentFilter(display: display, excludingWindows: [])   // the CLI: no Sill app to leave out
             }
             return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing the whole Mac's sound (every app but Sill).")
-        case .app(let pid, _, let name):
-            guard let display = appAudioDisplay else { return .failed("no display to capture from") }
+        case .app(let pid, let displayID, let name):
+            guard let display = (stage.scDisplay.flatMap { $0.displayID == displayID ? $0 : nil }) ?? appAudioDisplay else { return .failed("no display to capture from") }
             guard let app = await runningApplication(pid) else { return .failed("\(name) is not among the apps ScreenCaptureKit lists") }
             let filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
             return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing \(name)'s sound (every window of it).")
