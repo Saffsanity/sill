@@ -2676,9 +2676,9 @@ only if it has none; `asc.swift whats-new` always replaces.
 127.0.0.1 (throwaway keys, every run sandboxed to loopback).
 `Scripts/nightly-notes.sh` writes both apps' words from the pull requests
 merged since the last release tag. A nightly says the version main says, the
-version of main's next release (0.6.1 since App Review approved 0.6.0; 0.6.0
-from 2026-10-31 until then, 0.5.5 the pre-release number before), with the commit
-count as its build, as in "Sill nightly 0.6.1 (1280)"; the update check never offers a nightly, and offers
+version of main's next release (0.6.2 since App Review approved 0.6.1 on 2026-11-12; 0.6.1
+from 0.6.0's approval until then; 0.6.0 from 2026-10-31, 0.5.5 the pre-release number before), with the commit
+count as its build, as in "Sill nightly 0.6.2 (1530)"; the update check never offers a nightly, and offers
 one nothing until a release newer than its version exists. A nightly reads the
 release's data-protection keychain items, so a device paired with one stays
 paired with the other. `swift Scripts/asc.swift groups --key-file … --key-id …
