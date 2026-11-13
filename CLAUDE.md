@@ -447,8 +447,36 @@ Rules found in the steps that hold for all work (each where it is written):
   pure, `Tests/checks/pairing-sharing`), `PairingWindowAddress` (the address that window gives to type:
   Tailscale's name and IPv4 first, another VPN's IP only under this network's
   address; pure, checked with swiftc), `UpdatePolicy` (the update check's rules
-  and words; pure, checked with swiftc) and `UpdateChecker` (main actor; asks
-  GitHub's releases feed and times the checks; compiles on its own with swiftc).
+  and words, and whether a release is signed for Update Now; pure, checked with
+  swiftc) and `UpdateChecker` (main actor; asks GitHub's releases feed and times
+  the checks; compiles on its own with swiftc). Update Now, the one-click update
+  (docs/one-click-update-plan.md): `UpdateInstallPolicy` (the trust and endpoints
+  Sill.app uses, `Trust.release` and `Endpoints.github`, immutable; the refusals and
+  their words; the release; the bundle's verdict; the state machine; the words; pure),
+  `UpdateManifest` (the release's manifest and its Ed25519 signature with Noah's
+  update key, its signed date, and a stop (`Sill.zip.stop`); a nightly's ("Sill nightly 1",
+  the nightly key's); `releaseKeys` and `nightlyKeys`, empty until he makes the keys, so no
+  build shows Update Now or Use nightly builds; the tests' key, `testKeySeed`, which anyone
+  can make and no Sill trusts; pure), `UpdateArchive` (Sill's own zip
+  reader and inflate; pure), `UpdateAutoPolicy` (Automatically update Sill and Use
+  nightly builds: when it begins; the cooling-off, 48 hours from this Sill's first sight
+  of the verified manifest (never from its signed line) on this Mac's clock and on GitHub's
+  (the `Date` of its HTTPS answers), from the release's latest `published_at` when that is
+  later, kept by GitHub's release object too (its `id`); never a nightly, which Update
+  Now alone installs (Noah's option 4: `start` and `dates` refuse one first, and AppUpdater
+  gives it the release offer alone); the quiet moment, what it remembers and its bounds,
+  stops by version, its words; pure;
+  all four in `Tests/checks/update-install`), `UpdateInstaller` (the
+  mechanism: the release, manifest and stop, GitHub's clock in each answer, the download,
+  unpacking through directory descriptors, the Security checks, the atomic swap with its
+  check right before and its put-back, the staging folders, where Sill runs, the notes
+  between two Sills and the watcher, which never leaves Sill's path empty by its own choice and
+  moves nothing back that isn't whole (its note's third line, `kept` or `lost`); no AppKit,
+  driven by `Tests/update-harness`), `AutoUpdateStore` (the
+  switches and the memory in Sill's keychain group) and `AppUpdater` (main actor: the
+  facts, the steps of both modes, the quiet wait and the hold, the relaunch, the
+  watcher and the quit, the wait at launch for a Sill that is quitting, the clean-up
+  after a start).
 - `Packaging/` — Sill.app's `Info.plist` and the development entitlements
   (get-task-allow only), the release's (`SillRelease.entitlements`:
   `com.apple.application-identifier`, the team and the keychain group, signed
@@ -496,8 +524,10 @@ Rules found in the steps that hold for all work (each where it is written):
   Developer ID Application identity (`SILL_SIGN_IDENTITY`, checked against the
   keychain) or the profile, or on a HEAD without the tag v‹version› (the
   update check's), or with `SILL_RELEASE_TAG` (the release workflow sets it)
-  not `v<CFBundleShortVersionString>` or naming another commit (`--check-tag`
-  checks only that), and `--dry-run` stops before notarytool (the profile and
+  not `v<CFBundleShortVersionString>` or naming another commit, or on a HEAD
+  that isn't an ancestor of `origin/main` (a release is tagged on main's line,
+  so a nightly's build number orders it; `--check-tag` checks only these), and
+  `--dry-run` stops before notarytool (the profile and
   the tag only warned about: it sets `SILL_RELEASE_DRY_RUN=1`, with which
   `make-app.sh --release` builds an untagged commit); it refuses a build
   without Assets.car and AppIcon.icns. `--publish` makes the GitHub Release in
@@ -647,7 +677,24 @@ Rules found in the steps that hold for all work (each where it is written):
   `sillclient.py --hello=VER[,PROTO]` (or `none`) sends a device's hello
   first (`--hello-delay=S` S seconds after the connection is up, for a change
   made while a host's device gate holds it), and kind 22's new fields are
-  printed. `Scripts/sillfeed.py PORT`
+  printed. `Scripts/sign-update.sh v<version>` signs a published release for Update
+  Now on Noah's Mac (never CI): only a zip built on this Mac, or with `--run ID` the zip a
+  release.yml run kept, once GitHub's record of that run names the local tag's commit; it
+  checks the published Sill.zip as the checklist checks a download, refuses a nightly
+  (`SillChannel`) and an app of another commit (`SillCommit`), shows the updater's changes
+  since the last release signed and asks (whatever `--yes` says), signs `Sill.zip.manifest`
+  with his update key (login keychain, or `--key-file`), reads it back with the key the
+  tag's source carries, asks and uploads, and keeps a line in the signing record;
+  `--audit [--notify]` compares every release on GitHub with that record, drafts and
+  pre-releases too (each manifest, each `Sill.zip` since the first release signed, every
+  release signed still listed and none marked pulled back, an empty listing, a login that
+  can't see drafts), and
+  notifies when something isn't right or the audit couldn't run; `--pulled vX` marks a
+  release Noah pulled; `--new-key` makes the key once; `Scripts/update-manifest.swift` is its
+  tool, compiled with the app's own UpdateManifest and UpdateInstaller.
+  `Scripts/sign-nightly.sh` signs tonight's nightly for Use nightly builds in nightly.yml
+  (the nightly key from the environment's secret; `--new-key` makes it in a new file).
+  `Scripts/sillfeed.py PORT`
   is a fake GitHub releases feed for the update check's tests (`--tag`,
   `--status`, `--etag`, `--draft`, `--prerelease`, `--html-url`, `--body`,
   `--big`, `--slow`, `--reset`, `--redirect`, `--set-cookie`,
@@ -1035,7 +1082,8 @@ Rules found in the steps that hold for all work (each where it is written):
   ID .p12 into a temporary keychain, the notary key stored as a profile in it, the Developer ID
   profile decoded from `SILL_PROVISION_PROFILE` into
   `Packaging/embedded.provisionprofile` (since the nightlies), `release.sh
-  --publish`, Apple's notary logs kept as an artifact (`include-hidden-files:
+  --publish`, the published zip kept as the artifact `sill-zip-<tag>` for 30 days
+  (`sign-update.sh --run`), Apple's notary logs kept as an artifact (`include-hidden-files:
   true`: upload-artifact skips whatever is under a folder whose name starts
   with a dot, `.build` included), and the keychain deleted in an always()
   step. Secrets,
@@ -1058,7 +1106,10 @@ Rules found in the steps that hold for all work (each where it is written):
   upload with `SILL_TESTFLIGHT_IN_CI`, then `asc.swift distribute`: every
   internal group, the public beta group only while `SILL_NIGHTLY_PUBLIC_BETA` is
   `true`, the night's notes replacing What to Test only on a build that run
-  uploaded, `--replace-whats-new` after the upload step's `uploaded=true`); only main builds: both jobs run in the environment `nightly` (only
+  uploaded, `--replace-whats-new` after the upload step's `uploaded=true`), and the nightly
+  signed for Use nightly builds (`Scripts/sign-nightly.sh`: `Sill-nightly.zip` and its
+  manifest on the pre-release, only with the secret `SILL_NIGHTLY_UPDATE_KEY` and a
+  nightly key compiled in; green without them); only main builds: both jobs run in the environment `nightly` (only
   main, no reviewer), which holds the nine secrets, none of them a repository
   secret (docs/release-checklist.md, "Nightlies", "Secrets and variables").
   `.github/actions/select-xcode` —
@@ -1081,6 +1132,16 @@ Rules found in the steps that hold for all work (each where it is written):
   README.md, a static mutants list in ci.yml, and a step entry written back into CLAUDE.md;
   `HISTORY.md` is the old README with its table, frozen. A change to a checked file updates its
   check (and a mutant's pattern) in the same commit.
+- `Tests/update-harness/` — Update Now's mechanism end to end (docs/one-click-update-plan.md
+  §11, G2): `run.sh` compiles UpdateInstaller and the pure update files with `main.swift`,
+  makes ad hoc test apps (`me.saffer.sill.updater-test`) and their zips (ditto's, and
+  `make-zip.py`'s hostile kinds), starts `server.py` (a stand-in for GitHub on 127.0.0.1),
+  and checks the installs and every refusal (the installed copy's tree unchanged), the
+  requests, the launch check, where an app runs (a disk image too) and the staging; with
+  the genuine v0.6.1 zip in `.build/updater-scratch`, `Trust.release`'s every rule with
+  the harness's own key; a nightly feed; the watcher on scratch copies. `sign-test.sh` runs
+  `Scripts/sign-update.sh` and `Scripts/sign-nightly.sh` against a stand-in `gh` with
+  throwaway keys in files. Local only (not CI): no /Applications, no keychain, no launch.
 - `Tests/touchrig/` — the touch rig (docs/trackpad-gestures-plan.md §9.2): the
   real `TrackpadView.swift` and `InputOverlay.swift` in a scratch simulator
   app, driven with synthesized touches (`TouchSynth`, private UIKit calls, test

@@ -987,7 +987,7 @@ final class StreamServer {
                 client.route = .home(origin, peer: nil)
                 let admit = { (hello: Hello?) in
                     client.link = self.link(connection, path: connection.currentPath)
-                    self.register(client)
+                    guard self.register(client) else { return }
                     print("Client connected: \(connection.endpoint)")
                     self.receiveLoop(client)
                     self.onClientConnected?(connection, client.route, client.link)
@@ -1022,8 +1022,36 @@ final class StreamServer {
         connection.start(queue: queue)
     }
 
-    /// On `queue`: from now on `client` gets broadcasts, ticks and the catalog.
-    private func register(_ client: Client) {
+    /// While set (`holdNewSessions`): a session that would be registered gets this goodbye instead and is
+    /// closed. The automatic update's install (Sill.app's AppUpdater), which must never disconnect anyone:
+    /// it holds new sessions, then looks at how many are connected, in one step on `queue`, so no device
+    /// can connect between its look and its quit. On `queue`.
+    private var heldGoodbye: Goodbye?
+
+    /// Holds every new session from now on (each answered with the "restarting" goodbye: its message names
+    /// this Mac, and the device reconnects by itself), or releases the hold (`hold` false), and says how
+    /// many sessions are registered at this moment. Zero with the hold on: none is, and none can be until
+    /// it is released. Waits for `queue`: never from `queue` itself.
+    func holdNewSessions(_ hold: Bool) -> Int {
+        dispatchPrecondition(condition: .notOnQueue(queue))
+        let goodbye = hold ? Goodbye(reason: Goodbye.restarting,
+                                     message: "\(macName) is restarting Sill to install an update. It reconnects in a moment.",
+                                     reconnect: true) : nil
+        return queue.sync {
+            heldGoodbye = goodbye
+            return clients.count
+        }
+    }
+
+    /// On `queue`: from now on `client` gets broadcasts, ticks and the catalog. False, and the connection
+    /// closed with the hold's goodbye, while new sessions are held.
+    @discardableResult
+    private func register(_ client: Client) -> Bool {
+        if let goodbye = heldGoodbye {
+            print("Held \(client.connection.endpoint): Sill is restarting to install an update.")
+            Self.closeWithGoodbye(goodbye, on: client.connection, queue: queue)
+            return false
+        }
         client.connectedAt = Date().timeIntervalSince1970
         client.lastHeardAt = client.connectedAt
         heard(ObjectIdentifier(client.connection))
@@ -1031,6 +1059,7 @@ final class StreamServer {
         onClientCountChanged?(clients.count)
         updateTicking()
         updateSweep()
+        return true
     }
 
     /// A session a TLS door admitted, already `.ready` and pinned, once the device gate has let it
@@ -1069,7 +1098,7 @@ final class StreamServer {
                 self.onClientRouteChanged?(connection, link)
             }
         }
-        register(client)
+        guard register(client) else { return }
         receiveLoop(client)
         onClientConnected?(connection, route, client.link)
         admitted()

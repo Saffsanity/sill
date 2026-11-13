@@ -102,6 +102,18 @@ xcrun vtool -set-build-version macos "${minos:?vtool reported no deployment targ
 cp Packaging/Info.plist "$stage/Contents/Info.plist"
 build_number="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" "$stage/Contents/Info.plist"
+# The commit this Sill is built from, sealed by its code signature (docs/one-click-update-plan.md §12d, R1):
+# Scripts/sign-update.sh signs a release only when its app names the commit of the tag whose trust it read.
+# "+changes" when the files that make Sill.app differ from that commit; nothing outside a git checkout.
+if built_from="$(git rev-parse --verify -q HEAD 2>/dev/null)"; then
+    [ -z "$(git status --porcelain -- Package.swift Sources Packaging design Scripts/make-app.sh 2>/dev/null)" ] || built_from="$built_from+changes"
+    /usr/libexec/PlistBuddy -c "Add :SillCommit string $built_from" "$stage/Contents/Info.plist"
+fi
+# A nightly says so in its signed Info.plist (SillChannel = nightly): its update check orders by version, then
+# build, against releases and nightlies alike (docs/one-click-update-plan.md §16.3). A release has no such key.
+if [ "${SILL_RELEASE_NIGHTLY:-}" = 1 ]; then
+    /usr/libexec/PlistBuddy -c "Add :SillChannel string nightly" "$stage/Contents/Info.plist"
+fi
 printf 'APPL????' > "$stage/Contents/PkgInfo"
 
 # The icon. design/AppIcon.svg is the iOS art, a full-bleed square. macOS 26+ masks and lights a

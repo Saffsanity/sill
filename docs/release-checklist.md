@@ -143,6 +143,20 @@ serves the root or `/docs`, never `/site`. So:
   `grep -n` of a phrase from each block that nothing of it is left. Add the marker's line and its
   grep here when a pull request marks words; the release that ships them deletes its markers in
   `site/`, keeps the words, and takes its lines out of here.
+- `Update Now` (privacy.html's Update check section and support.html's "Updating Sill for Mac", the
+  one-click update and Automatically update Sill, docs/one-click-update-plan.md §7 and §15): `perl -0pi -e
+  's/[ \t]*<!-- Update Now:.*?<!-- \/Update Now -->\n//gs' ../sill-site/*.html`, then `grep -n -e
+  'release-assets.githubusercontent.com' -e 'Automatically update Sill' ../sill-site/*.html` prints nothing
+  (README.md's block, marked the same, goes out with the release that ships it). It ships with the
+  first release whose Sill carries an update key (part 1 §7), not with the code alone: a release whose
+  Sill has an empty key list offers no Update Now.
+- `Nightly Update Now` (Use nightly builds: support.html's paragraph after "Updating Sill for Mac",
+  download.html's, privacy.html's, docs/one-click-update-plan.md §16): `perl -0pi -e
+  's/[ \t]*<!-- Nightly Update Now:.*?<!-- \/Nightly Update Now -->\n//gs' ../sill-site/*.html`, then
+  `grep -n 'Use nightly builds' ../sill-site/*.html` prints nothing (README.md's block, marked the same, goes
+  out with the release that ships it). It ships with the first release whose Sill carries a nightly key
+  (`UpdateManifest.nightlyKeys`, "Nightlies"), and that release also deletes the sentences that say Sill
+  never offers a nightly (download.html's two, README.md's two, "Nightlies" here).
 - Open: `Version label` (support.html, under the lede: where each app shows its version, true from
   Sill for iPhone and iPad 0.6.2; PR #351, docs/version-label-plan.md): `grep -n "shows its version"
   ../sill-site/support.html` finds nothing after the cut.
@@ -348,6 +362,111 @@ comes later, when the cask qualifies (below).
       `site/download.html`, the README, the tap's README and part 2's Homebrew item say `brew
       install --cask sill`.
 
+### 7. Update Now's key (once, on Noah's Mac; docs/one-click-update-plan.md §4.8)
+
+Update Now installs a release only when its manifest (`Sill.zip.manifest`) is signed with an update key
+whose public half is compiled into the Sill that runs (`UpdateManifest.releaseKeys`). The private half
+never touches GitHub or CI: the Developer ID identity does (the `nightly` environment signs and notarizes
+with no reviewer), so this key is what tells a release Noah made from a build CI made.
+
+- [ ] In Terminal.app, never a terminal inside the Claude app (agents can read that one). Install the
+      signer, the one program that ever holds the key: `Scripts/sign-update.sh --install-signer`. It lists
+      the three files it is built from (UpdateManifest.swift, Compatibility.swift and its own main) with
+      their SHA-256 and the commit, and the trust it will hold every release to (the update keys, the
+      pinned code requirement, Trust.release and Endpoints.github), asks whether you have read them, and
+      builds it with the hardened runtime into `~/Library/Application Support/Sill Update Signer/`;
+      signing runs that binary only, and only for a release whose Sill carries exactly that trust. Again
+      after any change to those files or that trust you have read (the keychain then asks once before the
+      new one uses the key: allow it only right after you ran --install-signer yourself).
+- [ ] Make the key: `Scripts/sign-update.sh --new-key`. It makes an Ed25519 key (CryptoKit) and keeps it
+      in the login keychain (a generic password: service `me.saffer.sill.update-signing`, account
+      `ed25519`, label "Sill update signing key", not synchronizable), and prints the public key and its
+      key ID. Run it once: it refuses when the keychain has one.
+- [ ] One copy off the Mac, for loss, in Terminal.app: `security find-generic-password -s
+      me.saffer.sill.update-signing -a ed25519 -w` shows the private key as base64. At the keychain's
+      question choose Allow, never Always Allow (Always Allow lets `security`, and so any program running
+      as you, read it without asking). Type it into a 1Password item (or on paper in a safe), without the
+      clipboard (Sill shares it with your devices, Universal Clipboard with your other Apple devices), then
+      ⌘K. Never a file in the repository, the handoff folder or ~/Downloads (every agent and tool works
+      there), never GitHub, never CI.
+- [ ] The public key into `Sources/SillMenuBar/UpdateManifest.swift`, `releaseKeys` (one line, a commit of
+      its own). `Tests/checks/update-install` checks that every key listed is usable. Then
+      `--install-signer` again from that commit (it shows your key in the trust). The first release that
+      carries it is installed by hand (Update Now in the Sill before it has no key to check with); the
+      release after it is the first Update Now can install. Sign that first release too, right after you
+      publish it (part 2), though no Sill installs it through Update Now: the audit checks every release from
+      the lowest version you signed, so leaving it unsigned would leave the versions between it and the next
+      signed one checked by their manifests alone (the fifth security pass's N12 b).
+- Rotation: a release carries both keys and is signed with the old one (`--install-signer` from it first:
+      the trust then lists both); the next is signed with the new one; a later one drops the old. Lost: releases go out without a manifest (Update Now doesn't show;
+      Open Release Page… as before) until one carrying a new key is installed by hand once (say so in its
+      notes). Leaked: the same as lost, and the notes ask people to update by hand once; the leaked key
+      alone installs nothing (a Developer ID signed, notarized build is still needed), and a Sill that
+      never updates by hand keeps trusting it (it can't be revoked: docs/one-click-update-plan.md T28).
+- A release no Sill may install (a bad build, one signed with a key that leaked): within two days of its
+      appearance on GitHub, pull it or mark it a prerelease (each Sill waits two days after it first finds
+      a release and asks GitHub again right before it installs by itself, so none does), and mark it once
+      with `Scripts/sign-update.sh --pulled v<version>`. Pulling stops a release only while it stays pulled:
+      anyone with write access to the repository can publish it again from its genuine files (your signed
+      manifest and the zip), and every Mac below its version installs it 48 hours after reading it; the
+      audit names a release marked pulled that is back. To stop it for good, publish a newer release: each
+      Mac's floor then refuses the old one once it has installed the newer (the fifth security pass's AU3).
+      For one that stays listed, a stop, in Terminal.app: `"$HOME/Library/Application
+      Support/Sill Update Signer/update-manifest" stop --tag v<version> --sha256 <the sha256 line of its
+      Sill.zip.manifest> --out Sill.zip.stop` (Touch ID or your password, the prompt showing the whole
+      SHA-256), then `gh release upload v<version> Sill.zip.stop --repo Saffsanity/sill`. Every Sill reads it
+      before downloading anything, by Update Now and by itself, and remembers the tag
+      (docs/one-click-update-plan.md §15.4).
+- Noticing a release you didn't sign: every manifest `sign-update.sh` signs goes in the signing record
+      (`signed.txt` beside the signer; this Mac's: sign every release here, or the audit names one signed
+      elsewhere). `Scripts/sign-update.sh --audit` downloads the `Sill.zip.manifest` of every release that
+      carries one, drafts and pre-releases included (one turned into either for a few minutes around a run
+      would otherwise pass unseen), and compares it with the record; it also names a `Sill.zip` not in the
+      record on any release since the first you signed, whatever became of its manifest, a release you signed
+      that GitHub no longer lists, an empty listing, a `gh` login that can't see drafts, and a manifest larger
+      than any Sill reads. "Audit: all N signed releases in Saffsanity/sill (drafts and pre-releases
+      included) are in your signing record, every Sill.zip since v… is too, and every release you signed is
+      listed." when all is well. A release you pulled yourself (deleted): mark it once with
+      `Scripts/sign-update.sh --pulled v<version>`, or the audit keeps asking where it went;
+      "NOT IN YOUR SIGNING RECORD, and it verifies with your update key" names a release made with your key
+      that you didn't sign here, which every Sill with Automatically update Sill on installs two days after
+      it first finds it as the latest release: pull it or stop it (above), then treat the key as leaked
+      (rotation, above). Read-only: GitHub's release listing (with your `gh` login, which lists drafts too)
+      and a few kilobytes a release; no secret. What it guards against is a key that leaked off this Mac:
+      someone in control of this Mac or of your account here also controls `signed.txt`, the script and
+      the LaunchAgent below (docs/one-click-update-plan.md §15.4).
+- [ ] Your choice: the audit every few hours, notifying you when something is wrong and whenever it couldn't
+      run (an expired `gh` login, no network: an audit never fails in silence). `--install-signer` puts a
+      copy of `sign-update.sh` beside the signer (the one you read); this LaunchAgent runs it every four hours
+      from the moment you load it (`StartInterval`, so no time of day is written anywhere; a Mac asleep runs it
+      once on waking), and `gh` must be on its PATH (`/opt/homebrew/bin` here). In Terminal.app:
+
+      ```
+      d="$HOME/Library/Application Support/Sill Update Signer"
+      cat > ~/Library/LaunchAgents/me.saffer.sill.update-audit.plist <<PLIST
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0"><dict>
+      <key>Label</key><string>me.saffer.sill.update-audit</string>
+      <key>ProgramArguments</key><array><string>/bin/bash</string><string>$d/sign-update.sh</string>
+        <string>--audit</string><string>--notify</string></array>
+      <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+      <key>StartInterval</key><integer>14400</integer>
+      <key>StandardOutPath</key><string>$d/audit.log</string><key>StandardErrorPath</key><string>$d/audit.log</string>
+      </dict></plist>
+      PLIST
+      launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/me.saffer.sill.update-audit.plist
+      launchctl kickstart gui/$(id -u)/me.saffer.sill.update-audit
+      ```
+
+      The last command runs it once now: `"$d/audit.log"` then ends in "Audit: all N signed releases in
+      Saffsanity/sill (drafts and pre-releases included) are in your signing record, every Sill.zip since v… is
+      too, and every release you signed is listed." Another interval:
+      change 14400 (seconds) before loading it. To stop it: `launchctl bootout
+      gui/$(id -u)/me.saffer.sill.update-audit` and delete the plist. Without it, the two days protect only
+      as well as you happen to notice; GitHub's "Watch › Custom › Releases" mail is the setup-free complement
+      (a release published, not an asset replaced on an old one or a release turned into a draft).
+
 ## Part 2: every release
 
 - [ ] Versions: one number for both apps. From 0.5.1 on, a release's Sill for Mac and Sill for
@@ -396,7 +515,10 @@ comes later, when the cask qualifies (below).
       annotated tags on merge commits of main: v0.4.0 on its release pull request's, #41, v0.3.1 on
       #32's, and v0.3.0 on main's head that day, #20's). `make-app.sh --release` builds only the
       commit carrying it, and `release.sh --publish` refuses to start until origin's tag names that
-      commit, then makes the GitHub Release for it. Every Sill.app's update check reads the releases
+      commit, and until that commit is on main (an ancestor of `origin/main` as the checkout knows it:
+      Update Now orders a release and a nightly of one version by build number, which holds only for a
+      commit main carries; `git fetch origin` first if origin/main here is old), then makes the GitHub
+      Release for it. Every Sill.app's update check reads the releases
       of Saffsanity/sill alone (`UpdatePolicy.feed`) and compares the newest published one's tag
       (not a draft, not a prerelease) with the version it runs: Saffsanity/sill is public (since
       2026-09-26), so within a day of a release there every older Sill.app offers it (Check Now in
@@ -448,6 +570,40 @@ comes later, when the cask qualifies (below).
       `.sha256`, `spctl -a -vv -t open --context context:primary-signature` on the image and
       `spctl -a -vv -t exec` on the Sill.app inside each ("Notarized Developer ID"), and the app's
       `CFBundleShortVersionString` and `CFBundleVersion`.
+- [ ] Sign the release for Update Now, on Noah's Mac, in Terminal.app, right after it is published (never
+      in CI: part 1 §7): `Scripts/sign-update.sh v<version>`. It first checks that the release's Sill
+      trusts exactly what you recorded at `--install-signer` (its update keys, the pinned code
+      requirement, Trust.release and Endpoints.github), and refuses otherwise, showing the difference; that
+      GitHub's tag names your tag's commit, and that the app in the zip was built from it (`SillCommit` in its
+      Info.plist, which `make-app.sh` writes), refusing a moved tag or a build of another commit; and shows
+      what changed in the updater's own files (and the ones that steer it: AppModel, SettingsPanes,
+      Compatibility.swift, StreamServer) since the last release you signed, and asks, whatever `--yes`
+      says; and refuses a nightly build (`SillChannel` in its Info.plist). It signs only a zip you know
+      without GitHub: by default `.build/Sill-<version>.zip` from your own `release.sh` run (GitHub's must be
+      it, byte for byte), the way to prefer; or, for a release the release workflow built in a run you
+      approved, `--run <the run's number>` (the digits at the end of the run page's address): it asks GitHub
+      for that run's record and signs only when it is a finished, successful run of release.yml for this tag
+      whose commit (`head_sha`, GitHub's own record of what it built, which no build writes) is your tag's,
+      started by the pushed tag or Run workflow on this repository's own code,
+      and it takes the zip from the artifact `sill-zip-v<version>` that run kept (30 days). A zip the app
+      alone vouches for is never enough: `SillCommit` is written by the build it describes, so a tag moved
+      for the run and back would pass every other check (docs/one-click-update-plan.md §12e, R1′). A
+      release CI published that you did not approve is never signed: that is the point of the key
+      (docs/one-click-update-plan.md T4). It reads the published release, downloads `Sill.zip` into
+      `.build/update-sign`, checks it as the item above does (the SHA-256 against `Sill.zip.sha256` and
+      GitHub's digest, exactly one Sill.app, `codesign --verify --strict --deep` with Sill's pinned
+      requirement and `notarized`, `stapler validate`, spctl's "Notarized Developer ID", the version is
+      the tag's), reads each slice's cdhash with codesign (the values Update Now reads with Security),
+      prints the SHA-256 in groups of eight, and signs the manifest: Touch ID or your password, the prompt
+      showing the whole SHA-256 in the same groups; allow only when every group is the SHA-256 release.sh
+      printed. The manifest carries the time it is signed, and goes in the signing record. Sills with
+      Automatically update Sill on install the release by themselves two days after each first finds it
+      (docs/one-click-update-plan.md §15.4), so those two days are the time to pull it if it is wrong. It
+      reads the manifest back with the recorded keys, shows it, asks, uploads
+      `Sill.zip.manifest` and downloads it again to compare. Until it is there, Update Now does not show
+      for the release (every Sill's check stores whether the release lists the manifest), and the release
+      page is the way, as before Update Now. A Sill that checked before the signing shows Update Now after
+      its next daily check, or Check Now.
 - [ ] Homebrew: bump the cask once the release is published (its `Sill.dmg` must answer). In the
       tap (part 1 §6), from a Mac that has it tapped and the cask trusted: `brew bump-cask-pr
       --no-fork --version <version> --sha256 <SHA-256> saffsanity/sill/sill`, the SHA-256 the one in
@@ -462,12 +618,12 @@ comes later, when the cask qualifies (below).
 - [x] Done 2026-09-27 with Sill for Mac 0.3.1 (PR #33; sill-site 39754b9): the download page
       moved to Sill.dmg, after the release that carries it was published and its
       `releases/latest/download/Sill.dmg` answered.
-- [ ] Keep `Sill.zip` in every release for now: `release.sh --publish` uploads it beside the disk
-      image, so the page's zip links keep working until it moves, and so do links that name
-      `Sill.zip` elsewhere (v0.3.0's notes, pages people saved). Every Sill.app's update check
-      opens the release's page, which lists both. Dropping the zip later is one line in
-      `publish_release` (and its `.sha256`), for a release after the page has moved, never while
-      download.html still links it.
+- [ ] Keep `Sill.zip` in every release: `release.sh --publish` uploads it beside the disk image, so
+      the page's zip links keep working, and so do links that name `Sill.zip` elsewhere (v0.3.0's
+      notes, pages people saved). Every Sill.app's update check opens the release's page, which lists
+      both. Update Now installs exactly `Sill.zip` (docs/one-click-update-plan.md T24): that name, one
+      top-level `Sill.app`, stapled, its version the tag's. Never drop or rename it, and never zip it
+      another way than `release.sh` does (`ditto -c -k --keepParent`).
 - [x] Done 2026-09-26 with v0.3.0 (sill-site e4046a1): the first release, and the site
       republished right after Saffsanity/sill went public, so the button shows.
 - [ ] iOS: `Scripts/release-ios.sh --bump --upload` (a new version's first upload without `--bump`:
@@ -967,6 +1123,31 @@ For a nightly tester:
   nightly, and back. The settings (`me.saffer.sill.mac`) and the Screen Recording and Accessibility
   permissions (granted to the bundle ID and the designated requirement, which names the team) carry
   over too. That is why a nightly refuses to build without the profile.
+- Use nightly builds (docs/one-click-update-plan.md §16, with Update Now): a switch in Sill for Mac's
+  Settings › General, off by default, shown only in a build with Update Now and the nightly key's public
+  half (`UpdateManifest.nightlyKeys`, empty until Noah makes the key). With it on, the daily check also reads
+  the pre-release's `Sill-nightly.zip.manifest`, signed by the step "Sign the nightly for Update Now"
+  (`Scripts/sign-nightly.sh`, the secret `SILL_NIGHTLY_UPDATE_KEY` of the environment `nightly`; without it
+  the step says so and the job stays green), and offers the build it names to Update Now: one click on Update
+  Now installs each nightly, never the automatic update, which installs releases only (Noah's decision of
+  2026-11-12, option 4: "Automatic for releases only. Nightlies take one click on Update Now each."; read the
+  plan's T38 before turning it on for anyone). A release is still newer by its version alone, so the release of
+  a nightly's own version is never offered to it. Until a release carries the key, everything in the next item
+  holds for everyone.
+  The GitHub settings the third security pass asked for are in place since 2026-11-12, 16:35 EST (the plan's
+  §16.10): the ruleset "main" (id 27158533: no deletion, no force push, every change through a pull request,
+  no bypass) and, on the environment `nightly`, administrators no longer bypass its rules (`can_admins_bypass`
+  false; its branch policy still main alone, no reviewer or wait timer, its secrets untouched). Read them back
+  before storing the nightly secret: `gh api repos/Saffsanity/sill/environments/nightly --jq .can_admins_bypass`
+  prints false, and `gh api repos/Saffsanity/sill/rules/branches/main --jq '.[].type'` prints deletion,
+  non_fast_forward and pull_request.
+  The nightly key, once (a few minutes, Terminal.app; the plan's §16.8 has what each step shows):
+  `Scripts/sign-nightly.sh --new-key --key-file "/Volumes/<encrypted image>/sill-nightly.key"`, then
+  `gh secret set SILL_NIGHTLY_UPDATE_KEY --env nightly --repo Saffsanity/sill < "<that file>"`, then the
+  public key it printed into `nightlyKeys` (a commit of its own), then eject the image. Never: the update key
+  (or any key of `releaseKeys`) as the nightly key; the nightly key in the keychain item the release signer
+  reads (`me.saffer.sill.update-signing`), or the update key in GitHub; a release signed with the nightly key,
+  or a nightly with the update key (neither verifies anyway: another first line, another key list).
 - The update check never offers a nightly: it reads only
   `https://api.github.com/repos/Saffsanity/sill/releases/latest`, which never lists a pre-release
   (`UpdatePolicy.feed`), refuses an answer that says `prerelease` anyway (`UpdatePolicy.release`), and
@@ -1262,12 +1443,15 @@ and with them the nightly Mac job's token, which can publish any release (`conte
 the update check offers included. So the approval keeps a tag from publishing a release unseen, not
 a commit on main. A ruleset on main that requires a pull request stops a direct push but not a
 merged pull request, unless an approval is required too, and GitHub never lets a pull request's
-author approve it: with Noah alone it holds only against someone else's write access. A ruleset
+author approve it: with Noah alone it holds only against someone else's write access. Main has one
+since 2026-11-12 (the ruleset "main", id 27158533: no deletion, no force push, every change through a
+pull request, 0 approvals, no bypass; docs/one-click-update-plan.md §16.10). A ruleset
 keeping `v*` tags to Noah keeps other people's tags from reaching his approval at all, and one
 that restricts updates and deletions of `v*` tags keeps any tag where it was pushed: a tag moved
 after its run began stops that run, but one moved while the job builds still gets the release,
 its files the approved commit's build and its tag and source archives the other commit's. An
-administrator can still bypass an environment's rules (GitHub's default), which is Noah.
+administrator can still bypass `release`'s rules (GitHub's default), which is Noah; on `nightly` that
+bypass is off since 2026-11-12 (`can_admins_bypass` false).
 
 | Name | Kind | What it holds |
 |---|---|---|

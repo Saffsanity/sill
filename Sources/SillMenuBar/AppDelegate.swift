@@ -32,6 +32,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A menu bar app with no windows open is exactly what automatic termination would end.
         ProcessInfo.processInfo.disableAutomaticTermination("Sill serves devices from the menu bar")
         ProcessInfo.processInfo.disableSuddenTermination()
+        // Another Sill of this account is running: after Update Now, the copy that launched this one,
+        // which quits once this one has finished launching (docs/one-click-update-plan.md T20). Nothing
+        // starts until it has (no status item, no host, no keychain), and this one quits if it hasn't
+        // within 30 s. Every later Sill keeps this wait: the version updating to it counts on it.
+        if AppUpdater.waitForOtherSill(then: { [weak self] in self?.finishLaunching() }) { return }
+        finishLaunching()
+    }
+
+    /// Everything a launch starts, once no other Sill of this account is running.
+    private func finishLaunching() {
         let item = StatusItemController(model: model)        // "Starting…" until the host is up
         statusItem = item
         model.onPresentation = { [weak item] p in item?.show(p) }
@@ -81,6 +91,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if terminating { return .terminateNow }
         terminating = true
+        // An update's install step under way (under a second): the quit waits for it, so it never leaves a
+        // half-done step behind (review 3, F5), at most 10 s, on a run-loop Timer.
+        if model.updater.installing {
+            print("Quit: waiting for the update’s install step to finish.")
+            // The new copy is then left in place, unstarted: a quit is no restart (the second security pass's N9).
+            model.updater.quitRequested()
+            let deadline = Date().addingTimeInterval(10)
+            let poll = Timer(timeInterval: 0.1, repeats: true) { [weak self] timer in
+                MainActor.assumeIsolated {
+                    guard let self, !self.model.updater.installing || Date() >= deadline else { return }
+                    timer.invalidate()
+                    if self.quit() == .terminateNow { NSApp.reply(toApplicationShouldTerminate: true) }
+                }
+            }
+            RunLoop.main.add(poll, forMode: .common)
+            return .terminateLater
+        }
+        return quit()
+    }
+
+    /// The quit itself, once no install step runs: the update's word to its watcher (a quit asked for is no
+    /// failure of the new version), then the streamed window home and the virtual display gone.
+    private func quit() -> NSApplication.TerminateReply {
+        model.updater.willQuit()
         let coordinator = model.coordinator
         guard let c = coordinator, c.stagedWindowIsFullScreen else {
             HostShutdown.releaseForQuit(coordinator: coordinator)
