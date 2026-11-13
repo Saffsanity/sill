@@ -89,8 +89,11 @@ These texts are only true once these are:
   Distribution (the + beside iOS App), and copies its metadata into it. The
   third is 0.6.0 (main said 0.5.5 from 2026-10-29, the pre-release number of its TestFlight builds and nightlies, and 0.6.0 since 2026-10-31), so its
   TestFlight builds went to the version 0.6.0 (0.5.1's is closed now it is
-  released). The fourth is 0.6.1, which main says since App Review approved
-  0.6.0 (the approval closes 0.6.0's train), so the nightlies' builds go to it.
+  released). The fourth is 0.6.1, which main said from App Review's approval of
+  0.6.0 (the approval closes 0.6.0's train) until its own, so the nightlies' builds went to it.
+  The fifth is 0.6.2, which main says since App Review approved 0.6.1 (2026-11-12): that night's
+  upload of 0.6.1 (1527) was refused ("The train version '0.6.1' is closed for new build
+  submissions"), so the nightlies' builds go to 0.6.2 from then on.
 - Every claim in the description has been seen working on a device. Still
   open: pairing at home (PR #37's P1 to P16: the code over Wi-Fi, the cable
   pairing by itself, Remove), three-finger gestures (PR #38's P1 to P13), the

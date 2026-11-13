@@ -369,13 +369,15 @@ comes later, when the cask qualifies (below).
       never a Sill for Mac 0.4.1). A release that changes only one app is Noah's call: both at
       the new number, or the other left at its last (nothing in the code compares the two).
       main carries the next release's number, both apps together, from soon after the last
-      release on: 0.6.1 since App Review approved 0.6.0 (PR #286, merged then:
-      the approval closes 0.6.0's train), ahead of 0.6.0 on GitHub (2026-11-02) and on the App Store; 0.6.0
+      release on: 0.6.2 since App Review approved 0.6.1 (2026-11-12, branch `version-0-6-2`: the
+      approval closed 0.6.1's train, and a nightly's upload of 0.6.1 (1527) was refused that night),
+      ahead of 0.6.1 on GitHub (2026-11-11); 0.6.1 from App Review's approval of 0.6.0 (PR #286, merged then:
+      the approval closes 0.6.0's train) until then, ahead of 0.6.0 on GitHub (2026-11-02) and on the App Store; 0.6.0
       from 2026-10-31 until then, whose release builds are 0.6.0 (1276), and 0.5.5 from 2026-10-29 (PR
       #244), the pre-release number its TestFlight builds and nightlies carried. App Store Connect takes no new build of a version it has
       released (its train is closed), so every build of main for TestFlight needs the next
       number; and Sill.app's update check compares only release tags with the version it runs,
-      so a build of main saying 0.6.1 is offered nothing until a release newer than 0.6.1 exists.
+      so a build of main saying 0.6.2 is offered nothing until a release newer than 0.6.2 exists.
       The release's tag then names a commit of main that already says its number.
 - [ ] A Mac release and a device build that need each other (a change to the home door or the wire
       that older builds on the other side can't follow): the release notes say which versions go
@@ -924,8 +926,8 @@ What a nightly is:
   words afterwards: `asc.swift whats-new` (it always replaces) or TestFlight › the build › Test
   Details. `asc.swift distribute` by hand keeps a build's words too unless given
   `--replace-whats-new` (docs/nightly-whats-new-plan.md).
-- Versions: what main says (0.6.1 since App Review approved 0.6.0, part 2's first item; 0.6.0 from 2026-10-31 until then, its release builds 0.6.0 (1276), and 0.5.5 the pre-release number from 2026-10-29), with the commit count as
-  the build number on both apps, as in "Sill 0.6.1 (1280)". The store release's own build is uploaded with the same number
+- Versions: what main says (0.6.2 since App Review approved 0.6.1, part 2's first item; 0.6.1 from App Review's approval of 0.6.0 until then; 0.6.0 from 2026-10-31, its release builds 0.6.0 (1276), and 0.5.5 the pre-release number from 2026-10-29), with the commit count as
+  the build number on both apps, as in "Sill 0.6.2 (1530)". The store release's own build is uploaded with the same number
   (`Scripts/release-ios.sh --build-number "$(git rev-list --count HEAD)" --upload`), never `--bump`: App Store Connect wants a
   version's build numbers to rise, and the nightlies have already used the commit counts under that version. Never committed: make-app.sh has always
   stamped the count into the Mac's bundle, and `--build-number` gives it to xcodebuild for the run.
@@ -968,7 +970,7 @@ For a nightly tester:
 - The update check never offers a nightly: it reads only
   `https://api.github.com/repos/Saffsanity/sill/releases/latest`, which never lists a pre-release
   (`UpdatePolicy.feed`), refuses an answer that says `prerelease` anyway (`UpdatePolicy.release`), and
-  "nightly" is no version. A nightly Sill.app says main's version with its build number (0.5.5 until 2026-10-31, 0.6.0 until App Review approved 0.6.0, 0.6.1 since), so the update check offered a nightly that said 0.5.5 the 0.6.0 release once that was published, like everyone else's. A nightly is never offered the release of the version it says: the check offers only a higher version and build numbers don't count (`UpdatePolicy`: `version > running`), so the nightlies saying 0.6.1 are not offered the 0.6.1 release, and whoever runs one swaps it for the download by hand (settings, permissions and pairings carry over); the next release they are offered is 0.6.2's. Say so wherever a nightly is offered to someone (found 2026-11-11, while writing to reporters).
+  "nightly" is no version. A nightly Sill.app says main's version with its build number (0.5.5 until 2026-10-31, 0.6.0 until App Review approved 0.6.0, 0.6.1 until it approved 0.6.1, 0.6.2 since), so the update check offered a nightly that said 0.5.5 the 0.6.0 release once that was published, like everyone else's. A nightly is never offered the release of the version it says: the check offers only a higher version and build numbers don't count (`UpdatePolicy`: `version > running`), so the nightlies saying 0.6.1 are not offered the 0.6.1 release, and whoever runs one swaps it for the download by hand (settings, permissions and pairings carry over); the next release they are offered is 0.6.2's. Say so wherever a nightly is offered to someone (found 2026-11-11, while writing to reporters).
 - Going back: on the Mac, quit Sill, download the release from https://getsill.app/download and
   replace Sill in Applications; nothing to set up again. On a device, TestFlight › Sill › Previous
   Builds installs an earlier build, and the App Store installs the release over a TestFlight build
