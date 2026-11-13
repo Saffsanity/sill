@@ -2275,6 +2275,27 @@ simulator:
   active|inactive` holds the audio session active while a picture is offered
   or shows (a device's default), or never (the simulator's). The console's
   `pip:` lines say what happened.
+- Full screen (docs/full-screen-plan.md): `-SillFullScreen 1` starts with
+  Sill's controls hidden (in the mock, live and in the normal app), and with
+  it `-SillFullScreenReveal 0.4` catches the swipe in 40% of the way, its
+  preview photographed; `-SillFullScreenHint 1` (or `hold`, kept up) the hint;
+  `-SillFullScreenRoom screen|housing|safe` where the hidden picture goes;
+  `-SillFullScreenToggle 3,6`, `-SillFullScreenSwipe 9` and `-SillShakeAt 12`
+  hide or show (as Settings › Full Screen and the swipe in do), play a swipe
+  in and shake at those seconds; `-SillFullScreenTakeBack 2` plays one taken
+  back (it springs back), and `-SillRevealSlow 20` makes the swipe in's own
+  animations twenty times slower, so a photo catches them mid-way;
+  `-Sill.shakeToShowControls 0` turns Shake to Show Controls off for one run. The console's `full screen:` lines say what
+  happened, and in a Debug build `reveal:` lines give every touch the swipe in
+  judged at the left edge (where it landed, why it was let go, when it began)
+  and each lift's travel, speed and verdict; `full screen: Sill's window
+  fills the screen: …` gives the window's and the screen's frames.
+  `-SillSettings 1 -SillSettingsScroll fullscreen` opens the panel at the
+  rows (after Frame Rate). The swipe in itself is proved in the touch rig:
+  `RIG_ONLY=edge Tests/touchrig/run.sh NAME` (the controls shown, then hidden),
+  `RIG_ONLY=reveal RIG_ORIENT=landscape` on an iPhone-idiom simulator for the
+  hidden strokes on its side, then `Tests/touchrig/compare.py --edge` against
+  main's surfaces, and `compare.py --all` for every other stroke.
 - `-SillAXDump <s>`: `s` seconds after the stream screen shows, the console
   lists its accessibility elements in the order the tree hands them to
   VoiceOver. SwiftUI builds that tree only for an assistive technology, so on
@@ -2779,9 +2800,9 @@ only if it has none; `asc.swift whats-new` always replaces.
 127.0.0.1 (throwaway keys, every run sandboxed to loopback).
 `Scripts/nightly-notes.sh` writes both apps' words from the pull requests
 merged since the last release tag. A nightly says the version main says, the
-version of main's next release (0.6.1 since App Review approved 0.6.0; 0.6.0
-from 2026-10-31 until then, 0.5.5 the pre-release number before), with the commit
-count as its build, as in "Sill nightly 0.6.1 (1280)"; the update check never offers a nightly (Update Now
+version of main's next release (0.6.2 since App Review approved 0.6.1 on 2026-11-12; 0.6.1
+from 0.6.0's approval until then; 0.6.0 from 2026-10-31, 0.5.5 the pre-release number before), with the commit
+count as its build, as in "Sill nightly 0.6.2 (1530)"; the update check never offers a nightly (Update Now
 does, with Use nightly builds on: above), and offers one nothing until a release newer than its version exists. A nightly reads the
 release's data-protection keychain items, so a device paired with one stays
 paired with the other. `swift Scripts/asc.swift groups --key-file … --key-id …

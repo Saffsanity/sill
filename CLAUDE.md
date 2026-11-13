@@ -835,7 +835,23 @@ Rules found in the steps that hold for all work (each where it is written):
   #291: when a window's picture is offered and which window, what counts as watched, heard and
   running while it shows, the pause, what ends it, the Lifecycle; pure,
   `Tests/checks/picture-in-picture`; pbxproj A291/F291) and `PictureInPicture` (AVKit's
-  controller on the display layer, its delegates, `PictureInPictureHub`; A29A/F29A), `KeyChords`
+  controller on the display layer, its delegates, `PictureInPictureHub`; A29A/F29A),
+  `FullScreenPolicy` (full screen, docs/full-screen-plan.md: Sill's controls hidden from Settings › Full
+  Screen, the picture in the screen's room; the swipe in from the left edge, `EdgeSwipe` (a finger landing
+  within max(24 pt, the left safe-area inset), judged after 8 pt: right and no steeper than 45°, let go by
+  0.3 s), its finish or spring back, `EdgeReveal` (min(a third of the width, 80 pt), a 300 pt/s flick
+  after 12, back at 200), the preview's cut, `RevealCut` (each layout's picture's place, from its own
+  geometry with DuoPosture's split and PhonePortraitLayout), the pointer's dwell at the edge, when it is
+  offered, when the controls come back by themselves, the shake (`Sill.shakeToShowControls`), the Settings
+  rows' place, the hint, the room, the words; pure, `Tests/checks/full-screen`; pbxproj A279/F279),
+  `RevealEdgePan` (the swipe in's recognizer, a UIPanGestureRecognizer of Sill's on its window, only while
+  hidden, which other recognizers wait for it, `EdgeRecognizers.waits` (never one that only watches,
+  `WatchesTouchesOnly`), where a held stroke landed, `heldLanding`, for the picture's scroll, and a stroke
+  it held until its lift, `releasedAtLift`; UIKit only, so Tests/touchrig compiles it; A27B/F27B) and `FullScreen`
+  (`FullScreenEdges`, which puts it and a hover on the window and says whether the window covers the screen
+  and its safe area, `FullScreenSystem` for the status bar, the home indicator and the deferred left edge, the
+  shake through `UIWindow.motionEnded`, the hint, the swipe in's preview cut, `RevealCutMask`, the hidden
+  picture's element, DEBUG `FullScreenDebug`; A27A/F27A), `KeyChords`
   (`KeyModifiers`; a
   shortcut with its modifiers' own keys pressed around it, the Spotlight key's
   ⌘Space, the trackpad's modifier keys around a click; `ForwardedKeys`, a
@@ -1133,7 +1149,15 @@ Rules found in the steps that hold for all work (each where it is written):
   off] NAME` builds and runs it on a simulator of its own
   (`SILL_TOUCHRIG_SIM`), `compare.py` judges a run against the surfaces
   before, and a stroke made right after a gesture against the same stroke
-  made fresh.
+  made fresh; `compare.py --all` every stroke against main's, and, where the
+  sources have full screen's RevealEdgePan (on the rig's window),
+  `compare.py --edge` its strokes at the left edge (`RIG_ONLY=edge`): the
+  controls shown, every stroke main's exactly; hidden, a swipe in from the
+  band brings them and sends nothing, anything else goes on whole and in order
+  (`RIG_ONLY=reveal RIG_ORIENT=landscape`: the hidden strokes with the scene
+  on its side, on an iPhone-idiom simulator); `RIG_TRACE=1` logs every
+  recognizer's state (and the swipe in's trace). It compiles StreamProtocol
+  whole, and DuoPosture.swift, as the surfaces need.
 - `Tests/duorig/` — TEST ONLY, private interfaces, simulator only: folds and
   turns the iPhone Duo simulator with Device Hub's own events (usage page
   0xFF61, usage 0x5B, an IOCFSerialize dictionary from
