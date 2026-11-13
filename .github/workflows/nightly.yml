@@ -20,10 +20,11 @@
 # - Sill for iPhone and iPad: Scripts/release-ios.sh with the build number given (--build-number),
 #   - with the App Store Connect key and SILL_TESTFLIGHT_IN_CI true, from main, not "verify only":
 #     uploaded (unless App Store Connect has that build already), then Scripts/asc.swift waits for it
-#     to be processed, gives it What to Test, adds it to every internal TestFlight group, and to the
-#     public beta group (the external group with the public link) only while the repository variable
-#     SILL_NIGHTLY_PUBLIC_BETA is true, with the Beta App Review submission that needs. Noah tries a
-#     nightly in his internal group first (2026-10-29), so that variable starts unset.
+#     to be processed, gives it What to Test (tonight's notes; a build this run did not upload keeps
+#     its own, and gets them only if it has none), adds it to every internal TestFlight group, and
+#     to the public beta group (the external group with the public link) only while the repository
+#     variable SILL_NIGHTLY_PUBLIC_BETA is true, with the Beta App Review submission that needs. Noah
+#     tries a nightly in his internal group first (2026-10-29), so that variable starts unset.
 #   - with the key otherwise: signed through it and exported, nothing uploaded.
 #   - without the key: archived without signing and checked.
 #
@@ -182,7 +183,7 @@ jobs:
       SILL_NIGHTLY_DATE: ${{ needs.decide.outputs.date }}
       # Universal (Apple silicon and Intel, #62, #88), as the first nightly was (by hand, 2026-10-29) and as
       # Noah told #62 the next version's download will be: make-app.sh builds both slices with lipo, and
-      # release.sh's check_signature checks each one. A release so far is Apple silicon only.
+      # release.sh's check_signature checks each one. Releases are universal too from 0.6.0 on (release.yml).
       SILL_UNIVERSAL: '1'
     steps:
       - name: Check out tonight's commit
@@ -527,7 +528,11 @@ jobs:
       # refuses a number it has), and the next step gives it its groups. A build with this number is
       # this commit's: only commits on main's first-parent line, where each count is one commit's, are
       # uploaded with their commit count (here, and in testflight.yml, which runs from main alone).
+      # It can also be one uploaded by hand from this commit with What to Test of its own (build 1304,
+      # 2026-11-09): the step says whether this run uploaded (uploaded=true), and only then does the
+      # next step replace the build's What to Test.
       - name: Archive, sign, export, check and upload (Scripts/release-ios.sh --sign-at-export --upload)
+        id: upload
         if: steps.mode.outputs.mode == 'upload'
         env:
           SILL_TESTFLIGHT_KEY_ID: ${{ secrets.SILL_TESTFLIGHT_KEY_ID }}
@@ -540,15 +545,20 @@ jobs:
           if [ "$state" = missing ]; then
             Scripts/release-ios.sh --sign-at-export --upload --build-number "$BUILD_NUMBER" -v --api-key "$SILL_TESTFLIGHT_KEY_FILE" \
               --api-key-id "$SILL_TESTFLIGHT_KEY_ID" --api-issuer "$SILL_TESTFLIGHT_ISSUER_ID"
+            echo "uploaded=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::App Store Connect has build $BUILD_NUMBER of $VERSION already ($state): exported for the artifact, not uploaded again."
+            echo "::notice::App Store Connect has build $BUILD_NUMBER of $VERSION already ($state): exported for the artifact, not uploaded again; its What to Test is kept (tonight's notes only if it has none)."
             Scripts/release-ios.sh --sign-at-export --build-number "$BUILD_NUMBER" -v --api-key "$SILL_TESTFLIGHT_KEY_FILE" \
               --api-key-id "$SILL_TESTFLIGHT_KEY_ID" --api-issuer "$SILL_TESTFLIGHT_ISSUER_ID"
+            echo "uploaded=false" >> "$GITHUB_OUTPUT"
           fi
 
       # The public beta group only while SILL_NIGHTLY_PUBLIC_BETA is true: then this step passes
       # --public-beta, and Scripts/asc.swift takes it only with the variable's value in its environment
-      # too. Otherwise no external group is touched and nothing goes to Beta App Review.
+      # too. Otherwise no external group is touched and nothing goes to Beta App Review. What to Test:
+      # tonight's notes replace what the build has (--replace-whats-new) only when the step above
+      # uploaded it; a build App Store Connect had already keeps its own and gets them only if it has
+      # none (asc.swift's "What to Test, in `distribute`").
       - name: Give the build to TestFlight's groups, with What to Test (Scripts/asc.swift distribute)
         if: steps.mode.outputs.mode == 'upload'
         # asc.swift's own bounds first: up to 90 minutes for processing, then What to Test, the groups and
@@ -560,8 +570,15 @@ jobs:
           SILL_NIGHTLY_PUBLIC_BETA: ${{ vars.SILL_NIGHTLY_PUBLIC_BETA }}
           VERSION: ${{ steps.mode.outputs.version }}
           WHATS_NEW_B64: ${{ needs.decide.outputs.whats_new }}
+          UPLOADED: ${{ steps.upload.outputs.uploaded }}
         run: |
           printf '%s' "$WHATS_NEW_B64" | base64 --decode > "$RUNNER_TEMP/whats-new.txt"
+          replace=()
+          if [ "$UPLOADED" = true ]; then
+            replace=(--replace-whats-new)
+          else
+            echo "This run did not upload build $BUILD_NUMBER: its What to Test is kept, and tonight's notes go to it only if it has none."
+          fi
           public=()
           if [ "$SILL_NIGHTLY_PUBLIC_BETA" = true ]; then
             public=(--public-beta)
@@ -571,9 +588,10 @@ jobs:
           fi
           "$RUNNER_TEMP/asc" distribute --key-file "$SILL_TESTFLIGHT_KEY_FILE" --key-id "$SILL_TESTFLIGHT_KEY_ID" \
             --issuer "$SILL_TESTFLIGHT_ISSUER_ID" --version "$VERSION" --build "$BUILD_NUMBER" \
-            --whats-new "$RUNNER_TEMP/whats-new.txt" ${public[@]+"${public[@]}"} 2>&1 | tee .build/ios/asc-distribute.log
+            --whats-new "$RUNNER_TEMP/whats-new.txt" ${replace[@]+"${replace[@]}"} ${public[@]+"${public[@]}"} 2>&1 | tee .build/ios/asc-distribute.log
           {
             echo "TestFlight: $(grep -E '^Assigned build ' .build/ios/asc-distribute.log || echo 'see the step log')"
+            grep -E '^What to Test ' .build/ios/asc-distribute.log || true
             grep -E '^Public beta' .build/ios/asc-distribute.log || true
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -581,6 +599,7 @@ jobs:
         id: ipa
         env:
           MODE: ${{ steps.mode.outputs.mode }}
+          UPLOADED: ${{ steps.upload.outputs.uploaded }}
         run: |
           version="$(/usr/libexec/PlistBuddy -c 'Print :ApplicationProperties:CFBundleShortVersionString' .build/ios/Sill.xcarchive/Info.plist)"
           build="$(/usr/libexec/PlistBuddy -c 'Print :ApplicationProperties:CFBundleVersion' .build/ios/Sill.xcarchive/Info.plist)"
@@ -599,8 +618,10 @@ jobs:
               echo "Built without signing and checked; the artifact $(basename "$ipa") is for looking inside only. No App Store Connect API key is set."
             elif [ "$MODE" = export ]; then
               echo "Signed for App Store Connect and checked; the artifact is $(basename "$ipa"). Nothing was uploaded."
-            else
+            elif [ "$UPLOADED" = true ]; then
               echo "Uploaded to App Store Connect and given to TestFlight's groups (the step above says which). The artifact $(basename "$ipa") is the same build, exported the same way."
+            else
+              echo "App Store Connect had this build number already, so nothing was uploaded; that build was given to TestFlight's groups (the step above says which, and what became of its What to Test). The artifact $(basename "$ipa") is this run's export of the same commit."
             fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
 

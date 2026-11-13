@@ -1,9 +1,12 @@
 """H2 (docs/first-run-walkthrough-plan.md, §14 step 1) mutants of TourPolicy.swift, and of Larger Picture's
 rule in PhonePortraitLayout.swift (docs/larger-picture-plan.md): each changes one in one place, is compiled
-with the check and must make it fail. usage: mutants.py WORKTREE"""
+with the check and must make it fail. The tour once more for 0.6 (tour version 2: its version rule, the
+clipboard's and the sound's card, the rows that follow TourFeatures, and "New:") has its own below.
+usage: mutants.py WORKTREE"""
 import os, subprocess, sys, tempfile
 WT = sys.argv[1]; HERE = os.path.dirname(os.path.abspath(__file__))
 F = os.path.join(WT, "iOSClient/TourPolicy.swift")
+PINCH = 'rows.append(row("plus.magnifyingglass", [strong("Pinch"), plain(" to zoom the picture here, up to 5×. Zoomed in, two fingers move it, and one finger still taps, holds and drags on \\(mac).")], new: true))'
 MUTANTS = [
     # When it shows by itself.
     ("the beat dropped", "if m.now < opens + beat { return .wait(until: opens + beat) }", "if false { return .wait(until: opens + beat) }"),
@@ -19,7 +22,8 @@ MUTANTS = [
     ("a turn offers every owed step", "let list = m.decided ? owedHere.filter { only(layout).contains($0) } : owedHere", "let list = owedHere"),
     # Steps and memory.
     ("touch kept under VoiceOver", "return voiceOver ? all.filter { $0 != .touch } : all", "return all"),
-    ("laptop owed in landscape", "let all: [TourTopic] = layout == .landscape ? [.touch, .bar, .settings] : [.touch, .bar, .settings, .laptop]", "let all: [TourTopic] = layout == .landscape ? [.touch, .bar, .settings, .laptop] : [.touch, .bar, .settings, .laptop]"),
+    ("laptop owed in landscape", "let all: [TourTopic] = layout == .landscape ? [.touch, .bar, .sharing, .settings] : [.touch, .bar, .sharing, .settings, .laptop]",
+     "let all: [TourTopic] = layout == .landscape ? [.touch, .bar, .sharing, .settings, .laptop] : [.touch, .bar, .sharing, .settings, .laptop]"),
     ("Next not saving", "memory.seen.insert(t)", "_ = t"),
     ("Skip not saving", "memory.skipped = true", "memory.skipped = m.skipped"),
     ("Skip in Take the Tour turns the tour off", "run.replay ? m : skipped(m)", "skipped(m)"),
@@ -62,7 +66,8 @@ MUTANTS = [
     ("the home indicator ignored", "let bottom = max(top, screen.height - margin - max(0, bottomInset))", "let bottom = max(top, screen.height - margin)"),
     ("an upright card past the crease when it grows", "let above = fold == nil ? min(bottom, max(top, t.minY - gap)) : pictureBottom", "let above = fold == nil ? min(bottom, max(top, t.minY - gap)) : bottom"),
     # A phone held upright.
-    ("a phone's bar without its Keyboard", "case .bar: return layout == .portrait ? [.strip, .textSize] : [.strip, .textSize, .keyboard]", "case .bar: return layout != .landscape ? [.strip, .textSize] : [.strip, .textSize, .keyboard]"),
+    ("a phone's bar without its Keyboard", "case .bar: return layout == .portrait ? [.strip, .menus, .textSize] : [.strip, .menus, .textSize, .keyboard]",
+     "case .bar: return layout != .landscape ? [.strip, .menus, .textSize] : [.strip, .menus, .textSize, .keyboard]"),
     ("the laptop card not owed at a turn on a phone", "layout.upright ? [.laptop] : []", "layout == .portrait ? [.laptop] : []"),
     ("a phone's picture card not growing past the picture", "let reach = layout.upright && fold == nil ? bottom : lowest", "let reach = layout == .portrait && fold == nil ? bottom : lowest"),
     ("a phone's card never under its targets", "if layout == .phone && h > above - top {", "if false && h > above - top {"),
@@ -79,26 +84,78 @@ MUTANTS = [
     ("the trackpad's rows under VoiceOver", "if !voiceOver {\n                rows.append(row(\"cursorarrow.click.2\"", "if true {\n                rows.append(row(\"cursorarrow.click.2\""),
     ("laptop's subtitle on a card that is not the run's first", "subtitle: firstOfRun ? subtitle : nil", "subtitle: subtitle"),
     ("one word of the copy changed", "plain(\" to scroll.\")", "plain(\" to scroll it.\")"),
-    ("no Keyboard row on a phone's bar card", "if layout != .portrait { rows.append(keyboardRow) }", "if layout == .landscape { rows.append(keyboardRow) }"),
+    ("no Keyboard row on a phone's bar card", "if layout != .portrait {\n                rows.append(row(\"keyboard\", [strong(\"Keyboard\")",
+     "if layout == .landscape {\n                rows.append(row(\"keyboard\", [strong(\"Keyboard\")"),
     ("the keyboard key's row on a phone", "if layout != .phone {\n                rows.append(row(\"keyboard\", [strong(\"The keyboard key\")", "if true {\n                rows.append(row(\"keyboard\", [strong(\"The keyboard key\")"),
     ("a phone's laptop hint as the halves'", 'case .phone: hint = thumbnails ? "Under the windows: the row of keys, then the trackpad." : "Under the buttons: the row of keys, then the trackpad."',
      'case .phone: hint = "Below the bar: the row of keys, then the trackpad."'),
-    ("Aa not said to be a window's", "plain(\": while a window shows, touch it and slide to make its text larger or smaller.\")", "plain(\": touch it and slide to make text larger or smaller.\")"),
+    ("B3's Aa clause dropped", ': [plain("; "), strong("Aa"), plain(" then sizes its text.")]', ': [plain(".")]'),
     ("the caps not spoken by name", "spoken: \"Command, Option, Control and Shift stay on for the next key or trackpad click: tap Command, then C, to copy.\")", "spoken: nil)"),
     # Larger Picture (docs/larger-picture-plan.md): no thumbnails on a phone.
-    ("Larger Picture's bar card lights the strip", "case .bar where layout == .phone && !thumbnails: return [.apps, .textSize, .keyboard]",
-     "case .bar where layout == .phone && !thumbnails: return [.strip, .textSize, .keyboard]"),
-    ("Larger Picture's bar card without Apps", "case .bar where layout == .phone && !thumbnails: return [.apps, .textSize, .keyboard]",
-     "case .bar where layout == .phone && !thumbnails: return [.textSize, .keyboard]"),
+    ("Larger Picture's bar card lights the strip", "case .bar where layout == .phone && !thumbnails: return [.apps, .menus, .textSize, .keyboard]",
+     "case .bar where layout == .phone && !thumbnails: return [.strip, .menus, .textSize, .keyboard]"),
+    ("Larger Picture's bar card without Apps", "case .bar where layout == .phone && !thumbnails: return [.apps, .menus, .textSize, .keyboard]",
+     "case .bar where layout == .phone && !thumbnails: return [.menus, .textSize, .keyboard]"),
     ("no thumbnails in the halves too", "case .bar where layout == .phone && !thumbnails:", "case .bar where layout != .landscape && !thumbnails:"),
     ("Larger Picture's bar card about the thumbnails", "if layout == .phone && !thumbnails {\n                rows[0] = voiceOver", "if false {\n                rows[0] = voiceOver"),
     ("Apps' row says tap under VoiceOver", 'plain(" lists the apps on \\(mac). Choose an open one again for its next window.")',
      'plain(" lists the apps on \\(mac): tap an open one again for its next window.")'),
-    ("Larger Picture's bar hint as the thumbnails'", 'case .phone where !thumbnails: hint = "Under the picture, in the row of buttons: Apps, Aa and Keyboard."',
-     'case .phone where false: hint = "Under the picture, in the row of buttons: Apps, Aa and Keyboard."'),
+    ("Larger Picture's bar hint as the thumbnails'", "case .phone where !thumbnails: hint = features.menus", "case .phone where false: hint = features.menus"),
     ("Larger Picture's laptop hint under the windows", 'hint = thumbnails ? "Under the windows: the row of keys, then the trackpad." : "Under the buttons: the row of keys, then the trackpad."',
      'hint = "Under the windows: the row of keys, then the trackpad."'),
     ("the picture's room ignored", "let half = room ?? stream", "let half = stream"),
+    # The tour once more for 0.6 (tour version 2): the version rule.
+    ("the version not raised", "static let version = 2", "static let version = 1"),
+    ("this version's memory cleared again (>= is >)", "guard let v = savedVersion, v >= version else", "guard let v = savedVersion, v > version else"),
+    ("a later build's memory cleared (>= is ==)", "guard let v = savedVersion, v >= version else", "guard let v = savedVersion, v == version else"),
+    ("a cleared memory that keeps Skip", "else { return (TourMemory(), true) }", "else { return (TourMemory(skipped: saved.skipped), true) }"),
+    ("a cleared memory that keeps what was seen", "else { return (TourMemory(), true) }", "else { return (TourMemory(seen: saved.seen), true) }"),
+    ("the upgrade not written", "else { return (TourMemory(), true) }", "else { return (TourMemory(), false) }"),
+    ("no version stored read as this one", "guard let v = savedVersion, v >= version else", "guard let v = savedVersion ?? Optional(version), v >= version else"),
+    ("a write when the memory is this version's", "return (saved, false)   // this version's", "return (saved, true)   // this version's"),
+    # …the clipboard's and the sound's card, and the Menus button's target.
+    ("sharing missing sideways", "layout == .landscape ? [.touch, .bar, .sharing, .settings] :", "layout == .landscape ? [.touch, .bar, .settings] :"),
+    ("sharing lighting the picture", "case .sharing: return [.settings]", "case .sharing: return [.stream]"),
+    ("sharing after settings in the tour's order", "case touch, bar, sharing, settings, laptop", "case touch, bar, settings, sharing, laptop"),
+    ("Menus dropped from the bar's targets sideways", "case .bar: return layout == .portrait ? [.strip, .menus, .textSize] : [.strip, .menus, .textSize, .keyboard]",
+     "case .bar: return layout == .portrait ? [.strip, .menus, .textSize] : [.strip, .textSize, .keyboard]"),
+    ("Menus dropped from the halves' bar", "? [.strip, .menus, .textSize] :", "? [.strip, .textSize] :"),
+    # …the words that follow the Mac and this device (TourFeatures).
+    ("the swipe row with the gestures off", "if features.gestures {", "if features.gestures || true {"),
+    ("the Menus row without the button", "if features.menus {\n                rows.append(row(\"filemenu.and.selection\"", "if true {\n                rows.append(row(\"filemenu.and.selection\""),
+    ("the title Windows with the Menus button", 'let title = features.menus ? "Windows and Menus" : "Windows"', 'let title = "Windows"'),
+    ("a phone's bar hint without Menus while it shows", 'case .phone: hint = features.menus ? "Under the picture: Aa and Keyboard in the first row, the windows and Menus in the second."',
+     'case .phone: hint = features.menus && false ? "Under the picture: Aa and Keyboard in the first row, the windows and Menus in the second."'),
+    ("Virtual Display is on while it is off", "if features.virtualDisplay {", "if features.virtualDisplay || true {"),
+    ("Virtual Display's off form unmarked", 'something covers it")] + aa, new: true))\n            }\n', 'something covers it")] + aa))\n            }\n'),
+    ("Aa named under VoiceOver", "let aa = voiceOver ? [", "let aa = false ? ["),
+    ("the Keyboard rows in the halves' bar card", "if layout != .portrait {\n                rows.append(row(\"keyboard\", [strong(\"Keyboard\")",
+     "if true {\n                rows.append(row(\"keyboard\", [strong(\"Keyboard\")"),
+    ("the keyboard key's rows off the halves' laptop card", "if layout != .phone {\n                rows.append(row(\"keyboard\", [strong(\"The keyboard key\")",
+     "if false {\n                rows.append(row(\"keyboard\", [strong(\"The keyboard key\")"),
+    ("the clipboard's rows for a Mac that does not share it", "if features.clipboard {", "if features.clipboard || true {"),
+    ("the sound's row for a Mac without sound", "if features.sound {", "if features.sound || true {"),
+    ("the update row for a Mac that shares its clipboard", "if !features.clipboard && !features.sound {", "if !features.sound {"),
+    ("Paste's cursor with Paste right away off", 'plain(features.pasteRightAway ? " puts it where \\(mac)’s cursor is." : " sends it to \\(mac)’s clipboard.")',
+     'plain(" puts it where \\(mac)’s cursor is.")'),
+    ("the sharing card's title whatever the Mac has", 'let title = features.clipboard == features.sound ? "Clipboard and Sound" : features.clipboard ? "Clipboard" : "Sound"', 'let title = "Clipboard and Sound"'),
+    ("the sharing card's hint on a phone as the bar's", 'hint: layout == .phone ? "In Settings, the last button in the row under the picture." : "In Settings, the last button in the bar.")',
+     'hint: "In Settings, the last button in the bar.")'),
+    ("Reverse Scrolling and the hold under VoiceOver", "if !voiceOver {\n                rows.append(row(\"arrow.up.arrow.down\"", "if true {\n                rows.append(row(\"arrow.up.arrow.down\""),
+    ("Larger Picture's row where it is not offered", "if layout == .phone && features.largerPicture {", "if layout == .phone {"),
+    ("Larger Picture's row in the halves", "if layout == .phone && features.largerPicture {", "if features.largerPicture {"),
+    # …and "New:".
+    ("New: dropped", 'let mark = new ? [TourSpan(text: newPrefix, strong: true, isNew: true), TourSpan(text: " ")] : []', "let mark: [TourSpan] = []"),
+    ("the mark not marked", "TourSpan(text: newPrefix, strong: true, isNew: true)", "TourSpan(text: newPrefix, strong: true, isNew: false)"),
+    ("the mark not semibold", "TourSpan(text: newPrefix, strong: true, isNew: true)", "TourSpan(text: newPrefix, strong: false, isNew: true)"),
+    ("no space after the mark", 'TourSpan(text: newPrefix, strong: true, isNew: true), TourSpan(text: " ")]', 'TourSpan(text: newPrefix, strong: true, isNew: true), TourSpan(text: "")]'),
+    ("the mark's word changed", 'static let newPrefix = "New:"', 'static let newPrefix = "NEW:"'),
+    ("VoiceOver reads a New row without its mark", "?? all.map(\\.text).joined())", "?? spans.map(\\.text).joined())"),
+    ("the pinch row unmarked", 'one finger still taps, holds and drags on \\(mac).")], new: true))', 'one finger still taps, holds and drags on \\(mac).")]))'),
+    ("the pinch row on iPad only", PINCH, "if iPad { " + PINCH + " }"),
+    ("the swipe row unmarked", 'and sideways between Spaces.")], new: true))', 'and sideways between Spaces.")]))'),
+    ("the Menus row unmarked", 'you’re using on \\(mac).")], new: true))', 'you’re using on \\(mac).")]))'),
+    ("the hardware keyboard's bar row unmarked", 'strong("Keyboard"), plain(" then brings up the keyboard bar.")], new: true))', 'strong("Keyboard"), plain(" then brings up the keyboard bar.")]))'),
 ]
 # Larger Picture only while a window streams (Noah, 2026-10-15): the rule is PhonePortraitLayout's
 # (compiled into this check), and the tour's targets, words and places follow it. Each of these
@@ -112,11 +169,11 @@ LAYOUT_MUTANTS = [
 ]
 caught = 0
 for (name, old, new), path in [(m, F) for m in MUTANTS] + [(m, LAYOUT) for m in LAYOUT_MUTANTS]:
-    src = open(path).read()
+    src = open(path, encoding="utf-8").read()
     if src.count(old) != 1:
         print(f"{name}: NOT APPLIED (pattern found {src.count(old)} times)"); continue
     with tempfile.TemporaryDirectory() as t:
-        mf = os.path.join(t, os.path.basename(path)); open(mf, "w").write(src.replace(old, new, 1))
+        mf = os.path.join(t, os.path.basename(path)); open(mf, "w", encoding="utf-8").write(src.replace(old, new, 1))
         sources = [mf, LAYOUT] if path == F else [F, mf]
         exe = os.path.join(t, "c")
         r = subprocess.run(["swiftc", "-O", *sources, os.path.join(WT, "iOSClient/DuoPosture.swift"),

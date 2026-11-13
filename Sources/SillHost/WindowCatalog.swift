@@ -58,6 +58,31 @@ final class WindowCatalog {
         didSet { if thumbnailsWanted && clientCount > 0 { resendAllThumbnails() } }
     }
 
+    /// This Mac's screen is locked (the coordinator's reading; LockPolicy, docs/locked-mac-plan.md): no
+    /// thumbnail is taken, and none that a capture under way brings back is sent, no new icon goes out
+    /// and the installed apps are not sent when their scan ends (`allIcons` and `installedApps` keep
+    /// them for the unlock, which the coordinator sends). The window list is still read, so the unlock
+    /// finds the windows as they are. Unlocked again: every thumbnail is taken and sent afresh.
+    var locked = false {
+        didSet { if oldValue && !locked { resendAllThumbnails() } }
+    }
+    /// The lock's gate now (SessionLock's, set on its own queue the moment a witness says locked): asked
+    /// before each thumbnail, so none is taken after the lock even before the coordinator has set `locked`.
+    var isLocked: () -> Bool = { false }
+    /// Locked by either: what this catalog withholds by.
+    private var withholding: Bool { locked || isLocked() }
+    /// What `locked` withheld from the devices that were connected: the icons announced meanwhile, and
+    /// whether the installed apps' scan ended meanwhile (`takeWithheld`).
+    private var withheldIcons: [String] = []
+    private var appsWithheld = false
+
+    /// What was withheld while locked, once: the coordinator sends it at the unlock to the devices that
+    /// were connected before the lock (one that connected while locked gets every icon and the apps).
+    func takeWithheld() -> (icons: [(bundleID: String, png: Data)], apps: Bool) {
+        defer { withheldIcons = []; appsWithheld = false }
+        return (withheldIcons.compactMap { id in icons[id].map { (id, $0) } }, appsWithheld)
+    }
+
     /// Connected clients, from the server. 0→N starts polling (with an immediate pass); N→0 stops
     /// it, so an idle host makes no ScreenCaptureKit calls at all.
     ///
@@ -74,8 +99,10 @@ final class WindowCatalog {
             guard clientCount != oldValue else { return }
             Stats.shared.activeClients = clientCount
             if oldValue == 0 && clientCount > 0 {
+                devicesArrived()
                 startPolling()
             } else if oldValue > 0 && clientCount == 0 {
+                devicesLeftAt = .now
                 stopPolling()
             } else if clientCount > oldValue {
                 resendAllThumbnails()      // another client joined; it has no thumbnails yet
@@ -87,10 +114,42 @@ final class WindowCatalog {
     /// because its contents are the ones changing. Nil is fine: it is then treated like any other.
     var activeWindowID: UInt32?
 
-    /// `--virtual-display`: the Desktop source must capture the Mac's real main display, never the
-    /// virtual one. `SCShareableContent.displays` order is not guaranteed once a second display
-    /// exists, so pick by ID. Off by default: the default path keeps `displays.first`.
-    var preferMainDisplay = false
+    /// The Desktop's stop a device stepped to (kind 47, DesktopDisplays), by its UUID: kept across sleeps,
+    /// where a display's ID can change, while a device is connected and for DesktopDisplays.choiceGrace
+    /// after the last one left (`clientCount`), so a reconnect or a move to the cable comes back to it and a
+    /// later session begins on the main display. Nil until a device steps; while its display is unplugged
+    /// the Desktop is on the main display, and back on it when it returns.
+    private(set) var desktopDisplayUUID: String?
+    /// When the last device left, on the clock that keeps counting while the Mac sleeps: the choice's span.
+    private var devicesLeftAt: ContinuousClock.Instant?
+    /// The Desktop's stops from the last look, in the cycle's order (DesktopDisplays.candidates: the main
+    /// display first, never Sill's own display or macOS's stand-in, one per mirror set): the window list's
+    /// `desktopDisplays`, `desktopDisplay` and `desktopDisplayNames`.
+    private(set) var desktopCandidates: [DesktopDisplays.Display] = []
+    /// The stop the Desktop shows, or comes back to while a window streams: `display`'s ID, or a test
+    /// host's stop's (`testDisplays`). Nil with no display at all.
+    private(set) var desktopDisplayID: UInt32?
+    /// The displays the last look listed, which the stops are chosen among (where PR #200 puts its pool:
+    /// a real display, else Sill's, else macOS's stand-in).
+    private var lookedDisplays: [SCDisplay] = []
+    /// The Desktop on the main display alone (DesktopDisplays.resolve's `mainOnly`): this Mac locked, or
+    /// another user on its screen (the coordinator's lock reading). The choice is kept, and the Desktop
+    /// goes back to it when this is cleared.
+    var mainOnly = false {
+        didSet { if mainOnly != oldValue { resolveDesktopDisplay() } }
+    }
+    /// The displays the stage made this run (VirtualStage: a picked window's own display), by ID: never one of the
+    /// Desktop's stops, also once one has gone and reads no monitor (vendor 0xFFFFFFFF) while an old look still lists it
+    /// (DesktopDisplays.role). Kept for the run; an ID that now reads another display's identity is that display.
+    var stageDisplayIDs: Set<CGDirectDisplayID> = []
+    /// TEST ONLY (SILL_TEST_DISPLAYS on a --synthetic host, DesktopDisplaysHook): the stops a test host
+    /// lists in place of this Mac's displays, the first its main display. Nil on every other host.
+    var testDisplays: [DesktopDisplays.Display]? {
+        didSet { resolveDesktopDisplay() }
+    }
+    /// The Desktop's stops, which one it shows, or their names changed: the list goes out again, and a
+    /// Desktop streaming another display restarts on the one it shows now.
+    var onDesktopDisplaysChanged: (() -> Void)?
 
     /// `--virtual-display`: the window the coordinator has moved onto the virtual display. Set right
     /// after a successful placement, cleared on release. If ScreenCaptureKit stops treating it as
@@ -98,13 +157,16 @@ final class WindowCatalog {
     /// the client's bar and the coordinator can still find it.
     var stagedWindowID: CGWindowID?
 
-    /// Windows AppKit and SwiftUI make for themselves when a display appears ("LayerProbeParent":
-    /// an off-screen window that probes layer backing on the new screen). They carry the app's
-    /// name and no content, showed up as duplicate tiles with blank thumbnails, and the window
-    /// server drops them onto a real display when a virtual display goes away.
-    static func isSystemHelperWindow(_ w: SCWindow) -> Bool {
-        (w.title ?? "").lowercased().contains("layerprobe")
+    /// A window in the plain values CatalogWindows judges it by.
+    static func plain(_ w: SCWindow) -> CatalogWindows.Window {
+        CatalogWindows.Window(title: w.title, appName: w.owningApplication?.applicationName,
+                              bundleID: w.owningApplication?.bundleIdentifier,
+                              pid: w.owningApplication?.processID ?? -1, layer: w.windowLayer,
+                              width: Double(w.frame.width), height: Double(w.frame.height))
     }
+
+    /// The owners whose left-out windows Sill.log has named (CatalogWindows.leftOutLines): once each.
+    private var leftOutNamed: Set<String> = []
 
     /// Window list and thumbnails, while a client is connected.
     static let pollInterval: Duration = .seconds(2)
@@ -235,7 +297,7 @@ final class WindowCatalog {
             await refreshWindows()
             if Task.isCancelled { break }
             onPolled?()
-            if thumbnailsWanted { await refreshThumbnails() }
+            if thumbnailsWanted && !withholding { await refreshThumbnails() }
             if Task.isCancelled { break }
             if passOwed { continue }
             let nap = Task { _ = try? await Task.sleep(for: Self.pollInterval) }
@@ -273,16 +335,13 @@ final class WindowCatalog {
         appliedSeq = seq
         lookedAt = .now
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
-        display = preferMainDisplay
-            ? (content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first)
-            : content.displays.first
-        var visible = content.windows.filter { w in
-            guard let app = w.owningApplication, !app.applicationName.isEmpty else { return false }
-            return w.windowLayer == 0                                  // drops widgets, wallpaper, backstop
-                && w.frame.width > 100 && w.frame.height > 100
-                && app.processID != Self.ownPID
-                && !Self.isSystemHelperWindow(w)
-        }
+        lookedDisplays = content.displays
+        resolveDesktopDisplay()
+        // An app's own windows only (CatalogWindows): no widgets, wallpaper or backstop, nothing of
+        // Sill's, and no helper's window (LayerProbeParent, macOS's own interface, a tool's overlay).
+        let plain = content.windows.map(Self.plain)
+        var visible = zip(content.windows, plain).filter { CatalogWindows.lists($1, ownPID: Self.ownPID) }.map(\.0)
+        for line in CatalogWindows.leftOutLines(plain, ownPID: Self.ownPID, named: &leftOutNamed) { print(line) }
         if let pinned, !visible.contains(where: { $0.windowID == pinned.windowID }) { visible.append(pinned) }
         // The system's order is not front-to-back and shuffles between polls. The brief wants a
         // fixed order in the bar, so keep first-seen order and append newcomers.
@@ -305,6 +364,70 @@ final class WindowCatalog {
         }
     }
 
+    /// Steps the Desktop to the stop after the one it shows (kind 47), from the last look: kept by its
+    /// UUID, and `display` at once. Nil with fewer than two stops, or while only the main display shows.
+    func chooseNextDesktopDisplay() -> DesktopDisplays.Display? {
+        guard !mainOnly, let next = DesktopDisplays.next(after: desktopDisplayID, in: desktopCandidates) else { return nil }
+        chooseDesktopDisplay(next.uuid)
+        return next
+    }
+
+    /// The Desktop's stop by UUID (nil: none chosen, the main display), and `display` from the last look
+    /// at once.
+    func chooseDesktopDisplay(_ uuid: String?) {
+        desktopDisplayUUID = uuid
+        resolveDesktopDisplay()
+    }
+
+    /// The stop the Desktop shows now, if it is one.
+    var desktopStop: DesktopDisplays.Display? { desktopCandidates.first { $0.id == desktopDisplayID } }
+
+    /// The main display as the last look has it, whatever the Desktop shows: the Desktop's sound is built
+    /// on it (the coordinator's `makeAudioSource`), so a step never restarts the sound. Else macOS's first.
+    var mainDisplay: SCDisplay? { lookedDisplays.first { $0.displayID == CGMainDisplayID() } ?? lookedDisplays.first }
+
+    /// A device is connected again after none was: a choice older than its span is forgotten, so the
+    /// session begins on the main display (DesktopDisplays.keepsChoice).
+    private func devicesArrived() {
+        defer { devicesLeftAt = nil }
+        guard desktopDisplayUUID != nil, let left = devicesLeftAt else { return }
+        let gone = CatalogLook.seconds(ContinuousClock.now - left)
+        if !DesktopDisplays.keepsChoice(devices: 0, leftAt: 0, now: gone) { chooseDesktopDisplay(nil) }
+    }
+
+    /// `display` from the last look (DesktopDisplays.resolve): the main display while `mainOnly`; else the
+    /// stop a device stepped to while it is connected; else the main display, with Virtual Display on or
+    /// off (issue #345). With no stop at all (every display Sill's own or macOS's stand-in): the main
+    /// display, else macOS's first, as before.
+    private func resolveDesktopDisplay() {
+        let before = (desktopCandidates.map(\.id), desktopCandidates.map(\.name), desktopDisplayID)
+        let stops = testDisplays ?? lookedDisplays.map(described)
+        desktopCandidates = DesktopDisplays.candidates(stops, main: testDisplays?.first?.id ?? CGMainDisplayID())
+        let id = DesktopDisplays.resolve(chosen: desktopDisplayUUID, among: desktopCandidates, mainOnly: mainOnly)?.id
+        display = lookedDisplays.first { $0.displayID == id } ?? mainDisplay
+        desktopDisplayID = testDisplays != nil ? id : display?.displayID
+        if before != (desktopCandidates.map(\.id), desktopCandidates.map(\.name), desktopDisplayID) {
+            onDesktopDisplaysChanged?()
+        }
+    }
+
+    /// A display as DesktopDisplays judges it: its UUID, frame, what it is (the stage's by the IDs the stage made, or
+    /// by its identity read now: DesktopDisplays.role), whether it is there now, the display it mirrors, its refresh
+    /// rate and its name.
+    private func described(_ d: SCDisplay) -> DesktopDisplays.Display {
+        let id = d.displayID
+        let uuid = CGDisplayCreateUUIDFromDisplayID(id).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String }
+        let mirrors = CGDisplayMirrorsDisplay(id)
+        let refresh = CGDisplayCopyDisplayMode(id).map { $0.refreshRate }
+        let role = DesktopDisplays.role(vendor: CGDisplayVendorNumber(id), product: CGDisplayModelNumber(id),
+                                        madeByStage: stageDisplayIDs.contains(id))
+        return DesktopDisplays.Display(id: id, uuid: uuid ?? "display \(id)", frame: d.frame,
+                                       role: role, online: CGDisplayIsOnline(id) > 0,   // a gone display's ID reads -1
+                                       mirrors: mirrors == kCGNullDirectDisplay ? nil : mirrors,
+                                       refreshHz: refresh.flatMap { $0 > 0 ? $0 : nil },
+                                       name: VirtualStage.screen(for: id)?.localizedName)
+    }
+
     /// Thumbnail cadence, per window: every pass (2 s) if its `WindowInfo` changed since its last
     /// thumbnail or it is the active source; otherwise every `staticThumbnailInterval` (6 s), which
     /// still catches content changing inside a window of fixed size and title. A window is
@@ -317,7 +440,7 @@ final class WindowCatalog {
         let infoByID = Dictionary(uniqueKeysWithValues: infos.map { ($0.id, $0) })
         thumbStamps = thumbStamps.filter { infoByID[$0.key] != nil }      // forget closed windows
         for w in windows {
-            if Task.isCancelled { return }
+            if Task.isCancelled || withholding { return }   // locked meanwhile: no more captures
             guard let info = infoByID[w.windowID] else { continue }
             if let stamp = thumbStamps[w.windowID], stamp.info == info, w.windowID != activeWindowID,
                now - stamp.at < Self.staticThumbnailInterval { continue }
@@ -330,6 +453,8 @@ final class WindowCatalog {
             let filter = SCContentFilter(desktopIndependentWindow: w)
             guard let image = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config),
                   let jpeg = Self.jpeg(image, quality: 0.6) else { continue }
+            // Locked while it was taken: dropped (the unlock takes every thumbnail afresh).
+            if withholding { return }
             onThumbnail?(w.windowID, jpeg)
         }
     }
@@ -350,7 +475,8 @@ final class WindowCatalog {
         icons[bundleID] = png
         announcedIcons.insert(bundleID)
         // With nobody connected a broadcast reaches no one; `allIcons` carries it to the next client.
-        if clientCount > 0 { onNewIcon?(bundleID, png) }
+        // While locked it waits for the unlock (`takeWithheld`).
+        if clientCount > 0 && !withholding { onNewIcon?(bundleID, png) } else if withholding { withheldIcons.append(bundleID) }
     }
 
     // MARK: Installed apps
@@ -377,7 +503,7 @@ final class WindowCatalog {
         installedApps = apps
         // A running app's icon, announced by a window refresh meanwhile, wins over the file icon.
         for (id, png) in rendered where !announcedIcons.contains(id) { announce(bundleID: id, png: png) }
-        if clientCount > 0 { onInstalledAppsReady?(apps) }
+        if clientCount > 0 && !withholding { onInstalledAppsReady?(apps) } else if withholding { appsWithheld = true }   // the unlock sends them
     }
 
     /// Sorted by display name, first bundle ID wins. Thread-safe (FileManager + Bundle only).

@@ -6,7 +6,7 @@
 # 0.1 s, and every 2 s anyway), never waited for, a stale answer dropped and an owed one run; the
 # kind 26 each device is sent (nothing to the one driving); Sill's own motion noted before it lands;
 # the TEST ONLY scripted pointer (SILL_TEST_POINTER_PATH: its file, its clock, a dry run's move
-# against its steps) and SILL_TEST_SOFTWARE_ENCODER, with their lines.
+# against its steps), SILL_TEST_SOFTWARE_ENCODER and SILL_TEST_NO_SCREEN, with their lines.
 # Compiled with PointerControl.swift, Stats.swift and StreamProtocol's sources as one module
 # (build.sh strips `import StreamProtocol`).
 #   Tests/checks/pointer-watch/run.sh             compile and run the check

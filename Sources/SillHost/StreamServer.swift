@@ -18,7 +18,10 @@ import StreamProtocol
 /// `SILL_TEST_ORIGIN=vpn|internet` makes loopback sources classify as that origin, so the origin
 /// gate can refuse a test client; `SILL_TEST_REMOTE_ORIGIN=vpn|internet` does so at the remote door
 /// alone, so one loopback host serves a device away from home (the remote door) beside one at home
-/// (the home door, where loopback stays loopback): docs/remote-bundle-plan.md's H8 and S4. `SILL_TEST_MIN_DEVICE_VERSION=1.2` raises the device floor
+/// (the home door, where loopback stays loopback): docs/remote-bundle-plan.md's H8 and S4. At the
+/// remote door a loopback client is a relay on this Mac, away from home, without either
+/// (OriginPolicy.atRemoteDoor, issue #326); `SILL_TEST_REMOTE_ORIGIN=lan` makes it this network
+/// instead, a device at home that dialled the remote door ("by address"). `SILL_TEST_MIN_DEVICE_VERSION=1.2` raises the device floor
 /// (DeviceGate) from "0", so the gate below runs, and `SILL_TEST_GOODBYE='<JSON>'` makes its
 /// refusals send that kind 22 payload instead (a reason this build does not know, for the device's
 /// tests). `SILL_TEST_LOOPBACK=1` makes both doors listen on 127.0.0.1 alone, so a test host takes
@@ -145,6 +148,9 @@ final class StreamServer {
         var audioEpochSent: Int?
         /// Sound messages handed to its connection and not taken yet (`audioCap`).
         var audioUnsent = 0
+        /// Its hello said it shows a Mac's off-console view (`Hello.offConsoleView`; docs/off-console-plan.md):
+        /// it is sent the view's window list (`broadcastList`), every other device the plain one.
+        var viewsOffConsole = false
         init(_ c: NWConnection) { connection = c }
     }
 
@@ -164,8 +170,18 @@ final class StreamServer {
     /// A connected home client's link changed with its connection's path. Only reported, never
     /// acted on: the menu card shows it. Called on the network queue.
     var onClientRouteChanged: ((NWConnection, ClientLink.Route?) -> Void)?
-    /// A message from a client (selectSource, launchApp). Called on the network queue.
-    var onMessage: ((StreamMessage, NWConnection) -> Void)?
+    /// A message from a client (selectSource, launchApp), with the lock's reading as it arrived (the
+    /// gate's, LockPolicy.restrictive). Called on the network queue.
+    var onMessage: ((StreamMessage, NWConnection, LockPolicy.Reading) -> Void)?
+    /// A locked Mac (LockPolicy, docs/locked-mac-plan.md): SessionLock's gate, set before `start()`. From
+    /// the moment it reads locked, the server sends no picture of the Mac but its placeholder, no thumbnail,
+    /// icon, app list, sound, clipboard, pointer or cursor shape (`LockPolicy.withheld`), whatever the main
+    /// actor is doing; and the Mac's pointer is not even read. The default never locks (the harnesses).
+    var lockGate = LockGate()
+    /// An icon or the installed apps the gate withheld: a send that left the coordinator just before the
+    /// Mac read locked. The connection it was for, nil for a broadcast's (every device): the unlock sends
+    /// that device every icon and the apps again. Called on the network queue.
+    var onCatalogWithheld: ((ObjectIdentifier?) -> Void)?
     /// A client fell behind and lost a delta frame; the encoder should produce a keyframe now
     /// rather than in up to 4 s. Called on the network queue.
     var onKeyframeNeeded: (() -> Void)?
@@ -299,6 +315,12 @@ final class StreamServer {
     /// (PointerWatch.samplerInterval). Returns the devices sent one.
     @discardableResult
     private func samplePointer(now: TimeInterval) -> Set<ObjectIdentifier> {
+        // A locked Mac's pointer is never read, nor sent (LockPolicy): off console it is the console's.
+        if lockGate.locked {
+            for client in clients.values { client.lastPointer = nil }
+            setPointerSampler(interval: nil)
+            return []
+        }
         let ready = clients.compactMap { $0.value.connection.state == .ready ? $0.key : nil }
         guard let watch = pointerWatch, let reading = watch.sample(devices: ready) else {
             setPointerSampler(interval: nil)
@@ -532,11 +554,12 @@ final class StreamServer {
     }()
 
     /// TEST ONLY: SILL_TEST_REMOTE_ORIGIN (see the type's doc comment), SILL_TEST_ORIGIN's twin for
-    /// the remote door alone. Read once, and only by a host that does not advertise.
+    /// the remote door alone, which also takes "lan": a loopback client there is then this network, at
+    /// home, rather than a relay on this Mac. Read once, and only by a host that does not advertise.
     static let testRemoteOrigin: OriginPolicy.Origin? = {
         guard let value = ProcessInfo.processInfo.environment["SILL_TEST_REMOTE_ORIGIN"], !value.isEmpty else { return nil }
-        guard value == "vpn" || value == "internet" else {
-            print("SILL_TEST_REMOTE_ORIGIN=\(value) ignored: vpn or internet.")
+        guard value == "vpn" || value == "internet" || value == "lan" else {
+            print("SILL_TEST_REMOTE_ORIGIN=\(value) ignored: vpn, internet or lan.")
             return nil
         }
         return OriginPolicy.Origin(rawValue: value)
@@ -545,9 +568,11 @@ final class StreamServer {
     /// Where `c` comes from: its endpoint's address (and the interface a link-local one is scoped
     /// to), the local address it arrived at (`currentPath.localEndpoint`, which names the
     /// interface through `InterfaceSnapshot`; `availableInterfaces` listed en0 and lo0 for one
-    /// loopback connection, so it is not used), classified by OriginPolicy. On a test host,
-    /// SILL_TEST_ORIGIN turns a loopback source into that origin (and SILL_TEST_REMOTE_ORIGIN, at the
-    /// remote door: `remoteDoor`). On `queue`, at `.preparing` or later (the path exists from then on).
+    /// loopback connection, so it is not used), classified by OriginPolicy; at the remote door
+    /// (`remoteDoor`) a source that is this Mac itself is a relay on it (`atRemoteDoor`). On a test
+    /// host, SILL_TEST_ORIGIN turns a loopback source into that origin (and SILL_TEST_REMOTE_ORIGIN,
+    /// at the remote door), in place of the relay. On `queue`, at `.preparing` or later (the path
+    /// exists from then on).
     func origin(of c: NWConnection) -> OriginPolicy.Origin { arrival(of: c).origin }
 
     /// `origin(of:)` with the interface it arrived on (the scope, else the owner of the local
@@ -587,7 +612,11 @@ final class StreamServer {
     private func arrival(remote: String, scope: String?, local: String?, remoteDoor: Bool) -> (origin: OriginPolicy.Origin, interface: String?) {
         let interfaces = InterfaceSnapshot.shared.interfaces()
         var o = OriginPolicy.classify(remote: remote, localAddress: local, scope: scope, interfaces: interfaces)
-        if testHost, o == .loopback, let t = (remoteDoor ? Self.testRemoteOrigin : nil) ?? Self.testOrigin { o = t }
+        if testHost, o == .loopback, let t = (remoteDoor ? Self.testRemoteOrigin : nil) ?? Self.testOrigin {
+            o = t
+        } else if remoteDoor {
+            o = OriginPolicy.atRemoteDoor(o, remote: remote, interfaces: interfaces)
+        }
         return (o, OriginPolicy.arrivalInterface(localAddress: local, scope: scope, interfaces: interfaces))
     }
 
@@ -1256,6 +1285,7 @@ final class StreamServer {
         print(DeviceGate.helloLine(hello, endpoint: "\(c.endpoint)"))
         // The Mac's sound goes only to a device that said it plays a codec this host makes.
         client.audioCodec = AudioCodec.choose(offered: hello.audio)
+        client.viewsOffConsole = (hello.offConsoleView ?? 0) >= LockedMac.viewGeneration
         updateAudioListeners()
         onClientHello?(c, hello)
     }
@@ -1394,10 +1424,11 @@ final class StreamServer {
     /// built for a connection the server has just forgotten, before the coordinator hears it left).
     /// Thread-safe.
     func send(each messages: [(NWConnection, StreamMessage)]) {
-        let items = messages.map { (ObjectIdentifier($0.0), $0.1.serialized()) }
+        let items = messages.map { (ObjectIdentifier($0.0), $0.1.kind, $0.1.serialized()) }
         queue.async { [self] in
-            for (id, data) in items {
+            for (id, kind, data) in items {
                 guard let client = clients[id], client.connection.state == .ready else { continue }
+                if lockGate.withholds(kind) { withheld(kind, for: id); continue }   // a locked Mac (LockPolicy)
                 send(data, to: client)
             }
         }
@@ -1406,13 +1437,46 @@ final class StreamServer {
     /// One message to one client (catalog on connect). Thread-safe.
     func send(_ message: StreamMessage, to connection: NWConnection) {
         let data = message.serialized()
+        let kind = message.kind
         queue.async { [self] in
             guard let client = clients[ObjectIdentifier(connection)] else {
                 print("send: no client for \(connection.endpoint) (\(clients.count) known)")
                 return
             }
+            if lockGate.withholds(kind) { withheld(kind, for: ObjectIdentifier(connection)); return }   // a locked Mac (LockPolicy)
             send(data, to: client)
         }
+    }
+
+    /// A window list in two forms (StreamCoordinator.listMessages; docs/off-console-plan.md): the off-console
+    /// view's to each device whose hello said it shows it (`Client.viewsOffConsole`), the plain one, as Sill for
+    /// Mac 0.6.0 sends it, to every other. Thread-safe.
+    func broadcastList(view: StreamMessage, plain: StreamMessage) {
+        let viewData = view.serialized(), plainData = plain.serialized()
+        queue.async { [self] in
+            for client in clients.values where client.connection.state == .ready {
+                send(client.viewsOffConsole ? viewData : plainData, to: client)
+            }
+        }
+    }
+
+    /// The same to one device (the catalog on connect). Thread-safe.
+    func sendList(view: StreamMessage, plain: StreamMessage, to connection: NWConnection) {
+        let viewData = view.serialized(), plainData = plain.serialized()
+        queue.async { [self] in
+            guard let client = clients[ObjectIdentifier(connection)] else {
+                print("send: no client for \(connection.endpoint) (\(clients.count) known)")
+                return
+            }
+            send(client.viewsOffConsole ? viewData : plainData, to: client)
+        }
+    }
+
+    /// A message the gate withheld (LockPolicy): counted, and an icon's or the apps' reported
+    /// (`onCatalogWithheld`). On the network queue.
+    private func withheld(_ kind: StreamMessageKind, for id: ObjectIdentifier?) {
+        Stats.shared.bump("lock.withheld")
+        if kind == .appIcon || kind == .appList { onCatalogWithheld?(id) }
     }
 
     /// Client → host messages share the same framing. Small and rare, so read them one at a time.
@@ -1436,13 +1500,16 @@ final class StreamServer {
                 return
             }
             let deliver = { (payload: Data) in
+                // The lock's reading as this message arrived (LockPolicy): the coordinator judges it by the
+                // more restrictive of this and the reading when it handles it.
+                let arrived = self.lockGate.reading
                 if client.revoked {
                     // The Mac no longer serves it (`closeSessions`): until its connection closes, only a
                     // key's or a button's up goes on, which the coordinator posts only if it lets go of
                     // something this device holds down (RevokedInput). No pong, no stats line, no
                     // pointer handed to it; the rest of its input is counted (`in.revoked`).
                     if header.kind == .input, let event = Wire.decode(InputEvent.self, from: payload), RevokedInput.mayLetGo(event) {
-                        self.onMessage?(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), c)
+                        self.onMessage?(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), c, arrived)
                     } else if header.kind == .input || header.kind == .gesture {
                         Stats.shared.bump("in.revoked")
                     }
@@ -1507,7 +1574,7 @@ final class StreamServer {
                 } else if header.kind == .pairingWanted && client.route.isRemote {
                     // "Show your pairing code" comes only from a device near the Mac: ignored here.
                 } else {
-                    self.onMessage?(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), c)
+                    self.onMessage?(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), c, arrived)
                 }
                 self.receiveLoop(client)
             }
@@ -1533,10 +1600,13 @@ final class StreamServer {
         return "\(median)/\(max(worst, median)) ms"
     }
 
-    /// Thread-safe: hops onto the network queue.
-    func broadcast(_ message: StreamMessage) {
+    /// Thread-safe: hops onto the network queue. `picture`: what a frame or its parameter sets show
+    /// (LockPolicy.Picture; nil counts as a window's), for the gate: from the moment the Mac reads locked
+    /// nothing of it goes out but the placeholder (a frame withheld here is never counted against a link).
+    func broadcast(_ message: StreamMessage, picture: LockPolicy.Picture? = nil) {
         let data = message.serialized()
         queue.async { [self] in
+            if lockGate.withholds(message.kind, picture: picture) { withheld(message.kind, for: nil); return }
             if message.kind == .parameterSets { lastParameterSets = data }
             if message.kind == .frame, message.isKeyframe { lastKeyframeAt = Date().timeIntervalSince1970 }
             var wantKeyframe = false
@@ -1615,9 +1685,10 @@ final class StreamServer {
 
     /// One packets message (a whole kind 43) of `epoch`, to every ready device that plays the sound:
     /// the epoch's format first to a device that has not had it, then the packet, unless the device
-    /// has `audioCap` messages untaken. Thread-safe.
+    /// has `audioCap` messages untaken. None while the Mac reads locked (LockPolicy). Thread-safe.
     func broadcastAudio(packets: Data, epoch: Int) {
         queue.async { [self] in
+            if lockGate.withholds(.audio) { withheld(.audio, for: nil); return }
             for client in clients.values where client.audioCodec == AudioCodec.aacELD && client.connection.state == .ready {
                 if client.audioEpochSent != epoch {
                     guard let format = audioFormat, format.epoch == epoch else { continue }

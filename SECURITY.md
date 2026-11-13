@@ -21,6 +21,9 @@ who has it, and the newest iPhone and iPad app.
 - The connection on the Mac's own networks, over a USB cable and with Direct
   Wireless Connection: what Sill for Mac accepts, and what a device can make
   it do.
+- A locked Mac, or one switched to another user: a device should see none of
+  it, and nothing a device sends should act on it, but a paired device's typing
+  at its own lock screen.
 - Remote Access's connection, and pairing, at home and away: the QR code, the
   typed code, `sill://pair` links, a USB cable's automatic pairing, Require
   pairing, and the paired devices and keys Sill for Mac keeps in the keychain.
@@ -54,6 +57,6 @@ and what pairing needs (`SILL_TEST_…` variables, and the bare binary's
 `-Sill…After` arguments and `-requirePairing`). Sill for Mac takes none of
 them, whatever its folder is called and however it is started (a renamed copy,
 a link to its executable): it knows itself by its code signature and its
-bundle. Sill for Mac 0.4.0 to 0.5.1, and the nightly builds before the next
+bundle. Sill for Mac 0.4.0 to 0.5.1, and the nightly builds before the 0.6.0
 release, knew themselves by their folder's name and take them from a renamed
 copy or a link: update to the newest release.

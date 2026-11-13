@@ -21,7 +21,7 @@ and the command under the table changes every copy in this file.
 | Privacy Policy URL | `https://getsill.app/privacy` | `site/privacy.html`; the same link as `SillLinks.privacy` in the app. |
 | Mac download | `https://getsill.app/download` | `site/download.html`; the same link as `SillLinks.download` in the app. |
 | Contact address | `support@getsill.app` | Noah's: Cloudflare Email Routing forwards it to his mailbox (2026-09-25). |
-| Mac requirement | Apple silicon, macOS 14 or later | Today's Sill.app is arm64 only; `LSMinimumSystemVersion` is 14.0. If the release build becomes universal, take "with Apple silicon" out of the description and the review notes. |
+| Mac requirement | macOS 14 or later, Apple silicon or Intel | Sill.app is universal (arm64 and x86_64) from 0.6.0 on (#62; release.yml's publish job sets `SILL_UNIVERSAL=1`, as the nightlies do); `LSMinimumSystemVersion` is 14.0. The description says "a Mac with macOS 14 or later" and the review notes "A Mac with Apple silicon or Intel and macOS 14 or later" (0.5.1's both said "with Apple silicon"). |
 | App Store Connect record | "Sill – Mac Streaming", Apple ID 6816359860, SKU `sill-ios` | Created 2026-09-26 (section 1). Builds 0.5 (1) to (3) went to TestFlight; 0.5 (3) went to App Review as the first version, live 2026-10-08; 0.5.1 (4), the version both apps share from Sill for Mac 0.5.1 on, live 2026-10-10 (section 5). |
 | Remote Access | In every version since 0.5, and in Sill for Mac since 0.3.0 (PR #13) | The live listing names it; the Remote Access switch below is only for a build without it. |
 
@@ -87,9 +87,13 @@ These texts are only true once these are:
   the number both apps share from this release on (Noah, 2026-10-09): App
   Store Connect adds a version only once the current one is Ready for
   Distribution (the + beside iOS App), and copies its metadata into it. The
-  third is 0.5.5, which main says since 2026-10-29 for both apps (the pre-release number; the store release will be 0.6.0), so its
-  TestFlight builds go to the version 0.5.5 (0.5.1's is closed now it is
-  released).
+  third is 0.6.0 (main said 0.5.5 from 2026-10-29, the pre-release number of its TestFlight builds and nightlies, and 0.6.0 since 2026-10-31), so its
+  TestFlight builds went to the version 0.6.0 (0.5.1's is closed now it is
+  released). The fourth is 0.6.1, which main said from App Review's approval of
+  0.6.0 (the approval closes 0.6.0's train) until its own, so the nightlies' builds went to it.
+  The fifth is 0.6.2, which main says since App Review approved 0.6.1 (2026-11-12): that night's
+  upload of 0.6.1 (1527) was refused ("The train version '0.6.1' is closed for new build
+  submissions"), so the nightlies' builds go to 0.6.2 from then on.
 - Every claim in the description has been seen working on a device. Still
   open: pairing at home (PR #37's P1 to P16: the code over Wi-Fi, the cable
   pairing by itself, Remove), three-finger gestures (PR #38's P1 to P13), the
@@ -294,7 +298,7 @@ Keep three things saying the same: this label, `PrivacyInfo.xcprivacy`
 again before adding crash reporting, analytics, a server of any kind, or
 anything that sends data somewhere other than the user's Mac.
 
-## 5. The version page (0.5, then 0.5.1)
+## 5. The version page (0.5, 0.5.1, 0.6.0, then 0.6.1)
 
 ### Promotional text (170 characters at most; editable any time without review)
 
@@ -304,18 +308,20 @@ Free, with no account and no servers. Use any window on your Mac, or the whole d
 
 ### Description (4,000 characters at most)
 
-The App Store shows another description with 0.5.1 (3,302 characters,
-beginning "Sill shows a window from your Mac, or its whole desktop…"), which
-this file doesn't hold. Paste this block at the next version: it has what that
-one leaves out, the Mac requirement, iPhone Duo and away from home among them.
-Its "no sound" line is for a version without the sound: delete it from any
-version whose build carries the sound (the next one, as a beta), whether or
-not the sound's bullet (below) is in yet.
+0.6.0's description, as entered in App Store Connect on 2026-11-02 (3,350 characters; 0.5.1 had
+another, 3,302 characters, beginning "Sill shows a window from your Mac, or its whole desktop…", which
+this file doesn't hold). Against the 0.5.1-era block this file held before, it has the clipboard's
+bullet in "Made for touch" (after "Type with"; docs/clipboard-plan.md), the sound's in "Smooth and
+sharp" (after "Set quality"; PR #94, docs/audio-plan.md: Noah's D2 of 2026-11-02 kept the sound in
+0.6.0's words), no "Sill doesn’t play sound from your Mac." in "Good to know", and "a Mac with macOS
+14 or later" without "Apple silicon and" (D1: Sill for Mac is universal from 0.6.0). Both bullets
+need Sill for Mac 0.6.0, the download since that release. "Beta" goes on the sound, never on the
+app: guideline 2.2 keeps betas and trials of an app off the App Store (TestFlight is for those).
 
 ```text
 Sill puts your Mac on your iPhone and iPad. Pick any window, or the whole desktop, and use it with touch, a trackpad, a keyboard or Apple Pencil. Your apps keep running on your Mac. Sill shows them and sends back what you do.
 
-Sill needs the free Sill for Mac on the Mac you want to use. Get it at getsill.app. It runs on a Mac with Apple silicon and macOS 14 or later.
+Sill needs the free Sill for Mac on the Mac you want to use. Get it at getsill.app. It runs on a Mac with macOS 14 or later.
 
 Get started
 • Open Sill for Mac and allow Screen Recording and Accessibility.
@@ -329,6 +335,7 @@ Made for touch
 • Hold your device upright for a laptop layout: the picture on top, a trackpad and a row of keys below. On iPhone, turn on Larger Picture to give a window’s picture more of the screen.
 • On iPhone Duo, open it flat and your Mac fills the inner display. Half open, it’s a laptop: the picture above the fold, a trackpad and keys below. Closed, Sill runs on the cover display.
 • Type with the on-screen keyboard, or on a hardware keyboard as soon as you connect, with shortcuts and Esc. A trackpad or a mouse scrolls the window under the pointer.
+• Copy text on your Mac and paste it on your iPhone or iPad. To paste on your Mac what you copied on your device, tap Paste in Sill: it goes where your Mac’s cursor is.
 • Swipe and pinch with three fingers for Mission Control, App Exposé, Spaces, Apps and Show Desktop.
 • Use the menus of the app you’re in: tap Menus in the bar, or on iPad with iPadOS 26 or later, use the menu bar at the top of the screen.
 • Switch windows from live thumbnails in the bar. Touch and hold one to close, minimize or go full screen. Drag it to reorder.
@@ -338,6 +345,7 @@ Made for touch
 Smooth and sharp
 • Up to 120 frames per second on displays that support it.
 • Set quality, resolution and frame rate from your iPhone or iPad.
+• Hear sound from your Mac in step with the picture, a beta feature that is on unless you turn off Send Audio in Sill’s settings, on your Mac or your iPhone or iPad. Mute it on any device in Sill’s settings.
 
 Your Mac, your network
 • Connect over Wi-Fi, or over a USB cable.
@@ -352,31 +360,10 @@ Private
 
 Good to know
 • Sill shows one window, or the whole desktop, at a time.
-• Sill doesn’t play sound from your Mac.
 • Sill for Mac comes from getsill.app, not the Mac App Store.
 ```
 
-Local-only build: delete the bullet that starts "Away from home".
-
-**For the next version, not 0.5.1** (the clipboard, docs/clipboard-plan.md: it ships with the next
-submission of both apps, and needs Sill for Mac from the same release): add this bullet to "Made for
-touch", after the one that starts "Type with":
-
-```text
-• Copy text on your Mac and paste it on your iPhone or iPad. To paste on your Mac what you copied on your device, tap Paste in Sill: it goes where your Mac’s cursor is. Copies a password manager marks as concealed stay on your Mac.
-```
-
-**For the next version, with the sound** (PR #94, a beta feature; docs/audio-plan.md: it ships with
-the next submission of both apps, and needs Sill for Mac from the same release): delete "Sill
-doesn’t play sound from your Mac." from "Good to know" in every version whose build carries the
-sound, with or without this bullet, since a device plays it once Send Audio is on; and
-once the sound's device tests pass (Before you submit), add this bullet to "Smooth and sharp",
-after the one that starts "Set quality". "Beta" goes on the feature, never on the app: guideline
-2.2 keeps betas and trials of an app off the App Store (TestFlight is for those).
-
-```text
-• Hear sound from your Mac in step with the picture, a beta feature that is on unless you turn off Send Audio in Sill’s settings, on your Mac or your iPhone or iPad. Mute it on any device in Sill’s settings.
-```
+Local-only build: delete the bullet that starts "Away from home" (3,129 characters).
 
 The source is public under the Apache License 2.0 (since 2026-09-26), so the
 listing may call Sill open source, as the live description does and the last
@@ -391,7 +378,7 @@ a Sill for Mac that has it at the download URL (Before you submit).
 
 Apple's trademark rules keep its product names singular and never possessive
 in public copy, here and on the site: "sound from your Mac" and "Mac computers
-with Apple silicon", not "your Mac’s sound" or "Macs". The review notes aren't
+with Apple silicon or Intel", not "your Mac’s sound" or "Macs". The review notes aren't
 public.
 
 ### Keywords (100 bytes at most, commas, no spaces)
@@ -416,12 +403,12 @@ company's name.
 |---|---|
 | Support URL | `https://getsill.app/support` |
 | Marketing URL (optional) | `https://getsill.app` |
-| Version | 0.5.5 for the third version, the same number as Sill for Mac 0.5.5 (main says it since 2026-10-29). 0.5.1 was the second, the same number as Sill for Mac 0.5.1. The first was 0.5 (App Store Connect proposed 1.0 for a new app; the build said 0.5) |
+| Version | 0.6.1 for the fourth version, the same number as Sill for Mac 0.6.1 (main says it since App Review approved 0.6.0; docs/release-checklist.md, part 2's first item). App Store Connect adds it with the + beside iOS App, 0.6.0 being Ready for Distribution (live since 2026-11-02), and copies 0.6.0's description, keywords, screenshots and App Review Information into it. 0.6.0 (1276) was the third, shipped, the same number as Sill for Mac 0.6.0 (main said it from 2026-10-31; 0.5.5 was its pre-release number, carried by the TestFlight builds and the nightlies before the release), created in App Store Connect on 2026-11-02. 0.5.1 was the second, the same number as Sill for Mac 0.5.1. The first was 0.5 (App Store Connect proposed 1.0 for a new app; the build said 0.5) |
 | Copyright | `2026 Noah Saffer` (App Store Connect adds the ©) |
 | App Previews | None for the first version. They are optional, and the sizzle reel can't be one: 2.3.4 allows only captures of the app itself, and previews run 15 to 30 seconds. |
 | Screenshots | Section 9 |
 | Version Release | Manually release this version, so an approval can't go live before the Mac download and the site are up |
-| Build | 0.5.1 (4) for 0.5.1 (0.5 had 0.5 (3)): the Release archive with the privacy manifest and the export compliance key |
+| Build | 0.6.1 (the commit count of its tagged merge commit, the release pull request's) for 0.6.1, uploaded by that commit's nightly before the tag, or from a clean checkout of it on this Mac with `Scripts/release-ios.sh --build-number "$(git rev-list --count HEAD)" --upload`; never `--bump`. 0.6.0 (1276) for 0.6.0: the commit count of the tagged merge commit a39084f4 (PR #274), uploaded by that commit's nightly (run 41419194155), never `--bump`. 0.5.1 had 0.5.1 (4), 0.5 had 0.5 (3): each the Release archive with the privacy manifest and the export compliance key |
 
 ### What's New
 
@@ -435,8 +422,6 @@ changed since the build before.
 Made for iPhone Duo. Open it flat and your Mac fills the inner display. Half open, it’s a laptop: the picture above the fold, a trackpad and keys below. Closed, Sill runs on the cover display. Nothing you touch sits on the fold.
 
 Away from home, Sill now starts at a quality a slower connection can carry, tells you when the connection can’t keep up and offers a quality it can, and moves your session back to your home network by itself when you get home. Also fixed: if your Mac showed twice away from home after Sill for Mac 0.4.0 gave it a new key, the row that didn’t work now connects, and the other goes. For the away quality and the notice, update Sill for Mac to 0.5.1 from getsill.app: from this release on, both apps share one version number.
-
-Pinch to zoom: two fingers zoom the picture up to 5× around the point between them, and move it while it’s zoomed. Taps, clicks and scrolls land on what you see under your finger. Pinch all the way out to see everything again.
 ```
 
 Local-only build (0.5.1's other changes are all away from home's):
@@ -447,8 +432,10 @@ Made for iPhone Duo. Open it flat and your Mac fills the inner display. Half ope
 Sill for iPhone and iPad and Sill for Mac now share one version number: this is 0.5.1, with Sill for Mac 0.5.1 from getsill.app.
 ```
 
-The next version's, a draft: what changed on the device since 0.5.1 (4), as its release notes say it,
-a paragraph a change (the same in the local-only build).
+0.6.0's, as entered in App Store Connect on 2026-11-02 (3,395 characters): what changed on the
+device since 0.5.1 (4), as its release notes say it, a paragraph a change (the same in the local-only
+build). Noah's D2 kept the sound's paragraph, and D3 left out a sentence on typing the Mac's password
+from the device.
 
 ```text
 Larger Picture, in Settings on iPhone: held upright, a window’s picture takes the place of the window thumbnails and reaches down to where the keyboard comes up. Set a window’s text size with Aa and your Mac makes it as tall as the picture. The Desktop keeps the usual layout.
@@ -456,6 +443,8 @@ Larger Picture, in Settings on iPhone: held upright, a window’s picture takes 
 With a keyboard attached to your iPhone or iPad, what you type goes to your Mac as soon as its picture shows, Esc included, without the Keyboard button. Two fingers on a trackpad, or a mouse’s scroll wheel, now scroll the window under the pointer.
 
 Reverse Scrolling, in Settings: a finger dragged over the picture, or two fingers on the trackpad below it, scroll the other way. A trackpad or mouse connected to your iPad keeps following its Natural Scrolling setting.
+
+Pinch to zoom: two fingers zoom the picture up to 5× around the point between them, and move it while it’s zoomed. Taps, clicks and scrolls land on what you see under your finger. Pinch all the way out to see everything again.
 
 Hold a window’s thumbnail and its close, minimize and full-screen controls now show after half a second, not a second and a half. To hold longer or shorter, from 0.2 to 2 seconds, use Hold to Show Window Controls in Settings.
 
@@ -470,10 +459,25 @@ Copy and paste between your Mac and your iPhone or iPad: text you copy on your M
 Sound from your Mac, a beta feature: your iPhone or iPad plays the sound of the window you’re using, or of every app for the Desktop, a moment behind the picture. Send Audio in Sill’s settings on your iPhone or iPad, or in the Sill menu on your Mac, turns it off and on for every device, and Mute in Sill’s settings silences it on one device. It needs Sill for Mac from this release.
 
 Aa now starts at Off, which leaves your Mac’s window as it is, and sliding it back to Off puts a window Sill resized back to its own size right away. That needs Sill for Mac from this release: with an earlier one, Off only stops the resizing. On Sill’s virtual display a window always fits, so Aa has no Off there. Aa is dimmed while the Desktop shows: it sizes a window.
+
+While your Mac is locked, Sill shows its lock screen and nothing else, and while it is switched to another user, your iPhone or iPad says so. The Apps list, your Mac’s menus, its sound and the clipboard wait until it is unlocked.
+
+After this update, the tour of Sill’s controls shows once more, with what’s new marked New. Take the Tour, at the bottom of Settings, shows it again any time.
 ```
 
-The sound's paragraph (PR #94) is "a beta feature", never a beta of the app (guideline 2.2), and waits,
-as the description's bullet does, for its device tests (Before you submit).
+The pinch's paragraph (PR #196) sat in 0.5.1's block above, which App Store Connect showed for 0.5.1;
+the pinch ships with 0.6.0, so it is in 0.6.0's (the tour's last paragraph came with it,
+2026-10-31). For that version's TestFlight build, What to Test can say: "The tour shows once more after
+this update; please tell us if a New: row is wrong."
+
+The locked Mac's paragraph (branch locked-mac, docs/locked-mac-plan.md, 229 characters) is a security
+fix found on 2026-10-31: say what it does, not what it fixed. Its device test (the plan's Untested) is
+Noah's: a real lock, another user at the login screen. Typing the Mac's password from the device
+unlocked a Mac in his test of 2026-11-01 (the plan's step 2); his D3 of 2026-11-02 left that sentence
+out of 0.6.0's words, here and on the support page.
+
+The sound's paragraph (PR #94) is "a beta feature", never a beta of the app (guideline 2.2); Noah's D2
+of 2026-11-02 kept it, and the description's bullet, in 0.6.0.
 
 Esc and scrolling with a trackpad or a mouse showed on the iPad through Universal Control on 2026-10-15
 (docs/hardware-keyboard-plan.md, "Words that wait for a device"), so their words are in: this draft, the
@@ -490,6 +494,47 @@ The tiles (PR #117, 232 characters) are the connect screen's default since 2026-
 not list the default behavior of the app"), in this draft as the default; the list is one tap away and
 a choice is kept. #117 passed Noah's iPad test that day (a tile's picture as each session ended, list and
 tiles back and forth, every tile of one Mac its one picture); a fresh install showing tiles is his to see.
+
+0.6.1's, for App Store Connect (1,544 characters): what changed since 0.6.0 (1276) that a person
+notices on the device, a paragraph a change, as the release notes say it. The waking click, macOS's own
+windows out of the bar and the other account's view come from Sill for Mac 0.6.1, which the last two
+paragraphs say. Not in it: the connections a firewall holds (#342), which change only Sill for Mac's
+waiting places and its log. The Duo's paragraph claims nothing about the emoji keyboard's search, which
+still closes as it opens in the laptop pose once the keyboard has been put away since Sill opened
+(docs/iphone-duo-plan.md, "The keyboard toggle"), and the waking click's sentence names the Desktop's
+black picture alone: a window on Sill's virtual display with the panels asleep was never tried (#228's
+step 2), so neither this text nor the support page says what a tap does there.
+
+```text
+iPhone Duo, half open: the on-screen keyboard no longer covers Sill’s keys. While it’s up, the row of keys, with a Keyboard key that puts it away, sits between the fold and the keyboard. A taller keyboard, such as emoji, leaves no room for the row, so a Keyboard button at the picture’s bottom left corner puts it away instead. Opened flat, the row moves up above a keyboard that would cover it.
+
+Fixed: lifting Apple Pencil no longer draws a line from the end of a stroke back to near its start in drawing apps on your Mac, such as Notes.
+
+While Sill shows your Mac, your iPhone or iPad no longer locks by itself until 10 minutes after you last used it. Then its own Auto-Lock setting applies.
+
+Away from home, when a connection fails because a VPN looks off, Sill now says it may be off on either end, on your iPhone or iPad or on your Mac, where it blamed your iPhone or iPad alone.
+
+While your Mac’s display sleeps, a tap on the Desktop’s black picture now only wakes it: the pointer moves there and nothing is clicked. And windows that belong to macOS itself, such as Stage Manager’s, no longer show as thumbnails in Sill’s bar. Both need Sill for Mac from this release.
+
+If another user has your Mac’s screen, your iPhone or iPad can show your own account’s desktop and windows instead, with a note that it isn’t the Mac’s screen. Turn on Show this account while another user is on the screen in Sill’s Settings › Devices on your Mac. Taps and keys reach your account once it’s back on the screen. It needs Sill for Mac from this release.
+```
+
+Held for the next version: Picture in Picture (issue #291, docs/picture-in-picture-plan.md), a
+paragraph of 284 characters for its What's New, once Noah's device tests (the plan's P
+list) have passed; until then it stays out, as Esc's words waited for a device:
+
+```text
+Picture in Picture, in Settings › This iPad (This iPhone): leave Sill while your Mac’s picture shows, and it keeps playing in a small window over your other apps, with its sound when Send Audio is on. Tap the window to come back to Sill. Nothing you do in other apps reaches your Mac.
+```
+
+Held for the next version: Full Screen (issues #279, #92, #280; docs/full-screen-plan.md), a paragraph of 160
+characters for its What's New, once Noah's device tests (the plan's "Noah's test") have passed. It promises
+nothing about the Desktop's shape upright, which keeps its own until the Virtual Desktop can match the
+device:
+
+```text
+Full Screen, in Settings, hides Sill’s controls so only your Mac’s picture shows. Swipe in from the left edge, or shake your iPhone or iPad, to bring them back.
+```
 
 ## 6. Export compliance (encryption)
 
@@ -543,7 +588,7 @@ Plain ASCII on purpose, so every character is one byte.
 
 ```text
 PURPOSE AND AUDIENCE
-Sill is a general-purpose remote desktop for the user's own Mac: it mirrors the whole Mac (the Desktop button) or any window of any app the user picks. It lets people use their Mac from their iPhone or iPad. It shows any Mac window, or the whole desktop, on the device and sends touch, trackpad, keyboard and Apple Pencil input back, so a Mac app can be used from another room, the couch or away from home, with no cloud service. It is for people who own a Mac and an iPhone or iPad. Every app runs and draws on the Mac; the iOS app shows the picture, lists the menu items of the Mac app in front so they can be chosen by touch (choosing one performs it on the Mac), and sends input. Its Apps list shows only apps already installed on that Mac.
+Sill is a general-purpose remote desktop for the user's own Mac: it mirrors the whole Mac (the Desktop button) or any window of any app the user picks. It sends touch, trackpad, keyboard and Apple Pencil input back, so a Mac app can be used from another room or away from home, with no cloud service. It is for people who own a Mac and an iPhone or iPad. Every app runs and draws on the Mac; the iOS app shows the picture and lists the menus of the Mac app in front so they can be chosen by touch. Its Apps list shows only apps already installed on that Mac.
 
 ACCOUNTS AND PURCHASES
 None: no account, no sign-in, no in-app purchase, no ads. No demo account is needed.
@@ -552,18 +597,18 @@ EXTERNAL SERVICES
 None. The app talks only to the user's own Mac, found with Bonjour on the local network, over TLS 1.3 after a one-time pairing. Optional Remote Access uses a VPN the user already runs (such as Tailscale) or a port the user forwards; Sill runs no server. No analytics, AI, payment or login service.
 
 REGIONS
-The app works the same in every region, with no regional differences.
+The app works the same in every region.
 
 REGULATED OR THIRD-PARTY MATERIAL
 Not applicable. Sill shows only the user's own Mac and its apps.
 
 NO VPN FUNCTIONALITY
-Sill creates, configures and operates no VPN and uses no Network Extension (no NEVPNManager, tunnel or proxy provider, no such entitlement). Only Network.framework, for TCP with TLS 1.3 to the user's own Mac. "VPN" appears only because a user may optionally reach their Mac through a VPN they already run themselves (such as Tailscale); Sill just connects to the Mac's address over the network the device has and names that connection. It collects no user information through VPN or anything else, and shares nothing with third parties.
+Sill creates, configures and operates no VPN and uses no Network Extension (no NEVPNManager, tunnel or proxy provider, no such entitlement). It uses only Network.framework (TCP with TLS 1.3). "VPN" appears only because a user may optionally reach their Mac through a VPN they already run themselves. It collects no user information through VPN or anything else, and shares nothing with third parties.
 
 WHAT YOU NEED
-- A Mac with Apple silicon and macOS 14 or later.
+- A Mac with Apple silicon or Intel and macOS 14 or later.
 - An iPhone or iPad on the same Wi-Fi network.
-- Sill for Mac 0.5.1 or later, free: https://getsill.app/download (Developer ID, notarized).
+- Sill for Mac 0.6.0 or later, free: https://getsill.app/download (Developer ID, notarized).
 
 SET UP THE MAC (about 2 minutes)
 1. Download Sill for Mac, move it to Applications and open it. It lives in the menu bar and opens its Settings on Permissions.
@@ -578,41 +623,68 @@ CONNECT AND PAIR (once per device)
 
 WHAT TO TRY
 - Apps (magnifying glass): pick a window, or search and open an app.
-- Tap to click, drag to scroll, touch and hold to right-click. Apple Pencil works as a mouse.
-- Three fingers: swipe up for Mission Control, spread for Show Desktop.
+- Tap to click, drag to scroll, touch and hold to right-click.
 - Keyboard, Menus, Aa (text size), window thumbnails, Desktop.
 - Hold the device upright for a laptop layout with a trackpad and keys.
 - Settings (gear): Quality, Resolution and Frame Rate; Disconnect at the bottom.
+
+NEW IN 0.6.1 (the last two need Sill for Mac 0.6.1)
+- iPhone Duo, half open: the key row stays above the on-screen keyboard; a tall one (emoji) gets a Keyboard button instead.
+- Pencil strokes on the Mac no longer end with a line back to their start.
+- The device stays awake while streaming, until 10 minutes after the last touch.
+- A remote dial that fails with a VPN off names both ends.
+- A tap on the Desktop's black picture while the Mac's display sleeps only wakes it.
+- Mac Settings > Devices: "Show this account while another user is on the screen" (off by default).
 
 IF THE MAC DOES NOT APPEAR
 Guest or office networks can keep devices apart: use a USB-C cable, or turn on Direct Wireless Connection in the Sill menu and tap Search Nearby.
 
 REMOTE ACCESS (optional)
-In the Sill menu choose Remote Access... and turn it on while the device is connected. The device can then reach the Mac from another network through the user's own VPN. It starts at a lower quality for slower links.
+Turn on Remote Access... in the Sill menu while the device is connected; it can then reach the Mac from another network through the user's own VPN.
 
 VIDEO
-The attached screen recording (a physical device, latest OS) starts at launch: pairing, streaming a window, input, menus, Settings.
+The attached screen recording, on a physical device, shows pairing, streaming a window, input, menus and Settings.
 ```
 
 Local-only build: delete the REMOTE ACCESS (optional) paragraph.
 
-**For the next version, with the sound** (PR #94, a beta feature): add this line to WHAT TO TRY,
-after the Settings line, and, to stay within 4,000 bytes, delete "It lets people use their Mac from
-their iPhone or iPad. " from PURPOSE AND AUDIENCE (the sentence after it says the same). The notes
-are then 3,995 bytes (local-only 3,752), all ASCII, as this file's measure counts them (the block's
-last newline included). "Beta" stays on the feature, never on the app (guideline 2.2).
+The notes for 0.6.1 are 3,998 bytes with the block's last newline (3,997 without), all ASCII: 0.6.0's with
+NEW IN 0.6.0 replaced by NEW IN 0.6.1 (guideline 2.3.1(a): what is new in this version, specifically),
+the Duo's keyboard, the Pencil, the device staying awake, the VPN message, the waking click on the
+Desktop's picture and the Mac's opt-in for another user's screen; nothing else changed, Sill for Mac
+0.6.0 or later still enough for WHAT YOU NEED (the last two items name 0.6.1). App Store Connect copies
+0.6.0's notes into 0.6.1: replace them with this block.
+
+The notes for 0.6.0 were 3,993 bytes (local-only 3,819), all ASCII, as this file's measure counts them
+(the block's last newline included). App Store Connect copies 0.5.1's notes into a new version: replace
+them with this block. Against 0.5.1's they ask for Sill for Mac 0.6.0 (the clipboard, the sound and the
+locked Mac are its), say Apple silicon or Intel (the Mac download is universal from 0.6.0), and add NEW
+IN 0.6.0, with the sound's line (a beta feature, PR #94: "Beta" stays on the feature, never on the app,
+guideline 2.2) and Mute. To make room: PURPOSE AND AUDIENCE loses "It lets people use their Mac from
+their iPhone or iPad." and the repeat of "any Mac window, or the whole desktop"; REGIONS, NO VPN
+FUNCTIONALITY, REMOTE ACCESS and VIDEO are shorter; REMOTE ACCESS loses 0.5.1's "It starts at a lower
+quality for slower links."; WHAT TO TRY loses the three-finger line and "Apple Pencil works as a mouse."
+(PURPOSE AND AUDIENCE names the Pencil). The answers to App Review's questions about 0.5 (purpose and
+audience, accounts, external services, regions, no VPN functionality) stay.
+
+Held for the next version: Picture in Picture (issue #291) puts the audio background mode in the
+binary (`UIBackgroundModes` `audio`, Xcode's "Audio, AirPlay, and Picture in Picture"), which App Review
+sees; guideline 2.5.4 allows background services only for their intended purposes, and Apple's own
+pages make Picture in Picture one of this mode's (Configuring background execution modes; the
+AVPictureInPictureController reference requires it). One developer reported a 2.5.4 rejection for an app
+that declared the mode for AirPlay and Picture in Picture (Apple Developer Forums 671406, unanswered), so
+the next notes say what the mode is for, in their NEW IN list (330 bytes, ASCII; the
+next notes make room as each version's NEW IN list replaces the last's):
 
 ```text
-- Sound (optional beta feature): Send Audio (Beta), in the Sill menu, is on; the device plays it.
+- Picture in Picture (Settings > This iPad, off by default): leaving the app floats the Mac's live picture in iOS's Picture in Picture window, with the Mac's sound if Send Audio is on. The audio background mode is declared for this alone; nothing plays in the background otherwise. To try: turn it on, stream a window, swipe home.
 ```
 
-These are the notes as App Store Connect holds them since App Review's
-questions about 0.5, which they answer (purpose and audience, accounts,
-external services, regions, no VPN functionality); a new version starts with
-them. For 0.5.1 this block adds the last sentence of REMOTE ACCESS, "It starts
-at a lower quality for slower links." (47 bytes), and asks for Sill for Mac
-0.5.1 in WHAT YOU NEED, whose away quality that sentence describes: check that
-App Store Connect's copy has both.
+Nothing else about it changes App Store Connect: no new privacy manifest entry (it uses no
+required-reason API beyond UserDefaults and `systemUptime`, declared already), nothing new collected
+(App Privacy, section 4), no new data sent (site/privacy.html lists what goes between the devices and
+the Mac; Picture in Picture sends nothing new, it keeps the same connection running), no entitlement
+(the playback variant needs none; the video-call one, not used, is for calls).
 
 ## 8. Demo video
 
@@ -877,6 +949,26 @@ Safe:
   goes where the Mac's cursor is, 231 characters (222 before); the next What's New gains the
   clipboard's paragraph, 289 characters, before the sound's (the clipboard had none, though it ships
   with that version): the draft 2,176 characters (1,885 on main at 35a9c47); the rest unchanged.
+- With the tour once more (branch `tour-0-6`, tour version 2; Noah, 2026-10-31), measured by a script
+  on the blocks, each without its last newline: the pinch's paragraph (226 characters) moved from
+  0.5.1's What's New, which App Store Connect showed for 0.5.1 without it (981 characters on main at
+  e4d30349, 753 now, as it was measured for 0.5.1), into the next version's draft, after Reverse
+  Scrolling's; the tour's paragraph (158) at the draft's end; the draft 3,164 characters of 4,000
+  (2,776 on main at e4d30349). The description's clipboard bullet for the next version lost "Copies a
+  password manager marks as concealed stay on your Mac." (untrue since 2026-10-29, when they began
+  to go like any other copy): 168 characters (231). The description block itself, 3,032, and the
+  review notes unchanged. Its "The first time, a short tour shows you the controls." stays true.
+- For 0.6.0 (1276), as entered in App Store Connect on 2026-11-02 and as this file now holds the
+  blocks, measured by a script on each block without its last newline: description 3,350 (local-only
+  3,129) of 4,000 characters (the 0.5.1-era block before it, 3,032, was 3,014 once D1 took "Apple
+  silicon and " out of its Mac sentence, 18 characters; then the clipboard's and the sound's bullets
+  in and the "no sound" line out); What's New 3,395 of 4,000 characters; review notes 3,993 bytes
+  with the block's last newline (local-only 3,819), 3,992 without, of 4,000, all ASCII (D6's block
+  with NEW IN 0.6.0, after D1's "Apple silicon or Intel"); promotional text, keywords and subtitle
+  unchanged (164, 95, 27).
+- For 0.6.1, measured by a script on each block without its last newline: What's New 1,544 of 4,000
+  characters; review notes 3,997 bytes (3,998 with the block's last newline) of 4,000, all ASCII;
+  the description, promotional text, keywords and subtitle unchanged from 0.6.0 (3,350, 164, 95, 27).
 - The encryption key, now in `iOSClient/Info.plist`: Release builds of this
   branch for the simulator and for a device each have
   `"ITSAppUsesNonExemptEncryption" => false` in the built Sill.app's
