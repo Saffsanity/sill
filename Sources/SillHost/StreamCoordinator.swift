@@ -3015,8 +3015,20 @@ package final class StreamCoordinator {
             guard pid != WindowCatalog.ownPID else { return (.none, "Sill's own window streams") }
             let name = NSRunningApplication(processIdentifier: pid)?.localizedName
                 ?? catalog.window(id: id)?.owningApplication?.applicationName ?? "pid \(pid)"
-            return (.app(pid: pid, name: SafeText.label(name)), "")
+            return (.app(pid: pid, display: appAudioDisplay?.displayID ?? 0, name: SafeText.label(name)), "")
         }
+    }
+
+    /// The display an app's sound filter is built on (issue #365): Sill's virtual display while the
+    /// streamed window is staged there (the app may have no window on the main display, and when Sill's
+    /// display appears or goes a filter on the main display can fail or end with -3815), else the main
+    /// display.
+    private var appAudioDisplay: SCDisplay? {
+        if case .window(let id) = active, virtualDisplay, stage.isStaged, stage.placement?.windowID == id,
+           let d = stage.scDisplay {
+            return d
+        }
+        return catalog.mainDisplay
     }
 
     /// Hands the pipeline what the sound should be of now.
@@ -3027,9 +3039,9 @@ package final class StreamCoordinator {
         }
     }
 
-    /// The source for `key`: ScreenCaptureKit's sound of one app, or of every app but Sill's, on the
-    /// main display whatever stop the Desktop shows (sound does not depend on the display: an app on the
-    /// virtual display or another monitor is heard the same), so a step to another stop keeps the sound
+    /// The source for `key`: ScreenCaptureKit's sound of one app (on Sill's virtual display while its
+    /// window is staged there, else on the main display: `appAudioDisplay`), or of every app but Sill's
+    /// on the main display whatever stop the Desktop shows, so a step to another stop keeps the sound
     /// running (DesktopDisplays); or a synthetic host's test tone.
     private func makeAudioSource(_ key: AudioKey) async -> AudioPipeline.Made {
         switch key {
@@ -3046,8 +3058,8 @@ package final class StreamCoordinator {
                 filter = SCContentFilter(display: display, excludingWindows: [])   // the CLI: no Sill app to leave out
             }
             return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing the whole Mac's sound (every app but Sill).")
-        case .app(let pid, let name):
-            guard let display = catalog.mainDisplay else { return .failed("no display to capture from") }
+        case .app(let pid, _, let name):
+            guard let display = appAudioDisplay else { return .failed("no display to capture from") }
             guard let app = await runningApplication(pid) else { return .failed("\(name) is not among the apps ScreenCaptureKit lists") }
             let filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
             return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing \(name)'s sound (every window of it).")

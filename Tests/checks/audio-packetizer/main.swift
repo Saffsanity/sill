@@ -239,6 +239,21 @@ check(rule(safari, .running, .none) == .stop && rule(safari, .starting, .none) =
       "none wanted: stop, whatever the phase")
 check(R.retryInterval == 10, "the retry is 10 s")
 check(safari == safariRenamed && safari != music && AudioKey.desktop != .test && AudioKey.none != .desktop, "keys: an app by its pid")
+let safariStaged = AudioKey.app(pid: 501, display: 77, name: "Safari")
+let safariRemade = AudioKey.app(pid: 501, display: 78, name: "Safari")
+check(safari != safariStaged && safariStaged != safariRemade && safariStaged == AudioKey.app(pid: 501, display: 77, name: "Safari TP"),
+      "#365: an app moved to Sill's display, or Sill's display remade under a new ID, is a new source")
+check(rule(safari, .running, safariStaged) == .start && rule(safari, .ended, since: 0.2, safariStaged) == .start,
+      "#365: moving to Sill's display starts the sound there at once, even 0.2 s after an ended start")
+check(near(R.retryIn(phase: .ended, wanted: safari, lastStartAt: 100, now: 100.3) ?? -1, 9.7)
+      && R.retryIn(phase: .ended, wanted: safari, lastStartAt: 100, now: 100.25) == 9.75, "#365: failed 0.3 s in: retry in 9.7 s")
+check(R.retryIn(phase: .ended, wanted: safari, lastStartAt: 100, now: 125) == 0, "#365: ended after 25 s of running: retry at once")
+check(R.retryIn(phase: .ended, wanted: safari, lastStartAt: 100, now: 90) == 10, "#365: a clock that went back waits at most retryInterval")
+check(R.retryIn(phase: .running, wanted: safari, lastStartAt: 100, now: 102) == nil
+      && R.retryIn(phase: .starting, wanted: safari, lastStartAt: 100, now: 102) == nil
+      && R.retryIn(phase: .idle, wanted: safari, lastStartAt: 100, now: 102) == nil
+      && R.retryIn(phase: .ended, wanted: .none, lastStartAt: 100, now: 102) == nil,
+      "#365: only an ended source that is still wanted schedules a retry")
 
 // MARK: - PCMLayout
 
