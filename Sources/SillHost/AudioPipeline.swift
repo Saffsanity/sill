@@ -92,6 +92,8 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
     }
     private var requested: Request?
     private var worker: Task<Void, Never>?
+    private var lastMake: (@MainActor (AudioKey) async -> Made)?
+    private var retryTask: Task<Void, Never>?
     /// AAC-ELD could not be made (`encoderProblem`): no sound this run, and every source shows why.
     private var encoderGone: String?
     /// "Audio stopped" was said for the source that runs.
@@ -134,6 +136,9 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
     /// `make` builds the source when one is to start.
     @MainActor
     func follow(_ key: AudioKey, reason: String = "", make: @escaping @MainActor (AudioKey) async -> Made) {
+        retryTask?.cancel()
+        retryTask = nil
+        lastMake = key == .none ? nil : make
         requested = Request(key: key, reason: reason, make: make)
         wanted = key
         if key == .none { status = nil }
@@ -144,6 +149,9 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
     /// it ends, and needs nothing: the process's end takes the capture with it).
     @MainActor
     func shutdown() {
+        retryTask?.cancel()
+        retryTask = nil
+        lastMake = nil
         if !stopSaid, current != .none, phase == .starting || phase == .running {
             stopSaid = true
             print("Audio stopped: Sill is quitting.")
@@ -176,6 +184,7 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
             }
         }
         worker = nil
+        scheduleRetry()
     }
 
     /// On the main actor: the source goes, and its chunks with it (a stopped source delivers none, and
@@ -253,6 +262,25 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
         generation += 1
         let next = generation
         queue.async { self.live = next; self.packetizer = nil; self.encoder = nil }
+        scheduleRetry()
+    }
+
+    /// A source that failed or ended while it is still wanted tries again by itself once
+    /// `AudioSourceRule.retryInterval` has passed since its last start (issue #365).
+    @MainActor
+    private func scheduleRetry() {
+        retryTask?.cancel()
+        retryTask = nil
+        guard let delay = AudioSourceRule.retryIn(phase: phase, wanted: wanted, lastStartAt: lastStartAt, now: HostClock.now()),
+              let make = lastMake else { return }
+        let key = wanted
+        retryTask = Task { @MainActor [weak self] in
+            if delay > 0 {
+                try? await Task.sleep(for: .seconds(delay + 0.05))
+            }
+            guard !Task.isCancelled, let self, self.phase == .ended, self.wanted == key else { return }
+            self.follow(key, make: make)
+        }
     }
 
 
@@ -267,7 +295,7 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
     /// The Mac's status: "Safari", "Whole Mac", "Test Tone".
     static func shown(_ key: AudioKey) -> String {
         switch key {
-        case .app(_, let name): return name
+        case .app(_, _, let name): return name
         case .desktop: return "Whole Mac"
         case .test: return "Test Tone"
         case .none: return ""
@@ -277,7 +305,7 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
     /// The log's words: "Safari's sound", "the whole Mac's sound", "the test tone".
     static func said(_ key: AudioKey) -> String {
         switch key {
-        case .app(_, let name): return "\(name)'s sound"
+        case .app(_, _, let name): return "\(name)'s sound"
         case .desktop: return "the whole Mac's sound"
         case .test: return "the test tone"
         case .none: return "no sound"
@@ -287,7 +315,7 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
     /// The Mac's and the device's words: "the sound of Safari", "the sound of the whole Mac".
     static func soundOf(_ key: AudioKey) -> String {
         switch key {
-        case .app(_, let name): return "the sound of \(name)"
+        case .app(_, _, let name): return "the sound of \(name)"
         case .desktop: return "the sound of the whole Mac"
         case .test: return "the test tone"
         case .none: return "no sound"
@@ -296,7 +324,7 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
 
     private static func formatSource(_ key: AudioKey) -> (String, String?) {
         switch key {
-        case .app(_, let name): return (AudioFormat.sourceApp, SafeText.label(name))
+        case .app(_, _, let name): return (AudioFormat.sourceApp, SafeText.label(name))
         case .desktop: return (AudioFormat.sourceDesktop, nil)
         case .test, .none: return (AudioFormat.sourceTest, nil)
         }

@@ -144,13 +144,15 @@ enum AudioKey: Equatable, CustomStringConvertible {
     case none
     case desktop
     case test
-    case app(pid: Int32, name: String)
+    case app(pid: Int32, display: UInt32 = 0, name: String)
 
-    /// The same source: an app is the same by its pid (the name is only shown).
+    /// The same source: an app is the same by its pid and the display its capture is built on
+    /// (the name is only shown; when its window moves to Sill's virtual display, or Sill's display
+    /// is remade under a new ID, #365, it is a new capture).
     static func == (a: AudioKey, b: AudioKey) -> Bool {
         switch (a, b) {
         case (.none, .none), (.desktop, .desktop), (.test, .test): return true
-        case (.app(let p, _), .app(let q, _)): return p == q
+        case (.app(let p, let d1, _), .app(let q, let d2, _)): return p == q && d1 == d2
         default: return false
         }
     }
@@ -160,7 +162,7 @@ enum AudioKey: Equatable, CustomStringConvertible {
         case .none: return "none"
         case .desktop: return "desktop"
         case .test: return "test"
-        case .app(let pid, let name): return "\(name) (pid \(pid))"
+        case .app(let pid, _, let name): return "\(name) (pid \(pid))"
         }
     }
 }
@@ -195,6 +197,14 @@ enum AudioSourceRule {
         case .ended: return now - lastStartAt >= retryInterval ? .start : .keep
         case .idle: return .start
         }
+    }
+
+    /// How long until a source in `phase` that `wanted` still asks for should be tried again, in
+    /// seconds from `now` (`retryInterval` after `lastStartAt`, at least 0; a clock that went back
+    /// waits at most `retryInterval`, issue #365); nil unless `phase == .ended` and `wanted != .none`.
+    static func retryIn(phase: Phase, wanted: AudioKey, lastStartAt: TimeInterval, now: TimeInterval) -> TimeInterval? {
+        guard phase == .ended, wanted != .none else { return nil }
+        return max(0, retryInterval - max(0, now - lastStartAt))
     }
 }
 
