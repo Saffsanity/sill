@@ -1012,7 +1012,10 @@ extension StreamClient {
                            recognitionKey: recognition, remotePort: HostConfigDefaults.remotePort, addresses: [], typedAddresses: nil,
                            infoIssuedAt: 0, bonjourName: bonjourName, lastWorked: nil, pairedAt: Date(), method: method,
                            lastConnectedAt: nil, lastRoute: nil, homeTLS: true, revoked: nil)
-        if let info { mac = SavedMacs.refreshed(mac, info: info, fingerprint: fingerprint, allowLoopback: Self.keepsLoopback) ?? mac }
+        if let info {
+            mac = SavedMacs.refreshed(mac, info: info, fingerprint: fingerprint, allowLoopback: Self.keepsLoopback,
+                                      now: Date().timeIntervalSince1970) ?? mac
+        }
         if let link, link.fingerprint == fingerprint {
             mac = SavedMacs.applyingLink(link.addresses.map(RemoteDialPolicy.address(for:)), port: link.port, to: mac,
                                          allowLoopback: Self.keepsLoopback)

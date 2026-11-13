@@ -121,10 +121,13 @@ struct ContentView: View {
 ///   normal app too, and in the mock (where a real keyboard then upsets the fake screen, but where
 ///   the fake screen is the simulator's own: `-SillLayout 669x951 -SillHinge half` on the iPhone Duo
 ///   simulator folded into the laptop pose draws the key row above the real keyboard, #215).
-/// * `-SillKeyboardProbe 1` — every software keyboard notification on the console ("keyboard probe:
-///   UIKeyboardWillChangeFrameNotification: begin 0,0 0×0, end 0,455.5 669×495.5; own heights …"),
-///   beside the `keyboard frame: top 455.5, 495.5 pt tall` line each change prints: how the laptop
-///   pose's numbers were measured (DuoPosture.visibleKeyboardTop). In the normal app too.
+/// * `-SillKeyboardProbe 1` — every software keyboard notification on the console ("keyboard probe
+///   12.345: UIKeyboardWillChangeFrameNotification: begin 0,555 669×396, end 0,455.5 669×495.5; a reading"),
+///   and the keyboard's views when a look tells nothing: how the inner display's numbers were measured
+///   (KeyboardFrameMonitor, DuoPosture.keyboardGlass). In the normal app too. `-SillKeyboardReadDelays
+///   '0.05,0.1'` sets when the input views are reloaded after every change instead of
+///   DuoPosture.keyboardReadDelays (empty: never), `-SillKeyboardReloadCap N` another cap than 40 in ten
+///   seconds: tests only (reloads under typing, the world with no reloads).
 /// * `-SillHardwareKeyboard 1|0` — a hardware keyboard is attached, or not, for this run, whatever
 ///   GameController says (HardwareKeyboardMonitor; docs/hardware-keyboard-plan.md). A simulator's
 ///   GameController always counts the simulator's own keyboard, so without it the stream's input view
@@ -152,9 +155,15 @@ struct ContentView: View {
 ///   only at a synthetic host, or put a relay that drops kind 8 (input) in front of the host.
 /// * `-SillActive none` — start with nothing streaming (also `desktop`, or a window ID like `104`).
 ///   The mock otherwise starts on Code's window, as the boards draw it.
+/// * `-SillDesktopDisplays 3,2` — the mock's Mac has three stops, the Desktop on the second: the
+///   Desktop button reads "Desktop 2", with three dots while the Desktop streams (`-SillActive desktop`)
+///   and "2/7" from seven stops (DesktopDisplays, issue #91, docs/virtual-desktop-plan.md §1). `2` alone
+///   is the first. The stops are named as a MacBook with monitors would name them ("Built-in Retina
+///   Display", "DELL U2723QE", …), for VoiceOver's value; `-SillDesktopDisplayNames 'A|B|C'` names them.
 /// * `-SillIdiom pad` — draw a screen taller than wide and narrower than 600 pt as an iPad draws
 ///   such a window (the compact halves), not as a phone does (`DuoLayout.phoneArrangement`), so an
-///   iPhone simulator can photograph it; `phone` the other way round. Also in the normal app.
+///   iPhone simulator can photograph it; `phone` the other way round. Also in the normal app. The
+///   Settings panel's "This iPad" or "This iPhone" follows it too (#291's photos, one simulator).
 /// * `-SillLive 1` — host the app's *real* `StreamClient` in the frame instead of the mock, so the
 ///   simulator can connect to a Mac over Bonjour at a Duo size. Not connected yet shows the normal
 ///   connect screen inside the frame. Without it nothing touches the network, exactly as before.
@@ -203,13 +212,15 @@ struct ContentView: View {
 /// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
 /// * `-SillSettingsEnd 1` — with `-SillSettings 1`: the panel's rows start scrolled to their end,
 ///   so a photo of a short screen shows the last groups (Direct Wireless, Away from home, This
-///   iPad, Take the Tour). `-SillSettingsScroll gestures` starts them at the This iPad group
+///   iPad, Take the Tour, the version). `-SillSettingsScroll gestures` starts them at the This iPad group
 ///   instead (its switches and rows, which the footnotes under them push out of the end's view on a
 ///   short screen), `-SillSettingsScroll sound` at the Send Audio row, `-SillSettingsScroll mute` at
 ///   the Mute row under Send Audio, `-SillSettingsScroll reverse` at its Reverse Scrolling switch, and
 ///   `-SillSettingsScroll hold` at its Hold to Show Window Controls stepper.
 ///   `-SillSettingsScroll clipboard` at the clipboard's Paste row (it and the group's footnote, which
 ///   a short screen's `gestures` leaves under the two switches above them).
+///   `-SillSettingsScroll pip` at the This iPad group's title over its first row, the Picture in Picture
+///   switch and its footnote (#291).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
@@ -243,16 +254,20 @@ struct ContentView: View {
 ///   Settings panel's This iPad group) off for one run, in the normal app too. The mock Mac shares its
 ///   clipboard (`WindowList.clipboard` 1) in every settings case but `legacy`, whose group then has no
 ///   clipboard rows. `-SillClipboardChip 1` offers the clipboard's chip over the mock's stream (as
-///   after a copy on this device; it stays), and `-SillClipboardNote sent|long|notsent|pasted` shows a
+///   after a copy on this device; it stays; `-SillMockMacName <name>` gives the mock Mac another name), and `-SillClipboardNote sent|long|notsent|pasted` shows a
 ///   Paste's note in its place and under the group's Paste (`pasted`: "Pasted on ‹Mac›.", the note
 ///   after ⌘V; docs/clipboard-plan.md).
-/// * `-SillMacLocked 1|2|unlocking` — the mock Mac's screen is locked (1) or it is switched to another
+/// * `-SillMacLocked 1|2|unlocking|view` — the mock Mac's screen is locked (1) or it is switched to another
 ///   user (2) (docs/locked-mac-plan.md): its list has no windows, apps or clipboard and says `locked` (and
 ///   `offConsole` for 2), its placeholder streams as the Desktop, the cover over the stream says why
 ///   (`LockedMac.title` and `detail`), and the Apps drawer and the Settings panel's header show the line
 ///   ("Mac mini is locked. Unlock it to see its windows."); `unlocking` shows the cover's "Unlocking…". A
 ///   live session against a locked test host (SILL_TEST_LOCKED=1, or SILL_TEST_LOCKED_FILE holding 1 or
-///   2) shows the same.
+///   2) shows the same. `view`: the off-console view (docs/off-console-plan.md): switched to another user, the
+///   Mac showing this session anyway, its user's switch on: the mock's windows and picture as they are, no
+///   cover, the line over the stream ("Your account’s own desktop, not this Mac’s screen. …"), the drawer's
+///   and the Settings panel's line, Aa dimmed, no Menus button or Paste; a live session against a test host
+///   with --off-console-view and SILL_TEST_LOCKED_FILE holding 2 shows the same.
 /// * `-Sill.pasteRightAway 0` — not a harness argument either: this device's Paste on ‹Mac› Right Away
 ///   (the This iPad group, under Share Clipboard) off for one run, in the normal app too: a Paste's
 ///   receipt then presses no ⌘V on the Mac, and the chip, the note and the group's footnote say what
@@ -272,11 +287,36 @@ struct ContentView: View {
 ///   `-SillLargerPictureToggle <s>[,<s>…]` switches it at those seconds after the stream screen
 ///   shows, as the Settings panel's switch does (saved; leave out `-Sill.largerPicture`, which would
 ///   hold it), so a live run shows the one new viewport each switch sends.
-/// * `-SillAXDump <s>` — `s` seconds after the stream screen shows, the console lists its
-///   accessibility elements in the order the accessibility tree hands them to VoiceOver ("ax: 1
-///   Open the app list (33,463 55×50)"). SwiftUI builds that tree only for an assistive technology:
-///   on a private simulator, `xcrun simctl spawn UDID defaults write com.apple.Accessibility
-///   ApplicationAccessibilityEnabled -bool true` first. In the mock and the normal app.
+/// * `-Sill.pictureInPicture 1` — not a harness argument either: this device's Picture in Picture switch
+///   (the Settings panel's This iPad group; docs/picture-in-picture-plan.md, #291) on for one run, in the
+///   normal app too. `-SillPiPSupported 1|0` says iOS has Picture in Picture here, or not, for one run: the
+///   switch shows (or not) whatever the simulator says, for the harness's photos (`-SillSettings 1
+///   -SillSettingsScroll pip`); AVKit's own answer still decides whether a controller is made. In a live
+///   session (the normal app with `-SillConnect`, or `-SillLive 1`), with the switch on:
+///   `-SillPiPStartAt <s>` starts Picture in Picture s seconds after the picture is first offered, as iOS
+///   starts it as Sill leaves (a stand-in for leaving, which a test cannot do: then `xcrun simctl launch
+///   UDID com.apple.Preferences` sends Sill to the background and `xcrun simctl launch UDID me.saffer.sill`
+///   brings it back); `-SillPiPPauseAt <s>[,<s>…]` presses the window's pause or play button at those
+///   seconds after it started; `-SillPiPLockAt <s>` locks the device then, as iOS says it (protected data
+///   going away); `-SillPiPSession active|inactive` holds the app's audio session active while the picture
+///   is offered or shows (a device's default), or never (the simulator's). The console's `pip:` lines say
+///   what happened ("pip: offered …", "pip: playing (iOS starts Picture in Picture)", "pip: stopping: …").
+/// * `-SillAXDump <s>` — `s` seconds after the stream screen shows, and after the connect screen
+///   shows, the console lists its accessibility elements in the order the accessibility tree hands
+///   them to VoiceOver ("ax: 1 Open the app list (33,463 55×50)"). SwiftUI builds that tree only for
+///   an assistive technology: on a private simulator, `xcrun simctl spawn UDID defaults write
+///   com.apple.Accessibility ApplicationAccessibilityEnabled -bool true` first. In the mock and the
+///   normal app. Each line ends in the element's custom actions ("actions “Copy”").
+///   `-SillAXAction '<label>|<action>'`, with it: half a second after the dump, the custom action of
+///   that name on the first element whose label begins with that label, as VoiceOver's actions do
+///   it, then what the clipboard holds ("ax: performed “Copy” on “Sill version 0.6.2, build 1400”:
+///   true; the clipboard holds “Sill 0.6.2 (1400)”"): a private simulator only (it writes that
+///   simulator's clipboard, and Simulator.app, while it runs, can share it with the Mac's).
+/// * `-SillAppVersion <v>` and `-SillAppBuild <b>` — the version label at the bottom of the connect
+///   screen and of the Settings panel (VersionLabel.shown) shows these instead of the bundle's
+///   CFBundleShortVersionString and CFBundleVersion (an empty one: as if the bundle had none), so a
+///   photo shows a long version or a missing one without another build. The label alone: the hello
+///   still says the bundle's. In the mock and the normal app.
 /// * `-SillVoiceOver 1` — the Settings panel acts as if VoiceOver were on: the This iPad group's
 ///   footnote says VoiceOver keeps three fingers and its rows do the gestures instead (they are
 ///   accessibility actions whether or not it is on).
@@ -329,6 +369,29 @@ struct ContentView: View {
 ///   fraction of the picture's pane (its middle without one), then the lift's settle: `2.5@0.3,0.4; 3
 ///   0.1` zooms in, then pinches all the way out. The console's "harness: -SillZoom …" line gives the
 ///   zoom.
+/// * `-SillDesktopTapAt <s>[,<s>…]` — live: the Desktop button tapped at those seconds, as a finger does (on a
+///   Mac of two stops or more, with the Desktop streaming, its next stop; full screen's gate shows a hide keeping
+///   it). The console says "harness: the Desktop button tapped at … (it read …)".
+/// * `-SillMockHardware 1` — an iPhone 15 Pro's Dynamic Island (where the fake safe area puts the sensor
+///   housing), rounded corners and home indicator drawn over the fake screen (MockHardware), for photos of
+///   where full screen's hidden picture goes.
+/// * `-SillFullScreen 1` — full screen (docs/full-screen-plan.md): Sill's controls hidden from the start, the
+///   picture in the screen's room, in the mock and live, and in the normal app. With it,
+///   `-SillFullScreenReveal P` catches the swipe in from the left edge P of the way (0…1), so the preview of the
+///   controls coming in can be photographed. `-SillFullScreenHint 1` shows the hint every time the controls
+///   hide (`hold`: and keeps it up, for a photo; with `-SillFullScreen 1` from the start).
+///   `-SillFullScreenRoom screen|housing|safe` sets where the hidden picture goes (FullScreenPolicy.Room;
+///   `housing`, clear of the sensor housing and down under the home indicator, is the default).
+///   `-SillFullScreenToggle <s>[,<s>…]` hides or shows the controls at those seconds after the stream screen
+///   shows, as Settings › Full Screen and the swipe in do (only while a hide may start: something open, or
+///   nothing streaming, keeps them); `-SillFullScreenSwipe <s>[,<s>…]` plays a swipe in at those seconds (its
+///   progress in steps, then its lift), `-SillFullScreenTakeBack <s>[,<s>…]` one taken back (in 60 % of the
+///   width, then lifted moving back, so it springs back), and `-SillRevealSlow F` makes the swipe in's own
+///   animations F times slower (1 to 50), for photos of them mid-way; `-SillShakeAt <s>[,<s>…]` a shake (the
+///   window's notification, which Shake to Show Controls, `-Sill.shakeToShowControls 0`, turns off). The
+///   console says "full screen: hidden by …" and "full screen: shown by …", and in a Debug build every touch the
+///   swipe in judged at the left edge, "reveal: …" with its numbers (RevealEdgePan), and each lift's travel,
+///   speed and verdict.
 /// * `-SillInputScript '<t> <step>; …'` — with `-SillLive 1` only: input for the simulator gates,
 ///   which have no finger (`InputScript`): `t` is seconds since the session's first window list, and
 ///   a step is `down`, `pad DX,DY`, `lift`, `click` or `padscroll DX,DY` on the portrait pad, `tap
@@ -517,10 +580,12 @@ struct ContentView: View {
 /// and `keyboard: up, 320 pt tall, its top at 574 pt in the stream screen; the key row ends 10 pt
 /// above it, …` each time the software keyboard moves (PortraitStreamScreen); `keyboard frame: top
 /// 455.5, 495.5 pt tall` (or `none`) each time UIKit reports the keyboard elsewhere
-/// (KeyboardFrameMonitor); and in the Duo's laptop pose `keyboard row: the caps 500–551 (51 pt) between
-/// the fold's edge at 496 and the keyboard's glass at 555 (…)`, under a tall keyboard `keyboard row: the
-/// caps 458.5–492.5 (34 pt) in the crease, 455.5–495.5: …`, or `keyboard row: none`, as the key row goes
-/// alone above the keyboard and comes back (#215).
+/// (KeyboardFrameMonitor); and on the Duo's inner display upright `keyboard: the row 500–551 (51 pt): the
+/// glass at 555, 59 pt under the fold's edge at 496 (read: 0,555 669×396; reported 455.5)`, under a tall
+/// keyboard `keyboard: the toggle at 14,395 (44 pt): …`, `keyboard: nothing yet (a reading on its way)`,
+/// or `keyboard: none`, as the key row or the toggle stands in for the rows and goes (#215), with the
+/// monitor's `keyboard: looked: …`, `keyboard: assumed …`, `keyboard: reload …`, `keyboard: read …` and
+/// `keyboard: remembered: …` lines that say where each reading came from.
 ///
 /// Launch arguments land in `NSArgumentDomain`, which is not persisted, so a normal launch is
 /// exactly the app it was before. None of this is built in Release.
@@ -530,6 +595,52 @@ struct ContentView: View {
 /// The container ignores the safe area, and since the frame is centred and smaller than the
 /// device's safe area, the iPad's own insets never reach `StreamScreen`: the fake screen behaves
 /// like a device screen with zero insets.
+/// DEBUG `-SillMockHardware 1` (ContentView's contract): the parts of an iPhone 15 Pro the fake screen does not
+/// have, drawn over it for full screen's photos (docs/full-screen-plan.md, open question 5): the Dynamic Island
+/// (126×37 pt, 11 pt from the edge) on the side the fake safe area says the sensor housing is (its top inset
+/// upright, its left inset sideways), the display's rounded corners (55 pt, the clip), and the home indicator
+/// (134×5 pt, 8 pt from the bottom). Nothing here touches the stream screen's own layout.
+struct MockHardware: View {
+    let size: CGSize
+    let insets: EdgeInsets?
+    static let wanted = UserDefaults.standard.bool(forKey: "SillMockHardware")
+    static let cornerRadius: CGFloat = 55
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if let insets, insets.top > 40 {
+                Capsule().fill(Color.black)
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.25), lineWidth: 0.5))
+                    .frame(width: 126, height: 37)
+                    .offset(x: (size.width - 126) / 2, y: 11)
+            } else if let insets, insets.leading > 40 {
+                Capsule().fill(Color.black)
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.25), lineWidth: 0.5))
+                    .frame(width: 37, height: 126)
+                    .offset(x: 11, y: (size.height - 126) / 2)
+            }
+            Capsule().fill(Color.white.opacity(0.85))
+                .frame(width: 134, height: 5)
+                .offset(x: (size.width - 134) / 2, y: size.height - 8 - 5)
+        }
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    /// The fake screen's clip: the display's rounded corners with the mock hardware, else the plain clip the
+    /// harness always had (so every photo without it is pixel for pixel as before).
+    struct Clip: ViewModifier {
+        @ViewBuilder func body(content: Content) -> some View {
+            if MockHardware.wanted {
+                content.clipShape(RoundedRectangle(cornerRadius: MockHardware.cornerRadius, style: .continuous))
+            } else {
+                content.clipped()
+            }
+        }
+    }
+}
+
 struct LayoutHarness: View {
     struct Spec {
         let size: CGSize
@@ -625,10 +736,26 @@ struct LayoutHarness: View {
     init(spec: Spec, live: StreamClient) {
         self.spec = spec
         self.live = live
-        _mock = StateObject(wrappedValue: spec.connectCase.map(MockCatalog.connectClient)
+        _mock = StateObject(wrappedValue: Self.withDisplays(spec.connectCase.map(MockCatalog.connectClient)
                                 ?? MockCatalog.client(active: spec.mockActive, settings: spec.settingsCase,
                                                       menus: spec.live ? nil : spec.macMenu,
-                                                      pointer: spec.pointer, pencilPointer: spec.pencilPointer))
+                                                      pointer: spec.pointer, pencilPointer: spec.pencilPointer)))
+    }
+
+    /// `-SillDesktopDisplays 3,2`: the mock's Mac has three stops and the Desktop is on the second
+    /// (DesktopDisplays: the Desktop button reads "Desktop 2"); `2` alone, the first. Named as a MacBook's
+    /// screens would be, or by `-SillDesktopDisplayNames 'A|B|C'`.
+    private static func withDisplays(_ client: StreamClient) -> StreamClient {
+        let parts = (UserDefaults.standard.string(forKey: "SillDesktopDisplays") ?? "").split(separator: ",").compactMap { Int($0) }
+        if let count = parts.first {
+            client.hostDesktopDisplays = count
+            client.hostDesktopDisplay = parts.count > 1 ? parts[1] : 1
+            let given = (UserDefaults.standard.string(forKey: "SillDesktopDisplayNames") ?? "").split(separator: "|").map(String.init)
+            let mock = ["Built-in Retina Display", "DELL U2723QE", "LG HDR 4K", "Studio Display", "Sidecar Display (iPad)",
+                        "BenQ PD2705U", "SAMSUNG", "PHL 346B1C", "ASUS PA279CV"]
+            client.hostDesktopDisplayNames = given.count == count ? given : (0..<max(0, count)).map { mock[$0 % mock.count] }
+        }
+        return client
     }
 
     var body: some View {
@@ -638,9 +765,14 @@ struct LayoutHarness: View {
                 Color.black
                 insetScreen
                     .environment(\.duoEnvironment, spec.duoEnvironment)
+                    // The fake screen's safe area, which full screen measures its room by (a device: the window's).
+                    .environment(\.harnessSafeArea, spec.insets ?? EdgeInsets())
                     .frame(width: spec.size.width, height: spec.size.height)
                     .coordinateSpace(.named(DuoPosture.displaySpace))
-                    .clipped()
+                    // `-SillMockHardware 1`: an iPhone's Dynamic Island, rounded corners and home indicator drawn
+                    // over the fake screen, for full screen's photos of where the hidden picture goes.
+                    .overlay { if MockHardware.wanted { MockHardware(size: spec.size, insets: spec.insets) } }
+                    .modifier(MockHardware.Clip())
                     .padding(1)
                     .background(Color(hex: 0x333333))
                     .rotationEffect(.degrees(fit.turned ? 90 : 0))
@@ -1244,6 +1376,20 @@ struct ConnectScreen: View {
             #if DEBUG
             print("connect: \(style.rawValue) (Sill.connectionStyle \(styleRaw ?? "unset"))")
             scheduleStyleToggles()
+            // `-SillAXDump <s>`: the connect screen's accessibility elements too, s seconds after it shows,
+            // and `-SillAXAction '<label>|<action>'` half a second later.
+            // Not once a session has taken the screen: the stream screen dumps itself.
+            let dump = UserDefaults.standard.double(forKey: "SillAXDump")
+            if dump > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + dump) { [client] in
+                    if !client.connected { StreamScreen.accessibilityDump() }
+                }
+            }
+            if dump > 0, let spec = UserDefaults.standard.string(forKey: "SillAXAction") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + dump + 0.5) { [client] in
+                    if !client.connected { StreamScreen.accessibilityPerform(spec) }
+                }
+            }
             #endif
         }
         .onChange(of: client.status) { _, line in announce(line) }
@@ -1627,30 +1773,67 @@ struct ConnectScreen: View {
     // MARK: The footer
 
     /// For someone who found Sill here first, and for App Review: what else it needs, where to get
-    /// it, where to get help, and the privacy policy. Muted and 13 pt like the status line, but it
-    /// follows the text size, up to the Settings panel's cap (the column keeps its fixed sizes); it
-    /// wraps, never truncates. Each link opens in Safari (a Link hands its URL to the environment's
-    /// openURL), and VoiceOver reads it as a link. The addresses are SillLinks'.
+    /// it, where to get help, and the privacy policy; and this app's version, for a bug report. Muted
+    /// and 13 pt like the status line, but it follows the text size, up to the Settings panel's cap
+    /// (the column keeps its fixed sizes); it wraps, never truncates. Each link opens in Safari (a
+    /// Link hands its URL to the environment's openURL), and VoiceOver reads it as a link. The
+    /// addresses are SillLinks'.
+    ///
+    /// The version (VersionLine, docs/version-label-plan.md) sits at the footer's trailing edge, on a
+    /// line the footer has wherever it fits there, so the footer is no taller for it and the column
+    /// never moves for it (ColumnOverFooter measures this view): after "Needs the free Sill app on your
+    /// Mac." (every screen from 390 pt wide at the default text size); else a line of its own under
+    /// the links on one line; else, the links on two lines, beside Support and the privacy policy, or
+    /// beside the download link, the shorter; else a line of its own under those. VoiceOver reads it
+    /// last in the footer, wherever it is.
     private func footer(_ layout: ConnectLayout) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Needs the free Sill app on your Mac.")
-                .foregroundStyle(Palette.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            // All three on one line while they fit, else the download link over the other two,
-            // the lines far enough apart that their tap areas meet without overlapping. Upward the
-            // areas reach a little into the line above, which is plain text.
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 0) {
-                    downloadLink
-                    linkSeparator
-                    supportAndPrivacy
+        Group {
+            if let version = VersionLabel.shown {
+                ViewThatFits(in: .horizontal) {
+                    // After the sentence; the links are on one line whenever this fits.
+                    VStack(alignment: .leading, spacing: 8) {
+                        atLineEnd(needsMac, version)
+                        linksOnOneLine
+                    }
+                    // A line of its own under the links on one line.
+                    VStack(alignment: .leading, spacing: 8) {
+                        needsMac
+                        linksOnOneLine
+                        onItsOwnLine(version)
+                    }
+                    // The links on two lines: beside Support and the privacy policy, else beside the
+                    // download link, the shorter.
+                    VStack(alignment: .leading, spacing: 8) {
+                        needsMac
+                        VStack(alignment: .leading, spacing: 2 * Self.linkReach) {
+                            downloadLink
+                            atLineEnd(supportAndPrivacy, version)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        needsMac
+                        VStack(alignment: .leading, spacing: 2 * Self.linkReach) {
+                            atLineEnd(downloadLink, version)
+                            supportAndPrivacy
+                        }
+                    }
+                    // A line of its own under the two lines of links.
+                    VStack(alignment: .leading, spacing: 8) {
+                        needsMac
+                        linksOnTwoLines
+                        onItsOwnLine(version)
+                    }
                 }
-                VStack(alignment: .leading, spacing: 2 * Self.linkReach) {
-                    downloadLink
-                    supportAndPrivacy
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    needsMac
+                    links
                 }
             }
         }
+        // One container, so VoiceOver can read the version after the links (VersionLine's sort
+        // priority) where it is drawn beside the sentence above them.
+        .accessibilityElement(children: .contain)
         .font(.footnote)
         .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         .padding(.horizontal, 10)
@@ -1662,6 +1845,61 @@ struct ConnectScreen: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         // Room for the last link's tap area, which then stays on the screen.
         .padding(.bottom, Self.linkReach)
+    }
+
+    /// The least room between the version and the words before it on their line.
+    private static let versionGap: CGFloat = 12
+
+    /// The version at the end of a line of the footer, at its trailing edge. The gap is the version's
+    /// own padding, so it is part of the line's width when ViewThatFits asks whether the line fits
+    /// (the Spacer beside it asks for none). Read after the links (the footer is one container).
+    private func atLineEnd(_ words: some View, _ version: VersionLabel) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+            words
+            Spacer(minLength: 0)
+            VersionLine(label: version).padding(.leading, Self.versionGap).accessibilitySortPriority(-1)
+        }
+    }
+
+    /// The version on a line of its own under the links, at the trailing edge, and behind them: the
+    /// links' tap areas reach 14 pt below their words, into this line, as they reached below the
+    /// footer's last line before.
+    private func onItsOwnLine(_ version: VersionLabel) -> some View {
+        VersionLine(label: version)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .accessibilitySortPriority(-1)
+            .zIndex(-1)
+    }
+
+    private var needsMac: some View {
+        Text("Needs the free Sill app on your Mac.")
+            .foregroundStyle(Palette.muted)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// All three on one line while they fit, else the download link over the other two, the lines
+    /// far enough apart that their tap areas meet without overlapping. Upward the areas reach a
+    /// little into the line above, which is plain text.
+    private var links: some View {
+        ViewThatFits(in: .horizontal) {
+            linksOnOneLine
+            linksOnTwoLines
+        }
+    }
+
+    private var linksOnOneLine: some View {
+        HStack(spacing: 0) {
+            downloadLink
+            linkSeparator
+            supportAndPrivacy
+        }
+    }
+
+    private var linksOnTwoLines: some View {
+        VStack(alignment: .leading, spacing: 2 * Self.linkReach) {
+            downloadLink
+            supportAndPrivacy
+        }
     }
 
     private var downloadLink: some View {
@@ -1696,6 +1934,45 @@ struct ConnectScreen: View {
         }
         .padding(.vertical, -Self.linkReach)
     }
+}
+
+/// This app's version and build, "Sill 0.6.2 (1400)" (VersionLabel), at the bottom of the connect
+/// screen's footer and as the Settings panel's last line (Noah, 2026-11-11; docs/version-label-plan.md),
+/// in the muted colour, at the size of the text around it (the footnote style both give it). One
+/// element for VoiceOver, "Sill version 0.6.2, build 1400". A long press offers Copy (a context menu:
+/// a tap and a scroll pass by), which puts the words shown on the clipboard for a bug report;
+/// VoiceOver has it as an action. It wraps rather than truncate, on a screen too narrow for it.
+struct VersionLine: View {
+    let label: VersionLabel
+
+    var body: some View {
+        Text(label.text)
+            .foregroundStyle(Palette.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .contextMenu {
+                Button("Copy", systemImage: "doc.on.doc", action: copy)
+            }
+            .accessibilityLabel(label.spoken)
+            .accessibilityAction(named: "Copy", copy)
+    }
+
+    private func copy() {
+        UIPasteboard.general.string = label.text
+    }
+}
+
+extension VersionLabel {
+    /// This app's, from its bundle's Info.plist. DEBUG: `-SillAppVersion <v>` and `-SillAppBuild <b>`
+    /// stand in for the bundle's values in the label alone (not the hello), so the harness photographs
+    /// a long version or a missing one (an empty value) without another build.
+    static let shown: VersionLabel? = {
+        var info = Bundle.main.infoDictionary ?? [:]
+        #if DEBUG
+        if let v = UserDefaults.standard.string(forKey: "SillAppVersion") { info["CFBundleShortVersionString"] = v }
+        if let b = UserDefaults.standard.string(forKey: "SillAppBuild") { info["CFBundleVersion"] = b }
+        #endif
+        return VersionLabel(info: info)
+    }()
 }
 
 /// The connect screen's column inside the scroll view that sits above its footer. The column sits

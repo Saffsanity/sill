@@ -549,7 +549,7 @@ alone comes up then (`KeyRow.hidden`), not when the finger lifts. In the crease 
 tall. #220's `halvesBarShowsKeyboard` and `halvesPadTop` went with their checks and mutants.
 
 **The tall keyboards: the crease** (Noah, 2026-10-29: "Crease", for those keyboards only; the threshold
-2026-11-09). A keyboard whose glass leaves under 52 pt below the fold's edge gets the row in the crease:
+2026-11-09; replaced on 2026-11-10 by the toggle after the device test, "The keyboard toggle" below). A keyboard whose glass leaves under 52 pt below the fold's edge gets the row in the crease:
 34 pt caps centred on the fold's band (458.5–492.5 of 455.5–495.5, 3 pt either side), 14 pt sides, 6 pt
 gaps, the same caps, never taller than the band. The threshold is a rule, not a list of keyboards: 44 pt
 is the least touch target in Apple's Human Interface Guidelines, and with the 4 pt of black above and
@@ -608,6 +608,213 @@ dumps and logs in `~/Downloads/sill-handoff/device-tests/2026-11-09/215/` with a
   esc held 16 s with the keyboard raised 12 s in: up 10 ms after the row went alone (4.2 s, at the
   finger's lift, before the fix).
 
+## The keyboard toggle (#215 after the device test, 2026-11-10)
+
+matt-cahill ran TestFlight 0.6.1 (1304) on a real Duo (#215, 2026-11-09): the English keyboard right; the
+emoji keyboard reached the crease only after it had been put away once, every time, and then the row stayed
+in the crease for the English keyboard too; taps in the crease hard to hit, a miss clicking the Mac; open
+flat, the emoji keyboard over the button rows. The causes: in the laptop pose the glass came only from heights
+learned at a hide, one per width (not per keyboard), a switch while up changing nothing Sill read; the crease
+row sat in the fold's valley under the picture, which takes every touch above 447; open flat had no rule.
+Noah (2026-11-10, 00:19): "For #215, I really dont want the UI to have to go into the top half. What I would
+propose is that we do read the keyboard's height while it is up. If the keyboard is regular as we have done, we
+keep the compact view. If for some reason that would be covered up (i.e. emoji keyboard) surface a small toggle
+on the top screen for the keyboard, and thats it. No full row." Accepted with his go: the toggle 44 pt in the
+bar's look at the picture's bottom trailing corner (since 2026-11-11 the leading one, below), only while a
+keyboard covers the row, a tap on it never the Mac's, putting the keyboard away; open flat the row follows the
+keyboard up; if iOS will not say the height live, the toggle whenever Sill is not sure the row is visible; the
+crease row gone, nothing else on the upper screen, the picture never moved or resized for this.
+
+**What can read the glass while it is up** (the first probe, 2026-11-10: the iOS 27.1 simulator 24A94232,
+"Sill 215b duo" folded by duorig, a DEBUG probe build, `-SillKeyboardProbe 1`; logs in sill-handoff's
+triage/2026-11-10/duo215):
+- An input accessory view on the stream's input view (clear, 1 pt): UIKit puts it at the top of the
+  reported page (454.5–455.5, in UITextEffectsWindow < UITrackingWindowView < UIKeyboardItemContainerView),
+  not on the glass, and it does not move when the emoji keyboard comes; the reports then begin 1 pt higher.
+- The input view's `keyboardLayoutGuide`: its top held at the view's own foot (the picture pane's 447).
+- `textInputMode.primaryLanguage`: "en-US" with the emoji keyboard up (iOS 27's emoji keyboard is another
+  keyboard of the input mode, not a mode of its own), but UITextInputMode's notification comes at every
+  switch, the emoji key's included.
+- The keyboard's own notifications at a switch while up: will and did change frame and show, duration 0,
+  about 0.1 s after UITextInputMode's, the begin frame the keyboard LEFT (English (0, 555, 669×396), emoji and
+  Pinyin (0, 506, 669×445)), the end frame the lower page again. The emoji search from the emoji keyboard
+  reported (0, 555, 669×396) as left, and coming back from the search sent UITextInputMode's notification alone.
+- Open flat every keyboard is reported as itself, live: English (0, 640, 669×311), emoji (0, 553, 669×398),
+  Pinyin (0, 600, 669×351); a switch reports the keyboard left as its begin and the one brought as its end.
+  Folded either way with the emoji keyboard up, it stays up (the laptop pose's glass at 506, open flat's at
+  553). A show while the screen is mid-fold at launch can report the other pose's frame for a moment.
+
+The first version (4e9f412) built on that: which of the input mode's keyboards is up (`planeAfterSwitch`,
+from the keyboard's report at each switch), and the letters keyboard's height by input mode (English 396,
+`zh-Hans` 445, others learned at a hide). **Noah's hand test (2026-11-11)**: 😀 brought the toggle, but "it
+doesn't switch back to the toolbar view when the regular keyboard is again selected", and "Is there a more
+clever way to know when to show the button rather than indexing all the keyboards that exist and how far
+they open?" Reproduced with that build (OLD2): show, hide, show, then 😀 and ABC three times: no keyboard
+report at any switch, so each waited out the second and was taken for another keyboard, and after ABC the
+toggle stayed over the English keyboard (the glass at 555, no row). Its own runs had switched only in the
+first keyboard session.
+
+**What the second probe found** (2026-11-11, my own simulator "Sill 215c duo", iOS 27.1, against a synthetic
+host on loopback, XCUITest taps; logs in triage/2026-11-10/duo215/live-v2):
+- A reload of the input views (`reloadInputViews`, nothing else changed) makes UIKit report the keyboard that
+  is up as the report's begin frame, exactly ((0, 555, 669×396) for English, (0, 506, 669×445) for emoji),
+  with no animation and no hide, 25–70 ms later. It keeps the emoji keyboard, its numbers and symbols and a
+  Pinyin composition; it closes the emoji search; one made while a show animates is never answered; the first
+  that runs after UITextInputMode's notification (60–120 ms after it) already returns the keyboard brought.
+- Two worlds. Until the keyboard is first put away after Sill opens (and before any reload), iOS posts its
+  own report at each switch, and the keyboard's in-process views (a container and the remote keyboard's
+  placeholder, in a window of the scene other than Sill's, found by geometry) sit where the keyboard is drawn:
+  English 555, emoji 507, the emoji search 516, Japanese 515, Pinyin 516, English after the search 564. After
+  the first hide, or any reload, iOS posts no report at a switch and those views are the page (454.7, 455.7):
+  what broke 4e9f412.
+- After a fold into the laptop pose with the keyboard up, the reload's report goes on giving open flat's
+  keyboard ((0, 640, 669×311), (0, 553, 669×398)) for about a second.
+- With any input accessory installed (1 pt, or poked by its height), iOS posts its report at every switch in
+  every session, but its begin frame is the keyboard left as UIKit last committed it (at the switch into the
+  emoji search, the English keyboard from before the emoji one): never the keyboard brought, so no reading. A
+  1 pt accessory also moves every report by a point or two, and each reload is then answered twice (A1–A3).
+
+**The rule** (merged in PR #343 at baf0901; DuoPosture, pure; `Tests/checks/duo`), read and not indexed:
+- `plausibleGlass`: a frame can be the glass when it is as wide as the screen and reaches its foot (each
+  within a point), of some height, and begins under `controlsTop` (the fold's lower edge, 496: nothing of a
+  keyboard is ever over it, and UIKit's page begins over it). `keyboardGlass`: open flat the report, live; in
+  the laptop pose the reading, a plausible one, else not known.
+- The reading (KeyboardFrameMonitor, InputOverlay.swift): a look first (`keyboardLook`, those views, the first
+  as wide as the screen and down to its foot whose top is more than a point under the reported top; no side
+  effects, so the emoji search stays open), at once and 20, 60, 150, 400 ms, 1 and 2 s after a change
+  (`keyboardLookDelays`). Where a look tells nothing, is off (`keyboardLookIsOff`: a switch's report puts the
+  keyboard left more than 1.5 pt from the last look, around the emoji search; or a fold), or a switch brings
+  no report within `keyboardSwitchReportWait` (0.4 s), reloads at `keyboardReadDelays`: a coming keyboard just
+  after its animation (and 1.5 and 2.5 s), the end of an animation at once, a switch every 40–70 ms from 50 ms
+  while `keyboardReadsAgain` (until a reading differs from the glass before the change and one more confirms
+  it), a fold every 150–200 ms, and always two late ones or more from a second on (`keyboardLateRead`). A report within 0.5 s
+  of a reload, not animated and not a hide, is that reload's reading (`keyboardReportIsReading`); after a fold
+  one within half a point of the frame before it is the other pose's and skipped for 2 s
+  (`keyboardReadingIsStale`). Never a reload while an input method composes; at most 40 in 10 s. A reading is
+  kept until another differs, forgotten when the keyboard goes.
+- Instant (`KeyboardHints`, `keyboardHints`, `keyboardPrediction`): Sill remembers the last reading of each
+  input mode's letters keyboard (by mode and width) and of the other keyboard a switch within the mode brings
+  (by width: emoji), kept across launches as `Sill.keyboardHints`, never sent, filled only by readings. At a
+  show or a switch it assumes at once what they say (a show or another mode: its letters keyboard; within the
+  mode, from the letters keyboard the other one, from anything else the letters keyboard), and the reading
+  that follows corrects it. A show's reading of the other keyboard (iOS may bring the emoji keyboard back at a
+  show) is not taught as the letters one.
+- `keyboardStandIn` (the inner display upright, a known fold): in the laptop pose the compact row exactly as
+  before (the caps the room less 8, 44 to 58, the black above and below alike, 4 + 51 + 4 under the English
+  keyboard) while 44 pt caps fit between the fold's edge and the glass with the 8 of black (52 pt), else the
+  toggle; the glass not known: the toggle, but nothing in place while a reading is on its way
+  (`keyboardSettle`, 0.8 s at most, 1.2 after a fold), so neither flashes before the reading; open flat the
+  row 4 pt above the glass, 51 pt (44 at least, never above the picture pane's foot) whenever the glass covers
+  some of the window bar and the key row, else the toggle. Nil off the inner display upright, without the
+  person's keyboard, and while the rows stay in view. `keyboardRowFits` says where the row fits.
+- `keyboardToggle`: 44×44 at (14, 395) in the laptop pose, at the pane's bottom leading corner, its leading
+  edge on the row's (14 pt sides), its bottom 8 pt above the pane's drawn foot (447): the left corner, the right
+  one in a right-to-left layout (placed from the leading edge), always opposite the clipboard chip's bottom
+  trailing corner. Until 2026-11-11 it was at the trailing corner, (611, 395), where the chip covered it.
+- PortraitStreamScreen: the toggle is a BarButton, lit, the Keyboard cap's symbol, "Hide the keyboard" (a
+  button), `accessibilityShowsLargeContentViewer` as a phone's bar buttons; over the picture in the halves'
+  ZStack, so the input overlay never sees its touches. It asks the monitor for readings only while the
+  person's keyboard is up on the inner display upright with a fold across (`setWantsReadings`). The controls
+  under it are hidden from sight, touch and VoiceOver while the row or the toggle stands in. DEBUG `keyboard:
+  …` lines say which and why (the ContentView's contract lists them).
+- Gone: the crease row (`keyboardRowCrease`, `KeyboardRow.inCrease`; Noah chose it on 2026-10-29, the device
+  test of 2026-11-09 replaced it), and the first version's `laptopKeyboardHeight`, `measuredLaptopKeyboard`,
+  `KeyboardPlane`, `planeAfterSwitch`, the learned heights and `KeyboardGlass.sure`.
+
+**Timing** (milliseconds from UITextInputMode's notification, or the show's first notification, to the
+decision line; the iOS 27.1 simulator with a hardware keyboard seen):
+
+| | 4e9f412 | baf0901 |
+|---|---|---|
+| show | 6 (5–7) | 6 (0–13) |
+| 😀, first keyboard session | 60 (59–127) | 60 (58–138) |
+| ABC, first keyboard session | 72 (71–74) | 72 (65–76) |
+| 😀, later sessions | 1007–1049 | 28–40 |
+| ABC, later sessions | never (the bug) | 45–54 |
+
+**Results** (2026-11-10, the first version; the iOS 27.1 runtime, "Sill 215b duo"; photos with an INDEX in
+sill-handoff's device-tests/2026-11-10/215-toggle, logs in triage/2026-11-10/duo215): the toggle, its tap,
+Pinyin, open flat's three keyboards and folds as described there, all in the first keyboard session; ten
+harness layouts (a window, the Desktop and the English row, the drawer in the laptop pose; the book pose;
+open flat both ways; an iPad's 744×1133 and an iPhone's 402×812; the cover both ways) pixel for pixel main's
+(f224323); the iOS app Debug and Release for the simulator and Debug for a device.
+
+**Results at the merge** (2026-11-11, baf0901; "Sill 215c duo", iOS 27.1, against `SillHost --synthetic` on
+loopback, XCUITest taps inside the simulator, every photo judged by its pixels (the glass's top edge, a cap
+of the row, the toggle's glyph); photos in device-tests/2026-11-10/215-toggle-v2 with an INDEX, logs in
+triage/2026-11-10/duo215/live-v2):
+- `Tests/checks/duo` 301,002 checks; CI's Build and check on baf0901.
+- Noah's sequence (English, 😀, ABC, photographed half a second after each switch): 40/40 on a fresh install,
+  20/20 in a later keyboard session (and 20/20 again under load), 40/40 with Noah's conditions (a hardware
+  keyboard seen, automatic minimization off), 40/40 on the final build on Noah's runtime (24A94425) on a fresh
+  install, a hardware keyboard seen, under heavy load; English letters, numbers and symbols; hide and show; Pinyin with its composition, candidate bar and expanded list (no reload while composing), Japanese,
+  the Globe key across three languages; folds both ways with the emoji and English keyboards up; open flat
+  unchanged; typing right after a switch, every letter arrived (15/15).
+- The iOS app Debug for the simulator and Debug for a device (installed on an iPad mini).
+- Noah's hand test on "Sill 215b duo" against Sill for Mac and on his iPad mini: "The keyboard build is
+  approved for a merge".
+
+**Known limits at the merge** (PR #343's body): the emoji search stays open in the first keyboard session but
+closes as it opens after that (the reload that reads the glass closes it); the first keyboard after a fresh
+install, and a fold with the keyboard up, show the row about 0.4 s late (nothing remembered, stale readings
+skipped); the clipboard's "Paste on ‹Mac›" chip can cover the toggle's corner while it shows (closed since:
+below).
+
+**The emoji search** (not changed by the follow-up): in later keyboard sessions the reload that reads the glass
+closes the emoji search as it opens; in the first keyboard session after Sill opens the looks tell, nothing
+reloads, and it stays open. No gentler way reads the glass (the iOS 27.1 simulator, 2026-11-11, A1–A3 in
+triage/2026-11-10/duo215/live-v2): an input accessory poked by its height makes UIKit report without a reload
+and keeps the search open, but the report's begin frame is the keyboard left as UIKit last committed it, never
+the one brought; any input accessory also keeps iOS reporting every switch in later sessions, with the same
+begin frames (at the switch into the search, the English keyboard from before the emoji one), and with a 1 pt
+accessory each reload is answered twice, a point or two off. The options, none taken:
+- As merged: the decision 28–54 ms after a switch in later sessions; the search closes as it opens there.
+- No reload at a switch away from a tall keyboard: the search stays open, but ABC then has nothing to read
+  and the toggle stays over the English keyboard, 4e9f412's bug again. Ruled out.
+- An accessory and an inference from iOS's report: a begin frame equal to the tall keyboard read before the
+  switch is ABC (read it), any other the search (no reload). ABC's row would wait for that report (about 75 ms
+  after UITextInputMode's notification, against 45–54 ms now) unless assumed at once, which shows the row for
+  those 75 ms at a switch into the search; leaving the search sent no report in the first probe (with an
+  accessory not measured), so its exit would wait 0.4 s and read by a reload; and the accessory changes every
+  report Sill reads. A change of its own, to try on a real Duo.
+
+**The toggle at the left corner** (2026-11-11, branch `duo-keyboard-followup` from main at c1e612a). Noah, on
+the merged build with the chip over the toggle: "Why would you merge that with the overlap? Move the keyboard
+icon to the left corner instead and merge". `keyboardToggle` now returns the pane's bottom leading corner,
+(14, 395, 44×44) in the laptop pose (open flat 8 pt above its own pane's foot), its leading edge on the key
+row's; PortraitStreamScreen places it from the leading edge as before, so in a right-to-left layout it is the
+right corner, (611, 395) on the screen, and the chip (`ClipboardPolicy.chipCorner`: the bottom trailing corner
+upright, the left one right to left) takes the other. Same size, inset, action, label and Large Content Viewer.
+What else can sit at that corner of the pane: nothing of Sill's own. The link's line hangs from the pane's top
+(`LinkLineView`, `.overlay(alignment: .top)`), the locked Mac's shade covers the whole picture under the
+toggle, the tour, the Settings panel, the Apps drawer and Pair This iPad… take the keyboard down first (no
+toggle then), the window lights hang below the strip under the fold, and the chip's note ("Sent to ‹Mac›’s
+clipboard") is the chip's corner. Only the Mac's picture and its pointer pass under it, as they did at the
+other corner. The chip is as wide as its words, and while the toggle shows at most as wide as the room beside
+it on the chip's side, 8 pt clear of it (`clipboardChipMaxWidth`: 587 pt in the laptop pose), so a long Mac name
+truncates in the middle instead of reaching the toggle: a 65-character name at the default text size and at
+xxLarge, left to right and right to left, ends short of it (photos 11–14), and "Mac mini" draws as before.
+
+Results (the iOS 27.1 simulator "Sill 215c duo" folded by duorig, the harness's mock with the real keyboard,
+`-SillLayout 669x951 -SillHinge half|flat -SillKeyboardToggle 1.5`, no host and no taps; the emoji keyboard
+brought up by the simulator's last-used keyboard, `KeyboardLastUsed` in com.apple.keyboard.preferences;
+photos with an INDEX in sill-handoff's device-tests/2026-11-10/215-toggle-v2/left-corner):
+- The emoji keyboard up: the toggle at the bottom left, the console's `keyboard: the toggle at 14,395 (44
+  pt)`; with the chip (`-SillClipboardChip 1`) at the bottom right, apart; right to left
+  (`-AppleTextDirection YES -NSForceRightToLeftWritingDirection YES`) the toggle at the bottom right, the chip
+  at the bottom left, apart. `-SillAXDump`, left to right without the chip: one element, "Hide the keyboard"
+  (14,395 44×44); right to left with the chip: "Hide the keyboard" (611,395 44×44), then the chip's three.
+- Main's build (baf0901) against this one, the same arguments: the laptop pose with the English keyboard (the
+  row 500–551), and open flat with the English and the emoji keyboard, pixel for pixel the same.
+- `Tests/checks/duo` 332,316 checks; its mutants 170 of 170 caught; the iOS app Debug for the simulator,
+  the known `StreamClient` capture warning alone.
+- Noah's sequence once on the final build, once no-device.sh opened (02:10), in a later keyboard session
+  (the keyboard put away and brought back first), against `SillHost --synthetic` on loopback with XCUITest
+  taps: 20/20 (every 😀 the toggle at the left over the glass at 506, every ABC the row over 555); 😀 31–33 ms
+  after the switch (316 the first, nothing remembered yet), ABC 48–54 ms, as at the merge, while the mutants
+  ran. Noah's Sill.log gained no line naming this simulator.
+- Not run: run-all, the tour's mutants, the Release and device builds (the disk); anything on a real Duo.
+
 ## For Noah, on an iPhone Duo (a build made with Xcode 27.1), from Oct 23
 
 TestFlight 0.5 (3) was built with Xcode 27.0: on a Duo it runs in the compatibility window (871×669,
@@ -646,16 +853,21 @@ inner display in every pose, shown on every other screen; P1 and P4 below check 
   `DeviceSupportsEnhancedMultitasking` false): Sill beside another app in the book and laptop poses.
 - P13 The connect screen in the laptop pose with five Macs or more: the list scrolls above the fold
   (with the status bar there, five rows show); Add a Mac… side by side above it.
-- P14 The keyboard in the laptop pose (#215): the Keyboard cap, then the key row alone just above the
-  keyboard's glass, black above and below it, the window bar gone; esc, ⌘C and the arrows reach the
-  Mac; the Keyboard cap takes the keyboard down and the bar comes back as it was. The console's
-  `keyboard frame:` and `keyboard row:` lines (the device's report and glass: 455.5 and 555 here).
-  Then the emoji keyboard and Chinese or Japanese input with candidates (the first appearance assumes
-  396 pt, its top 6 pt showing; once it has gone, the row in the crease: tap esc there and see it on the
-  Mac, the fold's taps being the one thing the simulator cannot answer), Display Zoom if the Duo offers
-  it, a hardware keyboard (nothing should change), open flat with the keyboard up, then fold to the
-  laptop pose (the row just above the glass, not under it), and VoiceOver (the row read alone, left to
-  right, under the fold and in the crease).
+- P14 The keyboard in the laptop pose (#215; the toggle since 2026-11-10, read since 2026-11-11): the
+  Keyboard cap, then the key row alone just above the keyboard's glass, black above and below it, the window
+  bar gone; esc, ⌘C and the arrows reach the Mac; the Keyboard cap takes the keyboard down and the bar comes
+  back as it was. Then 😀: the row goes and the Keyboard toggle shows at once at the picture's bottom left
+  corner (no dismissal first); a tap on it puts the keyboard away and clicks nothing on the Mac; ABC brings
+  the row back with the keyboard still up. All of it again after the keyboard has been put away once (the
+  later keyboard sessions, where iOS reports no switch: the first version's bug), and after a fold. Chinese or
+  Japanese input with candidates: the toggle, and typing goes on while it composes. With a Debug build the
+  console's `keyboard: …` lines say what was read and how (`keyboard: looked: …` or `keyboard: read …` after a
+  reload): whether a real Duo answers a reload as the simulator does is the one thing the rule rests on. With
+  predictive text on (Sill's input view turns it off, so none is expected), a third-party keyboard, Display
+  Zoom if the Duo offers it, a hardware keyboard (nothing should change), open flat with the emoji keyboard up
+  (the row just above its glass), folds both ways with it up (the toggle in the laptop pose, the row open
+  flat), the toggle at an accessibility text size (a long press shows it large), and VoiceOver (the toggle
+  read right after the picture as "Hide the keyboard"; the row read alone, left to right).
 
 ## Left
 
@@ -687,3 +899,16 @@ inner display in every pose, shown on every other screen; P1 and P4 below check 
   VoiceOver guard and the held cap, one commit each; checks, mutants, AX dumps, photos against main on
   the iPad, the iPhone and the Duo's six poses, live runs with XCUITest and keyrig; this document. The
   simulator "Sill 215b duo" stays booted with the final build for Noah's look; the others deleted.
+- 2026-11-10 The keyboard toggle (Noah's decision after matt-cahill's device test of 0.6.1 (1304)): the probe
+  of what can read the glass while it is up (nothing in the laptop pose; open flat the reports), the plane
+  and the learned heights by input mode, the toggle, open flat's row, the crease row removed; checks, mutants,
+  live runs and photos on "Sill 215b duo", harness photos against main; this document (branch
+  `duo-keyboard-toggle`, worktree wt-215c). "Sill 215b duo" left shut down with the final Debug build.
+- 2026-11-11 The reading (Noah's hand test of the first version: ABC left the toggle over the English
+  keyboard): the second probe (the two worlds, the reload's reading, the stale readings after a fold), the
+  rule rebuilt on looks, reloads and hints, its timing against the first version, live runs and photos on
+  "Sill 215c duo"; merged as PR #343 at baf0901 on Noah's word. Then the follow-up (branch
+  `duo-keyboard-followup`): the toggle at the pane's bottom left corner (Noah: "Move the keyboard icon to
+  the left corner instead"), the duo mutants for the merged code, this document; harness photos with the
+  real keyboard, both layout directions, against main's build. "Sill 215c duo" left shut down with the
+  final Debug build.

@@ -209,98 +209,305 @@ extension DuoPosture {
     }
 }
 
-// MARK: - The laptop pose with the software keyboard up: the key row alone (#215)
+// MARK: - The inner display upright with the software keyboard up: the key row alone, or the toggle (#215)
 
 extension DuoPosture {
-    /// The software keyboard's own height on the Duo's inner display held upright: the English
-    /// keyboard's glass from 555 to the foot (951), measured on the iOS 27.1 simulator (the frame it
-    /// leaves as it goes, and the glass's edge in a screenshot) and in the reporter's screenshot (#215).
-    /// Used until the keyboard has gone once at that width (KeyboardFrameMonitor's own heights): the
-    /// Chinese (Pinyin) keyboard's is 445 (its glass from 506, a band for its candidates over the same
-    /// keys).
-    static let laptopKeyboardHeight: CGFloat = 396
-
-    /// Where the software keyboard's glass begins, in the screen's space, from the top UIKit reports
-    /// (nil: none up). In the laptop pose iOS 27.1 reports a keyboard from the fold's top edge down, the
-    /// whole lower page (455.5, 495.5 pt tall on the Duo), while it draws it at the foot: a report that
-    /// begins at or above `controlsTop` (the fold's lower edge, where nothing of a keyboard ever is) is
-    /// that page, and the glass begins its own height above the screen's foot, never above the report:
-    /// `ownHeight`, the height it last went with, unless that would put the glass at or above the fold's
-    /// edge too, else `laptopKeyboardHeight`. Any other report is the glass's own top, but never under the
-    /// glass that height gives: folded from open flat with the keyboard up, iOS 27.1 goes on reporting the
-    /// open flat keyboard, (0, 640, 669×311), while the keyboard it goes with is the laptop pose's, (0, 555,
-    /// 669×396) (2026-11-09); a show begins with that report too, a moment before the page.
-    static func visibleKeyboardTop(reported: CGFloat?, screenHeight: CGFloat, controlsTop: CGFloat,
-                                   ownHeight: CGFloat?) -> CGFloat? {
-        guard let reported, reported < screenHeight else { return nil }
-        let own = ownHeight.flatMap { $0 > 0 && screenHeight - $0 > controlsTop ? $0 : nil } ?? laptopKeyboardHeight
-        guard reported > controlsTop else { return max(reported, screenHeight - own) }
-        return min(reported, screenHeight - own)
+    /// The software keyboard's glass as Sill knows it, in the screen's space: where it begins, or nil while
+    /// Sill cannot tell (in the laptop pose, before a reading since the last change, or with only one that
+    /// cannot be a keyboard).
+    struct KeyboardGlass: Equatable {
+        var top: CGFloat?
     }
 
-    /// The keyboard's own height to remember from a hide (KeyboardFrameMonitor's own heights), or nil. The
-    /// frame it leaves as it goes (the hide's begin frame) is its glass where it spans `screen` and reaches
-    /// its foot, and it is remembered only where UIKit had reported the keyboard from above that glass
-    /// while it was up (`shown`, the monitor's last report): the laptop pose's whole lower page. Where UIKit
-    /// reported the keyboard as itself there is nothing to learn: open flat upright the English keyboard is
-    /// (0, 640, 669×311) on the same 669 pt width, and that height, remembered, put the laptop pose's row
-    /// at 539–597 over a glass at 555 (the iOS 27.1 simulator, 2026-11-09).
-    static func keyboardHeightToLearn(leaving begin: CGRect?, shown: CGRect?, screen: CGRect?) -> CGFloat? {
-        guard let begin, begin.height > 0, let screen, begin.width == screen.width, abs(begin.maxY - screen.maxY) < 0.5,
-              let shown, shown.minY < begin.minY - 0.5 else { return nil }
-        return begin.height
+    /// The top of `frame` when it can be the software keyboard's glass on a screen of `size`: as wide as the
+    /// screen (within a point), down to its foot (within a point), of some height, and beginning under
+    /// `controlsTop` (in the laptop pose the fold's lower edge: nothing of a keyboard is ever over it, and
+    /// UIKit's page begins over it, at the fold's top edge); else nil.
+    static func plausibleGlass(_ frame: CGRect?, size: CGSize, controlsTop: CGFloat) -> CGFloat? {
+        guard let frame, frame.height > 0, abs(frame.width - size.width) <= 1, abs(frame.maxY - size.height) <= 1,
+              frame.minY > controlsTop, frame.minY < size.height else { return nil }
+        return frame.minY
     }
 
-    /// The key row alone between the fold and the keyboard (Noah, 2026-10-27, "Let's start with A"): its
-    /// caps as tall as the room allows less 8 (`keyboardRowMargins`), at most `keyboardRowMost`, with as
-    /// much black above as below; for a keyboard too tall for caps of `keyboardRowLeast` there, in the
-    /// crease instead (Noah, 2026-10-29, "Crease"), its caps `keyboardRowCrease` tall.
+    /// Where the glass begins, in the screen's space; nil while no keyboard is up (`reported`, the top UIKit
+    /// reports, nil or at or below the foot).
+    /// - Open flat (`laptop` false) UIKit reports every keyboard as itself, live: its top.
+    /// - In the laptop pose UIKit reports every keyboard as the whole lower page, (0, 455.5, 669×495.5) on
+    ///   the Duo, whatever it draws at the foot (the English keyboard from 555, the emoji and Chinese
+    ///   (Pinyin) ones from 506; the iOS 27.1 simulator), and the begin frame of a switch's report is UIKit's
+    ///   last committed frame, the keyboard left or an older one. So only a reading tells: `read`, the begin
+    ///   frame of the report Sill provokes by reloading its input views, which is the keyboard up at that
+    ///   moment (KeyboardFrameMonitor), taken since the last change. None yet, or none that can be a
+    ///   keyboard (`plausibleGlass`): not known.
+    static func keyboardGlass(reported: CGFloat?, read: CGRect?, size: CGSize, controlsTop: CGFloat, laptop: Bool) -> KeyboardGlass? {
+        guard let reported, reported < size.height else { return nil }
+        guard laptop else { return KeyboardGlass(top: reported) }
+        return KeyboardGlass(top: plausibleGlass(read, size: size, controlsTop: controlsTop))
+    }
+
+    /// The keyboard as its own views place it (KeyboardFrameMonitor's look, no side effects): of `frames`,
+    /// the frames on the screen of the views in the scene's windows other than Sill's (the keyboard's: a
+    /// container and the remote keyboard's placeholder, found by their geometry alone), the first as wide as
+    /// the screen (within a point) and down to its foot whose top is more than a point under the top UIKit
+    /// reports (`reported`). In the laptop pose UIKit reports the page (from the fold's top edge, 455.5)
+    /// while these views sit where the keyboard is drawn, updated with each show and each switch as UIKit
+    /// posts its report (the iOS 27.1 simulator: English 555, emoji 507 for a glass at 506); once anything
+    /// has reloaded the input views they are the page as well, and tell nothing (nil).
+    static func keyboardLook(_ frames: [CGRect], reported: CGRect?, screen: CGSize) -> CGRect? {
+        guard let reported else { return nil }
+        return frames.first { frame in
+            frame.height > 0 && abs(frame.width - screen.width) <= 1 && abs(frame.maxY - screen.height) <= 1
+                && frame.minY > reported.minY + 1 && frame.minY < screen.height
+        }
+    }
+
+    /// Whether looks are off: UIKit's own report of the keyboard a switch left (`begin`, its frame as UIKit
+    /// last committed it) begins more than 1.5 pt from where the last look put that keyboard (`lastLook`).
+    /// On the simulator they agree within a point but around the emoji search, after which the views sit
+    /// 9–10 pt under the glass (English read at 564 for a glass at 555).
+    static func keyboardLookIsOff(lastLook: CGRect?, begin: CGRect?) -> Bool {
+        guard let lastLook, let begin, begin.height > 0, !begin.isNull else { return false }
+        return abs(lastLook.minY - begin.minY) > 1.5
+    }
+
+    /// When KeyboardFrameMonitor looks again after a change (each change restarts them), in seconds: looks
+    /// cost nothing, and a late update of the keyboard's views must not matter.
+    static let keyboardLookDelays: [Double] = [0.02, 0.06, 0.15, 0.4, 1, 2]
+    /// How long after UITextInputMode's notification a switch's own report may come (55–190 ms on the
+    /// simulator) before the keyboard is read by reloads instead: a switch with no report (the emoji search
+    /// left; two keyboards of one height) leaves the keyboard's views where they were.
+    static let keyboardSwitchReportWait: Double = 0.4
+
+    /// Whether the key row fits between the controls' top and a glass at `glassTop` (both on the same
+    /// screen): caps of `keyboardRowLeast` with `keyboardRowMargins` of black.
+    static func keyboardRowFits(glassTop: CGFloat, controlsTop: CGFloat) -> Bool {
+        glassTop - controlsTop >= keyboardRowLeast + keyboardRowMargins
+    }
+
+    /// What Sill remembers of the keyboards it has read in the laptop pose, to decide at once at a show or a
+    /// switch and let the reading that follows correct it (KeyboardFrameMonitor): the height of each input
+    /// mode's letters keyboard as last read (`letters`, by `keyboardHintKey`: the mode and the screen's width),
+    /// and the height of the other keyboard a switch within one mode brings (`other`, by the width: the emoji
+    /// keyboard; iOS 27's emoji keyboard is no input mode of its own) as last read. Filled only by readings,
+    /// never by hand, and trusted only until the next reading; kept across launches (`Sill.keyboardHints`,
+    /// never sent).
+    struct KeyboardHints: Equatable, Codable {
+        var letters: [String: Double] = [:]
+        var other: [String: Double] = [:]
+    }
+
+    /// What came before a reading, for what it teaches and what to assume: a show, a switch to another input
+    /// mode (the Globe key), a switch within the mode (😀, ABC, the emoji search), anything else (a fold,
+    /// coming back to the front).
+    enum KeyboardCause: Equatable { case show, modeChange, sameMode, other }
+
+    static func keyboardHintKey(mode: String?, width: CGFloat) -> String { "\(mode ?? "")@\(Int(width.rounded()))" }
+    static func keyboardWidthKey(_ width: CGFloat) -> String { "@\(Int(width.rounded()))" }
+
+    /// Two keyboard heights are the same keyboard within 1.5 pt (a look puts the emoji keyboard at 444 where
+    /// a reload reads 445).
+    static func sameKeyboard(_ a: Double?, _ b: Double?) -> Bool {
+        guard let a, let b else { return false }
+        return abs(a - b) < 1.5
+    }
+
+    /// The hints after a reading of `height`, `cause` the change before it and `before` the height read
+    /// before that change: a show's or another input mode's first reading is the mode's letters keyboard
+    /// (unless it is the other keyboard as last read: iOS may bring that back at a show); after a switch
+    /// within the mode, a reading that is neither the keyboard before it nor the letters keyboard is the
+    /// other one. Anything else teaches nothing.
+    static func keyboardHints(_ hints: KeyboardHints, after height: Double, cause: KeyboardCause, before: Double?,
+                              key: String, widthKey: String) -> KeyboardHints {
+        var learned = hints
+        switch cause {
+        case .show, .modeChange:
+            if sameKeyboard(height, hints.other[widthKey]), !sameKeyboard(height, hints.letters[key]) { return hints }
+            learned.letters[key] = height
+        case .sameMode:
+            guard !sameKeyboard(height, before), !sameKeyboard(height, hints.letters[key]) else { return hints }
+            learned.other[widthKey] = height
+        case .other:
+            return hints
+        }
+        return learned
+    }
+
+    /// The keyboard height to assume at once at a change, before it is read (nil: none): a show, or a switch
+    /// to another input mode: that mode's letters keyboard; a switch within the mode: from its letters
+    /// keyboard the other one, from anything else its letters keyboard (ABC; the emoji search, which the
+    /// reading that follows closes).
+    static func keyboardPrediction(cause: KeyboardCause, current: Double?, hints: KeyboardHints, key: String, widthKey: String) -> Double? {
+        switch cause {
+        case .show, .modeChange: return hints.letters[key]
+        case .sameMode:
+            guard let letters = hints.letters[key] else { return nil }
+            return sameKeyboard(current, letters) ? hints.other[widthKey] : letters
+        case .other: return nil
+        }
+    }
+
+    /// What started the readings: a report of the keyboard animating (`animating`, a will-show or
+    /// will-change with its animation's duration: the keyboard coming), the report that ends that animation
+    /// (`animated`: did-show, did-change), or anything else (a switch, a fold, coming back to the front, a
+    /// report without an animation).
+    enum KeyboardChange: Equatable {
+        case animating(Double)
+        case animated
+        /// The screen folded into the laptop pose with the keyboard up (or unfolded).
+        case fold
+        case other
+    }
+
+    /// When KeyboardFrameMonitor reloads the input views to read the keyboard after a change, in seconds
+    /// after it (each change restarts them), in the world where only a reload tells (the keyboard's views
+    /// are the page: something reloaded the input views before): a reload made while the keyboard animates
+    /// is never answered (the iOS 27.1 simulator), so a coming keyboard is read as its animation ends (the
+    /// did-show), with reloads after the animation's length in case that report never comes; after a
+    /// switch every 40–70 ms from 50 ms on (the first reload that runs after UITextInputMode's notification,
+    /// 60–120 ms after it, already returns the keyboard brought), the early ones only until a reading differs
+    /// from the glass before the change and one more confirms it (`keyboardReadsAgain`); then two late ones,
+    /// always, so that a late or missing report does not matter.
+    static func keyboardReadDelays(after change: KeyboardChange) -> [Double] {
+        switch change {
+        case .animating(let duration): return [duration + 0.02, duration + 0.1, 1.5, 2.5]
+        case .animated: return [0.01, 0.06, 1, 2]
+        case .fold: return [0.15, 0.3, 0.45, 0.6, 0.8, 1, 1.5, 2]
+        case .other: return [0.05, 0.09, 0.13, 0.18, 0.25, 0.32, 1, 2]
+        }
+    }
+
+    /// How long nothing stands in while the first reading after a change is on its way (`keyboardSettle`;
+    /// after a fold longer: the first readings there are stale, `keyboardReadingIsStale`).
+    static func keyboardSettle(after change: KeyboardChange) -> Double { change == .fold ? 1.2 : keyboardSettle }
+
+    /// After a fold (`staleUntil`, two seconds), UIKit's reload report goes on giving the keyboard as it was in
+    /// the other pose for about a second (open flat's English (0, 640, 669×311) and emoji (0, 553, 669×398) in
+    /// the laptop pose; the iOS 27.1 simulator, 2026-11-11): a reading within half a point of the frame UIKit
+    /// reported before the fold (`staleFrame`) is that, and no reading.
+    static func keyboardReadingIsStale(_ begin: CGRect, staleFrame: CGRect?, at: Double, staleUntil: Double) -> Bool {
+        guard let staleFrame, at < staleUntil else { return false }
+        return abs(begin.minY - staleFrame.minY) < 0.5 && abs(begin.height - staleFrame.height) < 0.5
+    }
+    /// The late reloads of `keyboardReadDelays` (at a second and more): always made.
+    static let keyboardLateRead: Double = 1
+
+    /// A report this soon after Sill reloaded its input views is that reload's (25–70 ms on the simulator),
+    /// so its begin frame is the reading (`keyboardReportIsReading`).
+    static let keyboardReadWindow: Double = 0.5
+    /// How long after the first of a run of changes nothing stands in while a reading is on its way, at
+    /// most: then the toggle, if there is still no reading.
+    static let keyboardSettle: Double = 0.8
+
+    /// Whether a keyboard report at `at` is the reading of the reload Sill made at `reloadedAt` (nil: none
+    /// since the last change, UITextInputMode's notification among the changes): within
+    /// `keyboardReadWindow`, with a begin frame (`begin`) of some height, not animated (a reload's report has
+    /// no animation; a show's has, and a reload made while the keyboard comes is not answered), and never a
+    /// hide. Anything else is a change.
+    static func keyboardReportIsReading(at: Double, reloadedAt: Double?, hiding: Bool, animated: Bool, begin: CGRect?) -> Bool {
+        guard !hiding, !animated, let begin, begin.height > 0, !begin.isNull, let reloadedAt, at >= reloadedAt else { return false }
+        return at - reloadedAt < keyboardReadWindow
+    }
+
+    /// Whether an early reload is still needed after the readings since the last change (`readings`, one per
+    /// reload that was answered, oldest first): while none differs from the glass before the change (`before`,
+    /// within half a point; none before: any reading differs), and once more after the first that does, to
+    /// confirm it. A reading equal to the glass on screen changes nothing on screen.
+    static func keyboardReadsAgain(_ readings: [CGRect], before: CGRect?) -> Bool {
+        func same(_ a: CGRect, _ b: CGRect?) -> Bool {
+            guard let b else { return false }
+            return abs(a.minY - b.minY) < 0.5 && abs(a.height - b.height) < 0.5 && abs(a.width - b.width) < 0.5
+        }
+        guard let first = readings.firstIndex(where: { !same($0, before) }) else { return true }
+        return readings.count - first < 2
+    }
+
+    /// The key row alone above the keyboard (Noah, 2026-10-27, "Let's start with A"): in the laptop pose its
+    /// caps as tall as the room under the fold allows less 8 (`keyboardRowMargins`), at most
+    /// `keyboardRowMost`, with as much black above as below; open flat `keyboardRowFlat` tall, 4 pt above the
+    /// glass (`keyboardRowGlassGap`).
     static let keyboardRowMost: CGFloat = 58
     static let keyboardRowMargins: CGFloat = 8
-    /// The least caps between the fold and the glass: Apple's least touch target (44 pt, the Human
-    /// Interface Guidelines' "Buttons"). A room under 52 (44 and the 8 of black) puts the row in the
-    /// crease: the 445 pt keyboards (emoji, Chinese Pinyin; their glass at 506, 10 pt under the fold).
+    /// The least caps: Apple's least touch target (44 pt, the Human Interface Guidelines' "Buttons"). A room
+    /// under 52 in the laptop pose (44 and the 8 of black) gets no row but the toggle: the 445 pt keyboards
+    /// (emoji, Chinese Pinyin; their glass at 506, 10 pt under the fold).
     static let keyboardRowLeast: CGFloat = 44
-    /// The crease row's caps, centred on the fold's band (458.5–492.5 of the Duo's 455.5–495.5).
-    static let keyboardRowCrease: CGFloat = 34
-    /// Between the row's caps (twelve ≈ 48 pt wide across 641).
+    /// Open flat, the caps of the row under the English keyboard in the laptop pose (4 + 51 + 4), and the
+    /// black between them and the glass.
+    static let keyboardRowFlat: CGFloat = 51
+    static let keyboardRowGlassGap: CGFloat = 4
+    /// Between the row's caps (twelve ≈ 48 pt wide across 641; the halves' key row keeps its 8).
     static let keyboardRowGap: CGFloat = 6
+    /// The toggle (Noah, 2026-11-10: "surface a small toggle on the top screen for the keyboard, and thats
+    /// it"): a 44 pt button, its bottom 8 pt above the picture pane's bottom edge, in its leading corner.
+    static let keyboardToggleSize: CGFloat = 44
+    static let keyboardToggleInset: CGFloat = 8
 
-    /// Where the key row stands alone while the person's software keyboard covers the laptop pose's
-    /// controls: its caps, in the screen's space, and whether that is in the fold's band.
-    struct KeyboardRow: Equatable {
-        var rect: CGRect
-        /// In the crease (a keyboard too tall for the row under the fold), not between the fold and
-        /// the keyboard's glass.
-        var inCrease: Bool
+    /// What stands in for the window bar and the key row while the person's software keyboard covers them.
+    struct KeyboardStandIn: Equatable {
+        /// The key row alone, its caps in the screen's space; nil where it would not be in view.
+        var row: CGRect?
+        /// The Keyboard toggle on the picture's corner (`keyboardToggle`), which puts the keyboard away.
+        var toggle: Bool
     }
 
-    /// The laptop pose's lower half while the person's software keyboard covers its key row: the key row
-    /// alone (its Keyboard cap with it, so the keyboard can go), across the screen less `sides`; the
-    /// window bar hidden (it comes back as it was with the keyboard), the trackpad under the keyboard.
-    /// - Under the fold, in the room from `controlsTop` (the fold's lower edge, 496) down to the
-    ///   keyboard's visible top, while that room holds caps of `keyboardRowLeast` with 8 of black: the
-    ///   caps the room less 8, at most 58, the black above and below alike (whole points above, the odd
-    ///   point below): 4 + 51 + 4 under the Duo's English keyboard (59 pt), 4 + 44 + 4 at 52, 8 + 58 + 8
-    ///   at 74.
-    /// - Else in the crease, `keyboardRowCrease` caps centred on the fold's band (never taller than the
-    ///   band): the 445 pt keyboards leave 10 pt (their glass at 506), so 458.5–492.5. The picture above
-    ///   the fold is never covered.
-    /// Nil, the halves as they are, off the laptop pose, without a keyboard, and while the keyboard leaves
-    /// the window bar and the key row in view (`standardRows`, what they take from `controlsTop`).
-    static func keyboardRow(size: CGSize, fold: FoldInfo, controlsTop: CGFloat, keyboardTop: CGFloat?,
-                            standardRows: CGFloat, sides: CGFloat) -> KeyboardRow? {
-        guard let band = fold.horizontalBand, let keyboardTop, keyboardTop < size.height else { return nil }
-        let room = keyboardTop - controlsTop
-        guard room < standardRows else { return nil }
+    /// The inner display held upright while the person's software keyboard is up and its glass leaves the
+    /// window bar and the key row no room (`standardRows`, what they take from `controlsTop`):
+    /// - The laptop pose (the fold across, `controlsTop` its lower edge, 496): while the room under the fold
+    ///   to the glass holds caps of `keyboardRowLeast` with 8 of black, the key row there, its caps the room
+    ///   less 8, at most 58, the black above and below alike (whole points above, the odd point below):
+    ///   4 + 51 + 4 under the Duo's English keyboard (59 pt), 4 + 44 + 4 at 52, 8 + 58 + 8 at 74. Else the
+    ///   toggle: the emoji keyboard and Pinyin (445 pt, the glass at 506, 10 pt under the fold). Noah,
+    ///   2026-11-10: "If the keyboard is regular as we have done, we keep the compact view. If for some
+    ///   reason that would be covered up (i.e. emoji keyboard) surface a small toggle on the top screen".
+    /// - Open flat (no fold across; `controlsTop` the picture pane's foot): UIKit reports the keyboard as
+    ///   itself, so the key row stands `keyboardRowGlassGap` above its glass, `keyboardRowFlat` tall, never
+    ///   above `controlsTop`; with no room for 44 pt caps there, the toggle.
+    /// - The glass not known (`glass.top` nil): the toggle; while `settling` (a reading is on its way, at
+    ///   most a moment after a change: KeyboardFrameMonitor), nothing in their place yet, so that neither the
+    ///   toggle nor the row flashes before the reading puts the right one there.
+    /// Nil, the halves as they are, off the inner display upright (the book pose, the cover, before
+    /// iOS 27.1, an iPad), without a keyboard, and while the keyboard leaves the rows in view.
+    static func keyboardStandIn(size: CGSize, fold: FoldInfo, controlsTop: CGFloat, glass: KeyboardGlass?,
+                                standardRows: CGFloat, sides: CGFloat, settling: Bool = false) -> KeyboardStandIn? {
+        guard case .known(let band) = fold, band == nil || fold.horizontalBand != nil, size.height > size.width,
+              let glass else { return nil }
         let width = max(0, size.width - 2 * sides)
-        if room - keyboardRowMargins >= keyboardRowLeast {
+        guard let top = glass.top else { return KeyboardStandIn(row: nil, toggle: !settling) }
+        guard top < size.height else { return nil }
+        let room = top - controlsTop
+        guard room < standardRows else { return nil }
+        if fold.horizontalBand != nil {
+            guard room - keyboardRowMargins >= keyboardRowLeast else { return KeyboardStandIn(row: nil, toggle: true) }
             let caps = min(keyboardRowMost, room - keyboardRowMargins)
             let above = ((room - caps) / 2).rounded(.down)
-            return KeyboardRow(rect: CGRect(x: sides, y: controlsTop + above, width: width, height: caps), inCrease: false)
+            return KeyboardStandIn(row: CGRect(x: sides, y: controlsTop + above, width: width, height: caps), toggle: false)
         }
-        let caps = min(keyboardRowCrease, band.height)
-        return KeyboardRow(rect: CGRect(x: sides, y: band.midY - caps / 2, width: width, height: caps), inCrease: true)
+        let caps = min(keyboardRowFlat, room - keyboardRowGlassGap)
+        guard caps >= keyboardRowLeast else { return KeyboardStandIn(row: nil, toggle: true) }
+        return KeyboardStandIn(row: CGRect(x: sides, y: top - keyboardRowGlassGap - caps, width: width, height: caps), toggle: false)
+    }
+
+    /// The toggle's place: inside the picture's pane (its drawn foot at `paneBottom`) at its bottom leading
+    /// corner, its leading edge on the key row's (`sides` from the screen's leading edge): the left corner, and
+    /// in a right-to-left layout the right one (PortraitStreamScreen places it from the leading edge). The
+    /// clipboard's "Paste on ‹Mac›" chip takes the pane's bottom trailing corner (ClipboardPolicy.chipCorner),
+    /// so the two never meet there (Noah, 2026-11-11: "Move the keyboard icon to the left corner instead").
+    static func keyboardToggle(paneBottom: CGFloat, sides: CGFloat) -> CGRect {
+        CGRect(x: sides, y: paneBottom - keyboardToggleInset - keyboardToggleSize,
+               width: keyboardToggleSize, height: keyboardToggleSize)
+    }
+
+    /// The clipboard chip's widest in the stream's pane (`panel`, in the stream screen's space), so that it never
+    /// covers the Keyboard toggle (Noah, 2026-11-11: the two must never overlap). The pane less 8 on each side,
+    /// as always; while the toggle shows in the pane's bottom band (`toggle`, in the same space; the chip's own
+    /// corner is the other bottom one), at most the room beside the toggle on the chip's side (the wider side,
+    /// whichever way the layout runs) less 8 at the pane's edge and 8 clear of the toggle. The chip's title
+    /// truncates in the middle on its one line, so a long Mac name only shortens.
+    static func clipboardChipMaxWidth(panel: CGRect, toggle: CGRect?) -> CGFloat {
+        let most = max(0, panel.width - 16)
+        guard let toggle, toggle.intersects(panel), toggle.maxY > panel.maxY - 120 else { return most }
+        let beside = max(panel.maxX - toggle.maxX, toggle.minX - panel.minX)
+        return min(most, max(0, beside - 16))
     }
 
     /// A cap's width when `count` caps share `width` with the row's gaps.
