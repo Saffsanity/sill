@@ -69,14 +69,59 @@ expect("unknown arrival: on-link of a LAN interface", c("192.168.1.99"), .lan)
 expect("unknown arrival: public", c("198.51.100.4"), .internet)
 expect("unknown arrival: 100.64/10 on-link of bridge0 (any LAN interface)", c("100.72.9.9"), .lan)
 expect("an unparseable source is internet", c("not-an-address"), .internet)
+// Issue #326: at the remote door a connection from this Mac itself is a relay on it (a userspace Tailscale or
+// WireGuard node, an SSH tunnel, a proxy): loopback, and this network's origin from one of the Mac's own
+// addresses (a relay forwarding to the Mac's LAN address). Everything else keeps classify's origin.
+var own = ifs
+own.owner[b("fe80::aede:48ff:fe00:1122")] = "en0"        // en0's own link-local address, stored without the kernel's scope
+func r(_ remote: String, local: String? = nil, scope: String? = nil) -> P.Origin {
+    P.atRemoteDoor(P.classify(remote: remote, localAddress: local, scope: scope, interfaces: own), remote: remote, interfaces: own)
+}
+expect("remote door: 127.0.0.1 (a relay on this Mac)", r("127.0.0.1", local: "127.0.0.1"), .relay)
+expect("remote door: 127.9.9.9 (all of 127/8)", r("127.9.9.9", local: "127.0.0.1"), .relay)
+expect("remote door: ::1", r("::1", local: "::1"), .relay)
+expect("remote door: ::ffff:127.0.0.1 (mapped)", r("::ffff:127.0.0.1", local: "::ffff:127.0.0.1"), .relay)
+expect("remote door: this Mac's own LAN address (a relay forwarding to it)", r("192.168.1.20", local: "192.168.1.20"), .relay)
+expect("remote door: this Mac's own LAN address, IPv4-mapped", r("::ffff:192.168.1.20", local: "::ffff:192.168.1.20"), .relay)
+expect("remote door: this Mac's own global IPv6 address", r("2001:db8:1::20", local: "2001:db8:1::20"), .relay)
+expect("remote door: this Mac's own ULA", r("fd4e:4f6b:37dc:4a0f::20", local: "fd4e:4f6b:37dc:4a0f::20"), .relay)
+expect("remote door: this Mac's own link-local IPv4 on en14", r("169.254.172.122", local: "169.254.172.122"), .relay)
+expect("remote door: this Mac's own link-local IPv6, scoped to en0", r("fe80::aede:48ff:fe00:1122", local: "fe80::aede:48ff:fe00:1122", scope: "en0"), .relay)
+expect("remote door: the same with the kernel's scope in its bytes (fe80:4::…)", r("fe80:4::aede:48ff:fe00:1122", scope: "en0"), .relay)
+expect("remote door: a public address this Mac holds (bridge0's) is this Mac too", r("203.0.113.20", local: "203.0.113.20"), .relay)
+expect("remote door: a neighbour on en0 stays lan (by address, at home)", r("192.168.1.23", local: "192.168.1.20"), .lan)
+expect("remote door: a private routed source stays lan (a VPN ending on the router)", r("10.1.2.3", local: "192.168.1.20"), .lan)
+expect("remote door: a link-local neighbour on en0 stays lan", r("fe80::47b:5945:e0aa:d0ac", local: "fe80::2", scope: "en0"), .lan)
+expect("remote door: a neighbour on the cable (en14) stays lan", r("169.254.1.2", local: "169.254.172.122"), .lan)
+expect("remote door: Tailscale stays vpn", r("100.84.3.2", local: "100.88.123.45"), .vpn)
+expect("remote door: this Mac at its own Tailscale address stays vpn (away already, named by its service)", r("100.88.123.45", local: "100.88.123.45"), .vpn)
+expect("remote door: WireGuard stays vpn", r("10.99.0.9", local: "10.99.0.2"), .vpn)
+expect("remote door: the internet stays internet", r("203.0.113.9", local: "192.168.1.20"), .internet)
+expect("remote door: peer-to-peer Wi-Fi stays direct (the remote door refuses it)", r("fe80::1", scope: "awdl0"), .direct)
+expect("remote door: an unparseable source stays internet", r("not-an-address"), .internet)
+check("remote door: a relay stays a relay, from any address", P.atRemoteDoor(.relay, remote: "198.51.100.4", interfaces: own) == .relay)
+check("remote door: the mapping never makes a source from elsewhere a relay (every origin, a neighbour's address)",
+      [P.Origin.loopback, .direct, .vpn, .lan, .internet].allSatisfy { o in
+          P.atRemoteDoor(o, remote: "192.168.1.23", interfaces: own) == (o == .loopback ? .relay : o) })
+check("this Mac: loopback (127/8, ::1, mapped) and each of its own addresses, by their owners",
+      ["127.0.0.1", "127.1.2.3", "::1", "::ffff:127.0.0.1", "192.168.1.20", "::ffff:192.168.1.20", "fd4e:4f6b:37dc:4a0f::20", "2001:db8:1::20",
+       "100.88.123.45", "10.99.0.2", "169.254.172.122", "fe80::aede:48ff:fe00:1122", "fe80::aede:48ff:fe00:1122%en0", "fe80:4::aede:48ff:fe00:1122",
+       "[2001:db8:1::20]"].allSatisfy { P.isThisMac($0, interfaces: own) })
+check("this Mac: never a neighbour, a peer, another link-local address or something unparseable",
+      !["192.168.1.23", "192.168.1.21", "2001:db8:1::21", "fe80::aede:48ff:fe00:1123", "100.84.3.2", "203.0.113.9", "128.0.0.1", "", "not-an-address", "localhost"]
+        .contains { P.isThisMac($0, interfaces: own) })
+check("this Mac: the owner table decides (an empty table: loopback alone)",
+      P.isThisMac("127.0.0.1", interfaces: P.Interfaces()) && !P.isThisMac("192.168.1.20", interfaces: P.Interfaces()))
 // The doors
-let all: [P.Origin] = [.loopback, .direct, .vpn, .lan, .internet]
-check("home door: loopback, direct and lan only", all.filter(P.homeAdmits) == [.loopback, .direct, .lan])
-check("remote door, internet off: loopback, vpn, lan", all.filter { P.remoteAdmits($0, internetAccess: false) } == [.loopback, .vpn, .lan])
-check("remote door, internet on: loopback, vpn, lan, internet; never direct", all.filter { P.remoteAdmits($0, internetAccess: true) } == [.loopback, .vpn, .lan, .internet])
+let all: [P.Origin] = [.loopback, .direct, .vpn, .lan, .internet, .relay]
+check("home door: loopback, direct and lan only (never a relay: the remote door alone names one)", all.filter(P.homeAdmits) == [.loopback, .direct, .lan])
+check("remote door, internet off: loopback, vpn, lan, a relay on this Mac", all.filter { P.remoteAdmits($0, internetAccess: false) } == [.loopback, .vpn, .lan, .relay])
+check("remote door, internet on: loopback, vpn, lan, internet, a relay on this Mac; never direct", all.filter { P.remoteAdmits($0, internetAccess: true) } == [.loopback, .vpn, .lan, .internet, .relay])
 check("labels", P.label(.vpn, interface: "utun4", serviceName: "Tailscale") == "through Tailscale" && P.label(.vpn, interface: "utun6", serviceName: nil) == "through your VPN"
       && P.label(.internet, interface: nil, serviceName: nil) == "over the internet" && P.label(.lan, interface: "en0", serviceName: nil) == "by address"
       && P.label(.loopback, interface: nil, serviceName: nil) == "by address" && P.label(.direct, interface: "awdl0", serviceName: nil) == nil)
+check("labels: a relay on this Mac, whatever its interface", P.label(.relay, interface: nil, serviceName: nil) == "through a relay on this Mac"
+      && P.label(.relay, interface: "lo0", serviceName: "Tailscale") == "through a relay on this Mac")
 // Endpoint scopes (ported from the fixes' ClientLink)
 check("scope: fe80::1%awdl0.52397", P.scope(ofEndpoint: "fe80::1%awdl0.52397") == "awdl0")
 check("scope: [fe80::1%en0]:52397", P.scope(ofEndpoint: "[fe80::1%en0]:52397") == "en0")
@@ -96,6 +141,7 @@ let live = InterfaceSnapshot.shared
 let entries = live.entries()
 let liveIfs = live.interfaces()
 check("live: loopback is loopback", P.classify(remote: "127.0.0.1", localAddress: "127.0.0.1", scope: nil, interfaces: liveIfs) == .loopback)
+check("live: loopback at the remote door is a relay on this Mac", P.atRemoteDoor(.loopback, remote: "127.0.0.1", interfaces: liveIfs) == .relay)
 let tunnelV4 = entries.first { $0.pointToPoint && $0.address.count == 4 && !IPBytes.isLinkLocal($0.address) }
 if let t = tunnelV4 {
     let a = IPBytes.text(t.address)
@@ -105,6 +151,8 @@ if let t = tunnelV4 {
 if let lan = entries.first(where: { $0.name.hasPrefix("en") && $0.address.count == 4 && !IPBytes.isLinkLocal($0.address) }) {
     let a = IPBytes.text(lan.address)
     check("live: a neighbour on \(lan.name)'s own prefix is lan", P.classify(remote: a, localAddress: a, scope: nil, interfaces: liveIfs) == .lan)
+    check("live: this Mac's own address on \(lan.name) at the remote door is a relay on this Mac",
+          P.atRemoteDoor(P.classify(remote: a, localAddress: a, scope: nil, interfaces: liveIfs), remote: a, interfaces: liveIfs) == .relay)
     check("live: a public source arriving on \(lan.name) is internet", P.classify(remote: "198.51.100.7", localAddress: a, scope: nil, interfaces: liveIfs) == .internet)
 }
 check("live: cached (the second read is the same object's cache)", live.entries() == entries)

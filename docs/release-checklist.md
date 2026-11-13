@@ -129,18 +129,40 @@ serves the root or `/docs`, never `/site`. So:
       after the release whose builds the change describes (part 2, the last item):
 - Words on main for a release not out yet are marked: each block sits between `<!-- Name: …`
   and `<!-- /Name -->` (the Remote Access markers are another matter: they stay, for a build
-  without it). None is open since 0.6.0 (2026-11-02): that release shipped the words of the
-  Clipboard, Keyframe, Display wake, Other languages, Sound, Tiles, Reverse Scrolling, Pairing
-  window, Virtual Display, Aa Off, Thumbnail hold, Firewall, Tour 0.6, Locked Mac and Pinch zoom
-  markers, and its words commit (7871d5c) took their marker lines out of `site/` and kept the
-  words. A republish before a release whose words are marked (for words that hold for the builds
-  already out, such as support.html's on a Mac asleep or restarted, or on a black picture) deletes
-  each such block in the sill-site copy after the rsync below, one line a marker,
+  without it). None is open since 0.6.1: 0.6.0 (2026-11-02) shipped the words of the Clipboard,
+  Keyframe, Display wake, Other languages, Sound, Tiles, Reverse Scrolling, Pairing window,
+  Virtual Display, Aa Off, Thumbnail hold, Firewall, Tour 0.6, Locked Mac and Pinch zoom markers,
+  and its words commit (7871d5c) took their marker lines out of `site/` and kept the words; 0.6.1
+  shipped `Display wake click` (PR #228, without its tap sentence: below) and `Off-console view`
+  (PR #340) the same way, in its release pull request (#348). A republish before a release whose words
+  are marked (for words that hold for the builds already out, such as support.html's on a Mac
+  asleep or restarted, or on a black picture) deletes each such block in the sill-site copy after
+  the rsync below, one line a marker,
   `perl -0pi -e 's/[ \t]*<!-- Name:.*?<!-- \/Name -->\n//gs' ../sill-site/*.html` (a `.` in the
   name escaped), puts privacy.html's date back to the one last published, and checks with a
   `grep -n` of a phrase from each block that nothing of it is left. Add the marker's line and its
   grep here when a pull request marks words; the release that ships them deletes its markers in
   `site/`, keeps the words, and takes its lines out of here.
+- Open: `Version label` (support.html, under the lede: where each app shows its version, true from
+  Sill for iPhone and iPad 0.6.2; PR #351, docs/version-label-plan.md): `grep -n "shows its version"
+  ../sill-site/support.html` finds nothing after the cut.
+- Open: `Desktop displays` (the Desktop button steps through the Mac's screens: phase 1 of
+  docs/virtual-desktop-plan.md, PR #355, built on #173), support.html's "More than one screen on your
+  Mac": after the perl, `grep -n "More than one screen" ../sill-site/*.html` finds nothing. README's How
+  it works line waits inside an HTML comment after the iPhone Duo bullet (README is the public page on
+  main, never republished): the release's words commit takes the comment out and makes it a bullet.
+- Held back from the support page in 0.6.1, until a test shows it true: #228's tap sentence. The
+  page says "To wake it again, move the pointer, scroll, or press the Command key on a keyboard
+  attached to your iPhone or iPad; Shift alone doesn’t reach your Mac." With the sentence it would
+  say "To wake it again, tap the picture: the tap only wakes the display and moves the pointer
+  there, so nothing you can’t see is clicked. Moving the pointer, scrolling, or pressing the Command
+  key on a keyboard attached to your iPhone or iPad wakes it too; Shift alone doesn’t reach your
+  Mac." That claim also covers a window on Sill's virtual display while the panels sleep, which no
+  test has reached: Noah's Mac locks when its display sleeps, so his test of 2026-11-11 saw the
+  click held back on the lock screen (three times), never there. His #228 step 2 decides it
+  (Virtual Display on, a window picked, `pmset displaysleepnow`: is the picture black, and is a tap
+  held back?). Until then the release notes, What's New and the review notes name only the
+  Desktop's black picture, as the page names none.
 - Once sill is public, it can serve the site itself: `git subtree push --prefix site origin gh-pages`,
   then Settings › Pages › gh-pages, / (root). Retire sill-site then.
 
@@ -347,13 +369,15 @@ comes later, when the cask qualifies (below).
       never a Sill for Mac 0.4.1). A release that changes only one app is Noah's call: both at
       the new number, or the other left at its last (nothing in the code compares the two).
       main carries the next release's number, both apps together, from soon after the last
-      release on: 0.6.1 since App Review approved 0.6.0 (PR #286, merged then:
-      the approval closes 0.6.0's train), ahead of 0.6.0 on GitHub (2026-11-02) and on the App Store; 0.6.0
+      release on: 0.6.2 since App Review approved 0.6.1 (2026-11-12, branch `version-0-6-2`: the
+      approval closed 0.6.1's train, and a nightly's upload of 0.6.1 (1527) was refused that night),
+      ahead of 0.6.1 on GitHub (2026-11-11); 0.6.1 from App Review's approval of 0.6.0 (PR #286, merged then:
+      the approval closes 0.6.0's train) until then, ahead of 0.6.0 on GitHub (2026-11-02) and on the App Store; 0.6.0
       from 2026-10-31 until then, whose release builds are 0.6.0 (1276), and 0.5.5 from 2026-10-29 (PR
       #244), the pre-release number its TestFlight builds and nightlies carried. App Store Connect takes no new build of a version it has
       released (its train is closed), so every build of main for TestFlight needs the next
       number; and Sill.app's update check compares only release tags with the version it runs,
-      so a build of main saying 0.6.1 is offered nothing until a release newer than 0.6.1 exists.
+      so a build of main saying 0.6.2 is offered nothing until a release newer than 0.6.2 exists.
       The release's tag then names a commit of main that already says its number.
 - [ ] A Mac release and a device build that need each other (a change to the home door or the wire
       that older builds on the other side can't follow): the release notes say which versions go
@@ -470,6 +494,10 @@ comes later, when the cask qualifies (below).
       with it. The published pages are the newest release's `site/` (0.6.0's since
       2026-11-02, with its markers' words in and the privacy page dated November 2, 2026);
       words marked for a release not out yet stay out of them (part 1 §3).
+- [ ] `site/contribute.html` with it: refresh its "As of" month, its sponsors (the public ones on
+      github.com/sponsors/Saffsanity as a visitor sees them, by the name shown there; the private
+      ones only as "N more who sponsor privately") and its contributors (merged pull requests by
+      others, each with what it brought).
 
 ### The pairing release: Sill for Mac 0.4.0 with Sill for iPhone and iPad 0.5 (2)
 
@@ -889,8 +917,17 @@ What a nightly is:
   the build (a look a minute, 90 minutes at most), gives it What to Test, and gives it to TestFlight's
   groups (below). A night run again by hand finds its build in App Store Connect and only gives it its
   groups again.
-- Versions: what main says (0.6.1 since App Review approved 0.6.0, part 2's first item; 0.6.0 from 2026-10-31 until then, its release builds 0.6.0 (1276), and 0.5.5 the pre-release number from 2026-10-29), with the commit count as
-  the build number on both apps, as in "Sill 0.6.1 (1280)". The store release's own build is uploaded with the same number
+- What to Test: the night's notes replace what a build has only when that night's run uploaded it
+  (the upload step's `uploaded=true`, then `asc.swift distribute --replace-whats-new`). A build App
+  Store Connect has already, from a night run again or uploaded by hand from main's head (as 0.6.1
+  (1304) was on 2026-11-09, with its own words for the reporters, which that night's nightly then
+  replaced with its notes: the reason for this rule), keeps its What to Test, in any language, and
+  gets the notes only if it has none; the job's notice and summary say which. To change a build's
+  words afterwards: `asc.swift whats-new` (it always replaces) or TestFlight › the build › Test
+  Details. `asc.swift distribute` by hand keeps a build's words too unless given
+  `--replace-whats-new` (docs/nightly-whats-new-plan.md).
+- Versions: what main says (0.6.2 since App Review approved 0.6.1, part 2's first item; 0.6.1 from App Review's approval of 0.6.0 until then; 0.6.0 from 2026-10-31, its release builds 0.6.0 (1276), and 0.5.5 the pre-release number from 2026-10-29), with the commit count as
+  the build number on both apps, as in "Sill 0.6.2 (1530)". The store release's own build is uploaded with the same number
   (`Scripts/release-ios.sh --build-number "$(git rev-list --count HEAD)" --upload`), never `--bump`: App Store Connect wants a
   version's build numbers to rise, and the nightlies have already used the commit counts under that version. Never committed: make-app.sh has always
   stamped the count into the Mac's bundle, and `--build-number` gives it to xcodebuild for the run.
@@ -933,7 +970,7 @@ For a nightly tester:
 - The update check never offers a nightly: it reads only
   `https://api.github.com/repos/Saffsanity/sill/releases/latest`, which never lists a pre-release
   (`UpdatePolicy.feed`), refuses an answer that says `prerelease` anyway (`UpdatePolicy.release`), and
-  "nightly" is no version. A nightly Sill.app says main's version with its build number (0.5.5 until 2026-10-31, 0.6.0 until App Review approved 0.6.0, 0.6.1 since), so the update check offered it the 0.6.0 release once that was published, like everyone else's, and the nightlies after the release, saying 0.6.1, are offered the 0.6.1 release in turn.
+  "nightly" is no version. A nightly Sill.app says main's version with its build number (0.5.5 until 2026-10-31, 0.6.0 until App Review approved 0.6.0, 0.6.1 until it approved 0.6.1, 0.6.2 since), so the update check offered a nightly that said 0.5.5 the 0.6.0 release once that was published, like everyone else's. A nightly is never offered the release of the version it says: the check offers only a higher version and build numbers don't count (`UpdatePolicy`: `version > running`), so the nightlies saying 0.6.1 are not offered the 0.6.1 release, and whoever runs one swaps it for the download by hand (settings, permissions and pairings carry over); the next release they are offered is 0.6.2's. Say so wherever a nightly is offered to someone (found 2026-11-11, while writing to reporters).
 - Going back: on the Mac, quit Sill, download the release from https://getsill.app/download and
   replace Sill in Applications; nothing to set up again. On a device, TestFlight › Sill › Previous
   Builds installs an earlier build, and the App Store installs the release over a TestFlight build
@@ -1019,7 +1056,7 @@ The first run, for Noah:
    Mac job's log ("Identity keychain: data-protection", twice "Notarized Developer ID"), the disk image
    on a second Mac (downloaded, so quarantined: it opens, the drag, Sill opens, the iPad still
    paired), the iOS job's last step ("Assigned build … to: no group; by automatic distribution: Internal.",
-   "Public beta: not given") and
+   "What to Test set (English (U.S.), … characters)", "Public beta: not given") and
    TestFlight on the iPad (the build with its What to Test).
 8. `gh variable set SILL_NIGHTLY --body true`: every night from the next 09:17 UTC on.
 9. Once a nightly has worked in 'Internal': `gh variable set SILL_NIGHTLY_PUBLIC_BETA --body true`
@@ -1312,10 +1349,13 @@ GitHub's prices on 2026-09-25 ([runner pricing](https://docs.github.com/en/billi
   use a week's share; making the repository public ends the question. A verify-only release
   takes about the same (the disk image adds well under a minute). A signed release also waits for
   Apple's notary service twice (the zip, then the disk image), usually 15 to 30 minutes in all.
-  The mutants (CI started by hand with "mutants" ticked) run a job for each of the 32 checks with
-  mutants, about four hours of macOS time in all (their scripts took 205 minutes here on
-  2026-09-27, several at once; each job also checks out and selects Xcode, and is rounded up to
-  the minute): some 2,400 included minutes, more than Free's month, or about $15.
+  The mutants (CI started by hand with "mutants" ticked) run a job for each check with mutants,
+  read from the folders (32 checks on 2026-09-27, 66 on 2026-11-12), each job allowed 120 minutes
+  (Noah, 2026-11-12: remote-rules' 124 mutants took about 58 minutes here, and a job cut off at its
+  limit loses its results). On 2026-09-27 that was about four hours of macOS time in all (their
+  scripts took 205 minutes here, several at once; each job also checks out and selects Xcode, and
+  is rounded up to the minute): some 2,400 included minutes, more than Free's month, or about $15
+  then (not measured since).
 - Storage is small: the build cache stays within the 10 GB each repository gets for caches, and
   the artifacts (a zip and a disk image of about 3 MB each for 14 days, the notary logs for 30, a
   TestFlight .ipa of about 2 MB for 14 days) within the 500 MB of artifact storage on GitHub Free.

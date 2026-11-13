@@ -215,6 +215,35 @@ enum DoorPolicy {
         }
     }
 
+    // MARK: A handshake that never finished (issue #314)
+
+    /// How a connection that ended before its TLS handshake finished is counted in the line below:
+    /// "timedOut" when the door's deadline closed it (`Places.End.timedOut`), "closed" when the other
+    /// end closed or reset it after waiting `freeHold` or more (a device giving up on a dial that
+    /// stalled); nil for one that went in less (a dial's loser cancelled at once, a port check), which
+    /// says nothing and is counted nowhere, as before. Never one the door refused (a key it does not
+    /// trust, a handshake it failed), nor an older Sill's plain try ("older").
+    static func stall(timedOut: Bool, held: Double) -> String? {
+        if timedOut { return "timedOut" }
+        return held >= freeHold ? "closed" : nil
+    }
+
+    /// The minute's line about them, beside the refusals' and at most once a minute like it
+    /// (RefusalSummary): "Home door: 5 connections in the last minute never finished their TLS
+    /// handshake (4 timed out, 1 closed by the other end after waiting), so no key was checked and
+    /// none counts as a refusal. A firewall or a content filter on this Mac may be holding them."
+    /// Issue #314: a macOS 27.3 beta's firewall held every connection to both doors until the
+    /// deadline, and the log counted them "unpaired" and backed the phone off, so a filter read as a
+    /// pairing problem.
+    static func stallLine(_ door: Door, timedOut: Int, closed: Int) -> String {
+        let n = timedOut + closed
+        let one = n == 1
+        return "\(door == .home ? "Home door" : "Remote access"): \(n) connection\(one ? "" : "s") in the last minute never finished "
+            + "\(one ? "its" : "their") TLS handshake (\(timedOut) timed out, \(closed) closed by the other end after waiting), "
+            + "so no key was checked and \(one ? "it doesn’t count" : "none counts") as a refusal. "
+            + "A firewall or a content filter on this Mac may be holding \(one ? "it" : "them")."
+    }
+
     // MARK: The places waiting for admission
 
     // Finding 9 of the security scan of 2026-10-18: a door held at most 8 connections waiting for
@@ -223,7 +252,9 @@ enum DoorPolicy {
     // kept every place full for as long as it liked and was never backed off, while a real device got
     // "limit" (and IPv6 gives one host any number of addresses). Now holding a place costs its
     // source, the TLS handshake has 4 s, an IPv6 address answers for its /64 too, and two places
-    // beyond the eight are kept for addresses that recently proved a paired key.
+    // beyond the eight are kept for addresses that recently proved a paired key. Issue #314: a wait
+    // that never reaches a key costs its hold only while every shared place is held (a firewall's
+    // stall on this Mac looks the same as a holder before TLS, but alone it never fills the places).
 
     /// Places any source may take.
     static let sharedPlaces = 8
@@ -290,6 +321,21 @@ enum DoorPolicy {
         return refused ? max(1, cost) : cost
     }
 
+    /// What a connection that ended before its TLS handshake finished costs its source (issue #314):
+    /// one the door's deadline closed (`Places.End.timedOut`), or one that went away by itself before
+    /// `.ready`. No key was checked, so it is never a refusal. While the door had a place for every
+    /// newcomer it costs `endCost` alone, which still bounds how fast one address may open
+    /// connections (50 in a minute back it off). When every shared place was held while it waited
+    /// (`contended`), it costs what holding its place costs (`charge(held:refused: false)`, 1.1 at
+    /// the 4 s deadline), as every such wait did since finding 9: holders that keep every place full
+    /// are backed off as before. A firewall's or a content filter's stall on this Mac (#314: a macOS
+    /// 27.3 beta with the firewall on held every connection to Sill's doors until the deadline) is
+    /// told from a holder by nothing before TLS, but a device's own stalled dials, two at a time per
+    /// address, never fill the eight places, so they no longer back it off for 300 s.
+    static func chargeBeforeKey(held: Double, contended: Bool) -> Double {
+        contended ? charge(held: held, refused: false) : endCost
+    }
+
     /// When a connection waiting for admission is refused, in seconds after it was accepted:
     /// `handshakeDeadline` while it is not ready (`admissionDeadline` from a known address); once
     /// ready (a pairing connection waiting for its kind 19), `requestDeadline` after `.ready`, and
@@ -335,9 +381,12 @@ enum DoorPolicy {
     /// address itself is backed off, never for its group. Every connection that ends unadmitted, and
     /// a pairing connection when its kind 19 comes (`End.request`), costs its address
     /// `charge(held:refused:)`, known or not: an address that is known, or that someone else on the
-    /// network takes while its device is away, still pays for what it holds. Its group is
-    /// charged the same while the address is not known, one address counting for `groupShare` at
-    /// most. A paired key at `.ready` clears its address's failures and backoff, as before.
+    /// network takes while its device is away, still pays for what it holds. One that never
+    /// finished its TLS handshake (`End.timedOut`, or `End.ended` before `.ready`) pays for what it
+    /// held only when every shared place was held while it waited (`Entry.contended`), else the
+    /// tenth alone (`chargeBeforeKey`, issue #314). Its group is charged the same while the address
+    /// is not known, one address counting for `groupShare` at most. A paired key at `.ready` clears
+    /// its address's failures and backoff, as before.
     struct Places {
         enum Arrival: Equatable {
             /// It waits in a place now; `known`: its address is known.
@@ -364,8 +413,14 @@ enum DoorPolicy {
             /// The door refused it: at least one failure.
             case refused
             /// It ended by itself before admission: closed, reset, a handshake that failed for the
-            /// peer, an older Sill's plain try.
+            /// peer, an older Sill's plain try. Before `.ready` it costs as a connection that never
+            /// finished its handshake does (`chargeBeforeKey`); after it, what it held.
             case ended
+            /// The door's deadline passed before `.ready`: no TLS handshake finished in the time its
+            /// source has (4 s, 10 s from a known address), so no key was checked (issue #314). Never
+            /// a refusal: `chargeBeforeKey`. A pairing connection that reached `.ready` and sent no kind
+            /// 19 by its deadline showed a key, and is refused.
+            case timedOut
             /// The Mac let it go (Direct Wireless turned off): nothing counted.
             case dropped
         }
@@ -375,6 +430,9 @@ enum DoorPolicy {
             let acceptedAt: Double
             let known: Bool
             var readyAt: Double?
+            /// Every shared place was held at some moment while it waited (`contend`): it kept a
+            /// newcomer out, or would have.
+            var contended = false
         }
 
         let backoff: Double
@@ -422,8 +480,28 @@ enum DoorPolicy {
             key.contains("/") ? DoorPolicy.groupFailureWindow : DoorPolicy.failureWindow
         }
 
-        /// A connection accepted from `s`: does it take a place?
+        /// A connection accepted from `s`: does it take a place? Whenever every shared place is held
+        /// after it (it took the last one, or it was refused for want of one: `.full` comes only then),
+        /// every connection waiting is marked as one that kept a newcomer out (`Entry.contended`), so
+        /// that its wait costs what holding its place costs should it end before its key
+        /// (`chargeBeforeKey`, issue #314). A source refused for its own two places marks nothing:
+        /// those are its own connections (or its NAT's), and a device's own stalled dials meet that
+        /// limit by themselves.
         mutating func arrive(_ id: AnyHashable, _ s: Source, now: Double) -> Arrival {
+            let arrival = place(id, s, now: now)
+            if sharedInUse >= DoorPolicy.sharedPlaces { contend() }
+            return arrival
+        }
+
+        /// The shared places in use: every waiting connection but the known ones in the reserved places.
+        private var sharedInUse: Int { pending.count - min(pending.values.filter(\.known).count, DoorPolicy.reservedPlaces) }
+
+        /// Every connection waiting now is marked as one that kept a newcomer out, or would have.
+        private mutating func contend() {
+            for id in pending.keys { pending[id]?.contended = true }
+        }
+
+        private mutating func place(_ id: AnyHashable, _ s: Source, now: Double) -> Arrival {
             if backedOff(s, now: now) { return .backedOff }
             let known = isKnown(s.address, now: now)
             if known {
@@ -448,6 +526,12 @@ enum DoorPolicy {
             pending[id] = e
         }
 
+        /// How long it has waited (since accept, on the `now` clock) and whether it reached `.ready`;
+        /// nil when it holds no place. Door's view, for the line about handshakes that never finished.
+        func waited(_ id: AnyHashable, now: Double) -> (held: Double, ready: Bool)? {
+            pending[id].map { (now - $0.acceptedAt, $0.readyAt != nil) }
+        }
+
         /// When it is refused if it still waits (on the `now` clock); nil when it holds no place.
         func deadline(_ id: AnyHashable) -> Double? {
             guard let e = pending[id] else { return nil }
@@ -464,6 +548,9 @@ enum DoorPolicy {
                 return []
             case .dropped:
                 return []
+            case .ended where e.readyAt == nil, .timedOut:
+                // No key was checked (issue #314): the end alone while the door had room for everyone.
+                return charge(e.source, DoorPolicy.chargeBeforeKey(held: Self.held(e, now: now), contended: e.contended), now: now)
             case .refused, .ended, .request:
                 return charge(e.source, DoorPolicy.charge(held: Self.held(e, now: now), refused: end == .refused), now: now)
             }
