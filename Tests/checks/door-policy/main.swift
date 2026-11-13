@@ -9,7 +9,7 @@ var fails = 0, passes = 0
 func check(_ name: String, _ ok: Bool) { if ok { passes += 1; print("ok   \(name)") } else { fails += 1; print("FAIL \(name)") }; fflush(stdout) }
 typealias D = DoorPolicy
 typealias T = DoorPolicy.Trust
-let origins: [OriginPolicy.Origin] = [.loopback, .direct, .vpn, .lan, .internet]
+let origins: [OriginPolicy.Origin] = [.loopback, .direct, .vpn, .lan, .internet, .relay]
 let session = RemoteTLS.sessionALPN, pairing = RemoteTLS.pairingALPN
 check("the ALPNs are sill/1 and sill-pair/1", session == "sill/1" && pairing == "sill-pair/1")
 
@@ -22,10 +22,15 @@ for o in origins {
         let home = D.admitsBeforeStart(.home, origin: o, internetAccess: ia)
         let remote = D.admitsBeforeStart(.remote, origin: o, internetAccess: ia)
         if home == [.loopback, .direct, .lan].contains(o) { gateOK += 1 } else { print("  home \(o) ia=\(ia): \(home)") }
-        if remote == ([.loopback, .lan, .vpn].contains(o) || (o == .internet && ia)) { gateOK += 1 } else { print("  remote \(o) ia=\(ia): \(remote)") }
+        if remote == ([.loopback, .lan, .vpn, .relay].contains(o) || (o == .internet && ia)) { gateOK += 1 } else { print("  remote \(o) ia=\(ia): \(remote)") }
     }
 }
-check("before start: \(gateOK) of \(gate) (home: loopback, direct, lan; remote: loopback, lan, vpn, internet with access)", gate == gateOK)
+check("before start: \(gateOK) of \(gate) (home: loopback, direct, lan; remote: loopback, lan, vpn, a relay on this Mac, internet with access)", gate == gateOK)
+// Issue #326: at the remote door a connection from this Mac itself is a relay on it (OriginPolicy.atRemoteDoor),
+// admitted there as loopback was, whatever the internet switch; the home door never names one.
+check("before start: a relay on this Mac at the remote door, internet access on or off, as loopback was; never at home",
+      D.admitsBeforeStart(.remote, origin: .relay, internetAccess: false) && D.admitsBeforeStart(.remote, origin: .relay, internetAccess: true)
+      && !D.admitsBeforeStart(.home, origin: .relay, internetAccess: true) && D.refusalBeforeStart(.remote, origin: .relay, internetAccess: false) == nil)
 check("before start: home refuses a VPN and the internet whatever the switch",
       !D.admitsBeforeStart(.home, origin: .vpn, internetAccess: true) && !D.admitsBeforeStart(.home, origin: .internet, internetAccess: true))
 check("before start: home takes peer-to-peer Wi-Fi (Direct Wireless), the remote door never",
@@ -152,14 +157,14 @@ for door in [D.Door.home, .remote] { for w in [false, true] { for o in origins {
 check("after the gate: \(agOK) of \(ag) combinations (both doors, paired at `.ready` or not, every origin, 0, 7, 8, 9 remote sessions) match", ag == agOK)
 let full = T(paired: true, requirePairing: true, remoteAccess: true, internetAccess: true)
 check("after the gate, remote: nothing changed → admitted, from every origin the door takes",
-      [OriginPolicy.Origin.loopback, .lan, .vpn, .internet].allSatisfy { D.afterGate(.remote, wasPaired: true, origin: $0, full, remoteSessions: 0) == nil })
+      [OriginPolicy.Origin.loopback, .lan, .vpn, .internet, .relay].allSatisfy { D.afterGate(.remote, wasPaired: true, origin: $0, full, remoteSessions: 0) == nil })
 check("after the gate, remote: removed meanwhile → removed, before any other change",
       D.afterGate(.remote, wasPaired: true, origin: .internet, T(paired: false, remoteAccess: false), remoteSessions: 9) == Goodbye.removed)
 check("after the gate, remote: Remote Access off meanwhile → remoteOff, before the internet switch and the limit",
       D.afterGate(.remote, wasPaired: true, origin: .internet, T(paired: true, remoteAccess: false, internetAccess: false), remoteSessions: 9) == Goodbye.remoteOff)
 check("after the gate, remote: internet access off meanwhile → internetOff for an internet origin only, before the limit",
       D.afterGate(.remote, wasPaired: true, origin: .internet, T(paired: true, remoteAccess: true, internetAccess: false), remoteSessions: 9) == Goodbye.internetOff
-      && [OriginPolicy.Origin.loopback, .lan, .vpn].allSatisfy { D.afterGate(.remote, wasPaired: true, origin: $0, T(paired: true, remoteAccess: true, internetAccess: false), remoteSessions: 0) == nil })
+      && [OriginPolicy.Origin.loopback, .lan, .vpn, .relay].allSatisfy { D.afterGate(.remote, wasPaired: true, origin: $0, T(paired: true, remoteAccess: true, internetAccess: false), remoteSessions: 0) == nil })
 check("after the gate, remote: the limit reached meanwhile → busy at 8 sessions, the 8th served",
       D.afterGate(.remote, wasPaired: true, origin: .lan, full, remoteSessions: 8) == Goodbye.busy
       && D.afterGate(.remote, wasPaired: true, origin: .lan, full, remoteSessions: 7) == nil)
@@ -214,7 +219,7 @@ check("still served: Remove, Remote Access off and internet access off at the re
       !D.stillServes(.remote, encrypted: true, wasPaired: true, origin: .vpn, T(paired: false, remoteAccess: true))
       && !D.stillServes(.remote, encrypted: true, wasPaired: true, origin: .vpn, T(paired: true, remoteAccess: false))
       && !D.stillServes(.remote, encrypted: true, wasPaired: true, origin: .internet, T(paired: true, remoteAccess: true, internetAccess: false))
-      && [OriginPolicy.Origin.loopback, .lan, .vpn].allSatisfy { D.stillServes(.remote, encrypted: true, wasPaired: true, origin: $0, T(paired: true, remoteAccess: true, internetAccess: false)) })
+      && [OriginPolicy.Origin.loopback, .lan, .vpn, .relay].allSatisfy { D.stillServes(.remote, encrypted: true, wasPaired: true, origin: $0, T(paired: true, remoteAccess: true, internetAccess: false)) })
 check("still served: nothing changed, at either door, and the remote door's limit is no cut",
       D.stillServes(.remote, encrypted: true, wasPaired: true, origin: .internet, full)
       && D.stillServes(.home, encrypted: true, wasPaired: true, origin: .lan, full))
@@ -606,10 +611,17 @@ check("group: two such addresses back the /64 off once both have given their 6 (
       (r16two.at.map { near($0, 88.1) } ?? false) && r16two.backed.allSatisfy { $0 == "2601:600:1:2::/64" })
 var gKnownPays = Places()
 _ = gKnownPays.arrive("p", a7, now: 0); gKnownPays.leave("p", .admitted(paired: true), now: 0)
-var gKnownBacked: [String] = []
-for n in 0..<5 { _ = gKnownPays.arrive(n, a7, now: Double(n)); gKnownBacked += gKnownPays.leave(n, .ended, now: Double(n) + 9.9) }
-check("group: a known address's waits cost it (five 9.9 s, 1.1 each: backed off at the fifth), never its /64",
+var gKnownRoom = gKnownPays
+for n in 0..<8 { _ = gKnownPays.arrive("f\(n)", v4("10.9.8.\(n / 2)"), now: 0) }     // every shared place held (issue #314)
+var gKnownBacked: [String] = [], gKnownRoomBacked: [String] = []
+for n in 0..<5 {
+    _ = gKnownPays.arrive(n, a7, now: Double(n)); gKnownBacked += gKnownPays.leave(n, .ended, now: Double(n) + 9.9)
+    _ = gKnownRoom.arrive(n, a7, now: Double(n)); gKnownRoomBacked += gKnownRoom.leave(n, .ended, now: Double(n) + 9.9)
+}
+check("group: a known address's waits while every shared place is held cost it (five 9.9 s, 1.1 each: backed off at the fifth), never its /64",
       gKnownBacked == ["2601:600:1:2::7"] && near(gKnownPays.failures("2601:600:1:2::/64", now: 11), 0))
+check("group: the same five waits with the door's other places free cost a tenth each (issue #314): not backed off",
+      gKnownRoomBacked.isEmpty && near(gKnownRoom.failures("2601:600:1:2::7", now: 11), 0.5))
 var gSlow = Places()
 for n in 0..<11 { _ = gSlow.refusedBeforeStart(src("2601:600:1:2::\(n + 1)"), now: Double(n) * 15) }
 check("group: its failures count for 300 s (11 between 0 and 150 s, the 12th at 299.9 s backs it off; at 300 s the first has gone)",
@@ -661,8 +673,9 @@ check("known: a known address refused 5 times is backed off like any other", kaB
       && ka.backedOff(v4("10.0.0.9"), now: 10) && ka.arrive("late", v4("10.0.0.9"), now: 10) == .backedOff)
 var kh = Places()
 _ = kh.arrive("p", v4("10.0.0.9"), now: 0); kh.leave("p", .admitted(paired: true), now: 0)
+for n in 0..<8 { _ = kh.arrive("f\(n)", v4("10.9.7.\(n / 2)"), now: 1) }     // every shared place held (issue #314)
 _ = kh.arrive("h", v4("10.0.0.9"), now: 1)
-check("known: its 10 s wait costs what an address not known pays at most for its handshake (9.9 s: 1.1; the review of 2026-10-29: it was 4.05)",
+check("known: its 10 s wait, every shared place held, costs what an address not known pays at most for its handshake (9.9 s: 1.1; the review of 2026-10-29: it was 4.05)",
       { var k = kh; k.leave("h", .ended, now: 10.9); return near(k.failures("10.0.0.9", now: 11), 1.1) }())
 var b4 = Places()
 for t in 0..<5 { _ = b4.refusedBeforeStart(v4("10.0.0.3"), now: Double(t)) }
@@ -673,9 +686,11 @@ _ = f4.arrive("p", v4("10.0.0.4"), now: 5); f4.leave("p", .admitted(paired: true
 check("backoff: an address that proves a paired key starts clean, as before", near(f4.failures("10.0.0.4", now: 6), 0))
 
 // Leaving a place: what each end costs.
-func cost(_ end: Places.End, held: Double, known: Bool = false, readyAfter: Double? = nil) -> Double {
+func cost(_ end: Places.End, held: Double, known: Bool = false, readyAfter: Double? = nil, contended: Bool = false) -> Double {
     var p = Places()
     if known { _ = p.arrive("k", v4("s"), now: 0); p.leave("k", .admitted(paired: true), now: 0) }
+    // Contended (issue #314): every shared place held while it waits, by others that stay.
+    if contended { for n in 0..<(known ? 8 : 7) { _ = p.arrive("f\(n)", v4("10.9.9.\(n / 2)"), now: 10) } }
     _ = p.arrive("c", v4("s"), now: 10)
     if let readyAfter { p.ready("c", now: 10 + readyAfter) }
     p.leave("c", end, now: 10 + held)
@@ -683,34 +698,42 @@ func cost(_ end: Places.End, held: Double, known: Bool = false, readyAfter: Doub
 }
 check("leave: admitted, paired or not, costs nothing", cost(.admitted(paired: true), held: 9) == 0 && cost(.admitted(paired: false), held: 9) == 0)
 check("leave: let go by the Mac (Direct Wireless off) costs nothing", cost(.dropped, held: 9) == 0)
-check("leave: ended by itself costs charge(held:)", near(cost(.ended, held: 1), 0.1) && near(cost(.ended, held: 3.9), 1.05)
-      && near(cost(.ended, held: 7.9, readyAfter: 3.9), 3.05))
+check("leave: ended by itself before .ready costs a tenth while the door has room (issue #314), what it held when every shared place was (1 s 0.1, 3.9 s 1.05)",
+      near(cost(.ended, held: 1), 0.1) && near(cost(.ended, held: 3.9), 0.1) && near(cost(.ended, held: 1, contended: true), 0.1)
+      && near(cost(.ended, held: 3.9, contended: true), 1.05))
+check("leave: ended by itself after .ready (a pairing connection without its kind 19) costs what it held, room or not",
+      near(cost(.ended, held: 7.9, readyAfter: 3.9), 3.05) && near(cost(.ended, held: 7.9, readyAfter: 3.9, contended: true), 3.05))
+check("leave: timed out before .ready (issue #314) costs a tenth while the door has room, never a refusal's one; what it held when every shared place was (4 s 1.1, 0.2 s 0.1)",
+      near(cost(.timedOut, held: 4), 0.1) && near(cost(.timedOut, held: 4, contended: true), 1.1) && near(cost(.timedOut, held: 0.2, contended: true), 0.1)
+      && near(cost(.timedOut, held: 10, known: true), 0.1) && near(cost(.timedOut, held: 10, known: true, contended: true), 1.1))
 check("leave: a pairing connection's kind 19 costs as one that ended then, never a refusal (the review of 2026-10-29: it cost nothing)",
       near(cost(.request, held: 0.1, readyAfter: 0.05), 0.1) && near(cost(.request, held: 1.9, readyAfter: 0.05), 0.19)
       && near(cost(.request, held: 7.9, readyAfter: 3.9), 3.05))
 check("leave: refused costs at least one", near(cost(.refused, held: 0.2), 1) && near(cost(.refused, held: 4), 1.1))
-check("leave: a known address pays as one not known at most (9.9 s: 1.1; 3 s: 0.6; refused at once: 1)",
-      near(cost(.ended, held: 9.9, known: true), 1.1) && near(cost(.ended, held: 3, known: true), 0.6) && near(cost(.refused, held: 0.2, known: true), 1))
-check("leave: an IPv6 address's end costs it and its /64 alike", { var p = Places()
-    _ = p.arrive("c", src("2601:600:1:2::5"), now: 0); p.leave("c", .ended, now: 3)
+check("leave: a known address pays as one not known at most (every shared place held: 9.9 s 1.1, 3 s 0.6; refused at once: 1)",
+      near(cost(.ended, held: 9.9, known: true, contended: true), 1.1) && near(cost(.ended, held: 3, known: true, contended: true), 0.6)
+      && near(cost(.refused, held: 0.2, known: true), 1) && near(cost(.ended, held: 9.9, known: true), 0.1))
+check("leave: an IPv6 address's end costs it and its /64 alike (a pairing connection gone 3 s in, ready at once: 0.6 each)", { var p = Places()
+    _ = p.arrive("c", src("2601:600:1:2::5"), now: 0); p.ready("c", now: 0.5); p.leave("c", .ended, now: 3)
     return near(p.failures("2601:600:1:2::5", now: 3), 0.6) && near(p.failures("2601:600:1:2::/64", now: 3), 0.6) }())
 check("leave: an id that holds no place changes nothing", { var p = Places(); return p.leave("none", .refused, now: 1).isEmpty && p.failures("x", now: 1) == 0 }())
 // The review of 2026-10-29: a wait counts up to its place's deadline at most. The door's clock runs
 // on through the Mac's sleep and its deadline timer does not, so a connection waiting as the Mac
 // slept ended at the wake, an hour "held": it backed its address off, and an IPv6 address's /64.
-check("leave: a wait counts to its deadline at most (the Mac asleep an hour with it waiting: what the cut at 4 s costs, 1.1, refused or ended; a kind 19 read at the wake, ready at 1 s: 1.6)",
-      near(cost(.refused, held: 3600), 1.1) && near(cost(.ended, held: 3600), 1.1) && near(cost(.request, held: 3600, readyAfter: 1), 1.6))
+check("leave: a wait counts to its deadline at most (the Mac asleep an hour with it waiting: what the cut at 4 s costs, 1.1, refused, or ended or timed out with every shared place held; a kind 19 read at the wake, ready at 1 s: 1.6)",
+      near(cost(.refused, held: 3600), 1.1) && near(cost(.ended, held: 3600, contended: true), 1.1) && near(cost(.timedOut, held: 3600, contended: true), 1.1)
+      && near(cost(.request, held: 3600, readyAfter: 1), 1.6))
 check("leave: a pairing connection ready at 3 s, an hour on: what its cut at 7 s costs (2.6)", { var p = Places()
     _ = p.arrive("c", v4("s"), now: 10); p.ready("c", now: 13); p.leave("c", .ended, now: 3610)
     return near(p.failures("s", now: 3610), 2.6) }())
-check("leave: a known address's an hour asleep: 1.1, as one not known", near(cost(.ended, held: 3600, known: true), 1.1))
+check("leave: a known address's an hour asleep, every shared place held: 1.1, as one not known", near(cost(.ended, held: 3600, known: true, contended: true), 1.1))
 check("leave: a known address's pairing connection ready late (at 9 s), its kind 19 at 9.9 s: 3.1 at most, as one not known can (ready by 4 s, 8 s)",
       near(cost(.request, held: 9.9, known: true, readyAfter: 9), 3.1) && near(cost(.request, held: 5, known: true, readyAfter: 1), 1.6))
 var slept = Places()
 _ = slept.arrive("a", src("2601:600:1:2::5"), now: 0); _ = slept.arrive("b", src("2601:600:1:2::6"), now: 0)
 let sleptBacked = slept.leave("a", .refused, now: 3600) + slept.leave("b", .ended, now: 3600)
-check("leave: two connections of one /64 waiting through an hour's sleep back off nothing (2.2 each address and its /64)",
-      sleptBacked.isEmpty && near(slept.failures("2601:600:1:2::/64", now: 3600), 2.2) && !slept.backedOff(src("2601:600:1:2::7"), now: 3600))
+check("leave: two connections of one /64 waiting through an hour's sleep back off nothing (1.1 and a tenth, each address and its /64)",
+      sleptBacked.isEmpty && near(slept.failures("2601:600:1:2::/64", now: 3600), 1.2) && !slept.backedOff(src("2601:600:1:2::7"), now: 3600))
 
 // Deadlines of one place.
 var dl = Places()
@@ -787,7 +810,7 @@ struct OldPlaces: PlaceRule {
             return []
         case .dropped, .ended, .request:      // a kind 19 was admitted: it cost nothing
             return []
-        case .refused:
+        case .refused, .timedOut:          // the deadline was a refusal
             let list = (failures[e.address] ?? []).filter { now - $0 < 60 } + [now]
             if list.count >= 5 { backoffUntil[e.address] = now + 300; failures[e.address] = []; return [e.address] }
             failures[e.address] = list
@@ -829,7 +852,8 @@ func simulate<R: PlaceRule>(_ rule: R, holders: [Holder], device: Device?, known
         var kept: [Conn] = []
         for var c in conns {
             if let dl = r.deadline(c.id), now >= dl {
-                note(r.leave(c.id, .refused, now: now)); free[c.holder] += 1; continue
+                // As Door: once ready (a pairing connection without its kind 19) a refusal; before, a timeout (issue #314).
+                note(r.leave(c.id, c.ready ? .refused : .timedOut, now: now)); free[c.holder] += 1; continue
             }
             if let ra = c.readyAt, !c.ready, now >= ra { r.ready(c.id, now: now); c.ready = true }
             if c.ready, let rq = c.requestAt, now >= rq { note(r.leave(c.id, .request, now: now)); free[c.holder] += 1; continue }
@@ -840,7 +864,7 @@ func simulate<R: PlaceRule>(_ rule: R, holders: [Holder], device: Device?, known
         // The device.
         if let dc = deviceConn {
             if let dl = r.deadline(dc.id), now >= dl, now < dc.readyAt {
-                note(r.leave(dc.id, .refused, now: now)); deviceConn = nil
+                note(r.leave(dc.id, .timedOut, now: now)); deviceConn = nil
             } else if now >= dc.readyAt {
                 r.ready(dc.id, now: now); r.leave(dc.id, .admitted(paired: true), now: now)
                 out.deviceIn += 1; if out.firstIn == nil { out.firstIn = now }
@@ -949,25 +973,31 @@ check("old rule, the same: every place held for good, nobody backed off, the dev
 // What stays (the plan's "What stays open"): an address keeps about 4/5 of a place for good, so ten
 // addresses taking turns could keep the 8 shared places full. One connection held 2 s in every 2.5 s
 // (24 ends in any minute, 4.8): never backed off; in every 2.45 s (25 ends, 5.0): backed off.
-func paced(every: Double) -> [String] {
+func paced(every: Double, othersHold: Int = 0) -> [String] {
     var p = Places(), backed: [String] = [], t = 0.0, n = 0
+    for k in 0..<othersHold { _ = p.arrive("f\(k)", v4("10.9.6.\(k / 2)"), now: 0) }     // other places held for good
     while t < 600 { n += 1; _ = p.arrive(n, v4("10.0.6.1"), now: t); backed += p.leave(n, .ended, now: t + 2); t += every }
     return backed
 }
-check("new rule, a trade-off: one place held 2 s in every 2.5 s (4/5 of a place, 4.8 a minute) is never backed off; in every 2.45 s it is",
-      paced(every: 2.5).isEmpty && paced(every: 2.45).first == "10.0.6.1")
+check("new rule, a trade-off: with every other shared place held, one place held 2 s in every 2.5 s (4/5 of a place, 4.8 a minute) is never backed off; in every 2.45 s it is",
+      paced(every: 2.5, othersHold: 7).isEmpty && paced(every: 2.45, othersHold: 7).first == "10.0.6.1")
+check("issue #314, a trade-off: with the door's other places free a place costs only its tenths, so an address keeps it at any pace under 50 ends a minute (every 2.45 s and 1.25 s: never; every 1.19 s: backed off)",
+      paced(every: 2.45).isEmpty && paced(every: 1.25).isEmpty && paced(every: 1.19).first == "10.0.6.1")
 // IPv6: any number of addresses in one /64, each trying to keep 2 places.
 let g64 = "2601:600:1:2::/64"
 let v6holders = (1...8).map { Holder(addresses: [src("2601:600:1:2::\($0)")], hold: 9.9) }
 let v6new = simulate(Places(), holders: v6holders, device: Device(source: v4("10.0.0.20")), seconds: 60)
-check("new rule, 8 addresses of one /64: 2 places at most, the /64 backed off within 25 s (at \(v6new.backedOffAt[g64] ?? -1) s), an unknown IPv4 device admitted at every try",
-      v6new.maxHolderPlaces == 2 && (v6new.backedOffAt[g64] ?? .infinity) <= 25 && v6new.firstIn == 1.05 && v6new.deviceIn == v6new.deviceTries)
+check("new rule, 8 addresses of one /64: 2 places at most; with the door's other places free a tenth a connection (issue #314), not backed off within the minute; an unknown IPv4 device admitted at every try",
+      v6new.maxHolderPlaces == 2 && v6new.backedOffAt.isEmpty && v6new.firstIn == 1.05 && v6new.deviceIn == v6new.deviceTries)
+let v6full = simulate(Places(), holders: v6holders + holdersOn(["10.0.1.1", "10.0.1.2", "10.0.1.3"], hold: 9.9), device: nil, seconds: 60)
+check("new rule, the same with three IPv4 holders filling the other six places: the three and the /64's address holding its two places backed off within 13 s (\(v6full.backedOffAt.count) of them, the last at \(v6full.backedOffAt.values.max() ?? -1) s), as every place held paid before issue #314",
+      ["10.0.1.1", "10.0.1.2", "10.0.1.3", "2601:600:1:2::1"].allSatisfy { (v6full.backedOffAt[$0] ?? .infinity) <= 13 } && v6full.maxHolderPlaces == 8)
 let v6churn = simulate(Places(), holders: [Holder(addresses: (1...500).map { src("2601:600:1:2::\($0)") }, hold: 1.9)], device: nil, seconds: 200)
-check("new rule, one host taking a new address of its /64 for every connection, closing at 1.9 s: no address ever backed off, the /64 within 62 s (at \(v6churn.backedOffAt[g64] ?? -1) s)",
-      v6churn.backedOffAt.keys.sorted() == [g64] && (v6churn.backedOffAt[g64] ?? .infinity) <= 62)
+check("new rule, one host taking a new address of its /64 for every connection, closing at 1.9 s: no address ever backed off, the /64 within 120 s on its tenths alone (at \(v6churn.backedOffAt[g64] ?? -1) s; issue #314: 62 s when every wait paid its hold)",
+      v6churn.backedOffAt.keys.sorted() == [g64] && (v6churn.backedOffAt[g64] ?? .infinity) <= 120)
 let v6one = simulate(Places(), holders: [Holder(addresses: (1...500).map { src("2601:600:1:2::\($0)") }, hold: 2.0, per: 1)], device: nil, seconds: 320)
-check("new rule, the same holding one place at the cheapest (closing at 2.0 s, a tenth a second): the /64 within 121 s (at \(v6one.backedOffAt[g64] ?? -1) s)",
-      v6one.backedOffAt.keys.sorted() == [g64] && (v6one.backedOffAt[g64] ?? .infinity) <= 121)
+check("new rule, the same holding one place (closing at 2.0 s): the /64 within 241 s on its tenths alone (at \(v6one.backedOffAt[g64] ?? -1) s; 121 s before issue #314)",
+      v6one.backedOffAt.keys.sorted() == [g64] && (v6one.backedOffAt[g64] ?? .infinity) <= 241)
 let v6old = simulate(OldPlaces(), holders: v6holders, device: Device(source: v4("10.0.0.20")), seconds: 60)
 check("old rule, 8 addresses of one /64: every place held, nobody backed off, the device refused throughout",
       v6old.maxHolderPlaces == 8 && v6old.backedOffAt.isEmpty && v6old.deviceIn == 0)
@@ -978,8 +1008,11 @@ check("new rule, a device not yet known in the holders' own /64: refused while t
       v6stranger.deviceIn == 0)
 // Someone at a paired device's own address (its NAT, or its address while it is away) pays too.
 let shared = simulate(Places(), holders: holdersOn(["10.0.0.9"], hold: 9.9), device: paired, known: true, seconds: 60)
-check("new rule, a holder at the paired device's own address: that address backed off within 30 s (at \(shared.backedOffAt["10.0.0.9"] ?? -1) s: 1.1 each, as an address not known), the device with it (nothing tells them apart before TLS)",
-      (shared.backedOffAt["10.0.0.9"] ?? .infinity) <= 30 && shared.deviceIn < shared.deviceTries)
+check("new rule, a trade-off of issue #314: a holder at the paired device's own address, the door's other places free, pays a tenth a connection and is not backed off; the device there is refused while it holds that address's two places (in at \(shared.deviceIn) of \(shared.deviceTries) tries; before #314 both were backed off within 30 s and the device refused as much, nothing telling them apart before TLS)",
+      shared.backedOffAt.isEmpty && shared.deviceIn < shared.deviceTries)
+let sharedFull = simulate(Places(), holders: holdersOn(["10.0.0.9", "10.0.1.1", "10.0.1.2", "10.0.1.3", "10.0.1.4"], hold: 9.9), device: paired, known: true, seconds: 60)
+check("new rule, the same with four more holders filling the shared places: that address pays its hold while they do (its first two rounds, 2.2 each), the four are backed off at 12 s, and it is backed off by 50 s (at \(sharedFull.backedOffAt["10.0.0.9"] ?? -1) s; before issue #314, 30 s)",
+      (sharedFull.backedOffAt["10.0.0.9"] ?? .infinity) <= 50 && ["10.0.1.1", "10.0.1.2", "10.0.1.3", "10.0.1.4"].allSatisfy { (sharedFull.backedOffAt[$0] ?? .infinity) <= 13 })
 
 // Legitimate traffic is never backed off.
 func legit(_ ends: [(at: Double, held: Double, end: Places.End)], source: Src = v4("10.0.0.30")) -> Places {
@@ -1031,7 +1064,7 @@ func stalledReconnect(known: Bool) -> (backedOffAt: Double?, dials: Int, owed: D
         n += 1
         if case .taken = p.arrive(n, s, now: start), let cut = p.deadline(n) {
             let end = min(cut, start + 5)
-            if !p.leave(n, cut <= start + 5 ? .refused : .ended, now: end).isEmpty, backedAt == nil { backedAt = end }
+            if !p.leave(n, cut <= start + 5 ? .timedOut : .ended, now: end).isEmpty, backedAt == nil { backedAt = end }
             owed = max(owed, p.failures("10.0.0.50", now: end))
         }
         start += gaps.isEmpty ? 30 : gaps.removeFirst()
@@ -1044,9 +1077,133 @@ check("legit: a known device whose 12 reconnect dials all stall (each let go at 
 check("legit: nor one not yet known (each cut at 4 s: \(String(format: "%.1f", stalledNew.owed)) owed at most)", stalledNew.backedOffAt == nil)
 var tapped = Places()
 _ = tapped.arrive("p", v4("10.0.0.51"), now: -1); tapped.leave("p", .admitted(paired: true), now: -1)
-for (n, t) in [0.0, 12, 24, 36].enumerated() { _ = tapped.arrive(n, v4("10.0.0.51"), now: t); tapped.leave(n, .refused, now: t + 10) }
+for (n, t) in [0.0, 12, 24, 36].enumerated() { _ = tapped.arrive(n, v4("10.0.0.51"), now: t); tapped.leave(n, .timedOut, now: t + 10) }
 check("legit: a known device's taps whose dials stall to the Mac's 10 s, four in a minute: \(String(format: "%.1f", tapped.failures("10.0.0.51", now: 46))), not backed off",
       !tapped.backedOff(v4("10.0.0.51"), now: 46))
+
+// MARK: A handshake that never finishes (issue #314)
+//
+// A macOS 27.3 beta with the firewall on held every connection to both doors, accepted at TCP, until the
+// door's deadline cut it at 4 s: the door counted each "unpaired", a refusal (one failure at least, 1.1 at
+// 4 s), and backed the phone off for 300 s, so a filter on the Mac read as a pairing problem and kept the
+// phone out for 5 minutes after it went. Now a connection whose TLS handshake never finished showed no
+// key: never a refusal, its own line (DoorPolicy.stall, stallLine), and the tenth alone while the door had
+// a place for every newcomer; its hold, as since finding 9, when every shared place was held while it
+// waited (DoorPolicy.chargeBeforeKey, Places' contention).
+
+check("chargeBeforeKey: while the door has room, the tenth alone, however long it held (0 s to an hour)",
+      [0, 0.5, 1, 1.99, 2, 3.9, 4, 9.9, 3600].allSatisfy { near(D.chargeBeforeKey(held: $0, contended: false), D.endCost) })
+check("chargeBeforeKey: every shared place held while it waited: what holding its place costs, never a refusal's floor (0.2 s 0.1, 3 s 0.6, 4 s 1.1)",
+      stride(from: 0.0, through: 10, by: 0.25).allSatisfy { near(D.chargeBeforeKey(held: $0, contended: true), D.charge(held: $0, refused: false)) }
+      && near(D.chargeBeforeKey(held: 0.2, contended: true), 0.1) && near(D.chargeBeforeKey(held: 3, contended: true), 0.6)
+      && near(D.chargeBeforeKey(held: 4, contended: true), 1.1))
+
+check("stall: the deadline's cut counts as timed out, however long it held", [0, 4, 10].allSatisfy { D.stall(timedOut: true, held: $0) == "timedOut" })
+check("stall: the other end's close after 2 s or more counts as closed; sooner, nothing (a dial's loser, a port check), as before",
+      D.stall(timedOut: false, held: 2) == "closed" && D.stall(timedOut: false, held: 9.9) == "closed"
+      && D.stall(timedOut: false, held: 1.99) == nil && D.stall(timedOut: false, held: 0) == nil)
+check("stall line: the home door's",
+      D.stallLine(.home, timedOut: 4, closed: 1) == "Home door: 5 connections in the last minute never finished their TLS handshake (4 timed out, 1 closed by the other end after waiting), so no key was checked and none counts as a refusal. A firewall or a content filter on this Mac may be holding them.")
+check("stall line: the remote door's, for one",
+      D.stallLine(.remote, timedOut: 1, closed: 0) == "Remote access: 1 connection in the last minute never finished its TLS handshake (1 timed out, 0 closed by the other end after waiting), so no key was checked and it doesn’t count as a refusal. A firewall or a content filter on this Mac may be holding it.")
+check("stall line: one closed by the other end alone is one connection too",
+      D.stallLine(.home, timedOut: 0, closed: 1).hasPrefix("Home door: 1 connection in the last minute never finished its TLS handshake (0 timed out, 1 closed"))
+check("stall line: never a refusal's word", ![D.stallLine(.home, timedOut: 3, closed: 2), D.stallLine(.remote, timedOut: 1, closed: 0)]
+    .contains { $0.contains("unpaired") || $0.contains("refused") || $0.contains("backed off") })
+
+// Contention: which waits pay for their hold.
+var cn = Places()
+for n in 0..<7 { _ = cn.arrive("a\(n)", v4("10.0.7.\(n / 2)"), now: 0) }
+check("contention: seven waiting leave a shared place free; timed out at 4 s, each costs a tenth (0.2, 0.2, 0.2 and 0.1 by address)", { var c = cn
+    for n in 0..<7 { c.leave("a\(n)", .timedOut, now: 4) }
+    return (0..<4).allSatisfy { near(c.failures("10.0.7.\($0)", now: 4), $0 < 3 ? 0.2 : 0.1) } }())
+var cn8 = cn
+_ = cn8.arrive("a7", v4("10.0.7.3"), now: 1)
+check("contention: the eighth holds the last shared place and marks every waiting one, those before it too (timed out at 4 s: 1.1 each, 2.2 by address)", { var c = cn8
+    for n in 0..<8 { c.leave("a\(n)", .timedOut, now: n == 7 ? 5 : 4) }
+    return (0..<4).allSatisfy { near(c.failures("10.0.7.\($0)", now: 5), 2.2) } }())
+check("contention: a wait stays marked once the places free again (it kept them full)", { var c = cn8
+    c.leave("a7", .admitted(paired: false), now: 1.1); c.leave("a0", .timedOut, now: 4)
+    return near(c.failures("10.0.7.0", now: 4), 1.1) }())
+check("contention: one that arrives after places freed, and fills no place's last, is not marked", { var c = cn8
+    c.leave("a7", .admitted(paired: false), now: 1.1); c.leave("a6", .admitted(paired: false), now: 1.1)
+    _ = c.arrive("late", v4("10.0.7.9"), now: 2); c.leave("late", .timedOut, now: 6)
+    return near(c.failures("10.0.7.9", now: 6), 0.1) }())
+check("contention: a stranger turned away for want of a place leaves every waiting one marked",
+      { var c = cn8; return c.arrive("x", v4("10.0.7.8"), now: 2) == .full }() && { var c = cn8
+          _ = c.arrive("x", v4("10.0.7.8"), now: 2); c.leave("a1", .ended, now: 3.9); return near(c.failures("10.0.7.0", now: 3.9), 1.05) }())
+var cs = Places()
+_ = cs.arrive("s1", v4("10.0.8.1"), now: 0); _ = cs.arrive("s2", v4("10.0.8.1"), now: 0)
+check("contention: a source refused for its own two places marks nothing (a device's own stalled dials meet that limit by themselves)",
+      { var c = cs; return c.arrive("s3", v4("10.0.8.1"), now: 1) == .source }()
+      && { var c = cs; _ = c.arrive("s3", v4("10.0.8.1"), now: 1); c.leave("s1", .timedOut, now: 4); return near(c.failures("10.0.8.1", now: 4), 0.1) }())
+var ck = Places()
+_ = ck.arrive("p", v4("10.0.0.9"), now: 0); ck.leave("p", .admitted(paired: true), now: 0)
+var ck7 = ck
+for n in 0..<8 { _ = ck.arrive("f\(n)", v4("10.0.9.\(n / 2)"), now: 1) }
+_ = ck.arrive("k", v4("10.0.0.9"), now: 1)
+check("contention: a known device waiting in a reserved place while every shared one is held is marked too (4.9 s: 1.1)",
+      { var c = ck; c.leave("k", .ended, now: 5.9); return near(c.failures("10.0.0.9", now: 6), 1.1) }())
+for n in 0..<7 { _ = ck7.arrive("f\(n)", v4("10.0.9.\(n / 2)"), now: 1) }
+_ = ck7.arrive("k", v4("10.0.0.9"), now: 1)
+check("contention: seven strangers and a known device in a reserved place leave a shared place free: nobody marked",
+      { var c = ck7; c.leave("k", .ended, now: 5.9); c.leave("f0", .timedOut, now: 5); return near(c.failures("10.0.0.9", now: 6), 0.1) && near(c.failures("10.0.9.0", now: 6), 0.1) }())
+
+/// The rule before #314 for a deadline before `.ready`: a refusal, at least one failure (1.1 at 4 s).
+struct Before314: PlaceRule {
+    var p = Places()
+    mutating func arrive(_ id: AnyHashable, _ s: Src, now: Double) -> Places.Arrival { p.arrive(id, s, now: now) }
+    mutating func ready(_ id: AnyHashable, now: Double) { p.ready(id, now: now) }
+    func deadline(_ id: AnyHashable) -> Double? { p.deadline(id) }
+    mutating func leave(_ id: AnyHashable, _ end: Places.End, now: Double) -> [String] { p.leave(id, end == .timedOut ? .refused : end, now: now) }
+}
+
+/// Devices whose every dial stalls until the door's deadline (a filter on the Mac holding it): from each
+/// of `sources`, a dial every `every` s (two wait at most per source; the rest are refused for its two
+/// places) for `minutes`; then the filter goes and a dial from the first source completes in 50 ms, every
+/// 5 s until one is admitted. When the first was backed off, and when it got in.
+func stalled<R: PlaceRule>(_ rule: R, _ sources: [Src], every: Double, minutes: Double) -> (backedOffAt: Double?, admittedAt: Double?, dials: Int, refused: Int) {
+    var r = rule, waiting: [Int] = [], id = 0, t = 0.0, backedAt: Double?, refused = 0, dials = 0
+    let end = minutes * 60
+    func cut(upTo now: Double) {
+        waiting = waiting.filter { w in
+            guard let dl = r.deadline(w), dl <= now else { return true }
+            if r.leave(w, .timedOut, now: dl).contains(sources[0].address), backedAt == nil { backedAt = dl }
+            return false
+        }
+    }
+    while t < end {
+        cut(upTo: t)
+        for s in sources {
+            id += 1; dials += 1
+            if case .taken = r.arrive(id, s, now: t) { waiting.append(id) } else { refused += 1 }
+        }
+        t += every
+    }
+    cut(upTo: end + 10)
+    var admitted: Double?, at = end + 10
+    while admitted == nil && at < end + 400 {
+        id += 1
+        if case .taken = r.arrive(id, sources[0], now: at) { r.ready(id, now: at + 0.05); r.leave(id, .admitted(paired: true), now: at + 0.05); admitted = at }
+        at += 5
+    }
+    return (backedAt, admitted, dials, refused)
+}
+let phone = v4("192.168.1.30")
+let report = stalled(Places(), [phone], every: 3.16, minutes: 10), reportBefore = stalled(Before314(), [phone], every: 3.16, minutes: 10)
+check("issue #314: a phone whose every dial stalls to the 4 s deadline, 19 a minute for 10 minutes (\(report.dials) dials), is never backed off; the filter gone, its next dial is admitted at once",
+      report.backedOffAt == nil && report.admittedAt == 610)
+check("issue #314: the rule before backed it off at its fifth stall (at \(reportBefore.backedOffAt ?? -1) s) and kept it out after the filter went (in at \(reportBefore.admittedAt ?? -1) s, not 610)",
+      (reportBefore.backedOffAt ?? .infinity) <= 20 && (reportBefore.admittedAt ?? .infinity) > 610)
+let burst = stalled(Places(), [phone], every: 1.5, minutes: 10)
+check("issue #314: the same dialling every 1.5 s, two waiting and the rest refused for its two places (\(burst.refused) of \(burst.dials)): never backed off, in at once after",
+      burst.backedOffAt == nil && burst.refused > 0 && burst.admittedAt == 610)
+let twoPaths = stalled(Places(), [phone, src("fe80::1c:30", "en0"), src("2601:600:1:2::30")], every: 1.5, minutes: 10)
+check("issue #314: a phone dialling by its IPv4, link-local and global IPv6 addresses at once, every dial stalled (six places at most): never backed off",
+      twoPaths.backedOffAt == nil && twoPaths.admittedAt == 610)
+let household = stalled(Places(), [phone, v4("192.168.1.31"), v4("192.168.1.32"), v4("192.168.1.33")], every: 1.5, minutes: 2)
+check("issue #314, the trade-off: four devices whose dials all stall fill the eight shared places, and then pay their hold as holders do (backed off at \(household.backedOffAt ?? -1) s)",
+      (household.backedOffAt ?? .infinity) <= 20)
 
 // MARK: Test hooks
 

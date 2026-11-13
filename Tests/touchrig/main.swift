@@ -64,7 +64,37 @@ enum Step {
     /// The picture's zoom (#65): set to `factor` about a point of the overlay (from 1×), and logged.
     case zoom(CGFloat, CGPoint)
     case logZoom
+    /// Full screen (docs/full-screen-plan.md): the surfaces against the window's left edge (true), or back
+    /// inside their margins.
+    case edgeLayout(Bool)
+    /// The swipe in from the left edge listening (the controls hidden), or not (shown: nothing listens).
+    case reveal(Bool)
+    /// A measuring pan on the overlay (beside everything, taking nothing) says where UIKit lets a pan begin.
+    case measure(Bool)
 }
+
+/// UIKit's own pan threshold, measured: a pan beside every other recognizer, taking no touch, that logs its
+/// translation as it begins (full screen's swipe in judges a touch at the left edge after 8 pt, before a pan
+/// would begin, so a drag it lets go is not even late: docs/full-screen-plan.md).
+final class PanProbe: NSObject, UIGestureRecognizerDelegate {
+    let pan = UIPanGestureRecognizer()
+    override init() {
+        super.init()
+        pan.addTarget(self, action: #selector(moved))
+        pan.cancelsTouchesInView = false
+        pan.delaysTouchesEnded = false
+        pan.delegate = self
+        pan.isEnabled = false
+    }
+    @objc func moved() {
+        if pan.state == .began {
+            let t = pan.translation(in: pan.view)
+            RigLog.log(String(format: "[measure] a pan begins at %.1f pt (%.1f, %.1f)", hypot(t.x, t.y), t.x, t.y))
+        }
+    }
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+}
+let panProbe = PanProbe()
 
 enum Gesture {
     static let spacing: CGFloat = 62
@@ -230,6 +260,68 @@ func zoomScenarios(_ c: CGPoint) -> [(String, [Step])] {
 }
 #endif
 
+/// Full screen (docs/full-screen-plan.md) at the left edge, the surfaces laid against the window's left edge so x
+/// is the window's. With the controls shown nothing of full screen's listens, so every stroke there must be
+/// main's, the first build's flicks among them (`EDGE ON`, on both surfaces; compare.py --edge).
+func edgeShownScenarios(_ y: CGFloat) -> [(String, [Step])] {
+    func path(_ xs: [CGFloat], dy: CGFloat = 0, rest: Int = 0) -> [Step] {
+        var steps: [Step] = [.begin([CGPoint(x: xs[0], y: y)])]
+        if rest > 0 { steps.append(.wait(rest)) }
+        for (i, x) in xs.dropFirst().enumerated() { steps.append(.move([CGPoint(x: x, y: y + dy * CGFloat(i + 1))])) }
+        return steps + [.end([0])]
+    }
+    return [
+        ("EDGE ON a tap at the edge", Gesture.tap(1, at: CGPoint(x: 20, y: y))),
+        ("EDGE ON a long press at the edge, 0.6 s", [.begin([CGPoint(x: 24, y: y)]), .wait(36), .end([0])]),
+        ("EDGE ON a drag right from the edge", Gesture.swipe(1, at: CGPoint(x: 20, y: y), dx: 120, dy: 0, frames: 12)),
+        ("EDGE ON a drag down at the edge", Gesture.swipe(1, at: CGPoint(x: 24, y: y), dx: 2, dy: 150, frames: 12)),
+        ("EDGE ON a drag up at the edge", Gesture.swipe(1, at: CGPoint(x: 24, y: y), dx: -2, dy: -150, frames: 12)),
+        ("EDGE ON a slow drag left to the edge (40 pt in 0.5 s)", Gesture.swipe(1, at: CGPoint(x: 44, y: y), dx: -40, dy: 0, frames: 30)),
+        ("EDGE ON a quick drag left lifted 26 pt in", path([48, 40, 32, 26])),
+        ("EDGE ON two fingers from the edge, up 150", Gesture.stroke([CGPoint(x: 20, y: y), CGPoint(x: 80, y: y)],
+                                                                 to: [CGPoint(x: 20, y: y - 150), CGPoint(x: 80, y: y - 150)], frames: 8)),
+        ("EDGE ON a scroll from the middle off the left edge", Gesture.swipe(1, at: CGPoint(x: 300, y: y), dx: -300, dy: 0, frames: 10)),
+        ("EDGE ON a grip resting at the edge, a tap elsewhere", [.begin([CGPoint(x: 6, y: y + 60)]), .wait(18),
+                                                                .begin([CGPoint(x: 300, y: y)]), .wait(4), .end([1]), .wait(10), .end([0])]),
+        // The first build's hide flicks: nothing of Sill's now, the Mac's scroll as on main.
+        ("EDGE ON a flick off the edge from 30 pt", path([30, 15, 2])),
+        ("EDGE ON a flick stopped by a case's lip 22 pt in", path([46, 34, 22])),
+        ("EDGE ON a flick 45° down from 40 pt", path([40, 26, 12, 2], dy: 13)),
+        ("EDGE ON a flick after a 0.1 s rest", path([36, 24, 12, 2], rest: 6)),
+    ]
+}
+
+/// The controls hidden: the swipe in listens (RevealEdgePan, on the window). A swipe in from the band is the
+/// controls' and nothing else (`EDGE REVEAL`); every other stroke is the Mac's, whole and in order, as main's
+/// surfaces send it (`EDGE REVEALOFF`). Only on the picture: the trackpad is hidden with the controls.
+func edgeHiddenScenarios(_ y: CGFloat) -> [(String, [Step])] {
+    func path(_ xs: [CGFloat], dy: CGFloat = 0) -> [Step] {
+        var steps: [Step] = [.begin([CGPoint(x: xs[0], y: y)])]
+        for (i, x) in xs.dropFirst().enumerated() { steps.append(.move([CGPoint(x: x, y: y + dy * CGFloat(i + 1))])) }
+        return steps + [.end([0])]
+    }
+    func hiddenRun(_ steps: [Step]) -> [Step] { [.reveal(true)] + steps + [.wait(60), .reveal(false)] }
+    return [
+        ("EDGE REVEAL a swipe in from the very edge", hiddenRun(path([0.5, 30, 70, 120, 180, 240]))),
+        ("EDGE REVEAL a swipe in from 20 pt, 30° down", hiddenRun(path([20, 45, 75, 110, 150], dy: 14))),
+        ("EDGE REVEAL a slow swipe in from 10 pt (2 pt a frame)", hiddenRun(Gesture.swipe(1, at: CGPoint(x: 10, y: y), dx: 120, dy: 0, frames: 60))),
+        // In 180 pt, then back toward the edge at speed: the app springs back (Noah's iPhone on its side, 2026-11-12);
+        // finished or taken back, a swipe in sends the Mac nothing.
+        ("EDGE REVEAL a swipe in taken back (in 180 pt, then back fast)", hiddenRun(path([0.5, 40, 100, 160, 180, 150, 100, 50, 20]))),
+        ("EDGE REVEALOFF a tap in the middle", hiddenRun(Gesture.tap(1, at: CGPoint(x: 300, y: y)))),
+        ("EDGE REVEALOFF a drag right in the middle", hiddenRun(Gesture.swipe(1, at: CGPoint(x: 300, y: y), dx: 120, dy: 0, frames: 12))),
+        ("EDGE REVEALOFF a drag left from further in than the band", hiddenRun(Gesture.swipe(1, at: CGPoint(x: 60, y: y), dx: -50, dy: 0, frames: 8))),
+        ("EDGE REVEALOFF a tap 20 pt from the edge", hiddenRun(Gesture.tap(1, at: CGPoint(x: 20, y: y)))),
+        ("EDGE REVEALOFF a long press 20 pt from the edge", hiddenRun([.begin([CGPoint(x: 20, y: y)]), .wait(36), .end([0])])),
+        ("EDGE REVEALOFF a drag down from 20 pt", hiddenRun(Gesture.swipe(1, at: CGPoint(x: 20, y: y), dx: 0, dy: 150, frames: 12))),
+        ("EDGE REVEALOFF a drag up from 20 pt", hiddenRun(Gesture.swipe(1, at: CGPoint(x: 20, y: y), dx: 1, dy: -150, frames: 12))),
+        ("EDGE REVEALOFF a drag left from 22 pt to the edge", hiddenRun(Gesture.swipe(1, at: CGPoint(x: 22, y: y), dx: -20, dy: 0, frames: 10))),
+        ("EDGE REVEALOFF a flick off the edge from 20 pt", hiddenRun(path([20, 11, 2]))),
+        ("EDGE REVEALOFF two fingers from the band, up 150", hiddenRun(Gesture.stroke([CGPoint(x: 12, y: y), CGPoint(x: 72, y: y)],
+                                                                                    to: [CGPoint(x: 12, y: y - 150), CGPoint(x: 72, y: y - 150)], frames: 8))),
+    ]
+}
+
 /// The review's strokes (2026-09-27): fingers placed slowly, a thumb resting on the glass, a pinch led by
 /// the thumb, the Mac's own thumb-and-three-finger pinch, a brief extra contact, and one- and two-finger
 /// strokes made right after a gesture on the same surface (compare.py holds them to the same strokes made
@@ -337,6 +429,8 @@ final class Runner {
     #endif
     let window: UIWindow
     let synth: TouchSynth
+    /// The rig's root, for the edge layout.
+    weak var root: Root?
     var queue: [(String, UIView, [Step])] = []
     var steps: [Step] = []
     var view: UIView!
@@ -401,6 +495,17 @@ final class Runner {
             #if ZOOM
             if let overlay = view as? InputOverlayView { RigLog.log("zoom: " + Runner.zoomText(overlay.zoom)) }
             #endif
+        case .edgeLayout(let on):
+            root?.edge = on
+            root?.view.setNeedsLayout()
+            root?.view.layoutIfNeeded()
+        case .reveal(let on):
+            #if REVEAL
+            edgeReveal.isEnabled = on
+            RigLog.log("[edge] reveal listening \(on)")
+            #endif
+        case .measure(let on):
+            panProbe.pan.isEnabled = on
         }
     }
 }
@@ -417,9 +522,28 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 }
 
+#if REVEAL
+/// The swipe in from the left edge, on the rig's window as the app puts it on Sill's (FullScreenEdges) while its
+/// controls are hidden: off but for the hidden strokes.
+let edgeReveal = RevealEdgePan(target: nil, action: nil)
+final class RevealLog: NSObject {
+    @objc func changed(_ g: UIPanGestureRecognizer) {
+        switch g.state {
+        case .began: RigLog.log("[edge] reveal began")
+        case .ended: RigLog.log(String(format: "[edge] reveal ended at %.0f pt, %.0f pt/s", g.translation(in: g.view).x, g.velocity(in: g.view).x))
+        case .cancelled, .failed: RigLog.log("[edge] reveal cancelled")
+        default: break
+        }
+    }
+}
+let revealLog = RevealLog()
+#endif
+
 final class Root: UIViewController {
     let trackpad = TrackpadSurface(frame: .zero)
     let overlay = InputOverlayView(frame: .zero)
+    /// The surfaces laid against the window's left edge, for the EDGE strokes.
+    var edge = false
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
@@ -427,6 +551,7 @@ final class Root: UIViewController {
         overlay.backgroundColor = UIColor(white: 0.2, alpha: 1)
         view.addSubview(trackpad)
         view.addSubview(overlay)
+        overlay.addGestureRecognizer(panProbe.pan)
         trackpad.send = { RigLog.log("trackpad send \(describe($0))") }
         overlay.send = { RigLog.log("overlay  send \(describe($0))") }
         overlay.videoSize = CGSize(width: 1512, height: 948)
@@ -438,7 +563,8 @@ final class Root: UIViewController {
     }
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        let b = view.bounds.inset(by: view.safeAreaInsets).insetBy(dx: 16, dy: 16)
+        var b = view.bounds.inset(by: view.safeAreaInsets).insetBy(dx: 16, dy: 16)
+        if edge { b = CGRect(x: 0, y: b.minY, width: view.bounds.width, height: b.height) }
         let h = (b.height - 16) / 2
         trackpad.frame = CGRect(x: b.minX, y: b.minY, width: b.width, height: h)
         overlay.frame = CGRect(x: b.minX, y: b.minY + h + 16, width: b.width, height: h)
@@ -457,7 +583,18 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         w.rootViewController = root
         w.makeKeyAndVisible()
         window = w
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.run(root, w) }
+        // RIG_ORIENT=landscape: the scene turned on its side first (an iPhone's, the Duo's; iPadOS's windowing
+        // refuses), so the hidden strokes run against the interface's left edge sideways, where the system's edge
+        // pan read the device's upright left edge (docs/full-screen-plan.md). The run line says what it got.
+        var wait = 1.5
+        if ProcessInfo.processInfo.environment["RIG_ORIENT"] == "landscape" {
+            ws.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeRight)) { error in
+                print("RIG orientation: refused: \(error.localizedDescription)")
+            }
+            root.setNeedsUpdateOfSupportedInterfaceOrientations()
+            wait = 3
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { self.run(root, w) }
     }
 
     func run(_ root: Root, _ w: UIWindow) {
@@ -467,17 +604,27 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         #else
         print("RIG surfaces: without the gestures")
         #endif
-        print("RIG iOS \(UIDevice.current.systemVersion), window \(w.bounds.size), trackpad \(root.trackpad.frame), overlay \(root.overlay.frame)")
+        let turned = w.windowScene.map { $0.effectiveGeometry.interfaceOrientation.isLandscape ? "on its side" : "upright" } ?? "?"
+        print("RIG iOS \(UIDevice.current.systemVersion), window \(w.bounds.size) \(turned), safe area \(w.safeAreaInsets), trackpad \(root.trackpad.frame), overlay \(root.overlay.frame)")
         if ProcessInfo.processInfo.environment["RIG_TRACE"] == "1" {
             for g in root.trackpad.gestureRecognizers ?? [] { Tracer.shared.trace(g, as: "T.\(type(of: g))") }
             for g in root.overlay.gestureRecognizers ?? [] { Tracer.shared.trace(g, as: "O.\(type(of: g))") }
         }
+        #if REVEAL
+        edgeReveal.trace = { RigLog.log("[edge] trace " + $0) }
+        if ProcessInfo.processInfo.environment["RIG_TRACE"] == "1" { Tracer.shared.trace(edgeReveal, as: "W.RevealEdgePan") }
+        edgeReveal.addTarget(revealLog, action: #selector(RevealLog.changed(_:)))
+        edgeReveal.isEnabled = false
+        w.addGestureRecognizer(edgeReveal)
+        print("RIG edge: the swipe in on the window, off but for the hidden strokes; window safe area \(w.safeAreaInsets)")
+        #endif
         let runner = Runner(window: w)
+        runner.root = root
         self.runner = runner
         let tc = CGPoint(x: root.trackpad.bounds.midX, y: root.trackpad.bounds.midY + 60)
         let oc = CGPoint(x: root.overlay.bounds.midX, y: root.overlay.bounds.midY + 60)
-        // RIG_ONLY=zoom: the overlay's zoom strokes alone (#65), a minute instead of five; RIG_ONLY=hold: its
-        // touch and hold alone (#178).
+        // RIG_ONLY=zoom: the overlay's zoom strokes alone (#65), a minute instead of five; hold: its touch and hold
+        // alone (#178); edge: the strokes at the left edge alone.
         let only = ProcessInfo.processInfo.environment["RIG_ONLY"] ?? ""
         if only.isEmpty {
             for (title, steps) in scenarios(tc) { runner.add("TRACKPAD \(title)", root.trackpad, steps) }
@@ -491,6 +638,26 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             for (title, steps) in zoomScenarios(oc) { runner.add("OVERLAY ZOOM \(title)", root.overlay, steps) }
         }
         #endif
+        // At the left edge: the surfaces laid against it first (each stroke's first step), back after the last.
+        // RIG_ONLY=reveal: the hidden strokes alone, for a device turned on its side (docs/full-screen-plan.md).
+        if only.isEmpty || only == "edge" || only == "reveal" {
+            let ty = root.trackpad.bounds.midY, oy = root.overlay.bounds.midY
+            if only != "reveal" {
+                for (title, steps) in edgeShownScenarios(ty) { runner.add("TRACKPAD \(title)", root.trackpad, [.edgeLayout(true)] + steps) }
+                for (title, steps) in edgeShownScenarios(oy) { runner.add("OVERLAY \(title)", root.overlay, [.edgeLayout(true)] + steps) }
+            }
+            for (title, steps) in edgeHiddenScenarios(oy) { runner.add("OVERLAY \(title)", root.overlay, [.edgeLayout(true)] + steps) }
+        }
+        if only.isEmpty || only == "edge" {
+            // UIKit's pan threshold, measured on the overlay's middle: one point a frame, right, left, down.
+            let mid = CGPoint(x: root.overlay.bounds.midX, y: root.overlay.bounds.midY)
+            for (name, dx, dy) in [("right", 1.0, 0.0), ("left", -1.0, 0.0), ("down", 0.0, 1.0)] as [(String, CGFloat, CGFloat)] {
+                var steps: [Step] = [.edgeLayout(false), .measure(true), .begin([mid])]
+                for k in 1...30 { steps.append(.move([CGPoint(x: mid.x + dx * CGFloat(k), y: mid.y + dy * CGFloat(k))])) }
+                steps += [.end([0]), .wait(30), .measure(false)]
+                runner.add("MEASURE the pan threshold, a drag \(name) one point a frame", root.overlay, steps)
+            }
+        }
         runner.start { print("RIG done"); exit(0) }
     }
 }
