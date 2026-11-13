@@ -3587,6 +3587,9 @@ package final class StreamCoordinator {
             list.desktopDisplay = DesktopDisplays.number(of: catalog.desktopDisplayID, in: stops)
             list.desktopDisplayNames = stops.map { SafeText.label($0.name ?? "", limit: 64) }
         }
+        // A device's fn bit reaches the Mac (KeyStrokes.flags), so its Keys menu offers the window tiling,
+        // which macOS has from 15.
+        list.fnKey = KeyStrokes.fnKey(macOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion)
         // A locked Mac's list: no windows, no clipboard, `locked`, and off console `offConsole`
         // (LockPolicy); unlocked, as it is, byte for byte. Which went last, for `lockChanged`.
         let reading = lockReading

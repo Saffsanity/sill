@@ -349,6 +349,15 @@ check(StreamMessageKind(rawValue: 45) == nil && StreamMessageKind(rawValue: 46) 
 let nextMessage = StreamMessage(kind: .nextDisplay, timestamp: 1, isKeyframe: false, payload: Data()).serialized()
 check(StreamMessage.parseHeader(nextMessage).map { $0.kind == .nextDisplay && $0.payloadLength == 0 } == true
       && nextMessage[nextMessage.startIndex] == 47, "kind 47's header parses, its payload empty")
+// The window list's `fnKey` (2026-11-02, #272): a host that passes a device's fn bit (the Globe key) says 1,
+// and a device offers the Keys menu's window tiling only then. Additive, as `keyRepeat`.
+var takesFn = repeats
+takesFn.fnKey = 1
+check(json(takesFn).contains(#""fnKey":1"#) && !json(repeats).contains("fnKey") && repeats.fnKey == nil,
+      "a host that takes fn says fnKey 1; one without leaves the key out")
+check(Wire.decode(WindowList.self, from: Wire.encode(takesFn))?.fnKey == 1 && decodedOld?.fnKey == nil,
+      "fnKey round-trips, and an older host's list decodes with it nil")
+check(Wire.decode(ReaderBefore.self, from: Wire.encode(takesFn)).map { $0.macName == "Mac mini" } == true, "a reader from before it skips fnKey")
 
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil
