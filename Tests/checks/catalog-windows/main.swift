@@ -200,5 +200,35 @@ for _ in 0..<20_000 {
 }
 check(disagree == 0, "20,000 seeded random windows: the rule and its words agree (\(disagree) disagreements)")
 
+// MARK: Native tab switches (#366): an on-screen window replaced at the same frame by another of the same app
+
+typealias T = CatalogWindows.Tab
+let tab1 = T(id: 3508, pid: 900, x: 120, y: 80, width: 1000, height: 700)
+let tab2 = T(id: 3509, pid: 900, x: 120, y: 80, width: 1000, height: 700)
+let tab2Jitter = T(id: 3509, pid: 900, x: 122, y: 78, width: 998, height: 702)
+let tab2Moved = T(id: 3509, pid: 900, x: 123, y: 80, width: 1000, height: 700)
+let otherApp = T(id: 4001, pid: 901, x: 120, y: 80, width: 1000, height: 700)
+let notes = T(id: 2000, pid: 674, x: 40, y: 40, width: 800, height: 600)
+check(CatalogWindows.tabSwaps(from: [notes, tab1], to: [notes, tab2]) == [3508: 3509],
+      "#366: a tab that replaces another of the same app at the same frame is a swap")
+check(CatalogWindows.tabSwaps(from: [tab1], to: [tab2Jitter]) == [3508: 3509],
+      "#366: ±2 pt of frame jitter still counts as the same frame")
+check(CatalogWindows.tabSwaps(from: [tab1], to: [tab2Moved]).isEmpty,
+      "#366: more than 2 pt away is a new window at another place, not a tab")
+check(CatalogWindows.tabSwaps(from: [tab1], to: [otherApp]).isEmpty,
+      "#366: another process at the same frame is not a tab of this app")
+check(CatalogWindows.tabSwaps(from: [tab1], to: [tab1, tab2]).isEmpty,
+      "#366: when the first window stays on screen, a new window at its frame is not a tab swap")
+let swappedOrder = CatalogWindows.orderedIDs(seenOrder: [3508, 2000], currentIDs: [2000, 3509], swaps: [3508: 3509])
+check(swappedOrder == [3509, 2000], "#366: the new tab keeps the old tab's slot in the bar: \(swappedOrder)")
+let plainOrder = CatalogWindows.orderedIDs(seenOrder: [3508, 2000], currentIDs: [2000, 4001], swaps: [:])
+check(plainOrder == [2000, 4001], "#366: an ordinary new window still goes at the end of the bar: \(plainOrder)")
+check(CatalogWindows.mergedSwaps(existing: [3508: 3509], next: [3509: 3510]) == [3508: 3510],
+      "#366: chaining two tab swaps before the coordinator consumes the first reaches the newest tab")
+check(CatalogWindows.mergedSwaps(existing: [3508: 3509], next: [3509: 3508]).isEmpty,
+      "#366: switching right back to the original tab leaves no pending swap")
+check(CatalogWindows.mergedSwaps(existing: [3508: 3509], next: [:]) == [3508: 3509],
+      "#366: an empty poll keeps an unconsumed swap")
+
 print("catalog-windows: \(cases) checks, \(failures) failed")
 if failures > 0 { exit(1) }
