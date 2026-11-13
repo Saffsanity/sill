@@ -233,4 +233,16 @@ public struct Goodbye: Codable, Sendable, Equatable {
     public static let pairingRequired = "pairingRequired"
     /// The host no longer serves this device's version: update it (DeviceGate).
     public static let update = "update"
+    /// The Mac is going to sleep, or shutting down, restarting or logging out (#105). Both carry their
+    /// words and `reconnect`, so a device from before shows them and reconnects.
+    public static let sleep = "sleep", shutdown = "shutdown"
+
+    public static func sleeping(mac: String) -> Goodbye {
+        Goodbye(reason: sleep, message: "\(mac) went to sleep. Sill reconnects when it wakes.", reconnect: true)
+    }
+
+    public static func shuttingDown(mac: String) -> Goodbye {
+        Goodbye(reason: shutdown, message: "\(mac) is shutting down, restarting or logging out. Sill reconnects when it’s back.",
+                reconnect: true)
+    }
 }
