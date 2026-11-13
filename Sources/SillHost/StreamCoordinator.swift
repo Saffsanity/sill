@@ -2412,6 +2412,15 @@ package final class StreamCoordinator {
     private func startPipeline(source: StreamSource, filter: SCContentFilter?, sourceRect: CGRect?, displayScale: CGFloat?,
                                width: Int, height: Int, describe: String,
                                title: String, kind: HostStatusSnapshot.Stream.Kind, picture: LockPolicy.Picture) async throws {
+        let asked = (width: width, height: height)
+        var width = width, height = height
+        if !useSoftwareEncoder {
+            let fit = Self.hardwareFit(width, height)
+            if fit != asked {
+                print("This Mac's hardware video encoder doesn’t take \(width)×\(height): streaming \(describe) at \(fit.width)×\(fit.height), scaled down.")
+                (width, height) = fit
+            }
+        }
         let enc = try HEVCEncoder(width: width, height: height, fps: fps, bitrate: streamBitrate, prioritizeSpeed: prioritizeSpeed,
                                   software: useSoftwareEncoder)
         enc.onHung = { [weak self, weak enc] in
@@ -2452,6 +2461,7 @@ package final class StreamCoordinator {
             syntheticCapture.start(width: width, height: height, fps: fps)
         }
         encoder = enc
+        encoderAsked = asked
         placeholderStreams = picture == .placeholder
         active = source
         streamDisplayScale = displayScale
@@ -3321,10 +3331,24 @@ package final class StreamCoordinator {
         }
     }
 
-    /// The size a hardware stream would have now: the running one's at the full capture scale, or
+    /// `width`×`height`, or held to EncoderLimit when this Mac's hardware encoder makes no session of
+    /// that size (#278).
+    private static func hardwareFit(_ width: Int, _ height: Int) -> (width: Int, height: Int) {
+        guard let held = EncoderLimit.held(width: width, height: height),
+              !HEVCEncoder.hardwareTakes(width: width, height: height) else { return (width, height) }
+        return held
+    }
+
+    /// The size a hardware stream would have now (`hardwareProbeSizeAsked`), as `startPipeline` holds it.
+    private var hardwareProbeSize: (width: Int, height: Int) {
+        let size = hardwareProbeSizeAsked
+        return Self.hardwareFit(size.width, size.height)
+    }
+
+    /// The size a hardware stream would ask for now: the running one's at the full capture scale, or
     /// the Desktop's while nothing streams (a device asks for the Desktop first); either held to its
     /// display's own scale (CaptureScale), as the stream would be.
-    private var hardwareProbeSize: (width: Int, height: Int) {
+    private var hardwareProbeSizeAsked: (width: Int, height: Int) {
         if let size = Self.testProbeSize { return size }
         if active != .none, let enc = encoder {
             // The software encoder runs at points: the hardware's stream would run at the knob, both
@@ -3454,7 +3478,7 @@ package final class StreamCoordinator {
             // was rounded up never restarts at every poll; a move to a display of another scale alone
             // is `catalogPolled`'s).
             if let scw = catalog.window(id: id) {
-                if CaptureScale.windowNeedsRestart(encoder: (encoderWidth, encoderHeight), points: scw.frame.size,
+                if CaptureScale.windowNeedsRestart(encoder: encoderAsked, points: scw.frame.size,
                                                    knob: captureScale, displayScale: Self.displayScale(of: scw)) {
                     _ = w
                     await select(active)
@@ -3465,8 +3489,9 @@ package final class StreamCoordinator {
         broadcastList()
     }
 
-    private var encoderWidth: Int { encoder?.width ?? 0 }
-    private var encoderHeight: Int { encoder?.height ?? 0 }
+    /// The size the running encoder was asked for, before a hardware encoder's limit held it
+    /// (EncoderLimit): what a window's new size is compared with, so a held one never restarts at every poll.
+    private var encoderAsked = (width: 0, height: 0)
 
     // MARK: Trackpad gestures
 

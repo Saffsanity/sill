@@ -520,5 +520,28 @@ check(stageUnheld == 0, "20,000 random panels and scales: every window 1 to 6553
 check(stageNotAsBefore == 0, "wherever the old size was within 1…65536, the same as before (\(stageNotAsBefore) not)")
 check(stageNotOwn == 0, "a panel whose sides are not positive numbers: the window's own size (\(stageNotOwn) not)")
 
+// #278 (2026-11-02): a hardware encoder that refuses a size (a 5K Intel iMac's at 5120×2880, #62) is
+// asked for the size held to 4096 pixels on its longer side, its shape kept, even sides.
+func held(_ w: Int, _ h: Int) -> String { EncoderLimit.held(width: w, height: h).map { "\($0.width)×\($0.height)" } ?? "nil" }
+check(held(5120, 2880) == "4096×2304", "the 5K display: 4096×2304 (\(held(5120, 2880)))")
+check(held(2880, 5120) == "2304×4096", "the 5K display upright: 2304×4096 (\(held(2880, 5120)))")
+check(held(6016, 3384) == "4096×2304", "a 6K display: 4096×2304 (\(held(6016, 3384)))")
+check(held(4096, 2304) == "nil" && held(2560, 1440) == "nil" && held(4096, 4096) == "nil", "within 4096 a side: nothing held")
+check(held(4097, 3001) == "4096×3000", "a side just over: held, the other side rounded down to even (\(held(4097, 3001)))")
+var heldWrong = 0
+for _ in 0..<20_000 {
+    let w = 2 * Int(1 + next() % 8192), h = 2 * Int(1 + next() % 8192)
+    guard let x = EncoderLimit.held(width: w, height: h) else {
+        if max(w, h) > 4096 { heldWrong += 1 }
+        continue
+    }
+    let longer = max(x.width, x.height), shorter = min(x.width, x.height)
+    let even = x.width % 2 == 0 && x.height % 2 == 0
+    let exact: Double = Double(min(w, h)) * 4096 / Double(max(w, h))   // the shorter side at the shape asked
+    let shapeKept = Double(shorter) <= max(exact, 2) && Double(shorter) > exact - 2
+    if max(w, h) <= 4096 || longer > 4096 || longer < 4094 || !even || shorter < 2 || !shapeKept { heldWrong += 1 }
+}
+check(heldWrong == 0, "20,000 sizes: held only past 4096, then 4094…4096 on the longer side, even, at least 2, the shorter within 2 pixels of its shape's (\(heldWrong) not)")
+
 print("\(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)
