@@ -444,24 +444,24 @@
         }
       }
     },
-    "%@ looks off on this %@. Turn it on, then tap %@.": {
+    "%@ looks off on this %@ or on %@. Turn it on for both, then tap %@.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ looks off on this %@. Turn it on, then tap %@."
+            "value": "%@ looks off on this %@ or on %@. Turn it on for both, then tap %@."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这台 %2$@ 上的 %1$@ 似乎未开启。请开启它，然后轻点 %3$@。"
+            "value": "这台 %2$@ 或 %3$@ 上的 %1$@ 似乎未开启。请为两台设备都开启它，然后轻点 %4$@。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "這台 %2$@ 上的 %1$@ 似乎未開啟。請開啟它，然後點一下 %3$@。"
+            "value": "這台 %2$@ 或 %3$@ 上的 %1$@ 似乎未開啟。請將兩邊都開啟，然後點一下 %4$@。"
           }
         }
       }
@@ -664,7 +664,6 @@
         }
       }
     },
-    "%@ times": {},
     "%@ turned off Remote Access.": {
       "localizations": {
         "en": {
@@ -912,6 +911,28 @@
         }
       }
     },
+    "Allow in System Settings…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow in System Settings…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在系统设置中允许…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在系統設定中允許⋯"
+          }
+        }
+      }
+    },
     "Also looking nearby": {
       "localizations": {
         "en": {
@@ -1151,6 +1172,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "取消"
+          }
+        }
+      }
+    },
+    "Click Allow in System Settings: macOS asks about Sill once, then Privacy & Security opens, where you set Sill to Allow under Paste from Other Apps. Text a device sends with Paste still arrives.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Click Allow in System Settings: macOS asks about Sill once, then Privacy & Security opens, where you set Sill to Allow under Paste from Other Apps. Text a device sends with Paste still arrives."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点按“在系统设置中允许”：macOS 会先询问一次，随后打开“隐私与安全性”，请在“从其他App粘贴”中将 Sill 设为“允许”。设备通过“粘贴”发送的文本仍会送达。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按一下「在系統設定中允許」：macOS 會先詢問一次，接著打開「隱私權與安全性」，請在「從其他App貼上」中將 Sill 設為「允許」。裝置用「貼上」傳來的文字仍會送達。"
           }
         }
       }
@@ -1496,6 +1539,7 @@
         }
       }
     },
+    "Copy": {},
     "Direct": {
       "localizations": {
         "en": {
@@ -1742,6 +1786,7 @@
         }
       }
     },
+    "Keyboard": {},
     "Larger Picture": {},
     "Loading settings…": {},
     "Looking for Macs on this network": {
@@ -2685,6 +2730,28 @@
     "Search apps on this Mac": {},
     "Send Audio": {},
     "Send Audio, beta": {},
+    "Set Sill to Allow under Paste from Other Apps in Privacy & Security. Text a device sends with Paste still arrives.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set Sill to Allow under Paste from Other Apps in Privacy & Security. Text a device sends with Paste still arrives."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请在“隐私与安全性”的“从其他App粘贴”中将 Sill 设为“允许”。设备通过“粘贴”发送的文本仍会送达。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請在「隱私權與安全性」的「從其他App貼上」中將 Sill 設為「允許」。裝置用「貼上」傳來的文字仍會送達。"
+          }
+        }
+      }
+    },
     "Show as List": {
       "localizations": {
         "en": {
@@ -2929,6 +2996,28 @@
       }
     },
     "Text size": {},
+    "Text you copy here can be pasted on a connected iPhone or iPad, and text sent from one with Paste becomes this Mac’s.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Text you copy here can be pasted on a connected iPhone or iPad, and text sent from one with Paste becomes this Mac’s."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在此拷贝的文本可粘贴到已连接的 iPhone 或 iPad，设备通过“粘贴”发送的文本会放入这台 Mac 的剪贴板。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在這裡拷貝的文字可以貼到已連線的 iPhone 或 iPad，裝置用「貼上」傳來的文字會放進這部 Mac 的剪貼板。"
+          }
+        }
+      }
+    },
     "That code didn’t work. Check the code on your Mac. %lld tries left.": {
       "comment": "Wrong pairing code; pluralize the number of attempts remaining.",
       "localizations": {
@@ -3097,24 +3186,24 @@
         }
       }
     },
-    "This %@ can’t look up %@. Is Tailscale on?": {
+    "This %@ can’t look up %@. Is Tailscale on, here and on %@?": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This %@ can’t look up %@. Is Tailscale on?"
+            "value": "This %@ can’t look up %@. Is Tailscale on, here and on %@?"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这台 %1$@ 无法查询 %2$@。Tailscale 是否已开启？"
+            "value": "这台 %1$@ 无法查询 %2$@。这里和 %3$@ 上的 Tailscale 是否都已开启？"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "這台 %1$@ 無法查詢 %2$@。Tailscale 是否已開啟？"
+            "value": "這台 %1$@ 無法查詢 %2$@。這裡和 %3$@ 上的 Tailscale 是否都已開啟？"
           }
         }
       }
@@ -3564,24 +3653,24 @@
         }
       }
     },
-    "Your VPN looks off on this %@. Turn it on, then tap %@.": {
+    "Your VPN looks off on this %@ or on %@. Turn it on for both, then tap %@.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Your VPN looks off on this %@. Turn it on, then tap %@."
+            "value": "Your VPN looks off on this %@ or on %@. Turn it on for both, then tap %@."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这台 %1$@ 上的 VPN 似乎未开启。请开启它，然后轻点 %2$@。"
+            "value": "这台 %1$@ 或 %2$@ 上的 VPN 似乎未开启。请为两台设备都开启它，然后轻点 %3$@。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "這台 %1$@ 上的 VPN 似乎未開啟。請開啟它，然後點一下 %2$@。"
+            "value": "這台 %1$@ 或 %2$@ 上的 VPN 似乎未開啟。請將兩邊都開啟，然後點一下 %3$@。"
           }
         }
       }
@@ -3626,6 +3715,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "它的名稱"
+          }
+        }
+      }
+    },
+    "macOS asks before Sill reads the clipboard, so what you copy here stays on this Mac.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS asks before Sill reads the clipboard, so what you copy here stays on this Mac."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS 会在 Sill 读取剪贴板前询问，因此你在此拷贝的内容会留在这台 Mac 上。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sill 讀取剪貼板前 macOS 會先詢問，所以你在這裡拷貝的內容會留在這部 Mac 上。"
+          }
+        }
+      }
+    },
+    "macOS doesn’t let Sill read the clipboard, so what you copy here stays on this Mac.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS doesn’t let Sill read the clipboard, so what you copy here stays on this Mac."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS 不允许 Sill 读取剪贴板，因此你在此拷贝的内容会留在这台 Mac 上。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS 不允許 Sill 讀取剪貼板，所以你在這裡拷貝的內容會留在這部 Mac 上。"
           }
         }
       }
