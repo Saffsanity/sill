@@ -203,8 +203,11 @@ final class AppUpdater {
         let automatic = Auto.pane(memory, offered: o?.version, offeredTag: o?.tag, running: runningVersion,
                                   waitUntil: o.flatMap(waitUntil), now: now,
                                   offeredBuild: o?.build, runningBuild: runningIsNightly ? runningBuild : nil, release: alongside)
-        return Policy.pane(state, offered: o?.version, running: runningVersion, available: available, refusal: refusal,
-                           keptAt: keptAt, automatic: automatic, offeredBuild: o?.build, ownLine: idle && o != nil && o != offer())
+        var pane = Policy.pane(state, offered: o?.version, running: runningVersion, available: available, refusal: refusal,
+                               keptAt: keptAt, automatic: automatic, offeredBuild: o?.build, ownLine: idle && o != nil && o != offer())
+        // The green line of an update just installed, while no other update has the pane's line.
+        if pane.line == nil { pane.installed = installedLine }
+        return pane
     }
 
     var menu: MenuBuilder.UpdateMenuState {
@@ -948,6 +951,13 @@ final class AppUpdater {
     /// The launch the watcher made after it put this copy back: what happened, in Settings and the log.
     /// Otherwise: what earlier updates left goes at once. The notes are read off the main actor, and only as
     /// regular files (UpdateInstaller.readSmallFile; the second security pass's W2).
+    /// Opens Settings on General (AppModel sets it): after a launch that follows an update the person started
+    /// there (`Policy.reopensSettings`).
+    var showUpdated: (() -> Void)?
+    /// This Sill was installed by an update the person started: the pane's green line for this launch
+    /// (`Policy.installedLine`), until another update has the pane's line.
+    private(set) var installedLine: String?
+
     func afterHostUp() {
         guard isApp else { settleNotes(); return }
         Task { [weak self] in
@@ -969,6 +979,7 @@ final class AppUpdater {
                 let why = restored[1]
                 print("Update: Sill \(runningKey ?? "") didn’t start the first time (\(why)), and the copy it replaced failed the watcher’s last check, so the watcher left this one in place, not started.")
                 state = Policy.State(phase: .failed(.keptUnstarted(why)), mode: p[2] == "automatic" ? .automatic : .manual)
+                if Policy.reopensSettings(automatic: p[2] == "automatic") { showUpdated?() }
                 cleanUpAfterStart()
                 return
             }
@@ -985,6 +996,7 @@ final class AppUpdater {
                     remember { Auto.failed($0, failed, why: "it didn’t run: \(why); no whole Sill was left at its path", build: nightly ? failedBuild : nil) }
                 }
                 state = Policy.State(phase: .failed(.noWholeSillLeft(why)), mode: automatic ? .automatic : .manual)
+                if Policy.reopensSettings(automatic: automatic) { showUpdated?() }
                 cleanUpAfterStart()
                 return
             }
@@ -999,6 +1011,7 @@ final class AppUpdater {
                 target = UpdatePolicy.Offer(version: failed, tag: tag, url: URL(string: "https://github.com/Saffsanity/sill/releases/tag/\(tag)")!,
                                             signed: true, build: nightly ? failedBuild : nil)
                 state = Policy.State(phase: .failed(.didNotStart(why, putBack: true)), mode: automatic ? .automatic : .manual)
+                if Policy.reopensSettings(automatic: automatic) { showUpdated?() }
             }
             cleanUpAfterStart()
             return
@@ -1011,6 +1024,11 @@ final class AppUpdater {
         let token = p[0], automatic = p[2] == "automatic"
         // Until this Sill has told its update's watcher it works, no other update begins.
         proving = true
+        // This Sill is the update the person started in Settings: the window they clicked in, back, saying so.
+        installedLine = runningVersion.flatMap {
+            Policy.installedLine(Policy.name(version: $0, build: runningIsNightly ? runningBuild : nil), automatic: automatic)
+        }
+        if Policy.reopensSettings(automatic: automatic) { showUpdated?() }
         let proved = Timer(timeInterval: Policy.provedAfter, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.proved(token: token, automatic: automatic) }
         }

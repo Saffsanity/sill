@@ -109,6 +109,8 @@ final class AppModel {
         // devices), named as the menu's card names it. The key is the connection's endpoint (a new
         // connection has a new source port) with its object's identity, which alone can be reused once a
         // connection is gone: a device that connects later is never taken for one the person agreed to.
+        // After an update the person started in Settings › General, the new Sill opens that window again.
+        updater.showUpdated = { [weak self] in self?.showSettings?(.general) }
         updater.devices = { [weak self] in
             (self?.coordinator?.status.snapshot.devices ?? []).map {
                 UpdateInstallPolicy.Device(key: "\($0.endpoint) \(String(describing: $0.id))", name: $0.name ?? "a device")

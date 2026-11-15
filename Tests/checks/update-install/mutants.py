@@ -11,7 +11,7 @@ MUTANTS = [
     # One update at a time (the nightly rehearsal, 2026-11-15).
     ("a second update while the first proves itself", POL, "        if s.finishingUpdate { return .finishingUpdate }\n", ""),
     ("the wait after an update said after the space", POL, "        if s.finishingUpdate { return .finishingUpdate }\n        if let free = s.freeBytes, free < s.neededBytes {\n            return .lowSpace(volume: s.volumeName, neededMB: mebibytesRoundedUp(s.neededBytes))\n        }\n", "        if let free = s.freeBytes, free < s.neededBytes {\n            return .lowSpace(volume: s.volumeName, neededMB: mebibytesRoundedUp(s.neededBytes))\n        }\n        if s.finishingUpdate { return .finishingUpdate }\n"),
-    ("a Sill just installed never held", APP, "        proving = true\n        let proved = Timer", "        let proved = Timer"),
+    ("a Sill just installed never held", APP, "        proving = true\n", ""),
     ("a Sill held for good after an update", APP, "        proving = false\n        refresh()\n", "        refresh()\n"),
     ("the look never told", APP, "        s.finishingUpdate = i.finishingUpdate\n", ""),
     ("the watcher undoes a later update", INS, "later && exit 4\n", ""),
@@ -19,6 +19,16 @@ MUTANTS = [
     ("a helper Sill is starting counts as another copy of Sill", INS, "            if ProcessLife.parent(of: pid) == own { continue }\n", ""),
     ("a process's parent read without asking whose it is", LIFE, "              size >= MemoryLayout<kinfo_proc>.stride, info.kp_proc.p_pid == pid else { return nil }\n        return info.kp_eproc.e_ppid", "              size >= 0 else { return nil }\n        return info.kp_eproc.e_ppid"),
     ("every process's parent said to be launchd", LIFE, "        return info.kp_eproc.e_ppid", "        return 1"),
+    # Settings opens again after an update the person started there (Noah, the rehearsal, 2026-11-15).
+    ("Settings opens after an update Sill installed by itself", POL, "static func reopensSettings(automatic: Bool) -> Bool { !automatic }", "static func reopensSettings(automatic: Bool) -> Bool { true }"),
+    ("Settings never opens after an update", POL, "static func reopensSettings(automatic: Bool) -> Bool { !automatic }", "static func reopensSettings(automatic: Bool) -> Bool { false }"),
+    ("the window that opens isn't General", "AppModel.swift", "updater.showUpdated = { [weak self] in self?.showSettings?(.general) }", "updater.showUpdated = { [weak self] in self?.showSettings?(nil) }"),
+    ("the update that worked opens nothing", APP, "        if Policy.reopensSettings(automatic: automatic) { showUpdated?() }\n        let proved = Timer", "        let proved = Timer"),
+    ("an update the watcher put back opens nothing", APP, "                if Policy.reopensSettings(automatic: automatic) { showUpdated?() }\n            }\n            cleanUpAfterStart()", "            }\n            cleanUpAfterStart()"),
+    ("the green line after an update Sill installed by itself", POL, "automatic ? nil : \"\\(name) was installed successfully.\"", "\"\\(name) was installed successfully.\""),
+    ("the green line's words", POL, "automatic ? nil : \"\\(name) was installed successfully.\"", "automatic ? nil : \"\\(name) is installed.\""),
+    ("the green line kept over an update under way", APP, "if pane.line == nil { pane.installed = installedLine }", "pane.installed = installedLine"),
+    ("the line not green", "SettingsPanes.swift", "                        Text(installed)\n                            .foregroundStyle(Color.green)", "                        Text(installed)\n                            .foregroundStyle(Color.primary)"),
     # The launch wait: whether the other Sill has gone (ProcessLife; the rehearsal's first update, 2026-11-15).
     ("the launch wait asks AppKit alone (the fault as it was)", APP, "if lives.allSatisfy({ $0.app.isTerminated || ($0.life?.gone ?? true) }) {", "if lives.allSatisfy({ $0.app.isTerminated }) {"),
     ("no process with the pid counts as still there", LIFE, "guard let now else { return true }", "guard let now else { return false }"),

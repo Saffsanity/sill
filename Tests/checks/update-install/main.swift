@@ -1552,8 +1552,8 @@ do {
     low.freeBytes = 1
     check(P.refusal(low) == .finishingUpdate, "…and the space after it")
     let updater = text("AppUpdater.swift")
-    check(updater.contains("        proving = true\n        let proved = Timer(timeInterval: Policy.provedAfter, repeats: false)"),
-          "the updater holds new updates from the start of a launch that follows an update")
+    check(updater.contains("        let token = p[0], automatic = p[2] == \"automatic\"\n        // Until this Sill has told its update's watcher it works, no other update begins.\n        proving = true\n"),
+          "the updater holds new updates from the start of a launch that follows an update, before anything else it does")
     check(updater.contains("        UpdateInstaller.writeNote(Self.startedNote(token), lines: [token])\n        // The watcher has its word: another update may begin (the pane's note goes at the next look).\n        proving = false\n        refresh()"),
           "…until it has given the watcher its word, and then looks again")
     check(updater.contains("finishingUpdate: proving)") && updater.contains("s.finishingUpdate = i.finishingUpdate"),
@@ -1561,6 +1561,35 @@ do {
     check(watcher.contains("later() {\n    /usr/bin/codesign --verify --deep --strict \"-R=$req\" \"$app\" >/dev/null 2>&1 || return 1\n    have=$(/usr/bin/codesign -d -vvv --arch \"$arch\" \"$app\" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/head -n 1)\n    [ -n \"$have\" ] && [ \"$have\" != \"$newcdhash\" ] && [ \"$have\" != \"$cdhash\" ]\n}"),
           "the watcher knows a later update's copy: a genuine Sill at Sill's path that is neither the one it watched nor the one it would put back")
     check(watcher.contains("later && exit 4\nwhole \"$old\" \"$cdhash\" || exit 3\n"), "…and leaves it alone, before it moves anything")
+}
+
+// After an update the person started in Settings › General, the new Sill opens that window again (Noah, the
+// rehearsal of 2026-11-15); never after one Sill installed by itself.
+check(UpdateInstallPolicy.reopensSettings(automatic: false), "an update started by hand: Settings opens on General again")
+check(!UpdateInstallPolicy.reopensSettings(automatic: true), "an update Sill installed by itself: no window opens")
+do {
+    let updater = text("AppUpdater.swift"), model = text("AppModel.swift")
+    check(updater.components(separatedBy: "if Policy.reopensSettings(automatic: automatic) { showUpdated?() }").count - 1 == 3
+          && updater.contains("if Policy.reopensSettings(automatic: p[2] == \"automatic\") { showUpdated?() }"),
+          "the updater asks the rule at each launch that follows an update: the one that worked and the watcher's three")
+    check(updater.contains("        if Policy.reopensSettings(automatic: automatic) { showUpdated?() }\n        let proved = Timer"),
+          "the update that worked opens Settings before its 30 s begin")
+    check(model.contains("updater.showUpdated = { [weak self] in self?.showSettings?(.general) }"), "the window that opens is Settings on General")
+}
+// …and says so in green: "Sill 0.6.3 was installed successfully." (Noah, the same night).
+check(UpdateInstallPolicy.installedLine(UpdateInstallPolicy.name(version: SillVersion("0.6.3")!, build: nil), automatic: false) == "Sill 0.6.3 was installed successfully.",
+      "after an update started by hand: Sill 0.6.3 was installed successfully.")
+check(UpdateInstallPolicy.installedLine(UpdateInstallPolicy.name(version: SillVersion("0.6.2")!, build: 1600), automatic: false) == "Sill nightly 0.6.2 (1600) was installed successfully.",
+      "a nightly installed by hand is named with its build")
+check(UpdateInstallPolicy.installedLine("Sill 0.6.3", automatic: true) == nil, "after an update Sill installed by itself: no green line")
+check(UpdateInstallPolicy.Pane().installed == nil, "a pane says nothing was installed unless told")
+do {
+    let updater = text("AppUpdater.swift"), panes = text("SettingsPanes.swift")
+    check(updater.contains("Policy.installedLine(Policy.name(version: $0, build: runningIsNightly ? runningBuild : nil), automatic: automatic)")
+          && updater.contains("if pane.line == nil { pane.installed = installedLine }"),
+          "the updater makes the line for the Sill an update installed, and shows it while no other update has the pane's line")
+    check(panes.contains("if let installed = install.installed {\n                        Text(installed)\n                            .foregroundStyle(Color.green)"),
+          "Settings draws the line in green")
 }
 
 print("update-install: \(checks - failures) of \(checks) checks passed")
