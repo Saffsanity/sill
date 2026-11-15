@@ -129,12 +129,17 @@ serves the root or `/docs`, never `/site`. So:
       after the release whose builds the change describes (part 2, the last item):
 - Words on main for a release not out yet are marked: each block sits between `<!-- Name: …`
   and `<!-- /Name -->` (the Remote Access markers are another matter: they stay, for a build
-  without it). None is open since 0.6.1: 0.6.0 (2026-11-02) shipped the words of the Clipboard,
+  without it). None is open since 0.6.2: 0.6.0 (2026-11-02) shipped the words of the Clipboard,
   Keyframe, Display wake, Other languages, Sound, Tiles, Reverse Scrolling, Pairing window,
   Virtual Display, Aa Off, Thumbnail hold, Firewall, Tour 0.6, Locked Mac and Pinch zoom markers,
   and its words commit (7871d5c) took their marker lines out of `site/` and kept the words; 0.6.1
   shipped `Display wake click` (PR #228, without its tap sentence: below) and `Off-console view`
-  (PR #340) the same way, in its release pull request (#348). A republish before a release whose words
+  (PR #340) the same way, in its release pull request (#348); 0.6.2 shipped `Version label` (PR #351),
+  `Desktop displays` (PR #355, with README's bullet), `Update Now` and `Nightly Update Now` (PR #354, the
+  first release whose Sill carries both keys; README's two blocks shown, and the sentences that said Sill
+  never offers a nightly gone from download.html and README.md) in its own, and added support.html's
+  "Hiding Sill’s controls" and "Watching your Mac while you use another app" unmarked, with the release.
+  A republish before a release whose words
   are marked (for words that hold for the builds already out, such as support.html's on a Mac
   asleep or restarted, or on a black picture) deletes each such block in the sill-site copy after
   the rsync below, one line a marker,
@@ -143,28 +148,6 @@ serves the root or `/docs`, never `/site`. So:
   `grep -n` of a phrase from each block that nothing of it is left. Add the marker's line and its
   grep here when a pull request marks words; the release that ships them deletes its markers in
   `site/`, keeps the words, and takes its lines out of here.
-- `Update Now` (privacy.html's Update check section and support.html's "Updating Sill for Mac", the
-  one-click update and Automatically update Sill, docs/one-click-update-plan.md §7 and §15): `perl -0pi -e
-  's/[ \t]*<!-- Update Now:.*?<!-- \/Update Now -->\n//gs' ../sill-site/*.html`, then `grep -n -e
-  'release-assets.githubusercontent.com' -e 'Automatically update Sill' ../sill-site/*.html` prints nothing
-  (README.md's block, marked the same, is hidden inside its comment until the release that ships it: the
-  block's first lines say how to show it). It ships with the first release whose Sill carries an update
-  key (part 1 §7), not with the code alone: a release whose Sill has an empty key list offers no Update Now.
-- `Nightly Update Now` (Use nightly builds: support.html's paragraph after "Updating Sill for Mac",
-  download.html's, privacy.html's, docs/one-click-update-plan.md §16): `perl -0pi -e
-  's/[ \t]*<!-- Nightly Update Now:.*?<!-- \/Nightly Update Now -->\n//gs' ../sill-site/*.html`, then
-  `grep -n 'Use nightly builds' ../sill-site/*.html` prints nothing (README.md's block, marked the same, is hidden
-  inside its comment until the release that ships it). It ships with the first release whose Sill carries a nightly key
-  (`UpdateManifest.nightlyKeys`, "Nightlies"), and that release also deletes the sentences that say Sill
-  never offers a nightly (download.html's two, README.md's two, "Nightlies" here).
-- Open: `Version label` (support.html, under the lede: where each app shows its version, true from
-  Sill for iPhone and iPad 0.6.2; PR #351, docs/version-label-plan.md): `grep -n "shows its version"
-  ../sill-site/support.html` finds nothing after the cut.
-- Open: `Desktop displays` (the Desktop button steps through the Mac's screens: phase 1 of
-  docs/virtual-desktop-plan.md, PR #355, built on #173), support.html's "More than one screen on your
-  Mac": after the perl, `grep -n "More than one screen" ../sill-site/*.html` finds nothing. README's How
-  it works line waits inside an HTML comment after the iPhone Duo bullet (README is the public page on
-  main, never republished): the release's words commit takes the comment out and makes it a bullet.
 - Held back from the support page in 0.6.1, until a test shows it true: #228's tap sentence. The
   page says "To wake it again, move the pointer, scroll, or press the Command key on a keyboard
   attached to your iPhone or iPad; Shift alone doesn’t reach your Mac." With the sentence it would
@@ -369,7 +352,8 @@ whose public half is compiled into the Sill that runs (`UpdateManifest.releaseKe
 never touches GitHub or CI: the Developer ID identity does (the `nightly` environment signs and notarizes
 with no reviewer), so this key is what tells a release Noah made from a build CI made.
 
-- [ ] In Terminal.app, never a terminal inside the Claude app (agents can read that one). Install the
+- [x] Done 2026-11-15 (from main at 19af958; again on release day from the release's commit, before the
+      first signing: its trust then lists the key). In Terminal.app, never a terminal inside the Claude app (agents can read that one). Install the
       signer, the one program that ever holds the key: `Scripts/sign-update.sh --install-signer`. It lists
       the three files it is built from (UpdateManifest.swift, Compatibility.swift and its own main) with
       their SHA-256 and the commit, and the trust it will hold every release to (the update keys, the
@@ -378,18 +362,18 @@ with no reviewer), so this key is what tells a release Noah made from a build CI
       signing runs that binary only, and only for a release whose Sill carries exactly that trust. Again
       after any change to those files or that trust you have read (the keychain then asks once before the
       new one uses the key: allow it only right after you ran --install-signer yourself).
-- [ ] Make the key: `Scripts/sign-update.sh --new-key`. It makes an Ed25519 key (CryptoKit) and keeps it
+- [x] Done 2026-11-15: public key `VBi6RT1SKi60dit73HwGK1T3YALXQCPpq/rQX49+ZVE=`, key ID dbbd6d58. Make the key: `Scripts/sign-update.sh --new-key`. It makes an Ed25519 key (CryptoKit) and keeps it
       in the login keychain (a generic password: service `me.saffer.sill.update-signing`, account
       `ed25519`, label "Sill update signing key", not synchronizable), and prints the public key and its
       key ID. Run it once: it refuses when the keychain has one.
-- [ ] One copy off the Mac, for loss, in Terminal.app: `security find-generic-password -s
+- [x] Done 2026-11-15 (Noah: in his 1Password). One copy off the Mac, for loss, in Terminal.app: `security find-generic-password -s
       me.saffer.sill.update-signing -a ed25519 -w` shows the private key as base64. At the keychain's
       question choose Allow, never Always Allow (Always Allow lets `security`, and so any program running
       as you, read it without asking). Type it into a 1Password item (or on paper in a safe), without the
       clipboard (Sill shares it with your devices, Universal Clipboard with your other Apple devices), then
       ⌘K. Never a file in the repository, the handoff folder or ~/Downloads (every agent and tool works
       there), never GitHub, never CI.
-- [ ] The public key into `Sources/SillMenuBar/UpdateManifest.swift`, `releaseKeys` (one line, a commit of
+- [x] Done 2026-11-15 (PR #374). The public key into `Sources/SillMenuBar/UpdateManifest.swift`, `releaseKeys` (one line, a commit of
       its own). `Tests/checks/update-install` checks that every key listed is usable. Then
       `--install-signer` again from that commit (it shows your key in the trust). The first release that
       carries it is installed by hand (Update Now in the Sill before it has no key to check with); the
@@ -1125,7 +1109,8 @@ For a nightly tester:
   over too. That is why a nightly refuses to build without the profile.
 - Use nightly builds (docs/one-click-update-plan.md §16, with Update Now): a switch in Sill for Mac's
   Settings › General, off by default, shown only in a build with Update Now and the nightly key's public
-  half (`UpdateManifest.nightlyKeys`, empty until Noah makes the key). With it on, the daily check also reads
+  half (`UpdateManifest.nightlyKeys`: Noah's nightly key since 2026-11-15, key ID 3e6d90f4, PR #376; the
+  first nightly signed with it is 0.6.2 (1604) of that day, run 43698591267). With it on, the daily check also reads
   the pre-release's `Sill-nightly.zip.manifest`, signed by the step "Sign the nightly for Update Now"
   (`Scripts/sign-nightly.sh`, the secret `SILL_NIGHTLY_UPDATE_KEY` of the environment `nightly`; without it
   the step says so and the job stays green), and offers the build it names to Update Now: one click on Update
@@ -1143,7 +1128,7 @@ For a nightly tester:
   before storing the nightly secret: `gh api repos/Saffsanity/sill/environments/nightly --jq .can_admins_bypass`
   prints false, and `gh api repos/Saffsanity/sill/rules/branches/main --jq '.[].type'` prints deletion,
   non_fast_forward and pull_request.
-  The nightly key, once (a few minutes, Terminal.app; the plan's §16.8 has what each step shows):
+  The nightly key, once (done 2026-11-15; a few minutes, Terminal.app; the plan's §16.8 has what each step shows):
   `Scripts/sign-nightly.sh --new-key --key-file "/Volumes/<encrypted image>/sill-nightly.key"`, then
   `gh secret set SILL_NIGHTLY_UPDATE_KEY --env nightly --repo Saffsanity/sill < "<that file>"`, then the
   public key it printed into `nightlyKeys` (a commit of its own), then eject the image. Never: the update key
@@ -1153,7 +1138,7 @@ For a nightly tester:
 - The update check never offers a nightly: it reads only
   `https://api.github.com/repos/Saffsanity/sill/releases/latest`, which never lists a pre-release
   (`UpdatePolicy.feed`), refuses an answer that says `prerelease` anyway (`UpdatePolicy.release`), and
-  "nightly" is no version. A nightly Sill.app says main's version with its build number (0.5.5 until 2026-10-31, 0.6.0 until App Review approved 0.6.0, 0.6.1 until it approved 0.6.1, 0.6.2 since), so the update check offered a nightly that said 0.5.5 the 0.6.0 release once that was published, like everyone else's. A nightly is never offered the release of the version it says: the check offers only a higher version and build numbers don't count (`UpdatePolicy`: `version > running`), so the nightlies saying 0.6.1 are not offered the 0.6.1 release, and whoever runs one swaps it for the download by hand (settings, permissions and pairings carry over); the next release they are offered is 0.6.2's. Say so wherever a nightly is offered to someone (found 2026-11-11, while writing to reporters).
+  "nightly" is no version. A nightly Sill.app says main's version with its build number (0.5.5 until 2026-10-31, 0.6.0 until App Review approved 0.6.0, 0.6.1 until it approved 0.6.1, 0.6.2 since), so the update check offered a nightly that said 0.5.5 the 0.6.0 release once that was published, like everyone else's. A nightly from before 0.6.2 is never offered the release of the version it says: its check offers only a higher version and build numbers don't count (`UpdatePolicy`: `version > running`), so the nightlies saying 0.6.1 were not offered the 0.6.1 release, and whoever runs one swaps it for the download by hand (settings, permissions and pairings carry over). A nightly with Update Now (from 2026-11-15 on, the candidate of 0.6.2 first) is offered the release of its own version when that release was built from its commit or a later one (the plan's §16.3: tag the candidate's commit or a later one). Say which holds wherever a nightly is offered to someone (found 2026-11-11, while writing to reporters).
 - Going back: on the Mac, quit Sill, download the release from https://getsill.app/download and
   replace Sill in Applications; nothing to set up again. On a device, TestFlight › Sill › Previous
   Builds installs an earlier build, and the App Store installs the release over a TestFlight build
