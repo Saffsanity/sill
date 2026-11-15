@@ -296,6 +296,28 @@ updater features" (the plan's §15.1); the independent security review's finding
   the harness's nightly mutants 5 of 5; previews, 319: 304 identical to round 5's, 12 changed (the nightly samples'
   words), 3 new (nightly-auto-release), 3 gone (nightly-waiting: no such state any more), in the handoff's previews/
   with COMPARE-round8.txt; CI's Build and check green on a0dedd68. `sign-test.sh` unchanged (not run).
+- **The smoke test on Noah's Mac (2026-11-14, the build of b962f815, no key compiled in; Noah: "install the
+  updater branch and run the smoke test").** Built as a release is (`make-app.sh --release`, the Developer ID
+  identity, the embedded profile; arm64, not notarized) and installed over /Applications/Sill.app: 0.6.2 (1585),
+  the designated requirement the installed copy's, the three entitlements, the hardened runtime. Launch:
+  "Status: Starting…" 1.2 s after the old copy's end, the identity from the data-protection keychain, "Home door:
+  TLS, pairing required (5 paired)" as before, no permission asked again, his iPhone (away, through Tailscale)
+  streaming again 6.6 s after the swap. A second launch while it ran (`open -n -g`): the second process started
+  nothing, waited `launchWait` and quit after 30 s, and the first never missed a second of its stream
+  (`SecCodeCheckValidity` takes the running, locally built copy for the pinned requirement; `codesign -R` on a
+  pid answers "UNIX[Invalid argument]" whatever the requirement, the tool's own trouble). Quit as the menu's Quit
+  does (`NSRunningApplication.terminate`): gone in 0.41 s; opened again, the iPhone streamed 3.3 s later. Nothing
+  to clean up after the start, and no notes folder made. **Found:** the two Sills wrote Sill.log each at a place of
+  its own (`FileHandle(forWritingTo:)` and `seekToEnd` once), so the second one's first line ("Another Sill is
+  running…") was written over and its last two landed inside older lines: the log of every hand-over would be
+  torn exactly where it tells what happened. Fixed here: the file is opened for appending, each write looks
+  whether the path still names its file (another Sill moved it aside, or it was deleted) and the length is the
+  file's real one (HostLog.swift's FileSink; `Tests/checks/host-log`, 16 checks, 7 of 7 mutants, the first of
+  them the bug as it was: "the log is 3900 bytes, not 7500"). The installed build is from before the fix. Not
+  covered by this test: Update Now and the automatic update themselves (no key, nothing to install), the
+  watcher, App Management on a real swap, nightly.yml's signing step and release.sh's rules (the next nightly
+  and release run them), and the bundle's menu and Settings › General by eye (without a key `available` is
+  false, so neither shows anything new). The outputs are in the handoff's `one-click-update/smoke-test/`.
 - **Untested, for Noah:** the plan's §12 rehearsal with a throwaway repository and key (two notarized
   builds); the first real Update Now (a release carrying the key installed by hand first); §14's three
   step lists (once: the signer, the key, its backup; once: the public key into `releaseKeys`, a commit of

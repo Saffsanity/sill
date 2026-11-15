@@ -163,7 +163,9 @@ Rules found in the steps that hold for all work (each where it is written):
   listener comes up, when Sill.app's status menu or General opens, when a
   device gets in while the verdict says none can), `DeviceSettings` (what a device may
   set, `HostConfig` ↔ wire), `HostLog` (the print shadow, the app's ring and
-  log file),
+  log file, opened for appending so that two Sills at once, as at an update's hand-over, each keep their
+  lines, and written at its path again once another Sill moved it aside or it was deleted;
+  `Tests/checks/host-log`),
   `WindowCatalog` (polls windows and thumbnails only while a client is
   connected; icons; installed apps in the background; when its last look
   landed, `lookAge`; the Desktop's stops from that look, `desktopCandidates`,

@@ -1234,6 +1234,12 @@ publication over up to 120 days; the floor is the lowest version signed). None t
   (5 minutes: update-install 718, its 85 mutants 85 of 85 on an export of that commit, the harness 227 of 227,
   previews), then the second pass's fixes, then Use nightly builds. Their results are in the step file and the
   pull request.
+- 2026-11-14 23:10 EST: the smoke test on Noah's Mac, on his word, with the build of b962f815 and no key: installed
+  as a release is signed, it starts, keeps its five pairings and its grants, serves his iPhone again within seven
+  seconds, lets a second launch wait 30 s and leave without touching the stream, and quits in 0.4 s. It found
+  the two Sills of a hand-over writing over each other's lines in Sill.log; the file is now opened for appending
+  and followed at its path (HostLog.swift, `Tests/checks/host-log`). The step file has the numbers. Update Now
+  itself, the watcher and App Management stay §12's.
 
 ## 14. For Noah: the update key, step by step
 
