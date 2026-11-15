@@ -318,6 +318,18 @@ updater features" (the plan's §15.1); the independent security review's finding
   watcher, App Management on a real swap, nightly.yml's signing step and release.sh's rules (the next nightly
   and release run them), and the bundle's menu and Settings › General by eye (without a key `available` is
   false, so neither shows anything new). The outputs are in the handoff's `one-click-update/smoke-test/`.
+- **Before a merge without a key (2026-11-14, after the smoke test).** README.md's two marked blocks, Update Now's
+  and Use nightly builds', are hidden inside their comments until the release that carries a key: the public
+  front page would otherwise say Sill updates itself while no released Sill can (each block's first lines say how
+  to show it; the release checklist's two bullets say the same; the site's pages are cut by the checklist's
+  commands as before). The seventh security pass's N14 is taken: the nightly words of `.notAutomatic`, which no
+  path could show since option 4, are gone (`update-install` 955 of 955; no mutant's pattern named the line).
+  Tried besides, each cheap and on loopback or sourced: the plain door of this branch's SillHost serves a session
+  (283 frames in 5 s; the TLS doors' one place to register a session is the one Noah's iPhone came through),
+  `release.sh`'s `main_ancestry_problem` names this branch and says nothing in a checkout of main, and both
+  workflow files parse, with `steps.mode`, `nightly_stem` and the artifact action's pin where the new steps
+  expect them. nightly.yml's signing step and release.yml's kept zip run for the first time at the next
+  nightly and release.
 - **Untested, for Noah:** the plan's §12 rehearsal with a throwaway repository and key (two notarized
   builds); the first real Update Now (a release carrying the key installed by hand first); §14's three
   step lists (once: the signer, the key, its backup; once: the public key into `releaseKeys`, a commit of

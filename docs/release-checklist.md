@@ -147,14 +147,14 @@ serves the root or `/docs`, never `/site`. So:
   one-click update and Automatically update Sill, docs/one-click-update-plan.md §7 and §15): `perl -0pi -e
   's/[ \t]*<!-- Update Now:.*?<!-- \/Update Now -->\n//gs' ../sill-site/*.html`, then `grep -n -e
   'release-assets.githubusercontent.com' -e 'Automatically update Sill' ../sill-site/*.html` prints nothing
-  (README.md's block, marked the same, goes out with the release that ships it). It ships with the
-  first release whose Sill carries an update key (part 1 §7), not with the code alone: a release whose
-  Sill has an empty key list offers no Update Now.
+  (README.md's block, marked the same, is hidden inside its comment until the release that ships it: the
+  block's first lines say how to show it). It ships with the first release whose Sill carries an update
+  key (part 1 §7), not with the code alone: a release whose Sill has an empty key list offers no Update Now.
 - `Nightly Update Now` (Use nightly builds: support.html's paragraph after "Updating Sill for Mac",
   download.html's, privacy.html's, docs/one-click-update-plan.md §16): `perl -0pi -e
   's/[ \t]*<!-- Nightly Update Now:.*?<!-- \/Nightly Update Now -->\n//gs' ../sill-site/*.html`, then
-  `grep -n 'Use nightly builds' ../sill-site/*.html` prints nothing (README.md's block, marked the same, goes
-  out with the release that ships it). It ships with the first release whose Sill carries a nightly key
+  `grep -n 'Use nightly builds' ../sill-site/*.html` prints nothing (README.md's block, marked the same, is hidden
+  inside its comment until the release that ships it). It ships with the first release whose Sill carries a nightly key
   (`UpdateManifest.nightlyKeys`, "Nightlies"), and that release also deletes the sentences that say Sill
   never offers a nightly (download.html's two, README.md's two, "Nightlies" here).
 - Open: `Version label` (support.html, under the lede: where each app shows its version, true from

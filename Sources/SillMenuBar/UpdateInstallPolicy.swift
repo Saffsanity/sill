@@ -689,7 +689,6 @@ enum UpdateInstallPolicy {
             case .manifestMismatch: return couldNot("the nightly on GitHub isn’t the one signed with Sill’s nightly key")
             case .bundle(.notManifest): return couldNot("the downloaded app isn’t the one signed with Sill’s nightly key")
             case .didNotStart(_, true): return "\(nightly) didn’t start, so Sill \(running) is back."
-            case .notAutomatic(let why): return "Sill didn’t install nightly \(offered) (\(build)) by itself: \(why). Update Now still can."
             default: break
             }
         }
