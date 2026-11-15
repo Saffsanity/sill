@@ -69,9 +69,11 @@ final class UpdateInstaller: @unchecked Sendable {
     /// The nightly channel (`endpoints.channelTag`) is read with the nightly key alone, a release with the update
     /// key alone (plan §16.2): a nightly's `offeredVersion` and `offeredBuild` (the daily look's verified manifest)
     /// must be the manifest's again, newer by version, then build than this Sill's (`runningBuild`; `readNightly`).
-    /// A release is newer by its version alone (UpdateInstallPolicy.releaseToInstall).
+    /// A release is newer by its version (UpdateInstallPolicy.releaseToInstall); where this Sill is a nightly
+    /// (`runningIsNightly`), the release of its own version is too when its manifest's build, which the update key
+    /// signed, is at least this Sill's (plan §16.3: the same commit or a later one).
     func prepare(offeredTag: String, running: SillVersion, cancel: Cancel, offeredVersion: SillVersion? = nil, offeredBuild: Int? = nil,
-                 runningBuild: Int? = nil) async -> Result<(release: Policy.Release, manifest: UpdateManifest), Failure> {
+                 runningBuild: Int? = nil, runningIsNightly: Bool = false) async -> Result<(release: Policy.Release, manifest: UpdateManifest), Failure> {
         if endpoints.channelTag != nil {
             guard let offeredVersion, let offeredBuild else { return .failure(.releaseUnreadable("no nightly offered")) }
             switch await readNightly(cancel: cancel) {
@@ -101,7 +103,7 @@ final class UpdateInstaller: @unchecked Sendable {
             return .failure(f)
         }
         var release: Policy.Release
-        switch Policy.releaseToInstall(body.data, offeredTag: offeredTag, running: running, endpoints: endpoints) {
+        switch Policy.releaseToInstall(body.data, offeredTag: offeredTag, running: running, endpoints: endpoints, overNightly: runningIsNightly) {
         case .failure(let f): return .failure(f)
         case .success(let r): release = r
         }
@@ -121,6 +123,9 @@ final class UpdateInstaller: @unchecked Sendable {
             return .failure(.manifest(p))
         case .success(let m):
             if let f = Policy.manifestMatches(m, release: release, endpoints: endpoints) { return .failure(f) }
+            // The release of this nightly's own version: only when its signed build says it holds this nightly's code.
+            guard Policy.isNewer(m.version, build: Int(m.build), than: running, runningBuild: runningBuild, byBuild: false,
+                                 overNightly: runningIsNightly) else { return .failure(.releaseNotNewer) }
             manifest = m
         }
         // A stop beside it (UpdateManifest.Stop), before anything else is downloaded: one that names this
@@ -146,6 +151,21 @@ final class UpdateInstaller: @unchecked Sendable {
             }
         }
         return .success((release, manifest))
+    }
+
+    /// The build GitHub's latest release, `tag`, was made from, as its manifest signed with the update key says it:
+    /// the release read as Update Now reads one (`prepare`: the listing, the manifest, a stop beside it), for a
+    /// nightly of that release's own version, to which it is offered only when it holds that nightly's code (plan
+    /// §16.3). Any build of the version passes here (`runningBuild: 0`): the rule is UpdateInstallPolicy.isNewer's,
+    /// applied by `chooseOffer` to the build this returns, and again by `prepare` and the bundle's verdict when the
+    /// release is installed. Nothing is written.
+    func releaseBuild(tag: String, running: SillVersion, cancel: Cancel) async -> Result<Int, Failure> {
+        switch await prepare(offeredTag: tag, running: running, cancel: cancel, runningBuild: 0, runningIsNightly: true) {
+        case .failure(let f): return .failure(f)
+        case .success(let p):
+            guard let build = Int(p.manifest.build) else { return .failure(.manifest(.format("build"))) }
+            return .success(build)
+        }
     }
 
     /// The nightly channel's newest build as an offer (plan §16): its listing and its manifest, verified with the
@@ -393,10 +413,10 @@ final class UpdateInstaller: @unchecked Sendable {
 
     /// The trust's judgement of `bundle` against the verified manifest.
     func check(_ bundle: URL, manifest: UpdateManifest, running: SillVersion, runningRequirement: SecRequirement?,
-               runningBuild: Int? = nil) -> Result<Policy.Checked, Failure> {
+               runningBuild: Int? = nil, runningIsNightly: Bool = false) -> Result<Policy.Checked, Failure> {
         switch Policy.verdict(facts(of: bundle, runningRequirement: runningRequirement), trust: trust, manifest: manifest,
                               running: running, arch: .current, macOS: ProcessInfo.processInfo.operatingSystemVersion,
-                              runningBuild: runningBuild) {
+                              runningBuild: runningBuild, runningIsNightly: runningIsNightly) {
         case .success(let c): return .success(c)
         case .failure(let p): return .failure(.bundle(p))
         }
@@ -496,7 +516,8 @@ final class UpdateInstaller: @unchecked Sendable {
     /// note and between the last check and the swap); Sill.app never passes either.
     func install(staged: URL, installed: URL, runningCDHash: String, expected: Policy.Checked, manifest: UpdateManifest,
                  running: SillVersion, runningRequirement: SecRequirement?, leftoverNote: URL? = nil,
-                 afterNote: (() -> Void)? = nil, beforeSwap: (() -> Void)? = nil, runningBuild: Int? = nil) -> Result<Void, Failure> {
+                 afterNote: (() -> Void)? = nil, beforeSwap: (() -> Void)? = nil, runningBuild: Int? = nil,
+                 runningIsNightly: Bool = false) -> Result<Void, Failure> {
         guard Self.isFolder(installed) else { return .failure(.changedSinceStart) }
         guard Self.cdhash(of: installed, arch: .current) == runningCDHash else { return .failure(.changedSinceStart) }
         guard Self.isFolder(staged) else { return .failure(.swapFailed("the checked copy is gone")) }
@@ -504,7 +525,7 @@ final class UpdateInstaller: @unchecked Sendable {
               a == b else { return .failure(.swapFailed("not on the same volume")) }
         if let leftoverNote { Self.noteLeftover(staged.deletingLastPathComponent(), in: leftoverNote) }
         afterNote?()
-        switch check(staged, manifest: manifest, running: running, runningRequirement: runningRequirement, runningBuild: runningBuild) {
+        switch check(staged, manifest: manifest, running: running, runningRequirement: runningRequirement, runningBuild: runningBuild, runningIsNightly: runningIsNightly) {
         case .success(let c) where c == expected: break
         case .failure(.bundle(let p)): return .failure(.bundle(p))
         default: return .failure(.bundle(.codeChanged))
@@ -512,7 +533,7 @@ final class UpdateInstaller: @unchecked Sendable {
         beforeSwap?()
         guard renamex_np(staged.path, installed.path, UInt32(RENAME_SWAP)) == 0 else { return .failure(.swapFailed(Self.errnoText())) }
         let problem: Policy.BundleProblem
-        switch check(installed, manifest: manifest, running: running, runningRequirement: runningRequirement, runningBuild: runningBuild) {
+        switch check(installed, manifest: manifest, running: running, runningRequirement: runningRequirement, runningBuild: runningBuild, runningIsNightly: runningIsNightly) {
         case .success(let c) where c == expected: return .success(())
         case .failure(.bundle(let p)): problem = p
         default: problem = .codeChanged

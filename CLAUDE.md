@@ -457,7 +457,10 @@ Rules found in the steps that hold for all work (each where it is written):
   Foundation only, `Tests/checks/update-install`). Update Now, the one-click update
   (docs/one-click-update-plan.md): `UpdateInstallPolicy` (the trust and endpoints
   Sill.app uses, `Trust.release` and `Endpoints.github`, immutable; the refusals and
-  their words; the release; the bundle's verdict; the state machine; the words; pure),
+  their words; the release; the order of versions and builds, `isNewer`: a release by its version, and over a
+  nightly of its own version by a signed build at least that nightly's, read before any offer
+  (`releaseLookDue`, AppUpdater's `lookAtRelease`), with the pending note's channel (`noteNames`) since such a
+  release can have the nightly's build too; the bundle's verdict; the state machine; the words; pure),
   `UpdateManifest` (the release's manifest and its Ed25519 signature with Noah's
   update key, its signed date, and a stop (`Sill.zip.stop`); a nightly's ("Sill nightly 1",
   the nightly key's); `releaseKeys` and `nightlyKeys`, empty until he makes the keys, so no

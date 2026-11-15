@@ -157,13 +157,19 @@ enum UpdateInstallPolicy {
     /// with SillVersion); these name them where the rest of Update Now reads them.
     static func strictVersion(_ text: String) -> SillVersion? { UpdateManifest.strictVersion(text) }
 
-    /// Whether (`version`, `build`) is newer than what runs (plan §16.3): by version alone where a release is the
-    /// candidate; by version, then build (the number of commits the app was built from, make-app.sh's `git
-    /// rev-list --count HEAD`), where a nightly is (`byBuild`).
-    static func isNewer(_ version: SillVersion, build: Int?, than running: SillVersion, runningBuild: Int?, byBuild: Bool) -> Bool {
+    /// Whether (`version`, `build`) is newer than what runs (plan §16.3): a higher version always. Within this
+    /// Sill's own version the build decides (the number of commits the app was built from, make-app.sh's `git
+    /// rev-list --count HEAD`): a nightly (`byBuild`) when its build is higher; a release only where this Sill is a
+    /// nightly (`overNightly`) and the release was built from that nightly's commit or a later one (Noah,
+    /// 2026-11-15: "Someone on a 0.6.2 nightly should get offered official 0.6.2 release."; a nightly built after
+    /// the release keeps what it has, since the release would be older code: "Second case yes"). A release is never
+    /// newer than a release of its own version, and within a version nothing is without both builds.
+    static func isNewer(_ version: SillVersion, build: Int?, than running: SillVersion, runningBuild: Int?, byBuild: Bool,
+                        overNightly: Bool = false) -> Bool {
         if version != running { return version > running }
-        guard byBuild, let build, let runningBuild else { return false }
-        return build > runningBuild
+        guard let build, let runningBuild else { return false }
+        if byBuild { return build > runningBuild }
+        return overNightly && build >= runningBuild
     }
 
     /// GitHub's clock in an HTTPS answer (the third security pass's CL1): the `Date` header in RFC 9110's
@@ -250,13 +256,16 @@ enum UpdateInstallPolicy {
     }
 
     /// What Update Now offers (plan §16.3): `release` (the check's latest, newer or not) when its version is higher
-    /// than this Sill's, as the update check has always offered it (never the release of a nightly's own version:
-    /// main keeps a version both before its release and after it, so only the release's signed build could tell,
-    /// and the offer is made before any manifest is read); `nightly` (the switch on) when newer by version, then
-    /// build. Both: the higher version, and on a tie the release.
+    /// than this Sill's, as the update check has always offered it; and to a nightly (`runningIsNightly`) the
+    /// release of its own version, once that release's signed build is known and is at least the nightly's
+    /// (`releaseBuild`, read by AppUpdater.lookAtRelease before any offer: main keeps a version both before its
+    /// release and after it, so only the build tells whether the release holds this nightly's code). `nightly` (the
+    /// switch on) when newer by version, then build. Both: the higher version, and on a tie the release.
     static func chooseOffer(release: UpdatePolicy.Offer?, nightly: UpdatePolicy.Offer?, running: SillVersion,
-                            runningBuild: Int?) -> UpdatePolicy.Offer? {
-        let r = release.flatMap { $0.version > running ? $0 : nil }
+                            runningBuild: Int?, releaseBuild: Int? = nil, runningIsNightly: Bool = false) -> UpdatePolicy.Offer? {
+        let r = release.flatMap {
+            isNewer($0.version, build: releaseBuild, than: running, runningBuild: runningBuild, byBuild: false, overNightly: runningIsNightly) ? $0 : nil
+        }
         let n = nightly.flatMap { o -> UpdatePolicy.Offer? in
             guard let build = o.build, isNewer(o.version, build: build, than: running, runningBuild: runningBuild, byBuild: true) else { return nil }
             return o
@@ -267,6 +276,35 @@ enum UpdateInstallPolicy {
         case (nil, let n?): return n
         case (let r?, let n?): return n.version > r.version ? n : r
         }
+    }
+
+    /// The build a release was made from, as its manifest signed with the update key says it (AppUpdater.lookAtRelease).
+    struct ReleaseBuild: Equatable, Sendable {
+        let tag: String
+        let build: Int
+    }
+
+    /// Whether Sill reads the latest release's signed manifest before it offers anything (AppUpdater.lookAtRelease):
+    /// only a nightly does, only for the signed release of its own version, and once for each release (`looked`, the
+    /// last look's). Any other Sill, and any other release, is offered by its version as before, with nothing read.
+    static func releaseLookDue(latest: UpdatePolicy.Offer?, running: SillVersion?, runningIsNightly: Bool, looked: ReleaseBuild?) -> Bool {
+        guard runningIsNightly, let latest, let running, latest.build == nil, latest.signed, latest.version == running else { return false }
+        return looked?.tag != latest.tag
+    }
+
+    /// The build the last look read for `offer` (a release; nil for any other tag, or with no look yet).
+    static func releaseBuild(of offer: UpdatePolicy.Offer?, looked: ReleaseBuild?) -> Int? {
+        guard let offer, offer.build == nil, let looked, looked.tag == offer.tag else { return nil }
+        return looked.build
+    }
+
+    /// Whether the pending note names this Sill as the update's new copy: its version and build (`key`, "0.6.2
+    /// (1597)") and its channel (the note's fourth line, "nightly" or "release"; a note without one is a release's).
+    /// The channel counts because the release of a nightly's own version can be built from that nightly's very
+    /// commit: the same version and the same build, and only the new Sill may answer the watcher.
+    static func noteNames(_ note: [String]?, key: String?, nightly: Bool) -> Bool {
+        guard let note, note.count >= 3, let key, note[1] == key else { return false }
+        return (note.count > 3 && note[3] == UpdateManifest.nightlyTag) == nightly
     }
 
     /// How an offer is named: "Sill 0.6.2", or "Sill nightly 0.6.2 (1471)".
@@ -425,9 +463,11 @@ enum UpdateInstallPolicy {
 
     /// GitHub's latest release (a 200's body) as the one to install, or why not: it must be the
     /// offered tag, strict, published, newer than `running`, with exactly one zip and one manifest at
-    /// the URLs Sill builds, uploaded, of possible sizes. A release is newer by its version alone, also beside a
-    /// nightly (plan §16.3). The nightly channel's answer is `nightlyListing`'s, never this.
-    static func releaseToInstall(_ body: Data, offeredTag: String, running: SillVersion, endpoints: Endpoints) -> Result<Release, Failure> {
+    /// the URLs Sill builds, uploaded, of possible sizes. A release is newer by its version; the release of a
+    /// nightly's own version (`overNightly`: this Sill is a nightly) goes on to its manifest, whose signed build
+    /// decides (UpdateInstaller.prepare; plan §16.3). The nightly channel's answer is `nightlyListing`'s, never this.
+    static func releaseToInstall(_ body: Data, offeredTag: String, running: SillVersion, endpoints: Endpoints,
+                                 overNightly: Bool = false) -> Result<Release, Failure> {
         guard endpoints.channelTag == nil else { return .failure(.releaseUnreadable("the nightly channel's answer")) }
         guard body.count <= maxReleaseBytes,
               let object = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] else {
@@ -439,7 +479,7 @@ enum UpdateInstallPolicy {
         if object["draft"] as? Bool == true || object["prerelease"] as? Bool == true {
             return .failure(.releaseUnreadable("a draft or a prerelease"))
         }
-        guard version > running else { return .failure(.releaseNotNewer) }
+        guard version > running || (overNightly && version == running) else { return .failure(.releaseNotNewer) }
         switch releaseAssets(object, tag: tag, endpoints: endpoints) {
         case .failure(let f): return .failure(f)
         case .success(let a):
@@ -566,10 +606,12 @@ enum UpdateInstallPolicy {
         case codeChanged
     }
 
-    /// The judgement of a bundle's facts, in the plan's order (§4.5). Newer by version alone for a release's
-    /// manifest; by version, then build (`runningBuild`, this Sill's), for a nightly's (plan §16.3).
+    /// The judgement of a bundle's facts, in the plan's order (§4.5). Newer by `isNewer` (plan §16.3): a release's
+    /// manifest by its version, and where this Sill is a nightly of that version (`runningIsNightly`) by a build at
+    /// least its own (`runningBuild`); a nightly's by version, then build.
     static func verdict(_ f: BundleFacts, trust: Trust, manifest: UpdateManifest, running: SillVersion,
-                        arch: Architecture, macOS: OperatingSystemVersion, runningBuild: Int? = nil) -> Result<Checked, BundleProblem> {
+                        arch: Architecture, macOS: OperatingSystemVersion, runningBuild: Int? = nil,
+                        runningIsNightly: Bool = false) -> Result<Checked, BundleProblem> {
         if let tree = f.tree { return .failure(.notABundle(tree)) }
         guard f.signatureStatus == 0 else { return .failure(.invalidSignature(f.signatureStatus)) }
         guard f.signer else { return .failure(.wrongSigner) }
@@ -594,7 +636,7 @@ enum UpdateInstallPolicy {
         }
         guard let build = f.plist["CFBundleVersion"], UpdateManifest.isDigits(build, 1...9) else { return .failure(.info("CFBundleVersion")) }
         guard isNewer(version, build: Int(build), than: running, runningBuild: runningBuild,
-                      byBuild: manifest.channel == .nightly) else { return .failure(.notNewer(versionText)) }
+                      byBuild: manifest.channel == .nightly, overNightly: runningIsNightly) else { return .failure(.notNewer(versionText)) }
         guard version == manifest.version else { return .failure(.notManifest("version")) }
         guard build == manifest.build else { return .failure(.notManifest("build")) }
         if let minimum = f.plist["LSMinimumSystemVersion"] {
@@ -698,9 +740,12 @@ enum UpdateInstallPolicy {
     /// Settings' orange line for a failure. `running` and `offered` as SillVersion shows them;
     /// `keptAt` where the old copy is when it could not be put back.
     /// `offeredBuild`: the offer is a nightly (plan §16): it is named with its build, and its signature is the
-    /// nightly key's.
-    static func line(_ f: Failure, running: SillVersion, offered: SillVersion, keptAt: String?, offeredBuild: Int? = nil) -> String {
-        let unchanged = "Sill \(running) is unchanged."
+    /// nightly key's. `runningBuild`: this Sill is a nightly, named with its build too, since the release offered to
+    /// it can have its version ("Sill 0.6.2 didn’t start, so Sill nightly 0.6.2 (1597) is back.").
+    static func line(_ f: Failure, running: SillVersion, offered: SillVersion, keptAt: String?, offeredBuild: Int? = nil,
+                     runningBuild: Int? = nil) -> String {
+        let have = name(version: running, build: runningBuild)
+        let unchanged = "\(have) is unchanged."
         func couldNot(_ why: String) -> String { "Couldn’t update: \(why). \(unchanged)" }
         if let build = offeredBuild {
             let nightly = name(version: offered, build: build)
@@ -712,7 +757,7 @@ enum UpdateInstallPolicy {
             case .manifest(let p): return couldNot(updateKeyWords(p, nightly: true))
             case .manifestMismatch: return couldNot("the nightly on GitHub isn’t the one signed with Sill’s nightly key")
             case .bundle(.notManifest): return couldNot("the downloaded app isn’t the one signed with Sill’s nightly key")
-            case .didNotStart(_, true): return "\(nightly) didn’t start, so Sill \(running) is back."
+            case .didNotStart(_, true): return "\(nightly) didn’t start, so \(have) is back."
             default: break
             }
         }
@@ -738,7 +783,7 @@ enum UpdateInstallPolicy {
         case .checkAfterSwap(let p, let putBack):
             return putBack ? couldNot(words(p)) : lost(running: running, keptAt: keptAt)
         case .didNotStart(_, let putBack):
-            return putBack ? "Sill \(offered) didn’t start, so Sill \(running) is back." : lost(running: running, keptAt: keptAt)
+            return putBack ? "Sill \(offered) didn’t start, so \(have) is back." : lost(running: running, keptAt: keptAt)
         case .noWholeSillLeft:
             return "An update of Sill didn’t finish: the new version didn’t start the first time, and Sill’s watcher couldn’t leave a whole copy of Sill in its place. If this copy misbehaves, download Sill again from getsill.app."
         case .keptUnstarted:
@@ -1035,10 +1080,11 @@ enum UpdateInstallPolicy {
     /// update key (else nothing of Update Now shows). `refusal`: why it cannot run here. `keptAt`: where
     /// the old copy is when it could not be put back.
     /// `offeredBuild`: the offer is a nightly (named with its build). `ownLine`: the offer is not the check's own
-    /// (a nightly), so the pane says it is available itself.
+    /// (a nightly, or the release of this nightly's own version), so the pane says it is available itself.
+    /// `runningBuild`: this Sill is a nightly (a failure's line names it with its build).
     static func pane(_ s: State, offered: SillVersion?, running: SillVersion?, available: Bool, refusal: Refusal?,
                      keptAt: String? = nil, automatic: AutomaticPane = AutomaticPane(), offeredBuild: Int? = nil,
-                     ownLine: Bool = false) -> Pane {
+                     ownLine: Bool = false, runningBuild: Int? = nil) -> Pane {
         var p = Pane()
         guard available, let running else { return p }
         let target = offered.map { name(version: $0, build: offeredBuild) } ?? "the update"
@@ -1095,7 +1141,8 @@ enum UpdateInstallPolicy {
             p.line = "Restarting Sill…"
             p.spinning = true
         case .failed(let f):
-            p.line = line(f, running: running, offered: offered ?? running, keptAt: keptAt, offeredBuild: offeredBuild)
+            p.line = line(f, running: running, offered: offered ?? running, keptAt: keptAt, offeredBuild: offeredBuild,
+                          runningBuild: runningBuild)
             p.failed = true
             p.updateNow = offered != nil
             p.updateNowEnabled = refusal == nil && f.cleanUp
@@ -1123,10 +1170,12 @@ enum UpdateInstallPolicy {
     }
 
     /// The status menu's update item: its title and subtitle, and whether it opens Settings › General
-    /// (else the release page, as before Update Now).
+    /// (else the release page, as before Update Now). `runningBuild`: this Sill is a nightly, said with its build
+    /// ("You have nightly 0.6.2 (1597)": the release offered to it can have its version).
     static func menuItem(_ phase: Phase, offered: SillVersion, running: SillVersion, available: Bool, refusal: Refusal?,
-                         offeredBuild: Int? = nil) -> (title: String, subtitle: String, opensSettings: Bool) {
+                         offeredBuild: Int? = nil, runningBuild: Int? = nil) -> (title: String, subtitle: String, opensSettings: Bool) {
         let n = name(version: offered, build: offeredBuild)
+        let have = runningBuild.map { "nightly \(running) (\($0))" } ?? "\(running)"
         if case .waiting = phase {
             return ("\(n) Is Ready to Install…", "Installs by itself while no device is connected", true)
         }
@@ -1142,21 +1191,21 @@ enum UpdateInstallPolicy {
             return ("Updating to \(n)…", step, true)
         }
         if available, refusal == nil {
-            return ("\(n) Is Available…", "You have \(running); update it in Settings", true)
+            return ("\(n) Is Available…", "You have \(have); update it in Settings", true)
         }
-        return ("\(n) Is Available…", "You have \(running); opens its download page", false)
+        return ("\(n) Is Available…", "You have \(have); opens its download page", false)
     }
 
     /// Under "Use nightly builds" while it is on (plan §16.5): what a nightly trusts, said plainly (the third security
     /// pass's NB1: GitHub builds it and signs it, so its two signatures are one job's, with nobody in between), and
     /// that Update Now alone installs one (Noah's decision of 2026-11-12, option 4: "Automatic for releases only.
     /// Nightlies take one click on Update Now each.").
-    static let nightlyNote = "Nightly builds are built and signed by GitHub from Sill’s newest code; nobody looks at them first. They are less tested than releases and may break. Sill tells you when one is out, and Update Now installs it; a nightly never installs by itself, even with Automatically update Sill on. Turning this off doesn’t go back to the last release: Sill keeps the nightly you have until a release with a higher version number."
+    static let nightlyNote = "Nightly builds are built and signed by GitHub from Sill’s newest code; nobody looks at them first. They are less tested than releases and may break. Sill tells you when one is out, and Update Now installs it; a nightly never installs by itself, even with Automatically update Sill on. Turning this off doesn’t go back to the last release: Sill keeps the nightly you have until a release that is at least as new."
 
-    /// Under the switch while it is off and this Sill is a nightly (a release of its own version is never offered:
-    /// `chooseOffer`).
+    /// Under the switch while it is off and this Sill is a nightly: no downgrade. The next release it gets is one
+    /// built from its commit or a later one, its own version's included (`isNewer`, `chooseOffer`).
     static func nightlyOffNote(version: SillVersion, build: Int) -> String {
-        "You have a nightly build, \(version) (\(build)). Sill updates to the next release after \(version)."
+        "You have a nightly build, \(version) (\(build)). Sill updates to the next release that is at least as new."
     }
 
     /// Settings › General's footnote in a build with an update key (UpdatePolicy.footnote otherwise, which

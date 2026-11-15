@@ -52,6 +52,9 @@ final class AppUpdater {
     @ObservationIgnored var latestRelease: () -> UpdatePolicy.Offer? = { nil }
     /// The newest nightly the last look found (plan §16), while "Use nightly builds" is on.
     private(set) var nightlyOffer: UpdatePolicy.Offer?
+    /// Where this Sill is a nightly and the check's latest release has its version: the build that release's signed
+    /// manifest names (`lookAtRelease`), which tells whether the release holds this nightly's code (plan §16.3).
+    private(set) var lookedRelease: Policy.ReleaseBuild?
 
     @ObservationIgnored private let installer: UpdateInstaller
     /// The nightly channel's (Endpoints.nightly, the nightly key alone; plan §16).
@@ -60,6 +63,7 @@ final class AppUpdater {
     @ObservationIgnored private let runningBuild: Int?
     @ObservationIgnored private let runningIsNightly: Bool
     @ObservationIgnored private var lookingAtNightly = false
+    @ObservationIgnored private var lookingAtRelease = false
     @ObservationIgnored private let store: AutoUpdateStore
     @ObservationIgnored private let bundle: URL
     /// This bundle's own version (its signed Info.plist, read at launch), never a test version.
@@ -160,21 +164,26 @@ final class AppUpdater {
     /// "Use nightly builds" in effect: on, and a nightly key compiled in.
     private var nightliesOn: Bool { memory.nightly && !installer.trust.nightlyKeys.isEmpty }
 
-    /// What Update Now offers: UpdateInstallPolicy.chooseOffer over the check's latest release and the last
-    /// look's nightly.
+    /// What Update Now offers: UpdateInstallPolicy.chooseOffer over the check's latest release (with its build
+    /// where a nightly looked at the release of its own version) and the last look's nightly.
     private var chosen: UpdatePolicy.Offer? {
         guard let running = runningVersion else { return nil }
-        return Policy.chooseOffer(release: latestRelease(), nightly: nightliesOn ? nightlyOffer : nil, running: running,
-                                  runningBuild: runningBuild)
+        let latest = latestRelease()
+        return Policy.chooseOffer(release: latest, nightly: nightliesOn ? nightlyOffer : nil, running: running,
+                                  runningBuild: runningBuild, releaseBuild: Policy.releaseBuild(of: latest, looked: lookedRelease),
+                                  runningIsNightly: runningIsNightly)
     }
 
-    /// What the automatic update may install: the check's latest release when it is newer than this Sill (by version;
-    /// the release of a nightly's own version never), and never a nightly, by construction: the nightly offer isn't
-    /// passed (Noah's decision of 2026-11-12, option 4: "Automatic for releases only. Nightlies take one click on
-    /// Update Now each."). With Use nightly builds on, the pane may offer a newer nightly meanwhile (`chosen`).
+    /// What the automatic update may install: the check's latest release when it is newer than this Sill (by version,
+    /// or for a nightly the release of its own version built from its commit or a later one), and never a nightly,
+    /// by construction: the nightly offer isn't passed (Noah's decision of 2026-11-12, option 4: "Automatic for
+    /// releases only. Nightlies take one click on Update Now each."). With Use nightly builds on, the pane may offer
+    /// a newer nightly meanwhile (`chosen`).
     private var automaticOffer: UpdatePolicy.Offer? {
         guard let running = runningVersion else { return nil }
-        return Policy.chooseOffer(release: latestRelease(), nightly: nil, running: running, runningBuild: runningBuild)
+        let latest = latestRelease()
+        return Policy.chooseOffer(release: latest, nightly: nil, running: running, runningBuild: runningBuild,
+                                  releaseBuild: Policy.releaseBuild(of: latest, looked: lookedRelease), runningIsNightly: runningIsNightly)
     }
 
     /// Update Now's own choice where it isn't the check's offer (a nightly): the menu names it.
@@ -204,14 +213,16 @@ final class AppUpdater {
                                   waitUntil: o.flatMap(waitUntil), now: now,
                                   offeredBuild: o?.build, runningBuild: runningIsNightly ? runningBuild : nil, release: alongside)
         var pane = Policy.pane(state, offered: o?.version, running: runningVersion, available: available, refusal: refusal,
-                               keptAt: keptAt, automatic: automatic, offeredBuild: o?.build, ownLine: idle && o != nil && o != offer())
+                               keptAt: keptAt, automatic: automatic, offeredBuild: o?.build, ownLine: idle && o != nil && o != offer(),
+                               runningBuild: runningIsNightly ? runningBuild : nil)
         // The green line of an update just installed, while no other update has the pane's line.
         if pane.line == nil { pane.installed = installedLine }
         return pane
     }
 
     var menu: MenuBuilder.UpdateMenuState {
-        MenuBuilder.UpdateMenuState(phase: state.phase, available: shown, refusal: refusal)
+        MenuBuilder.UpdateMenuState(phase: state.phase, available: shown, refusal: refusal,
+                                    runningBuild: runningIsNightly ? runningBuild : nil)
     }
 
     /// Settings › General's "Automatically update Sill".
@@ -367,10 +378,49 @@ final class AppUpdater {
     }
 
     /// After every check GitHub answered (AppModel), and at launch (`atLaunch`, with the offer the last check stored):
-    /// the nightly looked at first while the switch is on; at launch only while Check for updates automatically is
+    /// a nightly looks at the release of its own version first, when there is one it hasn't read (`lookAtRelease`);
+    /// then the nightly is looked at while the switch is on; at launch only while Check for updates automatically is
     /// on too, so Sill asks GitHub nothing by itself with it off (privacy.html; the footnote's "each time Sill opens").
     func checkAnswered(atLaunch: Bool = false) {
+        if releaseLookDue, !atLaunch || checkOn() {
+            lookAtRelease { [weak self] in self?.afterReleaseLook(atLaunch: atLaunch) }
+        } else {
+            afterReleaseLook(atLaunch: atLaunch)
+        }
+    }
+
+    private func afterReleaseLook(atLaunch: Bool) {
         if nightliesOn, !atLaunch || checkOn() { lookAtNightly { [weak self] in self?.considerAutomatic() } } else { considerAutomatic() }
+    }
+
+    /// This Sill is a nightly and the check's latest release, signed, has its version: its build isn't read yet.
+    private var releaseLookDue: Bool {
+        available && Policy.releaseLookDue(latest: latestRelease(), running: runningVersion, runningIsNightly: runningIsNightly,
+                                           looked: lookedRelease)
+    }
+
+    /// The release of this nightly's own version (plan §16.3): its signed manifest read as Update Now reads it
+    /// (UpdateInstaller.releaseBuild), and the build it names kept for the offer (`chosen`, `automaticOffer`). A
+    /// release built from this nightly's commit or a later one is then offered like any release; an older one never.
+    private func lookAtRelease(then: @escaping () -> Void) {
+        guard releaseLookDue, !lookingAtRelease, let latest = latestRelease(), let running = runningVersion else { then(); return }
+        lookingAtRelease = true
+        let installer = self.installer
+        let runningBuild = self.runningBuild
+        Task { [weak self] in
+            let result = await installer.releaseBuild(tag: latest.tag, running: running, cancel: UpdateInstaller.Cancel())
+            guard let self else { return }
+            self.lookingAtRelease = false
+            switch result {
+            case .success(let build):
+                self.lookedRelease = Policy.ReleaseBuild(tag: latest.tag, build: build)
+                let newer = Policy.isNewer(latest.version, build: build, than: running, runningBuild: runningBuild, byBuild: false, overNightly: true)
+                print("Update: Sill \(latest.version) is build \(build) and this nightly is build \(runningBuild.map(String.init) ?? "unknown"): \(newer ? "the release has this nightly’s code, so it is offered" : "this nightly is newer, so the release isn’t offered").")
+            case .failure(let f):
+                print("Update: Sill \(latest.version)’s signed build couldn’t be read (\(Policy.logText(f))).")
+            }
+            then()
+        }
     }
 
     /// The nightly pre-release (Endpoints.nightly): its listing and its manifest, verified with the nightly key, and
@@ -406,7 +456,9 @@ final class AppUpdater {
             let now = Date()
             switch Auto.start(self.memory, checkOn: self.checkOn(), available: self.available, refusal: r, offered: offer.version,
                               offeredTag: offer.tag, signed: offer.signed, running: self.runningVersion, idle: self.mayBeginAutomatic,
-                              waitUntil: self.waitUntil(offer), now: now, offeredBuild: offer.build) {
+                              waitUntil: self.waitUntil(offer), now: now, offeredBuild: offer.build,
+                              releaseBuild: Policy.releaseBuild(of: offer, looked: self.lookedRelease), runningBuild: self.runningBuild,
+                              runningIsNightly: self.runningIsNightly) {
             case .no(let why):
                 if why != self.loggedAutomatic {
                     self.loggedAutomatic = why
@@ -432,8 +484,8 @@ final class AppUpdater {
 
     /// Every change of what the automatic update remembers, kept small (UpdateAutoPolicy.bounded, A3).
     private func remember(replacingUnreadable: Bool = false, _ change: (Auto.Memory) -> Auto.Memory) {
-        let (running, runningBuild) = (runningVersion, self.runningBuild)
-        store.update({ Auto.bounded(change($0), running: running, runningBuild: runningBuild) },
+        let (running, runningBuild, runningIsNightly) = (runningVersion, self.runningBuild, self.runningIsNightly)
+        store.update({ Auto.bounded(change($0), running: running, runningBuild: runningBuild, runningIsNightly: runningIsNightly) },
                      replacingUnreadable: replacingUnreadable)
         if store.memory != memory { memory = store.memory }
     }
@@ -486,10 +538,11 @@ final class AppUpdater {
         cancel = token
         let installer = installerFor(target)
         let runningBuild = self.runningBuild
+        let runningIsNightly = self.runningIsNightly
         Task { [weak self] in
             let result = await installer.prepare(offeredTag: target.tag, running: running, cancel: token,
                                                  offeredVersion: target.build != nil ? target.version : nil, offeredBuild: target.build,
-                                                 runningBuild: runningBuild)
+                                                 runningBuild: runningBuild, runningIsNightly: runningIsNightly)
             guard let self else { return }
             self.asking = false
             guard run == self.attempt, case .waiting = self.state.phase else { return }
@@ -535,10 +588,11 @@ final class AppUpdater {
         cancel = token
         let installer = installerFor(target)
         let runningBuild = self.runningBuild
+        let runningIsNightly = self.runningIsNightly
         Task { [weak self] in
             let result = await installer.prepare(offeredTag: target.tag, running: running, cancel: token,
                                                  offeredVersion: target.build != nil ? target.version : nil, offeredBuild: target.build,
-                                                 runningBuild: runningBuild)
+                                                 runningBuild: runningBuild, runningIsNightly: runningIsNightly)
             guard let self, run == self.attempt, case .lookingAgain = self.state.phase else { return }
             switch result {
             case .failure(let f):
@@ -619,11 +673,12 @@ final class AppUpdater {
         print("Update: getting \(Policy.name(version: target.version, build: target.build)) (\(target.tag)) from GitHub.")
         let installer = installerFor(target)
         let runningBuild = self.runningBuild
+        let runningIsNightly = self.runningIsNightly
         let nightly = target.build != nil
         Task { [weak self] in
             let result = await installer.prepare(offeredTag: target.tag, running: running, cancel: token,
                                                  offeredVersion: nightly ? target.version : nil, offeredBuild: target.build,
-                                                 runningBuild: runningBuild)
+                                                 runningBuild: runningBuild, runningIsNightly: runningIsNightly)
             guard let self, run == self.attempt else { return }
             switch result {
             case .failure(let f):
@@ -728,10 +783,11 @@ final class AppUpdater {
         let manifest = prepared.manifest
         let requirement = runningCode.requirement
         let runningBuild = self.runningBuild
+        let runningIsNightly = self.runningIsNightly
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
                 installer.check(unpacked, manifest: manifest, running: running, runningRequirement: requirement,
-                                runningBuild: runningBuild)
+                                runningBuild: runningBuild, runningIsNightly: runningIsNightly)
             }.value
             guard let self, run == self.attempt else { return }
             switch result {
@@ -776,6 +832,7 @@ final class AppUpdater {
         let inputs = lookInputs()
         let note = Self.leftoverNote
         let runningBuild = self.runningBuild
+        let runningIsNightly = self.runningIsNightly
         Task { [weak self] in
             // Off the main actor: where Sill runs, looked at once more right before the swap (another account
             // or copy may have started Sill since the click), the copy at the path, then the install (which
@@ -786,7 +843,7 @@ final class AppUpdater {
                 guard isInstalled, let cdhash else { return (.failure(.changedSinceStart), nil, false) }
                 let r = installer.install(staged: unpacked, installed: bundle, runningCDHash: cdhash, expected: checked,
                                           manifest: manifest, running: running, runningRequirement: requirement, leftoverNote: note,
-                                          runningBuild: runningBuild)
+                                          runningBuild: runningBuild, runningIsNightly: runningIsNightly)
                 // Not put back: whether what waits in staging is still the old copy, whole (the way back).
                 if case .failure(let f) = r, !f.cleanUp { return (r, cdhash, installer.isTheOldCopy(unpacked, old: cdhash)) }
                 return (r, cdhash, false)
@@ -975,7 +1032,8 @@ final class AppUpdater {
             try? FileManager.default.removeItem(at: Self.pendingNote)
             // The watcher couldn't put the old copy back (it failed its last check) and left this new one at Sill's
             // path, not started (the third security pass's W3): this Sill is that copy, opened since.
-            if restored.count > 2, restored[2] == "kept", let p = pending, p.count >= 3, restored.first == p[0], p[1] == runningKey {
+            if restored.count > 2, restored[2] == "kept", let p = pending, p.count >= 3, restored.first == p[0],
+               Policy.noteNames(p, key: runningKey, nightly: runningIsNightly) {
                 let why = restored[1]
                 print("Update: Sill \(runningKey ?? "") didn’t start the first time (\(why)), and the copy it replaced failed the watcher’s last check, so the watcher left this one in place, not started.")
                 state = Policy.State(phase: .failed(.keptUnstarted(why)), mode: p[2] == "automatic" ? .automatic : .manual)
@@ -990,9 +1048,9 @@ final class AppUpdater {
                 let why = restored[1]
                 let automatic = p[2] == "automatic"
                 print("Update: \(p[1]) didn’t start the first time (\(why)), and the watcher couldn’t leave a whole Sill at its path; this copy, \(runningKey ?? "unknown"), was opened since.")
+                let nightly = p.count > 3 && p[3] == UpdateManifest.nightlyTag
                 if automatic, let (failed, failedBuild) = Auto.parseKey(p[1]), let running = runningVersion,
-                   Policy.isNewer(failed, build: failedBuild, than: running, runningBuild: runningBuild, byBuild: true) {
-                    let nightly = p.count > 3 && p[3] == UpdateManifest.nightlyTag
+                   Policy.isNewer(failed, build: failedBuild, than: running, runningBuild: runningBuild, byBuild: nightly, overNightly: runningIsNightly) {
                     remember { Auto.failed($0, failed, why: "it didn’t run: \(why); no whole Sill was left at its path", build: nightly ? failedBuild : nil) }
                 }
                 state = Policy.State(phase: .failed(.noWholeSillLeft(why)), mode: automatic ? .automatic : .manual)
@@ -1001,7 +1059,8 @@ final class AppUpdater {
                 return
             }
             if let p = pending, p.count >= 3, restored.first == p[0], let (failed, failedBuild) = Auto.parseKey(p[1]), let running = runningVersion,
-               Policy.isNewer(failed, build: failedBuild, than: running, runningBuild: runningBuild, byBuild: true) {
+               Policy.isNewer(failed, build: failedBuild, than: running, runningBuild: runningBuild,
+                              byBuild: p.count > 3 && p[3] == UpdateManifest.nightlyTag, overNightly: runningIsNightly) {
                 let why = restored.count > 1 ? restored[1] : "it didn’t run"
                 let automatic = p[2] == "automatic"
                 let nightly = p.count > 3 && p[3] == UpdateManifest.nightlyTag
@@ -1016,7 +1075,7 @@ final class AppUpdater {
             cleanUpAfterStart()
             return
         }
-        guard let p = pending, p.count >= 3, Policy.isToken(p[0]), p[1] == runningKey else {
+        guard let p = pending, p.count >= 3, Policy.isToken(p[0]), Policy.noteNames(p, key: runningKey, nightly: runningIsNightly) else {
             if pending != nil { try? FileManager.default.removeItem(at: Self.pendingNote) }
             cleanUpAfterStart()
             return
@@ -1071,12 +1130,13 @@ final class AppUpdater {
     /// Quitting before `proved`: a quit asked for (not a crash) is no failure of the update, so the watcher
     /// is told the same. From AppDelegate's quit.
     func willQuit() {
-        guard isApp, let p = UpdateInstaller.readNote(Self.pendingNote), p.count >= 3, p[1] == runningKey else { return }
+        guard isApp, let p = UpdateInstaller.readNote(Self.pendingNote), Policy.noteNames(p, key: runningKey, nightly: runningIsNightly) else { return }
         proved(token: p[0], automatic: p[2] == "automatic")
     }
 
     /// This Sill as the pending note names the new one: "0.6.2 (1471)", its version and build (a nightly can have
-    /// the old Sill's version, so the build tells the new Sill from the old: only the new one answers the watcher).
+    /// the old Sill's version, so the build tells the new Sill from the old: only the new one answers the watcher);
+    /// with the note's channel line where a release has a nightly's version and build too (`Policy.noteNames`).
     private var runningKey: String? {
         guard let v = runningVersion, let b = runningBuild else { return nil }
         return "\(v) (\(b))"
