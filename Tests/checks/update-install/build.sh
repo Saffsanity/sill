@@ -5,7 +5,7 @@
 # module (each `import StreamProtocol` stripped), and this check's main.swift.
 WT=$1; OUT=$2; SRC=${3:-$WT/Sources/SillMenuBar}; T=$(mktemp -d)
 cp "$WT"/Sources/StreamProtocol/*.swift "$T"/
-for f in UpdatePolicy UpdateInstallPolicy UpdateManifest UpdateArchive UpdateAutoPolicy; do
+for f in UpdatePolicy UpdateInstallPolicy UpdateManifest UpdateArchive UpdateAutoPolicy ProcessLife; do
     sed '/^import StreamProtocol$/d' "$SRC/$f.swift" > "$T/$f.swift"
 done
 cp "$(dirname "$0")/main.swift" "$T/main.swift"

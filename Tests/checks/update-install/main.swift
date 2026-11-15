@@ -1479,5 +1479,45 @@ for path in ["StreamProtocol/HostSettings.swift", "StreamProtocol/StreamMessage.
 check(!text("DebugHooks.swift").contains("setAutomaticUpdate(") && !text("DebugHooks.swift").contains("AutoUpdateStore")
       && !text("DebugHooks.swift").contains("setNightly("), "the previews draw the switches, never set them")
 
+// The other Sill a launch waits for (AppUpdater.waitForOtherSill): gone by the kernel's word, ProcessLife. The
+// rehearsal's first update (2026-11-15) waited 30 s for a Sill that had exited after 0.2 s: NSRunningApplication's
+// isTerminated never changed in the new copy.
+do {
+    typealias Life = ProcessLife
+    let a = Life.Start(seconds: 1_794_000_000, microseconds: 10), b = Life.Start(seconds: 1_794_000_000, microseconds: 11)
+    check(Life.gone(then: Life(pid: 500, started: a), now: nil), "no process with the pid: gone")
+    check(!Life.gone(then: Life(pid: 500, started: a), now: Life(pid: 500, started: a)), "the same pid and start: still there")
+    check(Life.gone(then: Life(pid: 500, started: a), now: Life(pid: 500, started: b)), "the pid with another start (a pid reused): gone")
+    check(!Life.gone(then: Life(pid: 500, started: nil), now: Life(pid: 500, started: b)), "no start read then: the pid alone says still there")
+    check(!Life.gone(then: Life(pid: 500, started: a), now: Life(pid: 500, started: nil)), "no start read now: the pid alone says still there")
+    // Live, against this process, launchd, and a process of the check's own.
+    let me = ProcessInfo.processInfo.processIdentifier
+    let mine = Life.of(me)
+    check(mine != nil && mine?.started != nil, "this process is there, with a start time")
+    check(mine?.gone == false, "this process is not gone")
+    check(Life(pid: me, started: Life.Start(seconds: 1, microseconds: 2)).gone, "this pid under another start counts as another process")
+    check(Life.exists(1) && Life.of(1)?.gone == false, "launchd, another account's process, is there (EPERM is not ESRCH)")
+    check(Life.exists(0) && Life.exists(-1) && Life.start(of: 0) == nil, "no pid at all counts as there, with no start")
+    let child = Process()
+    child.executableURL = URL(fileURLWithPath: "/bin/sleep")
+    child.arguments = ["60"]
+    if (try? child.run()) != nil {
+        let life = Life.of(child.processIdentifier)
+        check(life != nil && life?.started != nil && life?.gone == false, "a running child is there")
+        child.terminate()
+        child.waitUntilExit()
+        check(life?.gone == true, "the child, once it has exited, is gone")
+        check(Life.of(child.processIdentifier) == nil && !Life.exists(child.processIdentifier), "and nothing has its pid")
+        check(Life.start(of: child.processIdentifier) == nil, "and a pid no process has reads no start time")
+    } else {
+        check(false, "the check's child process started")
+    }
+    // The wait asks it: a mutant that asks AppKit alone is the fault as it was.
+    let wait = text("AppUpdater.swift")
+    check(wait.contains("let lives = others.map { (app: $0, life: ProcessLife.of($0.processIdentifier)) }")
+          && wait.contains("if lives.allSatisfy({ $0.app.isTerminated || ($0.life?.gone ?? true) }) {")
+          && !wait.contains("others.allSatisfy({ $0.isTerminated })"), "the launch wait asks the kernel as well as AppKit whether the other Sill has gone")
+}
+
 print("update-install: \(checks - failures) of \(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

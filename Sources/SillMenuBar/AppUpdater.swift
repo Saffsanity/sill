@@ -1099,6 +1099,9 @@ final class AppUpdater {
     /// has quit, at most `Policy.launchWait`, then quits itself. True when it waits (`start` comes later).
     /// Only a process that satisfies Sill's requirement counts (review 3, N7: anything can claim the bundle
     /// identifier). From applicationDidFinishLaunching; the Timer is a run-loop one (it may call NSApp.terminate).
+    /// Whether the other one has quit is the kernel's word (ProcessLife) as well as AppKit's: `isTerminated`
+    /// alone never changed in a Sill that had only just launched, so the first real update's new copy waited
+    /// the whole 30 s for a Sill that had quit after 0.2 s, and left (the rehearsal, 2026-11-15).
     static func waitForOtherSill(then start: @escaping @MainActor () -> Void) -> Bool {
         guard let id = Bundle.main.bundleIdentifier else { return false }
         let own = ProcessInfo.processInfo.processIdentifier
@@ -1107,11 +1110,13 @@ final class AppUpdater {
         let others = candidates.filter { genuine.contains($0.processIdentifier) }
         guard !others.isEmpty else { return false }
         let pids = others.map { String($0.processIdentifier) }.joined(separator: ", ")
+        // Each as the kernel knows it now, its pid and when it started; none with that pid any more is gone already.
+        let lives = others.map { (app: $0, life: ProcessLife.of($0.processIdentifier)) }
         print("Another Sill is running (pid \(pids)); waiting for it to quit before starting.")
         let deadline = Date().addingTimeInterval(Policy.launchWait)
         let timer = Timer(timeInterval: 0.2, repeats: true) { timer in
             MainActor.assumeIsolated {
-                if others.allSatisfy({ $0.isTerminated }) {
+                if lives.allSatisfy({ $0.app.isTerminated || ($0.life?.gone ?? true) }) {
                     timer.invalidate()
                     print("The other Sill quit; starting.")
                     start()

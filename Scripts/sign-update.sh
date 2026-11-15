@@ -125,8 +125,10 @@ fi
 # The updater's own files and the ones that steer it: what R2 shows the changes of since the last release signed
 # (the third security pass's R2: AppModel wires the offer, the devices, the hold and the daily check; SettingsPanes
 # is the only caller of the two switches' setters; Compatibility.swift is SillVersion's order; StreamServer holds
-# new sessions for the install).
+# new sessions for the install; ProcessLife is the launch wait's word on whether the other Sill has gone: the
+# rehearsal's signing of 0.6.92 showed AppUpdater's four lines and not the new file they call).
 updater_files=('Sources/SillMenuBar/Update*.swift' Sources/SillMenuBar/AppUpdater.swift Sources/SillMenuBar/AutoUpdateStore.swift
+               Sources/SillMenuBar/ProcessLife.swift
                Sources/SillMenuBar/AppDelegate.swift Sources/SillMenuBar/AppModel.swift Sources/SillMenuBar/SettingsPanes.swift
                Sources/StreamProtocol/Compatibility.swift Sources/SillHost/StreamServer.swift Packaging Scripts/make-app.sh
                Scripts/release.sh Scripts/sign-update.sh Scripts/update-manifest.swift)
