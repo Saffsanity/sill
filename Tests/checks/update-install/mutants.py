@@ -36,7 +36,7 @@ MUTANTS = [
     ("an unread start counts as another process", LIFE, "if let before = then.started, let after = now.started, before != after { return true }", "if then.started != now.started { return true }"),
     ("another account's process counts as none", LIFE, "return kill(pid, 0) == 0 || errno != ESRCH", "return kill(pid, 0) == 0"),
     ("any failure of kill counts as there (a process gone is never noticed)", LIFE, "return kill(pid, 0) == 0 || errno != ESRCH", "return true"),
-    ("the start read without asking whose it is", LIFE, "size >= MemoryLayout<kinfo_proc>.stride, info.kp_proc.p_pid == pid else { return nil }", "size >= 0 else { return nil }"),
+    ("the start read without asking whose it is", LIFE, "size >= MemoryLayout<kinfo_proc>.stride, info.kp_proc.p_pid == pid else { return nil }\n        let t = info.kp_proc.p_starttime", "size >= 0 else { return nil }\n        let t = info.kp_proc.p_starttime"),
     # The version rule and the release.
     ("the same version installed", POL, "guard isNewer(version, build: Int(build), than: running, runningBuild: runningBuild,", "guard version >= running || isNewer(version, build: Int(build), than: running, runningBuild: runningBuild,"),
     ("the same release fetched", POL, "guard version > running else { return .failure(.releaseNotNewer) }", "guard version >= running else { return .failure(.releaseNotNewer) }"),
