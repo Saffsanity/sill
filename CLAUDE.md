@@ -451,7 +451,10 @@ Rules found in the steps that hold for all work (each where it is written):
   address; pure, checked with swiftc), `UpdatePolicy` (the update check's rules
   and words, and whether a release is signed for Update Now; pure, checked with
   swiftc) and `UpdateChecker` (main actor; asks GitHub's releases feed and times
-  the checks; compiles on its own with swiftc). Update Now, the one-click update
+  the checks; compiles on its own with swiftc), and `ProcessLife` (whether a process is still
+  there, by its pid and the time it started, the kernel's word: Update Now's new copy waits at launch
+  for the Sill that started it to quit, and NSRunningApplication's `isTerminated` never changed there;
+  Foundation only, `Tests/checks/update-install`). Update Now, the one-click update
   (docs/one-click-update-plan.md): `UpdateInstallPolicy` (the trust and endpoints
   Sill.app uses, `Trust.release` and `Endpoints.github`, immutable; the refusals and
   their words; the release; the bundle's verdict; the state machine; the words; pure),
