@@ -6,7 +6,16 @@ WT = sys.argv[1]; HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(WT, "Sources/SillMenuBar")
 POL, MAN, ARC, INS, APP = "UpdateInstallPolicy.swift", "UpdateManifest.swift", "UpdateArchive.swift", "UpdateInstaller.swift", "AppUpdater.swift"
 AUTO = "UpdateAutoPolicy.swift"
+LIFE = "ProcessLife.swift"
 MUTANTS = [
+    # The launch wait: whether the other Sill has gone (ProcessLife; the rehearsal's first update, 2026-11-15).
+    ("the launch wait asks AppKit alone (the fault as it was)", APP, "if lives.allSatisfy({ $0.app.isTerminated || ($0.life?.gone ?? true) }) {", "if lives.allSatisfy({ $0.app.isTerminated }) {"),
+    ("no process with the pid counts as still there", LIFE, "guard let now else { return true }", "guard let now else { return false }"),
+    ("a pid given to another process counts as the same one", LIFE, "if let before = then.started, let after = now.started, before != after { return true }", ""),
+    ("an unread start counts as another process", LIFE, "if let before = then.started, let after = now.started, before != after { return true }", "if then.started != now.started { return true }"),
+    ("another account's process counts as none", LIFE, "return kill(pid, 0) == 0 || errno != ESRCH", "return kill(pid, 0) == 0"),
+    ("any failure of kill counts as there (a process gone is never noticed)", LIFE, "return kill(pid, 0) == 0 || errno != ESRCH", "return true"),
+    ("the start read without asking whose it is", LIFE, "size >= MemoryLayout<kinfo_proc>.stride, info.kp_proc.p_pid == pid else { return nil }", "size >= 0 else { return nil }"),
     # The version rule and the release.
     ("the same version installed", POL, "guard isNewer(version, build: Int(build), than: running, runningBuild: runningBuild,", "guard version >= running || isNewer(version, build: Int(build), than: running, runningBuild: runningBuild,"),
     ("the same release fetched", POL, "guard version > running else { return .failure(.releaseNotNewer) }", "guard version >= running else { return .failure(.releaseNotNewer) }"),
