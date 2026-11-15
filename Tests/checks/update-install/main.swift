@@ -1519,5 +1519,19 @@ do {
           && !wait.contains("others.allSatisfy({ $0.isTerminated })"), "the launch wait asks the kernel as well as AppKit whether the other Sill has gone")
 }
 
+// After an update the person started in Settings › General, the new Sill opens that window again (Noah, the
+// rehearsal of 2026-11-15); never after one Sill installed by itself.
+check(UpdateInstallPolicy.reopensSettings(automatic: false), "an update started by hand: Settings opens on General again")
+check(!UpdateInstallPolicy.reopensSettings(automatic: true), "an update Sill installed by itself: no window opens")
+do {
+    let updater = text("AppUpdater.swift"), model = text("AppModel.swift")
+    check(updater.components(separatedBy: "if Policy.reopensSettings(automatic: automatic) { showUpdated?() }").count - 1 == 3
+          && updater.contains("if Policy.reopensSettings(automatic: p[2] == \"automatic\") { showUpdated?() }"),
+          "the updater asks the rule at each launch that follows an update: the one that worked and the watcher's three")
+    check(updater.contains("        if Policy.reopensSettings(automatic: automatic) { showUpdated?() }\n        let proved = Timer"),
+          "the update that worked opens Settings before its 30 s begin")
+    check(model.contains("updater.showUpdated = { [weak self] in self?.showSettings?(.general) }"), "the window that opens is Settings on General")
+}
+
 print("update-install: \(checks - failures) of \(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

@@ -8,6 +8,12 @@ POL, MAN, ARC, INS, APP = "UpdateInstallPolicy.swift", "UpdateManifest.swift", "
 AUTO = "UpdateAutoPolicy.swift"
 LIFE = "ProcessLife.swift"
 MUTANTS = [
+    # Settings opens again after an update the person started there (Noah, the rehearsal, 2026-11-15).
+    ("Settings opens after an update Sill installed by itself", POL, "static func reopensSettings(automatic: Bool) -> Bool { !automatic }", "static func reopensSettings(automatic: Bool) -> Bool { true }"),
+    ("Settings never opens after an update", POL, "static func reopensSettings(automatic: Bool) -> Bool { !automatic }", "static func reopensSettings(automatic: Bool) -> Bool { false }"),
+    ("the window that opens isn't General", "AppModel.swift", "updater.showUpdated = { [weak self] in self?.showSettings?(.general) }", "updater.showUpdated = { [weak self] in self?.showSettings?(nil) }"),
+    ("the update that worked opens nothing", APP, "        if Policy.reopensSettings(automatic: automatic) { showUpdated?() }\n        let proved = Timer", "        let proved = Timer"),
+    ("an update the watcher put back opens nothing", APP, "                if Policy.reopensSettings(automatic: automatic) { showUpdated?() }\n            }\n            cleanUpAfterStart()", "            }\n            cleanUpAfterStart()"),
     # The launch wait: whether the other Sill has gone (ProcessLife; the rehearsal's first update, 2026-11-15).
     ("the launch wait asks AppKit alone (the fault as it was)", APP, "if lives.allSatisfy({ $0.app.isTerminated || ($0.life?.gone ?? true) }) {", "if lives.allSatisfy({ $0.app.isTerminated }) {"),
     ("no process with the pid counts as still there", LIFE, "guard let now else { return true }", "guard let now else { return false }"),
