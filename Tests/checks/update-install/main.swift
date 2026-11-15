@@ -1519,5 +1519,32 @@ do {
           && !wait.contains("others.allSatisfy({ $0.isTerminated })"), "the launch wait asks the kernel as well as AppKit whether the other Sill has gone")
 }
 
+// One update at a time (the nightly rehearsal, 2026-11-15: a release, a nightly 29 s later, and the first update's
+// watcher put 0.6.97 back at Sill's path under the running nightly). A Sill an update installed refuses a new one
+// until it has told that update's watcher it works; and the watcher leaves a later update's copy alone.
+do {
+    var just = fine
+    just.finishingUpdate = true
+    check(P.refusal(fine) == nil && !fine.finishingUpdate, "a Sill that no update installed just now: Update Now may run")
+    check(P.refusal(just) == .finishingUpdate, "a Sill an update installed less than 30 s ago: no other update begins")
+    check(P.words(.finishingUpdate) == "Sill was just updated. Update Now is ready again in half a minute.", "…and it says so")
+    var other = just
+    other.otherInstances = 1
+    check(P.refusal(other) == .otherInstance, "another running Sill is said first")
+    var low = just
+    low.freeBytes = 1
+    check(P.refusal(low) == .finishingUpdate, "…and the space after it")
+    let updater = text("AppUpdater.swift")
+    check(updater.contains("        proving = true\n        let proved = Timer(timeInterval: Policy.provedAfter, repeats: false)"),
+          "the updater holds new updates from the start of a launch that follows an update")
+    check(updater.contains("        UpdateInstaller.writeNote(Self.startedNote(token), lines: [token])\n        // The watcher has its word: another update may begin (the pane's note goes at the next look).\n        proving = false\n        refresh()"),
+          "…until it has given the watcher its word, and then looks again")
+    check(updater.contains("finishingUpdate: proving)") && updater.contains("s.finishingUpdate = i.finishingUpdate"),
+          "the look at where Sill runs carries it")
+    check(watcher.contains("later() {\n    /usr/bin/codesign --verify --deep --strict \"-R=$req\" \"$app\" >/dev/null 2>&1 || return 1\n    have=$(/usr/bin/codesign -d -vvv --arch \"$arch\" \"$app\" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/head -n 1)\n    [ -n \"$have\" ] && [ \"$have\" != \"$newcdhash\" ] && [ \"$have\" != \"$cdhash\" ]\n}"),
+          "the watcher knows a later update's copy: a genuine Sill at Sill's path that is neither the one it watched nor the one it would put back")
+    check(watcher.contains("later && exit 4\nwhole \"$old\" \"$cdhash\" || exit 3\n"), "…and leaves it alone, before it moves anything")
+}
+
 print("update-install: \(checks - failures) of \(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

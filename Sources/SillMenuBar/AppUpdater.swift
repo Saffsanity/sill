@@ -224,6 +224,10 @@ final class AppUpdater {
                            unreadable: store.unreadable)
     }
 
+    /// An update installed this Sill and its watcher still waits for this Sill's word (`proved`, after
+    /// `Policy.provedAfter` with the host up): no other update begins until then (`Refusal.finishingUpdate`).
+    private var proving = false
+
     /// Looks again at where Sill runs, off the main actor (review 3, N2: the look takes 10 to 70 ms):
     /// Settings › General calls it while it shows, the menu as it opens, and every begin. Nothing while
     /// neither a signed release is offered nor the switch is on, or while an update is under way.
@@ -256,11 +260,13 @@ final class AppUpdater {
         let testFeed: Bool
         let requirement: String
         let bundleID: String?
+        let finishingUpdate: Bool
     }
 
     private func lookInputs() -> LookInputs {
         LookInputs(bundle: bundle, executable: installer.trust.executable, runningIsRelease: runningCode.isRelease,
-                   testFeed: checkerUsesTestValues(), requirement: installer.trust.signer, bundleID: Bundle.main.bundleIdentifier)
+                   testFeed: checkerUsesTestValues(), requirement: installer.trust.signer, bundleID: Bundle.main.bundleIdentifier,
+                   finishingUpdate: proving)
     }
 
     /// The first refusal that holds now (UpdateInstallPolicy.refusal over UpdateInstaller.situation),
@@ -278,6 +284,7 @@ final class AppUpdater {
                 .map(\.processIdentifier)
         } ?? []
         s.otherInstances = max(s.otherInstances, UpdateInstaller.genuine(others, requirement: i.requirement).count)
+        s.finishingUpdate = i.finishingUpdate
         return Policy.refusal(s)
     }
 
@@ -1002,6 +1009,8 @@ final class AppUpdater {
             return
         }
         let token = p[0], automatic = p[2] == "automatic"
+        // Until this Sill has told its update's watcher it works, no other update begins.
+        proving = true
         let proved = Timer(timeInterval: Policy.provedAfter, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.proved(token: token, automatic: automatic) }
         }
@@ -1026,6 +1035,9 @@ final class AppUpdater {
     private func proved(token: String, automatic: Bool) {
         guard Policy.isToken(token) else { return }
         UpdateInstaller.writeNote(Self.startedNote(token), lines: [token])
+        // The watcher has its word: another update may begin (the pane's note goes at the next look).
+        proving = false
+        refresh()
         try? FileManager.default.removeItem(at: Self.pendingNote)
         if automatic, available, let v = runningVersion { remember { Auto.updated($0, to: v, at: Date(), build: runningIsNightly ? runningBuild : nil) } }
         print("Update: Sill \(runningVersion.map { "\($0)" } ?? "") has run for \(Int(Policy.provedAfter)) s; the copy it replaced goes.")

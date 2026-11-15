@@ -8,6 +8,14 @@ POL, MAN, ARC, INS, APP = "UpdateInstallPolicy.swift", "UpdateManifest.swift", "
 AUTO = "UpdateAutoPolicy.swift"
 LIFE = "ProcessLife.swift"
 MUTANTS = [
+    # One update at a time (the nightly rehearsal, 2026-11-15).
+    ("a second update while the first proves itself", POL, "        if s.finishingUpdate { return .finishingUpdate }\n", ""),
+    ("the wait after an update said after the space", POL, "        if s.finishingUpdate { return .finishingUpdate }\n        if let free = s.freeBytes, free < s.neededBytes {\n            return .lowSpace(volume: s.volumeName, neededMB: mebibytesRoundedUp(s.neededBytes))\n        }\n", "        if let free = s.freeBytes, free < s.neededBytes {\n            return .lowSpace(volume: s.volumeName, neededMB: mebibytesRoundedUp(s.neededBytes))\n        }\n        if s.finishingUpdate { return .finishingUpdate }\n"),
+    ("a Sill just installed never held", APP, "        proving = true\n        let proved = Timer", "        let proved = Timer"),
+    ("a Sill held for good after an update", APP, "        proving = false\n        refresh()\n", "        refresh()\n"),
+    ("the look never told", APP, "        s.finishingUpdate = i.finishingUpdate\n", ""),
+    ("the watcher undoes a later update", INS, "later && exit 4\n", ""),
+    ("the watcher takes the copy it watched for a later one", INS, '[ -n "$have" ] && [ "$have" != "$newcdhash" ] && [ "$have" != "$cdhash" ]', '[ -n "$have" ] && [ "$have" != "$cdhash" ]'),
     # The launch wait: whether the other Sill has gone (ProcessLife; the rehearsal's first update, 2026-11-15).
     ("the launch wait asks AppKit alone (the fault as it was)", APP, "if lives.allSatisfy({ $0.app.isTerminated || ($0.life?.gone ?? true) }) {", "if lives.allSatisfy({ $0.app.isTerminated }) {"),
     ("no process with the pid counts as still there", LIFE, "guard let now else { return true }", "guard let now else { return false }"),
