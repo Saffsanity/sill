@@ -964,9 +964,9 @@ check(P.chooseOffer(release: offer(v062), nightly: offer(v063, build: 1500), run
 check(P.chooseOffer(release: offer(v062), nightly: offer(v062, build: 1500), running: v062, runningBuild: 1471) == offer(v062, build: 1500),
       "a newer nightly of this version beside its release: the nightly")
 // Main keeps a version both before its release and after it (0.6.1: nightlies of it before v0.6.1 and after), so
-// release V is never offered to nightly V by its version: only its signed build could tell (the update check never
-// offered it either).
-check(P.chooseOffer(release: offer(v062), nightly: nil, running: v062, runningBuild: 1471) == nil, "release V never offered to V, a nightly's or a release's")
+// release V is never offered to V by its version: only its signed build tells whether it holds a nightly's code
+// (the rule and its checks: "The release of a nightly's own version", below).
+check(P.chooseOffer(release: offer(v062), nightly: nil, running: v062, runningBuild: 1471) == nil, "release V never offered to V by its version alone, a nightly's or a release's")
 check(P.chooseOffer(release: nil, nightly: offer(v062, build: 1400), running: v062, runningBuild: 1471) == nil, "never an older nightly")
 check(P.name(version: v062, build: 1471) == "Sill nightly 0.6.2 (1471)" && P.name(version: v062, build: nil) == "Sill 0.6.2", "names")
 // The downloaded app's order (verdict): a release's manifest by its version alone, a nightly's by version, then build.
@@ -977,7 +977,7 @@ if case .success(let nm) = M.verify(Data(nightlyManifest(version: "0.4.0", build
           "a nightly of this very build doesn't")
 } else { check(false, "a nightly manifest for the verdict") }
 check(problem(P.verdict(base, trust: release, manifest: manifest, running: v040, arch: .arm64, macOS: macOS, runningBuild: 100)) == .notNewer("0.4.0"),
-      "a release's manifest of this version never passes by its build")
+      "a release's manifest of this version never passes by its build over a release")
 // The nightly channel's endpoints and listing: the version and build come from the signed manifest alone.
 let ne = P.Endpoints.nightly
 check(ne.latestRelease.absoluteString == "https://api.github.com/repos/Saffsanity/sill/releases/tags/nightly" && ne.channelTag == "nightly"
@@ -1067,13 +1067,13 @@ check(AP.nightlySwitch(available: true, keyCompiled: true, canKeep: true, on: tr
       "on: what nightlies are")
 // NB1 (the third security pass) and option 4: the words say what a nightly trusts, that Sill says when one is out and
 // Update Now installs it, and never that one installs by itself.
-check(P.nightlyNote == "Nightly builds are built and signed by GitHub from Sill’s newest code; nobody looks at them first. They are less tested than releases and may break. Sill tells you when one is out, and Update Now installs it; a nightly never installs by itself, even with Automatically update Sill on. Turning this off doesn’t go back to the last release: Sill keeps the nightly you have until a release with a higher version number.",
+check(P.nightlyNote == "Nightly builds are built and signed by GitHub from Sill’s newest code; nobody looks at them first. They are less tested than releases and may break. Sill tells you when one is out, and Update Now installs it; a nightly never installs by itself, even with Automatically update Sill on. Turning this off doesn’t go back to the last release: Sill keeps the nightly you have until a release that is at least as new.",
       "the nightly note: what a nightly trusts, Update Now alone, no downgrade")
 check(AP.waitWords(0) == "once it finds it" && AP.waitWords(48 * 3600) == "two days after it first finds it" && AP.waitWords(24 * 3600) == "a day after it first finds it"
       && AP.waitWords(12 * 3600) == "12 hours after it first finds it" && AP.waitWords(3600) == "an hour after it first finds it"
       && AP.waitWords(1800) == "30 minutes after it first finds it" && AP.waitWords(60) == "1 minute after it first finds it", "the waits' words")
 check(AP.nightlySwitch(available: true, keyCompiled: true, canKeep: true, on: false, runningNightly: (v063, 1520)).note
-      == "You have a nightly build, 0.6.3 (1520). Sill updates to the next release after 0.6.3.", "off on a nightly: no downgrade")
+      == "You have a nightly build, 0.6.3 (1520). Sill updates to the next release that is at least as new.", "off on a nightly: no downgrade")
 check(AP.nightlySwitch(available: true, keyCompiled: true, canKeep: false, on: false, runningNightly: nil).note == AP.canKeepNote, "no keychain group")
 // The pane while a nightly is offered and Automatically update Sill is on: releases only; and the release the
 // automatic update would install meanwhile, when there is one it would.
@@ -1390,7 +1390,7 @@ check(flatUpdater.contains("let github = Auto.GitHubClock(firstSeen: sight?.firs
       "CL1, AU1, AU2: fetch's GitHub clock: its first time, its time now, the latest publication and the release object")
 // Option 4, by construction: the automatic update's offer is the check's release alone (the nightly never passed), it
 // is the only offer considerAutomatic reads, and nothing anywhere still waits for, dates or floors a nightly.
-check(flatUpdater.contains("return Policy.chooseOffer(release: latestRelease(), nightly: nil, running: running, runningBuild: runningBuild)")
+check(flatUpdater.contains("return Policy.chooseOffer(release: latest, nightly: nil, running: running, runningBuild: runningBuild, releaseBuild: Policy.releaseBuild(of: latest, looked: lookedRelease), runningIsNightly: runningIsNightly)")
       && flatUpdater.contains("guard available, memory.on, let offer = automaticOffer, mayBeginAutomatic else { return }")
       && flatUpdater.contains("guard let self, self.mayBeginAutomatic, let current = self.automaticOffer, current == offer else { return }")
       && !updater.components(separatedBy: "func considerAutomatic()").last!.components(separatedBy: "func devicesChanged(").first!.contains("chosen"),
@@ -1407,7 +1407,7 @@ check(text("AutoUpdateStore.swift").contains("memory = UpdateAutoPolicy.heldBack
 check(text("UpdateInstallPolicy.swift").contains("updateKeys: UpdateManifest.releaseKeys.filter { !UpdateManifest.nightlyKeys.contains($0) && $0 != UpdateManifest.testPublicKey },")
       && text("UpdateInstallPolicy.swift").contains("nightlyKeys: UpdateManifest.nightlyKeys.filter { !UpdateManifest.releaseKeys.contains($0) && $0 != UpdateManifest.testPublicKey })"),
       "N10 a: Trust.release trusts a key in both lists for neither, and the tests' key for nothing")
-check(updater.contains("            if restored.count > 2, restored[2] == \"kept\", let p = pending, p.count >= 3, restored.first == p[0], p[1] == runningKey {")
+check(updater.contains("            if restored.count > 2, restored[2] == \"kept\", let p = pending, p.count >= 3, restored.first == p[0],\n               Policy.noteNames(p, key: runningKey, nightly: runningIsNightly) {")
       && updater.contains("state = Policy.State(phase: .failed(.keptUnstarted(why)), mode: p[2] == \"automatic\" ? .automatic : .manual)")
       && after("if restored.count > 2, restored[2] == \"kept\"", "if let p = pending, p.count >= 3, restored.first == p[0], let (failed, failedBuild) = Auto.parseKey(p[1])", in: updater),
       "W3: a new copy the watcher kept is said, word for word, before the put-back's words")
@@ -1415,7 +1415,7 @@ check(updater.contains("            if restored.count > 2, restored[2] == \"lost
       && updater.contains("state = Policy.State(phase: .failed(.noWholeSillLeft(why)), mode: automatic ? .automatic : .manual)")
       && after("if restored.count > 2, restored[2] == \"lost\"", "if let p = pending, p.count >= 3, restored.first == p[0], let (failed, failedBuild) = Auto.parseKey(p[1])", in: updater),
       "W4: a note that says no whole Sill was left is said, before the put-back's words")
-check(updater.contains("store.update({ Auto.bounded(change($0), running: running, runningBuild: runningBuild) }"),
+check(updater.contains("store.update({ Auto.bounded(change($0), running: running, runningBuild: runningBuild, runningIsNightly: runningIsNightly) }"),
       "A3: every write kept small")
 check(!updater.contains("Auto.switched($0, on: true)") && updater.contains("remember(replacingUnreadable: on) { Auto.switched($0, on: on) }")
       && updater.contains("remember(replacingUnreadable: on) { Auto.switchedNightly($0, on: on) }")
@@ -1590,6 +1590,148 @@ do {
           "the updater makes the line for the Sill an update installed, and shows it while no other update has the pane's line")
     check(panes.contains("if let installed = install.installed {\n                        Text(installed)\n                            .foregroundStyle(Color.green)"),
           "Settings draws the line in green")
+}
+
+// The release of a nightly's own version (Noah, 2026-11-15: "Someone on a 0.6.2 nightly should get offered official
+// 0.6.2 release."; and a nightly built after the release keeps waiting for the next one: "Second case yes"): by the
+// build its manifest names, signed with the update key, at least the nightly's (the same commit or a later one).
+do {
+    let v061 = SillVersion("0.6.1")!
+    check(P.isNewer(v062, build: 1500, than: v062, runningBuild: 1471, byBuild: false, overNightly: true), "release V over nightly V: a later commit")
+    check(P.isNewer(v062, build: 1471, than: v062, runningBuild: 1471, byBuild: false, overNightly: true), "…and the nightly's very commit")
+    check(!P.isNewer(v062, build: 1470, than: v062, runningBuild: 1471, byBuild: false, overNightly: true),
+          "…never an older one: a nightly built after the release keeps what it has")
+    check(!P.isNewer(v062, build: 1500, than: v062, runningBuild: 1471, byBuild: false, overNightly: false), "release V never over release V, whatever its build")
+    check(!P.isNewer(v062, build: nil, than: v062, runningBuild: 1471, byBuild: false, overNightly: true)
+          && !P.isNewer(v062, build: 1500, than: v062, runningBuild: nil, byBuild: false, overNightly: true), "…and never without both builds")
+    check(P.isNewer(v063, build: nil, than: v062, runningBuild: 1471, byBuild: false, overNightly: true)
+          && !P.isNewer(v061, build: 9999, than: v062, runningBuild: 1471, byBuild: false, overNightly: true), "for a nightly too the version comes first")
+    check(!P.isNewer(v062, build: 1471, than: v062, runningBuild: 1471, byBuild: true, overNightly: true)
+          && P.isNewer(v062, build: 1472, than: v062, runningBuild: 1471, byBuild: true, overNightly: true), "a nightly over a nightly is still by a higher build")
+    // The offer: only once the release's build is read.
+    func choose(release: UpdatePolicy.Offer? = offer(v062), nightly: UpdatePolicy.Offer? = nil, releaseBuild: Int?, runningIsNightly: Bool = true) -> UpdatePolicy.Offer? {
+        P.chooseOffer(release: release, nightly: nightly, running: v062, runningBuild: 1471, releaseBuild: releaseBuild, runningIsNightly: runningIsNightly)
+    }
+    check(choose(releaseBuild: 1500) == offer(v062), "release V offered to nightly V: a later commit")
+    check(choose(releaseBuild: 1471) == offer(v062), "…the nightly's very commit")
+    check(choose(releaseBuild: 1470) == nil, "…never an older one")
+    check(choose(releaseBuild: nil) == nil, "…never before its build is read")
+    check(choose(releaseBuild: 1500, runningIsNightly: false) == nil, "release V never offered to release V")
+    check(choose(nightly: offer(v062, build: 1600), releaseBuild: 1500) == offer(v062), "release V beside a newer nightly of V: the release (the tie)")
+    check(choose(nightly: offer(v063, build: 1600), releaseBuild: 1500) == offer(v063, build: 1600), "…beside a nightly of a higher version: the nightly")
+    check(choose(nightly: offer(v062, build: 1600), releaseBuild: 1470) == offer(v062, build: 1600), "an older release V beside a newer nightly: the nightly alone")
+    check(choose(release: offer(v063), releaseBuild: nil) == offer(v063), "a release of a higher version needs no build")
+    // The look that reads the build: a nightly's, for the signed release of its own version, once.
+    var unsigned = offer(v062)
+    unsigned.signed = false
+    let looked = P.ReleaseBuild(tag: "v0.6.2", build: 1500)
+    check(P.releaseLookDue(latest: offer(v062), running: v062, runningIsNightly: true, looked: nil), "a nightly reads the signed release of its own version before any offer")
+    check(!P.releaseLookDue(latest: offer(v062), running: v062, runningIsNightly: false, looked: nil), "a release reads nothing")
+    check(!P.releaseLookDue(latest: offer(v063), running: v062, runningIsNightly: true, looked: nil)
+          && !P.releaseLookDue(latest: offer(v061), running: v062, runningIsNightly: true, looked: nil), "a release of another version is not read")
+    check(!P.releaseLookDue(latest: unsigned, running: v062, runningIsNightly: true, looked: nil), "a release not signed yet is not read")
+    check(!P.releaseLookDue(latest: offer(v062), running: v062, runningIsNightly: true, looked: looked), "once for each release")
+    check(P.releaseLookDue(latest: offer(v062), running: v062, runningIsNightly: true, looked: P.ReleaseBuild(tag: "v0.6.1", build: 1388)), "…and again for another")
+    check(!P.releaseLookDue(latest: nil, running: v062, runningIsNightly: true, looked: nil) && !P.releaseLookDue(latest: offer(v062), running: nil, runningIsNightly: true, looked: nil)
+          && !P.releaseLookDue(latest: offer(v062, build: 1500), running: v062, runningIsNightly: true, looked: nil), "no release, no version, a nightly's offer: nothing to read")
+    check(P.releaseBuild(of: offer(v062), looked: looked) == 1500 && P.releaseBuild(of: offer(v063), looked: looked) == nil
+          && P.releaseBuild(of: offer(v062), looked: nil) == nil && P.releaseBuild(of: nil, looked: looked) == nil
+          && P.releaseBuild(of: offer(v062, build: 1500), looked: P.ReleaseBuild(tag: "nightly", build: 1500)) == nil, "the build read is its own release's alone")
+    // GitHub's answer: the release of this version goes on to its manifest only for a nightly.
+    if case .success(let r) = P.releaseToInstall(body(), offeredTag: "v0.4.0", running: v040, endpoints: gh, overNightly: true) {
+        check(r.version == v040, "a nightly reads on past the release of its own version: its manifest's build decides")
+    } else { check(false, "a nightly reads on past the release of its own version") }
+    check(failure(P.releaseToInstall(body(), offeredTag: "v0.4.0", running: v041, endpoints: gh, overNightly: true)) == .releaseNotNewer, "…never past an older version")
+    check(failure(P.releaseToInstall(body(), offeredTag: "v0.4.0", running: v040, endpoints: gh, overNightly: false)) == .releaseNotNewer, "…and a release never past its own")
+    // The downloaded app (the release manifest's and the app's build is 120).
+    check(problem(P.verdict(base, trust: release, manifest: manifest, running: v040, arch: .arm64, macOS: macOS, runningBuild: 100, runningIsNightly: true)) == nil,
+          "the release of a nightly's version passes with a later build")
+    check(problem(P.verdict(base, trust: release, manifest: manifest, running: v040, arch: .arm64, macOS: macOS, runningBuild: 120, runningIsNightly: true)) == nil,
+          "…and with the nightly's own")
+    check(problem(P.verdict(base, trust: release, manifest: manifest, running: v040, arch: .arm64, macOS: macOS, runningBuild: 121, runningIsNightly: true)) == .notNewer("0.4.0"),
+          "…never with an older one")
+    check(problem(P.verdict(base, trust: release, manifest: manifest, running: v040, arch: .arm64, macOS: macOS, runningBuild: nil, runningIsNightly: true)) == .notNewer("0.4.0"),
+          "…never without this Sill's build")
+    if case .success(let nm) = M.verify(Data(nightlyManifest(version: "0.4.0", build: "120").utf8), keys: [testPublic], channel: .nightly) {
+        check(problem(P.verdict(base, trust: release, manifest: nm, running: v040, arch: .arm64, macOS: macOS, runningBuild: 120, runningIsNightly: true)) == .notNewer("0.4.0"),
+              "a nightly's manifest of this very build still doesn't pass over a nightly")
+    } else { check(false, "a nightly manifest for the verdict over a nightly") }
+    // The automatic update: a release is a release, the release of a nightly's own version too.
+    let on = AP.switched(AP.Memory(), on: true)
+    func auto(releaseBuild: Int?, runningBuild: Int? = 1471, runningIsNightly: Bool = true) -> AP.Start {
+        AP.start(on, checkOn: true, available: true, refusal: nil, offered: v062, offeredTag: "v0.6.2", signed: true, running: v062, idle: true, now: t0,
+                 releaseBuild: releaseBuild, runningBuild: runningBuild, runningIsNightly: runningIsNightly)
+    }
+    check(auto(releaseBuild: 1500) == .go && auto(releaseBuild: 1471) == .go, "release V starts by itself over nightly V: its commit or a later one")
+    check(auto(releaseBuild: 1470) == .no("the offered release isn’t newer") && auto(releaseBuild: nil) == .no("the offered release isn’t newer")
+          && auto(releaseBuild: 1500, runningBuild: nil) == .no("the offered release isn’t newer"), "…never an older one, never unread")
+    check(auto(releaseBuild: 1500, runningIsNightly: false) == .no("the offered release isn’t newer"), "…and never over release V")
+    // What a nightly remembers of its own version's release (its first sight, a stop, its attempts) stays.
+    let same = AP.began(AP.stopped(AP.sighted(on, tag: "v0.6.2", sha256: sha1, signedAt: t0, now: t0, release: 7), "v0.6.2"), v062, now: t0)
+    let kept = AP.bounded(AP.began(same, v061, now: t0), running: v062, runningBuild: 1471, runningIsNightly: true)
+    check(kept.seen.map(\.tag) == ["v0.6.2"] && kept.stopped == ["v0.6.2"] && kept.attempts.keys.sorted() == ["0.6.2"],
+          "a nightly keeps what it remembers of its own version's release, and nothing older: \(kept.attempts.keys.sorted())")
+    let gone = AP.bounded(same, running: v062, runningBuild: 1471)
+    check(gone.seen.isEmpty && gone.stopped.isEmpty && gone.attempts.isEmpty, "a release keeps nothing of its own version")
+    check(AP.waitUntil(kept, tag: "v0.6.2") != nil, "…so that release's wait goes on from its first sight")
+    // The pending note names the new copy by version, build and channel: a release tagged on the nightly's own
+    // commit has that nightly's version and build.
+    let key = "0.6.2 (1471)"
+    check(P.noteNames(["t", key, "manual", "release"], key: key, nightly: false), "the note of a release names the release")
+    check(!P.noteNames(["t", key, "manual", "release"], key: key, nightly: true), "…never the nightly of that very commit, which it replaces")
+    check(P.noteNames(["t", key, "automatic", "nightly"], key: key, nightly: true) && !P.noteNames(["t", key, "automatic", "nightly"], key: key, nightly: false),
+          "a nightly's note names the nightly alone")
+    check(P.noteNames(["t", key, "manual"], key: key, nightly: false) && !P.noteNames(["t", key, "manual"], key: key, nightly: true),
+          "a note without a channel line is a release's")
+    check(!P.noteNames(["t", "0.6.2 (1472)", "manual", "release"], key: key, nightly: false) && !P.noteNames(["t", key], key: key, nightly: false)
+          && !P.noteNames(nil, key: key, nightly: false) && !P.noteNames(["t", key, "manual", "release"], key: nil, nightly: false),
+          "another build, a short note, no note, no key: not this Sill")
+    // The words name a nightly with its build: the release offered to it can have its version.
+    check(P.line(.didNotStart("x", putBack: true), running: v062, offered: v062, keptAt: nil, runningBuild: 1471) == "Sill 0.6.2 didn’t start, so Sill nightly 0.6.2 (1471) is back.",
+          "the put-back's line names the nightly that is back")
+    check(P.line(.didNotStart("x", putBack: true), running: v062, offered: v063, keptAt: nil, offeredBuild: 1500, runningBuild: 1471)
+          == "Sill nightly 0.6.3 (1500) didn’t start, so Sill nightly 0.6.2 (1471) is back.", "…after a nightly that didn't start too")
+    check(P.line(.cancelled, running: v062, offered: v062, keptAt: nil, runningBuild: 1471) == "Update cancelled. Sill nightly 0.6.2 (1471) is unchanged.",
+          "a failure's line names the nightly that is unchanged")
+    check(P.pane(S(phase: .failed(.cancelled)), offered: v062, running: v062, available: true, refusal: nil, runningBuild: 1471).line
+          == "Update cancelled. Sill nightly 0.6.2 (1471) is unchanged.", "…in the pane")
+    let item = P.menuItem(.idle, offered: v062, running: v062, available: true, refusal: nil, runningBuild: 1471)
+    check(item.title == "Sill 0.6.2 Is Available…" && item.subtitle == "You have nightly 0.6.2 (1471); update it in Settings" && item.opensSettings,
+          "the menu's item says which Sill this is: \(item.subtitle)")
+    check(P.menuItem(.idle, offered: v062, running: v062, available: false, refusal: nil, runningBuild: 1471).subtitle == "You have nightly 0.6.2 (1471); opens its download page",
+          "…where it opens the page too")
+    // The app's sources: every read of the release and every check of the app says whether this Sill is a nightly.
+    check(installerText.contains("switch Policy.releaseToInstall(body.data, offeredTag: offeredTag, running: running, endpoints: endpoints, overNightly: runningIsNightly) {"),
+          "prepare reads GitHub's answer as a nightly or a release does")
+    check(after("if let f = Policy.manifestMatches(m, release: release, endpoints: endpoints) { return .failure(f) }",
+                "guard Policy.isNewer(m.version, build: Int(m.build), than: running, runningBuild: runningBuild, byBuild: false,\n                                 overNightly: runningIsNightly) else { return .failure(.releaseNotNewer) }\n            manifest = m",
+                in: installerText), "prepare takes the release of this nightly's version only by its signed build, once the manifest is verified and matched")
+    check(installerText.contains("switch await prepare(offeredTag: tag, running: running, cancel: cancel, runningBuild: 0, runningIsNightly: true) {"),
+          "the look reads the release as Update Now does")
+    check(installerText.contains("runningBuild: runningBuild, runningIsNightly: runningIsNightly) {\n        case .success(let c): return .success(c)")
+          && installerText.components(separatedBy: "runningRequirement: runningRequirement, runningBuild: runningBuild, runningIsNightly: runningIsNightly) {").count - 1 == 2,
+          "the installer's checks of the app, before the swap and after it, carry it to the verdict")
+    check(updater.components(separatedBy: "runningBuild: runningBuild, runningIsNightly: runningIsNightly)\n").count - 1 == 5,
+          "the updater says it at each of its three reads of the release, at the check and at the install")
+    check(flatUpdater.contains("releaseBuild: Policy.releaseBuild(of: offer, looked: self.lookedRelease), runningBuild: self.runningBuild, runningIsNightly: self.runningIsNightly) {"),
+          "the automatic start is asked with the release's build")
+    check(flatUpdater.contains("return Policy.chooseOffer(release: latest, nightly: nightliesOn ? nightlyOffer : nil, running: running, runningBuild: runningBuild, releaseBuild: Policy.releaseBuild(of: latest, looked: lookedRelease), runningIsNightly: runningIsNightly)"),
+          "Update Now's offer is chosen with the release's build")
+    check(updater.contains("        if releaseLookDue, !atLaunch || checkOn() {\n            lookAtRelease { [weak self] in self?.afterReleaseLook(atLaunch: atLaunch) }\n        } else {\n            afterReleaseLook(atLaunch: atLaunch)\n        }")
+          && updater.contains("    private func afterReleaseLook(atLaunch: Bool) {\n        if nightliesOn, !atLaunch || checkOn() { lookAtNightly"),
+          "the release of this nightly's version is read before the nightly and the automatic update; at launch only while the daily check is on")
+    check(updater.contains("let result = await installer.releaseBuild(tag: latest.tag, running: running, cancel: UpdateInstaller.Cancel())")
+          && updater.contains("self.lookedRelease = Policy.ReleaseBuild(tag: latest.tag, build: build)"), "the look keeps the build under the release's tag")
+    check(updater.components(separatedBy: "Policy.noteNames(p, key: runningKey, nightly: runningIsNightly)").count - 1 == 3
+          && updater.contains("guard isApp, let p = UpdateInstaller.readNote(Self.pendingNote), Policy.noteNames(p, key: runningKey, nightly: runningIsNightly) else { return }")
+          && !updater.contains("p[1] == runningKey"),
+          "the launch that follows an update, the copy the watcher kept and a quit: each asks whether the note names this Sill, by its channel too")
+    check(updater.contains("Policy.isNewer(failed, build: failedBuild, than: running, runningBuild: runningBuild, byBuild: nightly, overNightly: runningIsNightly) {")
+          && updater.contains("Policy.isNewer(failed, build: failedBuild, than: running, runningBuild: runningBuild,\n                              byBuild: p.count > 3 && p[3] == UpdateManifest.nightlyTag, overNightly: runningIsNightly) {")
+          && !updater.contains("runningBuild: runningBuild, byBuild: true)"),
+          "an update the watcher undid is known as one by its channel: a release over the nightly of its version too")
+    check(text("StatusItemController.swift").contains("runningBuild: install.runningBuild)") && updater.contains("runningBuild: runningIsNightly ? runningBuild : nil)"),
+          "the menu and the pane are told when this Sill is a nightly")
 }
 
 print("update-install: \(checks - failures) of \(checks) checks passed")

@@ -35,9 +35,9 @@ server of Sill's, nothing privileged ever (no admin prompt, no helper tool, no S
 package), no test hook that loosens anything in Sill.app, and the update key never on GitHub.
 
 Not in scope: automatic or background installs; delta updates; "Skip This Version"; the iOS app (the
-App Store updates it); a nightly is never offered the release of its own version (the check compares
-versions only, so a nightly 0.6.2 (1400) sees no release until 0.6.3 is out: known, unchanged, and kept by
-§16.3; with "Use nightly builds" on, it gets the next nightly).
+App Store updates it). A nightly was never offered the release of its own version (the check compares
+versions only, so a nightly 0.6.2 (1400) saw no release until 0.6.3 was out); since 2026-11-15 it is, when
+that release was built from its commit or a later one (§16.3).
 
 ## 2. The design on one page
 
@@ -1744,22 +1744,42 @@ make-app.sh stamps every build): "0.6.2 (1471)". Main moves to the next number o
 approved a release (release-checklist "Versions": "0.6.1 since App Review approved 0.6.0"), so a version's
 nightlies come both before its release and after it until main moves on (0.6.1: nightlies of it before
 v0.6.1, tagged at 1388, and after it), and only the build orders builds of one version in time.
-- **The order.** A release by its version alone, as the update check has always compared (`releaseToInstall`,
-  `verdict` for a release's manifest). A nightly by version, then build (`UpdateInstallPolicy.isNewer`):
-  against this Sill's own build, whatever it is (a release's build is its commit count too).
-- **The offer.** A release when its version is higher than this Sill's (`chooseOffer`), never the release
-  of a nightly's own version: whether it is newer or older code only its signed build could tell, and the
-  offer is made before any manifest is read (the review of this design found a nightly user would otherwise
-  see "Sill 0.6.1 is available" for weeks after v0.6.1, then a refusal at Update Now). A nightly, with the
-  switch on, when its (version, build) is newer. Both: the higher version, and on a tie the release (the
-  tested one; the next night's nightly is offered after it if it is newer).
+- **The order** (`UpdateInstallPolicy.isNewer`, the one rule behind the offer, `releaseToInstall`, `prepare`,
+  the bundle's `verdict` and the automatic start). A higher version always. Within this Sill's own version
+  the build decides: a nightly when its build is higher, against this Sill's own build, whatever it is (a
+  release's build is its commit count too); a release only where this Sill is a nightly, when its build is
+  at least the nightly's (below). A release is never newer than a release of its own version.
+- **The release of a nightly's own version (Noah, 2026-11-15: "Someone on a 0.6.2 nightly should get offered
+  official 0.6.2 release.").** Offered and installed when the release was built from the nightly's commit or
+  a later one: its build, as its manifest signed with the update key says it, at least the nightly's. A
+  nightly built after the release keeps what it has and waits for the next version, since that release would
+  be older code (Noah, asked about exactly that case: "Second case yes"). The build is read before anything
+  is offered, so nobody is offered a release that Update Now would then refuse (the review of the first
+  design found a nightly user would otherwise see "Sill 0.6.1 is available" for weeks after v0.6.1, then a
+  refusal): `AppUpdater.lookAtRelease`, after a check that answered and at launch while the daily check is
+  on, only on a nightly, only for the signed latest release of its own version, once for each release
+  (`releaseLookDue`), reads it as Update Now reads a release (`UpdateInstaller.releaseBuild`: the listing,
+  the manifest, a stop), and `chooseOffer` takes the build it kept. `prepare` and the downloaded app's
+  `verdict` apply the same rule again with the manifest's and the app's build. The automatic update treats
+  that release as any release (its wait, its quiet minutes); what a nightly remembers of its own version's
+  release (the first sight, a stop, the attempts) is kept (`UpdateAutoPolicy.bounded`).
+- **The same version and the same build.** A release tagged on the nightly's own commit has the nightly's
+  version and build, the two things the pending note names the new copy by. So the note's channel line
+  counts too (`UpdateInstallPolicy.noteNames`): the nightly that was replaced never takes itself for the
+  update that worked, and never answers the watcher at its quit. An update the watcher undid is known as one
+  by its channel as well (`isNewer` with the note's channel), and the words name a nightly with its build
+  ("Sill 0.6.2 didn’t start, so Sill nightly 0.6.2 (1597) is back.").
+- **The offer.** A release when its version is higher than this Sill's, or by the rule above (`chooseOffer`).
+  A nightly, with the switch on, when its (version, build) is newer. Both: the higher version, and on a tie
+  the release (the tested one; the next night's nightly is offered after it if it is newer).
 - **A release Sill turning the switch on:** offered the newest nightly if it is newer by (version, build),
   so on the night after a release the nightly of main's newest commit comes, whatever its version.
 - **The switch off while a nightly runs:** no downgrade. The pane says "You have a nightly build, 0.6.3
-  (1520). Sill updates to the next release after 0.6.3." Stable updates resume with release 0.6.4 or any
-  later one (release 0.6.3 itself is never offered to a nightly of 0.6.3, as above).
-- **A release published while someone runs a nightly of its version:** not offered (as above); with the
-  switch on, the next nightly brings its code, and with it off, the next version does.
+  (1520). Sill updates to the next release that is at least as new." Stable updates resume with the first
+  release built from that nightly's commit or a later one: release 0.6.3 itself when it comes after the
+  nightly, else 0.6.4 or any later one.
+- **A release published while someone runs a nightly of its version:** offered when it holds that nightly's
+  code (as above); else, with the switch on, the next nightly is, and with it off, the next version.
 - **The rollback floor:** the highest release version whose app passed both checks here (the second security
   pass's A2: never a manifest alone); the automatic update never installs below it. The nightly floor of rounds
   4 to 7 went with option 4: it guarded only the automatic update's nightlies, and Update Now never installs an
@@ -1808,7 +1828,7 @@ branch.
   built and signed by GitHub from Sill's newest code; nobody looks at them first. They are less tested than
   releases and may break. Sill tells you when one is out, and Update Now installs it; a nightly never installs by
   itself, even with Automatically update Sill on. Turning this off doesn't go back to the last release: Sill
-  keeps the nightly you have until a release with a higher version number." (`UpdateInstallPolicy.nightlyNote`).
+  keeps the nightly you have until a release that is at least as new." (`UpdateInstallPolicy.nightlyNote`).
   The offers and steps name the build: "Sill nightly 0.6.2 (1471) is available.", "Downloading Sill nightly
   0.6.2 (1471)…". The update key's failures for a nightly name the nightly key. Under a nightly offer, with
   Automatically update Sill on, the note of §16.3's "Both offers at once" (`UpdateAutoPolicy.nightlyOfferNote`;
@@ -1898,12 +1918,13 @@ GitHub; sign a release's manifest with the nightly key, or a nightly with the re
    Now shows the build it installs).
 4. **A release and a nightly of one version.** Default: the release (the tested one). Alternative: the higher
    build.
-5. **Release V for someone on nightly V.** Default: never offered, as the update check never has (main keeps a
-   version before and after its release, so only the release's signed build could order them). The other
-   way: on a nightly, read the latest release's manifest when its version is this Sill's, and offer it when
-   its signed build is newer: one more request a day for nightly users, a third look in the code.
-6. **Turning the switch off.** Default: no downgrade; Sill keeps the nightly until a release with a higher
-   version number.
+5. **Release V for someone on nightly V. Decided (Noah, 2026-11-15: "Someone on a 0.6.2 nightly should get
+   offered official 0.6.2 release.", and for a nightly built after the release, which keeps waiting: "Second
+   case yes"):** on a nightly, Sill reads the latest release's manifest when its version is this Sill's, and
+   offers it when its signed build is at least this Sill's (§16.3): one more request for nightly users, once
+   for each release, a third look in the code. Before: never offered, as the update check never has.
+6. **Turning the switch off.** Default: no downgrade; Sill keeps the nightly until a release that is at least
+   as new (5).
    Alternative: offer the latest release even when older (Update Now never installs an older version today).
 7. **An audit for nightlies.** Default: none (CI signs them; no record on Noah's Mac). Alternative: the nightly
    job keeps a record of what it signed, and `--audit` reads it.

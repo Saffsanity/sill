@@ -207,8 +207,10 @@ With it on, the daily check (and each launch while that check is on) also reads 
 checks, newer by version, then build. The automatic update never does: it installs
 releases only (Noah's decision of 2026-11-12, option 4; `UpdateAutoPolicy.start` and
 `dates` refuse a nightly first, and AppUpdater gives it the release offer alone). A
-release is still newer by its version alone, so the release of a nightly's own version
-is never offered to it. nightly.yml signs each night's zip with `Scripts/sign-nightly.sh`
+release is newer by its version; a nightly is also offered the release of its own version
+when that release's signed build is at least its own (the same commit or a later one: it
+reads that release's manifest first, `AppUpdater.lookAtRelease`), and one built after the
+release waits for the next version. nightly.yml signs each night's zip with `Scripts/sign-nightly.sh`
 and the secret `SILL_NIGHTLY_UPDATE_KEY`, when the environment `nightly` has it;
 `make-app.sh` marks a nightly with `SillChannel = nightly` and every build with
 its commit (`SillCommit`).

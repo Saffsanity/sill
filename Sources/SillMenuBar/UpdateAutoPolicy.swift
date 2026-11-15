@@ -179,18 +179,22 @@ enum UpdateAutoPolicy {
     /// an idle updater (never beside Update Now, never twice). `available`: this build has Update Now;
     /// `signed`: the release lists a manifest; `refusal`: why Update Now can't run here; `waitUntil`: the
     /// end of the release's cooling-off, from what this Sill remembers (`waitUntil(_:tag:)`). A release is
-    /// newer by its version alone. `offeredBuild`: the offer is a nightly, which is refused first, whatever the
-    /// switches, the dates and the quiet minutes say: a nightly installs only through Update Now (option 4).
+    /// newer by its version, and to a nightly of its own version by a signed build at least that nightly's
+    /// (`releaseBuild`, `runningBuild`, `runningIsNightly`: UpdateInstallPolicy.isNewer). `offeredBuild`: the offer
+    /// is a nightly, which is refused first, whatever the switches, the dates and the quiet minutes say: a nightly
+    /// installs only through Update Now (option 4).
     static func start(_ m: Memory, checkOn: Bool, available: Bool, refusal: UpdateInstallPolicy.Refusal?,
                       offered: SillVersion?, offeredTag: String?, signed: Bool, running: SillVersion?, idle: Bool,
-                      waitUntil: Date? = nil, now: Date, offeredBuild: Int? = nil) -> Start {
+                      waitUntil: Date? = nil, now: Date, offeredBuild: Int? = nil, releaseBuild: Int? = nil,
+                      runningBuild: Int? = nil, runningIsNightly: Bool = false) -> Start {
         if offeredBuild != nil { return .no(nightlyNever) }
         guard m.on else { return .no("the switch is off") }
         guard checkOn else { return .no("the daily check is off") }
         guard available, let running else { return .no("Update Now isn’t available in this build") }
         guard idle else { return .no("an update is under way or waiting") }
         guard let offered, let offeredTag else { return .no("no release is offered") }
-        guard offered > running else { return .no("the offered release isn’t newer") }
+        guard UpdateInstallPolicy.isNewer(offered, build: releaseBuild, than: running, runningBuild: runningBuild, byBuild: false,
+                                          overNightly: runningIsNightly) else { return .no("the offered release isn’t newer") }
         guard signed else { return .no("the release isn’t signed with Sill’s update key yet") }
         if let r = refusal { return .no(UpdateInstallPolicy.words(r)) }
         if isStopped(m, tag: offeredTag) { return .no("a stop signed with an update key names \(offered)") }
@@ -378,20 +382,23 @@ enum UpdateAutoPolicy {
     }
 
     /// What is written, kept small (A3): only well-formed entries; attempts, sightings and stops only for a
-    /// version newer than `running` (an older one is never offered as an update again), at most
-    /// `maxRemembered` attempts and sightings (the newest) and `maxStops` stops (the highest versions). Applied
-    /// to every write, so no sequence of offers grows the item.
+    /// version newer than `running` (an older one is never offered as an update again), and for a nightly
+    /// (`runningIsNightly`) its own version's too, whose release it may be offered (UpdateInstallPolicy.isNewer:
+    /// without them that release's wait would start over at every write, and its stop and its failed attempts
+    /// would be forgotten); at most `maxRemembered` attempts and sightings (the newest) and `maxStops` stops (the
+    /// highest versions). Applied to every write, so no sequence of offers grows the item.
     /// Attempts and sightings are a release's alone (option 4: a nightly is never tried by itself); a key that
     /// names a build ("0.6.2 (1471)", from an item written before) goes.
-    static func bounded(_ m: Memory, running: SillVersion?, runningBuild: Int? = nil) -> Memory {
+    static func bounded(_ m: Memory, running: SillVersion?, runningBuild: Int? = nil, runningIsNightly: Bool = false) -> Memory {
         var n = m
+        func ahead(_ v: SillVersion) -> Bool { running.map { v > $0 || (runningIsNightly && v == $0) } ?? true }
         func newer(_ text: String) -> Bool {
             guard let (v, b) = parseKey(text), b == nil else { return false }
-            return running.map { v > $0 } ?? true
+            return ahead(v)
         }
         func newerTag(_ tag: String) -> Bool {
             guard let v = UpdateInstallPolicy.strictTag(tag) else { return false }
-            return running.map { v > $0 } ?? true
+            return ahead(v)
         }
         n.attempts = Dictionary(uniqueKeysWithValues: m.attempts
             .filter { newer($0.key) }

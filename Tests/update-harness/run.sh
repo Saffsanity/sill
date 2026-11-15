@@ -29,7 +29,7 @@ T="$out/src"; mkdir -p "$T"
 cp "$root"/Sources/StreamProtocol/*.swift "$T"/
 # SILL_HARNESS_SOURCES: a copy of Sources/SillMenuBar with one change (mutants.py); the app's own by default.
 sources="${SILL_HARNESS_SOURCES:-$root/Sources/SillMenuBar}"
-for f in UpdatePolicy UpdateInstallPolicy UpdateManifest UpdateArchive UpdateAutoPolicy UpdateInstaller; do
+for f in UpdatePolicy UpdateInstallPolicy UpdateManifest UpdateArchive UpdateAutoPolicy UpdateInstaller ProcessLife; do
     sed '/^import StreamProtocol$/d' "$sources/$f.swift" > "$T/$f.swift"
 done
 cp "$here/main.swift" "$T/main.swift"

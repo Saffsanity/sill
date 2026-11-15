@@ -64,6 +64,8 @@ enum MenuBuilder {
         var phase: UpdateInstallPolicy.Phase = .idle
         var available = false
         var refusal: UpdateInstallPolicy.Refusal?
+        /// This Sill is a nightly: its build, for the item's "You have nightly 0.6.2 (1597)".
+        var runningBuild: Int?
 
         static let none = UpdateMenuState()
     }
@@ -94,7 +96,8 @@ enum MenuBuilder {
         if let update {
             if install.available {
                 let item = UpdateInstallPolicy.menuItem(install.phase, offered: update.offer.version, running: update.running,
-                                                        available: true, refusal: install.refusal, offeredBuild: update.offer.build)
+                                                        available: true, refusal: install.refusal, offeredBuild: update.offer.build,
+                                                        runningBuild: install.runningBuild)
                 menu.append(MenuEntry(kind: .item, title: item.title, subtitle: item.subtitle,
                                       action: item.opensSettings ? .showSettingsTab(.general) : .openUpdate(update.offer.url)))
             } else {

@@ -1131,8 +1131,10 @@ For a nightly tester:
   the step says so and the job stays green), and offers the build it names to Update Now: one click on Update
   Now installs each nightly, never the automatic update, which installs releases only (Noah's decision of
   2026-11-12, option 4: "Automatic for releases only. Nightlies take one click on Update Now each."; read the
-  plan's T38 before turning it on for anyone). A release is still newer by its version alone, so the release of
-  a nightly's own version is never offered to it. Until a release carries the key, everything in the next item
+  plan's T38 before turning it on for anyone). A release is newer by its version, and a nightly is also
+  offered the release of its own version when that release was built from its commit or a later one (the
+  plan's §16.3, Noah's rule of 2026-11-15: tag the candidate nightly's commit or a later one, and the people
+  on the candidate get the release). Until a release carries the key, everything in the next item
   holds for everyone.
   The GitHub settings the third security pass asked for are in place since 2026-11-12, 16:35 EST (the plan's
   §16.10): the ruleset "main" (id 27158533: no deletion, no force push, every change through a pull request,

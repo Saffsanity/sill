@@ -176,7 +176,7 @@ enum Tamper { case none, stagedResource, raced, both, hardLink, signatureLink, s
 /// prepare, staging, download, unpack, check, install: the first failure, or none (the new copy in place).
 func update(_ name: String, using ins: UpdateInstaller = installer, installedFrom: URL? = nil, offeredTag: String = "v1.1",
             running: SillVersion = SillVersion("1.0")!, runningRequirement: SecRequirement? = nil, tamper: Tamper = .none,
-            holdBundle: Bool = false, leftoverNote: URL? = nil) async -> Outcome {
+            holdBundle: Bool = false, leftoverNote: URL? = nil, runningBuild: Int? = nil, runningIsNightly: Bool = false) async -> Outcome {
     let installed = installedCopy(name, from: installedFrom ?? out.appendingPathComponent("apps/installed/UpdTest.app"))
     var o = Outcome(failure: nil, installed: installed)
     // In Sill.app, Bundle.main is the installed copy, its Info.plist read long before the swap. With holdBundle an
@@ -197,7 +197,7 @@ func update(_ name: String, using ins: UpdateInstaller = installer, installedFro
     }
     let cancel = UpdateInstaller.Cancel()
     let prepared: (release: P.Release, manifest: UpdateManifest)
-    switch await ins.prepare(offeredTag: offeredTag, running: running, cancel: cancel) {
+    switch await ins.prepare(offeredTag: offeredTag, running: running, cancel: cancel, runningBuild: runningBuild, runningIsNightly: runningIsNightly) {
     case .failure(let f): o.failure = f; return o
     case .success(let p): prepared = p
     }
@@ -237,7 +237,8 @@ func update(_ name: String, using ins: UpdateInstaller = installer, installedFro
         try! FileManager.default.createSymbolicLink(atPath: resources.path, withDestinationPath: "../Info.plist")
     }
     let checked: P.Checked
-    switch ins.check(staged, manifest: prepared.manifest, running: running, runningRequirement: runningRequirement) {
+    switch ins.check(staged, manifest: prepared.manifest, running: running, runningRequirement: runningRequirement,
+                     runningBuild: runningBuild, runningIsNightly: runningIsNightly) {
     case .failure(let f): o.failure = f; return o
     case .success(let c): checked = c
     }
@@ -254,7 +255,8 @@ func update(_ name: String, using ins: UpdateInstaller = installer, installedFro
     let runningCDHash = tamper == .wrongRunningCDHash ? String(repeating: "0", count: 40) : (UpdateInstaller.cdhash(of: installed, arch: .current) ?? "")
     let atNote: (() -> Void)? = tamper == .atNote ? { append(staged, "changed when the leftover note appeared") } : nil
     switch ins.install(staged: staged, installed: installed, runningCDHash: runningCDHash, expected: checked, manifest: prepared.manifest,
-                       running: running, runningRequirement: runningRequirement, leftoverNote: leftoverNote, afterNote: atNote, beforeSwap: race) {
+                       running: running, runningRequirement: runningRequirement, leftoverNote: leftoverNote, afterNote: atNote, beforeSwap: race,
+                       runningBuild: runningBuild, runningIsNightly: runningIsNightly) {
     case .failure(let f): o.failure = f
     case .success: break
     }
@@ -265,12 +267,12 @@ func update(_ name: String, using ins: UpdateInstaller = installer, installedFro
 /// A case that must be refused for `expected`, the installed copy unchanged and nothing left outside.
 func refused(_ name: String, _ r: Release, offeredTag: String = "v1.1", running: SillVersion = SillVersion("1.0")!,
              using ins: UpdateInstaller = installer, installedFrom: URL? = nil, runningRequirement: SecRequirement? = nil,
-             tamper: Tamper = .none, _ expected: (P.Failure) -> Bool) async {
+             tamper: Tamper = .none, runningBuild: Int? = nil, runningIsNightly: Bool = false, _ expected: (P.Failure) -> Bool) async {
     publish(r)
     let source = installedFrom ?? out.appendingPathComponent("apps/installed/UpdTest.app")
     let before = treeHash(source)
     let o = await update(name, using: ins, installedFrom: installedFrom, offeredTag: offeredTag, running: running,
-                         runningRequirement: runningRequirement, tamper: tamper)
+                         runningRequirement: runningRequirement, tamper: tamper, runningBuild: runningBuild, runningIsNightly: runningIsNightly)
     check(o.failure.map(expected) == true, "\(name): \(o.failure.map { P.logText($0) } ?? "installed") — not the expected refusal")
     check(treeHash(o.installed) == before, "\(name): the installed copy changed")
     say("\(name): refused (\(o.failure.map { P.logText($0) } ?? "nothing")), the installed copy unchanged")
@@ -280,11 +282,12 @@ func refused(_ name: String, _ r: Release, offeredTag: String = "v1.1", running:
 /// A case that must install: the new version at the path, its code the manifest's, the old copy whole in staging.
 func installs(_ name: String, _ r: Release, expectVersion: String = "1.1", using ins: UpdateInstaller = installer,
               installedFrom: URL? = nil, offeredTag: String = "v1.1", running: SillVersion = SillVersion("1.0")!,
-              runningRequirement: SecRequirement? = nil, keepStaging: Bool = false, holdBundle: Bool = false) async -> Outcome {
+              runningRequirement: SecRequirement? = nil, keepStaging: Bool = false, holdBundle: Bool = false,
+              runningBuild: Int? = nil, runningIsNightly: Bool = false) async -> Outcome {
     publish(r)
     let before = treeHash(installedFrom ?? out.appendingPathComponent("apps/installed/UpdTest.app"))
     let o = await update(name, using: ins, installedFrom: installedFrom, offeredTag: offeredTag, running: running,
-                         runningRequirement: runningRequirement, holdBundle: holdBundle)
+                         runningRequirement: runningRequirement, holdBundle: holdBundle, runningBuild: runningBuild, runningIsNightly: runningIsNightly)
     check(o.failure == nil, "\(name): \(o.failure.map { P.logText($0) } ?? "")")
     check(version(of: o.installed) == expectVersion, "\(name): the installed version is \(version(of: o.installed) ?? "none")")
     check(cdhashes(o.installed) == cdhashes(r.app), "\(name): the installed code is the manifest's")
@@ -480,6 +483,34 @@ check(version(of: failedSwap.installed) == "1.0", "the swap fails: the copy at t
 say("the swap fails: \(failedSwap.failure.map { P.logText($0) } ?? "installed"); the note was written before it")
 if let s = failedSwap.staging { UpdateInstaller.remove(s) }
 
+say("== the release of a nightly's own version (Noah, 2026-11-15): by its signed build, the nightly's commit or a later one")
+// v1.1's app and manifest say build 11. The copy at the path stands for a nightly of 1.1.
+let v110 = SillVersion("1.1")!
+_ = await installs("over a nightly of its version built before it", v11, running: v110, runningBuild: 10, runningIsNightly: true)
+_ = await installs("over a nightly of its version and its very commit", v11, running: v110, runningBuild: 11, runningIsNightly: true)
+await refused("over a nightly of its version built after it", v11, running: v110, runningBuild: 12, runningIsNightly: true) { $0 == .releaseNotNewer }
+await refused("over a nightly of its version whose build isn't known", v11, running: v110, runningBuild: nil, runningIsNightly: true) { $0 == .releaseNotNewer }
+await refused("over a release of its version, whatever its build", v11, running: v110, runningBuild: 10) { $0 == .releaseNotNewer }
+await refused("a lower version over a nightly", Release(tag: "v0.9", zip: zip("v0.9"), app: app("v0.9"), build: "9"), offeredTag: "v0.9",
+              running: SillVersion("1.0")!, runningBuild: 1, runningIsNightly: true) { $0 == .releaseNotNewer }
+publish(v11)
+switch await installer.releaseBuild(tag: "v1.1", running: v110, cancel: UpdateInstaller.Cancel()) {
+case .success(let build): check(build == 11, "the look reads the release's signed build: \(build)")
+case .failure(let f): check(false, "the look reads the release's signed build: \(P.logText(f))")
+}
+if case .failure(.releaseChanged(tag: "v1.1")) = await installer.releaseBuild(tag: "v1.2", running: v110, cancel: UpdateInstaller.Cancel()) {
+    check(true, "")
+} else { check(false, "the look of a release that is no longer the latest ends there") }
+publish({ var r = v11; r.withManifest = false; return r }())
+if case .failure(.notSigned) = await installer.releaseBuild(tag: "v1.1", running: v110, cancel: UpdateInstaller.Cancel()) {
+    check(true, "")
+} else { check(false, "the look of a release not signed yet reads no build") }
+publish({ var r = v11; r.stop = .this; return r }())
+if case .failure(.stopped(tag: "v1.1")) = await installer.releaseBuild(tag: "v1.1", running: v110, cancel: UpdateInstaller.Cancel()) {
+    check(true, "")
+} else { check(false, "the look of a stopped release reads no build, so it is never offered") }
+say("the look: the signed build read, and none of a release that moved on, isn't signed or is stopped")
+
 say("== Use nightly builds (plan §16): the nightly key's manifest, read from its own channel alone")
 let nightlyKey = Curve25519.Signing.PrivateKey()
 var nightlyTrust = testTrust
@@ -643,6 +674,26 @@ check(UpdateInstaller.genuine([child.processIdentifier], requirement: "identifie
       && UpdateInstaller.genuine([child.processIdentifier], requirement: P.pinnedRequirement).isEmpty, "genuine Sills: by the requirement")
 
 say("== where an app runs (the refusals' facts)")
+// A process this harness started itself is its own helper, which the look leaves out (a helper Sill is starting is
+// no other copy of Sill: ProcessLife.parent, 2026-11-15). Another copy is one something else started: here one
+// started through a shell that has exited, so launchd is its parent, as it is of an app opened from Finder.
+check(UpdateInstaller.situation(bundle: running, executable: "UpdTest", runningIsRelease: true, testFeed: false, runningIsInstalled: true,
+                                neededBytes: 1 << 20).otherInstances == 0, "a process this harness started itself is left out, as a helper Sill starts is")
+let shell = Process()
+shell.executableURL = URL(fileURLWithPath: "/bin/sh")
+shell.arguments = ["-c", "\"$0\" sleep 20 >/dev/null 2>&1 & echo $!", running.appendingPathComponent("Contents/MacOS/UpdTest").path]
+let shellOut = Pipe()
+shell.standardOutput = shellOut
+try! shell.run()
+shell.waitUntilExit()
+let other = pid_t(String(decoding: shellOut.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)) ?? -1
+check(other > 0, "another copy started, not by this harness: pid \(other)")
+var otherReady = false
+for _ in 0..<50 where !otherReady {
+    otherReady = UpdateInstaller.process(other, satisfies: "identifier \"me.saffer.sill.updater-test\" and cdhash H\"\(childHash)\"")
+    if !otherReady { usleep(100_000) }
+}
+check(otherReady, "…and it runs the copy's code")
 var s = UpdateInstaller.situation(bundle: running, executable: "UpdTest", runningIsRelease: true, testFeed: false, runningIsInstalled: true, neededBytes: 1 << 20)
 // Seen once (2026-11-12 01:23): macOS's system policy put the freshly started ad hoc test app into provenance
 // tracking ("ASP: Security policy would not allow process", syspolicyd "Putting process into provenance
@@ -662,6 +713,10 @@ check(s.otherInstances == 1 && s.otherAccounts.isEmpty, "a process running from 
 check(P.refusal(s) == .otherInstance, "refused while it runs")
 child.terminate()
 child.waitUntilExit()
+if other > 0 {
+    kill(other, SIGTERM)
+    for _ in 0..<50 where kill(other, 0) == 0 { usleep(100_000) }
+}
 s = UpdateInstaller.situation(bundle: running, executable: "UpdTest", runningIsRelease: true, testFeed: false, runningIsInstalled: true, neededBytes: 1 << 20)
 check(s.otherInstances == 0 && P.refusal(s) == nil, "nothing running from it: no refusal")
 let folder = running.deletingLastPathComponent()
