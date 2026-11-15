@@ -38,11 +38,12 @@ import StreamProtocol
 /// beside it, `Sill.zip.stop`, signed with an update key too (`Stop`): it names the release's tag and its
 /// zip's SHA-256, and a Sill that reads it installs that release neither by Update Now nor by itself.
 struct UpdateManifest: Equatable, Sendable {
-    /// The Ed25519 public keys (raw 32 bytes, base64) whose signature Update Now accepts. EMPTY ON
-    /// PURPOSE: no key exists yet (Noah makes it: plan §10, Q1, and Scripts/sign-update.sh --new-key),
-    /// and with none Update Now is not offered at all (UpdateInstallPolicy.Trust.release). Setting it is
-    /// one line here; a second key beside the first is how the key is rotated (plan §4.3).
-    static let releaseKeys: [String] = []
+    /// The Ed25519 public keys (raw 32 bytes, base64) whose signature Update Now accepts. The one here is
+    /// Noah's update key, key ID dbbd6d58, made on his Mac on 2026-11-15 with Scripts/sign-update.sh --new-key
+    /// after the rehearsal (docs/one-click-update-plan.md §12); its private half is in his login keychain and
+    /// nowhere else but his own copy. With no key here Update Now is not offered at all
+    /// (UpdateInstallPolicy.Trust.release). A second key beside the first is how the key is rotated (plan §4.3).
+    static let releaseKeys: [String] = ["VBi6RT1SKi60dit73HwGK1T3YALXQCPpq/rQX49+ZVE="]
 
     /// The Ed25519 public keys of the nightly key (plan §16.2, Noah's decision of 2026-11-12: "A separate nightly
     /// key that GitHub holds"), held by GitHub as a secret and used only by nightly.yml, whose signature a
