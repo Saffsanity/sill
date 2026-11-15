@@ -42,12 +42,15 @@ struct SettingsPane: View {
             while !Task.isCancelled {
                 model.permissions.refresh()
                 model.loginItem.refresh()
+                // Where Sill runs, for Update Now (nothing unless a release is offered and it is available).
+                if tab == .general { model.updater.refresh() }
                 try? await Task.sleep(for: .seconds(1))
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.permissions.refresh()
             model.loginItem.refresh()
+            if tab == .general { model.updater.refresh() }
             // Back from Terminal with the command run: General's firewall line follows.
             if model.visibleSettingsTab == tab, tab == .general { model.coordinator?.checkFirewall() }
         }
@@ -162,9 +165,16 @@ private struct GeneralPane: View {
             if let preview = previewUpdates {
                 UpdatesSection(pane: preview, automatic: .constant(true))
             } else {
-                UpdatesSection(pane: model.updates.pane, automatic: $settings.updateCheck,
+                UpdatesSection(pane: model.updates.pane, install: model.updater.pane, installAvailable: model.updater.available,
+                               automatic: $settings.updateCheck, autoSwitch: model.updater.automaticSwitch,
+                               autoUpdate: Binding(get: { model.updater.memory.on }, set: { model.updater.setAutomaticUpdate($0) }),
+                               nightlySwitch: model.updater.nightlySwitch,
+                               nightly: Binding(get: { model.updater.memory.nightly }, set: { model.updater.setNightly($0) }),
                                actions: UpdatesSection.Actions(checkNow: { model.updates.checkNow() },
-                                                               openRelease: { NSWorkspace.shared.open($0) }))
+                                                               openRelease: { NSWorkspace.shared.open($0) },
+                                                               updateNow: { model.updater.updateNow() },
+                                                               confirm: { model.updater.confirm() },
+                                                               cancel: { model.updater.cancelUpdate() }))
             }
             Section {
                 HStack {
@@ -284,40 +294,135 @@ struct ClipboardSection: View {
 // MARK: Updates
 
 /// Settings › General's update check: the automatic switch, the line (what the last check found, or
-/// why Sill cannot check), Open Release Page… while a newer release is offered, and Check Now. Plain
-/// values in, so the previews draw every state. Errors show here and in the log, never in an alert.
+/// why Sill cannot check), Open Release Page… while a newer release is offered, and Check Now. With
+/// Update Now in this build (`installAvailable`), its button beside them, its progress, its question
+/// before a disconnect, and why it cannot run here (docs/one-click-update-plan.md §4.7). Plain values
+/// in, so the previews draw every state. Errors show here and in the log, never in an alert.
 struct UpdatesSection: View {
     struct Actions {
         var checkNow: () -> Void = {}
         var openRelease: (URL) -> Void = { _ in }
+        var updateNow: () -> Void = {}
+        var confirm: () -> Void = {}
+        var cancel: () -> Void = {}
     }
 
     let pane: UpdatePolicy.Pane
+    var install = UpdateInstallPolicy.Pane()
+    var installAvailable = false
     @Binding var automatic: Bool
+    /// Automatically update Sill (UpdateAutoPolicy): shown only in a build with Update Now. Settings is the only
+    /// place that turns it on (AppUpdater.setAutomaticUpdate).
+    var autoSwitch = UpdateAutoPolicy.Switch()
+    var autoUpdate: Binding<Bool> = .constant(false)
+    /// "Use nightly builds" (plan §16): shown only where Update Now is and a nightly key is compiled in.
+    var nightlySwitch = UpdateAutoPolicy.Switch()
+    var nightly: Binding<Bool> = .constant(false)
     var actions = Actions()
 
     var body: some View {
         Section {
             Toggle("Check for updates automatically", isOn: $automatic)
+            if autoSwitch.shown {
+                Toggle("Automatically update Sill", isOn: autoUpdate)
+                    .disabled(!autoSwitch.enabled)
+                // Why it can't act here; said once (Update Now's row may say the same refusal under its button).
+                if let note = autoSwitch.note, note != install.note {
+                    Text(note)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if nightlySwitch.shown {
+                Toggle("Use nightly builds", isOn: nightly)
+                    .disabled(!nightlySwitch.enabled)
+                if let note = nightlySwitch.note {
+                    Text(note)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             LabeledContent {
                 HStack(spacing: 8) {
+                    if install.updateNow {
+                        Button(install.updateNowTitle) { actions.updateNow() }
+                            .disabled(!install.updateNowEnabled)
+                    }
                     if let url = pane.releasePage {
                         Button("Open Release Page…") { actions.openRelease(url) }
                     }
                     Button("Check Now") { actions.checkNow() }
-                        .disabled(!pane.canCheck)
+                        .disabled(!pane.canCheck || install.busy)
                 }
             } label: {
-                Text(pane.line)
-                    .foregroundStyle(pane.failed ? Color.orange : Color.primary)
-                    .fixedSize(horizontal: false, vertical: true)
+                // The line, and under it on a line of its own the download's size ("2.4 of 5.9 MB").
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(install.line ?? pane.line)
+                        .foregroundStyle((install.line != nil ? install.failed : pane.failed) ? Color.orange : Color.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let detail = install.detail {
+                        Text(detail)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
             }
             // VoiceOver hears Check Now's result, which arrives after the click.
             .onChange(of: pane.resultID) { _, _ in
                 AccessibilityNotification.Announcement(pane.line).post()
             }
+            // …and each step of an update, and its question.
+            .onChange(of: install.announce) { _, line in
+                if let line { AccessibilityNotification.Announcement(line).post() }
+            }
+            if install.progress != nil || install.spinning {
+                HStack(spacing: 8) {
+                    if let progress = install.progress {
+                        ProgressView(value: progress)
+                    } else {
+                        ProgressView().controlSize(.small)
+                        Spacer(minLength: 0)
+                    }
+                    if install.cancel, install.question == nil {
+                        Button("Cancel") { actions.cancel() }
+                    }
+                }
+            }
+            if let question = install.question {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(question)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Button(install.confirmTitle ?? "Update") { actions.confirm() }
+                        Button("Cancel") { actions.cancel() }
+                    }
+                }
+            }
+            // A copy the automatic update checked waits for its moment: its Cancel beside the note (no progress
+            // bar or question to carry it).
+            let waitingCancel = install.cancel && install.progress == nil && !install.spinning && install.question == nil
+            if let note = install.note {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(note)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if waitingCancel {
+                        Spacer(minLength: 8)
+                        Button("Cancel") { actions.cancel() }
+                    }
+                }
+            } else if waitingCancel {
+                HStack {
+                    Spacer()
+                    Button("Cancel") { actions.cancel() }
+                }
+            }
         } footer: {
-            Footnote(UpdatePolicy.footnote)
+            Footnote(installAvailable ? UpdateInstallPolicy.footnote(automatic: autoSwitch.shown && autoUpdate.wrappedValue,
+                                                                     nightly: nightlySwitch.shown && nightly.wrappedValue) : UpdatePolicy.footnote)
         }
     }
 }

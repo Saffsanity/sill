@@ -40,8 +40,13 @@ enum UpdatePolicy {
         var latestTag: String?
         /// updateLatestURL: its html_url.
         var latestURL: String?
+        /// updateLatestSigned: it carries a signed manifest for Update Now (UpdateManifest), so Update Now
+        /// is offered for it (docs/one-click-update-plan.md §4.3). Nil (an older Sill stored the release) is
+        /// not signed.
+        var latestSigned: Bool?
 
         static let lastCheckKey = "updateLastCheck", etagKey = "updateETag", tagKey = "updateLatestTag", urlKey = "updateLatestURL"
+        static let signedKey = "updateLatestSigned"
     }
 
     /// A newer release to offer.
@@ -49,6 +54,21 @@ enum UpdatePolicy {
         let version: SillVersion
         let tag: String
         let url: URL
+        /// The release carries Update Now's signed manifest (`manifestAsset`).
+        var signed = false
+        /// A nightly's build (its tag is then "nightly": UpdateInstallPolicy.chooseOffer); nil for a release.
+        var build: Int? = nil
+    }
+
+    /// The asset that says a release is signed for Update Now (UpdateInstallPolicy.Endpoints.github's
+    /// manifest).
+    static let manifestAsset = "Sill.zip.manifest"
+
+    /// The stored release whether or not it is newer (Update Now's choice with nightlies: UpdateInstallPolicy.chooseOffer).
+    static func latest(stored: Stored, anyReleaseURL: Bool = false) -> Offer? {
+        guard let tag = stored.latestTag, let version = SillVersion(tag), let text = stored.latestURL,
+              let url = releasePage(text, anyReleaseURL: anyReleaseURL) else { return nil }
+        return Offer(version: version, tag: tag, url: url, signed: stored.latestSigned == true)
     }
 
     /// The stored release when it is newer than `running` and its page is one Sill opens: on
@@ -57,7 +77,7 @@ enum UpdatePolicy {
     static func offer(stored: Stored, running: SillVersion?, anyReleaseURL: Bool = false) -> Offer? {
         guard let running, let tag = stored.latestTag, let version = SillVersion(tag), version > running,
               let text = stored.latestURL, let url = releasePage(text, anyReleaseURL: anyReleaseURL) else { return nil }
-        return Offer(version: version, tag: tag, url: url)
+        return Offer(version: version, tag: tag, url: url, signed: stored.latestSigned == true)
     }
 
     /// A release's html_url as a page Sill opens: https on github.com, or with a test feed any http
@@ -146,7 +166,8 @@ enum UpdatePolicy {
                     next.etag = etag      // a 200 without one clears it: the next request sends none
                     next.latestTag = r.tag
                     next.latestURL = r.url.absoluteString
-                    return (r.version > running ? .newer(Offer(version: r.version, tag: r.tag, url: r.url)) : .upToDate(tag: r.tag), next)
+                    next.latestSigned = r.signed ? true : nil     // nil, not false: an unsigned release stores as before
+                    return (r.version > running ? .newer(Offer(version: r.version, tag: r.tag, url: r.url, signed: r.signed)) : .upToDate(tag: r.tag), next)
                 }
             case 304:
                 // Only sent back for a stored release (If-None-Match goes out with one alone).
@@ -154,10 +175,11 @@ enum UpdatePolicy {
                       let url = releasePage(text, anyReleaseURL: anyReleaseURL) else {
                     return (.notARelease("a 304 before any release"), next)
                 }
-                return (version > running ? .newer(Offer(version: version, tag: tag, url: url)) : .upToDate(tag: tag), next)
+                return (version > running ? .newer(Offer(version: version, tag: tag, url: url, signed: stored.latestSigned == true)) : .upToDate(tag: tag), next)
             case 404:
                 // A withdrawn release stops being offered.
                 next.etag = nil; next.latestTag = nil; next.latestURL = nil
+                next.latestSigned = nil
                 return (.noRelease, next)
             case 403, 429:
                 return (.limited(status: status, reset: reset), next)
@@ -187,6 +209,8 @@ enum UpdatePolicy {
         let tag: String
         let version: SillVersion
         let url: URL
+        /// An asset named `manifestAsset` is listed.
+        var signed = false
     }
 
     /// A 200's body as a published release: a JSON object with a string `tag_name` that parses,
@@ -199,7 +223,8 @@ enum UpdatePolicy {
         if object["prerelease"] as? Bool == true { return .failure(.prerelease) }
         guard let version = SillVersion(tag) else { return .failure(.badTag(String(tag.prefix(40)))) }
         guard let text = object["html_url"] as? String, let url = releasePage(text, anyReleaseURL: anyReleaseURL) else { return .failure(.badURL) }
-        return .success(Release(tag: tag, version: version, url: url))
+        let signed = (object["assets"] as? [[String: Any]])?.contains { $0["name"] as? String == manifestAsset } ?? false
+        return .success(Release(tag: tag, version: version, url: url, signed: signed))
     }
 
     // MARK: When
