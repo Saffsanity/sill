@@ -102,6 +102,21 @@ enum UpdateInstallPolicy {
     /// new one's wait for it, its host's start and `provedAfter`, with room to spare.
     static let watchWait: TimeInterval = 150
 
+    /// Whether a Sill that starts after an update opens Settings on General by itself: only after an update the
+    /// person started there (Update Now, or Install Now on a copy that waits), so the window they clicked in is
+    /// back and says what came of it, the new version or that the old one is back. Never after an update Sill
+    /// installed by itself, which nobody is watching (Noah, the rehearsal of 2026-11-15: "Reopen General
+    /// Settings after an update you start there.").
+    static func reopensSettings(automatic: Bool) -> Bool { !automatic }
+
+    /// The line Settings › General shows in green in a Sill that starts after an update the person started:
+    /// "Sill 0.6.3 was installed successfully." (Noah, the rehearsal of 2026-11-15: "I want it to show in green
+    /// text"). `name` is `name(version:build:)`'s. None after an update Sill installed by itself, whose words are
+    /// the automatic update's own.
+    static func installedLine(_ name: String, automatic: Bool) -> String? {
+        automatic ? nil : "\(name) was installed successfully."
+    }
+
     /// The watcher's token (a UUID's text, AppUpdater): the only kind whose started note Sill makes or looks for,
     /// so a token read from a note this user can write never names another path (the second security pass's W2).
     static func isToken(_ s: String) -> Bool {
@@ -987,6 +1002,9 @@ enum UpdateInstallPolicy {
         var busy = false
         /// VoiceOver hears each new line.
         var announce: String?
+        /// After an update the person started, in the Sill it installed: "Sill 0.6.3 was installed successfully.",
+        /// drawn in green above the check's line (`installedLine`).
+        var installed: String?
     }
 
     /// What the automatic update adds to the pane: AppUpdater's, from UpdateAutoPolicy and what it
