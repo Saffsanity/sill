@@ -16,6 +16,9 @@ MUTANTS = [
     ("the look never told", APP, "        s.finishingUpdate = i.finishingUpdate\n", ""),
     ("the watcher undoes a later update", INS, "later && exit 4\n", ""),
     ("the watcher takes the copy it watched for a later one", INS, '[ -n "$have" ] && [ "$have" != "$newcdhash" ] && [ "$have" != "$cdhash" ]', '[ -n "$have" ] && [ "$have" != "$cdhash" ]'),
+    ("a helper Sill is starting counts as another copy of Sill", INS, "            if ProcessLife.parent(of: pid) == own { continue }\n", ""),
+    ("a process's parent read without asking whose it is", LIFE, "              size >= MemoryLayout<kinfo_proc>.stride, info.kp_proc.p_pid == pid else { return nil }\n        return info.kp_eproc.e_ppid", "              size >= 0 else { return nil }\n        return info.kp_eproc.e_ppid"),
+    ("every process's parent said to be launchd", LIFE, "        return info.kp_eproc.e_ppid", "        return 1"),
     # The launch wait: whether the other Sill has gone (ProcessLife; the rehearsal's first update, 2026-11-15).
     ("the launch wait asks AppKit alone (the fault as it was)", APP, "if lives.allSatisfy({ $0.app.isTerminated || ($0.life?.gone ?? true) }) {", "if lives.allSatisfy({ $0.app.isTerminated }) {"),
     ("no process with the pid counts as still there", LIFE, "guard let now else { return true }", "guard let now else { return false }"),

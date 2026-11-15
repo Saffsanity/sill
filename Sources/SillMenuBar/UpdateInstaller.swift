@@ -959,7 +959,7 @@ exit 0
 
     /// Every other process running `bundle`'s executable (the same file, by device and inode, whatever
     /// path it was started by) or any other file inside it (by path), any account's (proc_pidpath reads
-    /// other users' processes), with its user.
+    /// other users' processes), with its user. Never a process `own` itself is starting.
     static func processesRunning(from bundle: URL, executable: String, excluding own: pid_t) -> [(pid: pid_t, uid: uid_t)] {
         let prefix = bundle.resolvingSymlinksInPath().standardizedFileURL.path + "/"
         var main = stat()
@@ -979,6 +979,12 @@ exit 0
             var file = stat()
             let same = haveMain && stat(text, &file) == 0 && file.st_dev == main.st_dev && file.st_ino == main.st_ino
             guard same || text.hasPrefix(prefix) else { continue }
+            // A helper this very process is starting shows this process's own path until its program is loaded
+            // (measured: 4 of 1,972 looks while a program started 60 helpers), and Sill starts five as Settings ›
+            // General opens, the firewall check's, the moment the pane looks: no other copy of Sill (the rehearsal,
+            // 2026-11-15: "Another copy of Sill is running" twice, with none). A Sill that an update starts is
+            // launchd's child, never this process's.
+            if ProcessLife.parent(of: pid) == own { continue }
             found.append((pid, uid(of: pid) ?? uid_t.max))
         }
         return found

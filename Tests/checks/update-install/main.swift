@@ -1512,6 +1512,23 @@ do {
     } else {
         check(false, "the check's child process started")
     }
+    // A process's parent: a helper Sill is starting shows Sill's own path for a moment, and is no other copy of Sill.
+    check(Life.parent(of: me) == getppid(), "this process's parent is the one that started it")
+    check(Life.parent(of: 0) == nil && Life.parent(of: -1) == nil, "no pid at all has no parent to name")
+    let helper = Process()
+    helper.executableURL = URL(fileURLWithPath: "/bin/sleep")
+    helper.arguments = ["60"]
+    if (try? helper.run()) != nil {
+        check(Life.parent(of: helper.processIdentifier) == me, "a process this one started names this one as its parent")
+        helper.terminate()
+        helper.waitUntilExit()
+        check(Life.parent(of: helper.processIdentifier) == nil, "…and once it has exited, none")
+    } else {
+        check(false, "the check's helper process started")
+    }
+    check(installerText.contains("            guard same || text.hasPrefix(prefix) else { continue }\n")
+          && installerText.contains("            if ProcessLife.parent(of: pid) == own { continue }\n            found.append((pid, uid(of: pid) ?? uid_t.max))"),
+          "the look for other copies of Sill leaves out a helper Sill itself is starting")
     // The wait asks it: a mutant that asks AppKit alone is the fault as it was.
     let wait = text("AppUpdater.swift")
     check(wait.contains("let lives = others.map { (app: $0, life: ProcessLife.of($0.processIdentifier)) }")

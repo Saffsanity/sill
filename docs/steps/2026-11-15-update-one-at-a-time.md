@@ -26,5 +26,15 @@
   moved, no note; the watched copy there → the old one put back as before, the note written; a tampered copy
   there → put back as before. `swift build -c release`. What two updates in quick succession do on Noah's Mac
   with the rehearsal's build of this (0.6.100, nightly 1603) is in the handoff's `one-click-update/rehearsal/`.
+- **And a helper Sill is starting is no other copy of Sill** (the same night, a third finding). Twice Settings said
+  "Another copy of Sill is running. Quit it first, then update." with one Sill running (01:53:59 and 02:42:07; the
+  process list and the system log had no second one). The look for other copies lists every process and takes
+  those whose program path is Sill's; a process being started shows its parent's path until its own program is
+  loaded, and Sill starts five as Settings › General opens (the firewall check's `socketfilterfw`), the moment the
+  pane looks. Measured with a program that starts helpers while another thread looks: 4 of 1,972 looks saw a
+  second process under the program's own path, each time its own child. `UpdateInstaller.processesRunning` now
+  leaves out a process whose parent is this one (`ProcessLife.parent`); a Sill that an update starts is launchd's
+  child, never this process's. `update-install` 988 of 988 (5 more: a process's parent for this process, a helper
+  of the check's own before and after it exits, no pid, and the look's line); three more mutants, 10 of 10 in all.
 - **Left:** the kept copy of an update whose watcher stands down this way stays in the temporary folder until macOS
   empties it (the leftover note names one folder).
