@@ -1532,6 +1532,21 @@ do {
           "the update that worked opens Settings before its 30 s begin")
     check(model.contains("updater.showUpdated = { [weak self] in self?.showSettings?(.general) }"), "the window that opens is Settings on General")
 }
+// …and says so in green: "Sill 0.6.3 was installed successfully." (Noah, the same night).
+check(UpdateInstallPolicy.installedLine(UpdateInstallPolicy.name(version: SillVersion("0.6.3")!, build: nil), automatic: false) == "Sill 0.6.3 was installed successfully.",
+      "after an update started by hand: Sill 0.6.3 was installed successfully.")
+check(UpdateInstallPolicy.installedLine(UpdateInstallPolicy.name(version: SillVersion("0.6.2")!, build: 1600), automatic: false) == "Sill nightly 0.6.2 (1600) was installed successfully.",
+      "a nightly installed by hand is named with its build")
+check(UpdateInstallPolicy.installedLine("Sill 0.6.3", automatic: true) == nil, "after an update Sill installed by itself: no green line")
+check(UpdateInstallPolicy.Pane().installed == nil, "a pane says nothing was installed unless told")
+do {
+    let updater = text("AppUpdater.swift"), panes = text("SettingsPanes.swift")
+    check(updater.contains("Policy.installedLine(Policy.name(version: $0, build: runningIsNightly ? runningBuild : nil), automatic: automatic)")
+          && updater.contains("if pane.line == nil { pane.installed = installedLine }"),
+          "the updater makes the line for the Sill an update installed, and shows it while no other update has the pane's line")
+    check(panes.contains("if let installed = install.installed {\n                        Text(installed)\n                            .foregroundStyle(Color.green)"),
+          "Settings draws the line in green")
+}
 
 print("update-install: \(checks - failures) of \(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

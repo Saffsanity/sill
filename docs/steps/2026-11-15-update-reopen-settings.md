@@ -12,8 +12,14 @@
 - **How.** The update's note already says which kind it was ("manual" or "automatic"); `AppUpdater.afterHostUp`
   reads it once the host is up and, by the rule, calls `showUpdated`, which AppModel sets to Settings on General.
   No new state, nothing stored.
-- **Verified.** `update-install` 978 of 978 (5 new: the rule both ways, the updater asking it at each of the four
-  places, the window being General); five new mutants, 5 of 5. `swift build -c release`. The rehearsal's build
+- **And it says so, in green** (Noah, minutes later: "I want it to show in green text that 'Sill x.y.z was
+  installed successfully.'"). `UpdateInstallPolicy.installedLine`: "Sill 0.6.3 was installed successfully." after
+  an update the person started (a nightly by its name, "Sill nightly 0.6.2 (1600)"), none after one Sill
+  installed by itself. The updater keeps it for that launch and puts it in the pane (`Pane.installed`) while no
+  other update has the pane's line; Settings › General draws it in green above the check's line.
+- **Verified.** `update-install` 984 of 984 (11 new: the rule both ways, the updater asking it at each of the four
+  places, the window being General, the line's words for a release and a nightly, none for an automatic update,
+  the pane and the green); nine new mutants, 9 of 9. `swift build -c release`. The rehearsal's build
   0.6.96 carries the same edits: what the update to it did on Noah's Mac is in the handoff's
   `one-click-update/rehearsal/RESULTS.md`.
 - **Not done:** the menu bar icon's dot for an update that waits (Noah: "Don't worry about the dot for now, we can

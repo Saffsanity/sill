@@ -203,8 +203,11 @@ final class AppUpdater {
         let automatic = Auto.pane(memory, offered: o?.version, offeredTag: o?.tag, running: runningVersion,
                                   waitUntil: o.flatMap(waitUntil), now: now,
                                   offeredBuild: o?.build, runningBuild: runningIsNightly ? runningBuild : nil, release: alongside)
-        return Policy.pane(state, offered: o?.version, running: runningVersion, available: available, refusal: refusal,
-                           keptAt: keptAt, automatic: automatic, offeredBuild: o?.build, ownLine: idle && o != nil && o != offer())
+        var pane = Policy.pane(state, offered: o?.version, running: runningVersion, available: available, refusal: refusal,
+                               keptAt: keptAt, automatic: automatic, offeredBuild: o?.build, ownLine: idle && o != nil && o != offer())
+        // The green line of an update just installed, while no other update has the pane's line.
+        if pane.line == nil { pane.installed = installedLine }
+        return pane
     }
 
     var menu: MenuBuilder.UpdateMenuState {
@@ -944,6 +947,9 @@ final class AppUpdater {
     /// Opens Settings on General (AppModel sets it): after a launch that follows an update the person started
     /// there (`Policy.reopensSettings`).
     var showUpdated: (() -> Void)?
+    /// This Sill was installed by an update the person started: the pane's green line for this launch
+    /// (`Policy.installedLine`), until another update has the pane's line.
+    private(set) var installedLine: String?
 
     func afterHostUp() {
         guard isApp else { settleNotes(); return }
@@ -1009,7 +1015,10 @@ final class AppUpdater {
             return
         }
         let token = p[0], automatic = p[2] == "automatic"
-        // This Sill is the update the person started in Settings: the window they clicked in, back.
+        // This Sill is the update the person started in Settings: the window they clicked in, back, saying so.
+        installedLine = runningVersion.flatMap {
+            Policy.installedLine(Policy.name(version: $0, build: runningIsNightly ? runningBuild : nil), automatic: automatic)
+        }
         if Policy.reopensSettings(automatic: automatic) { showUpdated?() }
         let proved = Timer(timeInterval: Policy.provedAfter, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.proved(token: token, automatic: automatic) }

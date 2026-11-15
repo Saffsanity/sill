@@ -359,6 +359,12 @@ struct UpdatesSection: View {
             } label: {
                 // The line, and under it on a line of its own the download's size ("2.4 of 5.9 MB").
                 VStack(alignment: .leading, spacing: 2) {
+                    // After an update the person started: "Sill 0.6.3 was installed successfully.", in green.
+                    if let installed = install.installed {
+                        Text(installed)
+                            .foregroundStyle(Color.green)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     Text(install.line ?? pane.line)
                         .foregroundStyle((install.line != nil ? install.failed : pane.failed) ? Color.orange : Color.primary)
                         .fixedSize(horizontal: false, vertical: true)
