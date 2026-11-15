@@ -16,7 +16,7 @@ import StreamProtocol
 ///                                              awayBitrate, awayCaptureScale,
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
 ///                                              sendAudio, remoteAccess, remotePort, internetAccess,
-///                                              shareClipboard, remoteAddressName=host[:port],
+///                                              shareClipboard, offConsoleView, remoteAddressName=host[:port],
 ///                                              updateCheck, showPairingWindowToScreenSharing=0|1,
 ///                                              requirePairing=0|1). Saved like any change
 ///                                              (requirePairing in the identity store: memory, or
@@ -369,6 +369,7 @@ enum DebugHooks {
         case "remotePort": if let v = Int(value) { config.remotePort = v }
         case "internetAccess": config.internetAccess = flag
         case "shareClipboard": config.shareClipboard = flag
+        case "offConsoleView": config.offConsoleView = flag
         case "remoteAddressName": addressName = value
         case "requirePairing": requirePairing = flag
         case "updateCheck": updateCheck = flag
@@ -401,6 +402,7 @@ enum DebugHooks {
         for sample in devicesPaneSamples() {
             let pane = DevicesPane(status: sample.status, requirePairing: .constant(sample.requirePairing),
                                    showPairingWindowToScreenSharing: .constant(sample.showPairingWindowToScreenSharing),
+                                   offConsoleView: .constant(sample.offConsoleView),
                                    requirePairingProblem: nil, actions: DevicesPane.Actions(), now: previewNow)
                 .formStyle(.grouped)
                 .frame(width: 520)
@@ -766,6 +768,9 @@ enum DebugHooks {
         waiting.network = .waiting("POSIXErrorCode(rawValue: 50): Network is down")
         var failed = HostStatusSnapshot()
         failed.network = .failed("POSIXErrorCode(rawValue: 48): Address already in use")
+        // The off-console view (docs/off-console-plan.md): another user on the screen, this account shown.
+        var offConsoleView = streaming
+        offConsoleView.offConsoleView = true
         return [
             Sample(name: "idle", snapshot: idle),
             Sample(name: "registering", snapshot: registering),
@@ -784,6 +789,7 @@ enum DebugHooks {
             Sample(name: "waiting", snapshot: waiting),
             Sample(name: "failed", snapshot: failed),
             Sample(name: "startup-error", snapshot: HostStatusSnapshot(), startupError: "POSIXErrorCode(rawValue: 22): Invalid argument"),
+            Sample(name: "off-console-view", snapshot: offConsoleView),
         ]
     }
 }
@@ -849,6 +855,7 @@ extension DebugHooks {
         var status: RemoteStatus
         var requirePairing = true
         var showPairingWindowToScreenSharing = false
+        var offConsoleView = false
     }
 
     /// pane-devices-{required,off,empty,screensharing,unavailable}: three devices, one paired over
@@ -872,6 +879,7 @@ extension DebugHooks {
             DevicesPaneSample(name: "empty", status: RemoteStatus(homeDoor: .pairingRequired)),
             DevicesPaneSample(name: "screensharing", status: RemoteStatus(homeDoor: .pairingRequired),
                               showPairingWindowToScreenSharing: true),
+            DevicesPaneSample(name: "offconsoleview", status: RemoteStatus(homeDoor: .pairingRequired), offConsoleView: true),
             DevicesPaneSample(name: "unavailable",
                               status: RemoteStatus(identityProblem: keychainProblem,
                                                    homeDoor: .unavailable("Sill couldn’t use its key in the keychain (\(keychainProblem))"))),

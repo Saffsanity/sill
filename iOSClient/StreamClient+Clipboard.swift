@@ -174,6 +174,15 @@ extension StreamClient {
 
     /// A kind 32 from the Mac.
     func receiveClipboard(_ payload: Data) {
+        // While the picture shows only in Picture in Picture (#291), the person is in another app: the Mac's copy
+        // would replace what they copy there. Dropped, as before Picture in Picture, when Sill was suspended
+        // in the background and none came (PictureInPicturePolicy.onlyInPictureInPicture).
+        if shownOnlyInPictureInPicture {
+            #if DEBUG
+            print("clipboard: a copy from the Mac not written: the picture shows only in Picture in Picture")
+            #endif
+            return
+        }
         let board = UIPasteboard.general
         guard let text = ClipboardPolicy.deviceWrites(payload, switchOn: Self.clipboardOn, hostClipboard: hostClipboard,
                                                       lastSent: clipboardSent, changeCount: board.changeCount) else { return }

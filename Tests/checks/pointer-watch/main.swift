@@ -529,6 +529,18 @@ do {
           == (false, "SILL_TEST_SOFTWARE_ENCODER ignored: only a --synthetic host takes it."), "a real host ignores it")
     check(H.softwareEncoder(synthetic: true, environment: ["SILL_TEST_SOFTWARE_ENCODER": "yes"])
           == (false, "SILL_TEST_SOFTWARE_ENCODER=yes ignored: 1 turns it on."), "another value is ignored")
+    // SILL_TEST_NO_SCREEN, the same four: its line is PointerWatch.swift's too, and until 2026-11-12
+    // nothing checked it (the mutants run of that day: its `guard value == "1"` made the software
+    // encoder's mutant's pattern match twice, so that mutant was never applied).
+    check(H.noScreen(synthetic: true, environment: [:]) == (false, nil), "no variable: the screen is asked as ever, silently")
+    check(H.noScreen(synthetic: true, environment: ["SILL_TEST_NO_SCREEN": ""]) == (false, nil), "an empty variable: off, and no line")
+    check(H.noScreen(synthetic: true, environment: ["SILL_TEST_NO_SCREEN": "1"])
+          == (true, "Test screen: ScreenCaptureKit is never asked (SILL_TEST_NO_SCREEN); the window list stays empty and no thumbnail is taken."),
+          "no screen: =1 on a synthetic host")
+    check(H.noScreen(synthetic: false, environment: ["SILL_TEST_NO_SCREEN": "1"])
+          == (false, "SILL_TEST_NO_SCREEN ignored: only a --synthetic host takes it."), "no screen: a real host ignores it")
+    check(H.noScreen(synthetic: true, environment: ["SILL_TEST_NO_SCREEN": "yes"])
+          == (false, "SILL_TEST_NO_SCREEN=yes ignored: 1 turns it on."), "no screen: another value is ignored")
 }
 
 print(failures == 0 ? "pointer-watch: all \(checks) checks passed" : "pointer-watch: \(failures) of \(checks) checks FAILED")

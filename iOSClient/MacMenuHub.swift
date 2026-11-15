@@ -119,6 +119,8 @@ final class WindowSessionObserverView: UIView {
     private func report() {
         guard let client else { return }
         MacMenuHub.shared.session(client, window: window)
+        DeviceIdleTimer.shared.session(client, window: window)     // auto-lock across windows (PR #230)
+        PictureInPictureHub.shared.session(client, window: window) // which window offers Picture in Picture (#291)
     }
 }
 

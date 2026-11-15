@@ -132,6 +132,9 @@ package struct HostStatusSnapshot: Equatable {
     /// connected device is away, so the away quality is the target. The menu's Quality subtitle
     /// and the Streaming pane say so.
     package var away = false
+    /// The off-console view applies (docs/off-console-plan.md): another user is on this Mac's screen and devices
+    /// see this session anyway, to look at. The card says so under its header.
+    package var offConsoleView = false
     /// The Mac's sound while it is wanted (Send Audio on, something streams, a device plays it); nil
     /// otherwise.
     package var audio: Audio?
