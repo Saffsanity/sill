@@ -48,9 +48,11 @@ struct UpdateManifest: Equatable, Sendable {
     /// The Ed25519 public keys of the nightly key (plan §16.2, Noah's decision of 2026-11-12: "A separate nightly
     /// key that GitHub holds"), held by GitHub as a secret and used only by nightly.yml, whose signature a
     /// nightly's manifest ("Sill nightly 1") needs. Trusted only for the nightly channel, only while "Use nightly
-    /// builds" is on; never for a release, whose manifest needs `releaseKeys`. EMPTY ON PURPOSE until Noah makes
-    /// the key (plan §16.8): until then the switch doesn't show.
-    static let nightlyKeys: [String] = []
+    /// builds" is on; never for a release, whose manifest needs `releaseKeys`. The one here is the nightly key Noah
+    /// made on his Mac on 2026-11-15 with Scripts/sign-nightly.sh --new-key (plan §16.8), key ID 3e6d90f4; its
+    /// private half is the secret SILL_NIGHTLY_UPDATE_KEY of the GitHub environment `nightly`. With no key here
+    /// the switch doesn't show.
+    static let nightlyKeys: [String] = ["LdPr0TWuzpFrPlCivrH1UGypmw65S2fQ76diCh+loRo="]
 
     static let firstLine = "Sill update 1"
     /// A nightly's manifest: its own first line, so that neither kind can ever be read as the other.
