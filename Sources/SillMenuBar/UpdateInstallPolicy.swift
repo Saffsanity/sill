@@ -307,6 +307,11 @@ enum UpdateInstallPolicy {
         var otherInstances: Int
         var freeBytes: Int64?
         var neededBytes: Int64
+        /// An update installed this Sill less than `provedAfter` ago: that update's watcher still waits for this
+        /// Sill's word that it works, and takes its quit before then for a failure. A new update would quit it
+        /// (the nightly rehearsal, 2026-11-15: a release, then a nightly 29 s later, and the first update's
+        /// watcher put the copy before both back at Sill's path under the running nightly).
+        var finishingUpdate = false
     }
 
     enum Refusal: Equatable, Sendable {
@@ -324,6 +329,8 @@ enum UpdateInstallPolicy {
         case changedSinceStart(String)
         case otherAccount(String)
         case otherInstance
+        /// This Sill was just installed by an update and hasn't told that update's watcher it works yet.
+        case finishingUpdate
         case lowSpace(volume: String, neededMB: Int)
     }
 
@@ -343,6 +350,7 @@ enum UpdateInstallPolicy {
         if !s.runningIsInstalled { return .changedSinceStart(s.bundlePath) }
         if let other = s.otherAccounts.first { return .otherAccount(other) }
         if s.otherInstances > 0 { return .otherInstance }
+        if s.finishingUpdate { return .finishingUpdate }
         if let free = s.freeBytes, free < s.neededBytes {
             return .lowSpace(volume: s.volumeName, neededMB: mebibytesRoundedUp(s.neededBytes))
         }
@@ -375,6 +383,7 @@ enum UpdateInstallPolicy {
         case .otherAccount(let name):
             return "Sill is open in another account on this Mac (\(name)). Quit it there first, then update."
         case .otherInstance: return "Another copy of Sill is running. Quit it first, then update."
+        case .finishingUpdate: return "Sill was just updated. Update Now is ready again in half a minute."
         case .lowSpace(let v, let mb): return "Not enough free space on \(v): about \(mb) MB are needed."
         }
     }

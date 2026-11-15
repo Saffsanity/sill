@@ -43,6 +43,18 @@ struct ProcessLife: Equatable, Sendable {
         return kill(pid, 0) == 0 || errno != ESRCH
     }
 
+    /// The process that started `pid` (its parent, kern.proc.pid); nil when there is no such process or it can't
+    /// be read. A process this one is starting shows this one's own program path until its own is loaded, so a
+    /// look for other copies of Sill by path takes its own child for one (UpdateInstaller.processesRunning).
+    static func parent(of pid: pid_t) -> pid_t? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard pid > 0, sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0) == 0,
+              size >= MemoryLayout<kinfo_proc>.stride, info.kp_proc.p_pid == pid else { return nil }
+        return info.kp_eproc.e_ppid
+    }
+
     /// When the process `pid` started (kern.proc.pid); nil when there is none or it can't be read.
     static func start(of pid: pid_t) -> Start? {
         var info = kinfo_proc()

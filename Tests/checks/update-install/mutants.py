@@ -8,6 +8,17 @@ POL, MAN, ARC, INS, APP = "UpdateInstallPolicy.swift", "UpdateManifest.swift", "
 AUTO = "UpdateAutoPolicy.swift"
 LIFE = "ProcessLife.swift"
 MUTANTS = [
+    # One update at a time (the nightly rehearsal, 2026-11-15).
+    ("a second update while the first proves itself", POL, "        if s.finishingUpdate { return .finishingUpdate }\n", ""),
+    ("the wait after an update said after the space", POL, "        if s.finishingUpdate { return .finishingUpdate }\n        if let free = s.freeBytes, free < s.neededBytes {\n            return .lowSpace(volume: s.volumeName, neededMB: mebibytesRoundedUp(s.neededBytes))\n        }\n", "        if let free = s.freeBytes, free < s.neededBytes {\n            return .lowSpace(volume: s.volumeName, neededMB: mebibytesRoundedUp(s.neededBytes))\n        }\n        if s.finishingUpdate { return .finishingUpdate }\n"),
+    ("a Sill just installed never held", APP, "        proving = true\n", ""),
+    ("a Sill held for good after an update", APP, "        proving = false\n        refresh()\n", "        refresh()\n"),
+    ("the look never told", APP, "        s.finishingUpdate = i.finishingUpdate\n", ""),
+    ("the watcher undoes a later update", INS, "later && exit 4\n", ""),
+    ("the watcher takes the copy it watched for a later one", INS, '[ -n "$have" ] && [ "$have" != "$newcdhash" ] && [ "$have" != "$cdhash" ]', '[ -n "$have" ] && [ "$have" != "$cdhash" ]'),
+    ("a helper Sill is starting counts as another copy of Sill", INS, "            if ProcessLife.parent(of: pid) == own { continue }\n", ""),
+    ("a process's parent read without asking whose it is", LIFE, "              size >= MemoryLayout<kinfo_proc>.stride, info.kp_proc.p_pid == pid else { return nil }\n        return info.kp_eproc.e_ppid", "              size >= 0 else { return nil }\n        return info.kp_eproc.e_ppid"),
+    ("every process's parent said to be launchd", LIFE, "        return info.kp_eproc.e_ppid", "        return 1"),
     # Settings opens again after an update the person started there (Noah, the rehearsal, 2026-11-15).
     ("Settings opens after an update Sill installed by itself", POL, "static func reopensSettings(automatic: Bool) -> Bool { !automatic }", "static func reopensSettings(automatic: Bool) -> Bool { true }"),
     ("Settings never opens after an update", POL, "static func reopensSettings(automatic: Bool) -> Bool { !automatic }", "static func reopensSettings(automatic: Bool) -> Bool { false }"),
@@ -25,7 +36,7 @@ MUTANTS = [
     ("an unread start counts as another process", LIFE, "if let before = then.started, let after = now.started, before != after { return true }", "if then.started != now.started { return true }"),
     ("another account's process counts as none", LIFE, "return kill(pid, 0) == 0 || errno != ESRCH", "return kill(pid, 0) == 0"),
     ("any failure of kill counts as there (a process gone is never noticed)", LIFE, "return kill(pid, 0) == 0 || errno != ESRCH", "return true"),
-    ("the start read without asking whose it is", LIFE, "size >= MemoryLayout<kinfo_proc>.stride, info.kp_proc.p_pid == pid else { return nil }", "size >= 0 else { return nil }"),
+    ("the start read without asking whose it is", LIFE, "size >= MemoryLayout<kinfo_proc>.stride, info.kp_proc.p_pid == pid else { return nil }\n        let t = info.kp_proc.p_starttime", "size >= 0 else { return nil }\n        let t = info.kp_proc.p_starttime"),
     # The version rule and the release.
     ("the same version installed", POL, "guard isNewer(version, build: Int(build), than: running, runningBuild: runningBuild,", "guard version >= running || isNewer(version, build: Int(build), than: running, runningBuild: runningBuild,"),
     ("the same release fetched", POL, "guard version > running else { return .failure(.releaseNotNewer) }", "guard version >= running else { return .failure(.releaseNotNewer) }"),

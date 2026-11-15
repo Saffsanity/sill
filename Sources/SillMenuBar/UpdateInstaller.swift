@@ -762,6 +762,12 @@ final class UpdateInstaller: @unchecked Sendable {
     /// opens through one in the moment after `mktemp`: N11 h) lands before the check and is caught. Every path and value is an argument, never part of the script's text;
     /// the token is one too, readable with `ps` by this user's processes, accepted (N10 j: any of them can as well
     /// kill the watcher, which is all a made-up started note achieves).
+    /// A later update's copy at Sill's path is left alone (`later`, exit 4): a genuine Sill there that is neither
+    /// the copy this watcher watched nor the one it would put back was installed since, by an update with a watcher
+    /// of its own, and putting the old copy back would undo that update under the Sill it started (the nightly
+    /// rehearsal, 2026-11-15: a release, then a nightly 29 s later, and 0.6.97 back at Sill's path under the
+    /// running nightly). AppUpdater refuses that second update now (`Refusal.finishingUpdate`); this is the
+    /// watcher's own guard. A copy that isn't a genuine Sill is still moved aside, as before.
     static let watcherScript = #"""
 pid=$1; app=$2; exe=$3; old=$4; cdhash=$5; req=$6; started=$7; token=$8; restored=$9; shift 9; wait=$1; launcher=$2; arch=$3; newcdhash=$4
 proved() { [ -f "$started" ] && [ ! -L "$started" ]; }
@@ -773,6 +779,11 @@ whole() {
     /usr/bin/codesign --verify --deep --strict "-R=$req" "$1" >/dev/null 2>&1 || return 1
     have=$(/usr/bin/codesign -d -vvv --arch "$arch" "$1" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/head -n 1)
     [ -n "$have" ] && [ -n "$2" ] && [ "$have" = "$2" ]
+}
+later() {
+    /usr/bin/codesign --verify --deep --strict "-R=$req" "$app" >/dev/null 2>&1 || return 1
+    have=$(/usr/bin/codesign -d -vvv --arch "$arch" "$app" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/head -n 1)
+    [ -n "$have" ] && [ "$have" != "$newcdhash" ] && [ "$have" != "$cdhash" ]
 }
 left() {
     note=$(/usr/bin/mktemp "$restored.XXXXXX") && /usr/bin/printf '%s
@@ -797,6 +808,7 @@ if running; then
     running && /bin/kill -KILL "$pid" 2>/dev/null
     /bin/sleep 1
 fi
+later && exit 4
 whole "$old" "$cdhash" || exit 3
 dir=$(/usr/bin/dirname "$old")
 parked="$dir/did not start.app"
@@ -947,7 +959,7 @@ exit 0
 
     /// Every other process running `bundle`'s executable (the same file, by device and inode, whatever
     /// path it was started by) or any other file inside it (by path), any account's (proc_pidpath reads
-    /// other users' processes), with its user.
+    /// other users' processes), with its user. Never a process `own` itself is starting.
     static func processesRunning(from bundle: URL, executable: String, excluding own: pid_t) -> [(pid: pid_t, uid: uid_t)] {
         let prefix = bundle.resolvingSymlinksInPath().standardizedFileURL.path + "/"
         var main = stat()
@@ -967,6 +979,12 @@ exit 0
             var file = stat()
             let same = haveMain && stat(text, &file) == 0 && file.st_dev == main.st_dev && file.st_ino == main.st_ino
             guard same || text.hasPrefix(prefix) else { continue }
+            // A helper this very process is starting shows this process's own path until its program is loaded
+            // (measured: 4 of 1,972 looks while a program started 60 helpers), and Sill starts five as Settings ›
+            // General opens, the firewall check's, the moment the pane looks: no other copy of Sill (the rehearsal,
+            // 2026-11-15: "Another copy of Sill is running" twice, with none). A Sill that an update starts is
+            // launchd's child, never this process's.
+            if ProcessLife.parent(of: pid) == own { continue }
             found.append((pid, uid(of: pid) ?? uid_t.max))
         }
         return found

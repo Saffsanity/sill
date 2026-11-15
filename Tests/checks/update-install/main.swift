@@ -1512,11 +1512,55 @@ do {
     } else {
         check(false, "the check's child process started")
     }
+    // A process's parent: a helper Sill is starting shows Sill's own path for a moment, and is no other copy of Sill.
+    check(Life.parent(of: me) == getppid(), "this process's parent is the one that started it")
+    check(Life.parent(of: 0) == nil && Life.parent(of: -1) == nil, "no pid at all has no parent to name")
+    let helper = Process()
+    helper.executableURL = URL(fileURLWithPath: "/bin/sleep")
+    helper.arguments = ["60"]
+    if (try? helper.run()) != nil {
+        check(Life.parent(of: helper.processIdentifier) == me, "a process this one started names this one as its parent")
+        helper.terminate()
+        helper.waitUntilExit()
+        check(Life.parent(of: helper.processIdentifier) == nil, "…and once it has exited, none")
+    } else {
+        check(false, "the check's helper process started")
+    }
+    check(installerText.contains("            guard same || text.hasPrefix(prefix) else { continue }\n")
+          && installerText.contains("            if ProcessLife.parent(of: pid) == own { continue }\n            found.append((pid, uid(of: pid) ?? uid_t.max))"),
+          "the look for other copies of Sill leaves out a helper Sill itself is starting")
     // The wait asks it: a mutant that asks AppKit alone is the fault as it was.
     let wait = text("AppUpdater.swift")
     check(wait.contains("let lives = others.map { (app: $0, life: ProcessLife.of($0.processIdentifier)) }")
           && wait.contains("if lives.allSatisfy({ $0.app.isTerminated || ($0.life?.gone ?? true) }) {")
           && !wait.contains("others.allSatisfy({ $0.isTerminated })"), "the launch wait asks the kernel as well as AppKit whether the other Sill has gone")
+}
+
+// One update at a time (the nightly rehearsal, 2026-11-15: a release, a nightly 29 s later, and the first update's
+// watcher put 0.6.97 back at Sill's path under the running nightly). A Sill an update installed refuses a new one
+// until it has told that update's watcher it works; and the watcher leaves a later update's copy alone.
+do {
+    var just = fine
+    just.finishingUpdate = true
+    check(P.refusal(fine) == nil && !fine.finishingUpdate, "a Sill that no update installed just now: Update Now may run")
+    check(P.refusal(just) == .finishingUpdate, "a Sill an update installed less than 30 s ago: no other update begins")
+    check(P.words(.finishingUpdate) == "Sill was just updated. Update Now is ready again in half a minute.", "…and it says so")
+    var other = just
+    other.otherInstances = 1
+    check(P.refusal(other) == .otherInstance, "another running Sill is said first")
+    var low = just
+    low.freeBytes = 1
+    check(P.refusal(low) == .finishingUpdate, "…and the space after it")
+    let updater = text("AppUpdater.swift")
+    check(updater.contains("        let token = p[0], automatic = p[2] == \"automatic\"\n        // Until this Sill has told its update's watcher it works, no other update begins.\n        proving = true\n"),
+          "the updater holds new updates from the start of a launch that follows an update, before anything else it does")
+    check(updater.contains("        UpdateInstaller.writeNote(Self.startedNote(token), lines: [token])\n        // The watcher has its word: another update may begin (the pane's note goes at the next look).\n        proving = false\n        refresh()"),
+          "…until it has given the watcher its word, and then looks again")
+    check(updater.contains("finishingUpdate: proving)") && updater.contains("s.finishingUpdate = i.finishingUpdate"),
+          "the look at where Sill runs carries it")
+    check(watcher.contains("later() {\n    /usr/bin/codesign --verify --deep --strict \"-R=$req\" \"$app\" >/dev/null 2>&1 || return 1\n    have=$(/usr/bin/codesign -d -vvv --arch \"$arch\" \"$app\" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/head -n 1)\n    [ -n \"$have\" ] && [ \"$have\" != \"$newcdhash\" ] && [ \"$have\" != \"$cdhash\" ]\n}"),
+          "the watcher knows a later update's copy: a genuine Sill at Sill's path that is neither the one it watched nor the one it would put back")
+    check(watcher.contains("later && exit 4\nwhole \"$old\" \"$cdhash\" || exit 3\n"), "…and leaves it alone, before it moves anything")
 }
 
 // After an update the person started in Settings › General, the new Sill opens that window again (Noah, the
