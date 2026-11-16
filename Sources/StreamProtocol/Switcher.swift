@@ -100,6 +100,24 @@ public struct WindowList: Codable {
     /// left out otherwise and by every host before. A device keeps the picture, covers nothing and says what it
     /// is (`LockedMac.viewLine`).
     public var offConsoleView: Bool?
+    /// True when the Mac's currently focused UI element is an editable text field / text area
+    /// (detected via Accessibility), so the iPad can automatically activate handwriting input.
+    public var textInputFocused: Bool?
+    /// Monotonic focus session ID that changes whenever focus moves to another text input field.
+    /// Allows a manually dismissed handwriting pad to stay closed for the current field and re-open
+    /// when a different text field gains focus.
+    public var textInputFocusID: UInt64?
+    /// Normalized vertical center (0.0 top .. 1.0 bottom) of the focused Mac text field within the
+    /// currently streamed source rect, so the iPad can dock the handwriting pad clear of it.
+    public var textInputAnchorY: Double?
+    /// Current text synchronized from the Mac's focused input field (or its selected text segment).
+    /// Nil for secure password fields, unsupported apps (e.g. Word), or fields where AX reading is unavailable.
+    public var textInputValue: String?
+    /// True when `textInputValue` represents a highlighted selection (`kAXSelectedTextAttribute`) inside
+    /// the focused Mac input field rather than the entire field value.
+    public var textInputIsSelection: Bool?
+    /// Monotonic revision bumped whenever the Mac's focused text or selection changes.
+    public var textInputRevision: UInt64?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
                 hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil) {

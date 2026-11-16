@@ -660,6 +660,10 @@ package final class StreamCoordinator {
             self?.server.broadcast(StreamMessage(kind: .cursorShape, timestamp: Date().timeIntervalSince1970,
                                                  isKeyframe: false, payload: blob))
         }
+        cursorShapes.onTextInputFocusChanged = { [weak self] in
+            guard let self, self.catalog.clientCount > 0, !self.lockReading.locked else { return }
+            self.broadcastList()
+        }
         catalog.onInstalledAppsReady = { [weak self] apps in
             guard let self else { return }
             self.server.broadcast(StreamMessage(kind: .appList, timestamp: Date().timeIntervalSince1970,
@@ -1276,6 +1280,17 @@ package final class StreamCoordinator {
             if !synthetic { raiseIfInteracting(event) }
             deliver(event, in: rect, from: device)
             desktopInputMayActivate(event)
+            switch event {
+            case .text:
+                cursorShapes.noteDeviceTyping()
+                cursorShapes.checkTextInputFocusAfterInteraction()
+            case .pointer(let action, _, _) where action == .leftUp || action == .rightUp:
+                cursorShapes.checkTextInputFocusAfterInteraction()
+            case .key(_, let down, _) where down:
+                cursorShapes.checkTextInputFocusAfterInteraction()
+            default:
+                break
+            }
         case .gesture:
             // A three- or four-finger gesture (docs/trackpad-gestures-plan.md §7.4), which the Mac
             // turns into its own shortcut. At most `gesturesPerSecond` a second per connection: a
@@ -3594,6 +3609,20 @@ package final class StreamCoordinator {
         // A locked Mac's list: no windows, no clipboard, `locked`, and off console `offConsole`
         // (LockPolicy); unlocked, as it is, byte for byte. Which went last, for `lockChanged`.
         let reading = lockReading
+        if !reading.locked {
+            list.textInputFocused = cursorShapes.isTextInputFocused
+            if cursorShapes.isTextInputFocused {
+                list.textInputFocusID = cursorShapes.textInputFocusID
+                list.textInputValue = cursorShapes.textInputValue
+                list.textInputIsSelection = cursorShapes.textInputIsSelection ? true : nil
+                list.textInputRevision = cursorShapes.textInputRevision
+                if let elemFrame = cursorShapes.textInputFrame,
+                   let src = currentSourceRect(), src.height > 1 {
+                    let normY = (elemFrame.midY - src.minY) / src.height
+                    list.textInputAnchorY = min(1.0, max(0.0, Double(normY)))
+                }
+            }
+        }
         lockedListSent = reading.locked
         return StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                              payload: Wire.encode(LockPolicy.list(list, reading: reading, offConsoleView: offConsoleView)))
