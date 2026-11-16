@@ -463,8 +463,10 @@ Rules found in the steps that hold for all work (each where it is written):
   release can have the nightly's build too; the bundle's verdict; the state machine; the words; pure),
   `UpdateManifest` (the release's manifest and its Ed25519 signature with Noah's
   update key, its signed date, and a stop (`Sill.zip.stop`); a nightly's ("Sill nightly 1",
-  the nightly key's); `releaseKeys` and `nightlyKeys`, empty until he makes the keys, so no
-  build shows Update Now or Use nightly builds; the tests' key, `testKeySeed`, which anyone
+  the nightly key's); `releaseKeys` and `nightlyKeys`, each with the key Noah made on 2026-11-15 (the
+  update key, ID dbbd6d58, in his login keychain; the nightly key, ID 3e6d90f4, a secret of the GitHub
+  environment `nightly`), so builds from then on show Update Now, Automatically update Sill and Use
+  nightly builds, and Sill 0.6.2 is the first release that has them; the tests' key, `testKeySeed`, which anyone
   can make and no Sill trusts; pure), `UpdateArchive` (Sill's own zip
   reader and inflate; pure), `UpdateAutoPolicy` (Automatically update Sill and Use
   nightly builds: when it begins; the cooling-off, 48 hours from this Sill's first sight

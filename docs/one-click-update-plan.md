@@ -837,6 +837,34 @@ not asked, each with the default taken:
 
 ## 12. Noah's end-to-end test (two notarized builds and a rehearsal key; nothing here does it)
 
+**Done on 2026-11-15, twice** (the release path, then the nightly channel; the tables and every finding are in
+the handoff's `one-click-update/rehearsal/RESULTS.md`, how it ran in `RUNBOOK.md` beside it): Update Now, a
+release published unsigned and then signed, the automatic update (its two-day wait set to none for the
+rehearsal; installed 5 min 19 s and 5 min 30 s after the last device left), a build that dies at launch (the
+old Sill put itself back in 0.6 s), one that dies after the hand-over (the watcher put the old copy back in
+3.5 s), a nightly by Update Now with a nightly key, a newer nightly never installing by itself, and a release
+installing by itself over a nightly. No macOS prompt appeared. Three faults were found and fixed before any
+key went in: the new copy's wait for the old Sill asked AppKit alone, which never said the old Sill had quit
+(#372); two updates half a minute apart let the first one's watcher put an older copy back under the running
+newer Sill (#375); and a helper Sill was starting was taken for another copy of Sill (#375). Not run: another
+account's Sill, a copy opened from Downloads, a stop file, a quit during the install, VoiceOver, the real
+two-day wait.
+
+The steps below predate three rules, so a rehearsal now differs from them in these ways:
+- `release.sh` refuses a commit that isn't on `origin/main`. A rehearsal's commits never are, so the scratch
+  clone moves its own `refs/remotes/origin/main` to each rehearsal commit (`git update-ref`), with its pushes to
+  Saffsanity/sill disabled, and is never fetched again.
+- `sign-update.sh` signs only when the repository's tag names the commit the app was built from. So the
+  throwaway repository holds the rehearsal branch and each tag, not "a README, no code", with Actions switched
+  off there first so that no workflow of Sill's runs in it.
+- `--expect-key` is gone. The signer for a key in a file lives outside Application Support
+  (`SILL_SIGNER_DIR` with `--key-file`); the real signer's place is Noah's alone.
+- A zip made inside the Claude app carries AppleDouble entries (`com.apple.provenance`), which
+  `sign-update.sh` refuses: zip again with `ditto -c -k --keepParent --norsrc --noextattr`.
+- Afterwards the rehearsal's memory goes too, or the real Sill reads it: Sill's keychain item (service
+  `me.saffer.sill.update`, account `automatic`), the six `update*` defaults of `me.saffer.sill.mac`, and the
+  notes in `~/Library/Caches/me.saffer.sill.mac/`.
+
 The real path cannot be rehearsed with a release of Saffsanity/sill without offering it to everyone, so
 the rehearsal uses a throwaway public repository, a throwaway key, and a scratch branch that changes only
 constants. Builds made from it are never released.
