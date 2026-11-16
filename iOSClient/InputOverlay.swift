@@ -41,6 +41,40 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// Fires once a latch has been spent, so the key row can un-highlight itself.
     var onModifiersConsumed: (() -> Void)?
 
+    /// Persistent modifier locks from the accessory bar or virtual keyboard.
+    var lockedModifiers: KeyModifiers = []
+    /// Combined active modifiers (latched + locked).
+    var currentActiveModifiers: KeyModifiers { latchedModifiers.union(lockedModifiers) }
+    var currentLatchedModifiers: KeyModifiers { latchedModifiers }
+    var currentLockedModifiers: KeyModifiers { lockedModifiers }
+    /// Toggles a modifier between off -> latched -> locked -> off.
+    func toggleAccessoryModifier(_ flag: KeyModifiers) {
+        if lockedModifiers.contains(flag) {
+            lockedModifiers.remove(flag)
+        } else if latchedModifiers.contains(flag) {
+            latchedModifiers.remove(flag)
+            lockedModifiers.insert(flag)
+        } else {
+            latchedModifiers.insert(flag)
+        }
+        accessoryBar.updateModifierAppearance()
+    }
+    func consumeLatchedModifiers() {
+        consumeLatch()
+    }
+    /// Accessory bar attached directly above the native system keyboard.
+    private lazy var accessoryBar: KeyboardAccessoryBar = {
+        let bar = KeyboardAccessoryBar()
+        bar.inputOverlay = self
+        bar.sendKey = { [weak self] event in
+            self?.send(event)
+        }
+        bar.onDismiss = { [weak self] in
+            _ = self?.resignFirstResponder()
+        }
+        return bar
+    }()
+
     /// What iPadOS's text system sees: the composition in progress and what was typed since the Mac's
     /// caret last moved some other way.
     private var composition = TextComposition()
@@ -984,6 +1018,9 @@ final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// shows no software keyboard, even for a keyboard it counts as gone a moment before GameController
     /// does) and no assistant groups; the system keyboard and its groups for the person's own.
     override var inputView: UIView? { holdsForHardwareKeyboard ? emptyInputView : nil }
+
+    /// Above the software keyboard: modifier and control keys (Esc, Tab, Space, ⌘, ⌥, ⌃, ⇧).
+    override var inputAccessoryView: UIView? { holdsForHardwareKeyboard ? nil : accessoryBar }
 
     /// An input method is composing here (marked text): KeyboardFrameMonitor reloads no input views then.
     var isComposingText: Bool { composition.isComposing }
