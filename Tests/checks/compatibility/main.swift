@@ -344,8 +344,8 @@ check(Wire.decode(ReaderOf173.self, from: Wire.encode(named)).map { $0.desktopDi
 check(Wire.decode(ReaderBefore.self, from: Wire.encode(named)).map { $0.macName == "Mac mini" && $0.clipboard == 1 } == true,
       "a reader from before them skips all three")
 check(StreamMessageKind.nextDisplay.rawValue == 47 && StreamMessageKind(rawValue: 47) == .nextDisplay, "kind 47 is the next display")
-check(StreamMessageKind(rawValue: 45) == nil && StreamMessageKind(rawValue: 46) == nil,
-      "45 and 46 not this build's (open pull requests' microphone, pen and camera)")
+check(StreamMessageKind.pen.rawValue == 45 && StreamMessageKind(rawValue: 45) == .pen, "kind 45 is the pen")
+check(StreamMessageKind(rawValue: 46) == nil, "46 not this build's (open pull requests' camera)")
 let nextMessage = StreamMessage(kind: .nextDisplay, timestamp: 1, isKeyframe: false, payload: Data()).serialized()
 check(StreamMessage.parseHeader(nextMessage).map { $0.kind == .nextDisplay && $0.payloadLength == 0 } == true
       && nextMessage[nextMessage.startIndex] == 47, "kind 47's header parses, its payload empty")

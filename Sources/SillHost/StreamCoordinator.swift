@@ -1172,6 +1172,7 @@ package final class StreamCoordinator {
     private func handle(_ message: StreamMessage, from connection: NWConnection, arrived: LockPolicy.Reading) async {
         // Input decoded once, for the display's rule and for its case below.
         let input = message.kind == .input ? Wire.decode(InputEvent.self, from: message.payload) : nil
+        let penBatch = message.kind == .pen ? Wire.decode(PenBatch.self, from: message.payload) : nil
         // A device the Mac no longer serves (`revoked`): only the up of a key or a button it holds down
         // on the Mac still goes, where the pointer is; nothing else of it acts, wakes the display or
         // raises a window. Its connection closes within 0.25 s.
@@ -1179,7 +1180,10 @@ package final class StreamCoordinator {
         if revoked.contains(sender) {
             if let input, injector.releasesWhatItHolds(input, from: sender) {
                 deliver(input, in: .null, from: sender)
-            } else if message.kind == .input || message.kind == .gesture {
+            } else if let penBatch, injector.pen.releasesWhatItHolds(penBatch, from: sender),
+                      let samples = Pen.accepted(penBatch) {
+                injector.pen.apply(samples, in: .null, from: sender)
+            } else if message.kind == .input || message.kind == .gesture || message.kind == .pen {
                 Stats.shared.bump("in.revoked")
             }
             return
@@ -1196,6 +1200,9 @@ package final class StreamCoordinator {
             break
         case .letGo:
             if let input { deliver(input, in: .null, from: sender) }
+            if let penBatch, let samples = Pen.accepted(penBatch) {
+                injector.pen.apply(samples, in: .null, from: sender)
+            }
             return
         case .refuse(let why):
             refusedWhileLocked(why, message, from: connection)
@@ -1276,6 +1283,28 @@ package final class StreamCoordinator {
             if !synthetic { raiseIfInteracting(event) }
             deliver(event, in: rect, from: device)
             desktopInputMayActivate(event)
+        case .pen:
+            guard let penBatch, let samples = Pen.accepted(penBatch), !samples.isEmpty else { return }
+            let device = ObjectIdentifier(connection)
+            let targetRect: CGRect?
+            if penBatch.target == PenTarget.display {
+                targetRect = (synthetic && pointer.hasTestPointer) ? Self.testPatternRect : catalog.display?.frame
+            } else {
+                targetRect = currentSourceRect()
+            }
+            guard let rect = targetRect else {
+                if injector.pen.releasesWhatItHolds(penBatch, from: device) {
+                    injector.pen.apply(samples, in: .null, from: device)
+                }
+                return
+            }
+            if penBatch.target == PenTarget.source,
+               samples.contains(where: { $0.phase == PenPhase.down }) {
+                let firstDown = InputEvent.pointer(.leftDown, x: samples[0].x, y: samples[0].y)
+                gestureChords.input(Self.gestureInput(firstDown))
+                if !synthetic { raiseIfInteracting(firstDown) }
+            }
+            injector.pen.apply(samples, in: rect, from: device, showOverlay: penBatch.target == PenTarget.display)
         case .gesture:
             // A three- or four-finger gesture (docs/trackpad-gestures-plan.md §7.4), which the Mac
             // turns into its own shortcut. At most `gesturesPerSecond` a second per connection: a
@@ -1660,6 +1689,10 @@ package final class StreamCoordinator {
         case .input:
             guard let input else { return .take }    // one that does not decode is dropped below
             request = .input(letsGo: injector.releasesWhatItHolds(input, from: id))
+        case .pen:
+            guard let batch = Wire.decode(PenBatch.self, from: message.payload),
+                  Pen.accepted(batch) != nil else { return .take }
+            request = .input(letsGo: injector.pen.releasesWhatItHolds(batch, from: id))
         case .selectSource:
             request = .pick(Wire.decode(StreamSource.self, from: message.payload) ?? .none)
         case .nextDisplay:
@@ -3591,6 +3624,10 @@ package final class StreamCoordinator {
             list.desktopDisplay = DesktopDisplays.number(of: catalog.desktopDisplayID, in: stops)
             list.desktopDisplayNames = stops.map { SafeText.label($0.name ?? "", limit: 64) }
         }
+        let displaySize = catalog.display?.frame.size ?? CGSize(width: 1920, height: 1080)
+        list.pen = PenCapability(generation: Pen.generation,
+                                 displayWidth: Double(displaySize.width),
+                                 displayHeight: Double(displaySize.height))
         // A locked Mac's list: no windows, no clipboard, `locked`, and off console `offConsole`
         // (LockPolicy); unlocked, as it is, byte for byte. Which went last, for `lockChanged`.
         let reading = lockReading
