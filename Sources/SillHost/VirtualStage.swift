@@ -374,16 +374,25 @@ final class VirtualStage {
             guard WindowSizer.liveBounds(of: p.windowID) != nil else { releaseWindow(); throw Failure.windowMissing }
         }
 
-        // (6) Place the window; grow the display once if the app enforces a larger minimum.
+        // (6) Learn the app's minimum, then enlarge the other side to keep the panel aspect.
+        // One aspect correction only: fixed-size windows must not trigger an endless resize loop.
+        var fitSize = wanted
+        var correctedAspect = false
+        if !wasFullScreen, let askedSize, Self.sameSize(askedSize, wanted), let placedSize {
+            fitSize = placedSize
+            correctedAspect = true
+        }
+        var grewDisplay = false
+        var sizeRetries = 0
         var live = CGRect.zero
         var displayBounds = CGRect.zero
         var dest = CGRect.zero
-        for attempt in 0..<2 {
+        for attempt in 0..<9 {
             guard let d = display else { releaseWindow(); throw Failure.neverOnline }
             displayBounds = CGDisplayBounds(d.displayID)
             let usable = Self.usableArea(of: d.displayID) ?? displayBounds.divided(atDistance: menuInset, from: .minYEdge).remainder
             dest = CGRect(origin: usable.origin,
-                          size: CGSize(width: min(wanted.width, usable.width), height: min(wanted.height, usable.height)))
+                          size: CGSize(width: min(fitSize.width, usable.width), height: min(fitSize.height, usable.height)))
             let before = WindowSizer.liveBounds(of: p.windowID)
             // Where the last placement left the window, if it asked for this same rectangle. An app
             // that clamps (System Settings' fixed width, a minimum) never reaches `dest`, so a restart
@@ -408,34 +417,20 @@ final class VirtualStage {
                     releaseWindow()
                     throw Failure.moveRefused(err)
                 }
-                // Wait for the window server to show the move, no blind sleep: until the frame is at
-                // `dest` or has stopped changing (an app that clamps settles somewhere else).
-                // The window list shows a resize only once the app commits it; an AppKit window's AX
-                // frame has the new size as soon as the writes return. 1Password (Electron) was still
-                // listed at its old size three reads after the writes, so the old frame passed for
-                // settled and became the crop (2026-09-23). So when AX reports a new size, stillness
-                // counts only once the listed size has changed too, the list showing AX's frame ends
-                // the wait, and the deadline is 1 s. When AX reports the old size, the app refused it
-                // (a minimum in both dimensions) and stillness counts at once, as before: waiting for
-                // a change that never comes would freeze each such restart for the whole deadline. An
-                // app that applies a size after answering the write (AX lags too) reads as a refusal
-                // and is left to the catalog's next poll, as before.
-                var taken: CGRect?                            // what AX says the app took, if a new size
-                if let before, let f = WindowSizer.frame(of: p.element), !Self.sameSize(f.size, before.size) { taken = f }
-                var stillnessCounts = taken == nil
+                // AX may report an intermediate animation frame (481 pt on the way to 480),
+                // or the previous target, before ChatGPT applies this request. Require a quiet
+                // window-server frame instead of treating the first AX/list agreement as final.
+                var settling = WindowFrameSettling()
                 var settled = false
-                var same = 0
                 var last = before
-                let deadline = Date().addingTimeInterval(taken == nil ? 0.5 : 1.0)
-                while Date() < deadline {
+                let started = Date()
+                while Date().timeIntervalSince(started) < 1.2 {
                     let now = WindowSizer.liveBounds(of: p.windowID)
-                    if let now, Self.close(now, dest) { last = now; settled = true; break }
-                    if let now, let taken, Self.close(now, taken) { last = now; settled = true; break }
-                    // Only the old size is suspect: a window the list no longer shows is not waited for.
-                    if let before, now.map({ Self.sameSize($0.size, before.size) }) != true { stillnessCounts = true }
-                    same = (now == last) ? same + 1 : 0
                     last = now
-                    if stillnessCounts, same >= 3 { settled = true; break }
+                    if settling.observe(now, elapsed: Date().timeIntervalSince(started)) {
+                        settled = true
+                        break
+                    }
                     try? await Task.sleep(for: .milliseconds(20))
                 }
                 guard let moved = last ?? WindowSizer.liveBounds(of: p.windowID) else {
@@ -448,8 +443,35 @@ final class VirtualStage {
                 print("Moved \(p.appName) — \(p.title) from \(before.map(Self.fmt) ?? "(unlisted)") to \(Self.fmt(live)) in \(Self.ms(since: t0)) ms (asked \(Self.fmt(dest)))"
                       + (settled ? "" : "; not settled by the deadline"))
             }
+            // Each target gets its own bounded retry budget, including the corrected target
+            // after a virtual-display recreation. A retry used to learn the minimum must not
+            // consume the retry needed to apply the aspect correction.
+            if sizeRetries < 2, !Self.sameSize(dest.size, live.size),
+               correctedAspect || before.map({ Self.sameSize($0.size, live.size) }) == true {
+                sizeRetries += 1
+                print("Window has not accepted requested size; retry \(sizeRetries)/2 at the settled destination.")
+                continue
+            }
+            if !correctedAspect,
+               let adjusted = VirtualDisplaySize.aspectSize(wanted: wanted, accepted: live.size),
+               !Self.sameSize(adjusted, live.size) {
+                correctedAspect = true
+                sizeRetries = 0
+                fitSize = adjusted
+                print("Aspect fit: accepted \(ViewportBounds.whole(live.size)), retrying \(ViewportBounds.whole(adjusted)) for panel \(ViewportBounds.whole(wanted))")
+                if adjusted.width > usable.width || adjusted.height > usable.height {
+                    do { try await ensureDisplay(atLeast: adjusted) }
+                    catch { releaseWindow(); throw error }
+                    placement = p
+                    EmergencySnapshot.set((p.element, p.originalFrame))
+                    catalog.stagedWindowID = p.windowID
+                }
+                continue
+            }
             let oversized = live.width > usable.width + 2 || live.height > usable.height + 2
-            if oversized, attempt == 0 {
+            if oversized, !grewDisplay, attempt < 8 {
+                sizeRetries = 0
+                grewDisplay = true
                 // The app took a bigger size than asked (its minimum). Grow the display to it once;
                 // the window lands on a real display for a moment while the display is recreated.
                 print("\(p.appName) insists on \(ViewportBounds.whole(live.size)) pt (asked \(ViewportBounds.whole(wanted))); growing the virtual display.")
