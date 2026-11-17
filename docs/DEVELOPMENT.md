@@ -55,7 +55,7 @@ Scripts/make-app.sh --install --open
 
 That builds the `SillMenuBar` executable with SwiftPM, wraps it into
 `Sill.app` (bundle ID `me.saffer.sill.mac`, the icon compiled from
-`design/AppIcon.svg`), signs it with your Apple Development identity, quits a
+`Packaging/AppIcon.icon`, the Icon Composer document the iOS app uses too), signs it with your Apple Development identity, quits a
 running Sill (its streamed window goes home first), replaces
 `/Applications/Sill.app` and opens it. Run the same command after every change.
 Without `--install` it only builds `.build/Sill.app`. It will not replace an
