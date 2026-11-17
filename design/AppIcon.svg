@@ -1,48 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"><defs>
-<linearGradient id="i-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a1a1c"></stop><stop offset="1" stop-color="#000000"></stop></linearGradient>
-<linearGradient id="i-gloss" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="0.6"></stop><stop offset="0.4" stop-color="#ffffff" stop-opacity="0.1"></stop><stop offset="1" stop-color="#ffffff" stop-opacity="0"></stop></linearGradient>
-<linearGradient id="i-grey" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c7e86" stop-opacity="0.98"></stop><stop offset="1" stop-color="#4c4e56" stop-opacity="0.96"></stop></linearGradient>
-<filter id="i-blur" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="26"></feGaussianBlur></filter>
-<filter id="i-lift" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="8" flood-color="#000000" flood-opacity="0.35"></feDropShadow></filter>
-<filter id="i-back" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.3"></feDropShadow></filter>
-<clipPath id="i-clip"><rect x="0" y="0" width="1024" height="1024" rx="229"></rect></clipPath>
-<clipPath id="i-imacclip"><rect x="176" y="176" width="672" height="456" rx="60"></rect></clipPath>
-<clipPath id="i-ipadclip"><rect x="316" y="240" width="408" height="300" rx="48"></rect></clipPath>
-</defs>
-<g>
-<!-- layer 1: background -->
-<rect x="0" y="0" width="1024" height="1024" fill="url(#i-bg)"></rect>
-<g transform="translate(0 56)">
-<!-- layer 2: iMac, space grey glass sitting back -->
-<g filter="url(#i-back)">
-<rect x="372" y="672" width="280" height="40" rx="20" fill="url(#i-grey)"></rect>
-<rect x="480" y="630" width="64" height="50" fill="url(#i-grey)"></rect>
-<rect x="176" y="176" width="672" height="456" rx="60" fill="url(#i-grey)"></rect>
-</g>
-<rect x="204" y="204" width="616" height="352" rx="36" fill="#07080a" fill-opacity="0.97"></rect>
-<rect x="176" y="176" width="672" height="456" rx="60" fill="url(#i-gloss)" clip-path="url(#i-imacclip)" opacity="0.5"></rect>
-<rect x="177.5" y="177.5" width="669" height="453" rx="59" fill="none" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3"></rect>
-<!-- layer 3: iPad, solid slate glass in front, tilted -->
-<g transform="rotate(-5 520 392)">
-<rect x="326" y="272" width="388" height="290" rx="48" fill="#000000" fill-opacity="0.5" filter="url(#i-blur)"></rect>
-<g filter="url(#i-lift)">
-<rect x="316" y="240" width="408" height="300" rx="48" fill="#2a2f3a"></rect>
-</g>
-<rect x="342" y="266" width="356" height="248" rx="28" fill="#f7f8fa"></rect>
-<circle cx="520" cy="253" r="5" fill="#6b7079"></circle>
-<!-- layer 4: the streamed window inside the iPad -->
-<rect x="368" y="296" width="304" height="180" rx="20" fill="#ffffff"></rect>
-<rect x="368" y="296" width="304" height="40" rx="20" fill="#9bb7ff"></rect>
-<rect x="368" y="316" width="304" height="20" fill="#9bb7ff"></rect>
-<circle cx="394" cy="316" r="7" fill="#ffffff" fill-opacity="0.7"></circle>
-<circle cx="416" cy="316" r="7" fill="#ffffff" fill-opacity="0.5"></circle>
-<circle cx="438" cy="316" r="7" fill="#ffffff" fill-opacity="0.35"></circle>
-<rect x="394" y="362" width="150" height="14" rx="7" fill="#5a5f6b" fill-opacity="0.9"></rect>
-<rect x="394" y="392" width="210" height="14" rx="7" fill="#5a5f6b" fill-opacity="0.55"></rect>
-<rect x="394" y="422" width="110" height="14" rx="7" fill="#5a5f6b" fill-opacity="0.55"></rect>
-<rect x="316" y="240" width="408" height="300" rx="48" fill="url(#i-gloss)" clip-path="url(#i-ipadclip)" opacity="0.8"></rect>
-<rect x="317.5" y="241.5" width="405" height="297" rx="47" fill="none" stroke="#ffffff" stroke-opacity="0.85" stroke-width="3"></rect>
-</g>
-</g>
-</g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<!-- A flat copy of Packaging/AppIcon.icon (the Icon Composer master, where Liquid Glass is applied),
+     for the website and other places that take a plain picture. Edit the .icon first, then this. -->
+<defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4c8cff"/><stop offset="1" stop-color="#1f38b3"/></linearGradient></defs>
+<rect width="1024" height="1024" fill="url(#bg)"/>
+<g opacity="0.85"><path fill-rule="evenodd" fill="#ffffff" d="M160 214h480a60 60 0 0 1 60 60v280a60 60 0 0 1 -60 60H160a60 60 0 0 1 -60 -60V274a60 60 0 0 1 60 -60ZM164 250h472a28 28 0 0 1 28 28v272a28 28 0 0 1 -28 28H164a28 28 0 0 1 -28 -28V278a28 28 0 0 1 28 -28Z"/><rect x="374.0" y="614" width="52" height="44" fill="#ffffff"/><rect x="310.0" y="654" width="180" height="26" rx="13" fill="#ffffff"/></g>
+<rect x="176" y="294" width="282.48" height="128.04" rx="20" fill="none" stroke="#ffffff" stroke-opacity=".6" stroke-width="10" stroke-dasharray="24 18"/>
+<rect x="406" y="530" width="504" height="234" rx="54" fill="#0c1020"/>
+<path fill-rule="evenodd" fill="#ffffff" d="M460 512h396a72 72 0 0 1 72 72v126a72 72 0 0 1 -72 72H460a72 72 0 0 1 -72 -72V584a72 72 0 0 1 72 -72ZM460 530h396a54 54 0 0 1 54 54v126a54 54 0 0 1 -54 54H460a54 54 0 0 1 -54 -54V584a54 54 0 0 1 54 -54Z"/>
+<rect x="422" y="609.0" width="20" height="76" rx="10" fill="#000000"/>
+<rect x="462" y="550" width="428" height="194" rx="24" fill="#ffffff"/><path d="M486 550h380a24 24 0 0 1 24 24v14.800000000000004H462v-14.800000000000004a24 24 0 0 1 24 -24Z" fill="#ff7a59"/><circle cx="483.6" cy="569.4" r="9.700000000000001" fill="#fff" fill-opacity="0.95"/><circle cx="508.82000000000005" cy="569.4" r="9.700000000000001" fill="#fff" fill-opacity="0.75"/><circle cx="534.0400000000001" cy="569.4" r="9.700000000000001" fill="#fff" fill-opacity="0.55"/><rect x="504.8" y="615.9599999999999" width="235.4" height="13.580000000000002" rx="6.790000000000001" fill="#3b3f4a" fill-opacity="0.55"/><rect x="504.8" y="643.1199999999999" width="321.0" height="13.580000000000002" rx="6.790000000000001" fill="#3b3f4a" fill-opacity="0.32"/><rect x="504.8" y="670.28" width="179.76" height="13.580000000000002" rx="6.790000000000001" fill="#3b3f4a" fill-opacity="0.32"/>
+</svg>
