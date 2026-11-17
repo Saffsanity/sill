@@ -30,11 +30,9 @@
   inside a grey tile. The result is cached in `.build/icon`. Without the
   `.icon`, the script falls back to rendering `AppIcon.svg` with Quick Look
   as the one layer of a generated document.
-- The menu bar glyph (`Sources/SillMenuBar/StatusGlyph.swift`) still draws
-  the old icon's iMac and tilted iPad; it has not followed the new icon yet.
 - `DMGBackground.svg` — the window of Sill.dmg, the Mac download: 660 x 400
   points of white, an arrow from where Sill.app sits (170, 180) to
-  Applications (490, 180) in the app icon's greys, and "To install Sill, drag
+  Applications (490, 180) in the app icon's blues, and "To install Sill, drag
   it to Applications." under them. `Scripts/make-dmg.sh` renders it with Quick
   Look at 1x and 2x into one TIFF and puts the icons on it with a `.DS_Store`;
   moving either icon means changing the SVG's arrow and the script's `--item`
@@ -42,9 +40,14 @@
   every edge white: the window is sized for macOS 27's title bar, so under
   macOS 14's and 15's shorter one it shows 4 points below the picture.
 - The menu bar glyph is drawn in code from the same geometry
-  (`Sources/SillMenuBar/StatusGlyph.swift`): the iMac outline with the tilted
-  iPad, as a template image. `SillMenuBar -SillRenderPreviews <dir>` writes
-  `glyphs.png` with every state on light and dark bars.
+  (`Sources/SillMenuBar/StatusGlyph.swift`): the Mac's screen as an outline
+  (its stand left out) with the sideways iPhone cut out of its lower right
+  corner, the state on the iPhone's screen, as a template image.
+  `SillMenuBar -SillRenderPreviews <dir>` writes `glyphs.png` with every
+  state on light and dark bars.
+- `../site/preview.jpg` — the picture link previews show (1200 × 630). Its
+  icon at the top left is the `.icon`'s macOS look, 55 pixels wide, pasted over
+  the old one; redo that by hand when the icon changes.
 - `screenshots/`: the App Store's iPad screenshots that the README shows, at
   half size (1032 × 1376, JPEG). Open-source app lists link these files, so
   keep their names.
