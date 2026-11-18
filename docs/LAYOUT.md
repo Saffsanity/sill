@@ -771,7 +771,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   `InputOverlay` (direct touch, Pencil, keyboard, scroll momentum; each input
   says what drew this device's pointer; hardware keys through `ForwardedKeys`,
   the characters too while `KeyTyping` says the Mac types them, let go when the
-  overlay stops taking keys; Esc's key commands; the iPad's
+  overlay stops taking keys; Esc's key commands, and on a Mac running the iPad
+  app the ⌘ shortcuts' (#129); the iPad's
   trackpad's and a wheel's scroll pans beside the finger pan, one scroll path
   (`scroll(_:at:translation:velocity:from:)`, a finger's drag in Reverse
   Scrolling's direction, `ScrollDirection`); a `UITextInput` since #138: an
@@ -798,7 +799,8 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   method composes nothing (`composingLatin`: Vietnamese, Hawaiian) with
   nothing composed or latched, else iPadOS's text system (#162's letters); pure,
   `Tests/checks/text-composition`; pbxproj AC0138/FC0138), `HardwareKeyboardPolicy` (when the stream's input
-  view holds the keyboard for a hardware keyboard and when it is the person's
+  view holds the keyboard for a hardware keyboard, a Mac running the iPad app
+  counting as one attached (`isAttached`, #129), and when it is the person's
   own; and `PointerScroll`, where a trackpad's or a wheel's scroll goes, the
   pointer's place as it began, and its readings added up; pure,
   `Tests/checks/hardware-keyboard`; pbxproj AC01/FC01), `DeviceIdlePolicy` (when Sill
@@ -832,7 +834,9 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   hardware key's up after its down, its way (a key, or the text system's)
   decided at the down by `KeyTyping` (`characterUsages`; a letter with Caps Lock
   on carries Shift, `carried`), and Esc's key command sent once beside
-  pressesBegan; `HeldCap`, the portrait key row's esc, tab and arrows down from
+  pressesBegan, and on a Mac running the iPad app the ⌘ shortcuts' (#129:
+  `shortcutCommandKeys`, each character as the key a US keyboard types it with,
+  never ⌘Q); `HeldCap`, the portrait key row's esc, tab and arrows down from
   a finger's touch to its release, so the Mac repeats them (#162); pure,
   `Tests/checks/key-strokes` with the
   host's KeyStrokes), `TrackpadView` (the relative pad: its
