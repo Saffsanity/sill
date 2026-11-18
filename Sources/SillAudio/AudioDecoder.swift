@@ -16,20 +16,21 @@ import Foundation
 /// the signal), its second within −41 dB and its fourth exactly (the plan's probe): the caller drops
 /// the first and fades in the next.
 ///
-/// Threads: every call on one queue; nothing here locks.
-final class AudioDecoder {
-    struct Failure: Error, CustomStringConvertible {
-        let status: OSStatus
-        let step: String
-        var description: String { "\(step) failed (\(status))" }
+/// Threads: every call on one queue; nothing here locks. Public: SillAudio, which SillHostCore and the
+/// iOS app both link.
+public final class AudioDecoder {
+    public struct Failure: Error, CustomStringConvertible {
+        public let status: OSStatus
+        public let step: String
+        public var description: String { "\(step) failed (\(status))" }
     }
 
     /// The codecs this decoder plays, as the wire names them (StreamProtocol's AudioCodec.aacELD).
-    static let codecs = ["aac-eld"]
-    static let sampleRate = 48_000.0
-    static let channels = 2
+    public static let codecs = ["aac-eld"]
+    public static let sampleRate = 48_000.0
+    public static let channels = 2
 
-    let framesPerPacket: Int
+    public let framesPerPacket: Int
 
     private let converter: AudioConverterRef
     private let feed = Feed()
@@ -39,7 +40,7 @@ final class AudioDecoder {
 
     /// A decoder for AAC-ELD at 48 kHz stereo, `framesPerPacket` frames a packet, with the encoder's
     /// magic cookie (its AudioSpecificConfig).
-    init(framesPerPacket: Int, cookie: Data) throws {
+    public init(framesPerPacket: Int, cookie: Data) throws {
         guard (1...8192).contains(framesPerPacket) else { throw Failure(status: -50, step: "the packet size") }
         var input = AudioStreamBasicDescription()
         input.mFormatID = kAudioFormatMPEG4AAC_ELD
@@ -78,7 +79,7 @@ final class AudioDecoder {
 
     /// One packet's frames, a buffer per channel: `framesPerPacket` of them from a packet the decoder
     /// can use. Nil when the converter made nothing (a packet it refused).
-    func decode(_ packet: Data) -> (left: [Float], right: [Float])? {
+    public func decode(_ packet: Data) -> (left: [Float], right: [Float])? {
         guard !packet.isEmpty else { return nil }
         return packet.withUnsafeBytes { bytes -> (left: [Float], right: [Float])? in
             feed.packet = bytes.baseAddress
@@ -97,7 +98,7 @@ final class AudioDecoder {
     }
 
     /// The next packet decodes as on a fresh decoder (a new segment, the packet after a gap).
-    func reset() {
+    public func reset() {
         AudioConverterReset(converter)
     }
 

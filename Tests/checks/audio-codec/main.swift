@@ -1,9 +1,9 @@
 import Foundation
 
-// H4 of docs/audio-plan.md: the host's encoder and the device's decoder in memory, with the host's
-// packetizer and the test tone between them, and nothing but AudioToolbox:
-//   swiftc -O Sources/SillHost/AudioEncoder.swift Sources/SillHost/AudioPacketizer.swift Sources/SillHost/TestTone.swift \
-//       iOSClient/AudioDecoder.swift Tests/checks/audio-codec/main.swift -o check
+// H4 of docs/audio-plan.md: the host's encoder and the device's decoder in memory (both SillAudio's),
+// with the packetizer and the host's test tone between them, and nothing but AudioToolbox:
+//   swiftc -O Sources/SillAudio/AudioEncoder.swift Sources/SillAudio/AudioPacketizer.swift Sources/SillHost/TestTone.swift \
+//       Sources/SillAudio/AudioDecoder.swift Tests/checks/audio-codec/main.swift -o check
 // The tone goes through the packetizer and the encoder in capture-sized chunks (480 and 1024 frames),
 // each packet is decoded at once, and every decoded sample is placed by its packet's stamp (the host
 // time of the frame it decodes to first): each click must land at its whole second ±2 frames, a

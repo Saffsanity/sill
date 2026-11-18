@@ -3,7 +3,8 @@ import Foundation
 
 /// The Mac's sound as AAC-ELD (docs/audio-plan.md §4.4): 48 kHz stereo Float32 in, one packet of
 /// 480 or 512 frames out per block, at 128 kbps. AudioToolbox only (no CoreMedia, no AVFoundation),
-/// so the encoder-free harness (Scripts/audio) and the `audio-codec` check link it.
+/// so the encoder-free harness (Scripts/audio) and the `audio-codec` check link it. Public: SillAudio,
+/// which SillHostCore and the iOS app both link.
 ///
 /// One block in is one packet out: the converter takes exactly a packet's frames of new input for
 /// each packet it makes, and delays its output by its priming (`priming`, 240 or 256 frames): packet
@@ -13,11 +14,11 @@ import Foundation
 /// probe, rerun on this Mac at the start of this step (H0).
 ///
 /// Threads: every call on one queue (the pipeline's `sill.audio`); nothing here locks.
-final class AudioEncoder {
-    struct Failure: Error, CustomStringConvertible {
-        let status: OSStatus
-        let step: String
-        var description: String { "\(step) failed (\(status)\(Self.fourCC(status)))" }
+public final class AudioEncoder {
+    public struct Failure: Error, CustomStringConvertible {
+        public let status: OSStatus
+        public let step: String
+        public var description: String { "\(step) failed (\(status)\(Self.fourCC(status)))" }
         /// OSStatus values that are four printable characters ('fmt?') read better that way.
         private static func fourCC(_ s: OSStatus) -> String {
             let v = UInt32(bitPattern: s)
@@ -27,18 +28,18 @@ final class AudioEncoder {
         }
     }
 
-    static let sampleRate = 48_000.0
-    static let channels = 2
-    static let bitrate = 128_000
+    public static let sampleRate = 48_000.0
+    public static let channels = 2
+    public static let bitrate = 128_000
 
     /// The frames each packet decodes to (the converter's own figure, read back).
-    let framesPerPacket: Int
+    public let framesPerPacket: Int
     /// The codec's delay: the decoded frames a segment starts with that are not input.
-    let priming: Int
+    public let priming: Int
     /// The magic cookie (AAC-ELD's AudioSpecificConfig), which the device's decoder needs.
-    let cookie: Data
+    public let cookie: Data
     /// The encoder's target, bits per second, as it reads back.
-    let bitrate: Int
+    public let bitrate: Int
 
     private let converter: AudioConverterRef
     private let maxPacketBytes: Int
@@ -47,7 +48,7 @@ final class AudioEncoder {
 
     /// A converter from interleaved stereo Float32 at 48 kHz to AAC-ELD at 48 kHz, `framesPerPacket`
     /// (480 or 512) frames a packet, `bitrate` bits a second.
-    init(framesPerPacket: Int, bitrate: Int = AudioEncoder.bitrate) throws {
+    public init(framesPerPacket: Int, bitrate: Int = AudioEncoder.bitrate) throws {
         let ch = UInt32(Self.channels)
         var input = AudioStreamBasicDescription(mSampleRate: Self.sampleRate, mFormatID: kAudioFormatLinearPCM,
                                                 mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
@@ -114,7 +115,7 @@ final class AudioEncoder {
     /// One packet for exactly one block: `framesPerPacket` frames of interleaved stereo Float32.
     /// Nil for a block of another size, or when the converter makes nothing (it never has, in the
     /// probe or the checks).
-    func encode(_ block: [Float]) -> Data? {
+    public func encode(_ block: [Float]) -> Data? {
         guard block.count == framesPerPacket * Self.channels else { return nil }
         return block.withUnsafeBufferPointer { samples -> Data? in
             feed.samples = UnsafeRawPointer(samples.baseAddress)
@@ -134,7 +135,7 @@ final class AudioEncoder {
 
     /// A new segment: what the converter holds (a partial packet's input and its lookahead) is
     /// dropped, and the next packet starts with the codec's priming again.
-    func reset() {
+    public func reset() {
         AudioConverterReset(converter)
     }
 
