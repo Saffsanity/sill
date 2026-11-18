@@ -6,7 +6,8 @@ nothing touches the hardware encoder, the router, ScreenCaptureKit or this Mac's
 folder under OUT), pairs a test client by the host's link, and drives Scripts/sillclient.py's --send-file, --raw49,
 --raw34 and --cancel-files against it. Every host runs under a minute. Prints a verdict per rule; exits 1 on any FAIL.
 
-    python3 Scripts/files-check/live.py OUT [send|refuse|hostile|lock|all]"""
+    python3 Scripts/files-check/live.py OUT [send|refuse|hostile|lock|all]
+    python3 Scripts/files-check/live.py OUT h2 --base=MAIN_SILLHOST   H2: the CLI's stdout against main's (about 75 s)"""
 import hashlib, json, os, random, re, shutil, signal, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -281,13 +282,45 @@ def case_hostile(out):
         h.stop()
 
 
+def case_h2(out, base):
+    """H2: the CLI's stdout is what main's was, idle and with a client that picks the Desktop and sends no file.
+    BASE is main's .build/release/SillHost (built from `git archive origin/main`)."""
+    print("== h2: the CLI's stdout, this branch's against main's", flush=True)
+    if not base or not os.path.exists(base): verdict(False, f"h2 needs main's SillHost: --base=PATH (got {base!r})"); return
+    def run(binary, label):
+        env = dict(os.environ); env.update({k: v for k, v in BASE_ENV.items() if k != "SILL_TEST_FILES_LOG"})
+        p = subprocess.Popen(["nice", "-n", "10", binary, "--synthetic"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
+                             start_new_session=True, text=True)
+        port = None
+        for _ in range(100):
+            time.sleep(0.1)
+            r = subprocess.run(["lsof", "-nP", "-a", "-p", str(p.pid), "-iTCP", "-sTCP:LISTEN"], capture_output=True, text=True)
+            ports = re.findall(r"127\.0\.0\.1:(\d+) \(LISTEN\)", r.stdout)
+            if ports: port = ports[0]; break
+        time.sleep(20)
+        if port: subprocess.run([sys.executable, "-I", CLIENT, port, "15", "desktop"], capture_output=True, text=True, timeout=60,
+                                env={**os.environ, **BASE_ENV})
+        time.sleep(15)
+        os.killpg(p.pid, signal.SIGTERM)
+        text = p.communicate(timeout=10)[0]
+        open(os.path.join(out, f"h2-{label}.log"), "w").write(text)
+        mask = lambda l: re.sub(r"\d+(\.\d+)?", "N", re.sub(r"(/[^\s]+)+", "PATH", l))
+        return sorted(set(mask(l) for l in text.splitlines() if l.strip()))
+    mine, theirs = run(HOST, "branch"), run(base, "main")
+    extra = [l for l in mine if l not in theirs]
+    missing = [l for l in theirs if l not in mine]
+    verdict(not extra and not missing, f"the same lines, masked: {len(extra)} new ({extra[:2]}), {len(missing)} gone ({missing[:2]})")
+
+
 def main():
     if len(sys.argv) < 2: raise SystemExit(__doc__)
     out = os.path.abspath(sys.argv[1]); os.makedirs(out, exist_ok=True)
     which = sys.argv[2] if len(sys.argv) > 2 else "all"
+    base = next((a.partition("=")[2] for a in sys.argv[3:] if a.startswith("--base=")), None)
     if not os.path.exists(HOST): raise SystemExit(f"no {HOST}: swift build -c release first")
     for name, case in [("send", case_send), ("refuse", case_refuse), ("hostile", case_hostile), ("lock", case_lock)]:
         if which in (name, "all"): case(out)
+    if which == "h2": case_h2(out, base)
     failed = [w for ok, w in verdicts if not ok]
     print(f"files-check: {len(verdicts) - len(failed)} of {len(verdicts)} rules hold")
     sys.exit(1 if failed else 0)
