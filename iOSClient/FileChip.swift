@@ -11,15 +11,21 @@ struct FileChip: View {
 
     private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
 
-    /// What the chip shows now: nil when nothing.
+    /// Whether the chip shows: a transfer, its end, or a file shared into Sill, asked about while the session
+    /// takes files and said why not while it cannot (an older Sill, its switch off, not paired). A locked Mac's
+    /// cover says why on its own.
     static func shows(_ client: StreamClient) -> Bool {
-        (client.filesShared != nil && client.filesOffering == .yes) || client.fileOut != nil
+        client.fileOut != nil || (client.filesShared != nil && client.filesOffering != .hidden)
     }
 
     var body: some View {
         ZStack(alignment: .trailing) {
             if let shared = client.filesShared, client.filesOffering == .yes, !OutgoingFiles.holdsMoves(client.fileOut) {
                 question(shared)
+                    .transition(.opacity)
+            } else if let shared = client.filesShared, [.older, .off, .notPaired].contains(client.filesOffering),
+                      let why = DeviceFilesCopy.footnote(client.filesOffering, mac: mac, device: StreamClient.deviceWord) {
+                blocked(shared, why)
                     .transition(.opacity)
             } else if let out = client.fileOut {
                 if out.isOver { result(out).transition(.opacity) } else { running(out).transition(.opacity) }
@@ -95,6 +101,34 @@ struct FileChip: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(DeviceFilesCopy.title(out, mac: mac, device: StreamClient.deviceWord))
         .accessibilityAddTraits(.isStaticText)
+    }
+
+    /// A shared file this session cannot send: why (the rows' footnote's words), and Cancel.
+    private func blocked(_ shared: FilesShared, _ why: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color.orange)
+                .accessibilityHidden(true)
+            Text(why)
+                .font(.footnote)
+                .foregroundStyle(Palette.text)
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(-1)
+            Button(action: { client.cancelShared() }) {
+                Image(systemName: "xmark")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Palette.muted)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Don’t send \(DeviceFilesCopy.what(shared.names))")
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 6)
+        .padding(.vertical, 6)
+        .chipBackground()
+        .accessibilityElement(children: .contain)
     }
 
     private func question(_ shared: FilesShared) -> some View {
