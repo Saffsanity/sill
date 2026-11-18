@@ -765,6 +765,8 @@ eq(DC.announcement(shot(.offering), mac: "Mac mini", device: "iPad"), "Sending â
 eq(DC.announcement(shot(.sending), mac: "Mac mini", device: "iPad"), nil, "not while it runs")
 check(DC.announcement(shot(.stopped(reason: "lost", message: nil, byPeer: false, name: nil)), mac: "Mac mini", device: "iPad") != nil, "announced at a stop")
 check(shot(.sending).isOver == false && shot(.stopped(reason: "lost", message: nil, byPeer: false, name: nil)).isOver, "isOver")
+check(!OutgoingFiles.holdsMoves(nil) && OutgoingFiles.holdsMoves(shot(.preparing)) && OutgoingFiles.holdsMoves(shot(.finishing))
+      && !OutgoingFiles.holdsMoves(shot(.done(.done(transfer: 1, kept: [], place: "x")))), "the session's moves wait while a transfer runs, and only then")
 
 print("files: \(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

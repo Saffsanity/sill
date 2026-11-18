@@ -125,6 +125,22 @@ enum DeviceFilesCopy {
 
     static let cancel = "Cancel"
     static let cancelSpoken = "Cancel sending"
+    static let send = "Send"
+    /// The Files rows' row while a transfer runs.
+    static let stopSending = "Stop Sending"
+
+    /// The Settings panel's line under the Files rows while a transfer runs or just ended: the chip's words
+    /// on one line ("Sending “a.pdf” to Mac mini · 42%").
+    static func panelLine(_ s: OutgoingFiles, mac: String, device: String) -> String {
+        title(s, mac: mac, device: device) + (detail(s, mac: mac).map { " · " + $0 } ?? "")
+    }
+
+    // MARK: A file shared into Sill
+
+    /// The chip's question while a session takes files.
+    static func sendShared(_ names: [String], mac: String) -> String { "Send \(what(names)) to \(mac)?" }
+    /// The connect screen's line while none does.
+    static func sharedWaits(_ names: [String]) -> String { "Connect to a Mac to send \(what(names))." }
 
     /// How long a transfer's end stays on the chip.
     static let resultLifetime = 6.0
@@ -171,4 +187,9 @@ struct OutgoingFiles: Equatable {
         if case .done = phase { return 1 }
         return total == 0 ? 0 : min(1, Double(acked) / Double(total))
     }
+
+    /// Whether the session's own moves wait (from Direct Wireless to the network, up to the cable, home from
+    /// away; docs/files-plan.md §8.5): while a transfer runs, since it belongs to the connection it was
+    /// offered on and a move would end it. A move off a path that is gone never waits.
+    static func holdsMoves(_ out: OutgoingFiles?) -> Bool { out.map { !$0.isOver } ?? false }
 }

@@ -959,6 +959,29 @@ final class StreamClient: ObservableObject {
     /// Mac takes and sends (`WindowList.clipboard`, 1 for text), nil from a Mac before it or with Share
     /// clipboard with devices off. Cleared with the session.
     @Published var hostClipboard: Int?
+    /// Files and photos (StreamClient+Files, docs/files-plan.md): what this session's Mac does with files
+    /// (`WindowList.files`: 0 its switch off, 1 it takes them from a paired device, 2 it also gives them),
+    /// nil from a Mac before it, from the CLI's plain door and while the Mac is locked. Cleared with the
+    /// session.
+    @Published var hostFiles: Int?
+    /// This device's transfer to the Mac as the chip and the Files rows show it (DeviceFiles), kept for
+    /// `DeviceFilesCopy.resultLifetime` after it ends.
+    @Published var fileOut: OutgoingFiles?
+    /// A file shared into Sill from another app, waiting for the person's Send (StreamClient+Files).
+    @Published var filesShared: FilesShared?
+    var fileOutExpiry: DispatchWorkItem?
+    var filesSharedExpiry: DispatchWorkItem?
+    /// While a transfer runs: the background task that lets it go on for a while after Sill leaves the screen.
+    var filesBackgroundTask: UIBackgroundTaskIdentifier = .invalid
+    /// When this session's transfer last moved (systemUptime): the device's auto-lock stays off meanwhile
+    /// (DeviceIdlePolicy.Uses.transfer).
+    var lastFileProgressAt: Double?
+    /// The device's sender, on this client's link (DeviceFiles): made in init on the main thread.
+    private(set) lazy var deviceFiles: DeviceFiles = {
+        let files = DeviceFiles(link: link)
+        files.onSnapshot = { [weak self] s in DispatchQueue.main.async { self?.fileSnapshot(s) } }
+        return files
+    }()
     /// Why this session's Mac shows nothing of itself (`WindowList.locked`, `offConsole`;
     /// docs/locked-mac-plan.md): its screen is locked, or it is switched to another user. Its lists have no
     /// windows then, it streams a black placeholder, and the Apps drawer and the Settings panel's header
@@ -1140,6 +1163,8 @@ final class StreamClient: ObservableObject {
         }
         // The clipboard's chip looks when Sill becomes active (StreamClient+Clipboard).
         observeClipboardActivation()
+        // Files and photos (StreamClient+Files): the sender exists before any connection reads a kind 49.
+        _ = deviceFiles
         sound.setMuted(soundMuted)
         sound.onRouteMuted = { [weak self] in self?.headphonesOut() }
         // The picture's window going away and coming back (KeyframeRecovery).
@@ -2226,6 +2251,8 @@ final class StreamClient: ObservableObject {
         moveCheck = nil
         guard connected, connectedDirectly, sessionListed, moving == nil, connection != nil,
               let mac = macs.first(where: { $0.name == hostName && $0.route == .network }) else { return }
+        // A transfer of files belongs to this connection: the move waits for its end (`filesMovesResume`).
+        guard !OutgoingFiles.holdsMoves(fileOut) else { return }
         let now = ProcessInfo.processInfo.systemUptime
         let decision = DiscoveryPolicy.moveToNetwork(listedSince: sightings.since[mac.name], lastAttempt: lastMoveAttempt,
                                                      refusedListing: refusedListing, now: now)
@@ -2296,6 +2323,8 @@ final class StreamClient: ObservableObject {
         homeMoveRows = homeMoveRows.keeping(listed: Set(macs.filter { $0.route == .network }.map(\.id)))
         guard connected, let s = session, s.route.isRemote, s.why != .connectRemotely, sessionListed, moving == nil, !sessionDead,
               connection != nil, homeInfo.latest != nil, let id = s.macID, let saved = savedMac(id) else { return }
+        // A transfer of files belongs to this connection: the move home waits for its end.
+        guard !OutgoingFiles.holdsMoves(fileOut) else { return }
         // Every network row whose tag names the session's saved Mac, by row: one not refused, at a door
         // that speaks TLS, dialed pinned to the saved Mac's key, never plain, never an ask (a plain door
         // is passed over; a Mac that removed this device or has a new key keeps the session remote).
@@ -2973,6 +3002,8 @@ final class StreamClient: ObservableObject {
             }
         case .moveTo(.wired, let interface):
             guard let mac = macs.first(where: { $0.name == hostName && $0.route == .network }), let wired = wiredDial(for: mac) else { return }
+            // A move up while a transfer of files runs waits for its end; a path gone never waits.
+            guard !OutgoingFiles.holdsMoves(fileOut) else { return }
             #if DEBUG
             lastKept = nil
             print(input.upFailures > 0 ? "path: the cable is still listed: moving the session to \(interface) again (\(input.upFailures) did not complete)"
@@ -2989,6 +3020,14 @@ final class StreamClient: ObservableObject {
         case .moveTo(.direct, _):
             break   // never planned: nothing moves a session to Direct
         }
+    }
+
+    /// A transfer of files ended: the moves it held (`OutgoingFiles.holdsMoves`) look again. Main thread.
+    func filesMovesResume() {
+        guard connected else { return }
+        moveToNetworkIfListed()
+        followBestPath()
+        moveHomeIfListed()
     }
 
     /// The session as DiscoveryPolicy.pathPlan reads it. Main thread.
@@ -3801,6 +3840,8 @@ final class StreamClient: ObservableObject {
         sound.sessionEnded()
         // Nor the clipboard's subscription, its chip or its note.
         resetClipboard()
+        // Nor a transfer of files: it ends `lost`, and the Mac deletes what it had of it.
+        filesSessionEnded()
     }
 
     /// The cover over the stream (a locked Mac, `LockedMac.Shade`): set, and "Unlocking…" given
@@ -4449,6 +4490,8 @@ final class StreamClient: ObservableObject {
                 #endif
                 // The clipboard: subscribe (or stop) as the Mac's word and this device's switch say.
                 self.hostClipboardChanged(list.clipboard)
+                // Files and photos: what the rows and the share sheet's question offer.
+                self.hostFilesChanged(list.files)
                 if !self.sessionListed {
                     self.sessionListed = true
                     #if DEBUG
@@ -4605,6 +4648,11 @@ final class StreamClient: ObservableObject {
                 guard self.connection === from else { return }
                 self.receiveClipboard(data)
             }
+        case .fileTransfer:
+            // A transfer of this device's (StreamClient+Files, DeviceFiles): the Mac's answer, its
+            // acknowledgements, its `done` or a cancel, for the transfer on this connection only.
+            guard let t = FileTransfer.parse(data), let from = connection else { return }
+            deviceFiles.received(t, from: from)
         case .macMenu:
             // The Mac's menus: a top level, or the answer to one of this connection's kind 27s or 25s
             // (MacMenuState). One that does not decode is dropped: its completion times out.
@@ -4780,6 +4828,7 @@ extension StreamClient {
         if !refused.isEmpty { settingsRefusals += 1 }
         scheduleSettingsExpiry()
         rememberDirectWireless(state)
+        updateFilesContext()
         #if DEBUG
         logLink(from: linkBefore, to: state.link)
         #endif

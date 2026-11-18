@@ -108,6 +108,9 @@ eq(P.lastUse(Uses(input: 5, control: 9, session: 3, front: 1)), 9, "the latest o
 eq(P.lastUse(Uses(input: 9, control: 5, session: 3, front: 1)), 9, "the latest of the four: input")
 eq(P.lastUse(Uses(input: 1, control: 5, session: 9, front: 3)), 9, "the latest of the four: a session's start")
 eq(P.lastUse(Uses(input: 1, control: 5, session: 3, front: 9)), 9, "the latest of the four: the front")
+eq(P.lastUse(Uses(input: nil, control: nil, session: nil, front: nil, transfer: 4)), 4, "a transfer's progress alone (files)")
+eq(P.lastUse(Uses(input: 1, control: 5, session: 3, front: 2, transfer: 9)), 9, "the latest of the five: a transfer's progress")
+eq(P.lastUse(Uses(input: 9, control: 5, session: 3, front: 2, transfer: 4)), 9, "a transfer's older progress leaves the latest")
 eq(P.sessionStart(previous: nil, reconnected: false, now: 50), 50,
    "a session the person started (a tap, Connect Remotely, a pairing): its start counts")
 eq(P.sessionStart(previous: 10, reconnected: false, now: 50), 50, "a new one the person started counts from its own start")

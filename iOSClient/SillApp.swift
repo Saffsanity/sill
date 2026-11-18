@@ -5,6 +5,11 @@ struct SillApp: App {
     /// Only `buildMenu(with:)`: the Mac's menus in the iPad's menu bar on iPadOS 26 (SillAppDelegate).
     @UIApplicationDelegateAdaptor(SillAppDelegate.self) var appDelegate
 
+    init() {
+        // What a quit left of the files waiting to go to a Mac (Sill's own copies: DeviceFiles.outbox).
+        DeviceFiles.cleanOutbox()
+    }
+
     var body: some Scene {
         WindowGroup {
             // iOS 27.1 on the iPhone Duo: the hinge for the layouts (DuoPostureReader); nothing

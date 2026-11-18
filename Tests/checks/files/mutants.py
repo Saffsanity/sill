@@ -127,6 +127,8 @@ M = [
     ("the person's own Cancel as a warning", DW, "return !(reason == FileReason.cancelled.rawValue && !byPeer)", "return true"),
     ("a folder said as a read failure", DW, "        if reason == folderReason {", "        if reason == folderReason && false {"),
     ("no announcement at the start", DW, '        case .offering: return "Sending \\(what(s.names)) to \\(mac)."\n', ""),
+    ("moves never wait for a transfer", DW, "static func holdsMoves(_ out: OutgoingFiles?) -> Bool { out.map { !$0.isOver } ?? false }",
+     "static func holdsMoves(_ out: OutgoingFiles?) -> Bool { false }"),
     ("a fraction past 1", DW, "return total == 0 ? 0 : min(1, Double(acked) / Double(total))", "return total == 0 ? 0 : Double(acked) / Double(total) * 1.01"),
 ]
 sys.exit(0 if module.mutate("files", M, sys.argv[1]) else 1)

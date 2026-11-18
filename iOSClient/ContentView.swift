@@ -1500,6 +1500,25 @@ struct ConnectScreen: View {
             .padding(.horizontal, 10)
             .padding(.bottom, 4)
 
+        // A file shared into Sill (StreamClient+Files) waits for a session that takes files: once there is one,
+        // the stream's chip asks to send it; until then this line says so, with Cancel.
+        if let shared = client.filesShared, !client.connected {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "square.and.arrow.up").foregroundStyle(Palette.muted).accessibilityHidden(true)
+                Text(DeviceFilesCopy.sharedWaits(shared.names))
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Button(DeviceFilesCopy.cancel) { client.cancelShared() }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Palette.accent)
+                    .accessibilityLabel("Don’t send \(DeviceFilesCopy.what(shared.names))")
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 6)
+        }
+
         // A Mac that no longer serves this version said so (GoodbyePolicy's "update", its words the
         // status line above): where to get the new one, while the status line still says why. Not
         // before Sill's App Store address is known (SillLinks): the words say what to do anyway.
