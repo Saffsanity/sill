@@ -80,10 +80,11 @@ enum ModifierLock {
     /// How long a finger stays on a modifier's cap before it locks ("about one second", #268).
     static let holdSeconds = 1.0
 
-    /// Hold to Lock Modifiers, this device's switch (Settings › This iPad › Keys): off unless turned on.
-    /// Off, a finger held on a modifier's cap is a tap, as before the lock, and VoiceOver offers no lock.
-    /// The device's own preference, never sent to the Mac.
+    /// Hold to Lock Modifiers, this device's switch (Settings › This iPad › Keys): off unless turned on
+    /// (`defaultOn`). Off, a finger held on a modifier's cap is a tap, as before the lock, and VoiceOver
+    /// offers no lock. The device's own preference, never sent to the Mac.
     static let switchKey = "Sill.holdToLockModifiers"
+    static let defaultOn = false
 
     /// A tap on `flag`'s cap: a locked modifier is let go; any other latches, or unlatches.
     static func tapped(_ flag: KeyModifiers, latched: KeyModifiers, locked: KeyModifiers)

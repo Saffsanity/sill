@@ -2740,6 +2740,7 @@ do {
 
     // Hold to Lock Modifiers turned off: every lock let go whole, a tapped latch kept for its one use.
     check(ModifierLock.switchKey == "Sill.holdToLockModifiers", "the switch is stored as Sill.holdToLockModifiers: \(ModifierLock.switchKey)")
+    check(ModifierLock.defaultOn == false, "Hold to Lock Modifiers is off unless turned on")
     let off = ModifierLock.switchedOff(latched: [cmd, sft, opt], locked: [cmd, opt])
     check(off.latched == sft && off.locked == [], "the switch off: ⌘ and ⌥ let go, the tapped ⇧ kept: \(off)")
     let offNone = ModifierLock.switchedOff(latched: ctl, locked: [])

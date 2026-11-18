@@ -1025,7 +1025,7 @@ private struct KeyRow: View {
     @State private var heldCap = HeldCap()
     /// Hold to Lock Modifiers (Settings › This iPad › Keys; ModifierLock.switchKey): off unless turned on.
     /// Off, the modifiers' caps act on their tap alone, as before the lock, and VoiceOver offers no lock.
-    @AppStorage(ModifierLock.switchKey) private var holdToLock = false
+    @AppStorage(ModifierLock.switchKey) private var holdToLock = ModifierLock.defaultOn
     /// The fingers on the modifiers' caps (ModifierHold): whether a hold locked, so the action as its finger
     /// lifts is the hold's end and not a tap, each cap on its own.
     @State private var modifierHold = ModifierHold()

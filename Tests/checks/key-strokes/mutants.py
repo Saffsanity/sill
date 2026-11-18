@@ -280,6 +280,7 @@ MUTANTS = [
     ("a use never spends", CHORDS, "latched.subtracting(locked).isEmpty ? nil : spent(locked: locked)", "nil"),
     # Hold to Lock Modifiers, the switch
     ("the switch stored under another name", CHORDS, 'static let switchKey = "Sill.holdToLockModifiers"', 'static let switchKey = "Sill.holdToLock"'),
+    ("the switch on unless turned off", CHORDS, "static let defaultOn = false", "static let defaultOn = true"),
     ("the switch off keeps the locks", CHORDS, "(latched.subtracting(locked), [])", "(latched.subtracting(locked), locked)"),
     ("the switch off leaves a lock latched for one more use", CHORDS, "(latched.subtracting(locked), [])", "(latched, [])"),
     ("the switch off drops a tapped latch too", CHORDS, "(latched.subtracting(locked), [])", "([], [])"),

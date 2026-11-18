@@ -70,7 +70,7 @@ struct HostSettingsPanel: View {
     @AppStorage(StreamClient.reverseScrollKey) private var reverseScroll = false
     /// This device's Hold to Lock Modifiers (#268; ModifierLock.switchKey): off unless turned on, read by the
     /// key row's modifier caps (a hold locks), never sent; turned off, the stream screen lets every lock go.
-    @AppStorage(ModifierLock.switchKey) private var holdToLock = false
+    @AppStorage(ModifierLock.switchKey) private var holdToLock = ModifierLock.defaultOn
     /// This device's switch for Picture in Picture (#291, docs/picture-in-picture-plan.md): off unless turned
     /// on (`PictureInPicturePolicy.defaultOn`), read by PictureInPictureHub, never sent.
     @AppStorage(StreamClient.pictureInPictureKey) private var pictureInPicture = PictureInPicturePolicy.defaultOn

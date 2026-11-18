@@ -211,7 +211,7 @@ struct StreamScreen: View {
     @State private var locked: KeyModifiers = []
     /// Hold to Lock Modifiers (Settings › This iPad › Keys; ModifierLock.switchKey): turned off, every lock
     /// is let go (ModifierLock.switchedOff).
-    @AppStorage(ModifierLock.switchKey) private var holdToLock = false
+    @AppStorage(ModifierLock.switchKey) private var holdToLock = ModifierLock.defaultOn
     /// The bar's Keyboard button drives the overlay's first responder through this.
     @State private var overlay = InputOverlayProxy()
     /// The Aa control's text scale, device points per Mac point; nil means the Mac window has never
