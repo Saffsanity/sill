@@ -137,7 +137,7 @@ enum MockCatalog {
             }
         }
         // The clipboard (docs/clipboard-plan.md): `-SillClipboardChip 1` offers the chip over the
-        // stream (as after a copy on this device), and `-SillClipboardNote sent|long|notsent|pasted` shows a
+        // stream (as after a copy on this device), and `-SillClipboardNote sent|long|notsent|pasted|sending|unreadable` shows a
         // Paste's note in its place and under the Settings group's Paste (`pasted`: with ⌘V, paste right
         // away); neither goes away by itself here.
         if ClipboardPolicy.hostTakes(client.hostClipboard) {
@@ -155,6 +155,12 @@ enum MockCatalog {
             case "pasted":
                 let note = ClipboardPolicy.receiptNote(pasted: true, mac: "Mac mini")
                 client.clipboardNote = ClipboardNote(text: note.text, spoken: note.spoken, warning: false, at: 0)
+            case "sending":
+                client.clipboardNote = ClipboardNote(text: ClipboardPolicy.Copy.sending(mac: "Mac mini"),
+                                                     spoken: ClipboardPolicy.Copy.sendingSpoken(mac: "Mac mini"), warning: false, at: 0)
+            case "unreadable":
+                client.clipboardNote = ClipboardNote(text: ClipboardPolicy.Copy.imageUnreadable, spoken: ClipboardPolicy.Copy.imageUnreadable,
+                                                     warning: true, at: 0)
             default:
                 break
             }

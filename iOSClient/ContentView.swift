@@ -256,7 +256,7 @@ struct ContentView: View {
 ///   its clipboard (`WindowList.clipboard` 2, text and images) in every settings case but `legacy`, whose
 ///   group then has no clipboard rows; `-SillMockClipboard 1` makes it a Mac that shares text alone (one
 ///   before images, or with its Include images off: no Include Images row). `-SillClipboardChip 1` offers the clipboard's chip over the mock's stream (as
-///   after a copy on this device; it stays; `-SillMockMacName <name>` gives the mock Mac another name), and `-SillClipboardNote sent|long|notsent|pasted` shows a
+///   after a copy on this device; it stays; `-SillMockMacName <name>` gives the mock Mac another name), and `-SillClipboardNote sent|long|notsent|pasted|sending|unreadable` shows a
 ///   Paste's note in its place and under the group's Paste (`pasted`: "Pasted on ‹Mac›.", the note
 ///   after ⌘V; docs/clipboard-plan.md).
 /// * `-SillMacLocked 1|2|unlocking|view` — the mock Mac's screen is locked (1) or it is switched to another
