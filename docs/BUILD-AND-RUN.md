@@ -528,8 +528,8 @@ simulator photographs it (`phone` the other way round; the normal app too).
 `-Sill.arrowKeys 1` turns an iPhone's Arrow Keys on for one run (in the normal app
 too; #287, PhoneKeyRow): the phone's key row upright adds ← ↓ ↑ → after shift and
 scrolls sideways, `-SillKeyScroll end` starting it scrolled to the arrows, and
-`-SillSettingsScroll keys` opens the Settings panel at its Keys group (an
-iPhone's; `-SillIdiom pad` has none).
+`-SillSettings 1 -SillSettingsScroll keys` shows the Settings panel at its Keys
+group (an iPhone's; `-SillIdiom pad` has none).
 `-SillInputTest 1`, with `-SillConnect` on this Mac's loopback: once, the
 portrait key row taps cmd, esc, shift and ctrl through its caps' action, then
 the trackpad checks that a touch at its centre lands on it, strokes, taps with
