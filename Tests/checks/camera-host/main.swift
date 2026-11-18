@@ -209,6 +209,19 @@ do {
     r.on(.format(2, stop))
     check(r.p.holder == "A", "B stops: A, whose offer was only said again (no claim), takes it")
 }
+do {
+    // A claim refreshes an offer's place: A, then B, then A again, then C; C stops: A, turned on after B.
+    var r = Run()
+    r.ready()
+    r.on(.appChanged(faceTime))
+    r.join(1, key: "A"); r.join(2, key: "B"); r.join(3, key: "C")
+    r.on(.format(1, offer), after: 1)
+    r.on(.format(2, claim), after: 1)
+    r.on(.format(1, claim), after: 1)
+    r.on(.format(3, claim), after: 1)
+    r.on(.format(3, stop))
+    check(r.p.holder == "A", "A turned on again after B: A takes the freed camera")
+}
 
 // MARK: - Moves, leaves, removals: the grace
 
@@ -336,6 +349,45 @@ do {
     check(r.p.wanted(1) && demands(on).first?.1.keyframe == true, "on again: wanted, a keyframe asked")
     r.on(.readyChanged(false))
     check(r.p.state(of: 1) == CameraState(state: CameraState.notReady) && !r.p.wanted(1), "Sill Camera gone: notReady")
+}
+
+// MARK: - The TEST ONLY hook (CameraTestHook): a test host's Sill Camera
+
+do {
+    typealias H = CameraTestHook
+    check(H.read(testHost: true, environment: [:]) == (nil, nil), "nothing set: no hook, no line (every output as it was)")
+    check(H.read(testHost: true, environment: [H.demandVariable: "1 on 640x360@30"]).line == "SILL_TEST_CAMERA_DEMAND ignored: it needs SILL_TEST_CAMERA.",
+          "a script without the camera: one line")
+    let refused = H.read(testHost: false, environment: [H.variable: "count"])
+    check(refused.hook == nil && refused.line == "SILL_TEST_CAMERA ignored: only a --synthetic test host takes it, never Sill.app.",
+          "not a test host (Sill.app, a host that advertises): ignored with one line")
+    let counted = H.read(testHost: true, environment: [H.variable: "count"])
+    check(counted.hook == H.Hook(output: .count, script: [], log: false)
+          && counted.line == "TEST: this host takes devices' cameras (SILL_TEST_CAMERA): its Sill Camera counts each decoded frame; no app uses it.",
+          "count: \(counted.line ?? "no line")")
+    check(H.read(testHost: true, environment: [H.variable: "dump:/tmp/frames", H.logVariable: "1"]).hook == H.Hook(output: .dump("/tmp/frames"), script: [], log: true),
+          "dump:DIR, and the log")
+    for bad in ["counts", "dump:", "dump", "png:/x", String(repeating: "x", count: 9)] {
+        let r = H.read(testHost: true, environment: [H.variable: bad])
+        check(r.hook == nil && (r.line ?? "").hasSuffix("ignored: it takes count, or dump:DIR with DIR an existing folder's path."), "\(bad): refused")
+    }
+    check(H.parseOutput("dump:" + String(repeating: "d", count: 1025)) == nil && H.parseOutput("dump:" + String(repeating: "d", count: 1024)) != nil,
+          "a folder's path of at most 1,024 bytes")
+    let script = H.parseScript("1 on 640x360@30; 4 off;2 notready; 3 ready ;0.5 on 1920x1080@60 FaceTime")
+    check(script.map { $0.map(\.at) } == [0.5, 1, 2, 3, 4], "the steps sorted by time: \(String(describing: script?.map(\.at)))")
+    check(script.map { $0.map(\.step) } == [.on(width: 1920, height: 1080, fps: 60, name: "FaceTime"), .on(width: 640, height: 360, fps: 30, name: "Test"),
+                                            .notReady, .ready, .off], "each step read")
+    for bad in ["1 on 641x360@30", "1 on 640x360@61", "1 on 640x360@0", "1 on 14x360@30", "1 on 1922x360@30", "1 on 640x360", "1 on 640@30",
+                "1 dance", "-1 off", "3601 off", "nan off", "1 off now", "1 on 640x360@30 Face Time", "", ";", "1 on 640x360@30 " + String(repeating: "n", count: 41)] {
+        check(H.parseScript(bad) == nil, "a script refused: '\(bad.prefix(40))'")
+    }
+    check(H.parseScript(Array(repeating: "1 off", count: 64).joined(separator: ";"))?.count == 64 && H.parseScript(Array(repeating: "1 off", count: 65).joined(separator: ";")) == nil,
+          "64 steps at most")
+    let scripted = H.read(testHost: true, environment: [H.variable: "count", H.demandVariable: "2 on 640x360@30; 9 off"])
+    check(scripted.hook?.script.count == 2 && scripted.line == "TEST: this host takes devices' cameras (SILL_TEST_CAMERA): its Sill Camera counts each decoded frame; 2 scripted steps of its apps (SILL_TEST_CAMERA_DEMAND).",
+          "with a script: \(scripted.line ?? "no line")")
+    let badScript = H.read(testHost: true, environment: [H.variable: "count", H.demandVariable: "2 on"])
+    check(badScript.hook == nil && (badScript.line ?? "").hasPrefix("SILL_TEST_CAMERA_DEMAND ignored, and with it SILL_TEST_CAMERA"), "a bad script: neither taken")
 }
 
 // MARK: - 20,000 random lives

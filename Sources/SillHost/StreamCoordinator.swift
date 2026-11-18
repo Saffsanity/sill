@@ -370,6 +370,15 @@ package final class StreamCoordinator {
     /// subscribed, while Share clipboard with devices (`HostConfig.shareClipboard`) is on. Looks at
     /// nothing while nobody subscribes.
     let clipboard: HostClipboard
+    /// The devices' cameras (kind 46, CameraReceiver on its own queue `sill.camera`; docs/camera-plan.md):
+    /// nil on the CLI, which cannot host Sill Camera and never says `camera`, and in Sill.app until Sill
+    /// Camera's extension (the plan's step 8); a TEST ONLY output's on a test host (SILL_TEST_CAMERA).
+    private let camera: CameraReceiver?
+    /// What the window list says of the camera: the receiver's word (1, or 0 while the switch is off or
+    /// Sill Camera is not ready), nil without a receiver. LockPolicy.list leaves it out while locked.
+    private var cameraAdvertised: Int?
+    /// Each connection's kind 16 camera as the receiver last said it (absent: none).
+    private var cameraStates: [ObjectIdentifier: CameraState] = [:]
     /// The Mac's sound (kind 43, AudioPipeline): the sound of what streams, to the devices that play
     /// it, while Send Audio is on. It follows the source from `active`'s didSet, as the pointer and
     /// the menus do, so the picture always starts first, and nothing of it waits on the picture or the
@@ -417,6 +426,10 @@ package final class StreamCoordinator {
         let desktopFail = Self.desktopFailHook(synthetic: synthetic, environment: env)
         let displaysHook = DesktopDisplaysHook.read(testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
                                                     environment: env)
+        // TEST ONLY: a test host's Sill Camera (CameraTestHook), with its switch on.
+        let cameraHook = CameraTestHook.read(testHost: DoorPolicy.isTestHost(advertises: !synthetic, bundled: !testHooks),
+                                             environment: env)
+        if cameraHook.hook != nil { config.deviceCamera = true; self.config = config }
         pointer = PointerWatch(synthetic: synthetic, path: path.path)
         softwareOnly = software.on
         let userActive = DisplayWake.userActive(environment: env, testHost: synthetic)
@@ -431,7 +444,7 @@ package final class StreamCoordinator {
         firewallPaths = FirewallRule.paths(executable: FirewallCheck.executablePath())
         desktopStartsToFail = desktopFail.count
         testHookLines = [path.line, software.line, inputLog.line, userActive.line, keyframeIgnore.line, desktopFail.line,
-                         noScreen.line, firewallTest.line, displayAsleep.line, displaysHook.line].compactMap { $0 }
+                         noScreen.line, firewallTest.line, displayAsleep.line, displaysHook.line, cameraHook.line].compactMap { $0 }
         status = HostStatus()
         var home = StreamServer.HomeDoorMode.plain
         if homePairing, let remote {
@@ -457,6 +470,11 @@ package final class StreamCoordinator {
         launchID = launch
         // A synthetic host shares a pasteboard of its own, never this Mac's clipboard.
         clipboard = HostClipboard(server: server, enabled: config.shareClipboard, launchID: launch, synthetic: synthetic)
+        if let hook = cameraHook.hook {
+            camera = CameraReceiver(output: CameraTestOutput(hook: hook), server: server, gate: lockGate, software: true, testLog: hook.log)
+        } else {
+            camera = nil
+        }
         let hook = Self.testMenuHook(synthetic: synthetic)
         testMenuPID = hook.pid
         testMenuLine = hook.line
@@ -569,6 +587,9 @@ package final class StreamCoordinator {
                 // A sleeping display gives black frames: the session's start wakes it, as a key would
                 // (not at a locked Mac, which streams none of it: DisplayWake's gate in `deviceActive`).
                 if !cut { self.deviceActive(.connect, connection) }
+                // The camera knows the session before its catalog says `camera`, so before any kind 46 of it.
+                self.camera?.joined(connection, key: route.fingerprint, paired: !cut && self.sessionPaired(id),
+                                    name: route.pairedName ?? "\(connection.endpoint)", away: route.isAway)
                 // Catalog first: the client's UI needs it even if the keyframe is slow to come. A locked
                 // Mac's has no windows, icons or apps from the first (the gate's reading now, LockPolicy).
                 self.catalog.thumbnailsWanted = true
@@ -614,6 +635,8 @@ package final class StreamCoordinator {
                 if self.flipWait == id { self.flipWait = nil }
                 self.menus.clientLeft(connection)
                 self.clipboard.clientLeft(connection)
+                self.camera?.left(connection)
+                self.cameraStates[id] = nil
                 self.displayWake.forget(id)
                 // Its keys go up, and its buttons when the Mac no longer served it (`revoked`, read before
                 // it is forgotten below). Its input still held for an activation is judged as a departed
@@ -664,6 +687,14 @@ package final class StreamCoordinator {
             guard let self else { return }
             self.server.broadcast(StreamMessage(kind: .appList, timestamp: Date().timeIntervalSince1970,
                                                 isKeyframe: false, payload: Wire.encode(apps)))
+        }
+        // The devices' cameras (CameraReceiver): kind 46 straight from the network queue to `sill.camera`, the
+        // receiver's word on kind 16 and the list back here when it changes, never per frame.
+        if let camera {
+            server.onCameraMessage = { [camera] message, connection, arrived in camera.received(message, from: connection, arrived: arrived) }
+            camera.onStates = { [weak self] states in Task { @MainActor in self?.cameraStatesChanged(states) } }
+            camera.onAdvertised = { [weak self] value in Task { @MainActor in self?.cameraAdvertisedChanged(value) } }
+            camera.start(switchOn: config.deviceCamera)
         }
         // Each message with the gate's reading as it arrived (the network queue's): judged by the more
         // restrictive of that and the reading when it is handled (LockPolicy.restrictive).
@@ -943,6 +974,8 @@ package final class StreamCoordinator {
         // Share clipboard with devices, at once rather than between pipelines: off must stop what goes
         // out now, not after a restart. The lists say `clipboard` again (or no longer).
         if clipboard.setEnabled(new.shareClipboard) { broadcastList() }
+        // Use iPhone and iPad cameras, at once too (CameraReceiver: the lists and kind 16 follow its word).
+        camera?.setSwitch(new.deviceCamera)
         // Show this account while another user is on the screen (docs/off-console-plan.md), at once too: the
         // gate takes it now (off stops this session's pictures before the next frame), the stream follows.
         let view = lockGate.setOffConsoleView(new.offConsoleView)
@@ -1510,6 +1543,8 @@ package final class StreamCoordinator {
     private func lockChanged() async {
         let now = lockReading
         guard lockGate.established else { return }
+        // A device's camera is refused at any lock (LockPolicy); the receiver hears every reading.
+        camera?.setUnlocked(now == .unlocked)
         let was = lockActedOn, wasView = lockActedView
         let view = lockGate.offConsoleView
         lockActedOn = now
@@ -2577,6 +2612,8 @@ package final class StreamCoordinator {
         guard revoked.insert(id).inserted else { return }
         // A menu choice or fetch of it still waiting for its turn is neither made nor read.
         menus.clientRevoked(id)
+        // Its camera is no longer Sill Camera's (its frames were dropped as revoked already).
+        if let c = connections[id] { camera?.revoked(c) }
         // TEST ONLY (SILL_TEST_INPUT_LOG, a synthetic host): where its input stops landing, so a test
         // reads what was posted for it after this line.
         if injector.testLog {
@@ -3582,6 +3619,9 @@ package final class StreamCoordinator {
         // This host repeats a device's held key (KeyRepeat), so a device sends it a hardware keyboard's
         // characters as keys.
         list.keyRepeat = KeyRepeat.generation
+        // The devices' cameras: 1 while this host takes them, 0 while its switch is off or Sill Camera is not
+        // ready, nothing from a host without a receiver (the CLI); never while locked (LockPolicy.list).
+        list.camera = cameraAdvertised
         // The Desktop's stops (DesktopDisplays), with two or more: a device's button reads "Desktop 2" and
         // steps with kind 47, and VoiceOver names the stop. None from a synthetic host, whose Desktop is the
         // test pattern, but under SILL_TEST_DISPLAYS; none while locked or off console (LockPolicy.list).
@@ -3684,7 +3724,7 @@ package final class StreamCoordinator {
                         awayBitrate: t.awayBitrate, awayCaptureScale: Double(t.awayCaptureScale),
                         thisConnectionAway: thisAway, awayRunning: awayWanted)
         }
-        return HostSettingsState(settings: t.streamSettings(away: thisAway),
+        var state = HostSettingsState(settings: t.streamSettings(away: thisAway),
                                  persistent: onDeviceSettingsChange != nil,
                                  virtualDisplayAvailable: appKitLoop,
                                  virtualDisplayNote: virtualDisplayNote(target: t, snapshot: s),
@@ -3695,6 +3735,23 @@ package final class StreamCoordinator {
                                  link: link,
                                  audioNote: t.sendAudio ? s.audio?.note : nil,
                                  sessionPaired: sessionPaired(id))
+        // The camera's word for this connection (CameraReceiver), while the list says `camera`.
+        if cameraAdvertised != nil { state.camera = cameraStates[id] }
+        return state
+    }
+
+    /// The receiver's kind 16 camera for the connections whose camera changed.
+    private func cameraStatesChanged(_ states: [ObjectIdentifier: CameraState?]) {
+        for (id, s) in states { cameraStates[id] = s }
+        publishSettings()
+    }
+
+    /// The receiver's word for the window list: the devices hear it at once.
+    private func cameraAdvertisedChanged(_ value: Int) {
+        guard cameraAdvertised != value else { return }
+        cameraAdvertised = value
+        broadcastList()
+        publishSettings()
     }
 
     /// Whether connection `id`'s key is on this Mac's trust list now, as the status snapshot lists it
@@ -3729,6 +3786,8 @@ package final class StreamCoordinator {
     /// To every device whose catalog went out, its own state, when that differs from the last one
     /// it was sent. Prints nothing, so the CLI's output only changes when a device sends a change.
     private func publishSettings() {
+        // The camera follows the trust list (a device removed, or paired during its session) as kind 16 does.
+        if let camera { camera.syncPaired(Dictionary(uniqueKeysWithValues: connections.keys.map { ($0, sessionPaired($0)) })) }
         var messages: [(NWConnection, StreamMessage)] = []
         for (id, connection) in connections {
             let state = settingsState(for: id)

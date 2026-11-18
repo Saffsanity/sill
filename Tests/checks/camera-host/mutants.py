@@ -4,6 +4,7 @@ import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import module
 F = "Sources/SillHost/CameraHostPolicy.swift"
+T = "Sources/SillHost/CameraTestHook.swift"
 M = [
     # Who may.
     ("refusal: a locked Mac takes the camera", F, "        if !unlocked { return .locked }\n", ""),
@@ -13,7 +14,7 @@ M = [
     # The holder.
     ("a claim takes nothing from a holder", F, "        if f.claim == true, holder != key {", "        if f.claim == true, holder == nil {"),
     ("an offer takes the camera from its holder", F, "        } else if holder == nil {\n            holder = key\n        }", "        } else {\n            holder = key\n        }"),
-    ("a stop keeps the camera", F, "                if holder == key { holder = nil }\n            }\n            return", "            }\n            return"),
+    ("a holder kept without its offer", F, "        if let h = holder, offers[h] == nil { holder = nil }\n", ""),
     ("a freed camera to the oldest offer", F, "                .max { ($0.value.since, $0.key) < ($1.value.since, $1.key) }", "                .min { ($0.value.since, $0.key) < ($1.value.since, $1.key) }"),
     ("a claim never refreshes the offer's place", F, "            if f.claim == true { o.since = now }\n", ""),
     ("the grace three times as long", F, "        if let left = o.leftAt { return now - left < Self.grace }", "        if let left = o.leftAt { return now - left < Self.grace * 3 }"),
@@ -41,5 +42,9 @@ M = [
     ("the device shown while locked", F, "        let f: Feed = !available ? .unavailable :", "        let f: Feed = !switchOn ? .unavailable :"),
     ("a pause not shown", F, "holder.map { .device(name: name(ofKey: $0), pause: offers[$0]?.pause) } ?? .waiting", "holder.map { .device(name: name(ofKey: $0), pause: nil) } ?? .waiting"),
     ("1080p at the 720p rate", F, "        return min(4_000_000, max(300_000, Int(rate.rounded())))", "        return min(2_500_000, max(300_000, Int(rate.rounded())))"),
+    # The TEST ONLY hook.
+    ("the hook taken by any host", T, "        guard testHost else { return (nil, \"\\(variable) ignored: only a --synthetic test host takes it, never Sill.app.\") }\n", ""),
+    ("odd sides in a script", T, "guard w >= 16, w <= 1920, w % 2 == 0, h >= 16, h <= 1920, h % 2 == 0 else { return nil }", "guard w >= 16, w <= 1920, h >= 16, h <= 1920 else { return nil }"),
+    ("a script in the order written", T, "        return steps.enumerated().sorted { ($0.element.at, $0.offset) < ($1.element.at, $1.offset) }.map(\\.element)", "        return steps"),
 ]
 sys.exit(0 if module.mutate("camera-host", M, sys.argv[1]) else 1)

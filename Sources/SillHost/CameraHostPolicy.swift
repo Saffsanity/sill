@@ -244,7 +244,6 @@ struct CameraHostPolicy {
             for id in sessions.keys where sessions[id]?.key == key { sessions[id]?.paired = false; sessions[id]?.epoch = nil }
             if let o = offers.removeValue(forKey: key), holder == key {
                 out.append(.line("Camera: \(o.name) was removed; Sill Camera is free."))
-                holder = nil
             }
         case .left(let id):
             if let key = sessions[id]?.key, offers[key]?.session == id {
@@ -295,6 +294,14 @@ struct CameraHostPolicy {
         return (true, [])
     }
 
+    /// A kind 46 that LockPolicy refused as it arrived or now (CameraReceiver judges the arrival's
+    /// reading, which this rule does not see): dropped, counted, said once a minute.
+    mutating func lockedArrival(_ id: Int, at now: Double) -> [Effect] {
+        var out: [Effect] = []
+        refused(id, .locked, at: now, into: &out)
+        return out
+    }
+
     // MARK: Inside
 
     private func name(ofKey key: String) -> String {
@@ -342,10 +349,8 @@ struct CameraHostPolicy {
         guard let s = sessions[id], let key = s.key else { return }
         if f.stop == true {
             sessions[id]?.epoch = nil
-            if offers.removeValue(forKey: key) != nil {
-                out.append(.line("Camera: \(s.name) stopped sharing its camera."))
-                if holder == key { holder = nil }
-            }
+            // Its offer goes; a holder without one is freed in `expire`, the one place that does it.
+            if offers.removeValue(forKey: key) != nil { out.append(.line("Camera: \(s.name) stopped sharing its camera.")) }
             return
         }
         let position = CameraCodec.position(f.position)
@@ -373,7 +378,7 @@ struct CameraHostPolicy {
         if f.isEpoch { sessions[id]?.epoch = f }
     }
 
-    /// Offers whose grace ran out go; a holder without one is freed.
+    /// Offers whose grace ran out go; a holder without an offer (this, a stop, a removal) is freed here.
     private mutating func expire(at now: Double, into out: inout [Effect]) {
         for (key, o) in offers where !stands(o, at: now) {
             offers[key] = nil

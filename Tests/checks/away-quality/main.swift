@@ -94,7 +94,7 @@ do {
     check(!off.validated().shareClipboard && standard.validated().shareClipboard, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: false, sendAudio: false, offConsoleView: false)
+                          requirePairing: true, shareClipboard: false, sendAudio: false, offConsoleView: false, deviceCamera: false)
     check(!made.shareClipboard, "a HostConfig made with it off has it off (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
@@ -114,12 +114,32 @@ do {
     check(on.validated().offConsoleView && !standard.validated().offConsoleView, "validated keeps it either way")
     let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
                           virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
-                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: true)
+                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: true, deviceCamera: false)
     check(made.offConsoleView, "a HostConfig made with it on has it on (as Sill.app's settings make one)")
     let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
                                  directWireless: true)
     check(on.applying(all).offConsoleView && on.applyingAway(all).offConsoleView
           && !standard.applying(all).offConsoleView && !standard.applyingAway(all).offConsoleView,
+          "a device's change never moves it, at home or away")
+}
+
+// Use iPhone and iPad cameras (docs/camera-plan.md §10), the Mac's alone: off in `standard` and `app` (a switch that
+// installs something into macOS starts off), named in the log's line, kept by `validated`, never moved by a device.
+do {
+    check(!standard.deviceCamera && !HostConfig.app.deviceCamera, "standard and app: device cameras off")
+    var on = standard
+    on.deviceCamera = true
+    eq(standard.changes(to: on), "device cameras off → on", "changes: the cameras' switch")
+    eq(on.changes(to: standard), "device cameras on → off", "changes: and back")
+    check(on.validated().deviceCamera && !standard.validated().deviceCamera, "validated keeps it either way")
+    let made = HostConfig(maxFPS: 60, captureScale: 1, bitrate: 8_000_000, awayBitrate: 4_000_000, awayCaptureScale: 1, prioritizeSpeed: false,
+                          virtualDisplay: false, directWireless: false, remoteAccess: false, remotePort: 7455, internetAccess: false,
+                          requirePairing: true, shareClipboard: true, sendAudio: false, offConsoleView: false, deviceCamera: true)
+    check(made.deviceCamera, "a HostConfig made with it on has it on")
+    let all = HostSettingsChange(token: 1, maxFPS: 60, bitrate: 25_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: true,
+                                 directWireless: true, sendAudio: true)
+    check(on.applying(all).deviceCamera && on.applyingAway(all).deviceCamera
+          && !standard.applying(all).deviceCamera && !standard.applyingAway(all).deviceCamera,
           "a device's change never moves it, at home or away")
 }
 
