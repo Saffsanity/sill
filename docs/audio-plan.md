@@ -642,7 +642,11 @@ Turns chunks into blocks of F frames with their host time, and decides the segme
 - **`AudioSourceRule`** (same file, pure): what `follow` does with the current and the wanted source
   (§4.5). The same app (by pid) with its stream running → keep. The same app whose stream ended by
   itself → start it again, at most once every 10 s. Another app, the Desktop, the test tone → a new
-  stream and a new epoch. None → stop.
+  stream and a new epoch. None → stop. **Since #365 (PR #367, 2026-11-18):** an app is the same by its
+  pid and the display its filter is built on (`AudioKey.app(pid, display, name)`), so the same app on
+  another display is a new stream, at once; and the pipeline's own retry waits `retryIn` (10 s after
+  the last start, twice as long for each failure in a row before it, at most 160 s), counting the
+  failures in a row with `failures` (an end after 10 s or more of running starts a new count).
 
 #### 4.4 `AudioEncoder.swift` (new; AudioToolbox only, so the harness links it: no CoreMedia, no AVFoundation)
 
@@ -683,7 +687,13 @@ epoch counter, and what the coordinator and the server see of them.
 - **Failures never touch the picture.** A source that fails to start, or stops by itself, sets
   `audioNote` and logs one line. The next `follow` tries again: the picture's next select (a pick, a
   rotation, a restart), another source, or Send Audio off and on; the same app at most once every
-  10 s. No retry loop.
+  10 s. No retry loop. **Since #365 (PR #367, 2026-11-18), a bounded one:** with no `follow` meanwhile,
+  the sound stayed off for the rest of a stream (issue #365; its two lines 8 and 10 times in two days
+  in Noah's log), so the pipeline asks again by itself (`onRetry`, the coordinator's `audioFollow`,
+  never during a select, whose end asks anyway), 10 s after the start that failed or ended, then 20,
+  40, 80 and every 160 s while the tries keep failing (`AudioSourceRule.retryIn`); the key is the
+  coordinator's as it is then, never the one that failed (another source, another display, none).
+  Each try says `Audio: trying Safari's sound again.` before its start line.
 - **Status:** `HostStatus.audio` (§4.8), and `audioNote` for kind 16.
 
 #### 4.6 `StreamServer.swift`
@@ -743,6 +753,12 @@ epoch counter, and what the coordinator and the server see of them.
     at once when nothing is switching, else not (`switching`): the select committing the change
     sets `active` once its picture has started, and the didSet follows then.
   - With `.none` in `shutdownForExit` (:1520-1524), after the goodbye.
+  - **Since #365:** at the pipeline's own retry (`audio.onRetry`), unless a select is under way
+    (`switching`): its end sets `active`, and the stage it ran may have just removed the display the
+    failed sound was built on.
+- **The display an app's sound is built on** (since #365, `appAudioDisplay`): Sill's virtual display
+  while the streamed window is staged there (`stage.isStaged`, its placement that window,
+  `stage.scDisplay`), else the main display, as before; its ID is in the key.
 - **`settingsState`** (:1852-1861): `sendAudio: config.sendAudio` in `StreamSettings`, and
   `audioNote: audio.note`.
 - **A device's change** goes through the kind 17 handler unchanged (:691-729,
@@ -774,6 +790,7 @@ Mac", "Test Tone"), `devices` (how many get it), `problem: String?`.
 | When | Line |
 |---|---|
 | Sound starts for a window | `Audio: capturing Safari's sound (every window of it).` |
+| … staged on Sill's display (since #365) | `Audio: capturing Safari's sound (every window of it) on virtual display 6.` |
 | … for the Desktop | `Audio: capturing the whole Mac's sound (every app but Sill).` |
 | … on a synthetic host | `Audio: a test tone (440 Hz at -30 dBFS, a click at each second).` |
 | Its first buffer | `Audio: first buffer 1024 frames, 48000 Hz, 2 channels, 32-bit float, non-interleaved, 9 ms after its time stamp.` |
@@ -782,6 +799,7 @@ Mac", "Test Tone"), `devices` (how many get it), `problem: String?`.
 | It stops | `Audio stopped: nothing streams.` · `Audio stopped: no connected device plays sound.` · `Audio stopped: Send Audio is off.` · `Audio stopped: Sill is quitting.` |
 | A start fails | `Audio: could not capture Safari's sound: <error>. The picture is unaffected.` |
 | It ends by itself | `Audio capture ended: <error>. The picture is unaffected.` |
+| The same source again (since #365; by itself or at the next select) | `Audio: trying Safari's sound again.`, before its start line |
 | A device's stats | the `client …` line gains `, sound 42 ms behind` (and `, 3 late` in a second with late packets) when the report's `audioBehindMs` is 0 or more |
 | A setting | `Settings: send audio off → on` · `Settings from iPad (iPad14,1): send audio off → on` (`HostConfig.changes`) |
 
@@ -793,6 +811,9 @@ gap).
 
 `SILL_TEST_AUDIO_CHUNK=1024` (§4.2), and `SILL_TEST_AUDIO_PAUSE=S@T[,S@T…]`: the tone makes
 nothing for S seconds from T seconds after it starts, then goes on from where the clock is (H8).
+**Since #365:** `SILL_TEST_AUDIO_END=S[,S…]`: the n-th start of a tone in the process ends by itself
+S seconds after it starts, as the system stops a capture, 0 failing that start, as "Start stream fail"
+does; the starts after the list run on (the pipeline's own retry, headless).
 Nothing else: the test tone is the test source. Every test host also runs with main's
 `SILL_TEST_LOOPBACK=1` (both doors on 127.0.0.1 alone) and `SILL_TEST_SOFTWARE_ENCODER=1` (never a
 hardware encoder session), PointerTestHooks' since #31, honoured by a synthetic host alone; with
@@ -1219,10 +1240,10 @@ thumbnail strip, as the Menus button (#36) takes its own.
 | A window of another app | The sound's stream restarts with a new epoch: about 0.1–0.3 s of silence, then a fade in |
 | The streamed window closes | The app's sound goes on (the filter is the app's, not the window's); the device asks for the Desktop 2 s later (today's rule) and the sound follows it, a new epoch |
 | The app has no window on screen (minimized) | Still captured: the filter is the app's (P5) |
-| A window on the virtual display | The same app filter on the main display (P5) |
+| A window on the virtual display | The same app's filter on Sill's virtual display while the window is staged there (since #365; until then on the main display, where the app may have no window: "Start stream fail" in #359's log, P5). Sill's display made again (a rate change, a larger window, its loss) is a new capture at the select's end; when Sill's display goes (Virtual Display off, the Desktop) the capture on it is expected to end with it (one "Audio capture ended" line; not yet seen on a Mac) and the next source starts |
 | Two displays, the Desktop | Every app's sound, whatever the display (per app; P5) |
 | The app goes quiet | Silent packets (8–12 KB/s with their headers) if ScreenCaptureKit keeps delivering (P2's minute line says); if it stops, the device plays out and fades, and the next chunk starts a new segment, placed by its stamp |
-| The Mac's output device changes | ScreenCaptureKit's behaviour is not documented (P12). If the stream ends: one line and `audioNote`; the picture's next select, or Send Audio off and on, starts it again (§4.5) |
+| The Mac's output device changes | ScreenCaptureKit's behaviour is not documented (P12). If the stream ends: one line and `audioNote`; the picture's next select, or Send Audio off and on, starts it again (§4.5), and since #365 the pipeline's own retry, 10 s after its start |
 | The Mac locks its screen, sleeps its display or switches user | Not documented for sound (P12). If the stream ends: as above |
 | The Mac's volume muted | Not documented whether capture comes before the volume (P11) |
 | FaceTime or a phone call on the Mac | Not heard: daemon sound (P4) |
@@ -1291,6 +1312,7 @@ thumbnail strip, as the Menus button (#36) takes its own.
 | H10 | **Previews.** The bare app's `-SillRenderPreviews` before and after | Only the Streaming and Permissions panes, menu.txt's Send Audio and the new `sound` card sample differ |
 | H11 | **Hard rules** (grep) | No `captureMicrophone`, `AudioHardwareCreateProcessTap`, `updateConfiguration` or `assumeIsolated` in Sources/SillHost; no `UIBackgroundModes` in the iOS Info.plist; `HostConfig.standard` has `sendAudio: false`; the sound's send path never calls the counting `send(_:to:isFrame:isKeyframe:)` and never touches `keyframesInFlight` or `backlogFloor`; no AVFoundation or CoreMedia import in AudioEncoder, AudioPacketizer, AudioPipeline or SyntheticAudio; no render block in iOSClient; `-SillSoundSink` and `-SillSoundVolume` only under `#if DEBUG` |
 | H12 | **Cost.** The harness host's CPU (`ps`, 60 s) with and without sound | At most 1.5 percentage points more |
+| H13 | **The sound tried again by itself** (#365, PR #367, 2026-11-18). `audio-packetizer`'s `retryIn` and `failures` with their mutants; the harness's `retry` case (`SILL_TEST_AUDIO_END=3,0`); and a synthetic `SillHost --audio` on loopback with the same variable and `sillclient.py --audio`, then `=12`, then `=3` with Send Audio off at 6 s and on at 16 s, and `=3` with the Mac read locked from 5 to 14 s (`SILL_TEST_LOCKED_FILE`) | The tone ends at 3 s, "Audio: trying the test tone again." 10 s after its start, that start refused, the next try 20 s after it and the tone runs on: the device hears epoch 1 for 3 s, nothing, then epoch 2, no seq gap; an end after 12 s of running tried again at once; no try while Send Audio is off or the Mac is locked, and Send Audio's return or the unlock starts the tone with no "trying" |
 
 **The harness** (`Scripts/audio/`, step 4) is built the way Scripts/pacing/build.sh builds its host:
 a throwaway package under `.build/audio` with StreamServer.swift and its neighbours (pacing's list:
@@ -1328,7 +1350,7 @@ P6 and P14.
 | P9 | **Interruptions and routes.** A FaceTime call to the iPad, Siri, AirPods in and out (out mutes and says so), wired headphones, AirPlay to a speaker (the console's output latency, and the sound trailing by it), and a stream started during a call (no sound and one line; sound once the call ends) |
 | P10 | **Away.** Tailscale over the iPhone's hotspot at Low: the sound goes on while `net.dropped` counts; the `client …` line's "sound … behind" |
 | P11 | **The Mac muted** (its volume): does the iPad still hear it? |
-| P12 | **The Mac's output changed** mid-stream (headphones into the Mac, AirPods on the Mac): the sound goes on, or one "Audio capture ended" line, and the next pick, or Send Audio off and on, brings it back. The same for the Mac's lock screen and a fast user switch |
+| P12 | **The Mac's output changed** mid-stream (headphones into the Mac, AirPods on the Mac): the sound goes on, or one "Audio capture ended" line, and the next pick, or Send Audio off and on, brings it back (since #365 also the pipeline's own retry, "Audio: trying … again.", 10 s after its start). The same for the Mac's lock screen and a fast user switch |
 | P13 | **An hour** of music: no drift (the console's error within ±5 ms and no jump after the first minute); Sill.app's CPU in Activity Monitor with sound on and off |
 | P14 | **Two devices** (the iPad and the iPhone): both play; muting one leaves the other |
 | P15 | **Mixed builds.** This iPad with Sill for Mac 0.3.1, the public release: no row, no button, no sound. An iPad build from before this step that reaches this Sill.app (main's Debug; once #37 is in, a build from before pairing at home, TestFlight's 0.5 among them, reaches its home door not at all) with Send Audio on: nothing changes for it |

@@ -352,17 +352,22 @@ Below, "this file" means CLAUDE.md, and "Build and run below" means docs/BUILD-A
   state table's flags from before it (`KeyStrokes.chord`;
   `in.gestureModifiersLeft` if some stay).
   The Mac's sound (docs/audio-plan.md; a beta since 2026-10-20): `AudioPipeline` (the source it follows
-  from `active`'s didSet, one transition at a time; on `sill.audio` the
+  from `active`'s didSet, one transition at a time; a source that failed or
+  ended by itself asked for again by itself, through the coordinator's
+  `audioFollow` and never during a select, 10 s after its start and up to 160 s
+  apart while it keeps failing (`onRetry`, issue #365); on `sill.audio` the
   packetizer, the encoder, the epochs and the stamps; the status and kind 16's
   note; `prepare`, AAC-ELD's codec loaded once off `sill.audio` when Send Audio
-  is on), `AudioCapture` (ScreenCaptureKit's audio-only stream of one app, or of
-  every app but Sill's, bounded start and stop, the running stream under a
-  lock; never run by a test),
+  is on), `AudioCapture` (ScreenCaptureKit's audio-only stream of one app, on
+  Sill's virtual display while its window is staged there, else on the main
+  display (`appAudioDisplay`, #365), or of every app but Sill's, bounded start
+  and stop, the running stream under a lock; never run by a test),
   `SyntheticAudio` (a synthetic host's test tone; the TEST ONLY
-  `SILL_TEST_AUDIO_CHUNK` and `SILL_TEST_AUDIO_PAUSE`), `TestTone` (440 Hz and a
+  `SILL_TEST_AUDIO_CHUNK`, `SILL_TEST_AUDIO_PAUSE` and `SILL_TEST_AUDIO_END`, a
+  start that ends by itself or fails), `TestTone` (440 Hz and a
   click at each whole second of the stamps' clock; pure), `AudioPacketizer`
-  (blocks, stamps and segments, `AudioSourceRule`, `PCMLayout`,
-  `AudioBufferTally`; pure, `Tests/checks/audio-packetizer`) and `AudioEncoder`
+  (blocks, stamps and segments, `AudioSourceRule` with the retry's wait,
+  `PCMLayout`, `AudioBufferTally`; pure, `Tests/checks/audio-packetizer`) and `AudioEncoder`
   (AAC-ELD, AudioToolbox only; `Tests/checks/audio-codec`). StreamServer sends
   kind 43 to the devices that play it on a send path of its own
   (`broadcastAudio`: never `inflight`; its bytes in every client's `pendingBytes`
