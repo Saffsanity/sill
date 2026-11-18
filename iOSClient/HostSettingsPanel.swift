@@ -757,13 +757,16 @@ struct HostSettingsPanel: View {
             Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, rightAway: pasteRightAway, mac: mac, device: device))
         }
         // Touch Mode (issue #178, TouchMode): Direct Touch or the whole picture as the Mac's trackpad, this device's
-        // own, never sent; first of the rows about touch (Reverse Scrolling, the thumbnails' hold, the gestures), which
-        // the whole-screen Settings pane gathers as Touch and Zoom.
+        // own, never sent; first of the rows about touch (Reverse Scrolling, the thumbnails' hold, the gestures), the
+        // group the review of 2026-11-18 proposes as Touch and Zoom in the whole-screen Settings pane. The control
+        // shows what the stream screens do with what is stored (TouchMode.stored: anything but "trackpad" is Direct
+        // Touch), so a stray value never leaves it with no segment chosen.
         Rows {
             AdaptiveRow(title: "Touch Mode", since: nil) {
-                Picker("Touch Mode", selection: $touchModeRaw) {
-                    ForEach(TouchMode.allCases, id: \.rawValue) { mode in
-                        Text(mode.title).tag(mode.rawValue)
+                Picker("Touch Mode", selection: Binding(get: { TouchMode.stored(touchModeRaw) },
+                                                        set: { touchModeRaw = $0.rawValue })) {
+                    ForEach(TouchMode.allCases, id: \.self) { mode in
+                        Text(mode.title).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
