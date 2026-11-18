@@ -4,7 +4,8 @@ main at 8dbbb50; phase 2a of `docs/virtual-desktop-plan.md` as revised 2026-11-1
 2026-11-18: "Work on #200, the option to give Sill its own virtual display (for headless macs or for adding an additional
 screen, if so allow the user to select resolution, should default to resolution and refresh of client device, not what
 we originally proposed)". This branch is the first of the plan's three pull requests: the display a Mac with no working
-screen gets by itself (no setting, Noah on #61), at the device's size and rate. The Virtual Desktop (its switch, its stop,
+screen gets by itself (on by default, Noah on #61, with a switch of its own since the review round below), at the
+device's size and rate. The Virtual Desktop (its switch, its stop,
 its lifetime, its windows, following a device's turn) is phase 2b, the resolution and refresh choices phase 3; nothing of
 either is here, and nothing on the wire.
 - How it was built: addhumal's head dad9a911 merged as it is (2d8147a2: his 14 commits, two of them the maintainer fixes of
@@ -45,9 +46,10 @@ either is here, and nothing on the wire.
   back on the console with no screen it is made again after the return's 2 s.
 - Sill.app: the card's source row "Sill’s display · 1218×800" (`Stream.onSillDisplay`, `HostStatusSnapshot.sillDisplay`);
   Settings › Virtual Display's Status shows the guard with Try Again ("Sill stopped twice while making its display, so it
-  makes none by itself now."), a "No screen" row while Sill's display exists ("Showing Sill’s display now: 1218 × 800 for
-  iPad mini."), and the footnote's sentence on a Mac with no screen. Previews: `pane-virtualDisplay-noscreen`,
-  `pane-virtualDisplay-guard`, `card-sills-display`.
+  makes none by itself now."), and a section of its own, "A Mac with no screen": the switch "Make a display when this Mac
+  has no screen" (`HostConfig.headlessDisplay`, on by default), a row "Sill’s display" while it exists ("1218 × 800 for
+  iPad mini, streaming now", or "…, kept until a screen works" while no device shows it), and its footnote. Previews:
+  `pane-virtualDisplay-noscreen`, `pane-virtualDisplay-noscreen-kept`, `pane-virtualDisplay-guard`, `card-sills-display`.
 - Wire: nothing. No kind, no field, no hello flag; older devices and Macs are unaffected. A Mac with no screen still sends
   no Desktop stops (Sill's display is no stop), so every device shows today's one-stop button.
 - Docs: docs/DEVELOPMENT.md (after the Desktop's stops: what it does, its lines, the guard, the headless hooks; the locked
@@ -75,18 +77,32 @@ either is here, and nothing on the wire.
 12. Off console: removed at once, made again after the return if there is still no screen.
 13. A clean quit while a display is being made is no stop; a crash or Force Quit (SIGKILL) is.
 14. Sill.app's guard is the bundled app's alone; the bare `SillMenuBar` binary is a test host.
+15. The card reads "Sill’s display · 1218×800" (points, `rectangle.dashed`); in 2a its section sits in the Virtual Display
+    tab, and 2b's Displays tab takes it.
+16. The switch (the review round; Noah, 2026-11-18: "Anything that it would make sense to add a toggle to you should add a
+    toggle"): "Make a display when this Mac has no screen", on by default (Noah on #61), the Mac's alone (no device turns
+    it), in a section of its own under "Stream from a virtual display", which stays the windows' and does not turn this
+    off (#380's workaround on GitHub names only that one). Turned off, Sill's display goes at once and the Desktop moves
+    to what macOS shows; turned on, a Desktop streaming with no screen gets it about a second later. The CLI keeps it on (it needs `--virtual-display` anyway) and turns it off with
+    `--no-headless-display`, like `--no-clipboard`.
+17. Its lifetime as built and now said in Settings: made when a device shows the Desktop, then kept with no device
+    connected until a real screen has worked 2 s, the switch is turned off, the session goes off console, or Sill quits
+    (plan §1: remaking it is a display change macOS may lock a closed-lid Mac on, addhumal 2026-11-02).
 
 **Proposed words, not written into any page** (for the release that ships it, Sill for Mac 0.6.3 if Noah takes it there;
 no device update needed):
 - site/support.html, a section "A Mac with no screen", inside a release marker: "When your Mac has no working screen, a
   MacBook with its lid closed and nothing attached or a Mac mini with no monitor, Sill for Mac gives it a display of its
-  own while your iPhone or iPad shows the Desktop, the size of your device. You see the login screen and can type your
-  password, and the Mac stays unlocked. The display goes away once a real screen works again."
+  own when your iPhone or iPad shows the Desktop, the size of your device. You see the login screen and can type your
+  password, and the Mac stays unlocked. The display stays after your device disconnects, with any windows you left on
+  it, until a real screen works again or you quit Sill for Mac. To turn it off, open Sill for Mac's Settings › Virtual
+  Display and turn off Make a display when this Mac has no screen."
 - README's Good to know, in one line inside a comment until the release: "A Mac with no working screen gets a display of
-  its own, the size of your device, while you stream its Desktop."
+  its own, the size of your device, when you stream its Desktop (Settings › Virtual Display turns it off)."
 - The release notes: "A Mac with no working screen (a closed MacBook, a Mac mini with no monitor) now gets a display of
-  its own, the size of your iPhone or iPad, so its login screen streams and takes your password (#298, #61; thanks to
-  addhumal, PR #200)." Noah posts on #61 when there is a build to try, as he promised.
+  its own when you stream its Desktop, the size of your iPhone or iPad, so its login screen streams and takes your
+  password. It is on by default; Settings › Virtual Display turns it off (#298, #61; thanks to addhumal, PR #200)." Noah
+  posts on #61 when there is a build to try, as he promised.
 
 **Verified** (on this Mac; nothing made a display, posted input, locked, slept or switched anything):
 - The four fixes on main's tree before anything else of ours: `Scripts/headless-check/live.py` 41 of 41 verdicts, as on
@@ -112,11 +128,58 @@ no device update needed):
   the known capture warning in StreamClient.swift; nothing under iOSClient, StreamProtocol or Package.swift differs from
   main. GitHub's CI on #395 (run 44283282836, head f4f2e977): every step of Build and check passed (the release build,
   run-all, the iOS app, the CLI's two paths).
-- H2 (the CLI against main's) was not run: main's CLI build waited over 15 minutes on the shared heavy lock behind long
-  mutant runs and was given up. Instead: every line this branch adds to the CLI's output is behind a TEST ONLY hook, the
-  AppKit loop (`--virtual-display`) or a made display; the gate's nodevice and view scenarios print no Headless line; and
-  the masked, sorted comparison (idle 8 s, then 8 s with a test client) gave identical output for this branch's CLI run
-  twice, so H2 is one build of main's `SillHost` and the same comparison away.
+- H2 (the CLI against main's) was not run in the first round, and the claim made in its place was wrong (the review's
+  finding 2): two lines this branch adds reach the plain CLI. The `Displays:` line after each `Locked:` and `Unlocked:`
+  (plan §2) is in every host, the CLI's included, and "Desktop: the display is W×H pt now (was …); restarting at its
+  size." (#200's follower folded into one, defect 7) in every host but a synthetic one. Every other line this branch adds
+  is behind a TEST ONLY hook, the AppKit loop (`--virtual-display`) or a display that was made. The idle and client
+  comparison, run twice on this branch's CLI, never locked the Mac, so it could not have shown the first.
+
+**Review round (2026-11-18, from 06:00; the reviewer's three findings on #395, each confirmed here):**
+1. *No switch, and none put to Noah* (confirmed: `headlessGateAllows` read no setting, so a Mac whose user turned "Stream
+   from a virtual display" off, as #380's workaround says, still got "Sill Desktop"; and the no-screen sentence sat in
+   the footnote under that switch, as if it governed it). Fixed: `HostConfig.headlessDisplay`, on in `standard` and `app`
+   (Noah on #61), the Mac's alone (absent from kinds 16 and 17, `accepted`, `applying`, `restartNeeded`); Sill.app's
+   switch "Make a display when this Mac has no screen" in its own section of Settings › Virtual Display, "A Mac with no
+   screen", with the row and the footnote; the key `headlessDisplay` (`-headlessDisplay 0` for one run, `-SillSetAfter
+   '<s> headlessDisplay=0'`); the CLI's `--no-headless-display`, like `--no-clipboard`; the gate's `switchOn`
+   (`needsVirtualDesktop`), its one line when it alone keeps the display from being made, and in `adopt` the switch
+   applied at once: off removes the display (`removeHeadlessAtOnce`, which the off-console removal now shares), on asks
+   again for a Desktop streaming with no screen. Checked: `virtual-display-api` (the gate with the switch off, the two
+   lines; its 2 new mutants caught) and `away-quality` (on in both, its log words, kept by `validated`, never moved by a
+   device's change; 4 new mutants, AQ-O1 rewritten for the new `standard` line); the live gate gains `switchoff`
+   (written, not yet run: below).
+2. *H2 skipped on a false premise* (confirmed: SessionLock prints the `Displays:` line after every `Locked:` and
+   `Unlocked:` in every host, the plain CLI too, as plan §2 asks; and `followDesktopDisplay`'s "Desktop: the display is …
+   now (was …); restarting at its size." is in every host but a synthetic one, #200's follower folded in). The claim is
+   corrected under Verified; `Scripts/desktop-check/live.py` and `Scripts/lock-check/live.py poll start paired view`
+   were run, H2 not yet (below).
+3. *The words misstate how long it stays* (confirmed: `Watch.release` answers `.keep` while no real screen works, devices
+   or not; the screenless scenario of run2 kept it from the client's leaving at 5.06 s to the next one at 7.05 s). Fixed:
+   the footnote ("…when a device shows the Desktop… The display stays after the device disconnects, until a screen works
+   again, you turn this off, or you quit Sill."), the row ("…, streaming now" only while the Desktop streams on it, else
+   "…, kept until a screen works"), the proposed support, README and release words, DEVELOPMENT.md and the snapshot's doc;
+   the live gate's new `kept` (3 of 3, below) shows the rule they now describe.
+
+**Verified in the review round** (06:00–07:30; nothing made a display, posted input, locked, slept or switched anything):
+- `virtual-display-api` 284 checks, 81 of 81 mutants; `away-quality` all passed, 48 of 48 mutants; `stage-release` 847;
+  `Tests/checks/run-all.sh` all 75 passed (576d86cb, at `nice -n 19` outside the heavy lock).
+- SillHostCore, SillMenuBar and SillHostCLI typecheck clean (`swiftc -typecheck` against the built StreamProtocol module;
+  a planted error in a function body was caught, so it reads the bodies). GitHub's CI on 576d86cb (run 44294273593):
+  every step of Build and check passed (the release build, run-all, the iOS app, the CLI's two paths).
+- On the pushed head's CLI from before this round (5786e36d's code, built 05:04, snapshotted in the scratchpad; the gates
+  and the test client are main's own, unchanged here): `Scripts/desktop-check/live.py` 24 of 24 (`followDesktopDisplay`
+  in place of #355's `followDesktopStop`); `Scripts/lock-check/live.py` poll 42 of 42, start 4 of 4, paired 6 of 6, view
+  26 of 26 (`notify` left out: it posts a Darwin notification), the `Displays:` line after each `Locked:` and `Unlocked:`
+  in their hosts' logs; `Scripts/headless-check/live.py kept` 3 of 3 (made at 2.07 s, the client gone at 6.07 s, kept
+  with nobody connected, removed at 14.02 s, 2 s after a monitor came back at 12 s). No host of those two gates has
+  Sill's display, so this round's change to `lockChanged` (the shared `removeHeadlessAtOnce`) is off their paths.
+- Not run: the release build here, main's `SillHost` for H2, H2 itself (idle, a test client, and locked then unlocked by
+  the TEST ONLY lock file, where the `Displays:` line is the one expected difference), the `switchoff` scenario, the
+  gates on this round's CLI and the previews of the new section (they need the new SillMenuBar). The heavy lock's turn came at 07:18 after 63 minutes in a queue of fifteen, with 24 GB free
+  where the rule's floor is 25, so the job stopped before building (privacy-lock's had too). All of it is one command
+  away once the disk allows: `~/Downloads/sill-handoff/tools/heavy.sh "vd-2a: build, main's CLI" --
+  ~/Downloads/sill-handoff/next/vd-2a/verify/heavy-job.sh && ~/Downloads/sill-handoff/next/vd-2a/verify/gates-after-build.sh`.
 
 **For Noah** (only he can: each makes a display, locks or switches his Mac, or needs a Mac with no screen; the same list is
 in the pull request). Install this branch as a release is built (his grants and pairings kept): `cd ~/Downloads/wt-vd-2a &&
@@ -144,8 +207,10 @@ stopped|Try Again" ~/Library/Logs/Sill/Sill.log | tail -40`.
    working: `Headless display: created 1218×800 pt @2× at 60 Hz (id N) for iPad …, its screen.`; the lock screen with its
    password field fills the iPad; the password sticks 30 s; disconnect and reconnect twice: no second `created`, no relock;
    the iPhone instead while locked: the same display, its stream at 60 fps (`Streaming … 60 fps`), not 120; the card reads
-   "Sill’s display · 1218×800" and Settings › Virtual Display "Showing Sill’s display now: 1218 × 800 for iPad …"; open the
-   lid: `a display is online again; removed …` about 2 s later, the windows on the built-in screen, one `Desktop:` restart.
+   "Sill’s display · 1218×800" and Settings › Virtual Display's row "Sill’s display" "1218 × 800 for iPad …, streaming
+   now"; disconnect every device: the row reads "…, kept until a screen works" and System Settings › Displays still lists
+   Sill Desktop; open the lid: `a display is online again; removed …` about 2 s later, the windows on the built-in screen,
+   one `Desktop:` restart.
    If the built-in still reads working, this Mac cannot reach the case: go to 8. Undo: `sudo pmset -a disablesleep 0`.
 7. **Lid closed, cables pulled one at a time:** with the Desktop on the Dell, unplug it: the Desktop on the Lenovo, no
    `Headless` line; unplug the Lenovo too: `looking again …`, then `created …` at the iPad's shape (the Mac may sleep unless
@@ -164,3 +229,9 @@ stopped|Try Again" ~/Library/Logs/Sill/Sill.log | tail -40`.
     Try Again; a window picked from the iPad streams where it is (the card: "real window (virtual display: Sill stopped twice
     while making its display)"). Try Again: `Displays: Try Again chosen; Sill makes its displays again.`, the next pick is
     staged as before, and `defaults read me.saffer.sill.mac displayMakeStops` says 0.
+11. **The switch** (in 6 or 8, while Sill's display shows the Desktop): turn off Settings › Virtual Display › "Make a
+    display when this Mac has no screen": `Settings: headless display on → off`, `Headless display: turned off in
+    Settings; removed Sill's display.`, then, as the Desktop starts again on what macOS shows (its 1x stand-in),
+    `Headless display: no real screen, but Sill's display for a Mac with no screen is turned off; none made.` once; the
+    row gone, nothing named Sill Desktop in System Settings › Displays, and `defaults read me.saffer.sill.mac
+    headlessDisplay` says 0. Turn it on: `looking again in 1.0 s …`, then `created …`, and the default says 1.
