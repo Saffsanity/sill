@@ -1,8 +1,11 @@
-"""Mutants of InstalledApps.swift (#76): each changes it in one place, is compiled with the check and
-must make it fail. A link to a folder is refused by contentsOfDirectory(at:) itself (ENOTDIR), so
-dropping the isDirectory test changes nothing and is no mutant here. The unsorted mutant counts on
-APFS listing a folder in its own order (by a hash of each name), which puts the fixture's "right"
-before "left"; a file system that lists names sorted would miss it. usage: mutants.py WORKTREE"""
+"""Mutants of InstalledApps.swift (#76, #370): each changes it in one place, is compiled with the check
+and must make it fail. A file that is no folder is refused by contentsOfDirectory(at:) itself
+(ENOTDIR), and a link never reaches that test (the alias branch takes it first), so dropping the
+isDirectory test changes nothing and is no mutant here; nor are an alias's resolution options (no UI,
+no mounting: nothing in a temporary folder needs either) or the I/O Registry's roles (the check's mount
+table is made up, all but the one line that reads the real one). The unsorted mutant counts on APFS
+listing a folder in its own order (by a hash of each name), which puts the fixture's "right" before
+"left"; a file system that lists names sorted would miss it. usage: mutants.py WORKTREE"""
 import os, subprocess, sys, tempfile
 WT = sys.argv[1]; HERE = os.path.dirname(os.path.abspath(__file__))
 F = os.path.join(WT, "Sources/SillHost/InstalledApps.swift")
@@ -31,6 +34,46 @@ MUTANTS = [
      ", !seen.contains(id) else", " else"),
     ("sorted backwards",
      "== .orderedAscending }\n    }", "== .orderedDescending }\n    }"),
+    # #370: links and aliases, and the reach of each look.
+    ("links and aliases not followed (Finder's aliases never listed, as before #370)",
+     "if values?.isAliasFile == true {", "if false {"),
+    ("links and aliases followed onto any volume",
+     "guard InstalledApps.inside(path, volumesRoot) else { return true }", "return true"),
+    ("the second look follows them onto no volume",
+     "return volumes?.contains { InstalledApps.inside(path, $0) } == true", "return false"),
+    ("where a link or an alias points not read before it is resolved",
+     "pointsAt(link), reach.allows(named),", "pointsAt(link),"),
+    ("where it resolves to not looked at",
+     ' && reach.allows(target.path) ? target', " ? target"),
+    ("an alias to a bundle that is no app listed",
+     'target.pathExtension == "app" && ', ""),
+    ("/private/var and /var counted as two folders",
+     'path.hasPrefix("/private/") ? String(path.dropFirst("/private".count)) : path', "path"),
+    ("the first look reads a folder given that leads into the volumes",
+     "if reach.volumes == nil && inside(folder.path, reach.volumesRoot) { continue }", ""),
+    # #370: which volumes, and which of their folders.
+    ("a network share read",
+     "volume.local && ", ""),
+    ("a read-only volume read (an installer's disk image)",
+     "!volume.readOnly && ", ""),
+    ("a volume Finder does not show read (Recovery)",
+     "volume.browsable && ", ""),
+    ("a volume with an APFS role read (another Mac's data, a backup)",
+     "volume.roles.isEmpty", "true"),
+    ("a volume with a dot name read",
+     ' && !mount.lastPathComponent.hasPrefix(".")', ""),
+    ("a volume mounted anywhere read",
+     "plain(mount.deletingLastPathComponent().path) == plain(root) && ", ""),
+    ("a volume mounted deeper in /Volumes read",
+     "plain(mount.deletingLastPathComponent().path) == plain(root)", "plain(mount.deletingLastPathComponent().path).hasPrefix(plain(root))"),
+    ("the volumes left in the table's order",
+     "}.map(\\.path).sorted()", "}.map(\\.path)"),
+    ("a link at a volume's top read as its Applications folder",
+     "lstat(folder, &info)", "stat(folder, &info)"),
+    ("an older Mac's disk read (its macOS's Applications)",
+     '!FileManager.default.fileExists(atPath: volume + "/System/Library/CoreServices/SystemVersion.plist")', "true"),
+    ("the mount table's local flag misread",
+     "local: entry.f_flags & UInt32(MNT_LOCAL) != 0", "local: entry.f_flags & UInt32(MNT_LOCAL) == 0"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

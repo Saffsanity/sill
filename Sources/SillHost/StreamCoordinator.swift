@@ -867,7 +867,10 @@ package final class StreamCoordinator {
             if !hardwareResponds { enterSoftwareFallback(afterHang: false) }
         }
         if virtualDisplay { enableVirtualDisplay() }
-        catalog.start()
+        // The Apps list reads the Mac's other volumes too (#370), never on a test host; and under the
+        // AppKit loop it looks again as they come and go.
+        catalog.start(volumes: !synthetic)
+        if appKitLoop && !synthetic { catalog.watchVolumes() }
         // The only startup line Direct Wireless adds, and only when it is on: the default path
         // prints what it always printed.
         if config.directWireless {
@@ -1245,8 +1248,11 @@ package final class StreamCoordinator {
             Stats.shared.bump("win.\(cmd.action.rawValue)")
             await catalog.refreshWindows()      // show the result now, not at the next poll
         case .launchApp:
+            // Launch Services' copy of the app, as always; else the one the Apps list found, such as an
+            // app on another disk Launch Services never registered (#370).
             guard let req = Wire.decode(LaunchApp.self, from: message.payload),
-                  let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: req.bundleID) else { return }
+                  let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: req.bundleID)
+                    ?? catalog.installedAppURL(for: req.bundleID) else { return }
             gestureChords.forget()              // the app comes forward, which closes a view a gesture opened
             pendingLaunch = req.bundleID
             let config = NSWorkspace.OpenConfiguration()

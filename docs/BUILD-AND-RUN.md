@@ -166,6 +166,8 @@ window list, no thumbnails, no display lookup), so a test host with a client con
 macOS for no screen recording: every ScreenCaptureKit call counts against the responsible app's
 grant (Claude's, for a host an agent runs), and macOS reminds the person once a month and after
 every rebuilt binary; set it on every headless host whose test needs no real window.
+A `--synthetic` host's Apps list reads this Mac's own disk alone, never its other volumes (#370), so
+it never makes macOS ask the app that runs it whether it may read a removable volume.
 `SILL_TEST_SOFTWARE_ENCODER=1` starts on the software encoder, with
 no launch probe and no re-check, so a test never touches the hardware encoder
 (60 fps at most: a 120 fps sampler test needs the hardware, and so the
