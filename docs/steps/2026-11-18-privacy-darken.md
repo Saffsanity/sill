@@ -53,8 +53,11 @@ used)"; #323: "as a toggle".
 - **Verified**: the darken check (202 checks, among them 20,000 random sessions running this rule beside part 1's
   against nine invariants; 91 of 91 mutants caught, the equivalent ones named in its mutants.py); away-quality with the
   new knobs (58 of 58 mutants, AQ-D1..9 new); stage-release and repo-rules; `Tests/checks/run-all.sh` (all passed);
-  typecheck of SillHostCore, the CLI and Sill.app; the probe compiled (`--build-only`). The release build and the live
-  dry run on loopback: in the pull request.
+  typecheck of SillHostCore, the CLI and Sill.app; the probe compiled (`--build-only`); `swift build -c release` (62 s,
+  through heavy.sh); `Scripts/privacy-check/darken.py OUT all` on loopback, 25 of 25 verdicts (order: the black up at
+  1.006 s, the wake counted after it in the same turn; home; away at the remote door from a relay on this Mac, and at
+  home by address; wait, lit 3.1 s after the last departure; keys; pass; takeback, lit at the settled unlock; hold, lit
+  0.5 s after the lock's outcome; quit). Not run: H2 (the CLI's stdout without the new flags, against main).
 - **Defaults taken** (the pull request lists them for Noah): the plan's recommendations for its open decisions; the
   black under the lock screen until G0; one key's lock may hold the dark up to 3 s past the wait; a failed key lock
   stops key locks until a lock shows or a switch changes; a change of scope lifts at once, a move home under "only away"

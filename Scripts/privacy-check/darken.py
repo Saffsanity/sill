@@ -228,15 +228,18 @@ def case_away(out):
         pair = subprocess.run([sys.executable, "-I", CLIENT, port.group(1), "2", "none", f"--pair-url={link.group(1)}", f"--identity={ident}"],
                               capture_output=True, text=True, timeout=30, env={**os.environ, **BASE_ENV})
         open(os.path.join(out, label + "-pair.client.log"), "w").write(pair.stdout + pair.stderr + f"\nEXIT {pair.returncode}\n")
-        joined = time.time() - h.start
         session = subprocess.run([sys.executable, "-I", CLIENT, port.group(1), "3", "desktop", "--tls", f"--identity={ident}"],
                                  capture_output=True, text=True, timeout=30, env={**os.environ, **BASE_ENV})
         open(os.path.join(out, label + ".client.log"), "w").write(session.stdout + session.stderr + f"\nEXIT {session.returncode}\n")
         h.at(time.time() - h.start + 1.0); h.stop()
-        dark = h.find(DARK, after=joined)
+        # The pairing client stays for its 2 s as a session of its own: away too, so the dark comes with it, and the
+        # session after it comes back within the wait.
+        dark = h.find(DARK)
         line = h.find("Privacy: this Mac’s screen is dark while a device away from home is connected (1 display).")
+        back = h.find("Privacy: a device came back within 30 s; this Mac’s screen stays dark.")
         if away:
-            verdict(bool(dark) and bool(line), f"a paired device at the remote door from a relay on this Mac (away) darkens it: {len(dark)} raises")
+            verdict(len(dark) == 1 and bool(line) and bool(back),
+                    f"a paired device at the remote door from a relay on this Mac (away) darkens it: {len(dark)} raise, its session back within the wait")
         else:
             verdict(not dark and not line, f"the same device from this network (at home) darkens nothing: {len(dark)} raises")
 
